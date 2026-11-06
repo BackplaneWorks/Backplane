@@ -1,4 +1,4 @@
-//! The `&` model mention (a mention like `@`, `>` and `%`, refs.bend's pattern): `&claude/opus` names a provider/model. It is resolved when a message is sent against the
+//! The `&` model mention: `&claude/opus` names a provider/model. It is resolved when a message is sent against the
 //! hub's `models.all` rows and checked, never acted on: it does NOT change the thread's provider or model. Each reference is `{word, provider, model, state}` with
 //! state `ok`, `unknown` (not a provider or model this hub lists) or `unavailable` (listed, but `ok: false` now). The first `/` splits provider from model, so
 //! `&opencode/openai/gpt-5` is provider `opencode`, model `openai/gpt-5`. The agent's `<references>` block gets one structured line per distinct reference.

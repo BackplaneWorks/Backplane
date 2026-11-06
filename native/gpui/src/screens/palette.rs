@@ -1,4 +1,4 @@
-//! "Jump or run a command" (client.bend `Palette.*`): one box over the window that finds a thread in any project, or an action, as you type, and does it on Enter
+//! "Jump or run a command": one box over the window that finds a thread in any project, or an action, as you type, and does it on Enter
 //! or a click. Threads come from the sidebar's rows (`projects`, or `active`), the actions are the window's and the open thread's own (its header tools, the viewer
 //! kinds, Settings...). Opened from the bar at the top, the Commands item on the rail or Ctrl+Shift+P; Esc shuts it. The ranking is `rank`: what starts with the text,
 //! then a word that does, then the letters in order.

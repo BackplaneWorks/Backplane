@@ -1,4 +1,4 @@
-//! The Rust presenter (docs/gpui/PRESENTER-PORT.md). `Routed` is a `Presenter` that asks each ported `Screen` first and falls to the helper
+//! The Rust presenter (docs/PRESENTER-PORT.md). `Routed` is a `Presenter` that asks each ported `Screen` first and falls to the helper
 //! for what is not ported yet; a screen takes the same params the helper takes and returns what the helper's V returns.
 //! `BACKPLANE_PRESENTER_DUMP=<dir>` writes every `(params, helper output)` pair to `<dir>/views.jsonl` (0600): the input of the differential test.
 //! The dump holds message text, drafts and `session`: SYNTHETIC logs only. It is written only by a copy run, only while the helper is running, and only for a log under

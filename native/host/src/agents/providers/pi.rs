@@ -1,8 +1,8 @@
-//! Pi (`pi --mode rpc`, earendil-works/pi 1.4): src/core/pi.bend. Pi speaks neither ACP nor MSP: its RPC mode reads JSON commands on stdin and
+//! Pi (`pi --mode rpc`, earendil-works/pi 1.4): src/core/pi. Pi speaks neither ACP nor MSP: its RPC mode reads JSON commands on stdin and
 //! writes responses and session events on stdout, one a line. One process per turn:
 //!   1 get_state: the session Pi opened (`--session-id`, made when absent);
 //!   2 prompt: the person's text; then its events until agent_settled.
-//! What it says is reported in the Codex event shapes (acp.bend). Pi has no approval prompts of its own and no MCP flag: Backplane's
+//! What it says is reported in the Codex event shapes. Pi has no approval prompts of its own and no MCP flag: Backplane's
 //! extension (`pi_ext.js`, written to `<home>/pi/backplane.js` and loaded with `-e`) adds the thread's Backplane MCP server and, before each
 //! tool the thread's mode does not allow, asks through Pi's extension UI (a `confirm` titled `backplane:approval`), which goes to the person as
 //! an approval (dialog.rs's envelope; the answer an extension_ui_response). Other extensions' dialogs go to the person as questions.
@@ -49,7 +49,7 @@ pub fn effort_args(e: &str) -> Vec<String> { if PI_LEVELS.contains(&e) { vec!["-
 pub fn opt(flag: &str, v: &str) -> Vec<String> { if v.is_empty() { vec![] } else { vec![flag.into(), v.into()] } }
 /// Pi.approval.title
 pub const APPROVAL_TITLE: &str = "backplane:approval";
-/// Pi.ext: Backplane's extension, as Pi loads it (plain ES module JavaScript), generated from pi.bend by test/gpui/agents/prov-pi/gen_ext.py.
+/// Pi.ext: Backplane's extension, as Pi loads it (plain ES module JavaScript), generated from pi by test/agents/prov-pi/gen_ext.py.
 pub const EXT: &str = include_str!("pi_ext.js");
 
 /// Written whole and moved into place (turns of several threads may start at once): PiRun.write.
@@ -184,7 +184,7 @@ fn ui(t: &Turn, o: &Value) -> Out {
 }
 
 /// Pi.line: one line from Pi. Lines this turn reads nothing from (the system prompt and the whole conversation come again in some of them) fall
-/// to the default arm; Bend skips them by their first bytes before parsing, which changes nothing observable.
+/// to the default arm; skips them by their first bytes before parsing, which changes nothing observable.
 pub fn line(a: &mut Acp, t: &Turn, o: &Value) -> Out {
     match gs(o, "type", "") {
         "response" => reply(a, t, o),
@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(r[1].plain(), vec![json!({"type":"tool.done","id":"c1"})]);
     }
 
-    #[test] fn the_command_line_is_the_bend_hubs() {
+    #[test] fn the_command_line_is_the_hubs() {
         let d = PiDriver::new(); let mut a = ti("approval-required"); a.model = "anthropic/claude-x".into(); a.effort = "high".into();
         let dir = std::env::temp_dir().join(format!("bp-pi-argv-{}", std::process::id())); a.home = dir.to_string_lossy().into();
         let v = d.argv(&a);
@@ -293,8 +293,8 @@ mod tests {
         assert_eq!(d.argv(&a)[3], "sess-1"); assert_eq!(d.argv(&a).len(), 8);
         let _ = std::fs::remove_dir_all(dir);
     }
-    // the file is generated from pi.bend by test/gpui/agents/prov-pi/gen_ext.py; its bytes are pinned
-    #[test] fn the_extension_is_pi_bends_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "97e272d8ae5d6a2bbb06895fa13c4b03053ef17772fe5d7bb813cc858fa6af5f") }
+    // the file is generated from pi by test/agents/prov-pi/gen_ext.py; its bytes are pinned
+    #[test] fn the_extension_is_pi_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "97e272d8ae5d6a2bbb06895fa13c4b03053ef17772fe5d7bb813cc858fa6af5f") }
 
     #[test] fn a_turn_streams_a_reply_and_ends() {
         let mut d = PiDriver::new(); assert_eq!(d.start(&ti("full-access")), vec![r#"{"id":"1","type":"get_state"}"#]);

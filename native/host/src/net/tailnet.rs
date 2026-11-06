@@ -1,4 +1,4 @@
-//! core/tailnet.bend and server.bend's `Machines.*`: the owner's machines on the tailnet (`tailscale status --json`),
+//! core/tailnet and server's `Machines.*`: the owner's machines on the tailnet (`tailscale status --json`),
 //! hubs named in BACKPLANE_PEERS, which of them run Backplane (GET /hello), and who owns a node
 //! (`tailscale whois --json`). Parsing is pure; the probes and the finder loop are the only IO. Laws `tailnet_*`.
 use serde_json::{json, Value};
@@ -92,7 +92,7 @@ pub fn machines_json(status: &str, port: u16, found: &[(Cand, String)]) -> Value
 
 /// GET /hello on a hub: the version it names (CBOR; JSON from a hub not updated yet); "" for no answer. http only.
 pub async fn hello(url: &str) -> String { hello_with(crate::copy::on(), url).await }
-/// (Bend probes with curl, which a hub on a copied log refuses: so does this, with no connection made.)
+///
 pub async fn hello_with(copy: bool, url: &str) -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     if copy { return String::new() }

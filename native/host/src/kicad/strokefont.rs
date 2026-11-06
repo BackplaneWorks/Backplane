@@ -1,5 +1,5 @@
-//! core/strokefont.bend's layout in Rust: KiCad's text markup, lines, placement and wrapping over the Hershey glyphs
-//! (strokefont_data.rs, generated). Every sum runs in the order the Bend code runs it: the floats must come out the same.
+//! core/strokefont's layout in Rust: KiCad's text markup, lines, placement and wrapping over the Hershey glyphs
+//! (strokefont_data.rs, generated). Every sum runs in the order code runs it: the floats must come out the same.
 use super::board::{Prim, Pt};
 use super::fl;
 use super::strokefont_data as data;

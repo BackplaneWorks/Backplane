@@ -101,7 +101,7 @@ Open-source clients cannot keep a secret. HMAC-SHA256 over timestamp and raw
 body raises the cost of garbage submissions; server schema validation,
 version/channel allowlists, replay protection, rate limits and deduplication
 are the real controls. An identified install uses 18-bit SHA-256 proof of work
-in a disposable native child (`--telemetry-pow UUID`); the pure Bend verifier
+in a disposable native child (`--telemetry-pow UUID`); the pure verifier
 independently checks the result. This is not identity authentication.
 See [Privacy](https://backplane.works/privacy) for server retention/deletion.
 
@@ -188,12 +188,12 @@ Environment kill switches stop all telemetry workers and state writes.
 
 ## Development checks
 
-`test/telemetry_usage_test.bend` covers durable daily counts, known/unknown
+`test/telemetry_usage_test` covers durable daily counts, known/unknown
 token usage, duplicate reports/mail, mirrored threads, privacy clearing,
 worker invalidation, seven-day expiry, wire fields and incremental-store
-recovery. `test/telemetry_test.bend` covers the planner, queue, allowlist, wire bytes,
+recovery. `test/telemetry_test` covers the planner, queue, allowlist, wire bytes,
 HMAC and PoW vectors and shared client actions. The telemetry laws are appended
-to LAWS.bend and proven in PROOF.bend; existing laws are unchanged.
+to LAWS and proven in PROOF; existing laws are unchanged.
 `bun test/tools/telemetry_e2e.ts [BINARY] [WIREDIR]` uses a generated dev key,
 a random local HTTP port and temporary hub homes. It exercises signatures,
 PoW, opt-in/out, activity, backoff, rejection and closed gates. It never reads
@@ -201,7 +201,6 @@ production credentials. Outputs are saved to `build/telemetry-report/`.
 
 The alpha receiver implementation is pinned for paired testing at backend
 commit `be77491e1dd8a5e6e51b198c03bc24d7492bb034`. Build the small worker with
-`bend test/native/telemetry_usage_delivery.bend -o build/usage-delivery.js`
 then `bun build --compile build/usage-delivery.js --outfile build/usage-delivery`.
 Run `test/tools/telemetry_usage_e2e.py` with the backend's `uv` environment,
 `--backend` pointing to a clean checkout, `--revision` its exact full commit,

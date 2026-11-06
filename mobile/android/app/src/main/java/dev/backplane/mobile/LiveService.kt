@@ -17,7 +17,7 @@ import androidx.core.content.ContextCompat
 // runs while the island says agents are working. It keeps the process, and
 // so the socket, alive when the app leaves the screen, and shows what the
 // agents are doing as an ongoing notification (a status-bar chip where
-// Android 16 promotes it). What it says is Bend's (notify.bend's island).
+// Android 16 promotes it). What it says is .
 class LiveService : Service() {
     companion object {
         const val ID = 0x6c697665

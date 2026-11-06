@@ -1,4 +1,4 @@
-//! The viewer panel beside a thread, for the pages the GPUI desktop reads from `thread.viewer`: Board, Schematic and 3D (src/mobile/view.bend `View.open`, `View.json.single`),
+//! The viewer panel beside a thread, for the pages the GPUI desktop reads from `thread.viewer`: Board, Schematic and 3D,
 //! with the plot itself riding its own channel (`kicad.watch`). Pure functions over the session and `State`. `None`: a case not ported (a project with several boards, a
 //! version, a project home, a thread elsewhere). The Files tab is drawn here: the listing is read in-process (`files::dir`), not asked of the hub. Diff and Review are session/pages.rs's. Keys GPUI does not read (`hist`, `bg`, `look`...) keep the idle template.
 use crate::{session::{pages, patch}, state::State};
@@ -160,7 +160,7 @@ pub fn mech_action(st: &State, hub: &str, session: &Value, rel: &str, refresh: b
 }
 
 
-/// core/layers.bend's focus (KiCad's high contrast): one active layer and how the others show (0 as they are, 1 dimmed, 2 hidden), kept per kind as "<active>|<mode>".
+/// core/layers's focus (KiCad's high contrast): one active layer and how the others show (0 as they are, 1 dimmed, 2 hidden), kept per kind as "<active>|<mode>".
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Focus { pub active: u32, pub mode: u32 }
 const NONE: u32 = 255;
@@ -261,7 +261,7 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
 }
 
 
-// ------------------------------------------------------------------ the Files tab (src/core/fm.bend, client.bend's Fm.*, mobile/view.bend's Files.json / File.json)
+// ------------------------------------------------------------------ the Files tab
 
 fn pct(s: &str, slash: bool) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) || (slash && b == b'/') { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
@@ -421,10 +421,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fx() -> Value { serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/panel.json"))).unwrap() }
+    fn fx() -> Value { serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/panel.json"))).unwrap() }
     fn state() -> (State, String) {
         let mut st = State::new();
-        for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
         (st, "t1700000003-8".into())
     }
     #[test] fn the_threads_browser_is_a_page_with_nothing_to_watch() {
@@ -483,7 +483,7 @@ mod tests {
     fn files_world(tag: &str) -> (State, String, std::path::PathBuf) {
         let d = std::env::temp_dir().join(format!("bp-fm-pres-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("docs/deep")).unwrap(); std::fs::create_dir_all(d.join("mech")).unwrap();
         for (f, c) in [("notes.md", "# n"), ("a.kicad_pcb", "(kicad_pcb)"), ("pic.png", "x"), ("doc.pdf", "x"), ("m.step", "x"), ("plain.bin", "x"), ("docs/a.txt", "a"), (".env", "k"), ("docs/server.key", "k")] { std::fs::write(d.join(f), c).unwrap(); }
-        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
         let th = "t1700000003-8".to_string(); let proj = st.threads.get(&th).map(|t| t.project.clone()).unwrap();
         if let Some(p) = st.projects.get_mut(&proj) { p.root = d.to_string_lossy().into_owned(); p.title = "My: Board".into(); }
         (st, th, d)
@@ -590,7 +590,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("bp-mech2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("mech")).unwrap();
         for f in ["mech/a.step", "mech/b.step"] { std::fs::write(d.join(f), "x").unwrap(); }
         let root = d.to_string_lossy().into_owned();
-        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
         let th = "t1700000003-8"; let proj = st.threads.get(th).map(|t| t.project.clone()).unwrap();
         if let Some(p) = st.projects.get_mut(&proj) { p.root = root.clone(); }
         let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});

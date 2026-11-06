@@ -1,4 +1,4 @@
-//! Accounts.created for every writer (server.bend runs it on every step): a new thread freezes the default account of its provider as
+//! Accounts.created for every writer: a new thread freezes the default account of its provider as
 //! `account.thread.<id>.<provider>`, and a fork copies its source's bindings. One `Transform` (`before_commit`) so a thread made by a command, a bot, a launch or a
 //! task all get it; a batch that already carries a thread's binding is left alone, so the callers that add it themselves keep working and can be removed later.
 //!

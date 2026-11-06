@@ -1,5 +1,5 @@
 //! Grok's ACP (Agent Client Protocol: JSON-RPC over stdio), one process per turn: initialize, session/new (or session/load), session/prompt.
-//! A port of src/core/acp.bend. What the agent says is reported as Codex shapes (thread.started, item.completed, item.delta, tool.done,
+//! A port of src/core/acp. What the agent says is reported as Codex shapes (thread.started, item.completed, item.delta, tool.done,
 //! turn.completed, turn.failed), which `Cx::codex_line` turns into events. Shared with opencode.rs and, for `update` and the permission
 //! pieces, agy.rs. A permission request that goes to the person is the shape `{"type":"bp.ask","request":"<raw request line>"}`.
 use serde_json::{json, Map, Value};
@@ -111,7 +111,7 @@ pub fn ask_of(request: &Value) -> Option<super::AskInfo> {
 }
 /// Driver::answer: the response line for the person's answer (accept | session | anything else declines).
 pub fn answer_of(request: &Value, answer: &str) -> Vec<String> { match request.as_str() { Some(l) => vec![permit_answer(l, answer)], None => vec![] } }
-/// A JSON-RPC id as Bend's `Ocp.id`/`Nat.read` read it: its digits as a number (0 when none, or a string id with none).
+/// A JSON-RPC id as `Ocp.id`/`Nat.read` read it: its digits as a number (0 when none, or a string id with none).
 /// Acp.reply.k's id for Grok: Nat.read of the id's raw text (a number, or a string of digits; anything else 0).
 pub fn nat_id(o: &Value) -> u64 {
     match o.get("id") { Some(Value::Number(n)) => n.as_u64().unwrap_or(0), Some(Value::String(t)) if !t.is_empty() && t.chars().all(|c| c.is_ascii_digit()) => t.parse().unwrap_or(0), _ => 0 }
@@ -165,7 +165,7 @@ mod tests {
     fn method(l: &str) -> String { serde_json::from_str::<Value>(l).ok().map(|v| s(&v, "method").to_string()).unwrap_or_default() }
     const BODY: &str = r#"{"jsonrpc":"2.0","id":"p9","method":"session/request_permission","params":{"toolCall":{"toolCallId":"c1","title":"List files","kind":"execute","rawInput":{"command":"ls -la"}},"options":[{"optionId":"no","kind":"reject_once"},{"optionId":"always","kind":"allow_always"},{"optionId":"yes","kind":"allow_once"}]}}"#;
 
-    #[test] fn a_scripted_exchange_line_by_line() { // test/acp_test.bend
+    #[test] fn a_scripted_exchange_line_by_line() { // test/acp_test
         let tt = t(""); let mut a = Acp::new();
         assert_eq!(method(&init()), "initialize");
         let o1 = ln(&mut a, &tt, r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#); assert_eq!(method(&o1.send[0]), "session/new");
@@ -215,13 +215,13 @@ mod tests {
         assert_eq!(outs(&ln(&mut a, &tt, &u(r#"{"sessionUpdate":"plan","entries":[{"content":"x","priority":"high","status":"in_progress"},{"content":"y"}]}"#))),
             r#"{"type":"item.updated","item":{"type":"todo_list","items":[{"text":"x","status":"in_progress"},{"text":"y","status":"pending"}]}}"#);
     }
-    #[test] fn ids_and_empty_fields_read_as_bend_reads_them() {
+    #[test] fn ids_and_empty_fields_read_as_reads_them() {
         let o = json!({"id":"x3"}); assert_eq!(nat_id(&o), 0, "Grok: Nat.read of x3"); assert_eq!(num_id(&o), 3, "opencode: the digits of the id's text");
         assert_eq!(nat_id(&json!({"id":3})), 3); assert_eq!(nat_id(&json!({"id":"3"})), 3);
         let mut a = Acp::new(); a.sid = "S".into();
         let u = json!({"sessionUpdate":"tool_call","toolCallId":"c","title":"","kind":"read"});
         assert_eq!(update(&mut a, &u)[0]["item"]["command"], "", "a present empty title is logged as it is (get_str)");
-        assert_eq!(tool(&json!({"toolCall":{"kind":"","title":""}})), "", "present but empty title: Bend's get_str default does not apply");
+        assert_eq!(tool(&json!({"toolCall":{"kind":"","title":""}})), "", "present but empty title: get_str default does not apply");
         assert_eq!(tool(&json!({"toolCall":{}})), "tool");
     }
     // law todo_acp_plan (TD.Todo.codex over Acp.plan): the plan becomes todos, status kept
@@ -245,7 +245,7 @@ mod seam_tests {
 }
 
 /// Stand-in turns through the real actor (Agents on a temp Hub) against the events and the stand-in's input the JS hub produced for the same
-/// stand-in (test/gpui/agents/standin-acp.sh; recorded by record_acp.mjs, fixtures by make_acp_fixtures.py), ids and clocks normalised.
+/// stand-in (test/agents/standin-acp.sh; recorded by record_acp.mjs, fixtures by make_acp_fixtures.py), ids and clocks normalised.
 /// Stand-in agents only: BACKPLANE_AGENTS-style, a script in a temp folder; no real CLI, credentials or model.
 #[cfg(test)]
 mod e2e {
@@ -253,9 +253,9 @@ mod e2e {
     use crate::{agents::{proc::Cli, Agents}, api::Caller, hub::{Cfg, Hub}, presenter::Canned};
     use std::{path::{Path, PathBuf}, sync::Arc, time::{Duration, Instant}};
 
-    const STANDIN: &str = include_str!("../../../../../test/gpui/agents/standin-acp.sh");
+    const STANDIN: &str = include_str!("../../../../../test/agents/standin-acp.sh");
     const TH: &str = "t1700000009-9";
-    macro_rules! fx { ($n:literal) => { include_str!(concat!("../../../../../test/gpui/agents/fixtures/acp-", $n, ".json")) } }
+    macro_rules! fx { ($n:literal) => { include_str!(concat!("../../../../../test/agents/fixtures/acp-", $n, ".json")) } }
 
     fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-acp-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     fn script(d: &Path, name: &str, body: &str) { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }

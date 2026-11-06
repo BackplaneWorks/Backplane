@@ -16,7 +16,7 @@ import java.util.concurrent.Executors
 // (/voice/in?s=<key>, the bridge's "voice-audio" command), with the pairing
 // token; the last POST carries &end=1. Recording starts on the press and
 // what is heard before the address comes waits for it. Nothing here decides
-// anything about dictation (src/web/voice-mic.js is the web's twin): Bend
+// anything about dictation (src/web/voice-mic.js is the web's twin):
 // asks the hub, the hub answers, and its strip is drawn from the screen.
 class VoiceRecorder {
     companion object {

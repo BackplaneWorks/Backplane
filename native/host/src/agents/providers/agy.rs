@@ -1,4 +1,4 @@
-//! Google Antigravity (src/core/agy.bend, src/server/agyio.bend, server.bend's Agt.go): Backplane runs Google's own agent, `agy_acp_server`, pinned by
+//! Google Antigravity: Backplane runs Google's own agent, `agy_acp_server`, pinned by
 //! version, size and SHA-256 under `<home>/antigravity/<version>`, and speaks ACP to it like Grok, one process per turn, started through the runner
 //! script `<home>/antigravity/agy.sh` (the agent's profile is its GEMINI_HOME; only the method's own API key from the API keys file reaches it).
 //! Backplane never reads a Google token: the agent keeps its own in the profile, and nothing here opens a profile file.
@@ -6,7 +6,7 @@
 //! Ported: the turn (initialize, authenticate, session new/resume, mode, model, prompt), the runner script, the pinned releases and install script,
 //! methods/accounts/settings, models cache, the probe's info, the sign-in state machine (`AgySign`) and the callback check.
 //! Not ported here (IO the agents lane's Settings job host owns, no agent process): running the install script, the probe, the sign-in process,
-//! sign-out and forwarding Google's way back; each is a shell script this file builds, as in agyio.bend, and the Rust job host only has to run it.
+//! sign-out and forwarding Google's way back; each is a shell script this file builds, as in agyio, and the Rust job host only has to run it.
 use super::{AskInfo, Driver, Made, Reaction, TurnIn};
 use serde_json::{json, Value};
 
@@ -55,7 +55,7 @@ pub fn install_err(out: &str) -> String {
 /// opens on the hub's machine (`agy.sh --open URL` prints BACKPLANE-SIGNIN <url>). A missing agent says BACKPLANE-MISSING.
 pub fn run_sh() -> String {
     "#!/bin/sh\n\
-# Backplane's runner for Google's Antigravity agent (src/core/agy.bend)\n\
+# Backplane's runner for Google's Antigravity agent\n\
 if [ \"$1\" = --open ]; then printf 'BACKPLANE-SIGNIN %s\\n' \"$2\"; exit 0; fi\n\
 d=$1 p=$2 m=$3 k=$4\n\
 if [ ! -x \"$d/agy_acp_server.par\" ]; then echo BACKPLANE-MISSING; exit 1; fi\n\
@@ -126,7 +126,7 @@ pub fn args(root: &str, keys: &str, m: &str, a: &str, project: &str, location: &
 pub fn mode_k(i: u8) -> &'static str { match i { 1 => "auto_edit", 3 => "yolo", _ => "default" } }
 pub fn mode(runtime: &str) -> &'static str { mode_k(match runtime { "approval-required" => 0, "auto-accept-edits" => 1, "auto" => 2, _ => 3 }) }
 
-// ---- ACP, as acp.bend handles it for Grok (a private copy; the ACP lane's acp.rs is the shared one) ----
+// ---- ACP, as acp handles it for Grok (a private copy; the ACP lane's acp.rs is the shared one) ----
 fn gs<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 fn event(ty: &str, kvs: Value) -> Value { let mut m = serde_json::Map::new(); m.insert("type".into(), json!(ty)); if let Value::Object(o) = kvs { for (k, v) in o { m.insert(k, v); } } Value::Object(m) }
 fn failed(msg: &str) -> Value { event("turn.failed", json!({"message": msg})) }
@@ -532,15 +532,15 @@ mod standin_tests {
     use super::super::muse::e2e::{self, project as _p, js, run, script};
     fn setup(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let d = e2e::dir(name); let ag = d.join("antigravity/1.3.0"); std::fs::create_dir_all(&ag).unwrap();
-        script(&ag.join("agy_acp_server.par"), include_str!("../../../../../test/gpui/agents/prov/standin-agy.py"));
-        std::fs::write(ag.join("agy-turn.jsonl"), include_str!("../../../../../test/gpui/agents/prov/agy-turn.jsonl")).unwrap();
+        script(&ag.join("agy_acp_server.par"), include_str!("../../../../../test/agents/prov/standin-agy.py"));
+        std::fs::write(ag.join("agy-turn.jsonl"), include_str!("../../../../../test/agents/prov/agy-turn.jsonl")).unwrap();
         (d.clone(), d)
     }
     fn ti(d: &std::path::Path, runtime: &str, text: &str, session: &str, settings: Vec<(String, String)>) -> TurnIn {
         TurnIn { thread: "t1700000010-2".into(), cwd: d.to_string_lossy().into(), home: d.to_string_lossy().into(), runtime: runtime.into(), text: text.into(), session: session.into(),
             prompt: "RULES lls>".into(), mcp_url: "http://127.0.0.1:1/mcp/x".into(), gen: "1".into(), settings, ..Default::default() }
     }
-    // Stand-in Antigravity (test/gpui/agents/prov/standin-agy.py behind the real runner script) through the driver: equal to the JS hub's events.
+    // Stand-in Antigravity (test/agents/prov/standin-agy.py behind the real runner script) through the driver: equal to the JS hub's events.
     #[tokio::test] async fn agy_turn_matches_the_js_hub() {
         let (d, _) = setup("agy-turn"); let mut dr = AgyDriver::new(); let a = ti(&d, "full-access", "zq hello", "", vec![]); dr.prepare(&a).unwrap();
         let mut argv = dr.argv(&a); let log = d.join("agy.log").to_string_lossy().into_owned();
@@ -567,7 +567,7 @@ mod standin_tests {
 }
 
 
-/// The laws of src/core (LAWS.bend), one test each, named as the law: scripts/gpui/law-map.tsv maps them.
+/// The laws of src/core, one test each, named as the law: scripts/law-map.tsv maps them.
 #[cfg(test)]
 mod laws {
     use super::*;

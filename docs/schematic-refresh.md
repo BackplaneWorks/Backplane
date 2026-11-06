@@ -89,8 +89,8 @@ arrived in 151.949 ms (root) and 150.547 ms (child) on Boat, under the test's
 Build the small components with the normal admitted build workflow (on Bun):
 
 ```sh
-scripts/build-js.sh test/native/schematic_refresh_probe.bend build/refresh-native
-scripts/build-js.sh test/native/refresh_plot_probe.bend build/refresh-plot
+scripts/build-js.sh test/native/schematic_refresh_probe build/refresh-native
+scripts/build-js.sh test/native/refresh_plot_probe build/refresh-plot
 python3 test/tools/refresh_plot_test.py build/refresh-plot build/refresh-root
 python3 test/tools/refresh_plot_test.py build/refresh-plot build/refresh-child --child
 bun test/tools/refresh_effects_test.ts

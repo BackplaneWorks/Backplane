@@ -73,7 +73,7 @@ pub fn read_text(root: &Path, rel: &str, max: usize) -> Result<String, String> {
 }
 
 
-/// core/fm.bend's `Fm.zip.rules`: what a zip leaves out and what a download never serves ("=" a name, "*" the end of a name, "^" the start, "/" a path from the root).
+/// core/fm's `Fm.zip.rules`: what a zip leaves out and what a download never serves ("=" a name, "*" the end of a name, "^" the start, "/" a path from the root).
 const ZIP_RULES: &[&str] = &["*.pem", "*.key", "=id_rsa", "=id_ed25519", "=.git-credentials", "=.netrc", "=.npmrc", "=.ssh", "=.aws", "=.gnupg", "=.config", "=.codex", "=.claude", "=.backplane-bend", "=secrets", "=vault",
     "=credentials", "=auth.json", "=token", "=.git", "=node_modules", "=.ds_store", "=__pycache__", "=.env", "^.env.", "*-backups", "*.lck", "^_autosave-", "/.backplane/history.git", "/.backplane/worktrees"];
 /// `Fm.zip.skip`: whether a zip leaves out the entry at `p` (from the project's root).

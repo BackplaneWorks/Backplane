@@ -1,4 +1,4 @@
-//! Issue reports (core/issue-report.bend, byte for byte): the public report body, its GitHub link and the report-writing prompt.
+//! Issue reports: the public report body, its GitHub link and the report-writing prompt.
 //! Pure. Explicit values only; it never reads a thread, project, path, account or credential. The person's own words are never trimmed,
 //! redacted or cut. Requests: `improvements.preview {text, os, version, details, diagnostics}` and `{body}` -> {body, url};
 //! `improvements.template` -> {template}; `improvements.prompt {description, os, version, evidence, diagnostics}` -> {prompt}.

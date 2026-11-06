@@ -1,4 +1,4 @@
-//! The project home's snapshot (src/server/effects/project-home.js `bp_project_home`, core/project-home.bend): the files that make a project's home
+//! The project home's snapshot: the files that make a project's home
 //! page, read within the project's folder only. `project.home {project, op?}`: no op is the snapshot; `document` reads a window of one of its files;
 //! `intent` writes `.backplane/intent.md` (revision-checked, atomically) and answers the snapshot. Reads are bounded (windows, 256 scanned files, 32 rows).
 //! Reads are whole-file with caps (8 MiB for the fab/config metadata, 16 MiB for a saved check report; a bigger file counts as unreadable): the JS effect streams them in constant memory.

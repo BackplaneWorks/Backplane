@@ -1,4 +1,4 @@
-//! app/render.bend's `backplane --render MODEL` in Rust, with core/mech.bend's paths: a part's standard views as PNG files beside it,
+//! app/render's `backplane --render MODEL` in Rust, with core/mech's paths: a part's standard views as PNG files beside it,
 //! `renders/<stem>.<view>.png`. A STEP is meshed once (the models cache) and stood Z up; a GLB is read as it is. Each view is fitted to
 //! the whole part and drawn by kicad/mesh.rs, 800 x 600, written through a `.part` file and a rename. `Ran` holds what the command
 //! prints and its exit code, so Mech.error (files/misc.rs) reads it as it read the child.

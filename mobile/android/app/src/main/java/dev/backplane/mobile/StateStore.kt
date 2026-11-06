@@ -2,10 +2,10 @@ package dev.backplane.mobile
 
 import java.io.File
 
-// The Bend client's whole state (Backplane.save()), kept between launches:
+// client's whole state (Backplane.save()), kept between launches:
 // loading it shows every hub's log at once, where folding the log again in
 // QuickJS took seconds, and each hub then sends only what came since. The
-// file is named for the Bend types the state is made of (bridge.js ends
+// file is named for types the state is made of (bridge.js ends
 // with their hash, scripts/state-key.py): a new build with the same types
 // keeps it, one with other types starts afresh rather than load a state it
 // may not read. A bridge.js without the key names it by its whole text.

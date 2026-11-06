@@ -1,9 +1,9 @@
-//! The ledger tools of every thread's agent, a bot's or a plain thread's (src/core/ledger.bend, told.bend, tboard.bend): told_check and told_mark (what the person was
+//! The ledger tools of every thread's agent, a bot's or a plain thread's: told_check and told_mark (what the person was
 //! already told) and task_board_* (the shared task board). Records are the settings `told.<id>` and `board.<id>`, read from the model's index of the log; a change is a
-//! SettingSet committed through `World::also` like every tool's. Bend's order is kept where a list has ties: a family is read in reverse key order, then sorted stably.
+//! SettingSet committed through `World::also` like every tool's. order is kept where a list has ties: a family is read in reverse key order, then sorted stably.
 use super::rpc::Bots;
 use super::world::World;
-use crate::state::fam::turnend::{bend_trim as trim, key_norm};
+use crate::state::fam::turnend::{trim_ws as trim, key_norm};
 use serde_json::{json, Value};
 
 pub const JSON: &str = include_str!("ledger.json");

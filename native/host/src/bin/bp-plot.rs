@@ -1,5 +1,5 @@
 //! bp-plot KIND FILE [INFOS]: the Rust plot reader as a command, printing what `backplane --plot KIND FILE INFOS` prints, for comparing
-//! it with the Bend child and for timing it; exits 2 while the file is half written, 3 with a message when it cannot be read.
+//! it with child and for timing it; exits 2 while the file is half written, 3 with a message when it cannot be read.
 //! bp-plot --tree FILE and bp-plot --info FILE SIG IDX answer as `--plot-tree` and `--plot-info` do. Kinds 2, 3 and 4 read 3D models (kicad-cli from
 //! BACKPLANE_KICAD_CLI, the mesher as the hub picks it, BACKPLANE_HOME for its managed FreeCAD); bp-plot --render MODEL... is `backplane --render`.
 #![allow(dead_code)]

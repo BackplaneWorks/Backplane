@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
-// The phone app's screens for data/1 (docs/gpui/PHONE-DATA.md): native SwiftUI over typed values from DataClient. Fresh-home scope: projects, their
+// The phone app's screens for data/1 (docs/PHONE-DATA.md): native SwiftUI over typed values from DataClient. Fresh-home scope: projects, their
 // threads, one thread (entries, a composer, approvals), Improvements, and this phone's own settings.
 
 struct DataRoot: View {

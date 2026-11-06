@@ -1,4 +1,4 @@
-//! `shown.thread` entries, as the helper draws them (src/mobile/screen.bend `Mob.entries`, src/core/fold.bend, src/core/stamp.bend), from the
+//! `shown.thread` entries, as the helper draws them, from the
 //! 32 page rows the hub reads out of its index. Pure: rows in, JSON out. `None` is "not ported": anything this first cut does not reproduce
 //! exactly (images, chat rows, reminders, thoughts, design steps, terminals, reviews, API errors, restart rows, attachments, other time zones,
 //! stop/fail marks, rows sent to another thread) makes the caller fall to the helper, so a `Some` is always the helper's answer.
@@ -128,7 +128,7 @@ fn api_say(x: &str) -> String {
 }
 
 
-// ---- attachments and images (core/attach.bend, core/images.bend) ----
+// ---- attachments and images ----
 /// Att.split: the lines at the end of a message that are `[attachment: <path>]` (blank lines between them allowed) are its attachments; the rest is the body
 fn att_split(text: &str) -> (String, Vec<String>) {
     let lines: Vec<&str> = text.split('\n').collect();
@@ -257,7 +257,7 @@ use crate::state::{State, Turn};
 
 /// The keys of `thread_static.json` are NOT ported: each is a table value that holds only under `plain_thread`'s gate (which is why the gate is strict). Per
 /// PRESENTER-PORT.md a key is computed or left out, so every one of these comes out of the template as it is computed (src named):
-///   tools (core/tools.bend Tools.*: turn, pinned, settled, archived, fork source)      menu (Mob.menu.loc: snoozed, Fab.mini.tools, running)
+///   tools      menu (Mob.menu.loc: snoozed, Fab.mini.tools, running)
 ///   permissions (PM.Permissions.json: the thread's runtime mode `rt`)                   picker (Mob.picker.ctx.loc: provider, model, effort, usage, models info)
 ///   state (Mob.state: turn)   working/phase (SG.Signal.display: signal)   send/sendAct (U.Follow: draft, running, attachments)   boat (UZ.Chip.of)
 ///   canChild (U.ThreadTree.can_route)   viewer (VW.View.json: the viewer's kind/panes/review/files/hist/mech)   voice (Mob.voice: dictation state)
@@ -401,7 +401,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let mb = st.settings.get("files.max.mb").and_then(|v| v.trim().parse::<u64>().ok()).map_or(512, |n| n.clamp(1, 4000));
     o.insert("cap".into(), json!(mb * 1048576));
     // the composer's four keys: the draft, the send button and its action, the popup rows (parity-session's session::composer; ours are the `$ @ > % #` & rows, not ported:
-    // a mention being typed shows no popup — see docs/gpui/slim-thread-known-missing.md). Another interface language is the helper's (None).
+    // a mention being typed shows no popup — see docs/slim-thread-known-missing.md). Another interface language is the helper's (None).
     let lang = st.settings.get("lang").map(String::as_str).unwrap_or("");
     // Mob.chip: the attachments waiting in `@att:<thread>` and the file still uploading in `@att.up:<thread>`
     let atts = crate::session::composer::att_paths(params["session"]["drafts"][format!("@att:{thread}")].as_str().unwrap_or(""));
@@ -422,7 +422,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> Value { serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-pair.json")).unwrap()).unwrap() }
+    fn fixture() -> Value { serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json")).unwrap()).unwrap() }
     #[test] fn the_entries_of_a_plain_page_are_the_helpers() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
         let es = ents(p["params"]["page"]["rows"].as_array().unwrap(), th).unwrap();
@@ -434,7 +434,7 @@ mod tests {
     #[test] fn a_plain_threads_whole_shown_thread_is_the_helpers() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
         let mut st = State::new();
-        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
+        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
         let got = thread_object(&st, "h", th, &p["params"], "").expect("a plain idle thread is drawn here");
         let want = &p["out"]["shown"]["thread"];
         for (k, w) in want.as_object().unwrap() { assert_eq!(got.get(k), Some(w), "key {k}"); }
@@ -452,7 +452,7 @@ mod tests {
     }
     #[test] fn the_persons_zone_sets_the_stamps_and_an_unknown_one_reads_as_utc() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
-        let log = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap();
+        let log = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap();
         let with = |kv: &[(&str, &str)]| { let mut st = State::new(); for l in log.lines() { st.apply_line(l); } for (k, v) in kv { st.apply_line(&format!(r#"{{"$":"SettingSet","key":"{k}","value":"{v}","at":1}}"#)); } st };
         let stamp = |st: &State| thread_object(st, "h", th, &p["params"], "").unwrap()["entries"][0]["stamp"].as_str().unwrap().to_string();
         let utc = stamp(&with(&[]));
@@ -466,7 +466,7 @@ mod tests {
     #[test] fn the_drafts_composer_keys_come_from_session_composer() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
         let mut st = State::new();
-        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
+        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
         let o = thread_object(&st, "h", th, &p["params"], "hello").unwrap();
         assert_eq!((o["draft"].as_str(), o["send"].as_str(), o["sendAct"].as_str(), o["skills"].as_array().map(Vec::len)), (Some("hello"), Some("Send"), Some("send"), Some(0)));
         let o = thread_object(&st, "h", th, &p["params"], "/btw why").unwrap();
@@ -480,8 +480,8 @@ mod tests {
     }
     #[test] fn every_state_variant_of_a_thread_is_the_helpers() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
-        let v: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-variants.json"))).unwrap();
-        let log = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).unwrap();
+        let v: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-variants.json"))).unwrap();
+        let log = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap();
         let mut checked = Vec::new();
         for (name, x) in v.as_object().unwrap() {
             let mut st = State::new(); for l in log.lines() { st.apply_line(l); } for e in x["extra"].as_array().unwrap() { st.apply(e); }

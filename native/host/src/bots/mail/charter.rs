@@ -1,4 +1,4 @@
-//! A mailroom run's charter (src/core/charter.bend): which risky tools a run may use. The grammar is deliberately small: one `may: tool:NAME` or `may: bash:COMMAND PREFIX` per line.
+//! A mailroom run's charter: which risky tools a run may use. The grammar is deliberately small: one `may: tool:NAME` or `may: bash:COMMAND PREFIX` per line.
 use serde_json::Value;
 
 fn any(xs: &[&str], s: &str) -> bool { xs.iter().any(|h| s.contains(h)) }

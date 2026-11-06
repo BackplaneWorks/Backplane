@@ -1,4 +1,4 @@
-//! GET /dev/turns: how many turns this hub is running, as a count and nothing else. scripts/gpui/dev-reload.sh asks before it restarts the hub for a new
+//! GET /dev/turns: how many turns this hub is running, as a count and nothing else. scripts/dev-reload.sh asks before it restarts the hub for a new
 //! test build: a restart cuts a running turn, and on a copy nothing resumes it. The hub checks the pairing token first (default-deny).
 use super::Agents;
 use crate::{api::{Fut, HttpHandler, HttpReply}, auth::Req, hub::Hub};

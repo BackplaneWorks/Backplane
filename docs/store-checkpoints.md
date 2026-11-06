@@ -22,7 +22,7 @@ the store and canonical state are current.
 
 For a large existing stale cache, an offline preparer may offer a derived
 checkpoint as `<home>/.store-next/{store.db,READY.json}`. The manifest contains
-`version:1`, `schema:1`, `codec` (storedb.bend's `Sdb.codec()`, the one version the JS checks are given by `Disk.prepare`), `prefixBytes`, `appliedSeq`, `prefixSha256` and
+`version:1`, `schema:1`, `codec`, `prefixBytes`, `appliedSeq`, `prefixSha256` and
 `storeSha256`. Prepare only in an isolated consistent copy. Never promote a
 database from a test hub that has appended recovery or stand-in events.
 At boot, before opening SQLite, the hub verifies both hashes, the entire
@@ -36,20 +36,17 @@ closed settled/archived rows. IDs, hierarchy, titles, status and counts remain;
 opening a shelf renders its controls from current state. This bounds the real
 Older reply without raising the native payload limit or dropping history.
 The web view, all draft inputs and unknown `@` keys remain unchanged. The
-reviewed `thin-view.bend` hash in `sidebar-draft-inputs.json` changes only for
+reviewed `thin-view` hash in `sidebar-draft-inputs.json` changes only for
 this native JSON projection; the required dependency guard remains enabled.
 
 Focused regressions:
 
-- `bend test/storeio_telemetry_test.bend`: actual Plan SQL materialization,
   SQLite hotboot/cold-fold parity, reset/off/on recovery, all twelve usage
   counters and board source keys.
-- `bend test/store_checkpoint_test.bend`: commits, crash tails, atomic SQL
   rollback, ordinal continuity, clean reopen, torn tails and schema/log fallback.
 - `bun test/tools/store_checkpoint_io_test.cjs`: hash/prefix validation,
   atomic replacement failure boundaries, retained evidence, bounded Unicode
   reads and durable rejected-append rollback. Required by every local-small lane.
-- `bend test/folded_actions_test.bend`: closed/open shelves and preserved rows.
 - `bun test/tools/store_checkpoint_rpc_e2e.cjs BINARY`: disposable home,
   trigger installed before SQLite opens, failed RPC completion and subsequent
   successful commit. Blocks provider CLIs; never uses the person's home or UI.
@@ -60,10 +57,10 @@ expensive truthful rebuild. This change does not make that fallback instant.
 
 ## Upgrades in place
 
-A store at a codec listed in `Sdb.codec.from()` (storedb.bend) is brought to
+A store at a codec listed in `Sdb.codec.from()` is brought to
 `Sdb.codec()` at boot without a rebuild, when what the newer codec adds can be
-derived from a few kinds of change (storedb.bend's "Upgrades in place";
-storeio.bend's `Sto.upgrade`). The log's lines before the store's
+derived from a few kinds of change (storedb's "Upgrades in place";
+storeio's `Sto.upgrade`). The log's lines before the store's
 `applied_off` that name one of `Up.names()` are picked natively
 (`Disk.pick`, a superset), each is decoded, and only the changes `Up.keep`
 takes (by their decoded kind) are folded in log order through the real
@@ -102,7 +99,7 @@ Tests: `bun test/tools/store_checkpoint_io_test.cjs` (the JS checks preserve
 the codec-6 predecessor only when telemetry-free, reject codec 6 with
 telemetry and codec 7, require prepared stores to be current, and exercise
 the line picker), `bun test/tools/store_upgrade_e2e.ts OLD_HUB
-test/native/store_up_probe.bend [EVENTS | OLD_HOME]` (historic parent-setting
+test/native/store_up_probe [EVENTS | OLD_HOME]` (historic parent-setting
 upgrade, rollback and rebuild coverage), and
 `bun test/tools/store_telemetry_rebuild_e2e.ts BUILT_STORE_UP_PROBE` (current
 probe codec-7/6 recovery, exact invalid-cache backup, codec-8 rebuild and
@@ -111,14 +108,14 @@ reopen parity).
 ## far_line after a rebuild
 
 `far_line` lists the lines that go to the owner's other machines (`/far/log`
-v3 reads it). Commits and the catch-up write its rows (storeio.bend's
+v3 reads it). Commits and the catch-up write its rows (storeio's
 `Plan.change`); the full rebuild did not, so a store rebuilt before the fix
 lost its far history (on a real log: 232,919 rows before the Nov 1 rebuild,
 28,262 after; the Oct 24 one had already dropped 319,771). The build now
-writes them (stobuild.bend's `Stb.far`) and marks meta `far_line` 1.
+writes them and marks meta `far_line` 1.
 
 A store without that mark gets its rows refilled once the hub serves, by a
-child (`backplane --store-far HOME`, storefar.bend) at nice 19 and ionice
+child at nice 19 and ionice
 idle, its JS heap sized to 1 GB: the log is folded up to `applied_off` as
 the build folds it (no entries, no turn inputs, no other facts), its lines
 read by `effects/storefar.js` about 1 MB a call so their bytes stay in
@@ -132,7 +129,7 @@ rows, 150 s, 633 MB peak; its rows equal both surviving older stores', row
 for row, over their ranges.
 
 Peers that pulled while the history was missing skipped those lines for
-good, so the share version went to view:3 (far.bend's `Fr.view.tag`): every
+good, so the share version went to view:3: every
 mirror's next pull is one snapshot of what is live, not the history.
 
 Tests: `bun test/tools/store_far_line_e2e.ts` (a whole build equals a
@@ -146,9 +143,9 @@ skipped the renames inside the hole ends consistent after one snapshot).
 
 The term table is a function of the entry table alone (each row's text and
 ordinal), so a change to how terms are made (`THIN.Words.of`, the search
-fold) bumps `Sdb.terms.v()` (storedb.bend), not `Sdb.codec()`: no rebuild.
+fold) bumps `Sdb.terms.v()`, not `Sdb.codec()`: no rebuild.
 A store whose meta `terms` is behind (a store without the key is version 1)
-keeps serving, and once the hub serves (server/storeterms.bend):
+keeps serving, and once the hub serves:
 
 1. a child (`backplane --store-terms HOME`, nice 19, ionice idle, a 1 GB
    JS heap) clears any `term_old` a
@@ -174,7 +171,7 @@ gets terms equal to a fresh build's, row for row, and is then left alone).
 
 A step whose append fails (no space, a read-only disk) used to be dropped:
 its log was cut back and nothing of it was kept, while agents went on. Now,
-when the cut-back worked, the step waits (core/diskq.bend, server.bend's
+when the cut-back worked, the step waits (core/diskq, server's
 "Disk full"):
 
 - its changes are folded in at once, so every client sees them, and its

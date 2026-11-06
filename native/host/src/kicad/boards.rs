@@ -1,5 +1,5 @@
-//! boards.list: the boards the viewer's picker offers (core/order.bend's `Boards.pick`, server/orderio.bend's `Od.boards`).
-//! Pure twin of the Bend rule until the rules process is wired; the Bend defs are named at each function. Law boards_list_offered.
+//! boards.list: the boards the viewer's picker offers.
+//! Pure twin of rule until the rules process is wired; defs are named at each function. Law boards_list_offered.
 use std::path::Path;
 
 pub const MOST: usize = 24;

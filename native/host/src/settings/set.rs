@@ -1,6 +1,6 @@
-//! `setting.set` (core/hub.bend `Hub.setting`): a client writes one setting; the hub logs a SettingSet and every client hears it in the
+//! `setting.set`: a client writes one setting; the hub logs a SettingSet and every client hears it in the
 //! log. `peer.own.*` is the hub's own; the telemetry keys go through the choice rules (telemetry.rs); `account.*` / `accounts.*` are
-//! refused from a client (server.bend `AccountsRpc.reserved`: the account gate answers). An empty value removes the setting.
+//! refused from a client. An empty value removes the setting.
 use super::telemetry;
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};

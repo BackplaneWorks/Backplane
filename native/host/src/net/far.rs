@@ -1,4 +1,4 @@
-//! core/far.bend, the pure part: threads that live on a linked machine. A thing there is named here by the link
+//! core/far, the pure part: threads that live on a linked machine. A thing there is named here by the link
 //! and its id there ("<link>~<id>"), so nothing can be mistaken for a local one. The owning hub pushes each shared
 //! change as its own log numbers it (`Item`), a mirror takes a batch only when it follows what it has and only the
 //! items it lacks (`take`), so a batch that comes twice, late or out of order is harmless. Laws `far_*`.
@@ -11,7 +11,7 @@ pub fn id(link: &str, id: &str) -> String { format!("{link}~{id}") }
 pub fn opt(link: &str, i: &str) -> String { if i.is_empty() { String::new() } else { id(link, i) } }
 /// Whether an id names a thing elsewhere (local ids never hold a "~").
 pub fn is(i: &str) -> bool { i.contains('~') }
-/// The link an id elsewhere lives behind ("" for an id here; Bend takes the first of three or more '~' parts).
+/// The link an id elsewhere lives behind.
 pub fn link(i: &str) -> String { let p: Vec<&str> = i.split('~').collect(); if p.len() >= 2 { p[0].to_string() } else { String::new() } }
 /// Its id on its own machine (an id here is itself).
 pub fn local(i: &str) -> String { match i.split_once('~') { Some((_, rest)) => rest.to_string(), None => i.to_string() } }
@@ -48,8 +48,8 @@ use K::*;
 /// Fr.change's table: for each change that shows a thread, a bot and its space, the fields renamed into this hub's
 /// ids. Settings, devices, links, webhooks, rooms (shared rooms travel on their own), ordering and usage are absent:
 /// they stay home.
-/// Every variant `change` renames; the test below checks each field against codec.bend's wire names.
-/// Requests to a thing elsewhere (core/far.bend, `Fr.methods`): only these may go to a linked machine (thread.delete is not one: law far_no_delete).
+/// Every variant `change` renames; the test below checks each field against codec's wire names.
+/// Requests to a thing elsewhere: only these may go to a linked machine (thread.delete is not one: law far_no_delete).
 pub const METHODS: &[&str] = &["turn.start", "turn.interrupt", "ask.answer", "queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit",
     "thread.settle", "thread.unsettle", "thread.back", "thread.rename", "thread.btw", "thread.modes", "thread.provider", "thread.effort", "bots.space", "bots.routine_run",
     "thread.create", "thread.fork", "thread.archive", "thread.unarchive", "thread.pin", "thread.unpin",
@@ -125,7 +125,7 @@ pub fn change(l: &str, c: &Value, origin: &dyn Fn(&str, &str) -> String) -> Opti
 // ----- what the owning hub shares -----
 /// What `shared` asks of the owner's state, after the change.
 ///
-/// `ask_thread` MUST see a closed ask: Bend's `Fr.ask.shared` reads the asks after the change, where a closed ask
+/// `ask_thread` MUST see a closed ask: `Fr.ask.shared` reads the asks after the change, where a closed ask
 /// stays in the map with its flag off. A state that removes an ask on close (`commands::Fold`, the agents' world,
 /// the lean state) makes this answer None, so `AskClosed` is never shared and the mirror's ask stays open forever.
 /// Back it with the full state, or look the ask up before the fold. The same holds for `task_parent` of a finished task.

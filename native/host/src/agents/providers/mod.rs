@@ -1,6 +1,6 @@
-//! Providers whose turns are a process each, reported to the hub in Codex's shapes (hub.bend Codex.line.k; AGENTS.md "Agent providers").
+//! Providers whose turns are a process each, reported to the hub in Codex's shapes.
 //! Codex is the reference: providers/codex.rs. Grok/OpenCode/Muse/Antigravity/Pi/Oh My Pi are one file each, owned by their lanes
-//! (docs/gpui/LANES.md); each exports `driver(provider) -> Option<Made>`, and the single chain in `driver()` below already lists all of them:
+//! (docs/LANES.md); each exports `driver(provider) -> Option<Made>`, and the single chain in `driver()` below already lists all of them:
 //! a lane edits ONLY its own file(s). This file is the agents lane's.
 //!
 //! What the actor (agents/mod.rs) does for any driver, and a driver never does:
@@ -61,7 +61,7 @@ pub trait Driver: Send {
     fn prepare(&mut self, _a: &TurnIn) -> Result<(), String> { Ok(()) }
     /// The install sentence added after a failure to start ("Install Pi (https://pi.dev), then sign in: ..."; Proto.install).
     fn install_hint(&self) -> Option<String> { None }
-    /// Proto.gone: the words for a process that exits while its turn runs, WITHOUT the exit code or stderr. The actor words the row as Bend's Exit.say:
+    /// Proto.gone: the words for a process that exits while its turn runs, WITHOUT the exit code or stderr. The actor words the row as Exit.say:
     /// `<these words, or "agent was killed (signal 9, likely out of memory)" for 137> (exit N | signal N)` and the scrubbed tail of stderr.
     /// None: the actor's "agent exited with code N". (There is no on_exit: a turn that ends by itself says so in a turn.completed/turn.failed shape.)
     fn exit_why(&self, _code: i32) -> Option<String> { None }

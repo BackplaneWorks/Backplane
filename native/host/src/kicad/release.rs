@@ -1,4 +1,4 @@
-//! core/release.bend in Rust: a tag's name, the next tag to propose, the plan of commands that build a release's outputs from KiCad's
+//! core/release in Rust: a tag's name, the next tag to propose, the plan of commands that build a release's outputs from KiCad's
 //! templates (cad.rs), the manifest, the notes and the `gh release create` command. Pure. Laws `release_*`.
 use super::bj::{self, J};
 use super::cad;

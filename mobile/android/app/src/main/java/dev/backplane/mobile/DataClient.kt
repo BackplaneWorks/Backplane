@@ -12,7 +12,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-// The phone's whole link to a hub, docs/gpui/PHONE-DATA.md (data/1): one WebSocket of plain JSON, typed values, a disk cache that paints at launch,
+// The phone's whole link to a hub, docs/PHONE-DATA.md (data/1): one WebSocket of plain JSON, typed values, a disk cache that paints at launch,
 // deltas for the lists and the open thread only. No engine, no bridge, no server-drawn views. (Same protocol as iOS's DataClient.swift.)
 object DataClient {
     enum class Conn { OFFLINE, CONNECTING, ONLINE }

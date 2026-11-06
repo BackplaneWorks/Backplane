@@ -1,4 +1,4 @@
-//! Asks and approvals: `thread.asks` from the hub (Mob.asks in src/mobile/screen.bend).
+//! Asks and approvals: `thread.asks` from the hub.
 //! Three shapes: the standard card (permission, plan, input: head, optional markdown body or detail,
 //! buttons), the settings proposal (same card, Approve/Reject), and a buy thread's "Backplane needs" card
 //! (choices, a typed box sent as `pre + text`, Skip). Every press is the view action `answer` with the

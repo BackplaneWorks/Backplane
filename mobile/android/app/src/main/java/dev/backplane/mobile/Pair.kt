@@ -15,7 +15,7 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
-// A QR code as the hub drew it (core/qr.bend: rows, '1' dark), on white
+// A QR code as the hub drew it, on white
 // with four modules of quiet zone
 @Composable
 fun QrCode(rows: List<String>, modifier: Modifier = Modifier) {

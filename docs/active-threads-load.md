@@ -13,7 +13,6 @@ loads a real event log. No real agents run; updates, peer discovery, telemetry,
 Tailnet and skill sync are disabled. It needs Linux `/proc`, Bun and an already
 built hub binary, with no browser or generated wire bundle.
 
-Run the expensive fixture through the parent's existing `bend` lock/admission
 or remote runner. It takes approximately forty seconds with default settings;
 do not build or run it beside another heavy job. Keep the same test checkout
 and options for both binaries:

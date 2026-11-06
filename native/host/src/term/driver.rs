@@ -1,8 +1,8 @@
-//! The teach and task driver (src/server/server.bend's "Teaching a bot's browser" and "Task runs", docs/teach.md): `bots.browser`, `bots.teach`,
+//! The teach and task driver: `bots.browser`, `bots.teach`,
 //! `bots.task` requests, the task_* tools, recording events, run folders and the pause ask. The pure rules are task.rs and teach.rs.
 //! A "bot" here is the page owner (a thread's id until the bots lane says which threads are a bot's). Tasks are folded from the log's
 //! TaskSet/TaskDeleted events (a copy of each goes to <home>/bots/<bot>/tasks/<slug>.json). Bounded: MAX_RUNS runs in memory, MAX_WAITERS parked
-//! pauses per thread (not in all), the person's input queued per page (INPUT_QUEUE, MAX_PAGES pages), a run keeps its last 20 folders, the draft file is capped with the draft (400 steps), tool arguments are cut as in Bend.
+//! pauses per thread (not in all), the person's input queued per page (INPUT_QUEUE, MAX_PAGES pages), a run keeps its last 20 folders, the draft file is capped with the draft (400 steps), tool arguments are cut as in .
 //! Until `Driver::answered` is wired by the agents lane a `task_pause` waits up to PAUSE_WAIT_MS (24 h) for an answer nobody delivers. Seams for other lanes: `Driver::set_wake` (the bots lane wakes a bot with a message), `Driver::answered` (the agents lane calls it when an ask of kind
 //! browser/tool task_pause is answered), `Driver::info` (for a joining client's info).
 use super::{browser::Browser, now_s, task::{self, In, Run}, teach::{self, Teach, TeachBot}};

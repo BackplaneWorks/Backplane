@@ -1,7 +1,7 @@
-//! The mirrors of the owner's other machines, one per link, kept outside `events.jsonl` and `Model` (the Bend hub reads
+//! The mirrors of the owner's other machines, one per link, kept outside `events.jsonl` and `Model` (hub reads
 //! and writes that log: a mirror there would fold as local ids). Two files per link under `<home>/far/`:
 //!
-//! * `<link>.jsonl` — the Bend hub's own mirror format, so either hub reads it: a header `{"epoch":..,"tail":0}`, then
+//! * `<link>.jsonl` — hub's own mirror format, so either hub reads it: a header `{"epoch":..,"tail":0}`, then
 //!   each batch taken as its items `{"n":..,"c":..}` (the change as its owner numbers it, ids its own) and a
 //!   `{"head":n}` line.
 //! * `<link>.events` — derived and rebuilt at start from the items: each change renamed into this hub's ids
@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(fs.page("L~t", 0, 32).unwrap().rows.len(), 2);
         let _ = std::fs::remove_dir_all(h);
     }
-    #[test] fn far_a_mirror_survives_a_restart_in_the_bend_format() {
+    #[test] fn far_a_mirror_survives_a_restart_in_the_format() {
         let h = home("restart");
         { let fs = FarStore::open(&h).unwrap(); fs.take("L", "e1", 0, 2, &[thread(1, "t"), msg(2, "t", "user", "kept")]).unwrap(); }
         let text = std::fs::read_to_string(h.join("far/L.jsonl")).unwrap(); let mut ls = text.lines();
@@ -209,7 +209,7 @@ mod tests {
         { let fs = FarStore::open(&h).unwrap();
           fs.take("L", "", 0, 1, &[thread(1, "t")]).unwrap();           // a legacy push: no epoch yet
           let t = fs.take("L", "learned", 0, 2, &[thread(1, "u"), msg(2, "u", "user", "x")]).unwrap();
-          assert!(t.reset, "Bend: the first epoch-aware pull replaces the legacy projection (Fr.epoch.changed \"\" -> e)"); }
+          assert!(t.reset, ": the first epoch-aware pull replaces the legacy projection (Fr.epoch.changed \"\" -> e)"); }
         let fs = FarStore::open(&h).unwrap();
         assert_eq!((fs.epoch("L"), fs.head("L")), ("learned".to_string(), 2), "the epoch is in the file's header: a restart keeps it");
         assert!(fs.has("L~u") && !fs.has("L~t"));
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(r.iter().filter(|e| e["$"] == "MessagePosted").count(), 1); assert_eq!(r[1]["text"], "m59");
         let _ = std::fs::remove_dir_all(h);
     }
-    /// Start time and memory of a big mirror (ignored: run by test/gpui/net/boat-scale-job.sh; prints one number each).
+    /// Start time and memory of a big mirror (ignored: run by test/net/boat-scale-job.sh; prints one number each).
     #[test] #[ignore] fn scale_a_million_line_mirror() {
         use std::io::Write;
         fn rss_kb() -> u64 { std::fs::read_to_string("/proc/self/status").unwrap().lines().find(|l| l.starts_with("VmRSS:")).and_then(|l| l.split_whitespace().nth(1)?.parse().ok()).unwrap_or(0) }

@@ -1,5 +1,5 @@
 //! Webhooks: making one (`bots.hook`: its secret, shown once), its bearer token (`bots.hook_token`), and the route a call arrives on (POST /hook/<id>).
-//! Bend: bothub.bend's `Bots.hook`/`Bots.token`/`Bots.hooked`, server.bend's `BotJob.hook`/`BotJob.token`/`Bot.hook.in`, botnet.bend's `Bn.check`/`Bn.bearer`.
+//! : bothub's `Bots.hook`/`Bots.token`/`Bots.hooked`, server's `BotJob.hook`/`BotJob.token`/`Bot.hook.in`, botnet's `Bn.check`/`Bn.bearer`.
 //! The secret and the token are files (`<home>/secrets/hooks/<id>` and `<id>.token`, 0600); the log learns only the id, bot and name.
 //! A call proves itself by our signature (X-Backplane-Timestamp + X-Backplane-Signature, fresh, constant time), by GitHub's (X-Hub-Signature-256 with
 //! X-GitHub-Delivery as the replay key) or by `Authorization: Bearer <token>`; each is accepted once (the replay cache). The Pebble ring's form is not ported.

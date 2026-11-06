@@ -1,4 +1,4 @@
-//! core/schematic.bend in Rust: a .kicad_sch's forms as the same items a board draws; keys are KiCad uuids (a symbol's children add
+//! core/schematic in Rust: a .kicad_sch's forms as the same items a board draws; keys are KiCad uuids (a symbol's children add
 //! "/pin/<n>", "/f/<field>", "/g<i>"), layers index Sch.layer_names. Library symbols come from the file's own lib_symbols; Conn tags
 //! each connected group on the sheet. Sheet coordinates are mm with Y down; library coordinates have Y up.
 use super::board::{self, arc_points, kv, prop, rad, rot, tint_of, Info, Item, Prim, Pt};
@@ -153,7 +153,7 @@ fn top(out: &mut Vec<Item>, x: &Sx, key: &str, sig: u32) {
 // Library symbols
 struct Part<'s> { u: u32, s: u32, xs: &'s [Sx<'s>] }
 pub struct Lib<'s> { units: u32, off: f32, names: bool, nums: bool, parts: Vec<Part<'s>> }
-/// U32.read: digits, wrapping as Bend's does; None for what is not a number
+/// U32.read: digits, wrapping as does; None for what is not a number
 fn u32_read(s: &str) -> Option<u32> {
     if s.is_empty() { return None }
     let mut acc = 0u32;
@@ -529,7 +529,7 @@ fn along(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) -> bool {
 }
 fn find(u: &mut [u32], mut a: u32) -> u32 { while u[a as usize] != a { let g = u[u[a as usize] as usize]; u[a as usize] = g; a = g } a }
 /// Conn.of.k: each connection thing's group tag, by its id. The group's tag is its first thing in list order, hashed; the walk over
-/// neighbours in Bend marks exactly a connected component, so a union of the same edges gives the same answer.
+/// neighbours in marks exactly a connected component, so a union of the same edges gives the same answer.
 fn conn_of(cs: &[Cn]) -> HashMap<String, String> {
     let mut ix: HashMap<&str, u32> = HashMap::new();
     let mut names: Vec<&str> = vec![];

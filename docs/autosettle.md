@@ -62,7 +62,7 @@ search and old history pages do not. Unread replies never expire merely
 because time passed. Finishing work, answering an ask, dropping a wake or
 releasing a lock starts a new grace period.
 
-`src/core/autosettle.bend` is the pure live policy, shared by the hub's
+`src/core/autosettle` is the pure live policy, shared by the hub's
 minute planner and the one-time startup upgrade pass. The marker
 `autosettle.version=1` commits with the pass. It applies the same policy to
 existing threads and indexes legacy delivered reports once. Ordinary ticks
@@ -74,8 +74,8 @@ without bypassing the settling rule.
 
 The tests include synthetic blockers, recovery, receipts and sidebar DOM
 status classes. `test/tools/autosettle-dry-run.ts` evaluates a copied store
-using the same Bend policy and never writes settlement to a running hub.
-`test/autosettle_order_test.bend` compares accumulator output against
+using the same policy and never writes settlement to a running hub.
+`test/autosettle_order_test` compares accumulator output against
 bounded recursive references, including receipt ordering and the upgrade
 marker. The benchmark exercises 40 eligible decisions among 10,000 threads,
 476 historical tasks and up to 20,000 archived reports. Its policy budget
@@ -92,7 +92,7 @@ SQLite backup source; the policy evaluated the separate copy.
 
 All six focused runtime suites and the required eight-file regression
 gate passed. The ten new pure laws report `ALL PROOFS CHECK`. The full
-`PROOF.bend` run passed the repository's strict `bend_verdict` gate with
+`PROOF` run passed the repository's strict `verdict` gate with
 only its unsafe/foreign-code dependency notice; it did not report a failed
 law. Logs are in Boat job `j20261103041641-536529`, with separate order
 and required-regression runs `j20261103042031-563596` and
@@ -101,7 +101,6 @@ and required-regression runs `j20261103042031-563596` and
 After rebasing onto main `1209f0bde`, the server check, settling/sidebar/order
 suites and diff-cap render test passed in `j20261103044800-751935`. The
 full proof exceeded Boat's 16 GiB machine; the identical source passed
-on `h@backplane` under its `bend` lock (work
 `w-t1793673649-1323966-1346575`, 8m08s, peak 16,454,660 KiB). Its verdict
 contained only the unsafe/foreign-code notice. The rebase also moved
 main's two handwritten diff-count labels into the message catalogs so

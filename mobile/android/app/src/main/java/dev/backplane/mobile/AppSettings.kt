@@ -19,7 +19,7 @@ enum class Tab {
 }
 
 // Settings about this device: kept in SharedPreferences, applied at once,
-// never a round trip to a hub. The thread list's view also goes to Bend
+// never a round trip to a hub. The thread list's view also goes to
 // (Backplane.local), which draws the list; nothing here is written to a hub.
 object AppSettings {
     private val prefs get() = ctx!!.getSharedPreferences("backplane", Context.MODE_PRIVATE)

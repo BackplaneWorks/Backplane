@@ -1,7 +1,7 @@
 # step2glb
 
-Turns a STEP file (`.step`/`.stp`) into binary glTF (`.glb`) for the Bend STEP
-viewer. Tessellating B-reps is out of scope for Bend, so this is a host tool,
+Turns a STEP file (`.step`/`.stp`) into binary glTF (`.glb`) for STEP
+viewer. Tessellating B-reps is out of scope for , so this is a host tool,
 like `curl` or `git`: it meshes and packs, and the viewer does everything after.
 
 It wraps [occt-import-js](https://github.com/kovacsv/occt-import-js)
@@ -86,7 +86,7 @@ the program and reads its output, and never links it. Obligations when shipping 
   export comes out as a green board plus grey parts. Single-part files (the
   KiCad 3D library) keep their colours. To show a coloured board, convert each footprint
   model on its own and place it with the board's footprint transforms (which
-  Bend already parses), or fix colour lookup upstream.
+  already parses), or fix colour lookup upstream.
 - Instance names come from a small scan of the STEP text
   (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`), used only where it matches OCCT's tree
   level by level.

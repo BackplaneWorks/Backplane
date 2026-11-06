@@ -365,8 +365,8 @@ private fun AppContent(m: AppModel) {
         },
         dismissButton = { TextButton(onClick = { removed = true; m.act("proj-keep") }) { Text(r.no) } },
     )
-    // the first-run tour (core/onboard.bend): the same as iOS, dismissing it
-    // (Back, a tap outside) is Skip. The screen model has no step while Bend
+    // the first-run tour: the same as iOS, dismissing it
+    // (Back, a tap outside) is Skip. The screen model has no step while
     // knows of another overlay; the app adds the hubs screen and every
     // dialog it shows itself (Overlay: a picture, a diff, a confirmation)
     s.tour?.let { t ->
@@ -1491,7 +1491,7 @@ private fun PlotScreen(m: AppModel, v: Viewer) {
 // a plot key's kind and project (a version's key keeps both)
 private fun plotHead(k: String) = k.split("|", limit = 3).take(2).joinToString("|")
 
-// The design history under a board or schematic (src/mobile/view.bend's
+// The design history under a board or schematic (src/mobile/view's
 // Hist.json): the steps and the file now, a scrubber with a tick each,
 // what the agent said before the step shown (a tap goes back to it in the
 // thread), or a comparison of two versions and its legend
@@ -1724,7 +1724,7 @@ private fun ViewerControls(m: AppModel, v: Viewer, present: Set<Int>, modifier: 
             // stays open: several layers are turned on and off in a row. A
             // row's box shows or hides it; its name makes it the active layer
             // (again: all back), and over a board's rows All, Dim, Only say how
-            // the others show (core/layers.bend)
+            // the others show
             DropdownMenu(open, { open = false }) {
                 if (v.layerModes) Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                     for ((i, label) in listOf(NativeMessages.viewer_layers_all(lang), NativeMessages.viewer_layers_dim(lang), NativeMessages.viewer_layers_only(lang)).withIndex())

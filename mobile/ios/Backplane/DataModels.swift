@@ -1,6 +1,6 @@
 import Foundation
 
-// docs/gpui/PHONE-DATA.md (data/1): the plain data the hub sends, as typed values. Decoding is forgiving (a missing field is empty, an extra one ignored)
+// docs/PHONE-DATA.md (data/1): the plain data the hub sends, as typed values. Decoding is forgiving (a missing field is empty, an extra one ignored)
 // so a hub that grows a field never breaks an older phone; everything here is also what the disk cache stores.
 
 extension KeyedDecodingContainer {

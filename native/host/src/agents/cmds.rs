@@ -1,4 +1,4 @@
-//! The command ledger (src/core/cmds.bend): which of the user lines a Claude process was sent it still owes an answer for, so a
+//! The command ledger: which of the user lines a Claude process was sent it still owes an answer for, so a
 //! turn ends when its own command does. Claude Code 2.1.286+ reports each command's `command_lifecycle` (queued, started, then
 //! completed or cancelled), and a command's `result` comes BEFORE its lifecycle completes; a turn Claude starts by itself (a background
 //! task's notification, a wakeup) has no lifecycle and no echo. An old CLI (no lifecycle) keeps the legacy rule: verdict 0.

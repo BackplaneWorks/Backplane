@@ -1,5 +1,5 @@
-//! The thread, project and queue requests against a hub on a seeded log: the events appended, byte for byte what the Bend
-//! hub's `Change.encode` writes, and the reply. Each test names the Bend def it checks (core/hub.bend).
+//! The thread, project and queue requests against a hub on a seeded log: the events appended, byte for byte what
+//! hub's `Change.encode` writes, and the reply. Each test names def it checks.
 use crate::{hub::{Cfg, Hub}, presenter::Canned};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -32,7 +32,7 @@ async fn ask(h: &Arc<Hub>, m: &str, p: Value) -> (Vec<Value>, Value) {
 }
 fn ok() -> Value { json!({"t":"reply","id":7,"ok":true}) }
 
-// Hub.request.k 5-10: the flag events, whatever thread the name says (no check: the Bend hub logs them for an unknown id too)
+// Hub.request.k 5-10: the flag events, whatever thread the name says
 #[tokio::test] async fn the_flag_requests_log_their_event_and_acknowledge() {
     let h = hub("flags").await;
     for (m, ev) in [("thread.settle", json!({"$":"ThreadSettled","id":"t1","manual":true,"at":0})), ("thread.unsettle", json!({"$":"ThreadUnsettled","id":"t1","at":0})),
@@ -76,7 +76,7 @@ fn ok() -> Value { json!({"t":"reply","id":7,"ok":true}) }
     let (e, _) = ask(&h, "project.reorder", json!({"project":"p1","ids":["p1"]})).await; assert_eq!(e, vec![json!({"$":"ProjectOrdered","id":"p1","key":"8","at":0})]);
 }
 // Home.rename.project keeps the id, root and creation time; Roots.move
-#[tokio::test] async fn project_rename_and_move_keep_what_the_bend_hub_keeps() {
+#[tokio::test] async fn project_rename_and_move_keep_what_the_hub_keeps() {
     let h = hub("proj").await;
     let (e, _) = ask(&h, "project.rename", json!({"project":"p1","title":" Renamed "})).await; assert_eq!(e, vec![json!({"$":"ProjectCreated","id":"p1","title":"Renamed","root":"/work/proj","at":0})]);
     let (e, _) = ask(&h, "project.rename", json!({"project":"zz","title":"x"})).await; assert!(e.is_empty());
@@ -273,7 +273,7 @@ async fn settled(h: &Arc<Hub>, n0: usize, want: usize) -> Vec<Value> {
 }
 // Hub.job.ready: the report lands, the waiting messages start through the agents seam, and a stale report (another provider now) does not start them
 #[tokio::test] async fn a_made_worktree_is_recorded_and_the_waiting_messages_start() {
-    let h = hub("wtreal").await; let repo = git_repo("wtreal-repo"); 
+    let h = hub("wtreal").await; let repo = git_repo("wtreal-repo");
     h.commit(&json!({"$":"ProjectCreated","id":"pr","title":"r","root":repo.to_str().unwrap(),"at":9})).await.unwrap();
     for th in ["t11", "t22"] { h.commit(&json!({"$":"ThreadCreated","id":th,"project":"pr","title":"x","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":9})).await.unwrap(); }
     let fold = Arc::new(tokio::sync::Mutex::new(super::fold::Fold::default()));
@@ -473,15 +473,15 @@ impl crate::api::RpcHandler for Arc<Starter> {
     let key = "0123456789abcdef0123456789abcdef";
     let (e, r) = ask(&h, "thread.create", json!({"project":"pb","creationKey":key,"base":"nope","branch":"x"})).await; assert!(e.is_empty(), "no thread for a missing base"); assert_eq!(r["error"], "base branch \"nope\" does not exist in this project");
     let (e, r) = ask(&h, "thread.create", json!({"project":"pb","creationKey":key,"base":"-x"})).await; assert!(e.is_empty()); assert!(r["error"].as_str().unwrap().contains("not a local branch name"));
-    let (e, r) = ask(&h, "thread.create", json!({"project":"pb","creationKey":key,"base":"gpui","branch":"gpui-imp-ab12cd34"})).await; assert_eq!(r["ok"], true, "{r}"); assert_eq!(e[0]["$"], "ThreadCreated");
-    // the job: branches from gpui, named gpui-imp-ab12cd34, under .backplane/worktrees
+    let (e, r) = ask(&h, "thread.create", json!({"project":"pb","creationKey":key,"base":"gpui","branch":"imp-ab12cd34"})).await; assert_eq!(r["ok"], true, "{r}"); assert_eq!(e[0]["$"], "ThreadCreated");
+    // the job: branches from gpui, named imp-ab12cd34, under .backplane/worktrees
     let fold = Arc::new(tokio::sync::Mutex::new(super::fold::Fold::default()));
     let n0 = h.store.len();
-    super::worktree::spawn_with(false, h.clone(), fold.clone(), "t77".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gpui".into(), branch: "gpui-imp-ab12cd34".into(), ..Default::default() });
+    super::worktree::spawn_with(false, h.clone(), fold.clone(), "t77".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gpui".into(), branch: "imp-ab12cd34".into(), ..Default::default() });
     h.commit(&json!({"$":"ThreadCreated","id":"t77","project":"pb","title":"x","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":9})).await.unwrap();
     let ev = settled(&h, n0 + 1, 2).await;
     let set = ev.iter().find(|v| v["$"] == "WorktreeSet").unwrap_or_else(|| panic!("{ev:?}"));
-    assert_eq!(set["branch"], "gpui-imp-ab12cd34"); assert!(set["worktree"].as_str().unwrap().ends_with("/.backplane/worktrees/gpui-imp-ab12cd34"));
+    assert_eq!(set["branch"], "imp-ab12cd34"); assert!(set["worktree"].as_str().unwrap().ends_with("/.backplane/worktrees/imp-ab12cd34"));
     // a base that vanished after the check: an error note, and NO WorktreeSkipped (the thread must not fall back to the project folder)
     let n1 = h.store.len();
     super::worktree::spawn_with(false, h.clone(), fold, "t78".into(), repo.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), super::worktree::Opts { base: "gone".into(), branch: "b2".into(), ..Default::default() });

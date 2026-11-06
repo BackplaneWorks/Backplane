@@ -4,7 +4,7 @@
 // One model does both the live words and the final ones: while a segment is
 // open its audio so far is decoded again every DECODE_MS, and each decode is
 // sent as a `hyp` with every word's start, end and probability. Backplane
-// (Bend: core/voice.bend's Settle) freezes the words two decodes agree on,
+// freezes the words two decodes agree on,
 // so what is shown never changes; the segment's last decode is its `done`.
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -152,7 +152,7 @@ export async function install(dir: string, id: string, progress: Progress) {
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
-  // the hub reads this to know the model is usable (server/voice.bend)
+  // the hub reads this to know the model is usable
   writeFileSync(join(dir, `ready-${id}`), "ok");
 }
 

@@ -1,4 +1,4 @@
-//! Md.render's block layer (src/web/dom.bend): lines classified, then folded into paragraphs, lists, quotes, tables and code.
+//! Md.render's block layer: lines classified, then folded into paragraphs, lists, quotes, tables and code.
 use super::{el, inline::inline, Loc, Node};
 
 enum Line { Fence, Head(usize, String), Item(String), Num(String, String), Quote(String), Row(Vec<String>), Sep(String), Hr, Blank, Text(String) }

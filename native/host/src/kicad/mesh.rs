@@ -1,5 +1,5 @@
-//! gfx/mesh.bend's `Mesh.render` in Rust: a z-buffered rasterizer of a model through a camera, one sample a pixel, for `mech.render`.
-//! The result is the Bend renderer's pixels exactly, so everything that decides a pixel is the Bend step in the Bend order:
+//! gfx/mesh's `Mesh.render` in Rust: a z-buffered rasterizer of a model through a camera, one sample a pixel, for `mech.render`.
+//! The result is renderer's pixels exactly, so everything that decides a pixel is step in order:
 //!   * single precision throughout, each operation rounded as Math.fround rounds it (no fused multiply-add: Rust never contracts);
 //!   * the triangle reaches a pixel only if it passed `meets` at every level above it, the conservative test included: regions of
 //!     64 px under a 2^d square (Bins.put), then 32, 16, 8 and 4 px squares inside a region (Seq.go, Tile.b16, Tile.b8);
@@ -8,7 +8,7 @@
 //!     end up second half first). `order_of_equal_depth` below states it.
 //!
 //! Regions are independent, so they are dealt over the cores in any order: the image does not depend on the deal. Projection runs in
-//! blocks over the cores and each block's region lists are joined in block order, last block first. The face image of gfx/mesh.bend
+//! blocks over the cores and each block's region lists are joined in block order, last block first. The face image of gfx/mesh
 //! (the board's own drawing in the window's 3D viewer) is not here: `Mesh.render` passes none, and only the native window drew one.
 use super::{fl, glb::Tri3};
 use std::sync::{atomic::{AtomicUsize, Ordering}, Mutex};
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(px(&i, 200, 2, 2), GROUND);
     }
     #[test] fn order_of_equal_depth() {
-        // the same plane twice: the triangle LAST in the model wins, as Bend's lists are last first and a tie keeps the first
+        // the same plane twice: the triangle LAST in the model wins, as lists are last first and a tie keeps the first
         let (r, g) = (quad(1.0, 0.0, 0xff0000), quad(1.0, 0.0, 0x00ff00));
         let m: Vec<Tri3> = r.iter().chain(g.iter()).copied().collect();
         let i = render(200, 200, &m, &front(), GROUND); let c = px(&i, 200, 100, 100); assert!(c & 0xff00 != 0 && c >> 16 == 0, "{c:x}");

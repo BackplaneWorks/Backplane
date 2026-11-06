@@ -1,4 +1,4 @@
-//! The uberbot's ops (src/core/ubop.bend, ubersync.bend): one uberbot on the owner's machines. Each machine keeps a log of ops (`UberOp`, folded into
+//! The uberbot's ops: one uberbot on the owner's machines. Each machine keeps a log of ops (`UberOp`, folded into
 //! registers by the state lane's fold, which `World::ub` runs); what the uberbot does here (memory, space, page, name and look, routines) becomes
 //! an op beside the change, a machine that joins gets the first ops, and the conversation's lease says which machine holds it.
 //! The exchange between machines (`uber.sync` over /far/rpc, takeover, the holder's beat) belongs with the net lane's transport; the ops are made here.
@@ -17,7 +17,7 @@ pub fn stamp_next(last: &str, now: u64, me: &str) -> String {
 pub fn gid(me: &str, id: &str) -> String { if id.contains(':') { id.to_string() } else { format!("{me}:{id}") } }
 fn show(v: Value) -> String { serde_json::to_string(&v).unwrap_or_default() }
 
-// the op bodies (Ub.b.*), fields in Bend's order
+// the op bodies (Ub.b.*), fields in order
 pub fn b_mem(key: &str, kind: &str, text: &str, tags: &str) -> String { show(json!({"k":"mem","key":key,"kind":kind,"text":text,"tags":tags})) }
 pub fn b_forget(key: &str) -> String { show(json!({"k":"forget","key":key})) }
 pub fn b_space(spec: &str) -> String { show(json!({"k":"space","spec":spec})) }
@@ -81,7 +81,7 @@ impl World {
     pub fn init_bodies(&self, bot: &str) -> Vec<String> {
         let Some(b) = self.bots.get(bot) else { return vec![] };
         let me = self.me(); let mut out = vec![b_who(&b.name, b.look, &b.persona)];
-        // World.mems: newest first (Mem.newer, by the time last saved; the Bend sort leaves equal times in no stated order: the key decides here)
+        // World.mems: newest first
         let mut mems: Vec<_> = self.mems.values().filter(|m| m.bot == bot).collect(); mems.sort_by(|a, c| c.updated.cmp(&a.updated).then_with(|| a.key.cmp(&c.key)));
         out.extend(mems.iter().map(|m| b_mem(&m.key, &m.kind, &m.text, &m.tags)));
         if let Some(sp) = self.spaces.get(bot).filter(|s| !s.is_empty()) { out.push(b_space(sp)) }
@@ -127,7 +127,7 @@ impl Bots {
     /// the first ops without the copy gate (a test fixture on a copy hub builds the uberbot's state with it)
     pub(crate) async fn uber_init_now(&self, now: u64) -> usize {
         let w = self.world().await;
-        // whenever this machine has no bind op, not when its op count is 0: a memory saved in the first minute is op 1, and the who, lease and bind would never be logged (the Bend hub's bug, fixed here on purpose)
+        // whenever this machine has no bind op, not when its op count is 0: a memory saved in the first minute is op 1, and the who, lease and bind would never be logged
         if !(w.ub_on() && w.reg(&w.uid(), &format!("bind:{}", w.me())).is_empty()) { return 0 }
         let ops = w.ops(now, &w.init_bodies(&w.ub.settings.get("uber.bot").cloned().unwrap_or_default()));
         let n = ops.len(); if n > 0 && self.hub.commit_many(&ops).await.is_err() { return 0 } n

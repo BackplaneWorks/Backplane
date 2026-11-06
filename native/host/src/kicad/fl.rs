@@ -1,4 +1,4 @@
-//! Bend's F32 as the JS hub runs it: every operation rounds to single precision (Math.fround), which native f32 arithmetic
+//! F32 as the JS hub runs it: every operation rounds to single precision (Math.fround), which native f32 arithmetic
 //! does for + - * / and sqrt; sin, cos and atan2 are the double functions of the single value, rounded once. `to_u32`, `read`
 //! and `show` have the runtime's own rules (f32_read, f32_show), which differ from Rust's casts and Display.
 use std::cell::RefCell;

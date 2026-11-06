@@ -2,7 +2,7 @@
 name = "backplane-hub"
 version = "0.15.0"
 edition = "2021"
-description = "Backplane hub in Rust. Native clients only (GPUI desktop, iOS, Android); renderer mobile; no helper process, no JS, no Bend."
+description = "Backplane hub in Rust. Native clients only (GPUI desktop, iOS, Android); renderer mobile; no helper process, no JS, no ."
 
 [[bin]]
 name = "backplane-hub"

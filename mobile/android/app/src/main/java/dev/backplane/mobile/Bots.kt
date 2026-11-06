@@ -89,7 +89,7 @@ import java.net.URL
 
 // Bots (docs/bots.md): the cats and rooms under the projects, the forms
 // that make them, and a bot's, a room's or a remote bot's screen. All of
-// it is the screen's (src/mobile/bots.bend); these views only draw it and
+// it is the screen's; these views only draw it and
 // send actions back.
 
 private const val SEP = "\u001f"

@@ -1,7 +1,7 @@
 import {join} from 'node:path';
 import {writeFileSync} from 'node:fs';
 import {check,jsonProcess,privateDisplay,until} from '../../cef/test/harness.ts';
-if(!process.env.CEF_NATIVE_PARENT)throw Error('set CEF_NATIVE_PARENT to built test/native/cef_parent.bend');
+if(!process.env.CEF_NATIVE_PARENT)throw Error('set CEF_NATIVE_PARENT to built test/native/cef_parent');
 const d=await privateDisplay();
 const file=join(d.root,'日本語 spaced file.txt');const content='Native dropped file 日本語\n';writeFileSync(file,content);
 const peer=jsonProcess(['/usr/bin/python3',new URL('../../cef/test/drag-source.py',import.meta.url).pathname,file],{...d.env,GDK_BACKEND:'x11',GDK_DEBUG:process.env.CEF_DND_DEBUG??''});

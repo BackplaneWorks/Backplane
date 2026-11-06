@@ -1,4 +1,4 @@
-//! test/vt_test.bend, line for line (same names, same expected strings).
+//! test/vt_test, line for line (same names, same expected strings).
 use super::*;
 
 const E: &str = "\x1b";

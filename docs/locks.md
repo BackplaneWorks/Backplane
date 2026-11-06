@@ -1,12 +1,12 @@
 # Named locks
 
-`lock_acquire {name: "bend", note: "native build"}` never blocks an MCP
+`lock_acquire {name: "build", note: "native build"}` never blocks an MCP
 call. It returns `{held:true}` when granted, or `{held:false, position,
 holder}` while waiting. Position is one-based; zero means the holder is
 reserved while waiting for an existing OS flock. End the turn after queuing.
 Backplane posts one message when a queued thread is granted:
 
-> Lock bend is yours (waited 3m). Release it with lock_release when done.
+> Lock build is yours (waited 3m). Release it with lock_release when done.
 
 `lock_release {name}` releases only the calling thread's lock.
 `lock_cancel {name}` removes only its waiter. Repeating an acquisition keeps
@@ -15,9 +15,7 @@ its original FIFO position, timestamp and note, and appends no event.
 note, since, lease, readiness and FIFO waiters. Empty locks remain listed.
 Names contain 1–64 letters, digits, hyphens or underscores.
 
-`work_run {command: "scripts/check.sh", lock: "bend", note: "checks"}`
 stores its work intent before starting anything. Its row says
-`waiting for lock bend (2nd)` while queued, and positions update when other
 waiters leave. The work id holds the lock; the owning thread receives its
 usual work outcome message, with no extra grant message. Cancelling a queued
 work item prevents its launch. An ended work item releases its lock. A timeout reports uncertainty but keeps
@@ -34,7 +32,6 @@ The rows use the existing light/dark themes.
 ## Shell commands
 
 ```sh
-scripts/bp-lock.sh bend -- scripts/check.sh
 scripts/bp-lock.sh render -- blender --background scene.blend
 ```
 
@@ -72,12 +69,11 @@ returns immediately. A guard for owned work retains its flock until the
 captured process identity ends; it never sends a signal. Hub death closes the
 pipe too, and the same non-killing cleanup protects surviving work and shell
 helpers. Retired guards are reaped on the hub's minute tick. Existing raw
-`flock /tmp/bp-bend.lock ...` users therefore exclude hub-held `bend` work,
 and an existing raw flock prevents a hub grant until it is released.
 
 `BACKPLANE_LOCK_DIR` changes the guard/fallback directory. Tests set it to a
 temporary directory for both the hub and helpers; they never operate on the
-real `/tmp/bp-bend.lock`. Raw callers in those tests use the same directory.
+real `/tmp/bp-build.lock`. Raw callers in those tests use the same directory.
 
 ## Persistence
 

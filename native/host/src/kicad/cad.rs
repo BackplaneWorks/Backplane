@@ -1,4 +1,4 @@
-//! core/cad.bend in Rust: which tool a file belongs to, and KiCad's check and output commands as argv templates ({cli}, {pcb}, {sch},
+//! core/cad in Rust: which tool a file belongs to, and KiCad's check and output commands as argv templates ({cli}, {pcb}, {sch},
 //! {out}, {name}). Pure data; the jobs (files/rv.rs) run the templates. Laws `cad_of_*`, `cad_fill_*`, `cad_shell_*`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hit { pub tool: String, pub role: String, pub draw: bool }
@@ -42,7 +42,7 @@ pub fn sub(s: &str, key: &str, val: &str) -> String {
     for seg in it { match seg.strip_prefix(&close) { Some(rest) => { o.push_str(val); o.push_str(rest) } None => { o.push('{'); o.push_str(seg) } } }
     o
 }
-/// Cad.fill: the variables go in one after the other, so a value holding "{out}" is filled by a later variable, as in Bend
+/// Cad.fill: the variables go in one after the other, so a value holding "{out}" is filled by a later variable, as in
 pub fn fill(argv: &[&str], vars: &[(&str, &str)]) -> Vec<String> { argv.iter().map(|a| vars.iter().fold(a.to_string(), |s, (k, v)| sub(&s, k, v))).collect() }
 /// Cad.quote
 pub fn quote(s: &str) -> String { format!("'{}'", s.replace('\'', "'\\''")) }

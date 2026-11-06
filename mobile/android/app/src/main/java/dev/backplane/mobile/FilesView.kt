@@ -74,12 +74,12 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-// The viewer's Files tab (client.bend's Fm, mobile/view.bend's Files.json):
+// The viewer's Files tab:
 // the project's folders and files; a board, schematic or model opens in the
 // viewer, an image or a PDF here (a PDF drawn page by page by Android's own
 // PdfRenderer, after one download).
 
-// a row's icon, by the name core/icons.bend gives it
+// a row's icon, by the name core/icons gives it
 private fun fileIcon(name: String): ImageVector = when (name) {
     "folder" -> Icons.Filled.Folder
     "circuit-board" -> Icons.Filled.DeveloperBoard
@@ -92,7 +92,7 @@ private fun fileIcon(name: String): ImageVector = when (name) {
     else -> Icons.Filled.InsertDriveFile
 }
 
-// A download from the Files tab (mobile/view.bend's Files.json: a row's
+// A download from the Files tab (mobile/view's Files.json: a row's
 // down, the folder's zip): the person picks where it goes (the system's
 // Create document, under the name the hub gives it), then it streams there
 // from the hub with its token. Never opened in a browser: the address

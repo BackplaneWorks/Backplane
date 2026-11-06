@@ -1,6 +1,6 @@
 import Foundation
 
-// The screen src/mobile/screen.bend emits. Plain data; no decisions.
+// The screen src/mobile/screen emits. Plain data; no decisions.
 
 // a swipe button: the action it sends with its value, or (a snooze)
 // choices whose values it sends instead
@@ -75,7 +75,7 @@ struct RowMenu: Decodable, Equatable {
 // offers choices whose values it sends instead; danger asks first
 struct Tool: Decodable, Hashable {
     let label, action: String
-    // core/icons.bend's name for it (Views' icon(_:) turns it into a symbol)
+    // core/icons's name for it (Views' icon(_:) turns it into a symbol)
     let icon: String?
     let on: Bool
     let value: String?
@@ -127,10 +127,10 @@ struct Entry: Decodable, Identifiable, Equatable, Sendable {
     let key: String?
     // a reminder (kind "reminder"): when, in the person's zone
     let when: String?
-    // a message: when it was sent, or the turn finished (core/stamp.bend)
+    // a message: when it was sent, or the turn finished
     let stamp: String?
     let partial: MessagePartial?
-    // a bot chat (core/reply.bend): Reply offered; a person's reply names
+    // a bot chat: Reply offered; a person's reply names
     // the message it answers; a bot's message heads with what it links most
     let reply: Bool?
     let replyTo: ReplyRef?
@@ -163,7 +163,7 @@ struct Ask: Decodable, Identifiable {
     let buttons: [AskButton]
     // a browser task's pause: the hub path of its screenshot
     let image: String?
-    // a buy thread's "Backplane needs" card (screen.bend's Mob.needs): an
+    // a buy thread's "Backplane needs" card: an
     // order question has a box whose text is sent as "answer" with pre and
     // the text (typed: the box leads, where it ships), its choices as
     // buttons, go (Continue) and skip; the files' approval only the look
@@ -175,7 +175,7 @@ struct Ask: Decodable, Identifiable {
     var skip: AskButton? = nil
 }
 
-// a buy thread's Order card (screen.bend's Mob.order): the project, the
+// a buy thread's Order card: the project, the
 // steps (mark "done", "on" or ""), what happens now (waiting: the quote on
 // its way), and once quoted the total, the customs line and Buy now (its
 // label and link, opened in the browser); the title is marked Order
@@ -191,7 +191,7 @@ struct OrderCard: Decodable {
     let total, customs, pay, label: String
 }
 
-// the subagent panel (src/core/subs.bend): what the thread delegated and
+// the subagent panel: what the thread delegated and
 // the agent's own; a row sends act with value (a task opens its thread, a
 // subagent opens or shuts its steps)
 struct SubStep: Decodable, Hashable {
@@ -269,7 +269,7 @@ struct Term: Decodable {
     let cursor: TermCursor
 }
 
-// a terminal in the chat (core/emb.bend): its key, size, whether it is live
+// a terminal in the chat: its key, size, whether it is live
 // or pinned, the value "emb-restart" sends, and its screen while live
 struct Emb: Decodable {
     let key, id, title: String
@@ -279,7 +279,7 @@ struct Emb: Decodable {
     let term: Term?
 }
 
-// the board viewer (src/mobile/view.bend): the source open ("" closed),
+// the board viewer: the source open ("" closed),
 // the key its plots carry, the choices, and how to draw
 struct Choice: Decodable, Hashable {
     let label, value: String
@@ -322,7 +322,7 @@ struct Viewer: Decodable {
     let sheets: [SheetRow]?
     let layerList: [LayerRow]?
     let off: UInt32?
-    // the layer focus (core/layers.bend): the layers drawn dimmed (a bit
+    // the layer focus: the layers drawn dimmed (a bit
     // each), the one drawn last (255 none), the list's All/Dim/Only (0-2)
     // and whether it has one (a board), and the Layers button's words
     let dim: UInt32?
@@ -346,7 +346,7 @@ struct Viewer: Decodable {
     let comments: ReviewComments?
 }
 
-// Review comments (client.bend's Rc): the pins, at places in mm of the
+// Review comments: the pins, at places in mm of the
 // file's coordinates ("rv-pin" id opens one), the one open, and the place
 // waiting for its note ("x\ty\tlayer\titem", "" none)
 struct ReviewPin: Decodable, Hashable {
@@ -415,7 +415,7 @@ struct FileCrumb: Decodable, Hashable {
     let label, action, value: String
 }
 
-// down: where the row downloads from ("" none; client.bend's Fm.down),
+// down: where the row downloads from,
 // downName: the name it saves under
 struct FileRow: Decodable, Hashable {
     let label, action, value, detail, kind, icon: String
@@ -436,7 +436,7 @@ struct FileView: Decodable {
     let name, kind, url: String
 }
 
-// The design history (src/mobile/view.bend's Hist.json): the steps in the
+// The design history: the steps in the
 // track and the one shown (0 the live file), what to call it, what the
 // agent said before it, playing, changes marked, a comparison on show and
 // its sides' labels, the side whose version menu is open ("" shut), a tick
@@ -468,7 +468,7 @@ struct HistRow: Decodable, Hashable {
     let label, sub, value: String
 }
 
-// The Mechanical page (src/mobile/view.bend's Mech.json): what to say
+// The Mechanical page: what to say
 // while there are no parts, the parts ("mech-part" value), the part on
 // show (its path for "mech-3d"), its renders and what to say without any,
 // and where to get FreeCAD when the hub has none
@@ -494,7 +494,7 @@ struct SheetRow: Decodable, Hashable {
     let label, value: String
     let on, loop: Bool
     // its sheet symbol on the sheet on show ("x0 y0 x1 y1" mm), when it is
-    // directly under it: a tap there opens it (mobile/view.bend)
+    // directly under it: a tap there opens it
     let box: String?
 }
 
@@ -502,7 +502,7 @@ struct LayerRow: Decodable, Hashable {
     let layer: Int
     let name: String
     let on: Bool
-    // the active layer of the focus (core/layers.bend)
+    // the active layer of the focus
     let active: Bool?
 }
 
@@ -605,11 +605,11 @@ struct ThreadView: Decodable {
     let term: Term?
     // the thread's terminals in the chat (entries of kind "emb" name them)
     let embs: [Emb]?
-    // dictation in this thread (screen.bend's Mob.voice)
+    // dictation in this thread
     var voice: VoiceView? = nil
 }
 
-// Dictation (screen.bend's Mob.voice): "on" while its strip shows, one
+// Dictation: "on" while its strip shows, one
 // quiet word for its state and the level (the words are only in the draft),
 // a note (an error when bad, closed by voice-err), the last segment's fixes
 // (each a chip that undoes it) and the first word to clarify
@@ -644,7 +644,7 @@ struct Deleting: Decodable, Equatable {
     let id, title, body, yes, no: String
 }
 
-// the first-run tour's step on screen (core/onboard.bend): the counter
+// the first-run tour's step on screen: the counter
 // ("3 of 8"), title and text, and the buttons' labels; actions "ob-skip",
 // "ob-back" (not on the first step) and "ob-next"
 struct Tour: Decodable, Equatable {
@@ -695,7 +695,7 @@ struct SetField: Codable, Hashable {
     let name, hint: String
     let secret: Bool
     let value: String
-    // the secret box's value field (screen.bend's Mob.sbox): kept by the app
+    // the secret box's value field: kept by the app
     // and handed over only at Save (AppModel.vaultText), never sent as typed
     var vault: Bool = false
 
@@ -772,7 +772,7 @@ struct Found: Decodable, Hashable {
     let name, url: String
 }
 
-// Bots (src/mobile/bots.bend). A cat in the list: act ("bot", or
+// Bots. A cat in the list: act ("bot", or
 // "remote" for a bot only reported by a linked machine; older bridges
 // leave it out and say remote) sends its id; mood and note say how it is;
 // cat names its rig ("look:mood"), which the bridge gives once
@@ -872,7 +872,7 @@ struct BotSettings: Decodable {
 // the hub's latest frame of the bot's page: n changes with every new one
 struct BotBrowser: Decodable {
     let url, n: String
-    // browser tasks (src/core/client.bend's Teach.*): the strip (mode 0 idle,
+    // browser tasks: the strip (mode 0 idle,
     // 1 recording, 2 save sheet, 3 the person has the browser), its buttons
     // (each sends its own action), whether the frame takes input ("bb-click"
     // "x y" in thousandths, "bb-scroll" dy, "bb-type", "bb-key", "bb-nav"
@@ -1048,7 +1048,7 @@ struct Screen: Decodable {
     let settings: Settings?
     let find: Find?
     let island: IslandAttributes.ContentState
-    // each paired hub's own island, for its Live Activity (hubs.bend's
+    // each paired hub's own island, for its Live Activity (hubs's
     // Hubs.islands); island above is all of them, for the picker
     let islands: [HubIsland]?
     let thread: ThreadView?
@@ -1062,7 +1062,7 @@ struct Screen: Decodable {
     // the hub's theme ("light", "dark"; empty follows the phone's): read only
     // once, to carry it into App settings (AppSettings.migrate)
     let theme: String?
-    // the tab bar's badges and the routines (src/mobile/tabs.bend)
+    // the tab bar's badges and the routines
     let tabs: TabsInfo?
 }
 
@@ -1097,7 +1097,7 @@ struct Cmd: Decodable {
     let text: String?
     // send: the CBOR frame, as base64, for the hub keyed hub
     let data, hub: String?
-    // notify; key is shared by alerts about the same item (src/core/notice.bend)
+    // notify; key is shared by alerts about the same item
     let thread, title, kind, body, key: String?
     // later: an action (with its value) to send after ms; jump: the entry to show
     let ms: Double?
@@ -1128,7 +1128,7 @@ struct SyncUpdate: Decodable, Sendable {
     }
 }
 
-// A key in a composer (bridge.js's composerPatch, session.bend's Composer.of):
+// A key in a composer:
 // only the composer's fields for the thread the hub drew, never a screen
 struct ComposerPatch: Decodable, Equatable {
     let thread: String
@@ -1208,8 +1208,8 @@ extension KeyedDecodingContainer {
     }
 }
 
-// The screen as Bend sends it (src/mobile/screen.bend). Every field is read
-// on its own: a field Bend leaves out or a shape this build does not know
+// The screen as sends it. Every field is read
+// on its own: a field leaves out or a shape this build does not know
 // costs that field, never the whole screen (a blank app).
 extension Screen {
     private enum K: String, CodingKey {

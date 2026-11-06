@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.security.SecureRandom
 
-// The app's one Backplane client, alive as long as the process: the Bend
+// The app's one Backplane client, alive as long as the process:
 // engine, a socket per paired hub (keyed by host:port, Pairing.key), the
 // current screen and the composer. Activities
 // come and go and only observe it; the live service keeps the process
@@ -164,7 +164,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
 
     // where a page selected from elsewhere (a notification, a link, a link in
     // a thread) opens: a bot's thread, a room or a remote bot in Bots, the
-    // uberbot's on Home, any other thread in Threads (Bend says which: the
+    // uberbot's on Home, any other thread in Threads (says which: the
     // screen's bot, and the uber card's sel)
     private fun destination(s: Screen, nav: String): Tab {
         openedIn?.let { if (it.first == nav) return it.second }
@@ -175,7 +175,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         tab = t
     }
 
-    // the thread list's view, for Bend to draw (the device's own choice)
+    // the thread list's view, for to draw (the device's own choice)
     private suspend fun languageLocal() {
         apply(engine.local("mailroom-renderer", "android-v1"))
         apply(engine.local("lang-preview", if (AppSettings.langPreview) "1" else ""))
@@ -244,12 +244,12 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         if (order.size > 24) map.remove(order.removeFirst())
     }
 
-    // the composer's text, owned here so typing never waits on Bend
+    // the composer's text, owned here so typing never waits on
     var composer by mutableStateOf("")
         private set
     // what the composer offers for the text typed now (popup rows, the send
     // button), from a key's own answer; only the composer reads it, so a key
-    // never recomposes the timeline. A new screen carries the same (Bend's
+    // never recomposes the timeline. A new screen carries the same (
     // law composer_screen_agrees) and clears it.
     var composerPatch by mutableStateOf<ComposerPatch?>(null)
         private set
@@ -265,7 +265,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     private var jumpLeft = 0
     // the board viewer's plots, which come straight from the socket
     val plots = PlotStore()
-    // drafts sent to Bend and not yet answered: until then a screen may
+    // drafts sent to and not yet answered: until then a screen may
     // carry an older draft than the one on screen
     private var typing = 0
     // activities started: above zero, the app is in the foreground
@@ -516,7 +516,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 // where the person is: every hub keeps the phone's zone (routines follow it)
                 act("tz-report", java.time.ZoneId.systemDefault().id)
             },
-            // plots go straight to the viewer, never through the Bend
+            // plots go straight to the viewer, never through
             // client, and only the hub in focus draws
             onMessage = { b ->
                 if (PlotStore.isPlot(b)) { if (shownHub == key) plots.receive(b) }
@@ -714,7 +714,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         }
     }
 
-    // a bot form's field ("bfield"), typed: Bend keeps it without a new
+    // a bot form's field ("bfield"), typed: keeps it without a new
     // screen, the field on screen already shows it
     fun field(name: String, text: String) {
         if (!acting) return
@@ -739,11 +739,11 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     // this phone's microphone for dictation (VoiceRecorder.kt)
     val recorder = VoiceRecorder()
 
-    // The composer's mic and the strip's Stop (screen.bend's Mob.voice): the
-    // first press starts this phone's recorder at once and tells Bend
+    // The composer's mic and the strip's Stop: the
+    // first press starts this phone's recorder at once and tells
     // ("voice" with "client": the phone records itself, the hub's reply says
     // where the audio goes); the next sends what is left with the end mark
-    // and Bend asks the hub to stop. The caller holds RECORD_AUDIO.
+    // and asks the hub to stop. The caller holds RECORD_AUDIO.
     fun voicePress(on: Boolean) {
         if (!contentReady) return
         val s = screen ?: return

@@ -2,8 +2,8 @@
 
 `backplane-serve` is one executable made by `bun build --compile` (Bun 1.4.3,
 https://bun.sh, source https://github.com/oven-sh/bun/tree/bun-v1.4.3). It holds
-two things: the Bun runtime, and Backplane's program (JavaScript emitted by Bend
-from this repository's `src/server/main.bend`).
+two things: the Bun runtime, and Backplane's program (JavaScript emitted by
+from this repository's `src/server/main`).
 
 Bun is MIT-licensed. It statically links JavaScriptCore and parts of WebKit,
 which are under LGPL-2 (some files under BSD licenses), and tinycc, which is
@@ -24,7 +24,7 @@ under LGPL-2.1. The other libraries it links, and their licenses, are listed in
   modified Bun, rebuild it with that Bun:
 
   ```sh
-  BACKPLANE_JS_BUN_RUNTIME=/path/to/your/bun scripts/build-js.sh src/server/main.bend backplane-serve
+  BACKPLANE_JS_BUN_RUNTIME=/path/to/your/bun scripts/build-js.sh src/server/main backplane-serve
   ```
 
   This uses `bun build --compile --compile-executable-path`.

@@ -1,5 +1,5 @@
 //! Board and schematic layers as the hub decides them (viewer.off / dim / lift bit masks, viewer.layerList rows): which chunks are drawn, which
-//! dimmed to a quarter, which one last. The phones and the web draw exactly this from the same fields (core/layers.bend `Lyr.masks`, Plot.kt
+//! dimmed to a quarter, which one last. The phones and the web draw exactly this from the same fields (core/layers `Lyr.masks`, Plot.kt
 //! `shown`/`dimmed`/`lift`). The client never decides a mask: a row press is a view action and the hub's next picture carries the new masks.
 use crate::{hub::Command, theme, Backplane};
 use gpui::{prelude::*, *};

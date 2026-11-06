@@ -3,33 +3,33 @@
 An agentic hardware development environment: an agent harness with deterministic
 viewers for KiCad boards, schematics and STEP models. The hub is Rust (`native/host`),
 the desktop client is GPUI (`native/gpui`), the phone apps are native (`mobile/`).
-There is no Bend, no JavaScript hub and no web client in this tree. The last Bend
-`main` is the tag `main-bend-final`.
+There is no JavaScript hub and no web client in this tree.
 
 ## Branches
 
-- `main` is the integration branch and is guarded: it moves only by `scripts/gpui/land.sh TIP`, which needs the reviewer's recorded OK for every commit (`scripts/gpui/review-ok.sh`, `scripts/gpui/ref-guard.hook`, installed by `scripts/gpui/install-guard.sh`). Never force anything, never push `main` yourself unless the person says so.
-- `gpui-next` is the unreviewed landing branch (`scripts/gpui/next-land.sh TIP`); a builder follows it (`scripts/gpui/next-build.sh`) and the app relaunches. A reviewed `gpui-next` is promoted to `main` with `land.sh`.
-- Lanes work in their own worktree: `git worktree add ~/Documents/i2cjak/bp-gpui-lanes/<lane> -b gpui-<lane> main`, rebase on `main`, land small and often. See `docs/gpui/LANES.md`. (`gpui` was this branch's name until 2026-11-06; the lock and state names `gpui-merge`, `gpui-reviewed`, `gpui-reviewer` stay.)
+- Work happens in your own worktree on your own branch: `git worktree add .backplane/worktrees/<name> -b <name> main`.
+- Threads merge to `main` themselves: when your tests pass, `git rebase main`, then fast-forward `main` from the checkout that has it (`git -C <that checkout> merge --ff-only <branch>`). No script, lock or review step. Never force, never merge-commit, never push unless the person says so.
+- Every move of `main` is built on this machine and the app relaunches on it (`scripts/main-build.sh`, started by a hook from `scripts/install-hooks.sh`; `docs/MAIN-BUILD.md`). A red test publishes nothing and leaves the bar red until the next merge fixes it, so run the tests before you merge.
 
 ## Layout
 
 - `native/host/`: the Rust hub (`backplane-hub`). HTTP + WebSocket, event store, agent processes (Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi), KiCad (in-process IPC, plots, STEP), bots and rooms, pairing, far threads, terminals. The presenter (`present/`, `presenter.rs`) is Rust only; there is no helper process and no `--policy-bin`. The CBOR dictionaries are in `src/wire_dict.rs` (append-only forever, the wire depends on the order).
 - `native/gpui/`: the GPUI desktop client (`backplane-gpui`); `vendor/` is vendored crates. Its colours come from `assets/web/style.css`, its logo from `assets/web/favicon*.svg`.
-- `mobile/ios`, `mobile/android`: the phone apps. They speak the hub's data/1 protocol (`docs/gpui/PHONE-DATA.md`). Their old Bend-bridge launcher (`Engine`, `Core`, `WebShell`) is dead code kept until the apps are cleaned.
+- `mobile/ios`, `mobile/android`: the phone apps. They speak the hub's data/1 protocol (`docs/PHONE-DATA.md`).
 - `tools/`: helper programs that are not Rust: `browser` (headless Chromium over NDJSON), `cef`, `kipc`, `step2glb`, `voice`, `platform`. Built by `scripts/build-*.sh`.
 - `order/`: the order server (`fabsrv`, Python) and deploy. `skills/`: agent skills. `deploy/kistack`: KiStack's skills, pinned by `deploy/kistack.lock` (`python3 scripts/kistack.py bump <commit>`). `i18n/`: message catalogs. `assets/`: fonts, icons, web colours.
-- `scripts/gpui/`: dev, build, fresh/watch, side-by-side, switch, landing and device scripts. `test/gpui/`: fixtures, oracles and e2e drivers; `test/tools/claude_standin.ts` and `perf_standin.ts`: the stand-in agents.
-- `docs/gpui/`: how this tree works (`LANES.md`, `BUILD.md`, `DEV-RELOAD.md`, `NEXT-BUILD.md`, `SIDE-BY-SIDE.md`, `COPY-GUARD.md`, `HUB-API.md`, `PHONE-DATA.md`). Other `docs/*.md` describe features the hub keeps.
+- `scripts/`: dev, build, fresh/watch, side-by-side, switch and device scripts. `test/`: fixtures, oracles and e2e drivers; `test/tools/claude_standin.ts` and `perf_standin.ts`: the stand-in agents.
+- `docs/`: how this tree works (`BUILD.md`, `DEV-RELOAD.md`, `MAIN-BUILD.md`, `SIDE-BY-SIDE.md`, `COPY-GUARD.md`, `HUB-API.md`, `PHONE-DATA.md`). Other `docs/*.md` describe features the hub keeps.
 
 ## Commands
 
 ```sh
 cd native/host && cargo test --offline          # hub tests
 cd native/gpui && cargo test --offline          # client tests
-scripts/gpui/dev-build.sh --gate --no-cut       # both crates' tests, then fast-profile builds; no publish
-scripts/gpui/dev-build.sh                       # build and publish to the person's `watch` terminal via dev-cut.sh
-scripts/gpui/bp-build.sh                        # build/test on a remote builder (Boat or h@backplane)
+scripts/dev-build.sh --gate --no-cut       # both crates' tests, then fast-profile builds; no publish
+scripts/dev-build.sh                       # build and publish to the person's `watch` terminal via dev-cut.sh
+scripts/main-build.sh --once               # build and publish the tip of main now
+scripts/bp-build.sh                        # build/test on a remote builder (Boat or h@backplane), when the desktop is busy
 backplane-hub --home DIR --port N --no-tailscale --foreground   # run a hub (temp home!)
 ```
 
@@ -38,7 +38,7 @@ backplane-hub --home DIR --port N --no-tailscale --foreground   # run a hub (tem
 ## Rules
 
 - Stand-in agents only in tests: set `BACKPLANE_AGENTS=<dir>` (the stand-ins go first on PATH; a missing CLI is blocked, never the real one). Real model turns only on temp homes, with the person's go.
-- Never write to live user data (`~/.backplane-bend`, `~/.backplane-gpui`, `~/.local/share/backplane`). Tests use a temp home, a port 3799+ and `--no-tailscale`. A hub on a copy of a real log runs with `BACKPLANE_COPY=1` (`docs/gpui/COPY-GUARD.md`); set `restart.continue` to `off` first so it does not resume real turns.
+- Never write to live user data (`~/.backplane*`, `~/.local/share/backplane`). Tests use a temp home, a port 3799+ and `--no-tailscale`. A hub on a copy of a real log runs with `BACKPLANE_COPY=1` (`docs/COPY-GUARD.md`); set `restart.continue` to `off` first so it does not resume real turns.
 - Never run the installed `backplane`/`backplane-hub` to probe it; ask `/hello`.
 - Never kill processes by name or pattern; only PIDs you captured.
 - Persisted events stay decodable forever: add event variants, never change the meaning of one. CBOR dictionary entries are append-only.
@@ -46,7 +46,7 @@ backplane-hub --home DIR --port N --no-tailscale --foreground   # run a hub (tem
 - The UI is dumb: decisions (order, settle state, what is visible) come from the hub or a pure function with a test.
 - No continuous repaint loops: animate only while a fade or stream is in flight.
 - Square corners, minimal copy, no decorative headings.
-- Keep disk headroom (`df -h /` first; 20 GB free); delete your own build leftovers. Heavy builds run under a memory cap on the shared builder, not on the person's desktop.
+- Keep disk headroom (`df -h /` first; 20 GB free); delete your own build leftovers. Builds of `main` run in the builder's own checkout and target dirs, at low priority; a build from a worktree uses its own target dir, not another's.
 - Before pushing, verify the GitHub account (`i2cjak`), the remote (`i2cjak/Backplane`), and the branch. Push only when asked.
 - Process spawning goes through `native/host/src/proc.rs` (its kinds decide what a copy run refuses); no other non-test `Command::new` under `src/`.
 

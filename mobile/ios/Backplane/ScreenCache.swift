@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-// Presentation only: independent of Bend's kept-state type key. Never used
+// Presentation only: independent of kept-state type key. Never used
 // as replay state, an applied cursor, commands, pending sends or drafts.
 final class ScreenCache: @unchecked Sendable {
     static let limit = 512 * 1024

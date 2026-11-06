@@ -1,4 +1,4 @@
-//! The project card (core/order.bend `Card.*` / `Estimate.*` / `Intent.goal`, server/orderio.bend `Od.look`, `Od.intent`, hub.bend `Buy.look`):
+//! The project card:
 //! `fab.look {thread}` answers `{thread, intent, goal, parts, boards, label, estimate_problems, error, estimates, board_files, board_default, order}`
 //! for the thread's folder, and `fab.intent {thread, text}` writes `.backplane/intent.md` and answers the same card. The clients draw the goal,
 //! the Buy it button and the Ready bar from it (the session's `fab.*` info keys are kept from this reply by the policy).

@@ -68,7 +68,7 @@ pixels, native Browser child-pane capture, dragging/clamping, recapture failure
 with preserved selection, Escape focus restoration, HTTP PNG upload, Send
 retry/double-click handling, and phone-width layout. Its RPC responses are
 fixtures, so it does not prove hub/provider execution or native phone capture.
-The real planner is exercised by `test/improvements_test.bend`.
+The real planner is exercised by `test/improvements_test`.
 
 `test/tools/improvements-gates.sh` records the focused planner/worktree checks,
 required regression set, repository type checks and mandated proof separately.

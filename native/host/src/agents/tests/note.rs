@@ -1,4 +1,4 @@
-//! A told note (Bend's `Ride.note`, core/hub.bend `Private.tell.fresh`) joins the thread's ride and starts no turn; the next turn takes it (Ride.post).
+//! A told note joins the thread's ride and starts no turn; the next turn takes it (Ride.post).
 use super::*;
 use super::lost::rig;
 

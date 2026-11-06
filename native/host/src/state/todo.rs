@@ -1,4 +1,4 @@
-//! TodosChanged beyond snapshots (src/core/model.bend Todos.changed; src/core/todo.bend): the agent's task tools, the person's
+//! TodosChanged beyond snapshots: the agent's task tools, the person's
 //! edits, and a whole agent list, merged by identity into the settings todos.<t>, todos.base.<t>, todos.visible.<t>.
 use super::json::*;
 use super::State;

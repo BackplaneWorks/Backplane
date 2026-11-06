@@ -135,7 +135,7 @@ Catbots are persistent agents for specific jobs. They have webhooks and routines
 
 ## How it works
 
-One hub per machine owns the event log, agent processes, git and file watchers. The desktop app, browser, iOS and Android clients connect to that hub, and your machines can pair over Tailscale. Agents edit KiCad through the fork’s IPC server. The hub is written in [Bend](https://bend-lang.com) and runs on Bun. Important rules are stated as laws in [`LAWS.bend`](LAWS.bend), with proofs in [`PROOF.bend`](PROOF.bend) checked by the compiler.
+One hub per machine owns the event log, agent processes, git and file watchers. The desktop app, browser, iOS and Android clients connect to that hub, and your machines can pair over Tailscale. Agents edit KiCad through the fork’s IPC server. The hub is written in  and runs on Bun. Important rules are stated as laws in [`LAWS`], with proofs in [`PROOF`] checked by the compiler.
 
 ## Docs
 
@@ -147,7 +147,7 @@ One hub per machine owns the event log, agent processes, git and file watchers. 
 
 ## Contributing
 
-Issues and pull requests are welcome. Building needs [Bend](https://bend-lang.com), Bun and Python 3.12+. Start with [`AGENTS.md`](AGENTS.md) for the code map and [local testing](docs/local-testing.md) for isolated builds and previews. The [desktop guide](desktop/README.md) covers the Electron shell, and the [mobile guide](mobile/README.md) covers the phone apps.
+Issues and pull requests are welcome. Building needs , Bun and Python 3.12+. Start with [`AGENTS.md`](AGENTS.md) for the code map and [local testing](docs/local-testing.md) for isolated builds and previews. The [desktop guide](desktop/README.md) covers the Electron shell, and the [mobile guide](mobile/README.md) covers the phone apps.
 
 ## License
 

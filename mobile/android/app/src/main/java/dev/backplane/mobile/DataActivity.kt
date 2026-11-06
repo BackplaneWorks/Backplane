@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 
-// The launcher: the data/1 app (docs/gpui/PHONE-DATA.md). No Bend engine; the hub sends plain data and these screens draw it.
+// The launcher: the data/1 app (docs/PHONE-DATA.md). No engine; the hub sends plain data and these screens draw it.
 class DataActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -31,7 +31,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 }
 
 // Settings about this device: kept in UserDefaults, applied at once, never a
-// round trip to a hub. The thread list's view also goes to Bend
+// round trip to a hub. The thread list's view also goes to
 // (Backplane.local), which draws the list; nothing here is written to a hub.
 @MainActor
 @Observable

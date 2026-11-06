@@ -1,4 +1,4 @@
-//! The terminal MCP tools (src/core/mcp.bend's `Mcp.term.*`, server.bend's `TermRead.*`): terminal_open, terminal_read, terminal_send,
+//! The terminal MCP tools: terminal_open, terminal_read, terminal_send,
 //! terminal_close. The agents lane's MCP server calls `call` for any name in `NAMES` (and lists them from the JS hub's tool definitions).
 use super::{emb, find_act, get, now_s, Terms};
 use crate::hub::Hub;
@@ -75,7 +75,7 @@ async fn close(t: &Arc<Terms>, hub: &Arc<Hub>, thread: &str, a: &Value) -> (bool
 }
 
 /// For the agents lane, when the person sends a message: what the thread's terminals show now that the agent has not seen (the
-/// `<terminals>` block, "" when none), after which the terminals not pinned are stopped (src/server/server.bend's EmbNote.take/kill).
+/// `<terminals>` block, "" when none), after which the terminals not pinned are stopped.
 pub async fn on_person_message(hub: &Arc<Hub>, thread: &str) -> String {
     let Some(t) = get(hub) else { return String::new() };
     let note = t.note(thread).await;

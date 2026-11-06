@@ -1,4 +1,4 @@
-//! Agent liveness (src/core/liveness.bend): a progress gap is an episode, one nudge, then one escalation, ending only on real
+//! Agent liveness: a progress gap is an episode, one nudge, then one escalation, ending only on real
 //! progress. Notices only: nothing here kills, interrupts, cancels or restarts a process. Pure; the hub's minute tick reads the
 //! record `liveness.<thread>` (a setting), asks `tick`, writes the record back and delivers the notices.
 use super::json::*;
@@ -75,7 +75,7 @@ mod tests {
     #[test] fn liveness_progress_clears_stall() { let p = progress(&l(50, 9, true, true), 10, "x"); assert!(!p.stalled && !p.reported && p.nudged == 0 && p.last == 50); }
     #[test] fn liveness_nudge_before_stall() { let d = tick(true, 5000, 1, 60, &l(100, 0, false, false)); assert!(!d.live.stalled && d.nudge); }
     #[test] fn liveness_timeout_explicit_optout() { assert_eq!(timeout(true, 0), 0); assert_eq!(timeout(false, 0), DEFAULT_GAP); }
-    #[test] fn liveness_record_roundtrips_like_bend() {
+    #[test] fn liveness_record_roundtrips_like() {
         let w = write(&l(5, 6, true, false)); assert_eq!(w, r#"{"last":5,"nudged":6,"stalled":true,"reported":false,"reason":"r"}"#); assert_eq!(read(&w), l(5, 6, true, false));
         assert_eq!(read("junk"), Live { last: 0, nudged: 0, stalled: false, reported: false, reason: "turn or owned work".into() });
     }

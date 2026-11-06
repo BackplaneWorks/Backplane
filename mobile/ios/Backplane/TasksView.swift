@@ -3,7 +3,7 @@ import SwiftUI
 // Browser tasks (docs/teach.md): the Browser tab (the strip, the frame that
 // takes the person's input while they drive, the save sheet), the Tasks tab,
 // and the picture on a paused run's card. All of it is the screen's
-// (src/mobile/bots.bend); these views only draw it and send actions back.
+//; these views only draw it and send actions back.
 
 private let amber = Color(red: 0.96, green: 0.49, blue: 0)
 

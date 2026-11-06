@@ -1,6 +1,6 @@
 # GPUI Files tab: parity with the main-branch web / Electron client
 
-Reference: `src/core/client.bend` (`Fm.*`, `Pdf.*`), `src/web/view.bend` (`View.fm.*`), `src/core/fm.bend`, `src/mobile/view.bend` (`Files.json`, `File.json`),
+Reference: `src/core/client` (`Fm.*`, `Pdf.*`), `src/web/view` (`View.fm.*`), `src/core/fm`, `src/mobile/view` (`Files.json`, `File.json`),
 main commits since `7c9b3c223c` (#960 thread-folder boundary, Files listings kept hub-wide, `String.drop`). GPUI: `native/gpui/src/screens/viewer.rs`
 (+ `filesui.rs`), hub side `native/host/src/files/*`.
 
@@ -34,7 +34,7 @@ The web Files tab has no upload, create, rename, delete or filter; those rows ar
 
 Not covered (and why): remote-machine threads (`<link>~<id>`) have no local folder in this hub; split view; drag *out* of the window.
 
-## Evidence (run `scripts/gpui/desktop-files-run.sh CLIENT HUB ASSETS NAME`, script `test/gpui/files/files-script.json`)
+## Evidence (run `scripts/desktop-files-run.sh CLIENT HUB ASSETS NAME`, script `test/files/files-script.json`)
 Real hub (this branch's `backplane-hub`, started with **no `--policy-bin`**: the script refuses a hub whose command line has one) + this branch's client on an isolated Xvfb, stand-in agents, a project of 40 mixed files. Screenshots land in
 `build/gpui/shots/files/<name>-NN-*.png` (not committed). Run `ro3` (34 `files` steps, none failing; hub log has no refusal):
 - 01 folder list with icons, breadcrumbs, New/Upload/Zip; 02 three `key:down` select the 3rd row; 03 filter `kicad` shows "3 of 39"; 04 context menu on a row;
@@ -51,5 +51,5 @@ Real hub (this branch's `backplane-hub`, started with **no `--policy-bin`**: the
 - The Rust presenter (`present/viewer.rs`) reads the folder in-process (`files::dir::list`) each time it draws the view, so the listing needs no hub job and no idle request (the 400 ms draft workaround is gone). The cost: a file an agent adds shows on the next view request (any action, or the thread's next change), not by push.
 - Remote-machine threads, Split view, and Markdown rendering are not done.
 
-## Rust presenter (no Bend helper)
+## Rust presenter
 `present/viewer.rs` draws the Files page (`files_page`, `file_rows`, `files_trail`, `files_action` for `fm`, `fm-cd`, `fm-up`, `fm-open`), previews (`image`/`pdf`/`text` kinds with `viewer.file`), and a board/schematic/3D opened from a row (watched by its own path). Board/Schematic/3D/Split/Mech/Browser behave as before; Review stays unported (refused, retryable). Tests: `present::viewer::tests::the_files_page_lists_rows_trail_and_downloads_as_core_fm_does`, `fm_actions_walk_folders_open_files_and_refuse_escapes`, and the old assertion now says Files opens (and stops the watch) while Review is still `None`.

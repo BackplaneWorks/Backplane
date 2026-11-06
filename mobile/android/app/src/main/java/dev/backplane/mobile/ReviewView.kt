@@ -58,7 +58,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 
-// The viewer's Review tab (client.bend's Rp, mobile/view.bend's Rv.json): a
+// The viewer's Review tab: a
 // chip per page, the page's title and the report as Markdown (the apps'
 // own; its tables scroll sideways), or what to say while there is none.
 // Refresh sits at the bottom, under the thumb.
@@ -110,7 +110,7 @@ fun ReviewScreen(m: AppModel, v: Viewer, r: ReviewPage) {
 
 // The Release page's form: the tag (empty releases the proposed one), two
 // switches off until the person turns them on (Publish on GitHub pushes the
-// tag and makes a GitHub release), and the button. The tag goes to Bend as
+// tag and makes a GitHub release), and the button. The tag goes to as
 // the field "rltag" while it is typed.
 @Composable
 fun ReleaseBox(m: AppModel, f: ReleaseForm, busy: Boolean) {
@@ -207,7 +207,7 @@ fun PinLayer(m: AppModel, pins: List<ReviewPin>, cam: FloatArray) {
 }
 
 // The note for a new comment, a bottom sheet that leaves the board in view
-// (partial, no scrim, the keyboard lifts it). The text goes to Bend as the
+// (partial, no scrim, the keyboard lifts it). The text goes to as the
 // field "rcnote" while it is typed; Send posts it.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

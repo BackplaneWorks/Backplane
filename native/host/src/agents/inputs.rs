@@ -1,5 +1,5 @@
-//! What a message and a project give an agent besides the prompt: the project's KiCad files (server/kicad.bend Files.*),
-//! skills and `$skill` mentions (core/agent.bend, prompt.bend's frontmatter), and attached images (core/attach.bend).
+//! What a message and a project give an agent besides the prompt: the project's KiCad files,
+//! skills and `$skill` mentions, and attached images.
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Files { pub pro: String, pub pcb: String, pub sch: String, pub all: String }
 
-/// A folder's name that says it holds copies (order.bend Boards.copies).
+/// A folder's name that says it holds copies.
 fn copies(c: &str) -> bool {
     let l = c.to_lowercase();
     l.starts_with("archive") || l.starts_with("build") || l.contains("backup") || l == "old" || l == "out" || l.starts_with("output") || l == "tmp" || l == "temp" || l == "staging" || l == "scratch" || l == "renders" || l.starts_with("export")

@@ -127,7 +127,7 @@ Catbotsは、特定の仕事を担当する常駐エージェントです。Webh
 
 ## 仕組み
 
-1台のマシンにつき1つのハブが、イベントログ、エージェントのプロセス、git、ファイル監視を管理します。デスクトップアプリ、ブラウザ、iOS、Androidのクライアントがそのハブに接続し、自分のマシン同士をTailscale経由でペアリングできます。エージェントはフォークのIPCサーバー経由でKiCadを編集します。ハブは[Bend](https://bend-lang.com)で書かれ、Bun上で動きます。重要なルールは[`LAWS.bend`](LAWS.bend)に法則として記述され、[`PROOF.bend`](PROOF.bend)の証明をコンパイラが検査します。
+1台のマシンにつき1つのハブが、イベントログ、エージェントのプロセス、git、ファイル監視を管理します。デスクトップアプリ、ブラウザ、iOS、Androidのクライアントがそのハブに接続し、自分のマシン同士をTailscale経由でペアリングできます。エージェントはフォークのIPCサーバー経由でKiCadを編集します。ハブはで書かれ、Bun上で動きます。重要なルールは[`LAWS`]に法則として記述され、[`PROOF`]の証明をコンパイラが検査します。
 
 ## ドキュメント
 
@@ -139,7 +139,7 @@ Catbotsは、特定の仕事を担当する常駐エージェントです。Webh
 
 ## コントリビュート
 
-IssueとPull Requestを歓迎します。ビルドには[Bend](https://bend-lang.com)、Bun、Python 3.12以上が必要です。コードの構成は[`AGENTS.md`](AGENTS.md)、独立した環境でのビルドとプレビューは[ローカルテスト](docs/local-testing.md)をご覧ください。[デスクトップガイド](desktop/README.md)はElectronシェル、[モバイルガイド](mobile/README.md)はスマートフォンアプリを説明しています。
+IssueとPull Requestを歓迎します。ビルドには、Bun、Python 3.12以上が必要です。コードの構成は[`AGENTS.md`](AGENTS.md)、独立した環境でのビルドとプレビューは[ローカルテスト](docs/local-testing.md)をご覧ください。[デスクトップガイド](desktop/README.md)はElectronシェル、[モバイルガイド](mobile/README.md)はスマートフォンアプリを説明しています。
 
 ## ライセンス
 

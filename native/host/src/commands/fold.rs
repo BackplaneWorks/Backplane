@@ -37,7 +37,7 @@ impl Fold {
         if crate::ckpt::check_on() { let (s, n, a) = (store.clone(), f.seen, serde_json::to_value(f).unwrap_or_default()); std::thread::spawn(move || { let mut g = Fold::default(); let _ = g.sync_to(&s, n); crate::ckpt::check("commands fold", a, serde_json::to_value(&g).unwrap_or_default()) }); } } f.unwrap_or_default() }
     /// Bring it up to the log and save it (the first round of a fold nobody has asked for yet reads the whole log once, here, off the request path).
     pub fn save(&mut self, store: &Store) { let _ = self.sync(store); if crate::ckpt::due("commands", self.seen) { crate::ckpt::save_json(&Self::path(store), store, self.seen, self); crate::ckpt::saved("commands", self.seen) } }
-    /// Events seen: the Bend hub's `Hub.seq` (the id source for generated ids).
+    /// Events seen: hub's `Hub.seq` (the id source for generated ids).
     pub fn n(&self) -> usize { self.alloc.unwrap_or(self.seen) }
     pub fn setting(&self, k: &str) -> &str { self.st.get(k).map(String::as_str).unwrap_or("") }
     /// M.Setting.get(s, k, d): a stored value, an empty one included, else d.

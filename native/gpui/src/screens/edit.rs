@@ -1,6 +1,6 @@
 //! The composer's text model: pure, no GPUI. A buffer with one selection (anchor + head, byte offsets on
 //! grapheme boundaries), word and line motions, multi-line text and an undo history that merges a run of
-//! typing. Mirrors src/core/edit.bend's behaviour; the view only maps keys and mouse onto these calls.
+//! typing. Mirrors src/core/edit's behaviour; the view only maps keys and mouse onto these calls.
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 

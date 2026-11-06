@@ -1,4 +1,4 @@
-//! The sidebar's drag and drop (client.bend `Ui.reorder`, `Ui.reorder_project`): the action `reorder` (a thread dropped where another stands on its shelf) and
+//! The sidebar's drag and drop: the action `reorder` (a thread dropped where another stands on its shelf) and
 //! `reorder-project` (a project dropped on a project, or on a thread standing for its project), value `<moved>\u{1f}<target>` in raw ids. The shelf's ids in
 //! their order come from the model (`order_of`); the moved one is taken out and put where the target stood (M.Order.move), and the request goes out as
 //! `thread.reorder {section, thread, ids}` or `project.reorder {project, ids}`. A drop that changes nothing (onto itself, or across shelves) sends nothing.

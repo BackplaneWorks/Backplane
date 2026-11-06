@@ -1,6 +1,6 @@
 //! events.jsonl, format unchanged: one JSON change per line. Whole lines only; a torn tail
 //! (bytes after the last newline) is never a line and is closed off with a newline before the
-//! next write, as the Bend hub does (evlog.js "tail's fix"). A write is fsync'd before it is
+//! next write, as hub does (evlog.js "tail's fix"). A write is fsync'd before it is
 //! acknowledged.
 use anyhow::{Context, Result};
 use serde::de::IgnoredAny;
@@ -10,7 +10,7 @@ use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 /// A lone surrogate escape (\\ud83d with no partner, a pasted half emoji) is not valid JSON text for a Rust
-/// parser; the Bend hub reads it as U+FFFD (src/web/wire.js json()), and so does this: the line becomes valid.
+/// parser; hub reads it as U+FFFD (src/web/wire.js json()), and so does this: the line becomes valid.
 pub fn clean(line: &str) -> std::borrow::Cow<'_, str> {
     if !line.contains("\\u") { return std::borrow::Cow::Borrowed(line) }
     let b = line.as_bytes();

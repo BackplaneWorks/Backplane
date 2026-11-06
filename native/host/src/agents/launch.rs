@@ -1,5 +1,5 @@
-//! thread_launch (mcp.bend Mcp.launch): a continuing subthread of the caller (or a top-level thread with `subthread:false`) with its first message.
-//! The launcher's reports (hub.bend Launch.tell / Lr.*) are `launch_tell`/`report_plan` below. Not done here: reports to a launcher on another machine (Lr.far), a worktree for the new thread (Hub.new.env "auto"), the depth/chain
+//! thread_launch: a continuing subthread of the caller (or a top-level thread with `subthread:false`) with its first message.
+//! The launcher's reports are `launch_tell`/`report_plan` below. Not done here: reports to a launcher on another machine (Lr.far), a worktree for the new thread (Hub.new.env "auto"), the depth/chain
 //! check beyond "same project, launcher alive" (ST.Tree.chain). They are listed in PARITY.md.
 use super::{hub_id, lines::s, now_s, rules, Agents};
 use serde_json::{json, Value};

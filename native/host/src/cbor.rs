@@ -1,4 +1,4 @@
-//! Backplane's CBOR subset (src/core/cbor.bend): byte-exact encoder and a bounded decoder.
+//! Backplane's CBOR subset: byte-exact encoder and a bounded decoder.
 //! Keys in KEYS travel as their index, string values in WORDS as tag 6 over their index,
 //! integers in 32 bits as major 0/1, any other number as tag 7 over its raw text.
 use anyhow::{bail, ensure, Result};

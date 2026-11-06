@@ -1,4 +1,4 @@
-//! The planners: request in, events and reply out. Each cites the Bend def it follows.
+//! The planners: request in, events and reply out. Each cites def it follows.
 use super::{fold::Fold, key};
 use serde_json::{json, Value};
 
@@ -8,7 +8,7 @@ pub struct Plan { pub events: Vec<Value>, pub reply: Value, /// a running turn t
     pub scratch: Option<String>, /// what the agents module does after the events: ("steer" | "resume", thread, text)
     pub act: Option<(&'static str, String, String)> }
 
-/// One entry of a thread as the handoff text reads it (core/handoff.bend `Hand.line`): a message or an activity row.
+/// One entry of a thread as the handoff text reads it: a message or an activity row.
 #[derive(Clone, Debug)]
 pub struct Line { pub msg: bool, pub role: String, pub kind: String, pub text: String }
 /// The entries of the thread a request names (`thread`), newest first, for the requests that hand its conversation over.
@@ -69,7 +69,7 @@ fn parent_valid(f: &Fold, th: &str, parent: &str) -> bool {
     alive(f, th) && (parent.is_empty() || (alive(f, parent) && tree_project(f, th) == tree_project(f, parent) && chain(f, 64, parent.to_string(), th)))
 }
 
-/// Fallback.manual (hub.bend, applied to every step by `Fallback.after`): an explicit provider, model or mode choice, and a turn that starts,
+/// Fallback.manual: an explicit provider, model or mode choice, and a turn that starts,
 /// clear the automatic-fallback bookkeeping of that thread; appended after the step's own events.
 pub fn step_tail(mut ev: Vec<Value>, at: u64) -> Vec<Value> {
     let set = |k: String| json!({"$":"SettingSet","key":k,"value":"","at":at});
@@ -301,7 +301,7 @@ fn modes(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
     done(ev, id)
 }
 
-// ---- handing a conversation over (core/handoff.bend) --------------------------------------------------------------------
+// ---- handing a conversation over --------------------------------------------------------------------
 
 fn cut(t: &str, n: usize) -> String { if t.chars().count() > n { format!("{} ...[{} more characters]", t.chars().take(n).collect::<String>(), t.chars().count() - n) } else { t.to_string() } }
 fn hand_line(l: &Line) -> String {

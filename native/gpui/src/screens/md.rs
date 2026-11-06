@@ -27,7 +27,7 @@ pub enum Block {
 const MAX_DEPTH: usize = 16;
 
 /// A person's own text (their message) cut into spans with web addresses and absolute file paths as links, as the other clients do
-/// (links.bend: `http(s)://…`, paths from `/` or `~/`, a trailing `.,;:!?)` left out, an optional `:12` kept). Pure.
+///` left out, an optional `:12` kept). Pure.
 pub fn linkify(text: &str) -> Vec<Span> {
     let mut out: Vec<Span> = Vec::new(); let mut plain = String::new();
     let flush = |plain: &mut String, out: &mut Vec<Span>| if !plain.is_empty() { out.push(Span { text: std::mem::take(plain), style: Style::default() }); };

@@ -1,8 +1,8 @@
 import SwiftUI
 import WebKit
 
-// A bot's space: the JSON src/mobile/space.bend emits (MSpace.json). Plain
-// data; Bend has already kept what it understands and capped every size.
+// A bot's space: the JSON src/mobile/space emits (MSpace.json). Plain
+// data; has already kept what it understands and capped every size.
 // A button calls act("space", send); an input calls
 // act("space-input", send + "\u{1f}" + text).
 
@@ -227,10 +227,10 @@ private struct SpaceInput: View {
     }
 }
 
-// A bot's space as a web page (mobile/bots.bend's "page"): the hub serves
+// A bot's space as a web page: the hub serves
 // it at url behind a policy that runs no script and loads nothing from the
 // network, and the web view runs no script either. n is new when the page
-// is. A tapped link or submitted form goes to Bend as ("space-link",
+// is. A tapped link or submitted form goes to as ("space-link",
 // bot + "\u{1f}" + url), which decides what a "space:" one sends; web
 // links open in the browser.
 struct SpacePageModel: Decodable {

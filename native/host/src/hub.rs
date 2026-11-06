@@ -112,7 +112,7 @@ impl Hub {
         Ok(hub)
     }
 
-    /// The Bend hub's start-up housekeeping events, written once when the log lacks them (a hub that already ran
+    /// hub's start-up housekeeping events, written once when the log lacks them (a hub that already ran
     /// here has them): the machine's id, the time zone and its rule, empty account and allowance state.
     fn bootstrap(&self) -> Result<()> {
         let have = |k: &str| self.model.try_lock().map_or(true, |m| m.setting_seq(k).is_some());
@@ -124,7 +124,7 @@ impl Hub {
         if !have("accounts.inventory") { set("accounts.inventory", "{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}".into()) }
         if !have("allowance.codex") { set("allowance.codex", format!("{{\"provider\":\"codex\",\"at\":0,\"attempted_at\":{at},\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}}")) }
         if !have("tz.machine") { set("tz.machine", zone.0.clone()); set(&format!("tz.rule.{}", zone.0), zone.1.clone()); set("tz.checked", at.to_string()) }
-        // projects whose root folder is gone: " <id> <id> " (start-up scan; the Bend hub keeps it as a setting)
+        // projects whose root folder is gone: " <id> <id> "
         let missing = { let m = self.model.try_lock().map_err(|_| anyhow::anyhow!("model busy at start"))?;
             let mut ids: Vec<&String> = m.projects.iter().filter(|(_, p)| !p.removed && !p.root.is_empty() && !std::path::Path::new(&p.root).exists()).map(|(i, _)| i).collect(); ids.sort();
             if ids.is_empty() { String::new() } else { format!(" {} ", ids.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")) } };
@@ -171,7 +171,7 @@ impl Hub {
         true
     }
 
-    /// The signal revision (core/signal.bend SignalRevision): the log position of the last batch that held something besides
+    /// The signal revision: the log position of the last batch that held something besides
     /// activity lines and assistant/system messages. The native sidebar keeps a saved page only while it is unchanged.
     /// A fresh number for ids built from the log position (`p<at>-<n>`, `t<at>-<n+1>`, `g<at>-<n+3>`): the log length, or past a number
     /// already handed out, so concurrent requests never share one (the log length alone is read before the commit lands). Reserves `width`.
@@ -297,7 +297,7 @@ impl Hub {
         }
     }
 
-    // ---- the published interface (see api.rs, docs/gpui/HUB-API.md) ----
+    // ---- the published interface (see api.rs, docs/HUB-API.md) ----
     /// Later registrations win over earlier ones for the same method.
     pub fn register_rpc(&self, h: Arc<dyn RpcHandler>) { let mut v = self.rpc.write().unwrap(); for m in h.methods() { v.retain(|(n, _)| n != m); v.push((m, h.clone())) } }
     /// Runs before every batch is written (api.rs `Transform`), after the secret mask, in registration order. Once this returns, no batch
@@ -416,12 +416,12 @@ impl Hub {
     }
     /// The live text of every streaming thread (for a client that joins mid-turn).
     pub fn live_snapshot(&self) -> Vec<(String, String)> { self.live.lock().unwrap().iter().map(|(a, b)| (a.clone(), b.clone())).collect() }
-    /// The `live` frame a joining client gets: every streaming thread's text so far (core/live.bend Live.set).
+    /// The `live` frame a joining client gets: every streaming thread's text so far.
     pub fn live_frame(&self) -> Value {
         let mut v = self.live_snapshot(); v.sort();
         json!({"t":"live","items":v.into_iter().map(|(t, x)| json!({"thread":t,"text":x,"trunc":false,"gen":0})).collect::<Vec<_>>()})
     }
-    /// A stored log line as ANY client receives it, join or live (core/codec.bend Change.wire_line): a device's registration and drop
+    /// A stored log line as ANY client receives it, join or live: a device's registration and drop
     /// travel as `{"$","at"}` only (the push token, platform and bundle never leave the hub: laws device_token_never_sent,
     /// device_drop_never_sent), and a turn's input and riding mail (`launch.input.`, `fallback.input.`, `ride.`) travel blank
     /// (Setting.wire_blank). The log and the presenter keep the whole line.
@@ -460,7 +460,7 @@ impl Hub {
             if let Some(r) = out.first().filter(|r| r["t"] == "reply") { crate::session::record_reply(c.client, method, r); }
         }
         // Diff and Review are the same kind of read (U.Ui.recv takes git.diff's reply by its `diff` field and a review page's by its @rp.req id), but the policy
-        // helper's list of read kinds (slim_serve.bend Pol.read.kinds) predates them: it drops any other kind, so the reply is handed over under one it takes.
+        // helper's list of read kinds predates them: it drops any other kind, so the reply is handed over under one it takes.
         // Without this the Diff panel never opened and Review sat on "Working…".
         // (git.act and git.revert too: a Diff on show is asked again after a commit or a revert; `method` names what the reply answers, for the Rust presenter)
         if matches!(method, "git.diff" | "git.status" | "git.act" | "git.revert" | "review.bom" | "review.checks" | "review.tick" | "review.release") && !c.view_id.is_empty() {
@@ -474,12 +474,12 @@ impl Hub {
     }
     async fn request_one(&self, c: &mut Conn, msg: &Value) -> Vec<Value> { self.request_one_r(c, msg, true).await }
     /// A request run on this hub whatever its params name: the owner's side of /far/rpc runs a linked machine's request here, and must never route it onward
-    /// (`on` is not renamed on the way, so a router would send it straight back; Bend's owner calls `Bot.request` directly).
+    ///.
     pub async fn request_here(&self, c: &mut Conn, msg: &Value) -> Vec<Value> { self.request_one_r(c, msg, false).await }
     async fn request_one_r(&self, c: &mut Conn, msg: &Value, routed: bool) -> Vec<Value> {
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
         let m = msg.get("m").and_then(Value::as_str).unwrap_or("");
-        // `ping` and `load.ping` are not methods of the Bend hub: it answers them "unknown method" (recorded, parity/recA)
+        // `ping` and `load.ping` are not methods of hub: it answers them "unknown method" (recorded, parity/recA)
         // a copy of a log: git that writes and acting on the machine are told, not run (copy.rs)
         if crate::copy::rpc_refused(m) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::copy::GIT_TOLD})] }
         // a request naming a thing on a linked machine goes there (net lane: Far.rpc.go)
@@ -501,7 +501,7 @@ impl Hub {
         self.view_request(c, id, m, msg).await
     }
 
-    /// fab.look: the card for a thread with no goal, intent or fab files (what the Bend hub answers for one).
+    /// fab.look: the card for a thread with no goal, intent or fab files.
     fn fab_look(&self, id: &Value, p: &Value) -> Value {
         json!({"t":"reply","id":id,"ok":true,"result":{"thread":p.get("thread").cloned().unwrap_or(json!("")),"intent":"","goal":"","parts":[],"boards":0,"label":"","estimate_problems":"","error":"","estimates":true,"board_files":[],"board_default":"","order":""}})
     }
@@ -594,7 +594,7 @@ mod tests {
     }
 
     const TOKEN: &str = "apns-token-SECRET-0123456789abcdef";
-    // laws device_token_never_sent, device_drop_never_sent, input_wire_blank, ride_wire_blank (core/codec.bend Change.wire_line)
+    // laws device_token_never_sent, device_drop_never_sent, input_wire_blank, ride_wire_blank
     #[test] fn device_token_never_sent() {
         let line = format!("{{\"$\":\"DeviceRegistered\",\"id\":\"d1\",\"token\":\"{TOKEN}\",\"platform\":\"ios\",\"bundle\":\"dev.backplane.mobile\",\"name\":\"Phone\",\"at\":42}}");
         let w = Hub::wire_item(&line).unwrap();

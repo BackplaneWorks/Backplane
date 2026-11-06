@@ -62,6 +62,5 @@ Real design project `p1790229698-1087`, thread `t1790229700-1088`: `/home/h/Docu
 - Native compact rendering has no claimed original GLB/PBR/solder material parity with the separate web viewer effort.
 - Custom/history/parts/layer/sheet restoration is conservative: Close/reselect. Interrupted claimed restore and late receipt after Close have helper/source coverage without a dedicated native runtime case.
 - No live message sends or attachment uploads were tested on the shared hub. iPad and comprehensive VoiceOver remain unqualified. Light/dark, small-phone accessibility-size and draft-edit/cleanup evidence is from earlier 946/266 sources, recorded separately.
-- `bend PROOF.bend` remains red at the existing `Laws.post_running_delivers` pending/waits mismatch; final precommit run `698709` retained the failure in `final-delivery-proof.log`. No law was weakened or deleted.
 
 Earlier 946 app/video and 0aff/4eb failure candidates are preserved with their own hashes and receipts. Keep all screenshots, recordings and result bundles private. Future chat prefetch/lazy-loading changes belong to the separate chat owner and are not included in this app artifact.

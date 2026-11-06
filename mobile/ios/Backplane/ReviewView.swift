@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The viewer's Review tab (client.bend's Rp, mobile/view.bend's Rv.json): a
+// The viewer's Review tab: a
 // chip per page, the page's title and the report as Markdown (the apps'
 // own MarkdownView; its tables scroll sideways), or what to say while
 // there is none. Refresh sits at the bottom, under the thumb.
@@ -67,7 +67,7 @@ struct ReviewScreen: View {
 // The Release page's form: the tag (empty releases the proposed one), two
 // switches that are off until the person turns them on (Publish on GitHub
 // pushes the tag and makes a GitHub release), and the button. The tag goes
-// to Bend as the field "rltag" while it is typed.
+// to as the field "rltag" while it is typed.
 struct ReleaseBox: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
@@ -168,7 +168,7 @@ struct CheckBoxStyle: ToggleStyle {
 }
 
 // The note for a new comment, as a bottom sheet small enough to leave the
-// board (and the place) in view. The text goes to Bend as the field
+// board (and the place) in view. The text goes to as the field
 // "rcnote" while it is typed; Send posts it.
 struct NoteSheet: View {
     @Environment(\.backplaneLanguage) private var lang

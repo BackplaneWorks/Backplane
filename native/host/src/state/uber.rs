@@ -1,4 +1,4 @@
-//! UberOp: the uberbot's op log folded into settings under its uid (src/core/model.bend State.uberop*, ubop.bend).
+//! UberOp: the uberbot's op log folded into settings under its uid.
 //! An op is taken only as its origin's next (n = highest seen + 1); taken, it is kept as a line, moves the origin's count and the
 //! clock, and writes its register only if it is later than the one there. A "fired" op keeps the highest slot a routine ran for.
 use super::json::*;

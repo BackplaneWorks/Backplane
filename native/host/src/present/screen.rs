@@ -146,7 +146,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             if let Some(o)=session.as_object_mut() { o.remove("route"); }
             return Some(json!({"remoteReady":false,"nextTarget":{"kind":"bot","id":id},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
         },
-        // a room's page: its row opens it (Bend's `room`), the post box (`bfield` rpost) is sent as a post by the person (`bots.post`)
+        // a room's page: its row opens it, the post box (`bfield` rpost) is sent as a post by the person (`bots.post`)
         "room" => {
             let id=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
             if !st.rooms_nav.contains_key(id) || id.starts_with("dm:") { return refused("action.room-unknown") }
@@ -527,9 +527,9 @@ mod dispatcher_tests {
 mod thread_binding_tests {
     use super::*;
     fn fixture(lean: bool) -> (State,Value,Value) {
-        let pair:Value=serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-pair.json"))).unwrap();
+        let pair:Value=serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json"))).unwrap();
         let mut st=State::new(); st.lean=lean;
-        for line in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(line); }
+        for line in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(line); }
         let mut p=pair["params"].clone(); p["nativeSidebar"]=json!(1); p["nativeKey"]=json!("00112233445566778899aabbccddeeff");
         p["generation"]=json!("g"); p["epoch"]=json!("e"); p["viewId"]=json!("v"); p["revision"]=json!(st.seq);
         // The fixture predates the host window seam. Its raw helper reply has earlier=0.

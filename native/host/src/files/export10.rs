@@ -1,5 +1,5 @@
-//! kicad.export10 and the agents' kicad_export10 (server/kexport.bend): a project downgraded by kicad-cli into <home>/exports/..., through
-//! the Bend hub's guard script (scripts/kexport_guard.sh), with the report's words as consent. The rules are kicad/kexport.rs. A deadline
+//! kicad.export10 and the agents' kicad_export10: a project downgraded by kicad-cli into <home>/exports/..., through
+//! hub's guard script (scripts/kexport_guard.sh), with the report's words as consent. The rules are kicad/kexport.rs. A deadline
 //! returns to the caller without signalling the child: the command keeps its .busy folder until it exits.
 use super::git::{proc, Ran};
 use super::kicad::bj::{self, J};

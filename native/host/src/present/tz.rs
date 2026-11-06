@@ -1,5 +1,5 @@
-//! Time zones as POSIX TZ rules (src/core/tz.bend): parse the rule the hub stored for a zone (`tz.rule.<name>`, the footer of its TZif file),
-//! and read the wall clock at a UTC instant. Same arithmetic as tz.bend, including its saturating subtraction (`M.Snooze.local`/`utc`).
+//! Time zones as POSIX TZ rules: parse the rule the hub stored for a zone (`tz.rule.<name>`, the footer of its TZif file),
+//! and read the wall clock at a UTC instant. Same arithmetic as tz, including its saturating subtraction (`M.Snooze.local`/`utc`).
 //! Only what the time stamps need: no `Tz.at` (the instant of a wall time), no abbreviations.
 
 #[derive(Clone, Copy, Debug, PartialEq)]

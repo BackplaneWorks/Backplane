@@ -1,4 +1,4 @@
-//! The new-bot and new-room forms (docs/bots.md; Bend's `Bots.form`/`Rooms.form` in client.bend, the phones' `bot-new`, `bot-create`, `room-new`, `room-pick`, `room-save`, `form-close`):
+//! The new-bot and new-room forms:
 //! the form is open while the session's scratch `@bnew` / `@rnew` is "1"; its typed fields are `@f.name`, `@f.persona`, `@f.rname` (the `bfield` action), the provider `@bnew.provider`, the
 //! members `@rnew.members` (bot ids, one a line). Create and Save are the hub's `bots.create` and `bots.room`. The screen's `newBot` / `newRoom` objects come from here.
 use crate::state::State;
@@ -62,7 +62,7 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
     Some(Out { patch, cmds })
 }
 
-/// A bot page's routine form (Bend's `Bots.routine.edit`, `Bots.routine.save`; `routine-edit` fills it, `bfield` oname / ocron / oprompt type into it): `bot` is the bot's id,
+/// A bot page's routine form: `bot` is the bot's id,
 /// `page` its page (the routines it lists). A schedule the hub reads as cron is sent as `cron`, anything else as `at` (a one-time time): the hub's `bots.routine` says what it cannot read.
 pub fn routine_act(page: &Value, bot: &str, hub: &str, session: &Value, action: &str, value: &str) -> Option<Out> {
     let mut rid = session["rid"].as_u64().unwrap_or(1);

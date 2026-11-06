@@ -1,6 +1,6 @@
-//! Against a REAL JS hub (the Bend hub compiled by Bun), on a temp home, with stand-in agents (none): the mirror built
+//! Against a REAL JS hub, on a temp home, with stand-in agents (none): the mirror built
 //! from its `/far/log`, a page near the size limit, a push to it, and the mirror file format both ways. Ignored unless
-//! BACKPLANE_JS_HUB names the binary (test/gpui/net/boat-js-peer.sh runs it on Boat). Ports 3915 (JS) and 3916 (here).
+//! BACKPLANE_JS_HUB names the binary (test/net/boat-js-peer.sh runs it on Boat). Ports 3915 (JS) and 3916 (here).
 use super::*;
 use crate::net::peering::tests::{node_extra, Extra, FIXED_PORT};
 use crate::net::{botnet, farstore::FarStore, outbox, feed::Feed};
@@ -73,7 +73,7 @@ fn line(v: Value) -> String { v.to_string() }
     assert_eq!(lens, vec![9, 390_000, 390_000, 700_000], "every message arrived whole, including the ones near the page size");
     assert_eq!(fs.catalog(me_link)[0]["id"], "proj1");
     assert!(store.epoch(me_link).starts_with("sha256="), "the JS hub's epoch is pinned: {}", store.epoch(me_link));
-    // the mirror file is in the Bend format: header, items, head
+    // the mirror file is in format: header, items, head
     let text = std::fs::read_to_string(b.home.join(format!("far/{me_link}.jsonl"))).unwrap();
     assert!(text.lines().next().unwrap().contains("\"epoch\"") && text.lines().last().unwrap().starts_with("{\"head\":"));
 
@@ -98,18 +98,18 @@ fn line(v: Value) -> String { v.to_string() }
         .filter(|o| o["c"]["$"] == "MessagePosted" && o["c"]["thread"] == "trs0").map(|o| o["c"]["text"].as_str().unwrap().chars().count()).collect();
     lens.sort();
     assert_eq!(lens, vec![23, 390_000, 390_000, 700_000], "built from our /far/log pages");
-    // Rust reads the file the JS hub wrote (the Bend format), as a mirror of this hub's own history
+    // Rust reads the file the JS hub wrote, as a mirror of this hub's own history
     let copy = root.join("copy"); std::fs::create_dir_all(copy.join("far")).unwrap(); std::fs::copy(&jfile, copy.join(format!("far/{me_link}.jsonl"))).unwrap();
     let again = FarStore::open(&copy).unwrap();
-    assert!(again.has(&format!("{me_link}~trs1")), "FarStore reads a mirror file written by the Bend hub");
-    // ----- Bend reads a mirror file Rust wrote. A second JS hub starts on it; it reads each link's mirror back from disk and pulls from
-    // the head it holds, so a stub peer that records what it is asked sees `since` = the file's head. A control: a file the Bend hub wrote. -----
+    assert!(again.has(&format!("{me_link}~trs1")), "FarStore reads a mirror file written by hub");
+    // ----- reads a mirror file Rust wrote. A second JS hub starts on it; it reads each link's mirror back from disk and pulls from
+    // the head it holds, so a stub peer that records what it is asked sees `since` = the file's head. A control: a file hub wrote. -----
     let _ = js.kill().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     let (j2, link2, link3) = (root.join("js2"), "pmirrorfrom0001", "pmirrorfrom0002");
     std::fs::create_dir_all(j2.join("far")).unwrap();
     let rust_file = b.home.join(format!("far/{me_link}.jsonl"));
     std::fs::copy(&rust_file, j2.join(format!("far/{link2}.jsonl"))).unwrap(); // written by Rust
-    std::fs::copy(&jfile, j2.join(format!("far/{link3}.jsonl"))).unwrap();     // written by the Bend hub
+    std::fs::copy(&jfile, j2.join(format!("far/{link3}.jsonl"))).unwrap();     // written by hub
     let head_of = |p: &std::path::Path| -> u64 { std::fs::read_to_string(p).unwrap().lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|o| o["head"].as_u64()).last().unwrap_or(0) };
     let (h2, h3) = (head_of(&j2.join(format!("far/{link2}.jsonl"))), head_of(&j2.join(format!("far/{link3}.jsonl"))));
     assert!(h2 > 0 && h3 > 0, "heads {h2} {h3}");
@@ -139,8 +139,8 @@ fn line(v: Value) -> String { v.to_string() }
     let got = asked.lock().unwrap().clone();
     assert!(both, "the second JS hub pulled both links (it asked: {got:?})");
     let since = |l: &str| got.iter().find(|(p, _, _)| p == l).map(|x| x.1).unwrap();
-    assert_eq!(since(link3), h3, "CONTROL: the Bend hub pulls from the head of the file the Bend hub wrote: asked {got:?}");
-    assert_eq!(since(link2), h2, "the Bend hub read the mirror file Rust wrote (it pulls from its head {h2}, not from 0): asked {got:?}");
+    assert_eq!(since(link3), h3, "CONTROL: hub pulls from the head of the file hub wrote: asked {got:?}");
+    assert_eq!(since(link2), h2, "hub read the mirror file Rust wrote (it pulls from its head {h2}, not from 0): asked {got:?}");
     let _ = js2.kill().await;
     let _ = std::fs::remove_dir_all(&root);
 }

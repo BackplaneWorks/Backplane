@@ -52,9 +52,9 @@ pub struct Core { pub st: State }
 impl Core {
     pub fn new() -> Core { let mut st = State::new(); st.lean = true; Core { st } }
     pub fn fold_line(&mut self, l: &str) { self.st.apply_line(l); }
-    /// fold a batch and return what the policies add to it. Judged against the state before the batch, as Bend's Hub.step does. The parts are in
-    /// Bend's log order: `core` (the batch without a failed end's marks), `end` (the summary clock and alert record of a marked end), `marks` (that
-    /// failed end's `failed.<msg>`, which Bend writes after the alert), then `after`: liveness records, told marks, quiet marks, message metadata.
+    /// fold a batch and return what the policies add to it. Judged against the state before the batch, as Hub.step does. The parts are in
+    /// log order: `core` (the batch without a failed end's marks), `end` (the summary clock and alert record of a marked end), `marks` (that
+    /// failed end's `failed.<msg>`, which writes after the alert), then `after`: liveness records, told marks, quiet marks, message metadata.
     pub fn derive(&mut self, events: &[Value]) -> Derived {
         let now = events.iter().map(|e| gnat(e, "at", 0)).max().unwrap_or(0);
         let (core, marks) = turnend::split_fail_marks(events);
@@ -259,7 +259,7 @@ mod tests {
         let out = p.before_commit(3, vec![msg("t1", "a1", "assistant", 10)]);
         assert_eq!(out.len(), 4, "the message, then the policies' events");
         assert_eq!(out[0]["msg"], "a1");
-        assert_eq!(keys(&out), vec!["liveness.t1".to_string(), "autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "Bend's order: the batch, the liveness record, the quiet marks, then the metadata");
+        assert_eq!(keys(&out), vec!["liveness.t1".to_string(), "autosettle.quiet.t1".to_string(), "autosettle.output.t1".to_string()], "order: the batch, the liveness record, the quiet marks, then the metadata");
     }
     #[test] fn two_back_to_back_batches_derive_in_order_from_the_state_the_first_left() {
         let p = booted();
@@ -327,7 +327,7 @@ mod tests {
         assert!(p.finish_boot(c, 5, 1000).iter().all(|e| e["key"] == "autosettle.version")); p
     }
     #[test] fn a_stop_and_a_spawn_failure_write_no_clock_and_no_alert() {
-        // Bend does not run Ended.out for Retire.turn.f (Stop) or Hub.spawned.fail: their TurnChanged carries no end marker
+        // does not run Ended.out for Retire.turn.f (Stop) or Hub.spawned.fail: their TurnChanged carries no end marker
         let p = ended_world();
         let stop = p.before_commit(6, vec![json!({"$":"TurnChanged","thread":"t1","state":"interrupted","at":100}), json!({"$":"SettingSet","key":"stopped.mu1","value":"1","at":100})]);
         assert!(!keys(&stop).iter().any(|k| k.starts_with("summary.at.") || k.starts_with("alert.") || k.starts_with("told.")), "{:?}", keys(&stop));
@@ -335,7 +335,7 @@ mod tests {
         let spawn = p.before_commit(6, vec![json!({"$":"ActivityLogged","thread":"t1","act":"g1","tone":"error","kind":"spawn","summary":"no cli","at":100}), json!({"$":"TurnChanged","thread":"t1","state":"failed","at":100}), json!({"$":"SettingSet","key":"failed.mu1","value":"1","at":100})]);
         assert!(!keys(&spawn).iter().any(|k| k.starts_with("summary.at.") || k.starts_with("alert.") || k.starts_with("told.")), "{:?}", keys(&spawn));
     }
-    #[test] fn a_failed_end_has_bends_order_stamp_and_told_index_and_loses_its_marker() {
+    #[test] fn a_failed_end_has_order_stamp_and_told_index_and_loses_its_marker() {
         let p = ended_world();
         let out = p.before_commit(6, vec![json!({"$":"ActivityLogged","thread":"t1","act":"g1","tone":"error","kind":"agent","summary":"boom","at":100}),
             json!({"$":"TurnChanged","thread":"t1","state":"failed","_end":true,"at":100}), json!({"$":"SettingSet","key":"failed.mu1","value":"1","at":100})]);
@@ -345,7 +345,7 @@ mod tests {
         let alert = out.iter().find(|e| e["key"] == "alert.t1").unwrap()["value"].as_str().unwrap().to_string();
         assert_eq!(alert, "fail\tturn-t1\tmu1\t100.7\t", "stamp: 5 + the 2 events of the end, the mark not counted");
         let told = out.iter().find(|e| e["key"].as_str().map_or(false, |k| k.starts_with("told."))).unwrap();
-        assert_eq!(told["key"], "told.k100-5-3", "the alert sits at index 3 of [act, turn, summary.at, alert]... as the list Bend marks");
+        assert_eq!(told["key"], "told.k100-5-3", "the alert sits at index 3 of [act, turn, summary.at, alert]... as the list marks");
     }
     #[test] fn a_poisoned_lock_does_not_panic_the_next_batch_and_asks_for_a_resync() {
         let p = std::sync::Arc::new(booted());

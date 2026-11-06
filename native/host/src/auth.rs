@@ -1,5 +1,5 @@
 //! Who may connect: the hub's pairing token (<home>/token) or a paired device's credential
-//! (devices-v1.json), exactly as core/auth.bend and effects/pairing.js decide it.
+//! (devices-v1.json), exactly as core/auth and effects/pairing.js decide it.
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -11,7 +11,7 @@ pub struct Req {
     /// the accepted socket's peer (owner trust asks the tailnet about this address); None in tests
     pub peer: Option<std::net::SocketAddr>,
     /// The socket's peer is the owner's own device (decided by the tailnet listener's whois) or loopback. NEVER a credential by itself:
-    /// handlers still apply owner_pair / owner_peer / the credential (core/auth.bend Auth.trusted).
+    /// handlers still apply owner_pair / owner_peer / the credential.
     pub trusted: bool,
 }
 /// The most body bytes the hub reads for a request (/far bodies reach 256 KB).
@@ -36,7 +36,7 @@ fn truthy(v: &serde_json::Value) -> bool {
 }
 
 fn same(a: &str, b: &str) -> bool {
-    // constant time over equal lengths (core/auth.bend Auth.same)
+    // constant time over equal lengths
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 fn digest(x: &str) -> String { hex::encode(Sha256::digest(x.as_bytes())) }
@@ -104,7 +104,7 @@ mod tests {
     fn req(target: &str, hs: &[(&str, &str)]) -> Req { Req::new("GET", target, hs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()) }
     fn h(k: &str, v: &str) -> (&'static str, String) { (Box::leak(k.to_string().into_boxed_str()), v.to_string()) }
     fn with(hs: &[(&str, &str)], path: &str) -> Req { req(path, hs) }
-    // laws auth_* of LAWS.bend, stated over many paths and tokens
+    // laws auth_* of LAWS, stated over many paths and tokens
     #[test] fn auth_foreign_origin_denied() {
         for path in ["/ws", "/ws?token=secret", "/x?token=t&y=1", ""] { for token in ["secret", "t", "", "a b"] {
             let a = Auth::with_root(token);
@@ -186,7 +186,7 @@ mod tests {
             assert_eq!(a.allowed(&req("/x", &[("authorization", &format!("Bearer {tok}"))])), admitted, "revoked = {revoked}");
         }
     }
-    #[test] fn param_takes_the_second_segment_like_the_bend_param() {
+    #[test] fn param_takes_the_second_segment_like_the_param() {
         let r = req("/ws?token=abc?x=1&y=2", &[]);
         assert_eq!(r.param("token"), "abc", "a second '?' ends the query");
         assert_eq!(r.param("x"), "", "nothing after the second '?' is read");

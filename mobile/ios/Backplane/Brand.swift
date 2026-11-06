@@ -55,7 +55,7 @@ struct BrandMark: View {
 
 #if DEBUG
 // BACKPLANE_GEOM=1: where a logo or cat is drawn, in points, once it appears (the
-// visual check, test/gpui/visual, cuts these rectangles out of a screenshot)
+// visual check, test/visual, cuts these rectangles out of a screenshot)
 private let geomOn = ProcessInfo.processInfo.environment["BACKPLANE_GEOM"] == "1"
 extension View {
     func geomLog(_ name: String) -> some View {

@@ -1,4 +1,4 @@
-//! core/kexport.bend in Rust: where a KiCad 10 copy of a project goes (<home>/exports/...), what kicad-cli's compatibility report says,
+//! core/kexport in Rust: where a KiCad 10 copy of a project goes (<home>/exports/...), what kicad-cli's compatibility report says,
 //! which words the person consented to, the flags that consent allows, and which folder may be cleared. Pure. Laws `kexport_*`.
 use super::bj::{self, J};
 

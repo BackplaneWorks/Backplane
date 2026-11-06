@@ -1,5 +1,5 @@
-//! src/core/ref.bend in Rust: Backplane references (`backplane://thread/<id>#<msg>`, bare ids), parsed and written.
-//! Strings are Vec<char> where Bend counts code points; `acc` buffers that Bend keeps reversed are kept forward here.
+//! src/core/ref in Rust: Backplane references (`backplane://thread/<id>#<msg>`, bare ids), parsed and written.
+//! Strings are Vec<char> where counts code points; `acc` buffers that keeps reversed are kept forward here.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ref { pub kind: String, pub rest: Vec<String>, pub frag: String }
 

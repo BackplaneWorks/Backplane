@@ -81,7 +81,7 @@ struct LicencesView: View {
 }
 
 #if DEBUG
-// BACKPLANE_ACTS "@fonts": the font probe for test/gpui/visual/check_fonts_ios.py: five lines at x=16, y=120+24i (below the status bar), 13 pt,
+// BACKPLANE_ACTS "@fonts": the font probe for test/visual/check_fonts_ios.py: five lines at x=16, y=120+24i (below the status bar), 13 pt,
 // line 4 bold, the screen's own background (the same lines as the desktop's `--fonts`)
 struct FontsProbe: View {
     @Environment(\.colorScheme) private var scheme

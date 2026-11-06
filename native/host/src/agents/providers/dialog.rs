@@ -1,4 +1,4 @@
-//! Agents' dialogs (src/core/dialog.bend, mcp.bend's Bp.permit): asks a runner hands the hub that are neither ACP permission requests
+//! Agents' dialogs: asks a runner hands the hub that are neither ACP permission requests
 //! nor Muse approvals: Pi's and Oh My Pi's extension dialogs, and ACP form elicitations. Each is one envelope line, method `bp/ask`,
 //! with what the approval or question card shows and what the answer must be written back as.
 //!
@@ -173,14 +173,14 @@ mod tests {
         let q = line(&json!("q"), "question", "pi", vec![("tool", json!("Pi")), ("detail", json!("Pick")), ("options", json!("a\nb"))]);
         assert_eq!(permit(&q, true), Permit::Open { kind: "input", tool: "Pi".into(), detail: "Pick".into(), options: "a\nb".into() });
     }
-    #[test] fn show_escapes_as_bend_does() {
+    #[test] fn show_escapes_as_does() {
         assert_eq!(jshow(&json!({"a":"x\"y\\z\n\u{8}\u{1}é/"})), "{\"a\":\"x\\\"y\\\\z\\n\\u0008\\u0001é/\"}");
         assert_eq!(jshow(&serde_json::from_str::<Value>(r#"{"n":1.50,"b":[true,null]}"#).unwrap()), r#"{"n":1.50,"b":[true,null]}"#);
     }
 }
 
 /// End to end, stand-ins only: a Pi or Oh My Pi turn through the real actor against a real Hub on a temp home, its log compared event for event with the
-/// one the JS hub wrote for the same stand-in (test/gpui/agents/prov-pi/fixtures/js-*.jsonl, recorded by record_pi.mjs from build/gpui/backplane-serve-current),
+/// one the JS hub wrote for the same stand-in (test/agents/prov-pi/fixtures/js-*.jsonl, recorded by record_pi.mjs from build/gpui/backplane-serve-current),
 /// ids and clocks normalised. Settings and bookkeeping the JS hub also writes are not compared; the thread's messages, turn, activity, asks, session and usage are.
 #[cfg(test)]
 mod e2e {
@@ -188,8 +188,8 @@ mod e2e {
     use serde_json::{json, Value};
     use std::{path::{Path, PathBuf}, sync::Arc, time::{Duration, Instant}};
     const T1: &str = "t1700000001-2";
-    const PI: &str = include_str!("../../../../../test/gpui/agents/prov-pi/standin-pi.sh");
-    const OMP: &str = include_str!("../../../../../test/gpui/agents/prov-pi/standin-omp.sh");
+    const PI: &str = include_str!("../../../../../test/agents/prov-pi/standin-pi.sh");
+    const OMP: &str = include_str!("../../../../../test/agents/prov-pi/standin-omp.sh");
 
     fn dir(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-pi-{}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     fn script(d: &Path, name: &str, body: &str) { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
@@ -237,7 +237,7 @@ mod e2e {
         assert_eq!(g.len(), w.len(), "counts; extra rust: {:?}; extra js: {:?}", g.iter().skip(w.len()).collect::<Vec<_>>(), w.iter().skip(g.len()).collect::<Vec<_>>());
         let _ = std::fs::remove_dir_all(&home);
     }
-    macro_rules! fx { ($n:literal) => { include_str!(concat!("../../../../../test/gpui/agents/prov-pi/fixtures/", $n)) } }
+    macro_rules! fx { ($n:literal) => { include_str!(concat!("../../../../../test/agents/prov-pi/fixtures/", $n)) } }
     #[tokio::test(flavor = "multi_thread")] async fn pi_turn_matches_the_js_hub() { scene("pi", PI, "full-access", "hello pi", None, fx!("js-pi-turn.jsonl")).await }
     #[tokio::test(flavor = "multi_thread")] async fn pi_failure_matches_the_js_hub() { scene("pi", PI, "full-access", "zqfail please", None, fx!("js-pi-fail.jsonl")).await }
     #[tokio::test(flavor = "multi_thread")] async fn pi_allowed_tool_matches_the_js_hub() { scene("pi", PI, "approval-required", "zqask go", Some("accept"), fx!("js-pi-askaccept.jsonl")).await }

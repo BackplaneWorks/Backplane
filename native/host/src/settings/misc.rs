@@ -2,7 +2,7 @@
 //!
 //! This hub is a packaged binary (info `update: "package"`): it never replaces itself and looks for no release (the JS hub's managed install does
 //! the same: `Media.check` answers an empty version, `Upgrade.go` does nothing). So `update.check` answers `{version: "", channel}` and `app.update`
-//! only clears the `update.wait` mark, as the Bend hub does before its (here empty) upgrade. `models.refresh` sends the models info again; the CLI
+//! only clears the `update.wait` mark, as hub does before its (here empty) upgrade. `models.refresh` sends the models info again; the CLI
 //! probing it would redo (opencode, codex, grok, muse model listings) is not ported, so the list is the built-in one.
 use super::models;
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};

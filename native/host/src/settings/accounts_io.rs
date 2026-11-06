@@ -1,4 +1,4 @@
-//! The provider-owned account lifecycle (server/effects/accounts.js, server/accountsio.bend): named logins ("profiles") of Claude and Codex, each in a private
+//! The provider-owned account lifecycle: named logins ("profiles") of Claude and Codex, each in a private
 //! store of its own under `<home>/providers/accounts-v1/<profile>[/<store>]`. Ops (`request`): list, add, status, login (a sign-in attempt that shows a link, and for
 //! Claude takes the pasted code), respond, cancel, rename, disconnect, remove. No inference request is ever made: status asks the CLI who is signed in
 //! (`claude auth status`, Codex's `account/read`), the allowance reads are the providers' own read-only usage requests, and nothing but allowlisted metadata

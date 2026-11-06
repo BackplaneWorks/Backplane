@@ -1,4 +1,4 @@
-//! Mail (src/core/mail.bend, mailbody.bend, hub.bend `Mail.*`, mailowner.bend): the mailroom's pure part. A mail is a body (the text, kept in
+//! Mail: the mailroom's pure part. A mail is a body (the text, kept in
 //! `<home>/mail/<conversation>.jsonl`) and a header event (`MailPosted`, with `ConvSet` for a new conversation); the box folded from those events is
 //! `mailbox::Box`. Slice 1 files mail (`file.rs`), slice 2 is the requests, slice 3 routing, triage and private threads (`route.rs`, `escalate.rs`, `run.rs`, `funnel.rs`, `tools.rs`); Google (slice 4) will use these types.
 //! No message text or address is ever logged by this module.
@@ -129,14 +129,14 @@ pub fn classify(from: &str, msg: &str, system: bool, text: &str) -> Origin {
     classify_base(from, system)
 }
 
-// ---- JSON (mailbody.bend Body.encode / Json.emit) ----
+// ---- JSON ----
 fn esc(s: &str) -> String {
     let mut o = String::from("\"");
     for c in s.chars() { match c { '\n' => o += "\\n", '\r' => o += "\\r", '\t' => o += "\\t", '"' => o += "\\\"", '\\' => o += "\\\\", c if (c as u32) < 32 => o += &format!("\\u00{:02x}", c as u32), c => o.push(c) } }
     o.push('"'); o
 }
 fn arr(xs: &[String]) -> String { format!("[{}]", xs.iter().map(|x| esc(x)).collect::<Vec<_>>().join(",")) }
-/// Body.line: the compact JSON of a body and a newline (the exact text Bend writes; string escapes as Json.esc)
+/// Body.line: the compact JSON of a body and a newline
 pub fn body_line(b: &Body) -> String {
     let (c, m) = (&b.conv, &b.mail);
     format!("{{\"v\":1,\"conv\":{{\"id\":{},\"subject\":{},\"kind\":{},\"parts\":{},\"project\":{},\"tags\":{},\"made\":{},\"last\":{},\"n\":{}}},\"mail\":{{\"id\":{},\"conv\":{},\"from\":{},\"to\":{},\"kind\":{},\"ref\":{},\"want\":{},\"head\":{},\"size\":{},\"at\":{}}},\"text\":{}}}\n",

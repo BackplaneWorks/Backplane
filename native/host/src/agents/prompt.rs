@@ -1,10 +1,10 @@
-//! What an agent is told: src/core/prompt.bend's text assembly (Hub.prompt in src/server/server.bend), with the
-//! literals generated from the Bend source (prompt_text.rs, by test/gpui/agents/gen_prompt.py) so the words cannot drift.
+//! What an agent is told: src/core/prompt's text assembly, with the
+//! literals generated from source (prompt_text.rs, by test/agents/gen_prompt.py) so the words cannot drift.
 //! The golden test compares the whole string with the argv the JS hub started a stand-in Claude with
-//! (test/gpui/agents/fixtures/argv-default.json); the Bend names are kept on each fn.
+//! (test/agents/fixtures/argv-default.json); names are kept on each fn.
 use super::prompt_text as T;
 
-/// What the host learned of KiCad (kihealth.bend): status ok|stock|old|broken|checking|missing, the CLI path, version, commit, why it broke.
+/// What the host learned of KiCad: status ok|stock|old|broken|checking|missing, the CLI path, version, commit, why it broke.
 #[derive(Clone, Debug, Default)]
 pub struct Kicad { pub status: String, pub cli: String, pub version: String, pub commit: String, pub why: String }
 
@@ -114,7 +114,7 @@ pub fn build(e: &PromptEnv) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    const GOLD: &str = include_str!("../../../../test/gpui/agents/fixtures/argv-default.json");
+    const GOLD: &str = include_str!("../../../../test/agents/fixtures/argv-default.json");
     pub fn gold() -> (String, serde_json::Value) { let a: Vec<String> = serde_json::from_str(GOLD).unwrap(); let i = a.iter().position(|x| x == "--append-system-prompt").unwrap(); (a[i + 1].clone(), serde_json::json!(a)) }
     pub fn gold_env() -> PromptEnv {
         PromptEnv { fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve-current".into(),

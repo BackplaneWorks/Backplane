@@ -1,7 +1,7 @@
-//! Telemetry choices (core/telemetry-choice.bend, core/telemetry.bend `Tm.choice.*`, hub.bend `Hub.telemetry.choice`).
+//! Telemetry choices.
 //! One installation-wide choice covers every category. Missing values select On in the disclosure but never authorize collection.
 //!
-//! This hub SENDS NOTHING: the sender (server/telemetry.bend: the queue, the proof of work, the signed request) is not ported and no
+//! This hub SENDS NOTHING: the sender is not ported and no
 //! endpoint or key is baked into this binary, so `may_send` is false in every build and every test. What is here is the choice itself:
 //! the opt-out, the reset and the receipts that keep a retried click from re-enabling.
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};

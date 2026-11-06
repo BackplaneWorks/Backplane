@@ -3,7 +3,7 @@ import SwiftUI
 // The status plane (docs/uber.md): the uberbot's card, and what waits on
 // the person, what runs, the bots, rooms and routines under it, on the home
 // list and as the uberbot's Status tab. All of it is the screen's
-// (src/mobile/plane.bend, merged over hubs by hubs.bend); these views only
+//; these views only
 // draw it and send each row's act and value back.
 
 // the uberbot's card: a bot's row with the plane's counts
@@ -31,7 +31,7 @@ struct PlaneMachine: Decodable, Hashable {
     let name, state: String
 }
 
-// where the uberbot's conversation is held; Bend says whether to offer
+// where the uberbot's conversation is held; says whether to offer
 // "Make this the home" (button), and what a tap sends (act, value)
 struct PlaneHome: Decodable {
     let name, line, label, act, value: String

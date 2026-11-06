@@ -12,8 +12,8 @@ Desktop and responsive web use the same shared rows and the existing sealed form
 
 Validation entry points:
 
-- `test/provider_setup_test.bend`: real client actions and native phone projection, readiness, missing programs, return/skip, failed/expired retry, default selection, sealed routing, session/binding/draft preservation.
-- Existing `test/onboard_test.bend`, `test/tour_preview_test.bend`, `test/accounts_test.bend`, `test/initial_provider_test.bend` retain tour and session coverage.
+- `test/provider_setup_test`: real client actions and native phone projection, readiness, missing programs, return/skip, failed/expired retry, default selection, sealed routing, session/binding/draft preservation.
+- Existing `test/onboard_test`, `test/tour_preview_test`, `test/accounts_test`, `test/initial_provider_test` retain tour and session coverage.
 - `test/tools/provider_setup_e2e.ts BUILT_SERVICE WEB WIRE`: isolated built hub/web and fake provider-owned stores, desktop/390px browser flow, failure/retry/cancel/success, Codex device sign-in, Claude sealed response, returning users and no inference. Set `BACKPLANE_PLAYWRIGHT_MODULE` and `BACKPLANE_CHROMIUM` when dependencies live outside this checkout.
 
 Provider instructions follow the supported CLI behavior and the official [Codex installation guide](https://developers.openai.com/codex/cli), [Claude installation guide](https://code.claude.com/docs/en/setup), and [Muse authentication guide](https://dev.meta.ai/docs/muse-code/auth). Browser tests block non-loopback requests and never perform a real login. Build products and screenshots are review artifacts, not an installed or released app.

@@ -3,7 +3,7 @@ package dev.backplane.mobile
 import org.json.JSONArray
 import org.json.JSONObject
 
-// docs/gpui/PHONE-DATA.md (data/1): the plain data the hub sends, as typed values. Parsing is forgiving: a missing field is empty, an extra one ignored.
+// docs/PHONE-DATA.md (data/1): the plain data the hub sends, as typed values. Parsing is forgiving: a missing field is empty, an extra one ignored.
 private fun JSONObject.str(k: String): String = if (isNull(k)) "" else optString(k, "")
 private fun JSONObject.lng(k: String): Long = optLong(k, 0L)
 private fun <T> JSONArray?.list(f: (JSONObject) -> T): List<T> = if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it)?.let(f) }

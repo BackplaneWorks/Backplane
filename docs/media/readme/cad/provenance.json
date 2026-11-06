@@ -95,8 +95,6 @@
       "last_commit_touching_original": "bc026e6d7ca5f648f2b00c7420a8f9328fe98dac",
       "description": "Three actual Backplane cats from the original top row: idle ginger, working ginger with laptop, thinking ginger. Solid original #111111 background, no invented art. Export 432x144; suggested display 216x72.",
       "implementation_references": [
-        "src/core/cat.bend",
-        "src/web/cat.bend"
       ]
     },
     "export": {

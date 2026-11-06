@@ -1,4 +1,4 @@
-//! The `select` action (src/core/client.bend: `Ui.select` -> `Ui.select.nav`, `Ui.reselect`, the focus and scroll commands, then the post-hook `Fab.sync`): a pure function
+//! The `select` action: a pure function
 //! over the request's session, returning the session patch, the commands and the target the view moves to (`Target.after`). Ported: a local thread picked with no viewer open and no
 //! pending draft check. Not ported (None; the caller falls back to the helper): project homes, far threads (`~`), a thread whose viewer panel is open (`panel:<id>`: Viewer restore, Dv/Mpage
 //! syncs), a draft marked read back from disk (`@kept:<id>`: Draft.stale), no thread named.

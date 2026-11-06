@@ -1,6 +1,6 @@
-//! core/plot.bend's making of a plot, and server/plot.bend's `Pv.child`, in Rust: a board or schematic file to the same `Plot` the Bend
+//! core/plot's making of a plot, and server/plot's `Pv.child`, in Rust: a board or schematic file to the same `Plot`
 //! child prints, and the same info file. Items become pieces (integer micrometres), sorted by (layer, mode, width, bucket, key hash),
-//! runs of one rank become chunks of delta-coded varints. Pieces of one rank and key hash keep the order Bend's sort leaves them in:
+//! runs of one rank become chunks of delta-coded varints. Pieces of one rank and key hash keep the order sort leaves them in:
 //! the forms are dealt into hands as Pcb2.par deals them and the items as Piece.psort does, and the sorts and merges are stable alike.
 use super::board::{self, Info, Item, Prim, Pt};
 use super::fl;
@@ -254,7 +254,7 @@ pub fn write_infos(path: &str, text: &str) {
     let new = format!("{path}.new");
     if std::fs::write(&new, text).is_ok() { let _ = std::fs::rename(&new, path); }
 }
-/// Line.plot: the lines the Bend child prints (a byte goes as the char of that number), for comparing with it
+/// Line.plot: the lines child prints (a byte goes as the char of that number), for comparing with it
 pub fn lines(p: &Plot) -> Vec<u8> {
     let mut o = format!("b{} {} {} {} {} {} {} {} {}\n", p.b.x0, p.b.y0, p.b.x1, p.b.y1, p.thick, p.edge.x0, p.edge.y0, p.edge.x1, p.edge.y1).into_bytes();
     for c in &p.cs {

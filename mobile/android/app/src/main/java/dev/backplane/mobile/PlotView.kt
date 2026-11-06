@@ -341,7 +341,7 @@ class PlotRenderer : GLSurfaceView.Renderer {
     // the layers the user turned off, a bit each
     @Volatile var off = 0
     private fun shown(layer: Int) = layer !in 0..31 || (off shr layer) and 1 == 0
-    // the layer focus (core/layers.bend): layers drawn at a quarter, a bit
+    // the layer focus: layers drawn at a quarter, a bit
     // each, and the active one, drawn after the rest (255 none)
     @Volatile var dim = 0
     @Volatile var lift = 255
@@ -900,7 +900,7 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         return floatArrayOf(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) to (if (above) renderer.top else renderer.bottom)
     }
 
-    // what lies under a point, for Bend to pick from (View.pick)
+    // what lies under a point, for to pick from (View.pick)
     fun pick(px: Float, py: Float) {
         val (q, face) = board(px, py) ?: run { onPick("[]"); return }
         // a sheet symbol opens that sheet (the smallest when they nest)

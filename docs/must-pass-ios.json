@@ -1,0 +1,152 @@
+{
+ "note": "iOS column of docs/must-pass.json, from the real app in the simulator against a seeded stand-in hub; statuses: pass, fail, open (not driven here), fix-untested.",
+ "extra": {
+  "mention popup (not on the list)": "PASS with bridge 4ca2caee: '@B' lists @Bub and @Ember, '>l' lists >load-2, '/' lists the slash commands (shots popup-at/gt/slash.png, scripts/ios-popup.sh)"
+ },
+ "items": [
+  {
+   "item": "Paste a clipboard image into the composer",
+   "ios": "open",
+   "evidence": "paperclip menu offers Paste when the pasteboard holds an image (ThreadParts.swift AttachButton); simulator cannot put an image on the pasteboard from here, so not driven",
+   "test": "scripts/ios-mustpass.sh (no step yet)"
+  },
+  {
+   "item": "Drag and drop an image or file",
+   "ios": "fix-untested",
+   "evidence": "there was no drop target: added .onDrop(image, fileURL) on the composer (ThreadComposer.swift), compiles; a drag cannot be driven in the simulator from here",
+   "test": "needs an iPad drag by mechanics"
+  },
+  {
+   "item": "Attach through the file picker",
+   "ios": "open",
+   "evidence": "fileImporter(.item) and PhotosPicker are wired (AttachButton); the system pickers are not drivable by ACTS",
+   "test": "needs a tap by mechanics"
+  },
+  {
+   "item": "Attachment preview, remove, and sending it",
+   "ios": "pass",
+   "evidence": "preview chip 'noise.png x' in the composer and the sent picture with the agent seeing the attachment: mp-attach-preview.png, mp-attach-sent.png; Remove (x) is drawn, not tapped",
+   "test": "scripts/ios-mustpass.sh (@attach, @send)"
+  },
+  {
+   "item": "Select text within a message",
+   "ios": "open",
+   "evidence": "messages are UITextView (ThreadParts.swift) so selection is the system's; not driven",
+   "test": "needs a long press by mechanics"
+  },
+  {
+   "item": "Select across messages",
+   "ios": "fail",
+   "evidence": "each message is its own UITextView: a selection cannot extend into the next message (the web selects across)",
+   "test": "by construction; needs a design decision"
+  },
+  {
+   "item": "Copy with Ctrl/Cmd-C",
+   "ios": "open",
+   "evidence": "system edit menu / hardware-keyboard copy on UITextView; not driven",
+   "test": ""
+  },
+  {
+   "item": "Code block Copy button",
+   "ios": "pass",
+   "evidence": "fixed: full code lines and a Copy button as the web's (Markdown.swift CodeBlockView): mp-ipad-s.png, before: 'def f(x):...' truncated and no button",
+   "test": "scripts/ios-mustpass.sh markdown shots"
+  },
+  {
+   "item": "Links clickable and copyable",
+   "ios": "open",
+   "evidence": "links draw as links (shot); open goes through InternalURLRoute; tap and copy not driven",
+   "test": ""
+  },
+  {
+   "item": "IME and composition input",
+   "ios": "open",
+   "evidence": "the composer is the system text field, so composition is the system's; not driven (no keyboard in ACTS)",
+   "test": ""
+  },
+  {
+   "item": "Emoji input and display",
+   "ios": "pass",
+   "evidence": "display matches the web incl. skin tone (sbs-md-*.png); typing an emoji is not driven",
+   "test": "sbs-md shots"
+  },
+  {
+   "item": "Undo and redo in the composer",
+   "ios": "open",
+   "evidence": "system text field undo; not driven",
+   "test": ""
+  },
+  {
+   "item": "Cursor movement, word and line selection",
+   "ios": "open",
+   "evidence": "system text field; not driven",
+   "test": ""
+  },
+  {
+   "item": "Multi-line text",
+   "ios": "open",
+   "evidence": "composer grows with lines (system); not driven with newlines",
+   "test": ""
+  },
+  {
+   "item": "Draft persists across thread switch and restart",
+   "ios": "pass",
+   "evidence": "draft kept across switching threads and across killing and relaunching the app: mp-draft-switch.png, mp-draft-restart.png",
+   "test": "scripts/ios-mustpass.sh"
+  },
+  {
+   "item": "Markdown headings and lists",
+   "ios": "pass",
+   "evidence": "headings, bullets, nested, ordered match: sbs-md-ipad.png",
+   "test": "sbs-md shots"
+  },
+  {
+   "item": "Markdown tables",
+   "ios": "pass",
+   "evidence": "header row, cells, borders match: sbs-md-ipad.png",
+   "test": "sbs-md shots"
+  },
+  {
+   "item": "Code blocks with highlighting, inline code",
+   "ios": "pass",
+   "evidence": "inline code and block in monospace; neither the web nor iOS colours tokens (no highlighting in the web either)",
+   "test": "sbs-md shots"
+  },
+  {
+   "item": "Images in messages, including local-path images served by the hub (#798)",
+   "ios": "pass",
+   "evidence": "absolute-path image rendered inline on both: sbs-md-phone.png (hub 3811 on h@backplane)",
+   "test": "sbs-md shots"
+  },
+  {
+   "item": "Long lines wrap",
+   "ios": "pass",
+   "evidence": "200-character word wraps within the bubble on both",
+   "test": "sbs-md shots"
+  },
+  {
+   "item": "RTL and non-Latin text",
+   "ios": "pass",
+   "evidence": "Arabic, Hebrew, CJK and mixed lines shape and wrap as the web's",
+   "test": "sbs-md shots"
+  },
+  {
+   "item": "Text rendering: JetBrains Mono for code blocks and mono labels (ligatures off), body text system",
+   "ios": "pass",
+   "evidence": "JetBrains Mono 2.304 bundled (mobile/ios/Backplane/Fonts, registered by Mono.swift, ligatures and calt off, OFL notice under Settings > Licences); check_fonts_ios.py passes lines 0,1,4 and CJK fallback on iPhone and iPad, dark and light, and fails a swapped face (selftest); shots fonts-*.png, code-phone-*.png",
+   "test": "test/visual/check_fonts_ios.py via scripts/ios-fonts.sh"
+  },
+  {
+   "item": "Colours match the web's tokens",
+   "ios": "pass",
+   "evidence": "BackplaneDesign.swift equals style.css tokens (bg/panel/accent/line, light and dark); logo and cat colours checked pixel-wise by check_logo_cats.py",
+   "test": "test/visual/manifest-ios-*.json"
+  },
+  {
+   "item": "Icons present everywhere the web shows them",
+   "ios": "open",
+   "evidence": "icons are present (SF Symbols), but the glyph set differs from the web's Lucide; the logo and cats match exactly (check_logo_cats.py); a full icon audit not done",
+   "test": ""
+  }
+ ]
+}

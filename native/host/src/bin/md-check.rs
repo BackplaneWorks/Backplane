@@ -1,5 +1,5 @@
 //! md-check CORPUS.json: render each string of a JSON array as markdown and print the nodes JSON (Mob.nodes), one line per string.
-//! The Bend twin (test/gpui/screen/md_dump.bend) prints the same; test/gpui/screen/md_oracle.sh compares them. Reads only the corpus file.
+//! twin prints the same; test/screen/md_oracle.sh compares them. Reads only the corpus file.
 #[path = "../md/mod.rs"]
 mod md;
 

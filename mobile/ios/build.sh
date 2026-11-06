@@ -10,7 +10,7 @@
 # Connect key (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH).
 #
 # The app bundles two scripts made outside Xcode: Backplane/bridge.js (the
-# Bend client: scripts/build-mobile.sh --js, which needs bend) and
+# client: scripts/build-mobile.sh --js) and
 # Backplane/backplane-app.js (the web shell's bridge,
 # mobile/shell/backplane-app.js). In a whole checkout this script makes and
 # copies both (BACKPLANE_SKIP_JS=1 keeps the bridge.js already there);

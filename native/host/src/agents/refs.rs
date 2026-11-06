@@ -1,4 +1,4 @@
-//! Refs.agent (core/refs.bend): the references a sent message makes, read by the agent as a `<references>` block after the text.
+//! Refs.agent: the references a sent message makes, read by the agent as a `<references>` block after the text.
 //! `@bot`, `>thread`, `%project`, `#room`: each word starting with a sigil is resolved against this hub's own bots, threads, projects and
 //! rooms (slugs); a bot on a linked machine (`@name@machine`) and a thread elsewhere (`>machine:slug`) are not resolved here.
 use super::world::World;

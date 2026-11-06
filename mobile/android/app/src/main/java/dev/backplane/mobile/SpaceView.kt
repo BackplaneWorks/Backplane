@@ -40,8 +40,8 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
 
-// A bot's space: the JSON src/mobile/space.bend emits (MSpace.json). Plain
-// data; Bend has already kept what it understands and capped every size.
+// A bot's space: the JSON src/mobile/space emits (MSpace.json). Plain
+// data; has already kept what it understands and capped every size.
 // A button calls act("space", send); an input calls
 // act("space-input", send + "\u001f" + text).
 

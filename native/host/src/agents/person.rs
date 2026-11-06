@@ -1,4 +1,4 @@
-//! Side-by-side mode (docs/gpui/SIDE-BY-SIDE.md): the checks a person's `turn.start` passes before a REAL agent (`proc::Kind::PersonTurn`) starts on a copy of the real data,
+//! Side-by-side mode (docs/SIDE-BY-SIDE.md): the checks a person's `turn.start` passes before a REAL agent (`proc::Kind::PersonTurn`) starts on a copy of the real data,
 //! and the environment that child gets. Everything else on a copy stays `Kind::Agent`, stand-in only.
 //!   1 trigger (agents/mod.rs: the client's turn.start only; delivery to a live process is a door too), 2 folder (`check_folder`), 3 fresh session (no `--resume`),
 //!   4 permissions (`runtime_for`), 5 the live log's tail (`live_conflict`), 6 environment (`child_env`).

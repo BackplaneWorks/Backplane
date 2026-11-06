@@ -12,7 +12,7 @@ machine or across machines, including other people's Backplanes.
   project (project `""`), so it never shows on a project shelf; it works in
   `<home>/bots/<id>/`, its home folder (set by a `WorktreeSet` once the hub
   has made the folder).
-- Everything else lives in `M.State.bots : BT.World` (`src/core/bot.bend`),
+- Everything else lives in `M.State.bots : BT.World`,
   folded from additive `Change` variants (`Bot*`, `Room*`, `Hook*`,
   `Routine*`, `Memory*`, `Space*`, `Peer*`).
 - Secrets never enter the event log or reach a client: webhook and peer
@@ -44,7 +44,7 @@ New work gets a visible thread. A bot starts it with `thread_launch` and
 its `project`, and `delegate_task` from a bot needs a `project` too (law
 `bot_delegate_needs_project`): the child runs in that project's folder,
 its first message names the bot, and unlike a thread's delegated child it
-is not hidden under its parent (`Kids.set` in client.bend skips children
+is not hidden under its parent (`Kids.set` in client skips children
 of bot threads, law `kids_bot_child_shown`), so the person sees it in that
 project's sidebar. Its result still comes back to the bot as a message,
 and the delegation depth limit applies as before.
@@ -85,7 +85,7 @@ sends the person no push: the launched thread alerted for itself.
 
 A message a bot sends carries a hop count: a human, a routine, a webhook or
 a space button starts at 0, and a bot's message to another bot is one more
-than the hop of the turn that sent it (`Hop.send` in `src/core/bot.bend`).
+than the hop of the turn that sent it.
 
 A turn's hop is the lowest hop of the messages it answers (`Hops`,
 `Hop.woke`, `Hop.taken`). A message that reaches a bot at rest starts a
@@ -105,12 +105,12 @@ bot (`Bots.hop.gate`, law `bot_held_wakes_none`). In a shared room it goes
 to the members' machines too, which log it and wake no one there. The
 sending bot gets an answer saying so (`held: true` and a note telling it
 not to send it again or anywhere else), not an error. A hop from a linked
-machine is capped at the held hop (`Bots.hop.cap`). `test/depth_test.bend`
+machine is capped at the held hop (`Bots.hop.cap`). `test/depth_test`
 runs #staff: five bots here and one on a linked machine answering one post.
 
 ## Cats
 
-`src/core/cat.bend`. A look (fur, pattern, eyes) comes from the bot's
+`src/core/cat`. A look (fur, pattern, eyes) comes from the bot's
 `look` seed. A mood comes from the bot's status:
 
 | mood | when | moves |
@@ -148,7 +148,7 @@ runs #staff: five bots here and one on a linked machine answering one post.
   (members compare as a bot's id here, or its lower-case name and the
   peer id). A bot on another machine is a member like any other
   (`name@machine`), so the post travels as a shared room post (below).
-  `Req.*` in bothub.bend; law `bot_request_in_room` (a request is never
+  `Req.*` in bothub; law `bot_request_in_room` (a request is never
   posted to a `dm:` room) with `bot_request_fresh_id`.
 - `bot_send` with `direct: true` is a private message, for when the person
   asks for one: room `dm:<a>:<b>`, names sorted, as before.
@@ -199,7 +199,7 @@ and Everything on the window, web, iOS and Android.
 
 The person is alerted (the phones' APNs push, the phones' own alerts,
 desktop notifications, and the same relayed to the owner's other machines)
-in three cases only (`src/core/notice.bend`, `Policy.*`, laws `policy_*`,
+in three cases only (`src/core/notice`, `Policy.*`, laws `policy_*`,
 `notify_*`):
 
 1. **Needs you.** An ask opens for the person (any kind: a tool approval,
@@ -265,7 +265,7 @@ in use is showing it)`.
 
 ### Desks
 
-The window and the web page are desks (`src/core/desk.bend`). Each tells
+The window and the web page are desks. Each tells
 the hub which thread it shows and whether it has the focus, when either
 changes and at most once a minute while in use. A desk is in use only after
 the person's input: keys, the pointer, the wheel, focus changes. A redraw,
@@ -287,7 +287,7 @@ POST a JSON notice for each alert **Notify me for** would raise. Settings,
 on the Threads page, has the address and the path of the secret file
 (empty turns the webhook off; an address that is not http or https is
 refused; the secret's contents are never shown). The same
-record decides it (`Policy.loud` / `Policy.kind` in `src/core/notice.bend`):
+record decides it:
 a kind of `done` or `fail` goes out from `TurnEnded`, and a kind of `ask`,
 `merged`, `reminder` or `note` goes out from `Alerted`. A quiet settle (an
 empty kind: a stop, an intermediate end, a routine, a launched report, or a
@@ -340,7 +340,7 @@ The notice is signed when a secret is configured. `push.webhook.secret` is
 the path of a file that holds it (only the path is a setting, as with
 `push.apns.key`). With that unset, `<home>/secrets/push.webhook` is used
 when the file exists. The request then carries the same headers a signed
-webhook in does (`src/core/sign.bend`):
+webhook in does:
 
 ```
 X-Backplane-Timestamp: <unix seconds>
@@ -365,7 +365,7 @@ line.
 ## Already told
 
 A record of what the person has actually been told, so a bot's digest, a
-reminder or a second bot does not say it again (`src/core/told.bend`).
+reminder or a second bot does not say it again.
 Each record is the setting `told.<id>` holding `{key, text, channel, bot,
 at}`: the topic key (lower case, runs of characters outside
 `[a-z0-9._:-]` become `-`, 120 at most), what was said (280 characters at
@@ -375,7 +375,7 @@ the bot that said it (`""` for a thread that is no bot's) and when.
 Every alert is marked by itself. Since the notification policy, each one
 comes from a record `alert.<thread>` that some step writes with a kind
 (see Notifications): a settled turn, an ask, a failure, a merge, a
-`notify_person` note. `Told.after` (called from hub.bend's
+`notify_person` note. `Told.after` (called from hub's
 `Alerts.changes`, which every step passes through) marks each record that
 has a kind, under the record's key (`turn-<thread>`, `room-<room>`,
 `note-...`) with channel `alert`, the thread's bot, and the record's text
@@ -399,7 +399,7 @@ or `board.*` setting (`State.setting`), so none are left behind.
 
 ## Standing rules
 
-What the person wants always done, or never done (`src/core/rules.bend`).
+What the person wants always done, or never done.
 A rule is the setting `rule.<id>` holding `{id, text, bot, project, tool,
 enforce, word, on, at, by}`: its words; the bot it is for (`""` all), the
 project (`""` all), tool patterns (names, or a prefix ending in `*`,
@@ -424,7 +424,7 @@ machine (not synced to others).
 
 ## Task board
 
-One shared list of what is to be done (`src/core/tboard.bend`). An item is
+One shared list of what is to be done. An item is
 the setting `board.<id>` holding `{id, title, status, owner, project, due,
 group, links, notes, at, updated, by}`: status `todo`, `doing`, `blocked`,
 `done` or `dropped`; the owner a bot's id (`""` is the person); the due
@@ -482,13 +482,13 @@ matches too, and `>machine:` alone offers only that machine's threads. A
 `>machine:slug` never names a thread here (`>fix: it fails` still names
 `fix`: a slug must follow the colon, laws `refs_machine_word`,
 `refs_colon_after_stays_here`). The hub has no read model of other
-machines' threads, only its mirror of each, so `src/core/xref.bend` folds
+machines' threads, only its mirror of each, so `src/core/xref` folds
 the one mirror a word names when it must: for the agent's
-`<references>` block (server.bend's `Far.turn`, around `Bots.turn`), and
+`<references>` block, and
 for `thread_read` on a `<link>~<id>` (`Xref.read`, answered from the
 mirror, before the MCP call reaches the hub).
 
-The menu (`Refs.offer` in `src/core/refs.bend`) ranks by how well the
+The menu ranks by how well the
 query matches the slug or name (fuzzy), a query of three or more letters
 found in the summary, then nearness: the same project, recent work, pinned
 or running threads. It is worked out once per edit of the draft and kept
@@ -649,8 +649,8 @@ Settings shows "Time zone" on every client with a field, Set and Automatic.
 (Repeats, Once, Reminder with a bell), when, `Next ... · in 3h` in the
 person's zone, the zone when it is not theirs, and `Done · ...`; a bot's list
 is pending by next fire, then off, then done (`Sched.order`). The forms'
-live hint is `Sched.hint`. `test/sched_test.bend`, `test/tz_test.bend`,
-`test/when_test.bend`.
+live hint is `Sched.hint`. `test/sched_test`, `test/tz_test`,
+`test/when_test`.
 
 ## Memory
 
@@ -751,7 +751,7 @@ comma-separated string), `draft` and `account`. A reply carries
 (`threadId`); `subject` defaults to `Re: <original>` (not twice) and `to` to
 the original's `Reply-To`, else its sender. Attachments: at most 20, each
 and all together at most 18 MB (`Gmail.att_max`); the hub never reads their
-bytes into Bend: a shell step probes them (`Gm.probe.sh`) and assembles the
+bytes into : a shell step probes them (`Gm.probe.sh`) and assembles the
 message on disk (`base64 | tr | fold | awk`, `Gm.assemble.sh`) in a folder
 `<home>/secrets/gm-<nonce>` (0700, removed after the send or the refusal),
 and every message goes up by Gmail's media upload
@@ -779,7 +779,7 @@ text after a blank line, HTML escaped after two `<br>`); never to a draft
 being sent. Settings: each Google account has a Signature button
 (`google` action `sig-edit:<address>`, then `sig-save`, which writes the
 setting; an empty text removes it, `sig-cancel`).
-Laws `gmail_*`, `ask_head_*`; tests `test/google_test.bend`,
+Laws `gmail_*`, `ask_head_*`; tests `test/google_test`,
 `bun test/tools/google_e2e.ts`.
 
 Google always sends the browser back to `127.0.0.1:<port>`, so a sign-in
@@ -813,7 +813,7 @@ file from before keeps its one account at its top and is read as the
 first). Every tool takes an optional `account` address; without it, the
 first. Settings lists the accounts, each with its own Sign out (the
 `google` action `signout:<address>`; `disconnect` with no address signs
-out all). Pure half: `Acct`/`Accts.*` in `src/core/google.bend`, laws
+out all). Pure half: `Acct`/`Accts.*` in `src/core/google`, laws
 `google_accts_*`.
 
 Connect Google in Settings signs in with Backplane's shared OAuth client,
@@ -823,7 +823,7 @@ so nobody pastes anything. The client is baked in at build time:
 them from the repository's Actions secrets) or from a git-ignored `.env` in
 the checkout or the main checkout into a private prelude of the binary, and
 `src/server/effects/google.js` hands them to `Gs.shared`. The same variables at run time win over the baked
-ones; with neither, `Google.shared` in `src/core/google.bend` is used.
+ones; with neither, `Google.shared` in `src/core/google` is used.
 The shared client asks for Gmail and Calendar (laws `google_shared_*`).
 Gmail's scopes are restricted: until Google verifies the client (a yearly
 security assessment), people click past an unverified-app warning and at
@@ -843,8 +843,8 @@ after 7 days.
 
 ## Server
 
-`src/server/botnet.bend` (secrets, signing, verifying, the directory) and
-the Bots section of `src/server/server.bend` (effects, routes, Google's
+`src/server/botnet` (secrets, signing, verifying, the directory) and
+the Bots section of `src/server/server` (effects, routes, Google's
 tools). Routes:
 
 | route | who | auth |
@@ -880,7 +880,7 @@ asks each linked machine for its bots; the merged list is the info
 key `bots.remote` (a machine that does not answer keeps its bots, away).
 `test/tools/bots_e2e.ts` runs two hubs against each other; `test/tools/newproj_e2e.ts` runs project_create on one.
 
-Each bot is listed once (`src/core/once.bend`; laws `bot_rows_once`,
+Each bot is listed once (`src/core/once`; laws `bot_rows_once`,
 `bot_picks_once`, `hubs_bots_once`). A bot here is keyed by its id, a bot
 elsewhere by its name (any case) at its machine's link id, so one bot
 reported twice, or named `Kit@box` in one room and `Kit@<box's id>` in
@@ -894,19 +894,19 @@ as its own hub's.
 A bot elsewhere that lives on one of the owner's own machines (the
 machine switcher's list: the same address, or, when the link's address is
 on the owner's tailnet domain, the peer's name or MagicDNS label on the
-same port, `Far.machine` in client.bend) is mirrored here (below) and
+same port, `Far.machine` in client) is mirrored here (below) and
 opens here, at once, as a bot like any other. A bot on anyone else's
 machine, or one not mirrored yet, is a conversation (`bots.tell`). The
 window no longer switches hubs to show a bot: that fetched the other hub's
-whole log over the link (11 to 20 s for a 13 MB log, `test/native/link_bench.bend`).
+whole log over the link.
 
 ## Threads elsewhere
 
-`src/core/far.bend`. A hub shares its projects, ordinary project threads and bots (turns,
+`src/core/far`. A hub shares its projects, ordinary project threads and bots (turns,
 messages, tool calls, asks, delegated tasks, bot space, memory and routines) with the owner's other machines it is
 linked to. It shares no settings, devices, links, webhooks or rooms (rooms
 travel on their own, above), and nothing with a machine that is not the
-owner's (`Far.own` in server.bend, client.bend's `Far.mine`: the machines
+owner's (`Far.own` in server, client's `Far.mine`: the machines
 list, and a link the hub verified as the owner's; laws `far_*_stay_home`).
 
 What a link says of itself (the address and name in its `POST /bots/link`)
@@ -1011,7 +1011,7 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
   shares; folders and adding need nothing but an owner's link. `thread.delete`
   is not one of them (law `far_no_delete`): a thread elsewhere is deleted on
   its own machine. Laws `far_create_*`, `made_far_*`, `proj_machine_*`; tests
-  `test/far_test.bend`, `bun test/tools/create_far_e2e.ts`.
+  `test/far_test`, `bun test/tools/create_far_e2e.ts`.
 - The same view. A mirrored bot is a bot in the read model, so the window,
   the web and the phones show it with the same header, tabs, space and
   chat, its thread with the same timeline and composer; only its name
@@ -1026,7 +1026,7 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
   the focused hub, its machine badge remains visible. Hidden Older and Settled
   counts also drop duplicates.
 - Pairing. The owner's machines link by themselves; nobody pastes an
-  invite (`Mate.*` in client.bend). Every two minutes a hub lists the
+  invite. Every two minutes a hub lists the
   tailnet's online machines of its owner that answer `GET /hello`
   (`Machines.*`), and each minute it asks those it is not linked to and
   whose address is above its own (so of two hubs exactly one asks) with
@@ -1075,7 +1075,7 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
   clients through `Label.title`/`Label.syncing` and the phones' `quiet`.
   Projects that have arrived work meanwhile, and nothing pops in or moves.
   Laws `far_catalog_*`, `far_scope_*`.
-- Live text of a far turn (core/farlive.bend, laws `flive_*`): the owner's
+- Live text of a far turn: the owner's
   streamed reply is not a change, so it never enters the log or the mirror
   file. It goes hub to hub as an ephemeral `live` body on POST /far/push
   (deltas of the owner's Live buffer: `off` = length before, `gen` bumps at
@@ -1088,12 +1088,12 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
   (`watch: false`) is left alone for 8 s; the first delta after finds a gap
   and gets a snapshot. A far turn's end alerts once, by the owner's key.
 - Join cost: a mirror's chunks are cut by a tail-recursive walk
-  (`Fr.after`), linear in the mirror, not stack-deep (`test/native/far_sync_bench.bend`).
+  (`Fr.after`), linear in the mirror, not stack-deep.
 - Not mirrored: a bot's browser. The viewers of a far project thread are below.
 - Viewers elsewhere. The viewer panel of a thread on another machine (Board,
   Schematic, 3D, Mech, Files, Diff) works from any client of any hub, the
-  window, the web and both phones, with the same Bend defs (`core/fview.bend`,
-  client.bend's `Fv.*`, `src/server/farview.bend`). The files stay on the owner's
+  window, the web and both phones, with the same defs (`core/fview`,
+  client's `Fv.*`, `src/server/farview`). The files stay on the owner's
   machine; the hub the client is on keeps what the viewers read in a cache of
   its own, `<home>/farfs/<link>/<the owner's project folder>`, and a client
   of a far thread reads that folder (`Ui.root`, "" until the hub says which)
@@ -1147,14 +1147,14 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
     only a thread that hub keeps in its own folder shows there, and the cache
     is never cleaned (`<home>/farfs`).
 
-`test/far_test.bend` (the client's fold, routing, sharing) and
+`test/far_test` (the client's fold, routing, sharing) and
 `test/tools/far_e2e.ts` (two hubs: a bot made on one shows on the other,
 a message from the other reaches it and its answer comes back, away when
 it stops, from disk after a restart).
 - A window on another hub. The native window can switch to another machine's
-  hub (the machine switch, `src/app/link.bend`); its viewers read files from
+  hub; its viewers read files from
   the window's own disk, so on another machine's hub they would show nothing.
-  They read copies instead (`core/rview.bend`, `src/app/rvw.bend`, main.bend's
+  They read copies instead (`core/rview`, `src/app/rvw`, main's
   `Watch.follow`): the hub lists a thread's viewer files for its clients and
   sends their bytes, and the window keeps them under
   `$XDG_CACHE_HOME/backplane-bend/remote/<hub>` in the same folders as on the
@@ -1187,13 +1187,13 @@ it stops, from disk after a restart).
     when the viewer returns (`Shell.stale`). A history version or comparison
     asks the hub for each commit's bytes (`Watch.hist.r`). A remote source
     runs no 150 ms stat loop: the viewers read once after each round that
-    changed something. Tests `test/rview_test.bend`, `bun test/tools/remote_view_e2e.ts`,
-    `test/native/rvw_sync.bend`.
+    changed something. Tests `test/rview_test`, `bun test/tools/remote_view_e2e.ts`,
+    `test/native/rvw_sync`.
 
 ### Agents across machines
 
 An agent (Claude, Codex, Grok or Muse, through the hub's MCP tools) works with the owner's other machines
-the way it works with its own project. `src/core/fmcp.bend` is the whole of it.
+the way it works with its own project. `src/core/fmcp` is the whole of it.
 
 - `machine_list` (every agent): this machine first, then each linked machine (`here` or `away`) with its
   projects, ids as clients name them (`<link>~<id>`). Every hub starts an agent's prompt with the
@@ -1202,7 +1202,7 @@ the way it works with its own project. `src/core/fmcp.bend` is the whole of it.
   or its `<link>~<id>` as `project`). `thread_send` (auto, queue, steer), `thread_wait`,
   `thread_interrupt` and `thread_update` take a thread's `<link>~<id>`, which any answer carries in
   its ids. `thread_read` asks the owning hub too (current even before its push reaches the mirror),
-  and reads the mirror (xref.bend) while that machine is away. A word `>machine:slug` in a message
+  and reads the mirror while that machine is away. A word `>machine:slug` in a message
   gets its id in the `<references>` block.
 - A call for another machine is not run here: the hub (`Hub.mcp.f`, `Fm.plan.o`) turns it into the signed
   request `mcp.call {tool, from, args}` (POST /far/rpc, the route clients use for threads elsewhere),
@@ -1229,4 +1229,4 @@ the way it works with its own project. `src/core/fmcp.bend` is the whole of it.
 - Bots: `@name@machine` already reaches a bot on a linked machine (`Bots.mention.far`); rooms travel
   with the owner's machines (see "Shared rooms").
 
-Laws `fmc_*`; tests `test/fmcp_test.bend`, `bun test/tools/agents_far_e2e.ts`.
+Laws `fmc_*`; tests `test/fmcp_test`, `bun test/tools/agents_far_e2e.ts`.

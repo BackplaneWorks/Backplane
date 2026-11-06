@@ -13,7 +13,7 @@ final class IslandController {
     private var activities: [String: Activity<IslandAttributes>] = [:]
     private let register: (String, String, String?) -> Void
     // with no word for this long iOS marks it stale (the hubs push at least
-    // hourly while any thread works: push.bend's Island.fresh)
+    // hourly while any thread works: push's Island.fresh)
     private var stale: Date { Date().addingTimeInterval(3 * 3600) }
 
     // register(kind, token, hub): "activity" for a hub's activity (to that

@@ -1,4 +1,4 @@
-//! A post in a room (bothub.bend `Bots.post`, `Bots.fan`, `Bots.member`, `Bots.wake.room`, `Bots.direct`): the post is logged, then every other member here hears it,
+//! A post in a room: the post is logged, then every other member here hears it,
 //! one after the other (BotWoke, then the message). Used for a person's post (`from` empty) and for a bot's (room_post, bot_send).
 use super::{mail::mailbox::room_parts, rpc::{hop_live, note, Bots}, world::World};
 use serde_json::{json, Value};

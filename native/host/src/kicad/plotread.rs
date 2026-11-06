@@ -1,4 +1,4 @@
-//! server/plot.bend's `Pv.child` and `Pv.child.tree`, with core/hist.bend's comparison and core/hier.bend's sheets, in Rust: what a viewer's
+//! server/plot's `Pv.child` and `Pv.child.tree`, with core/hist's comparison and core/hier's sheets, in Rust: what a viewer's
 //! source path names (a live file, a file in a commit, a comparison of two versions) read to a plot, and a schematic's sheet tree.
 use super::board::{Item, Prim};
 use super::fl;
@@ -41,7 +41,7 @@ pub fn version_env(path: &str, env: &[(&str, &str)]) -> Vec<u8> {
     match o { Ok(o) if o.status.success() => decode(&o.stdout).into_bytes(), _ => vec![] }
 }
 
-// Comparisons: core/hist.bend's Hist.mark
+// Comparisons: core/hist's Hist.mark
 const REMOVED: u32 = 26; const CHANGED: u32 = 27; const ADDED: u32 = 28;
 fn on(layer: u32, suffix: &str, i: Item) -> Item {
     let prim = match i.prim { Prim::Tint { ps, .. } => Prim::Poly { ps, w: 0.0, fill: true }, p => p };
@@ -110,7 +110,7 @@ pub fn read(kind: u32, path: &str) -> Read {
     plotgen::of_bytes(kind, &b, fixed)
 }
 
-// A schematic's sheets: core/hier.bend
+// A schematic's sheets: core/hier
 pub struct Kids { pub file: String, pub sheets: Vec<(String, String)> }
 /// Hier.dir: the folder of a path, with its trailing slash ("" for a bare name)
 fn dir(p: &str) -> &str { p.rfind('/').map(|i| &p[..=i]).unwrap_or("") }

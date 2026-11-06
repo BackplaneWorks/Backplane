@@ -1,4 +1,4 @@
-//! A new thread's worktree (src/server/git.bend `Git.thread_wt`, server.bend `WtJob.*`): a branch of its own from upstream in
+//! A new thread's worktree: a branch of its own from upstream in
 //! `<repo>/.backplane/worktrees`, the folder's uncommitted KiCad work carried over; or the thread works in the project folder.
 //! Runs after the thread is committed and logs what the server's job reports: `WorktreeSet` / `WorktreeSkipped` and a note.
 //! Nothing here runs on a copy of a log (it writes git).
@@ -156,7 +156,7 @@ pub fn spawn_with(copy: bool, hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super:
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Git.branch.sanitize / Git.branch.temp: the same names the Bend hub gives
+    // Git.branch.sanitize / Git.branch.temp: the same names hub gives
     #[test] fn branch_names() {
         assert_eq!(sanitize("backplane/ab12cd34"), "backplane/ab12cd34"); assert_eq!(sanitize("  Fix The--Thing!! "), "fix-the-thing"); assert_eq!(sanitize("a//b..c"), "a/b.c"); assert_eq!(sanitize("---"), ""); assert_eq!(sanitize("a/-.b"), "a/b");
         assert_eq!(seed("t12-3"), 123); assert_eq!(temp_branch(0).len(), "backplane/".len() + 8);

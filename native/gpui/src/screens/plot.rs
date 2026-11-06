@@ -1,4 +1,4 @@
-//! Board and schematic plots from the hub (core/plot.bend, as the phones draw them): a binary CBOR frame
+//! Board and schematic plots from the hub: a binary CBOR frame
 //! `{t:"plot", key, fam, cs, box, edge, thick}` or `{key, none}`. `cs` lists each chunk as the index of one the client holds (the last
 //! plot applied) or the chunk itself `{l layer, c colour, a alpha, m mode, w width, d varints}`; applying it is `Plot.apply`, so
 //! `held` mirrors what the hub thinks this connection holds. Nothing is decided here: which chunks, their order, colour and
@@ -245,7 +245,7 @@ pub fn refs_of(r: &serde_json::Value) -> Option<Refs> {
     let rows = g("refs").lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 3 || f[2].is_empty() || !matches!(f[0], "head" | "base" | "branch" | "tag" | "commit") { return None } Some((f[0].to_string(), f[1].to_string(), f[2].to_string())) }).take(60).collect();
     Some(Refs { git: g("git"), top: g("top"), pcb: g("pcb"), sch: g("sch"), rows })
 }
-/// core/hist.bend's version path of `file` in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>"; a comparison is "diff\n<old>\n<new live file>".
+/// core/hist's version path of `file` in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>"; a comparison is "diff\n<old>\n<new live file>".
 pub fn compare_path(r: &Refs, commit: &str, file: &str) -> Option<String> {
     let rel = file.strip_prefix(&format!("{}/", r.top))?;
     Some(format!("diff\ngit\t{}\t{}\t{}\t{}/{}\n{}", r.git, commit, r.top.chars().count(), r.top, rel, file))
@@ -381,7 +381,7 @@ mod tests {
         (b, cks)
     }
     #[test] fn real_plots_from_the_generator_decode_inside_their_box() {
-        for (name, text) in [("ecc83-pp", include_str!("../../../../test/gpui/files/fixtures/plot/ecc83-pp.kicad_pcb.plot")), ("microwave", include_str!("../../../../test/gpui/files/fixtures/plot/microwave.kicad_pcb.plot"))] {
+        for (name, text) in [("ecc83-pp", include_str!("../../../../test/files/fixtures/plot/ecc83-pp.kicad_pcb.plot")), ("microwave", include_str!("../../../../test/files/fixtures/plot/microwave.kicad_pcb.plot"))] {
             let (b, cs) = child_chunks(text);
             assert!(b.len() >= 4 && !cs.is_empty(), "{name}: parsed {} chunks", cs.len());
             let (x0, y0, x1, y1) = (b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32);
@@ -396,9 +396,9 @@ mod tests {
             assert!(caps > 10 && polys > 0, "{name}: {caps} capsules, {polys} polygons");
         }
     }
-    /// The first frame the Rust hub sends after kicad.watch for the ecc83 demo (written by the hub's own plot::frame, test/gpui/files/fixtures/plot).
-    const BOARD: &[u8] = include_bytes!("../../../../test/gpui/files/fixtures/plot/ecc83-board.frame.cbor");
-    const SCH: &[u8] = include_bytes!("../../../../test/gpui/files/fixtures/plot/ecc83-sch.frame.cbor");
+    /// The first frame the Rust hub sends after kicad.watch for the ecc83 demo (written by the hub's own plot::frame, test/files/fixtures/plot).
+    const BOARD: &[u8] = include_bytes!("../../../../test/files/fixtures/plot/ecc83-board.frame.cbor");
+    const SCH: &[u8] = include_bytes!("../../../../test/files/fixtures/plot/ecc83-sch.frame.cbor");
     #[test] fn the_hubs_own_board_and_schematic_frames_decode() {
         for (name, bytes, key) in [("board", BOARD, "0|/fixture/ecc83|"), ("schematic", SCH, "1|/fixture/ecc83|")] {
             assert!(is_plot(bytes), "{name}: not recognised as a plot frame");

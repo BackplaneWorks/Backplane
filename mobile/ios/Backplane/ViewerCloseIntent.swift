@@ -69,7 +69,7 @@ struct ViewerCloseIntent {
     }
 }
 
-// The Engine checks this on its worker immediately before invoking Bend.
+// The Engine checks this on its worker immediately before invoking .
 // A newer open also invalidates an older close that was already queued.
 final class ViewerDispatchGate: @unchecked Sendable {
     private let lock = NSLock()

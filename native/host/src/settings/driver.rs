@@ -1,4 +1,4 @@
-//! The provider-limit driver (hub.bend `Fallback.line` / `AccountFallback.line` / `ProviderResume.*` / `Fallback.use` / `AccountFallback.use`): what happens when
+//! The provider-limit driver: what happens when
 //! a running turn's agent line says its provider ran out of allowance. It reads each line the agents' actor already parsed (two touch points there: `on_line`
 //! right after the line's events are built, `spawn_act` after the batch is committed) and decides with the pure planner in fallback.rs.
 //! NOT WIRED YET: `on_line` and `spawn_act` have no caller (the agents lane adds the two hooks once this is on `gpui`), so the limit fallback does not run in this hub;
@@ -232,7 +232,7 @@ pub const RESUME_TEXT: &str = "[Backplane] The provider's reported limit reset h
 pub fn resume_events(key: &str, th: &str, now: u64, seq: u64) -> Vec<Value> {
     vec![set(key, "", now), json!({"$":"ActivityLogged","thread":th,"act":crate::agents::lines::hub_id("quota", now, seq),"tone":"info","kind":"provider-resume","summary":"Provider limit reset; continuing from the last step","at":now})]
 }
-/// `ephemeral` is by name only: Bend's Ephemeral.is also counts a mail run or private run by record (MR.Run.is), which is not ported yet; whoever ports Run.is uses it here.
+/// `ephemeral` is by name only: Ephemeral.is also counts a mail run or private run by record (MR.Run.is), which is not ported yet; whoever ports Run.is uses it here.
 async fn resume_facts(hub: &Arc<Hub>, th: &str) -> ResumeFacts {
     let held = hub.setting(&format!("thread.config.hold.{th}")).await.as_deref() == Some("on");
     let t = { let m = hub.model().await; match m.threads.get(th) { Some(t) => t.clone(), None => return ResumeFacts::default() } };

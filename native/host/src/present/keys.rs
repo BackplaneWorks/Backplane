@@ -1,5 +1,5 @@
-//! The keys of `shown.thread` that follow the thread's own state (src/mobile/screen.bend `Mob.thread`): `state`, `tools` (core/tools.bend), `menu`,
-//! `working` and `phase` (core/signal.bend), computed from `state::State` for a thread with no asks, task links, queue, background rows or
+//! The keys of `shown.thread` that follow the thread's own state: `state`, `tools`, `menu`,
+//! `working` and `phase`, computed from `state::State` for a thread with no asks, task links, queue, background rows or
 //! launch (`plain_signal` is `signal::own` for exactly that case). `None`: a case this does not compute (a failed or stopped turn, a stalled thread,
 //! a forked thread whose fork record a lean State may have dropped): the caller refuses it, retryably.
 use crate::shelf::{shelf_of, Shelf};
@@ -202,12 +202,12 @@ mod tests {
         assert_eq!(allowance_text(&json!({"windows":[{"scope":"shared","used_permille":100,"resets_at":50}]}), "claude", "", 100), "", "a passed reset is no current reading");
         assert_eq!(allowance_text(&snap, "grok", "", 100), "");
     }
-    fn fx() -> Value { serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-variants.json"))).unwrap() }
+    fn fx() -> Value { serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-variants.json"))).unwrap() }
     const T: &str = "t1700000003-8";
     /// every variant the helper was dumped for: a key not in a variant's diff is the base thread's (the helper's own dump of it)
     #[test] fn each_variants_state_keys_are_the_helpers() {
-        let v = fx(); let log = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-log.jsonl"));
-        let pair: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/gpui/slim/fixtures/thread-pair.json"))).unwrap();
+        let v = fx(); let log = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl"));
+        let pair: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json"))).unwrap();
         let base = &pair["out"]["shown"]["thread"];
         let mut checked = 0;
         for (name, x) in v.as_object().unwrap() {

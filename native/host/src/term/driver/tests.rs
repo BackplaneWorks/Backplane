@@ -50,7 +50,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"click","x":500,"y":1000})).await["ok"], true);
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"mouse","type":"drag","x":0,"y":0})).await["ok"], true);
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"scroll","dy":120})).await["ok"], true);
-    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"explode"})).await["ok"], true, "an unknown op while the person drives is a no-op, as in Bend");
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"explode"})).await["ok"], true, "an unknown op while the person drives is a no-op, as in ");
     assert!(wait(10, || { let r = sent(&log); ["click", "mouse", "scroll"].iter().all(|o| r.iter().any(|x| x["op"] == *o)) }).await, "the queued input reached the helper");
     let reqs = sent(&log); let click = reqs.iter().find(|r| r["op"] == "click").unwrap(); assert_eq!((click["x"].as_u64(), click["y"].as_u64(), click["page"].as_str()), (Some(640), Some(799), Some("b1")));
     assert_eq!(reqs.iter().find(|r| r["op"] == "mouse").unwrap()["type"], "move", "only move, down or up");
@@ -122,7 +122,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     }
 }
 
-#[tokio::test] async fn an_unknown_owner_is_refused_and_the_words_are_bends() {
+#[tokio::test] async fn an_unknown_owner_is_refused_and_the_words_are() {
     let (hub, d, _log) = setup("owner").await;
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"nobody","op":"takeover"})).await["error"], "unknown browser owner");
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"","op":"takeover"})).await["error"], "unknown browser owner");

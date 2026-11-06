@@ -56,10 +56,10 @@ hard-code `/cygdrive` paths. Backplane's STEP helper performs path conversion
 for its own input/output arguments and preserves colors through the GUI
 FreeCAD fallback.
 
-Native checks include `test/native/native_pid.bend` and
-`test/native/windows_paths.bend`. They use the hub's effects, so they build
+Native checks include `test/native/native_pid` and
+`test/native/windows_paths`. They use the hub's effects, so they build
 as the hub does, on Bun:
-`BACKPLANE_JS_TARGET=windows-x64 scripts/build-js.sh test/native/windows_paths.bend build/windows-paths`
+`BACKPLANE_JS_TARGET=windows-x64 scripts/build-js.sh test/native/windows_paths build/windows-paths`
 writes `build/windows-paths.exe`. Require the printed path checks to pass: the
 Check helper reports failures in its output. Compare the PID test to the
 actual native process ID.
@@ -93,7 +93,7 @@ and writes their checksum manifest, WINDOWS-HELPERS.json, beside their
 dependency licenses. FreeCAD and the Backplane KiCad runtime are installed
 separately.
 
-The offline regressions for issue #927 are `test/kicad_paths_test.bend`,
+The offline regressions for issue #927 are `test/kicad_paths_test`,
 `test/tools/kicad_discovery_test.py`, and `test/tools/kicad_install_test.py`.
 They exercise the production resolver and installer with disposable filesystem
 entries and archives. Linux fixtures with Windows uname/path text do not

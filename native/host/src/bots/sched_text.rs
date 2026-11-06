@@ -1,4 +1,4 @@
-//! What a routine says of itself in words (sched.bend `Sched.row`, `Sched.saved`, `Sched.rel`, cron.bend `Cron.describe`), in English: the agents' tools keep the
+//! What a routine says of itself in words, in English: the agents' tools keep the
 //! English text whatever the person's language. Pure.
 use super::clock::{Cron, Plan, TzRule, Zones};
 use super::routines::machine_off;

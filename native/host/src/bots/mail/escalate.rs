@@ -1,5 +1,5 @@
-//! What a mail run's end, an ask or a failed filing asks of the coordinator (hub.bend `Run.escalate*`, `Run.triage.*`, `Private.*`, `Run.unresolved*`, `Run.ended*`, `Run.queue.hold`,
-//! `Triage.ask`, `Triage.bot.*`, `Mail.failure`, `Run.recover*`; maildisposition.bend, mailcontinuity.bend, mailtriage.bend): decisions over a `Ctx`, returned as a `Step`.
+//! What a mail run's end, an ask or a failed filing asks of the coordinator (hub `Run.escalate*`, `Run.triage.*`, `Private.*`, `Run.unresolved*`, `Run.ended*`, `Run.queue.hold`,
+//! `Triage.ask`, `Triage.bot.*`, `Mail.failure`, `Run.recover*`; maildisposition, mailcontinuity, mailtriage): decisions over a `Ctx`, returned as a `Step`.
 //! The coordinator's triage runs privately: an unresolved input goes to a back-office thread of its own (`mailcoord-<bot>-<id>`), never into the person's conversation.
 //! No message text or address is logged here.
 use super::{mailbox::Run, route::{jshow, ref_uri, take_chars, Ctx, RouteOut, Step}, Body, Hdr, Origin};

@@ -1,9 +1,9 @@
-//! Rust twin of src/core/kserve.bend: the pure policy of the hub's headless KiCad servers (one `kicad-cli api-server` per
+//! Rust twin of src/core/kserve: the pure policy of the hub's headless KiCad servers (one `kicad-cli api-server` per
 //! project, at most two): where a server's socket lives, its command line, reading its ready line, the version check, the
 //! 1/5/30 s restart schedule, which server a third project retires, the 18 commands a headless KiCad refuses, the bp.3
 //! guards and the words shown. No IO and no process handling here (ipc.rs owns that); nothing signals a process.
-//! In the final design these rules stay Bend and run in the rules process; until it is wired this twin carries them, and each
-//! test below names the Bend def (and the `kserve_*` law) it states. Times are epoch seconds like KS.* (Nat.sub saturates).
+//! In the final design these rules stay and run in the rules process; until it is wired this twin carries them, and each
+//! test below names def (and the `kserve_*` law) it states. Times are epoch seconds like KS.* (Nat.sub saturates).
 use serde_json::Value;
 
 /// One project's server (KSrv). state: "starting", "ready", "failed" or "stopped".

@@ -1,7 +1,7 @@
-//! A thread page's `window` object, computed by native Bend (native/bend/window.bend over
-//! src/server/thin-window.bend, equal to the JS hub's on the six reference threads of
-//! test/gpui/hub/fixtures/windows.json). Rust reads the page out of its own index and hands over rows and counts;
-//! the fold/context logic (60+ laws) stays in Bend. One process per request for now.
+//! A thread page's `window` object, computed by native (
+//! src/server/thin-window, equal to the JS hub's on the six reference threads of
+//! test/hub/fixtures/windows.json). Rust reads the page out of its own index and hands over rows and counts;
+//! the fold/context logic (60+ laws) stays in . One process per request for now.
 use crate::model::{Page, Row};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ static N: AtomicU64 = AtomicU64::new(0);
 
 fn esc(s: &str, out: &mut String) { for c in s.chars() { match c { '\\' => out.push_str("\\\\"), '\t' => out.push_str("\\t"), '\n' => out.push_str("\\n"), c => out.push(c) } } }
 
-/// The request file window.bend reads.
+/// The request file window reads.
 pub fn request_text(thread: &str, epoch: &str, before: u64, page: &Page, ctx: &[Row], p: &Value) -> String {
     let mut t = format!("window\t{thread}\t{epoch}\t{before}\t{}\t{}\t{}\t{}\n", page.below, page.above, ctx.len(), p);
     for r in ctx.iter().chain(page.rows.iter()) {

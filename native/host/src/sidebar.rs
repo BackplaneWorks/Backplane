@@ -1,6 +1,6 @@
 //! The sidebar's `shown.projects` for the native clients (renderer `mobile`, locale English) from the Rust read model:
-//! src/mobile/screen.bend `Mob.projects`/`Mob.project`/`Mob.row`, core/client.bend `Side.*`, core/subthreads.bend `Tree.*`,
-//! core/model.bend `Sidebar.at`/`Archive.of`. The Bend code stays as the differential oracle (bp-policy on the same log).
+//! src/mobile/screen `Mob.projects`/`Mob.project`/`Mob.row`, core/client `Side.*`, core/subthreads `Tree.*`,
+//! core/model `Sidebar.at`/`Archive.of`. code stays as the differential oracle (bp-policy on the same log).
 //!
 //! Covered: project order and live/quiet/older grouping, the five shelves with their order, thread tree rows (parents set by
 //! `thread.parent.<id>`), status words, ago, lead and trail swipes, the Settled count, qualified ids (`<hub>|<id>`).
@@ -38,7 +38,7 @@ fn state_word(t: &Thread) -> &'static str { match t.turn { crate::state::Turn::R
 
 fn rank(t: &Thread) -> u64 { t.created.max(t.unsettled_at) }
 
-// ---- manual order keys (core/model.bend "Order keys"): a binary fraction 0.b1b2b3..., zeros after its last digit ----------
+// ---- manual order keys: a binary fraction 0.b1b2b3..., zeros after its last digit ----------
 fn key_read(hex: &str) -> Vec<bool> {
     hex.bytes().flat_map(|c| { let v = match c { b'0'..=b'9' => c - b'0', b'a'..=b'f' => c - b'a' + 10, _ => 0 }; [v & 8 != 0, v & 4 != 0, v & 2 != 0, v & 1 != 0] }).collect()
 }
@@ -60,7 +60,7 @@ fn slot_cmp(st: &State, section: &str, a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
-// ---- the thread tree (core/subthreads.bend) -------------------------------------------------------------------------------
+// ---- the thread tree -------------------------------------------------------------------------------
 fn parent_raw<'a>(st: &'a State, id: &str) -> &'a str {
     let p = st.settings.get(&format!("thread.parent.{id}")).map(|s| s.as_str()).unwrap_or("");
     if p.is_empty() || p == id { return "" }
@@ -316,7 +316,7 @@ impl Plan<'_> {
         let rank = match word { "blocked" => if t.pending > 0 { 8 } else { 7 }, "failed" => 6, "finished" => 5, "stopped" => 4, "active" | "waiting" => 2, _ => 0 };
         rank * 2 + pin
     }
-    /// The Active view (client.bend `Active.rows`): every thread on a live shelf of any project, what needs the person first, newest first within each;
+    /// The Active view: every thread on a live shelf of any project, what needs the person first, newest first within each;
     /// then the threads settled within QUIET_DAYS, newest settled first (faded, for bringing back). `keep(title, project)` is the search.
     /// Rows are the roots of the thread trees, as in the project list; each names its project.
     pub fn active(&self, keep: &dyn Fn(&str, &str) -> bool) -> (Vec<Value>, Vec<Value>) {

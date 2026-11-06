@@ -72,10 +72,10 @@ daily counters, including their coverage counts. A completely empty range stays
 unknown. Limits and context retain their existing source and missing-data
 behavior. No model pricing or cost-to-token conversion is used.
 
-Focused validation: `test/usage_graph_test.bend` with
+Focused validation: `test/usage_graph_test` with
 `test/tools/usage_graph.mjs` exercises the production rollups, provider actions,
 UTC boundaries, cross-model rankings, unavailable/unknown projects, reset
-isolation, legacy missing dimensions, web nodes. `usage_graph_mobile_test.bend` and its driver cover phone chart payload and machine-scoped provider actions; native application builds are separate targets. Review
+isolation, legacy missing dimensions, web nodes. `usage_graph_mobile_test` and its driver cover phone chart payload and machine-scoped provider actions; native application builds are separate targets. Review
 renders use explicit deterministic TurnUsage fixtures, never claimed as live
 account readings.
 

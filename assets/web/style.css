@@ -53,7 +53,7 @@ html.light, .app.light, .bub-move.light {
 }
 /* A thread's activity, one colour each wherever it shows (the sidebar's
    dots, the phase line, the header's status, the plane, subagents, bot
-   moods; core/signal.bend's Signal.name says which): working blue, finished
+   moods; core/signal's Signal.name says which): working blue, finished
    green, wanting the person (an approval, a question, a failure) red, and
    stopped, idle or settled grey. Set again under the light theme so they
    follow its palette. */
@@ -159,7 +159,7 @@ html[data-picking="1"] .sidebar .thread.on:not([data-picked]) { background: none
 .thread-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .thread-head .title { font-weight: 600; }
 .thread-head .meta { color: var(--faint); flex: 1; font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); }
-/* a thread's Boat chip (core/usage.bend's Chip): small, square, opens Settings */
+/* a thread's Boat chip: small, square, opens Settings */
 .thread-head .boat-chip { color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 0; font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); padding: 2px 6px; white-space: nowrap; }
 .thread-head .tools { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin-left: auto; }
 .thread-head .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -210,7 +210,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
   .viewer > .viewer-tabs { display: flex; position: relative; z-index: 4; }
 }
 .timeline { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 0; display: block; position: relative; }
-/* away from the end with something new below (client.bend's Hold.pill).
+/* away from the end with something new below.
    It takes no room in the timeline (its height and the gap before it given
    back by its margin), so its coming and going never changes how far the
    timeline scrolls: at the end, its going clamped the view a few lines up */
@@ -219,7 +219,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg .body { min-width: 0; overflow-wrap: anywhere; }
 .msg .copy { position: absolute; top: 4px; right: 4px; opacity: 0; font-size: calc(11px * var(--text-scale, 100) / 100); padding: 1px 6px; }
 .msg:hover > .copy { opacity: 1; }
-/* bot chats (core/reply.bend): Reply sits under Copy and shows with it;
+/* bot chats: Reply sits under Copy and shows with it;
    a person's reply opens with one "In reply to" line; a bot's message that
    links threads or projects opens with the one it links most */
 .msg .reply { position: absolute; top: 26px; right: 4px; opacity: 0; font-size: calc(11px * var(--text-scale, 100) / 100); padding: 1px 6px; }
@@ -243,7 +243,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg.assistant .body > :first-child { margin-top: 0; }
 .msg.assistant .body > :last-child { margin-bottom: 0; }
 .msg.live { opacity: 0.9; }
-/* a provider's API error reply (view.bend's View.msg.body): one red
+/* a provider's API error reply: one red
    sentence, "› details" beside it opens the raw text */
 .body.apierr { color: var(--bad); }
 .apierr-raw { display: inline; margin-left: 6px; }
@@ -265,7 +265,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg .stamp { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); margin-top: 4px; font-variant-numeric: tabular-nums; }
 .msg .stamp:empty { display: none; }
 .msg.user .stamp { text-align: right; }
-/* A message the agent has not read yet (core/stamp.bend's Stamp.unread):
+/* A message the agent has not read yet:
    its text a step dimmer, its "not read yet" time in the queued colour. */
 .msg.user.unread .body { color: var(--dim); }
 .msg.user.unread .stamp { color: var(--queued); }
@@ -288,7 +288,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .act .kind { color: var(--faint); flex: none; }
 .act .summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act.error { color: var(--bad); }
-/* Backplane's continue message after a restart (view.bend's
+/* Backplane's continue message after a restart (view's
    View.carry.row): "› what it was told" opens what it said */
 .act.restart { align-items: flex-start; }
 .act.restart .summary { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
@@ -300,7 +300,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .carry-told > .told { display: block; margin: 4px 0 2px; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 720px; }
 /* a failure says all of why it failed: its row wraps, never cut */
 .act.error .summary { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
-/* A run of tool calls is a drawer (view.bend's View.fold.row.live): one
+/* A run of tool calls is a drawer: one
    tidy line, shut until clicked, a click again shuts it. Open, its rows
    (data-run, View.run.mark) hang under it on a rule that bridges the 10px
    between rows. The live one (the last thing while its turn runs) says
@@ -333,7 +333,7 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 .composer-foot { display: flex; justify-content: space-between; align-items: center; }
 .model-chip { background: none; border-color: transparent; color: var(--dim); padding-left: 0; }
 .shade { position: fixed; inset: 0; z-index: 30; }
-/* the model picker: agent | model | effort, a column each (view.bend's
+/* the model picker: agent | model | effort, a column each (view's
    View.mp.*); the keys' column has its head lit, the cursor's row the
    accent edge, the thread's own row a faint one */
 /* (never taller than the room over the composer, host.js's --composer-top:
@@ -434,7 +434,7 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .sub-step .text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .sub-step:last-child { padding-bottom: 12px; }
 .sub-empty { display: block; padding: 0 16px 12px 32px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
-/* what a row says beside its name (view.bend's View.sub.meta/now/last/ask) */
+/* what a row says beside its name */
 .sub-meta { display: flex; flex-wrap: wrap; gap: 0 8px; margin-top: -6px; padding: 0 16px 6px 32px; color: var(--faint); font: calc(11px * var(--text-scale, 100) / 100)/1.5 var(--mono); }
 .sub-meta .part { min-width: 0; overflow-wrap: anywhere; }
 .sub-meta .part + .part::before { content: "·"; margin-right: 8px; }
@@ -839,7 +839,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .ask-detail { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
 .ask .body { max-height: 40vh; overflow: auto; }
 .ask-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-/* the secret box (view.bend's View.sbox): a masked paste box, square, accent-edged */
+/* the secret box: a masked paste box, square, accent-edged */
 .sbox { border: 1px solid var(--accent); background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 860px; }
 .set-row + .sbox { margin: 4px 0 8px; }
 .sbox-head { color: var(--accent); font-size: calc(12px * var(--text-scale, 100) / 100); }
@@ -849,7 +849,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .sbox-val { font-family: var(--mono); letter-spacing: 0.08em; }
 .sbox-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 /* the agent's to-do list at the top of the thread, beside the subagents and
-   in their style (view.bend's View.todos): one line until opened, then its
+   in their style: one line until opened, then its
    steps, which scroll within a third of the page */
 .thread-view > .todos, .thread-content > .todos { flex: none; min-width: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
 .todos-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 16px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); background: none; border: 0; text-align: left; cursor: pointer; }
@@ -886,7 +886,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .prow .pl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .prow .pd { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: var(--faint, var(--dim)); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .prow .pd:empty { display: none; }
-/* A typed path's completion (view.bend's View.prow.label): the part typed
+/* A typed path's completion: the part typed
    bright, the rest dim but on the selected row, which Tab writes. */
 .prow .pl .pr { color: var(--dim); }
 .prow.sel .pl .pr { color: inherit; }
@@ -947,7 +947,7 @@ html:not(.phone) .search-threads .find-rows:empty { display: block; }
 
 .msg a.link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; border: 0; padding: 0; font-size: inherit; white-space: normal; max-width: none; }
 .msg a.link.file code { color: inherit; }
-/* a quote's Buy now (the order server's /q/ link, server.bend's Od.quoted): a button, not a link */
+/* a quote's Buy now: a button, not a link */
 .msg a.link[href*="/q/q_"] { display: inline-block; margin-top: 4px; padding: 6px 16px; background: var(--accent); color: var(--on-accent, #fff); text-decoration: none; font-weight: 600; white-space: nowrap; }
 .ico { flex: none; display: block; }
 button.icon { display: inline-flex; align-items: center; justify-content: center; }
@@ -977,7 +977,7 @@ button.icon { display: inline-flex; align-items: center; justify-content: center
 .tools button.tool.gap:first-child { margin-left: 0; }
 .tools button.tool.gap:first-child::before { display: none; }
 
-/* Bots (src/web/bots.bend) */
+/* Bots */
 .bots { margin-top: 12px; padding: 8px 0 4px; border-top: 1px solid var(--line); }
 .bots-head { cursor: default; padding-top: 6px; }
 .cat { flex: none; display: block; image-rendering: auto; }
@@ -1136,7 +1136,7 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 
 /* Settings and the machine switch stay above the project and bot lists; a row's menu opens at the pointer */
 .project.quiet .project-head { opacity: 0.55; }
-/* a project whose folder is gone (view.bend's View.gone.*) */
+/* a project whose folder is gone */
 .project.missing .project-head .name { opacity: 0.6; text-decoration: line-through; text-decoration-color: var(--faint); }
 .project-head .missing-note { flex: none; font-size: 10px; color: var(--warn); text-transform: none; letter-spacing: 0; margin-right: 4px; }
 .thread.faded { opacity: 0.5; }
@@ -1155,7 +1155,7 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .rowmenu .mi:hover { background: var(--sel, var(--panel)); }
 .rowmenu .mi.danger { color: var(--bad); }
 
-/* the viewer's design history (core/hist.bend): the bar under the stage */
+/* the viewer's design history: the bar under the stage */
 .hist { flex: none; border-top: 1px solid var(--line); background: var(--bg); padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .hist-row { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
 .hist-row .title { color: var(--text); margin: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -1201,7 +1201,7 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .pair-qr svg { width: min(320px, 80vw); height: auto; }
 .pair-qr svg, .pairing-qr { background: #fff; fill: #000; }
 
-/* the first-run tour (view.bend's View.tour): the page dims, the part it points at is lifted over the dimming */
+/* the first-run tour: the page dims, the part it points at is lifted over the dimming */
 .tour-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; }
 .tour { position: fixed; z-index: 32; top: 12vh; left: 50%; transform: translateX(-50%); width: min(440px, calc(100vw - 24px)); max-height: calc(100vh - 12vh - 12px); overflow-y: auto; background: var(--raise); border: 1px solid var(--line); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
 .tour .count { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
@@ -1225,7 +1225,7 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
   .app.tour-sidebar .tour, .app.tour-add .tour, .app.tour-settings .tour { left: 50%; transform: translateX(-50%); }
 }
 
-/* The uberbot: its sidebar row and the Status tab (src/web/bots.bend) */
+/* The uberbot: its sidebar row and the Status tab */
 .uber-row { border-bottom: 1px solid var(--line); padding: 8px 12px; }
 .uber-row { cursor: default; }
 .uber-open { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; text-align: left; background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
@@ -1337,9 +1337,9 @@ button.dim { opacity: 0.5; pointer-events: none; }
 
 /* Spec 1: refs remain plain labels until navigation is implemented. */
 a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anywhere; }
-/* Buy it (view.bend's View.fab.buy) */
+/* Buy it */
 .fab-buy { font-size: calc(12px * var(--text-scale, 100) / 100); padding: 3px 12px; background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); font-weight: 600; white-space: nowrap; }
-/* a project's intent (view.bend's View.intent, its menu's Intent…): over
+/* a project's intent: over
    the page, its Markdown as a message's, Edit and Close in its head */
 .intent { position: fixed; z-index: 21; top: 10vh; left: 50%; transform: translateX(-50%); width: min(640px, calc(100vw - 24px)); max-height: 76vh; display: flex; flex-direction: column; background: var(--raise); border: 1px solid var(--line); outline: none; }
 .intent-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-bottom: 1px solid var(--line); }
@@ -1359,7 +1359,7 @@ a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anyw
 .fab-ready .fab-x { padding: 2px 8px; border: none; background: none; color: var(--faint); font-size: calc(16px * var(--text-scale, 100) / 100); line-height: 1; }
 .fab-ready .fab-x:hover { color: var(--text); }
 .fab-ready { animation: fab-ping 1.6s ease-out 1; }
-/* a buy thread's order card under the top bar (view.bend's View.order) */
+/* a buy thread's order card under the top bar */
 .order-card { margin: 8px 16px 0; padding: 8px 12px; border: 1px solid var(--line); border-left: 2px solid var(--accent); background: var(--panel); display: flex; flex-direction: column; gap: 6px; max-width: 860px; font-size: calc(12px * var(--text-scale, 100) / 100); }
 .order-card.waiting { border-left-color: var(--waiting); }
 .oc-head { display: flex; align-items: center; gap: 6px; color: var(--dim); min-width: 0; }
@@ -1403,7 +1403,7 @@ a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anyw
 .kicad-notice p { color: var(--dim); margin: 8px 0 12px; }
 .kn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .kn-actions button, .kn-actions a { border-radius: 0; }
-/* KiCad install: the pressed button turns into a working state at once (client.bend KN.install) */
+/* KiCad install: the pressed button turns into a working state at once */
 .kn-actions button.kn-busy, .kn-actions button.kn-done { display: inline-flex; align-items: center; gap: 8px; cursor: default; opacity: 1; }
 .kn-actions button.kn-busy::before { content: ""; width: 9px; height: 9px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: kn-spin .8s linear infinite; }
 .kn-actions button.kn-done { color: var(--ok); border-color: var(--ok); }
@@ -1642,7 +1642,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .sidebar[data-shortcut-hints="projects"] [data-shortcut-kind="projects"]::after,
 .sidebar[data-shortcut-hints="threads"] [data-shortcut-kind="threads"]::after { opacity:1; }
 
-/* A schematic's sheet navigation (view.bend's View.sch): the bar's
+/* A schematic's sheet navigation: the bar's
    buttons and trail, the hierarchy under it, a sheet symbol under the
    pointer. Square, every control a real button, nothing on hover only. */
 .viewer-bar .sch-btn { padding: 3px 9px; white-space: nowrap; }
@@ -1794,7 +1794,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 }
 
 /* Workspace navigation: one rail beside the conversation; a named switcher
-   on phones. Menus disclose the same Bend actions without changing state. */
+   on phones. Menus disclose the same actions without changing state. */
 .workspace-thread { flex-direction: row; min-width: 0; }
 .thread-content { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; }
 .workspace-thread > .workspace-bar { width: 76px; padding: 6px 4px; flex: none; flex-direction: column; flex-wrap: nowrap; align-items: stretch; border-right: 1px solid var(--line); border-bottom: 0; min-height: 0; overflow-y: auto; }
@@ -2037,7 +2037,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   html[data-workspace="thread"] .toast { right: calc(var(--workspace-w) + 16px); max-width: calc(100vw - var(--workspace-w) - 32px); }
 }
 
-/* The top bar (view.bend's View.chrome.bar, for a host that asks for it,
+/* The top bar (view's View.chrome.bar, for a host that asks for it,
    .app.top): the window's one bar across the top. The mark, where you are as
    crumbs, the shown thread's state as key/value cells, the command field,
    then the sidebar fold, search and Settings. The sidebar under it starts
@@ -2106,8 +2106,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .app.top .sidebar .find.with-add { position: sticky; top: 0; z-index: 6; background: var(--panel); display: flex; align-items: center; gap: 4px; padding: 6.75px 6px 6.75px 12px; }
 .app.top .sidebar .find.with-add input { flex: 1; min-width: 0; width: auto; }
 .app.top .sidebar .find .add-project { flex: none; height: 26px; padding: 0 5px; }
-/* the sidebar's own fold, a chevron like the rail's, first in the row
-   (view.bend's View.sidebar.find): the same 30 px square on the same spot
+/* the sidebar's own fold, a chevron like the rail's, first in the row: the same 30 px square on the same spot
    as the folded strip's unfold chevron (.side-strip below), so it does not
    move as the sidebar folds and unfolds */
 .app.top .sidebar .find .side-fold { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; margin-left: -5.5px; color: var(--faint); border-color: transparent; background: none; }
@@ -2120,7 +2119,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 @media (max-width: 1300px) { .topbar .kv.branch { display: none; } }
 @media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; container-type: normal; } .topbar .cmd-long { display: none; } .topbar .cmd-short { display: inline; } }
 @media (max-width: 960px) { .topbar .name { display: none; } }
-/* folded under the top bar: a 44 px strip (view.bend's View.strip), the
+/* folded under the top bar: a 44 px strip, the
    button that unfolds it over the projects' badges, each in its colour */
 .side-strip { display: none; }
 @media (min-width: 761px) {
@@ -2133,7 +2132,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   html[data-side="shut"] .side-strip .side-toggle svg, html[data-fold="auto"] .app.top.panel .side-strip .side-toggle svg { transform: none; }
   /* the sidebar the person opened where it cannot stand beside the thread
      and the viewer: a drawer over the thread, the panes laid out beside
-     its strip (data-fold="drawer", host.js's panes; core/panes.bend) */
+     its strip */
   html[data-fold="drawer"] .app.panel .sidebar { position: relative; z-index: 15; width: 264px; box-shadow: 8px 0 24px rgba(0, 0, 0, .45); }
   .side-strip button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; background: none; border-color: transparent; color: var(--tint, var(--dim)); }
   .side-strip button:hover { border-color: var(--line); background: var(--raise); }
@@ -2168,7 +2167,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   .app.top.tour-settings .tour { right: auto; left: 50%; transform: translateX(-50%); }
 }
 
-/* Buy it at the rail's foot (view.bend's View.workspace.buy), apart from
+/* Buy it at the rail's foot, apart from
    the views: a line and some room above it, the price under its words */
 .workspace-bar > .workspace-close { order: 1; }
 .workspace-bar > .workspace-buy { order: 2; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
@@ -2188,7 +2187,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   .workspace-buy .price { display: none; }
 }
 
-/* Keys you can see (R05): each rail view's keycap (view.bend's
+/* Keys you can see (R05): each rail view's keycap (view's
    View.workspace.key; workspace-keys.js presses the button for a bare
    key), each of the project's first nine threads' Ctrl+digit (faint, full
    while Ctrl is held: workspace-hints.js) and a short legend at the
@@ -2272,7 +2271,7 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .composer-foot:has(> .account-chip) > .foot-end { grid-area: 2 / 4; }
 }
 
-/* Geometry comes from the Bend port of TanStack virtual-core 3.19.9. */
+/* Geometry comes from port of TanStack virtual-core 3.19.9. */
 .timeline-virtual-track { overflow-anchor: none; }
 /* Keep questions, replies and the message box in one reading column on
    wide windows. The timeline scrollbar stays at the edge of its pane. */
@@ -2370,7 +2369,7 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 /* Phones (760 px and under), last so it settles the layers above:
    one top bar (back, the title over its state, the views, search), one
    row under the draft, and nothing wider than the screen. The rail's views
-   and Buy it ride in the top bar (view.bend's View.chrome.views); wide
+   and Buy it ride in the top bar; wide
    screens keep the rail. */
 .top-views { display: none; }
 .viewer-choice-status:empty { display: none; }
@@ -2541,7 +2540,7 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .msg .shot.image-unavailable { display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--bg); color: var(--faint); }
 .msg .shot.image-unavailable img { display: none; }
 .shot.image-unavailable .message-image-unavailable { display: block; }
-/* One control row at every pane width. The Bend layout owns the row's
+/* One control row at every pane width. layout owns the row's
    height and nowrap contract; labels yield space, disclosures leave flow. */
 .composer { --composer-button: 28px; container: composer / inline-size; }
 .composer-foot { flex: none; gap: 5px; align-items: center; min-width: 0; }
@@ -2688,7 +2687,7 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .project-home .viewer > .viewer-tabs { display:flex; flex-wrap:wrap; justify-content:flex-start; }
 
 /* ============================================================
-   The phone arrangement (view.bend's View.phone.page, phone.bend,
+   The phone arrangement (view's View.phone.page, phone,
    phone-shell.js; scratch DESIGN.md). Everything below is scoped under
    .app.phone or html.phone: a narrow desktop window never gets it.
    Sections: phone: shell, phone: lists (P), phone: thread (B),
@@ -2808,7 +2807,7 @@ html.phone.ph-kb .ph-tabs { display: none; }
 }
 
 /* menus are bottom sheets: every <details class="local-menu">, the row
-   menu, and the sheets the hub draws (phone.bend's Phone.sheet) */
+   menu, and the sheets the hub draws */
 @keyframes ph-sheet-up { from { transform: translateY(40px); opacity: 0.4; } to { transform: none; opacity: 1; } }
 .app.phone .local-menu[open]:not([data-inline="true"])::before { content: ""; position: fixed; inset: 0; z-index: 39; background: #0008; }
 .app.phone .local-menu[open]:not([data-inline="true"]) > .local-menu-body, .app.phone .rowmenu, .ph-sheet {
@@ -2911,7 +2910,7 @@ html.phone .find-group { padding: 14px 16px 6px; }
 html.phone .find-more { min-height: 48px; padding: 12px 16px; }
 html.phone .search-threads .find-note { padding: 4px 16px 10px; font-size: 14px; }
 html.phone .picker.search-threads footer { display: none; }
-/* the project picker's own × (view.bend's View.picker.close), in its corner */
+/* the project picker's own ×, in its corner */
 .app.phone .picker > .picker-close { position: absolute; top: calc(env(safe-area-inset-top) + 2px); right: calc(env(safe-area-inset-right) + 2px); min-width: 48px; min-height: 48px; border: 0; background: none; color: var(--dim); z-index: 1; }
 .app.phone .picker > .picker-close + .dir { padding-right: 56px; min-height: 48px; display: flex; align-items: center; font-size: 17px; color: var(--text); }
 .app.phone .picker .prows > * { min-height: 48px; display: flex; align-items: center; box-sizing: border-box; }
@@ -3173,7 +3172,7 @@ html.ph-nomic .app.phone .composer .mic { display: none; }
 /* what $ @ > % # complete to: rows a thumb can pick, over the composer */
 .app.phone .composer .skills { left: 0; right: 0; max-height: calc(var(--ph-vh, 100vh) * 0.4); overflow-y: auto; padding: 4px 0; z-index: 32; }
 .app.phone .composer .skills button { min-height: 44px; align-items: center; padding: 0 14px; }
-/* the model picker: a sheet over the composer (view.bend's View.mp.top,
+/* the model picker: a sheet over the composer (view's View.mp.top,
    .mp-body): a head with what it is and a close that stays put, then the
    agents (a row of chips), the models and the effort stacked in a body that
    scrolls, never over one another (the narrow-column container rules' 34dvh
@@ -3358,7 +3357,7 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 /* (no page pinch-zoom over the viewer: iOS ignores user-scalable=no, so a
    pinch that starts beside the canvas would zoom the whole page) */
 .app.phone #viewer { touch-action: pan-x pan-y; overscroll-behavior: contain; }
-/* the views as chips over the pane (view.bend's View.viewer.chips) */
+/* the views as chips over the pane */
 .app.phone .ph-views { flex: none; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--bg); overscroll-behavior-x: contain; }
 .app.phone .ph-views > .tab { display: inline-flex; align-items: center; gap: 6px; min-height: var(--ph-tap, 44px); padding: 0 14px; border: 1px solid var(--line); border-radius: 0; background: var(--raise); color: var(--dim); white-space: nowrap; }
 .app.phone .ph-views > .tab.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg)); }

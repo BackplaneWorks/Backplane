@@ -1,4 +1,4 @@
-//! The secret box (core/secret.bend, hub.bend `Secret.*`, server.bend `SecRpc.*` / `SecMcp.*`, docs/secrets.md): names, what may be stored,
+//! The secret box: names, what may be stored,
 //! handles, the requests `secret.set/del/list/dismiss`, the three tools `secret_request/secret_list/secret_run`, and the `<secrets>` prompt
 //! block. `secret.set`'s value goes from the parsed request straight to the vault: it is in no event, no reply and no log line.
 use super::{mask, vault};
@@ -130,7 +130,7 @@ pub async fn tool_run(thread: &str, cwd: &str, a: &Value) -> (bool, Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn sec_name_is_the_bend_name() { assert_eq!(name("Tailscale Bub"), "tailscale-bub"); assert_eq!(name("  A.b_c  "), "a.b_c"); assert_eq!(name(&"x".repeat(80)).len(), 64); }
+    #[test] fn sec_name_is_the_name() { assert_eq!(name("Tailscale Bub"), "tailscale-bub"); assert_eq!(name("  A.b_c  "), "a.b_c"); assert_eq!(name(&"x".repeat(80)).len(), 64); }
     #[test] fn values_follow_sec_bad() {
         assert_eq!(bad_value("short"), "A secret is at least 8 characters"); assert_eq!(bad_value(&"a".repeat(4097)), "A secret is at most 4096 characters");
         assert!(bad_value("has space1").starts_with("Only letters")); assert!(bad_value("quo\"te1234").starts_with("Only letters")); assert!(bad_value("back\\slash1").starts_with("Only letters"));

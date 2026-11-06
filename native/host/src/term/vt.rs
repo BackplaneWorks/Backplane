@@ -1,7 +1,7 @@
-//! The terminal emulator: a port of src/core/vt.bend (VT100/xterm subset: UTF-8, C0, ESC, CSI, SGR, OSC titles,
+//! The terminal emulator: a port of src/core/vt (VT100/xterm subset: UTF-8, C0, ESC, CSI, SGR, OSC titles,
 //! scroll regions, alternate screen, 2048-row scrollback, DSR/DA replies, keys and paste). Bytes in, styled rows out.
 //! Bounded: the screen is at most MAX_COLS x MAX_ROWS, the scrollback is 2048 rows, an OSC string 4096 bytes, queued
-//! replies MAX_REPLY bytes. The corpus in `tests` is test/vt_test.bend line for line.
+//! replies MAX_REPLY bytes. The corpus in `tests` is test/vt_test line for line.
 use std::collections::VecDeque;
 
 pub const MAX_COLS: usize = 500;
@@ -162,7 +162,7 @@ impl Vt {
         }
     }
     fn sgr(&mut self, ps: &[u32]) {
-        // a little machine, as vt.bend's Sg: 0 plain, 1 after 38/48, 2 palette index, 3/4/5 r/g/b
+        // a little machine, as vt's Sg: 0 plain, 1 after 38/48, 2 palette index, 3/4/5 r/g/b
         let (mut m, mut fg, mut r, mut g) = (0u8, true, 0u32, 0u32); let mut p = self.cur.pen;
         let color = |p: &mut Pen, fg: bool, c: u32| if fg { p.fg = c } else { p.bg = c };
         for &n in ps {

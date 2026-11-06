@@ -1,4 +1,4 @@
-//! `/far/rpc` (server.bend `Hub.far.rpc`, `Far.rpc.go`, core/far.bend `Fr.*`, core/fmcp.bend): a request about a thing on another of the owner's machines.
+//! `/far/rpc`: a request about a thing on another of the owner's machines.
 //!
 //! Asking side (`Router`, installed with `Hub::set_far_router`): a client's request whose params name `<link>~<id>` (or `on`) goes to that machine as a signed
 //! POST and the owner's reply comes back with the caller's request id and the thread ids made ours. It goes only to one of the owner's own machines with sync on

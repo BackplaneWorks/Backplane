@@ -26,7 +26,7 @@ previews. Web thumbnails load lazily with fixed geometry. Failed images show
 “Image unavailable”; native thumbnails have a text failure state too.
 
 Run `node --test test/tools/message_images_test.cjs desktop/test/image-actions.test.cjs`
-for boundary tests and `test/tools/message_images_verify.sh` for the Bend checks,
+for boundary tests and `test/tools/message_images_verify.sh` for checks,
 proof verdict, and candidate builds. `test/tools/message_images_browser.mjs`
 accepts its disposable device credential on stdin and tests a 390px mobile web
 conversation from a second machine; the caller must revoke the TEST device in

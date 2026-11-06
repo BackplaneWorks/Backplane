@@ -1,8 +1,8 @@
-//! Automatic settling (src/core/autosettle.bend, `Auto.changes`): which completed, idle threads settle by themselves, and
+//! Automatic settling: which completed, idle threads settle by themselves, and
 //! which wake subscriptions end. Pure: the caller hands the folded `State` and the time, and commits the events returned.
 //! The legacy upgrade (`Auto.upgrade`, `autosettle.version` below "1") is ported too: until it has run, a launched thread's report receipts are
 //! read from the launch mails the log holds (`ext.reports`, `Auto.old.reports`), and `upgrade` turns them into `autosettle.delivery.*` and sets
-//! the version, as the Bend hub does at start. The tick runs it first on such a home.
+//! the version, as hub does at start. The tick runs it first on such a home.
 use super::ext::Sum;
 use super::json::*;
 use crate::state::{Override, State, Thread, Turn};

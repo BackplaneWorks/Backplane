@@ -41,21 +41,21 @@ impl HttpHandler for MessageImage {
             let unavailable = || HttpReply::text("404 Not Found", "Image unavailable");
             if !mimg::is_image(&path) || path.contains("/../") || path.contains("/./") || path.contains('\\') { return unavailable() }
             let home = hub.cfg.home.clone();
-            // Bend snapshots before it announces the message; here the loop runs just after the commit. Wait (up to CATCH_UP) while the loop is
+            // snapshots before it announces the message; here the loop runs just after the commit. Wait (up to CATCH_UP) while the loop is
             // behind the log as it stood when this request arrived, then look once: an image the message named is there by then.
             let target = hub.store.len(); let t0 = std::time::Instant::now();
             while self.retained.load(Ordering::Acquire) < target && t0.elapsed() < CATCH_UP { tokio::time::sleep(std::time::Duration::from_millis(25)).await }
             let (h, e, p) = (home.clone(), entry.clone(), path.clone());
             let looked = tokio::task::spawn_blocking(move || mimg::lookup(&h, &e, &p)).await;
-            // no ref: a message from before this hub kept refs (the Bend hub made them at commit, or none was made). Find it in the recent log, as the
-            // Bend hub reads store.db, and let the message's own text authorize the path (Img.message_allowed); bounded so a bad id costs little.
+            // no ref: a message from before this hub kept refs. Find it in the recent log, as the
+            // hub reads store.db, and let the message's own text authorize the path (Img.message_allowed); bounded so a bad id costs little.
             let (hub2, e, p) = (hub.clone(), entry.clone(), path.clone());
             let s = match looked {
                 Ok(Ok(s)) => match tokio::task::spawn_blocking(move || adopt_ref(&hub2, s, &e, &p)).await { Ok(Some(s)) => s, _ => return unavailable() },
                 _ => {
                     if missed(&entry, &path) { return unavailable() }
                     match tokio::task::spawn_blocking(move || snapshot_from_log(&hub2, &e, &p)).await { Ok(Some(s)) => s, _ => { remember_miss(&entry, &path); return unavailable() } } } };
-            // a message of a deleted thread grants nothing (the Bend hub joins `thread.deleted = 0`)
+            // a message of a deleted thread grants nothing
             if let Some(t) = &s.thread { if hub.model().await.threads.get(t).map_or(false, |m| m.deleted) { return unavailable() } }
             let (p, ct) = (s.path.to_string_lossy().into_owned(), fm::ctype(&s.path.to_string_lossy()));
             tokio::task::spawn_blocking(move || serve::send(&p, ct, "")).await.unwrap_or_else(|_| unavailable())
@@ -105,7 +105,7 @@ fn snapshot_from_log(hub: &Hub, entry: &str, path: &str) -> Option<mimg::Snap> {
     if deleted(hub, &thread) || !mimg::message_allowed(&text, path) { return None }
     mimg::snapshot(&hub.cfg.home, entry, path, &thread).ok()
 }
-/// A ref the Bend hub wrote names no thread: look the message up, refuse a deleted thread's, and write the thread into the ref (then it is checked without a scan).
+/// A ref hub wrote names no thread: look the message up, refuse a deleted thread's, and write the thread into the ref (then it is checked without a scan).
 fn adopt_ref(hub: &Hub, s: mimg::Snap, entry: &str, path: &str) -> Option<mimg::Snap> {
     if s.thread.is_some() { return Some(s) }
     match find_message(hub, entry) {
@@ -169,7 +169,7 @@ mod tests {
         let r = get(&hub, &tok, "live1", &pa).await; assert_eq!((r.status, r.body.as_slice()), ("200 OK", png().as_slice())); assert!(r.extra.contains("Accept-Ranges: bytes") && r.ctype == "image/png");
         // an older message: no ref, found in the log, authorised by its own text
         let r = get(&hub, &tok, "old1", &pb).await; assert_eq!(r.status, "200 OK");
-        // a ref the Bend hub wrote (no thread) of a deleted thread's message: the scan finds the thread and refuses; a live thread's gets its thread written
+        // a ref hub wrote (no thread) of a deleted thread's message: the scan finds the thread and refuses; a live thread's gets its thread written
         let dir = home.join("message-images"); let snap = mimg::snapshot(&home, "gone1", &pb, "t2").unwrap(); let nm = snap.path.file_name().unwrap().to_string_lossy().into_owned();
         std::fs::write(dir.join(mimg::ref_name("gone1", &pb)), format!("{{\"image\":\"{nm}\"}}")).unwrap(); assert!(mimg::lookup(&home, "gone1", &pb).unwrap().thread.is_none());
         assert_eq!(get(&hub, &tok, "gone1", &pb).await.status, "404 Not Found");

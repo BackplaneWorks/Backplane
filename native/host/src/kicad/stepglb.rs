@@ -1,11 +1,11 @@
-//! A STEP file to a GLB, straight from the hub, no Bend child. Meshing a B-rep is out of scope for this crate, so a host tool does it,
+//! A STEP file to a GLB, straight from the hub, no child. Meshing a B-rep is out of scope for this crate, so a host tool does it,
 //! run as a subprocess and never linked. Which one is an explicit choice (`attempts`):
 //!   * `BACKPLANE_STEP2GLB=<path>`: that `backplane-step2glb` only. OpenCascade in WASM on Bun's runtime: the JS hub's meshes exactly.
 //!   * `BACKPLANE_STEP2GLB=off`: FreeCAD only: no Bun anywhere, and a machine without FreeCAD shows no STEP.
 //!   * unset: FreeCAD (Python, with native OpenCascade), then `backplane-step2glb` beside the hub only if FreeCAD is absent or failed.
 //! FreeCAD is run as step2glb itself runs it (tools/step2glb: the GUI offscreen, the only build that reads a STEP's colours, then the
-//! console build, tints only); the two scripts are step2glb.ts's text, extracted by test/gpui/files/extract_scripts.py.
-//! Also the models cache (server/modelcache.bend): a converter writes in a folder of its own, and only a non-empty file that
+//! console build, tints only); the two scripts are step2glb.ts's text, extracted by test/files/extract_scripts.py.
+//! Also the models cache: a converter writes in a folder of its own, and only a non-empty file that
 //! converted is moved into the cache in one rename.
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

@@ -1,26 +1,26 @@
-//! What a turn's end writes (hub.bend `Ended.out`, `Alerts.changes`, core/notice.bend `Policy.end`, core/told.bend `Told.alerts`): the thread's
+//! What a turn's end writes: the thread's
 //! summary clock `summary.at.<t>` when a summary is due, the alert record `alert.<t>` (done, fail, or the quiet record that moves the settle
-//! memory), and one `told.<id>` mark for every alert record that has a kind. Pure over the state BEFORE the batch (as Bend's `s`).
-//! Deliberate or open (docs/gpui/PARITY.md): `Triage.managed` reads false until mail lands; `notify.all` (the older `Notice.of` rule) reads off;
+//! memory), and one `told.<id>` mark for every alert record that has a kind. Pure over the state BEFORE the batch.
+//! Deliberate or open (docs/PARITY.md): `Triage.managed` reads false until mail lands; `notify.all` (the older `Notice.of` rule) reads off;
 //! the ask alert records of `Alerts.asks`; `Run.settle` (mail runs); the summary text itself (`Sum.out`, a seam of the agents lane).
 use super::json::*;
 use crate::state::{State, Thread, Turn};
 use serde_json::{json, Value};
 
 fn take(s: &str, n: usize) -> String { s.chars().take(n).collect() }
-/// String.trim: Bend's Char.is_space is only the space and 9..13 (tab, newline, vertical tab, form feed, carriage return)
-pub fn bend_trim(s: &str) -> &str { s.trim_matches(|c: char| c == ' ' || ('\t'..='\r').contains(&c)) }
+/// String.trim: Char.is_space is only the space and 9..13 (tab, newline, vertical tab, form feed, carriage return)
+pub fn trim_ws(s: &str) -> &str { s.trim_matches(|c: char| c == ' ' || ('\t'..='\r').contains(&c)) }
 
 /// Policy.direct: a message the person typed (no sender thread; not an envelope unless it is the person's own)
 pub fn policy_direct(id: &str, text: &str) -> bool { crate::state::link_from(id).is_empty() && (!text.starts_with('[') || text.starts_with("[message from person@")) }
 /// Told.first: the first line of a reply, at most 200 characters
-pub fn told_first(text: &str) -> String { take(take(bend_trim(text), 400).split('\n').next().map_or("", bend_trim), 200) }
+pub fn told_first(text: &str) -> String { take(take(trim_ws(text), 400).split('\n').next().map_or("", trim_ws), 200) }
 fn told_line(title: &str, line: &str) -> String { if line.is_empty() { title.to_string() } else { format!("{title}: {line}") } }
-fn text_cut(t: &str) -> String { bend_trim(&take(bend_trim(t), 280)).to_string() }
+fn text_cut(t: &str) -> String { trim_ws(&take(trim_ws(t), 280)).to_string() }
 /// Told.key.norm: trimmed, lower case, each run of other characters one "-", at most 120 characters
 pub fn key_norm(s: &str) -> String {
     let (mut n, mut dash, mut out) = (0usize, false, String::new());
-    for c in bend_trim(s).chars() {
+    for c in trim_ws(s).chars() {
         if n >= 120 { break }
         let l = if c.is_ascii_uppercase() { c.to_ascii_lowercase() } else { c };
         if l.is_ascii_lowercase() || l.is_ascii_digit() || matches!(l, '.' | '_' | ':' | '-') { out.push(l); n += 1; dash = false; }
@@ -79,8 +79,8 @@ pub fn sum_due(st: &State, id: &str, now: u64) -> bool {
     let at = st.get(&format!("summary.at.{id}"), "");
     at.is_empty() || now.saturating_sub(num(&at)) >= 600
 }
-/// The marker the writer of an end sets on its TurnChanged event (`"_end": true`) when the Bend hub runs `Ended.out` for that end: only the
-/// agent line handlers and agent-gone do (hub.bend: Hub.agent_line, Claude.line, Hub.agent_gone). A Stop (Retire.turn.f), a spawn failure
+/// The marker the writer of an end sets on its TurnChanged event (`"_end": true`) when hub runs `Ended.out` for that end: only the
+/// agent line handlers and agent-gone do. A Stop (Retire.turn.f), a spawn failure
 /// (Hub.spawned.fail), a restart cut and a task cancel commit their TurnChanged without it and get no summary clock and no alert record.
 /// `Policy::before_commit` removes the marker before the batch is written.
 pub const END_MARK: &str = "_end";
@@ -98,9 +98,9 @@ pub fn ended_state(batch: &[Value], thread: &str, was_running: bool) -> &'static
     ""
 }
 
-/// A failed end's mark (`failed.<msg>`): Bend writes it (Stamp.fail.mark) AFTER the alert record, outside the state the policy decided on; the
+/// A failed end's mark (`failed.<msg>`): writes it (Stamp.fail.mark) AFTER the alert record, outside the state the policy decided on; the
 /// agents put it in the batch next to the TurnChanged. Split the batch into what the end decides on and those marks, so the stamp, the order
-/// and the told numbering are Bend's. Empty marks when no marked end failed.
+/// and the told numbering are . Empty marks when no marked end failed.
 pub fn split_fail_marks(events: &[Value]) -> (Vec<Value>, Vec<Value>) {
     let failed = events.iter().any(|c| is_end(c) && gstr(c, "state", "") == "failed");
     if !failed { return (events.to_vec(), vec![]) }
@@ -164,7 +164,7 @@ pub fn policy_end(post: &State, seq: u64, now: u64, thread: &str, state: &str) -
 }
 
 /// Alert.clean / Alert.text: a text as one line (tab and newline become a space), cut to max characters after trimming
-fn alert_text(t: &str, max: usize) -> String { take(bend_trim(t), max).chars().map(|c| if c == '\t' || c == '\n' { ' ' } else { c }).collect() }
+fn alert_text(t: &str, max: usize) -> String { take(trim_ws(t), max).chars().map(|c| if c == '\t' || c == '\n' { ' ' } else { c }).collect() }
 /// Alert.ask.say: what an ask's alert says: a paused browser task its one-line question, an order's question or approval its detail, any other its tool and detail
 fn ask_say(tool: &str, detail: &str) -> String {
     if tool == "task_pause" { return gstr(&parse_or_null(detail), "question", "").to_string() }
@@ -252,7 +252,7 @@ pub fn was_running(pre: &State, th: &str) -> bool { pre.threads.get(th).map_or(f
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn told_keys_and_lines_follow_bend() {
+    #[test] fn told_keys_and_lines_follow() {
         assert_eq!(key_norm("  Lunch: Dana!!  "), "lunch:-dana-"); assert_eq!(key_norm("turn-t1"), "turn-t1");
         assert_eq!(key_norm(&"a".repeat(130)).len(), 120);
         assert_eq!(told_first("  Fixture long: first line\nsecond"), "Fixture long: first line"); assert_eq!(told_first(""), "");
@@ -271,9 +271,9 @@ mod tests {
         assert_eq!(ended_state(&marked, "t", true), "completed"); strip_marks(&mut marked);
         assert!(marked[0].get("_end").is_none(), "the marker is not written");
     }
-    #[test] fn bends_trim_is_the_space_and_nine_to_thirteen_only() {
-        assert_eq!(bend_trim(" \t\n\r\x0b\x0cx \n"), "x");
-        assert_eq!(bend_trim("\u{a0}x\u{3000}"), "\u{a0}x\u{3000}", "NBSP and U+3000 are not spaces to Bend");
+    #[test] fn trim_is_the_space_and_nine_to_thirteen_only() {
+        assert_eq!(trim_ws(" \t\n\r\x0b\x0cx \n"), "x");
+        assert_eq!(trim_ws("\u{a0}x\u{3000}"), "\u{a0}x\u{3000}", "NBSP and U+3000 are not spaces to ");
         assert_eq!(told_first("\u{a0}lead"), "\u{a0}lead");
     }
     #[test] fn a_failed_ends_marks_are_split_off() {

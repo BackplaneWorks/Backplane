@@ -1,4 +1,4 @@
-//! core/sign.bend: signed requests between hubs, the replay cache and peer invites.
+//! core/sign: signed requests between hubs, the replay cache and peer invites.
 //!
 //!   X-Backplane-Timestamp: <unix seconds>
 //!   X-Backplane-Signature: sha256=<hex HMAC-SHA256(secret, ts + "." + body)>

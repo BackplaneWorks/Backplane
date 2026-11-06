@@ -1,8 +1,8 @@
 # Git
 
 Two modules:
-- `src/core/diff.bend` (pure): parses unified diffs.
-- `src/server/git.bend` (IO): runs git as a subprocess. Arguments are always an argv list, never a shell line.
+- `src/core/diff` (pure): parses unified diffs.
+- `src/server/git` (IO): runs git as a subprocess. Arguments are always an argv list, never a shell line.
 
 Every IO action returns text:
 - the result, or
@@ -11,7 +11,7 @@ Every IO action returns text:
 
 `Git.failed(s)` tells whether an answer reports an error. That includes a failed step inside a multi-line stacked action.
 
-## Diffs (`src/core/diff.bend`)
+## Diffs
 
 ```
 DLine{kind: U32, text, old_no: Nat, new_no: Nat}   kind: 0 context, 1 add, 2 del, 3 meta
@@ -88,7 +88,7 @@ Removal (`M.Worktree.drop`, laws `worktree_kept_*`, `worktree_dropped_*`):
 - First a checkpoint of the worktree is taken, then `git worktree remove --force`; the branch stays (`WorktreeRemoved`).
 - A message to such a thread makes the worktree again from its branch, restores that last checkpoint, and then runs (law `worktree_revives`).
 
-## GitHub accounts (`src/core/gh.bend`, `src/server/gh.bend`)
+## GitHub accounts
 
 gh may be logged in to several accounts per host (`gh auth login` more than once). Backplane runs every gh call (listing merged pull requests, `gh pr create`) as the repository's account, and never switches gh's active account.
 - The first account tried: the one in the repository's git config `backplane.ghuser` (set it by hand to choose), else the one named like the remote's owner (`origin`, else the first remote), else gh's active one. The other logged-in accounts on that host follow (laws `gh_pick_*`, `gh_order_first`, `gh_without_drops`).
@@ -97,7 +97,7 @@ gh may be logged in to several accounts per host (`gh auth login` more than once
 - A token never goes on a command line, where any user on the machine could read it. `sh` fetches it with `gh auth token --hostname H --user U` and exports it as `GH_TOKEN` (`GH_ENTERPRISE_TOKEN` for GitHub Enterprise hosts) for that one command. Nothing prompts: `GH_PROMPT_DISABLED`, `GIT_TERMINAL_PROMPT=0`.
 - Pushes run as your git is set up. Only when an https push is refused, it runs again through gh's credential helper (`-c credential.helper=!gh auth git-credential`) with each account in turn. SSH remotes are left to your keys.
 - Accounts come from the gh config of the user the server runs as (`GH_CONFIG_DIR` is honoured).
-- Test: `test/gh_test.bend`, and `test/native/gh_test.bend` (a fake gh with three accounts, or the real one, read-only).
+- Test: `test/gh_test`, and `test/native/gh_test` (a fake gh with three accounts, or the real one, read-only).
 
 ## Merges
 
@@ -149,7 +149,7 @@ All diffs use `-c core.quotepath=false diff --no-color --no-ext-diff --src-prefi
 Git.step.capture(cwd, thread_id) -> IO(String)   the capture's output, "" when nothing changed
 Git.refs(cwd, thread_id) -> IO(String)           git dir, top, then "kind\tlabel\tcommit" lines
 Git.show(git_dir, "<commit>:<path>") -> IO(Maybe<String>)
-Git.version(path) -> IO(List<U32>)               a live file, or a file in a commit (core/hist.bend's paths)
+Git.version(path) -> IO(List<U32>)               a live file, or a file in a commit
 ```
 
 Ref layout: `refs/backplane/checkpoints/<b64url(thread_id)>/steps`, one ref whose history is the thread's steps.
@@ -157,7 +157,7 @@ Ref layout: `refs/backplane/checkpoints/<b64url(thread_id)>/steps`, one ref whos
 - After each tool call, and when a turn starts and ends, the hub asks for a step (job `step`, its `a` the tool call or message it follows).
 - One `sh` script stages the thread's `.kicad_sch` and `.kicad_pcb` files (not KiCad's autosaves or backups; tracked ones even when ignored) through the thread's own index (`<git-dir>/backplane-<b64>.steps.index`), and when that tree differs from the last step's, commits it with the last step as parent. `update-ref` checks the old value (a new ref is made with `update-ref --stdin`'s `create`), so two captures cannot fork the chain; a lock directory holding the owner's pid makes them take turns, and a dead owner's lock is cleared.
 - A folder outside git keeps its steps in `<folder>/.backplane/history.git` (its `info/exclude` lists `/.backplane/`), made only when the folder has KiCad files, never for `/` or the home folder.
-- The output is the commit, the step before (`""` for the first), the git dir, the top, then git's `-z` name-status of the files changed. The server logs it as an Act of tone `step` (core/hist.bend's `Hist.record`).
+- The output is the commit, the step before (`""` for the first), the git dir, the top, then git's `-z` name-status of the files changed. The server logs it as an Act of tone `step`.
 - A capture runs beside the agent, not before it: two quick edits may share a step.
 
 `history.refs` answers what a file may be compared with: the git dir and top as the capture finds them, `HEAD`, the 40 newest branches, the 40 newest commits that touched KiCad files, the thread's turn checkpoints, and the project's board and schematic.

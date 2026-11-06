@@ -1,4 +1,4 @@
-//! The desk's side of alerts (core/desk.bend `Desk.due`/`Desk.said`, client.bend `Notify`): the window tells the hub which thread it shows and whether
+//! The desk's side of alerts: the window tells the hub which thread it shows and whether
 //! it has the focus (`desk.look`) when either changes and at most once a minute while focused; a `{"t":"notify"}` frame the hub sends to the desk used
 //! last becomes a desktop notification (`notify-send`, or the program BACKPLANE_GPUI_NOTIFY_CMD names: a test sets it to record the call).
 use crate::{hub::Command, Backplane};

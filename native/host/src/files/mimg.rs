@@ -1,10 +1,10 @@
 //! Images in messages (hub-served local paths, #798): GET /message-image?entry=<message id>&path=<image path>. The hub keeps a private
-//! snapshot of each image an assistant message names, taken when the message is committed (server/message-image.bend,
-//! effects/message_image.js, core/images.bend): `<home>/message-images/<sha256>.<ext>` plus a ref `<sha256(entry NUL path)>.json`
+//! snapshot of each image an assistant message names, taken when the message is committed (server/message-image,
+//! effects/message_image.js, core/images): `<home>/message-images/<sha256>.<ext>` plus a ref `<sha256(entry NUL path)>.json`
 //! naming it. The route serves only a snapshot a ref names (the message's own text granted the path); the credential must be the
-//! hub's own (Conn.allowed AND Auth.credential), not a browser's cross-site request. The snapshot code is the Bend hub's, line for line:
+//! hub's own (Conn.allowed AND Auth.credential), not a browser's cross-site request. The snapshot code is hub's, line for line:
 //! raster signatures only (no SVG/HTML renamed to .png), 24 MiB encoded, 32 megapixels decoded, no symlink anywhere on the source path,
-//! the file read once with O_NOFOLLOW and checked unchanged. Older messages that no ref names answer 404 (the Bend hub looks their text up in
+//! the file read once with O_NOFOLLOW and checked unchanged. Older messages that no ref names answer 404 (hub looks their text up in
 //! store.db; this hub keeps no entry-id index) - stated limitation.
 use sha2::{Digest, Sha256};
 use std::{io::Read, os::unix::fs::{MetadataExt, OpenOptionsExt}, path::{Path, PathBuf}};
@@ -13,7 +13,7 @@ pub const MI_BYTES: u64 = 24 * 1024 * 1024;
 pub const MI_PIXELS: u64 = 32 * 1024 * 1024;
 const EXTS: [&str; 6] = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"];
 
-// ---- core/images.bend: which paths a message names
+// ---- core/images: which paths a message names
 fn sep(c: char) -> bool { matches!(c, ' ' | '\n' | '\t' | '\r' | '(' | ')' | '[' | ']' | '<' | '>' | '`' | '"' | '\'' | ',' | ';' | '|') }
 fn abs_or_home(p: &str) -> bool { p.starts_with('/') || p.starts_with("~/") }
 /// Img.is_image
@@ -108,7 +108,7 @@ pub fn source(src: &str) -> Result<PathBuf, &'static str> {
 }
 fn valid_name(n: &str) -> bool { n.len() > 65 && n.as_bytes()[64] == b'.' && n[..64].bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')) && matches!(&n[65..], "png" | "jpg" | "gif" | "webp" | "bmp") }
 pub fn ref_name(entry: &str, source: &str) -> String { format!("{}.json", sha_hex(format!("{entry}\0{source}").as_bytes())) }
-/// What a ref says besides the image: the thread of the message (written by this hub; absent in refs the Bend hub made).
+/// What a ref says besides the image: the thread of the message.
 pub struct Snap { pub path: PathBuf, pub thread: Option<String> }
 /// The ref half of mi_snapshot: the snapshot an existing ref names, checked against its own hash; never makes one.
 pub fn lookup(home: &Path, entry: &str, src: &str) -> Result<Snap, &'static str> {
@@ -122,7 +122,7 @@ pub fn lookup(home: &Path, entry: &str, src: &str) -> Result<Snap, &'static str>
     let file = dir.join(name); let b = read_image(&file)?; let ext = image_type(&b)?;
     if name == format!("{}.{ext}", sha_hex(&b)) { Ok(Snap { path: file, thread: j.get("thread").and_then(|v| v.as_str()).map(str::to_string) }) } else { Err("") }
 }
-/// Write the thread into a ref the Bend hub made (it has none), so the deleted-thread check can apply to it from now on.
+/// Write the thread into a ref hub made (it has none), so the deleted-thread check can apply to it from now on.
 pub fn set_thread(home: &Path, entry: &str, src: &str, thread: &str) -> bool {
     let Ok(dir) = snapshot_dir(home) else { return false };
     let rf = dir.join(ref_name(entry, src));
@@ -161,7 +161,7 @@ mod tests {
     // canonical: `source()` refuses a path with a link anywhere on it, so a TMPDIR that is itself a link (h@backplane, macOS /var) must be resolved first
     fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-mi-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); std::fs::canonicalize(&p).unwrap() }
     fn png(w: u32, h: u32) -> Vec<u8> { let mut v = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R']; v.extend(w.to_be_bytes()); v.extend(h.to_be_bytes()); v.extend([8, 6, 0, 0, 0]); v.extend([0u8; 16]); v }
-    // images.bend laws: Img.paths finds each image path once, in order; words over 1024 chars are no path
+    // images laws: Img.paths finds each image path once, in order; words over 1024 chars are no path
     #[test] fn img_paths() {
         assert_eq!(paths("see /a/b.png, and (~/c/d.JPG). Also file:///e/f.gif! and /a/b.png again <x> `/g.webp`: /h.bmp?"), ["/a/b.png", "~/c/d.JPG", "/e/f.gif", "/g.webp", "/h.bmp"]);
         assert!(paths("rel/x.png /x.txt http://x/y.png").is_empty());
@@ -177,7 +177,7 @@ mod tests {
     #[test] fn a_ref_without_a_thread_gets_one() {
         let home = tmp("sth"); let src = tmp("sths"); let f = src.join("p.png"); std::fs::write(&f, png(8, 8)).unwrap(); let fs = f.to_string_lossy().into_owned();
         let s = snapshot(&home, "m1", &fs, "t1").unwrap(); let name = s.path.file_name().unwrap().to_string_lossy().into_owned();
-        // a ref as the Bend hub writes it: the image only
+        // a ref as hub writes it: the image only
         let rf = home.join("message-images").join(ref_name("m1", &fs)); std::fs::write(&rf, format!("{{\"image\":\"{name}\"}}")).unwrap();
         assert!(lookup(&home, "m1", &fs).unwrap().thread.is_none());
         assert!(set_thread(&home, "m1", &fs, "t9")); assert_eq!(lookup(&home, "m1", &fs).unwrap().thread.as_deref(), Some("t9"));
@@ -197,7 +197,7 @@ mod tests {
         std::os::unix::fs::symlink(real.join("a.png"), src.join("l.png")).unwrap(); std::fs::write(src.join("x.png"), b"<svg/>").unwrap(); std::fs::write(src.join("big.png"), vec![0u8; 25 << 20]).unwrap();
         for bad in [src.join("ln/a.png"), src.join("l.png"), src.join("x.png"), src.join("big.png"), src.join("none.png"), PathBuf::from("rel/a.png"), src.join("real/../real/a.png")] { assert!(snapshot(&home, "m3", &bad.to_string_lossy(), "t").is_err(), "{bad:?}") }
         assert!(snapshot(&home, "m3", &real.join("a.png").to_string_lossy(), "t").is_ok());
-        // a ref pointing at something that is not its own hash is refused; ref names are the Bend hub's hash of entry NUL path
+        // a ref pointing at something that is not its own hash is refused; ref names are hub's hash of entry NUL path
         assert_eq!(ref_name("e", "/p.png").len(), 64 + 5); assert_eq!(ref_name("e", "/p.png"), format!("{}.json", sha_hex(b"e\0/p.png")));
         // m1's own snapshot (not "the first .png in the folder": read_dir order differs between hosts) is replaced by another image: its hash no longer fits its name
         std::fs::write(&s.path, png(9, 9)).unwrap(); assert!(snapshot(&home, "m1", &fs, "t1").is_err());

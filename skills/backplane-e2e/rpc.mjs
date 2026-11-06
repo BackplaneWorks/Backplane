@@ -1,5 +1,5 @@
 // node rpc.mjs PORT TOKEN METHOD 'JSON params' : one call to a hub over its
-// /ws (CBOR frames, src/core/cbor.bend), its reply printed as JSON. Known map
+// /ws, its reply printed as JSON. Known map
 // keys travel as their index in Cbor.keys(); the rest as strings.
 const KEYS = ['$', 't', 'id', 'm', 'p', 'ok', 'error', 'items', 'thread'];
 const enc = (v) => {

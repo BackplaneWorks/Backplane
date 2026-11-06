@@ -1,4 +1,4 @@
-//! A shell on a pty (src/server/pty.bend, effects/pty.js): the child is a session leader with the pty as its controlling terminal,
+//! A shell on a pty: the child is a session leader with the pty as its controlling terminal,
 //! stdin/stdout/stderr on it, TERM=xterm-256color, COLORTERM=truecolor, no LINES/COLUMNS, and none of our other descriptors.
 //! Reading and writing use one thread each (blocking fds) with bounded queues, so a flood from the program or a stuck program
 //! never grows our memory: output waits in a 64-chunk queue (the program blocks on its pty), input past 256 queued writes is dropped.

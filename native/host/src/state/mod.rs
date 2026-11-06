@@ -1,12 +1,12 @@
 //! The read model's fold in Rust: projects, threads, entry order, settings and the sequence number,
-//! equal to Backplane's `M.State.replay` (src/core/model.bend) for the events it covers.
-//! Its twin is checked by the differential oracle (test/gpui/parity/oracle): both fold the same
-//! events.jsonl and must print the same canonical digest (test/gpui/parity/oracle/DIGEST.md).
+//! equal to Backplane's `M.State.replay` for the events it covers.
+//! Its twin is checked by the differential oracle (test/parity/oracle): both fold the same
+//! events.jsonl and must print the same canonical digest (test/parity/oracle/DIGEST.md).
 //!
-//! Covered: every event the Bend decoder knows counts toward `seq` (State.tick); these change state:
+//! Covered: every event decoder knows counts toward `seq` (State.tick); these change state:
 //! ProjectCreated/Removed, ThreadCreated/Renamed/Settled/Unsettled/Woke/Archived/Pinned/Deleted, MessagePosted,
 //! ActivityLogged, TurnChanged (+ the todos bookkeeping it does to settings), PendingChanged, SessionSet,
-//! WorktreeSet/Skipped/Removed, ThreadMerged, SettingSet, ThreadParentSet, ThreadForked, ProviderSet, ModesSet, UsageSet (the usage.<thread> setting). Not folded here (they touch parts of the Bend State the digest does not print): bots,
+//! WorktreeSet/Skipped/Removed, ThreadMerged, SettingSet, ThreadParentSet, ThreadForked, ProviderSet, ModesSet, UsageSet (the usage.<thread> setting). Not folded here: bots,
 //! mail, tasks, asks, devices, nav, queues, TurnUsage's token totals (tok.*), deploy, routines, todos lists.
 use serde_json::Value;
 use std::collections::HashMap;
@@ -91,7 +91,7 @@ pub struct State {
     pub lean: bool,
 }
 
-/// every event name the Bend decoder (core/codec.bend Change.decode) knows
+/// every event name decoder knows
 const KNOWN: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "MessagePosted", "TurnChanged", "PendingChanged", "ActivityLogged",
     "ThreadSettled", "ThreadUnsettled", "ThreadArchived", "ThreadPinned", "ThreadDeleted", "WorktreeSet", "SessionSet", "ModesSet", "TaskDelegated", "TaskStateSet",
     "TaskDelivered", "SettingSet", "TurnQueued", "QueueTaken", "AskOpened", "AskClosed", "DeviceRegistered", "DeviceDropped", "ThreadSnoozed", "ThreadOrdered",
@@ -107,7 +107,7 @@ fn link_from(id: &str) -> &str {
     match rest.split_once(':') { Some((from, _)) => from, None => "" }
 }
 
-// as Bend's Change.decode: a missing or mistyped field reads "" / 0 (get_str / get_nat defaults), so an event still counts in seq
+// as Change.decode: a missing or mistyped field reads "" / 0 (get_str / get_nat defaults), so an event still counts in seq
 fn s<'a>(e: &'a Value, k: &str) -> Option<&'a str> { Some(e.get(k).and_then(|v| v.as_str()).unwrap_or("")) }
 fn n(e: &Value, k: &str) -> Option<u64> { Some(fam::json::gnat(e, k, 0)) }
 
@@ -145,7 +145,7 @@ impl State {
     }
     fn get(&self, k: &str, d: &str) -> String { self.settings.get(k).cloned().unwrap_or_else(|| d.to_string()) }
 
-    /// One event line. Returns false when the Bend decoder would refuse it (it then counts nowhere).
+    /// One event line. Returns false when decoder would refuse it (it then counts nowhere).
     pub fn apply_line(&mut self, line: &str) -> bool {
         match serde_json::from_str::<Value>(line) { Ok(v) => self.apply(&v), Err(_) => false }
     }
@@ -418,7 +418,7 @@ mod tests {
         let s = fold(&[r#"{"$":"SettingSet","key":"told.k1","value":"x","at":1}"#, r#"{"$":"SettingSet","key":"told.k1","value":"","at":2}"#, r#"{"$":"SettingSet","key":"other","value":"","at":3}"#]);
         assert!(!s.settings.contains_key("told.k1")); assert_eq!(s.settings["other"], "");
     }
-    #[test] fn a_mistyped_or_missing_field_still_counts_and_takes_bends_default() {
+    #[test] fn a_mistyped_or_missing_field_still_counts_and_takes_default() {
         // one line of each kind the decoder is lenient about: seq and the folded value, as Change.decode reads them
         let s = fold(&[PC, TC, r#"{"$":"TurnChanged","thread":"t1","state":"bogus","at":5}"#]);
         assert_eq!((s.seq, s.threads["t1"].turn), (3, Turn::Idle));
@@ -434,7 +434,7 @@ mod tests {
         assert_eq!((s.seq, s.threads["t1"].settled_at), (3, 60));
     }
     #[test] fn a_bot_edit_with_an_empty_thread_keeps_its_thread() {
-        // Bot.keep.k (bot.bend): bots.edit logs thread "" and must not unhook the bot from its thread
+        // Bot.keep.k: bots.edit logs thread "" and must not unhook the bot from its thread
         let s = fold(&[r#"{"$":"BotSet","id":"b1","name":"Bub","thread":"tb","look":0,"persona":"","at":1}"#, r#"{"$":"BotSet","id":"b1","name":"Bub2","thread":"","look":1,"persona":"x","at":2}"#]);
         assert_eq!(s.bot_threads["b1"], "tb");
         let s = fold(&[r#"{"$":"BotSet","id":"b1","name":"Bub","thread":"tb","look":0,"persona":"","at":1}"#, r#"{"$":"BotSet","id":"b1","name":"Bub","thread":"tc","look":0,"persona":"","at":2}"#]);

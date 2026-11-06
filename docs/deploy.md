@@ -28,7 +28,7 @@ permission to cut a turn.
 The request is the private setting `deploy.wait`, one JSON line (`by`, `note`,
 `stage`, `from`, `since`, `noted`, `locked`, `open`). Each tick, while it waits:
 
-1. The hub's open tool calls, in memory only (core/deploy.bend `Open.*`; the
+1. The hub's open tool calls, in memory only (core/deploy `Open.*`; the
    server's `Bn.tools`). A call opens where its Act is posted (`ToolOpen`:
    Claude's `tool_use` block, Codex's `item.started`, Grok's/Muse's logged
    call) and shuts at its result (`ToolShut`: the `tool_result` block, Codex's
@@ -65,15 +65,15 @@ At start `Deploy.after` reads `deploy.done`: it clears it and tells the
 requester once. A thread the restart cut gets the words appended to its
 continue message instead (`Deploy.suffix` in `Carry.k`), so no thread gets two.
 
-Laws `deploy_*`, `tool_*`; tests `test/deploy_test.bend`, `bun test/tools/deploy_e2e.ts`.
+Laws `deploy_*`, `tool_*`; tests `test/deploy_test`, `bun test/tools/deploy_e2e.ts`.
 
 ## Deploying origin/main
 
 Restarting into a new build is the hub's job, not any one agent's. The
 `deploy_main {note?}` MCP tool (and `POST /mcp/deploy` from loopback, which is
 the person) asks this hub to build origin/main and restart into it through
-the safe path above. Pure logic: `src/core/ship.bend`; steps: hub.bend's
-`Ship.*`; IO: server.bend's `ShipJob.*`.
+the safe path above. Pure logic: `src/core/ship`; steps: hub's
+`Ship.*`; IO: server's `ShipJob.*`.
 
 Settings (all off or empty by default):
 
@@ -141,7 +141,7 @@ State: the events `DeployAsked{by, note, commit, cover}` and
 failed, skipped, live), folded into the setting `deploy.ship`.
 `deploy_status` (and the `deploy.status` request) answer it under `main`.
 
-Laws `ship_*`; tests `test/ship_test.bend`, `bun test/tools/deploy_main_e2e.ts BINARY`.
+Laws `ship_*`; tests `test/ship_test`, `bun test/tools/deploy_main_e2e.ts BINARY`.
 
 Optional CEF runtimes use the same staged deployment. `scripts/dev.sh stage`
 only builds/stages a CEF host if this machine already has the optional runtime;

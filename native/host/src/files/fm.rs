@@ -1,6 +1,6 @@
-//! core/fm.bend in Rust: what the Files tab and /img may name. Security rules live here, with
-//! property tests over hostile corpora (test/gpui/files/hostile_paths.tsv). Laws fm_kind_*, fm_safe_*,
-//! fm_files_safe_*, fm_parent_*, fm_join_root, plus the symlink/containment rule of server.bend's DirJob.sh.
+//! core/fm in Rust: what the Files tab and /img may name. Security rules live here, with
+//! property tests over hostile corpora (test/files/hostile_paths.tsv). Laws fm_kind_*, fm_safe_*,
+//! fm_files_safe_*, fm_parent_*, fm_join_root, plus the symlink/containment rule of server's DirJob.sh.
 use std::path::{Component, Path, PathBuf};
 
 /// Fm.ext: the last 12 characters of a name, lower case (a name is short).
@@ -92,7 +92,7 @@ mod tests {
     #[test] fn fm_safe_rules() {
         for p in ["", "a", "a/b/c.txt", "..a", "a..", "a/..b/c", "a/.../b", ".hidden/x", "a//b"] { assert!(safe(p), "{p}") }
         for p in ["..", "../x", "a/..", "a/../b", "/etc/passwd", "/", "a/b/../../..", "a\0b"] { assert!(!safe(p), "{p}") }
-        assert!(!files_safe("a\\b")); assert!(!files_safe("C:x")); assert!(!files_safe("C:\\x")); assert!(files_safe("a/b")); assert!(!files_safe("\\\\host\\s")); 
+        assert!(!files_safe("a\\b")); assert!(!files_safe("C:x")); assert!(!files_safe("C:\\x")); assert!(files_safe("a/b")); assert!(!files_safe("\\\\host\\s"));
     }
     #[test] fn fm_parent_join() {
         assert_eq!(parent(""), ""); assert_eq!(parent("a"), ""); assert_eq!(parent("a/b"), "a"); assert_eq!(parent("a/b/c"), "a/b");
@@ -100,7 +100,7 @@ mod tests {
     }
     // the corpus: <expected safe 0/1> TAB <decoded rel path as JSON string>; every line is a hostile or odd path
     #[test] fn hostile_corpus() {
-        let corpus = include_str!("../../../../test/gpui/files/hostile_paths.tsv");
+        let corpus = include_str!("../../../../test/files/hostile_paths.tsv");
         let mut n = 0;
         for line in corpus.lines().filter(|l| !l.starts_with('#') && !l.is_empty()) {
             let (want, js) = line.split_once('\t').unwrap();

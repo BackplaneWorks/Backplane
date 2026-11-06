@@ -1,4 +1,4 @@
-//! Which machine a peer is, and whether this hub pairs with it: client.bend's `Far.hit/machine`, `Mate.*`
+//! Which machine a peer is, and whether this hub pairs with it: client's `Far.hit/machine`, `Mate.*`
 //! (pure). The owner's machines are the switcher's JSON: `{"self":{name,url,domain},"peers":[{name,url,named?}]}`.
 //! Laws `far_machine_*`, `mate_*`.
 use serde_json::Value;
@@ -126,7 +126,7 @@ mod tests {
         assert!(due(true, &j, &ps, &no, &no).is_empty());
     }
 
-    // the laws' own fixtures (client.bend Mate.demo / Mate.demo.lo)
+    // the laws' own fixtures
     fn lo(port: &str) -> Value { json!({"self":{"name":"box","url":format!("http://100.9.0.1:{port}"),"domain":"t.ts.net"},"peers":[{"name":"127.0.0.1","url":"http://127.0.0.1:4002","version":"1","named":true}]}) }
     fn p1() -> Vec<Peer> { vec![Peer { id: "p1".into(), name: "desk".into(), url: "http://desk.t.ts.net:3787".into() }] }
     fn desk_row() -> Vec<(String, String)> { vec![("desk".into(), "http://100.2.0.1:3787".into())] }

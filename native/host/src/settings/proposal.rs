@@ -1,4 +1,4 @@
-//! Settings propose / approve (core/settingsproposal.bend, mcp.bend `Settings.*`, hub.bend `Settings.answer`): an agent proposes a hub-wide
+//! Settings propose / approve: an agent proposes a hub-wide
 //! fallback change (`fallback.on`, `fallback.chain`); the person approves it once. The tool never applies anything. The proposal is stored in
 //! an ask (tool `settings_proposal`) with the settings it was made against and an expiry; any write to either setting, or the clock, makes it stale.
 use super::fallback;
@@ -90,7 +90,7 @@ pub fn answer_events(accept: bool, ask: &str, thread: &str, options: &str, now: 
 
 /// The agents' `answer` for an ask whose tool is `settings_proposal`: closes it and applies it when accepted and still current.
 /// `open` is every open settings proposal (the ask being answered included): an accepted proposal writes fallback.*, which closes the
-/// others "stale" in the same batch, as Bend's per-step Proposal.invalidate does. Rust has no per-step hook, so EVERY writer of
+/// others "stale" in the same batch, as per-step Proposal.invalidate does. Rust has no per-step hook, so EVERY writer of
 /// `fallback.on` / `fallback.chain` must call `invalidate` on its batch (setting.set and this are the only two today).
 pub async fn answer_ask(ag: &Arc<crate::agents::Agents>, ask: &str, thread: &str, options: &str, answer: &str, now: u64, open: &[String]) -> Result<(), String> {
     let hub = &ag.hub;

@@ -30,7 +30,7 @@ Three alternating rounds used the retained five-owner workload in
 charts and two polling pages; background snapshots once/sec. Each sample is
 8 seconds after 2.5 seconds settling. CPU includes the helper and its browser
 process tree (100% = one core); memory is summed PSS, avoiding shared-library
-RSS double counting. The Bend window and private Xvfb are excluded. CEF
+RSS double counting. window and private Xvfb are excluded. CEF
 154.0.8037.98 and installed headless Chrome155 stayed unchanged across the
 baseline and fix; the engines are not version matched. Xvfb uses software GPU.
 
@@ -60,7 +60,7 @@ hashes and screenshots are retained in
 `bp-coord/browser-cef/visibility-watcher-results/`; rejected intermediate
 results remain in `visibility-results/`. Original native app/wire binaries
 were reused. Changed host protocol, helper, native-window/shared-preview/
-teach/takeover, lifetime and Chrome regression checks passed. No Bend/law
+teach/takeover, lifetime and Chrome regression checks passed. No /law
 source changed, so the previous check/proof/suite evidence is retained.
 
 Remaining limits: five-page CEF PSS is still about 100–120 MiB higher. Unicode

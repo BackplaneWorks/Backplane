@@ -1,4 +1,4 @@
-//! opencode over ACP (`env OPENCODE_CONFIG_CONTENT=... opencode acp`): src/core/opencode.bend (Ocp.*, Ocm.*) and server.bend's Oc.*.
+//! opencode over ACP (`env OPENCODE_CONFIG_CONTENT=... opencode acp`): src/core/opencode (Ocp.*, Ocm.*) and server's Oc.*.
 //! Grok's translator (acp.rs) with what opencode does its own way: session/resume (no replay), a lost session opened afresh and told once
 //! (a `notice` shape), a tool call logged once at its first tool_call_update named by what it works on, the thread's model set on the session
 //! (ids 5 fresh / 15 resumed) before the prompt, opencode's own failure hints. Request ids: 1 initialize, 2 session/new or resume, 7 session/new
@@ -188,7 +188,7 @@ mod tests {
     const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"resume":{}}}}}"#;
     const LOST: &str = "{\"type\":\"notice\",\"message\":\"opencode could not resume its session S0, so it started a new one without the earlier conversation. This thread's history in Backplane is kept.\"}";
 
-    #[test] fn resume_without_replay_and_a_new_session() { // test/opencode_test.bend
+    #[test] fn resume_without_replay_and_a_new_session() { // test/opencode_test
         let (old, new) = (turn("S0", "", false), turn("", "", false)); let mut a0 = Acp::new();
         assert_eq!(method(&sends(&ln(&mut a0, &old, INIT))), "session/resume"); assert!(sends(&ln(&mut a0, &old, INIT)).contains(r#""sessionId":"S0""#));
         assert_eq!(method(&sends(&ln(&mut a0, &new, INIT))), "session/new");
@@ -223,16 +223,16 @@ mod tests {
         assert_eq!(outs(&ln(&mut a, &old, &upd(u1))), r#"{"type":"item.completed","item":{"type":"command_execution","id":"c1","command":"ls -la"}}"#);
         assert_eq!(outs(&ln(&mut a, &old, &upd(u1))), "");
         assert_eq!(outs(&ln(&mut a, &old, &upd(r#"{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed","locations":[],"content":[],"rawOutput":{}}"#))), r#"{"type":"tool.done","id":"c1"}"#);
-        assert_eq!(outs(&ln(&mut a, &old, &upd(r#"{"sessionUpdate":"tool_call_update","toolCallId":"c2","status":"in_progress","kind":"read","title":"read","locations":[{"path":"/tmp/p/src/a.bend"}],"rawInput":{"filePath":"/tmp/p/src/a.bend"}}"#))), r#"{"type":"item.completed","item":{"type":"command_execution","id":"c2","command":"read src/a.bend"}}"#);
+        assert_eq!(outs(&ln(&mut a, &old, &upd(r#"{"sessionUpdate":"tool_call_update","toolCallId":"c2","status":"in_progress","kind":"read","title":"read","locations":[{"path":"/tmp/p/src/a"}],"rawInput":{"filePath":"/tmp/p/src/a"}}"#))), r#"{"type":"item.completed","item":{"type":"command_execution","id":"c2","command":"read src/a"}}"#);
         assert_eq!(outs(&ln(&mut a, &old, &upd(r#"{"sessionUpdate":"tool_call_update","toolCallId":"c3","status":"failed","kind":"search","title":"grep","locations":[],"rawInput":{"pattern":"Ocp"}}"#))), r#"{"type":"item.completed","item":{"type":"command_execution","id":"c3","command":"grep Ocp"}} | {"type":"tool.done","id":"c3"}"#);
         assert_eq!(outs(&ln(&mut a, &old, &upd(r#"{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"Hi"}}"#))), r#"{"type":"item.delta","text":"Hi"}"#);
         let end = ln(&mut a, &old, r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#); assert!(outs(&end).contains(r#"{"type":"turn.completed"}"#)); assert!(a.done);
     }
     #[test] fn a_permission_request_goes_to_the_person() {
         let mut a = Acp { sid: "S0".into(), ..Default::default() };
-        let o = ln(&mut a, &turn("S0", "", true), r#"{"jsonrpc":"2.0","id":0,"method":"session/request_permission","params":{"sessionId":"S0","toolCall":{"toolCallId":"c4","title":"src/a.bend","kind":"edit","rawInput":{"filePath":"/tmp/p/src/a.bend"}},"options":[{"optionId":"once","kind":"allow_once","name":"Allow once"},{"optionId":"always","kind":"allow_always","name":"Always allow"},{"optionId":"reject","kind":"reject_once","name":"Reject"}]}}"#);
+        let o = ln(&mut a, &turn("S0", "", true), r#"{"jsonrpc":"2.0","id":0,"method":"session/request_permission","params":{"sessionId":"S0","toolCall":{"toolCallId":"c4","title":"src/a","kind":"edit","rawInput":{"filePath":"/tmp/p/src/a"}},"options":[{"optionId":"once","kind":"allow_once","name":"Allow once"},{"optionId":"always","kind":"allow_always","name":"Always allow"},{"optionId":"reject","kind":"reject_once","name":"Reject"}]}}"#);
         let req: Value = serde_json::from_str(o.shapes[0]["request"].as_str().unwrap()).unwrap();
-        assert_eq!(acp::s(&req, "method"), "session/request_permission"); assert_eq!(acp::detail(&req["params"]), "/tmp/p/src/a.bend");
+        assert_eq!(acp::s(&req, "method"), "session/request_permission"); assert_eq!(acp::detail(&req["params"]), "/tmp/p/src/a");
     }
     #[test] fn the_threads_model_goes_to_the_session_before_the_prompt() {
         let ds = "opencode/deepseek-v4.1-flash";
@@ -264,10 +264,10 @@ mod tests {
         assert!(models_sh().contains("opencode models") && models_sh().starts_with("tmo()"));
     }
 
-    // ---- the laws (LAWS.bend): each a Rust test named after it ----
+    // ---- the laws: each a Rust test named after it ----
     #[test] fn oc_lost_session() { assert!(lost("session not found: ses_1")) }
     #[test] fn oc_other_folder_session() { assert!(lost("session ses_1 does not belong to cwd: /p")) }
-    #[test] fn oc_tool_names_target() { assert_eq!(say_k("read", "src/a.bend"), "read src/a.bend") }
+    #[test] fn oc_tool_names_target() { assert_eq!(say_k("read", "src/a"), "read src/a") }
     #[test] fn oc_tool_command_once() { assert_eq!(say_k("ls -la src", "src"), "ls -la src") }
     #[test] fn oc_notice_kind() { // Codex.kind("notice") == 7: the shape this driver emits is read as a notice
         let fx = crate::agents::lines::Cx::new("t").codex_line(&acp::event("notice", json!({"message":"m"})), "opencode", "", 1); assert_eq!(fx.events.len(), 1) }

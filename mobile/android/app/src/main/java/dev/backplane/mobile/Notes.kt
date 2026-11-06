@@ -12,8 +12,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
-// The phone's alerts. "turns": a turn ended (what to say comes from Bend,
-// src/mobile/notify.bend). "live": the ongoing status while agents work.
+// The phone's alerts. "turns": a turn ended (what to say comes from ,
+// src/mobile/notify). "live": the ongoing status while agents work.
 object Notes {
     const val TURNS = "turns"
     const val LIVE = "live"
@@ -42,7 +42,7 @@ object Notes {
     }
 
 
-    // one notification per key (src/core/notice.bend: "turn-<thread>", or
+    // one notification per key (src/core/notice: "turn-<thread>", or
     // "room-<room>" for a room exchange, the same on every paired hub): a
     // newer alert replaces the last, and only the first one sounds
     private fun id(key: String) = key.hashCode().let { if (it == LiveService.ID) it + 1 else it }

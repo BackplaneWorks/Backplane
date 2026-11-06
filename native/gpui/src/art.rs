@@ -1,6 +1,6 @@
 //! The logo and the bots' cats, drawn as vector paths at the window's scale (no raster copies).
 //! Logo: src/web/favicon.svg / favicon-light.svg (the web's own files, read at build time).
-//! Cats: core/cat.bend's rig (Cat.rig.json), generated on Boat into cat-rigs/<look>-<mood>.json.
+//! Cats: core/cat's rig (Cat.rig.json), generated on Boat into cat-rigs/<look>-<mood>.json.
 use gpui::{prelude::*, *};
 use lyon::tessellation::{LineCap, LineJoin};
 use serde_json::Value;

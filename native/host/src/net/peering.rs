@@ -1,4 +1,4 @@
-//! The hub-to-hub handshake and signed intake (server.bend: `Hub.bot.pair*`, `Pair.*`, `Hub.bot.link`,
+//! The hub-to-hub handshake and signed intake (server: `Hub.bot.pair*`, `Pair.*`, `Hub.bot.link`,
 //! `Conn.bot.signed`, `Hub.bot_verified`/`Hub.bot.seen`):
 //!
 //! * `POST /bots/pair?name=&url=` — one of the owner's machines asks to link, admitted by (a) a credential,

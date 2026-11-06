@@ -2,15 +2,15 @@ import Foundation
 import Observation
 import simd
 
-// Plots from the hub (src/core/plot.bend) as GPU-ready geometry. Nothing
+// Plots from the hub as GPU-ready geometry. Nothing
 // is decided here: which chunks, their order, colour and opacity come from
-// the hub, which piece a tap picks from Bend, the fade and zoom range from
+// the hub, which piece a tap picks from , the fade and zoom range from
 // the screen. A plot lists each chunk as the index of one this app holds
 // (the last plot applied) or the chunk itself; applying it is Plot.apply
 // (law plot_delta_exact), so `held` always mirrors what the hub thinks
 // this connection holds, index for index (a tap names a chunk by it).
 
-// CBOR, as much as plots use (core/plot.bend writes them straight):
+// CBOR, as much as plots use:
 // unsigned and negative ints, byte and text strings, arrays, maps. Keys 1
 // and 31 are the hub's dictionary words "t" and "key".
 enum Cbor {

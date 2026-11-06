@@ -33,7 +33,7 @@ Every prompt carries a `<secrets>` block: the names set, how to use them, and "n
   - After the rename the folder is flushed. If that fails with a real I/O error, the change stands (it's on disk and in use), but the answer is `committed …`, not ok, the hub logs a warning, and the vault's status reports `flush: unflushed <code>`.
   - A file system that can't flush a folder (EINVAL, ENOTSUP) is accepted and recorded as `unsupported <code>`.
 - `BACKPLANE_VAULT_KEYRING=file` forces the key file (tests).
-- The hub opens the vault before any turn resumes. Values stay in the effect's memory (`src/server/effects/vault.js`), and Bend reads them only to mask (`Vx.vault`).
+- The hub opens the vault before any turn resumes. Values stay in the effect's memory (`src/server/effects/vault.js`), and reads them only to mask (`Vx.vault`).
 
 ## Where a value travels
 
@@ -54,11 +54,11 @@ Every prompt carries a `<secrets>` block: the names set, how to use them, and "n
 - `Agent.write` and the one-shot's stdin: every line to an agent;
 - `secret_run`'s output.
 
-**Cost.** In the hub's bundle the clean check is `String.contains`, native already. `Sec.fine`'s body is native too (`scripts/js-native.py`): the same cover computed by `indexOf` at code point boundaries, fenced by `secret.bend`'s hash. `test/tools/secret.mjs` builds the module the way `build-js.sh` does and checks the native body against the pure definition on 300+ inputs (overlaps, emoji, lone surrogates). Measured there, a 4 MB line with a secret masks in about 130 ms and a clean one in about 0 ms. The pure walk takes about 140 ms for 10 KB. Sec.mask's laws hold whatever `Sec.fine` answers, because the pure check follows it.
+**Cost.** In the hub's bundle the clean check is `String.contains`, native already. `Sec.fine`'s body is native too (`scripts/js-native.py`): the same cover computed by `indexOf` at code point boundaries, fenced by `secret`'s hash. `test/tools/secret.mjs` builds the module the way `build-js.sh` does and checks the native body against the pure definition on 300+ inputs (overlaps, emoji, lone surrogates). Measured there, a 4 MB line with a secret masks in about 130 ms and a clean one in about 0 ms. The pure walk takes about 140 ms for 10 KB. Sec.mask's laws hold whatever `Sec.fine` answers, because the pure check follows it.
 
 ## Laws
 
-LAWS.bend's "secret box" block, with proofs in `test/secret_proof.bend`:
+LAWS's "secret box" block, with proofs in `test/secret_proof`:
 
 - `sec_mask_total`: no stored value occurs in masked text.
 - `sec_vault_valid` and `sec_vault_total`: the vault the hub builds is always valid, so masking with it is total, with no premise.
@@ -69,7 +69,7 @@ LAWS.bend's "secret box" block, with proofs in `test/secret_proof.bend`:
 - `sec_handle_shape`: a handle holds only the name and the set flag.
 - `sec_changes_empty`: with nothing stored, a step's changes pass through unencoded.
 
-Stored values live only in `SecVal`, gathered in a `Vault`. `test/tools/secret.mjs` gates the source: `SecVal{` and `Vault{` appear only in `secret.bend`, `vault.bend` and the proofs, and no other type names either in a field. So no Change, mail, prompt, render or tool-result constructor can hold one.
+Stored values live only in `SecVal`, gathered in a `Vault`. `test/tools/secret.mjs` gates the source: `SecVal{` and `Vault{` appear only in `secret`, `vault` and the proofs, and no other type names either in a field. So no Change, mail, prompt, render or tool-result constructor can hold one.
 
 ## Limits
 
@@ -78,6 +78,5 @@ Agents run as the same OS user as the hub. The box stops accidental exposure: tr
 Tests:
 - `node test/tools/secret_save_test.mjs` and `python3 test/tools/secret_box_handler_test.py`: secure transport failure/success, reply correlation, no value in pending metadata, and rendered-action handler coverage (also checked by `sec_box_handlers`).
 - `node test/tools/secret_box_e2e.cjs BINARY WEB`: a real `secret_request` in an isolated named-account bot conversation, Save, `secret_list`, a sealed vault and a closed box. With `SECRET_BOX_FAULT=rename`, a failed write must remain an inline error. Uses the browser helper's Playwright dependency and `BACKPLANE_CHROME` when set.
-- `bend test/secret_test.bend -o X.mjs && bun test/tools/secret.mjs X.mjs`: masks, pure and native; the source gate; and the vault's fail-closed, fault-injection, run-lifecycle and race negatives.
 - `bun test/tools/secret_mcp_e2e.ts BINARY WIRE`: the tools through a real hub's gates. A copied log refuses `secret_run` and runs nothing; an ordinary hub runs it with masked output; an old process's call is refused as stale.
 - `bun test/tools/secret_e2e.ts BINARY WIRE`: stand-in claude and codex capture their argv and stdin; the event log, the store and every frame are checked for the value.

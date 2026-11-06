@@ -8,8 +8,8 @@ a risky step or a step that keeps failing, it pauses, alerts the person
 once with a screenshot and a one-line question, and the person answers or
 takes over the browser.
 
-Pure logic lives in `src/core/task.bend` (laws `task_*`, `drive_*`,
-`run_*`); test `test/task_test.bend`.
+Pure logic lives in `src/core/task` (laws `task_*`, `drive_*`,
+`run_*`); test `test/task_test`.
 
 ## Who drives the page
 
@@ -122,9 +122,9 @@ summary, shots: [urls]}`, logged at its start and end.
 
 ## The hub's side
 
-`src/core/teach.bend` (pure: the per-bot driver and draft, info text, saving
-a draft as a task, the pause ask; laws `teach_*`; test `test/teach_test.bend`);
-`src/server/server.bend`'s "Teaching a bot's browser" and "Task runs" (IO).
+`src/core/teach` (pure: the per-bot driver and draft, info text, saving
+a draft as a task, the pause ask; laws `teach_*`; test `test/teach_test`);
+`src/server/server`'s "Teaching a bot's browser" and "Task runs" (IO).
 The state lives in the hub's `Cfg` (`BN.Bn.tch`), never in the event log, and
 is sent as the info keys above (in every join's `info`, and as `{"t":"info"}`
 when a bot's state changes). Recorder steps arrive as helper `record` events
@@ -144,7 +144,7 @@ is `<slug>-<seconds>`, its files `<home>/bots/<id>/tasks/<slug>/runs/<run>/`
 picture behind the same auth as `screen.jpg`, only from that bot's folder.
 A pause alerts the person through the notification policy (docs/bots.md
 "Notifications"): its ask is a needs-you alert, key `ask-<thread>`, whose
-text is the pause's question (`Alert.ask.say` in core/notice.bend). The
+text is the pause's question. The
 screenshot shows in the stuck card on every client; a push that carries the
 picture (an iOS notification service extension) is a follow-up. Test:
 `bun test/tools/teach_e2e.ts`.

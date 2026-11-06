@@ -1,5 +1,5 @@
 //! What the hub-side policies read of a thread's entries, kept as a small summary per thread instead of the entries
-//! (src/core/autosettle.bend `Summary`): the newest time, whether the person wrote in it, which of their messages count as
+//!: the newest time, whether the person wrote in it, which of their messages count as
 //! theirs, the newest reply and its time, and when it last wrote to each thread. Bounded by threads and thread pairs.
 use super::json::nat_read;
 use crate::state::{link_from, State};
@@ -38,13 +38,13 @@ pub struct Ext {
     pub kids_open: HashMap<String, u32>,
     pub child_tasks: HashMap<String, BTreeSet<String>>,
     /// MailPosted launch mails, newest time per "<sender thread>\t<to address>": the receipts `Auto.old.reports` reads before the one-time migration
-    /// (autosettle.version "1"). Bounded by thread pairs. (Bend drops a mail whose id it already holds; the same id carries the same time.)
+    /// (autosettle.version "1"). Bounded by thread pairs.
     pub reports: HashMap<String, u64>,
 }
 
 fn until(s: &str, end: char) -> String { s.chars().take_while(|c| *c != end).collect() }
 fn drop_chars(s: &str, n: usize) -> String { s.chars().skip(n).collect() }
-/// Mail.classify's kind for a message that is not a system one (core/mail.bend), the first rule that fits
+/// Mail.classify's kind for a message that is not a system one, the first rule that fits
 pub fn classify_kind(from: &str, msg: &str, text: &str) -> &'static str {
     let head: String = text.chars().take(160).collect();
     let label = until(&head, ']');

@@ -1,4 +1,4 @@
-//! The thread signal: what a sidebar dot and status word say (src/core/signal.bend `Signal.index`, `Signal.name`,
+//! The thread signal: what a sidebar dot and status word say (src/core/signal `Signal.index`, `Signal.name`,
 //! `Signal.display.name`). The index is a pure function of threads, tasks, settings, queues and asks.
 //! Values: bits 1 = actual work, 2 = needs the person; 3 = both; 4 settled; 5 finished; 6 waiting (active only through
 //! owned work or children's); 7 waiting (finished or idle with something still out).
@@ -109,7 +109,7 @@ mod tests {
     const PC: &str = r#"{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":10}"#;
     fn tc(id: &str) -> String { format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":11}}"#) }
 
-    // ---- laws (LAWS.bend), restated ----
+    // ---- laws, restated ----
     #[test] fn signal_finished_named() { assert_eq!(name(done(true, 0)), "finished"); }
     #[test] fn signal_finished_keeps_rest() { assert_eq!([1, 2, 3, 4].map(|n| done(true, n)), [1, 2, 3, 4]); }
     #[test] fn signal_finished_needs_completed() { for n in 0..=255u8 { assert_eq!(done(false, n), n); } }

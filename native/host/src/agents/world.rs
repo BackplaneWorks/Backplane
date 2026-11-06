@@ -17,7 +17,7 @@ pub struct T {
     #[serde(default)] pub running_at: u64,
 }
 
-/// A delegated task (model.bend Task): its state is one of queued, running, done, failed, cancelled; a terminal state sticks (TaskState.next).
+/// A delegated task: its state is one of queued, running, done, failed, cancelled; a terminal state sticks (TaskState.next).
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Tk { pub parent: String, pub child: String, pub depth: u64, pub state: String, pub summary: String, pub delivered: bool, pub provider: String, pub model: String }
 impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" | "failed" | "cancelled") } }
@@ -149,7 +149,7 @@ impl World {
         for _ in 0..63 { if cur.is_empty() { return true } if cur == launcher { return false } cur = self.tree_raw(&cur) }
         cur.is_empty()
     }
-    /// Work.ready: the thread has no running work of its own (background or watched rows, tasks it delegated that still run). (A queued message also holds it in Bend; the Rust agents queue nothing.)
+    /// Work.ready: the thread has no running work of its own (background or watched rows, tasks it delegated that still run).
     pub fn ready(&self, th: &str) -> bool { self.work(th).0 == 0 && !self.queue_waiting(th) && !self.tasks.values().any(|k| k.parent == th && !k.terminal()) }
     pub fn cwd(&self, th: &str) -> String {
         let Some(t) = self.threads.get(th) else { return String::new() };

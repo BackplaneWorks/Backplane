@@ -1,4 +1,4 @@
-//! The composer's actions in Rust (src/core/client.bend: `Ui.draft`, `Ui.send.*`), as pure functions over the request's session (serde Values, no
+//! The composer's actions in Rust, as pure functions over the request's session (serde Values, no
 //! Session type), returning the patch to merge into the session and the commands for the client, or None for a case not ported (the caller falls back to the helper).
 //! Ported: a plain-text `draft` and a plain-text `send` to a thread (not a bot's). Not ported (None): a draft with a popup in play (a sigil word, `$`, an open
 //! popup: Refs.want/Skills.want), `/btw` `/give` `/secret` `/intent`, attachments, replies, a bot's thread (Bots.say), a bounded draft, accounts params.
@@ -11,7 +11,7 @@ pub struct ActOut { pub session_patch: Value, pub cmds: Vec<Value> }
 /// Att.nonblank: a thread's attachments, one path per line, blank lines gone.
 pub fn att_paths(text: &str) -> Vec<String> { text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect() }
 
-/// Rto.block: a reply is kept in the person's message itself, ahead of what they wrote (src/core/reply.bend): the quote is counted, never searched for.
+/// Rto.block: a reply is kept in the person's message itself, ahead of what they wrote: the quote is counted, never searched for.
 pub fn reply_block(id: &str, quote: &str) -> String {
     let q: String = quote.chars().take(2000).collect();
     format!("<in_reply_to msg={id} chars={}>\n{q}\n</in_reply_to>", q.chars().count())
@@ -40,7 +40,7 @@ fn draft_of<'a>(session: &'a Value, key: &str) -> &'a str { session["drafts"][ke
 /// Ui.act "draft": the selected thread's draft set, the host asked to keep it (Draft.keep).
 pub fn draft(hub: &str, session: &Value, value: &str) -> Option<ActOut> {
     let sel = s(session, "sel");
-    // A word with a sigil (`@ > % # $ /`) is only text here: its popup rows came from the Bend helper (refs/skills fetch), which the GPUI hub does not run; asking it answered
+    // A word with a sigil (`@ > % # $ /`) is only text here: its popup rows came from helper (refs/skills fetch), which the GPUI hub does not run; asking it answered
     // PRESENTER_UNAVAILABLE on every keystroke. The slash commands are still offered (fields), the draft is kept as typed.
     let mut cmds = vec![];
     if safe(sel) { cmds.push(json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": value})) }

@@ -1,4 +1,4 @@
-//! The thread screen's own buttons, each Bend's `Ui.act` case (client.bend) as a pure function of the request's session: `answer`, `interrupt`, `copy`, `panel`, `dismiss`, `fork`,
+//! The thread screen's own buttons, each `Ui.act` case as a pure function of the request's session: `answer`, `interrupt`, `copy`, `panel`, `dismiss`, `fork`,
 //! `diff`, `git`, `term-toggle` and the phones' `find-open`. Each is None for what it does not own; the answer carries the session patch and the commands, and whether the shared
 //! post-hook's `Fab.sync` tail follows (`look`). `Menu.after` (a non-menu action shuts an open menu unless it is the armed Delete's second press) is applied here for all of them.
 //! `syncs_pending` is the other half of the post-hook: `Mpage.sync` / `Dv.sync` / `Fv.sync` add commands for the viewer on show, which are not ported: the dispatcher answers None then.

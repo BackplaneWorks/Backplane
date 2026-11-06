@@ -22,7 +22,7 @@ never substitutes the selected conversation's worktree.
 
 `src/server/effects/project-home.js` resolves existing artifacts asynchronously.
 External symlinks, missing paths and fab files whose source is missing do not
-produce artifact panels. `src/core/project-home.bend` projects the resolved
+produce artifact panels. `src/core/project-home` projects the resolved
 snapshot into panels; `home_missing_artifact_has_no_panel` proves the empty
 path case over arbitrary panel kind, title and summary. Generic controls can
 create notes when there is no intent file, without displaying an empty file
@@ -81,8 +81,8 @@ is used to obtain that estimate.
 | No project-size refusal | At most 32 artifact panels, paged discovery and models, 32 conversations plus lookahead, bounded document/intent sections; no whole-file substitution for a preview | Large UTF-8 files, minified reports and model-directory tests |
 | Useful controls | Explicit home action dispatch plus the existing viewer, review and new-thread handlers | Source inventory, actual `Ui.act` state/RPC assertions and rendered-control browser checks |
 | One composer control row | Shared `ComposerBar.node`/overflow disclosure on web; one native horizontal control row | Actual emitted DOM measured at 1280 and 390 px |
-| Artifact-driven panels | Pure panel projection over resolved existing contents; no project eligibility flag | Bend law, missing-path/cross-project fixtures and software/spec-only browser checks |
-| Phone support | Responsive web layout plus native SwiftUI/Compose cards from the same Bend panel/control plan | Native builds and phone-width browser checks |
+| Artifact-driven panels | Pure panel projection over resolved existing contents; no project eligibility flag | law, missing-path/cross-project fixtures and software/spec-only browser checks |
+| Phone support | Responsive web layout plus native SwiftUI/Compose cards from the same panel/control plan | Native builds and phone-width browser checks |
 
 The source inventory from #790/#794 remains conservative: computed bindings
 and image expressions elsewhere in the application are unresolved, rather
@@ -90,7 +90,7 @@ than silently counted as covered. Its literal-handler result and the runtime
 home checks must be reported separately; they do not establish a universal
 all-input UI proof.
 
-`test/project_home_test.bend` exercises the pure projection, project ownership,
+`test/project_home_test` exercises the pure projection, project ownership,
 atomic creation/retry and useful home handler effects. The asynchronous reader
 is exercised by `desktop/test/project-home-io.test.cjs`. Transport/cache tests
 extend the existing `thin-host` and `recent-views` suites.

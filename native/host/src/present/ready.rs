@@ -1,4 +1,4 @@
-//! The project card's Ready to order bar (core/order.bend `Card.*`, client.bend `Fab.*`): the hub's `fab.look` answer is kept in the session's `fab.*` info
+//! The project card's Ready to order bar: the hub's `fab.look` answer is kept in the session's `fab.*` info
 //! (`keep`), and `bar` says what the thread draws above its composer from it. No order is made here: `order.buy` is not ported, so the bar names what there is to order and
 //! its price estimate, and puts away (`fab-min`, the setting `fab.min.<project>`) or comes back (`fab-show`).
 use crate::state::{State, Turn};

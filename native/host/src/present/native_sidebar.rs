@@ -1,4 +1,4 @@
-//! Actor-private native sidebar navigation (core/native-sidebar.bend Ns.*).
+//! Actor-private native sidebar navigation.
 //! Only the session actor supplies `local` and the hub supplies `nativeKey`.
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -16,7 +16,7 @@ fn key_valid(k: &str) -> bool { hex::decode(k).map_or(false, |b| b.len() == 16) 
 fn scope(kind: &str, owner: &str) -> String { hash(&show(&json!({"kind":kind,"owner":owner}))) }
 fn owner_digest(owner: &str) -> String { hash(&format!("backplane.native-sidebar.owner.v1\n{owner}")) }
 fn choices(mode: &str, query: &str, open: &Value) -> String {
-    // Bend Map.to_list is in key order; only Bool flags belong to Session.flags.
+    // Map.to_list is in key order; only Bool flags belong to Session.flags.
     let sorted: std::collections::BTreeMap<&String, bool> = open.as_object().into_iter().flatten()
         .filter_map(|(k,v)| v.as_bool().map(|v| (k,v))).collect();
     hash(&show(&json!({"mode":mode,"query":query,"open":sorted})))
@@ -49,7 +49,7 @@ impl NativeSidebar {
         let old_ctx = parse(text(&p["local"], &format!("{PREFIX}context")));
         let mut ctx = json!({"hub":text(p,"hub"),"generation":text(p,"generation"),"epoch":text(p,"epoch"),
             "viewId":text(p,"viewId"),"target":p["target"],"metadataRevision":p["revision"].as_u64().unwrap_or(0)});
-        // Obj.put prepends the choices field in Bend. It is not part of context_digest.
+        // Obj.put prepends the choices field in . It is not part of context_digest.
         let digest = choices(mode, query, open);
         let mut with_choices = json!({"choicesDigest":digest});
         with_choices.as_object_mut().unwrap().extend(ctx.as_object().unwrap().clone());
@@ -149,7 +149,7 @@ mod tests {
     fn next(pager: &Value) -> &str { text(&pager["next"],"value") }
     fn restored(p: &Value, local: Value) -> NativeSidebar { let mut p=p.clone(); p["local"]=local; ns(&p) }
     #[test] fn native_sidebar_external_mac_vector() {
-        // Same external vector checked by test/native_sidebar_page_test.bend.
+        // Same external vector checked by test/native_sidebar_page_test.
         let p=json!({"version":1,"hub":"h","generation":"1","epoch":"epoch","viewId":"view","target":{"kind":"thread","id":"a"},
             "metadataRevision":7,"listKind":"settled","projectOwner":"p","choicesDigest":"external-vector","membershipDigest":"ordered-ids","offset":16,"limit":16});
         assert_eq!(mac("00112233445566778899aabbccddeeff",&p),"31b6ca450712a692a077c3b9f85e0a6387a4d18195c3ef6c1fea86dedaf36a72");

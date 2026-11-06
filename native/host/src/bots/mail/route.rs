@@ -1,13 +1,13 @@
-//! Routing (hub.bend `Mail.route*`, `Run.queue.*`, `Run.spawn*`, `Run.deliver*`, `Run.start`; mailtriage.bend, mailowner.bend, mailrun.bend): once a mail is filed
+//! Routing: once a mail is filed
 //! its header decides who works on it. A `Ctx` is the state a step decides on (the bots world, the facts the hub model gives, and what the step's own changes
-//! have set so far: `M.State.replay`); every function returns the changes and outs of a Bend `Step`, and changes are replayed into the context as they are made.
+//! have set so far: `M.State.replay`); every function returns the changes and outs of a `Step`, and changes are replayed into the context as they are made.
 //! No message text or address is logged here.
 use super::{mailbox::Run, Body, Hdr};
 use crate::bots::world::World;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-/// What a step asks the hub to do after its changes are committed (hub.bend `Out`: RunStart, RunNext, OwnerMail; Hub.deliver)
+/// What a step asks the hub to do after its changes are committed
 #[derive(Clone, Debug, PartialEq)]
 pub enum RouteOut {
     /// the run's brief is ready: read the exact bodies and start the thread's turn (RunStart → RunReady → Run.start)

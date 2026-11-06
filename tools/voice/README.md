@@ -2,7 +2,7 @@
 
 Speech to text with OpenAI for Backplane: live dictation from the desktop
 microphone, and whole recordings (Pebble Index ring notes). A thin Bun host
-adapter with no dependencies; what to do with the text stays in Bend.
+adapter with no dependencies; what to do with the text stays in .
 
 ```sh
 scripts/build-voice.sh                     # -> dist/backplane-voice (bun --compile)

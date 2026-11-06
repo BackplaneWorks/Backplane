@@ -36,7 +36,7 @@ private func tap(_ s: IslandAttributes.ContentState) -> URL? {
 }
 
 // each thread its own row, a tap on it opens that thread. The hub sends
-// only the first few (notice.bend's Notice.island.max) and counts the rest
+// only the first few and counts the rest
 private struct Lines: View {
     let lines: [IslandAttributes.Line]
     let titles: Bool

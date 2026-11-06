@@ -1,12 +1,12 @@
-//! Design review's jobs (server/review.bend's RvJob, Rvc, Rvr; docs/design-review.md), run in the hub: no `backplane --review` child and
-//! no Bun. The rules are the pure twins in kicad/{bom,checks,cad,release,review}.rs; the shell text is the Bend hub's (scripts/*.sh,
-//! extracted by test/gpui/files/extract_scripts.py). Every route resolves the thread's folder first (threadpath.rs) and answers the refusal
+//! Design review's jobs, run in the hub: no `backplane --review` child and
+//! no Bun. The rules are the pure twins in kicad/{bom,checks,cad,release,review}.rs; the shell text is hub's (scripts/*.sh,
+//! extracted by test/files/extract_scripts.py). Every route resolves the thread's folder first (threadpath.rs) and answers the refusal
 //! with none, before any work. Deliberate differences from the JS hub, all refusals:
 //!   * a version a request names (`git\t<dir>\t<commit>...`) must name the thread's own repository and a commit id: the JS hub runs
 //!     `git show` in any folder, and a commit word starting with "-" is an option to it
 //!   * `.backplane/checklist.md` is not written through a link
 //!   * review.comment needs a thread with a folder (the JS hub logs a comment on any id)
-//!   * a hub on a copied log ticks nothing, releases nothing and runs no project's own checks (core/copy.bend's rule: it acts outside its home nowhere)
+//!   * a hub on a copied log ticks nothing, releases nothing and runs no project's own checks
 //!   * Not ported: the bundled library overlay (effects/kicad_library.js), which only a build with a baked library payload has.
 use super::git::{self, proc, proc_ro, Ran};
 use super::kicad::bj::{self, J};
@@ -50,7 +50,7 @@ async fn kicad_with(argv: &[String], ro: bool) -> Ran {
     if ro { proc_ro(c, &a, "/", &[]).await } else { proc(c, &a, "/", &[]).await }
 }
 
-// Versions: core/hist.bend
+// Versions: core/hist
 fn field(p: &str, i: usize) -> &str { p.split('\t').nth(i).unwrap_or("") }
 /// Hist.git
 pub fn hist_git(g: &str, c: &str, top: &str, rel: &str) -> String { format!("git\t{g}\t{c}\t{}\t{top}/{rel}", bj::len(top)) }
@@ -194,7 +194,7 @@ async fn ask(hub: &Arc<Hub>, thread: &str, hash: &str, text: &str) {
     let _ = hub.commit(&json!({"$":"AskOpened","id":format!("{pre}{now}"),"thread":thread,"kind":"input","tool":"checks_ok","detail":detail,"options":format!("{CHECKS_YES}\nNot now"),"at":now})).await;
 }
 pub const CHECKS_YES: &str = "Run them";
-/// Checks.answer.k's trust: "Run them" on an ask `checks:<sha256>:<n>` adds that sha256 to <home>/checks.trusted (server.bend's ChecksTrust). The
+/// Checks.answer.k's trust: "Run them" on an ask `checks:<sha256>:<n>` adds that sha256 to <home>/checks.trusted. The
 /// answer's AskClosed is the caller's. True when `ask` is such an ask, so the caller logs nothing more for it.
 pub fn checks_answer(home: &str, ask: &str, answer: &str) -> bool {
     let Some(rest) = ask.strip_prefix("checks:") else { return false };

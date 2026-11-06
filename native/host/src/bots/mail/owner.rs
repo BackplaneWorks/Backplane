@@ -1,4 +1,4 @@
-//! owner.mail (src/core/mailowner.bend, server.bend's OwnerJob.* and Hub.owner.*): waiting mail for the uberbot's triage follows the conversation, not the local bot
+//! owner.mail: waiting mail for the uberbot's triage follows the conversation, not the local bot
 //! replica. A machine that is not the holder of the uberbot's conversation sends the waiting input to the holder with the signed `owner.mail` request over /far/rpc;
 //! the holder imports it (journal body, header, a ticket and a receipt) and answers "committed", or "moved" when it no longer holds the lease. Only journal
 //! coordinates and the original header/conversation enter the log; bodies stay in the journal. A run claims its input with RunSet (the mail lane's), and an input
@@ -119,7 +119,7 @@ impl Bots {
 
     /// OwnerJob.records: each pending ticket is read back from the journal and either routed here, sent to its holder, or planned again.
     /// Nothing on a hub started on a copy of a log (Copy.on: OwnerJob.start.on), one walker at a time (Fh.busy), and every decision about a ticket is made and
-    /// committed under the world lock: Owner.current is only meaningful if the check and the write are one step, as in Bend's actor.
+    /// committed under the world lock: Owner.current is only meaningful if the check and the write are one step, as in actor.
     pub async fn owner_outbox(&self) {
         if crate::copy::on() { return }
         if self.owner_busy.swap(true, std::sync::atomic::Ordering::AcqRel) { return }

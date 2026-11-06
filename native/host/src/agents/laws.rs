@@ -1,5 +1,5 @@
-//! Rust statements of LAWS.bend's turn, queue, ledger, background-work and usage laws that this module ported. Each test is named after its law
-//! (scripts/gpui/law-map.tsv maps law -> `rust <test>`); the claim is the law's, stated over the Rust code.
+//! Rust statements of LAWS's turn, queue, ledger, background-work and usage laws that this module ported. Each test is named after its law
+//! (scripts/law-map.tsv maps law -> `rust <test>`); the claim is the law's, stated over the Rust code.
 use super::{bg, cmds::{Cmd, Cmds}, lines::{speed_value, wake_text, Cx, Flow}, tools::wait_clamp, world::World};
 use serde_json::{json, Value};
 
@@ -15,7 +15,7 @@ fn running_cx() -> Cx { let mut c = Cx::new("t1"); c.running = true; c }
 fn demo() -> Cx { let mut c = Cx::new("t1"); c.bg = bg::lines("a\tx\tc1\tsleep 8\tshell"); c.bg_text = bg::show(&c.bg); c }
 fn sys(c: &mut Cx, v: Value) { c.line(&v, 2); }
 
-// ---- the command ledger (core/cmds.bend) ----
+// ---- the command ledger ----
 #[test] fn cmds_foreign_result_quiet() { assert_eq!(one("u1", 1, false).verdict(true, &result()), 1) }
 #[test] fn cmds_foreign_result_keeps_running() { let mut c = running_cx(); let fx = c.line_flow(&result(), 9, Flow::Quiet); assert!(c.running && fx.events.iter().all(|e| e["$"] != "TurnChanged")) }
 #[test] fn cmds_result_waits_lc() { assert_eq!(one("u1", 2, false).verdict(true, &result()), 1) }
@@ -61,7 +61,7 @@ fn sys(c: &mut Cx, v: Value) { c.line(&v, 2); }
 }
 #[test] fn stuck_step_ends_turn() { let mut c = running_cx(); let ev = c.end(3, "", 9); assert_eq!(ev[0]["state"], "completed"); assert!(!c.running) }
 
-// ---- background work (model.bend Bg.*, hub.bend Bg.system / Prog.*) ----
+// ---- background work ----
 #[test] fn bg_start_progress_end() { assert_eq!(bg::show(&bg::drop(&bg::set(&bg::add(&bg::lines("a\tx"), "b", "y"), "b", "z"), "a")), "b\tz") }
 #[test] fn bg_added_once() { assert_eq!(bg::show(&bg::add(&bg::lines("a\tx"), "a", "y")), "a\tx") }
 #[test] fn bg_progress_unlisted() { assert_eq!(bg::show(&bg::set(&bg::lines("a\tx"), "b", "z")), "a\tx") }
@@ -119,7 +119,7 @@ fn merge(old: &str, used: u64, window: u64) -> String { let mut w = World::defau
 #[test] fn speed_unseen_untold() { assert_eq!(speed_value("", 5, 3, 1, 1), "5/3/0/0/1/0/0/1") }
 #[test] fn speed_told_rise() { assert_eq!(speed_value("2/1/0/0/0/0/0/0", 5, 4, 1, 1), "5/4/3/3/1/3/3/1") }
 
-// ---- small rules of hub.bend / prompt.bend ----
+// ---- small rules of hub / prompt ----
 #[test] fn claude_kistack_plugin() { let a = super::rules::claude_args(&super::rules::ArgsIn { model: "", session: "", runtime: "full-access", interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &["/k/rev".to_string()], mcp_url: "u" }); let i = a.iter().position(|x| x == "--plugin-dir").unwrap(); assert_eq!(&a[i..i + 2], ["--plugin-dir", "/k/rev"]) }
 #[test] fn tool_summary_question() { assert_eq!(super::lines::tool_summary("mcp__backplane__order_ask", &json!({"question":"Ship where?"})), "Ship where?") }
 #[test] fn tool_summary_todo() { assert_eq!(super::lines::todo_summary(&json!({"todos":[{"content":"Read","status":"completed"},{"content":"Edit","status":"in_progress"},{"content":"Test","status":"pending"}]})), "1 of 3 done · now: Edit") }

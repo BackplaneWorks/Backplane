@@ -1,6 +1,6 @@
-//! src/core/links.bend in Rust: the links in a text (web addresses, markdown links, file paths, Backplane refs and bare ids).
-//! Bend keeps its scan buffers reversed; here they are forward `Vec<char>`, so every "append to the reversed text"
-//! reads as a push and `reverse` calls disappear. Each function names the Bend def it ports.
+//! src/core/links in Rust: the links in a text (web addresses, markdown links, file paths, Backplane refs and bare ids).
+//! keeps its scan buffers reversed; here they are forward `Vec<char>`, so every "append to the reversed text"
+//! reads as a push and `reverse` calls disappear. Each function names def it ports.
 use super::refs::{self, Ref};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -205,7 +205,7 @@ fn ids_step(b: &mut Bw, c: char, muted: bool) {
 
 /// Link.ids.go over one word
 fn ids_go(w: &[char], b: &mut Bw, muted: bool) {
-    // the Bend call starts from the state with an empty word
+    // call starts from the state with an empty word
     for &c in w { ids_step(b, c, muted) }
     ids_test(b, muted);
 }

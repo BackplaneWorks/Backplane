@@ -1,10 +1,10 @@
-//! The thread-row actions of the view protocol, as pure functions over the session (client.bend `Ui.act` for `Menu.*`, `Ren.*` and `Made.*`):
+//! The thread-row actions of the view protocol, as pure functions over the session:
 //! `row-menu`, `proj-menu`, `menu-close`, `row-pin`, `row-unpin`, `row-archive`, `row-unarchive`, `row-settle`, `row-unsettle`, `row-snooze`,
-//! `row-rename`, `rename-save`, `rename-no` and `new-thread`, and the selected thread's own `pin`, `unpin`, `settle`, `unsettle`, `archive`, `unarchive`, `snooze`. An action answers what Bend's presenter answers: a patch of the session (its scratch
+//! `row-rename`, `rename-save`, `rename-no` and `new-thread`, and the selected thread's own `pin`, `unpin`, `settle`, `unsettle`, `archive`, `unarchive`, `snooze`. An action answers what presenter answers: a patch of the session (its scratch
 //! drafts `@menu`, `@del`, `@ren`..., and the request counter `rid`) and the commands the client runs (the `send` of the hub request, a `focus`).
 //! Not the dispatcher: the selection (`select`, `nextTarget`) and everything shared by all actions are the session module's; a row action takes the
-//! thread from its `value` and never selects. `None` is "not mine" (the helper answers). Oracle: test/gpui/commands/fixtures/actions.json, recorded
-//! from bp-policy by test/gpui/commands/actions-fixture.mjs.
+//! thread from its `value` and never selects. `None` is "not mine" (the helper answers). Oracle: test/commands/fixtures/actions.json, recorded
+//! from bp-policy by test/commands/actions-fixture.mjs.
 use serde_json::{json, Map, Value};
 
 #[derive(Clone, Copy)]
@@ -164,7 +164,7 @@ pub fn merge(session: &Value, patch: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const FIX: &str = include_str!("../../../../test/gpui/commands/fixtures/actions.json");
+    const FIX: &str = include_str!("../../../../test/commands/fixtures/actions.json");
     // Add project: open, type, go in, add; the add sends project.add with the path and arms the want for the first thread; close clears
     #[test] fn the_folder_picker_actions_set_the_text_and_add_sends_the_request() {
         let sess = json!({"rid": 3, "drafts": {}, "info": {"local.machine": "m", "local.generation": "g"}});
@@ -179,8 +179,8 @@ mod tests {
         assert!(act(&Req { hub: "h", session: &sess, sel: "", action: "proj-add", value: "  ", title_of: &|_| String::new() }).is_none(), "no path, no request");
         assert_eq!(run("proj-close", "", &sess).session_patch["drafts"]["@proj.open"], "");
     }
-    // Bend's presenter answers each recorded action with this session change and these commands: same keys, same values, same requests
-    #[test] fn every_recorded_row_action_is_answered_as_the_bend_presenter_answers_it() {
+    // presenter answers each recorded action with this session change and these commands: same keys, same values, same requests
+    #[test] fn every_recorded_row_action_is_answered_as_the_presenter_answers_it() {
         let fx: Value = serde_json::from_str(FIX).unwrap();
         let titles = fx["titles"].clone();
         let title_of = |t: &str| titles[t].as_str().unwrap_or("").to_string();
@@ -205,7 +205,7 @@ mod tests {
         }
         assert!(mine >= 33, "{mine} actions of the recorded ones are served here"); assert_eq!(passed, fx["steps"].as_array().unwrap().len());
     }
-    // Ui.row_delete / Ui.delete (hand cases from the Bend source: the recorded helper never answers the second press)
+    // Ui.row_delete / Ui.delete
     #[test] fn delete_asks_first_and_the_same_press_again_deletes_with_a_hubs_qualified_id_too() {
         let t = |_: &str| String::new();
         let step = |sess: &Value, sel: &str, action: &str, value: &str| { let o = act(&Req { hub: "h", session: sess, sel, action, value, title_of: &t }).unwrap(); (merge(sess, &o.session_patch), o) };

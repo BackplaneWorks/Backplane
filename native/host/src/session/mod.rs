@@ -51,7 +51,7 @@ fn target_valid(t: &Value) -> bool {
     within(i, 1024) && ((k == "recent" && i.is_empty()) || (!i.is_empty() && matches!(k, "project" | "thread" | "bot" | "room")))
 }
 
-/// The event type of a log line: `{"$":"Type",…}`, tolerant of JSON whitespace (`{ "$" : "Type"`), as the JSON parse of the Bend hub and `Model` are. A line
+/// The event type of a log line: `{"$":"Type",…}`, tolerant of JSON whitespace (`{ "$" : "Type"`), as the JSON parse of hub and `Model` are. A line
 /// that is not an object starting with a `$` string field gives None. The fast path is the compact form the hub writes itself; hand-written logs
 /// (Python's json.dumps puts a space after the colon) took the strict `strip_prefix` filters of agents/bots/commands to "no such event".
 pub fn event_type(line: &str) -> Option<&str> {
@@ -104,11 +104,11 @@ impl Hub {
         let mut params = p.clone();
         strip_hub_owned(&mut params);   // window, page, reads and local are the hub's: whatever the client sent is gone before the hub's own are put in
         if let Some(o) = params.as_object_mut() {
-            // what the presenter needs of the hub (native-sidebar.bend Ns.prepare): the view's id, the hub's signal revision (SignalRevision: the context's metadataRevision;
+            // what the presenter needs of the hub: the view's id, the hub's signal revision (SignalRevision: the context's metadataRevision;
             // saved sidebar pages are kept only while it, the view and the choices stay the same: activity lines and assistant text do not move it), this run's key
             o.insert("revision".into(), json!(self.signal_seq())); o.insert("viewId".into(), json!(view_id)); o.insert("nativeKey".into(), json!(self.native_key)); o.insert("now".into(), json!(now_ms()));
         }
-        // a thread's window: the page out of the Rust index, the fold/context logic in native Bend
+        // a thread's window: the page out of the Rust index, the fold/context logic in native
         // view.page: the cursor names the page (`before`, an ordinal); the reply is a view.open-shaped one
         // a bot target's owner is its chat thread, which the bots lane knows (U.Bots.chat.of)
         let bot = match (p["target"]["kind"].as_str(), p["target"]["id"].as_str()) {
@@ -179,7 +179,7 @@ impl Hub {
         out
     }
 
-    /// The window object for a thread target (newest page); None for other targets or without the Bend program.
+    /// The window object for a thread target (newest page); None for other targets or without program.
     /// `thread` is the conversation the target shows (V.Target.thread): a thread's own id, a bot's chat thread; none for the other targets.
     async fn window_for(&self, p: &Value, before: u64, thread: Option<&str>) -> Option<(Value, crate::model::Page)> {
         let t = p.get("target")?;
@@ -189,11 +189,11 @@ impl Hub {
         let mut req = Map::new(); req.insert("target".into(), t.clone());
         if let Some(a) = p.get("anchor") { req.insert("anchor".into(), a.clone()); }
         let req = Value::Object(req);
-        // an older page still names the thread's latest human prompt and assistant text (message-context.bend)
+        // an older page still names the thread's latest human prompt and assistant text
         let ctx = if before == 0 { vec![] } else { let m = self.model.lock().await; m.latest_context(&self.store, thread).unwrap_or_default() };
         // the Rust window first (present::window), computed here because the model lock is async and a presenter Screen cannot take it
         if let Some(w) = crate::present::window::window(&page, &ctx, &self.epoch, before, &req) { return Some((w, page)) }
-        // what Rust does not answer (None) is the helper's, and only while the policy helper runs: the window helper is a Bend child process the policy's V needs. A hub without the helper
+        // what Rust does not answer (None) is the helper's, and only while the policy helper runs: the window helper is a child process the policy's V needs. A hub without the helper
         // starts nothing for any target, whatever BACKPLANE_WINDOW_BIN says (wants_log is false while the helper is not running): the native refusal stands
         if !self.presenter.wants_log() { return None }
         let bin = self.window_bin.get()?;

@@ -1,4 +1,4 @@
-//! Start-up checkpoints (docs/gpui/STARTUP.md). The hub's folds of the log (the line index, the read model, the policies' state) are
+//! Start-up checkpoints (docs/STARTUP.md). The hub's folds of the log (the line index, the read model, the policies' state) are
 //! deterministic functions of the first N lines, so each is saved with N and a fingerprint of the log at N, in `<home>/ckpt/`. A start
 //! loads what is valid and folds only the lines past N; anything missing, torn, from another version or from a different log is
 //! ignored and the fold runs over the whole log as before. Files are written beside and renamed, never in place.

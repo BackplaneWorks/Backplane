@@ -1,7 +1,7 @@
 //! M5: agent process management. One actor per thread owns that thread's agent process (Claude: one
 //! long-lived stream-json process), turns the lines it writes into the events the JS hub writes, and commits
-//! them through `Hub::commit_many`. Ported from src/core/hub.bend (Hub.post.go, Claude.line.k, Retire.turn.f,
-//! Hub.agent_gone, Hub.recover, Carry.*) and the Claude paths in src/server/server.bend.
+//! them through `Hub::commit_many`. Ported from src/core/hub (Hub.post.go, Claude.line.k, Retire.turn.f,
+//! Hub.agent_gone, Hub.recover, Carry.*) and the Claude paths in src/server/server.
 //!
 //! Ported: Claude. Out (answered with an error, never silently): Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi.
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
@@ -49,7 +49,7 @@ pub enum Cmd {
 /// The hub's one agent manager, for hub-side callers that were not handed it (commands, bots).
 static HANDLE: std::sync::OnceLock<Arc<Agents>> = std::sync::OnceLock::new();
 pub use textgen::{summarizer, Summarizer};
-/// Mark the turn ends Bend runs Ended.out for with `"_end": true` for state's policy (which writes alert/told/summary.at and removes the field before the write).
+/// Mark the turn ends runs Ended.out for with `"_end": true` for state's policy (which writes alert/told/summary.at and removes the field before the write).
 /// On: state's policy (statehost, `_end` handling) is on the tree and strips the field before the write.
 const MARK_ENDS: bool = true;
 /// A design-history job in flight (checkpoint, step): counted so a test, or a shutdown, can wait for what a turn's end left running.
@@ -197,7 +197,7 @@ impl Agents {
     /// its next Backplane tool result or its end; an idle thread starts a turn with the ride (ActivityLogged "ride:<id>" "Delivered with a new turn: N waiting message(s)", the ride cleared).
     /// The caller owns Config.held. Logs no message of its own: the note is the agent's input, not a person's.
     pub async fn wake_ride(self: &Arc<Self>, thread: &str, id: &str, text: &str) -> Result<(), String> { self.ride_k(thread, id, text, true).await }
-    /// Ride.note alone (a told note: core/hub.bend `Private.tell.fresh`): a running Claude turn takes it on its input at once, any other keeps it in the ride for the next tool result or the
+    /// Ride.note alone: a running Claude turn takes it on its input at once, any other keeps it in the ride for the next tool result or the
     /// next turn; an idle thread is NOT started (the published text is already on screen, and a note must not run an agent turn in the person's conversation).
     pub async fn ride_note(self: &Arc<Self>, thread: &str, id: &str, text: &str) -> Result<(), String> { self.ride_k(thread, id, text, false).await }
     async fn ride_k(self: &Arc<Self>, thread: &str, id: &str, text: &str, start: bool) -> Result<(), String> {
@@ -378,7 +378,7 @@ impl Actor {
         if let Err(e) = self.ag.hub.commit_many(&ev).await { self.ag.stats.commit_errors.fetch_add(1, Relaxed); eprintln!("agents: {}: could not write {} events: {e:#}", self.th, ev.len()) }
     }
     async fn live_end(&mut self) { self.live.clear(); let _ = self.ag.hub.live_end(&self.th).await; }
-    /// The stream is over without an assistant line having closed it (a turn that ends, is stopped or fails mid-text): Bend sends no delta_end then (only Claude.assistant does), so the
+    /// The stream is over without an assistant line having closed it (a turn that ends, is stopped or fails mid-text): sends no delta_end then (only Claude.assistant does), so the
     /// frame is sent only when streamed text is still on screen and nothing else would clear it. A turn whose last assistant line already closed its stream sends none.
     async fn live_close(&mut self) { if !self.live.is_empty() { self.live_end().await } }
 
@@ -731,11 +731,11 @@ impl Actor {
 
     /// The turn ends in an error row and a failed turn (Hub.spawned.fail, Hub.agent_gone).
     async fn fail(&mut self, text: String, kind: &str, act: &str) { self.fail_k(text, kind, act, false).await }
-    /// `ended`: the failure is an agent-gone end (Bend runs Ended.out for it); a spawn failure is not marked.
+    /// `ended`: the failure is an agent-gone end; a spawn failure is not marked.
     async fn fail_k(&mut self, text: String, kind: &str, act: &str, ended: bool) {
         let (now, th) = (now_s(), self.th.clone());
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})]; if ended && MARK_ENDS { ev[1]["_end"] = json!(true) };
-        if ended && !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) } // Bend writes failed.<msg> for an agent-gone end, not for a spawn failure
+        if ended && !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) } // writes failed.<msg> for an agent-gone end, not for a spawn failure
         self.live_close().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
     }
 

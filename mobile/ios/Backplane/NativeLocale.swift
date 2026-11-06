@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The resolved Bend tag from Screen.locale. No native locale policy.
+// The resolved tag from Screen.locale. No native locale policy.
 private struct BackplaneLanguageKey: EnvironmentKey {
     static let defaultValue = "en"
 }

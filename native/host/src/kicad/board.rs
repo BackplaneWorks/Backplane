@@ -1,5 +1,5 @@
-//! core/board.bend, core/pcb2d.bend and pcb3d.bend's text in Rust: a .kicad_pcb's top-level forms as drawable items. Each Item keeps
-//! Bend's key and signature. Items are appended in the order the Bend lists hold them: a piece's place among equals in a plot depends on it.
+//! core/board, core/pcb2d and pcb3d's text in Rust: a .kicad_pcb's top-level forms as drawable items. Each Item keeps
+//! key and signature. Items are appended in the order lists hold them: a piece's place among equals in a plot depends on it.
 use super::fl;
 use super::sexpr::Sx;
 use super::strokefont;
@@ -163,7 +163,7 @@ fn zone(out: &mut Vec<Item>, x: &Sx, key: &str, sig: u32) {
     }
 }
 
-// Text (pcb3d.bend's Text.draw, pcb2d.bend's visibility)
+// Text
 /// Sx.flag: a bare word among the arguments (hide, dnp, ...), or (name yes)
 fn flag(x: &Sx, name: &str) -> bool { x.args().iter().any(|c| c.text() == name || (c.name() == name && c.arg(0) != "no")) }
 fn norm_deg(a: f32) -> f32 { a - 360.0 * ((a + 179.999) / 360.0).floor() }
@@ -206,7 +206,7 @@ pub fn hash(bs: &[u8], mut h: u32) -> u32 { for b in bs { h = (h ^ *b as u32).wr
 pub const FNV: u32 = 2166136261;
 
 /// Pcb2.form: the items one top-level form draws. Board.index answers 9 for gr_poly and for what it does not know alike, and form 9 draws
-/// nothing, so a top-level gr_poly draws nothing here either, as in Bend (kept for parity; reported).
+/// nothing, so a top-level gr_poly draws nothing here either, as in (kept for parity; reported).
 pub fn form(out: &mut Vec<Item>, x: &Sx, i: usize, sig: u32) {
     let k = key(x, || format!("n{i}"));
     let name = x.name();
@@ -237,7 +237,7 @@ mod tests {
         assert_eq!((p.x, p.y, p.c, p.s), (q.x, q.y, q.c, q.s));
         let x = parse(b"(footprint \"F\" (at 1 2 3) (transform (translate 0 0) (rotate 0)))"); let p = fp_place(&x); assert_eq!((p.x, p.y, p.c, p.s), (0.0, 0.0, 1.0, 0.0));
     }
-    #[test] fn a_top_level_gr_poly_draws_nothing_as_in_bend() {
+    #[test] fn a_top_level_gr_poly_draws_nothing_as_in() {
         let mut o = vec![]; form(&mut o, &parse(b"(gr_poly (pts (xy 0 0) (xy 1 1) (xy 2 0)) (layer \"F.Cu\") (uuid \"p\"))"), 0, 0); assert!(o.is_empty());
     }
     #[test] fn arcs_run_from_a_to_c() {

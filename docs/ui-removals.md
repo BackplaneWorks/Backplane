@@ -39,7 +39,7 @@ lookup tables. No draft reader, sidebar key or bridge projection was added. The 
 sidebar hit tests qualify this source review before the full server build.
 
 Validation: full `scripts/check.sh` typechecking and the repository's accepted
-Bend 2.0.36 foreign-effect proof verdict; focused allowance, publication, named
+2.0.36 foreign-effect proof verdict; focused allowance, publication, named
 account, phone composer, retained sidebar and sidebar-hit tests; 49 desktop
 browser unit cases, 13 account refresh/registry cases and 31 provider-account IO
 cases. Chromium renders cover 1440 and 390 px, old and new unknown/aged/browser

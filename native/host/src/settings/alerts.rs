@@ -1,9 +1,9 @@
-//! Alert delivery (core/desk.bend, core/notice.bend `Alert.*`, server.bend `B.Alerted`): when an `alert.<thread>` record with a kind is committed,
+//! Alert delivery: when an `alert.<thread>` record with a kind is committed,
 //! the webhook (settings::webhook) is posted, and the desk used last gets `{"t":"notify"}` as a desktop notification, unless a focused desk in use
 //! is showing the thread and the kind is one a watching desk holds (ask, done, fail, merged: never a note or a reminder).
 //! A desk (the GPUI window, the web page) says where it is with `desk.look {thread, focused}` on connect, on a change and every `BEAT_S` seconds
 //! while in use. Not ported here: the phones' APNs push and the Live Activity (they need Apple's credentials), and the owner's other machines
-//! (`Far.note.*`, the net lane). The body of a done/fail alert with no text of its own is "Finished"/"Failed" (Bend shows the reply's first line).
+//! (`Far.note.*`, the net lane). The body of a done/fail alert with no text of its own is "Finished"/"Failed".
 use crate::{api::{Caller, Fut, Observer, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::{Arc, Mutex}};
