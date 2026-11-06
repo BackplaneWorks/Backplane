@@ -302,6 +302,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         shown["bot"]=b;
     }
     if room_page.is_object() { shown["bot"]=room_page.clone(); }
+    if std::env::var("BP_DBG").is_ok() && text(p,"action").starts_with("room") { eprintln!("DBG out cmds={}",cmds.len()); }
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
