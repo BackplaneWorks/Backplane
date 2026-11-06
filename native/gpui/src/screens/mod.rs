@@ -73,6 +73,9 @@ pub struct Screens {
     pub settings_was_open: bool,
     pub settings_ui: settings::SettingsUi,
     pub parsed: timeline::ParseCache,
+    /// Rows that came in after the thread was shown, by id: when each was first drawn (for the arrival fade); `shown_at` is when the thread was shown.
+    pub born: HashMap<String, std::time::Instant>,
+    pub shown_at: std::time::Instant,
     pub images: images::Images,
     pub img_poll: bool,
     /// A popup row was pressed: the hub's reply carries the new draft; take it once.
@@ -86,6 +89,6 @@ pub struct Screens {
 impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, paging: None, reg: Default::default(), menu_open: false, projects: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new() }
+        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, paging: None, reg: Default::default(), menu_open: false, projects: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new() }
     }
 }
