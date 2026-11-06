@@ -30,6 +30,8 @@ struct DataRoot: View {
         .modifier(TextSizeModifier(size: settings.dynamicType))
         .task { if !client.links.isEmpty, client.conn == .offline { client.connect() } }
         .onChange(of: phase) { _, p in if p == .active { client.foreground() } }
+        // a newly paired (or forgotten) hub starts again on the default screen
+        .onChange(of: client.links.isEmpty) { _, _ in tab = "" }
     }
 }
 
@@ -63,13 +65,13 @@ struct DataThreadsView: View {
                     if client.threads.filter({ $0.project == p.id }).isEmpty {
                         Text("No threads").foregroundStyle(.secondary)
                     }
+                    Button { newThread = p.id } label: { Label("New thread", systemImage: "square.and.pencil") }
+                        .accessibilityLabel("New thread in \(p.title)").accessibilityIdentifier("data.thread.new." + p.id)
                 } header: {
                     HStack {
                         Text(p.title).font(.headline).textCase(nil).foregroundStyle(.primary)
                         if p.waiting > 0 { Text("\(p.waiting)").font(.caption.bold()).padding(.horizontal, 6).background(Capsule().fill(Color.orange.opacity(0.3))) }
                         Spacer()
-                        Button { newThread = p.id } label: { Image(systemName: "square.and.pencil") }
-                            .accessibilityLabel("New thread in \(p.title)").accessibilityIdentifier("data.thread.new." + p.id)
                     }
                 }
             }
