@@ -1,9 +1,10 @@
 #!/bin/sh
-# RUSTC_WRAPPER for builds (lib-buildslot.sh bq_cc): sccache with TMPDIR pinned to /tmp. The first compile that finds no sccache server starts the shared one, and the
+# RUSTC_WRAPPER for builds (lib-buildslot.sh bq_cc): sccache with TMPDIR pinned to a dir on disk ($BQ_CC_TMP, default ~/.cache/bp-tmp/sccache; never /tmp, a RAM tmpfs that lanes fill). The first compile that finds no sccache server starts the shared one, and the
 # server keeps that compile's TMPDIR for its own temp files; a test run's private TMPDIR (bpt_new) is removed when the run ends, and the server then failed every compile
 # of every lane ("Failed to create temp dir"). A server already running from a removed TMPDIR is stopped first, so the next compile starts a sound one.
+CC=${BQ_CC_TMP:-${BP_TMP:-$HOME/.cache/bp-tmp}/sccache}; mkdir -p "$CC"
 for p in $(pgrep -x -u "$(id -u)" sccache 2>/dev/null); do
   t=$(tr '\0' '\n' < /proc/$p/environ 2>/dev/null | sed -n 's/^TMPDIR=//p')
-  [ -n "$t" ] && [ ! -d "$t" ] && TMPDIR=/tmp sccache --stop-server > /dev/null 2>&1
+  [ -n "$t" ] && [ ! -d "$t" ] && TMPDIR=$CC sccache --stop-server > /dev/null 2>&1
 done
-TMPDIR=${BQ_CC_TMP:-/tmp} exec sccache "$@"
+TMPDIR=$CC exec sccache "$@"
