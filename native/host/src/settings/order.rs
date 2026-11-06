@@ -314,7 +314,8 @@ async fn watch(ag: Arc<Agents>, r: Rec, mut last: String) {
         tokio::time::sleep(pace(every(&last))).await;
         let q = get(&home, &r).await; let st = state(&q);
         if st.is_empty() { continue } // no answer: the server may be away; ask again
-        if st != last { progress(&ag, &r, &st, sv(&q["order"], "tracking")).await; card_set(&ag, &r.thread, &sum(&q), &r.id, false).await; let _ = keep(&home, &r, &st); last = st.clone(); }
+        // the card first, then the step's message: whoever reads the message finds the card already at that step
+        if st != last { card_set(&ag, &r.thread, &sum(&q), &r.id, false).await; progress(&ag, &r, &st, sv(&q["order"], "tracking")).await; let _ = keep(&home, &r, &st); last = st.clone(); }
         if done(&st) { return }
     }
 }
