@@ -6,6 +6,7 @@
 //! A `Tab` is one browser: its newest frame (BGRA, copied out of `on_paint`), address, title, loading state, cursor and the popups it asked for,
 //! plus the input methods the gpui page calls (mouse, wheel, key, text, IME, focus, resize, navigation).
 use cef::{rc::Rc as _, *};
+pub use cef::{CefStringList, ImplFileDialogCallback};
 use std::{path::{Path, PathBuf}, sync::{atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering}, Arc, Mutex, OnceLock}};
 
 /// The CEF version the `cef` crate in Cargo.toml was generated for; the runtime directory is `<cache>/backplane/cef-runtime/<VERSION>`.
@@ -16,7 +17,10 @@ pub enum Cur { Default, Hand, IBeam, Cross, Wait, Help, Move, ResizeH, ResizeV, 
 
 pub struct Frame { pub w: u32, pub h: u32, pub bgra: Vec<u8> }
 #[derive(Default)]
-pub struct State { pub frame: Option<Frame>, pub fresh: bool, pub url: String, pub title: String, pub loading: bool, pub back: bool, pub forward: bool, pub popups: Vec<String>, pub closed: bool, pub load_error: String }
+pub struct State { pub frame: Option<Frame>, pub fresh: bool, pub url: String, pub title: String, pub loading: bool, pub back: bool, pub forward: bool, pub popups: Vec<String>, pub popup_tabs: Vec<Arc<Tab>>, pub dialogs: Vec<Dialog>, pub download: String, pub closed: bool, pub load_error: String }
+/// A file dialog CEF asked for (OSR has none of its own): the page shows gpui's picker and answers through `cb`.
+pub struct Dialog { pub save: bool, pub multiple: bool, pub folder: bool, pub title: String, pub cb: FileDialogCallback }
+unsafe impl Send for Dialog {}
 struct B(Browser);
 unsafe impl Send for B {}
 
@@ -81,28 +85,72 @@ wrap_load_handler! {
 wrap_life_span_handler! {
     struct LifeH { tab: Arc<Tab> }
     impl LifeSpanHandler {
-        fn on_before_popup(&self, _b: Option<&mut Browser>, _f: Option<&mut Frame_>, _id: ::std::os::raw::c_int, url: Option<&CefString>, _name: Option<&CefString>,
-            _disp: WindowOpenDisposition, _gesture: ::std::os::raw::c_int, _features: Option<&PopupFeatures>, _wi: Option<&mut WindowInfo>, _client: Option<&mut Option<Client>>,
+        fn on_before_popup(&self, _b: Option<&mut Browser>, _f: Option<&mut Frame_>, _id: ::std::os::raw::c_int, _url: Option<&CefString>, _name: Option<&CefString>,
+            _disp: WindowOpenDisposition, _gesture: ::std::os::raw::c_int, _features: Option<&PopupFeatures>, wi: Option<&mut WindowInfo>, client: Option<&mut Option<Client>>,
             _settings: Option<&mut BrowserSettings>, _extra: Option<&mut Option<DictionaryValue>>, _nojs: Option<&mut ::std::os::raw::c_int>) -> ::std::os::raw::c_int {
-            // a new window is a new tab of the page (the opener link is dropped): cancel CEF's own and ask the page to open the address
-            let u = s(url); if !u.is_empty() { self.tab.st.lock().unwrap().popups.push(u); let _ = self.tab.wake.try_send(()); }
-            true as _
+            // a new window keeps its opener (window.opener, postMessage, window.close): CEF makes it, windowless, with our own handlers; the page shows it as a new tab
+            let (Some(wi), Some(client)) = (wi, client) else { return true as _ };
+            let (w, h) = self.tab.size(); let scale = self.tab.scale_milli.load(Ordering::Relaxed) as f32 / 1000.0;
+            let tab = Tab::detached("", w, h, scale, self.tab.wake.clone());
+            *client = Some(client_for(&tab)); wi.windowless_rendering_enabled = true as _;
+            self.tab.st.lock().unwrap().popup_tabs.push(tab); let _ = self.tab.wake.try_send(());
+            false as _
         }
         fn on_after_created(&self, b: Option<&mut Browser>) { if let Some(b) = b { self.tab.id.store(b.identifier(), Ordering::Relaxed); *self.tab.browser.lock().unwrap() = Some(B(b.clone())); let _ = self.tab.wake.try_send(()); } }
         fn do_close(&self, _b: Option<&mut Browser>) -> ::std::os::raw::c_int { false as _ }
         fn on_before_close(&self, _b: Option<&mut Browser>) { *self.tab.browser.lock().unwrap() = None; self.tab.st.lock().unwrap().closed = true; let _ = self.tab.wake.try_send(()); }
     }
 }
+wrap_dialog_handler! {
+    struct DialogH { tab: Arc<Tab> }
+    impl DialogHandler {
+        fn on_file_dialog(&self, _b: Option<&mut Browser>, mode: FileDialogMode, title: Option<&CefString>, _def: Option<&CefString>, _f: Option<&mut CefStringList>, _e: Option<&mut CefStringList>, _d: Option<&mut CefStringList>, cb: Option<&mut FileDialogCallback>) -> ::std::os::raw::c_int {
+            let Some(cb) = cb else { return false as _ };
+            self.tab.st.lock().unwrap().dialogs.push(Dialog { save: mode == FileDialogMode::SAVE, multiple: mode == FileDialogMode::OPEN_MULTIPLE, folder: mode == FileDialogMode::OPEN_FOLDER, title: s(title), cb: cb.clone() });
+            let _ = self.tab.wake.try_send(()); true as _
+        }
+    }
+}
+wrap_download_handler! {
+    struct DownloadH { tab: Arc<Tab> }
+    impl DownloadHandler {
+        fn on_before_download(&self, _b: Option<&mut Browser>, _item: Option<&mut DownloadItem>, name: Option<&CefString>, cb: Option<&mut BeforeDownloadCallback>) -> ::std::os::raw::c_int {
+            // no dialog: the file goes to the person's Downloads folder (never over a file), the page says so when it is done
+            let dir = std::env::var_os("XDG_DOWNLOAD_DIR").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads"))).unwrap_or_else(std::env::temp_dir);
+            let _ = std::fs::create_dir_all(&dir);
+            let path = unique_path(&dir, &safe_name(&s(name)));
+            if let Some(cb) = cb { cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), false as _); }
+            self.tab.st.lock().unwrap().download = format!("Downloading {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()); let _ = self.tab.wake.try_send(()); true as _
+        }
+        fn on_download_updated(&self, _b: Option<&mut Browser>, item: Option<&mut DownloadItem>, _cb: Option<&mut DownloadItemCallback>) {
+            let Some(item) = item else { return };
+            let full = PathBuf::from(CefString::from(&item.full_path()).to_string());
+            let name = full.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let msg = if item.is_complete() == 1 { format!("Downloaded {name} to {}", full.parent().map(|p| p.display().to_string()).unwrap_or_default()) } else if item.is_canceled() == 1 || item.is_interrupted() == 1 { format!("Download of {name} stopped") } else { format!("Downloading {name} {}%", item.percent_complete().max(0)) };
+            self.tab.st.lock().unwrap().download = msg; let _ = self.tab.wake.try_send(());
+        }
+    }
+}
+fn safe_name(n: &str) -> String { let n: String = n.chars().map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c }).collect(); let n = n.trim_matches('.').trim().to_string(); if n.is_empty() { "download".into() } else { n } }
+/// `dir/name`, or `dir/name (2)`... when that file exists
+pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
+    let first = dir.join(name); if !first.exists() { return first }
+    let (stem, ext) = match name.rsplit_once('.') { Some((a, b)) if !a.is_empty() => (a.to_string(), format!(".{b}")), _ => (name.to_string(), String::new()) };
+    (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
+}
 wrap_client! {
-    struct ClientH { render: RenderHandler, display: DisplayHandler, load: LoadHandler, life: LifeSpanHandler }
+    struct ClientH { render: RenderHandler, display: DisplayHandler, load: LoadHandler, life: LifeSpanHandler, dialog: DialogHandler, download: DownloadHandler }
     impl Client {
         fn render_handler(&self) -> Option<RenderHandler> { Some(self.render.clone()) }
         fn display_handler(&self) -> Option<DisplayHandler> { Some(self.display.clone()) }
         fn load_handler(&self) -> Option<LoadHandler> { Some(self.load.clone()) }
         fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(self.life.clone()) }
+        fn dialog_handler(&self) -> Option<DialogHandler> { Some(self.dialog.clone()) }
+        fn download_handler(&self) -> Option<DownloadHandler> { Some(self.download.clone()) }
     }
 }
 type Frame_ = cef::Frame;
+fn client_for(tab: &Arc<Tab>) -> Client { ClientH::new(RenderH::new(tab.clone()), DisplayH::new(tab.clone()), LoadH::new(tab.clone()), LifeH::new(tab.clone()), DialogH::new(tab.clone()), DownloadH::new(tab.clone())) }
 
 fn cur_of(t: CursorType) -> Cur {
     if t == CursorType::HAND { Cur::Hand } else if t == CursorType::IBEAM || t == CursorType::VERTICALTEXT { Cur::IBeam } else if t == CursorType::CROSS { Cur::Cross }
@@ -185,13 +233,17 @@ impl Engine {
 impl Tab {
     /// Creates a browser at `url` with a view of `w`x`h` logical px at `scale`; `wake` gets a message whenever something changed.
     pub fn open(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>) -> Arc<Tab> {
-        let tab = Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0) });
-        let mut client = ClientH::new(RenderH::new(tab.clone()), DisplayH::new(tab.clone()), LoadH::new(tab.clone()), LifeH::new(tab.clone()));
+        let tab = Tab::detached(url, w, h, scale, wake);
+        let mut client = client_for(&tab);
         let wi = WindowInfo { windowless_rendering_enabled: true as _, ..Default::default() };
         let bs = BrowserSettings { windowless_frame_rate: 30, ..Default::default() };
         let r = browser_host_create_browser(Some(&wi), Some(&mut client), Some(&CefString::from(url)), Some(&bs), None, None);
         if r != 1 { tab.st.lock().unwrap().load_error = "CEF refused to create the browser".into(); }
         tab
+    }
+    /// A tab whose browser CEF makes itself (a popup): the state and handlers only.
+    pub fn detached(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>) -> Arc<Tab> {
+        Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0) })
     }
     fn with<R>(&self, f: impl FnOnce(&Browser) -> R) -> Option<R> { self.browser.lock().unwrap().as_ref().map(|b| f(&b.0)) }
     fn host<R>(&self, f: impl FnOnce(&BrowserHost) -> R) -> Option<R> { self.with(|b| b.host().map(|h| f(&h))).flatten() }
@@ -250,6 +302,12 @@ pub fn flags(shift: bool, ctrl: bool, alt: bool, left: bool, middle: bool, right
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn downloads_never_overwrite_and_names_are_plain() {
+        let d = std::env::temp_dir().join(format!("bp-dl-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(unique_path(&d, "a.txt"), d.join("a.txt")); std::fs::write(d.join("a.txt"), b"x").unwrap();
+        assert_eq!(unique_path(&d, "a.txt"), d.join("a (2).txt")); std::fs::write(d.join("a (2).txt"), b"x").unwrap(); assert_eq!(unique_path(&d, "a.txt"), d.join("a (3).txt"));
+        assert_eq!(safe_name("../x/y.txt"), "_x_y.txt"); assert_eq!(safe_name(""), "download"); let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn key_codes() { assert_eq!(vk("a"), Some(65)); assert_eq!(vk("7"), Some(55)); assert_eq!(vk("enter"), Some(13)); assert_eq!(vk("f5"), Some(116)); assert_eq!(vk("é"), None); }
     #[test] fn event_flags() { assert_eq!(flags(true, false, false, true, false, false), 2 | 16); assert_eq!(flags(false, true, true, false, false, true), 4 | 8 | 64); }
 }
