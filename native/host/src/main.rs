@@ -121,6 +121,7 @@ fn raise_nofile() {
 #[tokio::main]
 async fn main() {
     raise_nofile();
+    if std::env::args().nth(1).as_deref() == Some("--agent-reaper") { std::process::exit(agents::proc::reaper_main()) }
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
     // a signal that ends the hub says so in hub.log and exits nonzero (128 + the signal); SIGKILL cannot be caught.
