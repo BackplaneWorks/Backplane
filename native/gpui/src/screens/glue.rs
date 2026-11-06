@@ -214,7 +214,10 @@ impl Backplane {
         let solid = self.screens.solid.clone().unwrap();
         if let Some(k) = crate::viewers::solid::peek_key(&bytes) { eprintln!("GPUI_LOG {{\"plot_frame\":{{\"key\":{},\"bytes\":{}}}}}", serde_json::Value::String(k), bytes.len()); }
         let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { cx.notify(); return };
+        let t0 = std::time::Instant::now();
         if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
+        // (script mode) what the UI thread spent decoding and applying this frame, and how much of it was new
+        if self.screens.plotview.measure { let f = self.screens.plot.frame.as_ref(); self.m("plot_recv", serde_json::json!({"key": f.map_or("", |f| f.key.as_str()), "bytes": bytes.len(), "chunks": f.map_or(0, |f| f.chunks.len()), "decode_apply_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3})); }
     }
     /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the owner is `browser_owner` (the bot's id on a bot's screen, else the thread).
     pub(crate) fn browser_page(&mut self, cx: &mut Context<Self>) {

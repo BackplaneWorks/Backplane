@@ -218,7 +218,10 @@ impl Worker {
             let job = { let (m, cv) = &*s2; let mut p = m.lock().unwrap();
                 while p.frame.is_none() && p.render.is_none() && !p.shutdown { p = cv.wait(p).unwrap(); }
                 if p.shutdown { return } (p.frame.take(), p.render.take()) };
-            if let (Some(bytes), _) = &job { if let Some(f) = parse_frame(bytes) { if tx.send_blocking(Msg::Mesh(f)).is_err() { return } } }
+            if let (Some(bytes), _) = &job { let t0 = std::time::Instant::now(); if let Some(f) = parse_frame(bytes) {
+                if let SolidFrame::Note(k, why) = &f { eprintln!("GPUI_LOG {{\"solid_note\":{{\"key\":{},\"why\":{}}}}}", serde_json::Value::String(k.clone()), serde_json::Value::String(why.clone())); }
+                if let SolidFrame::Model(k, m) = &f { eprintln!("GPUI_LOG {{\"solid_decode\":{{\"key\":{},\"bytes\":{},\"tris\":{},\"ms\":{:.1}}}}}", serde_json::Value::String(k.clone()), bytes.len(), m.tris.len(), t0.elapsed().as_secs_f64() * 1e3); }
+                if tx.send_blocking(Msg::Mesh(f)).is_err() { return } } }
             if let (_, Some((mesh, cam, w, h, ss, my))) = job {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
@@ -250,6 +253,8 @@ pub fn note_keeps_model(page_key: &str, note_key: &str) -> bool { page_key == no
 
 pub struct SolidPage {
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
+    /// The source of the image on show and when it arrived (the e2e `view_shown` metric).
+    pub shown: Option<(String, std::time::Instant)>,
     pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), want_gen: u64, pub stats: Stats,
 }
 impl SolidPage {
@@ -260,7 +265,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), shown: None, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), want_gen: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -281,7 +286,7 @@ impl SolidPage {
             Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; the same source's previous model stays shown
                 if !note_keeps_model(&self.key, &key) {
                     // another source's model could not be made: the old source's model must not show under this key
-                    self.mesh = None; self.cam = None; if let Some(i) = self.image.take() { self.retired.push(i); }
+                    self.mesh = None; self.cam = None; self.shown = None; if let Some(i) = self.image.take() { self.retired.push(i); }
                     self.want_gen = u64::MAX; // a render of the old model still in flight is stale
                 }
                 self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
@@ -290,6 +295,7 @@ impl SolidPage {
             Msg::Image { ticket, image, ms, tris, w, h } => {
                 if ticket != self.want_gen { self.retired.push(image); cx.notify(); return } // a newer request exists: this one is stale
                 if let Some(old) = self.image.replace(image) { self.retired.push(old); }
+                self.shown = Some((self.key.clone(), std::time::Instant::now()));
                 self.stats = Stats { images: self.stats.images + 1, last_ms: ms, last_tris: tris, last_size: (w, h) }; cx.notify();
             }
         }
@@ -326,6 +332,8 @@ impl SolidPage {
         image::RgbaImage::from_raw(w, h, px).ok_or("bad picture")?.save(&path).map_err(|e| e.to_string())?;
         Ok(path)
     }
+    /// The button went up: the full-size image (as the mouse-up handlers do).
+    pub fn settle(&mut self) { self.ask_render(false); }
     /// For the demo and tests: an orbit drag step as the mouse handler does it.
     pub fn drag_by(&mut self, dx: f32, dy: f32) { if let Some(c) = &mut self.cam { c.orbit(dx, dy); } self.ask_render(true); }
     /// Give the images back to the atlas (call before dropping the page, with the window).

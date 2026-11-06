@@ -12,14 +12,14 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+pub enum Step { Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32, usize), Zoom(f32, f32, f32), Orbit(f32, f32), OrbitEnd, Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { None, Pad, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
-pub enum Goal { Frame, Changed(u64), Reconnected, Home, Thread(String), Popup, Typed(String), Sent(usize), Sleep }
+pub enum Goal { Frame, Solid(u64), Changed(u64), Reconnected, Home, Thread(String), Popup, Typed(String), Sent(usize), Sleep }
 pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pub armed: bool, pub seq: u64 }
 
 /// Steps: {"select":N} {"home":N} {"popup":"/"} {"type":"text"} {"send":true} {"wait":ms}; e2e hooks: {"record":"start","name":"x"} {"record":"stop"}
@@ -53,7 +53,9 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
         else if v["cef"].is_object() { Some(Step::Cef(v["cef"].clone())) }
         else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
-        else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
+        else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(2).and_then(Value::as_u64).unwrap_or(0) as usize)) }
+        else if let Some(a) = v["orbit"].as_array() { Some(Step::Orbit(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
+        else if v["orbit_end"].as_bool() == Some(true) { Some(Step::OrbitEnd) }
         else if let Some(a) = v["zoom"].as_array() { Some(Step::Zoom(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_f64).unwrap_or(0.5) as f32)) }
         else if let Some(n) = v["scroll_state"].as_str() { Some(Step::ScrollState(n.to_string())) }
         else if let Some(n) = v["scroll"].as_f64() { Some(Step::Scroll(n as f32)) }
@@ -87,6 +89,13 @@ impl Backplane {
         }
         // G2: a frame timestamp for every frame drawn while a record is open (frames are kept coming while it is)
         if let Some((_, frames)) = &mut self.recording { frames.push((started.elapsed().as_secs_f64() * 1e6).round() / 1e3); window.request_animation_frame(); }
+        // a pressed viewer tab: the first frame that shows its whole picture (the plot painted for the asked source, the model's image)
+        if let Some((kind, t0)) = self.screens.shown_wait.clone() {
+            if let Some((at, detail)) = crate::screens::viewer::shown_at(self, &kind, cx) {
+                self.screens.shown_wait = None;
+                metric(started, "view_shown", json!({"kind": kind, "ms": (at.saturating_duration_since(t0).as_secs_f64() * 1e6).round() / 1e3, "detail": detail}));
+            }
+        }
         if crate::art::rects_on() {
             // G3: the stable regions' rectangles (probes painted last frame), on change
             let snap = crate::art::layout_snapshot();
@@ -119,6 +128,7 @@ impl Backplane {
         let done = match &p.goal {
             Goal::Thread(id) => self.data["thread"]["id"].as_str().map_or(false, |t| t.rsplit_once('|').map_or(t, |(_, i)| i) == id) && self.data["thread"]["loading"] != true,
             Goal::Frame => true,
+            Goal::Solid(n) => self.screens.solid.as_ref().map_or(true, |s| s.read(cx).stats.images >= *n),
             Goal::Changed(epoch) => self.ui_epoch != *epoch,
             Goal::Reconnected => self.reconnected,
             Goal::Home => self.data["projectHome"].is_object() || self.project_page.is_some(),
@@ -218,11 +228,16 @@ impl Backplane {
             Step::Record(None) => {
                 if let Some((name, frames)) = self.recording.take() {
                     self.m("frames", json!({"name": name, "n": frames.len(), "frames_ms": frames}));
+                    // the window's CPU per frame while recording: from the root's render to the end of its paint (build, layout, prepaint, paint; not the renderer)
+                    let mut cpu = std::mem::take(&mut self.screens.frame_cpu);
+                    if !cpu.is_empty() { cpu.sort_by(|a, b| a.partial_cmp(b).unwrap()); let p = |q: f32| cpu[((cpu.len() - 1) as f32 * q).round() as usize];
+                        self.m("frame_cpu", json!({"name": name, "n": cpu.len(), "p50_ms": p(0.5), "p95_ms": p(0.95), "max_ms": p(1.0)})); }
+                    if let Some(s) = &self.screens.solid { let st = s.read(cx).stats.clone(); self.m("solid_stats", json!({"name": name, "images": st.images, "last_ms": st.last_ms, "tris": st.last_tris, "size": [st.last_size.0, st.last_size.1]})); }
                     // the plot canvas's own CPU per paint while the record was open (culling, path building, tessellation, submission), not the rasterizer's time
-                    let mut ms = std::mem::take(&mut self.screens.plotview.paint_ms);
+                    let mut ms: Vec<f32> = Vec::new(); let mut sp: Vec<[f32; 3]> = Vec::new();
+                    for slot in 0..3 { let pv = self.screens.pv(slot); ms.append(&mut pv.paint_ms); sp.append(&mut pv.split); }
                     if !ms.is_empty() {
                         ms.sort_by(|a, b| a.partial_cmp(b).unwrap()); let p = |q: f32| ms[((ms.len() - 1) as f32 * q).round() as usize];
-                        let sp = std::mem::take(&mut self.screens.plotview.split);
                         let part = |k: usize| { let mut v: Vec<f32> = sp.iter().map(|x| x[k]).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); if v.is_empty() { (0.0, 0.0) } else { (v[(v.len() - 1) / 2], v[((v.len() - 1) as f32 * 0.95).round() as usize]) } };
                         let (lp, tess, sub) = (part(0), part(1), part(2));
                         self.m("plot_paint", json!({"name": name, "n": ms.len(), "p50_ms": p(0.5), "p95_ms": p(0.95), "max_ms": p(1.0), "loop_cull_build_p50_p95_ms": [lp.0, lp.1], "tessellate_p50_p95_ms": [tess.0, tess.1], "paint_path_p50_p95_ms": [sub.0, sub.1]}));
@@ -273,7 +288,7 @@ impl Backplane {
             }
             Step::Layers(on, cap, scroll) => { let pv = &mut self.screens.plotview; pv.layers_cap = cap; pv.layers_scroll.set_offset(point(px(0.), px(-scroll)));
                 self.screens.plotview.layers_open = on; self.ui_epoch += 1; self.begin("layers".into(), Goal::Frame, cx); cx.notify(); }
-            Step::ViewShow(kind, path) => { let t = self.selected.clone(); self.view_show(&t, &kind, &path, cx); self.m("viewshow", json!({"kind": kind, "path": path})); self.ui_epoch += 1; self.begin("viewshow".into(), Goal::Frame, cx); cx.notify(); }
+            Step::ViewShow(kind, path) => { let t = self.selected.clone(); self.screens.shown_wait = Some((kind.clone(), Instant::now())); for slot in 0..3 { self.screens.pv(slot).painted = None; } self.view_show(&t, &kind, &path, cx); self.m("viewshow", json!({"kind": kind, "path": path})); self.ui_epoch += 1; self.begin("viewshow".into(), Goal::Frame, cx); cx.notify(); }
             Step::Compare(i) => { // the Compare menu's row i (null: put the comparison away); the versions are asked for first
                 match i { None => crate::screens::histbar::compare(self, None),
                     Some(i) => { if self.screens.plotview.hist.refs.is_none() { crate::screens::histbar::ask_refs(self); } let r = self.screens.plotview.hist.refs.clone().and_then(|r| r.rows.get(i).cloned());
@@ -294,9 +309,18 @@ impl Backplane {
                 if let Some(b) = bounds { let at = (f32::from(b.origin.x) + fx * f32::from(b.size.width), f32::from(b.origin.y) + fy * f32::from(b.size.height)); crate::screens::plotview::tap_at(self, slot, &key, offs, at, view, Some(b)); }
                 let got = self.screens.pv(slot).picked.is_some(); self.m("tap", json!({"fx": fx, "fy": fy, "slot": slot, "picked": got})); self.ui_epoch += 1; self.begin("tap".into(), Goal::Frame, cx); cx.notify();
             }
-            Step::Pan(dx, dy) => { // a drag of the plot canvas by (dx, dy) window px
-                let pv = &mut self.screens.plotview; if let Some(v) = pv.view { pv.view = Some(v.pan(dx, dy)); }
+            Step::Pan(dx, dy, slot) => { // a drag of the plot canvas `slot` (0 Board/Schematic, 1 and 2 a Split's) by (dx, dy) window px
+                let pv = self.screens.pv(slot); if let Some(v) = pv.view { pv.touched = true; pv.view = Some(v.pan(dx, dy)); }
                 self.ui_epoch += 1; self.begin("pan".into(), Goal::Frame, cx); cx.notify();
+            }
+            Step::Orbit(..) | Step::OrbitEnd if self.screens.solid.is_none() => { self.m("input", json!({"step": "orbit", "ok": false, "error": "no 3D page"})); self.pump(cx); }
+            Step::Orbit(dx, dy) => { // a drag step on the 3D page as its mouse handler does it (a half-size draft); done when that image is shown
+                let s = self.screens.solid.clone().unwrap(); let n = s.read(cx).stats.images;
+                s.update(cx, |p, cx| { p.drag_by(dx, dy); cx.notify(); }); self.begin("orbit".into(), Goal::Solid(n + 1), cx); cx.notify();
+            }
+            Step::OrbitEnd => { // the button goes up: the full-size image
+                let s = self.screens.solid.clone().unwrap(); let n = s.read(cx).stats.images;
+                s.update(cx, |p, cx| { p.settle(); cx.notify(); }); self.begin("orbit_end".into(), Goal::Solid(n + 1), cx); cx.notify();
             }
             Step::Zoom(steps, fx, fy) => { // wheel notches at (fx, fy) as fractions of the canvas
                 let pv = &mut self.screens.plotview;
@@ -385,7 +409,7 @@ impl Backplane {
         match ctl {
             Ctl::None => "none".into(),
             Ctl::Pad => "pad (mouse only)".into(),
-            Ctl::Rail(kind) => { self.screens.rail_pending = Some(kind.clone()); self.screens.rail_at = Some(Instant::now()); self.screens.plot_click = matches!(kind.as_str(), "board" | "schematic").then(Instant::now); let _ = self.tx.try_send(crate::screens::viewer::view_kind(kind)); self.ui_epoch += 1; "view.action view".into() }
+            Ctl::Rail(kind) => { self.screens.rail_pending = Some(kind.clone()); self.screens.rail_at = Some(Instant::now()); self.screens.shown_wait = Some((kind.clone(), Instant::now())); for slot in 0..3 { self.screens.pv(slot).painted = None; } self.screens.plot_click = matches!(kind.as_str(), "board" | "schematic").then(Instant::now); let _ = self.tx.try_send(crate::screens::viewer::view_kind(kind)); self.ui_epoch += 1; "view.action view".into() }
             Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
             Ctl::ToggleSidebar => { self.sidebar_toggle(cx); "toggle sidebar".into() }
             Ctl::ToggleContext => { self.screens.ctx_open = !self.screens.ctx_open; self.ui_epoch += 1; cx.notify(); "context panel".into() }
