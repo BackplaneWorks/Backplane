@@ -114,6 +114,8 @@ impl Composer {
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
     pub fn dictate(&mut self, range: std::ops::Range<usize>, with: &str, caret: usize, cx: &mut Context<Self>) { self.ed.dictate(range, with, caret); self.sync(cx); }
     pub fn set_placeholder(&mut self, text: &str) { self.placeholder = text.to_string().into(); }
+    /// Move the caret one character: `dir` < 0 back, else forward.
+    pub fn caret(&mut self, dir: i32, cx: &mut Context<Self>) { self.edit(cx, |e| if dir < 0 { e.left(false, false) } else { e.right(false, false) }); }
     pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); }
     pub fn editor(&self) -> &Editor { &self.ed }
     pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }

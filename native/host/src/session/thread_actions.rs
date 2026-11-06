@@ -154,6 +154,15 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
                 None => b.rpc("thread.effort", json!({"thread": sel, "effort": value})),
             }
         }
+        // the desktop picker's cursor put on another agent (ModelPick.plan): one switch carrying `<provider>\u{1f}<model>`, then `\u{1f}<effort>` when the effort changed too; between turns the hub takes all of it or none
+        "provider" => {
+            if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            let mut p = value.split('\u{1f}');
+            let provider = p.next().unwrap_or(""); if provider.is_empty() { return None }
+            let mut q = json!({"thread": sel, "provider": provider, "model": p.next().unwrap_or("")});
+            if let Some(e) = p.next() { q["effort"] = json!(e) }
+            b.rpc("thread.provider", q);
+        }
         // Ui.fork.with: the next request makes a thread; the viewer on show is recorded for it (Viewer.record)
         "fork" => {
             let th = if value.is_empty() { sel } else { value };
@@ -296,6 +305,9 @@ mod tests {
         let o = run("model", "opus", sess()).unwrap(); assert_eq!(text(&o, 0), format!("{{\"id\":5,\"m\":\"thread.modes\",\"p\":{{\"thread\":\"{T}\",\"model\":\"opus\"}}}}"));
         let o = run("effort", "high", sess()).unwrap(); assert!(text(&o, 0).contains("\"m\":\"thread.effort\"") && text(&o, 0).contains("\"effort\":\"high\""));
         let o = run("effort", "@codex", sess()).unwrap(); assert!(text(&o, 0).contains("\"m\":\"thread.provider\"") && text(&o, 0).contains("\"provider\":\"codex\""));
+        let o = run("provider", "codex\u{1f}gpt-6\u{1f}high", sess()).unwrap(); assert_eq!(text(&o, 0), format!("{{\"id\":5,\"m\":\"thread.provider\",\"p\":{{\"thread\":\"{T}\",\"provider\":\"codex\",\"model\":\"gpt-6\",\"effort\":\"high\"}}}}"));
+        let o = run("provider", "codex\u{1f}", sess()).unwrap(); assert!(text(&o, 0).contains("\"model\":\"\"") && !text(&o, 0).contains("effort"), "an unchanged effort is not sent");
+        assert!(run("provider", "", sess()).is_none());
         let o = run("effort", "", sess()).unwrap(); assert!(text(&o, 0).contains("\"effort\":\"\""), "auto is the empty effort");
     }
     #[test] fn find_open_modes() {

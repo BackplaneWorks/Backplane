@@ -148,6 +148,14 @@ pub fn model_choices(models: &Value, provider: &str, model: &str) -> Value {
     Value::Array(v)
 }
 
+/// Every agent's models and efforts, by name: the desktop picker's cursor walks another agent's lists on the client, a key at a time, with no request (the thread's own lists stay in `picker`).
+pub fn picker_agents(models: Option<&Value>) -> Value {
+    Value::Object(["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"].iter().map(|p| {
+        let k = picker(p, "", "", "");
+        (p.to_string(), json!({"models": models.map_or(k["models"].clone(), |ms| model_choices(ms, p, "")), "efforts": k["efforts"]}))
+    }).collect())
+}
+
 /// The Context panel's sections for a thread (present/tokstats.rs), read from its settings.
 pub fn stats(st: &State, id: &str) -> Value {
     let Some(t) = st.threads.get(id) else { return Value::Null };
@@ -185,6 +193,7 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models: Option<&Value>)
     let mut pk = picker(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")));
     if let Some(ms) = models { pk["models"] = model_choices(ms, &t.provider, &t.model); }
     m.insert("picker".into(), pk);
+    m.insert("pickerAgents".into(), picker_agents(models));
     m.insert("claude".into(), json!(t.provider == "claude"));
     m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
     Some(m)
@@ -227,6 +236,9 @@ mod tests {
         assert_eq!(usage_tail("claude", ""), ""); assert_eq!(usage_tail("codex", ""), " · ctx n/a");
         assert_eq!(usage_tail("claude", "45000/200000"), " · ctx 22% of 200k"); assert_eq!(usage_tail("claude", "900/0"), " · ctx 900");
         let p = picker("claude", "claude-opus-4", "high", "");
+        let a = picker_agents(Some(&json!({"codex": ["gpt-6"]})));
+        assert_eq!(a["codex"]["models"].as_array().unwrap().iter().map(|m| m["value"].as_str().unwrap()).collect::<Vec<_>>(), ["", "gpt-6"], "the agent's default, then its models");
+        assert_eq!(a["claude"]["efforts"][0]["value"], "", "auto first"); assert_eq!(a["grok"]["models"][0]["value"], ""); assert_eq!(picker_agents(None)["codex"]["models"].as_array().unwrap().len(), 1, "only the default before the hub has heard its models");
         assert_eq!(p["label"], "claude · claude-opus-4 · high"); assert_eq!(p["efforts"][3]["on"], true); assert_eq!(p["models"][0]["on"], false);
     }
     #[test] fn the_model_menu_lists_the_providers_models_default_first_and_keeps_the_threads_own() {

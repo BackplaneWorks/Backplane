@@ -6,6 +6,7 @@ use gpui::{actions, prelude::*, *};
 use serde_json::Value;
 
 actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
+    PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
     RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal]);
@@ -19,6 +20,8 @@ const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !AskInput && !
 /// Where Ctrl+H is the viewer's: everywhere but the small fields, the terminal and web pages, whose own it stays (it deletes a character in many fields and in a shell, and opens a web page's history).
 /// The composer is included, as in the old client: the board beside it answers without a click on the canvas. With no plot on show the key goes on to the composer (`key_layers`).
 const NOT_FIELD: &str = "!TextInput && !PickInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
+/// The open model menu has its keys wherever the keyboard is: the window says `Picker` while it is open, and these bind at the depth of each text field, after the field's own keys, so they come first.
+const PICK_SCOPES: [&str; 6] = ["Picker", "Picker > Composer", "Picker > PickInput", "Picker > TextInput", "Picker > AskInput", "Picker > ImpInput"];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind { Legacy, Rebind, Fixed }
@@ -32,6 +35,13 @@ pub const TABLE: &[Entry] = &[
     e("send-alt", "Send (also)", "Composer", "ctrl-enter", Fixed),
     e("focus", "Put the keyboard in the message box", "Composer", "/", Fixed),
     e("models", "Agent, model and effort", "Composer", "ctrl-m", Rebind),
+    e("menu-up", "Previous row: wraps round, and scrolls into view", "Model menu and popups", "up", Fixed),
+    e("menu-down", "Next row: wraps round, and scrolls into view", "Model menu and popups", "down", Fixed),
+    e("menu-left", "Less effort, or the caret while the search holds text", "Model menu", "left", Fixed),
+    e("menu-right", "More effort, or the caret while the search holds text", "Model menu", "right", Fixed),
+    e("menu-tab", "Next column: provider, model, effort. In a popup, take the row", "Model menu and popups", "tab", Fixed),
+    e("menu-back", "Previous column", "Model menu", "shift-tab", Fixed),
+    e("menu-enter", "Take the highlighted row", "Model menu and popups", "enter", Fixed),
     e("close", "Close a popup, dialog or menu", "Dialogs", "escape", Legacy),
     e("palette", "Commands: jump to a thread or run a command", "Palette", "secondary-k", Rebind),
     e("palette-alt", "Commands (also)", "Palette", "secondary-shift-p", Fixed),
@@ -61,7 +71,6 @@ pub const TABLE: &[Entry] = &[
 ];
 /// Keys the old client had that this one cannot do yet (no equivalent): listed, not faked.
 pub const MISSING: &[(&str, &str)] = &[
-    ("Arrows, Tab in the model picker", "Picker cursor keys: the picker takes search and Enter only"),
 ];
 
 pub fn find(id: &str) -> Option<&'static Entry> { TABLE.iter().find(|x| x.id == id) }
@@ -84,7 +93,8 @@ pub fn show(key: &str, mac: bool) -> String {
         out.push(match (*p, mac) {
             ("secondary", true) => "⌘".into(), ("secondary" | "ctrl", false) => "Ctrl".into(), ("ctrl", true) => "⌃".into(),
             ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(),
-            ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(), ("delete", _) => "Delete".into(), ("backspace", _) => "Backspace".into(),
+            ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(), ("delete", _) => "Delete".into(), ("backspace", _) => "Backspace".into(), ("tab", _) => "Tab".into(),
+            ("up", _) => "Up".into(), ("down", _) => "Down".into(), ("left", _) => "Left".into(), ("right", _) => "Right".into(),
             (k, _) if last && k.chars().count() == 1 => k.to_uppercase(), (k, _) => k.to_string(),
         });
     }
@@ -125,6 +135,11 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     v.extend([KeyBinding::new("b", RailBoard, Some(FREE)), KeyBinding::new("s", RailSchematic, Some(FREE)), KeyBinding::new("3", Rail3d, Some(FREE)), KeyBinding::new("v", RailSplit, Some(FREE)),
         KeyBinding::new("m", RailMech, Some(FREE)), KeyBinding::new("f", RailFiles, Some(FREE)), KeyBinding::new("d", RailDiff, Some(FREE)), KeyBinding::new("r", RailReview, Some(FREE)),
         KeyBinding::new("w", RailBrowser, Some(FREE))]);
+    let key = |id: &str| find(id).map_or("", |x| x.key);
+    for c in PICK_SCOPES.map(Some) {
+        v.extend([KeyBinding::new(key("menu-up"), PickUp, c), KeyBinding::new(key("menu-down"), PickDown, c), KeyBinding::new(key("menu-left"), PickLeft, c), KeyBinding::new(key("menu-right"), PickRight, c),
+            KeyBinding::new(key("menu-tab"), PickTab, c), KeyBinding::new(key("menu-back"), PickBackTab, c), KeyBinding::new(key("menu-enter"), PickEnter, c)]);
+    }
     v.extend(pad_bindings(&v, &k("close")));
     let term = term_bindings(&v, &k("term"));
     v.extend(term);
@@ -150,7 +165,7 @@ fn pad_bindings(all: &[KeyBinding], close: &str) -> Vec<KeyBinding> {
     use crate::screens::padview::{Delete, Undo};
     let mut v = vec![KeyBinding::new("secondary-z", Undo, Some("DrawPad")), KeyBinding::new("delete", Delete, Some("DrawPad")), KeyBinding::new("backspace", Delete, Some("DrawPad"))];
     let close = Keystroke::parse(close).map(|k| k.unparse()).unwrap_or_default();
-    let own = ["composer::", "text_input::", "backplane::Send", "backplane::CopySelection"]; // the length box's editing keys, and keys only a text field or the page has
+    let own = ["composer::", "text_input::", "backplane::Send", "backplane::CopySelection", "keys::Pick"]; // the length box's editing keys, keys only a text field or the page has, and the picker's (bound only in its scopes)
     let shortcuts = all.iter().filter(|b| !own.iter().any(|o| b.action().name().starts_with(o)));
     for key in shortcuts.filter_map(|b| b.keystrokes().first().map(|k| k.unparse())).filter(|k| *k != close) {
         v.extend(["DrawPad", "PadLength"].map(|ctx| KeyBinding::new(&key, NoAction, Some(ctx))));
@@ -228,8 +243,8 @@ impl Backplane {
 }
 
 /// Registers every action on the root element.
-pub fn attach(el: Div, cx: &mut Context<Backplane>) -> Div {
-    let el = el.key_context("Backplane");
+pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
+    let el = el.key_context(if picker { "Backplane Picker" } else { "Backplane" });
     macro_rules! on { ($el:expr, $a:ty, $f:expr) => { $el.on_action(cx.listener(|this, _: &$a, window, cx| { let _ = &window; ($f)(this, window, cx) })) } }
     let el = on!(el, NewThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
         let mut pid = project_of(&this.data, &this.selected); if pid.is_empty() { pid = this.project_page.clone().or_else(|| nth_project(&this.data, 1)).unwrap_or_default(); }
@@ -240,6 +255,14 @@ pub fn attach(el: Div, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, StopTurn, |this: &mut Backplane, _, cx: &mut Context<Backplane>| if has_tool(&this.data, "interrupt") { let _ = this.tx.try_send(Command::Action("interrupt".into(), String::new())); cx.notify(); });
     let el = on!(el, SettleThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| for a in ["settle", "unsettle"] { if has_tool(&this.data, a) { let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); break } });
     let el = on!(el, ModelPicker, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.data["thread"].is_object() { this.picker_toggle(w, cx) });
+    use crate::screens::picker::Key;
+    let el = on!(el, PickUp, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_key(Key::Up, w, cx));
+    let el = on!(el, PickDown, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_key(Key::Down, w, cx));
+    let el = on!(el, PickTab, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_key(Key::Tab, w, cx));
+    let el = on!(el, PickBackTab, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_key(Key::BackTab, w, cx));
+    let el = on!(el, PickLeft, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_side(Key::Left, w, cx));
+    let el = on!(el, PickRight, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_side(Key::Right, w, cx));
+    let el = on!(el, PickEnter, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.picker_enter(cx));
     let el = on!(el, PrevThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, false); this.key_go(n, cx) });
     let el = on!(el, NextThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, true); this.key_go(n, cx) });
     let el = on!(el, UberChat, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
@@ -391,6 +414,21 @@ mod tests {
     #[test] fn palette_and_dialog_scopes() {
         assert_eq!(d("escape", &["PickInput"]), "backplane::ClosePopup"); assert_eq!(d("escape", &["AskInput"]), "backplane::ClosePopup");
         assert_eq!(d("enter", &["PickInput"]), "composer::Go"); assert_eq!(d("ctrl-k", &["PickInput"]), "backplane::OpenPaletteKey", "the same chord shuts it");
+    }
+    #[test] fn the_open_model_menu_has_its_keys_wherever_the_keyboard_is() {
+        for ctx in [&["Picker"][..], &["Picker", "PickInput"][..], &["Picker", "Composer"][..], &["Picker", "TextInput"][..], &["Picker", "AskInput"][..], &["Picker", "ImpInput"][..]] {
+            for (k, a) in [("up", "PickUp"), ("down", "PickDown"), ("left", "PickLeft"), ("right", "PickRight"), ("tab", "PickTab"), ("shift-tab", "PickBackTab"), ("enter", "PickEnter")] { assert_eq!(d(k, ctx), format!("keys::{a}"), "{k} in {ctx:?}"); }
+            assert_eq!(d("escape", ctx), "backplane::ClosePopup"); assert_eq!(d("ctrl-m", ctx), "keys::ModelPicker", "the same chord shuts it");
+        }
+        // shut (or with something over it, when the window does not say Picker) the same keys are the fields' own
+        assert_eq!(d("up", &["Composer"]), "composer::Up"); assert_eq!(d("tab", &["Composer"]), "composer::Tab"); assert_eq!(d("enter", &["Composer"]), "backplane::Send");
+        assert_eq!(d("up", &["PickInput"]), "composer::Up", "the palette's search"); assert_eq!(d("enter", &["PickInput"]), "composer::Go"); assert_eq!(d("up", &[]), "");
+        assert_eq!(d("shift-left", &["Picker", "PickInput"]), "composer::SelLeft", "selecting in the search stays");
+    }
+    #[test] fn the_menu_keys_are_listed_and_none_is_missing() {
+        for id in ["menu-up", "menu-down", "menu-left", "menu-right", "menu-tab", "menu-back", "menu-enter"] { let x = find(id).unwrap(); assert_eq!(x.kind, Fixed); assert!(Keystroke::parse(x.key).is_ok(), "{id}"); }
+        assert_eq!(hint(&Local::default(), "menu-up"), "Up"); assert_eq!(hint(&Local::default(), "menu-back"), "Shift+Tab"); assert_eq!(show("shift-tab", true), "⇧Tab");
+        assert!(MISSING.iter().all(|(k, _)| !k.contains("picker")));
     }
     #[test] fn a_rebound_shortcut_moves_and_reset_restores_it() {
         let mut l = Local::default();

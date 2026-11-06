@@ -475,8 +475,8 @@ mod tests {
         let got = thread_object(&st, "h", th, &p["params"], "").expect("a plain idle thread is drawn here");
         let want = &p["out"]["shown"]["thread"];
         for (k, w) in want.as_object().unwrap() { assert_eq!(got.get(k), Some(w), "key {k}"); }
-        // the Allowance chip's text (keys.rs `allowance`) is Backplane's own: the recorded helper reply has no such key
-        assert_eq!(got.as_object().unwrap().keys().filter(|k| *k != "allowance").count(), want.as_object().unwrap().len());
+        // the Allowance chip's text (keys.rs `allowance`) and the picker's other agents (`pickerAgents`) are Backplane's own: the recorded helper reply has no such keys
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "pickerAgents")).count(), want.as_object().unwrap().len());
     }
     // a thread that sent messages into other threads still opens: those rows are left out of its page
     #[test] fn rows_this_thread_sent_elsewhere_are_left_out_not_refused() {
