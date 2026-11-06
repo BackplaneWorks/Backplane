@@ -40,7 +40,7 @@ esac
 [ -n "${DISPLAY:-}" ] || die "no \$DISPLAY"
 mkdir -p "$H"; chmod 700 "$D" "$H"
 if [ -s "$H/events.jsonl" ] && [ ! -f "$D/.fresh" ]; then die "$H holds a log that fresh mode did not make: pick another FRESH_DIR"; fi
-touch "$D/.fresh"
+touch "$D/.fresh"; [ -e "$H/hub.owner" ] || echo "fresh.sh" > "$H/hub.owner"   # this home is ours (the hub refuses an unmarked log over a megabyte as someone else's data)
 if ! alive "$(pid hub)"; then
   ! curl -s -m1 -o /dev/null "http://127.0.0.1:$PORT/hello" || die "port $PORT already answers (another hub): set FRESH_PORT"
   if [ ! -s "$H/events.jsonl" ] && [ -n "$AGENT" ]; then   # a new home: new threads start on this provider and model
