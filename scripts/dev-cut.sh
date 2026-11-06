@@ -29,6 +29,7 @@ mkdir -p "$DEV/builds"; chmod 700 "$DEV"
 tmp=$DEV/builds/.cut-$$; trap 'rm -rf "${tmp:?}"' EXIT
 mkdir "$tmp"; cp "$src/backplane-hub" "$src/backplane-gpui" "$tmp/"
 [ ! -x "$src/backplane-browser" ] || cp "$src/backplane-browser" "$tmp/"
+[ ! -x "$src/backplane-voice" ] || cp "$src/backplane-voice" "$tmp/"
 [ ! -e "$src/libcef.so" ] || cp -P "$src/libcef.so" "$tmp/"   # a link to the shared stripped libcef (dev-build.sh)
 [ ! -f "$src/COMMIT" ] || cp "$src/COMMIT" "$tmp/"
 [ ! -f "$src/HAIKU" ] || cp "$src/HAIKU" "$tmp/"

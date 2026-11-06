@@ -14,6 +14,7 @@ There is no JavaScript hub and no web client in this tree.
 ## Layout
 
 - `native/host/`: the Rust hub (`backplane-hub`). HTTP + WebSocket, event store, agent processes (Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi), KiCad (in-process IPC, plots, STEP), bots and rooms, pairing, far threads, terminals. The presenter (`present/`, `presenter.rs`) is Rust only; there is no helper process and no `--policy-bin`. The CBOR dictionaries are in `src/wire_dict.rs` (append-only forever, the wire depends on the order).
+- `native/voice/`: the voice helper (`backplane-voice`), a child process of the hub: speech to text by OpenAI or locally through sherpa-onnx's C API, NDJSON on stdout (its `README.md`).
 - `native/gpui/`: the GPUI desktop client (`backplane-gpui`); `vendor/` is vendored crates. Its colours come from `assets/web/style.css`, its logo from `assets/web/favicon*.svg`.
 - `mobile/ios`, `mobile/android`: the phone apps. They speak the hub's data/1 protocol (`docs/PHONE-DATA.md`).
 - `tools/`: helper programs that are not Rust: `browser` (headless Chromium over NDJSON), `cef`, `step2glb`, `voice`, `platform`. Built by `scripts/build-*.sh`.

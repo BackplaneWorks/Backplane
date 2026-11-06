@@ -1,11 +1,11 @@
 #!/bin/bash
 # Build the hub and window and publish them with dev-cut.sh, keeping the app's progress strip (screens/devbar.rs) up to date.
-#   scripts/dev-build.sh [--no-cut] [--gate]    release builds of native/host (backplane-hub) and native/gpui (backplane-gpui), then dev-cut.sh
-#   --gate   run the tests of both crates first (minus scripts/gate-skip.txt); a red test stops the build and nothing is published
+#   scripts/dev-build.sh [--no-cut] [--gate]    release builds of native/host (backplane-hub), native/voice (backplane-voice) and native/gpui (backplane-gpui), then dev-cut.sh
+#   --gate   run the tests of all three crates first (minus scripts/gate-skip.txt); a red test stops the build and nothing is published
 # The strip's bar is time against the last build's time ($DEV/.build-secs, one per mode; a first build guesses 150 s): an incremental build compiles one crate, a full one
 # hundreds, so counting crates says nothing. The bar stops at 95% until the build is done.
 # Env: GPUI_DEV_DIR (default ~/.backplane-gpui-dev), BACKPLANE_DEV_STATUS (the status file; default $DEV/BUILD), BUILD_ROOT (the checkout to build; default this one),
-#      PROFILE (cargo profile, default fast; release for fat LTO), HOST_TARGET / GPUI_TARGET (a CARGO_TARGET_DIR for each crate), ASSETS (an assets/ folder to ship; default the one in the build now current), JOBS (default: about 2 GB of free memory a job, a share of the cores, at most 28), BUILD_SLOTS / BUILD_LOCK_DIR / NO_SCCACHE (scripts/lib-buildslot.sh).
+#      PROFILE (cargo profile, default fast; release for fat LTO), HOST_TARGET / GPUI_TARGET / VOICE_TARGET (a CARGO_TARGET_DIR for each crate), ASSETS (an assets/ folder to ship; default the one in the build now current), JOBS (default: about 2 GB of free memory a job, a share of the cores, at most 28), BUILD_SLOTS / BUILD_LOCK_DIR / NO_SCCACHE (scripts/lib-buildslot.sh).
 set -u
 ROOT=${BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}; HERE=$(cd "$(dirname "$0")" && pwd)
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; ST=${BACKPLANE_DEV_STATUS:-$DEV/BUILD}; J=${JOBS:-}  # cargo -j: JOBS, else sized from free memory once the build lock is held (below)
@@ -19,7 +19,7 @@ if [ -z "${BQ_HELD:-}" ]; then . "$HERE/lib-buildslot.sh"; export BQ_HELD=1
 PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
 GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;; esac; done
 SECS=$DEV/.build-secs$([ "$GATE" = 1 ] && echo -gate)
-HT=${HOST_TARGET:-$ROOT/native/host/target}; GT=${GPUI_TARGET:-$ROOT/native/gpui/target}
+HT=${HOST_TARGET:-$ROOT/native/host/target}; GT=${GPUI_TARGET:-$ROOT/native/gpui/target}; VT=${VOICE_TARGET:-$ROOT/native/voice/target}
 mkdir -p "$DEV"
 est=$(cat "$SECS" 2>/dev/null || echo 150); start=$(date +%s); PH=$(mktemp "$DEV/.phase.XXXX"); echo "hub" > "$PH"; LOG=$(mktemp "$DEV/.buildlog.XXXX")
 status() { printf '{"phase":"%s","text":"%s","done":%s,"total":%s}\n' "$1" "$2" "${3:-0}" "${4:-0}" > "$ST.$$" && mv -f "$ST.$$" "$ST"; }
@@ -46,6 +46,8 @@ CG() { ( cd "$1" && CARGO_TARGET_DIR="$2" taskset -c 0-27 nice -n 10 cargo "${@:
 # The window is built WITH the embedded Chromium (feature cef; docs/browser-gpui-cef.md) unless GPUI_FEATURES is set to something else (empty: none). CEF's distribution is cached once in
 # CEF_PATH (the cef crate downloads it on the first build); if that build fails the window is built without it and says so in the Browser tab ("embedded browser unavailable").
 FEATURES=${GPUI_FEATURES-cef}; export CEF_PATH=${CEF_PATH:-$HOME/.cache/backplane/cef-rs}
+# the voice helper: the hub looks for `backplane-voice` beside itself
+voicestep() { echo "voice" > "$PH"; CG "$ROOT/native/voice" "$VT" build --profile "$PROFILE" --offline -j "$J" --bin backplane-voice > "$LOG" 2>&1 || fail voice; }
 winstep() {
   echo "window" > "$PH"
   if [ -n "$FEATURES" ] && ! CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" --offline -j "$J" --features "$FEATURES" > "$LOG" 2>&1; then
@@ -54,30 +56,35 @@ winstep() {
   if [ -z "$FEATURES" ]; then CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" --offline -j "$J" > "$LOG" 2>&1 || fail window; fi
 }
 if [ "$GATE" = 1 ]; then
-  echo "compiling tests" > "$PH"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX")
+  echo "compiling tests" > "$PH"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX"); LV=$(mktemp "$DEV/.t.XXXX")
   CG "$ROOT/native/host" "$HT" test --offline -j "$J" --no-run > "$LH" 2>&1 & ph=$!
   CG "$ROOT/native/gpui" "$GT" test --offline -j "$J" --no-run > "$LW" 2>&1 & pw=$!
-  wait $ph || { cp "$LH" "$LOG"; rm -f "$LH" "$LW"; fail "hub tests"; }
-  wait $pw || { cp "$LW" "$LOG"; rm -f "$LH" "$LW"; fail "window tests"; }
+  CG "$ROOT/native/voice" "$VT" test --offline -j "$J" --no-run > "$LV" 2>&1 & pv=$!
+  wait $ph || { cp "$LH" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "hub tests"; }
+  wait $pw || { cp "$LW" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "window tests"; }
+  wait $pv || { cp "$LV" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "voice tests"; }
   echo "testing" > "$PH"; names=(); pids=(); logs=()
   # each test program gets its own TMPDIR (tests make dirs under temp_dir() and never remove them; lib-buildslot.sh bpt_new), removed after a pass, kept (bounded) after a failure
   run() { n=$1; dir=$2; shift 2; l=$(mktemp "$DEV/.t.XXXX"); t=$(bpt_new); tds+=("$t"); ( cd "$dir" && TMPDIR=$t CARGO_MANIFEST_DIR="$dir" "$@" ) > "$l" 2>&1 9>&- & pids+=($!); names+=("$n"); logs+=("$l"); }
   for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LH"); do run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}"; done
   for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LW"); do run "window tests" "$ROOT/native/gpui" "$x"; done
-  rm -f "$LH" "$LW"
+  for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LV"); do run "voice tests" "$ROOT/native/voice" "$x"; done
+  rm -f "$LH" "$LW" "$LV"
   bad=; for i in "${!pids[@]}"; do wait "${pids[$i]}" && bpt_end "${tds[$i]}" 0 || { [ -n "$bad" ] || bad=$i; bpt_end "${tds[$i]}" 1; }; done
   if [ -n "$bad" ]; then cp "${logs[$bad]}" "$LOG"; rm -f "${logs[@]}"; fail "${names[$bad]}"; fi
   rm -f "${logs[@]}"
   # the builds come after the tests, not beside them: a build at -j28 starves the timing-sensitive hub tests (reconnect_loses_nothing_under_streaming_load and others fail under that load)
   echo "hub" > "$PH"; CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
+  voicestep
   winstep
 else
   echo "hub" > "$PH";    CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
+  voicestep
   winstep
 fi
 kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"; rm -f "$DEV/.last-failure" "$DEV/.last-failure.log"
 D=$(mktemp -d "$DEV/.stage.XXXX")
-cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$D/"
+cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$VT/$PROFILE/backplane-voice" "$D/"
 # the embedded Chromium: libcef.so beside the window (it is linked with RUNPATH $ORIGIN); the rest of CEF's runtime (paks, icudtl.dat, locales, snapshot) is found in
 # ~/.cache/backplane/cef-runtime/<version>, which is made once here from the build (libcef stripped: 1.4 GB with symbols, ~270 MB without), and builds link to that one libcef.
 if [ -n "$FEATURES" ] && [ -f "$GT/$PROFILE/libcef.so" ]; then

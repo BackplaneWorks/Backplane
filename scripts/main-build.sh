@@ -47,7 +47,7 @@ while :; do
   if [ "${avail:-0}" -lt "$FREE" ]; then status failed "Not building $BR $(printf %s "$t" | cut -c1-10): ${avail}G free, need ${FREE}G"; [ "${1:-}" = --once ] && exit 1; sleep 30; continue; fi
   say "building $BR $(printf %s "$t" | cut -c1-10) (tests first)"
   git -C "$WT" checkout -q --detach "$t" && git -C "$WT" clean -qfd -e Cargo.lock || { say "cannot check out $t"; sleep "$POLL"; continue; }
-  ( exec setsid env BQ_MAIN=1 MAIN_PREV="$b" BUILD_ROOT="$WT" HOST_TARGET="$TG/host" GPUI_TARGET="$TG/gpui" "$HERE/dev-build.sh" --gate ) &
+  ( exec setsid env BQ_MAIN=1 MAIN_PREV="$b" BUILD_ROOT="$WT" HOST_TARGET="$TG/host" GPUI_TARGET="$TG/gpui" VOICE_TARGET="$TG/voice" "$HERE/dev-build.sh" --gate ) &
   PID=$!
   # a merge while a build runs does not drop it: the build finishes and publishes what passed, then the loop builds the newest tip (one build per burst of merges, never lost work)
   moved=
