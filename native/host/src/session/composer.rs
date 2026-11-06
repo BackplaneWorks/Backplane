@@ -143,9 +143,9 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
                 let text = mention::complete(draft_of(session, sel), &format!("$install?{url}")).trim_end().to_string();
                 return Some(ActOut { session_patch: json!({"drafts": { sel: text }}), cmds: vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text})] });
             }
-            if let Some(url) = word.strip_prefix("$install!") {
+            if let Some((url, replace)) = word.strip_prefix("$install!").map(|u| (u, false)).or_else(|| word.strip_prefix("$replace!").map(|u| (u, true))) {
                 let d = draft_of(session, sel); let t = mention::token(d); let text = d[..d.len() - t.len()].trim_end().to_string();
-                let req = json!({"id": session["rid"].as_u64().unwrap_or(0), "m": "skill.install", "p": {"url": url, "provider": facts.provider_of(sel)}});
+                let req = json!({"id": session["rid"].as_u64().unwrap_or(0), "m": "skill.install", "p": {"url": url, "provider": facts.provider_of(sel), "replace": replace}});
                 return Some(ActOut { session_patch: json!({"rid": session["rid"].as_u64().unwrap_or(0) + 1, "drafts": { sel: text }}), cmds: vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text}), json!({"type": "send", "hub": hub, "text": req.to_string()})] });
             }
             let text = mention::complete(draft_of(session, sel), word);
