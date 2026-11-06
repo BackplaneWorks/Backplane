@@ -55,7 +55,7 @@ Shared integration contracts (owned outside native code):
 - `Backplane.improvementsPreviewBody(body)` returns the exact complete body and
   encoded URL without another metadata footer.
 - Both browser fragment routes above must be supported by the paired hub version.
-- Missing/stale bridge APIs fail closed with the local draft retained.
+- If the shared preview functions are missing or stale, the app fails closed and keeps the local draft.
 
 Native diagnostics are deliberately unavailable in this first integration.
 The existing iOS performance collector is debug/simulator-only and Android has
@@ -67,18 +67,16 @@ Offline checks, with no external issue or sign-in requests:
 
 ```sh
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 uv run --no-project --offline mobile/tests/improvements/check.py
-node mobile/tests/improvements/bridge.mjs
 ```
 
-The first compiles/runs the actual Kotlin model using cached Gradle compiler
-jars and runs Foundation Swift model tests if `swiftc` is available. The second
-tests the real stateless bridge adapters with a stubbed shared policy and exact
-Unicode/CRLF/whitespace input. Shared format/normalization tests belong to the
-parent's `issue-report` checks. Neither test opens a URL. Model checks cover
-target migration, screenshot default, evidence gating, exact body/URL parity,
-destination restrictions and duplicate-opening receipts.
+The check compiles/runs the actual Kotlin model using cached Gradle compiler
+jars and runs Foundation Swift model tests if `swiftc` is available. Shared
+format/normalization tests belong to the parent's `issue-report` checks. It
+does not open a URL. Model checks cover target migration, screenshot default,
+evidence gating, exact body/URL parity, destination restrictions and
+duplicate-opening receipts.
 
-On this Linux host, Kotlin model and adapter checks pass. Swift compiler/Xcode
+On this Linux host, Kotlin model checks pass. Swift compiler/Xcode
 are unavailable, so the iOS model executable and SwiftUI build were not run.
 Android `:app:compileDebugKotlin` passed offline using Java 17, two workers and
 not an APK or device qualification. No simulator/device UI, system picker,
