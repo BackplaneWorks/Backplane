@@ -966,6 +966,8 @@ impl mail::owner::OwnerLink for ToHolder {
         Box::pin(async move { self.sent.lock().unwrap().push(link.to_string()); if link != "linkB" { return None } let o: Value = serde_json::from_str(&body).unwrap(); Some(self.holder.owner_received(&self.as_link, &o).await) })
     }
 }
+/// Walk A's outbox until `f` holds for its pending tickets (a walk already going makes ours return at once; the clock only bounds a hang).
+async fn walk_until(b: &Arc<Bots>, f: impl Fn(&[Value]) -> bool) { for _ in 0..800 { b.owner_outbox().await; if f(&b.owner_records().await) { return } tokio::time::sleep(std::time::Duration::from_millis(25)).await } panic!("the outbox never got there") }
 struct Pair { hb: Arc<Hub>, bb: Arc<Bots>, ha: Arc<Hub>, ba: Arc<Bots>, ua: String, ubb: String, uid: String, ame: String, bme: String }
 /// machine B holds the uberbot's conversation; machine A has a replica of it (same uid, the lease held by B) and the two know each other's links
 async fn owner_pair(tag: &str) -> Pair {
@@ -992,9 +994,9 @@ async fn owner_pair(tag: &str) -> Pair {
     // mail for the uberbot arrives on A: filed, with a pending ticket
     assert_eq!(rpc(&ha, "mail.send", json!({"to":format!("bot:{ua}"),"text":"hello owner\nmore"})).await["ok"], true);
     let pend = ba.owner_records().await; assert_eq!(pend.len(), 1, "{pend:?}"); let r = pend[0].clone(); assert_eq!(r["id"].as_str().unwrap().starts_with("mail"), true);
-    ba.owner_outbox().await;                       // plans: the holder is chosen and persisted before IO
-    let planned = ba.owner_records().await; assert_eq!(planned[0]["to"], bme.as_str()); assert!(link.sent.lock().unwrap().is_empty());
-    ba.owner_outbox().await;                       // sends
+    // a walk of the background timer or owner_kick may hold the walker, and ours then returns at once: walk until the step has happened, not once
+    walk_until(&ba, |r| r.is_empty() || r[0]["to"] == bme.as_str()).await;   // plans: the holder is chosen and persisted before IO
+    walk_until(&ba, |r| r.is_empty()).await;                                 // sends
     assert_eq!(link.sent.lock().unwrap().as_slice(), ["linkB"]);
     assert!(ba.owner_records().await.is_empty(), "committed: the ticket is cleared");
     // B has the mail: its own conversation, the original text, addressed to its uberbot, and a ticket of its own
@@ -1024,18 +1026,24 @@ impl mail::owner::OwnerLink for Slow {
 /// plan a pending ticket for A's outbox: file mail for the owner, then one walk that chooses the recipient
 async fn owner_planned(p: &Pair) {
     assert_eq!(rpc(&p.ha, "mail.send", json!({"to":format!("bot:{}", p.ua),"text":"hi"})).await["ok"], true);
-    p.ba.owner_outbox().await;
-    assert_eq!(p.ba.owner_records().await[0]["to"], p.bme.as_str());
+    walk_until(&p.ba, |r| r.first().map_or(false, |x| x["to"] == p.bme.as_str())).await;
+}
+/// a link whose request stays inside `post` until the test lets it go: no clock, so a loaded runner changes nothing
+struct Held { n: std::sync::atomic::AtomicUsize, entered: tokio::sync::Notify, release: tokio::sync::Semaphore }
+impl mail::owner::OwnerLink for Held {
+    fn post<'a>(&'a self, _l: &'a str, _b: String) -> Fut<'a, Option<(u16, String)>> { Box::pin(async move { self.n.fetch_add(1, std::sync::atomic::Ordering::SeqCst); self.entered.notify_one(); self.release.acquire().await.unwrap().forget(); None }) }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn the_owner_outbox_has_one_walker_at_a_time_and_a_walk_ends() {
     let p = owner_pair("walk").await; owner_planned(&p).await;
-    let link = Arc::new(Slow { n: Default::default() }); p.ba.set_owner_link(link.clone());
+    let link = Arc::new(Held { n: Default::default(), entered: Default::default(), release: tokio::sync::Semaphore::new(0) }); p.ba.set_owner_link(link.clone());
     let (b1, b2) = (p.ba.clone(), p.ba.clone());
-    let (w1, w2) = (tokio::spawn(async move { b1.owner_outbox().await }), tokio::spawn(async move { tokio::time::sleep(std::time::Duration::from_millis(100)).await; b2.owner_outbox().await }));
-    let _ = tokio::join!(w1, w2);
+    let w1 = tokio::spawn(async move { b1.owner_outbox().await });
+    link.entered.notified().await;                     // the first walk is inside its request, and stays there until released
+    tokio::spawn(async move { b2.owner_outbox().await }).await.unwrap();   // the second walk returns at once: it saw the first still going
     assert_eq!(link.n.load(std::sync::atomic::Ordering::SeqCst), 1, "the second walk saw the first still going and left");
-    p.ba.owner_outbox().await;
-    assert_eq!(link.n.load(std::sync::atomic::Ordering::SeqCst), 2, "a walk that ended lets the next one run");
+    link.release.add_permits(100); w1.await.unwrap();   // requests go through now, whoever walks (the background timer and owner_kick may too)
+    for _ in 0..800 { p.ba.owner_outbox().await; if link.n.load(std::sync::atomic::Ordering::SeqCst) >= 2 { break } tokio::time::sleep(std::time::Duration::from_millis(25)).await }
+    assert!(link.n.load(std::sync::atomic::Ordering::SeqCst) >= 2, "a walk that ended lets the next one run");
 }
 #[test] fn owner_copy_child_probe() {
     if std::env::var("BP_OWNER_COPY_PROBE").ok().as_deref() != Some("1") { return }
