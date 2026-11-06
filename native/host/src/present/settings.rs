@@ -32,6 +32,26 @@ fn chips(values: &[&str], cur: &str, key: &str) -> Vec<Value> {
 }
 fn onoff(on: bool) -> &'static str { if on { "on" } else { "off" } }
 
+/// The channel a stored value means: 0.14's "nightly" is beta now, and the unknown is stable (`update::rel::channel`, the rule the updater itself follows).
+fn update_channel(raw: &str) -> &'static str { match raw.trim() { "beta" | "nightly" => "beta", _ => "stable" } }
+/// Settings → Network's update line, from info `update.status` (what the hub's updater is doing, `update/svc.rs`).
+fn update_row(version: &str, status: &str) -> Value {
+    let v: Value = serde_json::from_str(status).unwrap_or_default();
+    let g = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    let (avail, note) = (g("available"), g("note")); let check = || vec![btn("Check now", "update-check", "", false)];
+    let (line, buttons) = match g("state").as_str() {
+        "" | "package" => ("Updated by its package.".to_string(), vec![]),
+        "off" => ("Updates are off on this machine.".to_string(), vec![]),
+        "checking" => ("Checking for updates.".to_string(), vec![]),
+        "downloading" => (format!("Downloading {avail}."), vec![]),
+        "waiting" => (format!("{avail} installs when running turns finish."), vec![]),
+        "installing" => (format!("Installing {avail}. Backplane restarts once it is ready."), vec![]),
+        "failed" => (if note.is_empty() { "The last update failed.".to_string() } else { note }, check()),
+        _ => (if note.is_empty() { "Up to date, checked hourly.".to_string() } else { note }, check()),
+    };
+    row(&format!("Backplane {version}"), &line, buttons)
+}
+
 fn appearance(st: &State) -> Vec<Value> {
     vec![
         row("Theme", "The window and the web page (phones unset follow their own system).", chips(&["dark", "light"], set(st, "ui.theme", ""), "ui.theme")),
@@ -78,7 +98,7 @@ fn threads(st: &State, session: &Value) -> Vec<Value> {
 fn about(st: &State) -> Vec<Value> {
     let v = VERSION.get().map(String::as_str).unwrap_or("");
     let _ = st;
-    vec![row(&format!("Backplane {v}"), "Updates are made by the installer or package this build came from.", vec![])]
+    vec![row(&format!("Backplane {v}"), "Updates are under Network.", vec![])]
 }
 
 const PROVIDERS: &[&str] = &["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"];
@@ -124,12 +144,11 @@ fn network(st: &State, info: &Value) -> Vec<Value> {
     };
     let link = i("pair");
     let version = VERSION.get().map(String::as_str).unwrap_or("");
-    let line = if i("update") == "package" || i("update").is_empty() { "Updated by its package." } else { "Up to date, checked hourly." };
     vec![
         row(&format!("Tailscale: {state}"), &note, vec![]),
         row("Pairing link", if link.is_empty() { "Shown once Backplane listens on your tailnet." } else { link }, vec![]),
-        row("Update channel", "Stable takes releases; nightly also takes the daily builds.", chips(&["stable", "nightly"], set(st, "update.channel", "stable"), "update.channel")),
-        row(&format!("Backplane {version}"), line, vec![]),
+        row("Update channel", "Stable takes releases; beta also takes prereleases.", chips(&["stable", "beta"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
+        update_row(version, &i("update.status")),
     ]
 }
 
@@ -336,6 +355,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
             json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
+        "update-check" => { send(session, hub, "update.check", json!({}), &mut cmds, &mut rid); json!({}) }
         // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
         "device-invite" | "device-revoke" | "device-uninvite" => {
             let Some(routes) = crate::net::start::routes() else { return Some(Out { patch: json!({"drafts": {"@invite": json!({"error": "no_registry"}).to_string()}}), cmds }) };
@@ -543,6 +563,17 @@ mod tests {
         assert_eq!((sent["m"].as_str(), sent["p"]["value"].as_str(), sent["p"]["expected"].as_str()), (Some("telemetry.choice"), Some("on"), b[0]["value"].as_str())); assert_eq!(b[2]["value"], "telemetry.reset=4");
         assert!(!r[1]["note"].as_str().unwrap().contains("Install id"), "no id while off");
     }
+    #[test] fn the_update_line_says_what_the_hub_is_doing() {
+        let r = |s: &str| update_row("0.15.0", s);
+        assert_eq!(r("")["note"], "Updated by its package."); assert_eq!(r(r#"{"state":"package"}"#)["buttons"], json!([]), "nothing to press");
+        assert_eq!(r(r#"{"state":"idle"}"#)["note"], "Up to date, checked hourly."); assert_eq!(r(r#"{"state":"idle"}"#)["buttons"][0]["action"], "update-check");
+        assert_eq!(r(r#"{"state":"idle","note":"Updated to v0.16.0."}"#)["note"], "Updated to v0.16.0.");
+        assert_eq!(r(r#"{"state":"waiting","available":"v0.16.0"}"#)["note"], "v0.16.0 installs when running turns finish.");
+        assert_eq!(r(r#"{"state":"failed","note":"v0.16.0 failed its health check, so this build stayed."}"#)["buttons"][0]["label"], "Check now");
+        assert_eq!(r(r#"{"state":"installing","available":"v0.16.0"}"#)["buttons"], json!([]), "nothing to press while it goes"); assert_eq!(r("not json")["note"], "Updated by its package.");
+    }
+    #[test] fn a_stored_nightly_lights_beta() { assert_eq!((update_channel("nightly"), update_channel("beta"), update_channel("stable"), update_channel("x")), ("beta", "beta", "stable", "stable")); }
+    #[test] fn check_now_asks_the_hub() { assert_eq!(act("h", &json!({"rid": 3}), "update-check", "").unwrap().cmds[0]["text"], json!(r#"{"id":3,"m":"update.check","p":{}}"#)); }
     #[test] fn agents_offers_the_hubs_models_with_default_first_and_the_current_lit() {
         let info = json!({"models": json!({"claude": ["fable", "opus"], "about": {"claude": {"cli": "", "labels": {"default": "Claude Code's own default", "opus": "Opus 5.5"}}}}).to_string()});
         let r = page_rows(&st(&[("agent.model", "opus")]), "agents", info);

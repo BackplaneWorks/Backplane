@@ -90,6 +90,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     { let (h, b) = (hub.clone(), bindings); tokio::spawn(async move { b.seed(&h).await }); }
     hub.register_ticker(Arc::new(driver::ResumeTicker));
     hub.register_rpc(Arc::new(misc::SettingsMisc));
+    crate::update::svc::install(&hub);
     hub.register_rpc(Arc::new(improvements::ImprovementsRpc));
     hub.register_http(Arc::new(diagnostics_http::DiagnosticsJson));
     hub.register_rpc(Arc::new(secret::SecretRpc { agents }));
