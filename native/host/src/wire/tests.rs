@@ -86,9 +86,11 @@ async fn a_requests_changes_come_before_its_reply() {
     let (hub, port) = test_hub("wire-order", FIXTURE).await;
     crate::commands::start(hub.clone()); // project.add is the commands lane's handler
     let proj = std::env::temp_dir().join(format!("wire-order-proj-{}", std::process::id())); std::fs::create_dir_all(&proj).unwrap(); // the handler refuses a folder that does not exist
-    let mut c = join(port, None).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    let mut c = join(port, None).await;
+    // a request of no kind is answered after the join's whole backlog, so once its reply is in, the next request starts from a caught-up client (a loaded runner joins slowly)
+    c.send(json!({"id":0,"m":"no.such.request"})).await; for _ in 0..3000 { if c.frames.lock().unwrap().iter().any(|f| f["t"] == "reply") { break } tokio::time::sleep(Duration::from_millis(10)).await }
     let before = c.frames.lock().unwrap().len();
-    c.send(json!({"id":1,"m":"project.add","p":{"path":proj.to_string_lossy()}})).await; tokio::time::sleep(Duration::from_millis(400)).await;
+    c.send(json!({"id":1,"m":"project.add","p":{"path":proj.to_string_lossy()}})).await; for _ in 0..2000 { if c.frames.lock().unwrap()[before..].iter().any(|f| f["t"] == "reply") { break } tokio::time::sleep(Duration::from_millis(10)).await } // until the reply is in, not for a clock
     let frames: Vec<Value> = c.frames.lock().unwrap()[before..].to_vec();
     let at = |t: &str| frames.iter().position(|f| f["t"] == t).unwrap_or(usize::MAX);
     assert!(at("changes") < at("reply"), "changes {} reply {}", at("changes"), at("reply"));

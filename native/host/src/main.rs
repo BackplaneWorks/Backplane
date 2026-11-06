@@ -251,6 +251,8 @@ mod reconnect_tests {
     }
     fn norm(v: &Value) -> String { let mut v = v.clone(); if let Some(k) = v["key"].as_str() { if k.starts_with("fallback.input.") || k.starts_with("launch.input.") { v["value"] = json!(""); } } v.to_string() }
 
+    /// Wait until `f` holds (events, not a clock: the 20 s only bounds a hang), so a loaded runner makes the test slower, not wrong.
+    async fn settle(f: impl Fn() -> bool) { for _ in 0..2000 { if f() { return } tokio::time::sleep(Duration::from_millis(10)).await } panic!("never settled") }
     // The JS hub's "dropped link" experiment (RESULTS.md, 20 streaming agents): the reference stream against
     // first + resume(since = items held, origin). Nothing may be missing or repeated, in order.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -278,16 +280,15 @@ mod reconnect_tests {
         hub.live_delta("tx", "a reply still streaming when the client joins").await.unwrap(); // a live item that is not a log line
         tokio::time::sleep(Duration::from_millis(150)).await;
         let first = join(port, None).await;
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        settle(|| !first.items.lock().unwrap().is_empty() && *first.lives.lock().unwrap() > 0).await;   // the join has been sent the log and a live frame
         let held = first.items.lock().unwrap().len();
         let live_seen = *first.lives.lock().unwrap();
         first.task.abort();                                   // the link drops
         tokio::time::sleep(Duration::from_millis(200)).await;
         let resume = join(port, Some((held, wire::origin(&hub)))).await;
         for w in writers { w.await.unwrap(); }
-        tokio::time::sleep(Duration::from_millis(600)).await;
-
         let total = hub.store.len();
+        settle(|| reference.items.lock().unwrap().len() >= total && held + resume.items.lock().unwrap().len() >= total).await;
         assert_eq!(*resume.log_since.lock().unwrap(), Some(held as u64), "the hub honours since for its own origin");
         let r: Vec<String> = reference.items.lock().unwrap().iter().map(norm).collect();
         let mut joined: Vec<String> = first.items.lock().unwrap().iter().take(held).map(norm).collect();
@@ -297,7 +298,7 @@ mod reconnect_tests {
         assert_eq!(joined, r, "same items, same order");
         reference.task.abort(); resume.task.abort();
         // and a client with another origin is sent the whole log, not a wrong suffix
-        let other = join(port, Some((held, "not-this-log".into()))).await; tokio::time::sleep(Duration::from_millis(300)).await;
+        let other = join(port, Some((held, "not-this-log".into()))).await; settle(|| other.items.lock().unwrap().len() >= total).await;
         assert_eq!(*other.log_since.lock().unwrap(), Some(0)); assert_eq!(other.items.lock().unwrap().len(), total); other.task.abort();
         assert!(live_seen > 0, "the join happened while agents were streaming: the live frame carried items that are not log lines");
     }
