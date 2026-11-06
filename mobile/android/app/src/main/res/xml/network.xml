@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- GPUI experiment: plain http only to the shared tailnet-only hub. -->
+<!-- A hub is reached at whatever LAN or tailnet address it has, over plain http unless it is behind tailscale serve. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">desktop.tail9e0cf2.ts.net</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

@@ -16,13 +16,13 @@ PKG, ACT = "dev.backplane.mobile.gpui", "dev.backplane.mobile.DataActivity"
 class Phone:
     def __init__(self, adb): self.adb = shlex.split(adb)
     def sh(self, cmd, timeout=30): return subprocess.run(self.adb + ["shell", cmd], capture_output=True, text=True, timeout=timeout).stdout
-    def fresh(self): self.sh(f"pm clear {PKG}"); self.launch()
+    def fresh(self): self.sh(f"pm clear {PKG}"); self.sh(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS"); self.launch()  # (the first-run permission dialog would cover the app)
     def launch(self): self.sh(f"am start -W -n {PKG}/{ACT}"); time.sleep(3)
     def nodes(self):
         self.sh("uiautomator dump /sdcard/ui.xml >/dev/null 2>&1")
         try: return list(ET.fromstring(self.sh("cat /sdcard/ui.xml")).iter("node"))
         except ET.ParseError: return []
-    def texts(self): return " | ".join(t for n in self.nodes() for t in (n.get("text"), n.get("content-desc")) if t)
+    def texts(self): return re.sub(r"(invite|code)=[^ &|]+", r"\1=<secret>", " | ".join(t for n in self.nodes() for t in (n.get("text"), n.get("content-desc")) if t))
     def tap(self, n):
         x1, y1, x2, y2 = map(int, re.findall(r"\d+", n.get("bounds")))
         self.sh(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
@@ -34,8 +34,17 @@ class Phone:
         self.tap(f); time.sleep(0.5)
         self.sh("input text " + shlex.quote(text))
         time.sleep(1)
-        self.sh("input keyevent 4"); time.sleep(0.7)
-        b = self.button("Pair")
+        b = self.button("Pair")  # with the keyboard up, as a person taps it: dismissing it moves the layout under the tap
+        if b is None: return False
+        self.tap(b); time.sleep(4); return True
+    def code_and_pair(self, address, code):
+        fs = [n for n in self.nodes() if n.get("class") == "android.widget.EditText"]
+        if len(fs) < 2: return False
+        self.tap(fs[1]); time.sleep(0.6); self.sh("input text " + shlex.quote(address)); time.sleep(0.6)
+        fs = [n for n in self.nodes() if n.get("class") == "android.widget.EditText"]
+        self.tap(fs[2]); time.sleep(0.6); self.sh("input text " + shlex.quote(code)); time.sleep(0.8)
+        b = self.button("Pair with code")
+        if b is None: self.sh("input keyevent 4"); time.sleep(1.2); b = self.button("Pair with code")
         if b is None: return False
         self.tap(b); time.sleep(4); return True
     def open_link(self, url): self.sh("am start -W -a android.intent.action.VIEW -d " + shlex.quote(shlex.quote(url)) + f" {PKG}"); time.sleep(5)
@@ -57,7 +66,7 @@ def main():
     p.fresh()
     check("a fresh app starts at pairing", on_pair_screen(p), p.texts()[:90])
     print("   screen offers:", p.texts()[:160], flush=True)
-    report("the screen offers a hub address and short code", "pass" if sum(1 for n in p.nodes() if n.get("class") == "android.widget.EditText") >= 2 else "fail", "one field: a link or address")
+    check("the screen offers a hub address and short code", sum(1 for n in p.nodes() if n.get("class") == "android.widget.EditText") == 3)
 
     # link, typed into the field
     n0 = live(hub); st, inv = hub.invite()
@@ -66,13 +75,14 @@ def main():
     check("link: the app holds a socket to the hub", sockets(o.sockets) >= 1)
     check("link: the app has left pairing", not on_pair_screen(p), p.texts()[:90])
 
-    # a short code, the only way this screen takes one: as a link
+    # a short code
     p.fresh(); n0 = live(hub); st, inv = hub.invite()
-    p.type_and_pair(f"{hub.base}/pair#code={inv['code']}")
-    check("short code as a #code= link pairs", live(hub) == n0 + 1, p.texts()[:90])
+    check("address and short code typed", p.code_and_pair(hub.base, inv["code"].lower()[:4] + "-" + inv["code"].lower()[4:]))
+    check("short code pairs (lower case, with a dash)", live(hub) == n0 + 1, p.texts()[:90])
+    check("short code: the app has left pairing", not on_pair_screen(p), p.texts()[:90])
     p.fresh(); st, inv = hub.invite(); n0 = live(hub)
     p.type_and_pair(inv["code"])
-    report("a bare short code in the field pairs", "pass" if live(hub) == n0 + 1 else "fail", p.texts()[:110])
+    check("a bare code is not taken for a hub address", on_pair_screen(p) and "address with the short code" in p.texts(), p.texts()[:120])
 
     # refusals: the words on screen
     time.sleep(61)
@@ -95,24 +105,23 @@ def main():
     time.sleep(61)
     p.fresh(); n0 = live(hub); st, inv = hub.invite()
     p.open_link("bpgpui://pair?url=" + urllib.parse.quote(inv["link"], safe=""))
-    paired = live(hub) == n0 + 1
-    report("a bpgpui:// link is handled", "pass" if paired or "Pair" in p.texts() else "fail", p.texts()[:90])
-    report("a bpgpui:// link asks before pairing", "fail" if paired else "pass", "paired with no question" if paired else "no device enrolled yet")
+    origin = hub.base
+    check("a bpgpui:// link names its hub and asks", "Pair with this hub?" in p.texts() and origin in p.texts() and live(hub) == n0, p.texts()[:110])
+    b = p.button("Cancel"); p.tap(b) if b is not None else None; time.sleep(1.5)
+    check("Cancel pairs nothing", live(hub) == n0 and "Pair with this hub?" not in p.texts())
+    p.open_link("bpgpui://pair?url=" + urllib.parse.quote(inv["link"], safe=""))
+    b = p.button("Pair"); p.tap(b) if b is not None else None; time.sleep(5)
+    check("confirming the question pairs", live(hub) == n0 + 1, p.texts()[:90])
 
     # revoke while connected, re-pair
-    if not paired:
-        st, inv = hub.invite(); p.fresh(); p.type_and_pair(inv["link"])
     ids = [d for d in hub.devices()[1]["devices"] if not d.get("revoked")]
     n = sockets(o.sockets)
     for d in ids: hub.revoke_device(d["id"])
     time.sleep(6)
     check("revoke ends the app's socket", sockets(o.sockets) < max(n, 1), f"{n} before")
     print("   after revoke:", p.texts()[:160], flush=True)
-    check("a revoked app asks to pair again", on_pair_screen(p) or "pair" in p.texts().lower(), p.texts()[:110])
+    check("a revoked app is at Re-pair", "Re-pair this device" in p.texts(), p.texts()[:110])
     n0 = live(hub); st, inv = hub.invite()
-    if p.field() is None:
-        b = p.button("Pair again") or p.button("Re-pair") or p.button("Pair")
-        if b is not None: p.tap(b); time.sleep(2)
     p.type_and_pair(inv["link"])
     check("re-pair after revoke", live(hub) == n0 + 1, p.texts()[:90])
     check("re-paired: the app holds a socket", sockets(o.sockets) >= 1)

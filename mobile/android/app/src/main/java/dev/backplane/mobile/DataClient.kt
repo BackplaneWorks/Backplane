@@ -31,6 +31,8 @@ object DataClient {
     var features by mutableStateOf<Set<String>>(emptySet()); private set
     var link by mutableStateOf<String?>(null); private set
     var pairingError by mutableStateOf(""); var pairingBusy by mutableStateOf(false)
+    /** a pairing link that came from outside the app: nothing happens until the person says so */
+    var askLink by mutableStateOf<String?>(null)
     val hubName get() = link?.let { Pairing.key(it) } ?: ""
 
     private var ws: WebSocket? = null
@@ -68,6 +70,7 @@ object DataClient {
             }
             return
         }
+        if (Pairing.bareCode(text)) { pairingError = "Enter the hub's address with the short code."; return }
         if (Pairing.malformedInvitation(text)) { pairingError = "Enter the complete invitation link or a valid eight-character code."; return }
         adopt(text.trim())
     }

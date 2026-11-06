@@ -71,7 +71,7 @@ fun DataRoot() {
     var page by remember { mutableStateOf<Page>(DataClient.openFromIntent?.let { Page.Thread(it) } ?: Page.Home) }
     LaunchedEffect(DataClient.openFromIntent) { DataClient.openFromIntent?.let { page = Page.Thread(it); DataClient.openFromIntent = null } }
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
-        if (DataClient.link == null) PairScreen()
+        if (DataClient.link == null || DataClient.needsRepair) PairScreen()
         else when (val p = page) {
             Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Folders }, { page = Page.New(it) }) { page = Page.Room(it) }
             is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it) { page = Page.Thread(p.id) } } }
@@ -82,6 +82,7 @@ fun DataRoot() {
             Page.Folders -> { BackHandler { page = Page.Home }; FolderScreen({ page = Page.Home }) { page = Page.New(it) } }
             is Page.New -> { BackHandler { page = Page.Home }; NewThreadScreen(p.project, { page = Page.Home }) { page = Page.Thread(it) } }
         }
+        DataClient.askLink?.let { AskPair(it) }
     }
 }
 
@@ -109,20 +110,52 @@ private fun ConnBanner() {
 @Composable
 private fun PairScreen() {
     var text by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
         DMono("BACKPLANE", dcs.primary, 13, bold = true)
         Spacer(Modifier.height(8.dp))
-        Text("Pair with a hub", color = dcs.onSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        Text(if (DataClient.needsRepair) "Re-pair this device" else "Pair with a hub", color = dcs.onSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
-        Text("Paste the hub's pairing link or its address.", color = dcs.onSurfaceVariant, fontSize = 14.sp)
+        Text(if (DataClient.needsRepair) "This device was revoked. Make a new link in Settings → Devices on the hub." else "Paste the hub's pairing link or its address.", color = dcs.onSurfaceVariant, fontSize = 14.sp)
         Spacer(Modifier.height(20.dp))
-        DField(text, { text = it }, "http://host:3787/#invite=…", Modifier.testTag("pair.field"))
+        DField(text, { text = it }, "http://host:3787/pair#invite=…", Modifier.testTag("pair.field"))
         if (DataClient.pairingError.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(DataClient.pairingError, color = dcs.onSurfaceVariant, fontSize = 13.sp) }
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DBtn("Pair", true, text.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.go")) { DataClient.pair(text) }
             DBtn("Scan code", false, true) { scanPairing(ctx, "data") { DataClient.pair(it) } }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("Or the hub's address and short code", color = dcs.onSurfaceVariant, fontSize = 13.sp)
+        Spacer(Modifier.height(8.dp))
+        DField(address, { address = it }, "host:port", Modifier.testTag("pair.address"))
+        Spacer(Modifier.height(8.dp))
+        DField(code, { code = it }, "ABCD-2345", Modifier.testTag("pair.code"))
+        Spacer(Modifier.height(16.dp))
+        DBtn("Pair with code", false, address.isNotBlank() && code.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.code.go")) {
+            val l = Pairing.codeLink(address.trim(), code)
+            if (l == null) DataClient.pairingError = "Check the hub address and the eight-character code." else DataClient.pair(l)
+        }
+    }
+}
+
+/** A link from outside the app names the hub it would pair with; Cancel comes first. */
+@Composable
+private fun AskPair(link: String) {
+    val hub = Pairing.invitation(link)?.origin ?: Pairing.key(link)
+    if (hub == null) { LaunchedEffect(link) { DataClient.askLink = null; DataClient.pairingError = "That is not a pairing link." }; return }
+    Column(Modifier.fillMaxSize().background(dcs.background).padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Text("Pair with this hub?", color = dcs.onSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        DMono(hub, dcs.onSurface, 14)
+        Spacer(Modifier.height(8.dp))
+        Text("A link opened this. Pair only with a hub you know.", color = dcs.onSurfaceVariant, fontSize = 14.sp)
+        Spacer(Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DBtn("Cancel", true, true, Modifier.testTag("pair.ask.cancel")) { DataClient.askLink = null }
+            DBtn("Pair", false, true, Modifier.testTag("pair.ask.yes")) { DataClient.askLink = null; DataClient.pair(link) }
         }
     }
 }
