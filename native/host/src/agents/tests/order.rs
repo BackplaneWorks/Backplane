@@ -262,3 +262,33 @@ async fn quoted_rig(name: &str, pilot: bool) -> (super::lost::Rig, Shared) {
     c.args(["agents::tests::order::copy_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BP_ORDER_COPY_PROBE", "1").env("BACKPLANE_COPY", "1");
     let o = c.output().unwrap(); let out = String::from_utf8_lossy(&o.stdout); assert!(o.status.success() && out.contains("copy_probe ... ok"), "{out}{}", String::from_utf8_lossy(&o.stderr));
 }
+
+/// The whole way against the real order server (test/order/local_server.py: order/fabsrv with its stand-in fab pack and a Stripe double), the one thing a fake cannot show:
+/// that it takes what this hub sends. Runs only with BP_ORDER_LOCAL=<its address>, BP_ORDER_EXPORT=<an --export folder> and BP_ORDER_PILOT=1 or 0; never another address.
+#[tokio::test(flavor = "multi_thread")] async fn the_real_order_server_takes_it_and_a_test_payment_comes_back() {
+    let Ok(url) = std::env::var("BP_ORDER_LOCAL") else { return }; assert!(url.starts_with("http://127.0.0.1:"), "a local order server only: {url}");
+    let pilot = std::env::var("BP_ORDER_PILOT").as_deref() == Ok("1");
+    let r = rig("or-real", "result", SESSION_OK).await; set(&r.hub, "order.server", &url).await; set(&r.hub, &format!("buy.{T1}"), "t0").await; tokio::time::sleep(Duration::from_millis(100)).await;
+    let d = cwd(&r.ag).await; let o = d.join("mfg/real"); std::fs::create_dir_all(o.join("main")).unwrap(); let src = std::path::PathBuf::from(std::env::var("BP_ORDER_EXPORT").unwrap());
+    for f in ["manifest.json", "main/gerbers.zip"] { std::fs::copy(src.join(f), o.join(f)).unwrap(); }
+    let from = len(&r.hub).await; let (ok, t) = call(&r.ag, "order_quote", json!({"dir":"mfg/real"})).await; assert!(ok, "{t}"); let ask = ask_of(&r, from).await;
+    let from = len(&r.hub).await; rpc(&r.hub, "ask.answer", json!({"id":ask["id"],"answer":"accept"})).await;
+    let ev = until(&r.hub, from, 60, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "system")).await;
+    let note = ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "system").expect("a note").clone(); println!("NOTE {note}");
+    let q = ev.iter().find(|e| is(e, "MessagePosted") && e["msg"].as_str().map_or(false, |m| m.starts_with("q:"))).unwrap_or_else(|| panic!("no quote posted: {note}")).clone(); println!("QUOTE {}", q["text"]);
+    let text = q["text"].as_str().unwrap(); assert!(text.contains("](order:q_"), "{text}");
+    let sum: Value = serde_json::from_str(&r.ag.hub.setting(&format!("order.quote.{T1}")).await.unwrap()).unwrap(); println!("SUM {sum}"); assert_eq!(sum["payable"], true, "{sum}");
+    let qid = sum["id"].as_str().unwrap().to_string(); let tok = serde_json::from_str::<Value>(&std::fs::read_to_string(r.hub.cfg.home.join(format!("orders/{qid}.json"))).unwrap()).unwrap()["token"].as_str().unwrap().to_string();
+    assert!(tok.len() >= 32); assert!(!whole_log(&r.hub).await.contains(&tok), "no token in the log");
+    // Buy now: the link the person is shown goes to the double's checkout, and its test card pays
+    let link = crate::settings::order::pay_link(&qid).unwrap(); assert!(link.starts_with(&url) && link.contains(&tok));
+    let o = std::process::Command::new("curl").args(["-sS", "-L", "-o", "/dev/null", "-w", "%{http_code} %{url_effective}", &link]).output().unwrap(); let said = String::from_utf8_lossy(&o.stdout).to_string(); println!("PAID {}", said.replace(&tok, "<token>")); assert!(said.starts_with("200 "), "{said}");
+    let from = len(&r.hub).await;
+    if pilot {
+        let ev = until(&r.hub, from, 30, |ev| posted(ev, &format!("o:{qid}:pilot")) == 1).await; assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("your card was not charged"))), "{ev:?}");
+        assert!(!ev.iter().any(|e| e["key"] == format!("alert.{T1}") && e["value"].as_str().unwrap_or("").starts_with("note")), "{ev:?}");
+    } else {
+        let ev = until(&r.hub, from, 30, |ev| posted(ev, &format!("o:{qid}:paid")) == 1).await; assert!(ev.iter().any(|e| e["key"] == format!("alert.{T1}") && e["value"].as_str().unwrap_or("").starts_with("note")), "{ev:?}");
+    }
+    r.ag.shutdown();
+}
