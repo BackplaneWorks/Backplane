@@ -6,7 +6,7 @@ publish = false
 
 [features]
 default = []
-# Embedded Chromium (OSR) in the Browser tab; needs libcef.so at run time (see docs/browser-gpui-cef.md). Off: the hub-frame JPEG poller.
+# Embedded Chromium (OSR) in the Browser tab; needs libcef.so at run time (see docs/browser-cef.md). Off: the hub-frame JPEG poller.
 cef = ["dep:cef"]
 
 [dependencies]
