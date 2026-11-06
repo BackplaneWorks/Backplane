@@ -46,6 +46,15 @@ struct DAsk: Codable, Equatable {
     }
 }
 
+struct DAttachment: Codable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var mime: String
+    var bytes: Int
+    enum CodingKeys: String, CodingKey { case id, name, mime, bytes }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); mime = c.str(.mime); bytes = c.int(.bytes) }
+}
+
 struct DEntry: Codable, Equatable, Identifiable {
     var id: String
     var kind: String    // user | assistant | tool | ask | note | step
@@ -56,10 +65,12 @@ struct DEntry: Codable, Equatable, Identifiable {
     var live: Bool
     var tool: DTool?
     var ask: DAsk?
+    var attachments: [DAttachment] = []
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, clientId, replaces, live, tool, ask }
+    var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, clientId, replaces, live, tool, ask, attachments }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -71,6 +82,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         live = c.bool(.live)
         tool = try? c.decode(DTool.self, forKey: .tool)
         ask = try? c.decode(DAsk.self, forKey: .ask)
+        attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []
     }
 }
 
@@ -130,6 +142,9 @@ struct DSubReply: Decodable { var sub: Int
     enum CodingKeys: String, CodingKey { case sub }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); sub = c.int(.sub) } }
 struct DEmpty: Decodable { init(from d: Decoder) throws {} }
+struct DAttachmentData: Decodable { var mime: String; var data: String
+    enum CodingKeys: String, CodingKey { case mime, data }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); mime = c.str(.mime); data = c.str(.data) } }
 
 struct DError: Error, LocalizedError {
     var code: String

@@ -48,7 +48,7 @@ for id in $IDS; do
   grep -E "error: -\[|JourneyTests.swift:[0-9]+: error|Driver.swift:[0-9]+: error|failed -" "$OUT/$id.xcodebuild.log" | head -3 > "$OUT/$id.assert.txt"
   # the app's own BPPerf records for this journey (numeric only): the navigation display times, from the unified log
   secs=$(( ($(now_ms) - VS) / 1000 + 10 ))
-  xcrun simctl spawn "$SIM_UDID" log show --last ${secs}s --predicate 'process == "Backplane"' --style compact 2>/dev/null | grep -o "BPPerf [0-9 ]*" > "$OUT/$id.bpperf"
+  xcrun simctl spawn "$SIM_UDID" log show --last ${secs}s --predicate 'process == "Backplane"' --style compact 2>/dev/null | grep -oE "BPPerf [0-9 ]*|Backplane open cached=[a-z]+ ms=[0-9.]+" > "$OUT/$id.bpperf"
   echo "$id: xcodebuild exit $rc"
 done
 /usr/bin/python3 - "$OUT" <<'PY'
