@@ -56,7 +56,7 @@ jobs:
         run: |
           (cd native/host && cargo build --release --bin backplane-hub) & a=$!
           (cd native/gpui && cargo build --release) & b=$!
-          wait $a; wait $b
+          wait $a; ra=$?; wait $b; rb=$?; exit $((ra | rb))
       - uses: oven-sh/setup-bun@v2
       - name: package
         run: |
