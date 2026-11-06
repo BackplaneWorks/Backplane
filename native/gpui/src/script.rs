@@ -311,6 +311,8 @@ impl Backplane {
                 let (text, supported) = match what.as_str() { "composer" => (self.input.read(cx).content.to_string(), true),
                     // the settings overlay's structure (labels, button actions, field names; never a field's value), to design its layout from the real payload
                     "settings" => (crate::screens::settings::structure(&self.data["settings"]), true),
+                    // the performance overlay's text; not supported while it is hidden
+                    "perf" => crate::perf::lines().map_or((String::new(), false), |l| (l.join("\n"), true)),
                     _ => (String::new(), false) };
                 self.m("read", json!({"what": what, "text": text, "supported": supported}));
                 self.pump(cx);

@@ -5,7 +5,7 @@ use crate::{hub::Command, local::Local, theme, Backplane};
 use gpui::{actions, prelude::*, *};
 use serde_json::Value;
 
-actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, SettleThread, FocusComposer, CycleLayers,
+actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
     RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser]);
@@ -49,12 +49,12 @@ pub const TABLE: &[Entry] = &[
     e("pad-delete", "Delete the selection, or clear the pad", "Drawing pad", "delete", Fixed),
     e("pad-delete-alt", "Delete (also)", "Drawing pad", "backspace", Fixed),
     e("rail", "Rail views: B board, S schematic, 3 3D, V split, M mech, F files, D diff, R review, W browser", "Viewer", "b s 3 v m f d r w", Fixed),
+    e("perf", "Performance overlay: the last few seconds of the window's work", "Window", "ctrl-shift-h", Rebind),
 ];
 /// Keys the old client had that this one cannot do yet (no equivalent): listed, not faked.
 pub const MISSING: &[(&str, &str)] = &[
     ("Ctrl+J, Backtick, Shift+Esc", "Floating terminal: the client has no terminal"),
     ("Ctrl+Shift+C / V", "Terminal copy and paste: no terminal"),
-    ("Ctrl+Shift+H", "Performance overlay: the client has none"),
     ("Arrows, Tab in the model picker", "Picker cursor keys: the picker takes search and Enter only"),
 ];
 
@@ -110,7 +110,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("new"), NewThread, None), KeyBinding::new(&k("diff"), OpenDiff, None), KeyBinding::new(&k("files"), OpenFiles, None),
         KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
-        KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_TEXT)),
+        KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_TEXT)), KeyBinding::new(&k("perf"), PerfOverlay, None),
         KeyBinding::new("/", FocusComposer, Some(FREE))]);
     let alt = if mac() { Some(NOT_MAC_COMPOSER) } else { None };
     macro_rules! digits { ($($n:literal $p:ident $t:ident),*) => { v.extend([$(KeyBinding::new(concat!("alt-", $n), $p, alt), KeyBinding::new(concat!("secondary-", $n), $t, None)),*]); } }
@@ -194,6 +194,11 @@ impl Backplane {
         let _ = self.tx.try_send(Command::Action("view-layer-cycle".into(), if schematic { "schematic" } else { "" }.into())); cx.notify();
     }
     fn key_go(&mut self, id: Option<String>, cx: &mut Context<Self>) { if let Some(id) = id { self.select_id(id, cx); self.want_focus = true; } }
+    /// The overlay up or down. Going up it asks for one more frame, so a quiet window shows the numbers of the frame that opened it instead of "measuring"; that is the only frame it ever asks for.
+    fn perf_toggle(&mut self, cx: &mut Context<Self>) {
+        if crate::perf::toggle() { cx.spawn(async move |this, cx| { cx.background_executor().timer(crate::perf::REFRESH).await; let _ = this.update(cx, |_, cx| cx.notify()); }).detach(); }
+        cx.notify();
+    }
 }
 
 /// Registers every action on the root element.
@@ -217,6 +222,7 @@ pub fn attach(el: Div, cx: &mut Context<Backplane>) -> Div {
     });
     let el = on!(el, FocusComposer, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { this.want_focus = true; cx.notify(); });
     let el = on!(el, CycleLayers, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.key_layers(w, cx));
+    let el = on!(el, PerfOverlay, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.perf_toggle(cx));
     macro_rules! rail { ($el:expr, $($a:ty => ($k:literal, $v:literal)),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail($k, $v, cx)); )* e }} }
     let el = rail!(el, RailBoard => ("view-kind", "board"), RailSchematic => ("view-kind", "schematic"), Rail3d => ("view-kind", "3d"), RailSplit => ("view-kind", "split"),
         RailMech => ("view-kind", "mech"), RailFiles => ("view-kind", "files"), RailDiff => ("diff", ""), RailReview => ("view-kind", "review"), RailBrowser => ("view-kind", "browser"));
@@ -295,7 +301,7 @@ mod tests {
         for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "BrowserBar", "BrowserView", "CefBar", "CefPage"] {
             assert_eq!(d("ctrl-h", &[c]), "", "{c} keeps Ctrl+H"); assert_eq!(d("ctrl-h", &["Viewer", c]), "", "{c} inside a viewer");
         }
-        assert_eq!(d("ctrl-shift-h", &["Viewer"]), "", "the performance overlay's chord stays free");
+        assert_eq!(d("ctrl-shift-h", &["Viewer"]), "keys::PerfOverlay", "Ctrl+Shift+H is the performance overlay, not layers");
         assert!(MISSING.iter().all(|m| m.0 != "Ctrl+H"), "listed as done, not missing");
     }
     #[test] fn layer_focus_is_in_the_table_and_rebinds() {
@@ -312,6 +318,12 @@ mod tests {
         assert_eq!(neighbour(&data, "a", false), None); assert_eq!(neighbour(&data, "c", false).as_deref(), Some("h|b"));
         assert_eq!(nth_project(&data, 2).as_deref(), Some("p2")); assert_eq!(nth_project(&data, 3), None);
         assert_eq!(nth_thread(&data, "b", None, 1).as_deref(), Some("h|a"), "the thread's own project"); assert_eq!(nth_thread(&data, "b", None, 3), None);
+    }
+    #[test] fn the_performance_overlay_key_works_everywhere_and_can_be_moved() {
+        for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage"] { assert_eq!(d("ctrl-shift-h", &[c]), "keys::PerfOverlay", "in {c}"); }
+        assert_eq!(d("ctrl-shift-h", &[]), "keys::PerfOverlay"); assert_eq!(hint(&Local::default(), "perf"), if mac() { "⌃⇧H" } else { "Ctrl+Shift+H" });
+        assert!(MISSING.iter().all(|(k, why)| *k != "Ctrl+Shift+H" && !why.contains("Performance")), "no longer a key the client cannot do");
+        let mut l = Local::default(); assert!(l.set("shortcut", "perf\u{1f}ctrl-alt-h")); assert_eq!(does(&l, "ctrl-alt-h", &[]), "keys::PerfOverlay"); assert_eq!(does(&l, "ctrl-shift-h", &[]), "");
     }
     #[test] fn palette_and_dialog_scopes() {
         assert_eq!(d("escape", &["PickInput"]), "backplane::ClosePopup"); assert_eq!(d("escape", &["AskInput"]), "backplane::ClosePopup");

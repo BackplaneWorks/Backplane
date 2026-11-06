@@ -8,12 +8,16 @@ use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64), /** read this history page of the thread, then stand on the newest again */ History(String) }
 #[derive(Debug)] pub enum Event { /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line */ Sheets(String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
+impl Event {
+    /// What the performance overlay calls it.
+    pub fn name(&self)->&'static str {match self {Event::BrowserTabs(..)=>"browser tabs",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(_)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused"}}
+}
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
 #[cfg(test)] mod status_tests{use super::*;use core::prelude::v1::test;
     #[test] fn a_refused_view_or_command_leaves_the_connection_label_alone(){assert_eq!(status_for(&Event::Refused("View request refused: \"PRESENTER_UNAVAILABLE\"".into())),None);assert_eq!(status_for(&Event::Error("Hub disconnected".into())),Some("Disconnected"));assert_eq!(status_for(&Event::Accepted),None);}}
-/// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, and the body's size.
-#[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool }
+/// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, the body's size, and when its frame arrived.
+#[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool, pub at:Option<std::time::Instant> }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String> }
 impl Config {
     pub fn parse() -> Result<Self> {
@@ -142,7 +146,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
         },
         frame=source.next()=>{
-            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {if b.len()<=(32<<20) {let _=events.send(Event::Plot(b.to_vec())).await;}else{let _=events.send(Event::PlotTooBig(b.len())).await;}continue;}}let recv=std::time::Instant::now();let mut size=0usize;
+            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();crate::perf::wire(frame.len());if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {if b.len()<=(32<<20) {let _=events.send(Event::Plot(b.to_vec())).await;}else{let _=events.send(Event::PlotTooBig(b.len())).await;}continue;}}let recv=std::time::Instant::now();let mut size=0usize;
             let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
             let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {
@@ -192,7 +196,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     }
                     let process_ms=decoded.elapsed().as_secs_f64()*1000.0;
                     let decode_ms=decoded.duration_since(recv).as_secs_f64()*1000.0;
-                    let timing=Timing{rtt_ms,decode_ms,process_ms,bytes:size,delta:is_delta};
+                    let timing=Timing{rtt_ms,decode_ms,process_ms,bytes:size,delta:is_delta,at:Some(recv)};
                     let rv=r;let r=&rv;
                     if target!=v.target||revision!=v.revision {
                         // The reply is stale for drawing (the hub moved on while it was in flight) but its commands are what the person's press asked for: they still go out, once.

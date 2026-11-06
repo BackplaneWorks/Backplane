@@ -55,6 +55,19 @@ and downloads do not exist in GPUI yet), so the harness marks those journeys blo
   `net {event:"reconnected", ms}` (ms from wake to the first picture).
 The input metric also carries the latency phases: `hub_rtt_ms, decode_ms, process_ms, apply_ms, render_build_ms, applied_to_frame_ms, bytes, delta`.
 
+## Performance overlay
+
+Ctrl+Shift+H (a choice in Settings, This device) shows the last 5 s of the window's work, top right: `src/perf.rs`. A row is `n`, mean, p50, p99 and max in ms.
+
+- `frame`: render's start to `window.present()` returning (the GPU may still be working). Its steps: `build` (`Backplane::render`), `layout` (child views and the layout pass), `prepaint`, `paint`, `present`.
+- `input>px`: a key, press or scroll to the next frame's end. An input that changes nothing is charged to the next frame within 1 s, because GPUI does not say whether it left one to draw.
+- `hub>px`: a picture's frame arriving from the hub to the next frame's end. `hub rtt`: a view request sent to its reply; then `decode`, `merge` (delta or whole body) and `apply`.
+- `fps`: frames drawn per second over the window, not the display's rate: GPUI draws on demand, so an idle window is near 0. `cpu`, `rss`, `peak`: the process (a Mac has `peak` only).
+- `wire`: frames and bytes from the hub. `events`: what the hub thread gave the window. `pictures`, `deltas`: pictures applied, and how many came as deltas.
+- `slowest paints`: regions (topbar, sidebar, main, composer, viewer, rail, over) by prepaint and paint time, heaviest first; timeline rows are built in `prepaint main`. `slowest events`: the window's handling of hub events. `overlay`: its own cost per frame.
+
+Hidden, nothing is measured or kept and no mark or listener exists. Up, it updates with the frames the window draws anyway, at most 4 times a second, and asks for none but one after it opens, so an idle window shows its last busy moment. `{"read":"perf"}` in a script gives its text as a `read` event.
+
 ## Build (never on the desktop)
 
     scripts/boat-job.sh --size large --artifact build/gpui-artifacts -- sh scripts/boat-build.sh        # full build + tests

@@ -406,6 +406,13 @@ mod tests {
         assert_eq!(note("Delete (also) · Drawing pad").as_deref(), Some("Backspace. Fixed."));
         assert!(!rows.iter().any(|r| r.note.contains("Not yet") && r.label.to_lowercase().contains("drawing pad")));
     }
+    #[test] fn the_performance_overlay_is_a_shortcut_on_the_device_page_and_no_longer_a_not_yet() {
+        let rows = device_rows(&crate::local::Local::default());
+        let r = rows.iter().find(|r| r.label.starts_with("Performance overlay")).expect("its row");
+        assert!(r.note.contains("Ctrl+Shift+H") || r.note.contains("⌃⇧H"), "{}", r.note);
+        assert_eq!((r.buttons[0].action.as_str(), r.buttons[0].value.as_str()), ("local:shortcut", "perf"));
+        assert!(!rows.iter().any(|r| r.note.starts_with("Not yet") && r.note.contains("Performance")));
+    }
     #[test] fn rows_parse_with_buttons_fields_and_qr_and_a_vault_field_keeps_no_hub_value() {
         let r = parse(&j(r#"{"rows":[{"label":"Theme","note":"light or dark","buttons":[{"label":"Dark","action":"theme","value":"dark","on":true},{"label":"Light","action":"theme","value":"light","on":false}]},
             {"label":"Key","note":"","buttons":[],"fields":[{"name":"kname","hint":"name","secret":false,"value":"OPENAI"},{"name":"kval","hint":"value","secret":true,"vault":true,"value":"leaked-from-hub"}]},
