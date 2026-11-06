@@ -363,7 +363,7 @@ struct AppSettingsTab: View {
 
     var body: some View {
         Form {
-            Section(NativeMessages.settings_appearance(tag)) {
+            Section {
                 Picker(NativeMessages.settings_appearance(tag), selection: $settings.appearance) {
                     Text(NativeMessages.native_settings_system(tag)).tag("system")
                     Text(NativeMessages.settings_theme_light(tag)).tag("light")
@@ -379,6 +379,15 @@ struct AppSettingsTab: View {
                 if let row = screen.lang?.rows.dropFirst().first, let button = row.buttons.first {
                     Toggle(row.label, isOn: Binding(get: { button.on }, set: { _ in model.act(button.action, button.value) }))
                 }
+                Picker(tag == "ja" ? "文字サイズ" : "Text size", selection: $settings.textSize) {
+                    Text(NativeMessages.native_settings_system(tag)).tag("system")
+                    ForEach(AppSettings.textSteps, id: \.tag) { Text($0.tag.uppercased()).tag($0.tag) }
+                }
+                .accessibilityIdentifier("settings.textsize")
+            } header: {
+                Text(tag == "ja" ? "この端末" : "On this phone")
+            } footer: {
+                Text(tag == "ja" ? "この電話にだけ保存され、ハブや他の端末には送られません。" : "Stored on this phone only. Never sent to a hub or your other devices.")
             }
             Section {
                 Picker(NativeMessages.settings_sidebar(tag), selection: listBinding) {
@@ -391,12 +400,15 @@ struct AppSettingsTab: View {
                     ForEach(AppTab.allCases.filter { $0 != .settings }) { Text($0.title(tag)).tag($0.rawValue) }
                 }
                 Toggle(NativeMessages.native_settings_haptics(tag), isOn: $settings.haptics)
+                Toggle(tag == "ja" ? "この電話で通知" : "Alerts on this phone", isOn: $settings.alerts)
+                    .accessibilityIdentifier("settings.alerts")
+                Toggle(tag == "ja" ? "通知音" : "Alert sound", isOn: $settings.alertSound).disabled(!settings.alerts)
                 #if !GPUI_NATIVE
                 // off: the hub's phone web client is the app's screen again
                 Toggle(tag == "ja" ? "クラシック画面" : "Classic screens", isOn: $settings.classic)
                 #endif
             } header: {
-                Text(NativeMessages.native_settings_behaviour(tag))
+                Text(tag == "ja" ? "この端末の動作" : "On this phone: behaviour")
             } footer: {
                 Text(NativeMessages.native_settings_behaviour_ios(tag))
             }
@@ -425,9 +437,12 @@ struct AppSettingsTab: View {
                 // what the hub alerts for: its settings, from the last screen that carried them
                 if let r = notifyRows { HubSettingsRows(model: model, rows: r, notify: true) }
             } header: {
-                Text(NativeMessages.native_settings_notifications(tag))
+                Text(NativeMessages.native_settings_notifications(tag) + (tag == "ja" ? "(iOS とハブ全体)" : " (iOS permission, and hub-wide policy)"))
             } footer: {
-                if screen.hubs.count > 1, let h = notifyHub { Text(NativeMessages.native_settings_notify_hub(tag, h.name)) }
+                VStack(alignment: .leading) {
+                    Text(tag == "ja" ? "下の項目はハブ全体の設定で、すべての端末に適用されます。" : "The rows below the iOS permission are hub-wide: they apply to every device on that hub.")
+                    if screen.hubs.count > 1, let h = notifyHub { Text(NativeMessages.native_settings_notify_hub(tag, h.name)) }
+                }
             }
             Section(NativeMessages.native_usage_machines(tag)) {
                 ForEach(screen.usageMachines ?? []) { machine in

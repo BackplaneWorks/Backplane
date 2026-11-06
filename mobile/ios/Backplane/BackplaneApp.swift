@@ -76,6 +76,7 @@ struct BackplaneApp: App {
                 .preferredColorScheme(model.webShown ? model.web.theme ?? model.settings.colorScheme : model.settings.colorScheme)
                 #endif
                 // Canonical references and legacy notification links share message-tap routing.
+                .modifier(TextSizeModifier(size: model.settings.dynamicType))
                 .onOpenURL { model.open($0) }
                 .onAppear { delegate.model = model }
         }

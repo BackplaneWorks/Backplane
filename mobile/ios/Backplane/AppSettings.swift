@@ -48,6 +48,11 @@ final class AppSettings {
     // a tab's raw value, or empty: Home with an uberbot, else Threads
     var defaultTab: String { didSet { d.set(defaultTab, forKey: "app.defaultTab") } }
     var haptics: Bool { didSet { d.set(haptics, forKey: "app.haptics") } }
+    // text size on this device: "system" (follow iOS) or a step from "xs" to "xxxl"; applied to the whole app at once
+    var textSize: String { didSet { d.set(textSize, forKey: "app.textSize") } }
+    // alerts and their sound on this phone (the hub's own policy, what it alerts for, is a hub setting)
+    var alerts: Bool { didSet { d.set(alerts, forKey: "app.alerts") } }
+    var alertSound: Bool { didSet { d.set(alertSound, forKey: "app.alertSound") } }
     // the native screens instead of the hub's phone web client (for one
     // release, while the web screens settle in)
     var classic: Bool { didSet { d.set(classic, forKey: "app.classic") } }
@@ -64,8 +69,14 @@ final class AppSettings {
         threadList = d.string(forKey: "app.threadList") ?? ""
         defaultTab = d.string(forKey: "app.defaultTab") ?? ""
         haptics = d.object(forKey: "app.haptics") as? Bool ?? true
+        textSize = d.string(forKey: "app.textSize") ?? "system"
+        alerts = d.object(forKey: "app.alerts") as? Bool ?? true
+        alertSound = d.object(forKey: "app.alertSound") as? Bool ?? true
         classic = d.bool(forKey: "app.classic")
     }
+
+    static let textSteps: [(tag: String, size: DynamicTypeSize)] = [("xs", .xSmall), ("s", .small), ("m", .medium), ("l", .large), ("xl", .xLarge), ("xxl", .xxLarge), ("xxxl", .xxxLarge)]
+    var dynamicType: DynamicTypeSize? { Self.textSteps.first { $0.tag == textSize }?.size }
 
     var colorScheme: ColorScheme? {
         appearance == "light" ? .light : appearance == "dark" ? .dark : nil
@@ -99,5 +110,13 @@ enum Haptics {
     static func selection() {
         guard UserDefaults.standard.object(forKey: "app.haptics") as? Bool ?? true else { return }
         UISelectionFeedbackGenerator().selectionChanged()
+    }
+}
+
+// Applies this device's text size to everything under it; "system" leaves iOS's own setting alone.
+struct TextSizeModifier: ViewModifier {
+    let size: DynamicTypeSize?
+    func body(content: Content) -> some View {
+        if let size { content.dynamicTypeSize(size) } else { content }
     }
 }
