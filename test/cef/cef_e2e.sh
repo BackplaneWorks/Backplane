@@ -7,7 +7,7 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd); MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
 CLIENT=$1; HUB=$2; OUT=${OUT:-/tmp/cef-e2e}; DISP=${DISP:-:77}; HPORT=${HPORT:-3873}; PPORT=${PPORT:-3898}; CDP=${CDP:-9411}
 RT=${BACKPLANE_CEF:-$HOME/.cache/backplane/cef-runtime/154.0.34}
-XV=$MAIN/build/gpui/xvfb; POLICY=${GPUI_POLICY:-$MAIN/build/gpui/slim/bp-policy-page}; WINBIN=${GPUI_WINDOW_BIN:-$MAIN/build/gpui/hub/new/window}
+XV=$MAIN/build/gpui/xvfb
 rm -rf "$OUT"; mkdir -p "$OUT/home" "$OUT/proj" "$OUT/bin" "$OUT/fakehome/.cache"
 [ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP in use"; exit 2; }
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > "$OUT/bin/claude"; chmod +x "$OUT/bin/claude"
@@ -29,7 +29,7 @@ printf 'font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border 
 mkdir -p -m 700 "$OUT/run"; XDG_RUNTIME_DIR=$OUT/run DISPLAY=$DISP i3 -c "$OUT/i3.conf" > "$OUT/i3.log" 2>&1 & PIDS="$PIDS $!"
 sleep 1
 ( cd "$OUT/proj" && BACKPLANE_BROWSER_DEBUG=1 BACKPLANE_AGENTS=$OUT/bin BACKPLANE_BROWSER=$OUT/bin/backplane-browser BACKPLANE_NO_UPDATE=1 FAKE_LOG=$OUT/standin.log BP_STANDIN_MODE=stream HOME=$OUT/fakehome XDG_CACHE_HOME=$OUT/fakehome/.cache \
-  exec "$HUB" --home "$OUT/home" --port $HPORT --host 127.0.0.1 --no-tailscale --foreground --policy-bin "$POLICY" --window-bin "$WINBIN" > "$OUT/hub.log" 2>&1 ) & HP=$!; PIDS="$PIDS $HP"
+  exec "$HUB" --home "$OUT/home" --port $HPORT --host 127.0.0.1 --no-tailscale --foreground > "$OUT/hub.log" 2>&1 ) & HP=$!; PIDS="$PIDS $HP"
 n=0; until curl -s -m1 -o /dev/null http://127.0.0.1:$HPORT/hello; do sleep 0.2; n=$((n+1)); [ $n -gt 100 ] && { echo "hub did not start"; tail -5 "$OUT/hub.log"; exit 1; }; done
 EV='mcpcall:{"name":"preview_evaluate","arguments":{"expression":"document.title"}}'
 cat > "$OUT/script.json" <<JSON
