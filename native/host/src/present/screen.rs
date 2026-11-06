@@ -153,7 +153,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
-    let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"thread":shown_thread,"rooms":rooms(st,hub),"bots":bots(st,hub,opts.now),"theme":setting(st,"ui.theme"),
+    let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,hub),"bots":bots(st,hub,opts.now),"theme":setting(st,"ui.theme"),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":null,"newRoom":null,"newBot":null,"projectHome":null});
     let mut shown=shown;
     { let f=picker::folders(&session["drafts"],&std::env::var("HOME").unwrap_or_default(),&st.projects.values().filter(|p|!p.removed).map(|p|p.root.as_str()).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
@@ -169,8 +169,8 @@ mod tests {
     use super::*;
     // These are explicit output differences, not additional parity normalisations. The JS replay gate
     // still compares the whole answer and must report them until the corresponding slices are ported.
-    const OMITTED: &[&str]=&["bubHomes","online","version","error","note","sel","making","lang","empty","older","settled","view","active","legacy","rowMenu","removing","search","folders","tour","starNudge","find","island","islands","uber","hub","hubs","usageMachines","found","tabs"];
-    const OVERLAY_OMITTED: &[&str]=&["machineUsage","tabs","online","version","seq","error","bubHome","lang","note","sel","making","empty","legacy","older","view","active","settled","rowMenu","search","removing","tour","starNudge","find","folders","island","islandAt","uber","plane"];
+    const OMITTED: &[&str]=&["bubHomes","online","version","error","note","sel","making","lang","empty","older","settled","view","rowMenu","removing","search","folders","tour","starNudge","find","island","islands","uber","hub","hubs","usageMachines","found","tabs"];
+    const OVERLAY_OMITTED: &[&str]=&["machineUsage","tabs","online","version","seq","error","bubHome","lang","note","sel","making","empty","older","view","settled","rowMenu","search","removing","tour","starNudge","find","folders","island","islandAt","uber","plane"];
     fn retain_root(v: &mut Value, omitted: &[&str]) {
         let m=v.as_object_mut().unwrap();
         for k in omitted { assert!(m.remove(*k).is_some(),"named approved difference absent in oracle: {k}"); }
@@ -196,6 +196,19 @@ mod tests {
     }
     #[test] fn recorded_js_recent_gpui() { oracle(include_str!("fixtures/session-gpui-recent.json")); }
     #[test] fn recorded_js_recent_gpuid() { oracle(include_str!("fixtures/session-gpuid-recent.json")); }
+    /// A fresh home (no projects, no threads): the sidebar descriptor has null pages, and the phone's bridge then requires `projects`, `active` and `legacy` to be
+    /// arrays (empty) in BOTH `shown` and `overlay.j` (src/mobile/thin-native-host-307265.js sidebarRange); a missing key is its 'invalid view presentation'.
+    #[test] fn a_fresh_home_sends_projects_active_and_legacy_as_empty_lists_in_shown_and_overlay() {
+        let recording:Value=serde_json::from_str(include_str!("fixtures/session-gpui-recent.json")).unwrap(); let frames=recording["frames"].as_array().unwrap();
+        let mut st=State::new(); st.lean=true;
+        let mut p=frames[3]["json"]["p"].clone(); p["viewId"]=frames[7]["json"]["result"]["viewId"].clone(); p["revision"]=json!(1); p["now"]=json!(1000); p["nativeKey"]=json!("00112233445566778899aabbccddeeff");
+        let out=recent(&st,&p).expect("a fresh home is claimed");
+        for (name,v) in [("shown",&out["shown"]),("overlay.j",&out["overlay"]["j"])] {
+            for k in ["projects","active","legacy"] { assert_eq!(v[k],json!([]),"{name}.{k} is an empty list"); }
+            assert_eq!(v["nativeSidebar"],1,"{name}.nativeSidebar");
+        }
+        assert_eq!(out["shown"]["sidebarPages"],out["overlay"]["j"]["sidebarPages"]);
+    }
     #[test] fn other_targets_and_unported_actions_are_unclaimed() {
         let s=State::new();
         for kind in ["thread","settings","bot","room","project"] {
