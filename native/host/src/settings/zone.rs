@@ -26,9 +26,11 @@ fn zoneinfo() -> PathBuf { std::env::var_os("BACKPLANE_ZONEINFO").map(PathBuf::f
 
 /// ZoneJob.rule: the zone's rule, "" when the name is not valid or the system does not know it. The footer is the last line of the TZif file
 /// (`tail -n 1`); a zone it cannot read that way but the system knows is taken as the offset it has now (`TZ=<name> date +%z`).
-pub fn rule(name: &str) -> String {
+pub fn rule(name: &str) -> String { rule_in(&zoneinfo(), name) }
+/// `rule` against one zoneinfo folder (the tests pass their own: the environment variable is process-wide, and tests that set it race).
+fn rule_in(dir: &std::path::Path, name: &str) -> String {
     if !valid(name) { return String::new() }
-    let path = zoneinfo().join(name);
+    let path = dir.join(name);
     let Ok(bytes) = std::fs::read(&path) else { return String::new() };
     let text = String::from_utf8_lossy(&bytes);
     let footer = text.trim_end_matches('\n').rsplit('\n').next().unwrap_or("").trim().to_string();
@@ -85,8 +87,10 @@ mod tests {
     }
     #[test] fn a_fixed_offset_is_a_posix_rule() { assert_eq!(fixed_rule("+0530"), "<+0530>-5:30"); assert_eq!(fixed_rule("-0300"), "<-0300>3"); assert_eq!(fixed_rule("+0000"), "<+0000>-0"); }
     #[test] fn the_rule_is_the_footer_of_the_tzif_file() {
-        zi();
-        assert_eq!(rule("Europe/Helsinki"), "EET-2EEST,M3.5.0/3,M10.5.0/4"); assert_eq!(rule("Europe/Nowhere"), ""); assert_eq!(rule("../../etc/passwd"), "");
+        let d = std::env::temp_dir().join(format!("bp-zi-rule-{}", std::process::id())); std::fs::create_dir_all(d.join("Europe")).unwrap();
+        std::fs::write(d.join("Europe/Helsinki"), b"TZif2\0\0binary\n\nEET-2EEST,M3.5.0/3,M10.5.0/4\n").unwrap();
+        assert_eq!(rule_in(&d, "Europe/Helsinki"), "EET-2EEST,M3.5.0/3,M10.5.0/4"); assert_eq!(rule_in(&d, "Europe/Nowhere"), ""); assert_eq!(rule_in(&d, "../../etc/passwd"), "");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[tokio::test(flavor = "multi_thread")] async fn report_and_set_write_the_settings_the_hub_writes() {
         zi();
