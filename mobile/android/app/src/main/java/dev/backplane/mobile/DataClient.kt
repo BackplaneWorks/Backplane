@@ -29,6 +29,7 @@ object DataClient {
     var older by mutableStateOf<Map<String, String>>(emptyMap()); private set
     var listsLoaded by mutableStateOf(false); private set
     var features by mutableStateOf<Set<String>>(emptySet()); private set
+    var notice by mutableStateOf(HubNotice()); private set   // hello `notice`, newer from /hub/status: the banner
     var link by mutableStateOf<String?>(null); private set
     var pairingError by mutableStateOf(""); var pairingBusy by mutableStateOf(false)
     /** a pairing link that came from outside the app: nothing happens until the person says so */
@@ -82,7 +83,7 @@ object DataClient {
         connect()
     }
     fun unpair() { link = null; prefs().edit().remove("link").apply(); reset(); close(); conn = Conn.OFFLINE }
-    private fun reset() { projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
+    private fun reset() { notice = HubNotice(); projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
     fun connect() {
@@ -126,6 +127,7 @@ object DataClient {
             "hello" -> {
                 if (!o.optString("proto").startsWith("data/")) { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
                 features = o.optJSONArray("features")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+                notice = HubRescue.notice(o.optJSONObject("notice"))
                 conn = Conn.ONLINE; failure = ""; backoff = 250; plots.reset()
                 scope.launch { synchronise(g) }
             }
@@ -291,6 +293,10 @@ object DataClient {
     }
     fun draft(tid: String) = prefs().getString("draft.$tid", "") ?: ""
     fun setDraft(tid: String, t: String) { prefs().edit().apply { if (t.isEmpty()) remove("draft.$tid") else putString("draft.$tid", t) }.apply() }
+
+    // ---- the Hub screen: plain HTTP from the pairing alone, whatever the socket is doing
+    fun hubHttp(): HubHttp? { val l = link ?: return null; return HubHttp(Pairing.http(l, "", token = false) ?: return null, Pairing.token(l)) }
+    fun heardNotice(n: HubNotice) { notice = n }
 
     // ---- the hub's additions to data/1 (features actions, search, models, mentions, bots, notify)
     fun has(f: String) = f in features

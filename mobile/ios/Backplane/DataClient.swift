@@ -31,6 +31,8 @@ final class DataClient {
     private(set) var rooms: [DRoom] = []
     // what the hub says it can do beyond the base of data/1 (hello.features); a hub that names none takes no pictures
     private(set) var features: Set<String> = []
+    // hello `notice`, newer from /hub/status: the banner
+    private(set) var notice = HubNotice()
     var canSendImages: Bool { features.contains("images") }
     var pairingError = ""
     var pairingBusy = false
@@ -91,9 +93,17 @@ final class DataClient {
         links = []; PairingStore.save(links); reset(); close(); conn = .offline
     }
     private func reset() {
+        notice = HubNotice()
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil
         try? FileManager.default.removeItem(at: cacheURL)
     }
+
+    // MARK: the Hub screen: plain HTTP from the pairing alone, whatever the socket is doing
+    func hubHttp() -> HubHttp? {
+        guard let link, let base = Pairing.http(link, path: "", token: false) else { return nil }
+        return HubHttp(base: base.absoluteString, token: Pairing.token(link))
+    }
+    func heardNotice(_ n: HubNotice) { notice = n }
 
     // MARK: connection
     func connect() {
@@ -174,6 +184,7 @@ final class DataClient {
         case "hello":
             guard (o["proto"] as? String)?.hasPrefix("data/") == true else { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
             features = Set((o["features"] as? [String]) ?? [])
+            notice = HubRescue.notice(o["notice"] as? [String: Any])
             conn = .online; failure = ""; backoff = 0.25; plots.reset()
             Task { await self.synchronise(g) }
         case "reply":

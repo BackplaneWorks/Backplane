@@ -102,6 +102,8 @@ object Pairing {
         return "$scheme://${w.host}$port$path" + (if (q.isEmpty()) "" else "?" + q.joinToString("&"))
     }
 
+    fun token(link: String): String? = socket(link)?.let { Uri.parse(it).getQueryParameter("token") }
+
     // the hub's key: host:port, the same for every link to it
     fun key(link: String): String? {
         val u = Uri.parse(socket(link) ?: return null)

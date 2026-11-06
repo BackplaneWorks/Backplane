@@ -88,7 +88,17 @@ Frames, to the client that started the session (`{"t":"voice","thread","ev",…}
 
 ## Updates
 
-The hub decides what to say; a phone shows it. Restart and rollback are not here: they are the guard's `hub.control`.
+The hub decides what to say; a phone shows it. Restart and rollback are not here: they are the guard's, on the Hub screen below.
 - `update.status` → `{current, version, channel, state, note, checked, line, canCheck}`: `line` is the sentence to show, the same one the desktop's Settings shows; `version` is what is available, "" for none; `channel` is `stable` or `beta` (a stored `nightly` reads as `beta`); `canCheck` says whether to offer Check now.
 - `update.check` looks now and answers the same; on a hub that updates itself this also installs what it finds once no turn runs. `app.update` asks for an install and answers the same.
 - `update.channel {channel}` sets it to `stable` or `beta` and answers the same.
+
+## The Hub screen (`HubRescue.kt`/`.swift`, `HubScreen.kt`, `HubView.swift`)
+Restarting the hub must work when its views are broken, the socket is down, or only its guard answers, so this is native UI on plain HTTP to the paired address, and nothing here goes through the socket. The app reaches it from Settings and from the offline banner.
+- `GET /healthz`, no credential: 200 `{status: ok|degraded, safe, …}`, 503 `{status: starting|hung|down, …}`; `status:"down"` with `rescue:1` is the guard answering on the hub's address. Every one of these bodies is an answer, a 503 as much as a 200.
+- `GET /hub/status`, `Authorization: Bearer <token>`: `{guard:{state, mode, build, text, actions:[{id, label, text?, remote?}]}, incidents:[{at, what, why, did}], hub:{…}, notice:{text, tone, actions}}`. In rescue the same with `rescue:1` and no `hub` or `notice`. `guard:null`: this hub has no guard. Incidents come oldest first and `at` is in unix **seconds**, unlike the rest of this file. `remote:false` on a rollback says the hub will refuse it from a phone; the app draws it anyway and shows the refusal.
+- `POST /hub/control {action: restart|normal|safe|rollback}`, the same credential: 202 `{ok:true, text}`; 409 `{ok:false, text}` is a refusal to show as it stands (3 restarts in 5 minutes, a rollback that would lock the person out, no guard); 401 the credential was refused. Another status with a `text` (503 "the guard did not answer") is shown as well.
+- The buttons are `guard.actions`, one each; the app adds none of its own unless `/hub/status` cannot be fetched or `guard` is null, when it offers a built-in `restart`. With no guard the hub's reason is control's 409, so the app sends that only on a confirmed tap, never by itself. Each action is confirmed first, with its `text` when it has one.
+- After a 202: `/healthz` every 2 s for up to 3 minutes until `ok`, `degraded` or `down`, stopping when the screen goes away and pausing while the app is in the background. The old hub (or rescue) goes on answering for a moment after its 202, so such an answer counts only once the restart has shown (no answer, `starting`, `hung`) or 10 s have passed. A request to `/healthz` gives up after 5 s, the others after 12 s; the credential is not sent on through a redirect.
+- `hello` carries `notice:{text, tone, actions}` (`text` empty when all is well, `tone` `warn` or `info`): a thin banner on the lists and the thread opens the Hub screen. `/hub/status` updates it too. The RPCs `hub.status` and `hub.control {action}` exist; the apps do not use them, since they need the socket.
+- `test/mobile/hub_cases.json` holds both apps to the same decisions (`HubRescueTest`, `scripts/mobile/hub-check.sh`); `test/mobile/hub_stub.py` plays these routes.
