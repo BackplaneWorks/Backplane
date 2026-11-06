@@ -238,33 +238,43 @@ impl Accounts {
     }
 
     /// Claude's stream-json control requests (`initialize` -> models; `get_usage`): one child, the answers it gives, 12 s, nothing else read.
-    async fn claude_control(&self, p: Option<&Profile>, want: &str) -> Option<Value> {
-        let prog = (self.resolve)("claude").ok()?;
+    async fn claude_control(&self, p: Option<&Profile>, want: &str) -> Option<Value> { self.claude_read(p, want).await.ok() }
+    /// The CLI's own control reply (`models`, or `usage` after `initialize`), or the plain reason there was none.
+    async fn claude_read(&self, p: Option<&Profile>, want: &str) -> Result<Value, String> {
+        let prog = (self.resolve)("claude").map_err(|_| "The Claude CLI was not found on this machine.".to_string())?;
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
         c.args(["--setting-sources", "user", "--settings", "{\"forceLoginMethod\":\"claudeai\"}", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
-        c.current_dir(&self.root); apply_env(&mut c, &self.environment(p).ok()?, p.is_some());
+        c.current_dir(&self.root); apply_env(&mut c, &self.environment(p).map_err(|_| "This account's private folder could not be verified.".to_string())?, p.is_some());
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
-        let mut child = c.spawn().ok()?;
-        let (mut stdin, stdout) = (child.stdin.take()?, child.stdout.take()?);
-        let init = json!({"type":"control_request","request_id":"init","request":{"subtype":"initialize"}}).to_string();
-        let first = if want == "models" { json!({"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}).to_string() } else { init };
-        stdin.write_all(format!("{first}\n").as_bytes()).await.ok()?;
-        let r = tokio::time::timeout(Duration::from_secs(12), async {
+        let mut child = c.spawn().map_err(|_| "The Claude CLI could not be started.".to_string())?;
+        let (mut stdin, stdout) = (child.stdin.take().ok_or("The Claude CLI could not be started.")?, child.stdout.take().ok_or("The Claude CLI could not be started.")?);
+        let first = json!({"type":"control_request","request_id":if want == "models" { "models" } else { "init" },"request":{"subtype":"initialize"}}).to_string();
+        stdin.write_all(format!("{first}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?;
+        let r = tokio::time::timeout(Duration::from_secs(30), async {
             let mut lines = BufReader::new(stdout).lines(); let mut total = 0usize;
             while let Ok(Some(l)) = lines.next_line().await {
-                total += l.len(); if total > 131072 { return None }
+                total += l.len(); if total > 524288 { return Err("The Claude CLI's reply was too large.".to_string()) }
                 let Ok(r) = serde_json::from_str::<Value>(&l) else { continue };
                 if r["type"] != "control_response" { continue }
+                let bad = r["response"]["subtype"] == "error";
+                let why = || format!("Claude refused the request: {}", label(r["response"]["error"].as_str().unwrap_or("no reason given")));
                 match (want, r["response"]["request_id"].as_str()) {
-                    ("models", Some("models")) => return if r["response"]["subtype"] == "error" { None } else { Some(r["response"]["response"].clone()) },
-                    ("usage", Some("init")) => { if r["response"]["subtype"] == "error" { return None } let q = json!({"type":"control_request","request_id":"usage","request":{"subtype":"get_usage","skip_behaviors":true}}).to_string(); stdin.write_all(format!("{q}\n").as_bytes()).await.ok()?; }
-                    ("usage", Some("usage")) => return if r["response"]["subtype"] == "error" { None } else { Some(r["response"]["response"].clone()) },
+                    ("models", Some("models")) => return if bad { Err(why()) } else { Ok(r["response"]["response"].clone()) },
+                    ("usage", Some("init")) => { if bad { return Err(why()) } let q = json!({"type":"control_request","request_id":"usage","request":{"subtype":"get_usage","skip_behaviors":true}}).to_string(); stdin.write_all(format!("{q}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?; }
+                    ("usage", Some("usage")) => return if bad { Err(why()) } else { Ok(r["response"]["response"].clone()) },
                     _ => {}
                 }
             }
-            None
-        }).await.ok().flatten();
+            Err("The Claude CLI closed before reporting usage.".to_string())
+        }).await.unwrap_or_else(|_| Err("The Claude CLI did not answer within 30 seconds.".to_string()));
         let _ = child.start_kill(); r
+    }
+    /// The windows Claude reports for a profile (or the default login), or why there are none.
+    async fn claude_usage(&self, p: Option<&Profile>) -> Result<Vec<Value>, String> {
+        let r = self.claude_read(p, "usage").await?;
+        if r["rate_limits_available"] != true { return Err("Claude does not report limits for this account (it may not be a subscription plan).".into()) }
+        let w = Self::claude_windows(&r);
+        if w.is_empty() { Err("Claude reported no limit windows for this account.".into()) } else { Ok(w) }
     }
     async fn claude_models(&self, p: &Profile) -> Vec<Value> {
         let Some(r) = self.claude_control(Some(p), "models").await else { return vec![] };
@@ -317,8 +327,14 @@ impl Accounts {
             let at = last(&format!("usage:{}", p.id));
             if new_login || at == 0 || now_s().saturating_sub(at) >= 300 {
                 self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s());
-                let windows = self.claude_control(Some(&p), "usage").await.map(|r| Self::claude_windows(&r)).unwrap_or_default();
-                if !windows.is_empty() { let n = now_s(); allowance = Some(json!({"provider":"claude","state":"ok","at":n,"attempted_at":n,"auth":"claude.ai","source":"claude-cli-usage","windows":windows})) }
+                match self.claude_usage(Some(&p)).await {
+                    Ok(windows) => { let n = now_s(); allowance = Some(json!({"provider":"claude","state":"ok","at":n,"attempted_at":n,"auth":"claude.ai","source":"claude-cli-usage","windows":windows})) }
+                    Err(reason) => {
+                        // a failed read is tried again in a minute, not five; the last good reading stays, else the reason is what the account shows
+                        self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s().saturating_sub(240));
+                        if allowance.as_ref().map_or(true, |a| a["state"] != "ok") { allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now_s(),"source":"claude-cli-usage","reason":reason,"windows":[]})) }
+                    }
+                }
             }
         } else {
             let prog = (self.resolve)("codex")?;
@@ -665,11 +681,24 @@ impl Accounts {
         self.with_profile(profile, |slot, g| { slot.allowance = Some(json!({"provider":"claude","state":"ok","at":n,"source":"claude-stream","auth":"claude.ai","windows":windows})); g.revision += 1; });
         self.snapshot()
     }
+    fn refresh_at_retry(&self, g: &mut Inner) { g.refresh_at.insert("default-claude".into(), now_s().saturating_sub(240)); }
     /// The 5-minute recheck of connected profiles (accounts.js `refresh`); a test hub and a copy never run it.
     pub async fn refresh(self: &Arc<Self>) {
         let now = now_s();
         let ids: Vec<String> = { let g = self.inner.lock().unwrap(); g.profiles.iter().filter(|p| matches!(p.state.as_str(), "connected" | "unchecked") && !g.jobs.contains_key(&p.id) && g.busy.get(&p.id).copied().unwrap_or(0) == 0)
             .filter(|p| { let at = g.refresh_at.get(&p.id).copied().unwrap_or(0).max(p.allowance.as_ref().and_then(|a| a["at"].as_u64()).unwrap_or(0)); at == 0 || now.saturating_sub(at) >= 300 }).map(|p| p.id.clone()).collect() };
+        // a profile with a turn running is not verified again (its sign-in is in use), but its usage is a read-only request and is kept current
+        let busy: Vec<String> = { let g = self.inner.lock().unwrap(); g.profiles.iter().filter(|p| p.provider == "claude" && p.state == "connected" && !g.jobs.contains_key(&p.id) && g.busy.get(&p.id).copied().unwrap_or(0) > 0)
+            .filter(|p| { let at = g.refresh_at.get(&format!("usage:{}", p.id)).copied().unwrap_or(0).max(p.allowance.as_ref().and_then(|a| a["at"].as_u64()).unwrap_or(0)); at == 0 || now.saturating_sub(at) >= 300 }).map(|p| p.id.clone()).collect() };
+        for id in busy {
+            self.inner.lock().unwrap().refresh_at.insert(format!("usage:{id}"), now);
+            let Ok(p) = self.profile(&id) else { continue };
+            let r = self.claude_usage(Some(&p)).await; let n = now_s();
+            let _ = self.with_profile(&id, |slot, g| { match r {
+                Ok(windows) => slot.allowance = Some(json!({"provider":"claude","state":"ok","at":n,"attempted_at":n,"auth":"claude.ai","source":"claude-cli-usage","windows":windows})),
+                Err(reason) => if slot.allowance.as_ref().map_or(true, |a| a["state"] != "ok") { slot.allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":n,"source":"claude-cli-usage","reason":reason,"windows":[]})) },
+            } g.revision += 1; });
+        }
         for id in ids {
             self.inner.lock().unwrap().refresh_at.insert(id.clone(), now);
             if self.begin(&id, "refresh", true).is_err() { continue }
@@ -684,8 +713,10 @@ impl Accounts {
                     use sha2::{Digest, Sha256};
                     let ident = hex::encode(Sha256::digest(json!([data["email"], data["accountUuid"].as_str().or(data["userId"].as_str()), data["orgUuid"].as_str().or(data["organizationId"].as_str())]).to_string().as_bytes()));
                     let changed = { let mut g = self.inner.lock().unwrap(); let c = g.default_identity != ident; if c { g.default_allowance = None } g.default_identity = ident; c }; let _ = changed;
-                    let windows = self.claude_control(None, "usage").await.map(|r| Self::claude_windows(&r)).unwrap_or_default();
-                    if !windows.is_empty() { let n = now_s(); let mut g = self.inner.lock().unwrap(); g.default_allowance = Some(json!({"provider":"claude","state":"ok","auth":"claude.ai","at":n,"attempted_at":n,"source":"claude-cli-usage","windows":windows})); g.revision += 1; }
+                    match self.claude_usage(None).await {
+                        Ok(windows) => { let n = now_s(); let mut g = self.inner.lock().unwrap(); g.default_allowance = Some(json!({"provider":"claude","state":"ok","auth":"claude.ai","at":n,"attempted_at":n,"source":"claude-cli-usage","windows":windows})); g.revision += 1; }
+                        Err(reason) => { let mut g = self.inner.lock().unwrap(); self.refresh_at_retry(&mut g); if g.default_allowance.as_ref().map_or(true, |a| a["state"] != "ok") { g.default_allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now,"source":"claude-cli-usage","reason":reason,"windows":[]})); g.revision += 1; } }
+                    }
                 } else { let mut g = self.inner.lock().unwrap(); g.default_identity.clear(); g.default_allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now,"source":"claude-cli-usage","windows":[]})); g.revision += 1; }
             }
         }
@@ -777,6 +808,15 @@ for l in sys.stdin:
         assert_eq!(w[1]["scope"], "seven_day_opus"); assert_eq!(w[1]["shared"], false); assert!(Accounts::claude_windows(&json!({"rate_limits_available":false})).is_empty());
         let c = Accounts::codex_windows(&json!({"rateLimits":{"limitId":"codex","primary":{"usedPercent":10,"resetsAt":5,"windowDurationMins":300},"secondary":{"usedPercent":-1}}}));
         assert_eq!(c.len(), 1); assert_eq!((c[0]["name"].clone(), c[0]["used_percent"].clone(), c[0]["window_minutes"].clone()), (json!("codex/primary"), json!(10.0), json!(300.0)));
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_usage_read_that_fails_says_why() {
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (h, sd) = dirs("usage"); let a = mgr(&h, &sd);
+        let script = CLAUDE.replace("resp = {\"rate_limits_available\": True,", "resp = {\"rate_limits_available\": os.environ.get(\"STANDIN_USAGE\") != \"none\",");
+        let path = sd.join("claude"); std::fs::write(&path, script).unwrap();
+        std::env::set_var("STANDIN_USAGE", "ok"); let w = a.claude_usage(None).await.unwrap(); assert_eq!(w[0]["scope"], "five_hour");
+        std::env::set_var("STANDIN_USAGE", "none"); let e = a.claude_usage(None).await.unwrap_err(); assert!(e.contains("does not report limits"), "{e}");
+        std::env::remove_var("STANDIN_USAGE"); let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn the_registry_adds_renames_removes_and_survives_a_restart_and_a_bad_file_is_not_trusted() {
         use std::os::unix::fs::PermissionsExt as _;
