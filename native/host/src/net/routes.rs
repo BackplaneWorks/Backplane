@@ -40,6 +40,12 @@ impl AuthRoutes {
         let cookie = req.header("cookie").split(';').find_map(|c| c.trim().strip_prefix("bp_token=").map(str::to_string)).unwrap_or_default();
         if cookie.is_empty() { owner::param(&req.target, "token") } else { cookie }
     }
+    /// A private invitation made from inside the hub (Settings → Devices → Add a device): the same one `POST /auth/invitations` makes, with the QR code of its link.
+    pub fn invite(&self) -> Value {
+        let mut j = self.reg.create(&self.create_routes("", false));
+        if let Some(l) = j["link"].as_str().map(str::to_string) { j["qr"] = json!((self.qr)(&l)); }
+        j
+    }
     fn create_routes(&self, authority: &str, https: bool) -> Vec<String> {
         let mut routes = self.state.lock().unwrap().routes.clone();
         // This exact origin already authenticated the issuing client. Other hints are only local interfaces
