@@ -86,11 +86,20 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, String> {
     Ok(Manifest { tag: s("tag"), version: s("version"), channel: s("channel"), commit: s("commit"), assets })
 }
 
-/// The public keys this build trusts, from `BACKPLANE_UPDATE_KEYS` when it was compiled: `id:hex,id:hex`. There is no way to add one at run time. Empty: this build cannot update.
-pub fn keys_of(raw: &str) -> Vec<(String, [u8; 32])> {
-    raw.split(',').filter_map(|e| { let (id, h) = e.trim().split_once(':')?; let b: [u8; 32] = hex::decode(h).ok()?.try_into().ok()?; (!id.is_empty()).then(|| (id.to_string(), b)) }).collect()
+/// The release key (`release.pub`, PEM SPKI: the raw key is the DER's last 32 bytes) under its ID (`release.keyid`). None when the ID is not the first 16 hex of
+/// SHA-256 over the key: the two files disagree, so neither is trusted.
+pub fn pem_key(pem: &str, keyid: &str) -> Option<(String, [u8; 32])> {
+    use base64::Engine; use sha2::Digest;
+    let b64: String = pem.lines().filter(|l| !l.starts_with("-----")).map(str::trim).collect();
+    let der = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+    // SPKI for ed25519: SEQUENCE { SEQUENCE { OID 1.3.101.112 }, BIT STRING 0 || key }, 44 bytes
+    if der.len() != 44 || der[..12] != [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00] { return None }
+    let k: [u8; 32] = der[12..].try_into().ok()?;
+    let id = keyid.trim();
+    (hex::encode(sha2::Sha256::digest(k))[..16] == *id).then(|| (id.to_string(), k))
 }
-pub fn keys() -> Vec<(String, [u8; 32])> { keys_of(option_env!("BACKPLANE_UPDATE_KEYS").unwrap_or("")) }
+/// The one key a release is checked against. There is no other, and no way to add one at run time or at build time: a test passes its own keys to `verify`.
+pub fn keys() -> Vec<(String, [u8; 32])> { pem_key(include_str!("release.pub"), include_str!("release.keyid")).into_iter().collect() }
 
 /// `manifest.json`'s bytes against `manifest.json.sig` (64 raw bytes) under the key `manifest.json.keyid` names. The bytes are checked before they are read as anything.
 pub fn verify(bytes: &[u8], sig: &[u8], keyid: &str, keys: &[(String, [u8; 32])]) -> Result<(), String> {
@@ -188,8 +197,11 @@ mod tests {
     }
     #[test] fn a_build_with_no_key_refuses_and_says_why() {
         let p = pair(); let body = b"x"; assert!(verify(body, p.sk.sign(body, None).as_ref(), "k1", &[]).unwrap_err().contains("no update key"));
-        assert_eq!(keys_of(""), vec![]); assert_eq!(keys_of("nocolon,a:zz,:00"), vec![], "a bad entry is no key");
-        assert_eq!(keys_of(&format!("a:{}", "00".repeat(32))).len(), 1);
+    }
+    #[test] fn a_manifest_signed_with_another_key_is_refused_by_the_release_key() {
+        let (body, other) = (br#"{"schema":1}"#, pair()); let sig = other.sk.sign(body, None);
+        assert!(verify(body, sig.as_ref(), "6c899f869be656d3", &keys()).unwrap_err().contains("does not match"), "under the release key's ID");
+        assert!(verify(body, sig.as_ref(), "k1", &keys()).unwrap_err().contains("does not trust"), "under its own ID");
     }
     #[test] fn a_good_manifest_names_its_asset() {
         assert_eq!(pick(&manifest("v0.16.0", "stable"), "v0.16.0", "stable", "linux-x64").unwrap().sha256, SHA);
@@ -215,5 +227,10 @@ mod tests {
     }
     #[test] fn a_newer_schema_or_junk_is_refused() {
         assert!(parse(br#"{"schema":2,"assets":{}}"#).unwrap_err().contains("newer")); assert!(parse(b"not json").is_err()); assert!(parse(br#"{"schema":1}"#).is_err());
+    }
+    #[test] fn the_release_key_is_trusted_under_its_id() {
+        let k = keys(); assert_eq!((k.len(), k[0].0.as_str()), (1, "6c899f869be656d3"), "release.pub and release.keyid agree, and nothing else is trusted");
+        assert!(pem_key(include_str!("release.pub"), "0000000000000000").is_none(), "a key ID that is not this key's is no key");
+        assert!(pem_key("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n", "x").is_none());
     }
 }

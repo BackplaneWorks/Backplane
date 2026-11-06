@@ -31,8 +31,14 @@ fn curl(url: &str, out: &Path, max: u64) -> Result<(), String> {
     let o = c.arg(url).output().map_err(|e| format!("curl: {e}"))?;
     if o.status.success() { Ok(()) } else { Err(format!("could not reach the release feed (curl {})", o.status.code().unwrap_or(-1))) }
 }
+/// Listed and checked (`run::members_ok`) before anything is written, then unpacked owning nothing but what this hub owns.
 fn tar(a: &Path, d: &Path) -> Result<(), String> {
-    let o = proc::std_cmd(Kind::Local, "tar").arg("-xzf").arg(a).arg("-C").arg(d).output().map_err(|e| format!("tar: {e}"))?;
+    let list = |flag: &str| -> Result<String, String> {
+        let o = proc::std_cmd(Kind::Local, "tar").arg(flag).arg(a).env("LC_ALL", "C").output().map_err(|e| format!("tar: {e}"))?;
+        if o.status.success() { Ok(String::from_utf8_lossy(&o.stdout).into_owned()) } else { Err("the archive would not unpack".into()) }
+    };
+    run::members_ok(&list("-tzf")?, &list("-tvzf")?)?;
+    let o = proc::std_cmd(Kind::Local, "tar").args(["--no-same-owner", "--no-same-permissions", "-xzf"]).arg(a).arg("-C").arg(d).output().map_err(|e| format!("tar: {e}"))?;
     if o.status.success() { Ok(()) } else { Err("the archive would not unpack".into()) }
 }
 /// `BAD`, the guard's list: id, tab, why.
@@ -64,16 +70,17 @@ impl Updates {
         let (current, channel) = (hub.cfg.version.clone(), Self::channel(hub).await);
         let Some(b) = builds() else { return self.tell(hub, |s| { s.state = "package".into(); s.current = current; s.channel = channel; }).await };
         hub.set_info("update", "managed").await;
-        let mut state = if off() { "off" } else { "idle" }.to_string(); let mut note = String::new();
+        let mut state = if off() { "off" } else { "idle" }.to_string(); let (mut note, mut available) = (String::new(), String::new());
         let p = Self::pending_path(hub);
         if let Some(tag) = lines_of(&p).into_iter().next() {
             match run::outcome(&tag, &current, &bad_lines(&b)) {
                 run::Outcome::Installed => { note = format!("Updated to {tag}."); let _ = fs::remove_file(&p); prune(&hub.cfg.home, &b); }
                 run::Outcome::RolledBack(why) => { state = "failed".into(); note = if why.is_empty() { format!("{tag} failed its health check, so this build stayed.") } else { format!("{tag} failed its health check, so this build stayed: {why}") }; let _ = fs::remove_file(&p); }
-                run::Outcome::Waiting => {}
+                // not yet: the guard has not moved to it, and has not given up on it. Neither done nor failed: the pending line stays, and the next start asks again.
+                run::Outcome::Waiting => { state = "installing".into(); available = tag.clone(); note = format!("{tag} has not started yet."); }
             }
         }
-        self.tell(hub, |s| { s.state = state; s.current = current; s.channel = channel; s.note = note; }).await;
+        self.tell(hub, |s| { s.state = state; s.current = current; s.channel = channel; s.note = note; s.available = available; }).await;
     }
 
     /// One pass: look, and when `install` is wanted and no turn runs, fetch and hand over. A pass already going is left to finish.
@@ -179,5 +186,19 @@ mod tests {
         fs::write(d.join("BAD"), "v0.16.0\tit panicked\nv0.16.1\n").unwrap();
         assert_eq!(bad_lines(&d), vec![("v0.16.0".to_string(), "it panicked".to_string()), ("v0.16.1".to_string(), String::new())]);
         assert_eq!(bad_lines(&d.join("none")), vec![]); let _ = fs::remove_dir_all(&d);
+    }
+    /// The real `tar`, on archives made to escape: each is refused before a byte of it is written, and the good one unpacks.
+    #[cfg(unix)] #[test] fn tar_lists_before_it_writes() {
+        let d = std::env::temp_dir().join(format!("bp-upd-tar-{}", std::process::id())); let _ = fs::remove_dir_all(&d);
+        let (src, out) = (d.join("src"), d.join("out")); fs::create_dir_all(src.join("in")).unwrap(); fs::create_dir_all(&out).unwrap();
+        fs::write(src.join("in/backplane-hub"), b"x").unwrap(); fs::write(src.join("evil"), b"x").unwrap(); fs::hard_link(src.join("in/backplane-hub"), src.join("in/twin")).unwrap();
+        let mk = |name: &str, args: &[&str]| { let a = d.join(name); assert!(std::process::Command::new("tar").arg("-czf").arg(&a).args(args).current_dir(&src).status().unwrap().success()); a };
+        let good = { let a = d.join("good.tgz"); assert!(std::process::Command::new("tar").args(["-czf"]).arg(&a).args(["backplane-hub"]).current_dir(src.join("in")).status().unwrap().success()); a };
+        let up = mk("up.tgz", &["-P", "in/../evil"]);
+        let abs = { let a = d.join("abs.tgz"); assert!(std::process::Command::new("tar").arg("-czPf").arg(&a).arg(src.join("evil")).status().unwrap().success()); a };
+        let hard = mk("hard.tgz", &["in/backplane-hub", "in/twin"]);
+        for (a, why) in [(&up, "outside"), (&abs, "outside"), (&hard, "hard link")] { let e = tar(a, &out).unwrap_err(); assert!(e.contains(why), "{a:?}: {e}"); assert_eq!(fs::read_dir(&out).unwrap().count(), 0, "nothing written"); }
+        tar(&good, &out).unwrap(); assert!(out.join("backplane-hub").is_file());
+        let _ = fs::remove_dir_all(&d);
     }
 }
