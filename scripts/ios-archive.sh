@@ -12,12 +12,11 @@ RSYNC_RSH=$PWD/$M rsync -a mobile/shell/backplane-app.js hs-mac-mini:bp-gpui-ios
 $M hs-mac-mini "
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 cd ~/bp-gpui-ios/ios || exit 1
-[ -f ~/bp-gpui-ios/bridge.js ] && cp ~/bp-gpui-ios/bridge.js Backplane/bridge.js  # the legacy bridge no longer exists; the data app needs none
 [ -f signing.env ] || cp ~/backplane-ios/signing.env signing.env
 case $MODE in
 check)
   xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
-    -derivedDataPath build/ddc CODE_SIGNING_ALLOWED=NO SWIFT_ACTIVE_COMPILATION_CONDITIONS=GPUI_NATIVE OTHER_SWIFT_FLAGS=-DDATA_APP build 2>&1 | tail -40; echo \"check done\";;
+    -derivedDataPath build/ddc CODE_SIGNING_ALLOWED=NO SWIFT_ACTIVE_COMPILATION_CONDITIONS=\"GPUI_NATIVE DATA_APP\" build 2>&1 | tail -40; echo \"check done\";;
 upload)
-  n=\$(date +%Y%m%d%H%M); BUILD_NUMBER=\$n NATIVE=1 DATA=1 sh build.sh archive 2>&1 | tail -30; echo \"build number \$n\";;
+  n=\$(date +%Y%m%d%H%M); BUILD_NUMBER=\$n sh build.sh archive 2>&1 | tail -30; echo \"build number \$n\";;
 esac"
