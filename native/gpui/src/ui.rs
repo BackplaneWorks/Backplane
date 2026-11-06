@@ -410,7 +410,6 @@ impl Render for Backplane {
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         // Remaining provider allowance, as the hub words it ("72% left · shared"); "limit —" until the provider has reported one.
         let allowance = { let a = string(thread, "allowance"); if a.is_empty() { "limit —".to_string() } else { a } };
-        let todo = thread["todos"]["count"].as_str().unwrap_or("").to_string();
         let tools_strip = crate::screens::tools::strip(cx, light, thread, self.screens.menu_open);
         let mut rail: Vec<AnyElement> = Vec::new();
         crate::screens::viewer::follow(&self.tx, thread);
