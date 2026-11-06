@@ -46,6 +46,7 @@ backplane-hub --home DIR --port N --no-tailscale --foreground   # run a hub (tem
 - The UI is dumb: decisions (order, settle state, what is visible) come from the hub or a pure function with a test.
 - No continuous repaint loops: animate only while a fade or stream is in flight.
 - Square corners, minimal copy, no decorative headings.
+- Build and test through `scripts/cargo-q` (`scripts/cargo-q test --offline` in `native/host` or `native/gpui`), not bare `cargo`: it waits for one of the machine's few build slots (two here, from cores and free memory), uses the shared `sccache` (compiled dependencies are shared by every worktree, so a new lane does not compile tokio, naga, zbus... from cold) and sizes `-j` from free memory. `scripts/dev-build.sh` does the same. When your branch has landed, `git worktree remove` it (or run `scripts/worktree-gc.sh --apply`: it removes merged, clean, idle worktrees and idle `target/` dirs; `main-build.sh` runs it when the disk is short).
 - Keep disk headroom (`df -h /` first; 20 GB free); delete your own build leftovers. Builds of `main` run in the builder's own checkout and target dirs, at low priority; a build from a worktree uses its own target dir, not another's.
 - Before pushing, verify the GitHub account (`i2cjak`), the remote (`i2cjak/Backplane`), and the branch. Push only when asked.
 - Process spawning goes through `native/host/src/proc.rs` (its kinds decide what a copy run refuses); no other non-test `Command::new` under `src/`.
