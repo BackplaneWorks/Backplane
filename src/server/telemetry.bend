@@ -235,7 +235,7 @@ def Tio.post(xs: List<&2, TmCfg>, +home: String, +body: String, +now: Nat) -> IO
         G.Gf.write(path, "url = " ++ G.Gc.q(url) ++ "\nrequest = \"POST\"\nheader = \"Content-Type: application/json\"\n" ++ G.Gc.headers(T.Tm.headers(kid, key, now, body)) ++ "\ndata-binary = " ++ G.Gc.q(body) ++ "\noutput = \"/dev/null\"\ndump-header = " ++ G.Gc.q(hdr) ++ "\nwrite-out = \"%{http_code}\"\n")
         # --disable must be first: a user's .curlrc must not enable redirects,
         # tracing or other settings on a request holding telemetry credentials.
-        r : P.Ran <- P.Proc.run("curl", ["--disable", "--silent", "--max-time", "10", "--max-filesize", "16384", "--proto", "=http,https", "-K", path], "")
+        r : P.Ran <- P.Proc.run("curl", ["--disable", "--silent", "--max-time", "10", "--max-filesize", "16384", "--proto", "=http,https", "-K", path], "/")
         headers : String <- G.Gf.text(hdr)
         G.Gf.rm(path)
         G.Gf.rm(hdr)

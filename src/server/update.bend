@@ -87,7 +87,7 @@ def Update.ran(r: P.Ran, +channel: String) -> Maybe<&2, Release>:
 # the newest release on a channel, or None when offline or rate-limited
 def Update.latest(+channel: String) -> IO(Maybe<&2, Release>):
   do IO<Maybe<&2, Release>>:
-    r : P.Ran <- P.Proc.run("curl", ["-fsSL", "--max-time", "20", "-H", "Accept: application/vnd.github+json", Update.api(channel)], "")
+    r : P.Ran <- P.Proc.run("curl", ["-fsSL", "--max-time", "20", "-H", "Accept: application/vnd.github+json", Update.api(channel)], "/")
     return Update.ran(r, channel)
 
 # "linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64"
@@ -104,7 +104,7 @@ def Update.out(r: P.Ran) -> String:
 
 def Update.platform() -> IO(String):
   do IO<String>:
-    r : P.Ran <- P.Proc.run("uname", ["-sm"], "")
+    r : P.Ran <- P.Proc.run("uname", ["-sm"], "/")
     return Update.plat(Update.out(r))
 
 # the asset whose name ends with the suffix
@@ -160,7 +160,7 @@ def Update.run.k(r: P.Ran, +what: String) -> String:
 
 def Update.run(cmd: String, args: List<&2, String>, +what: String) -> IO(String):
   do IO<String>:
-    r : P.Ran <- P.Proc.run(cmd, args, "")
+    r : P.Ran <- P.Proc.run(cmd, args, "/")
     return Update.run.k(r, what)
 
 def Update.text(r: P.Ran) -> String:
@@ -182,7 +182,7 @@ def Update.verify.k(+got: String, +want: String) -> String:
 # compare the file's sha256 with the published one
 def Update.verify(+file: String, +name: String, +sums: String) -> IO(String):
   do IO<String>:
-    r : P.Ran <- P.Proc.run("sh", ["-c", "command -v sha256sum >/dev/null && sha256sum \"$1\" || shasum -a 256 \"$1\"", "sh", file], "")
+    r : P.Ran <- P.Proc.run("sh", ["-c", "command -v sha256sum >/dev/null && sha256sum \"$1\" || shasum -a 256 \"$1\"", "sh", file], "/")
     return Update.verify.k(String.take(Update.text(r), 64n), Update.sum.k(String.lines(sums), name))
 
 def Update.swap.err(e: U32 & String, +to: String) -> String:
@@ -214,7 +214,7 @@ def Update.install.go(+tag: String, +plat: String, +tn: String, +tu: String, +su
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
     e1 : String <- Update.run("curl", ["-fsSL", "--max-time", "600", "-o", dir ++ "/" ++ tn, tu], "download")
     Update.then(e1, u =>
-      IO.bind(P.Ran, String, P.Proc.run("curl", ["-fsSL", "--max-time", "60", su], ""), sums =>
+      IO.bind(P.Ran, String, P.Proc.run("curl", ["-fsSL", "--max-time", "60", su], "/"), sums =>
         IO.bind(String, String, Update.verify(dir ++ "/" ++ tn, tn, Update.text(sums)), e2 =>
           Update.then(e2, u2 =>
             IO.bind(String, String, Update.run("tar", ["-xzf", dir ++ "/" ++ tn, "-C", dir], "unpack"), e3 =>

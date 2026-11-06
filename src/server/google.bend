@@ -1058,7 +1058,7 @@ def Gm.dir(+home: String, +nonce: String) -> String:
 def Gm.clean.k(ok: Bool, +dir: String) -> IO(Unit):
   match ok:
     case True{}:
-      IO.bind(P.Ran, Unit, P.Proc.run("rm", ["-rf", dir], ""), r => IO.pure(Unit, Unit{}))
+      IO.bind(P.Ran, Unit, P.Proc.run("rm", ["-rf", dir], "/"), r => IO.pure(Unit, Unit{}))
     case False{}:
       IO.pure(Unit, Unit{})
 
@@ -1186,7 +1186,7 @@ def Gm.probe.go(none: Bool, job: GJob, msg: GMsg, +paths: List<&2, String>) -> I
       Gm.assemble(job, msg, Nil{})
     case False{}:
       do IO<GPrep>:
-        r : P.Ran <- P.Proc.run("sh", List.append(&2, String, ["-c", Gm.probe.sh(), "sh"], paths), "")
+        r : P.Ran <- P.Proc.run("sh", List.append(&2, String, ["-c", Gm.probe.sh(), "sh"], paths), "/")
         +ls : List<&2, String> = String.lines(String.trim(Gc.ran(r)))
         Gm.probe.k(G.Gmail.att_err(paths, ls), job, msg, G.Gmail.att_sizes(ls))
 
