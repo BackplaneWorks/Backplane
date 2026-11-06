@@ -163,6 +163,27 @@ Driven in one thread with the stand-in's `stream` mode (`tools:`, `todos:`, `age
 | 94 | Browser teach and task skills | unchecked | Tasks tab shows "No tasks yet"; no CEF runtime on the rig. |
 | 95 to 97 | Peers; Google sign-in; Mail | unchecked | Mailroom tab shows "No mail". Google is its own lane. |
 
+### Project home, viewers, git (98 to 130)
+
+| # | Row | Status | What was driven |
+|---|---|---|---|
+| 98 | Project home (goal, intent, parts, boards) | partial | Clicking the project row opens a home with the name, the folder, New thread and the thread list. With `.backplane/intent.md` and a `board.fab.json` in the folder it still showed no goal, parts or boards (the card data is the commerce lane's `fab.look`/`fab.intent` row). |
+| 99 to 101 | Ready to order bar, order progress, manufacturing review | unchecked | Commerce lane's rows. |
+| 102 | Board picker (several boards) | unchecked | |
+| 104 | Board viewer | partial | A real board drew, with History, Compare, Layers and Fit. Pan, zoom, pick and layers are the E2E viewer rows (F17) and the layer-focus lane. |
+| 105 | Schematic viewer | partial | A real schematic drew, with History, Compare, Layers, Fit. Sheet navigation not driven. |
+| 107 | 3D board viewer | done | Drew a shaded board with Fit, Iso, Top, Bottom, Front, Right, Back, Left, Snap view. |
+| 108 | Mech tab | partial | Empty state ("No parts yet. Ask an agent to model one") and Refresh; FreeCAD was not found on the rig, so no part was drawn. |
+| 112, 117, 118 | Design history bar, compare | unchecked | History and Compare buttons show on the board and schematic viewers; not driven. |
+| 113, 120 | Review comments pinned to a place | unchecked | |
+| 115 | Files tab | partial | Lists the folder (name, size), New, Upload, Zip, a filter box, an up arrow. Operations are E2E F20. |
+| 116 | Diff viewer | partial | Opens with Commit, PR and Revert and "No changes since this thread began", also after I edited a tracked file in the folder from outside; whether it fills after a turn that edits was not driven. |
+| 119 | Review tab | partial | BOM, Checks, Comments, Release tabs; BOM said "This project has no schematic" (the board had none when opened). Not driven further. |
+| 121 | Browser tab | unchecked | The rig has no CEF runtime ("embedded browser unavailable"); the embedded-browser lane is finished. |
+| 127 | Git status, commit, push, PR | unchecked | Buttons exist (Commit, PR, Revert); none pressed. |
+| 128 | Worktrees per thread | done | See Worktree controls above (a real `git worktree` per thread in a git folder). Checkpoints not driven. |
+| 129 to 130 | Worktree and job reports | partial | The worktree's own note shows as a "git working in the project folder with ..." line in the thread. |
+
 ## Not gaps
 
 | Feature | Status | Why |
