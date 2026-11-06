@@ -197,6 +197,18 @@ fn commit_name(this: &mut Backplane, cx: &mut Context<Backplane>) {
     this.screens.files.mode = Mode::Browse; cx.notify();
 }
 
+/// Escape (the window's ClosePopup action runs before any key listener): while the Files page has the keys (its list, filter or name field focused) it clears the
+/// filter, cancels a rename or a delete, or goes up a folder, and nothing else sees the key. True when it took it.
+pub fn escape(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backplane>) -> bool {
+    if this.data["thread"]["viewer"]["open"].as_str() != Some("files") { return false }
+    let f = &this.screens.files;
+    let mine = f.focus.as_ref().map_or(false, |h| h.is_focused(window)) || f.filter.as_ref().map_or(false, |e| e.read(cx).focus_handle(cx).is_focused(window)) || f.name.as_ref().map_or(false, |e| e.read(cx).focus_handle(cx).is_focused(window));
+    if !mine { return false }
+    act(this, Do::Cancel, Some(window), cx);
+    if let Some(h) = this.screens.files.focus.clone() { window.focus(&h); }
+    true
+}
+
 /// A press the page can make; every one is also a script step (script.rs).
 #[derive(Clone, Debug)]
 pub enum Do { Open(usize), Up, Back, Download(usize), DownloadDir, Rename(usize), NewFolder, Delete(usize), ConfirmDelete, Copy(usize), Upload(Vec<PathBuf>), PickUpload, Cancel, Select(usize), Key(String) }
@@ -221,7 +233,7 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
         Do::PickUpload => { let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
             cx.spawn(async move |weak, cx| { if let Ok(Ok(Some(paths))) = rx.await { let _ = weak.update(cx, |this, cx| act(this, Do::Upload(paths), None, cx)); } }).detach(); }
         Do::Upload(paths) => upload(this, paths, &dir, cx),
-        Do::Cancel => { if this.screens.files.mode != Mode::Browse { this.screens.files.mode = Mode::Browse } else if let Some(f) = this.screens.files.filter.clone() { if !f.read(cx).content.is_empty() { f.update(cx, |i, cx| i.set(String::new(), cx)); } else { let _ = this.tx.try_send(Command::Action("fm-up".into(), String::new())); } } }
+        Do::Cancel => { if this.screens.files.mode != Mode::Browse { this.screens.files.mode = Mode::Browse } else if let Some(f) = this.screens.files.filter.clone() { if !f.read(cx).content.is_empty() { f.update(cx, |i, cx| i.set(String::new(), cx)); } else if !this.screens.files.dir.is_empty() { let _ = this.tx.try_send(Command::Action("fm-up".into(), String::new())); } } }
         Do::Key(k) if k == "name-ok" => return commit_name(this, cx),
         Do::Key(k) => {
             let sel = this.screens.files.sel;
@@ -356,7 +368,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     }
     if rows.len() > MAX_ROWS { list = list.child(div().px_3().py_1().text_color(c("dim")).child(format!("… {} more; filter to find them", rows.len() - MAX_ROWS))); }
     if vis.is_empty() { list = list.child(div().px_3().py_2().text_color(c("dim")).child(if files["ready"] == false { "Loading…".to_string() } else if !files["error"].as_str().unwrap_or("").is_empty() { files["error"].as_str().unwrap_or("").to_string() } else if rows.is_empty() { "Empty folder. Drop files here to upload.".to_string() } else { "Nothing matches".to_string() })); }
-    list = list.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| act(this, Do::Upload(paths.paths().to_vec()), None, cx)));
+    list = list.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| { this.m("files_drop", json!({"paths": paths.paths().iter().map(|p| p.display().to_string()).collect::<Vec<_>>()})); act(this, Do::Upload(paths.paths().to_vec()), None, cx) }));
     col = col.child(list);
     if let Some((i, pos)) = ui.menu {
         if let Some(r) = vis.get(i).and_then(|&k| rows.get(k)) {
@@ -372,7 +384,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
 }
 
 /// An image, PDF or text file the hub opened from the Files tab: a bar (Back, name, Download) over the preview.
-pub fn preview_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Value, ui: &FilesUi, images: &super::images::Images, target: Option<&Target>) -> AnyElement {
+pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, open: &str, viewer: &Value, ui: &FilesUi, images: &super::images::Images, target: Option<&Target>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let name = viewer["file"]["name"].as_str().unwrap_or("").to_string();
     let url = viewer["file"]["url"].as_str().unwrap_or("").to_string();
@@ -397,6 +409,12 @@ pub fn preview_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer
         "pdf" => if !ui.pdf.err.is_empty() { div().p_3().text_color(c("bad")).child(ui.pdf.err.clone()).into_any_element() }
             else if ui.pdf.png.is_empty() { div().p_3().text_color(c("dim")).child("Drawing the page…").into_any_element() }
             else { img_el(&format!("/img?path={}", super::attach::enc(&ui.pdf.png))) },
+        _ if viewer["file"]["blocks"].as_array().map_or(false, |b| !b.is_empty()) => {
+            // a Markdown note: the hub sent its nodes, drawn as the chat draws a reply
+            let blocks: Vec<Value> = viewer["file"]["blocks"].as_array().cloned().unwrap_or_default();
+            let parsed = super::md::parse(&blocks);
+            div().flex().flex_col().gap_2().p_3().children(super::timeline::blocks(cx, reg, light, &parsed, "file")).into_any_element()
+        }
         _ => match ui.texts.get(&url) {
             Some(Text::Ready(t)) => text_block(light, &name, t),
             Some(Text::Failed(e)) => div().p_3().text_color(c("bad")).child(e.clone()).into_any_element(),

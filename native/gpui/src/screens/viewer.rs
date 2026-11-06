@@ -256,7 +256,7 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close()); cx.notify(); })));
     let body: AnyElement = if diff_on { diff_page(cx, light, &thread["diff"]) }
         else if open == "files" && viewer["files"].is_object() { super::filesui::files_page(cx, light, &viewer["files"], files_ui) }
-        else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { super::filesui::preview_page(cx, light, open, viewer, files_ui, images, target) }
+        else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target) }
         else if open == "review" && viewer["review"].is_object() { review_page(cx, reg, light, &viewer["review"]) }
         else if matches!(open, "board" | "schematic") { plot_page(cx, light, open, viewer, plot, pv) }
         else if open == "split" { let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default(); split_page(cx, light, viewer, plot, split_pv, solid, &have) }
