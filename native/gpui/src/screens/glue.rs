@@ -82,6 +82,7 @@ impl Backplane {
     /// The rows on screen are another thread's: the list starts over, at the end or at the place this thread was left.
     pub(crate) fn timeline_show(&mut self, raw: &str) {
         self.timeline.reset(self.data["thread"]["entries"].as_array().map_or(0, |r| r.len()));
+        self.screens.born.clear(); self.screens.shown_at = std::time::Instant::now();
         self.screens.seeking = self.screens.offsets.get(raw).cloned();
         self.timeline_seek();
     }

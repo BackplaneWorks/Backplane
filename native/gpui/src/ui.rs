@@ -221,7 +221,18 @@ impl Backplane {
             _ if !text.is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).child(text).into_any_element(),
             _ => div().into_any_element(),
         };
-        div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().child(row)).into_any_element()
+        let inner = div().w_full().max_w(px(930.)).px_4().child(row);
+        // A row that arrives while the thread is on screen (a sent message, the reply starting) fades and slides in over 220 ms instead of popping in.
+        // Only the newest rows, only within a moment of their first draw, so scrolling back to a row or opening a thread never replays it.
+        let len = self.data["thread"]["entries"].as_array().map_or(0, |r| r.len());
+        let settled = self.screens.shown_at.elapsed().as_millis() > 800;
+        let first = *self.screens.born.entry(id.clone()).or_insert_with(std::time::Instant::now);
+        let fresh = settled && ei + 3 >= len && first.elapsed().as_millis() < 260;
+        let inner: AnyElement = if fresh {
+            inner.with_animation(SharedString::from(format!("arrive-{id}")), Animation::new(std::time::Duration::from_millis(220)).with_easing(ease_out_quint()),
+                |el, d| el.opacity(d).mt(px(10. * (1. - d)))).into_any_element()
+        } else { inner.into_any_element() };
+        div().w_full().flex().justify_center().child(inner).into_any_element()
     }
 }
 
