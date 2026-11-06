@@ -563,6 +563,7 @@ impl Render for Backplane {
                             .children(self.data["stats"].as_array().into_iter().flatten().map(|sec| div().flex().flex_col().gap_1().mt_1()
                                 .child(div().font_weight(FontWeight::BOLD).text_color(c("dim")).child(string(sec, "title")))
                                 .children(sec["rows"].as_array().into_iter().flatten().map(|r| div().flex().gap_2().child(div().w(px(110.)).text_color(c("dim")).child(string(r, "label"))).child(div().flex_1().min_w_0().child(string(r, "value")))).collect::<Vec<_>>())).collect::<Vec<_>>())))
+                        .children(crate::screens::order::view(cx, light, &thread["order"]))
                         .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
                         .children(self.screens.voice.views.get(&self.selected).cloned().and_then(|v| crate::screens::voice::view(cx, light, &v, self.screens.voice.level, self.screens.voice.fix.clone().as_ref())))
                         .children(reply_chip(cx, light, &thread["replying"]))

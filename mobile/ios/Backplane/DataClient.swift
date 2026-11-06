@@ -459,6 +459,7 @@ final class DataClient {
         } catch { failure = error.localizedDescription }
     }
     func search(_ q: String) async -> DSearch? { try? await call("search", ["q": q]) }
+    func order(_ thread: String) async throws -> DOrder? { (try await call("thread.order", ["thread": thread]) as DOrderReply).order }
     func picker(thread: String?, _ choice: DNewThreadChoice = DNewThreadChoice()) async throws -> DPicker {
         var p = choice.params; if let thread { p["thread"] = thread }
         return (try await call("thread.picker", p) as DPickerReply).picker

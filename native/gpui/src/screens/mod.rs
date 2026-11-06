@@ -22,6 +22,7 @@ pub mod improv_model;
 pub mod improvements;
 pub mod capture;
 pub mod md;
+pub mod order;
 pub mod picker;
 pub mod pad;
 pub mod padview;

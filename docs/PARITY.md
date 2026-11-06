@@ -43,7 +43,7 @@ Each lane updates its own rows in the commit that lands the work.
 | Buy it: `order.buy` starts a buy thread in the source's folder, "Buy: <project> · 2" naming, the person's Buy it as its first message; only for fab files or a KiCad project's own board. Tested on the hub with stand-ins; not yet driven in the window or on a phone | partial | commerce |
 | Buy threads: `order_ask` (its answer is the person's message), `order_quote` (the upload waits behind its approval card; nothing leaves before the person's Send, and a copy sends nothing), `order_status`, `order.wait`; order tokens only in `<home>/orders/`. Tested on the hub with stand-ins, and once against the real `order/fabsrv` on loopback with a Stripe double (`test/order/local_server.py`), pilot and paid | done | commerce |
 | `order_review` check and record work for every agent (`settings/order.rs`; the design hash matches 0.14's, so a review it recorded stays current). The gate is in, tested through the agent's MCP path with stand-ins, but needs a buy thread to be reached: not driven on a client | partial | commerce |
-| Order card and steps, on every client: the hub fills `order` and the "Backplane needs" cards (matching 0.14's `askbuy` fixture key for key); the phones draw them; the GPUI client does not yet | partial | commerce |
+| Order card and steps, on every client: the hub fills `order` and the "Backplane needs" cards (matching 0.14's `askbuy` fixture key for key). The GPUI client draws it above the asks; the phones get it through data/1 `thread.order` (feature `order`) and draw it above the composer, Buy now opening the hub's link. Built on all three and unit-tested; not yet driven on a screen with a live buy thread | partial | commerce |
 | Order watcher (resumed at start, nothing on a copy), customs line, pilot notice ("your card was not charged", alerts no one) | done | commerce |
 | Ready to order bar: dropped, as the person asked (thread improvement-aa3339b53c4456dd35d6ced196e44d4c): it showed on projects that were no KiCad project and not ready to order. Buy it is the first of the thread's tools instead, and the agents, Settings and `docs/order.md` say so | dropped | commerce |
 | **Thread views** | | |
@@ -228,4 +228,5 @@ Filled in by the lanes as they meet them. A row needs what was rough and what it
 | A dead control looks live (the `Dictate` chip): it starts a session now | done | voice |
 | A failed routine save said nothing | done | threads-small |
 | Buy it showed on any repository holding a board file, test fixtures included, and the card asked the order server for it. Only fab files or a KiCad project's own board count now | done | commerce |
+| A quote's Buy now link reached the phones as `order:<quote>`, which opens nothing (data/1 sent the log's text). The phones now get the link to open | done | commerce |
 | Provider marks were initials | missing | threads-small |
