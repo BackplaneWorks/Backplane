@@ -1,7 +1,7 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
 mod agents; mod api; mod auth; mod bots; mod cbor; mod commands; mod copy; mod delta; mod files; mod hub; mod md; mod model; mod net; mod present;
-mod presenter; mod proc; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod store; mod term; mod wire; mod window;
+mod presenter; mod proc; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; mod startup; mod store; mod term; mod wire; mod window;
 
 use anyhow::{Context, Result};
 use auth::Req;
@@ -113,6 +113,7 @@ async fn main() {
 }
 
 async fn run(a: Args) -> Result<()> {
+    startup::begin();
     let _ = rejected; // reserved for the handshake callback once the query rules grow
     // the safety gate, before the home is touched: a home that looks like a copy of a real hub's data needs BACKPLANE_COPY=1
     if let Err(why) = copy::gate(&a.home, copy::on()) { eprintln!("{why}"); std::process::exit(1); }
@@ -129,20 +130,33 @@ async fn run(a: Args) -> Result<()> {
     let recent = present::screen::Recent::new();
     let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![Box::new(recent.clone())], &a.home, a.policy.is_some()));
     let listen = format!("{}:{}", a.host, a.port);
+    startup::mark("home ready");
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
+    startup::mark("hub started");
+    ckptrun::start(hub.clone());
     recent.bind(&hub);
     session::start(&hub);
+    startup::mark("session started");
     // pairing and the /auth routes, before the listener accepts (net lane)
     let _routes = net::start::start_full(&hub, &a.host, a.port, a.tailscale, a.https);
+    startup::mark("net started");
     files::start(hub.clone());
+    startup::mark("files started");
     settings::open(&hub.cfg.home);
+    startup::mark("settings open started");
     term::start(hub.clone());
+    startup::mark("term started");
     let agents = agents::Agents::start(hub.clone()).await?;
+    startup::mark("agents started");
     let _bots = bots::start(hub.clone(), agents.clone()).await;
+    startup::mark("bots started");
     settings::start(hub.clone(), Some(agents));
+    startup::mark("settings start started");
     commands::start(hub.clone());
+    startup::mark("commands started");
     if let Some(w) = &a.window { let _ = hub.window_bin.set(w.clone()); }
     let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
+    startup::mark("listening");
     eprintln!("Backplane listening on http://{listen}");
     // the policies (autosettle, alerts, told, summaries, liveness, star nudge...): keep the Arc, the view lane reads it
     let _policies = statehost::start_with(hub.clone(), copy::passive_from(copy::person_turn_allowed()));

@@ -5,7 +5,7 @@ use super::json::nat_read;
 use crate::state::{link_from, State};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Sum {
     /// the newest `at` of any entry filed under the thread (messages, acts, links it sent)
     pub quiet: u64,
@@ -28,7 +28,7 @@ pub struct Sum {
     /// the ids of its newest messages (at most 64): `Shelve.input.seen` asks whether a message was already posted to the thread
     pub recent_msgs: std::collections::VecDeque<String>,
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Ext {
     /// TaskDelivered: tasks whose result was handed on
     pub delivered: HashSet<String>,

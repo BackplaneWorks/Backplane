@@ -2,6 +2,8 @@
 //! Only synthetic logs are accepted; stdout contains counts and fixed refusal labels, never content or ids.
 #[path="../state/mod.rs"] mod state;
 #[path="../store.rs"] mod store;
+#[path="../ckpt.rs"] mod ckpt;
+#[path="../startup.rs"] mod startup;
 #[path="../model.rs"] mod model;
 #[path="../stamp.rs"] mod stamp;
 #[path="../md/mod.rs"] mod md;

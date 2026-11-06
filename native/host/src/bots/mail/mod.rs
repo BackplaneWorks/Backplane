@@ -16,10 +16,10 @@ use serde_json::{json, Value};
 pub struct Origin { pub from: String, pub kind: String, pub r#ref: String }
 impl Origin { pub fn new(from: &str, kind: &str, r: &str) -> Origin { Origin { from: from.into(), kind: kind.into(), r#ref: r.into() } } }
 /// ML.Conv
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Conv { pub id: String, pub subject: String, pub kind: String, pub parts: Vec<String>, pub project: String, pub tags: Vec<String>, pub made: u64, pub last: u64, pub n: u64 }
 /// ML.Mail: a mail's header
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Hdr { pub id: String, pub conv: String, pub from: String, pub to: String, pub kind: String, pub r#ref: String, pub want: String, pub head: String, pub size: u64, pub at: u64 }
 /// MB.Body
 #[derive(Clone, Debug, PartialEq)]

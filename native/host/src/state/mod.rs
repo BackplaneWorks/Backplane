@@ -14,13 +14,13 @@ use std::collections::HashMap;
 // the digest-skipped families (UberOp, wakes, locks, TurnUsage, deploys, todos by tools/person/agent, Reminded): the state lane's
 pub mod fam;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Turn { Idle, Running, Completed, Interrupted, Failed }
 impl Turn {
     pub fn word(self) -> &'static str { match self { Turn::Idle => "idle", Turn::Running => "running", Turn::Completed => "completed", Turn::Interrupted => "interrupted", Turn::Failed => "failed" } }
     fn parse(s: &str) -> Option<Turn> { Some(match s { "idle" => Turn::Idle, "running" => Turn::Running, "completed" => Turn::Completed, "interrupted" => Turn::Interrupted, "failed" => Turn::Failed, _ => return None }) }
 }
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum TaskSt { Queued, Running, Done, Failed, Cancelled }
 impl TaskSt {
     pub fn terminal(self) -> bool { matches!(self, TaskSt::Done | TaskSt::Failed | TaskSt::Cancelled) }
@@ -28,17 +28,17 @@ impl TaskSt {
     /// TaskState.next: terminal states stay; a running task never goes back to queued
     fn next(cur: TaskSt, want: TaskSt) -> TaskSt { if cur.terminal() { cur } else if cur == TaskSt::Running && want == TaskSt::Queued { TaskSt::Running } else { want } }
 }
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Override { None, ForcedSettled, ForcedActive }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Project { pub title: String, pub root: String, pub created: u64, pub removed: bool }
 /// Navigation metadata only: no bot persona, posts, room history or second world fold.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BotNav { pub name: String, pub thread: String, pub look: u64, pub created: u64, pub talked: u64 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RoomNav { pub name: String, pub members: usize }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Thread {
     pub project: String, pub title: String, pub created: u64, pub activity: u64, pub turn: Turn, pub pending: u64,
     pub archived: bool, pub override_: Override, pub settled_at: u64, pub unsettled_at: u64, pub pinned: bool,
@@ -53,7 +53,7 @@ impl Thread {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 pub struct State {
     pub projects: HashMap<String, Project>,
     pub threads: HashMap<String, Thread>,

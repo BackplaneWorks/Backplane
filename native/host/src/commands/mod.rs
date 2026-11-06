@@ -22,7 +22,7 @@ pub use plan::{plan, Ctx, Line, Plan};
 pub fn start(hub: Arc<Hub>) { start_with(hub, None) }
 /// `seam`: the agents module to call instead of the process-wide one (tests that run a real one).
 pub fn start_with(hub: Arc<Hub>, seam: Option<Arc<dyn seam::Seam>>) {
-    hub.register_rpc(Arc::new(Commands { fold: Arc::new(tokio::sync::Mutex::new(fold::Fold::default())), seam }));
+    hub.register_rpc(Arc::new(Commands { fold: { let f = Arc::new(tokio::sync::Mutex::new(fold::Fold::load(&hub.store))); let f2 = f.clone(); crate::ckpt::register(move |store| f2.blocking_lock().save(store)); f }, seam }));
 }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }

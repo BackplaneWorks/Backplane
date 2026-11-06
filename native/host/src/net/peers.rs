@@ -6,10 +6,10 @@ use crate::{api::Observer, hub::Hub};
 use serde_json::Value;
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeerRow { pub id: String, pub name: String, pub url: String, pub created: u64, pub revoked: bool }
 
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Peers {
     rows: HashMap<String, PeerRow>,
     settings: HashMap<String, String>,
@@ -94,9 +94,14 @@ impl PeerTable {
     pub async fn start(self: &Arc<Self>, hub: &Arc<Hub>) {
         hub.register_observer(self.clone());
         let h = hub.clone();
+        let me = self.clone();
         let local = tokio::task::spawn_blocking(move || {
-            let (mut local, len) = (Peers::default(), h.store.len());
-            let mut at = 0;
+            let len = h.store.len();
+            let path = crate::ckpt::dir(h.store.path()).join("peers.json");
+            let mut local = crate::ckpt::load_json(&path, &h.store, |p: &Peers| p.applied as usize).unwrap_or_default();
+            crate::ckpt::saved("peers", local.applied as usize);
+            let mut at = local.applied as usize;
+            crate::ckpt::register(move |store| { let g = me.st.lock().unwrap(); let n = g.peers.applied as usize; if g.peers.replayed && crate::ckpt::due("peers", n) { crate::ckpt::save_json(&path, store, n, &g.peers); crate::ckpt::saved("peers", n) } });
             while at < len {
                 let to = (at + CHUNK).min(len);
                 for l in h.store.range(at, to).unwrap_or_default() { fold_line(&mut local, &l) }

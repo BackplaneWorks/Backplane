@@ -11,7 +11,7 @@ use crate::{api::Observer, hub::Hub};
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Index {
     threads: HashMap<String, String>,   // thread -> its project
     asks: HashMap<String, String>,      // ask -> its thread (a closed ask stays: Fr.ask.shared reads it after the close)
@@ -123,9 +123,14 @@ impl Feed {
     pub async fn start(self: &Arc<Self>, hub: &Arc<Hub>) {
         hub.register_observer(self.clone());
         let h = hub.clone();
+        let me = self.clone();
         let local = tokio::task::spawn_blocking(move || {
-            let (mut ix, len) = (Index::default(), h.store.len());
-            let mut at = 0;
+            let len = h.store.len();
+            let path = crate::ckpt::dir(h.store.path()).join("feed.json");
+            let mut ix = crate::ckpt::load_json(&path, &h.store, |i: &Index| i.applied as usize).unwrap_or_default();
+            crate::ckpt::saved("feed", ix.applied as usize);
+            let mut at = ix.applied as usize;
+            crate::ckpt::register(move |store| { let g = me.st.lock().unwrap(); let n = g.0.applied as usize; if g.0.built && crate::ckpt::due("feed", n) { crate::ckpt::save_json(&path, store, n, &g.0); crate::ckpt::saved("feed", n) } });
             while at < len {
                 let to = (at + CHUNK).min(len);
                 for (i, l) in h.store.range(at, to).unwrap_or_default().iter().enumerate() {

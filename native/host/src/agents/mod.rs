@@ -71,18 +71,24 @@ impl Agents {
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let no_dir = cli.dir().is_none();
-        let ag = Arc::new(Agents { hub: hub.clone(), cli, host, world: Mutex::new(World::default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
+        let ag = Arc::new(Agents { hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
             driver_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
         if no_dir && !crate::copy::on() { tokio::task::spawn_blocking(|| { let _ = proc::search_dirs(); }); } // the login shell's PATH is read now, off the workers, not inside the person's first send
+        crate::startup::mark("agents: world loaded");
+        { let a = ag.clone(); crate::ckpt::register(move |store| a.world.blocking_lock().save(store)); }
         let home = hub.cfg.home.to_string_lossy().into_owned(); let h2 = home.clone();
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&h2)).await.unwrap_or(0); proc::set_owner(&home);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
+        crate::startup::mark("agents: orphans reaped");
         let _ = ag.mcp.set(mcp::Mcp::start(&ag).await?);
+        crate::startup::mark("agents: mcp started");
         if crate::copy::person_turn_allowed() { let w = ag.world().await; let n = hub.store.len(); let last = if n > 0 { hub.store.range(n.saturating_sub(50), n).unwrap_or_default() } else { vec![] }; *ag.copy_point.lock().unwrap() = (w.threads.iter().map(|(id, x)| (id.clone(), w.cwd(id), x.turn == "running")).collect(), last); } // threads running at the copy point: the live hub may still be running them
         if crate::copy::person_turn_allowed() { let cleared: Vec<Value> = { let w = ag.world().await; w.threads.keys().filter(|t| !w.setting(&format!("ride.{t}")).is_empty()).map(|t| set(format!("ride.{t}"), String::new(), now_s())).collect() }; if !cleared.is_empty() { let _ = hub.commit_many(&cleared).await; } } // mail copied from the real log is not this app's to deliver to a fresh agent
         let repair = { let w = ag.world().await; tasks::repair_plan(&w) }; // Task.repair judges the state the hub started from, before recovery
+        crate::startup::mark("agents: before recover");
         ag.recover().await;
+        crate::startup::mark("agents: recovered");
         let _ = HANDLE.set(ag.clone()); tasks::watch(&ag); { let a = ag.clone(); tokio::spawn(async move { a.work_rearm().await }); } if !repair.is_empty() { let a = ag.clone(); tokio::spawn(async move { a.task_repair_run(repair).await }); }
         hub.register_rpc(Arc::new(Rpc(ag.clone())));
         hub.register_http(Arc::new(devturns::DevTurns(ag.clone())));

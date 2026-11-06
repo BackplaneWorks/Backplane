@@ -45,10 +45,13 @@ struct W { file: File, size: u64, torn: bool }
 
 impl Store {
     pub fn open(path: &Path) -> Result<Store> {
-        let mut idx = Vec::new();
-        let (mut size, mut bad, mut torn_bytes) = (0u64, 0usize, 0usize);
+        // the saved index (ckpt/index.bin) covers the first part of the log; only the bytes past it are scanned
+        let (mut idx, mut size, mut bad) = Self::load_index(path).unwrap_or_default();
+        let mut torn_bytes = 0usize;
         if path.exists() {
-            let mut r = BufReader::with_capacity(1 << 20, File::open(path).with_context(|| format!("open {}", path.display()))?);
+            let mut f = File::open(path).with_context(|| format!("open {}", path.display()))?;
+            { use std::io::Seek; f.seek(std::io::SeekFrom::Start(size))?; }
+            let mut r = BufReader::with_capacity(1 << 20, f);
             let mut buf = Vec::new();
             loop {
                 buf.clear();
@@ -65,6 +68,45 @@ impl Store {
         let file = OpenOptions::new().create(true).read(true).append(true).open(path).with_context(|| format!("append {}", path.display()))?;
         let read = File::open(path)?;
         Ok(Store { inner: std::sync::Arc::new(Inner { path: path.to_path_buf(), read, w: std::sync::Mutex::new(W { file, size, torn: torn_bytes > 0 }), idx: std::sync::RwLock::new(idx) }), torn_bytes, bad })
+    }
+
+    fn index_path(log: &Path) -> PathBuf { crate::ckpt::dir(log).join("index.bin") }
+    /// The saved index, when it is the index of this log's first bytes: its head and the bytes it ended on hash as they did, and the log is not shorter.
+    /// File: one JSON header line, then the offsets (u64 LE) and the lengths (u32 LE) of every line.
+    fn load_index(log: &Path) -> Option<(Vec<(u64, u32)>, u64, usize)> {
+        let raw = std::fs::read(Self::index_path(log)).ok()?;
+        let nl = raw.iter().position(|b| *b == b'\n')?;
+        let h: serde_json::Value = serde_json::from_slice(&raw[..nl]).ok()?;
+        let (lines, scanned, bad) = (h["lines"].as_u64()? as usize, h["scanned"].as_u64()?, h["bad"].as_u64()? as usize);
+        if h["v"].as_u64()? != crate::ckpt::VERSION { return None }
+        let body = &raw[nl + 1..];
+        if body.len() != lines * 12 { return None }
+        let f = File::open(log).ok()?;
+        if f.metadata().ok()?.len() < scanned { return None }
+        let take = |at: u64, n: usize| -> Option<Vec<u8>> { let mut b = vec![0u8; n]; f.read_exact_at(&mut b, at).ok()?; Some(b) };
+        let k = scanned.min(4096) as usize;
+        if crate::ckpt::fnv(&take(0, k)?) != h["head"].as_u64()? || crate::ckpt::fnv(&take(scanned - k as u64, k)?) != h["tail"].as_u64()? { return None }
+        let (offs, lens) = body.split_at(lines * 8);
+        let idx: Vec<(u64, u32)> = (0..lines).map(|i| (crate::ckpt::le64(offs, i * 8), crate::ckpt::le32(lens, i * 4))).collect();
+        if let Some((o, l)) = idx.last() { if o + *l as u64 + 1 > scanned { return None } }
+        Some((idx, scanned, bad))
+    }
+    /// Save the index of the log as it is now (nothing when a torn tail waits for the next write). Appends wait only while the index is copied.
+    pub fn save_index(&self) -> Result<usize> {
+        let (idx, size) = {
+            let w = self.inner.w.lock().unwrap();
+            if w.torn { return Ok(0) }
+            (self.inner.idx.read().unwrap().clone(), w.size)
+        };
+        let k = size.min(4096) as usize;
+        let take = |at: u64| -> Result<Vec<u8>> { let mut b = vec![0u8; k]; self.inner.read.read_exact_at(&mut b, at)?; Ok(b) };
+        let (head, tail) = (crate::ckpt::fnv(&take(0)?), crate::ckpt::fnv(&take(size - k as u64)?));
+        let bad = self.bad;
+        let header = format!("{{\"v\":{},\"lines\":{},\"scanned\":{},\"bad\":{},\"head\":{},\"tail\":{}}}\n", crate::ckpt::VERSION, idx.len(), size, bad, head, tail);
+        let (mut offs, mut lens) = (Vec::with_capacity(idx.len() * 8), Vec::with_capacity(idx.len() * 4));
+        for (o, l) in &idx { offs.extend(o.to_le_bytes()); lens.extend(l.to_le_bytes()); }
+        crate::ckpt::write_atomic(&Self::index_path(&self.inner.path), &[header.as_bytes(), &offs, &lens])?;
+        Ok(idx.len())
     }
     pub fn len(&self) -> usize { self.inner.idx.read().unwrap().len() }
     pub fn path(&self) -> &Path { &self.inner.path }
@@ -150,6 +192,31 @@ mod tests {
         let part = tmp("la-part"); std::fs::write(&part, xs.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
         let s = Store::open(&part).unwrap(); for y in &ys { s.append(y).unwrap(); }
         assert_eq!(Store::open(&part).unwrap().all(), Store::open(&whole).unwrap().all());
+    }
+    fn tmp_dir(name: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-store-ck-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    // the saved index is the index: same lines, and only the bytes past it are scanned
+    #[test] fn a_saved_index_is_the_index_and_the_tail_past_it_is_scanned() {
+        let d = tmp_dir("idx"); let p = d.join("events.jsonl");
+        std::fs::write(&p, "{\"$\":\"A\",\"at\":1}\nnot json\n{\"$\":\"B\",\"at\":2}\n").unwrap();
+        let s = Store::open(&p).unwrap(); assert_eq!((s.len(), s.bad), (2, 1)); assert_eq!(s.save_index().unwrap(), 2);
+        { use std::io::Write; let mut f = OpenOptions::new().append(true).open(&p).unwrap(); f.write_all(b"{\"$\":\"C\",\"at\":3}\n{\"$\":\"D\"").unwrap(); } // a line, and a torn one
+        let again = Store::open(&p).unwrap();
+        assert_eq!((again.len(), again.bad), (3, 1), "the saved index is used and the tail added"); assert!(again.torn_bytes > 0);
+        assert_eq!(again.all(), vec!["{\"$\":\"A\",\"at\":1}", "{\"$\":\"B\",\"at\":2}", "{\"$\":\"C\",\"at\":3}"]);
+        std::fs::remove_file(crate::ckpt::dir(&p).join("index.bin")).unwrap();
+        assert_eq!(Store::open(&p).unwrap().all(), again.all(), "with no index file: the same by scanning");
+    }
+    // an index of another log, or of a log that changed in what it covers, is not used
+    #[test] fn a_saved_index_of_another_log_is_ignored() {
+        let d = tmp_dir("other"); let p = d.join("events.jsonl");
+        std::fs::write(&p, "{\"$\":\"A\",\"at\":1}\n{\"$\":\"B\",\"at\":2}\n").unwrap();
+        Store::open(&p).unwrap().save_index().unwrap();
+        std::fs::write(&p, "{\"$\":\"X\",\"at\":9}\n{\"$\":\"Y\",\"at\":8}\n{\"$\":\"Z\",\"at\":7}\n").unwrap(); // longer, different
+        assert_eq!(Store::open(&p).unwrap().all(), vec!["{\"$\":\"X\",\"at\":9}", "{\"$\":\"Y\",\"at\":8}", "{\"$\":\"Z\",\"at\":7}"]);
+        std::fs::write(&p, "{\"$\":\"A\"}\n").unwrap(); // shorter than what the index covers
+        assert_eq!(Store::open(&p).unwrap().all(), vec!["{\"$\":\"A\"}"]);
+        let ix = crate::ckpt::dir(&p).join("index.bin"); std::fs::write(&ix, b"garbage").unwrap();
+        assert_eq!(Store::open(&p).unwrap().len(), 1, "a damaged index file is ignored");
     }
     #[test] fn lone_surrogates_become_replacement_characters() {
         assert_eq!(clean(r#"{"a":"x\ud83dy"}"#), r#"{"a":"x\ufffdy"}"#);   // lone high

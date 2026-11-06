@@ -6,24 +6,24 @@ use anyhow::Result;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct T { pub pinned: bool, pub forced: u8, pub settled_at: u64, pub unsettled_at: u64, pub session: String, pub project: String, pub title: String, pub provider: String, pub model: String, pub branch: String, pub worktree: String, pub env: String, pub turn: String,
     pub archived: bool, pub deleted: bool, pub runtime: String, pub interaction: String }
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct P { pub title: String, pub root: String, pub at: u64, pub removed: bool }
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Nav { pub until: u64, pub pinned: String, pub active: String }
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String }
 
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Fold {
     seen: usize,
     pub threads: BTreeMap<String, T>, pub projects: BTreeMap<String, P>, pub navs: HashMap<String, Nav>,
     pub queues: HashMap<String, Vec<(String, String)>>, pub asks: BTreeMap<String, Ask>, pub forks: HashMap<String, String>,
     pub st: HashMap<String, String>, /// Switch.count: entries filed under each thread by that thread
     pub count: HashMap<String, usize>, /// the number the request's ids are built from (Hub::alloc_n), else the log length
-    pub alloc: Option<usize>, /// the first messages of home threads ("home-<msg>"), so a retry knows whether the message arrived
+    #[serde(skip)] pub alloc: Option<usize>, /// the first messages of home threads ("home-<msg>"), so a retry knows whether the message arrived
     pub home_msgs: std::collections::HashSet<String>,
 }
 
@@ -31,13 +31,19 @@ const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "thread.env", "agent.
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) }
 
 impl Fold {
+    fn path(store: &Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("commands.json") }
+    /// The saved fold (ckpt/commands.json) when it is of this log; `sync` folds what is past it.
+    pub fn load(store: &Store) -> Fold { let f = crate::ckpt::load_json(&Self::path(store), store, |f: &Fold| f.seen); if let Some(f) = &f { crate::ckpt::saved("commands", f.seen);
+        if crate::ckpt::check_on() { let (s, n, a) = (store.clone(), f.seen, serde_json::to_value(f).unwrap_or_default()); std::thread::spawn(move || { let mut g = Fold::default(); let _ = g.sync_to(&s, n); crate::ckpt::check("commands fold", a, serde_json::to_value(&g).unwrap_or_default()) }); } } f.unwrap_or_default() }
+    /// Bring it up to the log and save it (the first round of a fold nobody has asked for yet reads the whole log once, here, off the request path).
+    pub fn save(&mut self, store: &Store) { let _ = self.sync(store); if crate::ckpt::due("commands", self.seen) { crate::ckpt::save_json(&Self::path(store), store, self.seen, self); crate::ckpt::saved("commands", self.seen) } }
     /// Events seen: the Bend hub's `Hub.seq` (the id source for generated ids).
     pub fn n(&self) -> usize { self.alloc.unwrap_or(self.seen) }
     pub fn setting(&self, k: &str) -> &str { self.st.get(k).map(String::as_str).unwrap_or("") }
     /// M.Setting.get(s, k, d): a stored value, an empty one included, else d.
     pub fn get<'a>(&'a self, k: &str, d: &'a str) -> &'a str { self.st.get(k).map(String::as_str).unwrap_or(d) }
-    pub fn sync(&mut self, store: &Store) -> Result<()> {
-        let total = store.len();
+    pub fn sync(&mut self, store: &Store) -> Result<()> { self.sync_to(store, store.len()) }
+    pub fn sync_to(&mut self, store: &Store, total: usize) -> Result<()> {
         while self.seen < total {
             let b = (self.seen + 4096).min(total);
             for l in store.range(self.seen, b)? { self.apply(&l) }
