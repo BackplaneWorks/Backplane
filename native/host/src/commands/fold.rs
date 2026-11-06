@@ -27,7 +27,7 @@ pub struct Fold {
     pub home_msgs: std::collections::HashSet<String>,
 }
 
-const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "carry.wait.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default.", "accounts.inventory", "account.session.", "account.seen."];
+const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "carry.wait.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default.", "accounts.inventory", "account.session.", "account.seen.", "account.chosen.", "account.limit."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) }
 
 impl Fold {
@@ -54,6 +54,8 @@ impl Fold {
     /// Queue.texts: the waiting messages as one text, a blank line between; an empty one at the head is skipped (Queue.join).
     pub fn queue_text(&self, th: &str) -> String { self.queue(th).iter().fold(String::new(), |acc, (_, t)| if acc.is_empty() { t.clone() } else { format!("{acc}\n\n{t}") }) }
     /// Queue.waiting: a message waits (handed-over context alone never starts a turn).
+    /// The holds on one login, its model holds with them (settings/fallback.rs `hold_key`): what the person's own choice of it overrules.
+    pub fn holds_of(&self, provider: &str, id: &str, epoch: u64) -> Vec<String> { let k = crate::settings::fallback::hold_key(provider, id, epoch); self.st.iter().filter(|(x, v)| x.starts_with(&k) && !v.is_empty()).map(|(x, _)| x.clone()).collect() }
     pub fn waiting(&self, th: &str) -> bool { self.queue(th).iter().any(|(m, _)| !m.starts_with("handoff:")) }
     pub fn queue(&self, th: &str) -> &[(String, String)] { self.queues.get(th).map(Vec::as_slice).unwrap_or(&[]) }
     pub fn nav(&self, id: &str) -> Nav { self.navs.get(id).cloned().unwrap_or_default() }

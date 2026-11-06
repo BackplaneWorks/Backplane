@@ -26,7 +26,7 @@ impl Tk { pub fn terminal(&self) -> bool { matches!(self.state.as_str(), "done" 
 pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub detail: String, pub options: String }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
-pub struct World { pub home: String, pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
+pub struct World { /** a thread's queued hand-overs (`handoff:*`), (msg, text): the conversation a switch or a fork owes the agent, which goes with its next turn */ #[serde(default)] pub handoffs: HashMap<String, Vec<(String, String)>>, pub home: String, pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
 const KEYS: &[&str] = &["carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
@@ -75,9 +75,9 @@ impl World {
         if let Some(x) = self.threads.get_mut(&g("thread")) { x.act = x.act.max(v.get("at").and_then(Value::as_u64).unwrap_or(0)) } // Refs.t.act: the thread's newest event
         match t {
             "ProjectCreated" => { self.roots.insert(g("id"), g("root")); self.projects.insert(g("id"), (g("title"), false)); }
-            "TurnQueued" => self.queued.entry(g("thread")).or_default().push(g("msg")),
-            "QueueTaken" => { self.queued.remove(&g("thread")); }
-            "QueueRemoved" | "QueueTakenOne" => if let Some(q) = self.queued.get_mut(&g("thread")) { let m = g("msg"); q.retain(|x| *x != m) },
+            "TurnQueued" => { let (th, m) = (g("thread"), g("msg")); if m.starts_with("handoff:") { self.handoffs.entry(th.clone()).or_default().push((m.clone(), g("text"))) } self.queued.entry(th).or_default().push(m) }
+            "QueueTaken" => { let th = g("thread"); self.queued.remove(&th); self.handoffs.remove(&th); }
+            "QueueRemoved" | "QueueTakenOne" => { let m = g("msg"); if let Some(q) = self.queued.get_mut(&g("thread")) { q.retain(|x| *x != m) } if let Some(q) = self.handoffs.get_mut(&g("thread")) { q.retain(|x| x.0 != m) } }
             "ThreadParentSet" => { self.parents.insert(g("id"), g("parent")); }
             "ProjectRemoved" => if let Some(p) = self.projects.get_mut(&g("id")) { p.1 = true },
             "BotSet" => { let th = g("thread"); if !th.is_empty() { self.bot_of.insert(th.clone(), g("id")); } let old = self.bots.get(&g("id")).cloned(); let (name, thread, _) = old.unwrap_or_default(); self.bots.insert(g("id"), (if g("name").is_empty() { name } else { g("name") }, if th.is_empty() { thread } else { th }, false)); }

@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod mailroom; mod devturns; pub mod bg; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod mailroom; mod devturns; pub mod bg; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -387,7 +387,14 @@ struct Actor {
     codex: bool, prov: String, model: String, next_ride: bool, driver: Option<Box<dyn providers::Driver>>, asked: HashMap<String, Value>,
     /// Claude: the session id the process was started with (`--resume`, "" for a new one; cleared once it says init), the message that started it (msg, text, what the agent gets), and a count of starts
     steer_now: bool, resumed: String, spawn_in: Option<(String, String, String)>, spawn_n: u64,
+    /// A usage limit or failed login this turn's lines have shown, until the turn's end says what comes of it (settings/driver.rs `on_line`)
+    limit_seen: Option<crate::settings::fallback::Limit>,
 }
+
+/// The state a line's events end the turn in.
+fn turn_end(ev: &[Value]) -> Option<String> { ev.iter().rev().find(|e| e["$"] == "TurnChanged" && matches!(e["state"].as_str(), Some("failed" | "interrupted" | "completed"))).and_then(|e| e["state"].as_str()).map(str::to_string) }
+/// What a failed turn says of itself, left out when the driver takes the turn over: it writes the Interrupted and the line that says what happened.
+fn failure_row(e: &Value) -> bool { (e["$"] == "TurnChanged" && e["state"] == "failed") || (e["$"] == "ActivityLogged" && e["tone"] == "error") }
 
 async fn next_batch(rx: &mut mpsc::Receiver<String>) -> Option<Vec<String>> {
     let first = rx.recv().await?; let mut bytes = first.len(); let mut v = vec![first];
@@ -399,7 +406,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0 } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, limit_seen: None } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -501,6 +508,8 @@ impl Actor {
         ev.push(set(format!("provider.resume.{th}"), String::new(), now));
         ev.extend(extra);
         ev.push(set(format!("fallback.input.{th}"), text.clone(), now));             // Fallback.attempt
+        ev.extend(self.new_request(now).await);
+        let handed = self.handed(&mut ev, now).await; // what a switch or a fork owes the agent goes with this message
         self.commit(ev).await;
         if let Some(ph) = first_title { let (ag, th2) = (self.ag.clone(), th.clone()); tokio::spawn(async move { if let Err(e) = ag.retitle(&th2, Some(&ph), false).await { eprintln!("titles: {th2}: kept the first line: {e}") } }); }
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
@@ -513,10 +522,28 @@ impl Actor {
         let agent_text = if role == "user" && origin.is_none() { let n = crate::term::tools::on_person_message(&self.ag.hub, &th).await; if n.is_empty() { text_rv.clone() } else { format!("{text_rv}\n\n{n}") } } else { text_rv.clone() };
         let agent_text = if takes_ride && !codex { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) } else { agent_text }; // what waited for the person goes with their next message
         let agent_text = match self.ag.mailroom() { Some(m) => { let b = m.turn_block(&th, &agent_text).await; if b.is_empty() { agent_text } else { format!("{b}\n\n{agent_text}") } } None => agent_text }; // Bots.turn: a bot's memory
+        let agent_text = if handed.is_empty() { agent_text } else { format!("{handed}\n\n{agent_text}") };
         let agent_text = { let w = self.ag.world().await; rules::rules_agent(&rules::rules_block(&w.st, w.bot(&th), &t.project), &agent_text) }; // Rules.agent: the standing rules come first
         if codex { let run = if ride.is_empty() { agent_text.clone() } else { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) }; self.codex_run(&t, &cwd, &run).await; return Ok(()) }
         self.claude_send(&t, &cwd, &msg, &text, &agent_text, now).await;
         Ok(())
+    }
+
+    /// A request that is a new one: this turn has seen no limit, and every account may be asked again (settings/driver.rs `tried_key`). Nothing written when nothing was tried.
+    async fn new_request(&mut self, now: u64) -> Vec<Value> {
+        self.limit_seen = None; let k = crate::settings::driver::tried_key(&self.th);
+        if self.ag.hub.setting(&k).await.unwrap_or_default().is_empty() { vec![] } else { vec![set(k, String::new(), now)] }
+    }
+    /// The hand-overs waiting for this thread's next turn (`handoff:*`, written by a fork, a provider or an account switch): their text, oldest first, taken off the queue in `ev`.
+    async fn handed(&mut self, ev: &mut Vec<Value>, now: u64) -> String {
+        let th = self.th.clone(); let xs = { let w = self.ag.world().await; w.handoffs.get(&th).cloned().unwrap_or_default() };
+        for (m, _) in &xs { ev.push(json!({"$":"QueueRemoved","thread":th,"msg":m,"at":now})) }
+        xs.into_iter().map(|x| x.1).collect::<Vec<_>>().join("\n\n")
+    }
+    /// What streamed of a reply the turn will not finish, as a message: it is part of the conversation the next account is handed.
+    fn partial(&mut self, at: u64) -> Option<Value> {
+        if self.live.trim().is_empty() || self.live.len() >= LIVE_CAP { return None }
+        Some(json!({"$":"MessagePosted","thread":self.th,"msg":format!("live:{}:{}:stopped", self.th, self.live_gen),"role":"assistant","text":self.live,"at":at}))
     }
 
     /// Wt.start / Hub.resume: an idle thread's queued text runs as one turn (QueueTaken, TurnChanged running).
@@ -527,7 +554,11 @@ impl Actor {
         if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
         let (now, th) = (now_s(), self.th.clone());
         self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone(); self.cx = cx; self.cwd = cwd.clone();
-        let mut ev = vec![]; if taken { ev.push(json!({"$":"QueueTaken","thread":th,"at":now})) } ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now})); self.commit(ev).await;
+        let mut ev = vec![]; if taken { ev.push(json!({"$":"QueueTaken","thread":th,"at":now})) } ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
+        self.limit_seen = None;
+        let handed = if taken { String::new() } else { self.handed(&mut ev, now).await }; // what was queued is `text` when it is all taken; otherwise the hand-overs go with this turn and the rest stays
+        let text = if handed.is_empty() { text } else { format!("{handed}\n\n{text}") };
+        self.commit(ev).await;
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, "");
         if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
         Ok(())
@@ -569,8 +600,21 @@ impl Actor {
         let root = self.ag.world().await.roots.get(&t.project).cloned().unwrap_or_default();
         if let Err(e) = remake_folder(cwd, &root).await { self.fail(format!("could not start codex: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
         let Some(made) = providers::driver(&t.provider) else { self.fail(format!("{} threads are not run by the Rust hub yet", t.provider), "spawn", &format!("spawn-{now}")).await; return };
-        let prog = match (if self.person { self.person_prog(made.cli) } else { self.ag.cli.resolve(made.cli) }) { Ok(p) => p, Err(e) => { let hint = made.driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
+        let mut prog = match (if self.person { self.person_prog(made.cli) } else { self.ag.cli.resolve(made.cli) }) { Ok(p) => p, Err(e) => { let hint = made.driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
         self.stop().await; self.lines = None; self.exit = None;
+        // as for Claude (`spawn`): a thread bound to a named account runs under that profile's own home, after its identity is rechecked; a stale or disconnected one never falls back to the default login
+        let (mut acct_env, mut acct_args, mut busy) = (vec![], vec![], None);
+        if !self.person && crate::settings::accounts::supported(&t.provider) {
+            let raw = self.ag.hub.setting(&crate::settings::accounts::binding_key(&th, &t.provider)).await.unwrap_or_default();
+            let b: Value = serde_json::from_str(&raw).unwrap_or(Value::Null); let id = b["id"].as_str().unwrap_or("").to_string();
+            if !id.is_empty() {
+                let Some(mgr) = self.ag.accounts.get().cloned() else { self.fail("could not start codex: Accounts are not available; select the default account".into(), "spawn", &format!("spawn-{now}")).await; return };
+                match mgr.launch_plan(&id, &b["epoch"].as_u64().unwrap_or(0).to_string(), &t.provider).await {
+                    Ok(plan) => { prog = plan.program; acct_env = plan.env; acct_args = plan.args; busy = Some(crate::settings::accounts_hub::Busy::new(mgr, &id)); }
+                    Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+                }
+            }
+        }
         let gen = format!("{now}-{}", self.ag.seq()); self.ag.set_gen(&th, &gen);
         let prompt = self.ag.prompt_for(&th, cwd).await;
         let (effort, think, session) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.threads.get(&th).map(|x| x.session.clone()).unwrap_or_else(|| t.session.clone())) };
@@ -581,10 +625,11 @@ impl Actor {
         let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url, pcbparts_url: "https://pcbparts.dev/mcp".into(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() } };
         let mut driver = made.driver;
         if let Err(e) = driver.prepare(&a) { let hint = driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
-        let (args, env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
+        let (mut args, mut env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
+        if !acct_args.is_empty() { acct_args.extend(args); args = acct_args } env.extend(acct_env);
         let spawned = if self.person { match self.person_child() { Ok(pc) => proc::spawn_person(&pc, &prog, &args, std::path::Path::new(cwd), &env), Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)) } } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env) };
         match spawned {
-            Ok(p) => { self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); } self.driver = Some(driver); self.live_proc = Some(Live { input: p.input, pid: p.pid, key: String::new(), person: self.person, _busy: None }); self.lines = Some(p.lines); self.exit = Some(p.exit) }
+            Ok(p) => { self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); } self.driver = Some(driver); self.live_proc = Some(Live { input: p.input, pid: p.pid, key: String::new(), person: self.person, _busy: busy }); self.lines = Some(p.lines); self.exit = Some(p.exit) }
             Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); }
         }
     }
@@ -642,7 +687,7 @@ impl Actor {
     async fn codex_batch(&mut self, ls: Vec<String>) {
         let st = &self.ag.stats; st.lines.fetch_add(ls.len() as u64, Relaxed); st.max_batch_lines.fetch_max(ls.len() as u64, Relaxed);
         let at = now_s(); self.heard = Instant::now();
-        let mut events: Vec<Value> = vec![]; let mut clear = false; let mut ended = false; let mut act: Option<crate::settings::driver::Act> = None;
+        let mut events: Vec<Value> = vec![]; let mut clear = false; let mut ended = false; let mut act: Option<crate::settings::driver::Act> = None; let mut dropped = false;
         for l in ls {
             if l.trim().is_empty() { continue }
             let raw = crate::store::clean(&l);
@@ -654,9 +699,9 @@ impl Actor {
             for v in re.shapes {
             if v["type"] == "bp.ask" { if let Some(e) = self.driver_ask(&v["request"], at).await { events.extend(e) } continue }
             let fx = self.cx.codex_line(&v, &self.prov.clone(), &self.model.clone(), at);
-            let terminal = fx.events.iter().any(|e| e["$"] == "TurnChanged" && matches!(e["state"].as_str(), Some("failed" | "interrupted" | "completed")));
-            let verdict = crate::settings::driver::on_line(&self.ag.hub, &self.th, &v, terminal).await;
-            let (drop_end, vevents) = (verdict.drop_turn_end, verdict.events); if verdict.act.is_some() { act = verdict.act }
+            let end = turn_end(&fx.events);
+            let verdict = crate::settings::driver::on_line(&self.ag.hub, &self.th, &v, end.as_deref(), &mut self.limit_seen).await;
+            let (drop_end, vevents) = (verdict.drop_turn_end, verdict.events); if verdict.act.is_some() { act = verdict.act } dropped |= drop_end;
             if let Some(id) = codex::step_for(&v) { self.jobs_step(&id) }
             for d in &fx.deltas {
                 self.ag.stats.deltas.fetch_add(1, Relaxed);
@@ -665,7 +710,7 @@ impl Actor {
                 let _ = self.ag.hub.live_delta(&self.th, d).await;
             }
             for mut e in fx.events {
-                if drop_end && e["$"] == "TurnChanged" && e["state"] == "failed" { continue }
+                if drop_end && failure_row(&e) { continue }
                 if MARK_ENDS && e["$"] == "TurnChanged" && e["state"] != "running" { e["_end"] = json!(true) }
                 if e["$"] == "ActivityLogged" && e["tone"] == "tool" { if let Some(a) = e["act"].as_str() { self.jobs_step(a) } }
                 if e["$"] == "TurnChanged" && e["state"] != "running" {
@@ -678,6 +723,7 @@ impl Actor {
             if fx.delta_end { clear = true }
             }
         }
+        if dropped { clear = true; self.cx.running = false; if let Some(e) = self.partial(at) { events.push(e) } } // the process may exit before the switch stops it: that is no failed turn
         if clear { self.live_close().await }
         self.commit(events).await;
         if let Some(a) = act { crate::settings::driver::spawn_act(self.ag.clone(), self.th.clone(), a) }
@@ -835,7 +881,7 @@ impl Actor {
         if self.codex { return self.codex_batch(ls).await }
         let st = &self.ag.stats; st.lines.fetch_add(ls.len() as u64, Relaxed); st.max_batch_lines.fetch_max(ls.len() as u64, Relaxed);
         let ls = lines::merge(ls); let pace = lines::streaming(&ls); let at = now_s(); self.heard = Instant::now();
-        let mut events: Vec<Value> = vec![]; let mut clear = false; let mut lost = false; let mut sends: Vec<String> = vec![]; let mut act: Option<crate::settings::driver::Act> = None;
+        let mut events: Vec<Value> = vec![]; let mut clear = false; let mut lost = false; let mut sends: Vec<String> = vec![]; let mut act: Option<crate::settings::driver::Act> = None; let mut dropped = false;
         for l in ls {
             if l.trim().is_empty() { continue }
             let Ok(v) = serde_json::from_str::<Value>(&crate::store::clean(&l)) else { self.ag.stats.bad_lines.fetch_add(1, Relaxed); continue };
@@ -864,9 +910,9 @@ impl Actor {
                     let mut fx = self.cx.line_flow(&v, at, Flow::Stream); ev.append(&mut fx.events); fx.events = ev; fx
                 }
             };
-            let terminal = fx.events.iter().any(|e| e["$"] == "TurnChanged" && matches!(e["state"].as_str(), Some("failed" | "interrupted" | "completed")));
-            let verdict = crate::settings::driver::on_line(&self.ag.hub, &self.th, &v, terminal).await; // a provider quota/limit line: hold, switch, start the same request again (Fallback.line)
-            let (drop_end, vevents) = (verdict.drop_turn_end, verdict.events); if verdict.act.is_some() { act = verdict.act }
+            let end = turn_end(&fx.events);
+            let verdict = crate::settings::driver::on_line(&self.ag.hub, &self.th, &v, end.as_deref(), &mut self.limit_seen).await; // a provider quota/limit line: hold, switch, start the same request again (Fallback.line)
+            let (drop_end, vevents) = (verdict.drop_turn_end, verdict.events); if verdict.act.is_some() { act = verdict.act } dropped |= drop_end;
             if v["type"] == "user" && v["parent_tool_use_id"].as_str().unwrap_or("").is_empty() { // Steps.claude: a step after the first tool result of a line
                 if let Some(id) = v["message"]["content"].as_array().and_then(|a| a.iter().find(|b| b["type"] == "tool_result")).and_then(|b| b["tool_use_id"].as_str()) { if !id.is_empty() { self.jobs_step(id) } } }
             if !drop_end && fx.events.iter().any(|e| e["$"] == "TurnChanged" && (e["state"] == "completed" || e["state"] == "failed" || e["state"] == "interrupted")) { self.jobs_end() }
@@ -877,7 +923,7 @@ impl Actor {
                 let _ = self.ag.hub.live_delta(&self.th, d).await;
             }
             for mut e in fx.events {
-                if drop_end && e["$"] == "TurnChanged" && e["state"] == "failed" { continue } // the driver commits Interrupted and the switch itself
+                if drop_end && failure_row(&e) { continue } // the driver commits Interrupted and the switch itself
                 if MARK_ENDS && e["$"] == "TurnChanged" && e["state"] != "running" { e["_end"] = json!(true) } // Ended.out runs for a turn an agent line ends (state's policy writes the end records and removes the marker)
                 if e["$"] == "MessagePosted" && e["role"] == "assistant" && !e["msg"].as_str().unwrap_or("").ends_with(":before") {
                     // Steer.whole: after a reply posted ahead, only what streamed after the cut is posted
@@ -896,6 +942,7 @@ impl Actor {
                 let w = ids.join(" "); if w != self.wait { events.push(set(format!("wait.{}", self.th), w.clone(), at)); self.wait = w }
             }
         }
+        if dropped { clear = true; self.cx.running = false; if let Some(e) = self.partial(at) { events.push(e) } }
         if clear { self.live_close().await; }
         self.commit(events).await;
         if lost && self.session_lost().await { return }
@@ -926,6 +973,14 @@ impl Actor {
         if self.spawn_n != n0 { return } // what it wrote was its lost session: another process runs the message now (session_lost)
         self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed);
         if self.cx.running && e.stderr.contains(SESSION_GONE) && self.can_retry_lost() && self.session_lost().await { return } // it said so on stderr only
+        if self.cx.running { // it ended on a limit or a failed login: what the turn's end would have done
+            let v = crate::settings::driver::on_exit(&self.ag.hub, &self.th, &e.stderr, &mut self.limit_seen).await;
+            if v.drop_turn_end {
+                let mut ev = v.events; if let Some(p) = self.partial(now_s()) { ev.push(p) }
+                self.cx.running = false; self.live_close().await; self.commit(ev).await;
+                if let Some(a) = v.act { crate::settings::driver::spawn_act(self.ag.clone(), self.th.clone(), a) }
+            }
+        }
         if self.cx.running {
             let code = e.code.or(e.signal.map(|s| 128 + s)).unwrap_or(1);
             self.fail_k(match self.driver.as_ref().and_then(|d| d.exit_why(code)) { Some(w) => rules::exit_say(&w, code, &e.stderr), None => rules::exit_why(code) }, "exit", &hub_id("x", now_s(), 0), true).await;

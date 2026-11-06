@@ -39,7 +39,7 @@ impl Commands { fn agents(&self) -> Option<Arc<dyn seam::Seam>> { self.seam.clon
 
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
-        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "accounts.select", "thread.fork", "thread.back", "project.remove", "project.rename",
+        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "accounts.select", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
         "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "order.buy", "fs.list", "fs.mkdir", "fs.find"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
@@ -55,6 +55,8 @@ impl RpcHandler for Commands {
                 return vec![json!({"t":"reply","id":id,"ok":true,"result":r})]; // GitJob.reply(..., True, r): the error is inside the result
             }
             if method == "accounts.select" && !crate::settings::accounts_hub::is_granted(who) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::settings::accounts::GATE})] }
+            // the hub's own requests: an agent's tool and the failover driver, which name who chose. A connection (client 1 and up) could say anything there, so it is never heard
+            if matches!(method, "accounts.choose" | "fallback.switch") && who.client != 0 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})] }
             let create_in: Option<String> = match method {
                 "fs.list" => return answer(fs::list(&path).await),
                 "fs.mkdir" => return answer(fs::mkdir(&path).await),

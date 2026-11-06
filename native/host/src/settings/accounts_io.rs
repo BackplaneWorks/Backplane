@@ -236,6 +236,18 @@ impl Accounts {
         Ok(env)
     }
 
+    /// A test's account: saved, signed in (the stand-in CLI reads `login.json` / `auth.json` from its store) and connected, with no sign-in ceremony.
+    #[cfg(test)]
+    pub async fn plant(self: &Arc<Self>, provider: &str, label: &str, email: &str, allowance: Value) -> (String, u64) {
+        let s = self.request(&json!({"op":"add","provider":provider,"label":label})).await;
+        let id = s["profiles"].as_array().and_then(|a| a.last()).and_then(|p| p["id"].as_str()).expect("added").to_string();
+        let store = new_id();
+        self.update(&id, |p| { p.store = store; p.state = "connected".into(); p.epoch = 2; p.identity = json!({"email":email,"plan":"max","auth":"claude.ai"}); p.checked_at = now_s(); if !allowance.is_null() { p.allowance = Some(allowance) } }).unwrap();
+        let dir = self.directory(&self.profile(&id).unwrap()).unwrap(); std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(if provider == "codex" { "auth.json" } else { "login.json" }), json!({"email":email,"subscriptionType":"max","accountUuid":email,"orgUuid":"o1"}).to_string()).unwrap();
+        (id, 2)
+    }
+
     /// One-shot `<provider> <args>`: stdout JSON (not for logout), 12 s, 128 KB.
     async fn cli(&self, p: Option<&Profile>, program: &str, args: &[&str]) -> Result<(i32, Value), ()> {
         let prog = (self.resolve)(program).map_err(|_| ())?;

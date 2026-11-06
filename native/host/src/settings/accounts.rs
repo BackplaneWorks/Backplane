@@ -2,13 +2,9 @@
 //! (claude, codex); an empty binding is the CLI's own login and keeps every legacy session key and launch behavior. Accounts are settings
 //! (`accounts.inventory`, `account.default.<provider>`, `account.thread.<thread>.<provider>`), not part of the thread's state.
 //!
-//! PORTED: the pure rules (which profile is ready, binding text, the bindings a new or forked thread freezes, the label and the unavailable
-//! reasons), and `accounts.default` {provider, profile, epoch}: make a connected profile the default for new threads.
-//! NOT PORTED, and why: `accounts` (status, login, disconnect, remove, refresh: it runs the provider CLIs' login and identity probes, in private
-//! profile folders, and keeps a live snapshot of attempts and URLs), `accounts.select` (switches a thread's session between accounts: it needs the
-//! agents' session handling and a history count) and the fallback runtime (`AccountFallback`: availability holds on a confirmed limit, clearing a
-//! hold). They need real provider CLIs, which no test here may run; with no profiles the hub is on legacy bindings everywhere, which is the
-//! JS hub's behavior with no profile too. The settings they would write are folded and kept as they are.
+//! Here: the pure rules (which profile is ready, binding text, the bindings a new or forked thread freezes, the label and the unavailable reasons, who chose and what a pin
+//! holds, finding an account by name), and `accounts.default` {provider, profile, epoch}: make a connected profile the default for new threads. The rest: accounts_io.rs (the
+//! provider CLIs' login and identity), accounts_hub.rs (the `accounts` request), commands/plan.rs (`accounts.select`, `accounts.choose`), fallback.rs and driver.rs (running out).
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -22,6 +18,40 @@ fn part(s: &str) -> String { format!("{}:{}", s.chars().count(), s) }
 /// Accounts.session.key / Accounts.seen.key: the native session, and how much of the conversation the account has seen, per thread, provider, profile and epoch.
 pub fn session_key(th: &str, provider: &str, id: &str, epoch: u64) -> String { format!("account.session.{}{}{}{}", part(th), part(provider), part(id), epoch) }
 pub fn seen_key(th: &str, provider: &str, id: &str, epoch: u64) -> String { format!("account.seen.{}{}{}{}", part(th), part(provider), part(id), epoch) }
+/// Who chose a thread's account, kept beside the binding: `{id, epoch, by, who, at}`, `by` "person", "agent" or "bot". What the person chose is the thread's pin; a failover leaves it, so
+/// the pin is still what stands when the thread has moved on. A thread that has none was never chosen for: it is on its frozen default.
+pub fn chosen_key(thread: &str, provider: &str) -> String { format!("account.chosen.{thread}.{provider}") }
+pub fn chosen_show(id: &str, epoch: u64, by: &str, who: &str, at: u64) -> String { json!({"id":id,"epoch":epoch,"by":by,"who":who,"at":at}).to_string() }
+/// The account a person's pin holds the thread to, by name, when `id`/`epoch` is another one.
+pub fn pinned_to(chosen: &str, inventory: &str, id: &str, epoch: u64) -> Option<String> {
+    let c: Value = serde_json::from_str(chosen).ok()?;
+    if c["by"] != "person" || (c["id"].as_str() == Some(id) && c["epoch"].as_u64() == Some(epoch)) { return None }
+    let pin = c["id"].as_str().unwrap_or(""); Some(label(pin, &profile(inventory, pin)))
+}
+pub fn pin_refusal(name: &str) -> String { format!("The person chose {name} for this thread. Only they can move it: ask them, and it goes through when their own message names the account you want.") }
+/// Account.find: the account a name means: its id, its email or its label, exact and then ignoring case (`default` is the CLI's own login); of `provider` when one is named.
+/// A name that fits two accounts is refused with what tells them apart.
+pub fn find<'a>(profiles: &'a [Value], provider: &str, name: &str) -> Result<Option<&'a Value>, String> {
+    let name = name.trim();
+    if name.is_empty() || name.eq_ignore_ascii_case("default") { return Ok(None) }
+    let xs: Vec<&Value> = profiles.iter().filter(|p| provider.is_empty() || p["provider"] == provider).collect();
+    let fits = |f: &dyn Fn(&str, &str) -> bool| -> Vec<&'a Value> { xs.iter().filter(|p| ["id", "label"].iter().any(|k| f(p[*k].as_str().unwrap_or(""), name)) || f(p["identity"]["email"].as_str().unwrap_or(""), name)).map(|p| *p).collect() };
+    let mut hit = fits(&|a, b| a == b);
+    if hit.is_empty() { hit = fits(&|a, b| a.eq_ignore_ascii_case(b)) }
+    match hit.len() {
+        1 => Ok(Some(hit[0])),
+        0 => Err(format!("No account is called {name}. account_list shows them.")),
+        _ => Err(format!("{name} fits {} accounts: {}. Name one by its id or give the provider.", hit.len(), hit.iter().map(|p| format!("{} ({}, {})", p["label"].as_str().unwrap_or(""), p["provider"].as_str().unwrap_or(""), p["id"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("; "))),
+    }
+}
+/// The person's own words name the account: a label, email or id, standing alone (a label "work" is not asked for by "homework").
+pub fn asked_for(text: &str, p: &Value) -> bool {
+    let low = text.to_lowercase();
+    ["label", "id"].iter().map(|k| p[*k].as_str().unwrap_or("")).chain([p["identity"]["email"].as_str().unwrap_or("")]).filter(|n| !n.is_empty()).any(|n| {
+        let n = n.to_lowercase(); let word = |c: char| c.is_alphanumeric() || c == '_';
+        low.match_indices(&n).any(|(i, _)| !low[..i].chars().next_back().map_or(false, word) && !low[i + n.len()..].chars().next().map_or(false, word))
+    })
+}
 /// Accounts.profile: the inventory's profile of that id (Null when none).
 pub fn profile(inventory: &str, id: &str) -> Value {
     serde_json::from_str::<Value>(inventory).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter().find(|p| p["id"].as_str() == Some(id)).unwrap_or(Value::Null)
@@ -93,6 +123,24 @@ mod tests {
     use crate::{hub::Cfg, presenter::Canned};
     fn inv() -> String { json!({"version":1,"revision":1,"profiles":[{"id":"w","provider":"claude","state":"connected","epoch":3,"label":"Work"},{"id":"x","provider":"codex","state":"connecting","epoch":1,"label":"X"}]}).to_string() }
     #[test] fn accounts_legacy_allowed() { assert_eq!(binding_show("", 0), r#"{"id":"","epoch":0}"#); assert!(allowed("", &Value::Null, "claude", 0), "no binding: always allowed"); assert!(!allowed("zz", &Value::Null, "claude", 0)); assert!(supported("claude") && supported("codex") && !supported("grok")); }
+    #[test] fn an_account_is_found_by_its_id_email_or_label_and_an_unclear_name_is_refused() {
+        let xs = vec![json!({"id":"w1","provider":"claude","label":"Work","identity":{"email":"me@work.com"}}), json!({"id":"c1","provider":"codex","label":"Work","identity":{"email":"me@work.com"}}), json!({"id":"p1","provider":"claude","label":"Personal","identity":{"email":"Me@Home.org"}})];
+        let id = |p: &str, n: &str| find(&xs, p, n).map(|x| x.map(|v| v["id"].as_str().unwrap().to_string()));
+        assert_eq!(id("", "p1").unwrap().unwrap(), "p1"); assert_eq!(id("", "personal").unwrap().unwrap(), "p1", "ignoring case"); assert_eq!(id("", "me@home.org").unwrap().unwrap(), "p1", "by email");
+        assert_eq!(id("codex", "Work").unwrap().unwrap(), "c1", "the provider narrows it"); assert!(id("", "work").unwrap_err().contains("fits 2 accounts"), "the same label on two providers is not guessed at");
+        assert_eq!(id("", "default").unwrap(), None); assert_eq!(id("", "").unwrap(), None); assert!(id("", "nobody").unwrap_err().contains("account_list"));
+    }
+    #[test] fn a_pin_is_the_persons_choice_only_and_holds_against_another_account() {
+        let c = chosen_show("w", 3, "person", "", 9);
+        assert_eq!(pinned_to(&c, &inv(), "x", 1).as_deref(), Some("Work")); assert_eq!(pinned_to(&c, &inv(), "w", 3), None, "the same account is no override"); assert_eq!(pinned_to(&c, &inv(), "w", 2).as_deref(), Some("Work"), "another sign-in of it is");
+        assert_eq!(pinned_to(&chosen_show("w", 3, "bot", "Bub", 9), &inv(), "x", 1), None, "a bot's choice pins nothing"); assert_eq!(pinned_to("", &inv(), "x", 1), None, "nobody chose");
+        assert_eq!(pinned_to(&chosen_show("", 0, "person", "", 9), &inv(), "w", 3).as_deref(), Some("Default account"), "the person may pin the CLI's own login");
+    }
+    #[test] fn the_persons_words_name_an_account_only_when_it_stands_alone() {
+        let p = json!({"id":"abc123","label":"Work","identity":{"email":"me@work.com"}});
+        assert!(asked_for("put that on work please", &p)); assert!(asked_for("Use me@work.com.", &p)); assert!(asked_for("use abc123", &p));
+        assert!(!asked_for("finish the homework first", &p), "inside another word"); assert!(!asked_for("use the other account", &p)); assert!(!asked_for("anything", &json!({"id":"","label":""})));
+    }
     #[test] fn a_profile_is_ready_when_connected_at_the_epoch_the_caller_saw() {
         let w = profile(&inv(), "w"); assert!(ready(&w, "claude", 3)); assert!(!ready(&w, "claude", 2), "its sign-in changed"); assert!(!ready(&w, "codex", 3)); assert!(!ready(&profile(&inv(), "x"), "codex", 1)); assert!(!ready(&profile(&inv(), "nope"), "claude", 0));
         assert_eq!(unavailable(&Value::Null, 0), "This saved account is no longer available. Choose another account."); assert_eq!(unavailable(&profile(&inv(), "x"), 1), "Finish this account's sign-in in Settings → Agents before selecting it.");

@@ -24,14 +24,19 @@ impl Agents {
         if !parent.is_empty() { let ok = caller.as_ref().map_or(false, |c| !c.archived && !c.deleted && c.project == proj); if !ok { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } }
         if !parent.is_empty() && !self.world().await.tree_chain_ok(&parent) { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } // ST.Tree.chain
         if prompt.trim().is_empty() { return fail("a prompt is needed") }
-        let provider = if s(a, "provider").is_empty() { if default_prov.is_empty() { "claude".to_string() } else { default_prov } } else { s(a, "provider").to_string() };
-        let model = if !s(a, "model").is_empty() { s(a, "model").to_string() } else if s(a, "provider").is_empty() { default_model } else { String::new() };
+        let default_prov = if default_prov.is_empty() { "claude".to_string() } else { default_prov };
+        // an account names its provider: an account of another one than asked for is refused, and with none asked for it decides
+        let asked = if s(a, "provider").is_empty() { if a.get("account").is_some() && !s(a, "account").eq_ignore_ascii_case("default") { String::new() } else { default_prov.clone() } } else { s(a, "provider").to_string() };
+        let chosen = match self.account_arg(a, &asked).await { Ok(c) => c, Err(e) => return fail(&e) };
+        let provider = chosen.as_ref().map(|c| c.provider.clone()).unwrap_or(if asked.is_empty() { default_prov.clone() } else { asked });
+        let model = if !s(a, "model").is_empty() { s(a, "model").to_string() } else if s(a, "provider").is_empty() && provider == default_prov { default_model } else { String::new() };
         if provider != "claude" && super::providers::driver(&provider).is_none() { return fail(&format!("{provider} threads are not run by the Rust hub yet")) }
         let (now, report) = (now_s(), a.get("report").and_then(Value::as_bool).unwrap_or(true));
         let seq = self.seq_n(); let th = hub_id("t", now, seq);
         let title = if s(a, "title").is_empty() { rules::title_of(&prompt) } else { s(a, "title").to_string() };
         let by = if caller.is_some() { thread.to_string() } else { String::new() }; // Mcp.launch.go: the launcher, parent or not
         let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":proj,"title":title,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now})];
+        ev.extend(self.thread_account(thread, &th, &provider, chosen.as_ref(), now).await);
         if !by.is_empty() { ev.push(json!({"$":"ThreadLaunched","id":th,"by":by,"report":report,"at":now})) }
         if !parent.is_empty() { ev.push(json!({"$":"ThreadParentSet","id":th,"parent":parent,"at":now})); ev.push(json!({"$":"SettingSet","key":format!("thread.tree.{parent}"),"value":"1","at":now})) }
         let mid = hub_id("m", now, seq + 1);
@@ -39,7 +44,7 @@ impl Agents {
         self.commit_events(ev).await;
         if let Err(e) = self.deliver_as("user", &th, &mid, &prompt, None, vec![]).await { return fail(&format!("could not start the thread: {e}")) }
         let note = if report && !by.is_empty() { "Its reports will come to you as messages when its turn ends or it asks the person something. End your turn instead of polling." } else { "" };
-        (true, json!({"threadId":th,"parent":parent,"title":title,"provider":provider,"state":"started","note":note}))
+        (true, json!({"threadId":th,"parent":parent,"title":title,"provider":provider,"account":chosen.map(|c| c.label),"state":"started","note":note}))
     }
 }
 
@@ -77,7 +82,7 @@ pub fn report_plan_to(w: &super::world::World, thread: &str, events: &[Value], f
     let title = w.threads.get(thread).map(|t| t.title.clone()).unwrap_or_default();
     if ask.is_some() && coordinated { return None }
     if let Some(a) = ask { return Some(Report { to, text: ask_note(thread, &title, &a), before: vec![setting(format!("autosettle.report.{thread}"), now.to_string(), now)] }) }
-    let e = match events.iter().rev().find(|e| e["$"] == "TurnChanged" && e["thread"] == thread).and_then(|e| e["state"].as_str()) { Some("completed") => 1u8, Some("failed") => 2, Some("interrupted") => 3, _ => return None };
+    let e = match events.iter().rev().find(|e| e["$"] == "TurnChanged" && e["thread"] == thread).filter(|e| e["failover"] != true).and_then(|e| e["state"].as_str()) { Some("completed") => 1u8, Some("failed") => 2, Some("interrupted") => 3, _ => return None };
     let busy = w.work(thread).0 + w.tasks.values().filter(|k| k.parent == thread && !k.terminal()).count();
     if e == 1 && busy > 0 { return None } // launch_waits_for_work
     if w.said_to.get(thread).map_or(false, |s| s.contains(&to)) { return None } // launch_said_quiet

@@ -5,7 +5,7 @@
 //! client). Here a connection is granted by a request in its view session that names the accounts wire version (`accountProfiles: 1`, as the web view sends it; `Hub::request`
 //! calls `note_request`), the grant is kept until the connection detaches, and every other client gets the named-account message. The live profiles are not broadcast:
 //! a granted client reads them with the `accounts` request (`op: list`), which is how the settings page gets them.
-use super::{accounts, accounts_io::Accounts};
+use super::{accounts, accounts_io::Accounts, fallback as fb};
 use crate::{agents::Agents, api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -110,14 +110,33 @@ impl RpcHandler for AccountsRpc {
             let mut snap = self.mgr.request(p).await;
             // a client that names a thread is also told what the thread is bound to (the account chip and its menu need the binding to send `accounts.select` with `expected`)
             snap["defaults"] = json!({"claude": hub.setting("account.default.claude").await.unwrap_or_default(), "codex": hub.setting("account.default.codex").await.unwrap_or_default()});
+            let mut model = String::new();
             if let Some(th) = p.get("thread").and_then(Value::as_str).map(|t| t.rsplit('|').next().unwrap_or(t)).filter(|t| !t.is_empty()) { // a picture names a thread `hub|id`
-                let provider = { let m = hub.model().await; m.threads.get(th).map(|t| t.provider.clone()).unwrap_or_default() };
+                let (provider, m) = { let m = hub.model().await; m.threads.get(th).map(|t| (t.provider.clone(), t.model.clone())).unwrap_or_default() }; model = m;
                 let raw = if accounts::supported(&provider) { hub.setting(&accounts::binding_key(th, &provider)).await.unwrap_or_default() } else { String::new() };
-                snap["thread"] = json!({"id": th, "provider": provider, "binding": raw});
+                let chosen = if accounts::supported(&provider) { hub.setting(&accounts::chosen_key(th, &provider)).await.unwrap_or_default() } else { String::new() };
+                snap["thread"] = json!({"id": th, "provider": provider, "binding": raw, "pinned": serde_json::from_str::<Value>(&chosen).map_or(false, |c| c["by"] == "person")});
             }
+            snap["holds"] = holds(hub, &snap["profiles"], &model).await;
             vec![json!({"t":"reply","id":id,"ok":snap["error"].as_str().unwrap_or("").is_empty(),"result":snap})]
         })
     }
+}
+
+/// Which accounts are out now, for the menus: `{profile id: {"until": seconds, "text": "out, resets 15:40"}}`. The client shows the words; the hub knows the zone and the holds.
+pub async fn holds(hub: &Arc<Hub>, profiles: &Value, model: &str) -> Value {
+    let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("account.limit.").map(|(k, _)| k.to_string()).collect() };
+    let mut settings = std::collections::HashMap::new();
+    for k in keys { if let Some(v) = hub.setting(&k).await { settings.insert(k, v); } }
+    let get = |k: &str| settings.get(k).cloned().unwrap_or_default();
+    let (now, zone) = (now_ms() / 1000, hub.setting("tz.machine").await.unwrap_or_default());
+    let mut out = serde_json::Map::new();
+    for p in profiles.as_array().into_iter().flatten() { let (id, pv, e) = (p["id"].as_str().unwrap_or(""), p["provider"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0));
+        if !fb::hold_current(&get, pv, id, e, model, now) { continue }
+        let until = fb::hold_until(&get, pv, id, e, model);
+        out.insert(id.to_string(), json!({"until":until,"text":if until > now { format!("out, resets {}", crate::agents::rules::when(&zone, until, now)) } else { "out".to_string() }}));
+    }
+    Value::Object(out)
 }
 
 /// The manager for this hub's home (provider CLIs resolved like the agents'), its RPC, and the 1-second watch that tells everyone of a change.

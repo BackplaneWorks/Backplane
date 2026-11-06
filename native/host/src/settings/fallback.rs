@@ -2,7 +2,7 @@
 //! person intervenes. Ported here: parsing, validity against the installed models, editing and picking; the outage classifier (`classify`: only a provider's own
 //! error envelope, never arbitrary text); holds on a provider or model; and the planner over named accounts (core/account-fallback: which account is
 //! eligible, the one with the most allowance left, when a hold ends, the thread's preference). What is NOT here is the driver: reading a failed turn,
-//! writing the hold, switching the thread to the next account or provider and starting it again belongs to the agents' turn handling, which calls these.
+//! writing the hold, switching the thread to the next account or provider and starting it again is settings/driver.rs, which the agents' actor calls.
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,11 +39,12 @@ use serde_json::json;
 
 /// Limit: a hold on a provider login (scope = the provider) or on a model (scope = `provider/model`). Unknown reset (0) stays held until cleared;
 /// no retry time is invented. No credential or account identifier is stored.
+/// `auth`: the login failed rather than ran out; it is held the same way, and only a fresh sign-in check or the person's own choice ends it.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Limit { pub scope: String, pub reason: String, pub reset: u64 }
+pub struct Limit { pub scope: String, pub reason: String, pub reset: u64, pub auth: bool }
 impl Limit {
     /// Limit.json: the record kept as the setting `fallback.outage.<scope>` (the reason cut to 400 characters).
-    pub fn json(&self, now: u64) -> String { json!({"scope":self.scope,"reason":self.reason.chars().take(400).collect::<String>(),"reset":self.reset,"at":now}).to_string() }
+    pub fn json(&self, now: u64) -> String { let mut o = json!({"scope":self.scope,"reason":self.reason.chars().take(400).collect::<String>(),"reset":self.reset,"at":now}); if self.auth { o["auth"] = json!(true) } o.to_string() }
     pub fn key(scope: &str) -> String { format!("fallback.outage.{scope}") }
 }
 /// Limit.active.o: a record holds from its start until its reset; an unknown reset (0) holds until cleared.
@@ -74,13 +75,13 @@ pub fn reason(o: &Value) -> String {
     parts.extend(o["message"]["content"].as_array().map(|a| a.iter().map(|x| s_of(x, "text").to_string()).collect::<Vec<_>>()).unwrap_or_default());
     parts.join("; ")
 }
-/// Error.reset: the provider's reset time (0 unknown).
-pub fn reset_of(o: &Value) -> u64 { o["error"]["resets_at"].as_u64().or(o["resets_at"].as_u64()).or(o["rate_limit_info"]["resetsAt"].as_u64()).unwrap_or(0) }
+/// Error.reset: the provider's reset time (0 unknown): its own field, else the time Claude Code puts after a bar ("Claude AI usage limit reached|1700000000").
+pub fn reset_of(o: &Value) -> u64 { o["error"]["resets_at"].as_u64().or(o["resets_at"].as_u64()).or(o["rate_limit_info"]["resetsAt"].as_u64()).or_else(|| reason(o).rsplit_once('|').and_then(|(_, t)| t.trim().parse().ok())).unwrap_or(0) }
 /// Error.scope: an account-wide limit holds the provider; a model limit holds `provider/model`. An explicit protocol scope wins over wording.
 pub fn scope_of(p: &str, m: &str, o: &Value) -> String {
     let explicit = o["error"]["scope"].as_str().or(o["scope"].as_str()).unwrap_or("");
     let low = reason(o).to_lowercase();
-    let account = explicit != "model" && (explicit == "account" || rejected(o) || assistant(o) || (!low.contains("hit your usage limit for ") && (low.contains("weekly limit") || low.contains("usage limit"))));
+    let account = explicit != "model" && (explicit == "account" || rejected(o) || assistant(o) || (!low.contains("hit your usage limit for ") && (low.contains("weekly limit") || low.contains("usage limit") || low.contains("hit your limit"))));
     if account { p.to_string() } else { format!("{p}/{m}") }
 }
 /// Error.classify: only a provider error envelope is read, never arbitrary text. Auth, cancellations and network failures are not capacity signals.
@@ -88,7 +89,26 @@ pub fn classify(p: &str, m: &str, o: &Value) -> Option<Limit> {
     let low = reason(o).to_lowercase();
     let code = o["error"]["code"].as_str().or(o["error"]["type"].as_str()).unwrap_or("");
     let signal = rejected(o) || assistant(o) || envelope(o);
-    if signal && !not_quota(&low) && (rejected(o) || assistant(o) || quota_code(code) || quota_words(&low)) { Some(Limit { scope: scope_of(p, m, o), reason: reason(o), reset: reset_of(o) }) } else { None }
+    if signal && !not_quota(&low) && (rejected(o) || assistant(o) || quota_code(code) || quota_words(&low)) { Some(Limit { scope: scope_of(p, m, o), reason: reason(o), reset: reset_of(o), auth: false }) } else { None }
+}
+/// Error.auth_code / Error.auth_words: what a provider's error envelope says when the login itself failed.
+fn auth_code(c: &str) -> bool { matches!(c, "authentication_error" | "invalid_api_key" | "permission_error" | "unauthorized" | "token_expired") }
+fn auth_words(s: &str) -> bool { ["please run /login", "invalid api key", "oauth token has expired", "authentication failed", "authentication_error", "not logged in", "login required", "unauthorized", "token has been revoked"].iter().any(|w| s.contains(w)) }
+/// Error.auth: a failed login on a provider's error envelope, never arbitrary text: an assistant message saying the words is not one, and a cancelled turn is not one.
+/// The whole login is held (the provider's scope); nobody reports when it comes back, so the reset is unknown.
+pub fn auth_failure(p: &str, o: &Value) -> Option<Limit> {
+    if s_of(o, "type") == "assistant" && s_of(o, "error") == "authentication_failed" { return Some(Limit { scope: p.to_string(), reason: reason(o), reset: 0, auth: true }) }
+    if !envelope(o) { return None }
+    let low = reason(o).to_lowercase();
+    let code = o["error"]["code"].as_str().or(o["error"]["type"].as_str()).unwrap_or("");
+    if low.contains("cancelled") || low.contains("canceled") || !(auth_code(code) || auth_words(&low)) { return None }
+    Some(Limit { scope: p.to_string(), reason: reason(o), reset: 0, auth: true })
+}
+/// A process that ended without a line saying why: what it left on stderr, read as the provider's own error envelope (its last 2000 characters; the limit or sign-in message is at the end).
+pub fn from_stderr(p: &str, m: &str, stderr: &str) -> Option<Limit> {
+    let n = stderr.chars().count(); let tail: String = stderr.chars().skip(n.saturating_sub(2000)).collect();
+    let o = json!({"type":"error","message":tail.trim()});
+    classify(p, m, &o).or_else(|| auth_failure(p, &o))
 }
 
 // ---- the planner over named accounts: holds, eligibility, the best account, the thread's preference ----
@@ -151,6 +171,37 @@ pub fn pick_account(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, 
     for p in xs.iter().skip(1) { let v = usage_score(p, now, model).unwrap_or(0); if v > score { best = p; score = v } }
     Some(best.clone())
 }
+/// Pick.account without the accounts this request already ran out on: a request never goes back to one, whatever its hold says now.
+pub fn pick_untried(profiles: &[Value], tried: &[String], get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &str) -> Option<Value> {
+    let xs: Vec<Value> = profiles.iter().filter(|p| !tried.contains(&accounts_id(p))).cloned().collect();
+    pick_account(&xs, get, now, provider, model)
+}
+fn accounts_id(p: &Value) -> String { format!("{}:{}", p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0)) }
+/// One entry of the list of logins a request has run out on.
+pub fn tried_id(id: &str, epoch: u64) -> String { format!("{id}:{epoch}") }
+/// Usage.reset: when a limit that came with no reset ends, from the login's own windows: the fullest window that applies and has a reset to come (0: none known).
+/// A window's reading is used however old it is: a reset time does not go stale until it has passed.
+pub fn window_reset(profile: &Value, model: &str, now: u64) -> u64 {
+    let mut best = (-1.0f64, 0u64);
+    for w in profile["allowance"]["windows"].as_array().cloned().unwrap_or_default() {
+        let (reset, used) = (w["resets_at"].as_u64().unwrap_or(0), w["used_percent"].as_f64().or(w["used_permille"].as_f64().map(|x| x / 10.0)).unwrap_or(0.0));
+        if applies(&w, model) && reset > now && used > best.0 { best = (used, reset) }
+    }
+    best.1
+}
+/// Hold.clearable: of `keys` (the hold records there are), the ones on this profile with no reset that a newer fact has ended: a limit once a reading taken after it shows allowance
+/// left, a failed login once the account's sign-in was checked after it. A hold with a reset ends by itself and is left alone.
+pub fn clearable(profile: &Value, keys: &[String], get: &dyn Fn(&str) -> String, now: u64) -> Vec<String> {
+    let (provider, id, epoch) = (profile["provider"].as_str().unwrap_or(""), profile["id"].as_str().unwrap_or(""), profile["epoch"].as_u64().unwrap_or(0));
+    if id.is_empty() || profile["state"] != "connected" { return vec![] }
+    let mine = hold_key(provider, id, epoch);
+    keys.iter().filter(|k| k.starts_with(&mine)).filter(|k| {
+        let o = rec(get, k);
+        if o["scope"].as_str().unwrap_or("").is_empty() || o["reset"].as_u64().unwrap_or(0) != 0 { return false }
+        let at = o["at"].as_u64().unwrap_or(0);
+        if o["auth"] == true { profile["checkedAt"].as_u64().unwrap_or(0) > at } else { profile["allowance"]["at"].as_u64().unwrap_or(0) > at && usage_score(profile, now, "").map_or(false, |s| s > 0) }
+    }).cloned().collect()
+}
 /// Pick.may_cross: a thread may leave its provider only when no account of it is eligible.
 pub fn may_cross(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &str) -> bool { pick_account(profiles, get, now, provider, model).is_none() }
 /// Reset.next: the earliest time any connected profile of the provider (or the thread's own login) is free again (0: none known).
@@ -165,6 +216,24 @@ pub fn next_reset(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, pr
 }
 /// Preference: the thread's own provider, model, effort and binding before a failover, kept so it can return when the hold ends.
 pub fn preference_key(thread: &str) -> String { format!("account.failover.preference.{thread}") }
+/// Preference.save: the first failover of a run of them keeps what the thread was on; a later one (the record still describes where the thread is) only moves `active`.
+pub fn preference_save(old: &str, provider: &str, model: &str, effort: &str, binding: &str, active: &str) -> String {
+    let o: Value = serde_json::from_str(old).unwrap_or(Value::Null);
+    let mut r = if o["activeProvider"] == provider && o["activeBinding"] == binding { o } else { json!({"provider":provider,"model":model,"effort":effort,"binding":binding}) };
+    r["activeProvider"] = json!(provider); r["activeBinding"] = json!(active); r.to_string()
+}
+/// Preference.ready: the thread is still where the failover left it (`binding`), and the login it left has a reset that has come, is not held any more and can be used again. A hold
+/// with no reset never reads as ready: it ends with a newer fact (`clearable`), and then `until` is 0 and nothing more is known, so the thread stays where it works.
+pub fn preference_ready(rec_raw: &str, provider: &str, binding: &str, inventory: &[Value], get: &dyn Fn(&str) -> String, now: u64) -> Option<(String, u64)> {
+    let o: Value = serde_json::from_str(rec_raw).ok()?;
+    if o["activeProvider"] != provider || o["activeBinding"] != binding || o["provider"] != provider { return None }
+    let b: Value = serde_json::from_str(o["binding"].as_str()?).ok()?;
+    let (id, epoch, model) = (b["id"].as_str()?, b["epoch"].as_u64().unwrap_or(0), o["model"].as_str().unwrap_or(""));
+    let until = hold_until(get, provider, id, epoch, model);
+    if until == 0 || now < until || hold_current(get, provider, id, epoch, model, now) { return None }
+    if !id.is_empty() && !inventory.iter().any(|p| p["id"] == id && p["epoch"] == epoch && p["provider"] == provider && p["state"] == "connected" && profile_model(p, model)) { return None }
+    Some((id.to_string(), epoch))
+}
 
 #[cfg(test)]
 mod outage_tests {
@@ -179,6 +248,7 @@ mod outage_tests {
         assert_eq!((l.scope.as_str(), l.reset), ("codex", 2000), "a bare usage limit is account capacity");
         let m = classify("codex", "gpt-6.1-sol", &json!({"type":"turn.failed","message":"You've hit your usage limit for gpt-6.1-sol"})).unwrap(); assert_eq!(m.scope, "codex/gpt-6.1-sol", "the 'for <model>' form is the model's");
         assert_eq!(classify("claude", "opus", &json!({"type":"result","is_error":true,"result":"Claude AI usage limit reached|1700000000"})).unwrap().scope, "claude");
+        assert_eq!(classify("claude", "opus", &json!({"type":"result","is_error":true,"result":"You've hit your limit"})).unwrap().scope, "claude", "Claude Code's own words are the account's");
         let r = classify("claude", "opus", &json!({"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":3000}})).unwrap(); assert_eq!((r.reason.as_str(), r.reset), ("Provider usage limit (seven_day)", 3000));
         assert_eq!(classify("claude", "opus", &json!({"type":"assistant","error":"rate_limit","message":{"content":[{"text":"limit"}]}})).unwrap().reason, "limit");
         assert_eq!(classify("codex", "m", &json!({"type":"turn.failed","error":{"message":"x","scope":"model"},"scope":"account"})).map(|l| l.scope), None, "no quota words: not a limit");
@@ -189,6 +259,56 @@ mod outage_tests {
         assert_eq!(classify("claude", "o", &json!({"type":"result","is_error":true,"result":"authentication failed: usage limit"})), None);
         assert_eq!(classify("claude", "o", &json!({"type":"error","error":{"message":"turn cancelled: weekly limit"}})), None); assert_eq!(classify("claude", "o", &json!({"type":"result","is_error":false,"result":"usage limit reached"})), None);
     }
+    #[test] fn a_failed_login_is_read_from_an_error_envelope_only_and_is_not_a_limit() {
+        for o in [json!({"type":"result","is_error":true,"result":"Invalid API key · Please run /login"}), json!({"type":"error","error":{"type":"authentication_error","message":"nope"}}), json!({"type":"turn.failed","error":{"message":"OAuth token has expired"}})] {
+            let l = auth_failure("claude", &o).unwrap(); assert!(l.auth && l.scope == "claude" && l.reset == 0, "{o}"); assert_eq!(classify("claude", "o", &o), None, "{o}: never a capacity signal"); }
+        assert_eq!(auth_failure("claude", &json!({"type":"assistant","message":{"content":[{"text":"please run /login"}]}})), None, "an assistant saying it is not a failure");
+        assert_eq!(auth_failure("claude", &json!({"type":"result","is_error":false,"result":"please run /login"})), None, "nor a good result");
+        assert_eq!(auth_failure("claude", &json!({"type":"error","message":"turn cancelled: not logged in"})), None);
+        assert_eq!(auth_failure("claude", &json!({"type":"result","is_error":true,"result":"Overloaded"})), None, "a provider's bad day is neither");
+        assert!(!Value::from(serde_json::from_str::<Value>(&Limit { scope: "c".into(), reason: "r".into(), reset: 0, auth: false }.json(1)).unwrap()).as_object().unwrap().contains_key("auth"), "the record of a plain limit is as it always was");
+    }
+    #[test] fn what_a_process_left_on_stderr_is_read_like_an_envelope() {
+        assert!(from_stderr("codex", "m", &format!("{}\nYou've hit your usage limit. Try again later.\n", "x".repeat(5000))).is_some());
+        assert!(from_stderr("claude", "m", "error: Please run /login").unwrap().auth); assert_eq!(from_stderr("claude", "m", "segmentation fault"), None);
+    }
+    #[test] fn the_reset_claude_code_puts_after_a_bar_is_read() {
+        assert_eq!(classify("claude", "opus", &json!({"type":"result","is_error":true,"result":"Claude AI usage limit reached|1700000000"})).unwrap().reset, 1700000000);
+        assert_eq!(classify("claude", "opus", &json!({"type":"result","is_error":true,"result":"Claude AI usage limit reached"})).unwrap().reset, 0, "no bar: unknown, never invented");
+    }
+    #[test] fn a_limit_with_no_reset_takes_it_from_the_fullest_window_that_applies() {
+        let p = json!({"allowance":{"state":"stale","windows":[{"scope":"five_hour","used_percent":100.0,"resets_at":500},{"scope":"seven_day","used_percent":60.0,"resets_at":9000},{"scope":"seven_day_opus","used_percent":100.0,"resets_at":7000},{"scope":"x","used_percent":100.0}]}});
+        assert_eq!(window_reset(&p, "sonnet", 100), 500, "a stale reading still knows its reset"); assert_eq!(window_reset(&p, "sonnet", 600), 9000, "a window that has passed says nothing");
+        assert_eq!(window_reset(&json!({}), "m", 1), 0);
+    }
+    #[test] fn a_hold_with_no_reset_ends_with_a_newer_fact_and_only_then() {
+        let key = hold_key("claude", "w", 2); let now = 1000;
+        let hold = |o: Value| { let (k, v) = (key.clone(), o.to_string()); move |x: &str| if x == k { v.clone() } else { String::new() } };
+        let p = |checked: u64, at: u64, used: f64| json!({"id":"w","epoch":2,"provider":"claude","state":"connected","checkedAt":checked,"allowance":{"state":"ok","phase":"complete","provider":"claude","at":at,"windows":[{"scope":"five_hour","used_percent":used}]}});
+        let lim = hold(json!({"scope":"claude","reset":0,"at":900}));
+        let ks = vec![key.clone()];
+        assert_eq!(clearable(&p(0, 950, 10.0), &ks, &lim, now), ks, "a reading after the limit shows allowance left");
+        assert!(clearable(&p(0, 950, 100.0), &ks, &lim, now).is_empty(), "still full"); assert!(clearable(&p(0, 850, 10.0), &ks, &lim, now).is_empty(), "the reading is older than the limit");
+        let auth = hold(json!({"scope":"claude","reset":0,"at":900,"auth":true}));
+        assert_eq!(clearable(&p(950, 950, 10.0), &ks, &auth, now), ks, "the sign-in was checked after it failed"); assert!(clearable(&p(850, 950, 10.0), &ks, &auth, now).is_empty(), "allowance says nothing of a login");
+        assert!(clearable(&p(950, 950, 10.0), &ks, &hold(json!({"scope":"claude","reset":2000,"at":900})), now).is_empty(), "a known reset ends by itself");
+        assert!(clearable(&p(950, 950, 10.0), &[hold_key("claude", "other", 2)], &auth, now).is_empty(), "another account's hold is not this one's");
+    }
+    #[test] fn a_request_never_goes_back_to_an_account_it_ran_out_on() {
+        let xs = vec![json!({"id":"a","epoch":1,"provider":"claude","state":"connected"}), json!({"id":"b","epoch":1,"provider":"claude","state":"connected"})];
+        assert_eq!(pick_untried(&xs, &[tried_id("a", 1)], &none, 5, "claude", "m").unwrap()["id"], "b");
+        assert_eq!(pick_untried(&xs, &[tried_id("a", 1), tried_id("b", 1)], &none, 5, "claude", "m"), None);
+    }
+    #[test] fn the_preference_is_the_first_login_of_a_run_and_ready_when_its_reset_has_come() {
+        let (a, b, c) = (r#"{"id":"a","epoch":1}"#, r#"{"id":"b","epoch":1}"#, r#"{"id":"c","epoch":1}"#);
+        let first = preference_save("", "claude", "opus", "high", a, b); let second = preference_save(&first, "claude", "opus", "high", b, c); let o: Value = serde_json::from_str(&second).unwrap();
+        assert_eq!((o["binding"].as_str().unwrap(), o["activeBinding"].as_str().unwrap()), (a, c), "where it started stays, where it is moves");
+        let inv = vec![json!({"id":"a","epoch":1,"provider":"claude","state":"connected"})]; let k = hold_key("claude", "a", 1);
+        let held = |reset: u64| { let (k, v) = (k.clone(), json!({"scope":"claude","reset":reset}).to_string()); move |x: &str| if x == k { v.clone() } else { String::new() } };
+        assert_eq!(preference_ready(&second, "claude", c, &inv, &held(500), 600), Some(("a".to_string(), 1)), "its reset has come");
+        assert_eq!(preference_ready(&second, "claude", c, &inv, &held(500), 400), None, "not yet"); assert_eq!(preference_ready(&second, "claude", c, &inv, &held(0), 600), None, "no reset: it stays");
+        assert_eq!(preference_ready(&second, "claude", b, &inv, &held(500), 600), None, "the thread is no longer where the failover left it"); assert_eq!(preference_ready(&second, "claude", c, &[], &held(500), 600), None, "the account is gone");
+    }
     #[test] fn a_stale_future_or_undated_allowance_scores_nothing() {
         let mk = |at: Value| json!({"provider":"claude","allowance":{"state":"ok","phase":"complete","provider":"claude","at":at,"windows":[{"scope":"five_hour","used_percent":10.0}]}});
         assert!(usage_score(&mk(json!(1000)), 1100, "m").is_some(), "fresh");
@@ -196,7 +316,7 @@ mod outage_tests {
         assert_eq!(usage_score(&mk(json!(2000)), 1100, "m"), None, "from the future");
         assert_eq!(usage_score(&mk(json!(0)), 1100, "m"), None, "undated");
     }
-    #[test] fn the_limit_record_keeps_four_fields_and_a_cut_reason() { let l = Limit { scope: "claude".into(), reason: "x".repeat(500), reset: 7 }; let v: Value = serde_json::from_str(&l.json(3)).unwrap(); assert_eq!((v["reason"].as_str().unwrap().len(), v["reset"].clone(), v["at"].clone()), (400, json!(7), json!(3))); assert_eq!(Limit::key("codex/m"), "fallback.outage.codex/m"); }
+    #[test] fn the_limit_record_keeps_four_fields_and_a_cut_reason() { let l = Limit { scope: "claude".into(), reason: "x".repeat(500), reset: 7, auth: false }; let v: Value = serde_json::from_str(&l.json(3)).unwrap(); assert_eq!((v["reason"].as_str().unwrap().len(), v["reset"].clone(), v["at"].clone()), (400, json!(7), json!(3))); assert_eq!(Limit::key("codex/m"), "fallback.outage.codex/m"); }
     #[test] fn a_chain_target_is_held_by_its_provider_or_its_model_and_the_pick_skips_it() {
         let get = |k: &str| match k { "fallback.outage.claude" => json!({"scope":"claude","reset":0}).to_string(), "fallback.outage.codex/gpt-6" => json!({"scope":"codex/gpt-6","reset":9999}).to_string(), _ => String::new() };
         let caps = json!({"claude":["opus"],"codex":["gpt-6","gpt-5"],"grok":["g"]});
@@ -227,8 +347,8 @@ mod outage_tests {
     }
     #[test] fn a_hold_is_marked_on_the_provider_or_the_model_with_length_prefixed_keys() {
         assert_eq!(hold_key("claude", "w", 3), "account.limit.6:claude1:w3:"); assert_eq!(hold_model_key("claude", "w", 3, "opus"), "account.limit.6:claude1:w3:model:4:opus");
-        let l = Limit { scope: "claude/opus".into(), reason: "r".into(), reset: 9 }; assert_eq!(hold_mark("claude", "w", 3, &l, 5, 5)["key"], "account.limit.6:claude1:w3:model:4:opus");
-        let p = Limit { scope: "claude".into(), reason: "r".into(), reset: 9 }; assert_eq!(hold_mark("claude", "w", 3, &p, 5, 5)["key"], "account.limit.6:claude1:w3:"); assert_eq!(preference_key("t1"), "account.failover.preference.t1");
+        let l = Limit { scope: "claude/opus".into(), reason: "r".into(), reset: 9, auth: false }; assert_eq!(hold_mark("claude", "w", 3, &l, 5, 5)["key"], "account.limit.6:claude1:w3:model:4:opus");
+        let p = Limit { scope: "claude".into(), reason: "r".into(), reset: 9, auth: false }; assert_eq!(hold_mark("claude", "w", 3, &p, 5, 5)["key"], "account.limit.6:claude1:w3:"); assert_eq!(preference_key("t1"), "account.failover.preference.t1");
     }
 }
 

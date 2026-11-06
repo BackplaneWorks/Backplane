@@ -6,13 +6,14 @@ use gpui::{actions, prelude::*, *};
 use serde_json::Value;
 
 actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
+    AccountMenu, Account1, Account2, Account3, Account4, Account5, Account6, Account7, Account8, Account9,
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
     RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
-pub const FREE: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
+pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
 const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput";
 /// Where a bare backtick shows the terminal: the message box, or nowhere that types (a shell, another field and a viewer keep their backticks).
@@ -35,6 +36,8 @@ pub const TABLE: &[Entry] = &[
     e("send-alt", "Send (also)", "Composer", "ctrl-enter", Fixed),
     e("focus", "Put the keyboard in the message box", "Composer", "/", Fixed),
     e("models", "Agent, model and effort", "Composer", "ctrl-m", Rebind),
+    e("account", "Account of this thread, with what each has left", "Composer", "secondary-shift-a", Rebind),
+    e("account-pick", "Pick account 1…9 in the account menu", "Composer", "1…9", Fixed),
     e("menu-up", "Previous row: wraps round, and scrolls into view", "Model menu and popups", "up", Fixed),
     e("menu-down", "Next row: wraps round, and scrolls into view", "Model menu and popups", "down", Fixed),
     e("menu-left", "Less effort, or the caret while the search holds text", "Model menu", "left", Fixed),
@@ -124,11 +127,13 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("sidebar"), crate::ToggleSidebarKey, None), KeyBinding::new(&k("search"), crate::FocusSearchKey, None),
         KeyBinding::new(&k("palette"), crate::OpenPaletteKey, None), KeyBinding::new("secondary-shift-p", crate::OpenPaletteKey, None),
         KeyBinding::new(&k("new"), NewThread, None), KeyBinding::new(&k("diff"), OpenDiff, None), KeyBinding::new(&k("files"), OpenFiles, None),
-        KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None),
+        KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None), KeyBinding::new(&k("account"), AccountMenu, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
         KeyBinding::new("/", FocusComposer, Some(FREE)),
         KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
+    v.extend([KeyBinding::new("1", Account1, Some("AccountMenu")), KeyBinding::new("2", Account2, Some("AccountMenu")), KeyBinding::new("3", Account3, Some("AccountMenu")), KeyBinding::new("4", Account4, Some("AccountMenu")), KeyBinding::new("5", Account5, Some("AccountMenu")),
+        KeyBinding::new("6", Account6, Some("AccountMenu")), KeyBinding::new("7", Account7, Some("AccountMenu")), KeyBinding::new("8", Account8, Some("AccountMenu")), KeyBinding::new("9", Account9, Some("AccountMenu"))]);
     let alt = if mac() { Some(NOT_MAC_COMPOSER) } else { None };
     macro_rules! digits { ($($n:literal $p:ident $t:ident),*) => { v.extend([$(KeyBinding::new(concat!("alt-", $n), $p, alt), KeyBinding::new(concat!("secondary-", $n), $t, None)),*]); } }
     digits!("1" Project1 Thread1, "2" Project2 Thread2, "3" Project3 Thread3, "4" Project4 Thread4, "5" Project5 Thread5, "6" Project6 Thread6, "7" Project7 Thread7, "8" Project8 Thread8, "9" Project9 Thread9);
@@ -255,6 +260,9 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, StopTurn, |this: &mut Backplane, _, cx: &mut Context<Backplane>| if has_tool(&this.data, "interrupt") { let _ = this.tx.try_send(Command::Action("interrupt".into(), String::new())); cx.notify(); });
     let el = on!(el, SettleThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| for a in ["settle", "unsettle"] { if has_tool(&this.data, a) { let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); break } });
     let el = on!(el, ModelPicker, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.data["thread"].is_object() { this.picker_toggle(w, cx) });
+    let el = on!(el, AccountMenu, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.data["thread"].is_object() { crate::screens::accounts::toggle(this, w, cx) });
+    macro_rules! picks { ($el:expr, $($n:literal $a:ty),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::accounts::press_nth(this, $n, cx)); )* e }} }
+    let el = picks!(el, 1 Account1, 2 Account2, 3 Account3, 4 Account4, 5 Account5, 6 Account6, 7 Account7, 8 Account8, 9 Account9);
     use crate::screens::picker::Key;
     let el = on!(el, PickUp, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_key(Key::Up, w, cx));
     let el = on!(el, PickDown, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_key(Key::Down, w, cx));
@@ -306,6 +314,20 @@ mod tests {
             assert_eq!(d("ctrl-n", ctx), "keys::NewThread"); assert_eq!(d("ctrl-b", ctx), "backplane::ToggleSidebarKey");
             assert_eq!(d("ctrl-.", ctx), "keys::StopTurn"); assert_eq!(d("ctrl-m", ctx), "keys::ModelPicker");
         }
+    }
+    #[test] fn the_account_chord_works_everywhere_and_shadows_nothing() {
+        for ctx in [&[][..], &["Composer"][..], &["TextInput"][..], &["Viewer"][..], &["FilesPage"][..]] { assert_eq!(d("ctrl-shift-a", ctx), "keys::AccountMenu", "{ctx:?}") }
+        assert_eq!(hint(&Local::default(), "account"), if mac() { "⌘⇧A" } else { "Ctrl+Shift+A" }); assert_eq!(find("account").unwrap().kind, Rebind);
+        let mut seen = std::collections::HashMap::new();
+        for x in TABLE.iter().filter(|x| x.kind != Fixed || x.id == "palette-alt") { if let Some(o) = seen.insert(x.key, x.id) { panic!("{} and {o} share {}", x.id, x.key) } }
+        for taken in ["alt-1", "alt-9"] { assert!(d(taken, &[]).starts_with("keys::Project"), "Alt+digit stays the project's") }
+        let mut l = Local::default(); assert!(l.set("shortcut", "account\u{1f}ctrl-alt-a")); assert_eq!(does(&l, "ctrl-alt-a", &["Composer"]), "keys::AccountMenu"); assert_eq!(does(&l, "ctrl-shift-a", &["Composer"]), "", "rebinding moves it");
+    }
+    #[test] fn in_the_open_account_menu_a_digit_picks_and_nowhere_else() {
+        for (k, a) in [("1", "keys::Account1"), ("3", "keys::Account3"), ("9", "keys::Account9")] { assert_eq!(d(k, &["AccountMenu"]), a) }
+        assert_eq!(d("3", &[]), "keys::Rail3d", "with the menu shut 3 is the rail's"); assert_eq!(d("1", &["Composer"]), "", "and in the composer it is typed");
+        for k in ["b", "m", "/", "s"] { assert_eq!(d(k, &["AccountMenu"]), "", "{k}: a bare key does nothing behind the menu") }
+        assert_eq!(d("escape", &["AccountMenu"]), "backplane::ClosePopup"); assert_eq!(d("ctrl-shift-a", &["AccountMenu"]), "keys::AccountMenu", "the chord shuts it");
     }
     #[test] fn composer_scope_keeps_its_own_keys_and_types_a_slash() {
         assert_eq!(d("enter", &["Composer"]), "backplane::Send"); assert_eq!(d("ctrl-enter", &["Composer"]), "backplane::Send");
