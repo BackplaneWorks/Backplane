@@ -153,6 +153,44 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     assert!(a["question"].as_str().unwrap().contains("rm -rf x"), "the question stays: {v}"); assert_eq!(a["options"][0]["id"], "accept");
     assert_eq!(v["entry"]["id"], "ask:q1", "the same entry id as when it opened"); let _ = hub;
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_images_are_stored_told_to_the_agent_and_read_back() {
+    use base64::Engine; let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    let (hub, port) = up("images").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let png: Vec<u8> = vec![0x89, b'P', b'N', b'G', 13, 10, 26, 10, 1, 2, 3, 4];
+    let r = ask(&mut ws, 1, "message.send", json!({"thread":"t2","text":"see this","clientId":"img-1","attachments":[{"name":"a b.png","mime":"image/png","data":b64(&png)},{"name":"c.jpg","mime":"image/jpeg","data":b64(b"jpegbytes")}]})).await;
+    assert_eq!(r["ok"], true, "{r}"); let e = &r["result"]["entry"]; assert_eq!((e["clientId"].as_str(), e["text"].as_str()), (Some("img-1"), Some("see this")));
+    let at = e["attachments"].as_array().unwrap(); assert_eq!(at.len(), 2); assert_eq!((at[0]["name"].as_str(), at[0]["mime"].as_str(), at[0]["bytes"].as_u64()), (Some("a b.png"), Some("image/png"), Some(png.len() as u64)));
+    let id = at[0]["id"].as_str().unwrap().to_string(); assert!(id.starts_with("t2~") && !id.contains('/') && !id.contains(' '), "opaque and path-safe: {id}");
+    // the file is in the thread's attachments folder, private, and the agent is told its path while the message keeps the person's words
+    let dir = hub.cfg.home.join("attachments").join("t2"); let files: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect(); assert_eq!(files.len(), 2);
+    { use std::os::unix::fs::PermissionsExt; assert_eq!(files[0].metadata().unwrap().permissions().mode() & 0o777, 0o600); }
+    let log = (0..hub.store.len()).map(|i| hub.store.get(i).unwrap()).collect::<Vec<_>>();
+    let posted: Value = serde_json::from_str(log.iter().rev().find(|l| l.contains("\"MessagePosted\"") && l.contains("img-1")).unwrap()).unwrap();
+    let queued: Value = serde_json::from_str(log.iter().rev().find(|l| l.contains("\"TurnQueued\"") && l.contains("img-1")).unwrap()).unwrap();
+    assert_eq!(posted["text"], "see this"); assert!(posted["attachments"].is_array());
+    assert!(queued["text"].as_str().unwrap().starts_with("see this\n\n[Attached image: ") && queued["text"].as_str().unwrap().contains(&dir.to_string_lossy().to_string()), "{queued}");
+    // a thread read shows them, and attachment.get returns the bytes
+    let en = ask(&mut ws, 2, "thread.entries", json!({"thread":"t2"})).await; let last = en["result"]["entries"].as_array().unwrap().iter().find(|x| x["id"] == "img-1").unwrap().clone();
+    assert_eq!(last["attachments"].as_array().unwrap().len(), 2);
+    let g = ask(&mut ws, 3, "attachment.get", json!({"id":id})).await; assert_eq!(g["result"]["mime"], "image/png");
+    assert_eq!(base64::engine::general_purpose::STANDARD.decode(g["result"]["data"].as_str().unwrap()).unwrap(), png);
+    // refused: a path out of the folder, an unknown id, too many, a wrong type, bad base64, an empty message
+    for bad in ["../x", "t2~../../token", "t2~", "t2", "t2~nope.png", "/etc/passwd", "t2/x~y"] { assert_eq!(ask(&mut ws, 9, "attachment.get", json!({"id":bad})).await["ok"], false, "{bad}") }
+    let img = json!({"name":"x.png","mime":"image/png","data":b64(&png)});
+    assert_eq!(ask(&mut ws, 10, "message.send", json!({"thread":"t2","text":"x","attachments":[img,img,img,img,img]})).await["ok"], false, "five images");
+    assert_eq!(ask(&mut ws, 11, "message.send", json!({"thread":"t2","text":"x","attachments":[{"name":"x.pdf","mime":"application/pdf","data":b64(&png)}]})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 12, "message.send", json!({"thread":"t2","text":"x","attachments":[{"name":"x.png","mime":"image/png","data":"!!!"}]})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 13, "message.send", json!({"thread":"t2","text":"","attachments":[]})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 14, "message.send", json!({"thread":"zz","text":"x","attachments":[img]})).await["ok"], false, "no files for an unknown thread");
+    assert!(!hub.cfg.home.join("attachments").join("zz").exists());
+    // an image-only message is a message
+    assert_eq!(ask(&mut ws, 15, "message.send", json!({"thread":"t2","text":"","attachments":[img]})).await["ok"], true);
+    // and a subscriber sees the images on the pushed entry
+    ask(&mut ws, 16, "subscribe", json!({"topic":"thread","thread":"t2"})).await;
+    ask(&mut ws, 17, "message.send", json!({"thread":"t2","text":"pushed","clientId":"img-2","attachments":[img]})).await;
+    let v = loop { let v = next(&mut ws).await; if v["k"] == "entry" && v["entry"]["id"] == "img-2" { break v } };
+    assert_eq!(v["entry"]["attachments"].as_array().unwrap().len(), 1); assert_eq!(v["entry"]["clientId"], "img-2");
+}
 #[test] fn data_plain_cbor_has_string_keys_and_the_hubs_decoder_reads_it_back() {
     let v = json!({"t":"reply","id":7,"ok":true,"result":{"xs":[1,-2,300,70000,"é"],"n":null,"f":false}});
     let mut o = vec![]; cbor_plain(&v, &mut o); assert_eq!(crate::cbor::decode(&o).unwrap(), v);

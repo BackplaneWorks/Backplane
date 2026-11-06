@@ -137,7 +137,10 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     let ids: HashSet<u64> = page.ids.iter().filter_map(|i| i.parse().ok()).collect();
     let mut rows: Vec<&crate::model::Row> = page.rows.iter().filter(|r| ids.contains(&r.ord) && r.thread == th).collect();
     rows.sort_by_key(|r| r.ord);
-    let mut out: Vec<Value> = rows.iter().filter_map(|r| row_entry(r)).collect();
+    let mut out: Vec<Value> = rows.iter().filter_map(|r| { let mut e = row_entry(r)?;
+        // a user message's images are on its log line
+        if r.kind == "msg" && r.role == "user" { if let Some(a) = hub.store.get(r.seq as usize - 1).ok().and_then(|l| if l.contains("\"attachments\"") { serde_json::from_str::<Value>(&l).ok() } else { None }).and_then(|v| v.get("attachments").cloned()) { e["attachments"] = a } }
+        Some(e) }).collect();
     // older entries exist when the page read more ordinals than it returns (its lookahead) or has rows below it
     let more = page.below > 0 || page.rows.iter().map(|r| r.ord).collect::<HashSet<_>>().len() > ids.len();
     let next = if more { rows.first().map(|r| json!(r.ord.to_string())).unwrap_or(Value::Null) } else { Value::Null };
@@ -169,14 +172,60 @@ static SENT: Mutex<Option<(HashMap<String, Value>, VecDeque<String>)>> = Mutex::
 fn remember(id: &str, entry: &Value) { let mut g = SENT.lock().unwrap(); let (m, q) = g.get_or_insert_with(Default::default); if m.insert(id.into(), entry.clone()).is_none() { q.push_back(id.into()); if q.len() > 2000 { if let Some(o) = q.pop_front() { m.remove(&o); } } } }
 fn recalled(id: &str) -> Option<Value> { SENT.lock().unwrap().as_ref().and_then(|(m, _)| m.get(id).cloned()) }
 
-async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, client_id: &str) -> Result<Value, Value> {
-    if text.trim().is_empty() { return Err(err("empty message")) }
+const MAX_ATTACH: usize = 4;
+const MAX_ATTACH_BYTES: usize = 8 << 20;
+fn mime_ok(m: &str) -> bool { matches!(m, "image/jpeg" | "image/png" | "image/webp" | "image/gif" | "image/heic" | "image/heif") }
+fn mime_of(name: &str) -> &'static str { match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() { "jpg" | "jpeg" => "image/jpeg", "png" => "image/png", "webp" => "image/webp", "gif" => "image/gif", "heic" => "image/heic", "heif" => "image/heif", _ => "application/octet-stream" } }
+/// Stores a message's images under `<home>/attachments/<thread>/` (safe names, 0600) and returns their metadata and paths.
+fn store_attachments(hub: &Hub, thread: &str, list: &Value) -> Result<(Vec<Value>, Vec<String>), Value> {
+    use base64::Engine; use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt}; use std::io::Write;
+    let Some(xs) = list.as_array() else { return Ok((vec![], vec![])) };
+    if xs.len() > MAX_ATTACH { return Err(err(format!("at most {MAX_ATTACH} images in a message"))) }
+    let dir = crate::files::attach::dir(&hub.cfg.home, thread);
+    let (mut meta, mut paths) = (vec![], vec![]);
+    for x in xs {
+        let (name, mime) = (s(x, "name"), s(x, "mime"));
+        if !mime_ok(mime) { return Err(err("images only: jpeg, png, webp, gif, heic")) }
+        let bytes = base64::engine::general_purpose::STANDARD.decode(s(x, "data")).map_err(|_| err("an image is not valid base64"))?;
+        if bytes.is_empty() || bytes.len() > MAX_ATTACH_BYTES { return Err(err("an image must be 1 byte to 8 MB")) }
+        let key = hex::encode(&crate::net::pairing::urandom(8));
+        let stored = crate::files::attach::stored(&key, if name.is_empty() { "image" } else { name });
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).map_err(|_| err("cannot store the image"))?;
+        let path = dir.join(&stored);
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).and_then(|mut f| f.write_all(&bytes)).map_err(|_| err("cannot store the image"))?;
+        meta.push(json!({"id":format!("{}~{}",crate::files::attach::safe(thread),stored),"name":name,"mime":mime,"bytes":bytes.len()}));
+        paths.push(path.to_string_lossy().into_owned());
+    }
+    Ok((meta, paths))
+}
+async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, client_id: &str, attachments: &Value) -> Result<Value, Value> {
+    let has = attachments.as_array().map_or(false, |a| !a.is_empty());
+    if text.trim().is_empty() && !has { return Err(err("empty message")) }
     if !client_id.is_empty() { if !safe_id(client_id) { return Err(err("clientId: letters, digits and - _ . : only, 64 at most")) } if let Some(e) = recalled(client_id) { return Ok(e) } }
+    if !hub.model().await.threads.get(thread).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
+    let (meta, paths) = store_attachments(hub, thread, attachments)?;
+    let agent_text = if paths.is_empty() { String::new() } else { format!("{}{}{}", text, if text.is_empty() { "" } else { "\n\n" }, paths.iter().map(|p| format!("[Attached image: {p}]")).collect::<Vec<_>>().join("\n")) };
     let msg = if client_id.is_empty() { format!("m{}-{}", now_ms(), hub.fresh_client()) } else { client_id.to_string() };
-    rpc(hub, c, "turn.start", json!({"thread":thread,"text":text,"msg":msg})).await?;
+    let mut p = json!({"thread":thread,"text":text,"msg":msg});
+    if !meta.is_empty() { p["attachments"] = json!(meta); p["agentText"] = json!(agent_text) }
+    rpc(hub, c, "turn.start", p).await?;
     let mut e = json!({"id":msg,"kind":"user","text":text,"at":now_ms()});
+    if !meta.is_empty() { e["attachments"] = json!(meta) }
     if !client_id.is_empty() { e["clientId"] = json!(client_id); remember(client_id, &e) }
     Ok(e)
+}
+/// `attachment.get {id}`: an image a message carries, from the thread's folder; the id names the thread and the stored file.
+fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
+    use base64::Engine;
+    let id = s(p, "id");
+    let Some((th, file)) = id.split_once('~') else { return Err(err("unknown attachment")) };
+    let clean = |x: &str| !x.is_empty() && x.len() <= 220 && x.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) && !x.starts_with('.');
+    if !clean(th) || !clean(file) { return Err(err("unknown attachment")) }
+    let path = hub.cfg.home.join("attachments").join(th).join(file);
+    let meta = std::fs::metadata(&path).map_err(|_| err("unknown attachment"))?;
+    if !meta.is_file() || meta.len() as usize > MAX_ATTACH_BYTES { return Err(err("unknown attachment")) }
+    let bytes = std::fs::read(&path).map_err(|_| err("unknown attachment"))?;
+    Ok(json!({"mime":mime_of(file),"data":base64::engine::general_purpose::STANDARD.encode(bytes)}))
 }
 
 async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
@@ -216,11 +265,12 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             let id = r["thread"].as_str().unwrap_or("").to_string(); if id.is_empty() { return Err(err("no thread was made")) }
             let runtime = if s(p, "permission") == "auto" { "full-access" } else { "approval-required" };
             rpc(hub, c, "thread.modes", json!({"thread":id,"runtime":runtime})).await?;
-            if !s(p, "text").is_empty() { send_message(hub, c, &id, s(p, "text"), "").await?; }
+            if !s(p, "text").is_empty() { send_message(hub, c, &id, s(p, "text"), "", &Value::Null).await?; }
             let g = hub.model().await; let asks = open_ask_counts(hub);
             thread_json(hub, &g, &id, &asks).map(|t| json!({"thread":t})).ok_or_else(|| err("no thread was made"))
         }
-        "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId")).await?})),
+        "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId"), p.get("attachments").unwrap_or(&Value::Null)).await?})),
+        "attachment.get" => attachment_get(hub, p),
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
         "turn.interrupt" => { rpc(hub, c, "turn.interrupt", json!({"thread":s(p, "thread")})).await?; Ok(json!({})) }
         _ => Err(err("unknown method")),
@@ -256,6 +306,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 let (id, role) = (s(&e, "msg"), s(&e, "role"));
                 let kind = match role { "user" => "user", "assistant" => "assistant", _ => "note" };
                 let mut en = json!({"id":id,"kind":kind,"text":s(&e,"text"),"at":ms(e["at"].as_u64().unwrap_or(0))});
+                if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
                 if kind == "assistant" && subs.live.remove(&th) { en["replaces"] = json!(format!("live:{th}")) }
                 entry = Some(en);
@@ -307,7 +358,7 @@ async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Val
 }
 
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String, host: String) -> Result<()> {
-    let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
+    let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(40 << 20); cfg.max_frame_size = Some(40 << 20); // (images come as base64 in one JSON frame: 4 x 8 MB)
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
     let (mut conn, _) = hub.connect(true);
     let mut outbox = hub.attach(conn.client);
