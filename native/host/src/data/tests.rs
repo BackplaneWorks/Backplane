@@ -143,6 +143,16 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     hub.commit(&json!({"$":"ThreadCreated","id":"t10","project":"p2","title":"x","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000301})).await.unwrap();
     let v = loop { let v = next(&mut ws).await; if v["k"] == "thread" || v["k"] == "entry" { break v } }; assert_eq!(v["k"], "thread", "no entry push after unsubscribing the thread: {v}");
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_an_answered_ask_reaches_the_thread_subscription_whole() {
+    let (hub, port) = up("askclosed").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let thr = ask(&mut ws, 1, "subscribe", json!({"topic":"thread","thread":"t1"})).await["result"]["sub"].as_u64().unwrap();
+    assert_eq!(ask(&mut ws, 2, "ask.answer", json!({"ask":"q1","answer":"decline"})).await["ok"], true);
+    let v = loop { let v = next(&mut ws).await; if v["k"] == "entry" && v["entry"]["kind"] == "ask" { break v } };
+    assert_eq!(v["sub"], thr); let a = &v["entry"]["ask"];
+    assert_eq!((a["id"].as_str(), a["state"].as_str(), a["answered"].as_str()), (Some("q1"), Some("answered"), Some("decline")), "{v}");
+    assert!(a["question"].as_str().unwrap().contains("rm -rf x"), "the question stays: {v}"); assert_eq!(a["options"][0]["id"], "accept");
+    assert_eq!(v["entry"]["id"], "ask:q1", "the same entry id as when it opened"); let _ = hub;
+}
 #[test] fn data_plain_cbor_has_string_keys_and_the_hubs_decoder_reads_it_back() {
     let v = json!({"t":"reply","id":7,"ok":true,"result":{"xs":[1,-2,300,70000,"é"],"n":null,"f":false}});
     let mut o = vec![]; cbor_plain(&v, &mut o); assert_eq!(crate::cbor::decode(&o).unwrap(), v);

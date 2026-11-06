@@ -106,6 +106,12 @@ fn open_asks(hub: &Hub, thread: &str) -> Vec<Value> {
         match s(&e, "$") { "AskOpened" if s(&e, "thread") == thread => opened.push(e), "AskClosed" => { closed.insert(s(&e, "id").to_string()); } _ => {} } }
     opened.into_iter().filter(|e| !closed.contains(s(e, "id"))).map(|e| ask_entry(&e, None)).collect()
 }
+/// The AskOpened line for `id`, from the log's tail (an AskClosed names only the ask).
+fn ask_opened(hub: &Hub, id: &str) -> Option<Value> {
+    let n = hub.store.len();
+    let lines = hub.store.range(n.saturating_sub(ASK_SCAN), n).ok()?;
+    lines.iter().rev().filter(|l| l.contains("\"AskOpened\"") && l.contains(id)).filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| s(e, "id") == id)
+}
 fn row_entry(r: &crate::model::Row) -> Option<Value> {
     let at = ms(r.at);
     if r.kind == "msg" {
@@ -239,7 +245,8 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     let mut out = vec![]; let (mut upsert, mut gone, mut projects): (Vec<String>, Vec<String>, Vec<(String, bool)>) = (vec![], vec![], vec![]);
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
-        let th = if matches!(s(&e, "$"), "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ProviderSet" | "ModesSet" | "ThreadDeleted") { s(&e, "id") } else { s(&e, "thread") }.to_string();
+        let opened = if s(&e, "$") == "AskClosed" { ask_opened(hub, s(&e, "id")) } else { None };
+        let th = if matches!(s(&e, "$"), "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ProviderSet" | "ModesSet" | "ThreadDeleted") { s(&e, "id") } else if let Some(o) = &opened { s(o, "thread") } else { s(&e, "thread") }.to_string();
         let mut entry: Option<Value> = None;
         match s(&e, "$") {
             "ThreadDeleted" => gone.push(th.clone()),
@@ -255,7 +262,8 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
             }
             "ActivityLogged" => entry = Some(row_entry(&crate::model::Row { seq: 0, ord: 0, id: s(&e, "act").into(), thread: th.clone(), src: String::new(), kind: "act", role: s(&e, "tone").into(), akind: s(&e, "kind").into(), text: s(&e, "summary").into(), at: e["at"].as_u64().unwrap_or(0) }).unwrap()),
             "AskOpened" => entry = Some(ask_entry(&e, None)),
-            "AskClosed" => { let id = s(&e, "id"); entry = Some(json!({"id":format!("ask:{id}"),"kind":"ask","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"ask":{"id":id,"state":"answered","question":"","options":[],"answered":s(&e,"answer")}})); }
+            // the whole ask again, answered (an AskClosed names only the ask: its thread and question come from its AskOpened)
+            "AskClosed" => { let id = s(&e, "id"); entry = Some(match &opened { Some(o) => ask_entry(o, Some(s(&e, "answer"))), None => json!({"id":format!("ask:{id}"),"kind":"ask","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"ask":{"id":id,"state":"answered","question":"","options":[],"answered":s(&e,"answer")}}) }); }
             "TurnChanged" => for sub in subs.threads(&th) { out.push(d(sub, "turn", json!({"thread":th,"state":turn_word(s(&e, "state"))}))) },
             _ => {}
         }
