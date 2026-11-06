@@ -392,8 +392,20 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "API keys", "Time zone", "About", "Privacy"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "API keys", "Time zone", "About", "Privacy"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
+    }
+    #[test] fn devices_lists_what_the_registry_says_and_offers_revoke_on_the_live_ones() {
+        let info = json!({"devices": {"devices": [{"id": "d1", "name": "Phone", "revoked": false}, {"id": "d2", "name": "Old", "revoked": true}],
+            "invitations": [{"id": "i1", "kind": "device", "state": "open"}, {"id": "i2", "kind": "machine", "state": "open"}, {"id": "i3", "kind": "device", "state": "used", "deviceName": "Phone", "deviceRevoked": true}]}});
+        let r = pg_rows("devices", &[], json!({}), info);
+        assert_eq!(r[1]["label"], "Add a device"); assert_eq!(r[1]["buttons"][0]["action"], "device-invite");
+        let by = |l: &str| r.iter().find(|x| x["label"] == l).unwrap_or_else(|| panic!("{l}")).clone();
+        assert_eq!((by("Phone")["buttons"][0]["action"].as_str(), by("Phone")["buttons"][0]["value"].as_str()), (Some("device-revoke"), Some("d1")));
+        assert!(by("Old")["buttons"].as_array().unwrap().is_empty(), "a revoked device has nothing to revoke");
+        assert_eq!(by("Pairing link · open")["buttons"][0]["action"], "device-uninvite");
+        assert!(by("Pairing link · used · Phone")["buttons"].as_array().unwrap().is_empty());
+        assert_eq!(r.len(), 1 + 1 + 2 + 2, "a machine invite is Bots' and is not listed");
     }
     fn pg_rows(page: &str, kv: &[(&str, &str)], drafts: Value, info: Value) -> Vec<Value> {
         let v = view(&st(kv), &json!({"open": {"settings": true}, "drafts": {"@settings.page": page, "x": drafts}}), &info); v["rows"].as_array().unwrap().clone()
