@@ -25,7 +25,7 @@ impl super::Screen for Recent {
         if !mine(params) { return refused("target.or-native-sidebar") }
         let Some(_hub)=self.hub.get().and_then(Weak::upgrade) else { return refused("screen.hub-not-bound") };
         let Some(policies)=crate::statehost::policies() else { return refused("state.not-started") };
-        let withinfo; let params=if super::settings::is_open(&params["session"]) || params["target"]["kind"]=="thread" { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); withinfo=c; &withinfo } else { params };
+        let withinfo; let params=if super::settings::is_open(&params["session"]) || params["target"]["kind"]=="thread" { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); if super::settings::page(&params["session"])=="devices" { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.reg.list(); } } withinfo=c; &withinfo } else { params };
         match policies.with_state(|st|recent(st,params)) { Some(out)=>out,None=>refused("state.booting") }
     }
 }

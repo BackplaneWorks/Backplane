@@ -11,7 +11,7 @@ static VERSION: OnceLock<String> = OnceLock::new();
 pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("keys", "API keys"), ("timezone", "Time zone"), ("about", "About"), ("privacy", "Privacy")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("keys", "API keys"), ("timezone", "Time zone"), ("about", "About"), ("privacy", "Privacy")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -131,6 +131,33 @@ fn network(st: &State, info: &Value) -> Vec<Value> {
         row("Update channel", "Stable takes releases; nightly also takes the daily builds.", chips(&["stable", "nightly"], set(st, "update.channel", "stable"), "update.channel")),
         row(&format!("Backplane {version}"), line, vec![]),
     ]
+}
+
+/// Settings → Devices: the paired devices and the pairing links (net/pairing.rs `Registry::list`, put in `info.devices` by the presenter's caller), and Add a device (an invitation of this hub's own, made by `device-invite`).
+fn devices(session: &Value, info: &Value) -> Vec<Value> {
+    let inv: Value = serde_json::from_str(draft(session, "@invite")).unwrap_or(Value::Null);
+    let mut r = vec![];
+    if let Some(link) = inv["link"].as_str() {
+        let mut row = row("Pairing link", link, vec![btn("Add another", "device-invite", "", false)]);
+        row["qr"] = json!(inv["qr"].as_str().unwrap_or("").lines().map(str::to_string).collect::<Vec<_>>());
+        row["qrnote"] = json!(format!("Code {} · works once, for ten minutes", inv["code"].as_str().unwrap_or("")));
+        r.push(row);
+    } else if let Some(e) = inv["error"].as_str() { r.push(row("Add a device", &format!("Could not make an invitation: {e}."), vec![btn("Try again", "device-invite", "", false)])) }
+    else { r.push(row("Add a device", "Makes a link, a QR code and a short code for one new device. Each works once, for ten minutes.", vec![btn("Add a device", "device-invite", "", false)])) }
+    let list = &info["devices"];
+    for d in list["devices"].as_array().into_iter().flatten() {
+        let name = if s(d, "name").is_empty() { s(d, "id") } else { s(d, "name") };
+        let revoked = d["revoked"].as_bool().unwrap_or(false) || s(d, "revoked") == "true";
+        r.push(row(name, if revoked { "Revoked" } else { "Paired" }, if revoked { vec![] } else { vec![btn("Revoke", "device-revoke", s(d, "id"), false)] }));
+    }
+    for i in list["invitations"].as_array().into_iter().flatten() {
+        let (state, kind) = (s(i, "state"), s(i, "kind"));
+        if kind == "machine" { continue } // a machine invite is Bots' (linking a machine)
+        let who = if s(i, "deviceName").is_empty() { String::new() } else { format!(" · {}", s(i, "deviceName")) };
+        let live = state == "open" || (state == "used" && i["deviceRevoked"] != true);
+        r.push(row(&format!("Pairing link · {state}{who}"), "", if live { vec![btn("Revoke", "device-uninvite", s(i, "id"), false)] } else { vec![] }));
+    }
+    r
 }
 
 /// Zone.person's source: a zone chosen here, else the phone's, else this machine's
@@ -272,7 +299,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -295,6 +322,15 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
             json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
+        }
+        // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
+        "device-invite" | "device-revoke" | "device-uninvite" => {
+            let Some(routes) = crate::net::start::routes() else { return Some(Out { patch: json!({"drafts": {"@invite": json!({"error": "no_registry"}).to_string()}}), cmds }) };
+            match action {
+                "device-invite" => json!({"drafts": {"@invite": routes.invite().to_string()}}),
+                "device-revoke" => { let _ = routes.reg.revoke(value); json!({}) }
+                _ => { let _ = routes.reg.uninvite(value); json!({}) }
+            }
         }
         "kicad-path" => {
             if !session["drafts"]["@f.kpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
