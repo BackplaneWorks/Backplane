@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "/home/user/ci-speed-test-once-1261555/CI-TEST-ONCE.py", line 331, in <module>
-    try:raise SystemExit(worker())
-                         ^^^^^^^^
-  File "/home/user/ci-speed-test-once-1261555/CI-TEST-ONCE.py", line 163, in worker
-    assert (r['exit']==0)==(p!=bad),('invalid fixture',p.name)
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: ('invalid fixture', 'depth.bend')

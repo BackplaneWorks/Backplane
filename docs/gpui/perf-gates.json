@@ -1,0 +1,47 @@
+{
+ "note": "Updated at each milestone by the mechanics thread. A gate passes only when measured on the Rust hub with the native client, on the hardware named. Partial evidence stays open. Lead with real-copy figures and label Rust smoke or fixture figures as such. Order gates by how far they miss, worst first.",
+ "gates": [
+  {
+   "gate": "Hub memory on a real-log copy",
+   "target": "Ship bar, accepted by the person: hub RSS only, startup peak under 1 GB and at rest under 500 MB, on a copy of the real log; /hello answers and nothing runs out of memory; building the store counts as startup. Scope anonymous memory is reported beside it. After ready, not blocking it: slim the index, a 10M-event log test, memory flat for at least 1 h after startup",
+   "status": "not run",
+   "latest": "The Rust hub has not opened a real-size log. Runs only after Bub lifts the copy hold; synthetic until then. Accepted by the person, 2026-11-05."
+  },
+  {
+   "gate": "Cached thread switch",
+   "target": "100 ms or less",
+   "status": "failing on real data",
+   "latest": "Real copy (JS hub, trimmed): up to 6 s. Fixture: GPUI on JS hub p95 96 ms idle, 160 ms under load. No cache in GPUI yet."
+  },
+  {
+   "gate": "Startup to usable",
+   "target": "1 s or less",
+   "status": "failing on real data",
+   "latest": "Real copy (JS hub, trimmed): 1.16-3.3 s. Fixture: GPUI + JS hub 511 ms. Rust smoke: hub alone 106 ms at 250 threads; GPUI + Rust hub 96 ms at 192 events. Rust hub not measured at real size."
+  },
+  {
+   "gate": "20 agents: hub + client CPU",
+   "target": "10% of a core or less",
+   "status": "failing on real data",
+   "latest": "JS hub + GPUI: about 30%; on the full store copy the JS hub saturates at 97% of a core. Rust smoke: hub 1% (time-driven jobs not ported) + GPUI 6.7% from separate runs, not measured together."
+  },
+  {
+   "gate": "Click and popup p95",
+   "target": "50 ms or less, median well under",
+   "status": "failing",
+   "latest": "Fixture, GPUI on JS hub, RTX: click 96 ms idle, 160 ms under 20 agents; popup 112 ms idle, 160 ms under load. Real copy and Rust hub not measured."
+  },
+  {
+   "gate": "Memory flat",
+   "target": "flat, not growing with the log, shown by a run of up to about 1 h",
+   "status": "failing on real data",
+   "latest": "JS hub floor rises 76 MB/h. Rust smoke: store 18.7 bytes per event at 1M. GPUI 38 min falling. The 24 h soak was dropped by the person, 2026-11-05."
+  },
+  {
+   "gate": "Install size",
+   "target": "small, tracked each milestone",
+   "status": "open",
+   "latest": "GPUI 9.6 MB + Rust hub 6.4 MB + Bend helper 59 MB (being retired) + cat rigs 5.8 MB, against Electron 288 MB + hub 115 MB."
+  }
+ ]
+}

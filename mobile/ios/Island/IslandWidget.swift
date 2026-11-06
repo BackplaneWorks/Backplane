@@ -22,7 +22,7 @@ private struct Mark: View {
 // the app; the island expands on a long press)
 private func link(_ thread: String) -> URL? {
     var c = URLComponents()
-    c.scheme = "backplane"
+    c.scheme = (Bundle.main.object(forInfoDictionaryKey: "BPScheme") as? String) ?? "backplane"
     c.host = "open"
     c.queryItems = [URLQueryItem(name: "thread", value: thread)]
     return c.url

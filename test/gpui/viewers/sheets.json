@@ -1,0 +1,1 @@
+[{"select":0},{"wait":1500},{"click":"rail:Schematic"},{"wait":7000},{"sheets":true},{"wait":6000},{"action":["view-sheet","/home/h/Documents/i2cjak/backplane-gpui/build/gpui/desktop-plot-sh/proj/ampli_ht.kicad_sch"]},{"wait":9000}]

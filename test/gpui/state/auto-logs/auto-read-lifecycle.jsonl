@@ -1,0 +1,347 @@
+{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":1794000000}
+{"$":"ThreadCreated","id":"old","project":"p1","title":"old","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"old","msg":"mold-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"old","msg":"aold","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"old","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"fresh","project":"p1","title":"fresh","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"fresh","msg":"mfresh-1","role":"user","text":"do it","at":1794020000}
+{"$":"MessagePosted","thread":"fresh","msg":"afresh","role":"assistant","text":"done","at":1794020005}
+{"$":"TurnChanged","thread":"fresh","state":"completed","at":1794020006}
+{"$":"ThreadCreated","id":"read","project":"p1","title":"read","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"read","msg":"mread-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"read","msg":"aread","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"read","state":"completed","at":1794000016}
+{"$":"SettingSet","key":"autosettle.read.read","value":"aread","at":1794000000}
+{"$":"SettingSet","key":"autosettle.output.read","value":"aread","at":1794000000}
+{"$":"ThreadCreated","id":"aud","project":"p1","title":"aud","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"aud","msg":"maud-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"aud","msg":"aaud","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"aud","state":"completed","at":1794000016}
+{"$":"SettingSet","key":"autosettle.audience.aud","value":"worker","at":1794000000}
+{"$":"ThreadCreated","id":"env","project":"p1","title":"env","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"env","msg":"menv","role":"user","text":"[message from person@box] hi","at":1794000010}
+{"$":"MessagePosted","thread":"env","msg":"aenv","role":"assistant","text":"ok","at":1794000015}
+{"$":"TurnChanged","thread":"env","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"bot1","project":"p1","title":"bot1","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"bot1","msg":"mb","role":"user","text":"[message from botty] hi","at":1794000010}
+{"$":"MessagePosted","thread":"bot1","msg":"ab","role":"assistant","text":"ok","at":1794000015}
+{"$":"TurnChanged","thread":"bot1","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"noinput","project":"p1","title":"noinput","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"noinput","msg":"an","role":"assistant","text":"hello","at":1794000010}
+{"$":"TurnChanged","thread":"noinput","state":"completed","at":1794000011}
+{"$":"ThreadCreated","id":"w-launched","project":"p1","title":"w-launched","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"w-launched","msg":"mw-launched-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"w-launched","msg":"aw-launched","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"w-launched","state":"completed","at":1794000016}
+{"$":"ThreadLaunched","id":"w-launched","by":"boss","report":true,"at":1794000001}
+{"$":"ThreadCreated","id":"w-noreport","project":"p1","title":"w-noreport","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"w-noreport","msg":"mw-noreport-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"w-noreport","msg":"aw-noreport","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"w-noreport","state":"completed","at":1794000016}
+{"$":"ThreadLaunched","id":"w-noreport","by":"boss","report":false,"at":1794000002}
+{"$":"ThreadCreated","id":"run7","project":"p1","title":"run7","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"run7","msg":"mrun7-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"run7","msg":"arun7","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"run7","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"mailcoord-x-1","project":"p1","title":"mailcoord-x-1","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"mailcoord-x-1","msg":"mmailcoord-x-1-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"mailcoord-x-1","msg":"amailcoord-x-1","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"mailcoord-x-1","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"w-parent","project":"p1","title":"w-parent","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"w-parent","msg":"mw-parent-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"w-parent","msg":"aw-parent","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"w-parent","state":"completed","at":1794000016}
+{"$":"SettingSet","key":"thread.parent.w-parent","value":"boss","at":1794000000}
+{"$":"ThreadCreated","id":"boss","project":"p1","title":"boss","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"boss","msg":"mboss","role":"user","text":"go","at":1794000005}
+{"$":"TurnChanged","thread":"boss","state":"completed","at":1794000006}
+{"$":"ThreadCreated","id":"w-rep2","project":"p1","title":"w-rep2","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"w-rep2","msg":"mw-rep2-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"w-rep2","msg":"aw-rep2","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"w-rep2","state":"completed","at":1794000016}
+{"$":"ThreadLaunched","id":"w-rep2","by":"boss2","report":true,"at":1794000003}
+{"$":"ThreadCreated","id":"boss2","project":"p1","title":"boss2","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"boss2","msg":"t:w-rep2:9","role":"user","text":"report","at":1794009000}
+{"$":"TurnChanged","thread":"boss2","state":"completed","at":1794009001}
+{"$":"ThreadCreated","id":"w-del","project":"p1","title":"w-del","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"w-del","msg":"mw-del-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"w-del","msg":"aw-del","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"w-del","state":"completed","at":1794000016}
+{"$":"ThreadLaunched","id":"w-del","by":"boss3","report":true,"at":1794000004}
+{"$":"SettingSet","key":"autosettle.report.w-del","value":"1794009999","at":1794000000}
+{"$":"ThreadCreated","id":"boss3","project":"p1","title":"boss3","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"ThreadCreated","id":"tp","project":"p1","title":"tp","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"tp","msg":"mtp-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"tp","msg":"atp","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"tp","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"tc","project":"p1","title":"tc","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"TaskDelegated","task":"k1","parent":"tp","child":"tc","depth":1,"provider":"claude","model":"","at":1794000005}
+{"$":"TurnChanged","thread":"tc","state":"running","at":1794000030}
+{"$":"ThreadCreated","id":"tp2","project":"p1","title":"tp2","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"tp2","msg":"mtp2-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"tp2","msg":"atp2","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"tp2","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"tc2","project":"p1","title":"tc2","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"TaskDelegated","task":"k2","parent":"tp2","child":"tc2","depth":1,"provider":"claude","model":"","at":1794000006}
+{"$":"TaskStateSet","task":"k2","state":"done","summary":"x","at":1794000007}
+{"$":"TaskDelivered","task":"k2","at":1794000008}
+{"$":"ThreadCreated","id":"tp3","project":"p1","title":"tp3","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"tp3","msg":"mtp3-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"tp3","msg":"atp3","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"tp3","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"tc3","project":"p1","title":"tc3","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"TaskDelegated","task":"k3","parent":"tp3","child":"tc3","depth":1,"provider":"claude","model":"","at":1794000009}
+{"$":"TaskStateSet","task":"k3","state":"done","summary":"x","at":1794000010}
+{"$":"ThreadCreated","id":"lk","project":"p1","title":"lk","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"lk","msg":"mlk-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"lk","msg":"alk","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"lk","state":"completed","at":1794000016}
+{"$":"LockChanged","name":"merge","lock":{"holder":{"id":"a","kind":"thread","thread":"lk","note":"","since":1,"lease":2},"waiters":[],"ready":false},"at":1794000011}
+{"$":"ThreadCreated","id":"lkw","project":"p1","title":"lkw","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"lkw","msg":"mlkw-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"lkw","msg":"alkw","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"lkw","state":"completed","at":1794000016}
+{"$":"LockChanged","name":"build","lock":{"holder":null,"waiters":[{"id":"b","thread":"lkw"}],"ready":false},"at":1794000012}
+{"$":"ThreadCreated","id":"ask","project":"p1","title":"ask","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"ask","msg":"mask-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"ask","msg":"aask","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"ask","state":"completed","at":1794000016}
+{"$":"AskOpened","id":"q1","thread":"ask","kind":"k","tool":"t","detail":"","options":"","at":1794000013}
+{"$":"ThreadCreated","id":"askc","project":"p1","title":"askc","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"askc","msg":"maskc-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"askc","msg":"aaskc","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"askc","state":"completed","at":1794000016}
+{"$":"AskOpened","id":"q2","thread":"askc","kind":"k","tool":"t","detail":"","options":"","at":1794000014}
+{"$":"AskClosed","id":"q2","answer":"a","at":1794000015}
+{"$":"ThreadCreated","id":"qd","project":"p1","title":"qd","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"qd","msg":"mqd-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"qd","msg":"aqd","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"qd","state":"completed","at":1794000016}
+{"$":"TurnQueued","thread":"qd","msg":"mq","text":"later","at":1794000016}
+{"$":"ThreadCreated","id":"bg","project":"p1","title":"bg","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"bg","msg":"mbg-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"bg","msg":"abg","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"bg","state":"completed","at":1794000016}
+{"$":"SettingSet","key":"bg.bg","value":"job1\tsleep\tx","at":1794000000}
+{"$":"ThreadCreated","id":"watch","project":"p1","title":"watch","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"watch","msg":"mwatch-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"watch","msg":"awatch","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"watch","state":"completed","at":1794000016}
+{"$":"SettingSet","key":"watch.watch","value":"wk1\tpr","at":1794000000}
+{"$":"ThreadCreated","id":"ord","project":"p1","title":"ord","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"ord","msg":"mord-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"ord","msg":"aord","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"ord","state":"completed","at":1794000016}
+{"$":"SettingSet","key":"order.wait.ord","value":"1","at":1794000000}
+{"$":"ThreadCreated","id":"sec","project":"p1","title":"sec","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"sec","msg":"msec-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"sec","msg":"asec","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"sec","state":"completed","at":1794000016}
+{"$":"SettingSet","key":"secret.ask.k","value":"{\"thread\":\"sec\"}","at":1794000000}
+{"$":"ThreadCreated","id":"pend","project":"p1","title":"pend","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"pend","msg":"mpend-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"pend","msg":"apend","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"pend","state":"completed","at":1794000016}
+{"$":"PendingChanged","thread":"pend","count":2,"at":1794000017}
+{"$":"ThreadCreated","id":"pinned","project":"p1","title":"pinned","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"pinned","msg":"mpinned-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"pinned","msg":"apinned","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"pinned","state":"completed","at":1794000016}
+{"$":"ThreadPinned","id":"pinned","pinned":true,"at":1794000018}
+{"$":"ThreadCreated","id":"arch","project":"p1","title":"arch","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"arch","msg":"march-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"arch","msg":"aarch","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"arch","state":"completed","at":1794000016}
+{"$":"ThreadArchived","id":"arch","archived":true,"at":1794000019}
+{"$":"ThreadCreated","id":"setd","project":"p1","title":"setd","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"setd","msg":"msetd-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"setd","msg":"asetd","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"setd","state":"completed","at":1794000016}
+{"$":"ThreadSettled","id":"setd","manual":true,"at":1794000020}
+{"$":"ThreadCreated","id":"snz","project":"p1","title":"snz","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"snz","msg":"msnz-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"snz","msg":"asnz","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"snz","state":"completed","at":1794000016}
+{"$":"ThreadSnoozed","id":"snz","until":1794040000,"at":1794000021}
+{"$":"ThreadCreated","id":"forced","project":"p1","title":"forced","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"forced","msg":"mforced-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"forced","msg":"aforced","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"forced","state":"completed","at":1794000016}
+{"$":"ThreadUnsettled","id":"forced","at":1794000022}
+{"$":"ThreadCreated","id":"wk-owner","project":"p1","title":"wk-owner","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk-owner","msg":"mwk-owner-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"wk-owner","msg":"awk-owner","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"wk-owner","state":"completed","at":1794000016}
+{"$":"ThreadCreated","id":"wk-target","project":"p1","title":"wk-target","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk-target","msg":"mwk-target-1","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"wk-target","msg":"awk-target","role":"assistant","text":"done","at":1794000015}
+{"$":"TurnChanged","thread":"wk-target","state":"completed","at":1794000016}
+{"$":"TurnChanged","thread":"wk-target","state":"running","at":1794000011}
+{"$":"WakeSet","id":"w1","by":"wk-owner","kind":"thread","target":"wk-target","events":["done"],"once":true,"note":"","at":1794000023}
+{"$":"WakeSet","id":"w2","by":"setd","kind":"work","target":"nowork","events":["x"],"once":true,"note":"","at":1794000000}
+{"$":"WakeSet","id":"w3","by":"setd","kind":"file","target":"/f","events":[],"once":true,"note":"","at":1794000024}
+{"$":"WakeSet","id":"w4","by":"setd","kind":"weird","target":"z","events":[],"once":true,"note":"","at":1794000025}
+{"$":"WakeSet","id":"w5","by":"pinned","kind":"pr","target":"7","events":[],"once":true,"note":"","at":1794000026}
+{"$":"WakeSet","id":"w6","by":"bg","kind":"work","target":"job1","events":[],"once":true,"note":"","at":1794000027}
+{"$":"SettingSet","key":"liveness.tc","value":"{\"last\":1794000010,\"nudged\":1794000500,\"stalled\":true,\"reported\":true,\"reason\":\"stuck\"}","at":1794000000}
+{"$":"SettingSet","key":"liveness.tp","value":"{\"last\":1794060000,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"x\"}","at":1794000000}
+{"$":"SettingSet","key":"restart.retry.tc","value":"2","at":1794000000}
+{"$":"SettingSet","key":"restart.retry.n.w-launched","value":"3","at":1794000000}
+{"$":"SettingSet","key":"provider.resume.w-parent","value":"1","at":1794000000}
+{"$":"SettingSet","key":"thread.config.hold.w-rep2","value":"on","at":1794000000}
+{"$":"ThreadCreated","id":"endA","project":"p1","title":"Thread endA","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endA","msg":"mendA","role":"user","text":"do the thing","at":1794000010}
+{"$":"MessagePosted","thread":"endA","msg":"aendA","role":"assistant","text":"Done.\nsecond line\twith tab","at":1794000015}
+{"$":"TurnChanged","thread":"endA","state":"running","at":1794000016}
+{"$":"SettingSet","key":"summary.at.endA","value":"1794000690","at":1794000000}
+{"$":"ThreadCreated","id":"endB","project":"p1","title":"Thread endB","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endB","msg":"mendB","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endB","msg":"aendB","role":"assistant","text":"ok","at":1794000015}
+{"$":"TurnChanged","thread":"endB","state":"running","at":1794000016}
+{"$":"AskOpened","id":"qB","thread":"endB","kind":"approval","tool":"Bash","detail":"ls","options":"","at":1794000028}
+{"$":"ThreadCreated","id":"endC","project":"p1","title":"Thread endC","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endC","msg":"mendC","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endC","msg":"aendC","role":"assistant","text":"failed text","at":1794000015}
+{"$":"TurnChanged","thread":"endC","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"endD","project":"p1","title":"Thread endD","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endD","msg":"mendD","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endD","msg":"aendD","role":"assistant","text":"half","at":1794000015}
+{"$":"TurnChanged","thread":"endD","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"endE","project":"p1","title":"Thread endE","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endE","msg":"mendE","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endE","msg":"aendE","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endE","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"helperE","project":"p1","title":"helperE","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"ThreadLaunched","id":"helperE","by":"endE","report":true,"at":1794000029}
+{"$":"TurnChanged","thread":"helperE","state":"running","at":1794000017}
+{"$":"ThreadCreated","id":"endF","project":"p1","title":"Thread endF","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endF","msg":"mendF","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endF","msg":"aendF","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endF","state":"running","at":1794000016}
+{"$":"SettingSet","key":"alert.endF","value":"done\tturn-endF\tmendF\t1.1\t","at":1794000000}
+{"$":"ThreadCreated","id":"endG","project":"p1","title":"Thread endG","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endG","msg":"mendG","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endG","msg":"aendG","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endG","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"endGc","project":"p1","title":"endGc","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"TaskDelegated","task":"kG","parent":"endG","child":"endGc","depth":1,"provider":"claude","model":"","at":1794000030}
+{"$":"TurnChanged","thread":"endGc","state":"running","at":1794000017}
+{"$":"ThreadCreated","id":"endH","project":"p1","title":"Odd: \"title\" \\ ü","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endH","msg":"mendH","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endH","msg":"aendH","role":"assistant","text":"   long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line long first line \nsecond","at":1794000015}
+{"$":"TurnChanged","thread":"endH","state":"running","at":1794000016}
+{"$":"SettingSet","key":"summary.at.endH","value":"1794000010","at":1794000000}
+{"$":"ThreadCreated","id":"endI","project":"p1","title":"endI","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endI","msg":"mI1","role":"user","text":"[message from botty] hi","at":1794000010}
+{"$":"MessagePosted","thread":"endI","msg":"aI","role":"assistant","text":"ok","at":1794000015}
+{"$":"TurnChanged","thread":"endI","state":"running","at":1794000016}
+{"$":"ThreadCreated","id":"endJ","project":"p1","title":"Thread endJ","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endJ","msg":"mendJ","role":"user","text":"[message from person@box] hi again","at":1794000010}
+{"$":"MessagePosted","thread":"endJ","msg":"aendJ","role":"assistant","text":"reply J","at":1794000015}
+{"$":"TurnChanged","thread":"endJ","state":"running","at":1794000016}
+{"$":"BotSet","id":"bJ","name":"Bub","thread":"endJ","look":0,"persona":"","at":1794000031}
+{"$":"ThreadCreated","id":"endK","project":"p1","title":"Thread endK","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endK","msg":"mendK","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endK","msg":"aendK","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endK","state":"running","at":1794000016}
+{"$":"SettingSet","key":"bg.endK","value":"job\tsleep\tx","at":1794000000}
+{"$":"ThreadCreated","id":"endL","project":"p1","title":"Thread endL","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endL","msg":"mendL","role":"user","text":"do it","at":1794000010}
+{"$":"MessagePosted","thread":"endL","msg":"aendL","role":"assistant","text":"x","at":1794000015}
+{"$":"TurnChanged","thread":"endL","state":"running","at":1794000016}
+{"$":"QueueTaken","thread":"endL","at":1794000032}
+{"$":"TurnQueued","thread":"endL","msg":"qq","text":"later","at":1794000033}
+{"$":"ThreadCreated","id":"endM","project":"p1","title":"Thread endM","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"endM","msg":"mendM","role":"user","text":"first","at":1794000010}
+{"$":"MessagePosted","thread":"endM","msg":"aendM","role":"assistant","text":"r1","at":1794000015}
+{"$":"TurnChanged","thread":"endM","state":"running","at":1794000016}
+{"$":"MessagePosted","thread":"endM","msg":"mM2","role":"user","text":"second ask","at":1794000012}
+{"$":"TurnChanged","thread":"endM","state":"running","at":1794000018}
+{"$":"ThreadCreated","id":"wk1","project":"p1","title":"wk1","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk1","msg":"mwk1","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk1","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk1","manual":false,"at":1794000012}
+{"$":"TurnChanged","thread":"wk1","state":"running","at":1794000013}
+{"$":"ThreadCreated","id":"wk2","project":"p1","title":"wk2","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk2","msg":"mwk2","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk2","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk2","manual":true,"at":1794000012}
+{"$":"TurnChanged","thread":"wk2","state":"running","at":1794000013}
+{"$":"ThreadCreated","id":"wk3","project":"p1","title":"wk3","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk3","msg":"mwk3","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk3","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk3","manual":true,"at":1794000012}
+{"$":"TurnChanged","thread":"wk3","state":"running","at":1794000013}
+{"$":"MessagePosted","thread":"wk3","msg":"mwk3b","role":"user","text":"again","at":1794000014}
+{"$":"ThreadCreated","id":"wk4","project":"p1","title":"wk4","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk4","msg":"mwk4","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk4","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk4","manual":false,"at":1794000012}
+{"$":"TurnQueued","thread":"wk4","msg":"qw4","text":"x","at":1794000034}
+{"$":"ThreadCreated","id":"wk5","project":"p1","title":"wk5","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk5","msg":"mwk5","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk5","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk5","manual":false,"at":1794000012}
+{"$":"ThreadCreated","id":"wk5c","project":"p1","title":"wk5c","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"TaskDelegated","task":"kw5","parent":"wk5","child":"wk5c","depth":1,"provider":"claude","model":"","at":1794000035}
+{"$":"ThreadCreated","id":"wk6","project":"p1","title":"wk6","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk6","msg":"mwk6","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk6","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk6","manual":false,"at":1794000012}
+{"$":"SettingSet","key":"bg.wk6","value":"job\tx\ty","at":1794000000}
+{"$":"ThreadCreated","id":"wk7","project":"p1","title":"wk7","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk7","msg":"mwk7","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk7","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk7","manual":false,"at":1794000012}
+{"$":"PendingChanged","thread":"wk7","count":2,"at":1794000036}
+{"$":"ProjectCreated","id":"pd","title":"dorm","root":"/d","at":1794000000}
+{"$":"SettingSet","key":"project.dormant.pd","value":"on","at":1794000000}
+{"$":"ThreadCreated","id":"wk8","project":"pd","title":"wk8","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk8","msg":"mwk8","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk8","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk8","manual":false,"at":1794000012}
+{"$":"TurnChanged","thread":"wk8","state":"running","at":1794000013}
+{"$":"ThreadCreated","id":"wk9","project":"p1","title":"wk9","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk9","msg":"mwk9","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk9","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk9","manual":false,"at":1794000012}
+{"$":"ThreadCreated","id":"wk10","project":"p1","title":"wk10","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794000000}
+{"$":"MessagePosted","thread":"wk10","msg":"mwk10","role":"user","text":"go","at":1794000010}
+{"$":"TurnChanged","thread":"wk10","state":"completed","at":1794000011}
+{"$":"ThreadSettled","id":"wk10","manual":false,"at":1794000012}
+{"$":"QueueTaken","thread":"wk10","at":1794000037}
+{"$":"TurnQueued","thread":"handoff-x","msg":"handoff:1","text":"ctx","at":1794000038}
+{"$":"TurnQueued","thread":"wk10","msg":"handoff:2","text":"ctx","at":1794000039}
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1794000000}
+{"$":"SettingSet","key":"autosettle.read.old","value":"aold","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.fresh","value":"afresh","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.read","value":"aread","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.aud","value":"aaud","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.w-launched","value":"aw-launched","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.w-noreport","value":"aw-noreport","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.run7","value":"arun7","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.mailcoord-x-1","value":"amailcoord-x-1","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.w-parent","value":"aw-parent","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.w-rep2","value":"aw-rep2","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.w-del","value":"aw-del","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.tp","value":"atp","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.tp2","value":"atp2","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.tp3","value":"atp3","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.lk","value":"alk","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.lkw","value":"alkw","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.ask","value":"aask","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.askc","value":"aaskc","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.qd","value":"aqd","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.bg","value":"abg","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.watch","value":"awatch","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.ord","value":"aord","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.sec","value":"asec","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.pend","value":"apend","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.pinned","value":"apinned","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.arch","value":"aarch","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.setd","value":"asetd","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.snz","value":"asnz","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.forced","value":"aforced","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.wk-owner","value":"awk-owner","at":1794000100}
+{"$":"SettingSet","key":"autosettle.read.wk-target","value":"awk-target","at":1794000100}
+{"$":"SettingSet","key":"settle.done","value":"on","at":1794000100}

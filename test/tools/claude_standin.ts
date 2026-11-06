@@ -365,6 +365,22 @@ async function run(c: Cmd, firstOne: boolean) {
       log(`PERMIT ${tool} ${got.slice(0, 300)}`);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.includes("allow") ? `answered: ${got.slice(0, 200)}` : "denied", is_error: !got.includes("allow") }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     }
+    // "mcpcall:{json}": one Backplane MCP tool call, {"name":"preview_evaluate","arguments":{...}}, its answer in the tool result
+    const mc = /mcpcall:(\{.*\})/.exec(c.text);
+    if (mc && mcpUrl) {
+      const call = JSON.parse(mc[1]) as { name: string; arguments: unknown };
+      const id = `toolu_${rnd()}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: `mcp__backplane__${call.name}`, input: call.arguments }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      let got = "";
+      try {
+        const r = await fetch(mcpUrl, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: call.name, arguments: call.arguments } }) });
+        got = await r.text();
+      } catch (e) { got = String(e); }
+      log(`MCPCALL ${call.name} ${got.slice(0, 600)}`);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `MCPRESULT ${got.slice(0, 1500)}` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
     // "edit:": an Edit call that moves the board's first footprint 2.54 mm right
     if (c.text.includes("edit:")) {
       const fs = await import("node:fs");

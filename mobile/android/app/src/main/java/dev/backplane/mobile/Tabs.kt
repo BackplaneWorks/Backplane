@@ -171,23 +171,22 @@ private fun BotsPage(m: AppModel, s: Screen, state: LazyListState) {
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = pad) {
             item(key = "seg") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(16.dp, 8.dp)) {
-                    SegmentedButton(part == "bots", { part = "bots" }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(NativeMessages.tour_title_bots(lang)) }
-                    SegmentedButton(part == "rooms", { part = "rooms" }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(NativeMessages.bots_rooms(lang)) }
+                    SegmentedButton(part == "bots", { part = "bots" }, SegmentedButtonDefaults.itemShape(0, 2, flat)) { Text(NativeMessages.tour_title_bots(lang)) }
+                    SegmentedButton(part == "rooms", { part = "rooms" }, SegmentedButtonDefaults.itemShape(1, 2, flat)) { Text(NativeMessages.bots_rooms(lang)) }
                 }
             }
             if (part == "bots") {
                 if (s.bots.isEmpty()) item(key = "none") { Empty(NativeMessages.native_bot_empty(lang)) }
                 items(s.bots, key = { "b:" + it.id }) { b ->
+                    // style.css .bot-row: a 28 px cat, the name, the mood in its colour; .cat-mood-away dims the cat only
                     ListItem(
                         headlineContent = { Text(b.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         supportingContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                MoodDot(b.mood)
-                                Text(listOf(b.note, b.peer, b.machine).filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+                            Text(listOf(b.note, b.peer, b.machine).filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelMedium, color = moodTextColor(b.mood))
                         },
-                        leadingContent = { BotCat(m, b.cat, 40.dp) },
-                        modifier = Modifier.alpha(if (b.mood == "away") 0.5f else 1f)
+                        leadingContent = { Box(Modifier.alpha(if (b.mood == "away") 0.5f else 1f)) { BotCat(m, b.cat, 28.dp) } },
+                        modifier = Modifier
                             .clickable { m.open(b.nav, b.act, b.id, b.name, b.cat, if (b.remote) "remote" else "bot") },
                     )
                 }
@@ -268,7 +267,7 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
             item { Header(NativeMessages.settings_appearance(tag)) }
             item { Choice(listOf("system" to NativeMessages.native_settings_system(tag), "light" to NativeMessages.settings_theme_light(tag), "dark" to NativeMessages.settings_theme_dark(tag)), AppSettings.appearance) { AppSettings.putAppearance(it) } }
             // (WebShell.kt: off shows the hub's page, the app's main screen)
-            item { ListItem(headlineContent = { Text("Classic screens") }, supportingContent = { Text("These native screens. Off: the hub's own phone page, as in a browser.") },
+            if (!BuildConfig.NATIVE_ONLY) item { ListItem(headlineContent = { Text("Classic screens") }, supportingContent = { Text("These native screens. Off: the hub's own phone page, as in a browser.") },
                 trailingContent = { Switch(AppSettings.classic, { AppSettings.putClassic(it) }) }) }
             s.lang?.rows?.firstOrNull()?.let { row ->
                 item { Text(NativeMessages.settings_lang(tag), Modifier.padding(horizontal = 16.dp)) }
@@ -305,7 +304,7 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
                     trailingContent = {
                         OutlinedButton(onClick = {
                             ctx.startActivity(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }) { Text(NativeMessages.native_settings_system_settings(tag)) }
+                        }, shape = flat) { Text(NativeMessages.native_settings_system_settings(tag)) }
                     })
             }
             // what the hub alerts for: its settings, from the last screen that carried them
@@ -351,7 +350,7 @@ private fun Header(text: String) {
 private fun Choice(options: List<Pair<String, String>>, current: String, pick: (String) -> Unit) {
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         options.forEachIndexed { i, (v, label) ->
-            SegmentedButton(current == v, { pick(v) }, SegmentedButtonDefaults.itemShape(i, options.size)) { Text(label) }
+            SegmentedButton(current == v, { pick(v) }, SegmentedButtonDefaults.itemShape(i, options.size, flat)) { Text(label) }
         }
     }
 }

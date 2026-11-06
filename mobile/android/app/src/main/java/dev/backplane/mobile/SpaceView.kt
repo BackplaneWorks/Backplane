@@ -160,7 +160,7 @@ private fun SpaceLeaf(b: SpaceBlock, act: (String, String) -> Unit) {
         }
         "code" -> Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
             Text(
-                b.text, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
+                b.text, style = MaterialTheme.typography.bodySmall.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                 modifier = Modifier.horizontalScroll(rememberScrollState()).padding(10.dp),
             )
         }

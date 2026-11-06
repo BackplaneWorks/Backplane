@@ -1,1 +1,0 @@
-ok binary asset streaming: byte parity, 64KiB bound, partial writes, yields, backpressure, timeout/disconnect, identity/cap checks and descriptor cleanup

@@ -197,7 +197,7 @@ struct DeviceManagerView: View {
                         TimelineView(.periodic(from: .now, by: 1)) { clock in
                             VStack(alignment: .leading, spacing: 12) {
                                 if clock.date < invitation.expires {
-                                    Text(invitation.code).font(.largeTitle.monospaced().bold()).privacySensitive()
+                                    Text(invitation.code).font(.mono(.largeTitle, weight: .bold)).privacySensitive()
                                     Text("Hub address: " + invitation.address)
                                     Text("Expires ").font(.footnote) + Text(invitation.expires, style: .relative).font(.footnote)
                                     QRCodeView(rows: invitation.qr).privacySensitive()

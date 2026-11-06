@@ -1,3 +1,20 @@
+#if GPUI_NATIVE
+import SwiftUI
+
+// The GPUI experiment's build has no web shell: nothing here creates or links
+// WKWebView for the app's screens. Only the two id helpers survive.
+enum WebShell {
+    static func local(_ thread: String) -> String {
+        guard let bar = thread.firstIndex(of: "|") else { return thread }
+        return String(thread[thread.index(after: bar)...])
+    }
+}
+
+struct AppRoot: View {
+    @Bindable var model: AppModel
+    var body: some View { RootView(model: model) }
+}
+#else
 import AVFoundation
 import SwiftUI
 import UIKit
@@ -784,3 +801,5 @@ enum BackplaneAppBridge {
         return shim.replacingOccurrences(of: "/*@info*/null", with: json)
     }
 }
+
+#endif

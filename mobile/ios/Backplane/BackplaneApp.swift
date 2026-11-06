@@ -13,16 +13,28 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
+#if !DATA_APP
 @main
+#endif
 struct BackplaneApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
     @Environment(\.scenePhase) private var phase
+    private let bootMark: Void = Boot.mark("app-struct")
     @State private var model = AppModel()
+    // JetBrains Mono (Mono.swift): registered before any view draws
+    private let monoFonts: Void = Mono.register()
+    #if DEBUG
+    private let stall: Void = Stall.start()
+    #endif
     @State private var grace: UIBackgroundTaskIdentifier = .invalid
 
     var body: some Scene {
         WindowGroup {
             AppRoot(model: model)
+                .onAppear { Boot.mark("root-appear") }
+                #if DEBUG
+                .overlay { if model.showFonts { FontsProbe() } }
+                #endif
                 .sheet(isPresented: $model.showingDevices) { if let link = model.devicesLink { DeviceManagerView(link: link) } }
                 .tint(BackplaneDesign.accent)
                 .accentColor(BackplaneDesign.accent)
@@ -30,7 +42,7 @@ struct BackplaneApp: App {
                     #if DEBUG && targetEnvironment(simulator)
                     if ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION"] == "1" {
                         Text("Simulator connection: " + model.qualificationConnection)
-                            .font(.caption2.monospaced())
+                            .font(.mono(.caption2))
                             .padding(3)
                             .background(.ultraThinMaterial)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -60,8 +72,13 @@ struct BackplaneApp: App {
                 #endif
                 // this device's appearance (App settings); the hub's theme is not
                 // read, except by the web screen, whose page says its theme
+                #if GPUI_NATIVE
+                .preferredColorScheme(model.settings.colorScheme)
+                #else
                 .preferredColorScheme(model.webShown ? model.web.theme ?? model.settings.colorScheme : model.settings.colorScheme)
+                #endif
                 // Canonical references and legacy notification links share message-tap routing.
+                .modifier(TextSizeModifier(size: model.settings.dynamicType))
                 .onOpenURL { model.open($0) }
                 .onAppear { delegate.model = model }
         }

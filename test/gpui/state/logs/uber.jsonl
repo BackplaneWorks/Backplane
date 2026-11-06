@@ -1,0 +1,29 @@
+{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":1793900000}
+{"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1793900001}
+{"$":"ThreadCreated","id":"t2","project":"p1","title":"U","env":"local","branch":"","worktree":"","provider":"codex","model":"m","at":1793900002}
+{"$":"UberSet","bot":"b1","uid":"U1","at":1793900003}
+{"$":"UberOp","uid":"U1","origin":"m1","n":1,"stamp":"0000000010.000000.m1","op":"{\"k\":\"space\",\"spec\":\"a\"}","at":1793900004}
+{"$":"UberOp","uid":"U1","origin":"m1","n":2,"stamp":"0000000012.000000.m1","op":"{\"k\":\"space\",\"spec\":\"b\"}","at":1793900005}
+{"$":"UberOp","uid":"U1","origin":"m2","n":1,"stamp":"0000000011.000000.m2","op":"{\"k\":\"space\",\"spec\":\"c\"}","at":1793900006}
+{"$":"UberOp","uid":"U1","origin":"m2","n":3,"stamp":"0000000013.000000.m2","op":"{\"k\":\"page\",\"html\":\"x\"}","at":1793900007}
+{"$":"UberOp","uid":"U1","origin":"m2","n":2,"stamp":"0000000009.000000.m2","op":"{\"k\":\"page\",\"html\":\"old\"}","at":1793900008}
+{"$":"UberOp","uid":"U1","origin":"m2","n":3,"stamp":"0000000013.000000.m2","op":"{\"k\":\"page\",\"html\":\"x\"}","at":1793900009}
+{"$":"UberOp","uid":"U1","origin":"m1","n":3,"stamp":"0000000020.000000.m1","op":"{\"k\":\"lease\",\"holder\":\"m1\",\"term\":2}","at":1793900010}
+{"$":"UberOp","uid":"U1","origin":"m2","n":4,"stamp":"0000000030.000000.m2","op":"{\"k\":\"lease\",\"holder\":\"m2\",\"term\":1}","at":1793900011}
+{"$":"UberOp","uid":"U1","origin":"m1","n":4,"stamp":"0000000031.000000.m1","op":"{\"k\":\"lease\",\"holder\":\"m1\",\"term\":\"2\"}","at":1793900012}
+{"$":"UberOp","uid":"U1","origin":"m1","n":5,"stamp":"0000000032.000000.m1","op":"{\"k\":\"mem\",\"key\":\"k\",\"kind\":\"fact\",\"text\":\"t\",\"tags\":\"\"}","at":1793900013}
+{"$":"UberOp","uid":"U1","origin":"m1","n":6,"stamp":"0000000033.000000.m1","op":"{\"k\":\"forget\",\"key\":\"k\"}","at":1793900014}
+{"$":"UberOp","uid":"U1","origin":"m1","n":7,"stamp":"0000000034.000000.m1","op":"{\"k\":\"routine\",\"id\":\"r1\",\"name\":\"n\",\"cron\":\"* * * * *\",\"prompt\":\"p\",\"on\":true,\"pin\":\"\"}","at":1793900015}
+{"$":"UberOp","uid":"U1","origin":"m1","n":8,"stamp":"0000000035.000000.m1","op":"{\"k\":\"routine-del\",\"id\":\"r1\"}","at":1793900016}
+{"$":"UberOp","uid":"U1","origin":"m1","n":9,"stamp":"0000000036.000000.m1","op":"{\"k\":\"fired\",\"routine\":\"r1\",\"slot\":5}","at":1793900017}
+{"$":"UberOp","uid":"U1","origin":"m2","n":5,"stamp":"0000000037.000000.m2","op":"{\"k\":\"fired\",\"routine\":\"r1\",\"slot\":4}","at":1793900018}
+{"$":"UberOp","uid":"U1","origin":"m2","n":6,"stamp":"0000000038.000000.m2","op":"{\"k\":\"fired\",\"routine\":\"r1\",\"slot\":9}","at":1793900019}
+{"$":"UberOp","uid":"U1","origin":"m1","n":10,"stamp":"0000000039.000000.m1","op":"{\"k\":\"bind\",\"machine\":\"mm\",\"bot\":\"b\",\"thread\":\"t\",\"name\":\"n\"}","at":1793900020}
+{"$":"UberOp","uid":"U1","origin":"m1","n":11,"stamp":"0000000040.000000.m1","op":"not json","at":1793900021}
+{"$":"UberOp","uid":"U1","origin":"m1","n":12,"stamp":"0000000041.000000.m1","op":"{\"k\":\"who\",\"name\":\"x\",\"look\":3,\"persona\":\"p\"}","at":1793900022}
+{"$":"UberOp","uid":"U1","origin":"a.b","n":1,"stamp":"0000000050.000000.a.b","op":"{\"k\":\"space\",\"spec\":\"dot\"}","at":1793900023}
+{"$":"UberOp","uid":"U1","origin":"a.b","n":2,"stamp":"0000000051.000000.a.b","op":"{\"k\":\"space\",\"spec\":\"dot2\"}","at":1793900024}
+{"$":"UberOp","uid":"U1","origin":"","n":1,"stamp":"0000000052.000000.","op":"{\"k\":\"space\",\"spec\":\"noorigin\"}","at":1793900025}
+{"$":"UberOp","uid":"U1","origin":"m3","n":1,"stamp":"weird","op":"{\"k\":\"who\",\"name\":\"w\",\"look\":1,\"persona\":\"\"}","at":1793900026}
+{"$":"UberOp","uid":"U1","origin":"m3","n":2,"stamp":"","op":"{\"k\":\"who\",\"name\":\"w2\",\"look\":1,\"persona\":\"\"}","at":1793900027}
+{"$":"UberOp","uid":"U1","origin":"m4","n":1,"stamp":"0000000060.000000.m4","op":"{\"k\":\"unknown\"}","at":1793900028}

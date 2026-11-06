@@ -471,7 +471,7 @@ class WebShell(private val activity: ComponentActivity, private val model: AppMo
             val u = request.url
             if (sameOrigin(u)) return false
             // a pairing link inside the page pairs the app
-            if (u.scheme == "backplane") { model.pair(u.toString()); return true }
+            if (u.scheme == BuildConfig.URL_SCHEME) { model.pair(u.toString()); return true }
             if (!external(u)) Toast.makeText(activity, "No app opens this link", Toast.LENGTH_SHORT).show()
             return true
         }

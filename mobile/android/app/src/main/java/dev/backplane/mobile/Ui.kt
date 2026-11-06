@@ -205,7 +205,7 @@ private fun OpeningDestination(m: AppModel, s: Screen, o: Core.Opening) {
             else if (t != null) ThreadScreen(m, page ?: s.copy(thread = t, bot = null), t)
             else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (o.cat.isNotEmpty()) BotCat(m, o.cat, 48.dp)
+                    if (o.cat.isNotEmpty()) BotCat(m, o.cat, 40.dp)
                     Text(o.title, style = MaterialTheme.typography.titleLarge)
                 }
                 repeat(6) {
@@ -442,12 +442,10 @@ private fun Pair(tag: String, link: String, cancel: (() -> Unit)?, status: Strin
     }) { pad ->
         Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val ctx = LocalContext.current
-            val scan = pairScanner(tag, done)
-            Button(onClick = scan.start) {
+            Button(onClick = { scanPairing(ctx, tag, done) }) {
                 Icon(Icons.Filled.QrCodeScanner, null)
                 Text(NativeMessages.native_pair_scan(tag), Modifier.padding(start = 8.dp))
             }
-            if (scan.blocked) ScanBlocked(tag)
             val photo = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
                 if (uri != null) pairingFromImage(ctx, uri)?.let(done)
                     ?: android.widget.Toast.makeText(ctx, NativeMessages.native_pair_scanner_invalid(tag), android.widget.Toast.LENGTH_SHORT).show()
@@ -515,15 +513,14 @@ private fun Hubs(m: AppModel, s: Screen, back: () -> Unit) {
                         style = MaterialTheme.typography.bodyMedium)
                     OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), singleLine = true,
                         label = { Text(NativeMessages.settings_pair(tag)) }, placeholder = { Text("http://host:3787/#token=…") })
-                    val scan = pairScanner(tag) { m.pair(it) }
+                    val ctx = LocalContext.current
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { m.pair(text); text = "" }, enabled = text.isNotBlank()) { Text(NativeMessages.native_pair_add(tag)) }
-                        OutlinedButton(onClick = scan.start) {
+                        OutlinedButton(onClick = { scanPairing(ctx, tag) { m.pair(it) } }) {
                             Icon(Icons.Filled.QrCodeScanner, null)
                             Text(NativeMessages.native_pair_scan(tag), Modifier.padding(start = 8.dp))
                         }
                     }
-                    if (scan.blocked) ScanBlocked(tag)
                 }
             }
         }
@@ -561,6 +558,21 @@ private fun swipeColor(s: Swipe?): Color = when (s?.tone) {
     "danger" -> MaterialTheme.colorScheme.errorContainer
     "settle" -> MaterialTheme.colorScheme.primaryContainer
     else -> MaterialTheme.colorScheme.secondaryContainer
+}
+
+// Previous / Next of a bounded sidebar list, one row each (iOS Views.swift pageControls)
+internal fun androidx.compose.foundation.lazy.LazyListScope.pageControls(m: AppModel, page: Pager?, scope: String, context: String) {
+    if (page == null || !page.any) return
+    for ((dir, c) in listOf("previous" to page.previous, "next" to page.next)) {
+        if (c == null) continue
+        item(key = "page:$scope:$dir") {
+            ListItem(
+                headlineContent = { Text(c.label) },
+                trailingContent = { Text(context, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                modifier = Modifier.combinedClickableCompat { m.act(c.action, c.value) },
+            )
+        }
+    }
 }
 
 // Swiping from the start sends the row's lead action; from the end it
@@ -715,12 +727,15 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(NativeMessages.tour_title_threads(lang))
-                        val online = s.online && m.linkUp(s.hub)
-                        Text(NativeMessages.native_thread_online(lang, if (online) "online" else "connecting"),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                    val online = s.online && m.linkUp(s.hub)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        BrandMark(online)
+                        Column {
+                            Text(NativeMessages.tour_title_threads(lang))
+                            Text(NativeMessages.native_thread_online(lang, if (online) "online" else "connecting"),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                        }
                     }
                 },
                 actions = {
@@ -781,6 +796,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                     }
                     items(s.active.filter { it.faded }, key = { "t:" + it.id }) { ThreadRow(m, it) }
                 }
+                for (hp in s.sidebarPages) pageControls(m, hp.active, hp.hub + ".active", s.hubs.firstOrNull { it.key == hp.hub }?.name ?: hp.hub)
             } else {
                 for (p in s.projects) {
                     item(key = "p:" + p.id) {
@@ -811,11 +827,13 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                         )
                     }
                     items(p.threads, key = { "t:" + it.id }) { ThreadRow(m, it) }
+                    pageControls(m, p.threadsPage, p.id + ".threads", p.title)
                     if (p.snoozed.isNotEmpty()) {
                         item(key = "z:" + p.id) {
                             ListItem(headlineContent = { Text(p.snoozedShelf, style = MaterialTheme.typography.labelLarge) })
                         }
                         items(p.snoozed, key = { "t:" + it.id }) { ThreadRow(m, it) }
+                        pageControls(m, p.snoozedPage, p.id + ".snoozed", p.title + ", " + p.snoozedShelf)
                     }
                     if (p.settled.isNotEmpty()) {
                         item(key = "s:" + p.id) {
@@ -827,7 +845,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                                 modifier = Modifier.combinedClickableCompat { m.act("toggle-settled", p.id) },
                             )
                         }
-                        if (p.open) items(p.settled, key = { "t:" + it.id }) { ThreadRow(m, it) }
+                        if (p.open) { items(p.settled, key = { "t:" + it.id }) { ThreadRow(m, it) }; pageControls(m, p.settledPage, p.id + ".settled", p.title + ", " + p.shelf) }
                     }
                     if (p.archived.isNotEmpty() && p.value.isNotEmpty()) {
                         item(key = "a:" + p.id) {
@@ -839,10 +857,11 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                                 modifier = Modifier.combinedClickableCompat { m.act("toggle-settled", p.value) },
                             )
                         }
-                        if (p.archOpen) items(p.archived, key = { "t:" + it.id }) { ThreadRow(m, it) }
+                        if (p.archOpen) { items(p.archived, key = { "t:" + it.id }) { ThreadRow(m, it) }; pageControls(m, p.archivedPage, p.id + ".archived", p.title) }
                     }
                     item(key = "d:" + p.id) { HorizontalDivider() }
                 }
+                for (hp in s.sidebarPages) pageControls(m, hp.projects, hp.hub + ".projects", s.hubs.firstOrNull { it.key == hp.hub }?.name ?: hp.hub)
                 // the folded shelf of older projects, at the end
                 s.older?.let { o ->
                     item(key = "older") {
@@ -860,6 +879,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                     ListItem(headlineContent = { Text("Conversation history", style = MaterialTheme.typography.labelLarge) })
                 }
                 items(s.legacy, key = { "legacy:" + it.id }) { ThreadRow(m, it, hierarchy = false) }
+                for (hp in s.sidebarPages) pageControls(m, hp.legacy, hp.hub + ".legacy", s.hubs.firstOrNull { it.key == hp.hub }?.name ?: hp.hub)
             }
         }
     }
@@ -915,7 +935,7 @@ private fun FolderPicker(m: AppModel, p: Folders) {
                     typed.add(t)
                     m.act("picker-type", t)
                 }, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), singleLine = true,
-                    placeholder = { Text(p.hint) }, textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                    placeholder = { Text(p.hint) }, textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
                 if (p.error.isNotEmpty()) Text(p.error, Modifier.padding(horizontal = 16.dp),
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -1499,7 +1519,7 @@ private fun HistoryBar(m: AppModel, h: HistBar, light: Boolean) {
                 val ways = listOf("old" to NativeMessages.viewer_history_old(lang), "diff" to NativeMessages.viewer_diff(lang), "new" to NativeMessages.viewer_history_new(lang))
                 ways.forEachIndexed { i, w ->
                     SegmentedButton(selected = shown == w.first, onClick = { m.act("rv-as", w.first) },
-                        shape = SegmentedButtonDefaults.itemShape(i, ways.size), icon = {}) { Text(w.second, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                        shape = SegmentedButtonDefaults.itemShape(i, ways.size, flat), icon = {}) { Text(w.second, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
                 }
             }
             if (shown == "diff") Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1630,7 +1650,7 @@ private fun MechScreen(m: AppModel, v: Viewer, p: MechPage) {
             SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
                 v.choices.forEachIndexed { i, c ->
                     SegmentedButton(selected = c.value == v.open, onClick = { m.act("view", c.value) },
-                        shape = SegmentedButtonDefaults.itemShape(i, v.choices.size), icon = {}) { Text(c.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                        shape = SegmentedButtonDefaults.itemShape(i, v.choices.size, flat), icon = {}) { Text(c.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
                 }
             }
             IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, NativeMessages.common_close(lang)) }

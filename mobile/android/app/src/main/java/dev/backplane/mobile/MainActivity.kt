@@ -126,6 +126,6 @@ class MainActivity : ComponentActivity() {
     private fun pairFrom(intent: Intent?) {
         val data = intent?.data ?: return
         // (backplane://google ends a Google sign-in: GoogleLoop)
-        if (data.scheme == "backplane" && data.host != "google") model.pair(data.toString())
+        if (data.scheme == BuildConfig.URL_SCHEME && data.host != "google") model.pair(data.toString())
     }
 }

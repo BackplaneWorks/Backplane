@@ -1,6 +1,9 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ThreadComposer: View {
+    // a draft above this many UTF-8 bytes is shown as a preview, not laid out in the field (see the composer row)
+    static let longDraftBytes = 64_000
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let thread: ThreadView
@@ -156,15 +159,32 @@ struct ThreadComposer: View {
                     .accessibilityIdentifier("thread.mic")
                     .disabled(!canSend)
                 }
-                TextField("", text: Binding(get: { model.composerText(for: thread) }, set: { model.editComposer($0, for: thread.id) }), prompt: Text(NativeMessages.native_thread_composer(lang)).foregroundStyle(BackplaneDesign.secondaryText), axis: .vertical)
-                    .disabled(!model.canEditComposer(for: thread.id))
-                    .lineLimit(1...6)
-                    .focused($focused)
-                    .accessibilityLabel(NativeMessages.native_thread_composer(lang))
-                    .accessibilityIdentifier("thread.composer")
+                // A draft this long (a pasted file, a log) is not edited in the field: SwiftUI's multi-line TextField lays the
+                // whole text out on the main thread at every screen update (8-22 s at 20-100 KB: views timed out, "Updating
+                // conversation..." and a send that never went). It is kept whole, sent whole, and shown as a preview.
+                if model.composerText(for: thread).utf8.count > Self.longDraftBytes {
+                    let long = model.composerText(for: thread)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(String(long.prefix(400)) + "…").font(.callout).lineLimit(5).foregroundStyle(.primary)
+                        HStack {
+                            Text(String(format: lang == "ja" ? "長い下書き · %d 文字" : "Long draft · %d characters", long.count))
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button(lang == "ja" ? "消去" : "Clear") { model.editComposer("", for: thread.id) }
+                                .font(.caption).accessibilityIdentifier("thread.composer.clear")
+                        }
+                    }
                     .padding(.horizontal, 12).padding(.vertical, 8)
-                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(BackplaneDesign.raised)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("thread.composer")
+                } else {
+                    ComposerInput(model: model, thread: thread, focus: $focused)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .foregroundStyle(.primary)
+                        .background(BackplaneDesign.raised)
+                }
                 // a long press sends with the other follow-up mode (queue or steer);
                 // while a turn runs with nothing typed the button stops it
                 let blank = model.composerText(for: thread).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -186,6 +206,30 @@ struct ThreadComposer: View {
             .padding(.horizontal).padding(.vertical, 8)
           }
           .background(BackplaneDesign.panel)
+          // a picture or a file dropped on the composer (iPad drag and drop) is attached like the paperclip's
+          .onDrop(of: [UTType.image, UTType.fileURL], isTargeted: nil) { providers in
+              guard canSend else { return false }
+              let owner = thread.id
+              for p in providers {
+                  if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                      _ = p.loadObject(ofClass: URL.self) { url, _ in
+                          guard let url else { return }
+                          // a copy in our temp folder: the dropped file's scope ends with this callback
+                          let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
+                          let scoped = url.startAccessingSecurityScopedResource()
+                          defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                          guard (try? FileManager.default.copyItem(at: url, to: tmp)) != nil else { return }
+                          Task { @MainActor in model.attach(file: tmp, name: url.lastPathComponent, for: owner) }
+                      }
+                  } else if p.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                      p.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                          guard let data else { return }
+                          Task { @MainActor in model.attach(data, name: "dropped.png", for: owner) }
+                      }
+                  }
+              }
+              return true
+          }
 
     }
 }

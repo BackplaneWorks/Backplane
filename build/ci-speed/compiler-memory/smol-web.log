@@ -1,8 +1,0 @@
-1 | import record from '../../desktop/connection-record.cjs';
-                       ^
-error: Could not resolve: "../../desktop/connection-record.cjs"
-    at /home/user/ci-speed-next-1261555/extra/ci-memory/source/src/web/connection-log.js:1:20
-
-warn: Invalid selector. Unsupported pseudo-class or pseudo-element 'highlight'
-
-Bun v1.3.10 (Linux x64 baseline)

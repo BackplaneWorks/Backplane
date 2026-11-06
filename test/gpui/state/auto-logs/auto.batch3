@@ -1,0 +1,2 @@
+{"$":"MessagePosted","thread":"tc","msg":"a-tc-9","role":"assistant","text":"x","at":1794060020}
+{"$":"SettingSet","key":"liveness.tc","value":"{\"last\":1,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"r\"}","at":1794060020}

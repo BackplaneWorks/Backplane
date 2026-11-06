@@ -1,6 +1,7 @@
 package dev.backplane.mobile
 
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.widthIn
@@ -10,6 +11,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 // A QR code as the hub drew it (core/qr.bend: rows, '1' dark), on white
 // with four modules of quiet zone
@@ -31,8 +35,22 @@ fun QrCode(rows: List<String>, modifier: Modifier = Modifier) {
     }
 }
 
+// The camera reading a pairing code: Google Play services' scanner (no
+// camera permission of our own); the code goes to found when it is a link
+// Pairing understands
+fun scanPairing(ctx: Context, tag: String, found: (String) -> Unit) {
+    val opts = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
+    GmsBarcodeScanning.getClient(ctx, opts).startScan()
+        .addOnSuccessListener { b ->
+            val s = b.rawValue.orEmpty()
+            if (Pairing.key(s) != null) found(s)
+            else Toast.makeText(ctx, NativeMessages.native_pair_scanner_invalid(tag), Toast.LENGTH_SHORT).show()
+        }
+        .addOnFailureListener { Toast.makeText(ctx, NativeMessages.native_pair_scanner_unavailable(tag), Toast.LENGTH_LONG).show() }
+}
+
 // A photo or screenshot of a pairing code (the gallery, Files): read on the
-// phone with ZXing, as the in-app scanner (Scanner.kt) reads the camera's frames
+// phone with ZXing, for phones without Google Play services' scanner too
 fun pairingFromImage(ctx: Context, uri: android.net.Uri): String? = runCatching {
     val src = ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return null
     // a big photo is read at about 1600 px across (enough for a code, and quick)
@@ -43,4 +61,4 @@ fun pairingFromImage(ctx: Context, uri: android.net.Uri): String? = runCatching 
     val bits = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(com.google.zxing.RGBLuminanceSource(bmp.width, bmp.height, px)))
     val hints = mapOf(com.google.zxing.DecodeHintType.TRY_HARDER to true, com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE))
     com.google.zxing.qrcode.QRCodeReader().decode(bits, hints).text
-}.getOrNull()?.takeIf(::pairingCode)
+}.getOrNull()?.takeIf { Pairing.key(it) != null || Pairing.invitation(it) != null }

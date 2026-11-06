@@ -1,7 +1,0 @@
-import Base
-
-law cache_first:
-  {0n == 0n : Nat}
-
-law cache_second:
-  {1n == 1n : Nat}

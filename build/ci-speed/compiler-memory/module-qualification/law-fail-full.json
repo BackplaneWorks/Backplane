@@ -1,4 +1,0 @@
-{
-  "capture_sha256": "63856126a4e2196f2a9687c61d65782cdbdb6ed398ed529627f4ed9429da10b5",
-  "combined_captured_streams": "SOME PROOFS FAIL\nError:\n- expected : 0n\n- observed : 1n\nLocation: L.identity\n3 | def L.identity():\n4>|   {==}\n  |   ^^^^\n5 | \n"
-}

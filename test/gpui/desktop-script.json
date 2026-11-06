@@ -1,0 +1,1 @@
+[{"select":0},{"wait":500},{"popup":"/"},{"type":"hello from script"},{"wait":300}]

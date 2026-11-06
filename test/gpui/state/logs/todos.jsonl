@@ -1,0 +1,25 @@
+{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":1793900000}
+{"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1793900001}
+{"$":"ThreadCreated","id":"t2","project":"p1","title":"U","env":"local","branch":"","worktree":"","provider":"codex","model":"m","at":1793900002}
+{"$":"TodosChanged","thread":"t1","who":"tools","data":"[{\"name\":\"TaskCreate\",\"id\":\"c1\",\"input\":{\"subject\":\"a\",\"activeForm\":\"doing a\"}},{\"name\":\"TaskCreate\",\"id\":\"c2\",\"input\":{\"description\":\"b\"}},{\"name\":\"TaskNamed\",\"use\":\"c1\",\"number\":\"1\"},{\"name\":\"TaskNamed\",\"use\":\"c2\",\"number\":\"2\"}]","at":1793900069}
+{"$":"TodosChanged","thread":"t1","who":"tools","data":"[{\"name\":\"TaskUpdate\",\"input\":{\"taskId\":\"1\",\"status\":\"in_progress\"}},{\"name\":\"TaskUpdate\",\"input\":{\"taskId\":\"2\",\"subject\":\"B2\",\"status\":\"weird\"}}]","at":1793900070}
+{"$":"TodosChanged","thread":"t1","who":"person","data":"{\"op\":\"add\",\"id\":\"p1\",\"text\":\"mine\"}","at":1793900071}
+{"$":"TodosChanged","thread":"t1","who":"person","data":"{\"op\":\"move\",\"id\":\"p1\",\"to\":0}","at":1793900072}
+{"$":"TodosChanged","thread":"t1","who":"person","data":"{\"op\":\"set\",\"id\":\"1\",\"text\":\"mine1\",\"status\":\"completed\"}","at":1793900073}
+{"$":"TodosChanged","thread":"t1","who":"tools","data":"[{\"name\":\"TodoWrite\",\"input\":{\"todos\":[{\"content\":\"a\",\"status\":\"completed\",\"activeForm\":\"x\"},{\"content\":\"b\",\"status\":\"pending\"},{\"content\":\"c\",\"status\":\"bogus\"}]}}]","at":1793900074}
+{"$":"TodosChanged","thread":"t1","who":"person","data":"{\"op\":\"delete\",\"id\":\"2\"}","at":1793900075}
+{"$":"TodosChanged","thread":"t1","who":"person","data":"{\"op\":\"nothing\"}","at":1793900076}
+{"$":"TodosChanged","thread":"t1","who":"agent","data":"[{\"id\":\"1\",\"text\":\"a\",\"form\":\"\",\"status\":\"completed\"},{\"id\":\"2\",\"text\":\"b\",\"form\":\"\",\"status\":\"pending\"},{\"id\":\"3\",\"text\":\"c\",\"form\":\"\",\"status\":\"pending\"}]","at":1793900077}
+{"$":"TodosChanged","thread":"t1","who":"agent","data":"[{\"id\":\"1\",\"text\":\"a\",\"form\":\"\",\"status\":\"completed\"},{\"id\":\"3\",\"text\":\"c\",\"form\":\"\",\"status\":\"in_progress\"}]","at":1793900078}
+{"$":"TodosChanged","thread":"t1","who":"tools","data":"[{\"name\":\"TaskUpdate\",\"input\":{\"taskId\":\"3\",\"status\":\"deleted\"}},{\"name\":\"TaskCreate\",\"id\":\"c9\",\"input\":{\"subject\":\"z\"}}]","at":1793900079}
+{"$":"TodosChanged","thread":"t1","who":"tools","data":"not json","at":1793900080}
+{"$":"TodosChanged","thread":"t1","who":"person","data":"not json","at":1793900081}
+{"$":"TodosChanged","thread":"t1","who":"agent","data":"not json","at":1793900082}
+{"$":"TodosChanged","thread":"t1","who":"snapshot","data":"{\"current\":\"[]\",\"base\":\"[]\",\"visible\":\"0\"}","at":1793900083}
+{"$":"TodosChanged","thread":"t1","who":"tools","data":"[{\"name\":\"TaskCreate\",\"id\":\"c3\",\"input\":{\"subject\":\"fresh\"}}]","at":1793900084}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1793900085}
+{"$":"TodosChanged","thread":"t1","who":"tools","data":"[{\"name\":\"TaskCreate\",\"id\":\"c4\",\"input\":{\"subject\":\"after turn\"}}]","at":1793900086}
+{"$":"TurnChanged","thread":"t1","state":"completed","at":1793900087}
+{"$":"TodosChanged","thread":"t2","who":"person","data":"{\"op\":\"add\",\"id\":\"q\",\"text\":\"q\"}","at":1793900088}
+{"$":"TodosChanged","thread":"t2","who":"agent","data":"[{\"id\":\"q\",\"text\":\"Q\",\"form\":\"\",\"status\":\"pending\"}]","at":1793900089}
+{"$":"TodosChanged","thread":"t2","who":"weird-who","data":"[{\"id\":\"1\",\"text\":\"x\",\"form\":\"\",\"status\":\"pending\"}]","at":1793900090}

@@ -332,7 +332,7 @@ struct EntryRow: View, Equatable {
                     Image(systemName: entry.open == true ? "chevron.down" : "chevron.right").font(.caption2)
                     Text(entry.text).lineLimit(1)
                 }
-                .font(.caption.monospaced())
+                .font(.mono(.caption))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(minHeight: 44)
@@ -364,7 +364,7 @@ struct EntryRow: View, Equatable {
                     Image(systemName: "clock.arrow.circlepath")
                     Text(entry.text).lineLimit(2)
                 }
-                .font(.caption.monospaced())
+                .font(.mono(.caption))
                 .foregroundStyle(Color.accentColor)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect)
@@ -376,7 +376,7 @@ struct EntryRow: View, Equatable {
                 Text(entry.label ?? "").foregroundStyle(.tertiary)
                 Text(entry.text).lineLimit(entry.tone == "error" ? nil : 2)
             }
-            .font(.caption.monospaced())
+            .font(.mono(.caption))
             .foregroundStyle(entry.tone == "error" ? AnyShapeStyle(PhaseColor.bad) : AnyShapeStyle(.secondary))
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
@@ -520,7 +520,7 @@ struct SubsView: View {
                                             if !st.kind.isEmpty { Text(st.kind).foregroundStyle(.tertiary) }
                                             Text(st.text).foregroundStyle(.secondary).lineLimit(1)
                                         }
-                                        .font(.caption2.monospaced())
+                                        .font(.mono(.caption2))
                                         .padding(.leading, 16)
                                     }
                                 }
@@ -609,7 +609,7 @@ struct AskCard: View {
             if !ask.blocks.isEmpty {
                 ScrollView { MarkdownView(blocks: ask.blocks).font(.callout) }.frame(maxHeight: 220)
             } else if !ask.detail.isEmpty {
-                ScrollView { Text(ask.detail).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 300)
+                ScrollView { Text(ask.detail).font(.mono(.caption)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 300)
             }
             FlowButtons(buttons: ask.buttons) { answer("answer", $0.value) }
         }
@@ -662,7 +662,7 @@ struct NeedsCard: View {
                 if let sk = ask.skip { Button(sk.label) { model.act("answer", sk.value) }.font(.caption).foregroundStyle(.secondary) }
             }
             if pre.isEmpty {
-                ScrollView { Text(ask.detail).font(.caption.monospaced()).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 300)
+                ScrollView { Text(ask.detail).font(.mono(.caption)).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 300)
                 chips
             } else {
                 Text(ask.detail).font(.callout)
@@ -701,7 +701,7 @@ struct OrderCardView: View {
             if !card.total.isEmpty {
                 Divider()
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(card.total).font(.subheadline.monospaced().bold())
+                    Text(card.total).font(.mono(.subheadline).bold())
                     Text(card.customs).font(.caption2).foregroundStyle(.secondary)
                 }
                 if !card.pay.isEmpty, let url = URL(string: card.pay) {
@@ -719,7 +719,7 @@ struct OrderCardView: View {
     @ViewBuilder private var steps: some View {
         ForEach(card.steps, id: \.self) { s in
             Text(s.mark == "done" ? "✓ " + s.label : s.mark == "on" ? "■ " + s.label : s.label)
-                .font(.caption2.monospaced()).fontWeight(s.mark == "on" ? .bold : .regular)
+                .font(.mono(.caption2)).fontWeight(s.mark == "on" ? .bold : .regular)
                 .foregroundStyle(s.mark == "done" ? PhaseColor.ok : s.mark == "on" ? lit : Color.secondary)
         }
     }
@@ -808,7 +808,7 @@ struct ComposerExtras: View {
                         ForEach(Array(skills.enumerated()), id: \.element) { i, k in
                             Button { model.actComposer("skill", k.name, for: thread.id) } label: {
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(k.name).font(.subheadline.monospaced().weight(.semibold)).lineLimit(1)
+                                    Text(k.name).font(.mono(.subheadline).weight(.semibold)).lineLimit(1)
                                     if !k.desc.isEmpty {
                                         Text(k.desc).font(.caption).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
                                     }
@@ -1009,7 +1009,7 @@ struct DiffSheet: View {
             }
             Spacer(minLength: 0)
         }
-        .font(.system(size: 11, design: .monospaced))
+        .font(.mono(size: 11))
         .padding(.vertical, 1)
         .listRowBackground(bg)
         .listRowSeparator(.hidden)
@@ -1027,7 +1027,7 @@ struct TermScreen: View {
 
     // a cell's width and a row's height at a size
     static func cell(_ size: CGFloat) -> (w: CGFloat, h: CGFloat) {
-        let f = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        let f = Mono.uiFont(size: size)
         return (("M" as NSString).size(withAttributes: [.font: f]).width, ceil(f.lineHeight))
     }
 
@@ -1044,7 +1044,7 @@ struct TermScreen: View {
             var a = AttributedString(r.t)
             a.foregroundColor = termColor(r.fg)
             if r.bg != term.bg { a.backgroundColor = termColor(r.bg) }
-            if r.b { a.font = .system(size: size, weight: .bold, design: .monospaced) }
+            if r.b { a.font = .mono(size: size, weight: .bold) }
             if r.u { a.underlineStyle = .single }
             out += a
         }
@@ -1065,7 +1065,7 @@ struct TermScreen: View {
                     .offset(x: CGFloat(term.cursor.x) * c.w, y: CGFloat(term.cursor.y) * c.h)
             }
         }
-        .font(.system(size: size, design: .monospaced))
+        .font(.mono(size: size))
         .foregroundStyle(termColor(term.fg))
     }
 }
@@ -1123,7 +1123,7 @@ struct TermKeys: View {
                 }
             }
             .buttonStyle(.bordered)
-            .font(.caption.monospaced())
+            .font(.mono(.caption))
             .padding(.horizontal).padding(.vertical, 6)
         }
         .background(.bar)
@@ -1138,7 +1138,7 @@ struct TermSheet: View {
     let term: Term
     @FocusState private var typing: Bool
 
-    static let font = UIFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    static let font = Mono.uiFont(size: 11)
     static let cw = ("M" as NSString).size(withAttributes: [.font: font]).width
     static let lh = ceil(font.lineHeight)
 
@@ -1253,7 +1253,7 @@ struct EmbRow: View {
             Image(systemName: icon)
             Text(text).lineLimit(1)
         }
-        .font(.caption.monospaced())
+        .font(.mono(.caption))
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)

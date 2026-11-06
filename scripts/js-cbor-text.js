@@ -1,3 +1,0 @@
-// Server-only implementation of core/cbor.bend Enc.text; byte order and
-// raw surrogate semantics match the compiled pure reference. No global state.
-function __bpCborText(s,acc,head){let n=0;for(const ch of s){const c=ch.codePointAt(0);n+=(c<128?1:c<2048?2:c<65536?3:4)}acc=head(96,n>>>0,acc);const push=b=>{acc={$:"Con",head:b,tail:acc}};for(const ch of s){const c=ch.codePointAt(0);if(c<128)push(c);else if(c<2048){push(192|(c>>>6));push(128|(c&63))}else if(c<65536){push(224|(c>>>12));push(128|((c>>>6)&63));push(128|(c&63))}else{push(240|(c>>>18));push(128|((c>>>12)&63));push(128|((c>>>6)&63));push(128|(c&63))}}return acc}

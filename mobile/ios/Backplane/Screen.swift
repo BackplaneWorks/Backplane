@@ -861,6 +861,10 @@ struct BotGoogle: Decodable {
 
 struct BotSettings: Decodable {
     let persona, personaField, invite, purl, join: String
+    // the look picker: the bot's look (index), how many there are, the section's label; each look is
+    // Backplane.cat("<i>:idle") and a tap is "bot-look" with the index (the web's look-pick)
+    let look, looks: Int?
+    let lookLabel: String?
     let google: BotGoogle
     let peers: [BotPeer]
 }
@@ -921,6 +925,8 @@ struct BotTasks: Decodable {
 struct BotPost: Decodable, Identifiable {
     let id, from, text, ago: String
     let mine: Bool
+    // the author's cat, "<look>:<mood>": "" for the person's own post, "0:away" for an unknown author
+    let cat: String?
 }
 
 // what the main area shows when it is not a thread: a bot (kind "bot",

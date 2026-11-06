@@ -20,16 +20,18 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>dev.backplane.mobile</string>
+			<string>$(BASE_BUNDLE_ID)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>backplane</string>
+				<string>$(URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
 	<!-- ProMotion: the board viewer draws at up to 120 Hz -->
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>BPScheme</key>
+	<string>$(URL_SCHEME)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>

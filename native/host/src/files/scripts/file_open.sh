@@ -1,0 +1,1 @@
+p="$1"; case "$p" in "~/"*) p="$HOME/${p#??}";; esac; case "$p" in /*) ;; *) p="$PWD/$p";; esac; [ -e "$p" ] || { echo "No such file: $p"; exit 1; }; if [ "$(uname)" = Darwin ]; then open "$p"; exit $?; fi; [ -n "$DISPLAY$WAYLAND_DISPLAY" ] || { echo "No desktop on this machine to open it on"; exit 1; }; (${BACKPLANE_OPEN:-xdg-open} "$p" >/dev/null 2>&1 &)

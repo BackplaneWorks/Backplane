@@ -190,7 +190,7 @@ import java.net.URL
 // each names.
 
 private val corner = RoundedCornerShape(4.dp)
-private val mono = FontFamily.Monospace
+private val mono = BpMono
 
 // the hub's palette for a thread's phase (src/web/style.css, src/app/theme.bend);
 // a thread's activity: working accent (blue), waiting on work it started
@@ -512,7 +512,7 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(if (e.open) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 if (e.open) NativeMessages.common_hide(lang) else NativeMessages.common_show(lang), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
-            Text(e.text, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono),
+            Text(e.text, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES),
                 color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         "link" -> Text(e.text, Modifier.clickable { m.act("select", e.value) }.padding(vertical = 2.dp),
@@ -529,12 +529,12 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
         "step" -> Row(Modifier.fillMaxWidth().clickable { m.act("hist-show", e.value) }.padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Filled.History, NativeMessages.native_entry_viewer_short(lang), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-            Text(e.text, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono),
+            Text(e.text, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES),
                 color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         else -> Box {
             val color = if (e.tone == "error") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
-            val style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono)
+            val style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES)
             Row(Modifier.fillMaxWidth().combinedClickableCompat(onLong = { menu = true }) {},
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(e.label, style = style, color = color.copy(alpha = 0.7f))
@@ -634,7 +634,7 @@ fun SubsView(m: AppModel, subs: Subs) {
                     if (r.doing.isNotEmpty()) Text(r.doing, Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelSmall,
                         color = PhaseColor.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     for (st in r.steps) Row(Modifier.padding(start = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val style = MaterialTheme.typography.labelSmall.copy(fontFamily = mono)
+                        val style = MaterialTheme.typography.labelSmall.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES)
                         if (st.kind.isNotEmpty()) Text(st.kind, style = style, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
                         Text(st.text, style = style, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -674,7 +674,7 @@ fun OrderCardView(c: OrderCard) {
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 for (st in c.steps) Text(if (st.mark == "done") "✓ " + st.label else if (st.mark == "on") "■ " + st.label else st.label,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = mono),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES),
                     fontWeight = if (st.mark == "on") FontWeight.Bold else FontWeight.Normal,
                     color = when (st.mark) { "done" -> PhaseColor.ok; "on" -> lit; else -> MaterialTheme.colorScheme.outline })
             }
@@ -682,7 +682,7 @@ fun OrderCardView(c: OrderCard) {
             if (c.total.isNotEmpty()) {
                 HorizontalDivider()
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(c.total, style = MaterialTheme.typography.titleSmall.copy(fontFamily = mono), fontWeight = FontWeight.Bold)
+                    Text(c.total, style = MaterialTheme.typography.titleSmall.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES), fontWeight = FontWeight.Bold)
                     Text(c.customs, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
                 if (c.pay.isNotEmpty()) Button(onClick = { runCatching { uri.openUri(c.pay) } }, shape = corner) { Text(c.label) }
@@ -709,7 +709,7 @@ fun NeedsCard(m: AppModel, a: Ask) {
             if (a.pre.isEmpty()) {
                 // the files' approval: what would be sent, Send / Not now
                 Box(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
-                    Text(a.detail, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono))
+                    Text(a.detail, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES))
                 }
             } else Text(a.detail, style = MaterialTheme.typography.titleSmall)
             val chips = @Composable {
@@ -752,7 +752,7 @@ fun AskCard(m: AppModel, a: Ask) {
             }
             if (a.blocks.isNotEmpty()) Box(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { Markdown(a.blocks) }
             else if (a.detail.isNotEmpty()) Box(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
-                Text(a.detail, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono))
+                Text(a.detail, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES))
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (b in a.buttons) {
@@ -819,7 +819,7 @@ fun ComposerExtras(m: AppModel, t: ThreadView) {
                             color = if (sel) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent) {
                             Column(Modifier.heightIn(min = 48.dp).padding(start = 12.dp, end = 56.dp, top = 6.dp, bottom = 6.dp),
                                 verticalArrangement = Arrangement.Center) {
-                                Text(k.name, style = MaterialTheme.typography.labelLarge, fontFamily = FontFamily.Monospace,
+                                Text(k.name, style = MaterialTheme.typography.labelLarge.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES),
                                     fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                     color = if (sel) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
                                 if (k.desc.isNotEmpty()) Text(k.desc, style = MaterialTheme.typography.bodySmall, maxLines = 2,
@@ -1019,7 +1019,7 @@ fun DiffSheet(m: AppModel, d: Diff) {
 
 @Composable
 private fun DiffRow(l: DiffLine) {
-    val style = TextStyle(fontFamily = mono, fontSize = 11.sp, lineHeight = 14.sp)
+    val style = TextStyle(fontFamily = mono, fontFeatureSettings = NO_LIGATURES, fontSize = 11.sp, lineHeight = 14.sp)
     val bg = when (l.k) { 1 -> Color(0x2443A047); 2 -> Color(0x24E53935); else -> Color.Transparent }
     Row(Modifier.fillMaxWidth().background(bg).padding(horizontal = 8.dp)) {
         if (l.k == 4) Text(l.t, style = style, color = Color(0xFF1E88E5))
@@ -1034,7 +1034,7 @@ private fun DiffRow(l: DiffLine) {
 
 private fun rgb(c: Int) = Color(0xFF000000.toInt() or c)
 
-private val termStyle = TextStyle(fontFamily = mono, fontSize = 11.sp, lineHeight = 14.sp)
+private val termStyle = TextStyle(fontFamily = mono, fontFeatureSettings = NO_LIGATURES, fontSize = 11.sp, lineHeight = 14.sp)
 
 // the size a terminal has room for on this phone, as "<cols>x<rows>"
 @Composable
@@ -1112,7 +1112,7 @@ fun TermKeys(key: (String, Int) -> Unit, keyboard: () -> Unit) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             @Composable fun k(label: String, go: () -> Unit) = OutlinedButton(onClick = go, shape = corner,
-                contentPadding = PaddingValues(horizontal = 10.dp)) { Text(label, fontFamily = mono, style = MaterialTheme.typography.labelMedium) }
+                contentPadding = PaddingValues(horizontal = 10.dp)) { Text(label, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES)) }
             @Composable fun ik(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, go: () -> Unit) =
                 OutlinedButton(onClick = go, shape = corner, contentPadding = PaddingValues(horizontal = 10.dp)) {
                     Icon(icon, label, Modifier.size(16.dp))
@@ -1204,7 +1204,7 @@ fun EmbView(m: AppModel, e: Emb, top: Boolean = false) {
             val room = with(density) { maxWidth.toPx() - 8.dp.toPx() }
             val pt = if (unit > 0f) (room / e.cols.coerceAtLeast(1) / unit * 2f).toInt() / 2f else 11f
             val sz = pt.coerceIn(7f, 11f)
-            val style = TextStyle(fontFamily = mono, fontSize = sz.sp, lineHeight = (sz * 14f / 11f).sp)
+            val style = TextStyle(fontFamily = mono, fontFeatureSettings = NO_LIGATURES, fontSize = sz.sp, lineHeight = (sz * 14f / 11f).sp)
             val cellH = remember(style) { measure.measure("M", style).size.height }
             val vs = rememberScrollState()
             if (top) LaunchedEffect(t.cursor.y, vs.maxValue, vs.viewportSize) {
@@ -1227,7 +1227,7 @@ fun EmbView(m: AppModel, e: Emb, top: Boolean = false) {
 @Composable
 fun EmbRow(m: AppModel, entry: Entry, e: Emb?) {
     val lang = LocalBackplaneLanguage.current
-    val style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono)
+    val style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono, fontFeatureSettings = NO_LIGATURES)
     val faint = MaterialTheme.colorScheme.outline
     when {
         e == null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

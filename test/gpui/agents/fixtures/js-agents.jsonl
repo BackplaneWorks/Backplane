@@ -1,0 +1,38 @@
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793845604-147","role":"user","text":"agents:2 agentsteps:2 go","at":1793845604}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793845604}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793845604-147","at":1793845604}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793845604}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793845604}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"agents:2 agentsteps:2 go","at":1793845604}
+{"$":"SessionSet","id":"t1700000001-2","session":"sess-2196181-1793845604998","at":1793845605}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"c:0","at":1793845605}
+{"$":"SettingSet","key":"turn.speed.t1700000001-2","value":"0/0/0/0/0/0/0/0","at":1793845605}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f","tone":"tool","kind":"Agent","summary":"Subagent 1 for go","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f/about","tone":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f","kind":"about","summary":"{\"type\":\"general-purpose\",\"model\":\"\",\"prompt\":\"Look into go: read the board files and report what you find.\\nKeep it short.\"}","at":1793845605}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793845605}
+{"$":"WorkSet","thread":"t1700000001-2","kind":"bg","rows":"a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f\tSubagent 1 for go\ttoolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f\tSubagent 1 for go\tsubagent","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f/start:subagent","tone":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f","kind":"start:subagent","summary":"Subagent 1 for go","at":1793845605}
+{"$":"SettingSet","key":"work.deadline.t1700000001-2.a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f","value":"1793846805","at":1793845605}
+{"$":"SettingSet","key":"work.deadline.t1700000001-2.a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f.noted","value":"","at":1793845605}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa","tone":"tool","kind":"Agent","summary":"Subagent 2 for go","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa/about","tone":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa","kind":"about","summary":"{\"type\":\"Explore\",\"model\":\"haiku\",\"prompt\":\"Look into go: read the board files and report what you find.\\nKeep it short.\"}","at":1793845605}
+{"$":"WorkSet","thread":"t1700000001-2","kind":"bg","rows":"a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f\tSubagent 1 for go\ttoolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f\tSubagent 1 for go\tsubagent\na2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa\tSubagent 2 for go\ttoolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa\tSubagent 2 for go\tsubagent","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa/start:subagent","tone":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa","kind":"start:subagent","summary":"Subagent 2 for go","at":1793845605}
+{"$":"SettingSet","key":"work.deadline.t1700000001-2.a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa","value":"1793846805","at":1793845605}
+{"$":"SettingSet","key":"work.deadline.t1700000001-2.a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa.noted","value":"","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f/toolu_332b755e-7d3f-44f7-aca2-874aa01be020","tone":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f","kind":"Bash","summary":"inspect go step 1","at":1793845605}
+{"$":"WorkSet","thread":"t1700000001-2","kind":"bg","rows":"a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f\tChecking go step 1\ttoolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f\tSubagent 1 for go\tsubagent\t1200\na2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa\tSubagent 2 for go\ttoolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa\tSubagent 2 for go\tsubagent","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f/msg_c694e632-d009-4856-b164-2d3769806bea:0","tone":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f","kind":"say","summary":"Checked go step 2","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa/toolu_346081bf-27be-4fe0-935a-9829d855aebc","tone":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa","kind":"Bash","summary":"inspect go step 1","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa/msg_bac00bc7-93fa-461f-a8be-7c612824fe81:0","tone":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa","kind":"say","summary":"Checked go step 2","at":1793845605}
+{"$":"UsageSet","thread":"t1700000001-2","used":11,"window":0,"at":1793845605}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"msg_2196181_1:0:12c755b4","role":"assistant","text":"go0 go1 go2 go3 go4 go5 go6 go7 ","at":1793845605}
+{"$":"UsageSet","thread":"t1700000001-2","used":15,"window":0,"at":1793845605}
+{"$":"WorkSet","thread":"t1700000001-2","kind":"bg","rows":"a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa\tSubagent 2 for go\ttoolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa\tSubagent 2 for go\tsubagent","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f/end","tone":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f","kind":"end","summary":"completed","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f/outcome","tone":"toolu_a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f","kind":"outcome","summary":"{\"summary\":\"a2196181x1fabbbf2-c4bd-49d7-953e-5ac7d8a4c35f done\",\"usage\":{\"total_tokens\":3200,\"tool_uses\":1,\"duration_ms\":5000}}","at":1793845605}
+{"$":"WorkSet","thread":"t1700000001-2","kind":"bg","rows":"","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa/end","tone":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa","kind":"end","summary":"completed","at":1793845605}
+{"$":"ActivityLogged","thread":"@sub:t1700000001-2","act":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa/outcome","tone":"toolu_a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa","kind":"outcome","summary":"{\"summary\":\"a2196181x376a5568-0000-4b6a-b9aa-b7400f6012aa done\",\"usage\":{\"total_tokens\":3200,\"tool_uses\":1,\"duration_ms\":5000}}","at":1793845605}
+{"$":"UsageSet","thread":"t1700000001-2","used":0,"window":200000,"at":1793845605}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793845605}

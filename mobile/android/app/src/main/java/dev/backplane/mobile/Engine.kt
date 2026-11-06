@@ -160,6 +160,9 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
                 }
             }
             android.util.Log.i("Backplane", "engine ${js.javaClass.simpleName} in ${android.os.SystemClock.elapsedRealtime() - t0} ms")
+            // as iOS does (Engine.swift): ask the hub for bounded native sidebar pages. Without it a hub with
+            // many threads sends every row, and the reply passes thin.js's replyBytes (262144) check
+            if (BuildConfig.NATIVE_SIDEBAR) js.evaluate("Backplane.nativeSidebar(1)")
             js.evaluate("Backplane.start(${q(cid)}, ${q(drafts)})")
             ctx = js
             js

@@ -1,0 +1,1 @@
+[{"select":0},{"wait":1500},{"viewshow":["schematic",""]},{"wait":5000},{"viewshow":["mech","/home/h/Documents/i2cjak/backplane-gpui/build/gpui/desktop-plot-a1/proj/mech/bracket.step"]},{"wait":12000}]

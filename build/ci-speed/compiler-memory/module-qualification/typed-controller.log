@@ -1,8 +1,0 @@
-bp-admit: admitted (2 GB, 1 cores; 0 other jobs running; waited 0s)
-ok false-proof all modes agree
-ok law-pass all modes agree
-ok law-fail all modes agree
-ok float_roundtrip.bend all modes agree
-ok json.bend all modes agree
-ok heap_queue_deque.bend all modes agree
-{"cases": 6, "invocations": 18, "seconds": 2.31363695699838}

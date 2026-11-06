@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- GPUI experiment: plain http only to the shared tailnet-only hub. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">desktop.tail9e0cf2.ts.net</domain>
+    </domain-config>
 </network-security-config>

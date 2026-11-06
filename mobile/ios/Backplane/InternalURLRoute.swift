@@ -9,7 +9,7 @@ enum InternalURLRoute: Equatable {
     case external
 
     static func route(_ url: URL) -> InternalURLRoute {
-        if url.scheme == "backplane" {
+        if url.scheme == AppIdentity.scheme || url.scheme == "backplane" {
             switch url.host {
             case "pair":
                 guard let link = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "url" })?.value,

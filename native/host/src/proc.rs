@@ -1,0 +1,159 @@
+//! The ONE place a child process is made. Every lane builds its commands with `tokio_cmd` / `std_cmd` and says what the process is
+//! for (`Kind`); on a copy of a real log (`BACKPLANE_COPY=1`, copy.rs) a command that acts outside the home is not run: the program
+//! becomes a path that does not exist, so the caller's own "could not start" handling answers, with the reason in the error.
+//! A source scan (tests below) fails the build of any other `Command::new` in non-test code.
+use crate::copy;
+use std::ffi::OsStr;
+
+/// What a process is for. On a copy: Net, Terminal, Browser and Shell are refused outright, Agent only from the stand-in folder
+/// (`BACKPLANE_AGENTS`), Local (git reads, kicad-cli, our own helpers) unless the program is a network command by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// our own helper children and local tools: the policy, the window program, plot, kicad-cli, git (its arguments are checked where known)
+    Local,
+    /// reaches another machine: curl, tailscale, ssh...
+    Net,
+    /// a user's terminal (a shell on a pty)
+    Terminal,
+    /// the browser helper
+    Browser,
+    /// a shell running a command line an agent or the user supplied (secret_run, hooks)
+    Shell,
+    /// an agent CLI (claude, codex, ...)
+    Agent,
+    /// a REAL agent CLI for a turn the person started (side-by-side mode only: `copy::person_turn_allowed()`); the only other kind that runs a real agent on a copy
+    PersonTurn,
+}
+
+/// Why a copy does not run this, or None. `on` is the copy switch (a parameter so the rule is testable).
+pub fn refusal_with(on: bool, kind: Kind, program: &str, agents_dir: Option<&str>) -> Option<String> {
+    if !on { return None }
+    let base = program.rsplit('/').next().unwrap_or(program);
+    let no = || Some(copy::refusal(base));
+    match kind {
+        Kind::Net | Kind::Terminal | Kind::Browser | Kind::Shell | Kind::PersonTurn => no(), // PersonTurn: refused here; the global `refusal` lets it through in side-by-side mode
+        Kind::Agent => match agents_dir { Some(d) if !d.is_empty() && program.starts_with(&format!("{}/", d.trim_end_matches('/'))) => None, _ => no() },
+        Kind::Local => if copy::refused_with(true, program, &[]) { no() } else { None },
+    }
+}
+fn refusal(kind: Kind, program: &str) -> Option<String> {
+    if !copy::on() { return None }
+    if kind == Kind::PersonTurn && copy::person_turn_allowed() { return None }
+    refusal_with(true, kind, program, std::env::var("BACKPLANE_AGENTS").ok().as_deref())
+}
+fn dead(program: &str, why: &str) -> String { eprintln!("{why}"); format!("/nonexistent/backplane-copy-refused/{}", program.rsplit('/').next().unwrap_or(program)) }
+
+/// `tokio::process::Command::new`, gated.
+pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Command {
+    let p = program.as_ref().to_string_lossy().into_owned();
+    match refusal(kind, &p) { None => tokio::process::Command::new(program), Some(why) => tokio::process::Command::new(dead(&p, &why)) }
+}
+/// `std::process::Command::new`, gated.
+pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
+    let p = program.as_ref().to_string_lossy().into_owned();
+    match refusal(kind, &p) { None => std::process::Command::new(program), Some(why) => std::process::Command::new(dead(&p, &why)) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // side-by-side: the person's turn is the one real agent on a copy, and nothing else opens up with it
+    #[test] fn a_person_turn_is_refused_on_a_copy_by_the_pure_rule_and_free_off_a_copy() {
+        assert!(refusal_with(true, Kind::PersonTurn, "/home/u/.local/bin/claude", None).is_some(), "refused unless side-by-side lets it through (the global `refusal`)");
+        assert!(refusal_with(false, Kind::PersonTurn, "claude", None).is_none(), "not a copy: no gate");
+    }
+    #[test] fn side_by_side_probe_child() { // run by the tests below with BACKPLANE_COPY=1 and the flag as given
+        let Ok(mode) = std::env::var("BP_SBS_PROBE") else { return };
+        assert!(copy::on());
+        let person = refusal(Kind::PersonTurn, "/home/u/.local/bin/claude").is_none();
+        assert_eq!(person, mode == "on", "PersonTurn runs only with the flag");
+        assert_eq!(copy::person_turn_allowed(), mode == "on");
+        for (k, p) in [(Kind::Agent, "/home/u/.local/bin/claude"), (Kind::Net, "curl"), (Kind::Shell, "sh"), (Kind::Terminal, "/bin/bash"), (Kind::Browser, "b"), (Kind::Local, "gh")] {
+            assert!(refusal(k, p).is_some(), "{k:?} {p} stays refused in side-by-side mode");
+        }
+        println!("sbs_probe_ok {mode}");
+    }
+    fn sbs_child(mode: &str, flag: Option<&str>) -> String {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap()); c.args(["proc::tests::side_by_side_probe_child", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BP_SBS_PROBE", mode).env_remove("BACKPLANE_AGENTS");
+        match flag { Some(f) => { c.env("BACKPLANE_SIDE_BY_SIDE", f); } None => { c.env_remove("BACKPLANE_SIDE_BY_SIDE"); } }
+        let o = c.output().unwrap(); assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); String::from_utf8_lossy(&o.stdout).into_owned()
+    }
+    #[test] fn with_the_side_by_side_flag_only_a_person_turn_may_run_a_real_agent_and_every_other_gate_holds() { assert!(sbs_child("on", Some("1")).contains(&format!("sbs_probe_ok on"))) }
+    #[test] fn without_the_flag_or_with_a_wrong_value_a_person_turn_is_refused_too() { assert!(sbs_child("off", None).contains("sbs_probe_ok off")); assert!(sbs_child("off", Some("yes")).contains("sbs_probe_ok off")); assert!(sbs_child("off", Some("0")).contains("sbs_probe_ok off")) }
+
+    // a copy runs nothing that acts outside its home
+    #[test] fn a_copy_refuses_network_terminal_browser_shell_and_foreign_agents() {
+        for (k, p) in [(Kind::Net, "curl"), (Kind::Net, "/usr/bin/tailscale"), (Kind::Terminal, "/bin/bash"), (Kind::Browser, "/x/backplane-browser"), (Kind::Shell, "/bin/sh"),
+            (Kind::Local, "curl"), (Kind::Local, "/usr/bin/ssh"), (Kind::Local, "gh"), (Kind::Agent, "/usr/bin/claude"), (Kind::Agent, "/home/u/.local/bin/codex")] {
+            assert!(refusal_with(true, k, p, None).is_some(), "{k:?} {p}");
+            assert!(refusal_with(true, k, p, Some("/tmp/standins")).is_some() || k == Kind::Agent && p.starts_with("/tmp/standins/"), "{k:?} {p}");
+        }
+        assert!(refusal_with(true, Kind::Agent, "/tmp/standins/claude", Some("/tmp/standins")).is_none(), "a stand-in agent runs");
+        assert!(refusal_with(true, Kind::Agent, "/tmp/standins-evil/claude", Some("/tmp/standins")).is_some(), "a sibling folder is not the stand-in folder");
+        for (k, p) in [(Kind::Local, "git"), (Kind::Local, "/usr/bin/kicad-cli"), (Kind::Local, "sh"), (Kind::Local, "/x/backplane-window"), (Kind::Local, "nice")] { assert_eq!(refusal_with(true, k, p, None), None, "{k:?} {p}") }
+    }
+    #[test] fn a_hub_that_is_no_copy_refuses_nothing() {
+        for (k, p) in [(Kind::Net, "curl"), (Kind::Terminal, "bash"), (Kind::Browser, "b"), (Kind::Shell, "sh"), (Kind::Agent, "claude"), (Kind::Local, "ssh")] { assert_eq!(refusal_with(false, k, p, None), None) }
+    }
+    #[test] fn a_refused_command_cannot_start_and_says_why() {
+        let p = dead("curl", "x"); assert!(p.starts_with("/nonexistent/backplane-copy-refused/"));
+        assert!(std::process::Command::new(&p).output().is_err());
+    }
+
+    /// The switch end to end: a child test process started with BACKPLANE_COPY=1 (copy::on reads it once) cannot make any of the
+    /// outside-reaching children; a normal process can still start local ones.
+    #[test] fn copy_child_probe() {
+        if std::env::var("BP_COPY_PROBE").ok().as_deref() != Some("1") { return }
+        assert!(copy::on(), "BACKPLANE_COPY=1 reached the child");
+        for (k, p) in [(Kind::Net, "curl"), (Kind::Net, "tailscale"), (Kind::Terminal, "/bin/sh"), (Kind::Browser, "/bin/true"), (Kind::Shell, "/bin/sh"), (Kind::Agent, "/bin/true"), (Kind::Local, "ssh")] {
+            assert!(std_cmd(k, p).output().is_err(), "{k:?} {p} ran on a copy");
+            assert!(tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(tokio_cmd(k, p).output()).is_err(), "{k:?} {p} ran on a copy (tokio)");
+        }
+        assert!(std_cmd(Kind::Local, "/bin/true").output().map_or(false, |o| o.status.success()), "a local tool still runs");
+    }
+    #[test] fn a_copy_run_does_nothing_outside_its_home() {
+        let me = std::env::current_exe().unwrap();
+        let o = std::process::Command::new(me).args(["proc::tests::copy_child_probe", "--exact", "--nocapture", "--test-threads=1"])
+            .env("BACKPLANE_COPY", "1").env("BP_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
+        assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    }
+
+    /// The gate is the only way to make a process: no other non-test `Command::new` anywhere under src/ (src/bin has its own crates' helpers).
+    #[test] fn every_child_process_is_made_through_proc() {
+        fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { if p.file_name().map_or(false, |n| n == "bin") { continue } walk(&p, out) } else if p.extension().map_or(false, |x| x == "rs") { out.push(p) } } }
+        let mut files = vec![]; walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+        let mut bad = vec![];
+        for f in files {
+            if f.ends_with("proc.rs") { continue }
+            let text = std::fs::read_to_string(&f).unwrap();
+            let name = f.to_string_lossy();
+            if name.ends_with("tests.rs") || name.contains("/tests/") { continue }
+            // everything after the first #[cfg(test)] line is test code
+            let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
+            for (i, l) in code.lines().enumerate() { if l.contains("Command::new(") && !l.trim_start().starts_with("//") { bad.push(format!("{}:{}", name, i + 1)) } }
+        }
+        assert!(bad.is_empty(), "build children with crate::proc::{{tokio_cmd, std_cmd}}: {bad:?}");
+    }
+
+    /// A raw socket to another machine is not a child process, so the gate above does not see it: every non-test connect is on this list,
+    /// and each entry says why it is fine on a copy. A new one must be added here by a reviewer, not by accident.
+    #[test] fn every_outbound_socket_is_on_the_allowlist() {
+        // presenter.rs: loopback to our own policy child; kicad/nng.rs: the KiCad unix socket; net/tailnet.rs: `hello_with` returns at once on a copy
+        const ALLOWED: [&str; 3] = ["presenter.rs", "kicad/nng.rs", "net/tailnet.rs"];
+        fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { if p.file_name().map_or(false, |n| n == "bin") { continue } walk(&p, out) } else if p.extension().map_or(false, |x| x == "rs") { out.push(p) } } }
+        let mut files = vec![]; walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+        let mut bad = vec![];
+        for f in files {
+            let name = f.to_string_lossy().into_owned();
+            if name.ends_with("tests.rs") || name.ends_with("e2e.rs") || name.contains("/tests/") || ALLOWED.iter().any(|a| name.ends_with(a)) { continue }
+            let text = std::fs::read_to_string(&f).unwrap();
+            let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
+            for (i, l) in code.lines().enumerate() {
+                let l = l.trim_start(); if l.starts_with("//") { continue }
+                if ["TcpStream::connect", "UdpSocket", "TcpSocket", "connect_async", "UnixStream::connect"].iter().any(|k| l.contains(k)) { bad.push(format!("{name}:{}", i + 1)) }
+            }
+        }
+        assert!(bad.is_empty(), "an outbound socket outside the allowlist (add it to proc.rs's list with a copy-guard): {bad:?}");
+    }
+}

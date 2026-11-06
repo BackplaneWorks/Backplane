@@ -1,1 +1,0 @@
-{"seconds": 40.400340459, "process_group": 5925, "owned": [{"pid": 5925, "state": "D", "user_ticks": 4, "system_ticks": 3, "start_ticks": "3988", "rss_pages": 14142, "wchan": "jbd2_log_wait_commit"}]}

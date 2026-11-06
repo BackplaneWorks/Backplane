@@ -1,0 +1,13 @@
+[
+ {"wait": 3000},
+ {"click": "ui:Improvements"}, {"wait": 1200},
+ {"imp": "text Hand-off test, nothing to change. Do not edit files and do not run any tool. Reply with exactly one sentence: which branch the hand-off block above tells you to work on."},
+ {"click": "imp:dest-internal"}, {"wait": 500},
+ {"click": "imp:capture"}, {"wait": 3500},
+ {"imp": "snap improvements-real-01-ready"},
+ {"click": "imp:primary"}, {"wait": 6000},
+ {"imp": "snap improvements-real-02-sent"},
+ {"wait": 90000},
+ {"imp": "state"}, {"imp": "snap improvements-real-03-reply"},
+ {"wait": 1500}
+]

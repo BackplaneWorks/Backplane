@@ -1,0 +1,42 @@
+{"$":"ThreadCreated","id":"t1793886907-147","project":"","title":"ada","env":"local","branch":"","worktree":"","provider":"claude","model":""}
+{"$":"BotSet","id":"b1793886907-147","name":"ada","thread":"t1793886907-147","look":304951,"persona":""}
+{"$":"WorktreeSet","id":"t1793886907-147","branch":"","worktree":"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec5/work/home/bots/b1793886907-147"}
+{"$":"ThreadCreated","id":"t1793886907-151","project":"","title":"bob","env":"local","branch":"","worktree":"","provider":"claude","model":""}
+{"$":"BotSet","id":"b1793886907-151","name":"bob","thread":"t1793886907-151","look":306254,"persona":""}
+{"$":"WorktreeSet","id":"t1793886907-151","branch":"","worktree":"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec5/work/home/bots/b1793886907-151"}
+{"$":"RoomSet","id":"r1","name":"lab","members":"b1793886907-147\nb1793886907-151"}
+{"$":"RoomPosted","id":"p1","room":"r1","from":"you","text":"hello all","hop":0}
+{"$":"MailPosted","id":"p1","conv":"room:r1","from":"person","to":"room:r1","kind":"room","ref":"r1","want":"fyi","head":"hello all","size":9}
+{"$":"RoutineSet","id":"ro1","bot":"b1793886907-147","name":"later","cron":"","prompt":"do it","on":true}
+{"$":"RoutinePlan","id":"ro1","once":"<T>","tz":"person","kind":""}
+{"$":"RoutineFired","id":"ro1"}
+{"$":"RoutineDone","id":"ro1"}
+{"$":"BotWoke","bot":"b1793886907-147","hop":0}
+{"$":"ConvSet","id":"routine:ro1","subject":"routine:ro1 ↔ ada","kind":"routine","parts":"routine:ro1\nbot:b1793886907-147","project":"","tags":""}
+{"$":"MailPosted","id":"m1793886909-162.0","conv":"routine:ro1","from":"routine:ro1","to":"bot:b1793886907-147","kind":"routine","ref":"ro1","want":"act","head":"[routine: later]","size":22}
+{"$":"ThreadCreated","id":"t1793886911-225","project":"","title":"bub","env":"local","branch":"","worktree":"","provider":"claude","model":""}
+{"$":"BotSet","id":"b1793886911-225","name":"bub","thread":"t1793886911-225","look":306440,"persona":""}
+{"$":"WorktreeSet","id":"t1793886911-225","branch":"","worktree":"/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/bots/rec5/work/home/bots/b1793886911-225"}
+{"$":"UberSet","bot":"b1793886911-225","uid":"<uid>"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":1,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"who\",\"name\":\"bub\",\"look\":306440,\"persona\":\"\"}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":2,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"lease\",\"holder\":\"<me>\",\"term\":1}"}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":3,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"bind\",\"machine\":\"<me>\",\"bot\":\"b1793886911-225\",\"thread\":\"t1793886911-225\",\"name\":\"bub\"}"}
+{"$":"RoomSet","id":"r2","name":"ops","members":"b1793886911-225\nb1793886907-147"}
+{"$":"RoomPosted","id":"p2","room":"r2","from":"you","text":"status?","hop":0}
+{"$":"BotWoke","bot":"b1793886907-147","hop":0}
+{"$":"MessagePosted","thread":"t1793886907-147","msg":"m1793886914-328.1","role":"user","text":"[message from you in #ops]\nstatus?"}
+{"$":"MessageFrom","thread":"t1793886907-147","msg":"m1793886914-328.1","from":"person","kind":"room","ref":"ops"}
+{"$":"RoutineSet","id":"ro2","bot":"b1793886911-225","name":"morning","cron":"","prompt":"plan the day","on":true}
+{"$":"RoutinePlan","id":"ro2","once":"<T>","tz":"person","kind":""}
+{"$":"UberOp","uid":"<uid>","origin":"<me>","n":4,"stamp":"<S>.<c>.<me>","op":"{\"k\":\"routine\",\"id\":\"<me>:ro2\",\"name\":\"morning\",\"cron\":\"\",\"prompt\":\"plan the day\",\"on\":true,\"pin\":\"\",\"once\":<T>,\"tz\":\"person\",\"kind\":\"\"}"}
+{"$":"RoutineFired","id":"ro2"}
+{"$":"RoutineDone","id":"ro2"}
+{"$":"BotWoke","bot":"b1793886911-225","hop":0}
+{"$":"ConvSet","id":"routine:ro2","subject":"routine:ro2 ↔ bub","kind":"routine","parts":"routine:ro2\nbot:b1793886911-225","project":"","tags":""}
+{"$":"MailPosted","id":"m1793886915-344.0","conv":"routine:ro2","from":"routine:ro2","to":"bot:b1793886911-225","kind":"routine","ref":"ro2","want":"act","head":"[routine: morning]","size":31}
+{"$":"SettingSet","key":"owner.mail.id.m1793886915-344.0","value":"owner:[\"<uid>\",\"<me>\",\"m1793886915-344.0\"]"}
+{"$":"SettingSet","key":"owner.mail.local.owner:[\"<uid>\",\"<me>\",\"m1793886915-344.0\"]","value":"{\"uid\":\"<uid>\",\"origin\":\"<me>\",\"mail\":{\"id\":\"m1793886915-344.0\",\"conv\":\"routine:ro2\",\"from\":\"routine:ro2\",\"to\":\"bot:b1793886911-225\",\"kind\":\"routine\",\"ref\":\"ro2\",\"want\":\"act\",\"head\":\"[routine: morning]\",\"size\":31,\"at\":1793886915},\"conversation\":{\"id\":\"routine:ro2\",\"subject\":\"routine:ro2 ↔ bub\",\"kind\":\"routine\",\"parts\":[\"routine:ro2\",\"bot:b1793886911-225\"],\"project\":\"\",\"tags\":[],\"made\":1793886915,\"last\":1793886915,\"n\":0},\"id\":\"m1793886915-344.0\",\"conv\":\"routine:ro2\",\"stamp\":\"1793886915:344:1\"}"}
+{"$":"SettingSet","key":"owner.mail.pending.owner:[\"<uid>\",\"<me>\",\"m1793886915-344.0\"]","value":"{\"uid\":\"<uid>\",\"origin\":\"<me>\",\"mail\":{\"id\":\"m1793886915-344.0\",\"conv\":\"routine:ro2\",\"from\":\"routine:ro2\",\"to\":\"bot:b1793886911-225\",\"kind\":\"routine\",\"ref\":\"ro2\",\"want\":\"act\",\"head\":\"[routine: morning]\",\"size\":31,\"at\":1793886915},\"conversation\":{\"id\":\"routine:ro2\",\"subject\":\"routine:ro2 ↔ bub\",\"kind\":\"routine\",\"parts\":[\"routine:ro2\",\"bot:b1793886911-225\"],\"project\":\"\",\"tags\":[],\"made\":1793886915,\"last\":1793886915,\"n\":0},\"id\":\"m1793886915-344.0\",\"conv\":\"routine:ro2\",\"stamp\":\"1793886915:344:1\"}"}
+{"$":"MailFile","name":"room%3Ar1.jsonl","lines":["{\"v\":1,\"conv\":{\"id\":\"room:r1\",\"subject\":\"lab\",\"kind\":\"room\",\"parts\":[\"bot:b1793886907-147\",\"bot:b1793886907-151\",\"person\"],\"project\":\"\",\"tags\":[],\"made\":1793886908,\"last\":1793886908,\"n\":0},\"mail\":{\"id\":\"p1\",\"conv\":\"room:r1\",\"from\":\"person\",\"to\":\"room:r1\",\"kind\":\"room\",\"ref\":\"r1\",\"want\":\"fyi\",\"head\":\"hello all\",\"size\":9,\"at\":1793886908},\"text\":\"hello all\"}"]}
+{"$":"MailFile","name":"routine%3Aro1.jsonl","lines":["{\"v\":1,\"conv\":{\"id\":\"routine:ro1\",\"subject\":\"routine:ro1 ↔ ada\",\"kind\":\"routine\",\"parts\":[\"routine:ro1\",\"bot:b1793886907-147\"],\"project\":\"\",\"tags\":[],\"made\":1793886909,\"last\":1793886909,\"n\":0},\"mail\":{\"id\":\"m1793886909-162.0\",\"conv\":\"routine:ro1\",\"from\":\"routine:ro1\",\"to\":\"bot:b1793886907-147\",\"kind\":\"routine\",\"ref\":\"ro1\",\"want\":\"act\",\"head\":\"[routine: later]\",\"size\":22,\"at\":1793886909},\"text\":\"[routine: later]\\ndo it\"}"]}
+{"$":"MailFile","name":"routine%3Aro2.jsonl","lines":["{\"v\":1,\"conv\":{\"id\":\"routine:ro2\",\"subject\":\"routine:ro2 ↔ bub\",\"kind\":\"routine\",\"parts\":[\"routine:ro2\",\"bot:b1793886911-225\"],\"project\":\"\",\"tags\":[],\"made\":1793886915,\"last\":1793886915,\"n\":0},\"mail\":{\"id\":\"m1793886915-344.0\",\"conv\":\"routine:ro2\",\"from\":\"routine:ro2\",\"to\":\"bot:b1793886911-225\",\"kind\":\"routine\",\"ref\":\"ro2\",\"want\":\"act\",\"head\":\"[routine: morning]\",\"size\":31,\"at\":1793886915},\"text\":\"[routine: morning]\\nplan the day\"}"]}

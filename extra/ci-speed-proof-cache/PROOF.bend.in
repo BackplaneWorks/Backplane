@@ -1,8 +1,0 @@
-import Base
-import ./LAWS.bend as Laws
-
-def Laws.cache_first():
-  {==}
-
-def Laws.cache_second():
-  {==}

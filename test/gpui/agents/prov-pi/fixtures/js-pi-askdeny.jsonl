@@ -1,0 +1,37 @@
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1793862326}
+{"$":"SettingSet","key":"machine.id","value":"m47d4a2d049e3ba0456261eeb9c91dca64e5a8f0aa8018198","at":1793862326}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1793862326}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1793862326,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1793862326}
+{"$":"SettingSet","key":"tz.machine","value":"America/New_York","at":1793862326}
+{"$":"SettingSet","key":"tz.rule.America/New_York","value":"EST5EDT,M3.2.0,M11.1.0","at":1793862326}
+{"$":"SettingSet","key":"tz.checked","value":"1793862326","at":1793862326}
+{"$":"ModesSet","id":"t1700000001-2","runtime":"approval-required","interaction":"default","model":"","at":1793862330}
+{"$":"SettingSet","key":"account.failover.preference.t1700000001-2","value":"","at":1793862330}
+{"$":"SettingSet","key":"fallback.intent.t1700000001-2","value":"","at":1793862330}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"m1793862330-150\"],\"token\":\"m1793862330-150\",\"eligibleAt\":0,\"sentAt\":0}","at":1793862330}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"m1793862330-150","role":"user","text":"zqask go","at":1793862330}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"running","at":1793862330}
+{"$":"SettingSet","key":"turn.from.t1700000001-2","value":"@m1793862330-150","at":1793862330}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862330,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1793862330}
+{"$":"SettingSet","key":"restart.retry.t1700000001-2","value":"","at":1793862330}
+{"$":"SettingSet","key":"provider.resume.t1700000001-2","value":"","at":1793862330}
+{"$":"SettingSet","key":"fallback.input.t1700000001-2","value":"zqask go","at":1793862330}
+{"$":"SettingSet","key":"autosettle.quiet.t1700000001-2","value":"1793862330","at":1793862330}
+{"$":"SettingSet","key":"autosettle.audience.t1700000001-2","value":"person","at":1793862330}
+{"$":"SessionSet","id":"t1700000001-2","session":"bp-t1700000001-2-1793862330-160-0","at":1793862330}
+{"$":"SettingSet","key":"tok.basis.t1700000001-2","value":"x:bp-t1700000001-2-1793862330-160-0:0/0/0/0/0","at":1793862330}
+{"$":"AskOpened","id":"q1793862330-162","thread":"t1700000001-2","kind":"approval","tool":"bash","detail":"rm -rf build","options":"","at":1793862330}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"ask\task-t1700000001-2\t\t1793862330.163\tbash rm -rf build","at":1793862330}
+{"$":"SettingSet","key":"told.k1793862330-162-1","value":"{\"key\":\"ask-t1700000001-2\",\"text\":\"Fixture short: bash rm -rf build\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862330}","at":1793862330}
+{"$":"PendingChanged","thread":"t1700000001-2","count":1,"at":1793862330}
+{"$":"AskClosed","id":"q1793862330-162","answer":"decline","at":1793862330}
+{"$":"ActivityLogged","thread":"t1700000001-2","act":"k1793862330-166","tone":"info","kind":"answer","summary":"Denied: bash rm -rf build","at":1793862330}
+{"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862330,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1793862330}
+{"$":"PendingChanged","thread":"t1700000001-2","count":0,"at":1793862330}
+{"$":"MessagePosted","thread":"t1700000001-2","msg":"c1793862330-170-170","role":"assistant","text":"Left it alone.","at":1793862330}
+{"$":"SettingSet","key":"autosettle.output.t1700000001-2","value":"c1793862330-170-170","at":1793862330}
+{"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793862330}
+{"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793862330","at":1793862330}
+{"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793862330-150\t1793862330.173\t","at":1793862330}
+{"$":"SettingSet","key":"told.k1793862330-172-2","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short: Left it alone.\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862330}","at":1793862330}
+{"$":"SettingSet","key":"summary.at.p1700000000-1","value":"1793862330","at":1793862330}
