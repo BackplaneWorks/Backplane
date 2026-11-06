@@ -1,5 +1,5 @@
 // Shared helpers for the perf stream: hub launch in a capped scope, ws client, /proc sampling.
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {mkdirSync,readFileSync,readdirSync,writeFileSync,chmodSync,existsSync,statSync} from 'node:fs';
 import {decode,encode} from '../wire.mjs';
 import {standinScript} from '../tools/perf_standin.ts';
@@ -41,9 +41,11 @@ export async function startHub({bin,home,port,standins,host,extraEnv={},extraArg
  // the hub pid: read hub.lock "<pid> <port> flock"
  let pid=NaN;for(let i=0;i<50;i++){const m=/^(\d+)/.exec(rd(`${home}/hub.lock`));if(m){pid=Number(m[1]);break}await sleep(100)}
  // COMMON.md rule: verify from the hub's own environ that it runs stand-in agents only, before any turn
- try{const env=readFileSync(`/proc/${pid}/environ`,'utf8').split('\0');const a=env.find(x=>x.startsWith('BACKPLANE_AGENTS='));if(!a||a.slice(17)!==standins){try{process.kill(pid,'SIGTERM')}catch{}throw Error('hub does not run stand-in agents only: '+a)}}catch(e){if(String(e).includes('stand-in'))throw e;throw Error('cannot verify BACKPLANE_AGENTS of hub '+pid+': '+e)}
+ try{const env=existsSync(`/proc/${pid}/environ`)?readFileSync(`/proc/${pid}/environ`,'utf8').split('\0'):execFileSync('ps',['eww','-p',String(pid)]).toString().split(/\s+/); /* no /proc (macOS): the process environment through ps */ const a=env.find(x=>x.startsWith('BACKPLANE_AGENTS='));if(!a||a.slice(17)!==standins){try{process.kill(pid,'SIGTERM')}catch{}throw Error('hub does not run stand-in agents only: '+a)}}catch(e){if(String(e).includes('stand-in'))throw e;throw Error('cannot verify BACKPLANE_AGENTS of hub '+pid+': '+e)}
  return {proc,pid,home,port,host:h,token:rd(`${home}/token`).trim(),url:`http://${h}:${port}`};
 }
+/** Whether a pid is still there (kill 0): /proc does not exist on macOS. */
+export const pidAlive=pid=>{try{process.kill(pid,0);return true}catch{return false}};
 export function stopHub(h){try{process.kill(h.pid,'SIGTERM')}catch{}}
 // Plain ws client (log + deltas), like agents_load.
 export async function client(h,{view=false,onMsg,since,origin}={}){
