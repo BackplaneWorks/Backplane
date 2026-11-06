@@ -92,6 +92,12 @@ impl Backplane {
             self.screens.seeking = None;
         }
     }
+    /// Go to a message by its entry id (a reply's link); nothing when the rows held do not have it.
+    pub(crate) fn timeline_goto(&mut self, id: &str) {
+        if let Some(ix) = self.data["thread"]["entries"].as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id))) {
+            self.timeline.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.) });
+        }
+    }
     /// The end of the thread, and following it again. (Past the last row: the list takes it for its end.)
     pub(crate) fn timeline_to_end(&self) { self.timeline.scroll_to(ListOffset { item_ix: self.timeline.item_count(), offset_in_item: px(0.) }); }
     /// A picture was applied. `prev` is the thread that was on screen: this picture of the same thread is laid over the rows it held, so what was

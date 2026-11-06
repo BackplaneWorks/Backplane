@@ -199,8 +199,12 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
         if e.role == "user" && e.text.starts_with(CARRY) {
             out.push(json!({"id": e.id, "kind": "act", "tone": "info restart", "label": "restart", "text": "Continuing after the restart"}));
         } else if e.role == "user" {
-            let (body, paths) = att_split(&e.text);
-            out.push(json!({"id": e.id, "kind": "user", "text": body, "attachments": paths.iter().map(|p| chip(p)).collect::<Vec<_>>(), "stamp": c.unwrap_or_default()}));
+            // Rto.of: a reply's quote block is the agent's; every client shows the body and an "In reply to" line naming the message
+            let (reply, shown) = match crate::session::composer::reply_split(&e.text) { Some((id, q, b)) => (Some((id, q)), b), None => (None, e.text.clone()) };
+            let (body, paths) = att_split(&shown);
+            let mut row = json!({"id": e.id, "kind": "user", "text": body, "attachments": paths.iter().map(|p| chip(p)).collect::<Vec<_>>(), "stamp": c.unwrap_or_default()});
+            if let Some((rid, q)) = reply { row["replyTo"] = json!({"id": rid, "quote": q.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); }
+            out.push(row);
         } else {
             let st = ends.get(&e.id).copied().unwrap_or(0);
             // Stamp.reply.s / .f / reply: how the turn ended says the word; a stopped one says it whether or not the page holds its start
@@ -393,8 +397,13 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     // Mob.chip: the attachments waiting in `@att:<thread>` and the file still uploading in `@att.up:<thread>`
     let atts = crate::session::composer::att_paths(params["session"]["drafts"][format!("@att:{thread}")].as_str().unwrap_or(""));
     o.insert("attaching".into(), Value::Array(atts.iter().map(|p| chip(p)).collect()));
+    // Rpl: the message being replied to, shown over the composer
+    let rid = params["session"]["drafts"][format!("@reply:{thread}")].as_str().unwrap_or("");
+    o.insert("replying".into(), if rid.is_empty() { Value::Null } else { json!({"id": rid, "text": params["session"]["drafts"][format!("@reply.q:{thread}")].as_str().unwrap_or("")}) });
     o.insert("uploading".into(), json!(params["session"]["drafts"][format!("@att.up:{thread}")].as_str().unwrap_or("")));
-    let c = crate::session::composer::fields(draft, running, !atts.is_empty(), t.provider == "claude", &json!([]), lang).ok_or("composer.language")?;
+    // the reference popup (`@bot >thread %project #room`), from this hub's own state
+    let refs = Value::Array(crate::session::composer::mention::rows(st, thread, draft));
+    let c = crate::session::composer::fields(draft, running, !atts.is_empty(), t.provider == "claude", &refs, lang).ok_or("composer.language")?;
     for (k, v) in state_keys { o.insert(k, v); }
     o.insert("asks".into(), Value::Array(asks_json(st, thread, draft)?));
     for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }
@@ -455,7 +464,7 @@ mod tests {
         let o = thread_object(&st, "h", th, &p["params"], "/").unwrap();
         assert!(!o["skills"].as_array().unwrap().is_empty(), "a slash being typed lists the commands");
         let o = thread_object(&st, "h", th, &p["params"], "see @bob").unwrap();
-        assert_eq!(o["skills"].as_array().map(Vec::len), Some(0), "a mention being typed: no popup yet, the thread is still drawn");
+        assert!(o["skills"].as_array().is_some(), "a mention being typed: the thread is still drawn");
         st.apply_line(r#"{"$":"SettingSet","key":"lang","value":"ja","at":1}"#);
         assert!(thread_object(&st, "h", th, &p["params"], "").is_none(), "another language is the helper's");
     }

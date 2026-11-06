@@ -173,7 +173,7 @@ pub fn chips(cx: &mut Context<Backplane>, light: bool, previews: &Previews, thre
         let (label, path) = (string(it, "label"), string(it, "path"));
         let thumb = previews.get(&label).filter(|_| it["image"].as_bool().unwrap_or(false));
         let mark = match thumb {
-            Some(img) => div().size(px(40.)).flex_shrink_0().child(gpui::img(ImageSource::Image(img)).size(px(40.)).object_fit(ObjectFit::Cover)).into_any_element(),
+            Some(img) => div().size(px(64.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).child(gpui::img(ImageSource::Image(img)).size(px(64.)).object_fit(ObjectFit::Contain)).into_any_element(),
             None => div().size(px(40.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).text_size(px(10.)).text_color(c("dim")).child(if it["image"].as_bool().unwrap_or(false) { "IMG" } else { "FILE" }).into_any_element(),
         };
         row = row.child(div().id(("att", i)).flex().items_center().gap_2().pr_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.))
