@@ -153,6 +153,32 @@ fn msg_tools(cx: &mut Context<Backplane>, light: bool, id: &str, text: &str) -> 
 }
 
 impl Backplane {
+    /// One thread row of the sidebar (a project's, or the Active view's: `sub` names the project there, `faded` is a settled one).
+    pub(crate) fn side_thread(&self, cx: &mut Context<Self>, light: bool, t: &Value, pid: &str, sub: &str, faded: bool, ctl: &mut Vec<CtlEntry>) -> AnyElement {
+        let c = |name: &str| theme::color(light, name);
+                let id = string(t, "id");
+                let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
+                let selected = raw == self.selected;
+                let dot = match t["status"].as_str().unwrap_or("") { "active" => c("accent"), "blocked" | "failed" | "stalled" => c("bad"), "waiting" => c("dim"), "settled" | "inactive" => c("faint"), _ => c("ok") };
+                ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
+                let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
+                let toggle = (kids > 0).then(|| {
+                    let tid = id.clone();
+                    div().id(SharedString::from(format!("tree-{id}"))).flex_shrink_0().w(px(16.)).cursor_pointer().child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
+                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
+                });
+                if kids > 0 { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
+                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(22. + depth * 14.)).pr_3().h(px(32.)).when(faded, |d| d.opacity(0.55))
+                    .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
+                    .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
+                    .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))
+                    .on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid.to_string()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) })
+                    .children(toggle).child(div().size(px(5.)).bg(dot)).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().child(div().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(px(11.)).text_color(c("faint")).child(sub.to_string()))))
+                    .child(div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") })).into_any_element()
+    }
+}
+
+impl Backplane {
     /// One row of the timeline, as the list asks for it: only rows on screen are drawn.
     pub(crate) fn timeline_row(&mut self, ei: usize, cx: &mut Context<Self>) -> AnyElement {
         let light = self.light();
@@ -274,25 +300,23 @@ impl Render for Backplane {
                 .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items(&pidm); this.ctx_open(e.position, items, cx); }) })
                 .child(ic(light, "chevron-down", 14., "dim")).child(ic(light, "folder", 14., "ok")).child(div().flex_1().child(string(project, "title").to_uppercase())).child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid_new2.clone())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
             for t in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {
-                let id = string(t, "id");
-                let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
-                let selected = raw == self.selected;
-                let dot = match t["state"].as_str().unwrap_or("") { "running" => c("accent"), "failed" => c("bad"), _ => c("ok") };
-                ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
-                let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
-                let toggle = (kids > 0).then(|| {
-                    let tid = id.clone();
-                    div().id(SharedString::from(format!("tree-{id}"))).flex_shrink_0().w(px(16.)).cursor_pointer().child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
-                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
-                });
-                if kids > 0 { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
-                rows.push(with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(22. + depth * 14.)).pr_3().h(px(32.))
-                    .border_l_2().border_color(if selected { c("ok") } else { c("panel") })
-                    .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
-                    .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))
-                    .on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid_thr.clone()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) })
-                    .children(toggle).child(div().size(px(5.)).bg(dot)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
-                    .child(div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") })).into_any_element());
+                rows.push(self.side_thread(cx, light, t, &pid_thr, "", false, &mut ctl));
+            }
+        }
+        // the Active view: threads that need the person first, then the settled ones folded under "Settled N"
+        for t in self.data["active"].as_array().into_iter().flatten() {
+            let pid = string(t, "projectId"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
+            rows.push(self.side_thread(cx, light, t, &pid, &string(t, "project"), false, &mut ctl));
+        }
+        if let Some(n) = self.data["activeSettled"]["count"].as_u64().filter(|n| *n > 0) {
+            let open = self.data["activeSettled"]["open"].as_bool().unwrap_or(false);
+            ctl.push(CtlEntry { id: "side-settled".into(), label: "Settled".into(), ctl: Ctl::Node("side-settled".into(), String::new()) });
+            rows.push(with_rect(div().id("side-settled"), || "side-settled".to_string()).flex().items_center().gap_2().px_3().py_1().mt_2().text_size(px(11.)).text_color(c("accent")).cursor_pointer().hover(|s| s.bg(c("raise")))
+                .child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(format!("Settled {n}"))
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("side-settled".into(), String::new())); cx.notify(); })).into_any_element());
+            for t in self.data["activeSettled"]["rows"].as_array().into_iter().flatten() {
+                let pid = string(t, "projectId"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
+                rows.push(self.side_thread(cx, light, t, &pid, &string(t, "project"), true, &mut ctl));
             }
         }
         for page in self.data["sidebarPages"].as_array().into_iter().flatten() {
@@ -480,7 +504,7 @@ impl Render for Backplane {
                         .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
                         .children(reply_chip(cx, light, &thread["replying"]))
                         .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
-                        .child(div().border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).child(self.input.clone()))
+                        .child(div().id("composer-box").border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
                         .child(div().flex().flex_wrap().gap_2().items_center().w_full().min_w_0()
                             .child(crate::screens::bar::fit(with_rect(div().id("model-chip"), || "ui:Model".to_string())).cursor_pointer().on_click(cx.listener(|this, _, window, cx| this.picker_toggle(window, cx))).flex_1().min_w(px(180.)).overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).flex().items_center().gap_2().child(crate::screens::picker::logo("claude")).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
                             .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::chip(cx, light, &self.screens.acct, &string(thread, "id")), || "ui:Account".to_string())))

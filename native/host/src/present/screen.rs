@@ -116,10 +116,10 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         // the sidebar's search box: the query is kept in the session (`@f.pq`); "proj-find" (the phones' toggle) changes nothing here
         "proj-find-q" => { session["drafts"]["@f.pq"]=json!(value); },
         "proj-find" => {},
-        "flag" | "side-older" => {
+        "flag" | "side-older" | "side-settled" => {
             let raw=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
-            let key=if action=="side-older" { "old-projects" } else { raw };
-            let known=key=="old-projects" || st.projects.contains_key(key.strip_prefix("arch:").unwrap_or(key));
+            let key=match action { "side-older"=>"old-projects", "side-settled"=>"active-settled", _=>raw };
+            let known=key=="old-projects" || key=="active-settled" || st.projects.contains_key(key.strip_prefix("arch:").unwrap_or(key));
             if !known { return refused("action.sidebar-flag") }
             if !session["open"].is_object() { session["open"]=json!({}); }
             let was=flag(&session,key); session["open"][key]=json!(!was);
@@ -215,11 +215,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         }
     };
     let local_mode=text(&session["drafts"],"@local.view");
-    let mode=if ["projects","active"].contains(&local_mode) { local_mode } else if setting(st,"sidebar.view")=="active" { "active" } else { "projects" };
-    // Active list and search are separate port slices; claiming them would hide projects silently.
-    // The setting alone (another client chose it) shows the projects list: the Active view is not drawn here yet; a view asked for in this session says so.
-    if local_mode=="active" { return refused("sidebar.active-mode") }
-    let mode="projects";
+    let mode: &'static str=if local_mode=="projects" { "projects" } else if local_mode=="active" || setting(st,"sidebar.view")=="active" { "active" } else { "projects" };
     let query=text(&session["drafts"],"@f.pq").trim().to_string();
     let Some(mut ns)=NativeSidebar::prepare(p,mode,&query,&session["open"],st.projects.keys().cloned().collect()) else { return refused("sidebar.key-or-capability") };
     if action=="native-sidebar-page" && !ns.accept(value) { return Some(json!({"refused":true,"local":p.get("local").cloned().unwrap_or(json!({}))})) }
@@ -235,7 +231,8 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     // For now an explicitly opened thread in a folded Older project is unported. The recent list
     // already offers only visible projects; forcing an excluded project needs the filter exception port.
     // (a removed project's thread still draws, with no row for it)
-    if !selected_project.is_empty() && !ids.contains(&selected_project) && st.projects.get(selected_project).map_or(false,|p|!p.removed) { return refused("sidebar.selected-project-hidden") }
+    if mode!="active" && !selected_project.is_empty() && !ids.contains(&selected_project) && st.projects.get(selected_project).map_or(false,|p|!p.removed) { return refused("sidebar.selected-project-hidden") }
+    let ids: Vec<&str>=if mode=="active" { vec![] } else { ids };
     let (mut indices,projects_page)=ns.slice_ids(&ids,"projects","",project_limit,selected_project);
     indices.sort_unstable(); // Mob.native.keep_projects keeps source order, including the selected exception.
     let selected: Vec<&str>=indices.into_iter().map(|i|ids[i]).collect();
@@ -258,8 +255,15 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,hub),"bots":bots(st,hub,opts.now),"theme":setting(st,"ui.theme"),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":null,"newBot":null,"projectHome":null});
     let mut shown=shown;
+    // the Active view: what needs the person first, then the recently settled folded under "Settled N" (a search shows them)
+    if mode=="active" {
+        let (live,faded)=plan.active(&|title,proj| query.is_empty() || fuzzy_hit(title,&query) || fuzzy_hit(proj,&query));
+        let open=flag(&session,"active-settled") || !query.is_empty();
+        shown["active"]=json!(live);
+        shown["activeSettled"]=json!({"count":faded.len(),"open":open,"rows":if open { faded } else { vec![] }});
+    }
     // the Older group: a row that opens or shuts it (a search opens it by itself)
-    if query.is_empty() && plan.older_count()>0 { shown["olderProjects"]=json!({"count":plan.older_count(),"open":flag(&session,"old-projects")}); }
+    if mode!="active" && query.is_empty() && plan.older_count()>0 { shown["olderProjects"]=json!({"count":plan.older_count(),"open":flag(&session,"old-projects")}); }
     // the query in force, said back once the box has been used (the client takes it when it is not what it sent: Enter clears it)
     if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search projects"}); }
     { let f=picker::folders(&session["drafts"],&std::env::var("HOME").unwrap_or_default(),&st.projects.values().filter(|p|!p.removed).map(|p|p.root.as_str()).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
@@ -402,10 +406,27 @@ mod state_tests {
         let mut p3=p.clone(); p3["session"]["open"]=json!({"old-projects":true}); let v3=recent(&st,&p3).unwrap();
         assert_eq!(names(&v3).len(),2); assert_eq!(v3["shown"]["olderProjects"],json!({"count":1,"open":true}));
     }
-    #[test] fn the_active_view_setting_alone_shows_the_projects_list() {
-        let mut st=two_projects(); event(&mut st,json!({"$":"SettingSet","key":"sidebar.view","value":"active","at":5}));
-        assert_eq!(names(&recent(&st,&params()).unwrap()).len(),2);
-        let mut p=params(); p["session"]["drafts"]=json!({"@local.view":"active"}); assert!(recent(&st,&p).is_none(),"asked for in this session: said, not drawn");
+    fn active_titles(v: &Value) -> Vec<String> { v["shown"]["active"].as_array().unwrap().iter().map(|r|r["title"].as_str().unwrap().to_string()).collect() }
+    #[test] fn the_active_view_lists_live_threads_by_urgency_with_the_settled_folded_and_no_project_rows() {
+        let mut st=two_projects();
+        for e in [json!({"$":"ThreadCreated","id":"tc","project":"pa","title":"Failing one","at":5}), json!({"$":"TurnChanged","thread":"tc","state":"failed","at":7}),
+            json!({"$":"ThreadCreated","id":"td","project":"pb","title":"Pinned old","at":2}), json!({"$":"ThreadCreated","id":"te","project":"pb","title":"Settled one","at":2})] { st.apply(&e); }
+        event(&mut st,json!({"$":"SettingSet","key":"sidebar.view","value":"active","at":9}));
+        let v=recent(&st,&params()).unwrap();
+        assert!(v["shown"]["projects"].as_array().unwrap().is_empty(), "the Active view has no project rows");
+        let titles=active_titles(&v); assert!(titles.contains(&"A1".to_string()) && titles.contains(&"B1".to_string()), "{titles:?}");
+        assert_eq!(v["shown"]["active"][0]["project"].as_str().is_some(), true, "each row names its project");
+        // a thread whose last turn failed (needs the person) leads the idle ones
+        assert_eq!(titles[0],"Failing one","{titles:?}");
+        // a search keeps the threads whose title or project matches
+        let mut p=params(); p["session"]["drafts"]=json!({"@f.pq":"beta"}); assert!(active_titles(&recent(&st,&p).unwrap()).iter().all(|t|t.starts_with('B') || t=="Pinned old" || t=="Settled one"));
+        // asked for in this session alone works too (the phones' local view)
+        let mut p=params(); p["session"]["drafts"]=json!({"@local.view":"active"}); assert!(recent(&st,&p).is_some());
+    }
+    #[test] fn the_projects_list_is_the_default_and_the_settled_fold_toggles() {
+        let st=two_projects(); let v=recent(&st,&params()).unwrap(); assert_eq!(names(&v).len(),2); assert!(v["shown"]["activeSettled"].is_null());
+        let mut p=params(); p["session"]["drafts"]=json!({"@local.view":"active"}); p["action"]=json!("side-settled");
+        let v=recent(&st,&p).unwrap(); assert_eq!(v["session"]["open"]["active-settled"],true);
     }
     #[test] fn recent_projects_rows_and_page_actions_are_bounded_and_read_only() {
         let mut st=State::new(); st.lean=true;
