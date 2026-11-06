@@ -5,6 +5,9 @@
 # The window comes back where it was (gpui-place.json, gpui-drafts.json in the home). A build whose hub does not answer is marked bad and the build before is put back.
 # Env: FRESH_DIR, FRESH_PORT (as fresh.sh), GPUI_DEV_DIR, GPUI_RELOAD_POLL (s, default 2), GPUI_RELOAD_BOOT (s the hub may take to answer, default 120).
 set -u
+# The hub reaps every process that carries its BACKPLANE_AGENT_OWNER mark and is not its child (agents/proc.rs reap_orphans). A watcher started from an agent turn inherits the mark,
+# and the first hub restart it makes would kill it, and the window it is about to open. Run again without the mark.
+if [ -n "${BACKPLANE_AGENT_OWNER:-}" ]; then exec env -u BACKPLANE_AGENT_OWNER "$0" "$@"; fi
 HERE=$(cd "$(dirname "$0")" && pwd)
 D=${FRESH_DIR:-$HOME/.backplane-gpui-fresh}; PORT=${FRESH_PORT:-3797}; H=$D/home
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; POLL=${GPUI_RELOAD_POLL:-2}; BOOT=${GPUI_RELOAD_BOOT:-120}
