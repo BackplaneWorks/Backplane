@@ -27,6 +27,7 @@ struct DataRoot: View {
                 NavigationStack(path: $path) { DataThreadsView(client: client, path: $path) }
             }
         }
+        .overlay { if let l = client.askLink { AskPairView(client: client, link: l) } }
         .tint(BackplaneDesign.accent)
         .preferredColorScheme(settings.colorScheme)
         .modifier(TextSizeModifier(size: settings.dynamicType))
@@ -852,5 +853,32 @@ struct DataOrderCard: View {
         }
         .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
         .padding(.horizontal, 12).padding(.vertical, 6).accessibilityIdentifier("thread.order")
+    }
+}
+
+// A link from outside the app names the hub it would pair with; Cancel comes first.
+struct AskPairView: View {
+    let client: DataClient
+    let link: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pair with this hub?").font(.title2.weight(.semibold))
+            Text(verbatim: Pairing.invitation(link)?.origin.absoluteString ?? Pairing.key(link) ?? "").font(.system(.body, design: .monospaced))
+            Text("A link opened this. Pair only with a hub you know.").font(.footnote).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button("Cancel") { client.askLink = nil }.buttonStyle(PairActionStyle()).accessibilityIdentifier("pair.ask.cancel")
+                Button("Pair") { client.askLink = nil; client.pair(link) }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 0)).accessibilityIdentifier("pair.ask.yes")
+            }
+        }
+        .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).background(BackplaneDesign.background)
+        #if DEBUG
+        .task { // the simulator's answer, with no taps
+            switch ProcessInfo.processInfo.environment["BACKPLANE_ASK"] {
+            case "cancel": try? await Task.sleep(for: .seconds(3)); client.askLink = nil
+            case "yes": try? await Task.sleep(for: .seconds(3)); client.askLink = nil; client.pair(link)
+            default: break
+            }
+        }
+        #endif
     }
 }
