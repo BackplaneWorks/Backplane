@@ -487,7 +487,7 @@ impl Render for Backplane {
                         .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
                         .children(crate::screens::panels::cells(cx, light, &self.screens.panels, thread))
                         .children(tools_strip)))
-                    .children(crate::screens::panels::dock(light, &self.screens.panels, thread))
+                    .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))
                     .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
                     .when(!has_home, |d| d.child(div().id("timeline").relative().flex_1().min_h_0().flex().flex_col()

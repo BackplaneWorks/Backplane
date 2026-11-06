@@ -114,7 +114,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let rows = parse(&this.data["settings"]);
     sync_nav(this, &rows, cx);
     let mut want: Vec<Field> = rows.into_iter().flat_map(|r| r.fields).collect();
-    want.extend(super::bots::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data));
+    want.extend(super::bots::form_fields(&this.data)); want.extend(super::panels::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data));
     this.screens.fields.retain(|n, _| want.iter().any(|f| f.name == *n));
     for f in want {
         if let Some(slot) = this.screens.fields.get_mut(&f.name) {
@@ -199,6 +199,8 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
         }
         // Enter in a settings field is its row's Save
         "whurl" | "whsec" | "tzname" => { flush_fields(this); let a = match name { "whurl" => "hook-url", "whsec" => "hook-secret", _ => "tz-set" }; let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); }
+        "todonew" => { flush_fields(this); let _ = this.tx.try_send(Command::Action("todo-add".into(), String::new())); cx.notify(); }
+        n if n.starts_with("todo.") => { flush_fields(this); let _ = this.tx.try_send(Command::Action("todo-text".into(), n[5..].to_string())); cx.notify(); }
         n => if let Some(a) = n.strip_prefix("sp.") { super::bots::send_space(this, a, cx) } }
 }
 

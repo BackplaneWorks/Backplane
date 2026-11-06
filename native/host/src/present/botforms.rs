@@ -30,7 +30,8 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
             match name {
-                "name" | "persona" | "rname" | "rpost" | "oname" | "ocron" | "oprompt" => json!({"drafts": {format!("@f.{name}"): text}}),
+                "name" | "persona" | "rname" | "rpost" | "oname" | "ocron" | "oprompt" | "todonew" => json!({"drafts": {format!("@f.{name}"): text}}),
+                n if n.starts_with("todo.") && n.len() > 5 && n.len() < 100 => json!({"drafts": {format!("@f.{n}"): text}}),
                 "provider" if PROVIDERS.contains(&text) => json!({"drafts": {"@bnew.provider": text}}),
                 _ => return None,
             }

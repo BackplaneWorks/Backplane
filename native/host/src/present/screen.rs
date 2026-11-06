@@ -161,6 +161,24 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
                 session["rid"]=json!(rid+1); session["drafts"]["@f.rpost"]=json!("");
             }
         },
+        // the to-do list's editing (Todos.edit.rpc): check, text, move, delete, add; the hub's `todos.edit` applies it and the list comes back from the log
+        "todo-check"|"todo-text"|"todo-move"|"todo-del"|"todo-add" if !thread.is_empty() => {
+            let rows=super::panels::todos(st,thread);
+            let row=|id:&str| rows["rows"].as_array().and_then(|r|r.iter().find(|x|text(x,"id")==id)).cloned();
+            let (id,arg)=value.split_once('\u{1f}').unwrap_or((value,""));
+            let p=match action {
+                "todo-add"=>{ let t=text(&session["drafts"],"@f.todonew").trim().to_string(); if t.is_empty() { json!(null) } else { session["drafts"]["@f.todonew"]=json!(""); json!({"thread":thread,"op":"add","id":"","text":t}) } },
+                "todo-text"=>match row(id) { Some(_)=>{ let t=text(&session["drafts"],&format!("@f.todo.{id}")).trim().to_string(); if t.is_empty() { json!(null) } else { json!({"thread":thread,"op":"set","id":id,"text":t,"status":""}) } }, None=>json!(null) },
+                "todo-check"=>match row(id) { Some(r)=>json!({"thread":thread,"op":"set","id":id,"text":text(&r,"text"),"status":if text(&r,"status")=="completed" {"pending"} else {"completed"}}), None=>json!(null) },
+                "todo-move"=>match row(id) { Some(_)=>json!({"thread":thread,"op":"move","id":id,"to":arg.parse::<u64>().unwrap_or(0)}), None=>json!(null) },
+                _=>match row(id) { Some(_)=>json!({"thread":thread,"op":"delete","id":id}), None=>json!(null) },
+            };
+            if !p.is_null() {
+                let rid=session["rid"].as_u64().unwrap_or(0);
+                cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"todos.edit","p":p}).to_string()}));
+                session["rid"]=json!(rid+1);
+            }
+        },
         // the Ready to order bar put away (its ×) or brought back (the small Buy it): the setting fab.min.<project>
         "fab-min"|"fab-show" => {
             let Some(pr)=st.threads.get(thread).map(|t|t.project.clone()).filter(|p|!p.is_empty()) else { return refused("action.fab-no-project") };
