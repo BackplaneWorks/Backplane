@@ -10,12 +10,12 @@ def T.plain.nlrlrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.composer.suggestions.close(l)}
+      Some{CAT_0.T.native.common.title(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrllllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllllll.cmp(String.cmp(key, "native.composer.suggestions.close"), l)
+  T.plain.nlrlrllllll.cmp(String.cmp(key, "native.common.title"), l)
 
 def T.plain.nlrlrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -23,12 +23,12 @@ def T.plain.nlrlrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nlrlrllllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.diff.revert.ask(l)}
+      Some{CAT_0.T.native.composer.suggestions.close(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlllll.cmp(String.cmp(key, "native.diff.revert.ask"), l)
+  T.plain.nlrlrlllll.cmp(String.cmp(key, "native.composer.suggestions.close"), l)
 
 def T.plain.nlrlrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -36,12 +36,12 @@ def T.plain.nlrlrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.file.image.unsupported(l)}
+      Some{CAT_0.T.native.entry.viewer.short(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrllllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllllr.cmp(String.cmp(key, "native.file.image.unsupported"), l)
+  T.plain.nlrlrllllr.cmp(String.cmp(key, "native.entry.viewer.short"), l)
 
 def T.plain.nlrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -49,12 +49,12 @@ def T.plain.nlrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrlrlllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.entry.viewer.short(l)}
+      Some{CAT_0.T.native.diff.revert.ask(l)}
     case GT{}:
       T.plain.nlrlrllllr(l, key)
 
 def T.plain.nlrlrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllll.cmp(String.cmp(key, "native.entry.viewer.short"), l)
+  T.plain.nlrlrllll.cmp(String.cmp(key, "native.diff.revert.ask"), l)
 
 def T.plain.nlrlrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -62,12 +62,12 @@ def T.plain.nlrlrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.find.file.hint(l)}
+      Some{CAT_0.T.native.find.empty(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlllrl.cmp(String.cmp(key, "native.find.file.hint"), l)
+  T.plain.nlrlrlllrl.cmp(String.cmp(key, "native.find.empty"), l)
 
 def T.plain.nlrlrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -75,12 +75,12 @@ def T.plain.nlrlrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.find.threads.hint(l)}
+      Some{CAT_0.T.native.find.file.label(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlllrr.cmp(String.cmp(key, "native.find.threads.hint"), l)
+  T.plain.nlrlrlllrr.cmp(String.cmp(key, "native.find.file.label"), l)
 
 def T.plain.nlrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -88,12 +88,12 @@ def T.plain.nlrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrlrlllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.find.file.label(l)}
+      Some{CAT_0.T.native.find.file.hint(l)}
     case GT{}:
       T.plain.nlrlrlllrr(l, key)
 
 def T.plain.nlrlrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlllr.cmp(String.cmp(key, "native.find.file.label"), l)
+  T.plain.nlrlrlllr.cmp(String.cmp(key, "native.find.file.hint"), l)
 
 def T.plain.nlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -101,12 +101,12 @@ def T.plain.nlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrlrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.find.empty(l)}
+      Some{CAT_0.T.native.file.image.unsupported(l)}
     case GT{}:
       T.plain.nlrlrlllr(l, key)
 
 def T.plain.nlrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlll.cmp(String.cmp(key, "native.find.empty"), l)
+  T.plain.nlrlrlll.cmp(String.cmp(key, "native.file.image.unsupported"), l)
 
 def T.plain.nlrlrllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -114,12 +114,12 @@ def T.plain.nlrlrllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.google.client.hide(l)}
+      Some{CAT_0.T.native.find.threads.label(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrllrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllrlll.cmp(String.cmp(key, "native.google.client.hide"), l)
+  T.plain.nlrlrllrlll.cmp(String.cmp(key, "native.find.threads.label"), l)
 
 def T.plain.nlrlrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -127,12 +127,12 @@ def T.plain.nlrlrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nlrlrllrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.google.client.id(l)}
+      Some{CAT_0.T.native.google.client.hide(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllrll.cmp(String.cmp(key, "native.google.client.id"), l)
+  T.plain.nlrlrllrll.cmp(String.cmp(key, "native.google.client.hide"), l)
 
 def T.plain.nlrlrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -140,12 +140,12 @@ def T.plain.nlrlrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.history.first(l)}
+      Some{CAT_0.T.native.google.redirect(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllrlr.cmp(String.cmp(key, "native.history.first"), l)
+  T.plain.nlrlrllrlr.cmp(String.cmp(key, "native.google.redirect"), l)
 
 def T.plain.nlrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -153,12 +153,12 @@ def T.plain.nlrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrlrllrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.google.redirect(l)}
+      Some{CAT_0.T.native.google.client.id(l)}
     case GT{}:
       T.plain.nlrlrllrlr(l, key)
 
 def T.plain.nlrlrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllrl.cmp(String.cmp(key, "native.google.redirect"), l)
+  T.plain.nlrlrllrl.cmp(String.cmp(key, "native.google.client.id"), l)
 
 def T.plain.nlrlrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -166,12 +166,12 @@ def T.plain.nlrlrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.history.livefile(l)}
+      Some{CAT_0.T.native.history.last(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllrrl.cmp(String.cmp(key, "native.history.livefile"), l)
+  T.plain.nlrlrllrrl.cmp(String.cmp(key, "native.history.last"), l)
 
 def T.plain.nlrlrllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -179,12 +179,12 @@ def T.plain.nlrlrllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.history.play(l)}
+      Some{CAT_0.T.native.history.next(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrllrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllrrr.cmp(String.cmp(key, "native.history.play"), l)
+  T.plain.nlrlrllrrr.cmp(String.cmp(key, "native.history.next"), l)
 
 def T.plain.nlrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -192,12 +192,12 @@ def T.plain.nlrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrlrllrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.history.next(l)}
+      Some{CAT_0.T.native.history.livefile(l)}
     case GT{}:
       T.plain.nlrlrllrrr(l, key)
 
 def T.plain.nlrlrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllrr.cmp(String.cmp(key, "native.history.next"), l)
+  T.plain.nlrlrllrr.cmp(String.cmp(key, "native.history.livefile"), l)
 
 def T.plain.nlrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -205,12 +205,12 @@ def T.plain.nlrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrlrllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.history.last(l)}
+      Some{CAT_0.T.native.history.first(l)}
     case GT{}:
       T.plain.nlrlrllrr(l, key)
 
 def T.plain.nlrlrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrllr.cmp(String.cmp(key, "native.history.last"), l)
+  T.plain.nlrlrllr.cmp(String.cmp(key, "native.history.first"), l)
 
 def T.plain.nlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -218,12 +218,12 @@ def T.plain.nlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nlrlrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.find.threads.label(l)}
+      Some{CAT_0.T.native.find.threads.hint(l)}
     case GT{}:
       T.plain.nlrlrllr(l, key)
 
 def T.plain.nlrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrll.cmp(String.cmp(key, "native.find.threads.label"), l)
+  T.plain.nlrlrll.cmp(String.cmp(key, "native.find.threads.hint"), l)
 
 def T.plain.nlrlrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -231,12 +231,12 @@ def T.plain.nlrlrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.history.thread.short(l)}
+      Some{CAT_0.T.native.history.previous(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrllll.cmp(String.cmp(key, "native.history.thread.short"), l)
+  T.plain.nlrlrlrllll.cmp(String.cmp(key, "native.history.previous"), l)
 
 def T.plain.nlrlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -244,12 +244,12 @@ def T.plain.nlrlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nlrlrlrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.home.hint(l)}
+      Some{CAT_0.T.native.history.thread.short(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrlll.cmp(String.cmp(key, "native.home.hint"), l)
+  T.plain.nlrlrlrlll.cmp(String.cmp(key, "native.history.thread.short"), l)
 
 def T.plain.nlrlrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -257,12 +257,12 @@ def T.plain.nlrlrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.home.none(l)}
+      Some{CAT_0.T.native.home.make(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrllr.cmp(String.cmp(key, "native.home.none"), l)
+  T.plain.nlrlrlrllr.cmp(String.cmp(key, "native.home.make"), l)
 
 def T.plain.nlrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -270,12 +270,12 @@ def T.plain.nlrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrlrlrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.home.make(l)}
+      Some{CAT_0.T.native.home.hint(l)}
     case GT{}:
       T.plain.nlrlrlrllr(l, key)
 
 def T.plain.nlrlrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrll.cmp(String.cmp(key, "native.home.make"), l)
+  T.plain.nlrlrlrll.cmp(String.cmp(key, "native.home.hint"), l)
 
 def T.plain.nlrlrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -283,12 +283,12 @@ def T.plain.nlrlrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.hook.once(l)}
+      Some{CAT_0.T.native.hook.copyurl(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrlrl.cmp(String.cmp(key, "native.hook.once"), l)
+  T.plain.nlrlrlrlrl.cmp(String.cmp(key, "native.hook.copyurl"), l)
 
 def T.plain.nlrlrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -296,12 +296,12 @@ def T.plain.nlrlrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.image.missing(l)}
+      Some{CAT_0.T.native.hook.secret(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrlrr.cmp(String.cmp(key, "native.image.missing"), l)
+  T.plain.nlrlrlrlrr.cmp(String.cmp(key, "native.hook.secret"), l)
 
 def T.plain.nlrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -309,12 +309,12 @@ def T.plain.nlrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrlrlrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.hook.secret(l)}
+      Some{CAT_0.T.native.hook.once(l)}
     case GT{}:
       T.plain.nlrlrlrlrr(l, key)
 
 def T.plain.nlrlrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrlr.cmp(String.cmp(key, "native.hook.secret"), l)
+  T.plain.nlrlrlrlr.cmp(String.cmp(key, "native.hook.once"), l)
 
 def T.plain.nlrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -322,12 +322,12 @@ def T.plain.nlrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrlrlrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.hook.copyurl(l)}
+      Some{CAT_0.T.native.home.none(l)}
     case GT{}:
       T.plain.nlrlrlrlr(l, key)
 
 def T.plain.nlrlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrl.cmp(String.cmp(key, "native.hook.copyurl"), l)
+  T.plain.nlrlrlrl.cmp(String.cmp(key, "native.home.none"), l)
 
 def T.plain.nlrlrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -335,12 +335,12 @@ def T.plain.nlrlrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.image.render(l)}
+      Some{CAT_0.T.native.image.plain(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrrll.cmp(String.cmp(key, "native.image.render"), l)
+  T.plain.nlrlrlrrll.cmp(String.cmp(key, "native.image.plain"), l)
 
 def T.plain.nlrlrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -348,12 +348,12 @@ def T.plain.nlrlrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.key.enter(l)}
+      Some{CAT_0.T.native.key.down(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrrlr.cmp(String.cmp(key, "native.key.enter"), l)
+  T.plain.nlrlrlrrlr.cmp(String.cmp(key, "native.key.down"), l)
 
 def T.plain.nlrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -361,12 +361,12 @@ def T.plain.nlrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrlrlrrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.key.down(l)}
+      Some{CAT_0.T.native.image.render(l)}
     case GT{}:
       T.plain.nlrlrlrrlr(l, key)
 
 def T.plain.nlrlrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrrl.cmp(String.cmp(key, "native.key.down"), l)
+  T.plain.nlrlrlrrl.cmp(String.cmp(key, "native.image.render"), l)
 
 def T.plain.nlrlrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -374,12 +374,12 @@ def T.plain.nlrlrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.key.keyboard(l)}
+      Some{CAT_0.T.native.key.esc(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrrrl.cmp(String.cmp(key, "native.key.keyboard"), l)
+  T.plain.nlrlrlrrrl.cmp(String.cmp(key, "native.key.esc"), l)
 
 def T.plain.nlrlrlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -387,12 +387,12 @@ def T.plain.nlrlrlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.key.right(l)}
+      Some{CAT_0.T.native.key.left(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrlrlrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrrrr.cmp(String.cmp(key, "native.key.right"), l)
+  T.plain.nlrlrlrrrr.cmp(String.cmp(key, "native.key.left"), l)
 
 def T.plain.nlrlrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -400,12 +400,12 @@ def T.plain.nlrlrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrlrlrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.key.left(l)}
+      Some{CAT_0.T.native.key.keyboard(l)}
     case GT{}:
       T.plain.nlrlrlrrrr(l, key)
 
 def T.plain.nlrlrlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrrr.cmp(String.cmp(key, "native.key.left"), l)
+  T.plain.nlrlrlrrr.cmp(String.cmp(key, "native.key.keyboard"), l)
 
 def T.plain.nlrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -413,12 +413,12 @@ def T.plain.nlrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrlrlrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.key.esc(l)}
+      Some{CAT_0.T.native.key.enter(l)}
     case GT{}:
       T.plain.nlrlrlrrr(l, key)
 
 def T.plain.nlrlrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlrr.cmp(String.cmp(key, "native.key.esc"), l)
+  T.plain.nlrlrlrr.cmp(String.cmp(key, "native.key.enter"), l)
 
 def T.plain.nlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -426,12 +426,12 @@ def T.plain.nlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nlrlrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.image.plain(l)}
+      Some{CAT_0.T.native.image.missing(l)}
     case GT{}:
       T.plain.nlrlrlrr(l, key)
 
 def T.plain.nlrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrlr.cmp(String.cmp(key, "native.image.plain"), l)
+  T.plain.nlrlrlr.cmp(String.cmp(key, "native.image.missing"), l)
 
 def T.plain.nlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -439,9 +439,9 @@ def T.plain.nlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nlrlrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.history.previous(l)}
+      Some{CAT_0.T.native.history.play(l)}
     case GT{}:
       T.plain.nlrlrlr(l, key)
 
 def T.plain.nlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlrl.cmp(String.cmp(key, "native.history.previous"), l)
+  T.plain.nlrlrl.cmp(String.cmp(key, "native.history.play"), l)

@@ -143,7 +143,7 @@ function subsNow() {
 import { BodyWindows } from "./body-windows.js";
 import { ThinContinuations } from "./thin-continuations.js";
 import { previewTextFiles, previewMarkdownFiles } from "./text-preview.js";
-import { DraftAttachments } from "./draft-attachments.js";
+import { DraftAttachments, SEND_WAIT } from "./draft-attachments.js";
 import { ThinMailDraft, mailReplyField } from "./mail-drafts.js";
 import { ThinViews, viewCapability } from "./thin.js";
 import * as Wire from "./wire.js";
@@ -1023,8 +1023,13 @@ function restoreFocused(force = false) {
 function refreshFocusedIdentity() {
   clearTimeout(attachmentIdentityRetry);attachmentIdentityRetry = 0;
   const generation = ++attachmentIdentityGeneration;
-  attachmentIdentityPending = true;attachmentIdentity = "";
+  identityUnverified();
   return attachmentIdentityCheck = refreshFocusedIdentityFor(generation);
+}
+// (a retry keeps the time the pairing check began: Send's wait is bounded from it)
+function identityUnverified() {
+  if (!attachmentIdentityPending) attachmentIdentitySince = Date.now();
+  attachmentIdentityPending = true;attachmentIdentity = "";
 }
 async function refreshFocusedIdentityFor(generation) {
   const before = cacheIdentity(document.cookie);
@@ -1967,7 +1972,10 @@ function dispatch(action, value, timer) {
   if (action === "voice-unkey") for (const field of sealedFields("vkey")) field.value = "";
   if (["send", "send-alt", "detach"].includes(action) && viewMode !== "compatibility") {
     restoreDraftAttachments(currentSession());
-    if (socket?.readyState === 1 && ((!thin?.ready && !thin?.opening) || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) { showViewStatus(App.host_message(ui, "attachment-restoring"));return true; }
+    // (each note stays up through the view's own status updates, which
+    // cleared it within 0.1 s; the wait's note goes once Send goes)
+    if (socket?.readyState === 1 && attachmentsHoldSend(currentSession().sel)) { holdViewNote(App.host_message(ui, "attachment-restoring"), SEND_WAIT);return true; }
+    if (viewNote && viewNote === App.host_message(ui, "attachment-restoring")) { clearTimeout(viewNoteTimer);viewNote = "";showViewStatus(""); }
   }
   if (["send", "send-alt"].includes(action)) { historyClear();if (socket?.readyState === 1) dropUnsentBack(); }
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
@@ -2193,7 +2201,23 @@ function inputValue(el) {
 const draftAttachments = new DraftAttachments({ identity: () => cacheIdentity(document.cookie) });
 setInterval(() => { void draftAttachments.prune().catch(() => {}); }, 60000);
 let attachmentController, attachmentView, attachmentActor, attachmentSelection;
-let attachmentIdentity = "", attachmentIdentityPending = true, attachmentIdentityGeneration = 0, attachmentIdentityRetry = 0, attachmentIdentityCheck = Promise.resolve();
+let attachmentIdentity = "", attachmentIdentityPending = true, attachmentIdentitySince = Date.now(), attachmentIdentityGeneration = 0, attachmentIdentityRetry = 0, attachmentIdentityCheck = Promise.resolve();
+// Send and file removal wait for the view, the pairing check and a saved
+// batch's restore, but the last two for at most SEND_WAIT each: a pairing
+// check or a restore that never finished (an IndexedDB the browser never
+// opened, a hub that never answered) refused every Send. Past the wait,
+// Send goes without: an unverified pairing restores nothing (its files stay
+// saved for a verified one), and a stalled batch is abandoned, said once.
+function attachmentsHoldSend(thread) {
+  if (!thin?.ready && !thin?.opening) return true;
+  if (attachmentIdentityPending && Date.now() - attachmentIdentitySince < SEND_WAIT) return true;
+  if (draftAttachments.pending(thread)) return true;
+  if (draftAttachments.stalled(thread)) {
+    draftAttachments.abandon(thread);trace("attachment-restore", { state: "abandoned" });
+    holdViewNote(App.host_message(ui, "attachment-unrestored"), 8000);
+  }
+  return false;
+}
 function draftAttachmentPaths(session, thread) {
   return (session.drafts?.["@att:" + thread] || "").split("\n").filter(Boolean);
 }
@@ -2205,11 +2229,12 @@ function restoreDraftAttachments(session) {
   }
   attachmentSelection = thread;
   if (draftAttachments.started.get(thread) === attachmentActor) return;
-  const scope = uploadScope();
+  // (an abandoned batch's upload under way stops before it reaches the draft)
+  const actor = attachmentActor, scope = { ...uploadScope(), live: () => draftAttachments.restores(thread, actor) };
   void draftAttachments.sync(thread, draftAttachmentPaths(session, thread),
     (file, previous) => upload("attach", file, scope, previous),
     () => thin === scope.controller && thin.ready && currentSession().sel === thread
-      && thin.epoch === scope.epoch && thin.client.links.get(thin.hub)?.viewId === scope.viewId, attachmentActor).catch(() => {});
+      && thin.epoch === scope.epoch && thin.client.links.get(thin.hub)?.viewId === scope.viewId, actor).catch(() => {});
 }
 function uploadScope() {
   const controller = viewMode === "compatibility" ? null : thin;
@@ -2300,7 +2325,7 @@ async function upload(action, file, scope = uploadScope(), previous = "") {
   const key = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, "0")).join("");
   const name = file.name || "pasted." + ((file.type || "").split("/")[1] || "bin");
   const { controller: uploadController, thread } = scope;
-  const current = () => cacheIdentity(document.cookie) === scope.identity && viewMode === scope.mode && (uploadController
+  const current = () => cacheIdentity(document.cookie) === scope.identity && viewMode === scope.mode && (!scope.live || scope.live()) && (uploadController
     ? thin === uploadController && uploadController.ready && currentSession().sel === thread && uploadController.epoch === scope.epoch
       && uploadController.target?.kind === scope.target?.kind && uploadController.target?.id === scope.target?.id
       && uploadController.client.links.get(uploadController.hub)?.viewId === scope.viewId
@@ -3949,7 +3974,7 @@ async function startThin(again = false, reason = "initial") {
     trace("thin-disconnect", { reason: typeof event === "string" ? event : event?.type || "connection-ended", code: event?.code });
     ended = true;
     clearTimeout(attachmentIdentityRetry);attachmentIdentityRetry = 0;
-    attachmentIdentity = "";attachmentIdentityPending = true;attachmentIdentityGeneration++;
+    identityUnverified();attachmentIdentityGeneration++;
     refocusKeep();
     keepSettingsRecovery();
     bubMoves.disconnect(location.origin);

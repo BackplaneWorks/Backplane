@@ -47,7 +47,7 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
   reviewPosition:new ReviewPosition({getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)}),
   composerKeeper:{selecting(){},navigationFailed(){}},keepDesk:s=>s,deskCheck(){},settingsRecovery:null,settingsRecovering:null,
   historyLetGo(){},historyBack(){},historyGone:{older:new Set(),newer:new Set()},historyRegion:()=> 'page',laterRegions(){},
-  attachmentIdentityRetry:0,attachmentIdentity:'',attachmentIdentityPending:true,attachmentIdentityGeneration:0,
+  attachmentIdentityRetry:0,attachmentIdentity:'',attachmentIdentityPending:true,attachmentIdentitySince:0,attachmentIdentityGeneration:0,
   attachmentController:null,attachmentView:null,attachmentSelection:null,
   viewNote:'',viewNoteTimer:0,shownTarget:null,refusedViews:new Set(),refusedFallback,searchJump:null,
   targetKey:t=>t?t.kind+':'+t.id:'',holdPicture(){if(ctx.frontendNode){ctx.transitionNode=ctx.frontendNode;ctx.frontendNode=null;}},
@@ -55,7 +55,7 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
  vm.createContext(ctx);
  const ownerStart=source.indexOf('function historyFillOwner()'),ownerEnd=source.indexOf('function historyHasMessage(tl)',ownerStart);
  assert(ownerStart>0&&ownerEnd>ownerStart);vm.runInContext(source.slice(ownerStart,ownerEnd),ctx);
- for(const [start,end] of [['function keepThinReading(','// (the re-render harness'],['function keepSettingsRecovery(','async function recoverSettings('],['function restoreDraftAttachments(','function uploadScope(']]){
+ for(const [start,end] of [['function keepThinReading(','// (the re-render harness'],['function keepSettingsRecovery(','async function recoverSettings('],['function restoreDraftAttachments(','function uploadScope('],['function identityUnverified(','async function refreshFocusedIdentityFor(']]){
   const from=source.indexOf(start),to=source.indexOf(end,from);assert(from>0&&to>from);vm.runInContext(source.slice(from,to),ctx);
  }
  // Top-level names of host.js that the slice below reads, taken from host.js itself.

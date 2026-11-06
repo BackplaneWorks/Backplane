@@ -1417,6 +1417,7 @@ composer.offline = Not sent: reconnecting by itself. Your draft is kept; send it
 composer.offline.back = Connected again. Your message was not sent: it is still in the composer, ready to send.
 composer.attachment.reload = This attachment could not be kept for reload. Send it before leaving this page.
 composer.attachment.restoring = Restoring attachments. Wait before sending or removing files.
+composer.attachment.unrestored = A file saved with this draft could not be restored in time, so it was left out. Attach it again if it is needed.
 viewer.file.missing = The file is no longer in the folder: {name}
 viewer.file.unread = This version of the file cannot be read.
 composer.attachment.offline = Not attached: reconnecting by itself. Choose the file again once connected.

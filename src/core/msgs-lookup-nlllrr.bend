@@ -374,12 +374,12 @@ def T.plain.nlllrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.composer.draw.tip(l)}
+      Some{CAT_0.T.composer.attachment.unrestored(l)}
     case GT{}:
       None{}
 
 def T.plain.nlllrrrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlllrrrrrr.cmp(String.cmp(key, "composer.draw.tip"), l)
+  T.plain.nlllrrrrrr.cmp(String.cmp(key, "composer.attachment.unrestored"), l)
 
 def T.plain.nlllrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
