@@ -15,9 +15,13 @@ pub struct Bar { pub phase: String, pub text: String, pub frac: Option<f32>, ///
     pub restart: bool, /// turns that a relaunch would stop
     pub turns: u64 }
 
-fn path() -> PathBuf {
-    std::env::var_os("BACKPLANE_DEV_STATUS").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".backplane-gpui-dev/STATUS"))
+/// The watcher's status (STATUS: a build waits to relaunch the app, can be asked to) and the builder's (BUILD: a build is being made, failed): the watcher's is shown first.
+fn paths() -> Vec<PathBuf> {
+    if let Some(p) = std::env::var_os("BACKPLANE_DEV_STATUS") { return vec![PathBuf::from(p)] }
+    let d = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".backplane-gpui-dev");
+    vec![d.join("STATUS"), d.join("BUILD")]
 }
+fn path() -> PathBuf { paths().remove(0) }
 
 /// The bar a status line stands for (None: nothing to show).
 pub fn parse(line: &str) -> Option<Bar> {
@@ -29,12 +33,12 @@ pub fn parse(line: &str) -> Option<Bar> {
     Some(Bar { phase, text, frac: (total > 0.0).then(|| (done / total).clamp(0.0, 1.0) as f32), restart: v["action"].as_str() == Some("restart"), turns: v["turns"].as_u64().unwrap_or(0) })
 }
 
-fn read() -> Option<Bar> {
-    let p = path();
-    let age = SystemTime::now().duration_since(std::fs::metadata(&p).ok()?.modified().ok()?).unwrap_or_default();
+fn read_one(p: &PathBuf) -> Option<Bar> {
+    let age = SystemTime::now().duration_since(std::fs::metadata(p).ok()?.modified().ok()?).unwrap_or_default();
     if age.as_secs() > STALE { return None }
     parse(&std::fs::read_to_string(p).ok()?)
 }
+fn read() -> Option<Bar> { paths().iter().find_map(read_one) }
 
 /// Look at the status file once a second (one small read) and redraw when it changed.
 pub fn watch(cx: &mut Context<Backplane>) {
@@ -59,9 +63,9 @@ pub const CONFIRM: Duration = Duration::from_secs(6);
 pub fn strip(cx: &mut Context<Backplane>, bar: &Bar, light: bool, confirming: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let ready = bar.restart;
-    let hue = if bar.phase == "building" { c("accent") } else { c("ok") };
+    let hue = match bar.phase.as_str() { "building" => c("accent"), "failed" => c("bad"), _ => c("ok") };
     let mut el = div().h(px(22.)).flex_shrink_0().relative().overflow_hidden().bg(c("raise")).border_b_1().border_color(c("line"))
-        .child(div().absolute().top_0().left_0().bottom_0().w(relative(bar.frac.unwrap_or(1.0))).bg(hue).opacity(if ready { 0.5 } else { 0.35 }))
+        .child(div().absolute().top_0().left_0().bottom_0().w(relative(bar.frac.unwrap_or(1.0))).bg(hue).opacity(if ready || bar.phase == "failed" { 0.5 } else { 0.35 }))
         .child(div().absolute().inset_0().flex().items_center().px_3().text_size(px(11.)).text_color(c("text")).child(bar.text.clone()));
     if ready {
         let label = if confirming { format!("Click again: stops {} running turn{}", bar.turns, if bar.turns == 1 { "" } else { "s" }) } else { "Restart now".to_string() };
