@@ -104,3 +104,11 @@ test('unknown server failure is passed through without interpreting content as a
  await f.finish(0,{thread:'A',upload:true,uiError:'unknown',text:'raw {text} 日本語'});await p;
  assert.equal(f.completions[0].text,'raw {text} 日本語');assert.equal(f.getSession().drafts['@att.up:A'],'');assert.equal(f.records.size,0);
 });
+test('a restore upload whose batch Send abandoned never reaches the draft',{timeout:1000},async()=>{
+ const f=await fixture();let live=true;
+ const p=f.ctx.upload('attach',f.file('saved.png'),{...f.ctx.uploadScope(),live:()=>live});
+ await f.admit('saved.png');assert.equal(f.requests.length,1);
+ live=false;const before=f.sent.length;await f.finish(0,{thread:'A',attached:'/A/saved.png'});
+ assert.equal(await p,undefined);assert.equal(f.sent.length,before);assert.equal(f.completions.length,0);
+ assert.equal(f.getSession().drafts['@att:A'],undefined);assert.equal(f.records.size,0);
+});

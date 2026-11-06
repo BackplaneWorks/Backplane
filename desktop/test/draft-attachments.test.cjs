@@ -66,11 +66,19 @@ test('switching threads retains the file and permits a later retry', async () =>
   assert.equal(store.started.has('t'), false);
 });
 
-test('a refused restore retains its bytes for the next connection', async () => {
+test('a refused restore retains its bytes for the next connection, not the next Send', async () => {
   const store = await cache([{ path: '/unsent.txt', file: note() }]);
-  await store.sync('t', [], async () => undefined, () => true);
+  let uploads = 0;
+  const refuse = async () => { uploads++; };
+  await store.sync('t', [], refuse, () => true, 'actor-1');
   assert.equal(store.rows().length, 1);
-  assert.equal(store.started.has('t'), false);
+  // Each Send asks the same actor to restore: a refused batch began again and
+  // held that Send while it ran, so every Send was refused.
+  await store.sync('t', [], refuse, () => true, 'actor-1');
+  assert.equal(uploads, 1);
+  assert.equal(store.pending('t'), false);
+  await store.sync('t', [], refuse, () => true, 'actor-2');
+  assert.equal(uploads, 2);
 });
 
 test('a fresh actor restores a previously visited thread again', async () => {
@@ -169,4 +177,72 @@ test('restore keeps the saved project boundary before the fresh view is drawn', 
   const store = await cache([{ path: '/old.txt', file: note(), at: 1, project: 'p1' }]);
   await store.remember('t', '/new.txt', note(), '/old.txt', '');
   assert.equal(store.rows()[0].project, 'p1');
+});
+
+test('Send waits for a stalled batch only SEND_WAIT, and an abandoned batch stops', async () => {
+  const { SEND_WAIT } = await modulePromise;
+  const store = await cache([{ path: '/a.txt', file: note() }, { path: '/b.txt', file: note() }]);
+  let clock = 100, release, uploads = 0;
+  store.now = () => clock;
+  const upload = async () => { uploads++;await new Promise(resolve => { release = resolve; });return '/new.txt'; };
+  const restoring = store.sync('t', [], upload, () => true, 'actor');
+  await new Promise(setImmediate);
+  assert.equal(store.pending('t'), true);assert.equal(store.stalled('t'), false);
+  clock += SEND_WAIT;
+  assert.equal(store.pending('t'), false);assert.equal(store.stalled('t'), true);
+  assert.equal(store.restores('t', 'actor'), true);
+  store.abandon('t');
+  assert.equal(store.stalled('t'), false);assert.equal(store.restores('t', 'actor'), false);
+  // the upload under way settles late: the batch does not go on to the next file
+  release();await restoring;
+  assert.equal(uploads, 1);
+  // nor does the same actor begin it again at the next Send
+  await store.sync('t', [], upload, () => true, 'actor');
+  assert.equal(uploads, 1);assert.equal(store.pending('t'), false);
+});
+
+// The real store over an IndexedDB that never answers, as a desktop session
+// on 2026-11-06 had it: the open and every request behind it stayed pending.
+async function hungStore({ open = 'hang', tx = 'hang' } = {}) {
+  const { DraftAttachments, STORE_WAIT } = await modulePromise;
+  const aborted = [];
+  const db = { close() {}, transaction() {
+    const t = { abort() { aborted.push(t); }, objectStore: () => ({ getAll: () => ({}), clear() {}, index: () => ({ getAll: () => ({}) }) }) };
+    if (tx === 'answer') queueMicrotask(() => t.oncomplete());
+    return t;
+  } };
+  globalThis.indexedDB = { open() {
+    const request = { result: db };
+    if (open === 'answer') queueMicrotask(() => request.onsuccess());
+    return request;
+  } };
+  try { return { store: new DraftAttachments({ identity: () => 'pair-a', now: () => 100 }), aborted, STORE_WAIT }; }
+  finally { delete globalThis.indexedDB; }
+}
+
+test('an IndexedDB open that never answers fails the store within STORE_WAIT', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { store, STORE_WAIT } = await hungStore();
+  const pruned = store.prune();
+  const restoring = store.sync('t', [], () => assert.fail('no bytes'), () => true, 'actor');
+  assert.equal(store.pending('t'), true);
+  t.mock.timers.tick(STORE_WAIT);
+  await assert.rejects(pruned, /did not open/);
+  await restoring;
+  assert.equal(store.pending('t'), false);assert.equal(store.unavailable, true);
+});
+
+test('an IndexedDB transaction that never settles is aborted and frees the queue', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { store, aborted, STORE_WAIT } = await hungStore({ open: 'answer' });
+  // (the constructor's own prune is first in the queue)
+  const first = store.prune(), second = store.clear();
+  const wait = async () => { await new Promise(setImmediate);t.mock.timers.tick(STORE_WAIT);await new Promise(setImmediate); };
+  await wait();await wait();
+  await assert.rejects(first, /did not answer/);
+  assert.equal(aborted.length, 2);
+  // the next request is not held behind the ones that never settled
+  await wait();
+  await assert.rejects(second, /did not answer/);
+  assert.equal(aborted.length, 3);
 });

@@ -10,12 +10,12 @@ def T.plain.nlrrlrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.settings.placeholder.option(l)}
+      Some{CAT_0.T.native.settings.placeholder.name(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrlrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrlllll.cmp(String.cmp(key, "native.settings.placeholder.option"), l)
+  T.plain.nlrrlrlllll.cmp(String.cmp(key, "native.settings.placeholder.name"), l)
 
 def T.plain.nlrrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -23,12 +23,12 @@ def T.plain.nlrrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nlrrlrlllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.settings.system(l)}
+      Some{CAT_0.T.native.settings.placeholder.option(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrlrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrllll.cmp(String.cmp(key, "native.settings.system"), l)
+  T.plain.nlrrlrllll.cmp(String.cmp(key, "native.settings.placeholder.option"), l)
 
 def T.plain.nlrrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -36,12 +36,12 @@ def T.plain.nlrrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.settings.system.settings(l)}
+      Some{CAT_0.T.native.settings.system.open(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrlrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrlllr.cmp(String.cmp(key, "native.settings.system.settings"), l)
+  T.plain.nlrrlrlllr.cmp(String.cmp(key, "native.settings.system.open"), l)
 
 def T.plain.nlrrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -49,12 +49,12 @@ def T.plain.nlrrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrlrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.settings.system.open(l)}
+      Some{CAT_0.T.native.settings.system(l)}
     case GT{}:
       T.plain.nlrrlrlllr(l, key)
 
 def T.plain.nlrrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrlll.cmp(String.cmp(key, "native.settings.system.open"), l)
+  T.plain.nlrrlrlll.cmp(String.cmp(key, "native.settings.system"), l)
 
 def T.plain.nlrrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -62,12 +62,12 @@ def T.plain.nlrrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.status.approval(l)}
+      Some{CAT_0.T.native.status.answer(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrlrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrllrl.cmp(String.cmp(key, "native.status.approval"), l)
+  T.plain.nlrrlrllrl.cmp(String.cmp(key, "native.status.answer"), l)
 
 def T.plain.nlrrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -75,12 +75,12 @@ def T.plain.nlrrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.native.task.delete.ask(l)}
+      Some{CAT_0.T.native.tab.home(l)}
     case GT{}:
       None{}
 
 def T.plain.nlrrlrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrllrr.cmp(String.cmp(key, "native.task.delete.ask"), l)
+  T.plain.nlrrlrllrr.cmp(String.cmp(key, "native.tab.home"), l)
 
 def T.plain.nlrrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -88,12 +88,12 @@ def T.plain.nlrrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nlrrlrllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.tab.home(l)}
+      Some{CAT_0.T.native.status.approval(l)}
     case GT{}:
       T.plain.nlrrlrllrr(l, key)
 
 def T.plain.nlrrlrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrllr.cmp(String.cmp(key, "native.tab.home"), l)
+  T.plain.nlrrlrllr.cmp(String.cmp(key, "native.status.approval"), l)
 
 def T.plain.nlrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -101,18 +101,31 @@ def T.plain.nlrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nlrrlrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.status.answer(l)}
+      Some{CAT_0.T.native.settings.system.settings(l)}
     case GT{}:
       T.plain.nlrrlrllr(l, key)
 
 def T.plain.nlrrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrll.cmp(String.cmp(key, "native.status.answer"), l)
+  T.plain.nlrrlrll.cmp(String.cmp(key, "native.settings.system.settings"), l)
+
+def T.plain.nlrrlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+  ((key, _), c) = r
+  match c:
+    case LT{}:
+      None{}
+    case EQ{}:
+      Some{CAT_0.T.native.task.note(l)}
+    case GT{}:
+      None{}
+
+def T.plain.nlrrlrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nlrrlrlrlll.cmp(String.cmp(key, "native.task.note"), l)
 
 def T.plain.nlrrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
   match c:
     case LT{}:
-      None{}
+      T.plain.nlrrlrlrlll(l, key)
     case EQ{}:
       Some{CAT_0.T.native.task.private(l)}
     case GT{}:
@@ -205,12 +218,12 @@ def T.plain.nlrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nlrrlrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.native.task.note(l)}
+      Some{CAT_0.T.native.task.delete.ask(l)}
     case GT{}:
       T.plain.nlrrlrlr(l, key)
 
 def T.plain.nlrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrlrl.cmp(String.cmp(key, "native.task.note"), l)
+  T.plain.nlrrlrl.cmp(String.cmp(key, "native.task.delete.ask"), l)
 
 def T.plain.nlrrlrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r

@@ -1109,6 +1109,13 @@ def T.composer.attachment.restoring(l: I.Loc) -> String:
     case I.Ja{}:
       "添付ファイルを復元しています。送信や削除は完了までお待ちください。"
 
+def T.composer.attachment.unrestored(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "A file saved with this draft could not be restored in time, so it was left out. Attach it again if it is needed."
+    case I.Ja{}:
+      "この下書きに保存されたファイルを時間内に復元できなかったため、含めませんでした。必要な場合はもう一度添付してください。"
+
 def T.composer.detach(l: I.Loc, arg0: String) -> String:
   match l:
     case I.En{}:

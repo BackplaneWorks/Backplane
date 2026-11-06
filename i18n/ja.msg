@@ -1440,6 +1440,7 @@ composer.offline = 送信されていません。自動で再接続していま�
 composer.offline.back = 再接続しました。メッセージは送信されていません。入力欄に残っているので、送信してください。
 composer.attachment.reload = この添付ファイルを再読み込み用に保存できませんでした。このページを離れる前に送信してください。
 composer.attachment.restoring = 添付ファイルを復元しています。送信や削除は完了までお待ちください。
+composer.attachment.unrestored = この下書きに保存されたファイルを時間内に復元できなかったため、含めませんでした。必要な場合はもう一度添付してください。
 viewer.file.missing = ファイルがフォルダーにありません: {name}
 viewer.file.unread = このバージョンのファイルを読み込めません。
 composer.attachment.offline = 添付されていません。自動で再接続しています。接続後にファイルを選び直してください。

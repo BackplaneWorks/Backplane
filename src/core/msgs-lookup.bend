@@ -81,12 +81,12 @@ def T.plain.nllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_4.T.plain.nllrll(l, key)
     case EQ{}:
-      Some{CAT_32.T.google.client.own(l)}
+      Some{CAT_32.T.google.client.id(l)}
     case GT{}:
       CAT_5.T.plain.nllrlr(l, key)
 
 def T.plain.nllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrl.cmp(String.cmp(key, "google.client.own"), l)
+  T.plain.nllrl.cmp(String.cmp(key, "google.client.id"), l)
 
 def T.plain.nllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -94,12 +94,12 @@ def T.plain.nllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_6.T.plain.nllrrl(l, key)
     case EQ{}:
-      Some{CAT_32.T.hooks.post.http(l)}
+      Some{CAT_32.T.hooks.post(l)}
     case GT{}:
       CAT_7.T.plain.nllrrr(l, key)
 
 def T.plain.nllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrr.cmp(String.cmp(key, "hooks.post.http"), l)
+  T.plain.nllrr.cmp(String.cmp(key, "hooks.post"), l)
 
 def T.plain.nllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -107,12 +107,12 @@ def T.plain.nllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nllrl(l, key)
     case EQ{}:
-      Some{CAT_32.T.history.ref.head(l)}
+      Some{CAT_32.T.history.ref.commit(l)}
     case GT{}:
       T.plain.nllrr(l, key)
 
 def T.plain.nllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllr.cmp(String.cmp(key, "history.ref.head"), l)
+  T.plain.nllr.cmp(String.cmp(key, "history.ref.commit"), l)
 
 def T.plain.nll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -120,12 +120,12 @@ def T.plain.nll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nlll(l, key)
     case EQ{}:
-      Some{CAT_32.T.composer.enter.tip(l)}
+      Some{CAT_32.T.composer.draw.tip(l)}
     case GT{}:
       T.plain.nllr(l, key)
 
 def T.plain.nll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nll.cmp(String.cmp(key, "composer.enter.tip"), l)
+  T.plain.nll.cmp(String.cmp(key, "composer.draw.tip"), l)
 
 def T.plain.nlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -133,12 +133,12 @@ def T.plain.nlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_8.T.plain.nlrlll(l, key)
     case EQ{}:
-      Some{CAT_32.T.menu.snooze.tomorrow(l)}
+      Some{CAT_32.T.menu.snooze.hour(l)}
     case GT{}:
       CAT_9.T.plain.nlrllr(l, key)
 
 def T.plain.nlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrll.cmp(String.cmp(key, "menu.snooze.tomorrow"), l)
+  T.plain.nlrll.cmp(String.cmp(key, "menu.snooze.hour"), l)
 
 def T.plain.nlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -146,12 +146,12 @@ def T.plain.nlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_10.T.plain.nlrlrl(l, key)
     case EQ{}:
-      Some{CAT_32.T.native.key.tab(l)}
+      Some{CAT_32.T.native.key.right(l)}
     case GT{}:
       CAT_11.T.plain.nlrlrr(l, key)
 
 def T.plain.nlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrlr.cmp(String.cmp(key, "native.key.tab"), l)
+  T.plain.nlrlr.cmp(String.cmp(key, "native.key.right"), l)
 
 def T.plain.nlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -159,12 +159,12 @@ def T.plain.nlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nlrll(l, key)
     case EQ{}:
-      Some{CAT_32.T.native.common.title(l)}
+      Some{CAT_32.T.native.common.ok(l)}
     case GT{}:
       T.plain.nlrlr(l, key)
 
 def T.plain.nlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrl.cmp(String.cmp(key, "native.common.title"), l)
+  T.plain.nlrl.cmp(String.cmp(key, "native.common.ok"), l)
 
 def T.plain.nlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -172,12 +172,12 @@ def T.plain.nlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_12.T.plain.nlrrll(l, key)
     case EQ{}:
-      Some{CAT_32.T.native.settings.placeholder.name(l)}
+      Some{CAT_32.T.native.settings.placeholder.hint(l)}
     case GT{}:
       CAT_13.T.plain.nlrrlr(l, key)
 
 def T.plain.nlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrl.cmp(String.cmp(key, "native.settings.placeholder.name"), l)
+  T.plain.nlrrl.cmp(String.cmp(key, "native.settings.placeholder.hint"), l)
 
 def T.plain.nlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -211,12 +211,12 @@ def T.plain.nlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nlrl(l, key)
     case EQ{}:
-      Some{CAT_32.T.native.permission.camera(l)}
+      Some{CAT_32.T.native.pair.unpair(l)}
     case GT{}:
       T.plain.nlrr(l, key)
 
 def T.plain.nlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlr.cmp(String.cmp(key, "native.permission.camera"), l)
+  T.plain.nlr.cmp(String.cmp(key, "native.pair.unpair"), l)
 
 def T.plain.nl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -224,12 +224,12 @@ def T.plain.nl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nll(l, key)
     case EQ{}:
-      Some{CAT_32.T.machines.notmine.note(l)}
+      Some{CAT_32.T.machines.notmine(l)}
     case GT{}:
       T.plain.nlr(l, key)
 
 def T.plain.nl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nl.cmp(String.cmp(key, "machines.notmine.note"), l)
+  T.plain.nl.cmp(String.cmp(key, "machines.notmine"), l)
 
 def T.plain.nrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
