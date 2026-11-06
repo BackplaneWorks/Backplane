@@ -304,6 +304,40 @@ impl Plan<'_> {
     }
 }
 
+impl Plan<'_> {
+    /// Urg.display: how much a thread waits on the person (higher first): an approval, a question, a failure, a finished or stopped turn, work, idle; pinned ahead within each; a stall above all.
+    fn urgency(&self, id: &str, t: &Thread) -> u64 {
+        let pin = u64::from(t.pinned);
+        if signal::stalled(self.st, id) { return 12 + pin }
+        let n = self.ix.get(id).copied().unwrap_or(0);
+        let word = signal::shown_k(signal::dot_name(signal::name(n), t.turn, t.pending), t.turn, t.pending);
+        let rank = match word { "blocked" => if t.pending > 0 { 8 } else { 7 }, "failed" => 6, "finished" => 5, "stopped" => 4, "active" | "waiting" => 2, _ => 0 };
+        rank * 2 + pin
+    }
+    /// The Active view (client.bend `Active.rows`): every thread on a live shelf of any project, what needs the person first, newest first within each;
+    /// then the threads settled within QUIET_DAYS, newest settled first (faded, for bringing back). `keep(title, project)` is the search.
+    /// Rows are the roots of the thread trees, as in the project list; each names its project.
+    pub fn active(&self, keep: &dyn Fn(&str, &str) -> bool) -> (Vec<Value>, Vec<Value>) {
+        let (st, o) = (self.st, self.o);
+        let mut live: Vec<(u64, u64, &str, &str)> = vec![]; let mut faded: Vec<(u64, &str, &str)> = vec![];
+        for p in &self.projects {
+            let ptitle = st.projects[p.id].title.as_str();
+            for id in p.sh.pinned.iter().chain(p.sh.active.iter()) { let t = &st.threads[*id]; if keep(&t.title, ptitle) { live.push((self.urgency(id, t), t.activity, id, p.id)); } }
+            for id in &p.sh.settled { let t = &st.threads[*id]; if t.settled_at + QUIET_DAYS > o.now && keep(&t.title, ptitle) { faded.push((t.settled_at, id, p.id)); } }
+        }
+        live.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(b.2)));
+        faded.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+        let row = |id: &str, pid: &str, shelf: u8| {
+            let t = &st.threads[id]; let kids = self.kids_by.get(id).map_or(0, |k| k.len());
+            let r = Row { id, t, depth: 0, expanded: false, children: kids };
+            let mut j = thread_json(st, o, &self.ix, &r, shelf, 0);
+            j["project"] = json!(st.projects[pid].title); j["projectId"] = json!(q(o, pid)); j["faded"] = json!(shelf == 1);
+            j
+        };
+        (live.iter().map(|(_, _, id, pid)| row(id, pid, 0)).collect(), faded.iter().map(|(_, id, pid)| row(id, pid, 1)).collect())
+    }
+}
+
 /// The projects as the sidebar groups them: live, then quiet, then (when its shelf is open) the older ones.
 /// The full projection remains the parity oracle for the bounded API.
 pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
