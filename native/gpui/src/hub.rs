@@ -195,6 +195,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     let timing=Timing{rtt_ms,decode_ms,process_ms,bytes:size,delta:is_delta};
                     let rv=r;let r=&rv;
                     if target!=v.target||revision!=v.revision {
+                        eprintln!("GPUI_LOG {{\"stale_reply\":{{\"method\":\"{method}\",\"same_target\":{},\"reply_rev\":{revision},\"now_rev\":{}}}}}",target==v.target,v.revision);
                         v.dirty=true;
                         if let Some(cursor)=paged {
                             let _=events.send(Event::Older(cursor,None)).await;
