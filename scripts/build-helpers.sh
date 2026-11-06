@@ -31,12 +31,77 @@ fi
 lic=$out/licenses/helpers
 mkdir -p "$lic/kipc" "$lic/step2glb" "$lic/browser"
 
-(cd tools/kipc && "$BUN" install --frozen-lockfile >/dev/null && "$BUN" build.ts "$out/backplane-kipc")
+# The installs stay serial (they share bun's global cache); the four
+# compiles are independent (each writes only its own $out/backplane-*),
+# so they run side by side. BACKPLANE_HELPER_JOBS=1 is the old serial
+# order. Output of a parallel compile goes to its own log and is printed
+# in the fixed kipc/step2glb/voice/browser order once all four finish.
+(cd tools/kipc && "$BUN" install --frozen-lockfile >/dev/null)
 (cd tools/step2glb && "$BUN" install --frozen-lockfile >/dev/null)
-"$BUN" build tools/step2glb/step2glb.ts --compile --minify \
-  ${BUN_TARGET:+--target="$BUN_TARGET"} ${BUN_EXECUTABLE:+--compile-executable-path="$BUN_EXECUTABLE"} --outfile "$out/backplane-step2glb"
-(cd tools/voice && "$BUN" build.ts "$out/backplane-voice")
-(cd tools/browser && "$BUN" install --frozen-lockfile >/dev/null && "$BUN" build.ts "$out/backplane-browser")
+(cd tools/browser && "$BUN" install --frozen-lockfile >/dev/null)
+compile_kipc() { (cd tools/kipc && "$BUN" build.ts "$out/backplane-kipc"); }
+compile_step2glb() {
+  "$BUN" build tools/step2glb/step2glb.ts --compile --minify \
+    ${BUN_TARGET:+--target="$BUN_TARGET"} ${BUN_EXECUTABLE:+--compile-executable-path="$BUN_EXECUTABLE"} --outfile "$out/backplane-step2glb"
+}
+compile_voice() { (cd tools/voice && "$BUN" build.ts "$out/backplane-voice"); }
+compile_browser() { (cd tools/browser && "$BUN" build.ts "$out/backplane-browser"); }
+jobs=${BACKPLANE_HELPER_JOBS:-4}
+case $jobs in ''|*[!0-9]*|0) echo "build-helpers.sh: BACKPLANE_HELPER_JOBS=$jobs" >&2; exit 1 ;; esac
+# The width is capped by this process's own cgroup memory.max (read from
+# the kernel, never an env var): each compile gets a 800 MB allowance, so
+# under a 3.7 GB cap at most 4 run at once and a smaller cap runs fewer.
+# "max" (no cgroup limit) keeps the requested width; a limit that cannot
+# be read at all falls back to the serial order. An explicit
+# BACKPLANE_HELPER_JOBS is still capped by a readable finite limit.
+if [ "$jobs" -gt 1 ]; then
+  cg=$(cut -d: -f3 /proc/self/cgroup 2>/dev/null || true)
+  memmax=""
+  for f in "/sys/fs/cgroup$cg/memory.max" /sys/fs/cgroup/memory.max; do
+    [ -n "$cg" ] && [ -r "$f" ] && { memmax=$(cat "$f" 2>/dev/null || true); break; }
+  done
+  case $memmax in
+    max) ;;
+    ''|*[!0-9]*) echo "build-helpers.sh: cgroup memory.max unreadable; building helpers serially" >&2; jobs=1 ;;
+    *)
+      width=$(( memmax / 800000000 ))
+      if [ "$width" -lt 1 ]; then width=1; fi
+      if [ "$width" -lt "$jobs" ]; then
+        echo "build-helpers.sh: cgroup memory.max=$memmax caps helper compiles at $width at a time"
+        jobs=$width
+      fi ;;
+  esac
+fi
+if [ "$jobs" = 1 ]; then
+  compile_kipc
+  compile_step2glb
+  compile_voice
+  compile_browser
+else
+  hwork=$(mktemp -d)
+  trap 'rm -rf "$hwork"' 0 1 2 15
+  # at most $jobs compiles at a time, in waves of the fixed order
+  hpids="" hnames="" hn=0 hfail=0
+  hflush() {
+    hi=1
+    for pid in $hpids; do
+      name=$(echo $hnames | cut -d' ' -f$hi) rc=0
+      wait "$pid" || rc=$?
+      cat "$hwork/$name.log"
+      if [ "$rc" != 0 ]; then echo "build-helpers.sh: $name did not build (status $rc)" >&2; hfail=1; fi
+      hi=$(( hi + 1 ))
+    done
+    hpids="" hnames="" hn=0
+  }
+  for name in kipc step2glb voice browser; do
+    compile_$name >"$hwork/$name.log" 2>&1 &
+    hpids="$hpids $!" hnames="$hnames $name" hn=$(( hn + 1 ))
+    if [ "$hn" -ge "$jobs" ]; then hflush; fi
+  done
+  hflush
+  [ "$hfail" = 0 ] || exit 1
+  rm -rf "$hwork"; trap - 0 1 2 15
+fi
 chmod 755 "$out/backplane-kipc" "$out/backplane-step2glb" "$out/backplane-voice" "$out/backplane-browser"
 
 # the notices: OpenCascade's and occt-import-js's (LGPL-2.1, embedded in
