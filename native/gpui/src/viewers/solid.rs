@@ -1,10 +1,12 @@
 //! 3D / Mech: the hub's `solid` frame (CBOR {key, n, mesh, box3, none, ...}; mesh = varints: per triangle the colour XOR the previous one's, then
-//! three vertices as zigzag deltas of x y z in 10 micrometres, board axes, z up). Decoding and rasterizing run on a worker thread (latest request
-//! wins, a superseded render is abandoned part-way); the page only receives finished images, so input never waits for a model. The camera is the
+//! three vertices as zigzag deltas of x y z in 10 micrometres, board axes, z up). Decoding and drawing run on a worker thread, on the GPU (solid_gpu.rs: the model is uploaded once)
+//! or else on the cores (raster.rs); the page only receives finished images, so input never waits for a model. The latest request wins, but a picture of a drag is never given up
+//! part-way: a mouse moves faster than a picture is drawn, and giving up on each one for the next leaves the screen still until the pointer stops. The camera is the
 //! product's free orbit (solid.js `Orbit`): the model follows the pointer in any direction, the wheel zooms at the pointer between 1/60 and 20 times
 //! the fitted distance, a right/middle or shift drag moves it. The image is as big as the panel in device pixels. Nothing repaints while idle.
 use gpui::{prelude::*, *};
-use super::raster::{self, render, BG};
+use super::raster::{self, render};
+#[cfg(test)] use super::raster::BG;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Condvar, Mutex};
 
 pub const MAX_TRIANGLES: usize = (64 << 20) / 84;
@@ -204,9 +206,24 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 }
 
 // ---- the worker: latest request wins -------------------------------------------------------------------------------
-enum Msg { Mesh(SolidFrame), Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize } }
-/// What to render: the model, the camera, the size, the samples a pixel a side, the ticket.
-type Job = (Arc<Mesh>, Camera, usize, usize, usize, u64);
+enum Msg { Mesh(SolidFrame), Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str } }
+/// What to render: the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
+type Job = (Arc<Mesh>, Camera, usize, usize, usize, u64, bool);
+/// Whether a render in progress goes on: a draft does, or a drag would show nothing at all; a picture at rest gives way to anything newer.
+pub fn wanted(draft: bool, my: u64, newest: u64) -> bool { draft || my == newest }
+/// Whether a finished picture goes on the screen: it is of this model (`floor`) and newer than the one there. Pictures of a drag finish behind the pointer: that is no reason to drop them.
+pub fn shows(ticket: u64, shown: u64, floor: u64) -> bool { ticket >= floor && ticket > shown }
+/// What draws: the process's GPU (solid_gpu::shared), or the cores when there is none or it fails.
+#[derive(Default)] struct Drawer;
+impl Drawer {
+    fn draw(&mut self, mesh: &Arc<Mesh>, cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<(Vec<u8>, &'static str)> {
+        #[cfg(target_os = "linux")] {
+            let mut gpu = super::solid_gpu::shared().lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(g) = gpu.as_mut() { match g.render(mesh, cam, w, h) { Some(px) => return Some((px, "gpu")), None => { log::warn!("3D page: the GPU failed a picture, drawing on the CPU from now on"); std::mem::forget(gpu.take()); } } }
+        }
+        render(mesh, cam, w, h, ss, alive).map(|px| (px, "cpu"))
+    }
+}
 #[derive(Default)] struct Pending { frame: Option<Vec<u8>>, render: Option<Job>, shutdown: bool }
 struct Worker { slot: Arc<(Mutex<Pending>, Condvar)>, ticket: Arc<AtomicU64> }
 impl Worker {
@@ -214,26 +231,26 @@ impl Worker {
         let slot: Arc<(Mutex<Pending>, Condvar)> = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
         let ticket = Arc::new(AtomicU64::new(0));
         let (s2, g2) = (slot.clone(), ticket.clone());
-        std::thread::Builder::new().name("solid-render".into()).spawn(move || loop {
+        std::thread::Builder::new().name("solid-render".into()).spawn(move || { let mut drawer = Drawer::default(); loop {
             let job = { let (m, cv) = &*s2; let mut p = m.lock().unwrap();
                 while p.frame.is_none() && p.render.is_none() && !p.shutdown { p = cv.wait(p).unwrap(); }
                 if p.shutdown { return } (p.frame.take(), p.render.take()) };
             if let (Some(bytes), _) = &job { if let Some(f) = parse_frame(bytes) { if tx.send_blocking(Msg::Mesh(f)).is_err() { return } } }
-            if let (_, Some((mesh, cam, w, h, ss, my))) = job {
+            if let (_, Some((mesh, cam, w, h, ss, my, draft))) = job {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
-                if let Some(px) = render(&mesh, &cam, w, h, ss, &move || g.load(Ordering::Relaxed) == my) {
-                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris.len(), w, h }).is_err() { return } }
+                if let Some((px, by)) = drawer.draw(&mesh, &cam, w, h, ss, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
+                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris.len(), w, h, by }).is_err() { return } }
                 }
             }
-        }).ok();
+        } }).ok();
         Worker { slot, ticket }
     }
     fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frame = Some(bytes); cv.notify_one(); }
-    /// Ask for an image of `mesh`; any earlier request still rendering is abandoned.
-    fn submit_render(&self, mesh: Arc<Mesh>, cam: Camera, w: usize, h: usize, ss: usize) -> u64 {
+    /// Ask for an image of `mesh`, replacing any request not yet begun.
+    fn submit_render(&self, mesh: Arc<Mesh>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool) -> u64 {
         let ticket = self.ticket.fetch_add(1, Ordering::Relaxed) + 1;
-        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, cam, w, h, ss, ticket)); cv.notify_one(); ticket
+        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, cam, w, h, ss, ticket, draft)); cv.notify_one(); ticket
     }
 }
 impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
@@ -241,7 +258,7 @@ impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().
 // ---- the page ---------------------------------------------------------------------------------------------------------
 #[derive(Clone, Copy, PartialEq)] enum Drag { Orbit, Pan, Roll }
 /// What the demo/metrics read: how many images arrived, the last render's time.
-#[derive(Clone, Debug, Default)] pub struct Stats { pub images: u64, pub last_ms: f64, pub last_tris: usize, pub last_size: (usize, usize) }
+#[derive(Clone, Debug, Default)] pub struct Stats { pub images: u64, pub painted: u64, pub last_ms: f64, pub last_tris: usize, pub last_size: (usize, usize), pub by: &'static str }
 
 /// A note (no model for this source) keeps the page's model only when it is the same source's: a different key drops it.
 /// Whether the panel's shape differs enough from the one the camera was fitted for to fit it again.
@@ -250,7 +267,7 @@ pub fn note_keeps_model(page_key: &str, note_key: &str) -> bool { page_key == no
 
 pub struct SolidPage {
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
-    pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), want_gen: u64, pub stats: Stats,
+    pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
 }
 impl SolidPage {
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -261,7 +278,7 @@ impl SolidPage {
             }
         }).detach();
         SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
-            size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), want_gen: 0, stats: Stats::default() }
+            size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
     pub fn key(&self) -> &str { &self.key }
@@ -274,7 +291,7 @@ impl SolidPage {
         match msg {
             Msg::Mesh(SolidFrame::Model(key, mesh)) => {
                 let fresh = key != self.key || self.cam.is_none();
-                self.key = key; let mesh = Arc::new(mesh);
+                self.key = key; let mesh = Arc::new(mesh); self.floor = self.latest + 1;
                 if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fitted_for(&mesh, self.fit_aspect)); }
                 self.mesh = Some(mesh); self.note.clear(); self.ask_render(false); cx.notify();
             }
@@ -282,15 +299,16 @@ impl SolidPage {
                 if !note_keeps_model(&self.key, &key) {
                     // another source's model could not be made: the old source's model must not show under this key
                     self.mesh = None; self.cam = None; if let Some(i) = self.image.take() { self.retired.push(i); }
-                    self.want_gen = u64::MAX; // a render of the old model still in flight is stale
+                    self.floor = self.latest + 1; // a render of the old model still in flight is stale
                 }
                 self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
             }
             Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; cx.notify(); }
-            Msg::Image { ticket, image, ms, tris, w, h } => {
-                if ticket != self.want_gen { self.retired.push(image); cx.notify(); return } // a newer request exists: this one is stale
+            Msg::Image { ticket, image, ms, tris, w, h, by } => {
+                if !shows(ticket, self.on_screen, self.floor) { return } // never painted, so never in the atlas: nothing to give back
+                self.on_screen = ticket;
                 if let Some(old) = self.image.replace(image) { self.retired.push(old); }
-                self.stats = Stats { images: self.stats.images + 1, last_ms: ms, last_tris: tris, last_size: (w, h) }; cx.notify();
+                self.stats = Stats { images: self.stats.images + 1, painted: self.stats.painted, last_ms: ms, last_tris: tris, last_size: (w, h), by }; cx.notify();
             }
         }
     }
@@ -303,7 +321,7 @@ impl SolidPage {
         // a draft while moving: one sample a pixel, and half size only on a very large panel; the rest at rest: smooth outlines
         if draft && w * h > DRAFT_PIXELS { let k = (DRAFT_PIXELS as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
         self.asked = (w, h);
-        self.want_gen = self.worker.submit_render(mesh.clone(), cam, w, h, samples(w, h, draft));
+        self.latest = self.worker.submit_render(mesh.clone(), cam, w, h, samples(w, h, draft), draft);
     }
     /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
     pub fn set_view(&mut self, name: &str) {
@@ -328,6 +346,8 @@ impl SolidPage {
     }
     /// For the demo and tests: an orbit drag step as the mouse handler does it.
     pub fn drag_by(&mut self, dx: f32, dy: f32) { if let Some(c) = &mut self.cam { c.orbit(dx, dy); } self.ask_render(true); }
+    /// For the demo: the button went up, the full picture is asked for.
+    pub fn settle(&mut self) { self.ask_render(false); }
     /// Give the images back to the atlas (call before dropping the page, with the window).
     pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).chain(self.image.take()) { let _ = window.drop_image(i); } }
 }
@@ -335,6 +355,7 @@ impl Render for SolidPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // images no longer shown leave the sprite atlas (gpui keeps a painted RenderImage there until it is dropped)
         for old in self.retired.drain(..) { let _ = window.drop_image(old); }
+        if self.stats.images != self.counted { self.counted = self.stats.images; self.stats.painted += 1; }
         let size = self.size.clone();
         let probe = canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
             let new = [f32::from(b.size.width), f32::from(b.size.height), window.scale_factor(), f32::from(b.origin.x), f32::from(b.origin.y)];
@@ -377,7 +398,7 @@ impl Render for SolidPage {
                 let (dx, dy) = (f32::from(e.position.x - last.x), f32::from(e.position.y - last.y));
                 let h = this.size.lock().unwrap()[1];
                 this.touched = true; if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx) } }
-                this.drag = Some((kind, e.position)); this.ask_render(true); cx.notify(); // half size while dragging, the full image on release
+                this.drag = Some((kind, e.position)); this.ask_render(true); // a draft while dragging, the full image on release. No repaint here: the picture's arrival is what repaints
             }))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
@@ -536,9 +557,53 @@ mod tests {
             assert_eq!(px, render(&m, &c, w, h, ss, ALIVE).unwrap(), "ss {ss}: same picture twice");
         }
     }
+    #[test] fn a_red_model_is_red_and_light_is_not_decoded_twice() {
+        // the wire is 0xRRGGBB in linear light: red must not come out blue (0x0000ff was what this drew before), and a middle grey must not come out near black
+        let quad = |c: u32| { let t = vec![([0, 0, 0, 1000, 0, 0, 1000, 1000, 0], c), ([0, 0, 0, 1000, 1000, 0, 0, 1000, 0], c)]; decode_mesh(2, &encode(&t)).unwrap() };
+        let at = |m: &Mesh| { let (w, h) = (32, 32); let px = render(m, &Camera::fitted(m).named("top"), w, h, 1, ALIVE).unwrap(); let i = (h / 2 * w + w / 2) * 4; [px[i + 2], px[i + 1], px[i]] };
+        let [r, g, b] = at(&quad(0xc00000)); assert!(r > 100 && g < 40 && b < 40, "{r} {g} {b}");
+        let [r, g, b] = at(&quad(0x0000c0)); assert!(b > 100 && g < 40 && r < 40, "{r} {g} {b}");
+        // a plastic grey (0x373737 and up would be guessed as metal, which shows the dim studio straight on): 0.165 of light, decoded once
+        let [r, g, b] = at(&quad(0x2a2a2a)); assert!((r, g) == (g, b) && r > 70, "0.165 of light lit is well above black (about 92; decoded twice, about 40): {r}");
+    }
+    #[test] fn the_nearest_translucent_layer_shows_over_what_is_opaque_and_nothing_further() {
+        let quad = |z: i32, c: u32| vec![([0, 0, z, 1000, 0, z, 1000, 1000, z], c), ([0, 0, z, 1000, 1000, z, 0, 1000, z], c)];
+        let at = |t: Vec<([i32; 9], u32)>| { let m = decode_mesh(t.len(), &encode(&t)).unwrap(); let (w, h) = (32, 32); let px = render(&m, &Camera::fitted(&m).named("top"), w, h, 1, ALIVE).unwrap(); let i = (h / 2 * w + w / 2) * 4; [px[i + 2] as i32, px[i + 1] as i32, px[i] as i32] };
+        let (red, half_green, full_green) = (0xc00000, 0x80_00c000u32, 0x00c000);
+        let base = at([quad(0, red), quad(10, red)].concat());
+        let over = at([quad(0, red), quad(10, half_green)].concat());
+        let solid = at([quad(0, red), quad(10, full_green)].concat());
+        assert!(over[0] > solid[0] + 20 && over[0] < base[0] && over[1] > base[1] + 20, "red shows through: {base:?} {over:?} {solid:?}");
+        let under = at([quad(10, red), quad(0, half_green)].concat());
+        assert_eq!(under, base, "a layer behind the opaque one does not show");
+    }
+    #[test] fn a_drag_is_never_starved() {
+        use super::{shows, wanted};
+        assert!(wanted(true, 3, 9), "a draft finishes though the pointer moved on");
+        assert!(!wanted(false, 3, 9) && wanted(false, 9, 9), "a picture at rest gives way");
+        assert!(shows(5, 3, 1), "finished behind the pointer: still newer than the screen");
+        assert!(!shows(3, 5, 1), "an older picture landing late does not go back in time");
+        assert!(!shows(5, 3, 6), "a picture of the previous model never shows");
+    }
     #[test] fn samples_a_pixel_follow_the_panel_and_a_draft_is_one() {
         assert_eq!(super::samples(800, 600, true), 1); assert_eq!(super::samples(640, 480, false), 3);
         assert_eq!(super::samples(1600, 1000, false), 2); assert_eq!(super::samples(2880, 1800, false), 1);
+    }
+    /// The one device-backed test: skipped where there is no Vulkan at all.
+    #[cfg(target_os = "linux")] #[test] fn gpu_and_cpu_agree() {
+        // SAFETY of the env write: the only test that reads this variable
+        unsafe { std::env::set_var("BACKPLANE_SOLID_RENDERER", "gpu"); }
+        let Some(mut g) = super::super::solid_gpu::Gpu::new() else { eprintln!("no GPU here: skipped"); return };
+        let m = std::sync::Arc::new(mesh()); let (w, h) = (96, 64); let c = Camera::fitted(&m);
+        let (a, b) = (g.render(&m, &c, w, h).expect("a picture"), render(&m, &c, w, h, 3, ALIVE).unwrap());
+        // inside the model, away from edges where the two anti-alias differently: within a couple of levels of each other in every channel
+        let mut worst = 0; let mut seen = 0;
+        for y in 1..h - 1 { for x in 1..w - 1 { let i = (y * w + x) * 4;
+            let flat = |p: &[u8]| [-(w as isize) * 4, -4, 4, w as isize * 4].iter().all(|d| (0..3).all(|k| (p[(i as isize + d) as usize + k] as i32 - p[i + k] as i32).abs() < 3));
+            if !flat(&b) { continue } seen += 1;
+            for k in 0..3 { worst = worst.max((a[i + k] as i32 - b[i + k] as i32).abs()); }
+        } }
+        assert!(seen > 1000 && worst <= 4, "{seen} flat pixels, worst difference {worst}");
     }
     #[test] #[ignore] fn bench_png() {
         let (frame, n) = super::super::demo::sphere_frame(std::env::var("TRIS").ok().and_then(|t| t.parse().ok()).unwrap_or(200_000));

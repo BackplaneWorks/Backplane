@@ -25,6 +25,7 @@ try:
             if not t: continue
             g = groups.setdefault(c, ([], []))
             b0 = len(g[0]); g[0].extend(p); g[1].extend(k for tri in t for k in (b0 + tri[0], b0 + tri[1], b0 + tri[2]))
+    lin = lambda c: [x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c]  # a STEP's colour is display sRGB, glTF's is linear light
     buf = bytearray(); views = []; accs = []; prims = []; mats = []; tris = 0
     for c, (pts, idx) in groups.items():
         tris += len(idx) // 3
@@ -36,7 +37,7 @@ try:
         views.append({"buffer": 0, "byteOffset": len(buf), "byteLength": 4 * len(idx), "target": 34963})
         buf += array.array("I", idx).tobytes()
         accs.append({"bufferView": len(views) - 1, "componentType": 5125, "count": len(idx), "type": "SCALAR"})
-        mats.append({"pbrMetallicRoughness": {"baseColorFactor": list(c) + [1.0], "metallicFactor": 0.0, "roughnessFactor": 0.8}})
+        mats.append({"pbrMetallicRoughness": {"baseColorFactor": lin(c) + [1.0], "metallicFactor": 0.0, "roughnessFactor": 0.8}})
         prims.append({"attributes": {"POSITION": len(accs) - 2}, "indices": len(accs) - 1, "material": len(mats) - 1})
     if tris:
         gl = {"asset": {"version": "2.0", "generator": "backplane-step2glb (FreeCAD)", "extras": {"unit": "mm", "up": "Z"}},

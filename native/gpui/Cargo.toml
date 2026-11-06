@@ -12,6 +12,7 @@ cef = ["dep:cef"]
 [dependencies]
 cef = { version = "=154.5.0", default-features = false, optional = true }
 anyhow = "1"
+log = "0.4"
 async-channel = "2"
 env_logger = { version = "0.11", default-features = false }
 lyon = { version = "1", default-features = false }
@@ -31,6 +32,10 @@ unicode-segmentation = "1"
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13", default-features = false }
 gpui = { version = "=0.2.2", default-features = false, features = ["x11"] }
+# The 3D page's own GPU context (viewers/solid_gpu.rs): the versions gpui already builds on Linux.
+blade-graphics = "0.7.0"
+blade-macros = "0.3.0"
+bytemuck = { version = "1", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }

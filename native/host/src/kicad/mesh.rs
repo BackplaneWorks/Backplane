@@ -128,8 +128,12 @@ fn clip_two(v: &View, a: [f32; 3], b: [f32; 3], c: [f32; 3], col: u32, alpha: u3
     screen(v, a, b, bc, col, alpha, out);
     screen(v, a, bc, cut(a, c, v.near), col, alpha, out);
 }
-/// Rgb.scale.ch
-fn scale_ch(c: u32, s: u32, k: f32) -> u32 { fl::to_u32((((c >> s) & 255) as f32) * k) << s }
+/// Rgb.scale.ch: a colour's channel in linear light scaled by `k`, as the sRGB byte a picture holds
+fn scale_ch(c: u32, s: u32, k: f32) -> u32 {
+    let l = (((c >> s) & 255) as f32) / 255.0 * k;
+    let e = if l <= 0.0031308 { 12.92 * l } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+    fl::to_u32(e * 255.0 + 0.5) << s
+}
 /// Proj.shade: flat Lambert over a little ambient (a triangle kept faces us)
 fn shade(c: u32, n: [f32; 3], l: [f32; 3]) -> u32 {
     let len = fl::max(dot3(n, n[0], n[1], n[2]).sqrt(), 0.0000000001);

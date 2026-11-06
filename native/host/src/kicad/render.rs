@@ -29,7 +29,7 @@ fn glb_path(src: &str, cache: &str) -> String {
     use std::os::unix::fs::MetadataExt;
     if src.ends_with(".glb") { return src.to_string() }
     let size = std::fs::metadata(src).map_or("0".to_string(), |m| format!("{}.{}", m.len() as u32, m.mtime() as u32));
-    format!("{cache}/{}.glb", stepglb::fnv(&format!("step1|{src}|{size}")))
+    format!("{cache}/{}.glb", stepglb::fnv(&format!("step2|{src}|{size}")))
 }
 /// Parts.glb: the model's GLB, from the cache, else converted into it; None when it cannot be
 fn model_glb(src: &str, cache: &str, tools: &[Mesher]) -> Option<String> {

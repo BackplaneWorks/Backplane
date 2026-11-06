@@ -2,6 +2,7 @@
 //! it with child and for timing it; exits 2 while the file is half written, 3 with a message when it cannot be read.
 //! bp-plot --tree FILE and bp-plot --info FILE SIG IDX answer as `--plot-tree` and `--plot-info` do. Kinds 2, 3 and 4 read 3D models (kicad-cli from
 //! BACKPLANE_KICAD_CLI, the mesher as the hub picks it, BACKPLANE_HOME for its managed FreeCAD); bp-plot --render MODEL... is `backplane --render`.
+//! bp-plot --frame MODEL.glb OUT writes the model as the client's solid frame ({key, n, mesh}), past the hub's size limit: what `backplane-gpui --solid-demo FILE` measures.
 #![allow(dead_code)]
 // the process gate (proc.rs, copy.rs): the helper makes its git / kicad-cli / step children through it like the hub
 #[path = "../copy.rs"] mod copy;
@@ -35,6 +36,17 @@ fn main() {
         let r = render::run(&ms, &cwd, &tools());
         if !r.out.is_empty() { println!("{}", r.out) }
         std::process::exit(r.code)
+    }
+    if k == "--frame" {
+        let Some(out) = a.get(2) else { eprintln!("bp-plot --frame MODEL.glb OUT"); std::process::exit(64) };
+        let bytes = std::fs::read(file).unwrap_or_default();
+        let plot = solidread::plot_of(&bytes, false).unwrap_or_else(|_| { eprintln!("model too big"); std::process::exit(3) });
+        let Some(so) = plot.solid else { eprintln!("no triangles"); std::process::exit(3) };
+        let text = |f: &mut Vec<u8>, s: &str| { f.push(0x60 | s.len() as u8); f.extend(s.as_bytes()) };
+        let mut f = vec![0xa3]; text(&mut f, "key"); text(&mut f, "2|bench"); text(&mut f, "n"); f.push(0x1a); f.extend(so.n.to_be_bytes());
+        text(&mut f, "mesh"); f.push(0x5a); f.extend((so.d.len() as u32).to_be_bytes()); f.extend(&so.d);
+        std::fs::write(out, f).unwrap(); println!("{} triangles", so.n);
+        return
     }
     let kind: u32 = k.parse().unwrap_or(0);
     if kind >= 2 {

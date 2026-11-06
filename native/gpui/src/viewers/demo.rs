@@ -1,6 +1,8 @@
-//! `--solid-demo TRIS[,STEPS]`: the 3D page on a synthetic sphere of about TRIS triangles, put through the real frame path (CBOR frame -> worker decode ->
-//! render), then STEPS orbit-drag steps; prints render times (draft = half size while dragging, full at the end), the decode+first image time and the
-//! process's resident memory before and after, as `GPUI_METRIC {"event":"solid_demo",...}`. Memory is the atlas too under a software Vulkan (llvmpipe).
+//! `--solid-demo TRIS|FILE[,STEPS]`: the 3D page on a synthetic sphere of about TRIS triangles, or on a real model's frame file (`bp-plot --frame`), put through the real frame
+//! path (CBOR frame -> worker decode -> render), then STEPS orbit-drag steps, each waited for until it is painted; then a drag held at a mouse's rate (one move every
+//! BACKPLANE_SOLID_MOVE_MS, default 8) for three seconds, without waiting: the pictures that reach the screen a second and the longest time none did. Prints those, the render
+//! times (draft = half size while dragging, full at the end), the decode+first image time and the process's resident memory before and after, as
+//! `GPUI_METRIC {"event":"solid_demo",...}`. BACKPLANE_GPUI_SNAP_DIR: the last picture at rest is saved there. Memory is the atlas too under a software Vulkan (llvmpipe).
 //! A synthetic model: not a real board's. (The no-drop comparison, 137 -> 808 MB over 400 drag steps against 147 -> 156 MB with drop_image, was measured with a build
 //! that had a switch for it; the switch is gone from the shipping render path.)
 use super::solid::SolidPage;
@@ -36,29 +38,48 @@ fn pct(v: &mut Vec<f64>, p: f64) -> f64 { v.sort_by(|a, b| a.partial_cmp(b).unwr
 
 pub struct Demo { page: Entity<SolidPage> }
 impl Demo {
-    pub fn new(cx: &mut Context<Self>, tris: usize, steps: usize, started: Instant) -> Self {
+    pub fn new(cx: &mut Context<Self>, source: &str, steps: usize, started: Instant) -> Self {
         let page = cx.new(SolidPage::new);
-        let (frame, n) = sphere_frame(tris);
+        let (frame, n) = match source.parse() { Ok(tris) => sphere_frame(tris), Err(_) => { let f = std::fs::read(source).expect("a frame file"); let n = match super::solid::parse_frame(&f) { Some(super::solid::SolidFrame::Model(_, m)) => m.tris.len(), _ => 0 }; (f, n) } };
         let p2 = page.clone();
         cx.spawn(async move |_, cx| {
             let t0 = Instant::now(); let rss0 = rss_mb();
             cx.background_executor().timer(Duration::from_millis(500)).await; // the window and its size
             let _ = p2.update(cx, |p, _| { let _ = p.accept(frame); });
             let wait = |cx: &mut AsyncApp, target: u64| { let p = p2.clone(); let cx = cx.clone(); async move {
-                for _ in 0..5000 { if p.read_with(&cx, |p, _| p.stats.images).unwrap_or(target) >= target { return true } cx.background_executor().timer(Duration::from_millis(2)).await; } false } };
+                for _ in 0..20000 { if p.read_with(&cx, |p, _| p.stats.painted).unwrap_or(target) >= target { return true } cx.background_executor().timer(Duration::from_micros(500)).await; } false } };
             let ok = wait(cx, 1).await;
             let first_ms = t0.elapsed().as_secs_f64() * 1000.0 - 500.0;
             let (size0, rss1) = (p2.read_with(cx, |p, _| p.stats.last_size).unwrap_or((0, 0)), rss_mb());
-            let (mut draft, mut done) = (Vec::new(), 1u64);
+            let (mut draft, mut shown) = (Vec::new(), Vec::new());
             for i in 0..steps {
+                let done = p2.read_with(cx, |p, _| p.stats.painted).unwrap_or(0) + 1; let t = Instant::now();
                 let _ = p2.update(cx, |p, _| p.drag_by(5.0, if i % 2 == 0 { 3.0 } else { -3.0 }));
-                done += 1; wait(cx, done).await;
+                wait(cx, done).await; shown.push(t.elapsed().as_secs_f64() * 1000.0);
                 if let Ok(ms) = p2.read_with(cx, |p, _| p.stats.last_ms) { draft.push(ms); }
                 cx.background_executor().timer(Duration::from_millis(4)).await;
             }
+            // a drag at a mouse's rate: nothing waits for a picture
+            let every = std::env::var("BACKPLANE_SOLID_MOVE_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(8.0);
+            let (t, mut moves, mut seen, mut last, mut gap) = (Instant::now(), 0u32, p2.read_with(cx, |p, _| p.stats.painted).unwrap_or(0), Instant::now(), 0f64);
+            let first_seen = seen;
+            while t.elapsed().as_secs_f64() < 3.0 {
+                let _ = p2.update(cx, |p, _| p.drag_by(2.0, if moves % 2 == 0 { 1.0 } else { -1.0 })); moves += 1;
+                cx.background_executor().timer(Duration::from_secs_f64(every / 1000.0)).await;
+                let now = p2.read_with(cx, |p, _| p.stats.painted).unwrap_or(seen);
+                if now != seen { seen = now; gap = gap.max(last.elapsed().as_secs_f64() * 1000.0); last = Instant::now(); }
+            }
+            gap = gap.max(last.elapsed().as_secs_f64() * 1000.0);
+            let held = t.elapsed().as_secs_f64(); let held_fps = (seen - first_seen) as f64 / held;
+            let _ = p2.update(cx, |p, cx| { p.settle(); cx.notify(); });
+            let rest = p2.read_with(cx, |p, _| p.stats.painted).unwrap_or(0) + 1; wait(cx, rest).await;
+            let at_rest_ms = p2.read_with(cx, |p, _| p.stats.last_ms).unwrap_or(0.0);
+            let shot = std::env::var_os("BACKPLANE_GPUI_SNAP_DIR").map(|d| p2.update(cx, |p, _| p.snap(std::path::Path::new(&d)).map(|f| f.display().to_string())));
             let rss2 = rss_mb();
             let metric = serde_json::json!({"event": "solid_demo", "tris": n, "ok": ok, "steps": steps, "panel_image": [size0.0, size0.1],
                 "first_image_ms": (first_ms * 10.0).round() / 10.0, "drag_render_ms": {"p50": (pct(&mut draft.clone(), 0.5) * 10.0).round() / 10.0, "p95": (pct(&mut draft.clone(), 0.95) * 10.0).round() / 10.0, "max": (pct(&mut draft, 1.0) * 10.0).round() / 10.0},
+                "move_to_paint_ms": {"p50": (pct(&mut shown.clone(), 0.5) * 10.0).round() / 10.0, "p95": (pct(&mut shown.clone(), 0.95) * 10.0).round() / 10.0, "max": (pct(&mut shown, 1.0) * 10.0).round() / 10.0},
+                "held_drag": {"move_ms": every, "moves": moves, "painted_per_s": (held_fps * 10.0).round() / 10.0, "longest_gap_ms": gap.round()}, "at_rest_ms": (at_rest_ms * 10.0).round() / 10.0, "by": p2.read_with(cx, |p, _| p.stats.by).unwrap_or(""), "shot": format!("{shot:?}"),
                 "rss_mb": {"start": rss0.round(), "after_first_image": rss1.round(), "after_drag": rss2.round()}, "drop_image": true,
                 "t_ms": started.elapsed().as_millis() as u64});
             eprintln!("GPUI_METRIC {metric}");
