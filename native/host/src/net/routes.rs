@@ -42,7 +42,9 @@ impl AuthRoutes {
     }
     /// A private invitation made from inside the hub (Settings → Devices → Add a device): the same one `POST /auth/invitations` makes, with the QR code of its link.
     pub fn invite(&self) -> Value {
-        let mut j = self.reg.create(&self.create_routes("", false));
+        // the hub's own address stands in for the Host header an HTTP request would have carried (a hub bound to everything names its interfaces itself)
+        let authority = if self.host == "0.0.0.0" { String::new() } else { format!("{}:{}", self.host, self.port) };
+        let mut j = self.reg.create(&self.create_routes(&authority, false));
         if let Some(l) = j["link"].as_str().map(str::to_string) { j["qr"] = json!((self.qr)(&l)); }
         j
     }
