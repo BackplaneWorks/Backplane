@@ -46,7 +46,7 @@ final class Driver {
     // paired: BACKPLANE_LINK (the app's debug hook) so only the `pair` journey goes through the pairing screen
     func launch(paired: Bool = true) {
         app.terminate()
-        app.launchEnvironment = paired ? ["BACKPLANE_LINK": link] : [:]
+        app.launchEnvironment = (paired ? ["BACKPLANE_LINK": link] : [:]).merging(["BACKPLANE_PERFORMANCE": "1"]) { a, _ in a }
         app.launch()
         if paired { skipTour() }
     }
