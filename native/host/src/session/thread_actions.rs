@@ -134,6 +134,18 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
                 b.cmds.push(json!({"type": "focus", "id": "term"}));
             }
         }
+        // the picker under the composer: a model within the provider (Ui.model: thread.modes), a reasoning effort or, for a "@provider" chip, another agent (Ui.effort.set)
+        "model" => {
+            if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            b.rpc("thread.modes", json!({"thread": sel, "model": value}));
+        }
+        "effort" => {
+            if sel.is_empty() || sel.contains('~') || sel.starts_with('@') || !crate::session::select::Facts::thread_exists(f, sel) { return None }
+            match value.strip_prefix('@') {
+                Some(provider) => b.rpc("thread.provider", json!({"thread": sel, "provider": provider})),
+                None => b.rpc("thread.effort", json!({"thread": sel, "effort": value})),
+            }
+        }
         // Ui.fork.with: the next request makes a thread; the viewer on show is recorded for it (Viewer.record)
         "fork" => {
             let th = if value.is_empty() { sel } else { value };
@@ -192,7 +204,7 @@ mod tests {
         assert_eq!(s1["drafts"]["@att.up:t1"], "pasted-1.png");
         let s2 = merged(&s1, act(&F, "h", &s1, "t1", "attach-end", r#"{"attached":"/a/t1/k9-pasted-1.png","thread":"t1"}"#).unwrap());
         assert_eq!((s2["drafts"]["@att.up:t1"].as_str(), s2["drafts"]["@att:t1"].as_str()), (Some(""), Some("/a/t1/k9-pasted-1.png")));
-        let cx = composer::SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
+        let cx = composer::SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None };
         let sent = composer::send(&cx, &s2).unwrap();
         assert!(sent.cmds[1]["text"].as_str().unwrap().contains(r"look\n\n[attachment: /a/t1/k9-pasted-1.png]"), "{:?}", sent.cmds[1]);
         let s3 = merged(&s2, act(&F, "h", &s2, "t1", "detach", "/a/t1/k9-pasted-1.png").unwrap());
@@ -248,6 +260,12 @@ mod tests {
         assert_eq!((rec["open"].clone(), rec["root"].clone(), rec["kind"].clone()), (json!("1"), json!("/w/r"), json!("board")));
         assert_eq!(rec["path"], json!("/w/b.kicad_pcb"), "a version's live file");
         assert!(run("fork", "http://h|t9", sess()).is_none());
+    }
+    #[test] fn the_picker_chooses_a_model_an_effort_or_another_agent() {
+        let o = run("model", "opus", sess()).unwrap(); assert_eq!(text(&o, 0), format!("{{\"id\":5,\"m\":\"thread.modes\",\"p\":{{\"thread\":\"{T}\",\"model\":\"opus\"}}}}"));
+        let o = run("effort", "high", sess()).unwrap(); assert!(text(&o, 0).contains("\"m\":\"thread.effort\"") && text(&o, 0).contains("\"effort\":\"high\""));
+        let o = run("effort", "@codex", sess()).unwrap(); assert!(text(&o, 0).contains("\"m\":\"thread.provider\"") && text(&o, 0).contains("\"provider\":\"codex\""));
+        let o = run("effort", "", sess()).unwrap(); assert!(text(&o, 0).contains("\"effort\":\"\""), "auto is the empty effort");
     }
     #[test] fn find_open_modes() {
         let o = run("find-open", "search", sess()).unwrap();

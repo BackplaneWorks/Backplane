@@ -823,8 +823,11 @@ def Ui.view_pick(u: Ui, +kind: String) -> Ui:
 def Dv.at(+st: M.State, +th: String) -> String:
   C.Turn.name(M.Thread.turn(M.State.thread.get(st, th))) ++ "|" ++ Nat.show(List.length(&2, M.Entry, M.State.steps(st, th)))
 
+# (and "diff.kept:t", as the hub keeps it too: server.bend's GitJob.diff.k,
+# what the Diff pressed draws while it is asked again, View.diff.at)
 def Dv.text(+nf: Map<&2, String>, +th: String, +r: J.Json) -> Map<&2, String>:
-  Map.set(&2, String, Map.set(&2, String, nf, "diff:" ++ th, J.Json.get_str(r, "diff", "")), "diff.none:" ++ th, J.Json.get_str(r, "nogit", ""))
+  Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, nf, "diff:" ++ th, J.Json.get_str(r, "diff", "")), "diff.none:" ++ th, J.Json.get_str(r, "nogit", "")),
+    "diff.kept:" ++ th, J.Json.show(J.Json.obj([J.KV{"diff", J.Str{J.Json.get_str(r, "diff", "")}}, J.KV{"nogit", J.Str{J.Json.get_str(r, "nogit", "")}}])))
 
 # a diff asked for by hand opens its thread's viewer on it (on screen when
 # that thread is)
@@ -832,12 +835,12 @@ def Ui.diff.k(u: Ui, +th: String, +r: J.Json) -> Ui:
   match u:
     case Ui{+st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, Bool.or(pa, String.eq(th, sel)), v, rid, w, er, note,
-        Viewer.put(Map.set(&2, String, Map.set(&2, String, Dv.text(nf, th, r), "diff.at:" ++ th, Dv.at(st, th)), "panel:" ++ th, "1"), th, "diff", ""), ob, tr}
+        Viewer.put(Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Dv.text(nf, th, r), "diff.wait:" ++ th, ""), "diff.at:" ++ th, Dv.at(st, th)), "panel:" ++ th, "1"), th, "diff", ""), ob, tr}
 
 def Ui.diff.quiet(u: Ui, +th: String, +r: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Dv.text(nf, th, r), "diff.auto:" ++ th, ""), ob, tr}
+      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Map.set(&2, String, Dv.text(nf, th, r), "diff.wait:" ++ th, ""), "diff.auto:" ++ th, ""), ob, tr}
 
 def Ui.diff.by(auto: Bool, u: Ui, +th: String, +r: J.Json) -> Ui:
   match auto:
@@ -1028,8 +1031,21 @@ def KN.thread.k(shown: Bool, +info: Map<&2, String>, +st: M.State) -> Maybe<&2, 
     case True{}: KN.visible(info, st)
     case False{}: None{}
 
+# A differing worktree design never opens without a deliberate choice. The
+# first action is the default; its request is still resolved afresh by Git.
+def KO.pending(+nf: Map<&2, String>, +th: String) -> Bool:
+  Bool.not(String.is_empty(Str.get(nf, "ko:" ++ th)))
+
+def KO.notice(pending: Bool, +nf: Map<&2, String>, +th: String, other: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
+  match pending:
+    case False{}: other
+    case True{}:
+      +r = Maybe.default(&2, J.Json, J.Json.parse(Str.get(nf, "ko:" ++ th)), J.Null{})
+      Some{KH.KNote{"kicad-copy", "Open in KiCad", "This thread's design differs from main. Open main is the default.\nMain: " ++ J.Json.get_str(r, "main", "") ++ "\nThis thread: " ++ J.Json.get_str(r, "copy", ""),
+        [KH.KAct{"Open main", "kicad-copy-main", th}, KH.KAct{"Open this thread's copy", "kicad-copy-thread", th}, KH.KAct{"Cancel", "kicad-copy-cancel", th}]}}
+
 def KN.thread(+info: Map<&2, String>, +st: M.State, +sel: String) -> Maybe<&2, KH.KNote>:
-  KN.thread.k(String.eq(Str.get(info, "kn:" ++ sel), "1"), info, st)
+  KO.notice(KO.pending(info, sel), info, sel, KN.thread.k(String.eq(Str.get(info, "kn:" ++ sel), "1"), info, st))
 
 def KN.action(+a: String) -> String:
   Bool.pick(String, String.eq(a, "link"), "open-url", a)
@@ -1848,12 +1864,28 @@ def Ui.diff(+u: Ui, +r: J.Json) -> Ui:
   +th = Viewer.of(J.Json.get_str(r, "thread", ""), Ui.sel(u))
   Ui.diff.by(String.eq(Ui.info(u, "diff.auto:" ++ th), "1"), u, th, r)
 
+# any other answer to a Diff asked for by hand (an error) ends its wait
+# (Dv.open): the viewer says what went wrong, not "Loading…" for ever
+def Dv.unwait.go(u: Ui, +id: String, +th: String) -> Ui:
+  match u:
+    case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Map.set(&2, String, nf, "diff.ask:" ++ id, ""), "diff.wait:" ++ th, ""), ob, tr}
+
+def Dv.unwait.k(none: Bool, u: Ui, +id: String, +th: String) -> Ui:
+  match none:
+    case True{}: u
+    case False{}: Dv.unwait.go(u, id, th)
+
+def Dv.unwait(+u: Ui, +id: String) -> Ui:
+  +th = Ui.info(u, "diff.ask:" ++ id)
+  Dv.unwait.k(String.is_empty(th), u, id, th)
+
 def Ui.reply.diff(has: Bool, u: Ui, +o: J.Json) -> Ui:
   match has:
     case True{}:
       Ui.diff(Ui.reply.k(u, o), J.Json.get_obj(o, "result"))
     case False{}:
-      Ui.reply.k(u, o)
+      Dv.unwait(Ui.reply.k(u, o), J.Json.as_raw(J.Json.get(o, "id"), ""))
 
 # The hub's own view ("auto"), sent when an agent starts in a KiCad
 # project: it opens the thread's panel on its board (or schematic) only
@@ -5785,10 +5817,14 @@ def Ui.reply.att(+r: J.Json, +ok: Bool, u: Ui) -> Ui:
 # per thread (fm.list:<t>, and fm.dir:<t> the folder it is), and a PDF's
 # page drawn for the window (pdf.png:<path>#<page>, pdf.n:<path> its pages,
 # pdf.err:<path> why not)
+# (and as kept per thread and folder, Fm.kept)
+def Fm.kept.key(+thread: String, +dir: String) -> String:
+  "fm.kept:" ++ thread ++ "\n" ++ dir
+
 def Fm.got.k(has: Bool, u: Ui, +r: J.Json) -> Ui:
   match has:
     case True{}:
-      Ui.info_set(Ui.info_set(Ui.info_set(u, "fm.list:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmEntries", "")), "fm.dir:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmDir", "")), "fm.err:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmError", ""))
+      Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, Fm.kept.key(J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmDir", "")), J.Json.get_str(r, "fmEntries", "")), "fm.list:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmEntries", "")), "fm.dir:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmDir", "")), "fm.err:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmError", ""))
     case False{}:
       u
 
@@ -5835,8 +5871,20 @@ def Pdf.got.k(has: Bool, u: Ui, +r: J.Json) -> Ui:
 def Fm.has(+r: J.Json, +k: String) -> Bool:
   Bool.not(String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(r, k), J.Null{})), "null"))
 
+# A folder kept from before (Fm.kept) that its current listing says is
+# gone, or unreadable, is no longer drawn
+def Fm.reply.failed(failed: Bool, +u: Ui, +o: J.Json) -> Ui:
+  match failed:
+    case True{}:
+      Ui.info_drop(u, Fm.kept.key(Fm.reply.thread(u, o), Ui.info(u, "fm.want:" ++ Fm.reply.thread(u, o))))
+    case False{}:
+      u
+
+def Fm.reply.lost(+u: Ui, +o: J.Json) -> Bool:
+  Bool.and(Bool.and(Bool.not(String.is_empty(Fm.reply.thread(u, o))), Fm.reply.current(u, o)), Bool.not(J.Json.get_bool(o, "ok", True{})))
+
 def Fm.reply(+u: Ui, +o: J.Json) -> Ui:
-  Pdf.got.k(Fm.has(J.Json.get_obj(o, "result"), "pdfPath"), Fm.reply.done(Bool.and(Fm.has(J.Json.get_obj(o, "result"), "fmEntries"), Fm.reply.listed(u, o)), u, o), J.Json.get_obj(o, "result"))
+  Pdf.got.k(Fm.has(J.Json.get_obj(o, "result"), "pdfPath"), Fm.reply.failed(Fm.reply.lost(u, o), Fm.reply.done(Bool.and(Fm.has(J.Json.get_obj(o, "result"), "fmEntries"), Fm.reply.listed(u, o)), u, o), o), J.Json.get_obj(o, "result"))
 
 # a diff opens the diff view; a file list (files.list) is kept for the
 # file picker; a finished upload becomes an attachment of its thread; a
@@ -6126,9 +6174,41 @@ def Fm.ready.for(+done: String, +current: String, +listed: String, +wanted: Stri
 def Fm.ready(+u: Ui) -> Bool:
   Bool.and(Fm.received(u), Fm.ready.for(Ui.info(u, "fm.done:" ++ Ui.sel(u)), Ui.info(u, "fm.id:" ++ Ui.sel(u)), Ui.info(u, "fm.dir:" ++ Ui.sel(u)), Fm.dir(u)))
 
-# the folder's rows, once the hub has listed it
+# A folder's listing kept per thread and folder, "fm.kept:<t>\n<dir>":
+# every listing this connection was answered (Fm.got.k), and the hub's own
+# (server/viewer-kept.bend: kept hub-wide, so a reload or another window
+# has it too, and a shown thread's root read ahead), so a folder seen
+# before is drawn at once while it is listed again; only that thread's,
+# only that folder's
+def Fm.kept.k(r: Map<&2, String> & Bool) -> Bool:
+  (_, found) = r
+  found
+
+def Fm.kept.at(u: Ui, +dir: String) -> Bool:
+  match u:
+    case Ui{_, sel, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
+      Fm.kept.k(Map.has(&2, String, nf, Fm.kept.key(sel, dir)))
+
+def Fm.kept(+u: Ui) -> Bool:
+  Fm.kept.at(u, Fm.dir(u))
+
+# whether the Files tab has rows to draw: its folder listed for this very
+# request (Fm.ready), or kept from before while it is listed again
+def Fm.shown(+u: Ui) -> Bool:
+  Bool.or(Fm.ready(u), Fm.kept(u))
+
+def Fm.rows.k(ready: Bool, kept: Bool, +u: Ui) -> List<&2, FmRow>:
+  match ready kept:
+    case True{} _:
+      Fm.rows.go(FM.Fm.parse(Ui.info(u, "fm.list:" ++ Ui.sel(u))), Fm.dir(u))
+    case False{} True{}:
+      Fm.rows.go(FM.Fm.parse(Ui.info(u, Fm.kept.key(Ui.sel(u), Fm.dir(u)))), Fm.dir(u))
+    case False{} False{}:
+      Nil{}
+
+# the folder's rows, once the hub has listed it (or as it was listed before)
 def Fm.rows(+u: Ui) -> List<&2, FmRow>:
-  Bool.pick(List<&2, FmRow>, Fm.ready(u), Fm.rows.go(FM.Fm.parse(Ui.info(u, "fm.list:" ++ Ui.sel(u))), Fm.dir(u)), Nil{})
+  Fm.rows.k(Fm.ready(u), Fm.kept(u), u)
 
 def Fm.trail.go(ps: List<&2, String>, +at: String) -> List<&2, PItem>:
   match ps:
@@ -6596,16 +6676,16 @@ def Bd.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
 
 # The combined view
 # -----------------
-# Kind "split": the schematic beside the board or its 3D model, at most
-# two panes: the board and the 3D share the side, one at a time (showing
-# one puts the other away), each pane named, put away and brought back on
-# its own (the setting "split.hide": the panes put away, words of
-# "sch pcb 3d"; the 3D shows only when the board is put away and it is
-# not, so no setting gives the schematic and the board; one pane always
-# stays, test/split_test.bend). Its board is the viewer's file, as the
-# Board tab's (the board picked, else the project's own); its sheet is
-# kept per thread ("@split.sheet:<t>"): the board's own schematic until
-# another is opened there.
+# Kind "split": the schematic beside the board and its 3D model, each pane
+# named, put away and brought back on its own (the setting "split.hide":
+# the panes put away, words of "sch pcb 3d"; one pane always stays,
+# test/split_test.bend). On a phone (the phone arrangement) there is room
+# for two: the board and the 3D share the side, one at a time (showing one
+# puts the other away; the 3D shows only when the board is put away and it
+# is not). Its board is the viewer's file, as the Board tab's (the board
+# picked, else the project's own); its sheet is kept per thread
+# ("@split.sheet:<t>"): the board's own schematic until another is opened
+# there.
 
 def Split.hide(+u: Ui) -> String:
   M.Setting.get(Ui.state(u), "split.hide", "")
@@ -6613,9 +6693,14 @@ def Split.hide(+u: Ui) -> String:
 def Split.has(+hide: String, +p: String) -> Bool:
   String.contains(" " ++ hide ++ " ", " " ++ p ++ " ")
 
-# whether pane p shows, by the panes put away
-def Split.shows(+hide: String, +p: String) -> Bool:
-  Bool.pick(Bool, String.eq(p, "3d"), Bool.and(Split.has(hide, "pcb"), Bool.not(Split.has(hide, "3d"))), Bool.not(Split.has(hide, p)))
+# whether the board and the 3D take turns (the phone arrangement)
+def Split.one(+u: Ui) -> Bool:
+  String.eq(Ui.info(u, "local.workspace.form"), "phone")
+
+# whether pane p shows, by the panes put away (one: the board and the 3D
+# one at a time)
+def Split.shows(+one: Bool, +hide: String, +p: String) -> Bool:
+  Bool.pick(Bool, Bool.and(one, String.eq(p, "3d")), Bool.and(Split.has(hide, "pcb"), Bool.not(Split.has(hide, "3d"))), Bool.not(Split.has(hide, p)))
 
 # the panes put away when these show (the schematic, the board, the 3D)
 def Split.words(s: Bool, b: Bool, t: Bool) -> String:
@@ -6627,18 +6712,18 @@ def Split.flip.k(none: Bool, +hide: String, +next: String) -> String:
 def Split.flip.to(+hide: String, +s: Bool, +b: Bool, +t: Bool) -> String:
   Split.flip.k(Bool.not(Bool.or(s, Bool.or(b, t))), hide, Split.words(s, b, t))
 
-# the panes put away once pane p is flipped: the schematic on its own;
-# the board or the 3D shown puts the other away; the last one shown stays
-def Split.flip(+hide: String, +p: String) -> String:
-  +s = Split.shows(hide, "sch")
-  +b = Split.shows(hide, "pcb")
-  +t = Split.shows(hide, "3d")
+# the panes put away once pane p is flipped: each on its own (one: the
+# board or the 3D shown puts the other away); the last one shown stays
+def Split.flip(+one: Bool, +hide: String, +p: String) -> String:
+  +s = Split.shows(one, hide, "sch")
+  +b = Split.shows(one, hide, "pcb")
+  +t = Split.shows(one, hide, "3d")
   Bool.pick(String, String.eq(p, "sch"), Split.flip.to(hide, Bool.not(s), b, t),
-    Bool.pick(String, String.eq(p, "pcb"), Split.flip.to(hide, s, Bool.not(b), False{}),
-      Bool.pick(String, String.eq(p, "3d"), Split.flip.to(hide, s, False{}, Bool.not(t)), hide)))
+    Bool.pick(String, String.eq(p, "pcb"), Split.flip.to(hide, s, Bool.not(b), Bool.and(Bool.not(one), t)),
+      Bool.pick(String, String.eq(p, "3d"), Split.flip.to(hide, s, Bool.and(Bool.not(one), b), Bool.not(t)), hide)))
 
 def Split.on(+u: Ui, +p: String) -> Bool:
-  Split.shows(Split.hide(u), p)
+  Split.shows(Split.one(u), Split.hide(u), p)
 
 def Split.is(+u: Ui) -> Bool:
   String.eq(Ui.view_get(u, "view.kind"), "split")
@@ -7388,10 +7473,31 @@ def Mpage.sync.m(a: Act) -> Act:
 def Mpage.sync(a: Act) -> Act:
   Fv.sync(Mpage.sync.m(a))
 
-# Diff asked for by hand (the rail, ctrl+d, the palette): its answer opens
-# the viewer on it, even with one of Diff's own asks still out
+# Diff asked for by hand (the rail, ctrl+d, the palette) opens the viewer
+# at once, saying "Loading…" ("diff.wait:t"; the ask's id names the thread
+# in "diff.ask:<id>") until its answer fills it (Ui.diff.k), even with
+# one of Diff's own asks still out. It used to open only with the answer:
+# the click showed nothing for as long as git took (5 s on a big change).
+# What it is asked at is noted now too, or Dv.sync asks a second time.
+def Dv.open(u: Ui, +th: String) -> Ui:
+  match u:
+    case Ui{+st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
+      Ui{st, sel, dr, live, op, on, now, ad, Bool.or(pa, String.eq(th, sel)), v, rid, w, er, note,
+        Viewer.put(Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, nf, "diff.wait:" ++ th, "1"), "diff.at:" ++ th, Dv.at(st, th)), "panel:" ++ th, "1"), th, "diff", ""), ob, tr}
+
+# the id of the ask a command list sends
+def Dv.sent.id(cs: List<&2, Cmd>) -> String:
+  match cs:
+    case Nil{}: ""
+    case Send{+t} <> _: J.Json.as_raw(J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(t), J.Null{}), "id"), "")
+    case _ <> rest: Dv.sent.id(rest)
+
+def Dv.mark(a: Act, +th: String) -> Act:
+  match a:
+    case Act{u, +cmds}: Act{Ui.info_set(u, "diff.ask:" ++ Dv.sent.id(cmds), th), cmds}
+
 def Dv.ask(+u: Ui) -> Act:
-  Ui.on_thread.p(Ui.info_set(u, "diff.auto:" ++ Ui.sel(u), ""), "git.diff", [J.KV{"from", J.Num{"0"}}, J.KV{"to", J.Num{"-1"}}])
+  Dv.mark(Ui.on_thread.p(Dv.open(Ui.info_set(u, "diff.auto:" ++ Ui.sel(u), ""), Ui.sel(u)), "git.diff", [J.KV{"from", J.Num{"0"}}, J.KV{"to", J.Num{"-1"}}]), Ui.sel(u))
 
 # An open Diff follows the thread's changes: when the selected thread's
 # panel shows its Diff and the thread's turn or steps moved on from what
@@ -8719,6 +8825,20 @@ def Fab.sync(a: Act) -> Act:
   match a:
     case Act{+u, cmds}:
       Fab.sync.home(PH.Home.is(Ui.sel(u)), Act{u, cmds})
+
+# The card asked for by the hub's own render of a view (thin-actor.bend's
+# Actor.mail_ready), before it draws a thread: opening a thread there is no
+# action, so the page asked with a "fab-look" action after each open, a
+# whole render and two round trips before Ready to order could show.
+# Threads only: a project home asks for its own (Home.sync).
+def Fab.sync.shown.k(home: Bool, +u: Ui, cmds: List<&2, Cmd>) -> Act:
+  match home:
+    case True{}: Act{u, cmds}
+    case False{}: Fab.sync.k(Fab.want(u), u, cmds)
+
+def Fab.sync.shown(a: Act) -> Act:
+  match a:
+    case Act{+u, cmds}: Fab.sync.shown.k(PH.Home.is(Ui.sel(u)), u, cmds)
 
 # the hub's card for a thread
 def Fab.has(+o: J.Json) -> Bool:
@@ -10117,9 +10237,20 @@ def Hs.detail(+l: I.Loc, +u: Ui, +s: HI.Step, +es: List<&2, M.Entry>) -> String:
 def Hs.file.own(+kind: Nat, +board: String, +sch: String) -> String:
   Bool.pick(String, Nat.is_eq(kind, 1n), Bd.or(sch, Bool.pick(String, String.is_empty(board), "", Bd.path("schematic", board))), board)
 
+# The thread's own board or schematic ("pcb" / "sch") as this connection's
+# history.refs answer named it ("@rc.pcb:<t>" / "@rc.sch:<t>",
+# Hs.refs.keep), else as the hub's last answer for the thread did
+# ("refs.kept:<t>", kept hub-wide: server/viewer-kept.bend), so a board's
+# history bar is drawn at the press while the hub is asked again (Rc.need)
+def Rc.kept(+u: Ui, +field: String) -> String:
+  J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "refs.kept:" ++ Ui.sel(u))), J.Null{}), field, "")
+
+def Rc.held(+u: Ui, +field: String) -> String:
+  Bd.or(Ui.scratch(u, "@rc." ++ field ++ ":" ++ Ui.sel(u)), Rc.kept(u, field))
+
 def Hs.file(+u: Ui) -> String:
   Bd.or(HI.Hist.family(Ui.view_get(u, "view.path")), Hs.file.own(Hs.kind(u),
-    Bd.or(Bd.shown(u, Ui.view_get(u, "view.design")), Ui.scratch(u, "@rc.pcb:" ++ Ui.sel(u))), Ui.scratch(u, "@rc.sch:" ++ Ui.sel(u))))
+    Bd.or(Bd.shown(u, Ui.view_get(u, "view.design")), Rc.held(u, "pcb")), Rc.held(u, "sch")))
 
 # Until the default file has been resolved, there is no track to scrub.
 # Falling back to any file of the kind could open an unrelated board.
@@ -10665,8 +10796,12 @@ def Rc.at(+u: Ui) -> String:
 
 # (a viewer on the project's own board or schematic names no file: the
 # hub's history.refs answer does, Rc.sync asks for it once)
-def Rc.own(+u: Ui) -> String:
+def Rc.own.live(+u: Ui) -> String:
   Ui.scratch(u, Bool.pick(String, Nat.is_eq(Hs.kind(u), 1n), "@rc.sch:", "@rc.pcb:") ++ Ui.sel(u))
+
+# (or as the hub's last answer for the thread named it, Rc.held)
+def Rc.own(+u: Ui) -> String:
+  Rc.held(u, Bool.pick(String, Nat.is_eq(Hs.kind(u), 1n), "sch", "pcb"))
 
 def Rc.file(+u: Ui) -> String:
   Bool.pick(String, String.is_empty(HI.Hist.family(Ui.view_get(u, "view.path"))), Rc.own(u), HI.Hist.family(Ui.view_get(u, "view.path")))
@@ -10681,7 +10816,7 @@ def Rc.rel(+u: Ui) -> String:
 # other)
 def Rc.need(+u: Ui) -> Bool:
   Bool.and(Bool.and(Bool.not(String.is_empty(Ui.sel(u))), Bool.and(Nat.is_lt(Hs.kind(u), 2n), Bool.not(String.eq(Ui.view_get(u, "view.kind"), "review")))),
-    Bool.and(Bool.and(String.is_empty(HI.Hist.family(Ui.view_get(u, "view.path"))), String.is_empty(Rc.own(u))), String.is_empty(Ui.info(u, "rc.refs:" ++ Ui.sel(u)))))
+    Bool.and(Bool.and(String.is_empty(HI.Hist.family(Ui.view_get(u, "view.path"))), String.is_empty(Rc.own.live(u))), String.is_empty(Ui.info(u, "rc.refs:" ++ Ui.sel(u)))))
 
 def Rc.sync.join(a: Act, cs: List<&2, Cmd>) -> Act:
   match a:
@@ -12328,6 +12463,16 @@ def KN.reply.k(has: Bool, +u: Ui, +o: J.Json) -> Ui:
 
 def KN.reply(+u: Ui, +o: J.Json) -> Ui:
   KN.reply.k(Bool.not(String.is_empty(J.Json.get_str(J.Json.get_obj(o, "result"), "kicad", ""))), u, o)
+
+def KO.reply(+u: Ui, +o: J.Json) -> Ui:
+  +r = J.Json.get_obj(o, "result")
+  Bool.pick(Ui, J.Json.get_bool(r, "kicadCopy", False{}), Ui.info_set(u, "ko:" ++ J.Json.get_str(r, "thread", Ui.sel(u)), J.Json.show(r)), u)
+
+def KO.act(+u: Ui, +action: String, +value: String) -> Act:
+  +th = Bool.pick(String, String.is_empty(value), Ui.sel(u), value)
+  +cleared = Ui.info_set(u, "ko:" ++ th, "")
+  Bool.pick(Act, Bool.or(String.eq(action, "kicad-copy-cancel"), String.eq(action, "menu-close")), Act{cleared, Nil{}},
+    Ui.rpc(cleared, "kicad.open", [J.KV{"thread", J.Str{th}}, J.KV{"copy", J.Str{Bool.pick(String, String.eq(action, "kicad-copy-thread"), "thread", "main")}}]))
 
 def KX.result(+nf: Map<&2, String>, +th: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(Str.get(nf, "kx:" ++ th)), J.Null{})
@@ -16107,7 +16252,7 @@ def Mailv.reply(+u: Ui, +o: J.Json) -> Ui:
   Mailv.reply.on(Bool.not(String.is_empty(Ui.scratch(u, "@mr.req:" ++ J.Json.as_raw(J.Json.get(o, "id"), "")))), u, o, J.Json.as_raw(J.Json.get(o, "id"), ""))
 
 def Ui.reply.apply(u: Ui, +o: J.Json) -> Ui:
-  Share.reply(KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(Mailv.reply(u, o), o), o), o)))), o), o), o)
+  Share.reply(KO.reply(KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(Mailv.reply(u, o), o), o), o)))), o), o), o), o)
 
 def Ui.reply.fresh(stale: Bool, +u: Ui, +o: J.Json) -> Ui:
   match stale:
@@ -16936,13 +17081,18 @@ def Ui.act.kx(kx: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: KX.act(u, action, value)
     case False{}: Ui.act.share(Share.is(action), u, action, value)
 
+def Ui.act.ko(copy: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match copy:
+    case True{}: KO.act(u, action, value)
+    case False{}: Ui.act.kx(Bool.or(String.starts_with(action, "kicad-export10"), Bool.and(String.eq(action, "menu-close"), KX.pending(Ui.infos(u), Ui.sel(u)))), u, action, value)
+
 # (design review's "rv-" actions route before the rest: Rv.act)
 def Ui.act.r(rv: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match rv:
     case True{}:
       Rv.act(u, action, value)
     case False{}:
-      Ui.act.kx(Bool.or(String.starts_with(action, "kicad-export10"), Bool.and(String.eq(action, "menu-close"), KX.pending(Ui.infos(u), Ui.sel(u)))), u, action, value)
+      Ui.act.ko(Bool.or(String.starts_with(action, "kicad-copy-"), Bool.and(String.eq(action, "menu-close"), KO.pending(Ui.infos(u), Ui.sel(u)))), u, action, value)
 
 # (Antigravity's "agy-" actions route before the rest too: Agv.act)
 # (the secret box's "secret-" actions: Sbox.act)
@@ -16994,7 +17144,7 @@ def Ui.act.sch(sch: Bool, +u: Ui, +action: String, +value: String) -> Act:
 def Ui.act.split(i: Nat, +u: Ui, +action: String, +value: String) -> Act:
   match i:
     case 0n:
-      Ui.setting(u, "split.hide=" ++ Split.flip(Split.hide(u), value))
+      Ui.setting(u, "split.hide=" ++ Split.flip(Split.one(u), Split.hide(u), value))
     case 1n:
       Probe.set(u, value)
     case _:

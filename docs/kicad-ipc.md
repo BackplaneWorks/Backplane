@@ -1,5 +1,57 @@
 # KiCad over IPC
 
+KiCad discovery in a linked Git worktree defaults to the main checkout's
+project folder and `.backplane.json`. Git's common directory and registered
+main worktree establish the link; a project below the repository root keeps
+its relative subfolder. An ordinary project folder is unchanged. Absolute
+`project`, `pcb` and `schematic` entries in the thread's `.backplane.json`
+override the main configuration, preserving explicit external designs.
+
+Open in KiCad compares the selected project, board and schematic bytes,
+including sheets below the root schematic. When the thread's copy differs,
+the shared web, desktop and phone UI offers **Open main** first (the default),
+**Open this thread's copy**, and Cancel. The initial request launches nothing
+until the person chooses. Each request resolves the paths again.
+
+Viewer defaults, `viewer_show`, `kicad_ipc` and `kicad_ipc_status` use the same
+canonical files. MCP document paths inside the thread's worktree map to main;
+nested absolute IPC document paths follow the same mapping. Omitting `path`
+selects the canonical project for IPC, or the board/schematic for the viewer.
+`thread_copy: true` explicitly selects the thread's files instead. STEP and
+other non-KiCad files keep their paths. No worktree is merged or copied back.
+
+IPC **writes require an explicit target when the linked designs differ**.
+`BeginCommit`, `CreateItems`, `UpdateItems`, `DeleteItems`, `EndCommit`,
+`SaveDocument`, document lifecycle commands, routing and other mutations are
+refused before reaching the IPC actor unless the request passes
+`thread_copy: true` for this thread or `main: true` for canonical main.
+The error names both selected paths and both flags. Pass the chosen flag on
+**each** mutating call; it is never remembered for later commands. Passing
+both flags is an error. Absolute configuration overrides remain respected.
+
+When working on the thread copy, pass **`thread_copy: true` on every IPC
+call**, including `GetItems` and other reads, as well as commits, edits and
+saves. Without that flag, reads select main: the returned items and KIIDs may
+not identify the same items in the thread copy. Keep the target consistent
+throughout the workflow. After a write refusal, ask the person which copy is
+current before choosing `main: true`.
+
+Reads still default to main. Identical copies and non-worktree threads keep
+their existing write behavior. The read-only command list is explicit;
+unknown/new commands require the write choice too, including unknown commands
+whose names merely start with Get or List.
+
+The exact read-only allowlist is `Project.reads` in
+`src/core/kicad-project.bend`. It matches full protobuf type names, including
+legacy board/schematic GetItems spellings; an unknown namespace is not allowed
+merely because its command has a familiar leaf name.
+
+Regression coverage: `test/kicad_project_test.bend`,
+`test/kicad_copy_ui_test.bend`, `test/tools/kicad_project_test.py` and
+`test/tools/kicad_project_e2e.ts`. The filesystem tests use actual linked Git
+worktrees, including nested project folders and separate Git metadata; the
+integration test records launch and IPC-helper requests without a real GUI.
+
 Agents edit boards and schematics through the hub, not by starting their own KiCad. The hub runs one
 headless `kicad-cli api-server` per project and sends commands to it over KiCad's IPC API (nng and
 protobuf). Files and `kicad-cli` are the fallback, used only when IPC is unavailable, and every

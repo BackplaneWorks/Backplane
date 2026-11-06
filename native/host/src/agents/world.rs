@@ -13,6 +13,8 @@ pub struct T {
     pub runtime: String, pub interaction: String, pub turn: String, pub archived: bool, pub deleted: bool,
     pub title: String, pub last_user: String, pub newest: String, pub carry_text_last: bool,
     pub env: String, pub branch: String, pub last_assistant: String,
+    /// when the running turn began (the turn that is running now): a restart carries on the oldest first. 0 from a checkpoint older than this field: they go by id
+    #[serde(default)] pub running_at: u64,
 }
 
 /// A delegated task (model.bend Task): its state is one of queued, running, done, failed, cancelled; a terminal state sticks (TaskState.next).
@@ -26,16 +28,20 @@ pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub det
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct World { pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
-const KEYS: &[&str] = &["summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n."];
+const KEYS: &[&str] = &["carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
 
 pub const CARRY_TEXT: &str = "Backplane restarted while you were working. Continue where you left off.";
 
-/// Carry.will: a turn the restart cut short carries on when the setting is on, the thread was running, is live and has made
-/// progress since the last carry. Claude threads only here (others are not run by this hub yet).
-pub fn carry_will(t: &T, restart_continue: &str) -> bool {
-    restart_continue != "off" && t.turn == "running" && !t.archived && !t.deleted && !t.carry_text_last && t.provider == "claude"
+/// The providers a message can pick up where a cut turn stopped: each resumes its own session by id (a process per turn), Claude with `--resume`.
+pub const CARRIES: [&str; 8] = ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"];
+/// A thread that may go on: the setting is on, it is live, has made progress since the last carry, and its agent can resume. One of the process-per-turn providers
+/// needs a session to resume: with none the turn was cut before it began, and the note "continue where you left off" would reach an agent that knows nothing of it.
+pub fn carry_may(t: &T, restart_continue: &str) -> bool {
+    restart_continue != "off" && !t.archived && !t.deleted && !t.carry_text_last && CARRIES.contains(&t.provider.as_str()) && (t.provider == "claude" || !t.session.is_empty())
 }
+/// Carry.will: a turn the restart cut short carries on when it was running and may go on.
+pub fn carry_will(t: &T, restart_continue: &str) -> bool { t.turn == "running" && carry_may(t, restart_continue) }
 
 impl World {
     pub fn seen(&self) -> usize { self.seen }
@@ -99,7 +105,7 @@ impl World {
             "AskClosed" => if let Some(a) = self.asks.remove(&g("id")) { if a.kind == "approval" && g("answer") == "session" { self.sessions.insert((a.thread, a.tool)); } },
             "ThreadArchived" => if let Some(x) = self.threads.get_mut(&g("id")) { x.archived = v.get("archived").and_then(Value::as_bool).unwrap_or(false) },
             "ThreadDeleted" => if let Some(x) = self.threads.get_mut(&g("id")) { x.deleted = true },
-            "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { x.turn = g("state") },
+            "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { let st = g("state"); if st == "running" && x.turn != "running" { x.running_at = v.get("at").and_then(Value::as_u64).unwrap_or(0) } x.turn = st },
             "MessagePosted" => if let Some(x) = self.threads.get_mut(&g("thread")) {
                 x.newest = g("msg");
                 if v.get("role").and_then(Value::as_str) == Some("user") { // Lr.said: what a thread has written to others since its newest user message
@@ -195,6 +201,10 @@ mod tests {
     }
     #[test] fn carry_continues() { assert!(carry_will(&th("running"), "")); assert!(carry_will(&th("running"), "on")); }
     #[test] fn carry_leaves_idle() { for s in ["completed", "idle", "failed", "interrupted"] { assert!(!carry_will(&th(s), "on")) } }
+    #[test] fn carry_every_provider_that_resumes() {
+        for p in CARRIES { let mut t = th("running"); t.provider = p.into(); t.session = "S".into(); assert!(carry_will(&t, "on"), "{p}"); if p != "claude" { assert!(super::super::providers::driver(p).is_some(), "{p} is run here"); t.session.clear(); assert!(!carry_will(&t, "on"), "{p} has nothing to resume") } }
+        let mut t = th("running"); t.provider = "nonesuch".into(); t.session = "S".into(); assert!(!carry_will(&t, "on"));
+    }
     #[test] fn carry_off_nothing() { assert!(!carry_will(&th("running"), "off")); }
     #[test] fn carry_once() { let mut t = th("running"); t.carry_text_last = true; assert!(!carry_will(&t, "on")); }
     #[test] fn carry_skips_archived() { let mut t = th("running"); t.archived = true; assert!(!carry_will(&t, "on")); t.archived = false; t.deleted = true; assert!(!carry_will(&t, "on")); }

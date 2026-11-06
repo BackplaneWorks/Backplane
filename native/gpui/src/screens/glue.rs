@@ -193,12 +193,14 @@ impl Backplane {
         }
         super::settings::sync(self, cx);
         super::projects::sync(self, cx);
+        super::plotview::report_state(self);
+        super::filesui::sync(self, cx);
         self.browser_page(cx);
         // a form or a room page opened: its first field takes the keys; closed: back to the composer
         let open = super::bots::focus_target(&self.data);
         if open != self.screens.bots_open { self.screens.bots_open = open.clone(); if open.is_empty() { self.want_focus = true; } else { self.screens.focus_field = Some(open); } }
         // settings opened: the keys go into it; closed: back to the composer
-        let open = self.data["settings"].is_object();
+        let open = super::settings::is_open(self);
         if open != self.screens.settings_was_open { self.screens.settings_was_open = open; if open { self.screens.focus_settings = true; } else { self.want_focus = true; } }
     }
     /// A plot-lane frame arrived on the socket: a solid (3D) frame goes to the 3D page, anything else to the plot store.
@@ -211,18 +213,18 @@ impl Backplane {
     }
     /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the owner is `browser_owner` (the bot's id on a bot's screen, else the thread).
     pub(crate) fn browser_page(&mut self, cx: &mut Context<Self>) {
-        let open = self.data["thread"]["viewer"]["open"].as_str() == Some("browser");
+        let open = self.data["thread"]["viewer"]["open"].as_str() == Some("browser") || (self.data["bot"]["kind"] == "bot" && self.data["bot"]["tab"] == "browser");
         let owner = browser_owner(&self.data, &self.selected);
-        if let Some((o, page)) = &self.screens.browser { if *o != owner || !open { let page = page.clone(); page.update(cx, |p, _| p.set_visible(false)); if *o != owner { self.screens.browser = None; } } }
+        if let Some((o, page)) = &self.screens.browser { if *o != owner || !open { let page = page.clone(); page.update(cx, |p, cx| p.set_visible(false, cx)); if *o != owner { self.screens.browser = None; } } }
         if !open || owner.is_empty() { return; }
         if self.screens.browser.is_none() {
             let Some(t) = self.screens.attacher.target.clone() else { return };
             let (base, tok) = (format!("http://{}", t.addr), t.token.clone());
-            let o = owner.clone();
-            let page = cx.new(move |cx| crate::viewers::browser::BrowserPage::new(cx, base, o, tok));
+            let o = owner.clone(); let hubtx = self.tx.clone();
+            let page = cx.new(move |cx| crate::viewers::browser::BrowserPage::new(cx, base, o, tok, hubtx));
             self.screens.browser = Some((owner, page));
         }
-        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, _| p.set_visible(true)); }
+        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| p.set_visible(true, cx)); }
     }
 
 }

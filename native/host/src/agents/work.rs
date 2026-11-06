@@ -88,7 +88,7 @@ impl Agents {
         if !live { return } // an archived or deleted thread is told nothing
         let msg = format!("t:backplane:{}", hub_id("l", now_s(), self.seq_n()));
         if interrupted { self.commit_events(vec![json!({"$":"MessagePosted","thread":th,"msg":msg,"role":"system","text":say,"at":now_s()})]).await }
-        else { let _ = self.deliver_as("system", th, &msg, &say, Some(("backplane".into(), "system".into(), "work".into())), vec![]).await; }
+        else { let _ = self.inbound("system", th, &msg, &say, ("backplane".into(), "system".into(), "work".into()), vec![]).await; }
     }
 
     pub async fn tool_work_watch(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {

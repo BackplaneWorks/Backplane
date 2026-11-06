@@ -44,12 +44,30 @@ pub struct World {
     pub room_lines: HashMap<String, Vec<usize>>,
     /// projects (id -> title, root, removed): project_list
     pub projects: std::collections::BTreeMap<String, (String, String, bool)>,
+    /// a bot thread's latest ModesSet (runtime, interaction, model); none: full-access, default
+    pub modes: HashMap<String, (String, String, String)>,
+    /// an ask's tool and detail (Run.asks)
+    pub ask_text: HashMap<String, (String, String)>,
+    /// a launched thread's launcher (M.Launch.by): the thread that launched it, "" for a launch with no thread behind it
+    pub launched: HashMap<String, String>,
+    /// what the mailroom owes after a step (Run.after, Run.fallback), in log order: taken by `Bots::after_steps`, and only for lines folded after the start
+    #[serde(skip)] pub steps: Vec<StepEnd>,
     seen: usize, line: usize,
+}
+/// A line the mailroom answers once it is in the log (hub.bend `Run.after.go`, `Run.fallback.go`). A Bend step answers inside the step, on the state before it;
+/// here the line is noted as it folds, with what that state knew (the run live when its turn ended), and answered right after.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StepEnd {
+    /// a turn left running: `run` is the run that was live on the thread until this line
+    Turn { thread: String, state: String, run: Option<super::mail::mailbox::Run> },
+    Ask { id: String, thread: String, tool: String, detail: String },
+    Fallback { thread: String, run: Option<super::mail::mailbox::Run> },
 }
 /// the settings the bots lane reads: the new bot's provider and model, the mail switch, the uberbot
 pub const SETTINGS: [&str; 8] = ["agent.provider", "agent.model", "mail.on", "uber.bot", "uber.uid", "person.tz", "person.tz.device", "tz.machine"];
 /// whether a setting key is held: the list above and the zone rules the hub resolved (`tz.rule.<name>`)
-fn kept(k: &str) -> bool { SETTINGS.contains(&k) || k.starts_with("tz.rule.") }
+/// plus the families the mailroom's routing reads (run.*, triage.*, owner.mail.*, mail.private.*, the task board, told.*, the text model)
+fn kept(k: &str) -> bool { SETTINGS.contains(&k) || ["tz.rule.", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|p| k.starts_with(p)) }
 
 fn s<'a>(e: &'a Value, k: &str) -> &'a str { e.get(k).and_then(Value::as_str).unwrap_or("") }
 fn n(e: &Value, k: &str) -> u64 { e.get(k).and_then(Value::as_u64).unwrap_or(0) }
@@ -99,6 +117,45 @@ impl World {
     /// Ub.pin: where a routine (global id) is pinned
     pub fn pin(&self, gid: &str) -> String { let v: Value = serde_json::from_str(&self.reg(&self.uid(), &format!("routine:{gid}"))).unwrap_or(Value::Null); v["pin"].as_str().unwrap_or("").to_string() }
 
+    /// Ub.bound.thread: the thread a machine's replica of the uberbot is bound to
+    pub fn bound_thread(&self, machine: &str) -> String { let v: Value = serde_json::from_str(&self.reg(&self.uid(), &format!("bind:{machine}"))).unwrap_or(Value::Null); v["thread"].as_str().unwrap_or("").to_string() }
+    /// Ub.link: the link a machine was reached over
+    pub fn ub_link(&self, machine: &str) -> String { self.ubs(&format!("uber.link.{}.{machine}", self.uid())) }
+    /// Ub.thread.far: the uberbot's thread on a machine as the mirror here names it ("" when not known)
+    fn thread_far(&self, machine: &str) -> String { let (l, t) = (self.ub_link(machine), self.bound_thread(machine)); if l.is_empty() || t.is_empty() { String::new() } else { format!("{l}~{t}") } }
+    /// Triage.thread: the uberbot's thread here, "" when there is none
+    pub fn triage_thread(&self) -> String { self.bots.get(&self.uber_bot()).map(|b| b.thread.clone()).unwrap_or_default() }
+    /// Ub.chat: the thread that holds the uberbot's conversation now: here while this machine holds the lease or no other machine's thread is known
+    pub fn ub_chat(&self) -> String { let far = self.thread_far(&self.lease().0); if self.holder_me() || far.is_empty() { self.triage_thread() } else { far } }
+    /// Ub.chat.is: one of the uberbot's threads: its own, or a replica's elsewhere
+    pub fn chat_is(&self, sel: &str) -> bool {
+        if sel.is_empty() { return false }
+        self.triage_thread() == sel || self.ubs(&format!("uber.origins.{}", self.uid())).split(' ').any(|m| !m.is_empty() && self.thread_far(m) == sel)
+    }
+    /// Lr.dest: where a report for `by` goes: the thread that holds the uberbot's conversation when `by` is one of its threads, else `by`
+    pub fn lr_dest(&self, by: &str) -> String { if self.chat_is(by) { let c = self.ub_chat(); if c.is_empty() { by.to_string() } else { c } } else { by.to_string() } }
+    /// Private.owner: the coordinator a back-office thread belongs to, "" for any other thread
+    pub fn private_owner(&self, thread: &str) -> String { let bot = self.setting(&format!("mail.private.owner.{thread}"), ""); if self.uber_is(&bot) && thread.starts_with(&format!("mailcoord-{bot}-")) { bot } else { String::new() } }
+    pub fn private_is(&self, thread: &str) -> bool { !self.private_owner(thread).is_empty() }
+    /// Run.of: a mail run that still counts (Runs.gate: the mailroom is on or the bot is the owner, and it is no back office)
+    pub fn run_of(&self, thread: &str) -> Option<&super::mail::mailbox::Run> { self.mail.run_of(thread).filter(|r| (self.setting("mail.on", "off") == "on" || self.triage_owner(&r.bot)) && !self.private_is(&r.thread)) }
+    /// Run.is
+    pub fn run_is(&self, thread: &str) -> bool { self.private_is(thread) || self.run_of(thread).is_some() }
+    /// Run.bot: the bot a thread works for: a run's and a back office's owner, else the thread's own bot
+    pub fn run_bot(&self, thread: &str) -> Option<&Bot> {
+        if let Some(r) = self.run_of(thread) { return self.bots.get(&r.bot).filter(|b| !b.deleted) }
+        if self.private_is(thread) { return self.bots.get(&self.private_owner(thread)).filter(|b| !b.deleted) }
+        self.bots.values().find(|b| !b.deleted && b.thread == thread)
+    }
+    /// Triage.is: a run of the owner's triage
+    pub fn triage_is(&self, thread: &str) -> bool { self.mail.run_of(thread).map_or(false, |r| self.triage_owner(&r.bot) && !self.private_is(&r.thread)) }
+    /// Triage.managed: work the coordinator answers for: its triage and back office, another bot's thread, a thread it (or its triage) launched
+    pub fn managed(&self, thread: &str) -> bool {
+        let (tt, by) = (self.triage_thread(), self.launched.get(thread).cloned().unwrap_or_default());
+        self.triage_is(thread) || self.private_is(thread) || (!tt.is_empty() && self.bot_threads.contains(thread) && thread != tt) || (!by.is_empty() && (by == tt || self.triage_is(&by)))
+    }
+    pub fn is_bot_thread(&self, thread: &str) -> bool { self.bot_threads.contains(thread) }
+
     fn ckpt_path(store: &Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("bots.json") }
     /// The saved world (ckpt/bots.json) when it is of this log; `sync` folds what is past it.
     pub fn load(store: &Store) -> Option<World> { let w = crate::ckpt::load_json(&Self::ckpt_path(store), store, |w: &World| w.seen); if let Some(w) = &w { crate::ckpt::saved("bots", w.seen);
@@ -116,13 +173,18 @@ impl World {
     }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 35] = ["BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+        const READ: [&str; 41] = ["ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
             "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke", "ProjectCreated", "ProjectRemoved"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
-        if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id"].iter().any(|k| line.contains(k)) { return }
+        if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|k| line.contains(k)) { return }
         if t == "TurnChanged" || t == "QueueTaken" {
             let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
+            if !self.bot_threads.contains(th) && self.mail.run_of(th).is_none() { return }
+        }
+        if t == "ActivityLogged" && !line.contains("fallback-blocked") { return }
+        if t == "ModesSet" {
+            let th = line.split_once("\"id\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
             if !self.bot_threads.contains(th) { return }
         }
         if t == "MessagePosted" {
@@ -155,9 +217,19 @@ impl World {
             "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true } else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true }); } }
             "ProjectCreated" => { self.projects.insert(id, (s(e, "title").into(), s(e, "root").into(), false)); }
             "ProjectRemoved" => { if let Some(p) = self.projects.get_mut(&id) { p.2 = true } }
-            "TurnChanged" => { self.turns.insert(s(e, "thread").into(), s(e, "state").into()); }
+            "TurnChanged" => { let (st, th) = (s(e, "state"), s(e, "thread"));
+                let run = self.mail.run_of(th).filter(|r| r.live).cloned();
+                if st != "running" { self.steps.push(StepEnd::Turn { thread: th.into(), state: st.into(), run }) }
+                if ["completed", "failed", "interrupted"].contains(&st) { self.mail.run_end(th); }
+                self.turns.insert(th.into(), st.into()); }
+            "ThreadLaunched" => { self.launched.insert(id, s(e, "by").into()); }
+            "ActivityLogged" => { if s(e, "kind") == "fallback-blocked" { let th = s(e, "thread"); self.steps.push(StepEnd::Fallback { thread: th.into(), run: self.mail.run_of(th).filter(|r| r.live).cloned() }) } }
+            "RunSet" => { self.mail.run_set(s(e, "thread"), s(e, "bot"), s(e, "conv"), s(e, "mail"), at); }
+            "CharterSet" => { self.mail.charter_set(s(e, "bot"), s(e, "text")); }
+            "DecisionLogged" => { self.mail.decision(super::mail::mailbox::Decision { id, bot: s(e, "bot").into(), conv: s(e, "conv").into(), run: s(e, "run").into(), text: s(e, "text").into(), reason: s(e, "reason").into(), at }); }
+            "ModesSet" => { self.modes.insert(id, (s(e, "runtime").into(), s(e, "interaction").into(), s(e, "model").into())); }
             "QueueTaken" => { let th = s(e, "thread"); if let Some(b) = self.bots.values().find(|b| !b.deleted && b.thread == th).map(|b| b.id.clone()) { let c = self.hops.entry(b).or_default(); *c = if c.held { Hops { now: c.wait, wait: 0, held: false } } else { Hops { now: c.now, wait: 0, held: false } } } }
-            "AskOpened" => { self.asks.insert(id.clone(), (s(e, "thread").into(), s(e, "kind").into(), true)); }
+            "AskOpened" => { self.ask_text.insert(id.clone(), (s(e, "tool").into(), s(e, "detail").into())); self.steps.push(StepEnd::Ask { id: id.clone(), thread: s(e, "thread").into(), tool: s(e, "tool").into(), detail: s(e, "detail").into() }); self.asks.insert(id.clone(), (s(e, "thread").into(), s(e, "kind").into(), true)); }
             "AskClosed" => { if let Some(a) = self.asks.get_mut(&id) { a.2 = false } }
             "BotWoke" => { let bot = s(e, "bot").to_string(); let busy = self.bots.get(&bot).map_or(false, |b| self.turns.get(&b.thread).map_or(false, |t| t == "running")); let h = n(e, "hop");
                 let c = self.hops.entry(bot).or_default(); *c = if busy { Hops { now: c.now, wait: if c.held { c.wait.min(h) } else { h }, held: true } } else { Hops { now: h, wait: 0, held: false } }; }

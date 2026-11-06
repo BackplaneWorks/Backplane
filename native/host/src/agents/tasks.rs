@@ -75,7 +75,7 @@ impl Agents {
     }
     /// The result reaches the parent first; TaskDelivered only once the message is in (a failed delivery stays owed and is repaired at the next start).
     async fn deliver_result(self: &Arc<Self>, id: &str, parent: &str, child: &str, text: &str) {
-        if self.deliver_as("system", parent, &msg(child, id), text, Some((child.to_string(), "task".into(), String::new())), vec![]).await.is_ok() {
+        if self.inbound("system", parent, &msg(child, id), text, (child.to_string(), "task".into(), String::new()), vec![]).await.is_ok() {
             self.commit_events(vec![json!({"$":"TaskDelivered","task":id,"at":now_s()})]).await;
         }
     }

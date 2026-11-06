@@ -9,6 +9,9 @@ pub const FONTS: [(&str, &str); 3] = [("Noto Sans Mono CJK JP", "Noto Sans Mono"
 pub const VIEWS: [(&str, &str); 2] = [("last", "Where I left off"), ("list", "The thread list")];
 pub const TEXT_PCT: (u32, u32, u32) = (80, 160, 10);   // min, max, step
 pub const SIDEBAR_PX: (u32, u32, u32) = (180, 420, 24);
+/// The viewer pane's width: 0 is the default (VIEWER_PX_DEFAULT); a drag on its left edge sets it, a double click puts it back.
+pub const VIEWER_PX: (u32, u32) = (380, 1400);
+pub const VIEWER_PX_DEFAULT: u32 = 700;
 /// (action, label, default keystroke): the keys the client binds itself.
 pub const SHORTCUTS: [(&str, &str, &str); 4] = [("send", "Send the message", "enter"), ("close", "Close a popup", "escape"), ("sidebar", "Fold or unfold the sidebar", "ctrl-b"), ("search", "Search the sidebar", "ctrl-k")];
 /// Keystrokes a shortcut can be set to (a pick, not free text: a bad keystroke would unbind the action).
@@ -17,11 +20,11 @@ pub const KEYS: [&str; 8] = ["enter", "ctrl-enter", "escape", "ctrl-b", "ctrl-k"
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Local {
-    pub theme: String, pub text_pct: u32, pub font: String, pub sidebar_px: u32, pub sidebar_open: bool,
+    pub theme: String, pub text_pct: u32, pub font: String, pub sidebar_px: u32, pub viewer_px: u32, pub sidebar_open: bool,
     pub notifications: bool, pub default_view: String, pub shortcuts: BTreeMap<String, String>,
 }
 impl Default for Local {
-    fn default() -> Self { Local { theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, sidebar_open: true, notifications: true, default_view: "last".into(), shortcuts: BTreeMap::new() } }
+    fn default() -> Self { Local { theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), shortcuts: BTreeMap::new() } }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -38,6 +41,7 @@ impl Local {
     pub fn read(path: &std::path::Path) -> Local {
         let mut l: Local = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         l.text_pct = l.text_pct.clamp(TEXT_PCT.0, TEXT_PCT.1); l.sidebar_px = l.sidebar_px.clamp(SIDEBAR_PX.0, SIDEBAR_PX.1);
+        if l.viewer_px != 0 { l.viewer_px = l.viewer_px.clamp(VIEWER_PX.0, VIEWER_PX.1); }
         if !THEMES.iter().any(|(k, _)| *k == l.theme) { l.theme = "hub".into() }
         if !VIEWS.iter().any(|(k, _)| *k == l.default_view) { l.default_view = "last".into() }
         if l.font.is_empty() { l.font = FONTS[0].0.into() }

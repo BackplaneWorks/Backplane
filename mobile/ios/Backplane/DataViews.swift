@@ -44,8 +44,14 @@ struct DataThreadsView: View {
     @State private var newThread: String?       // a project id
     @State private var path: [String] = []
     @State private var open: String?
+    @State private var query = ""
+    @State private var renaming: DThread?
+    @State private var deleting: DThread?
+    @State private var projectMenu: DProject?
+    @State private var renamingProject: DProject?
+    @State private var projectTitle = ""
 
-    private func threads(_ p: DProject) -> [DThread] { client.threads.filter { $0.project == p.id }.prefix(8).map { $0 } }
+    private func threads(_ p: DProject) -> [DThread] { client.threads.filter { t in t.project == p.id && !client.bots.contains(where: { b in b.thread == t.id }) }.prefix(8).map { $0 } }
 
     var body: some View {
         List {
@@ -57,10 +63,23 @@ struct DataThreadsView: View {
                     Button("Add a project") { addingProject = true }.buttonStyle(.borderedProminent).accessibilityIdentifier("data.project.add.empty")
                 }.padding(.vertical, 12)
             }
+            if !client.bots.isEmpty {
+                Section("Bots") {
+                    ForEach(client.bots) { b in
+                        if !b.thread.isEmpty { NavigationLink(value: b.thread) { HStack { Text("@").foregroundStyle(BackplaneDesign.accent).bold(); Text(b.name); Spacer(); Text(b.uber ? "uberbot" : "bot").font(.caption).foregroundStyle(.secondary) } }.accessibilityIdentifier("data.bot." + b.id) }
+                    }
+                }
+            }
+            if !client.rooms.isEmpty {
+                Section("Rooms") {
+                    ForEach(client.rooms) { r in NavigationLink(value: r) { HStack { Text("#").foregroundStyle(BackplaneDesign.accent).bold(); Text(r.name); Spacer(); Text("room").font(.caption).foregroundStyle(.secondary) } }.accessibilityIdentifier("data.room." + r.id) }
+                }
+            }
             ForEach(client.projects) { p in
                 Section {
                     ForEach(threads(p)) { t in
                         NavigationLink(value: t.id) { DataThreadRow(thread: t) }
+                            .contextMenu { if client.has("actions") { DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting) } }
                             .onAppear { client.prefetch(t.id) }
                             .accessibilityIdentifier("data.thread.row." + t.id)
                     }
@@ -72,6 +91,7 @@ struct DataThreadsView: View {
                 } header: {
                     HStack {
                         Text(p.title).font(.headline).textCase(nil).foregroundStyle(.primary)
+                            .contextMenu { if client.has("actions") { Button("Rename", systemImage: "pencil") { projectTitle = p.title; renamingProject = p }; Button("Remove project", systemImage: "trash", role: .destructive) { projectMenu = p } } }
                         if p.waiting > 0 { Text("\(p.waiting)").font(.caption.bold()).padding(.horizontal, 6).background(Capsule().fill(Color.orange.opacity(0.3))) }
                         Spacer()
                     }
@@ -81,6 +101,20 @@ struct DataThreadsView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Threads")
         .navigationDestination(for: String.self) { DataThreadView(client: client, id: $0) }
+        .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
+        .navigationDestination(for: DViewerRoute.self) { r in if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t) } }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search projects and threads")
+        .overlay { if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty { DataSearchResults(client: client, query: query).background(Color(.systemBackground)) } }
+        .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
+        .alert("Rename project", isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
+            TextField("Title", text: $projectTitle)
+            Button("Rename") { if let p = renamingProject { Task { await client.projectAct(p.id, "rename", title: projectTitle) } } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Remove “\(projectMenu?.title ?? "")” and its threads from the list?", isPresented: Binding(get: { projectMenu != nil }, set: { if !$0 { projectMenu = nil } }), titleVisibility: .visible) {
+            Button("Remove project", role: .destructive) { if let p = projectMenu { Task { await client.projectAct(p.id, "remove") } } }
+            Button("Keep it", role: .cancel) {}
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { addingProject = true } label: { Image(systemName: "folder.badge.plus") }
@@ -220,6 +254,10 @@ struct DataThreadView: View {
     @State private var pending: [Data] = []
     @State private var picked: [PhotosPickerItem] = []
     @State private var notice = ""
+    @State private var renaming: DThread?
+    @State private var deleting: DThread?
+    @State private var modelSheet = false
+    @Environment(\.dismiss) private var dismiss
 
     init(client: DataClient, id: String) { self.client = client; self.id = id; client.touch(id) }
 
@@ -246,6 +284,7 @@ struct DataThreadView: View {
                 .onChange(of: list.last?.id) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
                 .onChange(of: list.count) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             }
+            DataMentionBar(client: client, text: text) { text = $0; client.setDraft(id, $0) }
             if !notice.isEmpty {
                 Text(notice).font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.vertical, 6).background(BackplaneDesign.panel)
                     .accessibilityIdentifier("data.images.notice")
@@ -290,6 +329,23 @@ struct DataThreadView: View {
         }
         .navigationTitle(thread?.title.isEmpty == false ? thread!.title : "Thread")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if client.has("viewers") {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink(value: DViewerRoute(id: id)) { Image(systemName: "square.grid.2x2") }.accessibilityLabel("Viewer").accessibilityIdentifier("data.thread.viewer")
+                }
+            }
+            if let t = thread, client.has("actions") || client.has("models") {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if client.has("models"), !t.provider.isEmpty { Button("Model: \(t.provider) / \(t.model.isEmpty ? "default" : t.model)", systemImage: "cpu") { modelSheet = true } }
+                        if client.has("actions") { DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting) }
+                    } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Thread actions").accessibilityIdentifier("data.thread.more")
+                }
+            }
+        }
+        .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting, deleted: { dismiss() }))
+        .sheet(isPresented: $modelSheet) { if let t = thread { DataModelSheet(client: client, thread: t) } }
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             Task {

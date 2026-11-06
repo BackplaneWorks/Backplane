@@ -50,7 +50,7 @@ fn owner(target: &Value, bot: Option<&(String, String)>) -> String {
 /// "bot-tab", the same bot, a tab of Route.tab's list. Limit: Route.restore also asks BU.nav.accept(BU.tabs.for(u, bot), tab),
 /// the tabs this bot offers, which the bots lane does not expose; an unoffered tab would fall back to BU.tab.default there.
 const BOT_TABS: [&str; 10] = ["chat", "mail", "status", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"];
-fn route_tab(req: &Value) -> Option<String> {
+pub(super) fn route_tab(req: &Value) -> Option<String> {
     let r = req["session"]["route"].as_object()?;
     let t = &req["target"];
     let ok = r.len() == 3 && r.values().all(Value::is_string) && r.get("kind")? == "bot-tab" && t["kind"] == "bot"
@@ -157,6 +157,12 @@ impl ViewActor {
         self.reads.push((None, e));
         let n = self.reads.len();
         if n > MAX_READS { self.reads.drain(..n - MAX_READS); }
+    }
+    /// `record_reply` for a reply to a request this view's own commands sent, bound to the view and target it was sent from: the very next view request carries it
+    /// (an unbound reply waits for a second one, and a client that asks once after the reply, GPUI, never shows it).
+    pub fn record_reply_bound(&mut self, kind: &str, reply: &Value, view: &str, target: &Value) {
+        self.record_reply(kind, reply);
+        if let Some(last) = self.reads.last_mut() { last.0 = Some((view.to_string(), target.clone())); }
     }
     pub fn record_read(&mut self, kind: &str, id: u64, ok: bool, result: Value) {
         self.reads.push((None, json!({"kind": kind, "id": id, "ok": ok, "result": result})));
@@ -331,6 +337,13 @@ pub fn record_read(client: u64, _view_id: &str, kind: &str, id: u64, ok: bool, r
     ACTORS.lock().unwrap().entry(client).or_default().record_read(kind, id, ok, result);
 }
 /// `record_read` for a whole reply frame (keeps its top-level `error`).
+pub fn record_reply_bound(client: u64, kind: &str, reply: &Value, view: &str, target: &Value) { ACTORS.lock().unwrap().entry(client).or_default().record_reply_bound(kind, reply, view, target); }
+/// `record_reply_bound` that also names the method the reply answers (`method`: git.diff, git.act, review.bom ...): the kind is the one the helper takes, the method is what the Rust presenter reads.
+pub fn record_reply_bound_m(client: u64, kind: &str, method: &str, reply: &Value, view: &str, target: &Value) {
+    let mut m = ACTORS.lock().unwrap(); let a = m.entry(client).or_default();
+    a.record_reply_bound(kind, reply, view, target);
+    if let Some(last) = a.reads.last_mut() { last.1["method"] = json!(method); }
+}
 pub fn record_reply(client: u64, kind: &str, reply: &Value) { ACTORS.lock().unwrap().entry(client).or_default().record_reply(kind, reply); }
 /// The reads recorded since the last V request, for `reads` in the next one.
 pub fn take_reads(client: u64, view_id: &str, target: &Value) -> Vec<Value> {

@@ -1,5 +1,5 @@
 //! thread_launch (mcp.bend Mcp.launch): a continuing subthread of the caller (or a top-level thread with `subthread:false`) with its first message.
-//! The launcher's reports (hub.bend Launch.tell / Lr.*) are `launch_tell`/`report_plan` below. Not done here: reports to a launcher on another machine (Lr.far), the uberbot's destination (Lr.dest), a worktree for the new thread (Hub.new.env "auto"), the depth/chain
+//! The launcher's reports (hub.bend Launch.tell / Lr.*) are `launch_tell`/`report_plan` below. Not done here: reports to a launcher on another machine (Lr.far), a worktree for the new thread (Hub.new.env "auto"), the depth/chain
 //! check beyond "same project, launcher alive" (ST.Tree.chain). They are listed in PARITY.md.
 use super::{hub_id, lines::s, now_s, rules, Agents};
 use serde_json::{json, Value};
@@ -9,6 +9,7 @@ fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 
 impl Agents {
     pub async fn tool_launch(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
+        let launcher = match self.mailroom() { Some(m) => m.launcher(thread).await, None => thread.to_string() }; let thread = launcher.as_str(); // a back office launches as its owner
         let prompt = s(a, "prompt").to_string();
         let (caller, proj, default_prov, default_model, scratch_ok) = { let w = self.world().await;
             let c = w.threads.get(thread).cloned();
@@ -17,7 +18,9 @@ impl Agents {
             (c, proj, w.setting("agent.provider").to_string(), w.setting("agent.model").to_string(), asked.trim().eq_ignore_ascii_case("scratch")) };
         if scratch_ok { return fail("Scratch is retired: name a project (machine_list), or ask the uberbot") }
         let Some(proj) = proj.filter(|p| !p.is_empty()) else { return fail("name an existing project (project_list shows them)") };
-        let parent = if a.get("subthread").and_then(Value::as_bool).unwrap_or(true) && caller.is_some() { thread.to_string() } else { String::new() };
+        // Mcp.launch.parent: a bot works across the person's projects and has no local parent; it hears from what it launched all the same
+        let as_bot = match self.mailroom() { Some(m) => m.reach(thread, "").await == Some(true), None => false };
+        let parent = if a.get("subthread").and_then(Value::as_bool).unwrap_or(true) && caller.is_some() && !as_bot { thread.to_string() } else { String::new() };
         if !parent.is_empty() { let ok = caller.as_ref().map_or(false, |c| !c.archived && !c.deleted && c.project == proj); if !ok { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } }
         if !parent.is_empty() && !self.world().await.tree_chain_ok(&parent) { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } // ST.Tree.chain
         if prompt.trim().is_empty() { return fail("a prompt is needed") }
@@ -27,7 +30,7 @@ impl Agents {
         let (now, report) = (now_s(), a.get("report").and_then(Value::as_bool).unwrap_or(true));
         let seq = self.seq_n(); let th = hub_id("t", now, seq);
         let title = if s(a, "title").is_empty() { rules::title_of(&prompt) } else { s(a, "title").to_string() };
-        let by = if parent.is_empty() { String::new() } else { thread.to_string() };
+        let by = if caller.is_some() { thread.to_string() } else { String::new() }; // Mcp.launch.go: the launcher, parent or not
         let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":proj,"title":title,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now})];
         if !by.is_empty() { ev.push(json!({"$":"ThreadLaunched","id":th,"by":by,"report":report,"at":now})) }
         if !parent.is_empty() { ev.push(json!({"$":"ThreadParentSet","id":th,"parent":parent,"at":now})); ev.push(json!({"$":"SettingSet","key":format!("thread.tree.{parent}"),"value":"1","at":now})) }
@@ -61,15 +64,18 @@ pub fn loop_note(id: &str) -> String { format!("\n\nReports from this thread sto
 /// Launch.tell over a step's events about `thread` (`from`: the thread whose call made the step, "" for the agent's own line or the person's Stop): None when nothing is owed.
 /// An ask opened is told at once; otherwise the last turn change of the thread (completed 1, failed 2, interrupted 3; running or none: nothing). Exceptions: reports off, a launcher that
 /// stopped the thread itself, a completed turn that left work out of hand, a thread that already wrote to its launcher this turn. The launcher-started turn counter moves; at Lr.loops() the reports stop.
-pub fn report_plan(w: &super::world::World, thread: &str, events: &[Value], from: &str, now: u64) -> Option<Report> {
+pub fn report_plan(w: &super::world::World, thread: &str, events: &[Value], from: &str, now: u64) -> Option<Report> { let by = w.launched.get(thread)?.0.clone(); report_plan_to(w, thread, events, from, now, &by, false) }
+/// `to`: Lr.dest of the launcher (a launcher elsewhere is not reached: Lr.far); `coordinated`: `to` is one of the uberbot's threads, and an ask reaches it through triage instead (Lr.ask.send)
+pub fn report_plan_to(w: &super::world::World, thread: &str, events: &[Value], from: &str, now: u64, to: &str, coordinated: bool) -> Option<Report> {
     let (by, on) = w.launched.get(thread).cloned()?; if !on || by.is_empty() { return None }
-    let to = by.clone(); // Lr.dest: the uberbot's current thread is not modelled; a launcher elsewhere is not reached (Lr.far)
+    let to = to.to_string();
     if to == thread || !w.threads.contains_key(&to) { return None }
     if !from.is_empty() && from == by { return None } // a launcher stopping its own thread is not told
     let ask = events.iter().find(|e| e["$"] == "AskOpened" && e["thread"] == thread).map(|e| {
         let (k, tool, d) = (e["kind"].as_str().unwrap_or(""), e["tool"].as_str().unwrap_or(""), e["detail"].as_str().unwrap_or(""));
         format!("{}{}", if tool.is_empty() { k.to_string() } else { format!("{k} ({tool})") }, if d.is_empty() { String::new() } else { format!(": {}", d.chars().take(600).collect::<String>()) }) });
     let title = w.threads.get(thread).map(|t| t.title.clone()).unwrap_or_default();
+    if ask.is_some() && coordinated { return None }
     if let Some(a) = ask { return Some(Report { to, text: ask_note(thread, &title, &a), before: vec![setting(format!("autosettle.report.{thread}"), now.to_string(), now)] }) }
     let e = match events.iter().rev().find(|e| e["$"] == "TurnChanged" && e["thread"] == thread).and_then(|e| e["state"].as_str()) { Some("completed") => 1u8, Some("failed") => 2, Some("interrupted") => 3, _ => return None };
     let busy = w.work(thread).0 + w.tasks.values().filter(|k| k.parent == thread && !k.terminal()).count();
@@ -89,10 +95,12 @@ fn setting(k: String, v: String, at: u64) -> Value { json!({"$":"SettingSet","ke
 impl Agents {
     /// Launch.tell for the events just committed about `thread`: the report goes to the launcher as a message from the thread (kind "launch"), one per end.
     pub async fn launch_tell(self: &Arc<Self>, thread: &str, events: &[Value], from: &str) {
-        let plan = { let w = self.world().await; report_plan(&w, thread, events, from, now_s()) };
+        let by = { let w = self.world().await; w.launched.get(thread).map(|x| x.0.clone()) }; let Some(by) = by else { return };
+        let (to, coordinated) = match self.mailroom() { Some(m) => { let to = m.dest(&by).await; let c = m.chat_is(&to).await; (to, c) } None => (by, false) };
+        let plan = { let w = self.world().await; report_plan_to(&w, thread, events, from, now_s(), &to, coordinated) };
         let Some(r) = plan else { return };
         let msg = format!("t:{thread}:lr-{}", hub_id("r", now_s(), self.seq_n()));
-        let _ = self.deliver_as("user", &r.to, &msg, &r.text, Some((thread.to_string(), "launch".into(), String::new())), r.before).await;
+        let _ = self.inbound("user", &r.to, &msg, &r.text, (thread.to_string(), "launch".into(), String::new()), r.before).await;
     }
 }
 

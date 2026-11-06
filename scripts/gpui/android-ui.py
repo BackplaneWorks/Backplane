@@ -28,6 +28,12 @@ elif cmd in ("bounds", "rowbox"):
     if cmd == "rowbox":
         while n is not None and n.get("clickable") != "true": n = par.get(n)
     print(*re.findall(r"\d+", n.get("bounds")))
+elif cmd == "edit":
+    # edit [nth]: centre of the nth EditText (a Compose text field shows its hint as no node, only an empty EditText)
+    nth = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    es = [n for n in nodes(t) if n.get("class") == "android.widget.EditText"]
+    if not es: sys.exit(1)
+    b = list(map(int, re.findall(r"\d+", es[nth].get("bounds")))); print((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
 elif cmd == "clickables":
     # clickables W H [tol]: bounds of clickable nodes of about that size, in document order
     w, h = int(sys.argv[2]), int(sys.argv[3]); tol = int(sys.argv[4]) if len(sys.argv) > 4 else 4

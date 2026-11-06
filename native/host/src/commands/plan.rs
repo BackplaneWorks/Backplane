@@ -16,7 +16,7 @@ pub struct Line { pub msg: bool, pub role: String, pub kind: String, pub text: S
 pub struct Ctx { pub entries: Vec<Line> }
 
 /// The requests that read the thread's whole conversation.
-pub fn needs_entries(m: &str) -> bool { matches!(m, "thread.fork" | "thread.back" | "thread.provider") }
+pub fn needs_entries(m: &str) -> bool { matches!(m, "thread.fork" | "thread.back" | "thread.provider" | "accounts.select") }
 
 fn ok(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":true}) }
 fn made(id: &Value, th: &str) -> Value { json!({"t":"reply","id":id,"ok":true,"thread":th}) }
@@ -211,6 +211,7 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
             done(vec![json!({"$":"SettingSet","key":format!("effort.{th}"),"value":effort_of(provider, &s(p, "effort", "")),"at":at})], id)
         }
         "thread.provider" => switch(f, at, id, p, cx),
+        "accounts.select" => account_select(f, at, id, p, cx),
         "thread.fork" => fork(f, at, id, &th, cx),
         "thread.back" => back(f, at, id, &th, cx),
         _ => None,
@@ -254,7 +255,8 @@ fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usiz
     }
     // the server's worktree job follows (it also says so when the folder is not a repository)
     // an Improvements send names its base (a local branch that exists: the handler checked) and its branch; only with a creation key
-    let opts = if !key.is_empty() { super::worktree::Opts { base: s(p, "base", ""), branch: super::worktree::sanitize(&s(p, "branch", "")) } } else { Default::default() };
+    let prefer = { let own = f.get(&format!("worktree.base.{project}"), ""); if own.is_empty() { f.get("worktree.base", "") } else { own } }.to_string(); // the project's default base (a local branch), when no base is asked for
+    let opts = if !key.is_empty() { super::worktree::Opts { base: s(p, "base", ""), branch: super::worktree::sanitize(&s(p, "branch", "")), prefer: String::new() } } else { super::worktree::Opts { prefer, ..Default::default() } };
     let wt = (mode == "worktree" && !scratch).then(|| (th.clone(), root.clone(), env.clone(), String::new(), opts));
     Some(Plan { events: ev, reply: made(id, &th), stop: None, wt, scratch: scratch.then(|| th.clone()), act: None })
 }
@@ -370,6 +372,49 @@ fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx) -> Option<Plan> {
     ev.extend(hold(f, &th, at));
     if count > 0 { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("p", at, n),"tone":"info","kind":"provider","summary":format!("Now on {to}{}", if missed == 0 { "" } else { "; it gets what it missed with the next message" }),"at":at})) }
     Some(Plan { events: ev, reply: ok(id), stop: if waiting { None } else { Some(th.clone()) }, wt: None, scratch: None, act: None })
+}
+
+/// Hub.accounts.select: the thread goes on under another account of its provider from its next message, between turns. The old account's native session and how much
+/// of the conversation it has seen are kept under its own key, the new account's are restored, and what the new account has not seen is handed over with the next message.
+/// A stale menu (binding, epoch, state) is refused; another provider's account is picked after the agent is switched (thread.provider).
+fn account_select(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx) -> Option<Plan> {
+    use crate::settings::accounts as ac;
+    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
+    let th = s(p, "thread", ""); let th = th.rsplit('|').next().unwrap_or("").to_string(); let profile = s(p, "profile", ""); let epoch = p.get("epoch").and_then(Value::as_u64).unwrap_or(0);
+    let Some(t) = f.threads.get(&th).filter(|t| !t.deleted).cloned() else { return refuse("The thread or account selection changed. Reopen the account menu and try again.") };
+    if running(f, &th) { return refuse("Finish or stop the current turn before selecting another account.") }
+    let inventory = f.setting("accounts.inventory").to_string();
+    let prof = ac::profile(&inventory, &profile);
+    let provider = if profile.is_empty() { t.provider.clone() } else { prof["provider"].as_str().unwrap_or("").to_string() };
+    if !ac::supported(&provider) { return refuse("The thread or account selection changed. Reopen the account menu and try again.") }
+    if provider != t.provider { return refuse("Switch this thread to that agent first, then pick the account.") }
+    let key = ac::binding_key(&th, &provider);
+    let raw = f.setting(&key).to_string();
+    if s(p, "expected", "") != raw { return refuse("The thread or account selection changed. Reopen the account menu and try again.") }
+    if !profile.is_empty() && !ac::ready(&prof, &provider, epoch) { return refuse(ac::unavailable(&prof, epoch)) }
+    let cur: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+    let (cur_id, cur_epoch) = (cur["id"].as_str().unwrap_or("").to_string(), cur["epoch"].as_u64().unwrap_or(0));
+    if cur_id == profile && cur_epoch == epoch { return done(vec![], id) }
+    let count = f.count.get(&th).copied().unwrap_or(0);
+    let seen: usize = f.setting(&ac::seen_key(&th, &provider, &profile, epoch)).parse().unwrap_or(0);
+    let n = f.n();
+    let set = |k: String, v: String| json!({"$":"SettingSet","key":k,"value":v,"at":at});
+    let mut ev: Vec<Value> = vec![];
+    for (m, _) in f.queue(&th) { if m.starts_with("handoff:switch:") { ev.push(json!({"$":"QueueRemoved","thread":th,"msg":m,"at":at})) } }
+    let session_new = f.setting(&ac::session_key(&th, &provider, &profile, epoch)).to_string();
+    ev.extend([
+        set(ac::session_key(&th, &provider, &cur_id, cur_epoch), t.session.clone()), set(ac::seen_key(&th, &provider, &cur_id, cur_epoch), count.to_string()),
+        set(key, ac::binding_show(&profile, epoch)),
+        set(format!("session.{th}.{provider}"), session_new.clone()), set(format!("seen.{th}.{provider}"), seen.to_string()),
+        json!({"$":"SessionSet","id":th,"session":session_new,"at":at})]);
+    if count != seen {
+        let missed = (count - seen.min(count)).min(128);
+        let why = "Selected another account. Recent conversation since this account last participated (at most 128 items); use thread_read with threadId ".to_string() + &th + " for earlier history:";
+        ev.push(json!({"$":"TurnQueued","thread":th,"msg":format!("handoff:switch:account{at}-{n}"),"text":hand_text(&why, &cx.entries[..missed.min(cx.entries.len())], &th),"at":at}));
+    }
+    let name = if profile.is_empty() { "Default account".to_string() } else { prof["label"].as_str().unwrap_or("account").to_string() };
+    ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("account", at, n + 1),"tone":"info","kind":"account","summary":format!("Selected {name}; conversation context is handed to this account with the next message."),"at":at}));
+    Some(Plan { events: ev, reply: ok(id), stop: Some(th), wt: None, scratch: None, act: None })
 }
 
 const NO_ACCOUNT: &str = "{\"id\":\"\",\"epoch\":0}";

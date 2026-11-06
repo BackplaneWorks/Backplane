@@ -3297,21 +3297,29 @@ def View.dfiles(fs: List<&2, DF.DFile>) -> List<&2, D.Node>:
 
 # a git action of the diff's head; with no changes there is nothing to
 # commit, push or put back, and it is shown disabled (no accent)
-def View.diff.btn(+none: Bool, +cls: String, +action: String, +value: String, +tip: String, +label: String) -> D.Node:
+def View.diff.btn.off(+none: Bool, +off: Bool, +cls: String, +action: String, +value: String, +tip: String, +label: String) -> D.Node:
   D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", Bool.pick(String, none, "", cls)}, D.At{"title", tip}, D.At{"data-value", value}, D.On{"click", action}],
-    Bool.pick(List<&2, D.Attr>, none, [D.At{"disabled", "true"}], Nil{})), [D.Txt{label}]}
+    Bool.pick(List<&2, D.Attr>, Bool.or(none, off), [D.At{"disabled", "true"}], Nil{})), [D.Txt{label}]}
 
-# what this thread changed, with the git actions (as the native Lay.diff)
-def View.diff.loc(+lc: I.Loc, +text: String) -> List<&2, D.Node>:
+def View.diff.btn(+none: Bool, +cls: String, +action: String, +value: String, +tip: String, +label: String) -> D.Node:
+  View.diff.btn.off(none, False{}, cls, action, value, tip, label)
+
+# what this thread changed, with the git actions (as the native Lay.diff);
+# off: the diff kept from before, drawn while git runs again (View.diff.at),
+# its actions off until git's answer replaces it
+def View.diff.loc.off(+lc: I.Loc, +text: String, +off: Bool) -> List<&2, D.Node>:
   +fs = DF.Diff.parse(text)
   +none = List.is_empty(&2, DF.DFile, fs)
   [D.El{"div", "", [D.At{"class", "diff-head"}], [
       D.Dom.span("summary", Bool.pick(String, none, MSG.T.viewer.diff.empty(lc), DF.Diff.summary(fs))),
       D.El{"div", "", [D.At{"class", "diff-btns"}], [
-        View.diff.btn(none, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
-        View.diff.btn(none, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
-        View.diff.btn(none, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
+        View.diff.btn.off(none, off, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
+        View.diff.btn.off(none, off, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
+        View.diff.btn.off(none, off, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
     D.El{"div", "", [D.At{"class", "diff-body"}], View.dfiles.b(fs, lc, View.diff.lines(), View.diff.files())}]
+
+def View.diff.loc(+lc: I.Loc, +text: String) -> List<&2, D.Node>:
+  View.diff.loc.off(lc, text, False{})
 
 def View.diff(+text: String) -> List<&2, D.Node>:
   View.diff.loc(I.En{}, text)
@@ -3333,9 +3341,39 @@ def View.diff.at.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<
     case False{}:
       View.diff.nogit(lc, none)
 
-# (none: the folder the hub found no repository in, "diff.none:t")
-def View.diff.at(+lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
-  View.diff.at.k(String.is_empty(none), lc, text, none)
+# a Diff asked for and not answered yet (client.bend's Dv.open): the
+# pane's own head, its buttons off, "Loading…" where the summary goes
+def View.diff.wait(+lc: I.Loc) -> List<&2, D.Node>:
+  [D.El{"div", "", [D.At{"class", "diff-head"}], [
+      D.Dom.span("summary", MSG.T.viewer.loading(lc)),
+      D.El{"div", "", [D.At{"class", "diff-btns"}], [
+        View.diff.btn(True{}, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
+        View.diff.btn(True{}, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
+        View.diff.btn(True{}, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
+    D.El{"div", "", [D.At{"class", "diff-body"}], Nil{}}]
+
+# a Diff asked for, drawn with the thread's diff kept from before (kept:
+# {diff, nogit} as this page or the hub had it last, client.bend's Dv.text,
+# "diff.kept:t") until git answers, else "Loading…"
+def View.diff.kept.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
+  match git:
+    case True{}: View.diff.loc.off(lc, text, True{})
+    case False{}: View.diff.nogit(lc, none)
+
+def View.diff.kept(known: Bool, +lc: I.Loc, +kept: J.Json) -> List<&2, D.Node>:
+  match known:
+    case True{}: View.diff.kept.k(String.is_empty(J.Json.get_str(kept, "nogit", "")), lc, J.Json.get_str(kept, "diff", ""), J.Json.get_str(kept, "nogit", ""))
+    case False{}: View.diff.wait(lc)
+
+def View.diff.at.w(wait: Bool, +lc: I.Loc, +text: String, +none: String, +kept: String) -> List<&2, D.Node>:
+  match wait:
+    case True{}: View.diff.kept(Bool.not(String.is_empty(kept)), lc, Maybe.default(&2, J.Json, J.Json.parse(kept), J.Null{}))
+    case False{}: View.diff.at.k(String.is_empty(none), lc, text, none)
+
+# (none: the folder the hub found no repository in, "diff.none:t"; wait:
+# the asked Diff not answered yet, "diff.wait:t"; kept: its diff from before)
+def View.diff.at(+lc: I.Loc, +text: String, +none: String, +wait: String, +kept: String) -> List<&2, D.Node>:
+  View.diff.at.w(Bool.not(String.is_empty(wait)), lc, text, none, kept)
 
 # The diff stays visible while the person decides what to discard.
 def View.revert.loc(on: Bool, +lc: I.Loc) -> List<&2, D.Node>:
@@ -4022,7 +4060,7 @@ def View.destinations(+lc: I.Loc, +cur: String) -> List<&2, D.Node>:
     View.tab(cur, "board", "view-kind", "board", MSG.T.viewer.board.tip(lc), MSG.T.viewer.board(lc)),
     View.tab(cur, "schematic", "view-kind", "schematic", MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.schematic(lc)),
     View.tab(cur, "3d", "view-kind", "3d", MSG.T.viewer.parts3d.tip(lc), "3D"),
-    View.tab(cur, "split", "view-kind", "split", "Schematic beside the board or its 3D", "Split"),
+    View.tab(cur, "split", "view-kind", "split", "Schematic, board and 3D side by side", "Split"),
     View.tab(cur, "mech", "mech", "", MSG.T.viewer.mech.tip(lc), MSG.T.viewer.mech(lc)),
     View.tab(cur, "files", "fm", "", MSG.T.viewer.files.tip(lc), MSG.T.viewer.files(lc)),
     View.tab(cur, "diff", "diff", "", MSG.T.viewer.diff.tip(lc), MSG.T.viewer.diff(lc)),
@@ -5256,7 +5294,7 @@ def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
       [View.solid.workbench(lc, u, U.Solid.want(u), View.solid.boardkey(u))])
 
 # The combined view (client.bend's Split): the schematic beside the board
-# or its 3D model (one at a time: the bar's Board and 3D swap them), each
+# and its 3D model (on a phone one at a time: the bar's Board and 3D swap them), each
 # pane under a head that names it, with a button that puts it away (the
 # bar's toggles bring it back). The panes draw as on their own tabs
 # (plot2d.js, solid.js), with the layers those show; the schematic's head
@@ -5270,11 +5308,11 @@ def View.combo.hide(+pane: String, +name: String) -> D.Node:
 def View.combo.head(+pane: String, +name: String, more: List<&2, D.Node>) -> D.Node:
   D.El{"div", "", [D.At{"class", "combo-head"}], List.append(&2, D.Node, D.Dom.span("combo-name", name) <> more, [View.combo.hide(pane, name)])}
 
-# (the board and the 3D take each other's place)
+# (on a phone the board and the 3D take each other's place)
 def View.combo.toggle.tip(+u: U.Ui, +pane: String, +name: String) -> String:
   Bool.pick(String, U.Split.on(u, pane), "Hide the " ++ name,
-    Bool.pick(String, Bool.and(String.eq(pane, "3d"), U.Split.on(u, "pcb")), "Show the 3D in place of the board",
-      Bool.pick(String, Bool.and(String.eq(pane, "pcb"), U.Split.on(u, "3d")), "Show the board in place of the 3D", "Show the " ++ name)))
+    Bool.pick(String, Bool.and(U.Split.one(u), Bool.and(String.eq(pane, "3d"), U.Split.on(u, "pcb"))), "Show the 3D in place of the board",
+      Bool.pick(String, Bool.and(U.Split.one(u), Bool.and(String.eq(pane, "pcb"), U.Split.on(u, "3d"))), "Show the board in place of the 3D", "Show the " ++ name)))
 
 def View.combo.toggle(+u: U.Ui, +pane: String, +name: String) -> D.Node:
   D.El{"button", "", [D.At{"type", "button"}, D.At{"class", Bool.pick(String, U.Split.on(u, pane), "combo-pick on", "combo-pick")},
@@ -5352,7 +5390,7 @@ def View.combo.if(on: Bool, +lc: I.Loc, +u: U.Ui, +i: Nat) -> List<&2, D.Node>:
       Nil{}
 
 def View.combo.side.label(+lc: I.Loc, +u: U.Ui) -> String:
-  Bool.pick(String, U.Split.on(u, "pcb"), MSG.T.viewer.board(lc), "3D")
+  Bool.pick(String, U.Split.on(u, "pcb"), Bool.pick(String, U.Split.on(u, "3d"), MSG.T.viewer.board(lc) ++ " and 3D", MSG.T.viewer.board(lc)), "3D")
 
 def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [View.bar.loc(lc, List.append(&2, D.Node, View.boards(u, "Split"), D.El{"span", "", [D.At{"class", "combo-picks"}, D.At{"role", "group"}, D.At{"aria-label", "Panes"}], [
@@ -5361,8 +5399,9 @@ def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
    D.El{"div", "combo", [D.At{"class", "combo"}, D.At{"data-split-project", U.Asset.project(u)}], [D.El{"div", "", [D.At{"class", "combo-in"}],
      List.concat(&2, D.Node, [View.combo.if(U.Split.on(u, "sch"), lc, u, 0n),
        D.Dom.when(Bool.and(U.Split.on(u, "sch"), Bool.or(U.Split.on(u, "pcb"), U.Split.on(u, "3d"))), View.combo.separator("primary", MSG.T.viewer.schematic(lc), View.combo.side.label(lc, u), "combo-sch combo-side")),
-       [D.El{"div", "combo-side", [D.At{"id", "combo-side"}, D.At{"class", "combo-side"}], List.append(&2, D.Node, View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n),
-         View.combo.if(U.Split.on(u, "3d"), lc, u, 2n))}]])}]}]
+       [D.El{"div", "combo-side", [D.At{"id", "combo-side"}, D.At{"class", "combo-side"}], List.concat(&2, D.Node, [View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n),
+         D.Dom.when(Bool.and(U.Split.on(u, "pcb"), U.Split.on(u, "3d")), View.combo.separator("secondary", MSG.T.viewer.board(lc), "3D", "combo-pcb combo-3d")),
+         View.combo.if(U.Split.on(u, "3d"), lc, u, 2n)])}]])}]}]
 
 # The viewer pane: a tab for each thing it shows (the one on show lit),
 # Close, then that thing
@@ -5436,7 +5475,7 @@ def View.files(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "fm-bar"}], List.append(&2, D.Node, View.fm.trail.loc(lc, U.Fm.trail.loc(lc, u)),
      D.El{"span", "", [D.At{"class", "grow"}], Nil{}} <> List.append(&2, D.Node, View.fm.dl("btn fm-dl-bar", U.Fm.down(u, True{}, U.Fm.dir(u)), MSG.T.files.download.tip(lc), "folder-down", [D.Txt{MSG.T.files.download(lc)}]),
        [D.Dom.button("", "fm-up", "", MSG.T.files.up.tip(lc), MSG.T.queue.up(lc))]))},
-   D.El{"div", "files-list", [D.At{"class", "fm-list"}], View.fm.body.loc(lc, U.Fm.ready(u), u)}]
+   D.El{"div", "files-list", [D.At{"class", "fm-list"}], View.fm.body.loc(lc, U.Fm.shown(u), u)}]
 
 # an image or a PDF opened from the Files tab: its name, back to the folder
 def View.fm.head.loc(+lc: I.Loc, +u: U.Ui, more: List<&2, D.Node>) -> D.Node:
@@ -5537,7 +5576,7 @@ def View.review(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match i:
     case 0n:
-      List.append(&2, D.Node, View.revert.loc(U.Ui.reverting(u), lc), View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none")))
+      List.append(&2, D.Node, View.revert.loc(U.Ui.reverting(u), lc), View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none"), U.Ui.view_get(u, "diff.wait"), U.Ui.view_get(u, "diff.kept")))
     case 1n:
       View.browser.loc(lc, u)
     case 2n:

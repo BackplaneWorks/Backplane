@@ -48,7 +48,7 @@ pub fn draft(hub: &str, session: &Value, value: &str) -> Option<ActOut> {
 }
 
 /// The facts of the thread and the setting a send needs, read from the model by the caller.
-pub struct SendCtx<'a> { pub hub: &'a str, pub cid: &'a str, pub now_s: u64, pub bot_thread: bool, pub binding: Option<String> }
+pub struct SendCtx<'a> { pub hub: &'a str, pub cid: &'a str, pub now_s: u64, pub bot_thread: bool, pub bot: Option<String>, pub binding: Option<String> }
 
 /// Accounts.rpc.params: a request about a thread bound to a named account carries that binding's setting text first (`accountBinding`), any other copy of the key dropped.
 pub fn bind(p: Value, binding: Option<&str>) -> Value {
@@ -77,12 +77,13 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let text = if !text.is_empty() && !reply_id.is_empty() && !reply_full.is_empty() { format!("{}\n\n{text}", reply_block(reply_id, reply_full)) } else { text };
     let text = text.as_str();
     if sel.is_empty() || !safe(sel) || text.is_empty() { return None }
-    if ["/btw", "/give", "/secret", "/intent"].iter().any(|w| command_is(body, w)) || cx.bot_thread { return None }
+    if ["/btw", "/give", "/secret", "/intent"].iter().any(|w| command_is(body, w)) || (cx.bot_thread && cx.bot.is_none()) { return None }
     if !s(d, &format!("@intent.edit:{sel}")).is_empty() || !s(d, "@draft.bound").is_empty() { return None }
     let rid = session["rid"].as_u64().unwrap_or(0);
     // Rpc.text: {"id":rid,"m":"turn.start","p":{thread,text,msg,mode}} in this key order
-    let p = bind(json!({"thread": sel, "text": text, "msg": msg_id(cx.cid, cx.now_s, rid), "mode": "steer"}), cx.binding.as_deref());
-    let request = format!("{{\"id\":{rid},\"m\":\"turn.start\",\"p\":{}}}", serde_json::to_string(&p).ok()?);
+    // a bot's thread is talked to as the bot (Bots.say: its wake, its memory, the star count); the thread's account is the bot's own
+    let (m, p) = match &cx.bot { Some(b) => ("bots.say", json!({"bot": b, "text": text, "msg": msg_id(cx.cid, cx.now_s, rid)})), None => ("turn.start", bind(json!({"thread": sel, "text": text, "msg": msg_id(cx.cid, cx.now_s, rid), "mode": "steer"}), cx.binding.as_deref())) };
+    let request = format!("{{\"id\":{rid},\"m\":\"{m}\",\"p\":{}}}", serde_json::to_string(&p).ok()?);
     let mut drafts = Map::new();
     for k in [sel.to_string(), format!("@att:{sel}"), format!("@reply:{sel}"), format!("@reply.q:{sel}"), format!("@reply.full:{sel}")] { drafts.insert(k, json!("")); }
     let mut outbox = Map::new(); outbox.insert(rid.to_string(), json!(request));
@@ -120,7 +121,8 @@ pub fn fields(draft: &str, running: bool, attaching: bool, claude: bool, own_ski
 }
 
 /// What the model knows about the selected thread that a send needs: the presenter implements it over its metadata projection.
-pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; fn account_params(&self, thread: &str) -> bool; /// the thread's named account binding, as its setting text (Accounts.owner); None when it has none (Accounts.named)
+pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; /// the bot whose thread this is
+    fn bot_of(&self, _thread: &str) -> Option<String> { None } fn account_params(&self, thread: &str) -> bool; /// the thread's named account binding, as its setting text (Accounts.owner); None when it has none (Accounts.named)
     fn account_binding(&self, _thread: &str) -> Option<String> { None } }
 
 /// The composer's actions as the presenter's action table calls them: `params` is the object the hub builds for a view request (`session`, `action`, `value`, `cid`, `hub`,
@@ -132,7 +134,8 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
         // a popup row chosen (a reference, a `/command` or a `$skill`): the word being typed becomes the row's word
         "skill" => {
             let sel = s(session, "sel"); let word = s(params, "value");
-            if !safe(sel) || word.is_empty() { return None }
+            if !safe(sel) { return None }
+            if word.is_empty() { return Some(ActOut { session_patch: json!({}), cmds: vec![] }) } // Skills.pick found no row: nothing to complete (Ui.skill.k), and not an error
             let text = mention::complete(draft_of(session, sel), word);
             Some(ActOut { session_patch: json!({"drafts": { sel: text }}), cmds: vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text})] })
         }
@@ -150,7 +153,7 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
         }
         "send" | "send-alt" => {
             let sel = s(session, "sel");
-            send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), binding: facts.account_binding(sel) }, session)
+            send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), bot: facts.bot_of(sel), binding: facts.account_binding(sel) }, session)
         }
         _ => None,
     }
@@ -164,7 +167,9 @@ mod tests {
         assert_eq!(reply_split(&msg), Some(("m1".into(), "line one\nline two".into(), "my answer".into())));
         assert_eq!(reply_split("plain"), None);
         assert_eq!(reply_split("<in_reply_to msg=m1 chars=99>\nshort\n</in_reply_to>\n\nx"), None, "a quote shorter than it says is not a block");
-        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
+        let b = send(&SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: true, bot: Some("b1".into()), binding: None }, &json!({"sel": "t1", "rid": 2, "drafts": {"t1": "hi"}, "info": {}})).unwrap();
+        assert!(b.cmds[1]["text"].as_str().unwrap().contains("\"m\":\"bots.say\"") && b.cmds[1]["text"].as_str().unwrap().contains("\"bot\":\"b1\""), "{:?}", b.cmds[1]);
+        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None };
         let s = json!({"sel": "t1", "rid": 2, "drafts": {"t1": "ok", "@reply:t1": "m7", "@reply.q:t1": "hi", "@reply.full:t1": "hi there"}, "info": {}});
         let o = send(&cx, &s).unwrap();
         assert!(o.cmds[1]["text"].as_str().unwrap().contains(r"<in_reply_to msg=m7 chars=8>\nhi there\n</in_reply_to>\n\nok"), "{:?}", o.cmds[1]);
@@ -188,13 +193,13 @@ mod tests {
         for v in ["/gi", "hi $sk", "see @bo", "to >th", "in %pr", "post #ro", "a ^b"] { assert!(draft("h", &session(), v).is_some(), "{v}") }
     }
     #[test] fn only_the_helpers_own_commands_do_not_send() {
-        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
+        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None };
         let with = |d: &str| json!({"sel": "t1700000002-3", "rid": 2, "drafts": {"t1700000002-3": d}, "info": {}});
         assert!(send(&cx, &with("/btw why")).is_none() && send(&cx, &with("/give >x")).is_none());
         assert!(send(&cx, &with("/compact")).is_some() && send(&cx, &with("see @bot %proj")).is_some());
     }
     #[test] fn send_is_what_the_js_hub_answered() {
-        let cx = SendCtx { hub: "http://127.0.0.1:3820", cid: "parity-gpui", now_s: 1793864523, bot_thread: false, binding: None };
+        let cx = SendCtx { hub: "http://127.0.0.1:3820", cid: "parity-gpui", now_s: 1793864523, bot_thread: false, bot: None, binding: None };
         let o = send(&cx, &session()).unwrap();
         assert_eq!(o.cmds, vec![
             json!({"type": "keep", "thread": "http://127.0.0.1:3820|t1700000002-3", "text": ""}),
@@ -241,13 +246,13 @@ mod tests {
         for a in ["select", "row-pin", "interrupt", ""] { assert!(act(&p(a, "x"), &Plain).is_none(), "{a}") }
     }
     #[test] fn what_is_not_ported_is_none() {
-        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None };
+        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None };
         let with = |k: &str, v: &str| { let mut s = session(); s["drafts"][k] = json!(v); s };
         assert!(send(&cx, &with("t1700000002-3", "   ")).is_none(), "blank");
         assert!(send(&cx, &with("t1700000002-3", "/btw why")).is_none(), "slash commands");
         assert!(send(&cx, &with("@att:t1700000002-3", "a")).is_some(), "attachments");
         assert!(send(&cx, &with("@reply:t1700000002-3", "m1")).is_some(), "a reply with no quote kept sends as plain text");
         assert!(send(&cx, &with("@draft.bound", "5 abc")).is_none(), "a bounded draft");
-        assert!(send(&SendCtx { bot_thread: true, ..SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, binding: None } }, &session()).is_none(), "a bot's thread");
+        assert!(send(&SendCtx { bot_thread: true, ..SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None } }, &session()).is_none(), "a bot's thread");
     }
 }

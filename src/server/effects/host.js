@@ -2071,6 +2071,11 @@ function sys_exe_path() {
 // Answers only on failure. Under `bun x.js` the script runs through bun
 // (host_self).
 function sys_exec(path, args) {
+  // Windows cannot replace the current process with POSIX execve. Return
+  // through Hub.reexec.k so it removes the handoff and reports the failure.
+  if (process.platform === "win32") {
+    return io_fail(globalThis.BP_H.ERRNO.ENOSYS);
+  }
   const c = host_libc();
   const argv = host_self([path, ...host_list_js(args)]);
   if (argv.some((a) => a.includes("\0"))) {
@@ -2185,6 +2190,98 @@ function json_cbor_frame(text, keys, words) {
   const b = jc_frame(text, keys, words);
   for (let k = b.length - 1; k >= 0; k -= 1) xs = { $: "Con", head: b[k], tail: xs };
   return xs;
+}
+
+// Json.tree_frame and Sock.send_tree: a message's Json tree (core/json.bend's
+// constructors, as Bend builds them) as one binary WebSocket frame of its
+// CBOR, the very bytes of http.bend's Ws.encode(2, cbor.bend's Cbor.encode(j)):
+// the same walk as Enc.go, chains front to back (a chain's cells counted as
+// Enc.count counts them, a tail that is not a cell encoded as Enc.go would),
+// numbers as Enc.kind reads their raw text, strings as code-point UTF-8 (a
+// lone surrogate its three bytes, as Enc.text; TextEncoder would replace it).
+// Bend's encoder built a list cell per byte that the send then copied back
+// out: 5-15 ms for a 95 KB view on a real home (2026-11-05), on every reply.
+// keys and words are Cbor.keys() and Cbor.words() joined by newlines; their
+// indexes are kept for the last dictionaries seen.
+let jt_dicts = null;
+function jt_maps(keys, words) {
+  if (jt_dicts === null || jt_dicts.keys !== keys || jt_dicts.words !== words) {
+    const index = (text) => { const m = new Map(); text.split("\n").forEach((w, i) => { if (!m.has(w)) m.set(w, i); }); return m; };
+    jt_dicts = { keys, words, k: index(keys), w: index(words) };
+  }
+  return jt_dicts;
+}
+function jt_frame(j, keys, words) {
+  const { k: km, w: wm } = jt_maps(keys, words);
+  let buf = new Uint8Array(4096), n = 0;
+  const room = (m) => { if (n + m > buf.length) { let size = buf.length * 2; while (size < n + m) size *= 2; const b = new Uint8Array(size); b.set(buf.subarray(0, n)); buf = b; } };
+  const byte = (x) => { room(1); buf[n++] = x; };
+  const head = (mb, v) => {
+    room(5);
+    if (v < 24) buf[n++] = mb | v;
+    else if (v < 256) { buf[n++] = mb | 24; buf[n++] = v; }
+    else if (v < 65536) { buf[n++] = mb | 25; buf[n++] = v >>> 8; buf[n++] = v & 255; }
+    else { buf[n++] = mb | 26; buf[n++] = (v >>> 24) & 255; buf[n++] = (v >>> 16) & 255; buf[n++] = (v >>> 8) & 255; buf[n++] = v & 255; }
+  };
+  const text = (s) => {
+    let len = 0;
+    for (const ch of s) { const c = ch.codePointAt(0); len += c < 128 ? 1 : c < 2048 ? 2 : c < 65536 ? 3 : 4; }
+    head(0x60, len); room(len);
+    for (const ch of s) {
+      const c = ch.codePointAt(0);
+      if (c < 128) buf[n++] = c;
+      else if (c < 2048) { buf[n++] = 0xc0 | (c >> 6); buf[n++] = 0x80 | (c & 63); }
+      else if (c < 65536) { buf[n++] = 0xe0 | (c >> 12); buf[n++] = 0x80 | ((c >> 6) & 63); buf[n++] = 0x80 | (c & 63); }
+      else { buf[n++] = 0xf0 | (c >> 18); buf[n++] = 0x80 | ((c >> 12) & 63); buf[n++] = 0x80 | ((c >> 6) & 63); buf[n++] = 0x80 | (c & 63); }
+    }
+  };
+  const pos = (r) => /^(0|[1-9][0-9]{0,9})$/.test(r) && Number(r) <= 0xffffffff ? Number(r) : -1;
+  const kind = (x) => x.$.slice(x.$.lastIndexOf(".") + 1);
+  const count = (xs) => { let c = 0; for (let x = xs; ; x = x.tail) { const t = kind(x); if (t !== "Item" && t !== "Field") return c; c++; } };
+  const todo = [j];
+  while (todo.length) {
+    const x = todo.pop();
+    switch (kind(x)) {
+      case "Null": byte(0xf6); break;
+      case "Flag": byte(x.value ? 0xf5 : 0xf4); break;
+      case "Num": {
+        const r = x.raw;
+        if (r[0] === "-") { const v = pos(r.slice(1)); if (v > 0) { head(0x20, v - 1); break; } }
+        else { const v = pos(r); if (v >= 0) { head(0, v); break; } }
+        byte(0xc7); text(r); break;
+      }
+      case "Str": { const i = wm.get(x.text); if (i !== undefined) { byte(0xc6); head(0, i); } else text(x.text); break; }
+      case "Arr": head(0x80, count(x.items)); todo.push(x.items); break;
+      case "Obj": head(0xa0, count(x.fields)); todo.push(x.fields); break;
+      case "Item": todo.push(x.tail, x.head); break;
+      case "Field": { const i = km.get(x.key); if (i !== undefined) head(0, i); else text(x.key); todo.push(x.tail, x.value); break; }
+      case "End": break;
+      default: throw "bend: Json.tree_frame met " + x.$;
+    }
+  }
+  const h = n < 126 ? [0x82, n] : n < 65536 ? [0x82, 126, n >> 8, n & 255] : [0x82, 127, 0, 0, 0, 0, (n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const out = new Uint8Array(h.length + n);
+  out.set(h); out.set(buf.subarray(0, n), h.length);
+  return out;
+}
+
+// the Bun loop (loop.js) sends these bytes as they are
+globalThis.bp_jt_frame = jt_frame;
+
+function json_tree_frame(j, keys, words) {
+  let xs = { $: "Nil" };
+  const b = jt_frame(j, keys, words);
+  for (let i = b.length - 1; i >= 0; i -= 1) xs = { $: "Con", head: b[i], tail: xs };
+  return xs;
+}
+
+// Done carries the frame's size (the writer counts it)
+function sock_send_tree(socket, j, keys, words, ms, k) {
+  const b = jt_frame(j, keys, words);
+  let xs = { $: "Nil" };
+  for (let i = b.length - 1; i >= 0; i -= 1) xs = { $: "Con", head: b[i], tail: xs };
+  const sized = (r) => r !== undefined && r.snd.$ === "Done" ? io_tup(r.fst, io_done(b.length)) : r;
+  return sized(sock_send_until(socket, xs, ms, (r) => k(sized(r))));
 }
 
 // Json.items_frames and Sock.send_items: a join frame's lines as
@@ -2338,6 +2435,8 @@ io_eff(CID(Sock.send_file), sock_send_file);
 io_eff(CID(Sock.send_path), sock_send_path);
 io_eff(CID(Sock.send_until), sock_send_until);
 io_eff(CID(Sock.send_cbor), sock_send_cbor);
+io_eff(CID(Sock.send_tree), sock_send_tree);
+io_eff(CID(Json.tree_frame), json_tree_frame);
 io_eff(CID(Json.cbor_frame), json_cbor_frame);
 io_eff(CID(Sock.send_items), sock_send_items);
 io_eff(CID(Json.items_frames), json_items_frames);

@@ -1,6 +1,7 @@
 import ./autosettle.bend as AUTO
 import Base
 import ./project-home.bend as PH
+import ./threadpath.bend as TP
 import ./folder.bend as FP
 import ./telemetry.bend as TLM
 import ./mailprivate.bend as PM
@@ -454,9 +455,7 @@ def Hub.project.home_root(p: M.Project) -> String:
 
 # the directory a thread's agent works in
 def Hub.cwd(+s: M.State, t: M.Thread) -> String:
-  match t:
-    case M.Thread{_, +project, _, _, _, _, _, _, _, _, _, _, _, _, +worktree, _, _, _, _, _, _}:
-      Bool.pick(String, String.is_empty(worktree), Hub.project.root(Hub.project(s, project)), worktree)
+  Maybe.default(&2, String, TP.ThreadPath.cwd(s, t), "")
 
 # Claude's stream-json input line for one user message
 def Claude.user(text: String) -> String:
@@ -955,11 +954,32 @@ def Rename.changes(+th: String, +title: String, +now: Nat) -> List<&2, M.Change>
 def Hub.methods.git() -> List<&2, String>:
   ["git.diff", "git.revert", "git.act", "git.status", "thread.worktree", "thread.note", "term.open", "term.input", "term.resize", "term.snap", "term.restart"]
 
-def Hub.root_for(+s: M.State, +owner: String) -> String:
-  Bool.pick(String, PH.Home.is(owner), Hub.project.root(Hub.project(s, PH.Home.project(owner))), Hub.cwd(s, Hub.thread(s, owner)))
+def Hub.root_for(+s: M.State, +owner: String) -> Maybe<&2, String>:
+  TP.ThreadPath.of(s, owner)
+
+# Paths supplied to a folder job stay beneath that resolved root.
+def Hub.folder.path(+root: String, +path: String) -> Bool:
+  Bool.or(Bool.and(Bool.not(String.is_empty(path)), FM.Fm.files.safe(path)),
+    Bool.and(String.starts_with(path, root ++ "/"), FM.Fm.files.safe(FM.Fm.rel(root, path))))
+
+def Hub.folder.path.ok(+job: String, +root: String, +path: String) -> Bool:
+  Bool.or(Bool.not(String.eq(job, "render")), Hub.folder.path(root, path))
+
+def Hub.folder.job.path(ok: Bool, +client: U32, +id: String, +job: String, +thread: String, +root: String, +a: String, +b: String) -> Step:
+  match ok:
+    case True{}: Step.outs([Git{client, id, job, thread, root, a, b}])
+    case False{}: Step.outs([Reply.err(client, id, "that path is not in this project")])
+
+# Every thread/project folder job refuses before scheduling any IO.
+def Hub.folder.job(at: Maybe<&2, String>, +client: U32, +id: String, +job: String, +thread: String, +a: String, +b: String) -> Step:
+  match at:
+    case None{}:
+      Step.outs([Reply.err(client, id, "No folder for this thread or project: unknown, deleted, removed or unavailable")])
+    case Some{+root}:
+      Hub.folder.job.path(Hub.folder.path.ok(job, root, a), client, id, job, thread, root, a, b)
 
 def Hub.git(+s: M.State, +client: U32, +id: String, +job: String, +thread: String, +a: String, +b: String) -> Step:
-  Step.outs([Git{client, id, job, thread, Hub.root_for(s, thread), a, b}])
+  Hub.folder.job(Hub.root_for(s, thread), client, id, job, thread, a, b)
 
 # a request's byte array, in tail calls only (a 64 KB paste is 64K
 # elements: a frame each overflowed the JS stack)
@@ -2721,10 +2741,10 @@ def Hub.agentm(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.
     case _:
       Hub.media(C.Codec.pos(Hub.methods.media(), m), s, now, client, id, p, m)
 
-def Hub.dir.k(ok: Bool, +client: U32, +id: String, +th: String, +cwd: String, +path: String) -> Step:
+def Hub.dir.k(ok: Bool, +client: U32, +id: String, +th: String, +root: Maybe<&2, String>, +path: String) -> Step:
   match ok:
     case True{}:
-      Step.outs([Git{client, id, "dir", th, cwd, path, ""}])
+      Hub.folder.job(root, client, id, "dir", th, path, "")
     case False{}:
       Step.outs([Reply.err(client, id, "that folder is not in this project")])
 
@@ -2735,31 +2755,31 @@ def Hub.nav(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Jso
     case 1n:
       Hub.reorder(s, now, client, id, p)
     case 2n:
-      Step.outs([Git{client, id, "files", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), "", ""}])
+      Hub.git(s, client, id, "files", J.Json.get_str(p, "thread", ""), "", "")
     case 3n:
-      Hub.git(s, client, id, "kicad", J.Json.get_str(p, "thread", ""), "", "")
+      Hub.git(s, client, id, "kicad", J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "copy", ""), "")
     case 4n:
       Hub.reorder_projects(s, now, client, id, p)
     case 5n:
-      Step.outs([Git{client, id, "mech", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), "", ""}])
+      Hub.git(s, client, id, "mech", J.Json.get_str(p, "thread", ""), "", "")
     case 6n:
-      Step.outs([Git{client, id, "render", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), J.Json.get_str(p, "path", ""), ""}])
+      Hub.git(s, client, id, "render", J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "path", ""), "")
     # a file link opened on this machine, or shown in its folder: {path, how}
     case 7n:
       Step.outs([Git{client, id, "open", "", "/", J.Json.get_str(p, "path", ""), J.Json.get_str(p, "how", "open")}])
     # the viewer's Files tab: a folder of the thread's project, {thread, path}
     # (from its root, never leaving it: core/fm.bend's Fm.safe)
     case 8n:
-      Hub.dir.k(FM.Fm.safe(J.Json.get_str(p, "path", "")), client, id, J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), J.Json.get_str(p, "path", ""))
+      Hub.dir.k(FM.Fm.files.safe(J.Json.get_str(p, "path", "")), client, id, J.Json.get_str(p, "thread", ""), Hub.root_for(s, J.Json.get_str(p, "thread", "")), J.Json.get_str(p, "path", ""))
     # a PDF's page as a picture, for the window, {path, page}
     case 9n:
       Step.outs([Git{client, id, "pdf", "", "/", J.Json.get_str(p, "path", ""), J.Json.as_raw(J.Json.get(p, "page"), "1")}])
     case 10n:
-      Step.outs([Git{client, id, "kexport", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), J.Json.show(p), ""}])
+      Hub.git(s, client, id, "kexport", J.Json.get_str(p, "thread", ""), J.Json.show(p), "")
     # the board picker opened: the project's boards read again, {thread}
     # (core/order.bend's Boards.list; server.bend's BoardsJob)
     case 11n:
-      Step.outs([Git{client, id, "boards", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), "", ""}])
+      Hub.git(s, client, id, "boards", J.Json.get_str(p, "thread", ""), "", "")
     case _:
       Hub.agentm(C.Codec.pos(Hub.methods.agent(), m), s, now, client, id, p, m)
 
@@ -2985,10 +3005,10 @@ def Hub.files.of.k(i: Nat, +s: M.State, +id: String) -> FilesAt:
     # a project home: its folder, as Hub.root_for chooses it, but never a
     # removed project's (Hub.project.home_root, as project.home reads)
     case 0n:
-      FilesAt{Hub.project.home_root(Hub.project(s, PH.Home.project(id))), Hub.project.title(Hub.project(s, PH.Home.project(id)))}
+      FilesAt{Maybe.default(&2, String, Hub.root_for(s, id), ""), Hub.project.title(Hub.project(s, PH.Home.project(id)))}
     # a thread here: the folder files.dir lists (Hub.root_for's Hub.cwd)
     case 1n:
-      FilesAt{Bool.pick(String, Bool.and(Hub.owns(s, id), Bool.not(String.is_empty(Hub.project.home_root(Hub.project(s, Hub.thread_project(Hub.thread(s, id))))))), Hub.cwd(s, Hub.thread(s, id)), ""), Hub.project.title(Hub.project(s, Hub.thread_project(Hub.thread(s, id))))}
+      FilesAt{Maybe.default(&2, String, Hub.root_for(s, id), ""), Hub.project.title(Hub.project(s, Hub.thread_project(Hub.thread(s, id))))}
     # a thread elsewhere (<link>~<id>): its files are its own hub's
     case _:
       FilesAt{"", ""}
@@ -10655,6 +10675,41 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     case _:
       Hub.more(C.Codec.pos(Hub.methods.git(), m), s, now, client, id, p, m)
 
+# Guard every scheduled folder consumer, including start/end checkpoints and
+# terminals. Reject the whole plan before its changes or any IO are applied.
+def Hub.folder.out(o: Out) -> Bool:
+  match o:
+    case Git{_, _, +job, _, +cwd, _, _}:
+      Bool.or(Device.one_of(["title", "btw", "summary", "snooze"], job), FP.Folder.absolute(cwd))
+    case AgentStart{_, cwd, _, _, _, _, _}: FP.Folder.absolute(cwd)
+    case CodexTurn{_, cwd, _, _, _, _}: FP.Folder.absolute(cwd)
+    case GrokTurn{_, cwd, _, _, _, _}: FP.Folder.absolute(cwd)
+    case MuseTurn{_, cwd, _, _, _, _}: FP.Folder.absolute(cwd)
+    case AgyTurn{_, cwd, _, _, _, _}: FP.Folder.absolute(cwd)
+    case OcTurn{_, cwd, _, _, _, _}: FP.Folder.absolute(cwd)
+    case PiTurn{_, cwd, _, _, _, _}: FP.Folder.absolute(cwd)
+    case OmpTurn{_, cwd, _, _, _, _}: FP.Folder.absolute(cwd)
+    case Watch{_, +kind, +root, +path, _, _, _}:
+      Bool.or(String.is_empty(kind), Bool.or(FP.Folder.absolute(root), FP.Folder.absolute(path)))
+    case TermOp{_, _, cwd, _, _, _}: FP.Folder.absolute(cwd)
+    case TermRun{_, _, cwd, _, _, _, _}: FP.Folder.absolute(cwd)
+    case Await{_, _, _, _, _, _, cwd}: FP.Folder.absolute(cwd)
+    case _: True{}
+
+def Hub.folder.outs(os: List<&2, Out>) -> Bool:
+  match os:
+    case Nil{}: True{}
+    case o <> rest: Bool.and(Hub.folder.out(o), Hub.folder.outs(rest))
+
+def Hub.folder.check.k(ok: Bool, step: Step, +client: U32, +id: String) -> Step:
+  match ok:
+    case True{}: step
+    case False{}: Hub.folder.job(None{}, client, id, "", "", "", "")
+
+def Hub.folder.check(step: Step, +client: U32, +id: String) -> Step:
+  match step:
+    case Step{cs, +os}: Hub.folder.check.k(Hub.folder.outs(os), Step{cs, os}, client, id)
+
 # one client request {"id": n, "m": method, "p": params}
 def Hub.request.route(telemetry: Bool, +s: M.State, +now: Nat, +client: U32, +o: J.Json) -> Step:
   match telemetry:
@@ -10664,7 +10719,7 @@ def Hub.request.route(telemetry: Bool, +s: M.State, +now: Nat, +client: U32, +o:
         J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"), J.Json.get_str(o, "m", ""))
 
 def Hub.request(+s: M.State, +now: Nat, +client: U32, +o: J.Json) -> Step:
-  Hub.request.route(String.eq(J.Json.get_str(o, "m", ""), "telemetry.choice"), s, now, client, o)
+  Hub.folder.check(Hub.request.route(String.eq(J.Json.get_str(o, "m", ""), "telemetry.choice"), s, now, client, o), client, J.Json.as_raw(J.Json.get(o, "id"), "0"))
 
 def Hub.request_text.k(m: Maybe<&2, J.Json>, +s: M.State, +now: Nat, +client: U32) -> Step:
   match m:

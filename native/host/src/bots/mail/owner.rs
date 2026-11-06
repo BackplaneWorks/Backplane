@@ -5,8 +5,6 @@
 //! that is running is never copied to a second machine.
 //! The transport is the net lane's: `OwnerLink` (a signed POST to a linked machine) is installed with `Bots::set_owner_link`; with none, the outbox waits.
 //! The receiving side is `Bots::owner_received(link, request)`, which the /far/rpc route calls with the request's link and `{"m":"owner.mail","p":{..}}`.
-//! Not ported (PARITY): Owner.legacy / Owner.waiting.* / Owner.recovered (seeding tickets from queues written before tickets existed, and for mail recovered from a
-//! crash), which belong with the triage queue.
 use super::{body_line, body_parse, store, Body, Conv, Hdr};
 use crate::{api::Fut, bots::{rpc::{now_s, Bots}, world::World}};
 use serde_json::{json, Value};
@@ -63,7 +61,7 @@ fn unpct(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 /// Ref.of_addr, as far as the owner needs: (kind, first id) of a checked address ("person" and anything malformed: None)
-fn ref_of(a: &str) -> Option<(String, String)> {
+pub(super) fn ref_of(a: &str) -> Option<(String, String)> {
     if a == "person" { return None }
     let (k, tail) = a.split_once(':')?;
     if !["thread", "bot", "room", "project", "routine", "task", "pr", "work", "file", "machine", "conv", "mail", "mailroom", "decision", "charter"].contains(&k) { return None }
@@ -150,6 +148,28 @@ impl Bots {
             }
         }
     }
+    /// Owner.legacy (OwnerJob's start): every queued input of the uberbot has a ticket: one written before tickets existed gets its first, one a stop put back gets its own again
+    pub async fn owner_legacy(&self) {
+        if crate::copy::on() { return }
+        let w = self.world().await; let (now, seq) = (now_s(), self.hub.store.len());
+        let mut keys: Vec<&String> = w.settings.keys().filter(|k| k.starts_with("triage.queue.")).collect(); keys.sort(); keys.reverse();
+        let mut evs = vec![];
+        for k in keys {
+            let Ok(parts) = serde_json::from_str::<Vec<String>>(&k[13..]) else { continue }; let [bot, conv] = parts.as_slice() else { continue };
+            if !w.triage_owner(bot) { continue }
+            let ids: Vec<String> = serde_json::from_str(&w.setting(k, "[]")).unwrap_or_default();
+            for id in ids {
+                let Some(m) = w.mail.headers(conv).iter().find(|h| h.id == id).cloned() else { continue };
+                let key = w.setting(&map_key(&id), "");
+                if key.is_empty() { evs.extend(self.owner_track_of(&w, &Body { conv: w.mail.conv(conv), mail: m, text: String::new() }).await) }
+                else if w.setting(&pending_key(&key), "").is_empty() { // Owner.waiting.known
+                    let prior: Value = serde_json::from_str(&w.setting(&local_key(&key), "")).unwrap_or(Value::Null);
+                    evs.extend(register(&attempt(&prior, "", w.lease().1, &format!("{now}:{seq}")), now));
+                }
+            }
+        }
+        if !evs.is_empty() { self.owner_commit(evs).await }
+    }
     /// run the outbox in the background (the mail lane calls this when it files mail that belongs to the owner's other machine)
     pub fn owner_kick(self: &Arc<Self>) { let me = self.clone(); tokio::spawn(async move { me.owner_outbox().await }); }
     async fn owner_commit(&self, evs: Vec<Value>) { if !evs.is_empty() { if let Err(e) = self.hub.commit_many(&evs).await { eprintln!("owner.mail: {e:#}") } } }
@@ -211,7 +231,7 @@ impl Bots {
         if w.mail.has(&b.mail.id) { // already filed here (an input that came back): only the ticket and receipt, and route it again
             if let Err(e) = self.hub.commit_many(&changes).await { eprintln!("owner.mail: {e:#}"); return (503, "mail not committed".into()) }
             drop(w); if let Some(rt) = self.router.get() { rt.routed(&b) }
-        } else if let Err(e) = self.file_body_with(&w, b, Some(changes)).await { eprintln!("owner.mail: {e}"); return (503, "mail not committed".into()) } else { drop(w) }
+        } else if let Err(e) = self.file_body_with(&w, b, Some(changes), vec![]).await { eprintln!("owner.mail: {e}"); return (503, "mail not committed".into()) } else { drop(w) }
         if seen().await { (200, response(&r, "committed")) } else { (503, "mail not committed".into()) }
     }
 }

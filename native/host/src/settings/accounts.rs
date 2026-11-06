@@ -17,6 +17,11 @@ pub fn supported(provider: &str) -> bool { provider == "claude" || provider == "
 pub fn binding_key(thread: &str, provider: &str) -> String { format!("account.thread.{thread}.{provider}") }
 /// Accounts.binding.show
 pub fn binding_show(id: &str, epoch: u64) -> String { json!({"id":id,"epoch":epoch}).to_string() }
+/// Tuple components have separate length prefixes; labels never enter a key (Accounts.part).
+fn part(s: &str) -> String { format!("{}:{}", s.chars().count(), s) }
+/// Accounts.session.key / Accounts.seen.key: the native session, and how much of the conversation the account has seen, per thread, provider, profile and epoch.
+pub fn session_key(th: &str, provider: &str, id: &str, epoch: u64) -> String { format!("account.session.{}{}{}{}", part(th), part(provider), part(id), epoch) }
+pub fn seen_key(th: &str, provider: &str, id: &str, epoch: u64) -> String { format!("account.seen.{}{}{}{}", part(th), part(provider), part(id), epoch) }
 /// Accounts.profile: the inventory's profile of that id (Null when none).
 pub fn profile(inventory: &str, id: &str) -> Value {
     serde_json::from_str::<Value>(inventory).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter().find(|p| p["id"].as_str() == Some(id)).unwrap_or(Value::Null)

@@ -35,7 +35,7 @@ fn parse() -> std::result::Result<Args, i32> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let (mut home, mut port, mut host, mut policy, mut window) = (None, None, "127.0.0.1".to_string(), None, None::<PathBuf>);
     let (mut no_tailscale, mut https, mut only) = (false, false, false);
-    let (mut version, mut commit) = ("0.14.0".to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| "unknown".into()));
+    let (mut version, mut commit) = (env!("CARGO_PKG_VERSION").to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| "unknown".into()));
     let mut i = 0;
     while i < a.len() {
         let value = |i: usize| a.get(i + 1).cloned().ok_or_else(|| { eprint!("{USAGE}"); 2 });
@@ -159,6 +159,7 @@ async fn run(a: Args) -> Result<()> {
     term::start(hub.clone());
     startup::mark("term started");
     let agents = agents::Agents::start(hub.clone()).await?;
+    files::tools::register(&hub, &agents);
     startup::mark("agents started");
     let _bots = bots::start(hub.clone(), agents.clone()).await;
     startup::mark("bots started");

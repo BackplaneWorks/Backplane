@@ -11,6 +11,8 @@ import { basename, extname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { chromium } from "./playwright.ts";
 import type { BrowserContext, CDPSession, Locator, Page } from "playwright-core";
+import { useBunWs } from "./bunws.ts";
+import { chromium as pwChromium } from "./playwright.ts";
 import { CefEngine, findCef, type CefOptions } from "./cef.ts";
 import { defaultEngine, saveTab, restoreTab } from "./session.ts";
 
@@ -1003,8 +1005,45 @@ function quick(name: string): void {
   if (o) o.shot.last = 0;
 }
 
+
+// ---- an external CEF (the native client's embedded Chromium) ----
+// The client sends {op:"attach", endpoint:"http://127.0.0.1:PORT", urls:[...], active:N}: connect over CDP (once per endpoint) and make the page it shows
+// (the active tab's url) the owner's active page, so preview_* acts on what the person sees. "detach" drops it.
+const external = new Map<string, Awaited<ReturnType<typeof pwChromium.connectOverCDP>>>();
+const externalPages = new WeakSet<Page>();
+async function attachExternal(a: Json, name: string): Promise<Json> {
+  const ep = String(a.endpoint ?? "");
+  if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/.test(ep)) throw new Error("attach needs a loopback http endpoint");
+  let b = external.get(ep);
+  if (!b || !b.isConnected()) {
+    useBunWs(); process.env.PW_CHROMIUM_ATTACH_TO_OTHER = "1";
+    b = await pwChromium.connectOverCDP(ep, { timeout: 15000 });
+    external.set(ep, b);
+    b.on("disconnected", () => { external.delete(ep); for (const o of owners.values()) { o.tabs = o.tabs.filter((t) => !externalPages.has(t) || !t.isClosed()); } });
+  }
+  const urls: string[] = Array.isArray(a.urls) ? a.urls.map(String) : [];
+  const want = urls[Number(a.active) | 0] ?? "";
+  const pages = b.contexts().flatMap((c) => c.pages()).filter((p) => !p.isClosed());
+  // the page showing the active tab's address; several: the newest (the client opened it last)
+  const p = [...pages].reverse().find((q) => q.url() === want) ?? pages[pages.length - 1];
+  if (!p) throw new Error("the embedded browser has no page yet");
+  const o = ownerFor(name);
+  if (!ownerOf.has(p)) {
+    ownerOf.set(p, o); externalPages.add(p); p.setDefaultTimeout(DEFAULT_TIMEOUT);
+    p.on("console", (m) => pushLog(o, { level: m.type(), text: m.text() }));
+    p.on("pageerror", (e) => pushLog(o, { level: "error", text: String(e) }));
+    p.on("framenavigated", (f) => { if (f === p.mainFrame()) { tellTabs(o); if (p === o.active) send({ event: "navigated", page: o.name, url: f.url() }); } });
+    p.on("close", () => { o.tabs = o.tabs.filter((t) => t !== p); if (o.active === p) o.active = o.tabs[o.tabs.length - 1] ?? null; tellTabs(o); });
+  }
+  o.tabs = o.tabs.filter((t) => externalPages.has(t) && !t.isClosed()); if (!o.tabs.includes(p)) o.tabs.push(p);
+  o.active = p; tellTabs(o);
+  return { attached: true, url: p.url() };
+}
+
 // every handler gets the request's arguments and the owner it acts for
 const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
+  async attach(a, name) { return attachExternal(a, name); },
+  async detach(_a, name) { const o = ownerFor(name); o.tabs = o.tabs.filter((t) => !externalPages.has(t)); if (o.active && externalPages.has(o.active)) o.active = o.tabs[o.tabs.length - 1] ?? null; tellTabs(o); return {}; },
   async engine(a, name) { return switchEngine(a, name); },
   // Per-owner restoration for an upgrade from the previous helper protocol.
   // Context cookies remain private and migrate through the browser API.

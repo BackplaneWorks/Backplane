@@ -374,12 +374,13 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
     let why: String = es.iter().rev().take_while(|e| !(e.msg && e.role == "user")).find(|e| !e.msg && e.role == "error").map(|e| e.text.trim().chars().take(400).collect()).unwrap_or_default();
-    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why).ok_or_else(||state_keys_refusal(st,thread))?;
+    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why, params["hubInfo"]["models"].as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()).as_ref()).ok_or_else(||state_keys_refusal(st,thread))?;
     let t = st.threads.get(thread).ok_or("thread.missing")?;
     let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).map_err(|_|"thread.template")?;
     // the viewer panel the thread has open (Board, Schematic, 3D; other pages are not ported)
     let viewer = super::viewer::viewer_json(st, &o["viewer"], &params["session"]).ok_or("viewer.page-not-ported")?;
     o.insert("viewer".into(), viewer);
+    o.insert("diff".into(), crate::session::pages::diff_json(&params["session"], thread));
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
     o.insert("title".into(), json!(t.title));
     o.insert("branch".into(), json!(t.branch));
@@ -434,7 +435,8 @@ mod tests {
         let got = thread_object(&st, "h", th, &p["params"], "").expect("a plain idle thread is drawn here");
         let want = &p["out"]["shown"]["thread"];
         for (k, w) in want.as_object().unwrap() { assert_eq!(got.get(k), Some(w), "key {k}"); }
-        assert_eq!(got.as_object().unwrap().len(), want.as_object().unwrap().len());
+        // the Allowance chip's text (keys.rs `allowance`) is Backplane's own: the recorded helper reply has no such key
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| *k != "allowance").count(), want.as_object().unwrap().len());
     }
     // a thread that sent messages into other threads still opens: those rows are left out of its page
     #[test] fn rows_this_thread_sent_elsewhere_are_left_out_not_refused() {

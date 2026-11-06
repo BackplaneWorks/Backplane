@@ -6,13 +6,40 @@
 set -eu
 ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; CLIENT=$1; ASSETS=$2; N=${3:-plot}
 R=$ROOT/build/gpui/desktop-plot-$N; OUT=$ROOT/build/gpui/results/desktop; SH=$ROOT/build/gpui/shots/desktop
-X=$ROOT/build/gpui/xvfb; HUB=$ROOT/build/gpui/hub/new
+X=$ROOT/build/gpui/xvfb; HUB=${GPUI_HUB:-$ROOT/build/gpui/hub/new}
 FIX=$ROOT/test/gpui/files/fixtures/plot; PORT=${GPUI_PORT:-3833}; DISP=${GPUI_DISP:-:61}
 mkdir -p $R $OUT $SH
 [ -x "$CLIENT" ] || { echo "no client binary"; exit 2; }
 [ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP is in use (set GPUI_DISP=:6N)"; exit 2; }
 rm -rf $R/home $R/proj $R/bin $R/fakehome; rm -f $R/*.pid; mkdir -p $R/home $R/proj $R/bin $R/fakehome/.cache
-cp $FIX/ecc83-pp.kicad_pcb $FIX/ecc83-pp.kicad_sch $R/proj/; echo '{}' > $R/proj/ecc83-pp.kicad_pro; mkdir -p $R/proj/mech; cp $ROOT/test/gpui/files/fixtures/mesh/bracket.step $R/proj/mech/
+if [ -n "${GPUI_DEMO:-}" ]; then cp -r "$GPUI_DEMO"/. $R/proj/; else cp $FIX/ecc83-pp.kicad_pcb $FIX/ecc83-pp.kicad_sch $R/proj/; echo '{}' > $R/proj/ecc83-pp.kicad_pro; fi; mkdir -p $R/proj/mech; cp $ROOT/test/gpui/files/fixtures/mesh/bracket.step $R/proj/mech/
+# GPUI_GIT=1: the project is a git repository whose board has an uncommitted change (the first 30 tracks are gone), for the Compare menu
+if [ -n "${GPUI_GIT:-}" ]; then ( cd $R/proj && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && python3 - <<'PYG'
+import re
+t=open('ecc83-pp.kicad_pcb').read(); n=0
+def drop(m):
+    global n; n+=1; return '' if n<=30 else m.group(0)
+open('ecc83-pp.kicad_pcb','w').write(re.sub(r'\t\(segment\n(?:\t\t[^\n]*\n)+\t\)\n',drop,t))
+PYG
+); fi
+# GPUI_STEPS=1: a git project with three design-history steps (10, 20, 30 tracks gone) on the thread's steps ref, as the hub's step job writes them, for the history bar
+if [ -n "${GPUI_STEPS:-}" ]; then ( cd $R/proj && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && python3 - <<'PYS'
+import re, os, subprocess
+f = 'ecc83-pp.kicad_pcb'; t = open(f).read()
+segs = list(re.finditer(r'\t\(segment\n(?:\t\t[^\n]*\n)+\t\)\n', t)); prev = ''
+env = dict(os.environ, GIT_INDEX_FILE='/tmp/bp-steps-idx-%d' % os.getpid(), GIT_AUTHOR_NAME='B', GIT_AUTHOR_EMAIL='b@b', GIT_COMMITTER_NAME='B', GIT_COMMITTER_EMAIL='b@b')
+g = lambda *a: subprocess.run(['git', *a], env=env, check=True, capture_output=True, text=True).stdout.strip()
+for k in (1, 2, 3):
+    out = t
+    for i in sorted(range(10 * k), reverse=True): out = out[:segs[i].start()] + out[segs[i].end():]
+    open(f, 'w').write(out); g('add', '-f', '--', f); tree = g('write-tree')
+    prev = g('commit-tree', '-m', 'backplane step', *(['-p', prev] if prev else []), tree)
+    g('update-ref', 'refs/backplane/checkpoints/dDE/steps', prev)
+open(f, 'w').write(t)
+try: os.remove(env['GIT_INDEX_FILE'])
+except OSError: pass
+PYS
+); fi
 # stand-in agents: nothing may call a model
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > $R/bin/claude; chmod +x $R/bin/claude
 for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > $R/bin/$n; chmod +x $R/bin/$n; done
@@ -35,7 +62,7 @@ trap cleanup EXIT INT TERM
 R='$R'; ROOT='$ROOT'; X='$X'; HUB='$HUB'; CLIENT='$CLIENT'; ASSETS='$ASSETS'; N='$N'; PORT='$PORT'; DISP='$DISP'; OUT='$OUT'; SH='$SH'
 export BACKPLANE_AGENTS=$R/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream HOME=$R/fakehome XDG_CACHE_HOME=$R/fakehome/.cache XDG_CONFIG_HOME=$R/fakehome/.config XDG_DATA_HOME=$R/fakehome/.local
 cd $R/proj
-$HUB/backplane-hub --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground --policy-bin ${GPUI_POLICY:-$ROOT/build/gpui/slim/bp-policy-page} --window-bin $HUB/window > $R/hub.log 2>&1 &
+$HUB/backplane-hub --home $R/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground ${GPUI_POLICY:+--policy-bin $GPUI_POLICY} > $R/hub.log 2>&1 &
 echo $! > $R/hub.pid; sleep 5
 HP=$(cat $R/hub.pid)
 # the hub must run with the stand-in agents before any turn
@@ -43,8 +70,8 @@ tr "\0" "\n" < /proc/$HP/environ | grep -q "^BACKPLANE_AGENTS=$R/bin\$" || { ech
 echo "hub pid $HP environ ok: $(tr "\0" "\n" < /proc/$HP/environ | grep "^BACKPLANE_AGENTS=")"; curl -s -m3 -o /dev/null -w "hello %{http_code}\n" http://127.0.0.1:$PORT/hello
 LD_LIBRARY_PATH=$X/usr/lib/x86_64-linux-gnu $X/usr/bin/Xvfb $DISP -screen 0 1440x900x24 -nolisten tcp -xkbdir /usr/share/X11/xkb > $R/xvfb.log 2>&1 &
 echo $! > $R/xvfb.pid; sleep 2
-printf "font pango:monospace 8\nnew_window none\nfor_window [class=\".*\"] border none\ndefault_border none\nhide_edge_borders both\n" > $R/i3.conf
-DISPLAY=$DISP i3 -c $R/i3.conf > $R/i3.log 2>&1 &
+printf "font pango:monospace 8\nnew_window none\nfor_window [class=\".*\"] border none\ndefault_border none\nhide_edge_borders both\nipc-socket $R/i3.sock\n" > $R/i3.conf
+mkdir -p -m 700 $R/run; XDG_RUNTIME_DIR=$R/run DISPLAY=$DISP i3 -c $R/i3.conf > $R/i3.log 2>&1 &
 echo $! > $R/i3.pid; sleep 1
 export DISPLAY=$DISP VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$ASSETS BACKPLANE_GPUI_RECTS=1
 if [ -n "${GPUI_PROJECTS:-}" ]; then cat > $R/script.json <<JSON
@@ -59,6 +86,7 @@ JSON
 elif [ -n "${GPUI_DAILY:-}" ]; then cat > $R/script.json <<JSON
 [{"select":0},{"wait":1500},{"popup":"/"},{"wait":800},{"type":" "},{"type":"x"},{"wait":300},{"read":"composer"},{"wait":500},{"type":"approve:one"},{"wait":300},{"send":true},{"wait":5000},{"wait":100},{"click":"ask:0:0"},{"wait":4000},{"click":"ui:Settings"},{"wait":2500},{"click":"ui:Settings"},{"wait":1500},{"click":"project:p1"},{"wait":2500}]
 JSON
+elif [ -n "${GPUI_SCRIPT:-}" ]; then cp "$GPUI_SCRIPT" $R/script.json
 elif [ -n "${GPUI_ATTACH:-}" ]; then cp "$GPUI_ATTACH" $R/attach.png; cat > $R/script.json <<JSON
 [{"select":0},{"wait":1500},{"attach":"$R/attach.png"},{"wait":2500},{"type":"see attach"},{"wait":2500},{"send":true},{"wait":2500}]
 JSON
@@ -69,7 +97,10 @@ JSON
 fi
 $CLIENT --url http://127.0.0.1:$PORT --token-file $R/home/token --script $R/script.json --exit-after 80 > $OUT/$N.client.log 2>&1 &
 echo $! > $R/client.pid
-if [ -n "${GPUI_PROJECTS:-}" ]; then sleep 5; import -window root $SH/$N-search.png; sleep 3; import -window root $SH/$N-add.png; sleep 5; import -window root $SH/$N-picked.png; sleep 4; import -window root $SH/$N-cleared.png; elif [ -n "${GPUI_LONG:-}" ]; then sleep 9; import -window root $SH/$N-long.png; elif [ -n "${GPUI_THREADS:-}" ]; then sleep 4; import -window root $SH/$N-more.png; sleep 6; import -window root $SH/$N-rename.png; sleep 7; import -window root $SH/$N-delete.png; sleep 10; import -window root $SH/$N-end.png; elif [ -n "${GPUI_DAILY:-}" ]; then sleep 9; import -window root $SH/$N-ask.png; sleep 5; import -window root $SH/$N-after.png; sleep 3; import -window root $SH/$N-settings.png; sleep 3; import -window root $SH/$N-home.png; elif [ -n "${GPUI_ATTACH:-}" ]; then sleep 5; import -window root $SH/$N-attach.png; sleep 2; import -window root $SH/$N-attach-sent.png; else sleep 7; import -window root $SH/$N-board.png
+if [ -n "${GPUI_DRIVE:-}" ]; then sleep ${GPUI_DRIVE_AFTER:-10}; SHOTS=$SH NAME=$N sh "$GPUI_DRIVE"; exit 0; fi
+if [ -n "${GPUI_PROJECTS:-}" ]; then sleep 5; import -window root $SH/$N-search.png; sleep 3; import -window root $SH/$N-add.png; sleep 5; import -window root $SH/$N-picked.png; sleep 4; import -window root $SH/$N-cleared.png; elif [ -n "${GPUI_LONG:-}" ]; then sleep 9; import -window root $SH/$N-long.png; elif [ -n "${GPUI_THREADS:-}" ]; then sleep 4; import -window root $SH/$N-more.png; sleep 6; import -window root $SH/$N-rename.png; sleep 7; import -window root $SH/$N-delete.png; sleep 10; import -window root $SH/$N-end.png; elif [ -n "${GPUI_DAILY:-}" ]; then sleep 9; import -window root $SH/$N-ask.png; sleep 5; import -window root $SH/$N-after.png; sleep 3; import -window root $SH/$N-settings.png; sleep 3; import -window root $SH/$N-home.png; elif [ -n "${GPUI_DRIVE:-}" ]; then sleep ${GPUI_DRIVE_AFTER:-10}; SHOTS=$SH NAME=$N sh "$GPUI_DRIVE"; fi
+if [ -n "${GPUI_SCRIPT:-}" ]; then for sh in ${GPUI_SHOTS:-end:10}; do sleep ${sh#*:}; import -window root $SH/$N-${sh%%:*}.png; done
+elif [ -n "${GPUI_ATTACH:-}" ]; then sleep 5; import -window root $SH/$N-attach.png; sleep 2; import -window root $SH/$N-attach-sent.png; else sleep 7; import -window root $SH/$N-board.png
 sleep 6; import -window root $SH/$N-schematic.png
 sleep 8; import -window root $SH/$N-3d.png
 sleep 9; import -window root $SH/$N-mech.png; fi

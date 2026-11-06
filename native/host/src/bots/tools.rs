@@ -1,20 +1,22 @@
 //! The bots' own MCP tools (src/core/bothub.bend `Bots.call.k`, `Bots.names`): what a bot's agent calls to talk to other bots, keep memory, set its space and
-//! routines, and remind the person. Only a bot's thread has them (`Bots.route`: a thread that is no bot's does not list them). Every tool decides under the world
+//! routines, and remind the person. Only a bot's thread, and a run or back office working for a bot, has them (`Bots.route`, `Run.bot`). Every tool decides under the world
 //! lock, logs through `World::also` (the uberbot's ops go beside its changes) and answers (ok, body) as `Mcp.content` shapes it.
-//! Ported: bot_whoami, bot_list, bot_send, room_list, room_create, room_post, room_read, memory_*, space_set/get/page, routine_list/set/delete, project_list,
-//! remind_person, person_timezone. Not yet (PARITY): bot_create, plane_read, notify_person, task_*, voice_dictionary_add, project_create.
+//! Ported: bot_whoami, bot_list, bot_send, bot_create, room_list, room_create, room_post, room_read, memory_*, space_set/get/page, routine_list/set/delete, project_list,
+//! project_create, notify_person, remind_person, person_timezone; ledger.rs has every thread's told_* and task_board_*. Not yet (PARITY): voice_dictionary_add;
+//! plane.rs has plane_read's text; task_* are the term lane's; decide, escalate, charter_set and tell_person go with the mailroom's runs (bots/mail).
 use super::clock::{Zones, TzRule};
 use super::post::{Pending, RoomRef};
 use super::rpc::{now_s, Bots};
 use super::routines::{plan, Pick};
 use super::sched_text::{person_rule, rel, routine_json, saved, zone_source};
 use super::world::{Bot, Routine, World};
+use crate::state::fam::turnend::{bend_trim as trim, policy_direct};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub const TOOLS_JSON: &str = include_str!("tools.json");
 pub const NAMES: &[&str] = &["bot_whoami", "bot_list", "bot_send", "room_list", "room_create", "room_post", "room_read", "memory_save", "memory_recall", "memory_forget", "memory_list",
-    "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "bot_create", "remind_person", "person_timezone"];
+    "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "bot_create", "plane_read", "notify_person", "remind_person", "person_timezone", "project_create"];
 const HOP_MAX: u64 = 6;
 const MAX_PAGE: usize = 262_144;
 
@@ -28,7 +30,7 @@ fn gn(a: &Value, k: &str, d: usize) -> usize { match a.get(k) { Some(Value::Numb
 
 /// The tool definitions an agent is shown in a bot's thread: the JS hub's own, in its order.
 pub fn defs() -> Vec<Value> { serde_json::from_str(TOOLS_JSON).unwrap_or_default() }
-pub fn owns(name: &str) -> bool { NAMES.contains(&name) }
+pub fn owns(name: &str) -> bool { NAMES.contains(&name) || super::ledger::NAMES.contains(&name) }
 
 /// Words.of: runs of letters and digits, lower case, three or more long (Mem.score counts a repeated word each time)
 fn words(s: &str) -> Vec<String> {
@@ -82,19 +84,24 @@ impl Bots {
     pub async fn tool_bot(&self, thread: &str) -> bool { self.world().await.bots.values().any(|b| !b.deleted && b.thread == thread) }
 
     /// One tools/call from the agent of `thread`: (ok, body)
-    pub async fn tool_call(self: &Arc<Self>, thread: &str, name: &str, a: &Value) -> Res {
-        let mut w = self.world().await;
+    pub async fn tool_call(self: &Arc<Self>, thread: &str, name: &str, a: &Value) -> Res { self.tool_call_at(thread, name, a, now_s()).await }
+    /// the same at a given time (a replay of a recording keeps its clock)
+    pub(crate) async fn tool_call_at(self: &Arc<Self>, thread: &str, name: &str, a: &Value, now: u64) -> Res {
+        if name == "project_create" { return self.t_project(thread, a, now).await } // it waits for the person, so it holds no lock
+        // Bots.call.private/scoped: a back office refuses, a managed thread's notice goes through the coordinator; it takes the world's lock itself
+        if name == "notify_person" { if let Some(r) = self.notify_relay(thread, a).await { return r } }
+        let w = self.world().await;
+        if super::ledger::NAMES.contains(&name) { return self.ledger_call(&w, thread, name, a, now).await } // Bots.route: every thread's, a bot's or not
         let mut later: Option<(Pending, u64)> = None;
-        let r = self.tool_decide(&w, thread, name, a, &mut later).await;
+        let r = self.tool_decide(&w, thread, name, a, &mut later, now).await;
         drop(w);
         // the members of a room hear a post only once the lock is let go (a delivery can take a while)
         if let Some((p, hop)) = later { self.post_finish(p, hop).await }
         r
     }
 
-    async fn tool_decide(self: &Arc<Self>, w: &World, thread: &str, name: &str, a: &Value, later: &mut Option<(Pending, u64)>) -> Res {
-        let Some(b) = w.bots.values().find(|b| !b.deleted && b.thread == thread).cloned() else { return fail("unknown tool") };
-        let now = now_s();
+    async fn tool_decide(self: &Arc<Self>, w: &World, thread: &str, name: &str, a: &Value, later: &mut Option<(Pending, u64)>, now: u64) -> Res {
+        let Some(b) = w.run_bot(thread).cloned() else { return fail("unknown tool") };
         match name {
             "bot_whoami" => {
                 let z = Zones { settings: &w.settings }; let hop = w.hops.get(&b.id).map_or(0, |h| h.now);
@@ -161,6 +168,15 @@ impl Bots {
             }
             "project_list" => (true, Value::Array(w.projects.iter().filter(|(_, p)| !p.2).map(|(id, p)| json!({"id":id,"name":p.0,"folder":p.1})).collect())),
             "bot_create" => self.t_spawn(w, &b, now, a).await,
+            "plane_read" => {
+                let word = gs(a, "machine").trim(); // Fm.plan.pw: no machine is linked until the net lane's transport
+                if !word.is_empty() { return fail(&format!("no machine of yours called {word} is linked here (machine_list shows them)")) }
+                let rooms = self.room_news(w, now).await; let idle = gb(a, "idle", false);
+                let text = crate::statehost::policies().and_then(|p| p.with_state(|st| super::plane::read(st, w, &rooms, now, idle)));
+                let text = match text { Some(t) => t, None => { let st = self.state_folded(); super::plane::read(&st, w, &rooms, now, idle) } };
+                (true, json!({"text":text}))
+            }
+            "notify_person" => self.t_notify(w, &b, now, trim(gs(a, "reason")), trim(gs(a, "text"))).await,
             "remind_person" => {
                 let text = gs(a, "text").trim().to_string();
                 if text.is_empty() { return fail("say what to remind them of (text)") }
@@ -266,6 +282,99 @@ impl Bots {
         (true, json!({"bot":bot,"name":name,"note":format!("{name} is made: talk to it with bot_send")}))
     }
 
+    /// the state as the log has it, for a hub whose state lane has not started or is still folding
+    pub(super) fn state_folded(&self) -> crate::state::State {
+        let mut st = crate::state::State::default();
+        for l in self.hub.store.range(0, self.hub.store.len()).unwrap_or_default().iter() { st.apply_line(l); }
+        st
+    }
+    /// Plane.rooms.go: each room's unread posts (those since the setting room.seen.<room>, or the last day, that the person did not write) and the last one's time
+    pub(super) async fn room_news(&self, w: &World, now: u64) -> Vec<super::plane::RoomNews> {
+        let mut out = vec![];
+        for r in rooms(w) {
+            let seen = self.hub.setting(&format!("room.seen.{}", r.id)).await.and_then(|v| v.parse::<u64>().ok()).unwrap_or(now.saturating_sub(86400));
+            let (mut unread, mut last) = (0, 0);
+            for l in w.room_lines.get(&r.id).map_or(&[][..], Vec::as_slice).iter().rev() {
+                let Ok(e) = self.hub.store.get(l - 1).map(|x| serde_json::from_str::<Value>(&x).unwrap_or(Value::Null)) else { continue };
+                let at = e["at"].as_u64().unwrap_or(0); if last == 0 { last = at }
+                if at <= seen { break } if e["from"] != "you" { unread += 1 }
+            }
+            out.push(super::plane::RoomNews { id: r.id.clone(), name: r.name.clone(), unread, at: last });
+        }
+        out
+    }
+
+    /// What notify_person reads of the thread (NO.Turn.of.state, NO.Policy.person): the message its turn answers (not one still queued) as (text, at), and the person's last
+    /// message's id. The thread's newest entries are read a page at a time, until both are found.
+    async fn turn_of(&self, thread: &str) -> ((String, u64), String) {
+        let queued = self.inbox.queued(thread).await;
+        let (mut turn, mut person, mut before): (Option<(String, u64)>, Option<String>, u64) = (None, None, 0);
+        while turn.is_none() || person.is_none() {
+            let page = { let m = self.hub.model().await; match m.page(&self.hub.store, thread, before, 32) { Ok(p) => p, Err(_) => break } };
+            if page.rows.is_empty() { break }
+            let oldest = page.rows.iter().map(|r| r.ord).min().unwrap_or(0);
+            let mut rows: Vec<_> = page.rows.iter().filter(|r| before == 0 || r.ord < before).collect(); rows.sort_by(|a, b| b.seq.cmp(&a.seq));
+            for r in rows.into_iter().filter(|r| r.kind == "msg" && r.role == "user") {
+                if turn.is_none() && !queued.contains(&r.id) { turn = Some((r.text.clone(), r.at)) }
+                if person.is_none() && policy_direct(&r.id, &r.text) { person = Some(r.id.clone()) }
+            }
+            if oldest <= 1 || page.below == 0 { break } before = oldest;
+        }
+        (turn.unwrap_or_default(), person.unwrap_or_default())
+    }
+
+    /// Bots.notify: the person is alerted for needs_you, a done they asked for, and a routine's reminder or digest, nothing else. An allowed call writes the thread's alert
+    /// record (kind note), which the told mark and the alert follow; with the setting off it writes the record with no kind.
+    async fn t_notify(&self, w: &World, b: &Bot, now: u64, reason: &str, text: &str) -> Res {
+        if text.is_empty() { return fail("Say what the person should know.") }
+        let th = &b.thread; let ((trigger, start), pid) = self.turn_of(th).await;
+        let rec = self.hub.setting(&format!("alert.{th}")).await.unwrap_or_default();
+        let f: Vec<&str> = rec.splitn(5, '\t').collect(); let field = |i: usize| f.get(i).copied().unwrap_or("");
+        let mem = field(2).to_string();
+        // Bots.notify.used: an alert this turn already: a note record written since its message
+        let used = field(0) == "note" && field(3).chars().take_while(char::is_ascii_digit).collect::<String>().parse::<u64>().unwrap_or(0) >= start;
+        let on = |name: &'static str| { let hub = self.hub.clone(); async move { hub.setting(&format!("notify.{name}")).await.as_deref() != Some("off") } }; // Policy.on: these default on
+        let (on, settled) = match reason {
+            "needs_you" => { if used { return fail("Not sent: already alerted the person this turn.") } (on("needs").await, mem) }
+            "reminder" | "digest" => {
+                if !trigger.starts_with("[routine: ") { return fail("Not sent: reminders and digests alert only from a routine the person scheduled. Use routine_set (or remind_person) to schedule it.") }
+                if used { return fail("Not sent: already alerted the person this turn.") } (on("reminders").await, mem)
+            }
+            "done" => { if pid.is_empty() || pid == mem { return fail("Not sent: the person was already told this work is done, or they did not ask for it here.") } (on("settled").await, pid) }
+            _ => return fail("Not sent: notify_person is for three things only: needs_you (you are blocked until the person decides, approves, logs in, enters a code or answers), done (work they gave you in your own thread is finished) and reminder or digest (only in a routine's turn). Put it in a room, your Space or on the task board instead."),
+        };
+        let stamp = format!("{now}.{}", self.hub.store.len());
+        let value = if on { format!("note\tnote-{}\t{settled}\t{stamp}\t{}", self.hub_id("n", now), one_line(text, 500)) } else { format!("\t\t{settled}\t{stamp}\t") };
+        let ev = json!({"$":"SettingSet","key":format!("alert.{th}"),"value":value,"at":now});
+        self.t_commit(w, now, vec![ev]).await.map_or_else(|e| fail(&e), |_| said(if on { "sent to the person" } else { "recorded; the person turned these alerts off" }))
+    }
+
+    /// project_create (Hub.newproj): the person is asked first, unless they allowed it for this session; once they accept, the folder is made when missing and resolved, and
+    /// becomes a project. Nothing is made before the answer. An answer comes as plain text, not JSON, when it is a refusal (Gg.say).
+    async fn t_project(&self, thread: &str, a: &Value, now: u64) -> Res {
+        let text = |m: String| (false, Value::String(m));
+        if !self.tool_bot(thread).await { return text("only bots have this tool".into()) }
+        let (path, name) = (trim(gs(a, "path")), trim(gs(a, "name")));
+        // Bots.newproj.detail
+        let detail = format!("New project{}\nFolder: {path} (made when missing)", if name.is_empty() { String::new() } else { format!(" {name}") });
+        match self.inbox.approve(thread, "project_create", &detail).await { Err(e) => return text(e), Ok(x) if x != "accept" && x != "session" => return text("The person declined this.".into()), Ok(_) => {} }
+        if path.is_empty() { return text("error: name a folder".into()) }
+        // Np.sh: the folder, made when missing, resolved
+        let root = match crate::commands::fs::resolve(path).await {
+            Ok(d) => d,
+            Err(e) if gs(&e, "error").starts_with("no such folder") => match crate::commands::fs::make(path).await { Ok(d) => d, Err(e) => return text(format!("error: {}", gs(&e, "error"))) },
+            Err(e) => return text(format!("error: {}", gs(&e, "error"))),
+        };
+        let root = root_norm(&root);
+        let w = self.world().await;
+        // Bots.newproj.made: a folder that is a project already answers that project; any other becomes one
+        if let Some((id, p)) = w.projects.iter().find(|(_, p)| !p.2 && root_norm(&p.1) == root) { return (true, json!({"project":{"id":id,"name":p.0,"folder":p.1},"note":"already a project"})) }
+        let title = if name.is_empty() { root.rsplit('/').find(|x| !x.is_empty()).unwrap_or("project").to_string() } else { name.to_string() };
+        let id = self.hub_id("p", now);
+        let ev = json!({"$":"ProjectCreated","id":id,"title":title,"root":root,"at":now});
+        match self.t_commit(&w, now, vec![ev]).await { Ok(()) => (true, json!({"project":{"id":id,"name":title,"folder":root},"note":"created"})), Err(e) => fail(&e) }
+    }
+
     async fn t_zone(&self, w: &World, now: u64, zone: &str) -> Res {
         let z = Zones { settings: &w.settings };
         if zone.is_empty() {
@@ -289,6 +398,11 @@ impl Bots {
     }
 }
 
+/// Alert.text: a text as one line, cut to max characters after trimming
+fn one_line(t: &str, max: usize) -> String { trim(t).chars().take(max).map(|c| if c == '\t' || c == '\n' { ' ' } else { c }).collect() }
+/// Hub.root.norm: a root without trailing slashes ("/" stays)
+fn root_norm(r: &str) -> String { let t = r.trim_end_matches('/'); if t.is_empty() && !r.is_empty() { "/".into() } else { t.into() } }
+
 /// Json.parse's verdict, as far as the recorded hub shows it: a value, or a bare word the lexer lets through; text that opens an object or an array and does not close is malformed
 fn lenient_json(s: &str) -> bool {
     let t = s.trim();
@@ -299,7 +413,7 @@ fn lenient_json(s: &str) -> bool {
 /// The bots' tools as the agents' MCP server serves them: listed in a bot's thread only (Bots.route: a thread that is no bot's lists and answers none of them)
 pub struct BotToolSet(pub Arc<Bots>);
 impl crate::agents::mcp::ToolSet for BotToolSet {
-    fn list(&self, thread: &str) -> Vec<Value> { if self.0.is_bot_thread(thread) { defs() } else { vec![] } }
+    fn list(&self, thread: &str) -> Vec<Value> { let mut v = super::ledger::defs(); if self.0.is_bot_thread(thread) { v.extend(defs()) } v }
     fn owns(&self, name: &str) -> bool { owns(name) }
     fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)> { Box::pin(async move { self.0.tool_call(thread, name, a).await }) }
 }

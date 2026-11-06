@@ -1,0 +1,1 @@
+[{"select":0},{"wait":1500},{"click":"rail:Files"},{"wait":5000},{"action":["fm-open","ecc83-pp.kicad_pcb"]},{"wait":12000}]

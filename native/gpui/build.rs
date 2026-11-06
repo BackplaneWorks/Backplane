@@ -1,5 +1,7 @@
 use std::{env, fs, path::PathBuf};
 fn main() {
+    // the cef feature links libcef.so dynamically; the cef crate copies it beside the binary, so find it there (docs/browser-gpui-cef.md)
+    if env::var_os("CARGO_FEATURE_CEF").is_some() { println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN"); }
     let source = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../src/core/cbor.bend");
     println!("cargo:rerun-if-changed={}", source.display());
     let text = fs::read_to_string(source).unwrap();

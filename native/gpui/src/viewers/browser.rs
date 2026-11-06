@@ -16,17 +16,29 @@ pub fn decode_jpeg(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 }
 fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)) }
 
-pub struct BrowserPage { image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
+pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
 impl BrowserPage {
     /// `base` like http://127.0.0.1:3821 (http only for now: this client has no TLS, so an https base never starts the poller), `owner` the page's owner as the hub names it (a bot's id, or the thread's id
     /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
     /// `set_visible(true)`; mount the page with the tab and call `set_visible(false)` when another tab is shown.
-    pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String) -> Self {
+    pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String, hub: tokio::sync::mpsc::Sender<crate::hub::Command>) -> Self {
+        // with the `cef` feature and a usable runtime the page is embedded Chromium (cef_page.rs); otherwise the hub's JPEG frames below
+        #[cfg(feature = "cef")]
+        let (cef, cef_note) = match super::cef_page::engine_port() {
+            Ok(port) => { let o = owner.clone(); (Some(cx.new(move |cx| super::cef_page::CefPage::new(cx, o, hub, port))), String::new()) }
+            Err(e) => { eprintln!("GPUI_LOG {{\"cef\":{}}}", serde_json::Value::String(e.clone())); (None, format!("Embedded browser unavailable ({e}); showing the hub's frames.")) }
+        };
+        #[cfg(not(feature = "cef"))]
+        let _ = hub;
+        #[cfg(feature = "cef")]
+        let use_poller = cef.is_none();
+        #[cfg(not(feature = "cef"))]
+        let use_poller = true;
         let https = base.starts_with("https://");
         let stop = Arc::new(AtomicBool::new(false)); let visible = Arc::new(AtomicBool::new(false)); let vis = visible.clone(); // fetches only after set_visible(true)
         let (tx, rx) = async_channel::bounded::<Result<Option<Arc<RenderImage>>, String>>(2); // Ok(None): a good fetch of the frame already shown
         let flag = stop.clone();
-        if !https { std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
+        if !https && use_poller { std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
             let url = format!("{}/bots/{}/screen.jpg", base.trim_end_matches('/'), owner);
             let (mut last, mut failing) = (0u64, false);
             while !flag.load(Ordering::Relaxed) {
@@ -54,10 +66,16 @@ impl BrowserPage {
                 if weak.update(cx, |this, cx| { match msg { Ok(Some(i)) => { if let Some(old) = this.image.replace(i) { this.retired.push(old); } this.status.clear(); } Ok(None) => this.status.clear(), Err(e) => this.status = e } cx.notify(); }).is_err() { break }
             }
         }).detach();
-        let status = if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
-        BrowserPage { image: None, retired: Vec::new(), status, stop, visible }
+        #[cfg(feature = "cef")]
+        let cef_note2 = cef_note;
+        #[cfg(not(feature = "cef"))]
+        let cef_note2 = String::new();
+        let status = if !cef_note2.is_empty() { cef_note2 } else if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
+        BrowserPage { #[cfg(feature = "cef")] cef, image: None, retired: Vec::new(), status, stop, visible }
     }
-    pub fn set_visible(&mut self, visible: bool) { self.visible.store(visible, Ordering::Relaxed); }
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        #[cfg(feature = "cef")]
+        if let Some(c) = &self.cef { let v = visible; c.update(cx, |p, _| p.set_visible(v)); } self.visible.store(visible, Ordering::Relaxed); }
     /// Give the images back to the atlas (call before dropping the page, with the window).
     pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).chain(self.image.take()) { let _ = window.drop_image(i); } }
 }
@@ -65,6 +83,8 @@ impl Drop for BrowserPage { fn drop(&mut self) { self.stop.store(true, Ordering:
 impl Render for BrowserPage {
     fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         for old in self.retired.drain(..) { let _ = window.drop_image(old); } // a painted RenderImage stays in the atlas until it is dropped
+        #[cfg(feature = "cef")]
+        if let Some(c) = &self.cef { return div().id("browser-page").size_full().child(c.clone()).into_any_element(); }
         let status = self.status.clone();
         match &self.image {
             // a dead hub must not look like a live, frozen page: the status shows over the last frame

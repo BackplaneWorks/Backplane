@@ -222,6 +222,37 @@ function zip_where(fs, pathm, root, rel, home) {
   }
 }
 
+function zip_listing(root, rel, home) {
+  const fs = require('fs'), pathm = require('path');
+  let opened, dir;
+  try {
+    const where = zip_where(fs, pathm, root, rel, home);
+    if (!where || where[2] !== 'd') return zip_bend_list([]);
+    opened = zip_open(fs, pathm, where[0], where[1], home);
+    dir = zip_dir(fs, opened.fd, opened.abs);
+    const folders = [], files = [];
+    for (let count = 0; count < 10000; count++) {
+      const name = dir.readSync()?.name;
+      if (name === undefined) break;
+      if (name.startsWith('.') || /[\t\r\n\\]/.test(name)) continue;
+      let child;
+      try {
+        const childRel = where[1] ? where[1] + '/' + name : name;
+        child = zip_open(fs, pathm, where[0], childRel, home);
+        if (child.st.isDirectory() && folders.length < 2000) folders.push({ name, row: 'd\t0\t' + name + '\n' });
+        if (child.st.isFile() && files.length < 2000) files.push({ name, row: 'f\t' + child.st.size + '\t' + name + '\n' });
+      } catch {} finally { if (child) fs.closeSync(child.fd); }
+      if (folders.length === 2000 && files.length === 2000) break;
+    }
+    const order = (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    return zip_bend_list([folders.sort(order).concat(files.sort(order)).map(x => x.row).join('')]);
+  } catch { return zip_bend_list([]); }
+  finally {
+    if (dir) try { dir.closeSync(); } catch {}
+    if (opened) try { fs.closeSync(opened.fd); } catch {}
+  }
+}
+
 function zip_inside(root, rel, home) {
   const w = zip_where(require('fs'), require('path'), root, rel, home);
   return zip_bend_list(w === null ? [] : w);
@@ -591,3 +622,5 @@ globalThis.BP_ZIP = { zip_skip, zip_within, zip_entry, zip_store, zip_where, zip
 io_eff(CID(Zip.inside), zip_inside);
 io_eff(CID(Zip.send), zip_send);
 io_eff(CID(Zip.file), zip_file);
+
+io_eff(CID(Zip.list), zip_listing);

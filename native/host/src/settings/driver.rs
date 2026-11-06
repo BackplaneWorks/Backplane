@@ -103,7 +103,12 @@ pub fn plan_switch(w: &World, text: &str) -> (Vec<Value>, Option<String>) {
             if id == cur_id && epoch == cur_epoch { return (vec![], Some(text.to_string())) }
             let name = |i: &str| if i.is_empty() { "Default account".to_string() } else { profiles.iter().find(|x| x["id"] == i).and_then(|x| x["label"].as_str()).unwrap_or("account").to_string() };
             let say = format!("Usage limit reached on {}; automatically switched to {} ({}). Continuing the request.", name(&cur_id), name(id), w.provider);
-            return (vec![set(&accounts::binding_key(th, &w.provider), &accounts::binding_show(id, epoch), at), act_row(th, "info", "fallback", &say, at)], Some(text.to_string()));
+            // each account has its own native session (its own config folder): the old one is kept, the new one's restored (a fresh account starts a new session and is handed the conversation)
+            let new_session = get(&accounts::session_key(th, &w.provider, id, epoch));
+            let ev = vec![set(&accounts::session_key(th, &w.provider, &cur_id, cur_epoch), &get("thread.session"), at),
+                set(&accounts::binding_key(th, &w.provider), &accounts::binding_show(id, epoch), at),
+                json!({"$":"SessionSet","id":th,"session":new_session,"at":at}), act_row(th, "info", "fallback", &say, at)];
+            return (ev, Some(text.to_string()));
         }
         // nothing of this provider is eligible: an opt-in chain may leave it (Pick.may_cross), otherwise the thread waits
         if !(w.chain_on() && fb::may_cross(&profiles, &get, at, &w.provider, &w.model)) {
@@ -187,7 +192,17 @@ pub fn spawn_act(ag: Arc<Agents>, thread: String, act: Act) {
         let mut w = match load_idle(&hub, &thread, provider, model).await { Some(w) => w, None => return };
         w.now = now_ms() / 1000;
         let (ev, start) = plan_switch(&w, &text);
+        let mut start = start;
+        let key = accounts::binding_key(&thread, &w.provider);
+        let switched = ev.iter().any(|e| e["$"] == "SettingSet" && e["key"] == key.as_str());
+        let fresh = ev.iter().any(|e| e["$"] == "SessionSet" && e["session"] == "");
         if !ev.is_empty() { let _ = hub.commit_many(&ev).await; }
+        if switched && fresh { // another account has no session of this conversation: it is told what was said, then the request
+            if let (Some(t), Some(cx)) = (start.take(), crate::commands::entries(&hub, &thread).await) {
+                let why = format!("This thread was worked on under another account until now, which reached its usage limit; you take it over. Its conversation so far, oldest first:");
+                start = Some(format!("{}\n\n{}", crate::commands::hand_text(&why, &cx.entries, &thread), t));
+            }
+        }
         if let Some(t) = start { let _ = ag.start_queued(&thread, &t).await; }
     });
 }
@@ -197,6 +212,8 @@ async fn load_idle(hub: &Arc<Hub>, thread: &str, provider: String, model: String
     for k in keys { if let Some(v) = hub.setting(&k).await { settings.insert(k, v); } }
     let mut caps = serde_json::from_str::<Value>(&models::info()).unwrap_or(Value::Null);
     if let Some(o) = caps.as_object_mut() { o.retain(|_, v| v.is_array()); }
+    let session = { let m = hub.model().await; m.threads.get(thread).map(|t| t.session.clone()).unwrap_or_default() };
+    settings.insert("thread.session".into(), session);
     Some(World { now: now_ms() / 1000, thread: thread.into(), provider, model, settings, caps })
 }
 
@@ -308,8 +325,11 @@ mod tests {
         let w = world("claude", "opus", &[(k, i), binding.clone()]);
         let v = on_limit(&w, &lim("claude", 0), true, "go"); assert_eq!(keys(&v.events), ["account.limit.6:claude1:w2:", "account.failover.pending.t1", "account.failover.continuing.t1", "TurnChanged"]);
         let after = w.with(&v.events); let (ev, start) = plan_switch(&after, "go");
-        assert_eq!(start.as_deref(), Some("go")); assert_eq!((ev[0]["key"].clone(), ev[0]["value"].clone()), (json!("account.thread.t1.claude"), json!(accounts::binding_show("p", 1))));
-        assert_eq!(ev[1]["summary"], "Usage limit reached on Work; automatically switched to Personal (claude). Continuing the request.");
+        assert_eq!(start.as_deref(), Some("go")); let at_key = |k: &str| ev.iter().find(|e| e["key"] == k).cloned().unwrap_or(Value::Null);
+        assert_eq!(at_key("account.thread.t1.claude")["value"], json!(accounts::binding_show("p", 1)));
+        assert_eq!(at_key(&accounts::session_key("t1", "claude", "w", 2))["value"], "", "the old account's session is kept under its own key");
+        assert!(ev.iter().any(|e| e["$"] == "SessionSet" && e["session"] == ""), "the other account starts its own session");
+        assert_eq!(ev.last().unwrap()["summary"], "Usage limit reached on Work; automatically switched to Personal (claude). Continuing the request.");
         // both held: the thread waits for the earliest reset, and the chain may not be left when it is off
         let both = after.with(&[set(&fb::hold_key("claude", "p", 1), &json!({"scope":"claude","reset":now_ms() / 1000 + 4000}).to_string(), 1)]);
         let (ev, start) = plan_switch(&both, "go"); assert!(start.is_none()); let rec: Value = serde_json::from_str(ev[0]["value"].as_str().unwrap()).unwrap(); assert_eq!(rec["reset"].as_u64().unwrap() / 10, (now_ms() / 1000 + 4000) / 10, "an unknown reset is skipped (Reset.earliest): the known one is waited for");

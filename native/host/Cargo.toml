@@ -1,6 +1,6 @@
 [package]
 name = "backplane-hub"
-version = "0.0.2"
+version = "0.15.0"
 edition = "2021"
 description = "Backplane hub in Rust (gpui branch). Native clients only: renderer mobile, bp-policy as presenter, no JS."
 

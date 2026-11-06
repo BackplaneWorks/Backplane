@@ -598,32 +598,49 @@ def Git.checkpoint.prev(thread_id: String, n: Nat) -> String:
 def Git.index_path(gd: String, thread_id: String) -> String:
   gd ++ "/backplane-" ++ Git.b64url(thread_id) ++ ".index"
 
-# Seed tracked paths and staged blobs from the real index every time.
-# A fresh private index omits cached stat data and optimization flags: its
-# add -A must read today's working files, including ignored tracked paths.
-# Git reads split indexes itself; the source index is never rewritten.
+# Seed tracked paths and staged blobs from the real index. A fresh private
+# index omits cached stat data and optimization flags: its add -A must read
+# today's working files, including ignored tracked paths. Git reads split
+# indexes itself; the source index is never rewritten.
+# A snapshot ("keep") reuses the private index its last add -A left when
+# what a seed is made of is the same: the real index's entries and the
+# untracked files add -A takes (their hash is kept beside it, ".key"). Its
+# add -A then reads only the files whose stat changed, as git status does:
+# a fresh seed re-read and hashed every file of a 371 MB project (0.76 s)
+# before each Diff and each turn's checkpoint. A revert's read-tree writes
+# that index otherwise, so any other seed starts fresh and drops the key.
 def Git.index.seed.sh() -> String:
   String.join([
     "set -eu",
     "src=$(git rev-parse --path-format=absolute --git-path index)",
-    "if [ ! -f \"$src\" ]; then rm -f \"$1\"; exit 0; fi",
+    "if [ ! -f \"$src\" ]; then rm -f \"$1\" \"$1.key\"; exit 0; fi",
     "paths=$(mktemp \"$1.paths.XXXXXX\")",
     "trap 'rm -f \"$paths\"' 0",
     "git ls-files --full-name --stage -z -- :/ > \"$paths\"",
+    "key=",
+    "if [ \"${2:-}\" = keep ]; then",
+    "  key=$({ cat \"$paths\"; printf '\\n--\\n'; git ls-files -z --others --exclude-standard --full-name -- :/; } | git hash-object --stdin)",
+    "  if [ -f \"$1\" ] && [ \"$(cat \"$1.key\" 2>/dev/null || true)\" = \"$key\" ]; then exit 0; fi",
+    "fi",
+    "rm -f \"$1.key\"",
     "export GIT_INDEX_FILE=\"$1\"",
     "rm -f \"$1\"",
     "git read-tree --empty",
-    "git -c core.ignorestat=false update-index -z --index-info < \"$paths\""
+    "git -c core.ignorestat=false update-index -z --index-info < \"$paths\"",
+    "if [ -n \"$key\" ]; then printf '%s\\n' \"$key\" > \"$1.key\"; fi"
   ], "\n")
 
 def Git.index.seed(cwd: String, idx: String) -> IO(P.Ran):
   P.Proc.run("sh", ["-c", Git.index.seed.sh(), "sh", idx], cwd)
 
+def Git.index.seed.keep(cwd: String, idx: String) -> IO(P.Ran):
+  P.Proc.run("sh", ["-c", Git.index.seed.sh(), "sh", idx, "keep"], cwd)
+
 # the whole work tree (tracked, including ignored tracked files, and
 # untracked non-ignored files) as a tree object; answers the tree id
 # without changing the real index or its staged contents.
 def Git.snapshot.k(+cwd: String, +idx: String) -> IO(String):
-  Git.seq(Git.index.seed(cwd, idx), _ =>
+  Git.seq(Git.index.seed.keep(cwd, idx), _ =>
     Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
       Git.seq(Git.run.idx(cwd, idx, ["write-tree"]), Git.done)))
 
@@ -673,15 +690,36 @@ def Git.diff.files() -> String:
 def Git.diff.cap.awk() -> String:
   "function flush() { if (!infile) return; if (big) printf \"%s@@ -0,0 +0,0 @@\\n\\\\ Too big to show here: +%d -%d lines\\n\", head, adds, dels; else { printf \"%s%s\", head, body; total += size }; infile = 0; inbody = 0; head = \"\"; body = \"\"; big = 0; adds = 0; dels = 0; size = 0 } /^diff --git / { flush(); files++; if (files > maxfiles) { extra++; skip = 1; next }; infile = 1 } { if (skip) next; if (!infile) { print; next }; if (!inbody && substr($0, 1, 3) == \"@@ \") inbody = 1; if (!inbody) { head = head $0 \"\\n\"; next }; c = substr($0, 1, 1); if (c == \"+\") adds++; else if (c == \"-\") dels++; if (big) next; size += length($0) + 1; if (size > per || total + size > max) { big = 1; body = \"\"; next }; body = body $0 \"\\n\" } END { flush(); if (extra) printf \"\\\\ %d more changed files not shown here\\n\", extra }"
 
-# git "$@" through the cap, with git's own exit status
+# past Git.diff.files() changed files, rename detection's exhaustive pass
+# is skipped (git's -l): it compared each of 1427 deleted files with each
+# of 331 added ones for 2.7 s, for files the viewer could not list anyway
+def Git.diff.renames() -> String:
+  "200"
+
+def Git.diff.cap.awk.sh() -> String:
+  "LC_ALL=C awk -v per=" ++ Git.diff.per() ++ " -v max=" ++ Git.diff.max() ++ " -v maxfiles=" ++ Git.diff.files() ++ " '" ++ Git.diff.cap.awk() ++ "'"
+
+# git "$@" -- through the cap, with git's own exit status. Past
+# Git.diff.files() changed files only the files the cap keeps are diffed
+# (their old and new paths, literally) and the rest are counted from a
+# list of names: git wrote the whole 165 MB diff for the cap to drop, 4.2 s
+# for 48 KB. A name git had to quote (a quote, a newline) takes the whole way.
 def Git.diff.cap.sh() -> String:
-  "bp_safe; t=$(mktemp) || exit 1; { git \"$@\"; echo $? > \"$t\"; } | LC_ALL=C awk -v per=" ++ Git.diff.per() ++ " -v max=" ++ Git.diff.max() ++ " -v maxfiles=" ++ Git.diff.files() ++ " '" ++ Git.diff.cap.awk() ++ "'; c=$(cat \"$t\"); rm -f \"$t\"; exit ${c:-1}"
+  String.join([
+    "bp_safe; t=$(mktemp) || exit 1; l=$(mktemp) || exit 1",
+    "if git \"$@\" --name-status -l" ++ Git.diff.renames() ++ " -- > \"$l\" 2>/dev/null && n=$(wc -l < \"$l\") && [ $n -gt " ++ Git.diff.files() ++ " ] && ! grep -q '\"' \"$l\"; then",
+    "  { awk -F '\\t' 'NR <= " ++ Git.diff.files() ++ " { print $2; if (NF > 2) print $3 }' \"$l\" | tr '\\n' '\\000' | GIT_LITERAL_PATHSPECS=1 xargs -0 git \"$@\" --; echo $? > \"$t\"; } | " ++ Git.diff.cap.awk.sh(),
+    "  printf '\\\\ %d more changed files not shown here\\n' $((n - " ++ Git.diff.files() ++ "))",
+    "else",
+    "  { git \"$@\" --; echo $? > \"$t\"; } | " ++ Git.diff.cap.awk.sh(),
+    "fi",
+    "c=$(cat \"$t\"); rm -f \"$t\" \"$l\"; exit ${c:-1}"], "\n")
 
 def Git.run.capped(cwd: String, args: List<&2, String>) -> IO(P.Ran):
   P.Proc.run("sh", List.append(&2, String, ["-c", Git.safe.sh() ++ Git.diff.cap.sh(), "sh"], args), cwd)
 
 def Git.diff.args(a: String, b: String) -> List<&2, String>:
-  ["-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "-M", a, b, "--"]
+  ["-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "-M", a, b]
 
 # unified diff text from checkpoint a to checkpoint b ("" when equal)
 def Git.checkpoint.diff(cwd: String, +thread_id: String, +from_n: Nat, +to_n: Nat) -> IO(String):

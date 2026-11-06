@@ -8,6 +8,12 @@ def Folder.drive(r: String) -> Bool:
     case _:
       False{}
 
+# Native absolute folders only. Empty/relative roots must never inherit cwd.
+def Folder.absolute(+p: String) -> Bool:
+  Bool.and(Bool.not(String.contains(p, SCon{Chr{0}, SNil{}})), Bool.or(String.starts_with(p, "/"),
+    Bool.or(String.starts_with(p, "\\\\"), Bool.and(Folder.drive(String.take(p, 2n)),
+      Bool.or(String.starts_with(String.drop(p, 2n), "/"), String.starts_with(String.drop(p, 2n), "\\"))))))
+
 def Folder.root.fin(+r: String) -> String:
   Bool.pick(String, String.is_empty(r), "/", Bool.pick(String, Folder.drive(r), r ++ "/", r))
 

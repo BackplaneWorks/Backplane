@@ -4,9 +4,11 @@
 //! The dump holds message text, drafts and `session`: SYNTHETIC logs only. It is written only by a copy run, only while the helper is running, and only for a log under
 //! `copy::BIG_LOG` (a copy of a real store is far larger); `frames.jsonl` (the fold stream) and a frame index per view are the next step and not written yet.
 pub mod keys;
+pub mod tokstats;
 pub mod picker;
 pub mod thread;
 pub mod viewer;
+pub mod settings;
 mod refusal;
 pub mod tz;
 pub mod window;
@@ -54,7 +56,12 @@ impl Presenter for Routed {
     fn fold<'a>(&'a self, frame: &'a Value) -> Fut<'a, ()> { self.helper.fold(frame) }
     fn view<'a>(&'a self, params: &'a Value) -> Fut<'a, Value> {
         Box::pin(async move {
-            for s in &self.screens { if let Some(v) = s.view(params) { return Ok(v) } }
+            // a request carrying the hub's own answers (reads: git.diff, mech.list, review pages...) is the helper's: only its Ui applies them, and a Rust screen would draw the
+            // thread as it was and drop them
+            // (a `fab.look` answer is the Ready to order bar's: no Rust screen draws it, and the thread must not stop answering because the hub looked: every action that moves a thread sends one)
+            // (with no helper there is nothing to send the others to: the Rust screens apply them themselves (session/pages.rs), and a view that carries one is answered like any other)
+            let reads = params.get("reads").and_then(Value::as_array).map_or(false, |r| r.iter().any(|x| x["kind"] != "fab.look")) && !self.helper.absent();
+            if !reads { for s in &self.screens { if let Some(v) = s.view(params) { return Ok(v) } } }
             let out = self.helper.view(params).await?;
             self.dump(params, &out);
             Ok(out)
@@ -65,6 +72,7 @@ impl Presenter for Routed {
     fn is_down(&self) -> bool { self.helper.is_down() }
     fn restart(&self) -> Fut<'_, ()> { self.helper.restart() }
     fn why_down(&self) -> Option<String> { self.helper.why_down() }
+    fn absent(&self) -> bool { self.helper.absent() }
 }
 
 /// The helper-less hub's base presenter: a view nothing ported answers says so (the session turns the error into the retryable PRESENTER_UNAVAILABLE) and
@@ -78,6 +86,7 @@ impl Presenter for NotPorted {
     }
     fn ping(&self) -> Fut<'_, ()> { Box::pin(async { Ok(()) }) }
     fn wants_log(&self) -> bool { false }
+    fn absent(&self) -> bool { true }
 }
 
 #[allow(dead_code)]
@@ -137,5 +146,11 @@ mod tests {
         assert!(Routed::open_dump(Some(d2.clone()), true, true, crate::copy::BIG_LOG + 1).is_none() && !d2.exists(), "a log of real size is never dumped");
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(d.join("views.jsonl")).unwrap().permissions().mode() & 0o777, 0o600, "the dump is private");
+    }
+    #[tokio::test] async fn a_fab_look_answer_does_not_send_the_view_to_the_helper_but_another_read_does() {
+        let r = Routed { helper: helper(), screens: vec![Box::new(Mine)], dump: None };
+        let p = |k: &str| json!({"target":{"kind":"thread","id":"t"},"reads":[{"kind":k,"id":1,"ok":true,"result":{}}]});
+        assert_eq!(r.view(&p("fab.look")).await.unwrap()["shown"]["by"], "rust");
+        assert_eq!(r.view(&p("git.diff")).await.unwrap()["shown"]["by"], "helper");
     }
 }

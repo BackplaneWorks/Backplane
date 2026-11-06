@@ -79,7 +79,7 @@ impl Echo {
 
 /// The settings dialog's own state (the hub keeps the page; this keeps the list the left nav shows and what is typed in its search).
 #[derive(Default)]
-pub struct SettingsUi { pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool }
+pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool }
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
 const GROUPS: [&[&str]; 4] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["usage", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
@@ -190,7 +190,14 @@ pub fn flush_fields(this: &mut Backplane) {
 
 /// Enter in a typed field: a room's or a remote bot's post box sends, as on the window.
 pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
-    match name { "rpost" => super::bots::send_post(this, "rpost", "room-post", cx), "rtext" => super::bots::send_post(this, "rtext", "remote-send", cx), _ => {} }
+    match name { "rpost" => super::bots::send_post(this, "rpost", "room-post", cx), "rtext" => super::bots::send_post(this, "rtext", "remote-send", cx), "title" => { // Enter in the rename box saves, as its Rename button does (nothing for a blank title)
+            let id = string(&this.data["renaming"], "id");
+            let text = this.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();
+            if let Some(c) = super::tools::rename_save(&id, &text) { flush_fields(this); let _ = this.tx.try_send(c); cx.notify(); }
+        }
+        // Enter in a settings field is its row's Save
+        "whurl" | "whsec" | "tzname" => { flush_fields(this); let a = match name { "whurl" => "hook-url", "whsec" => "hook-secret", _ => "tz-set" }; let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); }
+        n => if let Some(a) = n.strip_prefix("sp.") { super::bots::send_space(this, a, cx) } }
 }
 
 /// A vault Save: the field is the button's (`@apikey` is `kval`, else `sval`); the typed value leaves in one request straight to the hub, and
@@ -221,6 +228,7 @@ pub fn reply_error(x: &Value) -> String {
 
 /// The hub answered a direct request: a secret's outcome is shown by the client (`secret-sent` shuts the box, `secret-err` says why).
 pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str, cx: &mut Context<Backplane>) {
+    if tag.starts_with("hook") { return super::bots::hook_done(this, tag, ok, why, cx); }
     let (name, sent, err) = match tag { "key" => ("kval", "key-sent", "key-err"), "secret" => ("sval", "secret-sent", "secret-err"), _ => return };
     let (a, v) = if ok { (sent, String::new()) } else { (err, if why.is_empty() { format!("The hub refused the {}", if tag == "key" { "key" } else { "secret" }) } else { why.to_string() }) };
     // the typed value is kept until the hub accepted it, so a refusal can be corrected and sent again
@@ -260,7 +268,7 @@ fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fie
     if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(r.note.clone())); }
     let mut right = div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(430.));
     for f in &r.fields {
-        if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(260.)).px_2().py_1().rounded(px(6.)).bg(c("raise")).child(slot.input.clone())); }
+        if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(260.)).px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
     }
     if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().text_size(px(11.)).text_color(c("dim")).child(r.qrnote.clone())); } }
     if !r.buttons.is_empty() {
@@ -268,7 +276,7 @@ fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fie
         for (line, chunk) in r.buttons.chunks(CHIPS_PER_LINE).enumerate() {
             right = right.child(div().flex().justify_end().gap_1().children(chunk.iter().enumerate().map(|(k, b)| {
                 let j = line * CHIPS_PER_LINE + k; let b2 = b.clone();
-                let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().rounded(px(6.)).text_size(px(12.)).cursor_pointer();
+                let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer();
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
                 d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
             }).collect::<Vec<_>>()));
@@ -279,27 +287,42 @@ fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fie
 
 /// The dialog while the hub has settings open; None when it has not: a title bar with a close ×, the pages on the left (search above, an icon and a
 /// label each, the open one on a rounded fill, a thin divider between groups) and the page's rows on the right with their own scroll.
-pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local) -> Option<AnyElement> {
+/// Settings shut (the ×, Esc, a click outside): this device's page and the accounts page at once, and the hub's pages when it has them open.
+pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    let hub = this.data["settings"].is_object();
+    let ui = &mut this.screens.settings_ui; ui.open_local = false; ui.device = false; ui.accounts = false;
+    this.screens.acct.menu = false;
+    if hub { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); }
+    cx.notify();
+}
+/// Whether any settings page is up (the hub's, or this device's and the accounts page, which the hub need not serve).
+pub fn is_open(this: &Backplane) -> bool { this.data["settings"].is_object() || this.screens.settings_ui.open_local }
+
+pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts) -> Option<AnyElement> {
     let hub_on = settings.is_object();
     if !hub_on && !ui.open_local { return None; }
-    let on_device = ui.device || !hub_on;
+    let on_acct = ui.accounts;
+    let on_device = (ui.device || !hub_on) && !on_acct;
     let c = |n: &str| theme::color(light, n);
     let rows = parse(settings);
-    let on_page = hub_on && !on_device && matches!(shown(&rows), Shown::Page);
+    let on_page = hub_on && !on_device && !on_acct && matches!(shown(&rows), Shown::Page);
     let skip = if on_page { 1 } else { 0 };
     let dev_rows = device_rows(local);
-    let mut els: Vec<AnyElement> = if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i)).collect() };
-    if !on_device && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS - skip)).into_any_element()); }
+    let mut els: Vec<AnyElement> = if on_acct { super::accounts::page(cx, light, acct) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i)).collect() };
+    if !on_device && !on_acct && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS - skip)).into_any_element()); }
     // the left nav
     let mut nav = div().flex().flex_col().gap(px(2.)).p_3().w(px(220.)).flex_shrink_0().border_r_1().border_color(c("line"));
-    if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().rounded(px(6.)).bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
+    if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
     {
-        let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).rounded(px(6.)).cursor_pointer().text_size(px(13.));
+        let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let item = if on_device { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("THIS DEVICE"))
-            .child(item.child(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" }))).child("This device").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; cx.notify(); })));
-        if hub_on { nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("ALL DEVICES (HUB)")); }
-        else { nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().text_size(px(11.)).text_color(c("dim")).child("The hub's settings open here when it serves them.")); }
+            .child(item.child(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" }))).child("This device").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; cx.notify(); })));
+        let acct_item = div().id("set-nav-accounts").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
+        let acct_item = if on_acct { acct_item.bg(c("raise")) } else { acct_item.hover(|s| s.bg(c("panel"))) };
+        nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("ALL DEVICES (HUB)"))
+            .child(acct_item.child(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" }))).child("Accounts").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
+        if !hub_on { nav = nav.child(div().px_3().pt_2().text_size(px(11.)).text_color(c("dim")).child("The hub's other settings open here when it serves them.")); }
     }
     let mut last = usize::MAX;
     let title_now = rows.first().map(|r| r.label.clone()).unwrap_or_default();
@@ -308,22 +331,22 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let g = group_of(page);
         if last != usize::MAX && g != last { nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))); }
         last = g;
-        let (p2, on) = (page.clone(), !on_device && if on_page { title_now == *t_nav } else { *page == ui.page });
-        let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).rounded(px(6.)).cursor_pointer().text_size(px(13.));
+        let (p2, on) = (page.clone(), !on_device && !on_acct && if on_page { title_now == *t_nav } else { *page == ui.page });
+        let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let item = if on { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(item.child(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" }))).child(title.clone())
-            .on_click(cx.listener(move |this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.page = p2.clone(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p2.clone())); cx.notify(); })));
+            .on_click(cx.listener(move |this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.page = p2.clone(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p2.clone())); cx.notify(); })));
     }
-    let title = if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
-    let dialog = div().flex().flex_col().w(px(1040.)).max_w_full().h(px(760.)).max_h_full().rounded(px(10.)).border_1().border_color(c("line")).bg(c("bg")).overflow_hidden()
+    let title = if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
+    let dialog = div().id("settings-dialog").flex().flex_col().w(px(1040.)).max_w_full().h(px(760.)).max_h_full().border_1().border_color(c("line")).bg(c("bg")).overflow_hidden().on_mouse_down_out(cx.listener(|this, _, _, cx| close(this, cx)))
         .child(div().h(px(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
             .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(14.)).child("Settings"))
-            .child(div().id("settings-close").p_1().rounded(px(6.)).cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise"))).child(crate::art::icon("x", 16., c("dim")))
-                .on_click(cx.listener(|this, _, _, cx| { let hub = this.data["settings"].is_object(); this.screens.settings_ui.open_local = false; this.screens.settings_ui.device = false; if hub { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); } cx.notify(); }))))
+            .child(div().id("settings-close").p_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise"))).child(crate::art::icon("x", 16., c("dim")))
+                .on_click(cx.listener(|this, _, _, cx| close(this, cx)))))
         .child(div().flex().flex_1().min_h_0().child(nav)
             .child(div().id("settings-rows").flex_1().min_w_0().overflow_y_scroll().px_6().py_3().flex().flex_col()
                 .child(div().pb_1().text_size(px(15.)).font_weight(FontWeight::BOLD).child(title))
-                .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device { "accent" } else { "dim" })).child(if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." })).children(els)));
+                .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device { "accent" } else { "dim" })).child(if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." })).children(els)));
     Some(div().id("settings").absolute().inset_0().occlude().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p_6().child(dialog).into_any_element())
 }
 
@@ -342,7 +365,7 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
         r("Sidebar", "Whether it is folded when the app opens.", vec![b("Open", "sidebar-open", "on", l.sidebar_open), b("Folded", "sidebar-open", "off", !l.sidebar_open)]),
         r("Opens on", "What this device shows first.", lo::VIEWS.iter().map(|(k, lab)| b(lab, "default-view", k, l.default_view == *k)).collect()),
         r("Notifications", "", vec![]),
-        r("Desktop notifications", "Kept for this device. This client does not draw alerts yet; the choice is read when it does.", vec![b("On", "notifications", "on", l.notifications), b("Off", "notifications", "off", !l.notifications)]),
+        r("Desktop notifications", "Kept for this device. Alerts for what needs you and for settled work show as desktop notifications.", vec![b("On", "notifications", "on", l.notifications), b("Off", "notifications", "off", !l.notifications)]),
         r("Keyboard shortcuts", "", vec![]),
     ];
     for (a, label, _) in lo::SHORTCUTS {

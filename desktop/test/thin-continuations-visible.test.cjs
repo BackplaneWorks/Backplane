@@ -47,3 +47,21 @@ test('unknown partial metadata cannot leave orphan controls in the authoritative
  const c=await setup([]),shown=c.project(timeline([msg('last'),button('stale')]),n=>n);
  assert.equal(kids(shown).length,1);assert.equal(c.partial.size,0);
 });
+test('a run opened again at the click gets its rows’ Read full activity text as the hub draws it; never another thread’s, never a row it did not put back',async()=>{
+ const {ThinContinuations}=await import(process.env.CONTINUATIONS_SOURCE||'../../src/web/thin-continuations.js');const c=new ThinContinuations();
+ const bind=(id,ids)=>c.bind('h',{epoch:'e',target:{kind:'thread',id},window:{partial:ids.map(x=>({id:x,version:'1',cursor:'',hasMore:true,complete:false}))}});
+ bind('t',['a']);const hub=c.project(timeline([row('a'),button('a')]),n=>n);
+ bind('t',[]); // the run shut: its row and its control are no longer on the page
+ const shown=c.project(timeline([row('a')]),n=>n,true,new Set(['a']));
+ assert.deepEqual(JSON.stringify(kids(kids(shown)[0]).at(-1).kids),JSON.stringify(kids(kids(hub)[0]).at(-1).kids),'the same control the hub’s page gets');
+ assert.equal(kids(kids(kids(shown)[0]).at(-1))[0].text,'Read full activity text');assert.equal(kids(kids(shown)[0]).at(-1).key,'thin-more:a');
+ assert(!all(c.project(timeline([row('a')]),n=>n)).some(n=>n.tag==='button'),'a row not put back by the click gets none');
+ bind('u',[]);assert(!all(c.project(timeline([row('a')]),n=>n,true,new Set(['a']))).some(n=>n.tag==='button'),'another thread forgets them');
+});
+test('a read-ahead of the same conversation teaches its partial rows; another conversation’s teaches nothing',async()=>{
+ const {ThinContinuations}=await import(process.env.CONTINUATIONS_SOURCE||'../../src/web/thin-continuations.js');const c=new ThinContinuations();
+ const d=(id,ids)=>({epoch:'e',target:{kind:'thread',id},window:{partial:ids.map(x=>({id:x,version:'1',cursor:'',hasMore:true,complete:false}))}});
+ c.bind('h',d('t',[]));c.learn('h',d('u',['x']));c.learn('h',d('t',['a']));
+ assert(all(c.project(timeline([row('a')]),n=>n,true,new Set(['a']))).some(n=>n.tag==='button'),'learned from the read-ahead');
+ assert(!all(c.project(timeline([row('x')]),n=>n,true,new Set(['x']))).some(n=>n.tag==='button'),'not from another thread');
+});

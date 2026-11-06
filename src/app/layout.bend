@@ -5751,7 +5751,7 @@ def Fv.files(+ty: Ty, +u: U.Ui, +x0: U32, +x1: U32, +h: U32) -> Out:
     Fv.trail(U.Fm.trail.loc(Ty.loc(ty), u), ty, (x0 + 16 : U32), (x1 - 24 - uw : U32)),
     [Lay.button(ty, D.Clip.all(), (x1 - 16 - uw : U32), 64, label0, T.Th.soft(), "fm-up", ""),
      Out.ops([D.Draw.rect(D.Clip.all(), x0, 99, (x1 - x0 : U32), 1, T.Th.line(), 255)]),
-     Fv.list.k(U.Fm.ready(u), ty, u, x0, x1, h)]]))
+     Fv.list.k(U.Fm.shown(u), ty, u, x0, x1, h)]]))
 
 # a picture (an image, or a PDF's page) fitted under the head; its key is
 # the window's image key ("full:" decodes it large)

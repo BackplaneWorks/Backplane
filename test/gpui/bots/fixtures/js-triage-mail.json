@@ -1,0 +1,33 @@
+[
+ {
+  "name": "pair%3Abot%3Ab1793946269-147%7Cbot%3Ab1793946269-151.jsonl",
+  "lines": [
+   "{\"v\":1,\"conv\":{\"id\":\"pair:bot:b1793946269-147|bot:b1793946269-151\",\"subject\":\"ada ↔ bub\",\"kind\":\"pair\",\"parts\":[\"bot:b1793946269-147\",\"bot:b1793946269-151\"],\"project\":\"\",\"tags\":[],\"made\":1793946330,\"last\":1793946330,\"n\":0},\"mail\":{\"id\":\"triage-bot:t1793946269-147:1793946330\",\"conv\":\"pair:bot:b1793946269-147|bot:b1793946269-151\",\"from\":\"bot:b1793946269-147\",\"to\":\"bot:b1793946269-151\",\"kind\":\"bot\",\"ref\":\"\",\"want\":\"fyi\",\"head\":\"Bot report from backplane://thread/t1793946269-147:\",\"size\":82,\"at\":1793946330},\"text\":\"Bot report from backplane://thread/t1793946269-147:\\nREPLY mode:plain report please\"}",
+   "{\"v\":1,\"conv\":{\"id\":\"pair:bot:b1793946269-147|bot:b1793946269-151\",\"subject\":\"ada ↔ bub\",\"kind\":\"pair\",\"parts\":[\"bot:b1793946269-147\",\"bot:b1793946269-151\"],\"project\":\"\",\"tags\":[],\"made\":1793946330,\"last\":1793946330,\"n\":1},\"mail\":{\"id\":\"t:t1793946269-147:m1793946333-471\",\"conv\":\"pair:bot:b1793946269-147|bot:b1793946269-151\",\"from\":\"bot:b1793946269-147\",\"to\":\"bot:b1793946269-151\",\"kind\":\"thread\",\"ref\":\"\",\"want\":\"act\",\"head\":\"mode:plain a word for the uberbot\",\"size\":33,\"at\":1793946333},\"text\":\"mode:plain a word for the uberbot\"}"
+  ]
+ },
+ {
+  "name": "routine%3Ara.jsonl",
+  "lines": [
+   "{\"v\":1,\"conv\":{\"id\":\"routine:ra\",\"subject\":\"routine:ra ↔ bub\",\"kind\":\"routine\",\"parts\":[\"routine:ra\",\"bot:b1793946269-151\"],\"project\":\"\",\"tags\":[],\"made\":1793946274,\"last\":1793946274,\"n\":0},\"mail\":{\"id\":\"m1793946274-162.0\",\"conv\":\"routine:ra\",\"from\":\"routine:ra\",\"to\":\"bot:b1793946269-151\",\"kind\":\"routine\",\"ref\":\"ra\",\"want\":\"act\",\"head\":\"[routine: quick]\",\"size\":40,\"at\":1793946274},\"text\":\"[routine: quick]\\nmode:plain quick report\"}"
+  ]
+ },
+ {
+  "name": "routine%3Arb.jsonl",
+  "lines": [
+   "{\"v\":1,\"conv\":{\"id\":\"routine:rb\",\"subject\":\"routine:rb ↔ bub\",\"kind\":\"routine\",\"parts\":[\"routine:rb\",\"bot:b1793946269-151\"],\"project\":\"\",\"tags\":[],\"made\":1793946278,\"last\":1793946278,\"n\":0},\"mail\":{\"id\":\"m1793946278-240.0\",\"conv\":\"routine:rb\",\"from\":\"routine:rb\",\"to\":\"bot:b1793946269-151\",\"kind\":\"routine\",\"ref\":\"rb\",\"want\":\"act\",\"head\":\"[routine: slow]\",\"size\":37,\"at\":1793946278},\"text\":\"[routine: slow]\\nmode:stop slow report\"}"
+  ]
+ },
+ {
+  "name": "routine%3Arc.jsonl",
+  "lines": [
+   "{\"v\":1,\"conv\":{\"id\":\"routine:rc\",\"subject\":\"routine:rc ↔ bub\",\"kind\":\"routine\",\"parts\":[\"routine:rc\",\"bot:b1793946269-151\"],\"project\":\"\",\"tags\":[],\"made\":1793946301,\"last\":1793946301,\"n\":0},\"mail\":{\"id\":\"m1793946301-287.0\",\"conv\":\"routine:rc\",\"from\":\"routine:rc\",\"to\":\"bot:b1793946269-151\",\"kind\":\"routine\",\"ref\":\"rc\",\"want\":\"act\",\"head\":\"[routine: escalated]\",\"size\":42,\"at\":1793946301},\"text\":\"[routine: escalated]\\nmode:stop to escalate\"}"
+  ]
+ },
+ {
+  "name": "routine%3Ard.jsonl",
+  "lines": [
+   "{\"v\":1,\"conv\":{\"id\":\"routine:rd\",\"subject\":\"routine:rd ↔ bub\",\"kind\":\"routine\",\"parts\":[\"routine:rd\",\"bot:b1793946269-151\"],\"project\":\"\",\"tags\":[],\"made\":1793946325,\"last\":1793946325,\"n\":0},\"mail\":{\"id\":\"m1793946325-378.0\",\"conv\":\"routine:rd\",\"from\":\"routine:rd\",\"to\":\"bot:b1793946269-151\",\"kind\":\"routine\",\"ref\":\"rd\",\"want\":\"act\",\"head\":\"[routine: held]\",\"size\":33,\"at\":1793946325},\"text\":\"[routine: held]\\nmode:stop to stop\"}"
+  ]
+ }
+]

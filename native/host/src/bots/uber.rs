@@ -44,6 +44,11 @@ impl World {
     pub fn ops(&self, now: u64, bodies: &[String]) -> Vec<Value> { self.ops_with(&self.uid(), now, bodies) }
     fn routine_pin_body(&self, r: &Routine, pin: &str) -> String { b_routine_plan(&gid(&self.me(), &r.id), &r.name, &r.cron, &r.prompt, r.on, pin, r.once, &r.tz, &r.kind) }
 
+    /// Ub.fires: a pinned routine only on its machine, any other only on the conversation's holder, and a slot only once (a slot not later than one that ran is over)
+    pub fn fires(&self, gid: &str, slot: u64) -> bool {
+        let pin = self.pin(gid); let fired: u64 = self.ub.settings.get(&format!("uber.fired.{}.{gid}", self.uid())).and_then(|v| v.parse().ok()).unwrap_or(0);
+        slot > fired && if pin.is_empty() { self.holder_me() } else { pin == self.me() }
+    }
     /// Ub.bodies: the op bodies a request's changes call for (none for what is not the uberbot's)
     pub fn bodies(&self, cs: &[Value]) -> Vec<String> {
         let g = |c: &Value, k: &str| c.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -92,13 +97,38 @@ impl World {
 fn ok(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":true}) }
 fn err(id: &Value, e: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"error":e}) }
 
+impl World {
+    /// an uberbot with no thread: its id, its name, and the threads its own bind ops name (any machine's), best first
+    pub fn heal_wants(&self) -> Option<(String, String, Vec<String>)> {
+        let bot = self.uber_bot(); let b = self.bots.get(&bot)?; if !b.thread.is_empty() { return None }
+        let uid = self.uid(); let pre = format!("uber.r.{uid}.bind:");
+        let mut ts: Vec<String> = self.ub.settings.iter().filter(|(k, _)| k.starts_with(&pre)).filter_map(|(_, v)| {
+            let o: Value = serde_json::from_str(v).ok()?; (o["bot"].as_str() == Some(&bot)).then(|| o["thread"].as_str().unwrap_or("").to_string()) }).filter(|t| !t.is_empty()).collect();
+        ts.sort(); Some((bot, b.name.clone(), ts))
+    }
+}
+
 impl Bots {
-    /// Uber.init (the minute): the uberbot's first ops, when it has none
+    /// the uberbot has no conversation thread (an imported history ends with a BotSet that has none, and the sidebar then takes it for a bot on another machine): give it one
+    pub async fn uber_heal(&self, now: u64) -> bool {
+        if crate::copy::on() { return false }
+        let w = self.world().await;
+        let Some((bot, name, binds)) = w.heal_wants() else { return false };
+        let Some(b) = w.bot(&bot) else { return false };
+        let th = { let m = self.hub.model().await;
+            binds.into_iter().find(|t| m.threads.contains_key(t)).or_else(|| { let mut c: Vec<_> = m.threads.iter().filter(|(_, t)| t.title == name && !t.deleted).map(|(i, _)| i.clone()).collect(); c.sort(); c.into_iter().next() }) };
+        let Some(th) = th else { return false };
+        let ev = vec![json!({"$":"BotSet","id":bot,"name":b.name,"thread":th,"look":b.look,"persona":b.persona,"at":now})];
+        let ev = w.also(now, ev); drop(w);
+        self.hub.commit_many(&ev).await.is_ok()
+    }
+    /// Uber.init (the minute): the uberbot's first ops, while this machine has no bind op
     pub async fn uber_init(&self, now: u64) -> usize { if crate::copy::on() { return 0 } self.uber_init_now(now).await }
     /// the first ops without the copy gate (a test fixture on a copy hub builds the uberbot's state with it)
     pub(crate) async fn uber_init_now(&self, now: u64) -> usize {
         let w = self.world().await;
-        if !(w.ub_on() && w.vv(&w.uid(), &w.me()) == 0) { return 0 }
+        // whenever this machine has no bind op, not when its op count is 0: a memory saved in the first minute is op 1, and the who, lease and bind would never be logged (the Bend hub's bug, fixed here on purpose)
+        if !(w.ub_on() && w.reg(&w.uid(), &format!("bind:{}", w.me())).is_empty()) { return 0 }
         let ops = w.ops(now, &w.init_bodies(&w.ub.settings.get("uber.bot").cloned().unwrap_or_default()));
         let n = ops.len(); if n > 0 && self.hub.commit_many(&ops).await.is_err() { return 0 } n
     }

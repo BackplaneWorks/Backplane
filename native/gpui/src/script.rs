@@ -12,10 +12,10 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { ScrollState(String), Home(usize), Select(usize), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+pub enum Step { Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String), Imp(String), FocusSearch }
+pub enum Ctl { None, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), Node(String, String), More, RenameSave(String), Imp(String), FocusSearch }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -23,12 +23,19 @@ pub enum Goal { Frame, Changed(u64), Reconnected, Home, Thread(String), Popup, T
 pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pub armed: bool, pub seq: u64 }
 
 /// Steps: {"select":N} {"home":N} {"popup":"/"} {"type":"text"} {"send":true} {"wait":ms}; e2e hooks: {"record":"start","name":"x"} {"record":"stop"}
-/// {"click":"<control id>"} {"scroll":px} {"net_sleep":secs}; {"paste_image"|"open_viewer"|"open_settings"|"files_download":..} answer ok:false, error:not_implemented.
+/// {"click":"<control id>"} {"scroll":px} {"net_sleep":secs}; {"open_viewer":"files"} {"files":"select:N|open:N|key:down|filter:text|new:name|rename:N:name|delete:N|confirm_delete|menu:N|upload:PATH|download:N|zip|copy:N|up|back|cancel"} {"files_download":N|"name"}; {"paste_image"|"open_settings"} answer ok:false, error:not_implemented.
 pub fn load(path: &Path) -> VecDeque<Step> {
     let list: Vec<Value> = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     list.iter().filter_map(|v| {
         if let Some(n) = v["home"].as_u64() { Some(Step::Home(n as usize)) }
         else if let Some(n) = v["select"].as_u64() { Some(Step::Select(n as usize)) }
+        else if let Some(a) = v["viewshow"].as_array() { Some(Step::ViewShow(a.first().and_then(|x| x.as_str()).unwrap_or("").into(), a.get(1).and_then(|x| x.as_str()).unwrap_or("").into())) }
+        else if v.get("hist").is_some() { Some(Step::Hist(v["hist"].as_i64())) }
+        else if let Some(m) = v["histmode"].as_u64() { Some(Step::HistMode(m as u8)) }
+        else if v["histplay"].as_bool() == Some(true) { Some(Step::HistPlay) }
+        else if v.get("compare").is_some() { Some(Step::Compare(v["compare"].as_u64().map(|n| n as usize))) }
+        else if let Some(on) = v["sheets"].as_bool() { Some(Step::Sheets(on)) }
+        else if let Some(a) = v["tap"].as_array() { Some(Step::Tap(a.first().and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_u64).unwrap_or(0) as usize)) }
         else if let Some(t) = v["popup"].as_str() { Some(Step::Popup(t.into())) }
         else if let Some(t) = v["type"].as_str() { Some(Step::Type(t.into())) }
         else if v["send"].as_bool() == Some(true) { Some(Step::Send) }
@@ -44,13 +51,17 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(name) = v["mark"].as_str() { Some(Step::Mark(name.into())) }
         else if v["fit"].as_bool() == Some(true) { Some(Step::Fit) }
         else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
+        else if v["cef"].is_object() { Some(Step::Cef(v["cef"].clone())) }
         else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
         else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
         else if let Some(a) = v["zoom"].as_array() { Some(Step::Zoom(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_f64).unwrap_or(0.5) as f32)) }
         else if let Some(n) = v["scroll_state"].as_str() { Some(Step::ScrollState(n.to_string())) }
         else if let Some(n) = v["scroll"].as_f64() { Some(Step::Scroll(n as f32)) }
         else if let Some(sec) = v["net_sleep"].as_f64() { Some(Step::NetSleep(sec)) }
-        else if let Some(k) = ["paste_image", "open_viewer", "open_settings", "files_download"].iter().find(|k| v.get(**k).is_some()) { Some(Step::Unsupported((*k).to_string())) }
+        else if let Some(k) = v["open_viewer"].as_str() { Some(Step::View(k.into())) }
+        else if let Some(f) = v["files"].as_str() { Some(Step::Files(f.into())) }
+        else if let Some(n) = v["files_download"].as_str().map(String::from).or_else(|| v["files_download"].as_u64().map(|n| n.to_string())) { Some(Step::Files(format!("download:{n}"))) }
+        else if let Some(k) = ["paste_image", "open_settings"].iter().find(|k| v.get(**k).is_some()) { Some(Step::Unsupported((*k).to_string())) }
         else { None }
     }).collect()
 }
@@ -244,6 +255,15 @@ impl Backplane {
             Step::View(kind) => { // open a viewer page like the rail does (the idempotent `view` action)
                 let _ = self.tx.try_send(crate::screens::viewer::view_kind(&kind)); self.m("view", json!({"kind": kind})); cx.notify(); self.pump(cx);
             }
+            Step::Files(spec) => { let r = crate::screens::filesui::script(self, &spec, cx); self.m("files", json!({"step": spec, "ok": r.is_ok(), "error": r.err()})); self.pump(cx); }
+            Step::Cef(cmd) => { // {"cef":{"report":true|"goto":url|"click":[x,y]|"type":text|"handback":true}}: the embedded browser page, for the e2e (feature cef; else not implemented)
+                #[cfg(feature = "cef")]
+                { let page = self.screens.browser.as_ref().and_then(|(_, p)| p.read(cx).cef.clone());
+                  match page { Some(p) => { let r = p.update(cx, |c, cx| c.script(&cmd, cx)); self.m("cef", r); } None => { let v = self.data["thread"]["viewer"].clone(); self.m("cef", json!({"ok": false, "error": "no embedded page", "have_page": self.screens.browser.is_some(), "viewer_open": v["open"], "viewer_keys": v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>())})) } } }
+                #[cfg(not(feature = "cef"))]
+                { let _ = cmd; self.m("cef", json!({"ok": false, "error": "built without the cef feature"})); }
+                self.pump(cx);
+            }
             Step::Mark(name) => { self.m("mark", json!({"name": name})); self.pump(cx); }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
@@ -253,6 +273,27 @@ impl Backplane {
             }
             Step::Layers(on, cap, scroll) => { let pv = &mut self.screens.plotview; pv.layers_cap = cap; pv.layers_scroll.set_offset(point(px(0.), px(-scroll)));
                 self.screens.plotview.layers_open = on; self.ui_epoch += 1; self.begin("layers".into(), Goal::Frame, cx); cx.notify(); }
+            Step::ViewShow(kind, path) => { let t = self.selected.clone(); self.view_show(&t, &kind, &path, cx); self.m("viewshow", json!({"kind": kind, "path": path})); self.ui_epoch += 1; self.begin("viewshow".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Compare(i) => { // the Compare menu's row i (null: put the comparison away); the versions are asked for first
+                match i { None => crate::screens::histbar::compare(self, None),
+                    Some(i) => { if self.screens.plotview.hist.refs.is_none() { crate::screens::histbar::ask_refs(self); } let r = self.screens.plotview.hist.refs.clone().and_then(|r| r.rows.get(i).cloned());
+                        if let Some((_, name, commit)) = r { crate::screens::histbar::compare(self, Some((&commit, &name))); } else { self.m("compare", json!({"error": "no such version yet"})); } } }
+                self.ui_epoch += 1; self.begin("compare".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Hist(i) => { // the history bar's step i (0-based; null or negative: live); the steps are asked for first
+                if self.screens.plotview.hist.steps.is_none() { crate::screens::histbar::ask_steps(self); self.m("hist", json!({"asked": true})); }
+                else { crate::screens::histbar::select(self, i.filter(|n| *n >= 0).map(|n| n as usize)); self.m("hist", json!({"at": i})); }
+                self.ui_epoch += 1; self.begin("hist".into(), Goal::Frame, cx); cx.notify(); }
+            Step::HistMode(m) => { crate::screens::histbar::mode(self, m); self.ui_epoch += 1; self.begin("histmode".into(), Goal::Frame, cx); cx.notify(); }
+            Step::HistPlay => { crate::screens::histbar::play(self, cx); self.ui_epoch += 1; self.begin("histplay".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Sheets(on) => { self.screens.plotview.sheets_open = on; self.ui_epoch += 1; self.begin("sheets".into(), Goal::Frame, cx); cx.notify(); }
+            Step::Tap(fx, fy, slot) => { // a tap at (fx, fy) as fractions of canvas `slot` (0 the Board/Schematic page, 1 a Split's schematic, 2 its board): inspect what lies there
+                let (view, bounds) = { let pv = self.screens.pv(slot); (pv.view, pv.bounds) };
+                let panes = self.data["thread"]["viewer"]["panes"].as_array().cloned().unwrap_or_default();
+                let (key, offs) = if slot == 0 { (self.screens.plot.frame.as_ref().map(|f| f.key.clone()).unwrap_or_default(), self.data["thread"]["viewer"]["off"].as_u64().unwrap_or(0) as u32) }
+                    else { let p = panes.get(slot - 1).cloned().unwrap_or_default(); (p["key"].as_str().unwrap_or("").to_string(), p["off"].as_u64().unwrap_or(0) as u32) };
+                if let Some(b) = bounds { let at = (f32::from(b.origin.x) + fx * f32::from(b.size.width), f32::from(b.origin.y) + fy * f32::from(b.size.height)); crate::screens::plotview::tap_at(self, slot, &key, offs, at, view, Some(b)); }
+                let got = self.screens.pv(slot).picked.is_some(); self.m("tap", json!({"fx": fx, "fy": fy, "slot": slot, "picked": got})); self.ui_epoch += 1; self.begin("tap".into(), Goal::Frame, cx); cx.notify();
+            }
             Step::Pan(dx, dy) => { // a drag of the plot canvas by (dx, dy) window px
                 let pv = &mut self.screens.plotview; if let Some(v) = pv.view { pv.view = Some(v.pan(dx, dy)); }
                 self.ui_epoch += 1; self.begin("pan".into(), Goal::Frame, cx); cx.notify();
@@ -346,6 +387,7 @@ impl Backplane {
             Ctl::Rail(kind) => { self.screens.rail_pending = Some(kind.clone()); self.screens.rail_at = Some(Instant::now()); self.screens.plot_click = matches!(kind.as_str(), "board" | "schematic").then(Instant::now); let _ = self.tx.try_send(crate::screens::viewer::view_kind(kind)); self.ui_epoch += 1; "view.action view".into() }
             Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
             Ctl::ToggleSidebar => { self.sidebar_toggle(cx); "toggle sidebar".into() }
+            Ctl::ToggleContext => { self.screens.ctx_open = !self.screens.ctx_open; self.ui_epoch += 1; cx.notify(); "context panel".into() }
             Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
             Ctl::Home(pid) => { self.open_project(pid.clone(), cx); "project page".into() }
             Ctl::Fold(v) => { self.fold_click(v.clone()); "view.action fold".into() }

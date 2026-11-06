@@ -275,7 +275,53 @@ BP_H.errno = bp_errno;
 // TCP
 // ===
 
+// BACKPLANE_TIMING=1: one stderr line per request a connection sends, from its
+// first bytes in to the first bytes the hub writes back on that connection
+// ("[bp-timing] {...}": what it was (the WebSocket frame's method, unmasked,
+// or the HTTP request line), its size, the fibers waiting to run when it came,
+// in_to_out_ms, the process CPU spent meanwhile (cpu_ms: near in_to_out_ms
+// when the hub was busy on it or something else, far below when it waited or
+// the machine was loaded) and the reply's first write). A connection's next write may
+// be a broadcast rather than the answer; the method tells them apart. Off,
+// it costs one test per read and write.
+const BP_TIMING = process.env.BACKPLANE_TIMING === "1";
+function bp_timing_what(d) {
+  let b = d;
+  if (b.length >= 2 && (b[0] & 0x70) === 0 && (b[0] & 0x0f) <= 10 && (b[1] & 0x80) !== 0) {
+    const op = b[0] & 0x0f;
+    if (op >= 8) return op === 9 ? "ws.ping" : op === 10 ? "ws.pong" : "ws.close";
+    let at = 2, len = b[1] & 0x7f;
+    if (len === 126) at = 4; else if (len === 127) at = 10;
+    const mask = b.subarray(at, at + 4), body = new Uint8Array(Math.min(b.length - at - 4, 256));
+    for (let i = 0; i < body.length; i++) body[i] = b[at + 4 + i] ^ mask[i & 3];
+    b = body;
+  }
+  const text = String.fromCharCode(...b.subarray(0, 256));
+  const m = /^(GET|POST|PUT|DELETE|HEAD|OPTIONS) [^ ]{0,80}/.exec(text) || /(view|mobile|frontend)\.[a-z_]+|[a-z]+\.[a-z_]+(\.[a-z_]+)?/.exec(text);
+  return m ? m[0] : "?";
+}
+function bp_timing_in(h, d) {
+  if (h.tIn !== undefined) return;
+  h.tIn = performance.now();
+  h.tInBytes = d.length;
+  h.tInWhat = bp_timing_what(d);
+  h.tInRuns = globalThis.BEND_IO?.runs?.length ?? 0;
+  h.tInCpu = process.cpuUsage();
+}
+function bp_timing_out(h, n) {
+  if (h.tIn === undefined) return;
+  const ms = performance.now() - h.tIn, cpu = process.cpuUsage(h.tInCpu);
+  try {
+    console.error("[bp-timing] " + JSON.stringify({ what: h.tInWhat, in_bytes: h.tInBytes, runnable: h.tInRuns,
+      in_to_out_ms: Math.round(ms * 10) / 10, cpu_ms: Math.round((cpu.user + cpu.system) / 100) / 10, out_bytes: n, peer: h.addr }));
+  } catch (_) {}
+  h.tIn = undefined;
+}
 class BpTcp extends BpStream {
+  feed(d) {
+    if (BP_TIMING) bp_timing_in(this, d);
+    super.feed(d);
+  }
   constructor(sock) {
     super("tcp");
     this.s = sock;
@@ -308,6 +354,7 @@ class BpTcp extends BpStream {
     if (n < 0) {
       return -BP_ERRNO.EPIPE;
     }
+    if (BP_TIMING && n > 0) bp_timing_out(this, n);
     if (n < b.length) {
       this.full = true;
     }
@@ -761,7 +808,7 @@ function bp_list(b) {
 
 // Sock.send_until: the deadline renews after each send that made progress;
 // a stall for the whole span (or a failure) shuts the socket both ways
-function bp_send_until(socket, b, ms, k) {
+function bp_send_until(socket, b, ms, k, done = { $: "Unit" }) {
   const h = BP_H.get(socket);
   const span = Number(ms);
   let until = performance.now() + span;
@@ -782,7 +829,7 @@ function bp_send_until(socket, b, ms, k) {
       at += n;
       until = performance.now() + span;
     }
-    return io_tup(socket, io_done({ $: "Unit" }));
+    return io_tup(socket, io_done(done));
   };
   return go();
 }
@@ -857,6 +904,10 @@ function bp_host(old) {
     }],
     ["Sock.send_cbor", () => (s, text, keys, words, ms, k) =>
       bp_send_until(s, frame("Json.cbor_frame", text, keys, words), ms, k)],
+    ["Sock.send_tree", () => (s, j, keys, words, ms, k) => {
+      const b = globalThis.bp_jt_frame(j, keys, words);
+      return bp_send_until(s, b, ms, k, b.length);
+    }],
     ["Sock.send_items", () => (s, hd, plain, split, lines, tl, ends, most, bytes,
       keys, words, ms, k) => bp_send_until(s, frame("Json.items_frames", hd,
       plain, split, lines, tl, ends, most, bytes, keys, words), ms, k)],

@@ -26,8 +26,32 @@ export class BodyWindows {
     this.scopes = new Map();this.scope = '';this.fence = '';this.parts = new Map();this.pending = null;
     this.previews = new Map();this.previewBytes = 0;this.shells = new Map();
     this.runs = new Map();this.readGeneration = 0;
+    // each destination's last bound body-page metadata (the scope it was
+    // read in): its retained picture is drawn at a press with the bodies
+    // this page already read for it (held())
+    this.held = new Map();
+    // messages' whole text as a prefetched picture drew them (no body pages:
+    // whole), at most one page long: a body window not read yet draws it as
+    // its first page will (wholes())
+    this.whole = new Map();
   }
-  bind(hub, detail, owner, currentNode, holding = false) {
+  // (a picture fetched ahead, its messages whole)
+  wholes(root) {
+    const walk = n => {
+      if (!is(n, 'El')) return;
+      if (n.tag === 'bp-memo') {
+        if (attr(n, 'fn') === 'msg' && n.key && !n.key.startsWith('@live:')) {
+          const t = items(n.kids).filter(k => is(k, 'Txt')).map(k => k.text).join('');
+          if (t && bytes(t) <= 8000) { this.whole.delete(n.key);this.whole.set(n.key, t); }
+        }
+        return;
+      }
+      for (const k of items(n.kids)) walk(k);
+    };
+    walk(root);
+    while (this.whole.size > 256) this.whole.delete(this.whole.keys().next().value);
+  }
+  bind(hub, detail, owner, currentNode, holding = false, key = '') {
     const scope = JSON.stringify([hub, owner, detail.epoch, detail.target]);
     const fence = JSON.stringify([scope, detail.generation, detail.viewId]);
     const changedFence = fence !== this.fence;
@@ -88,6 +112,32 @@ export class BodyWindows {
     for (const id of currentMessages) if (authoritative.has(id) && !issued.has(id)) { this.parts.delete(id);saved.delete(id); }
     while (this.parts.size > 128) this.parts.delete(this.parts.keys().next().value);
     this.trim();
+    if (key) { this.held.delete(key);this.held.set(key, { scope, parts: new Map(this.parts) });while (this.held.size > 8) this.held.delete(this.held.keys().next().value); }
+  }
+  // A retained picture of `key` (not the destination bound now) drawn with
+  // the bodies read for it when it was last on show: the same windows the
+  // hub's view gets once it lands, so nothing in them is drawn again. Read
+  // only: no request, no reader made; a streaming row is left as it is.
+  heldParts(key) {
+    const h = this.held.get(key);
+    if (!h || h.scope === this.scope || !this.scopes.has(h.scope)) return null;
+    return h;
+  }
+  projectHeld(root, key) {
+    const h = this.heldParts(key);
+    if (!h) return root;
+    const saved = this.scopes.get(h.scope), parts = new Map([...h.parts].filter(([id]) => !id.startsWith('@live:')));
+    // (only the timeline holds messages: the rest of the page, the sidebar
+    // first, is left as it is without being walked)
+    const held = { parts, reader: id => saved.get(id) || null };
+    const walk = n => {
+      if (!is(n, 'El') || n.tag === 'bp-memo') return n;
+      if (attr(n, 'id') === 'timeline') return this.project(n, held);
+      if (n.tag === 'aside' && n.key === 'sidebar') return n;
+      const ks = items(n.kids), mapped = ks.map(walk);
+      return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
+    };
+    return walk(root);
   }
   // Prefetch metadata is read-only and can never establish a new scope or
   // picture. It may describe rows in the bounded adjacent reading bridge.
@@ -217,14 +267,15 @@ export class BodyWindows {
     }
     return rendered;
   }
-  project(root) {
+  project(root, held = null) {
+    const parts = held ? held.parts : this.parts, reader = held ? held.reader : id => this.reader(id);
     const walk = n => {
       if (!is(n, 'El')) return n;
       const memo = n.tag === 'bp-memo' && attr(n, 'fn') === 'msg';
       const activity = (attr(n, 'class') || '').split(/\s+/).includes('act');
-      const id = memo ? n.key : attr(n, 'data-id'), part = this.parts.get(id);
-      if (part && (memo || (attr(n, 'class') || '').split(/\s+/).includes('msg') || activity && this.reader(id)?.explicit)) {
-        const r = this.reader(id), pages = r?.pages || [];
+      const id = memo ? n.key : attr(n, 'data-id'), part = parts.get(id);
+      if (part && (memo || (attr(n, 'class') || '').split(/\s+/).includes('msg') || activity && reader(id)?.explicit)) {
+        const r = reader(id), pages = r?.pages || [];
         // Activity pages retain their source formatting. Message pages use
         // the same Bend Markdown renderer, once per retained small page.
         const body = [];
@@ -240,12 +291,22 @@ export class BodyWindows {
           }
           body.push(p.rendered);
         }
-        if (!pages.length) {
+        // (not read yet, its whole text known and one page long: drawn as
+        // that page will be, with nothing to say it is still loading)
+        const whole = !pages.length && memo && !activity && !id.startsWith('@live:') ? this.whole.get(id) : undefined;
+        if (whole !== undefined) {
+          const key = 'body-part:' + id + ':0';
+          const made = this.renderBody?.(node('bp-memo', key, {fn:'msg', who:attr(n,'who') || ((attr(n,'class') || '').split(/\s+/).includes('user') ? 'u' : 'a'), stamp:''}, [text(whole)]));
+          body.push(node(made ? 'div' : 'pre', key, {class:'body-message-part', 'data-body-id':id, 'data-body-start':0,
+            style:made ? 'overflow-wrap:anywhere;max-width:100%' : 'white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;margin:0'}, made ? items(made.kids).filter(k => !shellPart(k)) : [text(whole)]));
+        } else if (!pages.length) {
           body.push(this.preview(n, part, memo, activity));
         }
+        // (with the whole text drawn, the page is still read, saying nothing:
+        // it puts right a text the picture had cut)
         if (!pages.length || pages.at(-1).hasMore || r?.refreshTail) body.push(node('span', 'body-next:' + id, {
           class: 'muted', 'data-body-edge': 'next', 'data-body-id': id, role: 'status'
-        }, [text(r?.error ? 'Message text is unavailable while the connection refreshes.' : id.startsWith('@live:') && !pages.length ? 'Earlier text loads as you scroll.' : 'Loading message text…')]));
+        }, [text(whole !== undefined && !r?.error ? '' : r?.error ? 'Message text is unavailable while the connection refreshes.' : id.startsWith('@live:') && !pages.length ? 'Earlier text loads as you scroll.' : 'Loading message text…')]));
         if (r?.after) body.push(node('div', 'body-after-space:' + id, { style: 'height:' + r.after + 'px', 'aria-hidden': 'true' }, []));
         if (pages.length) body.push(node('span', 'body-range:' + id, { class: 'muted', 'aria-label': 'Message reading range' },
           [text(pages[0].start === 0 && !pages.at(-1).hasMore ? '' : 'Message text continues as you scroll.')]));

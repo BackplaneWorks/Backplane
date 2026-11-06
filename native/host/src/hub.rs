@@ -74,7 +74,7 @@ fn machine_zone() -> (String, String) {
     (name, rule)
 }
 pub fn limits() -> Value { json!({"replyBytes":262144,"entries":32,"recent":24,"searchResults":25,"searchCandidates":128,"chunkBytes":65536}) }
-pub fn capabilities() -> Value { json!({"version":1,"views":{"version":1,"websocketQuery":"view=1","renderers":["mobile"],"compatibility":"explicit-only"},"data":{"proto":"data/1","features":["images"]}}) }
+pub fn capabilities() -> Value { json!({"version":1,"views":{"version":1,"websocketQuery":"view=1","renderers":["mobile"],"compatibility":"explicit-only"},"data":{"proto":"data/1","features":crate::data::FEATURES}}) }
 pub fn error(id: &Value, code: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"error":{"code":code,"retryable":false,"compatibilityRequired":false}}) }
 
 
@@ -138,6 +138,8 @@ impl Hub {
         Ok(())
     }
 
+    /// The hub's info map as a joining client gets it (the Settings pages read it).
+    pub fn info_now(&self) -> Value { self.info() }
     fn info(&self) -> Value {
         let c = &self.cfg;
         json!({"cad.install":"","accounts.live":"{\"version\":1,\"revision\":0,\"default_allowance\":null,\"error\":\"\",\"profiles\":[],\"attempts\":[]}",
@@ -456,6 +458,13 @@ impl Hub {
         let method = msg.get("m").and_then(Value::as_str).unwrap_or("");
         if matches!(method, "files.dir" | "pdf.page" | "mech.list" | "mech.render" | "boards.list" | "history.refs") && !c.view_id.is_empty() {
             if let Some(r) = out.first().filter(|r| r["t"] == "reply") { crate::session::record_reply(c.client, method, r); }
+        }
+        // Diff and Review are the same kind of read (U.Ui.recv takes git.diff's reply by its `diff` field and a review page's by its @rp.req id), but the policy
+        // helper's list of read kinds (slim_serve.bend Pol.read.kinds) predates them: it drops any other kind, so the reply is handed over under one it takes.
+        // Without this the Diff panel never opened and Review sat on "Working…".
+        // (git.act and git.revert too: a Diff on show is asked again after a commit or a revert; `method` names what the reply answers, for the Rust presenter)
+        if matches!(method, "git.diff" | "git.status" | "git.act" | "git.revert" | "review.bom" | "review.checks" | "review.tick" | "review.release") && !c.view_id.is_empty() {
+            if let Some(r) = out.first().filter(|r| r["t"] == "reply") { crate::session::record_reply_bound_m(c.client, "history.refs", method, r, &c.view_id, &c.target); }
         }
         // the Settings pages' status reads (secret box, API keys/voice): the policy applies the hub's own answer to the view's Ui (settings::read_of)
         if !c.view_id.is_empty() { if let (Some(m), Some(id), Some(f)) = (msg.get("m").and_then(Value::as_str), msg.get("id").and_then(Value::as_u64), out.first()) { if let Some((kind, ok, body)) = crate::settings::read_of(m, f) { crate::session::record_read(c.client, &c.view_id, kind, id, ok, body); } } }

@@ -17,12 +17,23 @@ trees.push(item(trees[2],json('Str',{text:'bare tail'})),field('"\n日本語',tr
 test('whole JSON traversal keeps constructors, raw numeric text, duplicate field order and aliases exact',()=>{
  let cases=0;for(const j of trees){const before=JSON.stringify(j);ctx.selected=ctx.ref;vm.runInContext(`${esc}=selected.esc;${str}=selected.str;`,ctx);const a=outcome(ctx.count,j);ctx.selected=ctx.native;vm.runInContext(`${esc}=selected.esc;${str}=selected.str;`,ctx);assert.deepEqual(outcome(ctx.count,j),a);assert.equal(JSON.stringify(j),before);cases++}console.log('wholeTreeComparisons='+cases);
 });
+test('whole-tree native count with remembered sizes equals the pure count over shared, rebuilt and malformed trees',()=>{
+ vm.runInContext(`globalThis.whole=j=>__bpJsonBytes(j,${name('core$047json$058Json$bytes$go$')},nat_chk);`,ctx);
+ ctx.selected=ctx.ref;vm.runInContext(`${esc}=selected.esc;${str}=selected.str;`,ctx);
+ let seed=11;const rnd=n=>{seed=(seed*1103515245+12345)%2147483648;return seed%n};
+ const leaf=()=>[json('Null'),json('Flag',{value:!!rnd(2)}),json('Num',{raw:['1','-0','1e+03','日本'][rnd(4)]}),json('Str',{text:strings[rnd(strings.length)]})][rnd(4)];
+ const chain=(obj,xs)=>xs.reduceRight((t,x)=>obj?field('k'+rnd(3)+'"\n',x,t):item(x,t),end);
+ const tree=d=>d===0||rnd(4)===0?leaf():rnd(2)?json('Arr',{items:chain(false,Array.from({length:rnd(4)},()=>tree(d-1)))}):json('Obj',{fields:chain(true,Array.from({length:rnd(4)},()=>tree(d-1)))});
+ const pool=[...trees];for(let i=0;i<60;i++){const t=tree(5);pool.push(t,JSON.parse(JSON.stringify(t)));const s=pool[rnd(pool.length)];pool.push(json('Arr',{items:item(s,item(t,item(s,end)))}),json('Obj',{fields:field('a',s,field('b',t,end))}))}
+ let cases=0;for(let round=0;round<3;round++)for(const j of pool){const before=JSON.stringify(j);assert.deepEqual(outcome(ctx.whole,j),outcome(ctx.count,j));assert.equal(JSON.stringify(j),before);cases++}
+ console.log('rememberedWholeTreeComparisons='+cases);
+});
 test('actual server transform lands twice; web pure; missing/duplicate/body/callee/source drift fails before writes',()=>{
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'bp-json-bytes-'));try{
-  const scripts=path.join(temp,'scripts');fs.mkdirSync(scripts,{recursive:true});for(const file of ['js-native.py','js-content-eq.js','js-json-show.js','js-cbor-text.js','js-json-bytes.js','js-json-lex.js','js-utf8.js','js-text.js','js-map.js'])fs.copyFileSync(path.join(root,'scripts',file),path.join(scripts,file));
+  const scripts=path.join(temp,'scripts');fs.mkdirSync(scripts,{recursive:true});for(const file of ['js-native.py','js-content-eq.js','js-json-show.js','js-cbor-text.js','js-json-bytes.js','js-json-lex.js','js-utf8.js','js-text.js','js-map.js','js-tree-children.js','js-memo.js'])fs.copyFileSync(path.join(root,'scripts',file),path.join(scripts,file));
   for(const file of ['src/server/thin-content-eq.bend','src/core/json.bend','src/core/secret.bend','src/core/utf8.bend','src/core/search-fold.bend']){const to=path.join(temp,file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(path.join(root,file),to)}
   const raw=path.join(temp,'input.js'),min=path.join(temp,'min.js');fs.writeFileSync(raw,source);cp.execFileSync(process.env.BUN_BINARY||'bun',['build','--minify-whitespace','--minify-syntax','--keep-names','--target=bun',raw,'--outfile',min],{stdio:'pipe',timeout:20000});const original=fs.readFileSync(min,'utf8');
-  const run=(s,server=true)=>{fs.writeFileSync(min,s);return cp.spawnSync('python3',[path.join(scripts,'js-native.py'),...(server?['--server']:[]),min],{encoding:'utf8',timeout:10000})};let result=run(original);assert.equal(result.status,0,result.stderr);const got=fs.readFileSync(min,'utf8');assert.equal(got.split('return __bpJsonBytesEsc(').length-1,1);assert.equal(got.split('return __bpJsonBytesStr(').length-1,1);
+  const run=(s,server=true)=>{fs.writeFileSync(min,s);return cp.spawnSync('python3',[path.join(scripts,'js-native.py'),...(server?['--server']:[]),min],{encoding:'utf8',timeout:10000})};let result=run(original);assert.equal(result.status,0,result.stderr);const got=fs.readFileSync(min,'utf8');assert.equal(got.split('return __bpJsonBytesEsc(').length-1,1);assert.equal(got.split('return __bpJsonBytesStr(').length-1,1);assert.equal(got.split('return __bpJsonBytes(_j_0,').length-1,1);
   result=cp.spawnSync(process.execPath,['--input-type=module','--check'],{input:got,encoding:'utf8',timeout:10000});assert.equal(result.status,0,result.stderr.slice(0,200));
   result=run(original,false);assert.equal(result.status,0,result.stderr);assert(!fs.readFileSync(min,'utf8').includes('__bpJsonBytes'));
   let fences=0;for(const fn of [esc,str]){const start=original.indexOf('function '+fn+'('),stop=original.indexOf('function ',start+9);assert(start>=0&&stop>start);const body=original.slice(start,stop),callee=fn.replace(/\$(esc|str)\$$/,'$'+(fn===esc?'chr':'raw')+'$');assert(body.includes(callee+'('));

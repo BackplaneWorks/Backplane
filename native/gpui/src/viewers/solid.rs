@@ -41,7 +41,8 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
         color ^= v.next();
         let mut t = [0f32; 9];
         for k in 0..3 {
-            for a in 0..3 { p[a] = p[a].wrapping_add(v.signed()); t[3 * k + a] = p[a] as f32 * 0.01; } // 10 micrometres -> millimetres
+            // 10 micrometres -> millimetres; the wire is board axes (x right, y down, z up), the orbit is right-handed: (x, -y, z), as the web's `mesh()` does (without it silk text reads mirrored)
+            for a in 0..3 { p[a] = p[a].wrapping_add(v.signed()); t[3 * k + a] = if a == 1 { -(p[a] as f32 * 0.01) } else { p[a] as f32 * 0.01 }; }
             for a in 0..3 { lo[a] = lo[a].min(t[3 * k + a]); hi[a] = hi[a].max(t[3 * k + a]); }
         }
         if !v.valid { return Err("Incomplete model".into()) }
@@ -138,12 +139,27 @@ fn rotate(v: [f32; 3], axis: [f32; 3], angle: f32) -> [f32; 3] {
 }
 impl Camera {
     /// Looking at the model from the front-right and above, fitted to its bounding sphere.
-    pub fn fitted(mesh: &Mesh) -> Camera {
-        let fit = mesh.radius / (FOV / 2.0).sin() * 1.05;
+    pub fn fitted(mesh: &Mesh) -> Camera { Camera::fitted_for(mesh, 1.0) }
+    /// The same, for a panel `aspect` (width / height) wide: the field of view is the vertical one, so a panel narrower than it is tall needs the model further away to fit across.
+    pub fn fitted_for(mesh: &Mesh, aspect: f32) -> Camera {
+        let aspect = if aspect.is_finite() && aspect > 0.05 { aspect } else { 1.0 };
+        let fit = mesh.radius / (FOV / 2.0).sin() * 1.05 / aspect.min(1.0);
         let (yaw, pitch) = (0.6f32, 0.7f32);
         let eye_dir = [pitch.cos() * yaw.sin(), -pitch.cos() * yaw.cos(), pitch.sin()];
         let fwd = mul(eye_dir, -1.0); let right = norm(cross(fwd, [0.0, 0.0, 1.0])); let up = cross(right, fwd);
         Camera { right, up, fwd, target: mesh.center, dist: fit, fit }
+    }
+    /// A standard view of the same model at the same distance (the web's toolbar: Top, Bottom, Front, Right, Back, Left; anything else, Iso, is the fitted view).
+    /// Z is up and the part's front faces -Y, so Front looks along +Y from the -Y side.
+    pub fn named(&self, name: &str) -> Camera {
+        let (fwd, up) = match name {
+            "front" => ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]), "back" => ([0.0, -1.0, 0.0], [0.0, 0.0, 1.0]),
+            "right" => ([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), "left" => ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            "top" => ([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]), "bottom" => ([0.0, 0.0, 1.0], [0.0, -1.0, 0.0]),
+            _ => return Camera { target: self.target, dist: self.fit, ..*self },
+        };
+        let mut c = Camera { right: [1.0, 0.0, 0.0], up, fwd, target: self.target, dist: self.fit, fit: self.fit };
+        c.reortho(); c
     }
     pub fn eye(&self) -> [f32; 3] { sub(self.target, mul(self.fwd, self.dist)) }
     fn reortho(&mut self) { self.fwd = norm(self.fwd); self.right = norm(cross(self.fwd, self.up)); self.up = cross(self.right, self.fwd); }
@@ -288,10 +304,12 @@ impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().
 #[derive(Clone, Debug, Default)] pub struct Stats { pub images: u64, pub last_ms: f64, pub last_tris: usize, pub last_size: (usize, usize) }
 
 /// A note (no model for this source) keeps the page's model only when it is the same source's: a different key drops it.
+/// Whether the panel's shape differs enough from the one the camera was fitted for to fit it again.
+pub fn aspect_changed(was: f32, now: f32) -> bool { was <= 0.0 || (now / was - 1.0).abs() > 0.03 }
 pub fn note_keeps_model(page_key: &str, note_key: &str) -> bool { page_key == note_key }
 
 pub struct SolidPage {
-    mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
+    mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
     pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), want_gen: u64, pub stats: Stats,
 }
 impl SolidPage {
@@ -302,7 +320,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), want_gen: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -317,7 +335,7 @@ impl SolidPage {
             Msg::Mesh(SolidFrame::Model(key, mesh)) => {
                 let fresh = key != self.key || self.cam.is_none();
                 self.key = key; let mesh = Arc::new(mesh);
-                if fresh { self.cam = Some(Camera::fitted(&mesh)); }
+                if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fitted_for(&mesh, self.fit_aspect)); }
                 self.mesh = Some(mesh); self.note.clear(); self.ask_render(false); cx.notify();
             }
             Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; the same source's previous model stays shown
@@ -346,6 +364,27 @@ impl SolidPage {
         self.asked = (w, h);
         self.want_gen = self.worker.submit_render(mesh.clone(), cam, w, h);
     }
+    /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
+    pub fn set_view(&mut self, name: &str) {
+        let Some(m) = self.mesh.clone() else { return };
+        let fitted = Camera::fitted_for(&m, self.fit_aspect.max(0.05));
+        if name == "fit" { self.cam = Some(fitted); self.touched = false; }
+        else { self.cam = Some(fitted.named(name)); self.touched = true; }
+        self.ask_render(false);
+    }
+    /// Snap view: the picture on screen as a PNG in `dir` (never over a file); the path, or why not.
+    pub fn snap(&mut self, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
+        let img = self.image.clone().ok_or("no picture yet")?;
+        let (w, h) = { let s = img.size(0); (s.width.0 as u32, s.height.0 as u32) };
+        let mut px = img.as_bytes(0).ok_or("no picture yet")?.to_vec();
+        for p in px.chunks_exact_mut(4) { p.swap(0, 2); } // the container holds BGRA
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let mut path = dir.join(format!("backplane-3d-{stamp}.png")); let mut n = 1;
+        while path.exists() { path = dir.join(format!("backplane-3d-{stamp}-{n}.png")); n += 1; }
+        image::RgbaImage::from_raw(w, h, px).ok_or("bad picture")?.save(&path).map_err(|e| e.to_string())?;
+        Ok(path)
+    }
     /// For the demo and tests: an orbit drag step as the mouse handler does it.
     pub fn drag_by(&mut self, dx: f32, dy: f32) { if let Some(c) = &mut self.cam { c.orbit(dx, dy); } self.ask_render(true); }
     /// Give the images back to the atlas (call before dropping the page, with the window).
@@ -363,12 +402,30 @@ impl Render for SolidPage {
         }).absolute().size_full();
         // a panel whose size differs from the last request re-renders at the right size
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
+        // the model was fitted before the panel's size was known: an untouched camera is fitted again to the real shape
+        if let Some(m) = self.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.touched && aspect_changed(self.fit_aspect, pw / ph) { self.fit_aspect = pw / ph; self.cam = Some(Camera::fitted_for(&m, self.fit_aspect)); self.ask_render(false); } }
         if self.mesh.is_some() && pw > 0.0 { let want = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48)); if self.drag.is_none() && want.0 * want.1 <= MAX_PIXELS && want != self.asked && self.asked.0 * 2 != want.0 { self.ask_render(false); } }
         let body = match &self.image {
             Some(i) => img(i.clone()).size_full().object_fit(ObjectFit::Fill).into_any_element(),
             None => div().size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(self.note.clone()).into_any_element(),
         };
-        div().id("solid-page").size_full().overflow_hidden().relative().child(body).child(probe)
+        let tools = (self.mesh.is_some()).then(|| {
+            let mut bar = div().absolute().top_2().left_2().flex().flex_wrap().gap_1();
+            for (label, view) in [("Fit", "fit"), ("Iso", "iso"), ("Top", "top"), ("Bottom", "bottom"), ("Front", "front"), ("Right", "right"), ("Back", "back"), ("Left", "left"), ("Snap view", "snap")] {
+                bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().py_1().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
+                    .hover(|d| d.bg(rgba(0x2a3548ee))).child(label)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if view == "snap" {
+                            let dir = std::env::var_os("BACKPLANE_GPUI_SNAP_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Pictures/Backplane")).unwrap_or_default());
+                            this.note = match this.snap(&dir) { Ok(p) => format!("Saved {}", p.display()), Err(e) => format!("Snap view failed: {e}") };
+                        } else { this.set_view(view); }
+                        cx.notify();
+                    })));
+            }
+            bar
+        });
+        div().id("solid-page").size_full().overflow_hidden().relative().child(body).child(probe).children(tools)
             .when(self.image.is_some() && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((if e.modifiers.alt { Drag::Roll } else if e.modifiers.shift || e.modifiers.control { Drag::Pan } else { Drag::Orbit }, e.position)); }))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
@@ -378,7 +435,7 @@ impl Render for SolidPage {
                 if e.pressed_button.is_none() { this.drag = None; this.ask_render(false); cx.notify(); return } // the button went up where we could not see it
                 let (dx, dy) = (f32::from(e.position.x - last.x), f32::from(e.position.y - last.y));
                 let h = this.size.lock().unwrap()[1];
-                if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx) } }
+                this.touched = true; if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx) } }
                 this.drag = Some((kind, e.position)); this.ask_render(true); cx.notify(); // half size while dragging, the full image on release
             }))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
@@ -390,7 +447,7 @@ impl Render for SolidPage {
                 let [pw, ph, _, ox, oy] = *this.size.lock().unwrap();
                 let _ = window; // the pointer in panel coordinates, -1..1 with y up
                 let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
-                if let Some(c) = &mut this.cam { c.zoom_at(steps, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                this.touched = true; if let Some(c) = &mut this.cam { c.zoom_at(steps, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
                 this.ask_render(false); cx.notify();
             }))
     }
@@ -429,6 +486,27 @@ mod tests {
         assert_eq!(m.tris.len(), 12); assert_eq!(m.colors[0], 0x3060c0); assert_eq!(m.colors[11], 0x30c0c0);
         assert!((m.tris[0][3] - 10.0).abs() < 1e-3, "10 mm after 1000 x 10 um");
         assert!((m.center[0] - 5.0).abs() < 1e-3 && (m.radius - (3.0f32).sqrt() * 5.0).abs() < 1e-3);
+    }
+    #[test] fn the_wire_y_is_turned_over_as_the_webs_mesh_does_so_silk_text_is_not_mirrored() {
+        let m = mesh();
+        assert!((m.center[1] + 5.0).abs() < 1e-3, "y 0..10 mm on the wire is -10..0 here");
+        let t = encode(&[([0, 0, 0, 1000, 0, 0, 0, 500, 0], 1)]); let m = decode_mesh(1, &t).unwrap();
+        assert_eq!((m.tris[0][7], m.tris[0][1]), (-5.0, 0.0)); // 500 x 10 um down is 5 mm toward -y
+    }
+    #[test] fn the_standard_views_look_along_their_axes_with_z_up_and_front_toward_minus_y() {
+        let m = mesh(); let c = Camera::fitted(&m);
+        let near = |a: [f32; 3], b: [f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-5);
+        assert!(near(c.named("front").fwd, [0.0, 1.0, 0.0]) && near(c.named("front").up, [0.0, 0.0, 1.0]));
+        assert!(near(c.named("right").fwd, [-1.0, 0.0, 0.0]) && near(c.named("top").fwd, [0.0, 0.0, -1.0]) && near(c.named("top").up, [0.0, 1.0, 0.0]));
+        assert!(near(c.named("iso").fwd, c.fwd), "Iso is the fitted view");
+        for v in ["front", "back", "left", "right", "top", "bottom"] { let n = c.named(v); assert!((super::dot(n.right, n.up)).abs() < 1e-5 && (super::dot(n.fwd, n.up)).abs() < 1e-5, "{v}: orthonormal"); assert_eq!(n.target, c.target); }
+    }
+    #[test] fn a_narrow_panel_fits_further_away_and_a_wide_one_the_same() {
+        let m = mesh();
+        let (sq, narrow, wide) = (Camera::fitted_for(&m, 1.0), Camera::fitted_for(&m, 0.5), Camera::fitted_for(&m, 2.0));
+        assert!((narrow.dist / sq.dist - 2.0).abs() < 1e-3); assert!((wide.dist - sq.dist).abs() < 1e-3);
+        assert_eq!(Camera::fitted_for(&m, f32::NAN).dist, sq.dist);
+        assert!(super::aspect_changed(0.0, 0.5) && !super::aspect_changed(0.56, 0.57) && super::aspect_changed(0.56, 0.9));
     }
     #[test] fn rejects_wrong_counts_truncated_bytes_and_wraps_instead_of_panicking() {
         let bytes = encode(&cube());

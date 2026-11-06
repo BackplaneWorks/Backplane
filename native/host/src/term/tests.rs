@@ -220,3 +220,14 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     assert_eq!(crate::copy::refusal("a terminal"), "backplane: a hub on a copied log (BACKPLANE_COPY=1) does not run a terminal");
     assert!(crate::proc::refusal_with(true, crate::proc::Kind::Terminal, "/bin/sh", None).is_some() && crate::proc::refusal_with(true, crate::proc::Kind::Browser, "/x/backplane-browser", None).is_some());
 }
+
+#[tokio::test] async fn the_tasks_tab_lists_a_bots_tasks_and_task_actions_reach_bots_task() {
+    let (hub, _home, _work) = hub_in("tasktab").await; let d = driver::get(&hub).expect("driver");
+    d.set_task("b1", "login", r#"{"v":1,"slug":"login","name":"Log in","description":"sign in to the portal","params":[{"name":"user","label":"User name","kind":"text","example":"ada"}],"steps":[]}"#, 1700000001).await;
+    d.set_task("b2", "other", r#"{"v":1,"slug":"other","name":"Other bot's","description":"","params":[],"steps":[]}"#, 1700000002).await;
+    let v = d.tasks_view("b1").await;
+    assert_eq!(v["items"].as_array().unwrap().len(), 1, "{v}"); assert_eq!(v["items"][0]["name"], "Log in"); assert_eq!(v["items"][0]["params"][0]["example"], "ada"); assert_eq!(v["items"][0]["last"], "");
+    assert_eq!(rpc(&hub, "bots.task", json!({"bot":"b1","op":"delete","slug":"login"})).await["ok"], true);
+    assert!(d.tasks_view("b1").await["items"].as_array().unwrap().is_empty());
+    assert_eq!(d.tasks_view("b2").await["items"].as_array().unwrap().len(), 1);
+}

@@ -283,6 +283,25 @@ pub fn info_find(t: &str, sig: u32, idx: usize) -> String {
     hit.unwrap_or("").split('\0').nth(idx).unwrap_or("").to_string()
 }
 
+/// Every piece an info file holds with the field `name=value` (a `;`-separated entry of its text), as (chunk sig, piece index): what a cross-probe lights.
+/// The last line of a sig wins, as `info_find` does.
+pub fn info_scan(t: &str, name: &str, value: &str) -> Vec<(u32, usize)> {
+    let want = format!("{name}={value}");
+    let mut by_sig: std::collections::HashMap<u32, &str> = std::collections::HashMap::new();
+    let mut rest = t;
+    while !rest.is_empty() {
+        let Some((s, r)) = rest.split_once(' ') else { break };
+        let Some((n, r)) = r.split_once(' ') else { break };
+        let n: usize = n.parse().unwrap_or(0);
+        let end = r.char_indices().nth(n).map(|(i, _)| i).unwrap_or(r.len());
+        if n > 0 { if let Ok(sg) = s.parse::<u32>() { by_sig.insert(sg, &r[..end]); } }
+        rest = r[end..].strip_prefix('\n').unwrap_or(&r[end..]);
+    }
+    let mut out = vec![];
+    for (sig, text) in by_sig { for (i, piece) in text.split('\0').enumerate() { if piece.split(';').any(|f| f == want) { out.push((sig, i)) } } }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,4 +355,9 @@ mod tests {
     #[test] fn look_plain_sch() { for l in 0..40 { assert_eq!(look(1, l), look_plain(1, l)) } }
     // law look_marks_distinct
     #[test] fn look_marks_distinct() { let (a, b, c) = (look(8, 26).0, look(8, 27).0, look(8, 28).0); assert!(a != b && b != c && a != c) }
+    #[test] fn info_scan_finds_a_field_across_pieces() {
+        let (a, b) = ("pad 1;net=GND;ref=R1\0pad 2;net=VCC;ref=R1", "track;net=GND"); let t = &format!("7 {} {a}\n9 {} {b}", a.chars().count(), b.chars().count());
+        let mut a = info_scan(t, "net", "GND"); a.sort(); assert_eq!(a, vec![(7, 0), (9, 0)]);
+        assert_eq!(info_scan(t, "ref", "R1").len(), 2); assert!(info_scan(t, "net", "G").is_empty(), "whole values only");
+    }
 }

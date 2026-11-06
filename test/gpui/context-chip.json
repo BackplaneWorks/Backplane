@@ -1,0 +1,6 @@
+[
+ {"wait": 3000},
+ {"select": 0}, {"wait": 1500},
+ {"click": "ui:Context"}, {"wait": 600},
+ {"click": "ui:Context"}, {"wait": 600}
+]

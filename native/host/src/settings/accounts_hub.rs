@@ -86,6 +86,11 @@ pub fn is_granted(who: &Caller) -> bool { GRANTED.lock().unwrap().iter().any(|(a
 pub fn offered(p: &Value) -> bool { p.get("accountProfiles") == Some(&json!(1)) }
 pub fn note_request(gen: &str, client: u64, in_view: bool, msg: &Value) { if in_view && offered(msg.get("p").unwrap_or(&Value::Null)) { grant_client(gen, client) } }
 
+/// Marks a profile as in use by a running child until dropped (login, disconnect and removal refuse while one is).
+pub struct Busy(Arc<Accounts>, String);
+impl Busy { pub fn new(m: Arc<Accounts>, id: &str) -> Busy { m.child_started(id); Busy(m, id.to_string()) } }
+impl Drop for Busy { fn drop(&mut self) { self.0.child_ended(&self.1) } }
+
 pub struct AccountsRpc { pub mgr: Arc<Accounts> }
 impl AccountsRpc {
     pub fn new(mgr: Arc<Accounts>) -> Self { Self { mgr } }
@@ -102,16 +107,25 @@ impl RpcHandler for AccountsRpc {
             if matches!(op, "remove" | "login" | "disconnect") && active(hub, p.get("profile").and_then(Value::as_str).unwrap_or("")).await {
                 return vec![json!({"t":"reply","id":id,"ok":false,"error":"Stop this account's active turns before changing its login."})]
             }
-            let snap = self.mgr.request(p).await;
+            let mut snap = self.mgr.request(p).await;
+            // a client that names a thread is also told what the thread is bound to (the account chip and its menu need the binding to send `accounts.select` with `expected`)
+            snap["defaults"] = json!({"claude": hub.setting("account.default.claude").await.unwrap_or_default(), "codex": hub.setting("account.default.codex").await.unwrap_or_default()});
+            if let Some(th) = p.get("thread").and_then(Value::as_str).map(|t| t.rsplit('|').next().unwrap_or(t)).filter(|t| !t.is_empty()) { // a picture names a thread `hub|id`
+                let provider = { let m = hub.model().await; m.threads.get(th).map(|t| t.provider.clone()).unwrap_or_default() };
+                let raw = if accounts::supported(&provider) { hub.setting(&accounts::binding_key(th, &provider)).await.unwrap_or_default() } else { String::new() };
+                snap["thread"] = json!({"id": th, "provider": provider, "binding": raw});
+            }
             vec![json!({"t":"reply","id":id,"ok":snap["error"].as_str().unwrap_or("").is_empty(),"result":snap})]
         })
     }
 }
 
 /// The manager for this hub's home (provider CLIs resolved like the agents'), its RPC, and the 1-second watch that tells everyone of a change.
-pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> {
-    let cli = crate::agents::proc::Cli::from_env();
+pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> { start_cli(hub, agents, crate::agents::proc::Cli::from_env()) }
+/// `start` with the provider CLIs found by `cli` (a test gives it a folder of stand-ins).
+pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents::proc::Cli) -> Arc<Accounts> {
     let mgr = Arc::new(Accounts::open(&hub.cfg.home, Arc::new(move |p: &str| cli.resolve(p))));
+    if let Some(a) = &agents { let _ = a.accounts.set(mgr.clone()); }
     hub.register_rpc(Arc::new(AccountsRpc::new(mgr.clone())));
     let (h, m) = (hub.clone(), mgr.clone());
     tokio::spawn(async move {

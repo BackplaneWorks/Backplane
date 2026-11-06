@@ -45,7 +45,7 @@ fn small(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on
     let (a, v) = match cmd { Command::Action(a, v) => (a, v), _ => (String::new(), String::new()) };
     let d = div().id(SharedString::from(id)).px_2().h_full().flex().items_center().text_size(px(11.)).cursor_pointer().border_l_1().border_color(c("line")).hover(|s| s.bg(c("raise")));
     let d = if danger { d.text_color(c("bad")) } else if on { d.text_color(c("accent")) } else { d.text_color(c("dim")) };
-    d.child(label).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element()
+    d.child(label).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); if a == "fork" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element()
 }
 
 /// The header's strip: each tool, then "More" opening the menu. Returned as elements for the header row's right side.
@@ -70,7 +70,7 @@ pub fn dropdown(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: 
         if m.options.is_empty() {
             let cmd = press(&m); let (a, v) = match cmd { Command::Action(a, v) => (a, v), _ => unreachable!() };
             col = col.child(div().id(SharedString::from(format!("menu-{i}"))).px_3().py_1().cursor_pointer().text_size(px(12.)).text_color(c(if m.danger { "bad" } else { "text" })).hover(|s| s.bg(c("raise"))).child(m.label.clone())
-                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); this.screens.menu_open = false; cx.notify(); })));
+                .on_click(cx.listener(move |this, _, _, cx| { if a == "fork" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); this.screens.menu_open = false; cx.notify(); })));
         } else {
             col = col.child(div().px_3().pt_1().text_size(px(11.)).text_color(c("faint")).child(m.label.clone()));
             for (j, (label, value)) in m.options.iter().enumerate() {

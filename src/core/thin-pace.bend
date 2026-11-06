@@ -1,6 +1,8 @@
 import Base
 import ./model.bend as M
 import ./client.bend as U
+import ./signal.bend as SG
+import ./liveness.bend as L
 
 # When a thin view hears view.changed (pure; the hub's Hub.thin.notify).
 # Each step's changes and streamed deltas say which threads they touch
@@ -90,6 +92,33 @@ def Touch.live(+th: String) -> String:
 
 def Touch.is_live(+x: String) -> Bool:
   String.starts_with(x, "\t")
+
+# A step's liveness stamps (liveness.<thread>, a progress time each delta of
+# a running turn) show nowhere but that thread's dot and, while stalled, its
+# reason (core/signal.bend's Signal.display.*): a stamp that leaves both as
+# they were in the state before the step is its thread's own news
+# (Touch.live: its own views hear it, others not); one that stalls,
+# recovers or changes a shown reason is as before (the sidebar's, at the
+# soft cadence). 20 streaming bots otherwise re-rendered every other view
+# twice a second to an empty delta (2026-11-05).
+def Touch.live.shown(+st: M.State, +th: String) -> String:
+  Bool.pick(String, SG.Signal.display.stalled(st, th), "stalled " ++ L.Liveness.reason(SG.Signal.display.live(st, th)), "")
+
+def Touch.change.at(+old: M.State, +new: M.State, c: M.Change) -> List<&2, String>:
+  match c:
+    case M.SettingSet{+key, +v, +at}:
+      +th = String.drop(key, 9n)
+      Bool.pick(List<&2, String>, Bool.and(Bool.and(Bool.and(String.starts_with(key, "liveness."), Bool.not(String.is_empty(th))), Bool.not(String.eq(U.Touch.id(th), "*"))),
+          String.eq(Touch.live.shown(old, th), Touch.live.shown(new, th))),
+        [Touch.live(U.Touch.id(th))], Touch.change(M.SettingSet{key, v, at}))
+    case other: Touch.change(other)
+
+def Touch.changes.at(+old: M.State, +new: M.State, cs: List<&2, M.Change>, t: Touch) -> Touch:
+  match cs:
+    case Nil{}:
+      t
+    case c <> rest:
+      Touch.changes.at(old, new, rest, Touch.adds(Touch.change.at(old, new, c), t))
 
 # An asynchronous result belongs to the connection that requested it. A
 # carriage-return prefix cannot be a thread ID, and differs from Live's tab.
@@ -224,6 +253,12 @@ def Notes.changes(n: Notes, cs: List<&2, M.Change>) -> Notes:
   match n:
     case Notes{t, ps, f}:
       Notes{Touch.changes(cs, t), ps, f}
+
+# (old: the state before the step's changes, new: after)
+def Notes.changes.at(n: Notes, +old: M.State, +new: M.State, cs: List<&2, M.Change>) -> Notes:
+  match n:
+    case Notes{t, ps, f}:
+      Notes{Touch.changes.at(old, new, cs, t), ps, f}
 
 def Notes.touched(n: Notes) -> Touch:
   match n:

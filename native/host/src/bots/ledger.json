@@ -1,0 +1,214 @@
+[
+ {
+  "name": "told_check",
+  "description": "Before telling the person something (a digest item, a reminder, news), check whether they were already told: by its topic key, or by text (matching words). Answers {told: bool, matches: [{key, text, channel, bot, at, ago}]}. Covers the last 7 days by default (up to 30) on this machine, including every alert already sent (asks, finished work, failures, merges, notify_person notes, which are recorded by themselves). Alerting is notify_person's policy (needs_you, done, or a routine's reminder or digest); this only tells you what was already said.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "key": {
+     "type": "string",
+     "description": "The topic key, e.g. lunch-dana-1028 (as given to told_mark)."
+    },
+    "text": {
+     "type": "string",
+     "description": "The text you are about to say; matched by its words."
+    },
+    "days": {
+     "type": "number",
+     "description": "How many days back (default 7, at most 30)."
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "told_mark",
+  "description": "Record that you told the person something without an alert (in a digest, a room post, a chat answer, your Space, an email), so you and other bots skip it next time. Alerts, notify_person's included, are recorded by themselves. key: a short stable topic key (e.g. lunch-dana-1028); without one, it is made from the text. channel: digest, room, chat, email or other. Answers {key}.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "key": {
+     "type": "string",
+     "description": "A short stable topic key; made from the text when omitted."
+    },
+    "text": {
+     "type": "string",
+     "description": "What you told them, in a sentence."
+    },
+    "channel": {
+     "type": "string",
+     "description": "digest, room, chat, email or other (default chat)."
+    }
+   },
+   "required": [
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "task_board_list",
+  "description": "List the shared task board: open items by default (all includes done and dropped). Answers {text, items}: text is one line per item, [status] title (id; @owner; %project; due D; group), and items has the full records.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string",
+     "description": "todo, doing, blocked, done or dropped; several separated by commas."
+    },
+    "owner": {
+     "type": "string",
+     "description": "A bot's name or id, me for yourself, or person."
+    },
+    "project": {
+     "type": "string",
+     "description": "A project's name or id."
+    },
+    "group": {
+     "type": "string",
+     "description": "A section name."
+    },
+    "all": {
+     "type": "boolean",
+     "description": "Include done and dropped items."
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "task_board_add",
+  "description": "Add an item to the shared task board. Answers {id}.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "What is to be done (at most 300 characters)."
+    },
+    "status": {
+     "type": "string",
+     "description": "todo (default), doing, blocked, done or dropped."
+    },
+    "owner": {
+     "type": "string",
+     "description": "A bot's name or id, me for yourself, or person (default)."
+    },
+    "project": {
+     "type": "string",
+     "description": "A project's name or id."
+    },
+    "due": {
+     "type": "string",
+     "description": "YYYY-MM-DD."
+    },
+    "group": {
+     "type": "string",
+     "description": "A section name."
+    },
+    "links": {
+     "type": "string",
+     "description": "URLs, thread ids or paths: a JSON array, or a string split on spaces and commas (at most 20)."
+    },
+    "notes": {
+     "type": "string",
+     "description": "Notes (at most 4000 characters)."
+    }
+   },
+   "required": [
+    "title"
+   ]
+  }
+ },
+ {
+  "name": "task_board_update",
+  "description": "Change an item on the task board: only the fields you give change. Answers {id}.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "The item's id."
+    },
+    "title": {
+     "type": "string",
+     "description": "New title."
+    },
+    "status": {
+     "type": "string",
+     "description": "todo, doing, blocked, done or dropped."
+    },
+    "owner": {
+     "type": "string",
+     "description": "A bot's name or id, me for yourself, or person."
+    },
+    "project": {
+     "type": "string",
+     "description": "A project's name or id."
+    },
+    "due": {
+     "type": "string",
+     "description": "YYYY-MM-DD, or empty to clear."
+    },
+    "group": {
+     "type": "string",
+     "description": "A section name."
+    },
+    "links": {
+     "type": "string",
+     "description": "Replaces the links: a JSON array, or a string split on spaces and commas."
+    },
+    "notes": {
+     "type": "string",
+     "description": "Replaces the notes."
+    },
+    "notes_append": {
+     "type": "string",
+     "description": "A line added to the notes."
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "task_board_remove",
+  "description": "Delete an item from the task board for good. Prefer task_board_update with status dropped, which keeps a record.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "The item's id."
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "task_board_import",
+  "description": "Import a markdown todo list (checkbox items `- [ ]`, `- [x]`, `- [~]`; headings become groups). Lines without a checkbox are not imported and are returned as `skipped`. Importing the same list again adds nothing. Answers {added, duplicates, skipped}.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "markdown": {
+     "type": "string",
+     "description": "The list."
+    },
+    "project": {
+     "type": "string",
+     "description": "Put every item in this project (a name or id)."
+    },
+    "owner": {
+     "type": "string",
+     "description": "A bot's name or id, me for yourself, or person (default)."
+    }
+   },
+   "required": [
+    "markdown"
+   ]
+  }
+ }
+]

@@ -11,6 +11,12 @@ import Base
 def Zip.inside(root: String, rel: String, home: String) -> IO(List<&2, String>):
   import "./effects/zip.js"
 
+# A Files-tab listing, opened through the same descriptor-bound containment
+# checks as downloads. [entries] on success (including an empty directory),
+# [] on refusal. Symlinks and non-regular entries are never exposed.
+def Zip.list(root: String, rel: String, home: String) -> IO(List<&2, String>):
+  import "./effects/zip.js"
+
 # A zip of the folder rel of root, both as Zip.inside answered them:
 # top, the folder every entry is in; disposition, the attachment's header;
 # rules, what is left out (Fm.zip.rules, by each entry's path from root);

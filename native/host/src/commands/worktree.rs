@@ -115,7 +115,8 @@ async fn ready(hub: &Arc<Hub>, fold: &Arc<tokio::sync::Mutex<super::fold::Fold>>
 pub static SUPPRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// What an Improvements send names: the local branch to start from and the branch to make (both empty: today's worktree).
 #[derive(Clone, Default, Debug)]
-pub struct Opts { pub base: String, pub branch: String }
+/// `prefer`: the project's default base (setting worktree.base.<project> or worktree.base), used when no base was asked for and that local branch exists
+pub struct Opts { pub base: String, pub branch: String, pub prefer: String }
 
 pub fn spawn(hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super::fold::Fold>>, th: String, root: String, mode: String, src: String, provider: String, binding: String, opts: Opts) {
     if cfg!(test) && SUPPRESS.load(std::sync::atomic::Ordering::Relaxed) { return }
@@ -126,6 +127,8 @@ pub fn spawn_with(copy: bool, hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super:
     // a copy of a log runs no git that writes: its job runs on "/" (Copy.nowhere) and says at once that the thread uses the project folder
     let root = if copy { "/".to_string() } else { root };
     tokio::spawn(async move {
+        let mut opts = opts;
+        if opts.base.is_empty() && !opts.prefer.is_empty() && !copy && git::run_ro(&root, &["rev-parse", "--verify", "-q", &format!("refs/heads/{}^{{commit}}", opts.prefer)]).await.code == 0 { opts.base = opts.prefer.clone() }
         let named = !opts.base.is_empty();
         let carry = mode != "fork" && !named && { let r = root.clone(); tokio::task::spawn_blocking(move || hardware(&r)).await.unwrap_or(false) };
         let branch = if sanitize(&opts.branch).is_empty() { temp_branch(seed(&th)) } else { opts.branch.clone() };

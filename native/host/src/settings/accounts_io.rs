@@ -442,6 +442,12 @@ impl Accounts {
             "login" => { self.start(&p, r["mode"].as_str().unwrap_or("device")).await.map_err(|_| None)?; return Ok(self.snapshot()) }
             _ => {}
         }
+        // Delete is the way out of a stuck sign-in: its attempt is ended first (its child is told to stop), and a job left behind by an attempt that is gone is dropped
+        if op == "remove" {
+            let attempts: Vec<(String, Option<mpsc::UnboundedSender<Cmd>>)> = { let g = self.inner.lock().unwrap(); g.attempts.iter().filter(|a| a.profile == pid).map(|a| (a.id.clone(), g.cmds.get(&a.id).cloned())).collect() };
+            for (aid, tx) in attempts { self.cancel(&aid, "cancelled", ""); if let Some(t) = tx { let _ = t.send(Cmd::Cancel); } }
+            { let mut g = self.inner.lock().unwrap(); if g.jobs.get(&pid).map_or(false, |j| j.starts_with("attempt:")) { g.jobs.remove(&pid); } }
+        }
         self.begin(&pid, "status", false).map_err(|_| None)?;
         let res: Result<(), ()> = async {
             match op {
@@ -837,6 +843,12 @@ for l in sys.stdin:
         drop(hold);
         assert!(one.await.unwrap().is_ok() && two.await.unwrap().is_ok(), "they run one after the other");
         assert_eq!(queued(&a, &id), 0); assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "", "the profile is free again");
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_profile_with_a_stuck_sign_in_can_still_be_deleted() {
+        let (h, sd) = dirs("rm-stuck"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await;
+        a.request(&json!({"op":"login","profile":id})).await; let s = until(&a, |s| s["attempts"][0]["state"] == "waiting").await; assert_eq!(prof(&s, &id)["state"], "connecting");
+        let s = a.request(&json!({"op":"remove","profile":id})).await; assert_eq!(s["error"], "", "{s}"); assert_eq!(s["profiles"], json!([]), "the profile is gone with its sign-in");
         let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_launch_rechecks_the_profile_after_the_ones_ahead_and_a_dropped_one_leaves_the_queue() {

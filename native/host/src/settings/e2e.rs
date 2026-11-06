@@ -139,3 +139,83 @@ async fn a_process_is_launched_fed_and_read_through_the_masks() {
     let all = format!("{out:?} {}", exit.stderr);
     assert!(!all.contains(SECRET), "{all}"); assert!(out.iter().any(|l| l.starts_with("arg=\u{2022}")) && out.iter().any(|l| l.starts_with("in=typed \u{2022}")) && exit.stderr.contains("err=\u{2022}"), "{all}");
 }
+
+// ---- a thread on a named Claude account, through the real hub pieces and stand-in CLIs ----
+
+/// A `claude` for the account paths: `auth login` prints a link and reads the code, `auth status` reports the profile's own folder, a turn (stream-json) writes the
+/// config folder it runs under and what it was started with, and the control probes answer.
+const ACCOUNT_CLAUDE: &str = r#"#!/usr/bin/env python3
+import sys, os, json
+d = os.environ.get("CLAUDE_CONFIG_DIR", ""); a = sys.argv[1:]
+login = os.path.join(d, "login.json") if d else ""
+if a[:2] == ["auth", "status"]:
+    if d and os.path.exists(login):
+        j = json.load(open(login)); j.update({"loggedIn": True, "authMethod": "claude.ai", "configDirectory": d}); print(json.dumps(j))
+    else: print(json.dumps({"loggedIn": False}))
+elif a[:2] == ["auth", "login"]:
+    print("Open https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123 to sign in", flush=True)
+    if sys.stdin.readline().strip() == "CODE#STATE123":
+        json.dump({"email": "work@example.com", "subscriptionType": "max", "accountUuid": "u1", "orgUuid": "o1"}, open(login, "w"))
+    else: print("That code wasn't accepted.", flush=True); sys.exit(1)
+elif "-p" in a:
+    for l in sys.stdin:
+        try: r = json.loads(l)
+        except Exception: continue
+        if r.get("type") == "user":
+            open(os.environ["STANDIN_LOG"], "a").write(json.dumps({"dir": d, "args": a}) + "\n")
+            print(json.dumps({"type":"system","subtype":"init","session_id":"s-" + (os.path.basename(d) or "default"),"cwd":"/tmp","tools":[],"model":"fake","permissionMode":"default"}), flush=True)
+            print(json.dumps({"type":"result","subtype":"success","is_error":False,"result":"ok","session_id":"s-" + (os.path.basename(d) or "default"),"modelUsage":{"fake":{"contextWindow":200000}}}), flush=True)
+        else:
+            rid = r.get("request_id"); resp = {"models": [{"value": "opus", "displayName": "Opus", "supportedEffortLevels": ["low"]}]} if rid == "models" else {}
+            print(json.dumps({"type": "control_response", "response": {"request_id": rid, "subtype": "success", "response": resp}}), flush=True)
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_and_the_default_one_does_not() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = dir("acct-home"); let work = dir("acct-work"); let sd = dir("acct-bin"); let log = sd.join("turns.jsonl");
+    let p = sd.join("claude"); std::fs::write(&p, ACCOUNT_CLAUDE).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::env::set_var("STANDIN_LOG", &log);
+    let (t2, ev) = ("t1700000002-3", |t: &str| format!("{{\"$\":\"ThreadCreated\",\"id\":\"{t}\",\"project\":\"p1\",\"title\":\"x\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n"));
+    std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"fixture\",\"root\":{},\"at\":1700000000}}\n{}{}", serde_json::to_string(&work.to_string_lossy()).unwrap(), ev(T1), ev(t2))).unwrap();
+    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
+    let mgr = settings::accounts_hub::start_cli(&hub, Some(ag.clone()), Cli::standin(&sd)); assert!(ag.accounts.get().is_some(), "the agents are given the account manager");
+    let c = Caller { gen: "1".into(), client: 1 };
+    // sign in a profile the way the page does: add, login, the code Claude shows, done
+    let s = mgr.request(&json!({"op":"add","provider":"claude","label":"Work"})).await; assert_eq!(s["error"], "", "{s}");
+    let id = s["profiles"][0]["id"].as_str().unwrap().to_string();
+    mgr.request(&json!({"op":"login","profile":id})).await;
+    let waiting = async { for _ in 0..200 { let s = mgr.snapshot(); if s["attempts"][0]["state"] == "waiting" { return s } tokio::time::sleep(Duration::from_millis(50)).await } panic!("no link") }.await;
+    assert!(waiting["attempts"][0]["url"].as_str().unwrap().starts_with("https://claude.com/cai/oauth/authorize"), "the sign-in link is read from the CLI: {waiting}");
+    let aid = waiting["attempts"][0]["id"].as_str().unwrap().to_string();
+    let r = mgr.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"CODE#STATE123"})).await; assert_eq!(r["error"], "", "url {}", waiting["attempts"][0]["url"]);
+    let done = async { for _ in 0..200 { let s = mgr.snapshot(); if s["attempts"][0]["state"] == "done" { return s } tokio::time::sleep(Duration::from_millis(50)).await } panic!("sign-in never finished") }.await;
+    let prof = done["profiles"][0].clone(); assert_eq!((prof["state"].clone(), prof["identity"]["email"].clone()), (json!("connected"), json!("work@example.com")), "{prof}");
+    let epoch = prof["epoch"].as_u64().unwrap();
+    // T1 is bound to it, t2 is on the default login
+    hub.commit(&json!({"$":"SettingSet","key":format!("account.thread.{T1}.claude"),"value":json!({"id":id,"epoch":epoch}).to_string(),"at":2})).await.unwrap();
+    let turn = |t: &'static str| { let (hub, c) = (hub.clone(), Caller { gen: "1".into(), client: 1 }); async move {
+        let before = hub.store.len();
+        let r = hub.rpc_for("turn.start").unwrap().call(&hub, &c, &json!(7), "turn.start", &json!({"thread":t,"text":"hello"})).await; assert_eq!(r[0]["ok"], true, "{r:?}");
+        for _ in 0..200 { let ev = hub.store.range(before, usize::MAX).unwrap(); if ev.iter().any(|l| l.contains("\"completed\"") || l.contains("\"failed\"")) { break } tokio::time::sleep(Duration::from_millis(50)).await }
+        hub.store.range(before, usize::MAX).unwrap().join("\n")
+    } };
+    let out = turn(T1).await; assert!(out.contains("\"completed\""), "{out}");
+    let ran: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let d1 = ran[0]["dir"].as_str().unwrap();
+    assert!(d1.contains(&format!("providers/accounts-v1/{id}/")), "the bound thread runs in the profile's own config folder: {d1}");
+    let args: Vec<&str> = ran[0]["args"].as_array().unwrap().iter().filter_map(|a| a.as_str()).collect();
+    assert!(args.windows(2).any(|w| w == ["--setting-sources", "user"]) && args.iter().any(|a| a.contains("forceLoginMethod")), "claude.ai login is forced for the profile: {args:?}");
+    let out = turn(t2).await; assert!(out.contains("\"completed\""), "{out}");
+    let ran: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert!(!ran[1]["dir"].as_str().unwrap_or("").contains("accounts-v1"), "a thread on the default login is not put under a profile: {}", ran[1]["dir"]);
+    // a profile whose sign-in moved on is never silently swapped for the default
+    let s = mgr.request(&json!({"op":"disconnect","profile":id})).await; assert_ne!(s["error"], "", "an account a running thread uses cannot be signed out under it");
+    assert_eq!(s["profiles"][0]["state"], "connected");
+    ag.stop(T1).await.unwrap(); tokio::time::sleep(Duration::from_millis(300)).await;
+    let s = mgr.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!(s["error"], "", "{s}");
+    let out = turn(T1).await; assert!(out.contains("\"failed\"") && out.contains("Reconnect and select this account"), "a disconnected account is refused, not replaced: {out}");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2, "and no process was started for it");
+    ag.shutdown(); let _ = std::fs::remove_dir_all(&home);
+}

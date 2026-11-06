@@ -25,7 +25,7 @@
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
     "src/core/account-fallback.bend": "05ba18dd4ee4f3c1787f69711e376e9934f6782e12454f7fe25bb1d18f2f82fc",
-    "src/core/accounts.bend": "c477544bc0984a54d7b80d3a0abdad2784efa5f46043f4070e6e500865892f34",
+    "src/core/accounts.bend": "e2e3f9fa340eb1a8571150a0b265c970aa5b5e7bf96dda582e6dee8eb673a52e",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
     "src/core/agy.bend": "db6a8932469dd0848dc808bd5fe51dffdf9a3c209438798efe254ab6244c7e36",
@@ -43,11 +43,11 @@
     "src/core/cad-install.bend": "c27afcbe168c402eebf12621dff91b0564caf75a069c1558b6a5f5e0b1a4b77a",
     "src/core/cad.bend": "e53b068b417096d323f15aeec8fbaaa1c61410c2d34a83b47238c7fcb6b91775",
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
-    "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
+    "src/core/cef.bend": "c79232d201183cd013ff5dc943d76561705b6728f2ac19cb87698919d523721c",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
     "src/core/client-language.bend": "9315c77e9837deac6813974c711e52a2b4b885df7ecd1fa28ad8b84fb0bc4bac",
-    "src/core/client.bend": "4cbb7194de35393c575142a6a934afb33ae0069ae471950be7741d0eb7c717b0",
+    "src/core/client.bend": "976eb85d30cd207fd57f3e914dc90601e714c123bf3fefb681c8cdc26e6cb751",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -93,6 +93,7 @@
     "src/core/mech.bend": "be262b768558a21e6c401c48e2158e6156d2db6c7d174f14cda55e379d3d88f4",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/message-context.bend": "7e19596b3acec6ec7a1a10e6643c423ada897a6ee490a58b4a2b39a9767b677d",
+    "src/core/model-catalog.bend": "bdde44f85e11cf510a613d976a84c1964635c7f58efb1d64dae8a728a82e2a6e",
     "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
     "src/core/msgs.bend": "915c00db8275e7bef10a80cbe4c61d593f41ada6ecd6b5602c5b14ae4178e023",
@@ -140,7 +141,7 @@
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
-    "src/core/subs.bend": "9f349eb37a62b9b6dd3986b3501b94df1b2f2b3d5d2c56eb3159ead36c4c3a80",
+    "src/core/subs.bend": "b032937af372f9301f5c1676b78827c665b12adf0752596b57bb3be3a27ae7a1",
     "src/core/subthreads.bend": "48b0d1c078222b3ba94d9a95c7e59edd9c49705a39a89b6de33ae96ecf398fb0",
     "src/core/svg.bend": "dc334fd62bc35e0fa3c9cdac414ee563a31f99a3fd538810d42d35c148c30c14",
     "src/core/task.bend": "8280585ed265c028ae6fa6bc72be4b56e527e4f162262e1a4a61401d693457b2",
@@ -148,7 +149,7 @@
     "src/core/telemetry.bend": "280dcdf4f7e49568f3e35efdb17de0c5f73c0421f88eacbde81a5cecc7e3ec79",
     "src/core/textscale.bend": "6f3179e85bce1ed2f56191bcc25621fcd83dc4ecf239b60ceed9cb1fdf883b5c",
     "src/core/thin-chat.bend": "b654c26082a5b02b40a3eb6092744fd4e2f6befda5d4757eb2f8a55368fdceae",
-    "src/core/thin-wire.bend": "95299885f65f3dea85bf8a3bea4e0e5ae8bcbf3ebfb44b699cacb2cf6690454c",
+    "src/core/thin-wire.bend": "1ff6b258a0c5565023ab1565b2446d0df5e731b7292fe246b2f9db60ffe7b1fc",
     "src/core/thin.bend": "49445e60244e4820224d39989d0d22fc6ff59f049018d26bd29915b25ba091f0",
     "src/core/thinq.bend": "fb65373348a50fdae1a35947f0d66ea4573c389d221075dbe8ae373654b6afd4",
     "src/core/title.bend": "bac62f410792eb2feff74985b63f950130d03d9de75dc78fb6ac5f1e97f6d5eb",
@@ -172,19 +173,19 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "e8d78ec982828a8018c0845a36d03123c47bf9c94b5d4cee855f9358ccc293a3",
-    "src/mobile/screen.bend": "a4df008dd196cfbd6f7e877098bf86e41636947aeca15f76ed9db9be22a67912",
-    "src/server/thin-actor.bend": "2e91a6abd414d026cff5da6838c25b313c6b321dbcc663fa351878c028fe4e15",
+    "src/mobile/screen.bend": "354b867fec0e5a2bf900476c251bc33578e56f463a87382f6702061bd3ec4e58",
+    "src/server/thin-actor.bend": "fc0909a5d7287c5daedd890ab68bbfa272f9f4c7dac8c3263214a30bad702a09",
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "92ac2f5fb70858c3db946f316e9e25f0833251b253727c759b01130f61f4a96d",
-    "src/server/thin-sidebar.bend": "03a4481e05258eaead769ca352081b6782f0b20589fe29d33e3bb1151916844a",
+    "src/server/thin-sidebar.bend": "d4b8d139a5ff1576065fce8a18fe3f51d86f4916fa099c9ae2a278922b085ba6",
     "src/server/thin-signal-text.bend": "3762209930cc3605902b3e5cf7cfbb3022629cbac924e7081d1fb5e1e804a9c3",
     "src/server/thin-signals.bend": "e2213ac2fab79b79dea8d14d4daac4ab9c640231759721079347be156bddebb7",
     "src/server/thin-splice.bend": "d1bc1c8e7710e0efba2abcf3fa599391d5d480eb37ced2a8a4f079d7b079a2be",
     "src/server/thin-view.bend": "c9bfaf9bac65d287fd70d3b804bb7b9bcb20cddd93324f7e477301a9f57382ae",
     "src/server/thinstore.bend": "07a7bbcfe3f3813f80925c0229e16653e362567d86ff4fb1369de22dbd262572",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
-    "src/web/bots.bend": "f265768306a1bc1edc14f53d1d6f9c7f7e0362afe236c8edd59f8813bd12aa0c",
+    "src/web/bots.bend": "ca233856e989d9803c62521b9ced614e1681b461aae630ca3c71c30903b59ed2",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
     "src/web/composer-bar.bend": "fd6b6110ff409c090bf03f7ccbe64ed59f5474d548dfd804d8d1a0a441c1f863",
     "src/web/dom.bend": "6e0ddb26a372a07cf2af0bbccdae476087fb50d6e2af5da9c6f8d6b9cc1ca0b5",
@@ -200,7 +201,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "769d3fb9f716ef44f8c5fe6d9abd94f6e9da038615a96debb17a0b0d0a0eafd0"
+    "src/web/view.bend": "af44ff81a08003312eac701328df3a6d74d3ee17c1172900dd8b3c9818051012"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -1165,5 +1166,41 @@
       "src/web/view.bend": "769d3fb9f716ef44f8c5fe6d9abd94f6e9da038615a96debb17a0b0d0a0eafd0"
     },
     "scope": "view.bend gains View.settings.phone.app: one Settings row (Appearance and Threads pages, phone layout only) with a static [data-ph-app=settings] button that only the phone apps show (html.ph-in-app). It reads only the locale; no sidebar draft reader, unknown @ retention, private image key, scratch filter or transport/recipient authority change. (Not re-run: test/sidebar_draft_image_test.bend.)"
-  }
+  },
+  "kicadMainCheckoutReview": {
+    "scope": "KiCad copy-choice reads only the requesting thread id, committed reply metadata in ko:<thread>, and existing Ui info. No ordinary draft body reads, filtering, sidebar key, bridge authority or fallback policy changed. Phone projection uses that same metadata and existing shared action table.",
+    "files": {
+      "src/core/accounts.bend": "e2e3f9fa340eb1a8571150a0b265c970aa5b5e7bf96dda582e6dee8eb673a52e",
+      "src/core/cef.bend": "c79232d201183cd013ff5dc943d76561705b6728f2ac19cb87698919d523721c",
+      "src/core/client.bend": "47cb22bfb5e61595b1716c6765a2a22d822e3ae1cf67b8bc59f6d4eab18f2b5e",
+      "src/mobile/screen.bend": "49904f2c5310890302efd526c459b81c17899562169b441ab18f056cecb84a43",
+      "src/web/bots.bend": "ca233856e989d9803c62521b9ced614e1681b461aae630ca3c71c30903b59ed2",
+      "src/web/view.bend": "af9c1748d0a244425e90accd197f8315accc700d2e2dd93353a1f4e36b4a0cbe"
+    },
+    "qualification": {
+      "job": "j20261104221430-2461466",
+      "test": "test/sidebar_draft_image_test.bend",
+      "ok": 24,
+      "fail": 0,
+      "memoryMaxBytes": 3700000000,
+      "memorySwapMaxBytes": 0,
+      "oomKill": 0,
+      "logSha256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c"
+    },
+    "limits": "Full PROOF.bend attempted on this source under the 3.7e9 cap; OOM-killed. The three new laws and 13 copy-choice UI assertions passed separately. No native-device acceptance claimed.",
+    "inheritedMainReview": "Also reviewed main changes since 3d17db4ec7: accounts overlay catalog fast path reads committed bindings; CEF changes only the new-tab URL constant; bot header/tab identity keys add no state reads; model picker parses existing info catalog and the same retained scratch query. No new ordinary draft-body reader or sidebar filtering/authority change. The added model-catalog import is pure catalog/JSON preparation with no Ui or draft access; its current source is pinned too."
+  },
+  "snappyActorReview20261105": "thin-actor.bend: an owned reply or desk-only info that leaves the connection Ui's drawn parts unchanged keeps the view clean (no view.changed); mail_ready asks a shown thread's fab.look card itself (client.bend Fab.sync.shown, a hub-run read). No sidebar draft reader changed.",
+  "volatileImageInputsReview": {
+    "scope": "The private ordinary image key (Sidebar.key.input with image) leaves out the scratch '@fab.at' (Fab.want/Fab.sync.k, action path), '@rp.req:<id>' (Rp.reply/Rp.failed) and '@telemetry.req:<id>' (Share.reply), reply handlers only, and the info 'desk' (read only by mobile/hubs.bend's alerts). None is read under src/web/view.bend, bots.bend or sidebar-slot.bend. The full picture/transport keys and the Settings path keep every input unchanged. test/sidebar_draft_image_test.bend: each omitted value reuses the image, a near key ('@fab.atx') still invalidates, and the whole page drawn with the retained sidebar equals the fresh page for each.",
+    "files": {
+      "src/server/thin-sidebar.bend": "e0ac0b6fe6cf0b250ed06be1c19062764f36ea04b05125fe376d5d7434cf01db"
+    },
+    "viewerInfo": "Also left out of the private image key: info keys of each thread's viewer and fold choices ('fold:', 'view.', 'panel:', 'panel.hand:', 'diff:', 'hist.at:', 'hist.back:', 'hist.diff:', 'cmp.a:', 'cmp.b:', 'cmp.al', 'cmp.bl', 'fm.want:'; client.bend's Reset.prefixes less 'subs:' and 'fab.'). Call-graph scan from every View.sidebar/project/row/tree/groups def (1161 reachable defs): no literal reader of these prefixes; the only info walk (Side.signals.ix → Signal.cache.work) reads '@signal:' keys. test/sidebar_draft_image_test.bend: fold and viewer choices reuse the image and the whole page with the kept sidebar equals the fresh one; 'subs:' still invalidates."
+  },
+  "snappyDiffReview20261105": "client.bend Dv.open/Dv.mark/Dv.unwait, view.bend View.diff.wait, screen.bend Mob.diff.at.w: a Diff asked for by hand opens its viewer at once with a Loading head (diff.wait:t, diff.ask:<id>) until its answer or an error. Viewer/info keys only; no sidebar draft reader changed.",
+  "snappyGreetingReview20261105": "thin-wire.bend: the web greeting adds \"fabSelf\": true (Wire.greeting.extra); no sidebar or draft data.",
+  "snappySubsCountReview20261105": "subs.bend: Agg.kind 4 / Subs.count.of take a 'steps.count' act row's count (only from subagent-history.bend's SQL) as a call's step count; rows, titles and steps otherwise unchanged (test/tools/subagent_store.mjs compares with the old full read). No sidebar draft reader changed.",
+  "snappyViewerKeptReview20261105": "client.bend Fm.kept/Fm.shown/Fm.rows (fm.kept:<t>\\n<dir>), Rc.kept/Rc.held/Rc.own (refs.kept:<t>), Dv.text (diff.kept:t); view.bend View.fm.body via Fm.shown, View.diff.at/View.diff.kept/View.diff.loc.off: the viewer's Files rows, history bar file and Diff drawn from listings and answers kept per thread (this connection's, or the hub's given through info) while the hub is asked again. Viewer/info keys only; no sidebar draft reader changed. thin-sidebar.bend Sidebar.info leaves fm.kept:/refs.kept:/diff.kept:/kept.seq: out of both sidebar keys (no sidebar reader; with them the full key passed Sidebar.bounded's 32 KB and the sidebar was never kept); screen.bend Mob.diff.at draws diff.kept while diff.wait.",
+  "splitDesktopReview20261105": "client.bend Split.one/Split.shows/Split.flip and view.bend View.combo (toggle tips, side label, board/3D separator), View.destinations' Split tooltip: Split's board and 3D take turns only in the phone arrangement (local.workspace.form); the desktop shows all three panes again. Viewer keys and the split.hide setting only; no sidebar draft reader changed."
 }

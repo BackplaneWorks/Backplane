@@ -33,7 +33,7 @@ impl Commands { fn agents(&self) -> Option<Arc<dyn seam::Seam>> { self.seam.clon
 
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
-        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "thread.fork", "thread.back", "project.remove", "project.rename",
+        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "accounts.select", "thread.fork", "thread.back", "project.remove", "project.rename",
         "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "fs.list", "fs.mkdir", "fs.find"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
@@ -48,6 +48,7 @@ impl RpcHandler for Commands {
                 let r = home::read(&root, p).await;
                 return vec![json!({"t":"reply","id":id,"ok":true,"result":r})]; // GitJob.reply(..., True, r): the error is inside the result
             }
+            if method == "accounts.select" && !crate::settings::accounts_hub::is_granted(who) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::settings::accounts::GATE})] }
             let create_in: Option<String> = match method {
                 "fs.list" => return answer(fs::list(&path).await),
                 "fs.mkdir" => return answer(fs::mkdir(&path).await),
@@ -110,8 +111,13 @@ impl RpcHandler for Commands {
     }
 }
 
+/// The conversation of a thread, newest first, for a handoff to another account (settings/driver.rs).
+pub async fn entries(hub: &Arc<Hub>, th: &str) -> Option<Ctx> { Some(entries_of(hub, th).await) }
+pub use plan::hand_text;
 /// A thread's own entries, newest first (core/handoff.bend `Hand.mine`): the rows filed under it that it wrote, not the messages it sent elsewhere.
-async fn entries_of(hub: &Arc<Hub>, th: &str) -> Ctx {
+async fn entries_of(hub: &Arc<Hub>, th: &str) -> Ctx { entries_upto(hub, th, usize::MAX).await }
+/// The newest `max` or so entries (whole pages of 32), newest first.
+async fn entries_upto(hub: &Arc<Hub>, th: &str, max: usize) -> Ctx {
     let mut out = vec![]; let mut before = 0u64;
     loop {
         let (page, rows) = { let m = hub.model().await; match m.page(&hub.store, th, before, 32) {
@@ -121,9 +127,21 @@ async fn entries_of(hub: &Arc<Hub>, th: &str) -> Ctx {
                 (p, rows) }
             Err(_) => break } };
         for r in rows { out.push(Line { msg: r.kind == "msg", role: r.role.clone(), kind: r.akind.clone(), text: r.text.clone() }) }
+        if out.len() >= max { break }
         match page.ids.last().and_then(|l| l.parse::<u64>().ok()) { Some(l) if page.ids.len() == 32 && l > 1 => before = l, _ => break }
     }
+    out.truncate(max);
     Ctx { entries: out }
+}
+
+/// The recent conversation of a thread whose agent session is gone, as the text that goes ahead of the message being run again (at most 128 items, the message itself left out):
+/// "" when the thread has nothing yet. The same hand-over a fork or a provider switch makes (plan.rs `hand_text`).
+pub(crate) async fn lost_session_context(hub: &Arc<Hub>, th: &str, sent: &str) -> String {
+    let mut es = entries_upto(hub, th, 129).await.entries;
+    if es.first().map_or(false, |l| l.msg && l.role != "assistant" && l.text.trim() == sent.trim()) { es.remove(0); } // the message about to run again is the newest entry
+    es.truncate(128);
+    if es.is_empty() { return String::new() }
+    plan::hand_text(&format!("The agent session this thread was resuming is no longer available, so you start a new one. Recent conversation (at most 128 items), oldest first; use thread_read with threadId {th} for earlier history:"), &es, th)
 }
 
 /// BotJob.scratch: `<home>/scratch/<thread>` made at once (a name that is not a plain folder name makes nothing), a git repository, and the thread's folder recorded.

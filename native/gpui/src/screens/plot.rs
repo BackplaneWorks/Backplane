@@ -81,20 +81,25 @@ impl Varints<'_> {
 
 /// One chunk, decoded once: strokes as capsules (ax ay bx by r) and fills as fan triangles (6 floats each), micrometres.
 #[derive(Debug, Default, PartialEq)]
-pub struct Chunk { pub layer: u32, pub color: u32, pub alpha: f32, pub own: bool, pub caps: Vec<f32>, pub tris: Vec<f32>, pub polys: Vec<Vec<f32>> }
+pub struct Chunk { pub layer: u32, pub color: u32, pub alpha: f32, pub own: bool, pub caps: Vec<f32>, pub tris: Vec<f32>, pub polys: Vec<Vec<f32>>,
+    /// What a tap can pick: each piece's info index (its line in the hub's info file), its box and its points (`pts[at..at+n]`, x y pairs) as a dot, a stroke or a fill.
+    pub pieces: Vec<Piece>, pub pts: Vec<f32>, pub r: f32 }
+/// kind: 0 a fill (polygon), 1 a stroke (polyline of radius `Chunk::r`), 2 a dot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Piece { pub info: u32, pub bbox: [f32; 4], pub at: u32, pub n: u32, pub kind: u8 }
 
 impl Chunk {
     pub fn decode(o: &C) -> Chunk {
         let g = |k: &str, d: i64| o.get(k).and_then(C::int).unwrap_or(d);
         let mode = g("m", 1);
         let mut c = Chunk { layer: g("l", 0) as u32, color: g("c", 0) as u32, alpha: g("a", 255) as f32 / 255., own: mode == 0 && g("w", 0) != 0, ..Default::default() };
-        let r = g("w", 0) as f32 / 2.;
+        let r = g("w", 0) as f32 / 2.; c.r = r;
         let empty = Vec::new();
         let data = match o.get("d") { Some(C::Bytes(b)) => b, _ => &empty };
         let mut v = Varints { b: data, i: 0, ok: true };
         let (mut px, mut py) = (0i32, 0i32);
         while v.more() {
-            let _info = v.next();
+            let info = v.next();
             let mut pts: Vec<f32> = Vec::new();
             let mut point = |v: &mut Varints| { px = px.wrapping_add(v.signed()); py = py.wrapping_add(v.signed()); (px as f32, py as f32) };
             if mode == 2 { let (x, y) = point(&mut v); pts = vec![x, y]; c.caps.extend([x, y, x, y, r]); }
@@ -102,6 +107,13 @@ impl Chunk {
                 let n = v.next() as usize;
                 for _ in 0..n.min(1 << 20) { if !v.more() { break; } let (x, y) = point(&mut v); pts.extend([x, y]); }
                 if mode == 0 { fan(&pts, &mut c.tris); if pts.len() >= 6 { c.polys.push(pts.clone()); } } else { path(&pts, r, &mut c.caps); }
+            }
+            if !pts.is_empty() {
+                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for q in pts.chunks_exact(2) { x0 = x0.min(q[0]); x1 = x1.max(q[0]); y0 = y0.min(q[1]); y1 = y1.max(q[1]); }
+                let kind = if mode == 2 || pts.len() == 2 { 2 } else if mode == 0 { 0 } else { 1 };
+                c.pieces.push(Piece { info, bbox: [x0 - r, y0 - r, x1 + r, y1 + r], at: c.pts.len() as u32, n: (pts.len() / 2) as u32, kind });
+                c.pts.extend_from_slice(&pts);
             }
         }
         c
@@ -126,18 +138,28 @@ fn fan(p: &[f32], tris: &mut Vec<f32>) {
 }
 
 /// What the viewer draws: chunks in paint order, the plot's box, or why there is nothing.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edge: [f32; 4], pub thick: f32, pub chunks: Vec<Arc<Chunk>>, pub none: String }
 
-/// The chunks this client holds (the last plot applied), and the frame being drawn.
+/// The chunks this client holds per source (a delta names its `base` source; a Split watches a schematic and a board at once), the newest frame
+/// (`frame`, the one Board and Schematic draw) and each source's own (`frames`, what a Split's panes draw).
 #[derive(Default)]
-pub struct Store { held: Vec<Arc<Chunk>>, held_key: String, pub frame: Option<Frame> }
+pub struct Store { pub sheets: Vec<Sheet>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame> }
+
+const MAX_SOURCES: usize = 6;
 
 impl Store {
-    pub fn reset(&mut self) { self.held.clear(); self.held_key.clear(); self.frame = None; }
-    fn fail(&mut self, key: String, fam: String, why: &str) { self.held.clear(); self.held_key.clear(); self.frame = Some(Frame { key, fam, none: why.to_string(), ..Default::default() }); }
+    pub fn reset(&mut self) { self.held.clear(); self.held_key.clear(); self.frame = None; self.frames.clear(); }
+    fn fail(&mut self, key: String, fam: String, why: &str) {
+        self.held.remove(&key); if self.held_key == key { self.held_key.clear(); }
+        let f = Frame { key: key.clone(), fam, none: why.to_string(), ..Default::default() };
+        if !key.is_empty() { self.frames.insert(key, f.clone()); } else { self.held.clear(); self.frames.clear(); }
+        self.frame = Some(f);
+    }
     /// A frame the client will not take (over its size limit): said, not left on Loading.
     pub fn too_big(&mut self, bytes: usize) { self.fail(String::new(), String::new(), &format!("This plot is {} MB, too large to show here.", bytes >> 20)); }
+    /// The newest frame of the source named `key`.
+    pub fn frame_for(&self, key: &str) -> Option<&Frame> { self.frames.get(key) }
     /// Apply one plot frame. Err names a frame that cannot be used; the store is then empty, as on the phones.
     pub fn receive(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
         let Some(o) = decode(bytes) else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again."); return Err("undecodable plot frame") };
@@ -151,22 +173,100 @@ impl Store {
         }
         let none: Vec<C> = Vec::new();
         let refs = match o.get("cs") { Some(C::Arr(a)) => a, _ => &none };
-        // `base` names the source this delta is against: held chunks from another source are not what its indexes mean
+        // `base` names the source this delta is against: held chunks of another source are not what its indexes mean; none named is the last source applied
         let base = o.get("base").and_then(C::text).unwrap_or("");
-        let stale_base = !base.is_empty() && base != self.held_key;
+        let from = if base.is_empty() { self.held_key.clone() } else { base.to_string() };
+        let held: Vec<Arc<Chunk>> = self.held.get(&from).cloned().unwrap_or_default();
+        let stale_base = !base.is_empty() && !self.held.contains_key(base);
         let mut cs: Vec<Arc<Chunk>> = Vec::with_capacity(refs.len());
         for r in refs {
             match r {
-                C::U(k) if !stale_base && *k >= 0 && (*k as usize) < self.held.len() => cs.push(self.held[*k as usize].clone()),
+                C::U(k) if !stale_base && *k >= 0 && (*k as usize) < held.len() => cs.push(held[*k as usize].clone()),
                 C::Map(_) => cs.push(Arc::new(Chunk::decode(r))),
                 _ => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view."); return Err("invalid geometry reference"); }
             }
         }
         let four = |k: &str| -> [f32; 4] { match o.get(k) { Some(C::Arr(a)) if a.len() >= 4 => [0, 1, 2, 3].map(|i| a[i].int().unwrap_or(0) as f32), _ => [0.; 4] } };
-        self.held = cs.clone(); self.held_key = key.clone();
-        self.frame = Some(Frame { key, fam, bbox: four("box"), edge: four("edge"), thick: o.get("thick").and_then(C::int).unwrap_or(1600) as f32, chunks: cs, none: String::new() });
+        if self.held.len() >= MAX_SOURCES && !self.held.contains_key(&key) { self.held.clear(); self.frames.clear(); }
+        self.held.insert(key.clone(), cs.clone()); self.held_key = key.clone();
+        let f = Frame { key: key.clone(), fam, bbox: four("box"), edge: four("edge"), thick: o.get("thick").and_then(C::int).unwrap_or(1600) as f32, chunks: cs, none: String::new() };
+        self.frames.insert(key, f.clone()); self.frame = Some(f);
         Ok(())
     }
+}
+
+
+/// A piece a tap lies on: the chunk it is in (its index in the frame, which is the hub's `at`), its info index, its layer and its area (100 square micrometres).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pick { pub chunk: usize, pub info: u32, pub layer: u32, pub area: u64, pub kind: u8, pub pts: Vec<f32>, pub r: f32 }
+
+fn seg_dist(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
+    let (dx, dy) = (bx - ax, by - ay); let l2 = dx * dx + dy * dy;
+    let t = if l2 > 0. { (((px - ax) * dx + (py - ay) * dy) / l2).clamp(0., 1.) } else { 0. };
+    ((px - ax - t * dx).powi(2) + (py - ay - t * dy).powi(2)).sqrt()
+}
+fn inside(pts: &[f32], x: f32, y: f32) -> bool {
+    let n = pts.len() / 2; let mut c = false; let mut j = n.wrapping_sub(1);
+    for i in 0..n { let (xi, yi, xj, yj) = (pts[2 * i], pts[2 * i + 1], pts[2 * j], pts[2 * j + 1]); if (yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi { c = !c } j = i; }
+    c
+}
+/// Distance from (x, y) to a piece: 0 inside a fill, to the edge otherwise; to the stroke's centre line less its radius; to a dot less its radius.
+fn distance(c: &Chunk, p: &Piece, x: f32, y: f32) -> f32 {
+    let pts = &c.pts[p.at as usize..p.at as usize + p.n as usize * 2];
+    match p.kind {
+        2 => (((x - pts[0]).powi(2) + (y - pts[1]).powi(2)).sqrt() - c.r).max(0.),
+        0 => { if inside(pts, x, y) { return 0. } let n = pts.len() / 2; (0..n).map(|i| { let j = (i + 1) % n; seg_dist(x, y, pts[2 * i], pts[2 * i + 1], pts[2 * j], pts[2 * j + 1]) }).fold(f32::MAX, f32::min) }
+        _ => (pts.windows(4).step_by(2).map(|w| seg_dist(x, y, w[0], w[1], w[2], w[3])).fold(f32::MAX, f32::min) - c.r).max(0.),
+    }
+}
+/// View.pick / Pick.best: of the pieces within `tol` micrometres of the tap on layers not hidden (`off` mask), the smallest wins (a pad over the zone it sits in), then the one drawn on top.
+pub fn hit(f: &Frame, x: f32, y: f32, tol: f32, off: u32) -> Option<Pick> {
+    let mut best: Option<Pick> = None;
+    for (ci, c) in f.chunks.iter().enumerate() {
+        if c.layer < 32 && (off >> c.layer) & 1 == 1 { continue }
+        for p in &c.pieces {
+            let b = p.bbox;
+            if x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol { continue }
+            if distance(c, p, x, y) > tol { continue }
+            let area = (((b[2] - b[0]).max(1.) * (b[3] - b[1]).max(1.)) / 100.).min(4e9) as u64;
+            let take = match &best { None => true, Some(o) => area < o.area || (area == o.area && c.layer >= o.layer) };
+            if take { best = Some(Pick { chunk: ci, info: p.info, layer: c.layer, area, kind: p.kind, pts: c.pts[p.at as usize..p.at as usize + p.n as usize * 2].to_vec(), r: c.r }) }
+        }
+    }
+    best
+}
+
+/// The versions history.refs lists (the Compare menu): where the repository is, its top folder, and a row (kind, label, commit) for HEAD, the branch point, branches, tags and commits.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Refs { pub git: String, pub top: String, pub pcb: String, pub sch: String, pub rows: Vec<(String, String, String)> }
+pub fn refs_of(r: &serde_json::Value) -> Option<Refs> {
+    let g = |k: &str| r[k].as_str().unwrap_or("").to_string();
+    if !r.is_object() { return None }
+    let rows = g("refs").lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 3 || f[2].is_empty() || !matches!(f[0], "head" | "base" | "branch" | "tag" | "commit") { return None } Some((f[0].to_string(), f[1].to_string(), f[2].to_string())) }).take(60).collect();
+    Some(Refs { git: g("git"), top: g("top"), pcb: g("pcb"), sch: g("sch"), rows })
+}
+/// core/hist.bend's version path of `file` in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>"; a comparison is "diff\n<old>\n<new live file>".
+pub fn compare_path(r: &Refs, commit: &str, file: &str) -> Option<String> {
+    let rel = file.strip_prefix(&format!("{}/", r.top))?;
+    Some(format!("diff\ngit\t{}\t{}\t{}\t{}/{}\n{}", r.git, commit, r.top.chars().count(), r.top, rel, file))
+}
+
+/// A sheet of the schematic's hierarchy (Hier.show's line: depth, leaf, name, file; the root is the first row).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sheet { pub depth: u32, pub leaf: bool, pub name: String, pub file: String }
+pub fn sheet_rows(text: &str) -> Vec<Sheet> {
+    text.lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 4 { return None } Some(Sheet { depth: f[0].parse().unwrap_or(0), leaf: f[1] == "1", name: f[2].to_string(), file: f[3].to_string() }) }).collect()
+}
+
+/// An inspected piece's card (Insp.card): its kind, then key = value rows. `g=` (a schematic item's connected group) is cross-probing's business, no row.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Card { pub title: String, pub rows: Vec<(String, String)> }
+pub fn card(info: &str) -> Option<Card> {
+    if info.trim().is_empty() { return None }
+    let mut parts = info.split(';');
+    let title = parts.next().unwrap_or("").to_string();
+    let rows = parts.filter(|p| !p.starts_with("g=")).map(|p| match p.split_once('=') { Some((k, v)) => (k.to_string(), v.to_string()), None => (p.to_string(), String::new()) }).collect();
+    Some(Card { title, rows })
 }
 
 /// The view: where the plot's centre sits and how many pixels a micrometre is.
@@ -346,5 +446,34 @@ mod tests {
         assert!((x - x2).abs() < 1e-2 && (y - y2).abs() < 1e-2);
         assert!(v.zoom(1e9, 0., 0., 940., 500., v.scale).scale <= v.scale * 20.001); assert!(v.zoom(1e-9, 0., 0., 940., 500., v.scale).scale >= v.scale / 60.001);
         let p = v.pan(10., 0.); assert!(p.cx < v.cx);
+    }
+
+    #[test] fn a_tap_picks_the_smallest_piece_then_the_top_layer_and_skips_hidden_layers() {
+        let mk = |layer: u32, kind: u8, pts: &[f32], info: u32| Chunk { layer, r: 50., pieces: vec![Piece { info, bbox: { let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN]; for q in pts.chunks(2) { b = [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]; } [b[0] - 50., b[1] - 50., b[2] + 50., b[3] + 50.] }, at: 0, n: (pts.len() / 2) as u32, kind }], pts: pts.to_vec(), ..Default::default() };
+        let zone = mk(5, 0, &[0., 0., 10000., 0., 10000., 10000., 0., 10000.], 1);
+        let pad = mk(12, 2, &[5000., 5000.], 2);
+        let f = Frame { chunks: vec![Arc::new(zone), Arc::new(pad)], ..Default::default() };
+        assert_eq!(hit(&f, 5000., 5000., 100., 0).map(|p| (p.chunk, p.info)), Some((1, 2)), "the pad, not the zone it sits in");
+        assert_eq!(hit(&f, 5000., 5000., 100., 1 << 12).map(|p| p.info), Some(1), "a hidden layer is not there to tap");
+        assert_eq!(hit(&f, 9000., 9000., 100., 0).map(|p| p.info), Some(1));
+        assert!(hit(&f, 20000., 20000., 100., 0).is_none());
+        let line = mk(3, 1, &[0., 0., 1000., 0.], 7); let g = Frame { chunks: vec![Arc::new(line)], ..Default::default() };
+        assert_eq!(hit(&g, 500., 120., 100., 0).map(|p| p.info), Some(7), "within the stroke's width and the finger's reach"); assert!(hit(&g, 500., 500., 100., 0).is_none());
+    }
+    #[test] fn the_card_is_a_title_and_key_value_rows_without_the_group() {
+        let c = card("Pad;ref=U1;pin=3;net=GND;g=7").unwrap();
+        assert_eq!((c.title.as_str(), c.rows.len()), ("Pad", 3)); assert_eq!(c.rows[2], ("net".to_string(), "GND".to_string())); assert!(card("  ").is_none());
+    }
+
+    #[test] fn the_sheet_rows_are_hiers_lines() {
+        let r = sheet_rows("0\t0\troot\t/p/top.kicad_sch\n1\t1\tamp\t/p/amp.kicad_sch\nbad");
+        assert_eq!(r.len(), 2); assert_eq!((r[1].depth, r[1].leaf, r[1].name.as_str(), r[1].file.as_str()), (1, true, "amp", "/p/amp.kicad_sch"));
+    }
+
+    #[test] fn a_comparison_names_the_old_version_and_the_live_file() {
+        let r = refs_of(&serde_json::json!({"git": "/p/.git", "top": "/p", "pcb": "/p/b.kicad_pcb", "sch": "/p/s.kicad_sch", "refs": "head\tHEAD\tabc\nbranch\tmain\tdef\nturn\tx\tz\nbad"})).unwrap();
+        assert_eq!(r.rows.len(), 2, "head and branch; a turn checkpoint is not offered");
+        assert_eq!(compare_path(&r, "abc", "/p/b.kicad_pcb").unwrap(), "diff\ngit\t/p/.git\tabc\t2\t/p/b.kicad_pcb\n/p/b.kicad_pcb");
+        assert!(compare_path(&r, "abc", "/elsewhere/b.kicad_pcb").is_none());
     }
 }

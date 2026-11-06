@@ -21,6 +21,11 @@ final class DataClient {
     private(set) var older: [String: String] = [:]
     private(set) var loadedThreads: Set<String> = []
     private(set) var listsLoaded = false
+    let plots = PlotStore()
+    private(set) var shot = 0
+    private(set) var shotBot = ""
+    private(set) var bots: [DBot] = []
+    private(set) var rooms: [DRoom] = []
     // what the hub says it can do beyond the base of data/1 (hello.features); a hub that names none takes no pictures
     private(set) var features: Set<String> = []
     var canSendImages: Bool { features.contains("images") }
@@ -131,7 +136,7 @@ final class DataClient {
                     self.heard = Date()
                     switch m {
                     case .string(let s): self.handle(Data(s.utf8), g)
-                    case .data(let d): self.handle(d, g)
+                    case .data(let d): if PlotStore.isPlot(d) { self.plots.receive(d) } else { self.handle(d, g) }
                     @unknown default: break
                     }
                     self.receive(t, g)
@@ -165,7 +170,7 @@ final class DataClient {
         case "hello":
             guard (o["proto"] as? String)?.hasPrefix("data/") == true else { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
             features = Set((o["features"] as? [String]) ?? [])
-            conn = .online; failure = ""; backoff = 0.25
+            conn = .online; failure = ""; backoff = 0.25; plots.reset()
             Task { await self.synchronise(g) }
         case "reply":
             guard let id = o["id"] as? Int ?? (o["id"] as? Double).map(Int.init), let k = calls.removeValue(forKey: id) else { return }
@@ -175,6 +180,7 @@ final class DataClient {
                 k.resume(throwing: DError(code: e["code"] as? String ?? "ERROR", message: e["message"] as? String ?? ""))
             } else { k.resume(throwing: DError(code: "ERROR", message: o["error"] as? String ?? "The hub refused")) }
         case "d": push(o)
+        case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
         default: break
         }
     }
@@ -202,6 +208,7 @@ final class DataClient {
             let s: DSubReply = try await call("subscribe", ["topic": "lists"]); guard g == gen else { return }; listSub = s.sub
             async let p = loadProjects(g), t = loadThreads(g)
             _ = try await (p, t)
+            await loadBots()
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
@@ -315,11 +322,13 @@ final class DataClient {
                var l = entries[tid], let i = l.firstIndex(where: { $0.id == eid }) {
                 l[i].text += add; l[i].live = true; entries[tid] = l
             }
+        case "notify":
+            if let tid = o["thread"] as? String, let kind = o["kind"] as? String { notifyLocal(tid, kind, title: o["title"] as? String ?? "", body: o["body"] as? String ?? "") }
         case "turn":
             if let tid = o["thread"] as? String, let s = o["state"] as? String, let i = threads.firstIndex(where: { $0.id == tid }) {
                 let was = threads[i].state
                 threads[i].state = s
-                if was == "working" || was == "asking", s == "idle" || s == "asking" || s == "failed" { alert(threads[i], s) }
+                if !features.contains("notify"), was == "working" || was == "asking", s == "idle" || s == "asking" || s == "failed" { alert(threads[i], s) }
             }
         default: break
         }
@@ -328,7 +337,7 @@ final class DataClient {
         if let i = threads.firstIndex(where: { $0.id == t.id }) {
             let was = threads[i].state
             threads[i] = t
-            if (was == "working"), t.state == "idle" || t.state == "asking" || t.state == "failed" { alert(t, t.state) }
+            if !features.contains("notify"), (was == "working"), t.state == "idle" || t.state == "asking" || t.state == "failed" { alert(t, t.state) }
         } else { threads.append(t) }
         threads.sort { $0.updatedAt > $1.updatedAt }
         scheduleSave()
@@ -428,6 +437,43 @@ final class DataClient {
         UserDefaults.standard.set(drafts, forKey: "data.drafts")
     }
 
+    // MARK: data/1 additions (features actions, search, models, mentions, bots, notify; the hub's native/host/src/data/ext.rs)
+    func has(_ f: String) -> Bool { features.contains(f) }
+    func threadAct(_ id: String, _ action: String, title: String = "") async {
+        var p: [String: Any] = ["thread": id, "action": action]; if !title.isEmpty { p["title"] = title }
+        do {
+            let r: DThreadOpt = try await call("thread.act", p)
+            if action == "delete" { threads.removeAll { $0.id == id }; entries[id] = nil; scheduleSave() }
+            else if let t = r.thread { upsert(t) }
+        } catch { failure = error.localizedDescription }
+    }
+    func projectAct(_ id: String, _ action: String, title: String = "") async {
+        var p: [String: Any] = ["project": id, "action": action]; if !title.isEmpty { p["title"] = title }
+        do {
+            _ = try await call("project.act", p, as: DEmpty.self)
+            if action == "remove" { projects.removeAll { $0.id == id }; threads.removeAll { $0.project == id }; scheduleSave() } else { await refresh() }
+        } catch { failure = error.localizedDescription }
+    }
+    func search(_ q: String) async -> DSearch? { try? await call("search", ["q": q]) }
+    func models() async -> [DModelGroup] {
+        guard let r: DModels = try? await call("models.list") else { return [] }
+        // claude first, then the rest by name (a JSON object has no order)
+        return r.models.keys.sorted { a, b in a == "claude" ? b != "claude" : (b == "claude" ? false : a < b) }.map { DModelGroup(provider: $0, rows: r.models[$0] ?? []) }
+    }
+    func setModel(_ id: String, provider: String, model: String) async throws {
+        let r: DThreadOpt = try await call("thread.model", ["thread": id, "provider": provider, "model": model])
+        if let t = r.thread { upsert(t) }
+    }
+    func mentions(_ q: String, kind: String) async -> [DMention] {
+        ((try? await call("mentions.list", ["q": q, "kind": kind, "limit": 8]) as DMentions)?.items) ?? []
+    }
+    func loadBots() async {
+        guard has("bots"), let r: DDirectory = try? await call("bots.list") else { return }
+        bots = r.bots; rooms = r.rooms
+    }
+    func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
+    func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }
+
     // MARK: alerts: while the app still runs (iOS keeps the socket a short while in the background), a turn that ended or asks tells the person
     private func alert(_ t: DThread, _ state: String) {
         guard AppSettings.shared.alerts, UIApplication.shared.applicationState != .active else { return }
@@ -436,6 +482,16 @@ final class DataClient {
         n.body = state == "asking" ? "Waiting for your answer" : state == "failed" ? "The turn failed" : (t.preview.isEmpty ? "Finished" : t.preview)
         if AppSettings.shared.alertSound { n.sound = .default }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "turn-" + t.id, content: n, trigger: nil))
+    }
+    // the hub's own `notify` push (a turn ended, failed, or an ask opened): a local notification while the app is not on screen
+    private func notifyLocal(_ tid: String, _ kind: String, title: String, body: String) {
+        guard AppSettings.shared.alerts, UIApplication.shared.applicationState != .active else { return }
+        let n = UNMutableNotificationContent()
+        n.title = title.isEmpty ? "Backplane" : title
+        n.body = kind == "ask" ? "Waiting for your answer" + (body.isEmpty ? "" : ": " + body) : kind == "fail" ? "The turn failed" : "Finished"
+        n.userInfo = ["thread": tid]
+        if AppSettings.shared.alertSound { n.sound = .default }
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "turn-" + tid, content: n, trigger: nil))
     }
     func askNotificationPermission() async {
         _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])

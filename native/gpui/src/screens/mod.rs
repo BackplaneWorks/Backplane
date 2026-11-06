@@ -2,6 +2,7 @@
 //! hub already sends the phones (src/mobile/screen.bend) and answers with a view action; no decision lives here.
 pub mod asks;
 pub mod attach;
+pub mod desk;
 pub mod devbar;
 pub mod ctxmenu;
 pub mod bar;
@@ -10,6 +11,8 @@ pub mod bots;
 pub mod drafts;
 pub mod composer;
 pub mod edit;
+pub mod histbar;
+pub mod filesui;
 pub mod history;
 pub mod images;
 pub mod improv_model;
@@ -24,6 +27,7 @@ pub mod plotview;
 pub mod select;
 pub mod strip;
 pub mod settings;
+pub mod accounts;
 pub mod timeline;
 pub mod tools;
 pub mod viewer;
@@ -34,6 +38,7 @@ use std::collections::HashMap;
 
 /// State the screens keep between frames (input boxes, caches); the hub owns everything else.
 pub struct Screens {
+    pub acct: accounts::Accounts,
     pub ask_inputs: HashMap<String, Entity<composer::Composer>>,
     pub attacher: attach::Attacher,
     /// the dev build strip (devbar.rs), none when no build is being made
@@ -54,6 +59,7 @@ pub struct Screens {
     pub reg: timeline::Reg,
     pub menu_open: bool,
     pub projects: projects::Projects,
+    pub files: filesui::FilesUi,
     /// The 3D page (fed the hub's solid frames) and the Browser page (polls the thread's frame while it is shown); made when first needed.
     pub solid: Option<Entity<crate::viewers::solid::SolidPage>>,
     pub browser: Option<(String, Entity<crate::viewers::browser::BrowserPage>)>,
@@ -66,7 +72,15 @@ pub struct Screens {
     pub plot_click: Option<std::time::Instant>,
     pub plot: plot::Store,
     pub plotview: plotview::PlotView,
+    /// The cameras of a Split's schematic and board panes (`pv(1)`, `pv(2)`).
+    pub split_pv: [plotview::PlotView; 2],
+    /// The canvas a `kicad.info` request is answering for.
+    pub pick_slot: Option<usize>,
+    /// The last viewer state sent to the hub (`viewer.state`), so only a change is reported.
+    pub last_state: String,
     pub picker_open: bool,
+    /// the Context chip's panel (Bend's token-stats chip: a click opens what the provider told about the thread's context)
+    pub ctx_open: bool,
     pub fields: HashMap<String, settings::FieldSlot>,
     pub settings_focus: FocusHandle,
     pub focus_settings: bool,
@@ -87,8 +101,10 @@ pub struct Screens {
 }
 
 impl Screens {
+    /// The camera state of canvas `slot`: 0 the Board/Schematic page, 1 and 2 the Split's schematic and board.
+    pub fn pv(&mut self, slot: usize) -> &mut plotview::PlotView { match slot { 0 => &mut self.plotview, n => &mut self.split_pv[(n - 1).min(1)] } }
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
-        Self { ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, paging: None, reg: Default::default(), menu_open: false, projects: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new() }
+        Self { acct: Default::default(), ctx_open: false, split_pv: Default::default(), pick_slot: None, last_state: String::new(), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, paging: None, reg: Default::default(), menu_open: false, projects: Default::default(), files: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new() }
     }
 }

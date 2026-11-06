@@ -84,12 +84,19 @@ def Proc.git.env() -> List<&2, String>:
 def Proc.copy() -> IO(Bool):
   IO.bind(Result<&1, &1, U32 & String, String>, Bool, IO.get_env("BACKPLANE_COPY"), r => IO.pure(Bool, String.eq(Result.default(&1, &1, U32 & String, String, r, ""), "1")))
 
+def Proc.run.folder(+cmd: String, args: List<&2, String>, cwd: String) -> IO(Ran):
+  match cwd:
+    case SNil{}:
+      IO.pure(Ran, Ran{2, "No working folder: refusing to use the hub working directory"})
+    case SCon{c, rest}:
+      IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Ran, H.Proc.spawn("env", List.append(&2, String, Proc.git.env(), cmd <> args), SCon{c, rest}, 1), Proc.run.k)
+
 def Proc.run.go(refused: Bool, +cmd: String, args: List<&2, String>, cwd: String) -> IO(Ran):
   match refused:
     case True{}:
       IO.pure(Ran, Ran{126, CN.Copy.refusal(cmd)})
     case False{}:
-      IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Ran, H.Proc.spawn("env", List.append(&2, String, Proc.git.env(), cmd <> args), cwd, 1), Proc.run.k)
+      Proc.run.folder(cmd, args, cwd)
 
 # run cmd with args in cwd; stdout and stderr together, stdin closed (a
 # hub on a copied log runs no network command: CN.Copy.refused)
