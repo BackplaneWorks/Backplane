@@ -104,3 +104,82 @@ test('hub-to-hub invites are recorded: they expire like device invitations, link
  // an older hub's validator (device invitations only) still reads the registry
  const data=JSON.parse(disk);assert.ok(data.invitations.every(x=>/^[a-f0-9]{32}$/.test(x.id)&&/^[a-f0-9]{64}$/.test(x.hash)&&/^[a-f0-9]{64}$/.test(x.codeHash)));
 });
+// Add a device's addresses (pairingPlan): the tailnet, each local network
+// address, this computer, each its own link to the one invitation
+const nics={lo:[{family:'IPv4',address:'127.0.0.1',internal:true}],enp3s0:[{family:'IPv4',address:'192.168.1.23',internal:false},{family:'IPv6',address:'fe80::1',internal:false}],
+ wlan0:[{family:'IPv4',address:'10.0.0.7',internal:false},{family:'IPv4',address:'169.254.3.4',internal:false}],docker0:[{family:'IPv4',address:'172.17.0.1',internal:false}],'br-1a2b':[{family:'IPv4',address:'172.18.0.1',internal:false}],
+ veth9:[{family:'IPv4',address:'172.19.0.1',internal:false}],virbr0:[{family:'IPv4',address:'192.168.122.1',internal:false}],tailscale0:[{family:'IPv4',address:'100.101.102.103',internal:false}],odd0:[{family:'IPv4',address:'100.64.0.9',internal:false}]};
+function effectsWith(t,f,interfaces){
+ const effects=new Map(), code=fs.readFileSync('src/server/effects/pairing.js','utf8').replace(/CID\(([^)]+)\)/g,'"$1"');
+ const req=n=>n==='node:os'?{networkInterfaces:()=>interfaces}:require(n);
+ new Function('require','process','io_eff',code)(req,process,(id,fn)=>effects.set(id,fn));
+ return {start:(host,port=3787)=>effects.get('Pairing.start')(f.home,f.opts.root,host,port),address:x=>effects.get('Pairing.address')(x),
+  ask:(op,secret='',name='',authority='127.0.0.1:3787',https=false)=>JSON.parse(effects.get('Pairing.request')(op,secret,name,authority,https)),lan:(ip,base)=>effects.get('Pairing.lan')(ip,base).$==='True'};
+}
+const fragment=link=>{const u=new URL(link),p=new URLSearchParams(u.hash.slice(1));return {origin:u.origin,invite:p.get('invite'),routes:JSON.parse(p.get('routes'))};};
+test('an invitation lists the tailnet, each local network address and this computer, each with its own link',t=>{
+ const f=fixture(t),e=effectsWith(t,f,nics);assert.equal(e.start('127.0.0.1'),'');
+ e.address('http://100.101.102.103:3787/#token='+f.opts.root);
+ const x=e.ask('create');
+ assert.deepEqual(x.addresses.map(a=>[a.kind,a.url,a.listening]),[['tailnet','http://100.101.102.103:3787',true],['lan','http://192.168.1.23:3787',false],['lan','http://10.0.0.7:3787',false],['local','http://127.0.0.1:3787',true]]);
+ // one invitation: every link carries the same secret, its own address first
+ const parts=x.addresses.map(a=>fragment(a.link));
+ assert.equal(new Set(parts.map(p=>p.invite)).size,1);assert.equal(parts[0].invite,fragment(x.link).invite);
+ parts.forEach((p,i)=>{assert.equal(p.origin,x.addresses[i].url);assert.equal(p.routes[0],x.addresses[i].url);});
+ // a hint is only an address the hub answers on, and never loopback for another device
+ assert.deepEqual(parts[0].routes,['http://100.101.102.103:3787']);assert.deepEqual(parts[1].routes,['http://192.168.1.23:3787','http://100.101.102.103:3787']);
+ assert.deepEqual(parts[3].routes,['http://127.0.0.1:3787','http://100.101.102.103:3787']);
+ // the old fields are the default address's: the first remote one that answers
+ assert.equal(x.link,x.addresses[0].link);assert.deepEqual(x.routes,['http://100.101.102.103:3787']);assert.equal(x.localOnly,false);
+ for(const a of x.addresses)assert.ok(!a.link.includes(f.opts.root));
+ // loopback only: the old fields stay this computer's, as before
+ const g=fixture(t),h=effectsWith(t,g,nics);h.start('127.0.0.1');const y=h.ask('create','','','localhost:3787');
+ assert.deepEqual(y.addresses.map(a=>[a.kind,a.listening]),[['lan',false],['lan',false],['local',true]]);
+ assert.equal(y.addresses[2].url,'http://localhost:3787');assert.equal(y.localOnly,true);assert.equal(y.link,y.addresses[2].link);
+});
+test('a listener on every interface answers on each local network address and covers the tailnet one',t=>{
+ const f=fixture(t),e=effectsWith(t,f,nics);e.start('0.0.0.0');
+ const x=e.ask('create','','','192.168.1.23:3787');
+ assert.deepEqual(x.addresses.map(a=>[a.kind,a.url,a.listening]),[['tailnet','http://100.101.102.103:3787',true],['lan','http://192.168.1.23:3787',true],['lan','http://10.0.0.7:3787',true],['local','http://127.0.0.1:3787',true]]);
+ // (a second tailnet address is a hint after them, never an address of its own)
+ assert.deepEqual(x.routes,['http://100.101.102.103:3787','http://192.168.1.23:3787','http://10.0.0.7:3787','http://100.64.0.9:3787']);
+ // no container, VM bridge, link-local or second tailnet address is offered as the local network
+ assert.ok(!JSON.stringify(x).match(/172\.1[789]|192\.168\.122|169\.254/));assert.equal(x.addresses.filter(a=>a.url.includes('100.64.0.9')).length,0);
+ // nor is the lan list fooled by a tailnet address on an odd interface name
+ const {pairingPlan}=new Function('require',fs.readFileSync('src/server/effects/pairing.js','utf8').split('let bp_pairing;')[0]+';return {pairingPlan};')(require);
+ assert.deepEqual(pairingPlan({host:'127.0.0.1',port:1,interfaces:nics}).choices.map(c=>c.url),['http://192.168.1.23:1','http://10.0.0.7:1','http://127.0.0.1:1']);
+ // an origin none of these (a proxy's name) stays a hint after the chosen address
+ const p=pairingPlan({host:'127.0.0.1',port:1,interfaces:{},authority:'hub.example',https:true});
+ assert.deepEqual(p.choices.map(c=>c.kind),['local']);assert.deepEqual(p.routes,['https://hub.example']);
+});
+test('local network listening: kept across a restart, recorded when bound, closed when turned off',t=>{
+ const f=fixture(t),e=effectsWith(t,f,nics),file=path.join(f.home,'lan-v1.json');e.start('127.0.0.1');
+ assert.equal(e.ask('lan-on','172.17.0.1').error,'lan_unknown');assert.equal(e.ask('lan-on','8.8.8.8').error,'lan_unknown');assert.ok(!fs.existsSync(file));
+ assert.deepEqual(e.ask('lan-on','192.168.1.23'),{ok:true,ip:'192.168.1.23',port:3787,bind:true});
+ assert.deepEqual(JSON.parse(fs.readFileSync(file,'utf8')),{version:1,ips:['192.168.1.23']});if(process.platform!=='win32')assert.equal(fs.statSync(file).mode&0o777,0o600);
+ // the hub bound it (loop.js's listener on that address is the one kept)
+ let stopped=0,closed=0;const listener={server:{hostname:'192.168.1.23',port:3787,stop(all){stopped+=all?1:0;}},close(){closed++;}};
+ globalThis.BP_H={rows:new Map([[1,{server:{hostname:'127.0.0.1',port:3787}}],[2,listener]])};t.after(()=>{delete globalThis.BP_H;});
+ const up=e.ask('lan-up','192.168.1.23');assert.equal(up.base,3221225472);assert.equal(up.listening,true);
+ assert.equal(e.lan('192.168.1.23',3221225472),true);assert.equal(e.lan('192.168.1.23',2147483648),false);assert.equal(e.lan('10.0.0.7',3221225472),false);
+ assert.deepEqual(e.ask('lan-on','192.168.1.23'),{ok:true,ip:'192.168.1.23',listening:true});
+ assert.deepEqual(e.ask('create').addresses.map(a=>a.listening),[true,false,true]);
+ assert.deepEqual(e.ask('list').lan,[{ip:'192.168.1.23',url:'http://192.168.1.23:3787',listening:true}]);
+ // the owner's own hub: a link to that address is followed without asking
+ assert.equal(e.ask('known','http://192.168.1.23:3787').known,true);assert.equal(e.ask('known','http://10.0.0.7:3787').known,false);
+ // a restart listens there again
+ const r=effectsWith(t,f,nics);r.start('127.0.0.1');assert.deepEqual(r.ask('lan-saved'),{ips:['192.168.1.23'],port:3787});
+ assert.equal(r.ask('lan-fail','192.168.1.23','boot').error,'lan_unavailable');assert.deepEqual(r.ask('lan-saved').ips,['192.168.1.23']);
+ // off: forgotten, its listener and connections closed, the next accept ends the loop
+ assert.deepEqual(e.ask('lan-off','192.168.1.23'),{ok:true,ip:'192.168.1.23',listening:false});
+ assert.equal(stopped,1);assert.equal(closed,1);assert.equal(e.lan('192.168.1.23',3221225472),false);
+ assert.deepEqual(JSON.parse(fs.readFileSync(file,'utf8')).ips,[]);assert.deepEqual(e.ask('list').lan,[]);
+ assert.deepEqual(e.ask('create').addresses.map(a=>a.listening),[false,false,true]);
+ // opened again: a new id range, so the old loop ends rather than serving twice
+ e.ask('lan-on','192.168.1.23');assert.equal(e.ask('lan-up','192.168.1.23').base,3221225472+16777216);assert.equal(e.lan('192.168.1.23',3221225472),false);
+ // a bind the person asked for that failed is not kept
+ e.ask('lan-on','10.0.0.7');assert.equal(e.ask('lan-fail','10.0.0.7').error,'lan_unavailable');assert.deepEqual(JSON.parse(fs.readFileSync(file,'utf8')).ips,['192.168.1.23']);
+ // covered by the main listener: nothing to bind, nothing kept
+ const g=fixture(t),c=effectsWith(t,g,nics);c.start('0.0.0.0');assert.deepEqual(c.ask('lan-on','10.0.0.7'),{ok:true,ip:'10.0.0.7',listening:true});
+ assert.ok(!fs.existsSync(path.join(g.home,'lan-v1.json')));assert.deepEqual(c.ask('lan-off','10.0.0.7').listening,true);
+});

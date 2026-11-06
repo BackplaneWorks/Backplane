@@ -28,4 +28,6 @@ export const pairingErrors = {
   hub_unreachable: 'Hub unreachable. Check that it is running and that you are on its LAN or tailnet.',
   pairing_required: 'Access was revoked or pairing is missing. Connect with a new invitation.',
   storage_unavailable: 'The hub could not save this pairing. Try again when its storage is available.',
+  lan_unavailable: 'The hub could not listen on that address. Another program may be using its port.',
+  lan_unknown: 'This computer no longer has that local network address. Create a new invitation.',
 };
