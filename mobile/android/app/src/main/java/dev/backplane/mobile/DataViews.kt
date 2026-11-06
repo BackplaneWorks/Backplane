@@ -377,7 +377,7 @@ private fun EntryRow(tid: String, e: DEntry) {
             else DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 3.dp))
         }
         "assistant" -> Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
-            MdText(e.text)
+            MdText(e.text, thread = tid)
             if (!e.live) DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 4.dp))
         }
         "tool", "step" -> Box(Modifier.padding(horizontal = 12.dp)) { ToolRow(e) }

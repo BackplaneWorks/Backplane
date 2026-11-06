@@ -8,6 +8,8 @@ import UserNotifications
 @MainActor
 @Observable
 final class DataClient {
+    /// A thread a link in a message asked to open (backplane://thread/<id>); the root screen takes it.
+    var pendingThread: String?
     static let shared = DataClient()
     enum Conn: String { case offline, connecting, online }
 
