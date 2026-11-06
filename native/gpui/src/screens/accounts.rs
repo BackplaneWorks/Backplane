@@ -16,6 +16,8 @@ pub struct Accounts {
     /// The thread the chip last asked about, and whether the menu under the chip is open.
     pub asked_for: String,
     pub menu: bool,
+    /// Whether the limits menu (every account's remaining allowance) is open.
+    pub limits: bool,
     /// The profile whose Delete was pressed once (the second press deletes).
     pub armed: String,
     /// The last refusal or hint, said where the person is looking.
@@ -314,6 +316,78 @@ pub fn chip(cx: &mut Context<Backplane>, light: bool, st: &Accounts, thread: &st
     if st.menu { wrap.child(deferred(anchored().anchor(Corner::BottomLeft).offset(point(px(0.), px(-4.))).snap_to_window_with_margin(px(8.)).child(menu(cx, light, st, thread))).with_priority(10)) } else { wrap }
 }
 
+// ---- the limits chip -------------------------------------------------------------------------------------------------------------------------------
+
+/// One account's block in the limits menu: its name, whether the thread uses it, and a line per limit window (or why there is none).
+#[derive(Debug, PartialEq)]
+pub struct LimitBlock { pub name: String, pub bound: bool, pub lines: Vec<String>, pub note: String }
+fn window_name(scope: &str) -> String {
+    match scope { "five_hour" => "5-hour".into(), "seven_day" => "Weekly".into(), "seven_day_opus" => "Weekly Opus".into(), "seven_day_sonnet" => "Weekly Sonnet".into(), o => o.replace('_', " ") }
+}
+/// "in 2d 3h" / "in 4h 5m" / "in 12m" / "now" for a reset time in epoch seconds.
+pub fn resets_in(at: u64, now: u64) -> String {
+    if at <= now { return "now".into() }
+    let m = (at - now + 59) / 60;
+    if m >= 1440 { format!("in {}d {}h", m / 1440, (m % 1440) / 60) } else if m >= 60 { format!("in {}h {}m", m / 60, m % 60) } else { format!("in {m}m") }
+}
+/// A window as "5-hour  72% left · resets in 3h 10m".
+pub fn window_line(w: &Value, now: u64) -> Option<String> {
+    let used = w["used_percent"].as_f64().or_else(|| w["used_permille"].as_f64().map(|p| p / 10.0)).filter(|u| (0.0..=100.0).contains(u))?;
+    let mut s = format!("{}  {:.0}% left", window_name(w["scope"].as_str().unwrap_or("")), 100.0 - used);
+    if let Some(r) = w["resets_at"].as_f64().filter(|r| *r > 0.0) { s.push_str(&format!(" · resets {}", resets_in(r as u64, now))) }
+    Some(s)
+}
+fn block(name: String, bound: bool, al: &Value, missing: &str, now: u64) -> LimitBlock {
+    let lines: Vec<String> = al["windows"].as_array().into_iter().flatten().filter_map(|w| window_line(w, now)).collect();
+    let at = al["at"].as_u64().unwrap_or(0);
+    let note = if lines.is_empty() { missing.to_string() } else if at > 0 && now.saturating_sub(at) > 900 { format!("last read {}m ago", now.saturating_sub(at) / 60) } else { String::new() };
+    LimitBlock { name, bound, lines, note }
+}
+/// Every Claude account's limits: the CLI's default login, then each saved account; the one the thread uses is marked.
+pub fn limit_blocks(snap: &Value, now: u64) -> Vec<LimitBlock> {
+    let (bound, _) = binding(snap);
+    let mut out = vec![];
+    let d = &snap["default_allowance"];
+    let dmiss = if d["state"] == "unavailable" { "The Claude CLI is not signed in with a subscription, so it reports no limits." } else { "Not read yet. The hub checks every 5 minutes." };
+    out.push(block("Default account".into(), bound.is_empty(), d, dmiss, now));
+    for p in profiles(snap).iter().filter(|p| p["provider"] == "claude") {
+        let miss = if p["state"] == "unchecked" { "Checking the sign-in…" } else if p["state"] != "connected" { "Not signed in, so no limits to read. Connect it in Settings." } else { "Claude has not reported limits for this account yet." };
+        out.push(block(string(p, "label"), p["id"] == bound.as_str(), &p["allowance"], miss, now));
+    }
+    out
+}
+/// Opening the limits menu asks the hub to re-read each signed-in (or unchecked) Claude account's usage; the hub reads a profile at most every 5 minutes.
+fn refresh_usage(this: &mut Backplane) {
+    for p in profiles(&this.screens.acct.snap).iter().filter(|p| p["provider"] == "claude" && matches!(p["state"].as_str(), Some("connected" | "unchecked"))) { ask(this, json!({"op": "status", "profile": string(p, "id")})) }
+}
+fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
+fn limits_menu(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let mut list = div().id("limits-menu").w(px(340.)).max_h(px(420.)).overflow_y_scroll().flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).shadow_lg().occlude()
+        .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.acct.limits = false; cx.notify(); }));
+    list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("faint")).child("Remaining allowance per Claude account"));
+    for b in limit_blocks(&st.snap, now_s()) {
+        let mut col = div().flex().flex_col().gap(px(2.)).px_3().py(px(6.))
+            .child(div().flex().items_center().gap_2().child(div().w(px(14.)).flex_shrink_0().child(if b.bound { crate::art::icon("circle-check", 14., c("accent")) } else { div().into_any_element() }))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(13.)).font_weight(FontWeight::BOLD).child(b.name.clone()))
+                .child(div().text_size(px(11.)).text_color(c("faint")).child(if b.bound { "this thread" } else { "" })));
+        for l in b.lines { col = col.child(div().pl(px(22.)).text_size(px(12.)).child(l)) }
+        if !b.note.is_empty() { col = col.child(div().pl(px(22.)).text_size(px(11.)).text_color(c("dim")).child(b.note)) }
+        list = list.child(col);
+    }
+    if !st.notice.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("bad")).child(st.notice.clone())); }
+    list.into_any_element()
+}
+/// The composer's limits chip: the thread's least remaining window, opening the per-account menu.
+pub fn limits_chip(cx: &mut Context<Backplane>, light: bool, st: &Accounts, text: String) -> Div {
+    let c = |n: &str| theme::color(light, n);
+    let btn = div().id("limits-chip").h(px(30.)).px_3().flex().items_center().gap_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().cursor_pointer()
+        .hover(|s| s.bg(c("raise"))).child(crate::art::icon("gauge", 14., c("dim"))).child(text)
+        .on_click(cx.listener(|this, _, _, cx| { this.screens.acct.limits = !this.screens.acct.limits; if this.screens.acct.limits { list(this); refresh_usage(this) } cx.notify(); }));
+    let wrap = div().relative().child(btn);
+    if st.limits { wrap.child(deferred(anchored().anchor(Corner::BottomLeft).offset(point(px(0.), px(-4.))).snap_to_window_with_margin(px(8.)).child(limits_menu(cx, light, st))).with_priority(10)) } else { wrap }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,5 +418,18 @@ mod tests {
     #[test] fn a_pick_carries_the_binding_the_menu_was_drawn_from() {
         let p = select_params("t1", "w", 3, &snap()); assert_eq!((p["thread"].clone(), p["profile"].clone(), p["epoch"].clone()), (json!("t1"), json!("w"), json!(3))); assert_eq!(p["expected"], "{\"id\":\"w\",\"epoch\":3}");
         assert_eq!(binding(&snap()), ("w".to_string(), 3));
+    }
+    #[test] fn limits_list_every_account_with_what_is_left_and_why_when_nothing() {
+        let mut s = snap(); s["profiles"][0]["allowance"]["windows"][0]["resets_at"] = json!(10_000u64 + 3 * 3600 + 600);
+        s["default_allowance"] = json!({"state":"ok","at":9990,"windows":[{"scope":"seven_day","used_percent":86.0,"resets_at":10_000u64 + 2 * 86400}]});
+        let b = limit_blocks(&s, 10_000);
+        assert_eq!(b.len(), 3);
+        assert_eq!((b[0].name.as_str(), b[0].bound, b[0].lines.clone()), ("Default account", false, vec!["Weekly  14% left · resets in 2d 0h".to_string()]));
+        assert_eq!((b[1].name.as_str(), b[1].bound), ("Work", true));
+        assert_eq!(b[1].lines, vec!["5-hour  38% left · resets in 3h 10m".to_string(), "Weekly  80% left".to_string()]);
+        assert!(b[2].lines.is_empty() && b[2].note.contains("Not signed in"));
+        s["default_allowance"] = json!({"state":"unavailable","windows":[]}); assert!(limit_blocks(&s, 10_000)[0].note.contains("not signed in"));
+        assert!(limit_blocks(&Value::Null, 1)[0].note.contains("Not read yet"));
+        assert_eq!(resets_in(5, 10), "now"); assert_eq!(resets_in(10 + 720, 10), "in 12m");
     }
 }
