@@ -58,7 +58,22 @@ fn sha256(p: &Path) -> Result<String, String> {
     loop { let n = f.read(&mut b).map_err(|e| e.to_string())?; if n == 0 { break } h.update(&b[..n]); }
     Ok(hex::encode(h.finalize()))
 }
-/// A build ready to run: the hub is there and runs, and nothing in it is a link (it could point outside its folder).
+/// What `tar -tzf` (names) and `tar -tvzf` (one line per member, its type first) say an archive holds, before any of it is written. Only plain files and folders,
+/// every name inside the folder it unpacks into: no absolute path, no `..`, no link of either kind, no device. The two listings must agree line for line, so a name
+/// with a newline in it cannot hide a member.
+pub fn members_ok(names: &str, long: &str) -> Result<(), String> {
+    let (n, l): (Vec<&str>, Vec<&str>) = (names.lines().collect(), long.lines().collect());
+    if n.is_empty() { return Err("the archive is empty".into()) }
+    if n.len() != l.len() { return Err("the archive's listing does not add up".into()) }
+    for (name, line) in n.iter().zip(&l) {
+        match line.chars().next() { Some('-') | Some('d') => {}, Some('h') => return Err("the archive holds a hard link".into()), Some('l') => return Err("the archive holds a link".into()), _ => return Err("the archive holds something that is not a file".into()) }
+        if name.starts_with('/') || name.starts_with('\\') || name.contains(':') { return Err(format!("the archive names a path outside its folder: {name}")) }
+        if name.split(['/', '\\']).any(|c| c == "..") { return Err(format!("the archive names a path outside its folder: {name}")) }
+    }
+    Ok(())
+}
+
+/// A build ready to run: the hub is there and runs, and nothing in it is a link of either kind (it could point outside its folder). Checked again after unpacking, whatever the listing said.
 fn check_tree(d: &Path) -> Result<(), String> {
     let hub = fs::metadata(d.join("backplane-hub")).map_err(|_| "the archive has no backplane-hub".to_string())?;
     #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; if hub.permissions().mode() & 0o111 == 0 { return Err("the archive's backplane-hub cannot run".into()) } }
@@ -68,7 +83,8 @@ fn check_tree(d: &Path) -> Result<(), String> {
         for e in fs::read_dir(&x).map_err(|e| e.to_string())? {
             let e = e.map_err(|e| e.to_string())?; let t = e.file_type().map_err(|e| e.to_string())?;
             if t.is_symlink() { return Err("the archive holds a link".into()) }
-            if t.is_dir() { todo.push(e.path()) }
+            if t.is_dir() { todo.push(e.path()); continue }
+            #[cfg(unix)] { use std::os::unix::fs::MetadataExt; if e.metadata().map_err(|e| e.to_string())?.nlink() > 1 { return Err("the archive holds a hard link".into()) } }
         }
     }
     Ok(())
@@ -249,5 +265,22 @@ mod tests {
     #[test] fn pruning_keeps_what_the_guard_needs() {
         let s = |x: &[&str]| x.iter().map(|y| y.to_string()).collect::<Vec<_>>();
         assert_eq!(prunable(&s(&["a", "b", "c", "d", "e", ".stage-x"]), "e", &s(&["b"]), &s(&["a", "d"])), s(&["a", "c"]), "current e, pinned b, newest good d, scratch never");
+    }
+    #[test] fn only_plain_members_inside_the_folder_unpack() {
+        let ok = |n: &str, t: &str| members_ok(n, t);
+        assert!(ok("backplane-hub\nassets/\nassets/a.png\n", "-rwxr-xr-x x\ndrwxr-xr-x x\n-rw-r--r-- x\n").is_ok());
+        assert!(ok("/etc/passwd\n", "-rw-r--r-- x\n").unwrap_err().contains("outside"), "absolute");
+        assert!(ok("a/../../x\n", "-rw-r--r-- x\n").unwrap_err().contains("outside"), "..");
+        assert!(ok("..\n", "drwxr-xr-x x\n").is_err()); assert!(ok("C:x\n", "-rw-r--r-- x\n").is_err());
+        assert!(ok("x\n", "hrw-r--r-- x link to /etc/passwd\n").unwrap_err().contains("hard link"));
+        assert!(ok("x\n", "lrwxrwxrwx x -> /etc\n").unwrap_err().contains("link"));
+        assert!(ok("x\n", "crw-r--r-- x\n").is_err(), "a device");
+        assert!(ok("a\nb\n", "-rw-r--r-- x\n").unwrap_err().contains("add up"), "a name with a newline in it");
+        assert!(ok("", "").is_err());
+    }
+    #[test] fn a_hard_link_found_after_unpacking_is_refused() {
+        let r = Rig::new("hard"); let mut f = Feed::new(); let x = found(&mut f, &r, b"archive");
+        let e = stage(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &|a, d| { good_tree(a, d)?; fs::write(d.join("f"), b"x").unwrap(); fs::hard_link(d.join("f"), d.join("g")).unwrap(); Ok(()) }).unwrap_err();
+        assert!(e.contains("hard link"), "{e}"); assert!(left(&r).is_empty());
     }
 }
