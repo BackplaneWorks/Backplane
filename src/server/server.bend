@@ -340,6 +340,9 @@ type Msg is Data:
   MachinesFound{machines: String}
   # the tailnet listener is up: the pairing link clients show in Settings
   LinkFound{link: String}
+  # the person let the hub answer on a local network address too (POST
+  # /auth/lan): Hub.lan.open listens there, `reply` hears how it went
+  LanOpen{ip: String, reply: Chan(String)}
   # a Codex or Grok turn's process started: the one the hub now hears (and
   # stops) for the thread; its lines come tagged (B.Tag)
   TurnPid{thread: String, pid: U32, input: Chan(String), gen: String}
@@ -17137,6 +17140,33 @@ def Conn.devices.unpeer(go: Bool, +peer: String, +inbox: Chan(Msg)) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
+# a new invitation's addresses (effects/pairing.js's pairingPlan: the
+# tailnet, each local network address, this computer), each with the QR
+# code of its own link; the default link's code is its address's
+def Conn.devices.qrs(xs: List<&2, J.Json>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}: Nil{}
+    case +x <> rest:
+      TV.Obj.put(x, "qr", J.Str{QR.Qr.text(J.Json.get_str(x, "link", ""))}) <> Conn.devices.qrs(rest)
+
+def Conn.devices.qr.k(hit: Bool, +x: J.Json, k: Unit -> String) -> String:
+  match hit:
+    case True{}: J.Json.get_str(x, "qr", "")
+    case False{}: k(Unit{})
+
+def Conn.devices.qr(xs: List<&2, J.Json>, +link: String) -> String:
+  match xs:
+    case Nil{}: QR.Qr.text(link)
+    case +x <> rest: Conn.devices.qr.k(String.eq(J.Json.get_str(x, "link", ""), link), x, _ => Conn.devices.qr(rest, link))
+
+def Conn.devices.made.k(+xs: List<&2, J.Json>, +j: J.Json, +link: String) -> J.Json:
+  TV.Obj.put(TV.Obj.put(j, "addresses", J.Json.arr(xs)), "qr", J.Str{Conn.devices.qr(xs, link)})
+
+def Conn.devices.made(none: Bool, +j: J.Json, +link: String) -> J.Json:
+  match none:
+    case True{}: j
+    case False{}: Conn.devices.made.k(Conn.devices.qrs(J.Json.elems(J.Json.get_obj(j, "addresses"))), j, link)
+
 def Conn.devices.reply(+j: J.Json, s: Socket, +native: Bool, +https: Bool, +op: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     Conn.devices.left(J.Json.elems(J.Json.get_obj(j, "clients")), inbox)
@@ -17146,7 +17176,7 @@ def Conn.devices.reply(+j: J.Json, s: Socket, +native: Bool, +https: Bool, +op: 
     +link : String = J.Json.get_str(j, "link", "")
     +body : J.Json = Bool.pick(J.Json, String.eq(op, "enroll"),
       Bool.pick(J.Json, Bool.or(native, Bool.not(String.is_empty(error))), j, J.Json.obj([J.KV{"ok", J.Flag{True{}}}, J.KV{"device", J.Str{J.Json.get_str(j, "id", "")}}])),
-      Bool.pick(J.Json, String.is_empty(link), j, TV.Obj.put(j, "qr", J.Str{QR.Qr.text(link)})))
+      Conn.devices.made(String.is_empty(link), j, link))
     Conn.finish(s, W.Http.response(Bool.pick(String, String.is_empty(error), "200 OK", Bool.pick(String, String.eq(error, "rate_limited"), "429 Too Many Requests", "400 Bad Request")),
       "application/json", U.Utf8.encode(J.Json.show(body)), "Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n" ++
         Bool.pick(String, String.is_empty(credential), "", AUTH.Auth.pair.cookies(credential, https))))
@@ -17161,6 +17191,31 @@ def Conn.devices.request(ok: Bool, s: Socket, +hs: List<&2, W.Header>, +op: Stri
         Conn.devices.reply(Maybe.default(&2, J.Json, J.Json.parse(result), J.Null{}), s,
           Bool.and(String.is_empty(W.Http.header_of(hs, "origin")), String.eq(W.Http.header_of(hs, "x-backplane-client"), "native")), https, op, inbox)
 
+# Local network listening (Settings > Devices > Add a device, Local
+# network): POST /auth/lan with X-Backplane-Lan: the address and
+# X-Backplane-Lan-State: on or off, authorized as POST /auth/invitations
+# is. effects/pairing.js keeps the choice; a listener the hub must open
+# is opened by the hub (LanOpen, Hub.lan.open) and the reply says
+# whether it now answers there.
+def Lan.request.k(bind: Bool, +j: J.Json, s: Socket, +inbox: Chan(Msg)) -> IO(Unit):
+  match bind:
+    case False{}: Conn.devices.reply(j, s, False{}, False{}, "lan", inbox)
+    case True{}:
+      do IO<Unit>:
+        +reply : Chan(String) <- Chan.new(String, 1)
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LanOpen{J.Json.get_str(j, "ip", ""), reply})
+        got : Maybe<&1, String> <- Chan.recv(String, reply)
+        Conn.devices.reply(Maybe.default(&2, J.Json, J.Json.parse(Maybe.default(&1, String, got, "")), J.Json.obj([J.KV{"error", J.Str{"lan_unavailable"}}])), s, False{}, False{}, "lan", inbox)
+
+def Lan.request(ok: Bool, s: Socket, +hs: List<&2, W.Header>, +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case False{}: Conn.finish(s, W.Http.response("401 Unauthorized", "application/json", U.Utf8.encode("{\"error\":\"pairing_required\"}"), "Cache-Control: no-store\r\n"))
+    case True{}:
+      do IO<Unit>:
+        result : String <- PAIR.Pairing.request(Bool.pick(String, String.eq(W.Http.header_of(hs, "x-backplane-lan-state"), "off"), "lan-off", "lan-on"), W.Http.header_of(hs, "x-backplane-lan"), "", "", False{})
+        +j : J.Json = Maybe.default(&2, J.Json, J.Json.parse(result), J.Null{})
+        Lan.request.k(J.Json.get_bool(j, "bind", False{}), j, s, inbox)
+
 def Conn.devices.fallback(denied: Bool, +token: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool) -> IO(Unit):
   Conn.route.auth(String.eq(W.Http.route(Conn.devices.path(req)), "/auth/pair"), s, req, rest, web, id, inbox, Bool.and(trusted, Bool.not(denied)), token)
 
@@ -17173,6 +17228,7 @@ def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Requ
       Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), "revoke", "uninvite"),
       Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), W.Http.header_of(hs, "x-backplane-device"), W.Http.header_of(hs, "x-backplane-invitation")), inbox)
     case "/auth/known" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "known", W.Http.header_of(hs, "x-backplane-origin"), inbox)
+    case "/auth/lan" W.Request{method, _, +hs}: Lan.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, inbox)
     case _ _: Conn.devices.fallback(String.is_empty(token), token, s, req, rest, web, id, inbox, trusted)
 
 
@@ -17339,6 +17395,104 @@ def Tailnet.start(n: Net, +host: String, +port: U32, +web: String, +inbox: Chan(
         Tailnet.https(https, port, token, inbox)
     case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       IO.pure(Unit, Unit{})
+
+# Local network listeners
+# -----------------------
+# Beside the tailnet's, the hub may answer on a local network address the
+# person chose (Add a device, Local network; effects/pairing.js keeps it
+# in <home>/lan-v1.json, so a restart listens there again). Nothing there
+# is trusted, as on the tailnet listener for a device its owner does not
+# own: no loopback, no owner, no owner hosts, so every request needs a
+# paired credential (Accept.trust with ask and trusted False). It is
+# plain HTTP on that network. A listener turned off is closed by
+# effects/pairing.js; its loop ends at the next accept that answers
+# (Pairing.lan says it is no longer wanted).
+def Lan.take(r: Listener & Result<&1, &1, U32 & String, Socket>, +id: U32, +web: String, +inbox: Chan(Msg), +token: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  (l, res) = r
+  match res:
+    case Done{s}:
+      do IO<Unit>:
+        IO.spawn(Unit, Accept.trust(False{}, s, "", id, web, inbox, False{}, token, Nil{}))
+        k(l)
+    case Fail{_}:
+      do IO<Unit>:
+        IO.sleep(1000)
+        k(l)
+
+def Lan.stop(r: Listener & Result<&1, &1, U32 & String, Socket>) -> IO(Unit):
+  (l, res) = r
+  match res:
+    case Done{s}:
+      do IO<Unit>:
+        Socket.close(s)
+        Listener.close(l)
+    case Fail{_}:
+      Listener.close(l)
+
+def Lan.next(on: Bool, r: Listener & Result<&1, &1, U32 & String, Socket>, +id: U32, +web: String, +inbox: Chan(Msg), +token: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  match on:
+    case True{}: Lan.take(r, id, web, inbox, token, k)
+    case False{}: Lan.stop(r)
+
+def Lan.got(r: Listener & Result<&1, &1, U32 & String, Socket>, +ip: String, +base: U32, +id: U32, +web: String, +inbox: Chan(Msg), +token: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  IO.bind(Bool, Unit, PAIR.Pairing.lan(ip, base), on => Lan.next(on, r, id, web, inbox, token, k))
+
+# connections from one local network listener; ids count up from `base`
+# (effects/pairing.js's lan-up: never the loopback's or the tailnet's)
+def Lan.loop(fuel: Nat, l: Listener, +ip: String, +base: U32, +id: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match fuel:
+    case 0n:
+      Listener.close(l)
+    case 1n+f:
+      IO.bind(Listener & Result<&1, &1, U32 & String, Socket>, Unit, TCP.accept(l),
+        r => Lan.got(r, ip, base, id, web, inbox, token, l2 => Lan.loop(f, l2, ip, base, (id + 1 : U32), web, inbox, token)))
+
+def Lan.opened(r: Result<&1, &1, U32 & String, Listener>, +ip: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String, +why: String, +reply: Chan(String)) -> IO(Unit):
+  match r:
+    case Done{l}:
+      do IO<Unit>:
+        +got : String <- PAIR.Pairing.request("lan-up", ip, "", "", False{})
+        +base : U32 = U32.from_nat(J.Json.get_nat(Maybe.default(&2, J.Json, J.Json.parse(got), J.Null{}), "base", 0n))
+        IO.print("Backplane on the local network: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (plain HTTP; devices pair in Settings)")
+        IO.spawn(Unit, Lan.loop(Fuel.forever(), l, ip, base, base, web, inbox, token))
+        ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, got)
+        return Unit{}
+    case Fail{_}:
+      do IO<Unit>:
+        Log.info("could not listen on the local network address " ++ ip)
+        +got : String <- PAIR.Pairing.request("lan-fail", ip, why, "", False{})
+        ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, got)
+        return Unit{}
+
+def Lan.open(+ip: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String, +why: String, +reply: Chan(String)) -> IO(Unit):
+  IO.bind(Result<&1, &1, U32 & String, Listener>, Unit, H.Net.listen(ip, port), r => Lan.opened(r, ip, port, web, inbox, token, why, reply))
+
+def Lan.each(xs: List<&2, J.Json>, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match xs:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case x <> rest:
+      do IO<Unit>:
+        +reply : Chan(String) <- Chan.new(String, 1)
+        Lan.open(J.Json.as_str(Some{x}, ""), port, web, inbox, token, "boot", reply)
+        Lan.each(rest, port, web, inbox, token)
+
+# the local network addresses kept from before (a restart): listened on again
+def Lan.start(+port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  do IO<Unit>:
+    saved : String <- PAIR.Pairing.request("lan-saved", "", "", "", False{})
+    Lan.each(J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(saved), J.Null{}), "ips")), port, web, inbox, token)
+
+def Lan.web(c: Cfg) -> String:
+  match c:
+    case Cfg{_, w, _, _, _, _, _, _, +tcfg, +views, +accountInfo, +cadInfo}:
+      w
+
+def Hub.lan.open(h: Hub, +ip: String, +reply: Chan(String)) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Lan.open(ip, Cfg.port(cfg), Lan.web(cfg), inbox, Net.token(Cfg.net(cfg)), "", reply))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # Google's tools for bots
 # -----------------------
@@ -18570,6 +18724,8 @@ def Msg.kind(m: Msg) -> String:
       "machines"
     case LinkFound{_}:
       "link"
+    case LanOpen{_, _}:
+      "lan_open"
     case TurnPid{_, _, _, _}:
       "turn_pid"
     case TurnDone{_}:
@@ -19274,6 +19430,7 @@ def Listen.up(l: Listener, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: St
     Log.info("web server on: " ++ addr)
     IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), "", Nil{}))
     Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
+    Lan.start(Cfg.port(cfg), web, inbox, Net.token(Cfg.net(cfg)))
     Machines.start(inbox, Cfg.port(cfg))
 
 def Listen.got(r: Result<&1, &1, U32 & String, Listener>, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String, k: Unit -> IO(Unit)) -> IO(Unit):
@@ -19959,6 +20116,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.dir.returned(h, mc)
     case LinkFound{lk}:
       Hub.link(h, lk)
+    case LanOpen{ip, reply}:
+      Hub.lan.open(h, ip, reply)
     case MailRecovered{changes}: Hub.mail.recovered(h, changes, now)
     case OwnerReady{record, body}: Hub.owner.ready(h, record, body, now)
     case OwnerPlan{record}: Hub.owner.plan(h, record, now)
@@ -20137,6 +20296,7 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
   do IO<Unit>:
     IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), "", Nil{}))
     Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
+    Lan.start(Cfg.port(cfg), web, inbox, Net.token(Cfg.net(cfg)))
     IO.spawn(Unit, Ticker.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
