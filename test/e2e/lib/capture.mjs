@@ -2,7 +2,7 @@
 import {spawn,execSync} from 'node:child_process';import {mkdirSync,existsSync,readdirSync,writeFileSync} from 'node:fs';
 import {sleep} from '../../perf/lib.mjs';
 const have=c=>{try{execSync(`command -v ${c}`,{stdio:'ignore'});return true}catch{return false}};
-export function tools(){return {Xvfb:have('Xvfb'),i3:have('i3'),ffmpeg:have('ffmpeg'),import:have('import'),xdotool:have('xdotool'),vulkaninfo:have('vulkaninfo')}}
+export function tools(){return {Xvfb:have('Xvfb'),i3:have('i3'),twm:have('twm'),ffmpeg:have('ffmpeg'),import:have('import'),xdotool:have('xdotool'),vulkaninfo:have('vulkaninfo')}}
 export function installMissing(){
   if(!process.env.BOAT_SANDBOX)return {installed:false,tools:tools(),note:'apt only inside a Boat sandbox'}; // best effort on a disposable Boat sandbox (root there); never on the desktop
   const t=tools();if(t.Xvfb&&t.i3&&t.ffmpeg&&t.import)return {installed:false,tools:t};
@@ -12,7 +12,10 @@ export async function startDisplay(n=62,size='1440x900x24'){
   if(process.env.E2E_ALLOW_DESKTOP!=='1'&&process.env.DISPLAY&&!process.env.BOAT_SANDBOX&&!process.env.CI&&!existsSync('/home/user'))throw Error('refusing to start a display here: run on Boat (set E2E_ALLOW_DESKTOP=1 only with the person\'s word)');
   const xv=spawn('Xvfb',[`:${n}`,'-screen','0',size,'-nolisten','tcp'],{stdio:'ignore'});await sleep(1500);
   writeFileSync('/tmp/e2e-i3.conf','font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\ndefault_floating_border none\nhide_edge_borders both\n');
-  const i3=have('i3')?spawn('i3',['-c','/tmp/e2e-i3.conf'],{stdio:'ignore',env:{...process.env,DISPLAY:`:${n}`}}):null;await sleep(1500); // no i3 (h@backplane): a bare Xvfb maps the one window at the origin
+  // a window manager: GPUI presents no frame on a bare Xvfb. i3 (Boat), else E2E_WM (a command), else twm; none (h@backplane): the window maps at the origin
+  const wm=have('i3')?['i3',['-c','/tmp/e2e-i3.conf']]:process.env.E2E_WM?[process.env.E2E_WM,[]]:have('twm')?['twm',['-f','/tmp/e2e-twmrc']]:null;
+  if(wm?.[0]==='twm')writeFileSync('/tmp/e2e-twmrc','RandomPlacement\nUsePPosition "on"\nNoTitle\n'); // twm would ask a person to place the window
+  const i3=wm?spawn(wm[0],wm[1],{stdio:'ignore',env:{...process.env,DISPLAY:`:${n}`}}):null;await sleep(1500);
   const env={...process.env,DISPLAY:`:${n}`,VK_ICD_FILENAMES:process.env.VK_ICD_FILENAMES||'/usr/share/vulkan/icd.d/lvp_icd.json'}; // llvmpipe on Boat: software rendering
   return {display:`:${n}`,env,stop:()=>{for(const p of[i3,xv].filter(Boolean))try{p.kill('SIGTERM')}catch{}}}}
 export function startRecording(display,file,fps=30){mkdirSync(file.replace(/\/[^/]+$/,''),{recursive:true});
