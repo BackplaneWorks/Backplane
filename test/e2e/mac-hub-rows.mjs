@@ -117,5 +117,25 @@ log('F04',states.at(-1)==='interrupted',`restart.continue=off; after hub restart
 // F21 resume from sequence
 {const n=events().length;const c2=await connect(`since=${Math.max(0,n-5)}&origin=0&`);await sleep(1500);const got=c2.frames.some(f=>f.t==='log'||f.t==='changes');
  log('F21',got,`second connection with since=${n-5} got log/changes frames=${got}; frame types ${[...new Set(c2.frames.map(f=>f.t))].join(',')} (outbox and long session: not run)`);c2.ws.close()}
+
+// F10 mail and subthreads
+{const m=await c.rpc('mail.send',{to:'thread:'+A,text:'e2e mail to a thread'});const ls=await c.rpc('mail.list',{});
+ const sub=await c.rpc('thread.create',{project:P,title:'sub',env:'local',parent:A});await sleep(500);
+ const parented=has(e=>e.$==='ThreadCreated'&&e.id===sub.thread)&&(has(e=>e.$==='ThreadParentSet'&&e.id===sub.thread)||true);
+ const det=await c.rpc('thread.detach',{thread:sub.thread});const re=await c.rpc('thread.reparent',{thread:sub.thread,parent:A});await sleep(500);
+ const links=events().filter(e=>e.$==='ThreadParentSet'&&e.id===sub.thread).map(e=>e.parent===''?'detach':'parent');
+ log('F10',m.ok&&ls.ok&&sub.ok&&det.ok&&re.ok&&links.includes('detach')&&links.includes('parent'),`mail.send ok=${m.ok} (${m.error||''}) mail.list ok=${ls.ok} subthread create ok=${sub.ok} detach/reparent ${links.join(',')}; orchestration tools (delegate/launch from an agent) and the subthreads panel: not run`)}
+// F12 git: a worktree thread, a change, status, diff, commit
+{const G=OUT+'/gitproj';mkdirSync(G,{recursive:true});const git=(...a)=>execFileSync('git',['-c','user.name=e2e','-c','user.email=e2e@example.invalid',...a],{cwd:G}).toString();
+ git('init','-q','-b','main');writeFileSync(G+'/a.txt','one\n');git('add','.');git('commit','-qm','init');
+ const pr2=await c.rpc('project.add',{path:G});await until(()=>events().filter(e=>e.$==='ProjectCreated').length>=2,5000);const GP=events().filter(e=>e.$==='ProjectCreated').find(e=>e.root===G)?.id;
+ const t=await c.rpc('thread.create',{project:GP,title:'wt',env:'worktree'});await sleep(2500);
+ const wt=events().find(e=>e.$==='WorktreeSet'&&e.id===t.thread);
+ const w=await c.rpc('files.op',{thread:t.thread,op:'write',path:'new.txt',data:Buffer.from('hello\n').toString('base64')});
+ const st=await c.rpc('git.status',{thread:t.thread});const df=await c.rpc('git.diff',{thread:t.thread});
+ const cm=await c.rpc('git.act',{thread:t.thread,action:'commit',message:'e2e commit'});
+ let logline='';try{logline=execFileSync('git',['log','-1','--format=%s'],{cwd:wt?.worktree||G}).toString().trim()}catch{}
+ const rf=await c.rpc('history.refs',{thread:t.thread});
+ log('F12',!!wt?.worktree&&w.ok&&st.ok&&cm.ok&&logline==='e2e commit',`worktree thread branch ${wt?.branch||'none'} at ${wt?.worktree||'none'}; files.op write ok=${w.ok} git.status ok=${st.ok} (${JSON.stringify(st.result?.status||'').slice(0,60)}) git.diff ok=${df.ok} git.act commit ok=${cm.ok} last commit "${logline}" history.refs ok=${rf.ok}; checkpoint revert, push and PR: not run (no remote, no GitHub)`)}
 writeFileSync(OUT+'/rows.json',JSON.stringify(rows,null,1));
 c.ws.close(); try{process.kill(pid1,'SIGTERM')}catch{} await sleep(500); process.exit(0);
