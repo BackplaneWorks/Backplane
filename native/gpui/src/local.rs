@@ -22,9 +22,11 @@ pub const KEYS: [&str; 8] = ["enter", "ctrl-enter", "escape", "ctrl-b", "ctrl-k"
 pub struct Local {
     pub theme: String, pub text_pct: u32, pub font: String, pub sidebar_px: u32, pub viewer_px: u32, pub sidebar_open: bool,
     pub notifications: bool, pub default_view: String, pub shortcuts: BTreeMap<String, String>,
+    /// Starred models ("provider/model"), listed first in the model menu; kept on this device.
+    pub favs: Vec<String>,
 }
 impl Default for Local {
-    fn default() -> Self { Local { theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), shortcuts: BTreeMap::new() } }
+    fn default() -> Self { Local { theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new() } }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -78,6 +80,7 @@ impl Local {
                 self.shortcuts.insert(a.into(), key);
             }
             "shortcuts-reset" => self.shortcuts.clear(),
+            "fav" if !value.is_empty() && value.len() < 200 => { if let Some(i) = self.favs.iter().position(|f| f == value) { self.favs.remove(i); } else { self.favs.push(value.into()); self.favs.truncate(200); } }
             _ => return false,
         }
         true
