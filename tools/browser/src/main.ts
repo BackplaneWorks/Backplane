@@ -621,7 +621,8 @@ function tabOf(name: string): Page | null {
 async function status(name: string): Promise<Json> {
   const o = ownerFor(name);
   const p = tabOf(name);
-  if (engine === "cef" && p) o.viewport = await p.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  // a page of the native client's embedded Chromium (attached) has its own size too: clicks sent as thousandths are scaled by it
+  if ((engine === "cef" || (p && externalPages.has(p))) && p) o.viewport = await p.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   return {
     version: VERSION,
     engine,

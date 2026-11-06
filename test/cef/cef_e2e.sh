@@ -93,7 +93,7 @@ for i in 1 2 3 4 5 6 7 8 9 10 11 12; do T3=$(title); [ "$T3" = clicked:2 ] && br
 curl -s -m5 -H "Authorization: Bearer $(cat $HTOK)" http://127.0.0.1:$HPORT/bots/t1/screen.jpg -o "$OUT/screen2.jpg" || true
 check "screen.jpg changed after the tap (the live page, not a stale still)" "$([ "$(cmp -s $OUT/screen.jpg $OUT/screen2.jpg && echo same)" != same ] && echo 1 || echo 0)" "same"
 # download: real click on the link
-python3 "$HERE/xinput.py" click $((WX+VX+130)) $((WY+VY+275)); sleep 3; titles > "$OUT/targets-after-download.txt"; import -window root "$OUT/screen-download.png" 2>/dev/null || true
+python3 "$HERE/xinput.py" click $((WX+VX+125)) $((WY+VY+269)); sleep 3; titles > "$OUT/targets-after-download.txt"; echo "after download click: $(title)"; import -window root "$OUT/screen-download.png" 2>/dev/null || true
 DLF=$(ls "$OUT"/fakehome/Downloads 2>/dev/null | head -1)
 check "a download lands in ~/Downloads ($DLF)" "$([ "$DLF" = file.txt ] && grep -q downloaded-bytes "$OUT/fakehome/Downloads/file.txt" && echo 1 || echo 0)" "$DLF"
 # file dialog: real click on the file input (test hook answers with test-upload.txt)
@@ -102,9 +102,10 @@ T4=$(title); check "file dialog answered and the page got the file (title '$T4')
 # teach: start recording, a real native click, then the draft holds a click step
 bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.teach","p":{"bot":"t1","op":"start"},"wait":1500}]' > "$OUT/teach-start.txt" 2>&1 || true
 python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+104)); sleep 1.5
-TD=$(bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.teach","p":{"bot":"t1","op":"stop"}}]' 2>&1 | grep DRAFT | head -1)
+bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.teach","p":{"bot":"t1","op":"stop"}}]' >/dev/null 2>&1 || true
+TD=$(cat "$OUT/home/bots/t1/tasks/.draft.jsonl" 2>/dev/null | head -3)
 echo "$TD" | cut -c1-300
-check "teach mode recorded the native click" "$(echo "$TD" | grep -q 'click' && echo 1 || echo 0)" "$TD"
+check "teach mode recorded the native click in the hub's draft" "$(echo "$TD" | grep -q '"do":"click".*Click me' && echo 1 || echo 0)" "$TD"
 # popup keeps its opener
 python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+328)); sleep 3
 titles > "$OUT/targets-after-popup.txt"; T5=$(title); check "window.open popup kept its opener (opener title '$T5')" "$([ "$T5" = msg:hi-from-popup ] && echo 1 || echo 0)" "$T5"
