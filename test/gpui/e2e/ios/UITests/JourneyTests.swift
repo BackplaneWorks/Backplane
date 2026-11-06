@@ -159,6 +159,58 @@ final class Journeys: XCTestCase {
         d.shot("composer-autocorrect")
     }
 
+    // The data/1 app (DATA_APP build) against a hub that speaks docs/gpui/PHONE-DATA.md: add a project, start a thread, watch the streamed answer,
+    // answer an approval, send again, relaunch and see the saved copy at once. HUB_PROJECT_PATH: a folder path on the hub's machine.
+    func test_data_flow() {
+        d = Driver("data-flow"); defer { d.finish() }
+        func env(_ k: String) -> String? { let v = d.env[k]; return (v?.isEmpty ?? true) ? nil : v }
+        let path = env("HUB_PROJECT_PATH") ?? "~/bp-stub-projects/e2e1"
+        let title = path.split(separator: "/").last.map(String.init) ?? "e2e1"
+        let first = env("HUB_FIRST_PROMPT") ?? "hello from the phone", firstSees = env("HUB_FIRST_EXPECT") ?? "You said: hello from the phone"
+        let second = env("HUB_ASK_PROMPT") ?? "please ask me first", secondSees = env("HUB_ASK_EXPECT") ?? "You said: please ask me first"
+        let reply = Double(env("HUB_REPLY_WAIT") ?? "20") ?? 20
+        // paired by an invitation link the way a phone is (HUB_PAIR_LINK), or by the token link the fixture hubs allow
+        d.app.terminate()
+        if let pair = env("HUB_PAIR_LINK") {
+            d.app.launchEnvironment = ["BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+            let addr = d.el("pair.address")
+            guard d.step("pairing screen", act: {}, expect: { addr.waitForExistence(timeout: 20) }) else { return }
+            d.step("type the pairing link", act: { d.tap(addr); d.type(addr, pair) }, expect: { d.el("pair.connect").isEnabled })
+            d.step("connect", timeout: 30, act: { d.tap(d.el("pair.connect")) }, expect: { d.el("data.project.add").waitForExistence(timeout: 30) || d.el("data.project.add.empty").waitForExistence(timeout: 1) })
+        } else {
+            d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+        }
+        let rows = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.thread.row.'"))
+        guard d.step("threads tab", act: {}, expect: { d.el("data.project.add").waitForExistence(timeout: 20) }) else { return }
+        guard d.step("add project", act: { d.tap(d.el("data.project.add")) }, expect: { d.el("data.project.path").waitForExistence(timeout: 10) }) else { return }
+        d.step("choose the folder", act: { let f = d.el("data.project.path"); d.tap(f); f.press(forDuration: 1.0); if d.app.menuItems["Select All"].waitForExistence(timeout: 2) { d.app.menuItems["Select All"].tap() }; f.typeText(path) },
+               expect: { d.el("data.project.add.confirm").isEnabled })
+        guard d.step("project appears", act: { d.tap(d.el("data.project.add.confirm")) }, expect: { d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 15) }) else { d.shot("no-project"); return }
+        // a project the hub makes with a first empty thread: the thread to use is the one the next step starts
+        let before = rows.count
+        guard d.step("new thread sheet", act: { d.tap(d.app.buttons["New thread in \(title)"]) }, expect: { d.el("data.thread.new.text").waitForExistence(timeout: 10) }) else { return }
+        d.step("start the thread", act: { let t = d.el("data.thread.new.text"); d.tap(t); t.typeText(first); d.tap(d.el("data.thread.new.start")) },
+               expect: { rows.count > before || rows.firstMatch.waitForExistence(timeout: 15) })
+        // the thread whose preview or title is the prompt; else the first row
+        let mine = rows.containing(NSPredicate(format: "label CONTAINS[c] %@", String(first.prefix(20)))).firstMatch
+        guard d.step("open the thread", act: { d.tap(mine.exists ? mine : rows.firstMatch) }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
+        d.step("the answer shows", timeout: reply, act: {}, expect: { d.label(firstSees).exists })
+        d.shot("thread-answered")
+        let comp = d.el("thread.composer")
+        d.step("send a message that needs approval", act: { d.tap(comp); d.type(comp, second); d.tap(d.el("thread.send")) }, expect: { d.el("data.entry.ask").waitForExistence(timeout: reply) || d.app.buttons["Allow"].waitForExistence(timeout: 1) })
+        d.shot("approval")
+        let allow = d.app.buttons["Allow"]
+        d.step("allow", timeout: reply, act: { if allow.exists { allow.tap() } else { d.app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow'")).firstMatch.tap() } }, expect: { d.label(secondSees).waitForExistence(timeout: reply) })
+        // back to the list, then the app again from nothing: the saved copy paints before the hub answers
+        let back = d.app.navigationBars.buttons.element(boundBy: 0); if back.exists { back.tap() }
+        sleep(2)
+        d.app.terminate(); d.app.launchEnvironment = d.app.launchEnvironment
+        let t0 = CFAbsoluteTimeGetCurrent(); d.app.launch()
+        let painted = rows.firstMatch.waitForExistence(timeout: 10)
+        d.steps.append(["do": "relaunch: the saved threads show", "tap_epoch_ms": (Date().timeIntervalSince1970 * 1000).rounded(), "tap_ms": 0, "result_ms": d.ms(t0), "ok": painted])
+        d.shot("relaunch")
+    }
+
     func test_bots_rooms() {
         d = Driver("bots-rooms"); defer { d.finish() }
         d.launch(); tab("Bots")

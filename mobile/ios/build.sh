@@ -90,7 +90,7 @@ archive)
   xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Release \
     -destination 'generic/platform=iOS' -archivePath build/Backplane.xcarchive -derivedDataPath build/dd \
     DEVELOPMENT_TEAM="$TEAM_ID" BASE_BUNDLE_ID="$BUNDLE_ID" CURRENT_PROJECT_VERSION="$n" \
-    ${NATIVE:+SWIFT_ACTIVE_COMPILATION_CONDITIONS="GPUI_NATIVE"} \
+    ${NATIVE:+SWIFT_ACTIVE_COMPILATION_CONDITIONS="GPUI_NATIVE"} ${DATA:+OTHER_SWIFT_FLAGS=-DDATA_APP} \
     "$@" $auth archive
   cat > build/export.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
