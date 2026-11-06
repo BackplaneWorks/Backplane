@@ -1,3 +1,0 @@
-ok valid current cache is unchanged without an offered checkpoint
-ok exact hash/prefix checkpoint promotes atomically with rollback copy
-ok rejected hash offer leaves current cache untouched

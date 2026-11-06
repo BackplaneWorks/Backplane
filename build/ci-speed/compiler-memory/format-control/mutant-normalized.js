@@ -1,2 +1,0 @@
-// @bun
-function f32_round(s){let a=Math.abs(0),f=Math.fround(a),g=2*a-Math.min(f,340282366920938500000000000000000000000);if(g===f||Math.fround(g)!==g||g===1/0)return Math.sign(0)*f;let k=0;while(a*2**k%1!==0)k+=1;let[,i,r,e]=/(\d*)\.?(\d*)(?:e([+-]?\d+))?$/i.exec(s),n=Number(e??0)-r.length,x=BigInt(i+r)*2n**BigInt(k)*10n**BigInt(Math.max(n,0)),y=BigInt(a*2**k)*10n**BigInt(Math.max(-n,0));return Math.sign(0)*(x===y||x>y!==g>f?f:g)}export{f32_round};

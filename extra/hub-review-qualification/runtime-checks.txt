@@ -1,7 +1,0 @@
-ok review fixture
-ok fold spans three real SQLite pages
-ok through sequence is inclusive and fixed
-ok empty disk result preserves the accumulator
-ok late failure discards the entire partial fold
-ok nonadvancing continuation cannot loop
-ok review reader releases its savepoint and statements

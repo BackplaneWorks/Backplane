@@ -1,1 +1,0 @@
-{"kind":"RSS admission boundary controls, synthetic readings","real_gc_overridden_only_inside_test":true,"results":{"new_definitions_and_collection_reset":{"samples":5,"collections":[3]},"known_prefix_4096":{"samples":1,"collections":[]},"new_after_known_prefix_and_duplicate":{"samples":3,"collections":[2]},"new_object_at_existing_name":{"samples":2,"collections":[]}}}

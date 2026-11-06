@@ -1,1 +1,0 @@
-ok eight lint controls, valid binding scopes, strict project/type-error and format controls

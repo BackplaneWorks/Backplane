@@ -1,6 +1,0 @@
-91880e13bcc0f16e10b94ee75604242b5eada7db91a3db2b6e52ebef20d297a8  ./ci-packet/metrics/mutant.log
-99b4d034b89e7c1ea5092b5a94bbd19c7b702b3a368a56b44294e83a6acba3ea  ./ci-packet/metrics/scene.json
-931f1e664a679af1355a9ca547ac1daef9f7b14137bc7cc21b110b0cc504b5b1  ./ci-packet/metrics/scene.log
-ae3c4d858fc2a7ccba8fde5a0cf1ca39bc1f1083cbcc2922228b54a17476e356  ./ci-packet/metrics/usage.json
-931f1e664a679af1355a9ca547ac1daef9f7b14137bc7cc21b110b0cc504b5b1  ./ci-packet/metrics/usage.log
-caba43f2b77b47c1c2d19b8bab12db1906e28faf0e3929cb78df281d9b85fc45  ./ci-packet/result.json

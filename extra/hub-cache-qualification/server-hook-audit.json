@@ -1,9 +1,0 @@
-{
-  "kind": "source-only cleanup-hook audit; no server type/runtime qualification",
-  "source_head": "1ba75edefafc53497034bf5d0b065ad69175b7bd",
-  "source_sha256": "332b7479090b545c30d14800429e553ef04fc647fabeaee83ce7494d668cdbcc",
-  "definitions": {
-    "Hub.leave": "65f2b708d475be55d9db6824ab6b4458d6edf61f298caf640f468cce40aaa345",
-    "Hub.thin.close_client": "105d8818ff4248e74f33724b2a98a55218177c6a465ef67620ca49813e5a69cc"
-  }
-}

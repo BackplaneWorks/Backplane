@@ -1,1 +1,0 @@
-work w-t1793650867-1261555-1454192 exited 1 before key measurement: benchmark export omitted test/ modules referenced by canonical PROOF.bend. No proof execution or result. Corrected export to full tracked Git snapshot.

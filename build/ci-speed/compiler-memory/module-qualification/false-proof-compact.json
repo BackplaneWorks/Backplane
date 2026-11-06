@@ -1,4 +1,0 @@
-{
-  "capture_sha256": "0ee3b5fef068b5a948c85fd5dd3dd76824476a06f2efcae899589af76c1c096a",
-  "combined_captured_streams": "SOME PROOFS FAIL\nError:\n- expected : 0n\n- observed : 1n\nLocation: bad\n2 | def bad() -> {0n == 1n : Nat}:\n3>|   {==}\n  |   ^^^^\n4 | \n"
-}

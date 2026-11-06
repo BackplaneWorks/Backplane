@@ -1,6 +1,0 @@
-{
-  "measured_verifier_sha256": "0f71ef48d23c9015e4a621238f330739ad8ead4a0f8d53f55de7d92f0c1c1c07",
-  "final_verifier_sha256": "6f99009d9000f382c74373fdf4b49b0a319f5bee7f30193e5fd067a8b83c35ad",
-  "measured_delta": "ci-packet-measured.patch",
-  "validation": "16 focused tests; final permission hardening not rebenchmarked"
-}

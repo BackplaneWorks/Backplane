@@ -1,4 +1,0 @@
-{
-  "sha256": "8e00a14f3882b35e98adbe32acf7f4a83610bf09635960cf02869653411e8271",
-  "output": "SOME PROOFS FAIL\nError:\n- expected : 0n\n- observed : 1n\nLocation: false_theorem\n2 | def false_theorem() -> {0n == 1n : Nat}:\n3>|   {==}\n  |   ^^^^\n4 | \n"
-}

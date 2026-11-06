@@ -1,1 +1,0 @@
-{"specific_sql_errors_passed":true,"errors":{"premature_commit":{"name":"AssertionError","message":"schema committed the surrounding transaction\n\nfalse !== true\n","code":"ERR_ASSERTION"},"nested_begin":{"name":"SQLiteError","message":"cannot start a transaction within a transaction"}}}

@@ -1,5 +1,0 @@
-{
-  "extracted_replay_sha256": "ec751c71a5c1cfaab194fb8c0ed389b58cf063dfd348910ce88b906c3dc51d2e",
-  "note": "Exact production replay block, cost display stubbed; does not execute test.sh setup or mark passes.",
-  "test_sh_sha256": "75f25f5b71745b31d5b300b2591f68bcf674fc5370d55f8d5b79a360637c6fa8"
-}
