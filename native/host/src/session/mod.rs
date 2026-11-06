@@ -129,6 +129,8 @@ impl Hub {
         let before = actor::page(c.client, &view_id, m, p["action"].as_str().unwrap_or(""), &p["target"], if m == "view.page" { page_before(&p) } else { 0 });
         // the conversation the target shows: a thread's own, a bot's chat thread (a bot view without its window stays on "Updating conversation...")
         let shown: Option<String> = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()), _ => None };
+        // a thread opened on this view: its board, schematic and 3D model are read ahead, so its viewer shows them at the first press
+        if m == "view.open" { if let (Some("thread"), Some(t)) = (p["target"]["kind"].as_str(), shown.as_deref()) { crate::files::kicad::watch::shown(&self.arc(), t).await } }
         let (window, page) = match self.window_for(&p, before, shown.as_deref()).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(shown.as_deref().unwrap_or(""), before, pg)); }

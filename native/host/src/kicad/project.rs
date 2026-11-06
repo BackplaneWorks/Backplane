@@ -34,12 +34,15 @@ fn pick(ns: &[String], ext: &str) -> String { ns.iter().find(|n| n.ends_with(ext
 fn named(ns: &[String], stem: &str, ext: &str) -> String { let w = format!("{stem}{ext}"); if ns.contains(&w) { w } else { pick(ns, ext) } }
 fn in_dir(dir: &str, name: &str) -> String { if dir.is_empty() || name.is_empty() { name.into() } else { format!("{dir}/{name}") } }
 
-pub fn read(root: &str) -> Files {
+pub fn read(root: &str) -> Files { files(root, true) }
+/// `read` without the walk for every project below the root when the root names its own (a viewer's watch asks this at each press): `all` is then empty.
+pub fn main(root: &str) -> Files { files(root, false) }
+fn files(root: &str, every: bool) -> Files {
     let cfg: serde_json::Value = std::fs::read_to_string(format!("{root}/.backplane.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(serde_json::Value::Null);
     let g = |k: &str| cfg.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let all = found(Path::new(root));
     let top = pick(&names(Path::new(root)), ".kicad_pro");
     let named_pro = g("project");
+    let all = if every || (named_pro.is_empty() && top.is_empty()) { found(Path::new(root)) } else { vec![] };
     let pro = if !named_pro.is_empty() { named_pro } else if !top.is_empty() { top } else { all.first().cloned().unwrap_or_default() };
     let folder = if dir_of(&pro).is_empty() { root.to_string() } else { abs(root, dir_of(&pro)) };
     let ns = names(Path::new(&folder));
@@ -60,6 +63,13 @@ mod tests {
         let f = read(r.to_str().unwrap()); let root = r.to_str().unwrap();
         assert_eq!((f.pro.as_str(), f.pcb.as_str(), f.sch.as_str()), (&format!("{root}/x.kicad_pro")[..], &format!("{root}/x.kicad_pcb")[..], &format!("{root}/x.kicad_sch")[..]));
         assert_eq!(f.all, vec!["x.kicad_pro".to_string(), "sub/y.kicad_pro".to_string()]); // find lists the root level too
+    }
+    #[test] fn main_names_the_same_files_without_the_walk() {
+        let r = tmp("m"); for f in ["x.kicad_pro", "x.kicad_pcb", "x.kicad_sch", "sub/y.kicad_pro"] { touch(r.join(f)) }
+        let (a, b) = (read(r.to_str().unwrap()), main(r.to_str().unwrap()));
+        assert_eq!((&a.pro, &a.pcb, &a.sch), (&b.pro, &b.pcb, &b.sch)); assert!(b.all.is_empty());
+        let r = tmp("n"); for f in ["hw/m.kicad_pro", "hw/m.kicad_pcb"] { touch(r.join(f)) }
+        let (a, b) = (read(r.to_str().unwrap()), main(r.to_str().unwrap())); assert_eq!(a, b); // no project at the root: the walk decides, as before
     }
     #[test] fn shallowest_below_with_copies_last_and_hidden_skipped() {
         let r = tmp("b"); for f in ["archive/a.kicad_pro", "deep/er/c.kicad_pro", "hw/m.kicad_pro", "hw/m.kicad_pcb", ".backplane/worktrees/w/h.kicad_pro", "node_modules/z.kicad_pro", "k-backups/z.kicad_pro", "a/b/c/d/e/too.kicad_pro"] { touch(r.join(f)) }
