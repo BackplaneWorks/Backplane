@@ -172,12 +172,12 @@ def T.plain.nlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_12.T.plain.nlrrll(l, key)
     case EQ{}:
-      Some{CAT_32.T.native.settings.placeholder.option(l)}
+      Some{CAT_32.T.native.settings.placeholder.name(l)}
     case GT{}:
       CAT_13.T.plain.nlrrlr(l, key)
 
 def T.plain.nlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrl.cmp(String.cmp(key, "native.settings.placeholder.option"), l)
+  T.plain.nlrrl.cmp(String.cmp(key, "native.settings.placeholder.name"), l)
 
 def T.plain.nlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -185,12 +185,12 @@ def T.plain.nlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_14.T.plain.nlrrrl(l, key)
     case EQ{}:
-      Some{CAT_32.T.palette.command.placeholder(l)}
+      Some{CAT_32.T.palette.attach(l)}
     case GT{}:
       CAT_15.T.plain.nlrrrr(l, key)
 
 def T.plain.nlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrrr.cmp(String.cmp(key, "palette.command.placeholder"), l)
+  T.plain.nlrrr.cmp(String.cmp(key, "palette.attach"), l)
 
 def T.plain.nlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -198,12 +198,12 @@ def T.plain.nlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nlrrl(l, key)
     case EQ{}:
-      Some{CAT_32.T.native.usage.machines(l)}
+      Some{CAT_32.T.native.thread.sending(l)}
     case GT{}:
       T.plain.nlrrr(l, key)
 
 def T.plain.nlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlrr.cmp(String.cmp(key, "native.usage.machines"), l)
+  T.plain.nlrr.cmp(String.cmp(key, "native.thread.sending"), l)
 
 def T.plain.nlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -211,12 +211,12 @@ def T.plain.nlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nlrl(l, key)
     case EQ{}:
-      Some{CAT_32.T.native.permission.microphone(l)}
+      Some{CAT_32.T.native.permission.camera(l)}
     case GT{}:
       T.plain.nlrr(l, key)
 
 def T.plain.nlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nlr.cmp(String.cmp(key, "native.permission.microphone"), l)
+  T.plain.nlr.cmp(String.cmp(key, "native.permission.camera"), l)
 
 def T.plain.nl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -237,12 +237,12 @@ def T.plain.nrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_16.T.plain.nrllll(l, key)
     case EQ{}:
-      Some{CAT_32.T.remote.handshake.failed(l)}
+      Some{CAT_32.T.remote.empty(l)}
     case GT{}:
       CAT_17.T.plain.nrlllr(l, key)
 
 def T.plain.nrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlll.cmp(String.cmp(key, "remote.handshake.failed"), l)
+  T.plain.nrlll.cmp(String.cmp(key, "remote.empty"), l)
 
 def T.plain.nrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -250,12 +250,12 @@ def T.plain.nrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_18.T.plain.nrllrl(l, key)
     case EQ{}:
-      Some{CAT_32.T.secret.none(l)}
+      Some{CAT_32.T.secret.name.ph(l)}
     case GT{}:
       CAT_19.T.plain.nrllrr(l, key)
 
 def T.plain.nrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrllr.cmp(String.cmp(key, "secret.none"), l)
+  T.plain.nrllr.cmp(String.cmp(key, "secret.name.ph"), l)
 
 def T.plain.nrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -263,12 +263,12 @@ def T.plain.nrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nrlll(l, key)
     case EQ{}:
-      Some{CAT_32.T.review.step.show(l)}
+      Some{CAT_32.T.review.resolve.tip(l)}
     case GT{}:
       T.plain.nrllr(l, key)
 
 def T.plain.nrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrll.cmp(String.cmp(key, "review.step.show"), l)
+  T.plain.nrll.cmp(String.cmp(key, "review.resolve.tip"), l)
 
 def T.plain.nrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -276,12 +276,12 @@ def T.plain.nrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       CAT_20.T.plain.nrlrll(l, key)
     case EQ{}:
-      Some{CAT_32.T.settings.settle(l)}
+      Some{CAT_32.T.settings.search.none(l)}
     case GT{}:
       CAT_21.T.plain.nrlrlr(l, key)
 
 def T.plain.nrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrl.cmp(String.cmp(key, "settings.settle"), l)
+  T.plain.nrlrl.cmp(String.cmp(key, "settings.search.none"), l)
 
 def T.plain.nrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -315,12 +315,12 @@ def T.plain.nrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nrll(l, key)
     case EQ{}:
-      Some{CAT_32.T.settings.keys.add.tip(l)}
+      Some{CAT_32.T.settings.keys.add(l)}
     case GT{}:
       T.plain.nrlr(l, key)
 
 def T.plain.nrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrl.cmp(String.cmp(key, "settings.keys.add.tip"), l)
+  T.plain.nrl.cmp(String.cmp(key, "settings.keys.add"), l)
 
 def T.plain.nrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -432,12 +432,12 @@ def T.plain.n.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nl(l, key)
     case EQ{}:
-      Some{CAT_32.T.picker.hint.path(l)}
+      Some{CAT_32.T.picker.hint.find(l)}
     case GT{}:
       T.plain.nr(l, key)
 
 def T.plain.n(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.n.cmp(String.cmp(key, "picker.hint.path"), l)
+  T.plain.n.cmp(String.cmp(key, "picker.hint.find"), l)
 
 def T.plain(l: I.Loc, key: String) -> Maybe<&2, String>:
   T.plain.n(l, key)

@@ -636,13 +636,17 @@ object NativeMessages {
   fun native_pair_scanner_invalid(tag: String): String =
     if (tag == "ja") ("Backplaneのペアリング用コードではありません") else ("Not a Backplane pairing code")
 
+  // native.pair.scanner.light
+  fun native_pair_scanner_light(tag: String): String =
+    if (tag == "ja") ("ライト") else ("Light")
+
   // native.pair.scanner.title
   fun native_pair_scanner_title(tag: String): String =
     if (tag == "ja") ("コードを読み取る") else ("Scan code")
 
   // native.pair.scanner.unavailable
   fun native_pair_scanner_unavailable(tag: String): String =
-    if (tag == "ja") ("読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください") else ("The scanner needs Google Play services: paste the link instead")
+    if (tag == "ja") ("カメラを起動できませんでした。コードの写真を選ぶか、リンクを貼り付けてください") else ("The camera did not start: choose a photo of the code or paste the link instead")
 
   // native.pair.tailnet
   fun native_pair_tailnet(tag: String): String =

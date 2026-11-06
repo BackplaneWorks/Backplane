@@ -61,21 +61,27 @@ function pairingStore({home, root, now = () => Date.now(), random = n => require
     if (route === '/ws') clients.set(client, d.id);
     return token;
   }
-  function create(routes) {
+  // routes: the default address's (the link, code and routes older
+  // clients read); choices: every address the invitation may be shown
+  // with ({kind, url, listening, routes}, pairingPlan), each its own link
+  // to the same invitation, that address first in its routes
+  function create(routes, choices = []) {
     const at = now();
     if (invites.filter(x => !isMachine(x) && open(x, at)).length >= 16) return {error: 'too_many_invitations'};
     const token = random(16).toString('hex'), alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const code = Array.from(random(8), x => alphabet[x & 31]).join('');
-    const unique = [...new Set(routes)].filter(x => {
+    const valid = x => {
       try { const u = new URL(x);return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password && !u.hash && !u.search; } catch { return false; }
-    });
+    };
+    const unique = [...new Set(routes)].filter(valid);
     if (!unique.length) return {error: 'no_reachable_address'};
     const entry = {id: random(16).toString('hex'), hash: digest(token), codeHash: digest(code), createdAt: at, expiresAt: at + 600000, used: false, revoked: false};
     // recorded before it is handed out: a link the hub cannot keep a
     // record of is never issued
     persist(devices, trim([...invites, entry]));
-    const fragment = new URLSearchParams({invite: token, routes: JSON.stringify(unique)});
-    return {id: entry.id, code, expiresAt: entry.expiresAt, routes: unique, localOnly: unique.every(x => /^https?:\/\/(localhost|127\.|\[::1\])/.test(x)), link: unique[0] + '/pair#' + fragment};
+    const link = rs => rs[0] + '/pair#' + new URLSearchParams({invite: token, routes: JSON.stringify(rs)});
+    const addresses = choices.filter(c => valid(c.url)).map(c => ({kind: c.kind, url: c.url, link: link([...new Set([c.url, ...(c.routes || [])])].filter(valid)), listening: !!c.listening}));
+    return {id: entry.id, code, expiresAt: entry.expiresAt, routes: unique, localOnly: unique.every(x => /^https?:\/\/(localhost|127\.|\[::1\])/.test(x)), link: link(unique), addresses};
   }
   function enroll(secret, name) {
     const at = now();attempts = attempts.filter(x => x > at - 60000);
@@ -197,10 +203,116 @@ function pairingKnown(origin, {routes = [], machines = {}, peers = []} = {}) {
   const host = u.hostname.toLowerCase(), names = [self.name, ...others.map(m => m && m.name)].filter(x => typeof x === 'string' && x).map(x => x.toLowerCase());
   return !!domain && host.endsWith('.' + domain) && names.includes(host.slice(0, host.indexOf('.')));
 }
+// 100.64.0.0/10, the addresses Tailscale hands out
+const pairingTailnetIp = ip => { const m = /^100\.(\d+)\.\d+\.\d+$/.exec(ip);return !!m && +m[1] >= 64 && +m[1] <= 127; };
+// This machine's local network addresses: IPv4, not loopback or
+// link-local, not the tailnet's, and not a container's or a VM's bridge
+// (no other device on the network can reach those).
+const pairingVirtual = /^(docker|br-|veth|virbr|vboxnet|vmnet|tailscale|podman|cni|flannel|lxcbr|lxdbr|zt)/;
+function pairingLan(interfaces) {
+  const out = [];
+  for (const [name, values] of Object.entries(interfaces || {})) {
+    if (pairingVirtual.test(name)) continue;
+    for (const v of values || []) if ((v.family === 'IPv4' || v.family === 4) && !v.internal && !pairingTailnetIp(v.address) && !/^169\.254\./.test(v.address) && !out.includes(v.address)) out.push(v.address);
+  }
+  return out;
+}
+// Where an invitation may point (Settings > Devices > Add a device): the
+// tailnet, each local network address, this computer, in that order, each
+// saying whether this hub answers there now. The tailnet's are only
+// listener-confirmed origins (routes: the tailnet listener's, Serve's), the
+// tailnet address a listener on every interface covers, or the one this
+// request came through. A local network address answers when the main
+// listener covers it (--host 0.0.0.0 or that address) or the person let the
+// hub answer there too (bound: Lan.* in server.bend). The default (the
+// fields older clients read) is the first remote address that answers.
+// Each address's routes: itself, then the other remote ones that answer;
+// loopback is never a hint for another device (it would reach that
+// device's own hub).
+function pairingPlan({routes = [], host, port, authority = '', https = false, interfaces = {}, bound = []}) {
+  const local = x => /^https?:\/\/(localhost|127\.|\[::1\])/.test(x);
+  const name = x => { try { return new URL(x).hostname; } catch { return ''; } };
+  const tailnet = x => pairingTailnetIp(name(x)) || /\.ts\.net$/i.test(name(x));
+  const all = host === '0.0.0.0', at = ip => 'http://' + ip + ':' + port;
+  const loopHost = all || ['127.0.0.1', 'localhost', '::1'].includes(host);
+  // This exact origin already authenticated the issuing client.
+  const asked = /^[a-z0-9.\-\[\]:]+$/i.test(authority) ? (https ? 'https://' : 'http://') + authority : '';
+  const lan = pairingLan(interfaces);
+  const v4 = Object.values(interfaces || {}).flat().filter(v => v && (v.family === 'IPv4' || v.family === 4)).map(v => v.address);
+  const tails = [...new Set([...routes, ...(all ? v4.filter(pairingTailnetIp).map(at) : []), ...(pairingTailnetIp(host) ? [at(host)] : []), ...(asked && tailnet(asked) ? [asked] : [])])];
+  const choices = [
+    ...(tails.length ? [{kind: 'tailnet', url: tails[0], listening: true}] : []),
+    ...lan.map(ip => name(asked) === ip ? {kind: 'lan', url: asked, listening: true} : {kind: 'lan', url: at(ip), listening: all || host === ip || bound.includes(ip)}),
+    {kind: 'local', url: local(asked) ? asked : at('127.0.0.1'), listening: loopHost || local(asked)}];
+  // other origins this hub answers on, hints after the chosen one: more
+  // tailnet ones, the request's own and the main listener's when they are
+  // none of the above
+  const hints = [...tails.slice(1), ...(asked && !local(asked) && !tailnet(asked) && !lan.includes(name(asked)) ? [asked] : []),
+    ...(!loopHost && !pairingTailnetIp(host) && !lan.includes(host) ? [at(host)] : [])];
+  const remote = choices.filter(c => c.kind !== 'local' && c.listening).map(c => c.url);
+  for (const c of choices) c.routes = [...new Set([c.url, ...remote, ...hints])];
+  const first = choices.find(c => c.kind !== 'local' && c.listening);
+  return {routes: first ? first.routes : hints.length ? [...new Set(hints)] : choices[choices.length - 1].routes, choices};
+}
+// The local network addresses the person let the hub answer on too (Add a
+// device, Local network), kept in <home>/lan-v1.json so it listens there
+// again after a restart (server.bend's Lan.*); private, written whole.
+function pairingLanSaved(home, fs = require('node:fs')) {
+  try { const d = JSON.parse(fs.readFileSync(require('node:path').join(home, 'lan-v1.json'), 'utf8'));return d && d.version === 1 && Array.isArray(d.ips) ? d.ips.filter(x => typeof x === 'string' && /^\d+\.\d+\.\d+\.\d+$/.test(x)) : []; } catch { return []; }
+}
+function pairingLanSave(home, ips, fs = require('node:fs')) {
+  const path = require('node:path'), file = path.join(home, 'lan-v1.json'), tmp = file + '.' + require('node:crypto').randomBytes(8).toString('hex') + '.tmp';
+  try { fs.writeFileSync(tmp, JSON.stringify({version: 1, ips}), {mode: 0o600, flag: 'wx'});fs.renameSync(tmp, file); }
+  finally { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); }
+}
+// The listener the hub just opened on ip:port (loop.js's handle table, the
+// newest one there), so turning the address off closes it at once.
+function pairingListener(ip, port) {
+  let found;
+  for (const h of globalThis.BP_H?.rows?.values?.() || []) if (h && h.server && h.server.hostname === ip && Number(h.server.port) === Number(port)) found = h;
+  return found;
+}
 let bp_pairing;
 function pairing_start(home, root, host, port) {
-  try { bp_pairing = {store: pairingStore({home, root}), host, port, routes: [], machines: {}, peers: []};return ''; }
+  try { bp_pairing = {store: pairingStore({home, root}), home, host, port, routes: [], machines: {}, peers: [], lan: new Map(), lanSaved: pairingLanSaved(home), lanNext: 0};return ''; }
   catch { return 'Cannot read or initialize device registry; existing pairings were preserved'; }
+}
+// whether the local network listener opened as `base` is still wanted
+// (one turned off, or opened again since, ends: server.bend's Lan.loop)
+function pairing_lan(ip, base) { return {$: bp_pairing?.lan.get(ip)?.base === Number(base) ? 'True' : 'False'}; }
+// Local network listening (op lan-*, secret: the address). lan-on keeps
+// the choice and asks the hub to bind (bind: true) unless it answers there
+// already; lan-up records the bound listener and the id its connections
+// count from (each opening its own 2^24, from 3 * 2^30: loopback counts
+// from 1, the tailnet from 2^31); lan-fail drops a choice that could not
+// bind (at boot, name "boot", it is kept: the address may come back);
+// lan-off forgets it and closes the listener and its connections.
+function pairingLanOp(op, ip, name) {
+  const {home, host, port, lan} = bp_pairing, covered = host === '0.0.0.0' || host === ip;
+  const save = ips => { pairingLanSave(home, ips);bp_pairing.lanSaved = ips; };
+  if (op === 'lan-saved') return {ips: host === '0.0.0.0' ? [] : bp_pairing.lanSaved.filter(x => x !== host), port};
+  if (op === 'lan-on') {
+    if (!pairingLan(require('node:os').networkInterfaces()).includes(ip)) return {error: 'lan_unknown'};
+    if (covered || lan.has(ip)) return {ok: true, ip, listening: true};
+    if (!bp_pairing.lanSaved.includes(ip)) save([...bp_pairing.lanSaved, ip]);
+    return {ok: true, ip, port, bind: true};
+  }
+  if (op === 'lan-up') {
+    const base = (3221225472 + (bp_pairing.lanNext++ % 64) * 16777216) >>> 0;
+    lan.set(ip, {base, listener: pairingListener(ip, port)});
+    return {ok: true, ip, listening: true, base};
+  }
+  if (op === 'lan-fail') {
+    if (name !== 'boot' && bp_pairing.lanSaved.includes(ip)) save(bp_pairing.lanSaved.filter(x => x !== ip));
+    return {error: 'lan_unavailable'};
+  }
+  if (op === 'lan-off') {
+    if (bp_pairing.lanSaved.includes(ip)) save(bp_pairing.lanSaved.filter(x => x !== ip));
+    const was = lan.get(ip);lan.delete(ip);
+    if (was?.listener) { try { was.listener.server?.stop(true); } catch {} was.listener.close(); }
+    return {ok: true, ip, listening: covered};
+  }
+  return {error: 'invalid_request'};
 }
 function pairing_address(link) {
   const origin = pairingAddress(link);
@@ -224,24 +336,17 @@ function pairing_request(op, secret, name, authority, https) {
   try {
     const {store, host, port} = bp_pairing;
     if (op === 'enroll') return JSON.stringify(store.enroll(secret, name));
-    if (op === 'list') return JSON.stringify(store.list());
+    if (op === 'list') return JSON.stringify({...store.list(), lan: bp_pairing.lanSaved.map(ip => ({ip, url: 'http://' + ip + ':' + bp_pairing.port, listening: bp_pairing.lan.has(ip)}))});
+    if (op.startsWith('lan-')) return JSON.stringify(pairingLanOp(op, secret, name));
     if (op === 'revoke') return JSON.stringify(store.revoke(secret));
     if (op === 'uninvite') return JSON.stringify(store.uninvite(secret));
     if (op === 'machine') return JSON.stringify(store.machine(secret));
     if (op === 'link') return JSON.stringify(store.link(secret, name));
     if (op === 'unlinked') return JSON.stringify(store.unlinked(secret));
-    if (op === 'known') return JSON.stringify({known: pairingKnown(secret, {routes: [...bp_pairing.routes, 'http://' + host + ':' + port], machines: bp_pairing.machines, peers: bp_pairing.peers})});
+    if (op === 'known') return JSON.stringify({known: pairingKnown(secret, {routes: [...bp_pairing.routes, 'http://' + host + ':' + port, ...[...bp_pairing.lan.keys()].map(ip => 'http://' + ip + ':' + port)], machines: bp_pairing.machines, peers: bp_pairing.peers})});
     if (op === 'create') {
-      const routes = [...bp_pairing.routes], scheme = https ? 'https://' : 'http://';
-      // This exact origin already authenticated the issuing client. Other
-      // hints are only local interfaces on which this listener is bound.
-      if (/^[a-z0-9.\-\[\]:]+$/i.test(authority)) routes.push(scheme + authority);
-      if (host === '0.0.0.0') for (const values of Object.values(require('node:os').networkInterfaces())) for (const v of values || []) {
-        if (v.family === 'IPv4' && !v.internal) routes.push('http://' + v.address + ':' + port);
-      }
-      else if (host !== '127.0.0.1' && host !== 'localhost') routes.push('http://' + host + ':' + port);
-      const remote = routes.filter(x => !/^https?:\/\/(localhost|127\.|\[::1\])/.test(x));
-      return JSON.stringify(store.create(remote.length ? remote : routes));
+      const plan = pairingPlan({routes: bp_pairing.routes, host, port, authority, https, interfaces: require('node:os').networkInterfaces(), bound: [...bp_pairing.lan.keys()]});
+      return JSON.stringify(store.create(plan.routes, plan.choices));
     }
     return JSON.stringify({error: 'invalid_request'});
   } catch { return JSON.stringify({error: 'storage_unavailable'}); }
@@ -256,3 +361,5 @@ io_eff(CID(Pairing.active), pairing_active);
 io_eff(CID(Pairing.address), pairing_address);
 
 io_eff(CID(Pairing.known), pairing_known);
+
+io_eff(CID(Pairing.lan), pairing_lan);
