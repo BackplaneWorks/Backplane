@@ -187,6 +187,12 @@ fn timezone(st: &State, session: &Value) -> Vec<Value> {
     v
 }
 
+/// The preferences the page shows, bound into the On button: `setting.set` cannot re-enable telemetry (settings/telemetry.rs `reserved`), only a `telemetry.choice` carrying this token can.
+fn tm_token(st: &State) -> String {
+    crate::settings::telemetry::State { share: set(st, "telemetry.share", "").into(), asked: set(st, "telemetry.asked", "").into(), usage_asked: set(st, "telemetry.usage.asked", "").into(),
+        generation: set(st, "telemetry.usage.generation", "").into(), revision: set(st, "telemetry.choice.revision", "").into(), ..Default::default() }.token()
+}
+
 fn privacy(st: &State, info: &Value) -> Vec<Value> {
     let share = set(st, "telemetry.share", ""); let usage = set(st, "telemetry.usage.asked", "");
     let on = (share.is_empty() || share == "on") && usage != "0";
@@ -194,7 +200,7 @@ fn privacy(st: &State, info: &Value) -> Vec<Value> {
     let mut note = "All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them. This build of the hub sends nothing yet. Privacy policy: https://backplane.works/privacy".to_string();
     if !id.is_empty() { note.push_str(&format!(" Install id: {id}")); }
     let n = set(st, "telemetry.reset", "").parse::<u64>().unwrap_or(0) + 1;
-    vec![row("Share anonymous usage", &note, vec![btn("On", "setting", "telemetry.share=on", on), btn("Off", "setting", "telemetry.share=off", !on), btn("Reset id", "setting", &format!("telemetry.reset={n}"), false),
+    vec![row("Share anonymous usage", &note, vec![btn("On", "telemetry-on", &tm_token(st), on), btn("Off", "setting", "telemetry.share=off", !on), btn("Reset id", "setting", &format!("telemetry.reset={n}"), false),
         btn("Privacy", "open-url", "https://backplane.works/privacy", false), btn("Report an issue", "open-url", &bug_url(info), false)])]
 }
 
@@ -352,6 +358,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "kname") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
+        "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }
         "setting" => {
             let (k, v) = value.split_once('=')?;
             if k.is_empty() { return None }
@@ -519,7 +526,12 @@ mod tests {
     #[test] fn privacy_reads_the_choice_and_resets_with_the_next_number() {
         let r = page_rows(&st(&[("telemetry.share", "off"), ("telemetry.reset", "3")]), "privacy", json!({"telemetry.id": "abc"}));
         let b = r[1]["buttons"].as_array().unwrap();
-        assert_eq!((b[0]["on"].as_bool(), b[1]["on"].as_bool()), (Some(false), Some(true))); assert_eq!(b[2]["value"], "telemetry.reset=4");
+        assert_eq!((b[0]["on"].as_bool(), b[1]["on"].as_bool()), (Some(false), Some(true)));
+        // On goes through telemetry.choice with the token of what the page showed (setting.set cannot re-enable)
+        assert_eq!(b[0]["action"], "telemetry-on");
+        let o = act("h", &json!({"rid": 7}), "telemetry-on", b[0]["value"].as_str().unwrap()).unwrap();
+        let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((sent["m"].as_str(), sent["p"]["value"].as_str(), sent["p"]["expected"].as_str()), (Some("telemetry.choice"), Some("on"), b[0]["value"].as_str())); assert_eq!(b[2]["value"], "telemetry.reset=4");
         assert!(!r[1]["note"].as_str().unwrap().contains("Install id"), "no id while off");
     }
     #[test] fn agents_offers_the_hubs_models_with_default_first_and_the_current_lit() {

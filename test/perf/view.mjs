@@ -1,7 +1,7 @@
 // View-protocol client (the GPUI/web wire): view.open / view.update with optional keyed delta offer.
 import {decode,encode} from '../wire.mjs';
 import {sleep} from './lib.mjs';
-export async function viewClient(h,{mobile=false,delta=true,host,tag='c'}={}){
+export async function viewClient(h,{mobile=false,delta=true,host,tag='c',native=false}={}){
  const q=mobile?'view=1&mobile=1':'view=1&frontend=1';
  const ws=new WebSocket(`ws://${host||h.host}:${h.port}/ws?${q}&token=${encodeURIComponent(h.token)}`);ws.binaryType='arraybuffer';
  const v={ws,greet:null,session:{sel:'',rid:Date.now(),drafts:{},open:{},adding:false,panel:false,info:{}},target:{kind:'recent',id:''},viewId:'',rev:0,id:2**47+Math.floor(Math.random()*1e6),pending:new Map(),bytesIn:0,msgsIn:0,push:0,bases:new Map(),newest:'',last:null,stats:[],onPush:null,closed:false};
@@ -14,6 +14,7 @@ export async function viewClient(h,{mobile=false,delta=true,host,tag='c'}={}){
  v.req=async(m,extra={},ms=20000)=>{const id=++v.id;const rev=++v.rev;
   const p={...extra,version:1,hub:h.url,generation:v.greet.generation,epoch:v.greet.epoch,requestRevision:rev,target:v.target,viewId:v.viewId,session:v.session,cid:'perf-'+tag};
   if(!mobile){p.viewControl=1;p.windowProjection=1;p.accountProfiles=1;p.accountBinding=''}
+  if(native){p.nativeSidebar=1;p.accountProfiles=1} // what the GPUI client opts in to; without it the Rust presenter answers PRESENTER_UNAVAILABLE
   if(delta)p.viewDelta={version:1,token:v.newest};
   const t0=performance.now();const pr=new Promise(r=>v.pending.set(id,r));
   const body=encode({id,m,p});ws.send(body);
