@@ -9,7 +9,7 @@ fn identity(w: &World, b: &Bot, home: &str) -> String {
     let z = Zones { settings: &w.settings }; let h = T::HEAD; let k = T::WORK;
     let persona = if b.persona.is_empty() { String::new() } else { format!("{}{}{}", T::PERSONA[0], b.persona, T::PERSONA[1]) };
     let uber = if w.uber_is(&b.id) { T::UBER } else { "" };
-    format!("{}{}{}{}{home}/bots/{}{}{persona}{}{HOP_MAX}{}{}{}{}{}{uber}", h[0], b.name, h[1], h[2], b.id, h[3], k[0], k[1], z.person(), k[2], zone_source(&z), k[3])
+    format!("{}{}{}{}{home}/{}{}{persona}{}{HOP_MAX}{}{}{}{}{}{uber}", h[0], b.name, h[1], h[2], b.id, h[3], k[0], k[1], z.person(), k[2], zone_source(&z), k[3])
 }
 impl<'a> Ctx<'a> {
     /// Bots.prompt.for
@@ -31,7 +31,7 @@ impl Bots {
     /// Bots.prompt (the language line is the base prompt's, once)
     pub(crate) async fn bot_prompt(self: &Arc<Self>, thread: &str) -> String {
         if !self.is_bot_thread(thread) { return String::new() }
-        let w = self.world().await; let f = self.facts(&w, &[]).await; let home = self.hub.cfg.home.to_string_lossy().to_string();
+        let w = self.world().await; let f = self.facts(&w, &[]).await; let home = crate::bots::relocate::root(&self.hub.cfg.home).to_string_lossy().to_string();
         Ctx::new(&w, &f, now_s(), 0).bot_prompt(thread, &home)
     }
 }

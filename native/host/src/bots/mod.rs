@@ -9,6 +9,7 @@ pub mod hooks;
 pub mod ledger;
 pub mod plane;
 pub mod post;
+pub mod relocate;
 pub mod reply;
 pub mod routines;
 pub mod rpc;

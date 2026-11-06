@@ -85,6 +85,11 @@ impl Agents {
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&h2)).await.unwrap_or(0); proc::set_owner(&home);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
         crate::startup::mark("agents: orphans reaped");
+        { // bots live in ~/.backplane/bots/<bot>: copy what older builds kept elsewhere (folder, session history, memory) before any turn resumes
+            let moves: Vec<(String, String)> = { let w = ag.world.lock().await; w.bots.iter().filter(|(_, x)| !x.2).map(|(id, x)| (id.clone(), w.threads.get(&x.1).map(|t| t.worktree.clone()).unwrap_or_default())).collect() };
+            let h = hub.cfg.home.clone();
+            for l in tokio::task::spawn_blocking(move || crate::bots::relocate::run(&h, &moves)).await.unwrap_or_default() { eprintln!("{l}") }
+        }
         let _ = ag.mcp.set(mcp::Mcp::start(&ag).await?);
         crate::startup::mark("agents: mcp started");
         if crate::copy::person_turn_allowed() { let w = ag.world().await; let n = hub.store.len(); let last = if n > 0 { hub.store.range(n.saturating_sub(50), n).unwrap_or_default() } else { vec![] }; *ag.copy_point.lock().unwrap() = (w.threads.iter().map(|(id, x)| (id.clone(), w.cwd(id), x.turn == "running")).collect(), last); } // threads running at the copy point: the live hub may still be running them
