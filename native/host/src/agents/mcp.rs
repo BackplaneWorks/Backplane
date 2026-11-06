@@ -2,9 +2,9 @@
 //! one URL per thread and process generation (`/mcp/<thread>.<gen>?k=<HMAC>`), as src/core/mcp and server's
 //! Mcp.* do. Ported tools: permission_prompt (with its parked answer), thread_list, thread_read, thread_send,
 //! thread_interrupt, thread_wait, thread_update (title), viewer_show, orchestrator_capabilities, kicad_ipc and kicad_ipc_status (the files stream's crate::files::kicad::ipc). Every other tool the JS hub
-//! lists (delegation and tasks, work/wake/lock, secrets, terminals, browser, kicad_ipc, deploy, order, review, told, task board,
+//! lists (delegation and tasks, work/wake/lock, secrets, terminals, browser, kicad_ipc, deploy, review, told, task board,
 //! settings) is not listed here and answers "unknown tool": it belongs to the stream that owns that area.
-//! tools/list is the JS hub's own definitions (fixtures/mcp-tools.json) for the tools implemented.
+//! tools/list is the JS hub's own definitions (fixtures/mcp-tools.json) for the tools implemented, plus the order tools, which depend on the thread (settings/order.rs).
 use super::{lines::hub_id, now_s, Agents};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -150,7 +150,7 @@ impl Mcp {
         let ag = self.ag.upgrade()?;
         match sv(&o, "method") {
             "initialize" => { let pv = if sv(&p, "protocolVersion").is_empty() { "2025-06-18" } else { sv(&p, "protocolVersion") }; Some(result(&id, json!({"protocolVersion":pv,"capabilities":{"tools":{}},"serverInfo":{"name":"backplane","version":ag.hub.cfg.version}}))) }
-            "tools/list" => { let mut tools = self.tools.clone(); for s in ag.tool_sets() { tools.extend(s.list(thread)) } Some(result(&id, json!({"tools":tools}))) }
+            "tools/list" => { let mut tools = self.tools.clone(); tools.extend(crate::settings::order::listed(&ag, thread).await); for s in ag.tool_sets() { tools.extend(s.list(thread)) } Some(result(&id, json!({"tools":tools}))) }
             "tools/call" => self.call(&ag, thread, gen, &id, &p, sock).await,
             "ping" => Some(result(&id, json!({}))),
             _ => None, // notifications and anything unknown: no reply (Mcp.method.pos)
@@ -199,6 +199,7 @@ impl Mcp {
             "secret_request" => crate::settings::secret::tool_request(&ag.hub, thread, &a).await,
             "secret_list" => crate::settings::secret::tool_list(),
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
+            "order_review" | "order_ask" => crate::settings::order::call(ag, thread, name, &a).await,
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
             "viewer_show" => {
                 // the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client that does not answer in 2 s leaves the last report, marked
