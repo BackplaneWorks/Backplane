@@ -466,7 +466,7 @@ impl Hub {
         // helper's list of read kinds predates them: it drops any other kind, so the reply is handed over under one it takes.
         // Without this the Diff panel never opened and Review sat on "Working…".
         // (git.act and git.revert too: a Diff on show is asked again after a commit or a revert; `method` names what the reply answers, for the Rust presenter)
-        if matches!(method, "git.diff" | "git.status" | "git.act" | "git.revert" | "review.bom" | "review.checks" | "review.tick" | "review.release") && !c.view_id.is_empty() {
+        if matches!(method, "git.diff" | "git.status" | "git.act" | "git.revert" | "review.bom" | "review.checks" | "review.tick" | "review.release" | "bots.routine") && !c.view_id.is_empty() {
             if let Some(r) = out.first().filter(|r| r["t"] == "reply") { crate::session::record_reply_bound_m(c.client, "history.refs", method, r, &c.view_id, &c.target); }
         }
         // the Settings pages' status reads (secret box, API keys/voice): the policy applies the hub's own answer to the view's Ui (settings::read_of)

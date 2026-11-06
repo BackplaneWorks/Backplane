@@ -131,7 +131,7 @@ pub fn diff_object(text: &str, none: &str) -> Value {
 // ---- the session ----
 
 /// Whether Diff is on show for the thread: its kind, and the panel open (the session's, or the thread's own)
-fn diff_on(session: &Value, sel: &str) -> bool {
+pub fn diff_on(session: &Value, sel: &str) -> bool {
     !sel.is_empty() && info(session, &format!("view.kind:{sel}")) == "diff" && (session["panel"].as_bool().unwrap_or(false) || info(session, &format!("panel:{sel}")) == "1")
 }
 /// The special kinds this module draws; the drawings and the thread's Browser are viewer.rs's
@@ -316,6 +316,15 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
                     let why = r["error"].as_str().or_else(|| res["error"].as_str()).or_else(|| r["error"]["message"].as_str()).unwrap_or("The request failed.");
                     let th = key.split(':').next().unwrap_or("").to_string();
                     p = json!({"info": {format!("rp.err:{key}"): why}, "drafts": {format!("@rp.busy:{th}"): "", format!("@rp.req:{id}"): ""}});
+                }
+            }
+            // a routine save: accepted, the form closes; refused, it stays open with the hub's reason (`routine.error`)
+            "bots.routine" => {
+                if !draft(session, &format!("@o.req:{id}")).is_empty() {
+                    let mut d = json!({format!("@o.req:{id}"): ""});
+                    if ok { for k in ["@onew", "@f.oid", "@f.oname", "@f.ocron", "@f.oprompt", "@f.oerr"] { d[k] = json!(""); } }
+                    else { d["@f.oerr"] = json!(r["error"].as_str().or_else(|| res["error"].as_str()).or_else(|| r["error"]["message"].as_str()).unwrap_or("The routine was not saved.")); }
+                    p = json!({"drafts": d});
                 }
             }
             // a commit or a revert changes what Diff shows: a Diff on show is asked again

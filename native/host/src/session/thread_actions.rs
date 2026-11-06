@@ -115,6 +115,14 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
         // Dv.ask: Diff asked for by hand
         "diff" => {
             if sel.is_empty() { return None }
+            // Diff pressed while Diff is on show closes it: the hub decides, the button only says "diff"
+            if super::pages::diff_on(session, sel) {
+                b.patch.insert("panel".into(), json!(false));
+                b.info.insert(format!("panel:{sel}"), json!(""));
+                b.drafts.insert("@revert".into(), json!(""));
+                b.info.insert(format!("panel.hand:{sel}"), json!("1"));
+                return Some(b.out(true));
+            }
             b.info.insert(format!("diff.auto:{sel}"), json!(""));
             b.rpc("git.diff", json!({"thread": sel, "from": 0, "to": -1}));
         }
@@ -237,6 +245,13 @@ mod tests {
         assert_eq!(o.session_patch["info"][format!("diff.auto:{T}")], json!("")); assert_eq!(o.session_patch["rid"], json!(6));
         let o = run("git", "commit", sess()).unwrap();
         assert_eq!(text(&o, 0), "{\"id\":5,\"m\":\"git.act\",\"p\":{\"thread\":\"t1700000002-3\",\"action\":\"commit\"}}");
+    }
+    #[test] fn diff_pressed_while_diff_is_on_show_closes_it() {
+        let mut s = sess(); s["panel"] = json!(true); s["info"][format!("view.kind:{T}")] = json!("diff");
+        let o = run("diff", "", s.clone()).unwrap();
+        assert!(o.cmds.is_empty(), "no new request"); assert_eq!(o.session_patch["panel"], json!(false)); assert_eq!(o.session_patch["info"][format!("panel:{T}")], json!(""));
+        crate::session::patch::merge(&mut s, &o.session_patch); assert!(!crate::session::pages::diff_on(&s, T));
+        let o = run("diff", "", s).unwrap(); assert_eq!(o.cmds.len(), 1, "closed: it opens");
     }
     #[test] fn the_terminal_opens_with_its_size_and_shuts_to_the_composer() {
         let o = run("term-toggle", "80x30", sess()).unwrap();
