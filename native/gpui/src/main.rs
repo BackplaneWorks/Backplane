@@ -73,7 +73,7 @@ impl Backplane {
                 let mut r=r;let prev=self.data["thread"].take();self.data=r["shown"].take();self.picture_applied(cx);
                 self.timeline_picture(prev,&r["window"]);
                 if self.data["deleting"].is_object(){eprintln!("GPUI_LOG {{\"deleting\":{}}}",self.data["deleting"]["id"]);}let selected=string(&self.data["thread"],"id");
-                screens::accounts::thread_changed(self,&selected);if !selected.is_empty() {let selected=screens::attach::raw_id(&selected).to_string();self.screens.menu_open=screens::tools::menu_keeps(self.screens.menu_open,&self.selected,&selected);self.picture_arrived(&selected,cx);self.selected=selected;}
+                screens::accounts::thread_changed(self,&selected);if !selected.is_empty() {let selected=screens::attach::raw_id(&selected).to_string();self.picture_arrived(&selected,cx);self.selected=selected;}
                 self.thread_source="hub";
                 if let Some((label,t0))=self.confirm.take(){self.m("input",serde_json::json!({"step":label,"ok":true,"latency_ms":(t0.elapsed().as_secs_f64()*1e6).round()/1e3,"source":"hub"}));}
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());self.adopt_new(cx);
@@ -122,7 +122,7 @@ impl Backplane {
     pub fn open_project(&mut self,pid:String,cx:&mut Context<Self>){self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();}
     fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.project_page=None;self.ui_epoch+=1;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
-        self.screens.menu_open=screens::tools::menu_keeps(self.screens.menu_open,&self.selected,&raw);
+        
         let current=self.input.read(cx).content.to_string();
         let text=screens::drafts::switch(&mut self.drafts,&self.selected,&raw,&current);
         self.thread_switch(&raw);
@@ -179,7 +179,7 @@ impl Backplane {
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     /// Ctrl/Cmd-C with no text field focused (a click in the timeline leaves none): copy what is selected there.
     fn copy_selection(&mut self,_:&CopySelection,_:&mut Window,cx:&mut Context<Self>){self.timeline_copy(cx);}
-    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.ctx_close(cx){return;}if self.palette_close(cx){return;}if self.screens.lightbox.take().is_some(){cx.notify();return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if self.screens.menu_open {self.screens.menu_open=false;}else if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}cx.notify();}
+    fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){if self.ctx_close(cx){return;}if self.palette_close(cx){return;}if self.screens.lightbox.take().is_some(){cx.notify();return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}cx.notify();}
 }
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
 pub fn bind_all(cx:&mut App,l:&local::Local){
