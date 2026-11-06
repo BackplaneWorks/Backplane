@@ -16,8 +16,10 @@ Stacked on `gpui-bub-carry` (pass 5's carry lane). Builds ran on h@backplane (`s
 | Board picker | `fab.look` and `boards.list` answers fill `fab.boards`; with two or more boards the Board, Schematic and 3D pages show a chip row, the board on show marked; a chip is `view-board` (watches that board; its schematic for Schematic). Tried with two fixture boards: the plot changed. |
 | To-do editing | `todos.edit` was missing in the hub: added (`commands/plan.rs`, a `TodosChanged` of `who: "person"`). The dock: check, text (Enter), ↑ ↓ ×, an Add box. Tried: checked a step, added "buy parts", changed a step's text; the log has the `person` events. |
 
+| Devices, QR | Settings > Devices (`present/settings.rs`, the hub's own registry: `AuthRoutes::invite`, `Registry::list/revoke/uninvite`): Add a device made a link, its QR code (drawn by the window's row QR) and the short code; the link list showed "open", Revoke made it "revoked" (`devices-v1.json` in the temp home changed). A device row with Revoke is built from the same list but no device was enrolled to try it; "This device" is not marked. The list is read when a page request comes, so it shows a change from the next request on. |
+
 ## Not done
 - Buy it (`order.buy` is not in the hub; ordering stays off-limits in tests): the bar names the parts and the estimate, nothing starts an order.
 - A routine's save error is not shown. A to-do's agent is not told of a person's edit (the fix branch's concise note).
-- Devices, QR code, Your machines, Subagent drill-down, palette file mode, provider setup and sign-in, CAD install and update.
+- Your machines (the tailnet), Subagent drill-down, palette file mode, provider setup and sign-in, CAD install and update.
 - No test for `todos.edit` on its own in `commands/tests.rs` (tried only in the window).
