@@ -9,6 +9,12 @@
 set -u
 ROOT=${BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}; HERE=$(cd "$(dirname "$0")" && pwd)
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; ST=${BACKPLANE_DEV_STATUS:-$DEV/BUILD}; J=${JOBS:-}  # cargo -j: JOBS, else sized from free memory once the build lock is held (below)
+# A few heavy builds at a time on this machine (scripts/lib-buildslot.sh: slots from cores and free memory, two here): lanes cutting at once queue on a slot instead of all
+# compiling together and filling RAM. This script runs again inside the slot (BQ_HELD); nothing it leaves behind can keep the slot.
+if [ -z "${BQ_HELD:-}" ]; then . "$HERE/lib-buildslot.sh"; export BQ_HELD=1
+  queued() { mkdir -p "$DEV"; printf '{"phase":"building","text":"Queued behind other builds","done":0,"total":0}\n' > "$ST"; }
+  bq_run queued "$0" "$@"; rc=$?; exit $rc; fi
+. "$HERE/lib-buildslot.sh"
 PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
 GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;; esac; done
 SECS=$DEV/.build-secs$([ "$GATE" = 1 ] && echo -gate)
@@ -25,10 +31,8 @@ HK=$(mktemp "$DEV/.haiku.XXXX"); HKP=
 if [ -n "${MAIN_PREV:-}" ]; then "$HERE/build-haiku.sh" "$ROOT" "$MAIN_PREV" "$(git -C "$ROOT" rev-parse HEAD)" > "$HK" 2>/dev/null & HKP=$!; fi
 cleanup() { kill $TK $HKP 2>/dev/null; rm -f "$ST" "$ST.$$" "$PH" "$HK"; [ -n "${D:-}" ] && rm -rf "$D"; rm -f "$LOG"; }
 trap cleanup EXIT
-# A few heavy builds at a time on this machine (scripts/lib-buildslot.sh: slots from cores and free memory, two here): lanes cutting at once queue on a slot instead of all
-# compiling together and filling RAM. The slot is held until this script exits. Compiled dependencies come from the shared sccache, and the cargo -j from the memory free now.
-. "$HERE/lib-buildslot.sh"; queued() { echo "queued behind other builds" > "$PH"; }
-bq_acquire queued; bq_cc; [ -n "$J" ] || J=$(bq_jobs)
+# The slot is held by the wrapper at the top (below); the compiler cache and the cargo -j (about 2 GB of free memory a job) are set here.
+bq_cc; [ -n "$J" ] || J=$(bq_jobs)
 echo "hub" > "$PH"
 fail() { kill $TK 2>/dev/null; why=$(grep -m1 -E '^(error|test .* FAILED)' "$LOG" | cut -c1-110); printf '%s\n' "$1: ${why:-see the log}" > "$DEV/.last-failure"; cp "$LOG" "$DEV/.last-failure.log" 2>/dev/null
   status failed "Build failed in $1: ${why:-see $DEV/.last-failure.log}" 0 0; tail -20 "$LOG" >&2; sleep 8; exit 1; }

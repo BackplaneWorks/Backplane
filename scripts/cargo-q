@@ -3,6 +3,7 @@
 #   scripts/cargo-q test --offline          from native/host or native/gpui, in your own worktree, instead of bare cargo
 # Every lane runs its tests and builds this way, so a few heavy builds run at once and the rest wait; the wait is said on stderr. An explicit -j/--jobs is kept.
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-buildslot.sh"
-bq_acquire 'echo "cargo-q: waiting for a build slot" >&2'; bq_cc
+if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: waiting for a build slot" >&2; }; bq_run waiting "$0" "$@"; exit $?; fi
+bq_cc
 j=(); case " $* " in *" -j"*|*" --jobs"*) ;; *) j=(-j "$(bq_jobs)");; esac
 exec nice -n 10 cargo "$1" "${j[@]}" "${@:2}"
