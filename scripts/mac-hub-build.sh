@@ -11,7 +11,7 @@ $SSH $HOST "mkdir -p ~/$DEST/src ~/$DEST/dist ~/$DEST/logs"
 git -C "$ROOT" archive --format=tar HEAD native assets docs test i18n | $SSH $HOST "rm -rf ~/$DEST/src && mkdir -p ~/$DEST/src && tar -x -C ~/$DEST/src"
 $SSH $HOST "sh -s" -- "$WHAT" "$TEST" <<'REMOTE'
 set -eu
-WHAT=$1; TEST=$2
+WHAT=${1:-both}; TEST=${2:-}
 # the hub has no named locks yet: mkdir lock on the Mac itself, beside the hub-side "mac-heavy" lock
 while ! mkdir /tmp/bp-mac-heavy.lock 2>/dev/null; do sleep 20; done; trap 'rmdir /tmp/bp-mac-heavy.lock' EXIT
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
