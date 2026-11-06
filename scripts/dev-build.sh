@@ -5,10 +5,10 @@
 # The strip's bar is time against the last build's time ($DEV/.build-secs, one per mode; a first build guesses 150 s): an incremental build compiles one crate, a full one
 # hundreds, so counting crates says nothing. The bar stops at 95% until the build is done.
 # Env: GPUI_DEV_DIR (default ~/.backplane-gpui-dev), BACKPLANE_DEV_STATUS (the status file; default $DEV/BUILD), BUILD_ROOT (the checkout to build; default this one),
-#      PROFILE (cargo profile, default fast; release for fat LTO), HOST_TARGET / GPUI_TARGET (a CARGO_TARGET_DIR for each crate), ASSETS (an assets/ folder to ship; default the one in the build now current), JOBS (default 28).
+#      PROFILE (cargo profile, default fast; release for fat LTO), HOST_TARGET / GPUI_TARGET (a CARGO_TARGET_DIR for each crate), ASSETS (an assets/ folder to ship; default the one in the build now current), JOBS (default: MemAvailable / 2 GB, at most the 28 cores the build is pinned to, at least 1), BUILD_LOCK_FILE (default ~/.cache/backplane-build.lock).
 set -u
 ROOT=${BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}; HERE=$(cd "$(dirname "$0")" && pwd)
-DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; ST=${BACKPLANE_DEV_STATUS:-$DEV/BUILD}; J=${JOBS:-28}
+DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; ST=${BACKPLANE_DEV_STATUS:-$DEV/BUILD}; J=${JOBS:-}  # cargo -j: JOBS, else sized from free memory once the build lock is held (below)
 PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
 GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;; esac; done
 SECS=$DEV/.build-secs$([ "$GATE" = 1 ] && echo -gate)
@@ -25,6 +25,14 @@ HK=$(mktemp "$DEV/.haiku.XXXX"); HKP=
 if [ -n "${MAIN_PREV:-}" ]; then "$HERE/build-haiku.sh" "$ROOT" "$MAIN_PREV" "$(git -C "$ROOT" rev-parse HEAD)" > "$HK" 2>/dev/null & HKP=$!; fi
 cleanup() { kill $TK $HKP 2>/dev/null; rm -f "$ST" "$ST.$$" "$PH" "$HK"; [ -n "${D:-}" ] && rm -rf "$D"; rm -f "$LOG"; }
 trap cleanup EXIT
+# One heavy build at a time on this machine: lanes cutting at once queue on this lock (every dev-build.sh and main-build.sh shares the file; released when this script exits)
+# instead of all compiling together and filling RAM. The cargo -j is then sized from the memory free now, about 2 GB a job.
+BL=${BUILD_LOCK_FILE:-$HOME/.cache/backplane-build.lock}; mkdir -p "$(dirname "$BL")"; exec 9>"$BL"
+if ! flock -n 9; then echo "queued behind another build" > "$PH"; flock 9; fi
+if [ -z "$J" ]; then
+  gb=$(awk '/^MemAvailable:/ {print int($2 / 1048576 / 2)}' /proc/meminfo 2>/dev/null); J=${gb:-28}; [ "$J" -gt 28 ] && J=28; [ "$J" -lt 1 ] && J=1
+fi
+echo "hub" > "$PH"
 fail() { kill $TK 2>/dev/null; why=$(grep -m1 -E '^(error|test .* FAILED)' "$LOG" | cut -c1-110); printf '%s\n' "$1: ${why:-see the log}" > "$DEV/.last-failure"; cp "$LOG" "$DEV/.last-failure.log" 2>/dev/null
   status failed "Build failed in $1: ${why:-see $DEV/.last-failure.log}" 0 0; tail -20 "$LOG" >&2; sleep 8; exit 1; }
 skips=(); while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) skips+=(--skip "$l");; esac; done < "$HERE/gate-skip.txt"
