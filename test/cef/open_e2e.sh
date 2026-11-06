@@ -2,7 +2,7 @@
 # open_e2e.sh HUB_BIN : a thread with no browser page: /bots/<id>/screen.jpg is 404; the Browser tab's `bots.browser open` makes the hub's helper open one and the
 # frame appears (the fix for the tab saying "no browser frame yet" forever). Hub only, no display. usage: test/cef/open_e2e.sh HUB_BIN
 set -eu
-HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../../.." && pwd); HUB=$1; OUT=${OUT:-/tmp/cef-open-e2e}; HPORT=${HPORT:-3879}
+HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd); HUB=$1; OUT=${OUT:-/tmp/cef-open-e2e}; HPORT=${HPORT:-3879}
 rm -rf "$OUT"; mkdir -p "$OUT/home" "$OUT/proj" "$OUT/bin" "$OUT/fakehome/.cache"
 for n in claude codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$OUT/bin/$n"; chmod +x "$OUT/bin/$n"; done
 printf '#!/bin/sh\ncd %s/tools/browser && exec %s src/main.ts --engine chrome "$@" 2>> %s/helper.err\n' "$ROOT" "$(command -v bun)" "$OUT" > "$OUT/bin/backplane-browser"; chmod +x "$OUT/bin/backplane-browser"

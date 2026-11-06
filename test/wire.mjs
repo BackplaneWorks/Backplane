@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {cbor, plain} from './wire-codec.js';
-const source=readFileSync(new URL('native/host/src/wire_dict.rs',import.meta.url),'utf8');
+const source=readFileSync(new URL('../native/host/src/wire_dict.rs',import.meta.url),'utf8');
 const dictionary=name=>JSON.parse(source.match(new RegExp(`pub const ${name.toUpperCase()}: &\\[&str\\] = &(\\[[\\s\\S]*?\\]);`))[1]);
 export const decode=bytes=>plain(cbor(new Uint8Array(bytes),dictionary('keys'),dictionary('words')));
 export function encode(value){
