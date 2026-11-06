@@ -304,7 +304,11 @@ pub fn images(light: bool, list: &Value, key: &str, target: Option<&super::attac
         let url = it["url"].as_str().unwrap_or("");
         let name = it["path"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_string();
         let el = match imgs.get(target, url) {
-            Slot::Ready(img) => gpui::img(ImageSource::Image(img)).max_w(px(480.)).max_h(px(360.)).object_fit(ObjectFit::Contain).into_any_element(),
+            Slot::Ready(img) => match super::images::dims(&img.bytes) {
+                // an explicit box of the picture's own aspect: layout and paint agree, so the picture never spills over the rows below
+                Some((w, h)) => { let (w, h) = super::images::fit(w, h, 480., 360.); div().w(px(w)).h(px(h)).flex_none().overflow_hidden().child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
+                None => div().w(px(480.)).h(px(120.)).flex_none().overflow_hidden().child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain)).into_any_element(),
+            },
             Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(format!("Loading {name}…")).into_any_element(),
             Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(format!("Could not load {name}")).into_any_element(),
         };
