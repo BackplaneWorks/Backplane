@@ -22,7 +22,7 @@ fn blocks(s: &str) -> (String, usize) {
 }
 fn entry(r: &Row) -> E {
     let msg = r.kind == "msg";
-    E { id: r.id.clone(), msg, role: r.role.clone(), kind: r.akind.clone(), text: if msg { r.text.clone() } else { blocks(&r.text).0 } }
+    E { id: r.id.clone(), msg, role: r.role.clone(), kind: r.akind.clone(), text: if msg { crate::settings::order::pay_shown(&r.text) } else { blocks(&r.text).0 } }
 }
 
 // ---- fold ----

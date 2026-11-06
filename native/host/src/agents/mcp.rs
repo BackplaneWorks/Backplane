@@ -199,7 +199,7 @@ impl Mcp {
             "secret_request" => crate::settings::secret::tool_request(&ag.hub, thread, &a).await,
             "secret_list" => crate::settings::secret::tool_list(),
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
-            "order_review" | "order_ask" => crate::settings::order::call(ag, thread, name, &a).await,
+            "order_review" | "order_ask" | "order_quote" | "order_status" => crate::settings::order::call(ag, thread, name, &a).await,
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
             "viewer_show" => {
                 // the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client that does not answer in 2 s leaves the last report, marked

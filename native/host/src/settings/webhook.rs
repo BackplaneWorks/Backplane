@@ -81,7 +81,7 @@ pub fn headers(secret: &str, ts: u64, body: &str) -> Vec<String> {
 pub fn safe(thread: &str) -> String { thread.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).take(80).collect() }
 
 /// Curl.q / Curl.config: a quoted config value (control characters dropped, `"` and `\` escaped).
-fn q(s: &str) -> String { let mut o = String::from("\""); for c in s.chars() { if (c as u32) < 32 { continue } if c == '"' || c == '\\' { o.push('\\') } o.push(c) } o.push('"'); o }
+pub(crate) fn q(s: &str) -> String { let mut o = String::from("\""); for c in s.chars() { if (c as u32) < 32 { continue } if c == '"' || c == '\\' { o.push('\\') } o.push(c) } o.push('"'); o }
 pub fn curl_config(url: &str, hs: &[String], body_file: &str, out_file: &str) -> String {
     let mut c = format!("url = {}\n", q(url)); for h in hs { c.push_str(&format!("header = {}\n", q(h))) }
     c.push_str(&format!("data-binary = {}\noutput = {}\nwrite-out = \"%{{http_code}}\"\n", q(&format!("@{body_file}")), q(out_file))); c

@@ -18,7 +18,7 @@ pub fn ents(rows: &[Value], thread: &str) -> Option<Vec<Ent>> {
         let c: Vec<String> = (0..10).map(|i| match r.get(i) { Some(Value::String(s)) => s.clone(), Some(Value::Number(n)) => n.to_string(), _ => String::new() }).collect();
         if c[3] != thread || !c[4].is_empty() { continue } // a row this thread sent into another thread: not shown here (a gap in a key, not a refused screen)
         let msg = match c[5].as_str() { "msg" => true, "act" => false, _ => return None };
-        v.push(Ent { id: c[2].clone(), msg, role: c[6].clone(), akind: c[7].clone(), text: c[8].clone(), at: c[9].parse().ok()? });
+        v.push(Ent { id: c[2].clone(), msg, role: c[6].clone(), akind: c[7].clone(), text: if msg { crate::settings::order::pay_shown(&c[8]) } else { c[8].clone() }, at: c[9].parse().ok()? });
     }
     v.reverse();
     Some(v)
@@ -322,15 +322,33 @@ pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft:
     thread_object_checked(st,hub,thread,params,draft).ok()
 }
 
-/// Mob.asks / Mob.ask.std: the thread's open asks (newest first) as cards with their buttons (English). An ask of a buy thread or a browser task has its own card: not drawn here.
+/// Mob.order: a buy thread's Order card, from its open asks, the quote on its way and the quote the hub keeps; null for any other thread.
+fn order_json(st: &State, thread: &str, running: bool) -> Value {
+    if st.settings.get(&format!("buy.{thread}")).map_or(true, |v| v.is_empty()) { return Value::Null }
+    let mine = || st.ask_data.iter().filter(|a| a.1 == thread);
+    let (asked, files) = (mine().any(|a| a.3.starts_with("order_ask")), mine().any(|a| a.3 == "order_quote"));
+    let waiting = st.settings.get(&format!("order.wait.{thread}")).map_or(false, |v| !v.is_empty());
+    let name = st.threads.get(thread).and_then(|t| st.projects.get(&t.project)).map_or("", |p| p.title.as_str());
+    crate::settings::order::card(name, asked, files, waiting, running, st.settings.get(&format!("order.quote.{thread}")).map_or("", String::as_str))
+}
+/// Mob.needs.q: a buy thread's question: its choices as buttons (the earlier answer sent without its mark), a box whose text goes as `pre` and the text, and Skip.
+fn needs_json(id: &str, kind: &str, tool: &str, detail: &str, options: &str) -> Value {
+    let typed = tool == "order_ask.typed";
+    let chips: Vec<Value> = options.split('\n').map(str::trim).filter(|l| !l.is_empty()).enumerate().map(|(i, l)| json!({"label": l, "value": format!("{id}|{}", crate::settings::order::ask_value(l)), "primary": i == 0 && !typed})).collect();
+    json!({"id": id, "kind": kind, "needs": true, "head": "Backplane needs", "detail": detail, "blocks": [], "typed": typed, "pre": format!("{id}|"), "placeholder": if typed { "Type it here" } else { "Or type an answer" },
+        "go": "Continue", "skip": {"label": "Skip", "value": format!("{id}|"), "primary": false}, "buttons": chips})
+}
+/// Mob.asks / Mob.ask.std: the thread's open asks (newest first) as cards with their buttons (English). A buy thread's are "Backplane needs" cards (Mob.needs); a browser task's has its own card: not drawn here.
 fn asks_json(st: &State, thread: &str, draft: &str) -> Result<Vec<Value>, &'static str> {
     let _ = st.lean;
     let mine: Vec<_> = st.ask_data.iter().rev().filter(|a| a.1 == thread).collect();
     if mine.is_empty() { return Ok(vec![]) }
-    // a buy thread's "Backplane needs" card and a browser task's own card are drawn as an ordinary ask card (buttons by the ask's kind)
+    // a browser task's own card is drawn as an ordinary ask card (buttons by the ask's kind)
+    let buying = st.settings.get(&format!("buy.{thread}")).map_or(false, |v| !v.is_empty());
     let btn = |l: &str, v: String, primary: bool| json!({"label": l, "value": v, "primary": primary});
     let mut out = Vec::new();
     for (id, _, kind, tool, detail, options) in mine {
+        if buying && tool.starts_with("order_ask") { out.push(needs_json(id, kind, tool, detail, options)); continue }
         let head = match kind.as_str() {
             "plan" => "Proposed plan".to_string(), "input" => "The agent asks".to_string(),
             _ => match tool.as_str() {
@@ -346,8 +364,12 @@ fn asks_json(st: &State, thread: &str, draft: &str) -> Result<Vec<Value>, &'stat
                 "send" => vec![btn("Send", format!("{id}|accept"), true), btn("Not now", format!("{id}|decline"), false)],
                 _ => vec![btn("Allow", format!("{id}|accept"), true), btn("Allow for session", format!("{id}|session"), false), btn("Deny", format!("{id}|decline"), false)],
             } };
-        out.push(json!({"id": id, "kind": kind, "head": head, "detail": if kind == "plan" { String::new() } else { detail.clone() },
-            "blocks": if kind == "plan" { md_blocks(detail) } else { vec![] }, "buttons": buttons}));
+        let files = buying && tool == "order_quote"; // Mob.needs.files: the files' approval keeps its buttons with the needs head
+        let head = if files { format!("Backplane needs · {head}") } else { head };
+        let mut card = json!({"id": id, "kind": kind, "head": head, "detail": if kind == "plan" { String::new() } else { detail.clone() },
+            "blocks": if kind == "plan" { md_blocks(detail) } else { vec![] }, "buttons": buttons});
+        if files { card["needs"] = json!(true) }
+        out.push(card);
     }
     Ok(out)
 }
@@ -417,6 +439,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let c = crate::session::composer::fields(draft, running, !atts.is_empty(), t.provider == "claude", &refs, lang).ok_or("composer.language")?;
     for (k, v) in state_keys { o.insert(k, v); }
     o.insert("asks".into(), Value::Array(asks_json(st, thread, draft)?));
+    o.insert("order".into(), order_json(st, thread, running));
     // Buy it heads the thread's tools: in the window's header, and the first of the phones' overflow menu, which lists them
     if let Some(b) = super::ready::header(st, thread, &params["session"]) { if let Some(t) = o.get_mut("tools").and_then(Value::as_array_mut) { t.insert(0, b) } }
     for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }
@@ -505,8 +528,8 @@ mod tests {
             if let Some(info) = x.get("info").filter(|i| i.is_object()) { params["session"]["info"] = info.clone(); }
             let got = thread_object(&st, "h", th, &params, "").unwrap_or_else(|| panic!("{name} should be drawn"));
             let (diff, tail) = (x["diff"].as_object().unwrap(), x["tail"].as_array().unwrap());
-            // a browser task's and a buy thread's ask have cards of their own: here they draw as ordinary cards (a stated degrade)
-            for (k, w) in diff { if matches!(name.as_str(), "askbrowser" | "askbuy") && matches!(k.as_str(), "asks" | "order") { continue } assert_eq!(got.get(k), Some(w), "{name}: {k}"); }
+            // a browser task's ask has a card of its own: here it draws as an ordinary card (a stated degrade); a buy thread's is 0.14's, key for key
+            for (k, w) in diff { if name == "askbrowser" && matches!(k.as_str(), "asks" | "order") { continue } assert_eq!(got.get(k), Some(w), "{name}: {k}"); }
             let es = got["entries"].as_array().unwrap();
             assert_eq!(es.len() as u64, x["entries"].as_u64().unwrap(), "{name}: entries");
             assert_eq!(&es[es.len() - 2..], tail.as_slice(), "{name}: tail");
