@@ -2,7 +2,7 @@
 # bar_e2e.sh CLIENT_BIN HUB_BIN : the embedded Chromium end to end on a private Xvfb with a local hub, stand-in agents and a local test page.
 # Real X input (XTest) clicks the page's button and types in its field; CDP (the engine's loopback port) shows the page reacted; the hub's preview_*
 # tools (an agent's, through the stand-in's `mcpcall:`) read the same page, are refused while the person has it, and see the person's changes after hand back.
-# usage: test/gpui/cef/bar_e2e.sh CLIENT_BIN HUB_BIN   -> prints PASS/FAIL lines, exit 0 when all pass; artifacts in $OUT (default /tmp/cef-e2e)
+# usage: test/cef/bar_e2e.sh CLIENT_BIN HUB_BIN   -> prints PASS/FAIL lines, exit 0 when all pass; artifacts in $OUT (default /tmp/cef-e2e)
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../../.." && pwd); MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
 CLIENT=$1; HUB=$2; OUT=${OUT:-/tmp/cef-bar-e2e}; DISP=${DISP:-:78}; HPORT=${HPORT:-3874}; PPORT=${PPORT:-3898}; CDP=${CDP:-9411}
