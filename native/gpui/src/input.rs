@@ -613,6 +613,8 @@ impl TextInput {
         selected_range: 0..0, selection_reversed: false, marked_range: None,
         last_layout: None, last_bounds: None, is_selecting: false,
     }}
+    /// What it says while empty.
+    pub fn hint(mut self, text: SharedString) -> Self { self.placeholder = text; self }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) {
         self.reset(); self.selected_range=text.len()..text.len();self.content=text.into();cx.notify();
     }

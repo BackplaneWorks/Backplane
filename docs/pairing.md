@@ -2,27 +2,16 @@
 
 > Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
 
-An unpaired web or desktop client starts at **Connect to your Backplane hub**.
-A revoked device starts at **Re-pair this device**. On an already paired machine,
-open **Settings → Devices → Add a device** (Settings → Network has Add a
-device too). Copy or share its invitation link, scan its QR code,
-or enter the eight-character code and the shown hub address; the pairing
-screen says where to find them. Web clients show Pairing link, QR code and
-Short code as equal choices. The QR choice opens the camera full screen inside
-the page (`src/web/pairing-scanner.js`: the rear camera, a Torch where the
-camera has one, Close/Esc/Back; the browser's BarcodeDetector where it has
-one, else the bundled jsQR) and pairs with the first invitation it reads, the
-same way as a pasted link; it also has an image picker; images and frames are
-decoded locally. A browser gives the camera only to a secure page (https://,
-or localhost): over a plain http:// address (a phone at the hub's LAN or
-tailnet address) the QR choice says so and offers the other ways in (the
-phone's own camera app, which opens the link, or Short code) instead of a
-button that cannot work.
-Connection and device screens use the same light/dark theme as Settings.
-Device names start with the advertised OS and browser (or Desktop) and remain
-editable; no permission or network lookup is needed. A browser's enrolment answers its own device id
-(never its credential), so a phone's Devices list marks and lists first This
-device.
+An unpaired desktop client starts at **Connect to your Backplane hub**; a revoked
+one starts at **Re-pair this device**. On an already paired machine, open
+**Settings → Devices → Add a device** (Settings → Network has Add a device too).
+It makes one invitation with three forms: a link, a QR code and an
+eight-character code to enter with the shown hub address.
+
+The desktop client takes the link, or the address and code. It does not scan: a
+QR code is for the phones, which scan it with their own camera. The phones take
+the link or the QR code. Device names start with the OS and are shown in
+Settings → Devices.
 
 An invitation expires after ten minutes and works once, whether redeemed by
 link, QR or code. Create a separate invitation for each device. Wrong, expired,
@@ -44,43 +33,43 @@ unlinks the machine it linked. A short code needs the hub
 address: Backplane does not introduce a public code-resolver service. Both
 devices need a route to the hub, usually its LAN or tailnet.
 
-The HTTPS/HTTP link opens a web connection page and offers **Open in Backplane**
-for installed apps. A `backplane://pair` link reaches the desktop app from
-anywhere (a web page, a message), so the app pairs at once only with one of
-the person's own hubs: its own service, the hub it is already paired with, or
-one its own service knows (`POST /auth/known`: the hub's own addresses, the
-owner's machines it found on the tailnet or in `BACKPLANE_PEERS`, and the
-linked hubs it verified as the owner's). That hub then refuses a link it did
-not issue or has revoked. For any other address the app asks first, naming
-it, with Cancel the default. Links pasted, scanned or typed inside the app
-pair as before. iOS/Android handle the existing `backplane://pair` scheme;
-desktop packages register it too. This explicit web fallback works with
-user-owned hub domains; universal/app links on arbitrary hub domains are not
-claimed. A hosted HTTPS page does not bypass browser mixed-content rules.
+A pairing link is `http(s)://<hub>/pair#invite=<secret>&routes=<addresses>`. The
+scheme link `backplane://pair?url=<that link>` reaches an installed app from
+anywhere (a message, another app). The desktop client never pairs from a link
+that came from outside its window: it names the hub and asks, with Cancel first.
+Packages register the scheme: `deploy/backplane.desktop` on Linux, the bundle on
+macOS, the manifests on the phones. Short codes need the hub address: there is no
+public code resolver. Both devices need a route to the hub, usually its LAN or
+tailnet. The hub answers `POST /auth/known` (is this origin one of the owner's
+hubs), but no client asks it yet.
 
 The hub puts listener-confirmed tailnet origins ahead of a desktop's loopback
 address. A listener bound to every interface also advertises its IPv4 routes.
-When only loopback is available, web device management explains that tailnet
-access is needed to connect another computer. Alternative addresses in the link
-are hints, not a new tunneling service.
+A link whose every route is loopback is marked `localOnly`. Alternative addresses
+in the link are hints, not a new tunneling service.
+
+A hub on its tailnet address (`--host <100.x>`) or LAN address serves plain HTTP
+there. `--tailscale-https` or `--tailnet-only` also puts it behind
+`tailscale serve` and names that HTTPS address first; set `BACKPLANE_HTTPS_PORT`
+to a free port, because a hub never takes a port already mapped to something else.
+Every client reaches such a hub over TLS, checked against the system's roots.
 
 ## Access and preservation
 
-Invitation secrets are in fragments, removed from browser history before normal
-app handling, and exchanged in POST authorization headers. They never contain
-the hub's long-lived credential. Issued device tokens are random; the private
-atomic `devices-v1.json` registry stores their hashes, names and activity times.
-An invitation still open when the hub restarts keeps working until it expires. Enrollment
-uses a hub-wide ten-attempt/minute bucket. Registry read/write failures fail
-closed and never rotate or rewrite the existing hub token file.
+Invitation secrets are in fragments and exchanged in POST authorization headers.
+They never contain the hub's long-lived credential. Issued device tokens are
+random; the private atomic `devices-v1.json` registry stores their hashes, names
+and activity times. An invitation still open when the hub restarts keeps working
+until it expires. Enrollment uses a hub-wide ten-attempt/minute bucket. Registry
+read/write failures fail closed and never rotate or rewrite the existing hub token
+file.
 
-Browsers keep the resulting credential in an HttpOnly, SameSite=Strict cookie;
-native clients keep their resulting session using the existing saved-link
-storage. Failed native exchanges do not replace an existing pairing. Native
-and desktop exchanges reject redirects. Revoking a new session rejects future
-requests and closes its existing websocket connections, including admissions
-queued during revocation. Device sessions do not open the private desktop
-Browser channel, which retains its local main-process authentication boundary.
+Native clients keep their credential privately: the phones in their own storage,
+the desktop client in `device-token` and `pairing.json` beside its local settings,
+never in a hub's `token` file. A failed exchange does not replace an existing
+pairing, and exchanges reject redirects. Revoking a device, from Settings or
+`POST /auth/revoke`, rejects its future requests and closes its open connections,
+including admissions queued during the revocation.
 
 Existing shared-token pairings continue to work without re-pairing or token
 rotation. Because that older credential is shared, those pairings cannot be
@@ -90,16 +79,13 @@ linking and its existing owner-authentication rules are unchanged.
 
 ## Validation
 
-`node --test desktop/test/pair-browser.test.cjs desktop/test/pairing-links.test.cjs test/tools/pairing_devices_test.cjs`
-checks the existing exchange, strict link parsing, persistence, single-use
-link/code state, expiry, rate limiting, write failures, listener route hints,
-the invitation records and their revocation, and which origins count as the
-owner's hubs.
+`cd native/host && scripts/cargo-q test --offline pair_` and
+`cd native/gpui && scripts/cargo-q test --offline pairing` check the registry, the
+routes, link parsing, refusals and the revoke paths.
 
-`bun test/tools/pairing_ux_e2e.ts EMITTED_HUB_JS WEB_DIRECTORY` uses a private hub,
-stand-in providers and a fixture-only clock preload. It covers the HTTP flow,
-real QR decoding, actual browser controls, first-run and revocation screens,
-HttpOnly cookies, mobile-width layout and credential-free hub logs. Optional
-`ANDROID_SERIAL` and `ELECTRON_BINARY` target only dedicated test instances.
-It never reads or copies the live home. All hubs and browsers it starts are
-stopped by their captured handles/PIDs.
+`test/e2e/pairing/proto.py` drives a running temp-home hub over HTTP and its
+data/1 socket from any machine: link and short code, used, wrong, revoked and
+expired codes, rate limiting, revoke, re-pair and restart.
+`test/e2e/pairing/settings_revoke.py` sends the action a Settings button sends and
+checks the device's socket closes. Both are protocol results, not client results;
+`docs/e2e/MATRIX.md` holds what has been run where.

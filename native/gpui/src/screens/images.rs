@@ -45,8 +45,7 @@ pub fn split(resp: &[u8]) -> Option<(u16, &[u8])> {
 }
 
 fn fetch(t: &Target, url: &str) -> Option<Arc<Image>> {
-    let mut s = TcpStream::connect(&t.addr).ok()?;
-    s.set_read_timeout(Some(Duration::from_secs(30))).ok()?; s.set_write_timeout(Some(Duration::from_secs(30))).ok()?;
+    let mut s = t.stream().ok()?; s.set_timeouts(Duration::from_secs(30)).ok()?;
     s.write_all(request(t, url).as_bytes()).ok()?;
     let mut buf = Vec::new(); s.take((MAX_BYTES + 8192) as u64).read_to_end(&mut buf).ok()?;
     let (status, body) = split(&buf)?;
@@ -161,11 +160,11 @@ mod tests {
     #[test] fn failed_stays_failed_until_retry_and_never_refetches() {
         let im = Images::default();
         assert!(matches!(im.get(None, "/x.png"), Slot::Failed));            // no target: failed, recorded
-        assert!(matches!(im.get(Some(&Target { addr: "127.0.0.1:1".into(), token: "t".into() }), "/x.png"), Slot::Failed), "a failed image is not fetched again");
-        im.retry(); assert!(matches!(im.get(Some(&Target { addr: "127.0.0.1:1".into(), token: "t".into() }), "/x.png"), Slot::Loading));
+        assert!(matches!(im.get(Some(&Target { addr: "127.0.0.1:1".into(), token: "t".into(), tls: false }), "/x.png"), Slot::Failed), "a failed image is not fetched again");
+        im.retry(); assert!(matches!(im.get(Some(&Target { addr: "127.0.0.1:1".into(), token: "t".into(), tls: false }), "/x.png"), Slot::Loading));
     }
     #[test] fn many_images_use_a_fixed_pool_and_never_evict_what_is_drawn() {
-        let im = Images::default(); let t = Target { addr: "127.0.0.1:1".into(), token: "t".into() };   // connection refused: every fetch fails fast
+        let im = Images::default(); let t = Target { addr: "127.0.0.1:1".into(), token: "t".into(), tls: false };   // connection refused: every fetch fails fast
         im.frame();
         for i in 0..200 { let _ = im.get(Some(&t), &format!("/img?path={i}")); }
         for _ in 0..200 { if !im.loading() { break; } std::thread::sleep(Duration::from_millis(25)); }
@@ -174,7 +173,7 @@ mod tests {
         assert_eq!(im.s.0.lock().unwrap().items.len(), 200, "everything drawn this frame is kept");
     }
     #[test] fn the_request_carries_the_token_in_the_query() {
-        let t = Target { addr: "h:1".into(), token: "tok".into() };
+        let t = Target { addr: "h:1".into(), token: "tok".into(), tls: false };
         assert!(request(&t, "/message-image?entry=e1&path=%2Fa.png").starts_with("GET /message-image?entry=e1&path=%2Fa.png&token=tok HTTP/1.1\r\nHost: h:1\r\n"));
         assert!(request(&t, "/img").starts_with("GET /img?token=tok "));
     }
@@ -188,7 +187,7 @@ mod tests {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let addr = l.local_addr().unwrap().to_string();
             let b2 = body.clone();
             let srv = std::thread::spawn(move || { let (mut s, _) = l.accept().unwrap(); let mut b = [0u8; 2048]; let _ = s.read(&mut b); let _ = write!(s, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", b2.len()); let _ = s.write_all(&b2); });
-            let t = Target { addr, token: "t".into() };
+            let t = Target { addr, token: "t".into(), tls: false };
             assert_eq!(fetch(&t, "/message-image?entry=e&path=p").is_some(), ok);
             srv.join().unwrap();
         }

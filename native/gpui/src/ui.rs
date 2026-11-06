@@ -292,6 +292,7 @@ impl Render for Backplane {
         if self.swatches { return crate::swatch::view(light).into_any_element(); }
         if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
         if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
+        if self.pair.is_some() { let (el, ctl) = crate::screens::pair::view(self, light, window, cx); self.controls = ctl; return el; }
         let c = |name: &str| theme::color(light, name);
         self.screens.reg.borrow_mut().begin(); self.screens.images.frame();
         let reg = self.screens.reg.clone();
