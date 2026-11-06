@@ -101,7 +101,7 @@ def main() -> IO(Unit):
     C.Check.str("a message sent today shows its time", st(es(), utc(), at(3600n), True{}, 0n), "09:00")
     C.Check.str("a reply mid-turn shows its time", st(es(), utc(), at(3600n), True{}, 1n), "09:00")
     C.Check.str("a reply mid-turn is mid (time on hover)", sh(es(), True{}, 1n), "mid")
-    C.Check.str("a reply mid-turn: phones show nothing", S.Stamp.shown(I.En{}, ss(es(), utc(), at(3600n), True{}), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es(), 1n), act("none", 0n))), "")
+    C.Check.str("a reply mid-turn: phones show its time too", S.Stamp.shown(I.En{}, ss(es(), utc(), at(3600n), True{}), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es(), 1n), act("none", 0n))), "09:00")
     C.Check.str("a finished turn's last reply is not mid", sh(es(), True{}, 3n), "shown")
     C.Check.str("the person's message is not mid", sh(es(), True{}, 5n), "shown")
     C.Check.str("a running turn's newest reply is not mid", sh(es(), True{}, 6n), "shown")
