@@ -26,11 +26,11 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
     let patch = match action {
         "bot-new" => json!({"drafts": {"@bnew": "1", "@rnew": "", "@f.name": "", "@f.persona": "", "@bnew.provider": provider}}),
         "room-new" => json!({"drafts": {"@rnew": "1", "@bnew": "", "@f.rname": "", "@rnew.members": ""}}),
-        "form-close" => match value { "@bnew" => json!({"drafts": {"@bnew": ""}}), "@rnew" => json!({"drafts": {"@rnew": ""}}), _ => return None },
+        "form-close" => match value { "@bnew" => json!({"drafts": {"@bnew": ""}}), "@rnew" => json!({"drafts": {"@rnew": ""}}), "@onew" => json!({"drafts": {"@onew": ""}}), _ => return None },
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
             match name {
-                "name" | "persona" | "rname" => json!({"drafts": {format!("@f.{name}"): text}}),
+                "name" | "persona" | "rname" | "rpost" | "oname" | "ocron" | "oprompt" => json!({"drafts": {format!("@f.{name}"): text}}),
                 "provider" if PROVIDERS.contains(&text) => json!({"drafts": {"@bnew.provider": text}}),
                 _ => return None,
             }
@@ -59,6 +59,40 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
     let mut patch = patch;
     if !cmds.is_empty() { patch["rid"] = json!(rid); }
     Some(Out { patch, cmds })
+}
+
+/// A bot page's routine form (Bend's `Bots.routine.edit`, `Bots.routine.save`; `routine-edit` fills it, `bfield` oname / ocron / oprompt type into it): `bot` is the bot's id,
+/// `page` its page (the routines it lists). A schedule the hub reads as cron is sent as `cron`, anything else as `at` (a one-time time): the hub's `bots.routine` says what it cannot read.
+pub fn routine_act(page: &Value, bot: &str, hub: &str, session: &Value, action: &str, value: &str) -> Option<Out> {
+    let mut rid = session["rid"].as_u64().unwrap_or(1);
+    let mut cmds = vec![];
+    let patch = match action {
+        "routine-edit" => {
+            let r = page["routines"].as_array().and_then(|rs| rs.iter().find(|r| s(r, "id") == value));
+            if !value.is_empty() && r.is_none() { return None }
+            let g = |k: &str| r.map_or("", |r| s(r, k));
+            let when = if g("cron").is_empty() { g("label") } else { g("cron") };
+            json!({"drafts": {"@onew": "1", "@f.oid": value, "@f.oname": g("name"), "@f.ocron": when, "@f.oprompt": g("prompt")}})
+        }
+        "routine-save" if on(session, "@onew") => {
+            let when = draft(session, "@f.ocron").trim();
+            if when.is_empty() { return Some(Out { patch: json!({}), cmds }) }
+            let name = draft(session, "@f.oname");
+            let key = if crate::bots::clock::Cron::parse(when).is_some() { "cron" } else { "at" };
+            let mut p = json!({"bot": bot, "routine": draft(session, "@f.oid"), "name": if name.is_empty() { "routine" } else { name }, "prompt": draft(session, "@f.oprompt"), "on": true});
+            p[key] = json!(when);
+            send(session, hub, "bots.routine", p, &mut cmds, &mut rid);
+            json!({"drafts": {"@onew": "", "@f.oid": "", "@f.oname": "", "@f.ocron": "", "@f.oprompt": ""}, "rid": rid})
+        }
+        _ => return None,
+    };
+    Some(Out { patch, cmds })
+}
+/// The bot page's `routine` object (MBots.routine.form).
+pub fn routine_form(session: &Value) -> Value {
+    let when = draft(session, "@f.ocron").trim();
+    let hint = if crate::bots::clock::Cron::parse(when).is_some() { crate::bots::sched_text::when_cron(when) } else { String::new() };
+    json!({"open": on(session, "@onew"), "id": draft(session, "@f.oid"), "name": draft(session, "@f.oname"), "cron": draft(session, "@f.ocron"), "prompt": draft(session, "@f.oprompt"), "hint": hint})
 }
 
 /// The screen's `newBot` object: None while the form is shut.
@@ -101,6 +135,21 @@ mod tests {
         let o = act(&st, "h", &s, "room-save", "").unwrap();
         let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
         assert_eq!((req["m"].as_str(), req["p"]["name"].as_str(), req["p"]["members"].as_str()), (Some("bots.room"), Some("room"), Some("b2")));
+    }
+    #[test] fn a_routine_is_filled_saved_as_cron_or_at() {
+        let page = json!({"routines": [{"id": "o1", "name": "tidy", "cron": "0 9 * * *", "prompt": "tidy up"}]});
+        let mut s = sess(json!({}));
+        let o = routine_act(&page, "b1", "h", &s, "routine-edit", "o1").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
+        let f = routine_form(&s); assert_eq!((f["open"].as_bool(), f["name"].as_str(), f["cron"].as_str()), (Some(true), Some("tidy"), Some("0 9 * * *")));
+        let o = routine_act(&page, "b1", "h", &s, "routine-save", "").unwrap();
+        let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((req["m"].as_str(), req["p"]["routine"].as_str(), req["p"]["cron"].as_str(), req["p"]["at"].is_null()), (Some("bots.routine"), Some("o1"), Some("0 9 * * *"), true));
+        crate::session::patch::merge(&mut s, &o.patch); assert_eq!(routine_form(&s)["open"], false);
+        let mut s = sess(json!({"@onew": "1", "@f.ocron": "2030-01-01T09:00"}));
+        let o = routine_act(&page, "b1", "h", &s, "routine-save", "").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
+        let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((req["p"]["at"].as_str(), req["p"]["cron"].is_null(), req["p"]["name"].as_str()), (Some("2030-01-01T09:00"), true, Some("routine")));
+        assert!(routine_act(&page, "b1", "h", &sess(json!({"@onew": "1"})), "routine-save", "").unwrap().cmds.is_empty());
     }
     #[test] fn a_form_action_with_no_form_open_is_not_ours() {
         let st = State::default(); assert!(act(&st, "h", &sess(json!({})), "bot-create", "").is_none() && act(&st, "h", &sess(json!({})), "form-close", "x").is_none());

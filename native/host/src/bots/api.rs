@@ -114,6 +114,15 @@ pub async fn directory(hub: &Arc<Hub>) -> serde_json::Value {
     rooms.sort_by_key(|x| x.0);
     serde_json::json!({"bots":bots.into_iter().map(|x| x.1).collect::<Vec<_>>(),"rooms":rooms.into_iter().map(|x| x.1).collect::<Vec<_>>()})
 }
+/// MBots.room.view for a room here (MBots.room.view.loc): `{kind:"room", id, name, title, members, posts:[{id, from, text, ago, mine}]}`, the newest 200 posts oldest first. None for an unknown room.
+pub async fn room_page(hub: &Arc<Hub>, room: &str, now: u64) -> Option<Value> {
+    if room.contains('~') || room.starts_with("dm:") { return None }
+    let b = of(hub)?;
+    let (name, members) = { let w = b.world().await; let r = w.room(room).filter(|r| !r.deleted)?; (r.name.clone(), r.members.iter().map(|m| w.bot(m).map_or(m.clone(), |b| b.name.clone())).collect::<Vec<_>>()) };
+    let posts: Vec<Value> = room_posts(hub, room, 200).await?.into_iter().map(|p| { let from = p["from"].as_str().unwrap_or("").to_string();
+        json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you"}) }).collect();
+    Some(json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts}))
+}
 /// `room.posts`: the newest `limit` posts of a room, oldest first (`{id, from, text, at}`).
 pub async fn room_posts(hub: &Arc<Hub>, room: &str, limit: usize) -> Option<Vec<serde_json::Value>> {
     let b = of(hub)?; let w = b.world().await;

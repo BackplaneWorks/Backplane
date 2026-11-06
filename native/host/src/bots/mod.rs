@@ -16,7 +16,7 @@ pub mod tools;
 pub mod sched_text;
 pub mod uber;
 pub mod world;
-pub use api::{chat_thread, default_tab, page as bot_page, page_from as bot_page_from};
+pub use api::{chat_thread, default_tab, page as bot_page, page_from as bot_page_from, room_page};
 pub use rpc::{Bots, Inbox};
 #[cfg(test)]
 mod tests;

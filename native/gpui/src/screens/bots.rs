@@ -39,6 +39,7 @@ pub fn form_fields(data: &Value) -> Vec<Field> {
     match b["kind"].as_str() { Some("room") => out.push(f("rpost", "Post to the room", String::new())), Some("remote") => out.push(f("rtext", "Message", String::new())), _ => {} }
     // a space's inputs: the typed text stays here (a vault field sends nothing) until the input's Send, which carries it in the space action
     if b["kind"] == "bot" && b["tab"] == "settings" { out.push(Field { name: persona_field(&string(b, "id")), hint: "Persona".into(), secret: false, value: string(b, "persona"), vault: true }); }
+    if b["kind"] == "bot" && b["tab"] == "routines" && b["routine"]["open"] == true { out.push(f("oname", "Name", string(&b["routine"], "name"))); out.push(f("ocron", "When", string(&b["routine"], "cron"))); out.push(f("oprompt", "What to do each time", string(&b["routine"], "prompt"))); }
     if b["kind"] == "bot" && b["tab"] == "hooks" { out.push(Field { name: "hk.name".into(), hint: "Webhook name".into(), secret: false, value: String::new(), vault: true }); }
     if b["kind"] == "bot" && b["tab"] == "tasks" { for t in arr(b, "tasks") { for p in arr(t, "params") { out.push(Field { name: task_field(&string(t, "slug"), &string(p, "name")), hint: { let e = string(p, "example"); if e.is_empty() { string(p, "label") } else { format!("{} (e.g. {e})", string(p, "label")) } }, secret: false, value: String::new(), vault: true }); } } }
     if b["kind"] == "bot" { let mut ins = Vec::new(); space_inputs(&b["space"]["blocks"], &mut ins); for (a, l) in ins { out.push(Field { name: format!("sp.{a}"), hint: l, secret: false, value: String::new(), vault: true }); } }
@@ -118,6 +119,9 @@ fn tab_cmd(id: &str) -> Command { act("bot-tab", id) }
 fn memory_cmd(from: &str) -> Command { act("bot-memory", from) }
 fn pick_cmd(id: &str) -> Command { act("room-pick", id) }
 fn forget_cmd(id: &str) -> Command { act("mem-forget", id) }
+fn routine_edit(id: &str) -> Command { act("routine-edit", id) }
+fn routine_save(_: &str) -> Command { act("routine-save", "") }
+fn close_routine_form(_: &str) -> Command { act("form-close", "@onew") }
 fn routine_toggle(id: &str) -> Command { act("routine-toggle", id) }
 fn routine_run(id: &str) -> Command { act("routine-run", id) }
 fn routine_delete(id: &str) -> Command { act("routine-delete", id) }
@@ -228,17 +232,31 @@ fn memory_page(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> AnyElem
     }).into_any_element()
 }
 
-fn routines_page(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> AnyElement {
+fn routines_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let items: Vec<&Value> = arr(bot, "routines").collect();
-    if items.is_empty() { return div().p_3().text_color(c("dim")).child("No routines.").into_any_element(); }
-    div().flex().flex_col().children(items.into_iter().enumerate().map(|(i, r)| {
+    let form = &bot["routine"];
+    let head = if form["open"] == true {
+        let hint = string(form, "hint");
+        let can = fields.get("ocron").map_or(false, |s| !s.input.read(cx).content.trim().is_empty());
+        div().flex().flex_col().gap_2().px_3().py_2().border_b_1().border_color(c("line"))
+            .child(div().font_weight(FontWeight::BOLD).child(if string(form, "id").is_empty() { "New routine" } else { "Routine" }))
+            .children(field_box(light, fields, "oname")).children(field_box(light, fields, "ocron"))
+            .child(div().text_size(px(11.)).text_color(c("dim")).child(if hint.is_empty() { "When: every 15m, daily 09:30, weekdays 08:00, or a one-time time".to_string() } else { hint }))
+            .children(field_box_h(light, fields, "oprompt", 60.))
+            .child(div().flex().gap_2().child(btn(cx, light, "rt-cancel".into(), "Cancel".into(), false, close_routine_form, String::new())).child(if can { btn(cx, light, "rt-save".into(), "Save".into(), true, routine_save, String::new()) } else { div().px_2().py_1().text_size(px(12.)).text_color(c("faint")).child("Save").into_any_element() }))
+    } else {
+        div().flex().px_3().py_2().border_b_1().border_color(c("line")).child(btn(cx, light, "rt-new".into(), "New routine".into(), false, routine_edit, String::new()))
+    };
+    if items.is_empty() { return div().flex().flex_col().child(head).child(div().p_3().text_color(c("dim")).child("No routines.")).into_any_element(); }
+    div().flex().flex_col().child(head).children(items.into_iter().enumerate().map(|(i, r)| {
         let id = string(r, "id");
         let when = [string(r, "label"), string(r, "next"), string(r, "rel")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
         div().flex().flex_col().gap_1().px_3().py_2().border_b_1().border_color(c("line"))
             .child(div().flex().gap_2().items_center().child(div().font_weight(FontWeight::BOLD).child(string(r, "name"))).child(div().text_size(px(11.)).text_color(c("dim")).child(if when.is_empty() { string(r, "cron") } else { when }))
                 .child(div().flex_1())
                 .child(btn(cx, light, format!("rt-on-{i}"), if r["on"] == true { "On".into() } else { "Off".into() }, r["on"] == true, routine_toggle, id.clone()))
+                .child(btn(cx, light, format!("rt-edit-{i}"), "Edit".into(), false, routine_edit, id.clone()))
                 .child(btn(cx, light, format!("rt-run-{i}"), "Run".into(), false, routine_run, id.clone()))
                 .child(btn(cx, light, format!("rt-del-{i}"), "Delete".into(), false, routine_delete, id)))
             .child(div().text_size(px(12.)).text_color(c("dim")).child(string(r, "prompt"))).into_any_element()
@@ -404,7 +422,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             let inner = match tab {
                 "chat" => return None,
                 "memory" => memory_page(cx, light, bot),
-                "routines" => routines_page(cx, light, bot),
+                "routines" => routines_page(cx, light, fields, bot),
                 "hooks" => hooks_page(cx, light, fields, bot),
                 "status" => status_page(light, bot),
                 "mail" => mail_page(light, bot),
