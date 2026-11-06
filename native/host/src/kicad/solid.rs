@@ -3,9 +3,14 @@
 //! Grid.thin is the vertex clustering the phones and the web get a model through. The same bytes as `Line.solid`'s `m` line.
 use super::{fl, glb::Tri3, plot::{Plot, Rect, Solid}, plotgen::um};
 
-/// Solid.most: the biggest GLB the hub reads into a solid. reader took about 300 bytes of memory per byte; this reader does
-/// not, but the limit is the product's rule and its words, so the same models show.
-pub const MOST: u64 = 12582912;
+/// Solid.most: the biggest GLB the hub reads into a solid. It was 12 MB (the Bend reader took about 300 bytes of memory per byte), which
+/// refused every real board with its parts (CM5 carrier 30 MB, oscillogoat 21 MB, Thunderscope 40 MB). This reader takes about 10
+/// bytes of memory per byte of GLB for the moment it reads one (Thunderscope: 380 MB, most of it the 20 MB JSON of 106k accessors), one
+/// model at a time, once per model (the solid is then kept beside it); what goes out is bounded by `TRIS`, not by the file.
+pub const MOST: u64 = 64 << 20;
+/// The most triangles a solid sends: the window keeps three models up to 1M triangles and decodes at most (64 MB / 84 B) ~800k
+/// (native/gpui/src/viewers/solid.rs MAX_TRIANGLES); a model over this is thinned on a coarser grid until it is under.
+pub const TRIS: usize = 600_000;
 pub fn fits(size: u64) -> bool { size <= MOST }
 /// Solid.big: what a refused model says (its size in whole megabytes, rounded up)
 pub fn big(size: u64) -> String { format!("This 3D model is too big to show here ({} MB; the hub reads models up to {} MB)", (size + 1048575) >> 20, MOST >> 20) }
@@ -21,17 +26,28 @@ fn cell_of(v: f32, o: f32, s: f32) -> u32 { fl::to_u32(((v - o) / s).floor()) }
 fn snap(v: f32, o: f32, s: f32) -> f32 { o + (((v - o) / s).floor() + 0.5) * s }
 /// Solid.thin: every corner moves across to the centre of its cell in a grid a thousandth of the model's size, a triangle two of whose
 /// corners land in one cell is dropped. y, the model's up, keeps its value, so a board's thin layers stay apart.
-pub fn thin(ts: Vec<Tri3>) -> Vec<Tri3> {
+pub fn thin(ts: Vec<Tri3>) -> Vec<Tri3> { thin_by(&ts, 1000.0) }
+/// Solid.fit: `thin`, then again on a grid half as fine each time while more than `most` triangles are left (small parts' detail goes
+/// first: their triangles collapse into one cell). Real boards come to 60k-310k triangles at the first grid (CM5 587k -> 129k).
+pub fn fit(ts: Vec<Tri3>, most: usize) -> Vec<Tri3> {
+    let mut cells = 1000.0f32;
+    let mut out = thin_by(&ts, cells);
+    while out.len() > most && cells > 16.0 { cells /= 2.0; out = thin_by(&ts, cells) }
+    if out.len() > most { out.truncate(most) }
+    out
+}
+/// Grid.thin with `cells` cells across the model's diagonal.
+fn thin_by(ts: &[Tri3], cells: f32) -> Vec<Tri3> {
     let big = 1000000000.0f32;
     let (mut lo, mut hi) = ([big; 3], [-big; 3]);
-    for t in &ts { for v in [t.a, t.b, t.c] { for k in 0..3 { lo[k] = fl::min(lo[k], v[k]); hi[k] = fl::max(hi[k], v[k]) } } }
+    for t in ts { for v in [t.a, t.b, t.c] { for k in 0..3 { lo[k] = fl::min(lo[k], v[k]); hi[k] = fl::max(hi[k], v[k]) } } }
     let d = |k: usize| fl::max(hi[k] - lo[k], 0.0);
     let (dx, dy, dz) = (d(0), d(1), d(2));
-    let s = (dx * dx + (dy * dy + dz * dz)).sqrt() / 1000.0;
-    if !(s > 0.0) { return ts }
+    let s = (dx * dx + (dy * dy + dz * dz)).sqrt() / cells;
+    if !(s > 0.0) { return ts.to_vec() }
     let same = |p: [f32; 3], q: [f32; 3]| (0..3).all(|k| cell_of(p[k], lo[k], s) == cell_of(q[k], lo[k], s));
     let moved = |v: [f32; 3]| [snap(v[0], lo[0], s), v[1], snap(v[2], lo[2], s)];
-    ts.into_iter().filter(|t| !(same(t.a, t.b) || same(t.b, t.c) || same(t.a, t.c))).map(|t| Tri3 { a: moved(t.a), b: moved(t.b), c: moved(t.c), color: t.color }).collect()
+    ts.iter().filter(|t| !(same(t.a, t.b) || same(t.b, t.c) || same(t.a, t.c))).map(|t| Tri3 { a: moved(t.a), b: moved(t.b), c: moved(t.c), color: t.color }).collect()
 }
 
 fn zig(d: u32) -> u32 { (d << 1) ^ 0u32.wrapping_sub(d >> 31) }
@@ -97,7 +113,21 @@ mod tests {
         metres(&mut t); assert_eq!(t[0].a, [1.0f32 * 0.001, 3.0f32 * 0.001, -2.0f32 * 0.001]);
     }
     #[test] fn the_size_limit_says_so() {
-        assert!(fits(MOST) && !fits(MOST + 1));
-        assert_eq!(big(MOST + 1), "This 3D model is too big to show here (13 MB; the hub reads models up to 12 MB)");
+        assert!(fits(MOST) && !fits(MOST + 1) && fits(40 << 20), "a real board with its parts (Thunderscope: 40 MB of GLB) is read");
+        assert_eq!(big(MOST + 1), "This 3D model is too big to show here (65 MB; the hub reads models up to 64 MB)");
+    }
+    // what goes out is what the window decodes (its limit in the same tree)
+    #[test] fn a_fitted_model_is_one_the_window_takes() {
+        let w = include_str!("../../../gpui/src/viewers/solid.rs");
+        assert!(w.contains("pub const MAX_TRIANGLES: usize = (64 << 20) / 84;") && TRIS < (64 << 20) / 84, "native/gpui's 3D page takes another number of triangles: change TRIS with it");
+    }
+    #[test] fn fitting_thins_until_the_model_is_under_its_triangles() {
+        // a 400 x 400 sheet of triangles a metre across: 320k at the first grid would pass, 1000 does not
+        let mut ts = vec![]; let n = 400; let q = 1.0 / n as f32;
+        for i in 0..n { for j in 0..n { let (x, z) = (i as f32 * q, j as f32 * q); ts.push(tri([x, 0.0, z], [x + q, 0.0, z], [x, 0.0, z + q], 1)); ts.push(tri([x + q, 0.0, z], [x + q, 0.0, z + q], [x, 0.0, z + q], 1)); } }
+        let first = thin(ts.clone()).len(); assert!(first > 1000);
+        assert_eq!(fit(ts.clone(), first).len(), first, "under its triangles: thinned once, as before");
+        let f = fit(ts.clone(), 1000); assert!(f.len() <= 1000 && f.len() > 100, "{}", f.len());
+        assert!(fit(ts, 0).is_empty());
     }
 }

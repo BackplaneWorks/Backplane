@@ -24,9 +24,17 @@ const VERSIONS_KEPT: usize = 8; // saved versions no view watches: Src.versions.
 const MADE_BYTES: usize = 128 << 20; // plots kept by the bytes they are of
 const TREES_KEPT: usize = 32;
 const AHEAD_SHEETS: usize = 16;
-/// A board's 3D model is exported ahead only up to this much board file: kicad-cli takes 1.6 GB and 20 s for a 4 MB board, whose model
-/// (30 MB) is then over the 12 MB a 3D view takes. A bigger board's model is made when its 3D page is opened, as before.
-const AHEAD_MODEL_MOST: u64 = 2 << 20;
+/// A board's 3D model is exported ahead only while the machine has this much memory available: kicad-cli takes 1.6 GB for the CM5
+/// carrier (4 MB board, 22 s) and 3.5 GB for Thunderscope (23 MB board, 25 s). One model at a time, at nice 10.
+const AHEAD_MEM: u64 = 6 << 30;
+/// A board's bare model (body, copper, mask, silk) goes first only for a board up to this much file: then it is quick (CM5 carrier,
+/// 4 MB: 5.8 s against 22 s with the parts); a bigger board's copper is most of the export (Thunderscope, 23 MB: 18 s against 25 s),
+/// so its model waits for the parts rather than coming 18 s later.
+const BARE_FIRST_MOST: u64 = 8 << 20;
+/// MemAvailable, in bytes (u64::MAX where there is no /proc/meminfo: nothing is held back for it)
+fn mem_available() -> u64 {
+    std::fs::read_to_string("/proc/meminfo").ok().and_then(|t| t.lines().find(|l| l.starts_with("MemAvailable:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok())).map_or(u64::MAX, |kb| kb << 10)
+}
 /// The GPUI window's plot store (native/gpui/src/screens/plot.rs `Store`): it keeps this many sources by key and drops them all when one
 /// more comes; a frame over `CLIENT_FRAME_MOST` it refuses, and that empties it too. A `kicad.watch` with `held` = this asks for keyed deltas.
 pub const CLIENT_SOURCES: u64 = 6;
@@ -208,7 +216,7 @@ impl Plots {
             s.used = tick; let need = s.plot.is_none() && !s.busy; self.gc(&mut st); need };
         if need { self.read(hub, &ky, 0) }
     }
-    /// A thread's drawings read before they are asked for: its board, its schematic and the sheets below it, then the board's 3D model (a board up to AHEAD_MODEL_MOST),
+    /// A thread's drawings read before they are asked for: its board, its schematic and the sheets below it, then the board's 3D model (while AHEAD_MEM is available),
     /// each kept as an idle source, so the first press shows at once. A newer round (another thread shown) cancels what this one has
     /// not started; a source already read at its file's revision, or that failed at it, is not read again.
     pub fn ahead(self: &Arc<Self>, hub: &Arc<Hub>, root: &str) {
@@ -228,7 +236,7 @@ impl Plots {
             if !f.pcb.is_empty() { want.push((0, key(0, &root, ""), f.pcb.clone())) }
             if !f.sch.is_empty() { want.push((1, key(1, &root, ""), f.sch.clone())) }
             for s in sheets { want.push((1, key(1, &root, &s), s)) }
-            if f.pcb.ends_with(".kicad_pcb") && std::fs::metadata(&f.pcb).map_or(false, |m| m.len() <= AHEAD_MODEL_MOST) { want.push((2, key(2, &root, ""), f.pcb.clone())) }
+            if f.pcb.ends_with(".kicad_pcb") { want.push((2, key(2, &root, ""), f.pcb.clone())) }
             let todo: Vec<String> = { let mut st = me.st.lock().unwrap(); st.tick += 1; let tick = st.tick; let mut todo = vec![];
                 for (k, ky, file) in want {
                     let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: file.clone(), ..Default::default() });
@@ -316,7 +324,8 @@ impl Plots {
             let q0 = std::time::Instant::now();
             let ahead_solid = round != 0 && solid_kind(kind);
             if ahead_solid { tokio::time::sleep(Duration::from_millis(500)).await } // the drawings first
-            let cancelled = |me: &Plots| round != 0 && me.round.load(Relaxed) != round;
+            // a model ahead waits for no one and needs memory to spare (an export it cannot make now is made when it is asked for)
+            let cancelled = |me: &Plots| round != 0 && (me.round.load(Relaxed) != round || (ahead_solid && !solidread::ready(kind, &file) && mem_available() < AHEAD_MEM));
             let _slot = if ahead_solid || cancelled(&me) { None } else { me.readers.acquire().await.ok() };
             // Pv.read.at: a model whose GLB is known too big is refused at once, not behind another model's read
             let known = if solid_kind(kind) { solidread::known(kind, &file) } else { 0 };
@@ -330,7 +339,21 @@ impl Plots {
             }
             let r0 = std::time::Instant::now();
             let before = if is_version(&file) { Stamp::default() } else { stamp(&file) };
+            // a board's model not made yet: the bare board (body, copper, mask, silk: a quarter of the export's time for the CM5 carrier;
+            // a board up to BARE_FIRST_MOST) is made first and goes out whole to whoever watches, then the board with its parts replaces it under the same key
+            let mut first: Option<Arc<Plot>> = None;
+            if kind == 2 && native() && solid::fits(known) && file.ends_with(".kicad_pcb") && std::fs::metadata(&file).map_or(false, |m| m.len() <= BARE_FIRST_MOST) && !solidread::ready(2, &file) {
+                if let Some((0, _, Some(bare))) = me.run_native(&hub, 3, &file, &ky).await {
+                    if bare.solid.is_some() && stamp(&file) == before {
+                        { let mut st = me.st.lock().unwrap(); if let Some(s) = st.srcs.get_mut(&ky) { s.plot = Some(bare.clone()) } }
+                        plot::times(|| format!("{{\"stage\":\"solid_first\",\"key\":{:?},\"ms\":{:.1}}}", ky, r0.elapsed().as_secs_f64() * 1e3));
+                        me.send_to(&hub, &ky, &bare, None); first = Some(bare);
+                    }
+                }
+            }
             let out = if !solid::fits(known) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
+            // the parts could not be added: the bare board stays what is shown
+            let out = match (out, first) { (Some((c, _, _)), Some(b)) if c != 0 && c != 2 => Some((0, String::new(), Some(b))), (o, _) => o };
             let after = if is_version(&file) { Stamp::default() } else { stamp(&file) };
             plot::times(|| format!("{{\"stage\":\"read\",\"key\":{:?},\"round\":{round},\"queue_ms\":{:.1},\"run_ms\":{:.1}}}", ky, (r0 - q0).as_secs_f64() * 1e3, r0.elapsed().as_secs_f64() * 1e3));
             let (code, text, made) = match out { Some((c, t, m)) => if before != after { (2, String::new(), None) } else { (c, t, m) }, None => (1, "cannot run the plot reader".into(), None) };
