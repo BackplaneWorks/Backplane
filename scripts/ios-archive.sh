@@ -7,8 +7,7 @@
 # pairing link from the environment, and an archive must not.
 cd "$(dirname "$0")/.." || exit 1
 M=build/gpui/mac-ssh; MODE=${1:-check}
-RSYNC_RSH=$PWD/$M rsync -a --delete --exclude build --exclude Backplane/bridge.js --exclude signing.env mobile/ios/ hs-mac-mini:bp-gpui-ios/ios/ || exit 1
-RSYNC_RSH=$PWD/$M rsync -a mobile/shell/backplane-app.js hs-mac-mini:bp-gpui-ios/ios/Backplane/backplane-app.js || exit 1
+RSYNC_RSH=$PWD/$M rsync -a --delete --exclude build --exclude signing.env mobile/ios/ hs-mac-mini:bp-gpui-ios/ios/ || exit 1
 $M hs-mac-mini "
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 cd ~/bp-gpui-ios/ios || exit 1
