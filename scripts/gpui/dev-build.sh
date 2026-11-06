@@ -17,8 +17,8 @@ ticker & TK=$!
 cleanup() { kill $TK 2>/dev/null; rm -f "$ST" "$ST.$$" "$PH" "$LOG"; [ -n "${D:-}" ] && rm -rf "$D"; }
 trap cleanup EXIT
 fail() { kill $TK 2>/dev/null; status failed "Build failed in $1: $(grep -m1 '^error' "$LOG" | cut -c1-120)" 0 0; cat "$LOG" | tail -20 >&2; sleep 8; exit 1; }
-echo hub > "$PH";    ( cd "$ROOT/native/host" && taskset -c 0-27 nice -n 10 cargo build --release --offline --bin backplane-hub ) > "$LOG" 2>&1 || fail hub
-echo window > "$PH"; ( cd "$ROOT/native/gpui" && taskset -c 0-27 nice -n 10 cargo build --release --offline ) > "$LOG" 2>&1 || fail window
+echo hub > "$PH";    ( cd "$ROOT/native/host" && taskset -c 0-27 nice -n 10 cargo build --release --offline -j 28 --bin backplane-hub ) > "$LOG" 2>&1 || fail hub
+echo window > "$PH"; ( cd "$ROOT/native/gpui" && taskset -c 0-27 nice -n 10 cargo build --release --offline -j 28 ) > "$LOG" 2>&1 || fail window
 kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"
 D=$(mktemp -d "$DEV/.stage.XXXX")
 cp "$ROOT/native/host/target/release/backplane-hub" "$ROOT/native/gpui/target/release/backplane-gpui" "$D/"

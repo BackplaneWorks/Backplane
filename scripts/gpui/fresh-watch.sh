@@ -9,7 +9,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 D=${FRESH_DIR:-$HOME/.backplane-gpui-fresh}; PORT=${FRESH_PORT:-3797}; H=$D/home
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; POLL=${GPUI_RELOAD_POLL:-2}; BOOT=${GPUI_RELOAD_BOOT:-120}
 ST=${BACKPLANE_DEV_STATUS:-$DEV/STATUS}
-status() { printf '{"phase":"%s","text":"%s","done":0,"total":0}\n' "$1" "$2" > "$ST.w" && mv -f "$ST.w" "$ST"; }
+status() { printf '{"phase":"%s","text":"%s","done":0,"total":0%s}\n' "$1" "$2" "${3:-}" > "$ST.w" && mv -f "$ST.w" "$ST"; }
+REQ=$DEV/RESTART   # the window's Restart now (two clicks) leaves this file: it is a press of Enter
 clear_status() { rm -f "$ST" "$ST.w"; }
 say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 tell() { say "$*"; notify-send -a Backplane 'Backplane GPUI (fresh)' "$*" 2>/dev/null || true; }
@@ -35,7 +36,7 @@ go() {  # go BUILD_DIR WHAT(client|both): relaunch on that build
 trap 'echo; say "stopped following; the app keeps running"; exit 0' INT TERM
 [ -d "$H" ] || { echo "fresh-watch: no fresh home in $H: run fresh.sh start first" >&2; exit 1; }
 say "following $DEV/CURRENT (running: $(basename "$(running_dir)"))"
-waiting=
+rm -f "$REQ"; waiting=
 while :; do
   c=$(cur); now=$(basename "$(running_dir)"); bad=$(cat "$DEV/.fresh-bad" 2>/dev/null || true)
   if [ -z "$c" ] || [ "$c" = "$now" ] || [ "$c" = "$bad" ] || [ ! -d "$DEV/builds/$c" ]; then waiting=; sleep "$POLL"; continue; fi
@@ -44,8 +45,10 @@ while :; do
     n=$(turns)
     if [ "$n" != 0 ]; then
       [ "$waiting" = "$c:$n" ] || tell "Build $c is ready; waiting for $n running turn(s) to finish (Enter relaunches now)."
-      waiting=$c:$n; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to finish, then the app relaunches"
-      if [ -t 0 ]; then read -r -t "$POLL" _ || continue; else sleep "$POLL"; continue; fi
+      waiting=$c:$n; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to end" ",\"action\":\"restart\",\"turns\":$n"
+      if [ -e "$REQ" ]; then rm -f "$REQ"; say "relaunch asked for from the window"
+      elif [ -t 0 ]; then read -r -t "$POLL" _ || continue
+      else sleep "$POLL"; continue; fi
     fi
   fi
   waiting=; prev=$(running_dir); say "relaunching on $c ($what)"; status relaunching "Relaunching on build ${c##*-}"
