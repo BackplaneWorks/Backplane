@@ -16,6 +16,8 @@ pub trait Facts: composer::Facts + select::Facts {
     fn attach_cap(&self) -> u64 { 512 << 20 }
     /// the thread a fork was made from (the setting fork.<id>): "" for a thread that is no fork
     fn fork_source(&self, _id: &str) -> String { String::new() }
+    /// a drag's shelf: (section, ids in order) of a thread or of the projects (sidebar::order_of)
+    fn order_of(&self, _kind: &str, _id: &str) -> Option<(String, Vec<String>)> { None }
 }
 
 pub struct Dispatched { pub session: Value, pub cmds: Vec<Value>, pub next_target: Option<Value> }
@@ -63,6 +65,8 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
     } else { (action, value) };
     let (cmds, next_target, has_fab) = if let Some(o) = composer::act(params, f) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, false)
+    } else if let Some(o) = crate::commands::reorder::act(hub, &params["session"], action, value, &|k, i| f.order_of(k, i)) {
+        patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
     } else if let Some(o) = cmdact::act(&cmdact::Req { hub, session: &params["session"], sel, action, value, title_of: &|t| f.title_of(t) }) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
     } else if let Some(o) = thread_actions::act(f, hub, &params["session"], sel, action, value) {
@@ -107,6 +111,10 @@ impl select::Facts for StateFacts<'_> {
 impl Facts for StateFacts<'_> {
     fn title_of(&self, id: &str) -> String { self.0.threads.get(id).map_or(String::new(), |t| t.title.clone()) }
     fn fork_source(&self, id: &str) -> String { self.0.settings.get(&format!("fork.{id}")).cloned().unwrap_or_default() }
+    fn order_of(&self, kind: &str, id: &str) -> Option<(String, Vec<String>)> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        crate::sidebar::order_of(self.0, now, kind, id)
+    }
     fn attach_cap(&self) -> u64 { self.0.settings.get("files.max.mb").and_then(|v| v.trim().parse::<u64>().ok()).map_or(512, |n| n.clamp(1, 4000)) << 20 }
     fn root_of(&self, id: &str) -> String {
         let Some(t) = self.0.threads.get(id) else { return String::new() };

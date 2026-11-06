@@ -423,6 +423,12 @@ mod state_tests {
         // asked for in this session alone works too (the phones' local view)
         let mut p=params(); p["session"]["drafts"]=json!({"@local.view":"active"}); assert!(recent(&st,&p).is_some());
     }
+    #[test] fn a_removed_projects_open_thread_keeps_its_row_until_another_is_chosen() {
+        let mut st=two_projects(); event(&mut st,json!({"$":"ProjectRemoved","id":"pa","at":9}));
+        assert_eq!(names(&recent(&st,&params()).unwrap()),["Beta"],"nothing open: the removed project is gone");
+        let mut p=params(); p["target"]=json!({"kind":"thread","id":"ta"}); p["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
+        if let Some(v)=recent(&st,&p) { assert!(names(&v).contains(&"Alpha board".to_string()),"its thread is open: the row stays"); }
+    }
     #[test] fn the_projects_list_is_the_default_and_the_settled_fold_toggles() {
         let st=two_projects(); let v=recent(&st,&params()).unwrap(); assert_eq!(names(&v).len(),2); assert!(v["shown"]["activeSettled"].is_null());
         let mut p=params(); p["session"]["drafts"]=json!({"@local.view":"active"}); p["action"]=json!("side-settled");
