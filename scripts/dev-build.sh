@@ -29,7 +29,9 @@ ticker & TK=$!
 # a haiku on what this build adds (commits since MAIN_PREV, the tip built before), made by Haiku while the build runs; a miss costs nothing
 HK=$(mktemp "$DEV/.haiku.XXXX"); HKP=
 if [ -n "${MAIN_PREV:-}" ]; then "$HERE/build-haiku.sh" "$ROOT" "$MAIN_PREV" "$(git -C "$ROOT" rev-parse HEAD)" > "$HK" 2>/dev/null & HKP=$!; fi
-cleanup() { kill $TK $HKP 2>/dev/null; rm -f "$ST" "$ST.$$" "$PH" "$HK"; [ -n "${D:-}" ] && rm -rf "$D"; rm -f "$LOG"; }
+cleanup() { kill $TK $HKP 2>/dev/null; rm -f "$ST" "$ST.$$" "$PH" "$HK"; [ -n "${D:-}" ] && rm -rf "$D"; rm -f "$LOG"
+  for t in "${tds[@]}"; do [ -e "$t/.bpt-failed" ] || bpt_rm "$t"; done; }  # test temp dirs (below): a passing, interrupted or killed run leaves none; a failed one's stays
+tds=()
 trap cleanup EXIT
 # The slot is held by the wrapper at the top (below); the compiler cache and the cargo -j (about 2 GB of free memory a job) are set here.
 bq_cc; [ -n "$J" ] || J=$(bq_jobs)
@@ -39,7 +41,7 @@ fail() { kill $TK 2>/dev/null; why=$(grep -m1 -E '^(error|test .* FAILED)' "$LOG
 skips=(); while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) skips+=(--skip "$l");; esac; done < "$HERE/gate-skip.txt"
 # cargo runs the tests and the builds one after another; here the tests of both crates are compiled at once (--no-run), then every test program runs at the same time, then the two fast builds
 # (a running test program holds no cargo lock). Every test still runs and a red one still stops the build before anything is published.
-CG() { ( cd "$1" && CARGO_TARGET_DIR="$2" taskset -c 0-27 nice -n 10 cargo "${@:3}" ); }
+CG() { ( cd "$1" && CARGO_TARGET_DIR="$2" taskset -c 0-27 nice -n 10 cargo "${@:3}" ) 9>&-; }  # fd 9 is the build slot (lib-buildslot.sh): this shell keeps it, no child may
 # The window is built WITH the embedded Chromium (feature cef; docs/browser-gpui-cef.md) unless GPUI_FEATURES is set to something else (empty: none). CEF's distribution is cached once in
 # CEF_PATH (the cef crate downloads it on the first build); if that build fails the window is built without it and says so in the Browser tab ("embedded browser unavailable").
 FEATURES=${GPUI_FEATURES-cef}; export CEF_PATH=${CEF_PATH:-$HOME/.cache/backplane/cef-rs}
@@ -57,11 +59,12 @@ if [ "$GATE" = 1 ]; then
   wait $ph || { cp "$LH" "$LOG"; rm -f "$LH" "$LW"; fail "hub tests"; }
   wait $pw || { cp "$LW" "$LOG"; rm -f "$LH" "$LW"; fail "window tests"; }
   echo "testing" > "$PH"; names=(); pids=(); logs=()
-  run() { n=$1; dir=$2; shift 2; l=$(mktemp "$DEV/.t.XXXX"); ( cd "$dir" && CARGO_MANIFEST_DIR="$dir" "$@" ) > "$l" 2>&1 & pids+=($!); names+=("$n"); logs+=("$l"); }
+  # each test program gets its own TMPDIR (tests make dirs under temp_dir() and never remove them; lib-buildslot.sh bpt_new), removed after a pass, kept (bounded) after a failure
+  run() { n=$1; dir=$2; shift 2; l=$(mktemp "$DEV/.t.XXXX"); t=$(bpt_new); tds+=("$t"); ( cd "$dir" && TMPDIR=$t CARGO_MANIFEST_DIR="$dir" "$@" ) > "$l" 2>&1 9>&- & pids+=($!); names+=("$n"); logs+=("$l"); }
   for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LH"); do run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}"; done
   for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LW"); do run "window tests" "$ROOT/native/gpui" "$x"; done
   rm -f "$LH" "$LW"
-  bad=; for i in "${!pids[@]}"; do wait "${pids[$i]}" || { [ -n "$bad" ] || bad=$i; }; done
+  bad=; for i in "${!pids[@]}"; do wait "${pids[$i]}" && bpt_end "${tds[$i]}" 0 || { [ -n "$bad" ] || bad=$i; bpt_end "${tds[$i]}" 1; }; done
   if [ -n "$bad" ]; then cp "${logs[$bad]}" "$LOG"; rm -f "${logs[@]}"; fail "${names[$bad]}"; fi
   rm -f "${logs[@]}"
   # the builds come after the tests, not beside them: a build at -j28 starves the timing-sensitive hub tests (reconnect_loses_nothing_under_streaming_load and others fail under that load)
@@ -92,4 +95,4 @@ git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
 [ -z "$HKP" ] || wait "$HKP" 2>/dev/null; [ -s "$HK" ] && cp "$HK" "$D/HAIKU"
 [ "$CUT" = 0 ] && { echo "built in $D"; D=; exit 0; }
 status ready "Build $(cat "$D/COMMIT") ready: publishing" "$est" "$est"
-"$HERE/dev-cut.sh" "$D"
+"$HERE/dev-cut.sh" "$D" 9>&-

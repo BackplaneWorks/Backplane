@@ -24,3 +24,26 @@ git -C "$REPO" worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^
   for t in "$w"/native/*/target; do [ -d "$t" ] || continue; [ -z "$(find "$t" -maxdepth 2 -mmin -$(( HOURS * 60 )) -print -quit 2>/dev/null)" ] || continue
     say "target  $(( $(du -sk "$t" | cut -f1) / 1024 )) MB  $t"; [ "$APPLY" = 1 ] && rm -rf "$t"; done
 done
+# Test leftovers in /tmp (lanes' test runs; /tmp is a RAM tmpfs with an inode quota). Only top-level entries of this kind, made by this user, never a symlink, never across a mount, only when idle
+# for 30 minutes (--tmp-minutes N) and nothing uses them: bp-<area>-<pid>-<name> whose pid is dead (bp-chrome-<pid> is a real hub's, not a test's: left alone), and the per-run
+# bpt-XXXXXX dirs of scripts/lib-buildslot.sh (bpt_new) that no process has as its cwd or TMPDIR; a failed run's bpt dir (.bpt-failed) is evidence, bounded there, and left alone here.
+TMIN=30; set -- "$@"; while [ $# -gt 0 ]; do [ "$1" = --tmp-minutes ] && TMIN=$2; shift; done
+ENVS=$(mktemp); trap 'rm -f "$CWDS" "$ENVS"' EXIT; for e in /proc/[0-9]*/environ; do [ -r "$e" ] && tr '\0' '\n' < "$e" 2>/dev/null | grep -a '^TMPDIR=/tmp/bpt-'; done 2>/dev/null | sort -u > "$ENVS"
+# one find lists what was written lately (its top-level names), one pass checks each candidate; a dry run over 50 000 leftovers takes seconds
+ACT=$(mktemp); trap 'rm -f "$CWDS" "$ENVS" "$ACT"' EXIT
+find /tmp -xdev -mindepth 1 ! -path '/tmp/bp*' -prune -o -mmin -"$TMIN" -printf '%P\n' 2>/dev/null | cut -d/ -f1 | sort -u > "$ACT"
+declare -A act; while IFS= read -r l; do act[$l]=1; done < "$ACT"
+tn=0; re='^bp-[a-z0-9_]+-([0-9]+)(-.*)?$'
+for d in /tmp/bp-*-[0-9]* /tmp/bpt-??????; do
+  [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] || continue
+  b=${d#/tmp/}
+  case "$b" in
+    bpt-*) [ -e "$d/.bpt-failed" ] && continue; grep -qxF "TMPDIR=$d" "$ENVS" && continue;;
+    bp-chrome-*) continue;;
+    *) [[ $b =~ $re ]] && [ ! -e "/proc/${BASH_REMATCH[1]}" ] || continue;;
+  esac
+  [ -n "${act[$b]:-}" ] && continue
+  busy "$d" && continue
+  tn=$((tn + 1)); [ "$APPLY" = 1 ] && { chmod -R u+rwX "$d" 2>/dev/null; rm -rf --one-file-system "$d"; }
+done
+[ "$tn" -gt 0 ] && say "tmp     $tn test leftovers in /tmp (idle $TMIN min, owner dead)"

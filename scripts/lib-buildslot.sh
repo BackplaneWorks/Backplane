@@ -17,3 +17,17 @@ bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i
 # sccache shares compiled dependencies between worktrees (a new lane no longer compiles tokio, naga, zbus... from cold)
 bq_cc() { [ -z "${NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && command -v sccache > /dev/null 2>&1 || return 0
   export RUSTC_WRAPPER=sccache SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache} SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-20G}; }
+
+# A private temp dir for a test run. The tests make dirs under std::env::temp_dir() (bp-<area>-<pid>-<name>) and never remove them; temp_dir() honours TMPDIR, so every run gets its own
+# TMPDIR and drops it when it ends. /tmp here is a RAM tmpfs with an inode quota, and leftovers once stopped every agent shell.
+#   t=$(bpt_new); TMPDIR=$t cmd; bpt_end "$t" $?
+# The base is /tmp/bpt-XXXXXX (short: unix socket paths are limited to ~108 bytes). A run that failed keeps its dir (marked .bpt-failed) as evidence, and only the BPT_KEEP (default 5)
+# newest kept dirs survive; a passing or interrupted run removes its own. Only dirs this function made are ever touched; BPT_BASE (default /tmp) moves it.
+bpt_new() { mktemp -d "${BPT_BASE:-/tmp}/bpt-XXXXXX"; }
+bpt_rm() { [ -n "$1" ] && [ -d "$1" ] && [ ! -L "$1" ] || return 0; chmod -R u+rwX "$1" 2>/dev/null; rm -rf --one-file-system "$1"; }
+bpt_end() { local t=$1 rc=${2:-0} k=${BPT_KEEP:-5} d i=0
+  [ -n "$t" ] && [ -d "$t" ] || return 0
+  if [ "$rc" = 0 ]; then bpt_rm "$t"; return 0; fi
+  : > "$t/.bpt-failed"; echo "tests failed (exit $rc): their temp files are kept in $t" >&2
+  for d in $(ls -dt "${BPT_BASE:-/tmp}"/bpt-*/ 2>/dev/null); do d=${d%/}; [ -f "$d/.bpt-failed" ] && [ -O "$d" ] && [ ! -L "$d" ] || continue
+    i=$((i + 1)); [ "$i" -gt "$k" ] && bpt_rm "$d"; done; return 0; }
