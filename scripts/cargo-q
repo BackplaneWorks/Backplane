@@ -6,4 +6,11 @@ HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-buildslot.sh"
 if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: waiting for a build slot" >&2; }; bq_run waiting "$0" "$@"; exit $?; fi
 bq_cc
 j=(); case " $* " in *" -j"*|*" --jobs"*) ;; *) j=(-j "$(bq_jobs)");; esac
-exec nice -n 10 cargo "$1" "${j[@]}" "${@:2}"
+# The slot lock is fd 9 of THIS shell, which stays and waits: cargo and everything it starts (a test's stand-in `sleep`) run with fd 9 closed, so no orphan keeps a slot after the build ends.
+# `test` also gets its own TMPDIR (the tests leak temp dirs made with std::env::temp_dir()), removed when it ends; kept, bounded, when it failed (lib-buildslot.sh bpt_new).
+t=; [ "$1" = test ] && { t=$(bpt_new) || exit 1; }; pid=
+stop() { trap - EXIT INT TERM HUP; [ -n "$pid" ] && { kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; }; bpt_rm "$t"; exit "$1"; }
+trap 'stop 130' INT; trap 'stop 143' TERM HUP; trap 'stop 1' EXIT
+# (a background job starts with SIGINT ignored; the subshell puts it back so ^C still stops cargo)
+( trap - INT; [ -z "$t" ] || export TMPDIR=$t; exec nice -n 10 cargo "$1" "${j[@]}" "${@:2}" <&0 9>&- ) & pid=$!
+wait "$pid"; rc=$?; pid=; trap - EXIT INT TERM HUP; bpt_end "$t" "$rc"; exit "$rc"
