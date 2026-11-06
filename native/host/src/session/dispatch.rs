@@ -65,6 +65,10 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
     } else { (action, value) };
     let (cmds, next_target, has_fab) = if let Some(o) = composer::act(params, f) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, false)
+    } else if action == "fold" && value.len() > 1 && matches!(value.as_bytes()[0], b'0' | b'1') {
+        // a run of tool calls opened or shut (Fold.run.open): "<1|0><first id>"; the choice is kept in the session's info as `fold:<id>`, which the rows read
+        let key = format!("fold:{}", &value[1..]);
+        patch::merge(&mut session, &json!({"info": {key: if value.as_bytes()[0] == b'1' { "1" } else { "0" }}})); (vec![], None, false)
     } else if let Some(o) = crate::commands::reorder::act(hub, &params["session"], action, value, &|k, i| f.order_of(k, i)) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
     } else if let Some(o) = cmdact::act(&cmdact::Req { hub, session: &params["session"], sel, action, value, title_of: &|t| f.title_of(t) }) {
