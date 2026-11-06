@@ -505,7 +505,11 @@ impl Hub {
         if thread.is_empty() || !self.model.lock().await.threads.contains_key(thread) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown thread"})] }
         let at = now_ms() / 1000;
         let msg = p.get("msg").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_string).unwrap_or_else(|| format!("m{at}-{}", id.as_u64().unwrap_or(0)));
-        let events = [json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"user","text":text,"at":at}), json!({"$":"TurnQueued","thread":thread,"msg":msg,"text":text,"at":at})];
+        // `agentText`: what the agent is told when it differs from what the person sees (the phone data API adds the paths of attached images); `attachments`: their metadata, kept on the message
+        let agent_text = p.get("agentText").and_then(Value::as_str).filter(|t| !t.is_empty()).unwrap_or(text);
+        let mut posted = json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"user","text":text,"at":at});
+        if let Some(a) = p.get("attachments").filter(|a| a.as_array().map_or(false, |x| !x.is_empty())) { posted["attachments"] = a.clone(); }
+        let events = [posted, json!({"$":"TurnQueued","thread":thread,"msg":msg,"text":agent_text,"at":at})];
         if self.commit_many(&events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
         vec![json!({"t":"reply","id":id,"ok":true})]
     }
