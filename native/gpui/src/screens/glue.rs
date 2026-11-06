@@ -195,6 +195,15 @@ impl Backplane {
             let hub_on = super::viewer::active_kind(&self.data["thread"]["viewer"], None);
             if hub_on == p || self.screens.rail_at.map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(2)) { self.screens.rail_pending = None; self.screens.rail_at = None; }
         }
+        // remember the viewer state of a plot page (bounded: the newest 64 thread pages), so the next press of its tab draws at once
+        let v = &self.data["thread"]["viewer"];
+        if let Some(open) = v["open"].as_str().filter(|o| super::viewer::held_kind(o)) {
+            let k = format!("{}\u{1}{open}", super::viewer::thread_of(&self.data)); // (the thread this picture shows: `selected` follows it only after this)
+            if self.screens.seen_viewers.get(&k) != Some(v) {
+                if self.screens.seen_viewers.len() >= 64 && !self.screens.seen_viewers.contains_key(&k) { self.screens.seen_viewers.clear(); }
+                self.screens.seen_viewers.insert(k, v.clone());
+            }
+        }
         super::settings::sync(self, cx);
         super::projects::sync(self, cx);
         super::plotview::report_state(self);
@@ -216,8 +225,19 @@ impl Backplane {
         let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { cx.notify(); return };
         let t0 = std::time::Instant::now();
         if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
-        // (script mode) what the UI thread spent decoding and applying this frame, and how much of it was new
-        if self.screens.plotview.measure { let f = self.screens.plot.frame.as_ref(); self.m("plot_recv", serde_json::json!({"key": f.map_or("", |f| f.key.as_str()), "bytes": bytes.len(), "chunks": f.map_or(0, |f| f.chunks.len()), "decode_apply_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3})); }
+        self.plot_metric(bytes.len(), 0.0, t0);
+    }
+    /// A board or schematic frame the hub thread has read: its held chunks are resolved and it is applied here.
+    pub(crate) fn plot_ready(&mut self, p: Option<super::plot::Prepared>, bytes: usize, read_ms: f64) {
+        let t0 = std::time::Instant::now();
+        if let Err(e) = self.screens.plot.apply(p) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
+        self.plot_metric(bytes, read_ms, t0);
+    }
+    /// (script mode) what reading the frame took off the UI thread, what applying it took on it, and how much it was
+    fn plot_metric(&self, bytes: usize, read_ms: f64, t0: std::time::Instant) {
+        if !self.screens.plotview.measure { return }
+        let f = self.screens.plot.frame.as_ref();
+        self.m("plot_recv", serde_json::json!({"key": f.map_or("", |f| f.key.as_str()), "bytes": bytes, "chunks": f.map_or(0, |f| f.chunks.len()), "read_off_ui_ms": (read_ms * 1e3).round() / 1e3, "decode_apply_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3}));
     }
     /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the owner is `browser_owner` (the bot's id on a bot's screen, else the thread).
     pub(crate) fn browser_page(&mut self, cx: &mut Context<Self>) {

@@ -234,13 +234,13 @@ impl Backplane {
                         self.m("frame_cpu", json!({"name": name, "n": cpu.len(), "p50_ms": p(0.5), "p95_ms": p(0.95), "max_ms": p(1.0)})); }
                     if let Some(s) = &self.screens.solid { let st = s.read(cx).stats.clone(); self.m("solid_stats", json!({"name": name, "images": st.images, "last_ms": st.last_ms, "tris": st.last_tris, "size": [st.last_size.0, st.last_size.1]})); }
                     // the plot canvas's own CPU per paint while the record was open (culling, path building, tessellation, submission), not the rasterizer's time
-                    let mut ms: Vec<f32> = Vec::new(); let mut sp: Vec<[f32; 3]> = Vec::new();
+                    let mut ms: Vec<f32> = Vec::new(); let mut sp: Vec<[f32; 4]> = Vec::new();
                     for slot in 0..3 { let pv = self.screens.pv(slot); ms.append(&mut pv.paint_ms); sp.append(&mut pv.split); }
                     if !ms.is_empty() {
                         ms.sort_by(|a, b| a.partial_cmp(b).unwrap()); let p = |q: f32| ms[((ms.len() - 1) as f32 * q).round() as usize];
                         let part = |k: usize| { let mut v: Vec<f32> = sp.iter().map(|x| x[k]).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap()); if v.is_empty() { (0.0, 0.0) } else { (v[(v.len() - 1) / 2], v[((v.len() - 1) as f32 * 0.95).round() as usize]) } };
-                        let (lp, tess, sub) = (part(0), part(1), part(2));
-                        self.m("plot_paint", json!({"name": name, "n": ms.len(), "p50_ms": p(0.5), "p95_ms": p(0.95), "max_ms": p(1.0), "loop_cull_build_p50_p95_ms": [lp.0, lp.1], "tessellate_p50_p95_ms": [tess.0, tess.1], "paint_path_p50_p95_ms": [sub.0, sub.1]}));
+                        let (lp, tess, sub, tris) = (part(0), part(1), part(2), part(3));
+                        self.m("plot_paint", json!({"name": name, "n": ms.len(), "p50_ms": p(0.5), "p95_ms": p(0.95), "max_ms": p(1.0), "loop_cull_build_p50_p95_ms": [lp.0, lp.1], "tessellate_p50_p95_ms": [tess.0, tess.1], "paint_path_p50_p95_ms": [sub.0, sub.1], "triangles_p50_p95": [tris.0, tris.1]}));
                     }
                 }
                 self.pump(cx);

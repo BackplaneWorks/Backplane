@@ -17,7 +17,7 @@ pub struct PlotView {
     /// CPU ms of the last canvas paints (bounded), for the e2e `plot_paint` metric.
     pub paint_ms: Vec<f32>,
     /// Where those paints go (ms per paint): the segment/polygon loop (culling + path building), lyon's tessellation (`PathBuilder::build`), and `paint_path` (submission).
-    pub split: Vec<[f32; 3]>,
+    pub split: Vec<[f32; 4]>,
     /// Timing is on only when a script drives the client (the e2e metrics); a production paint takes no timestamps.
     pub measure: bool,
     /// The Layers panel's scroll state and, for the e2e `layers` step, a smaller height cap (px) so a short list scrolls too.
@@ -32,56 +32,65 @@ pub struct PlotView {
     pub down: Option<(f32, f32)>, pub picked: Option<super::plot::Pick>, pub card: Option<super::plot::Card>,
     /// (script mode) the source this canvas painted first since the last tab press and when, for the `view_shown` metric.
     pub painted: Option<(String, std::time::Instant)>,
+    /// The triangles this canvas keeps per chunk (screens::plotgeom), so a pan or zoom does not tessellate the plot again.
+    pub geom: std::rc::Rc<std::cell::RefCell<super::plotgeom::Cache>>,
 }
 
 fn color(c: &Chunk, factor: f32) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha * factor; r.into() }
 
-/// A chunk's stroke width in pixels: the hub's width is in micrometres on the capsule (radius = width / 2).
-fn paint_chunk(window: &mut Window, c: &Chunk, factor: f32, v: &View, o: Point<Pixels>, w: f32, h: f32, mut sp: Option<&mut [f32; 3]>) {
-    // (script mode only) ms since the last lap, added to the culling/tessellation/submission split
+/// Paint the chunks in `order` from the triangles the canvas keeps for them (screens::plotgeom): made once per chunk (strokes again only
+/// when a zoom changes how they look), so a frame only maps the triangles of the groups in view to pixels. Chunks next to each other in
+/// the hub's order with the same colour share a path (the same picture: every path is drawn in order into one layer); a big plot's paths
+/// are built on several cores, then submitted in order. `sp` (script mode): ms in culling and path building, in making triangles, in
+/// submission, and the triangles drawn.
+fn paint_chunks(window: &mut Window, cache: &mut super::plotgeom::Cache, chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: &View, b: Bounds<Pixels>, mut sp: Option<&mut [f32; 4]>) {
+    let (o, w, h) = (b.origin, f32::from(b.size.width), f32::from(b.size.height));
+    // plot -> window pixels: x * s + tx, y * s + ty
+    let (s, tx, ty) = (v.scale, f32::from(o.x) + w / 2. - v.cx * v.scale, f32::from(o.y) + h / 2. - v.cy * v.scale);
+    let (x0, y0) = v.to_plot(-8., -8., w, h); let (x1, y1) = v.to_plot(w + 8., h + 8., w, h);
+    let seen = move |q: &[f32; 4]| q[2] >= x0 && q[0] <= x1 && q[3] >= y0 && q[1] <= y1;
     let mut t = sp.as_ref().map(|_| std::time::Instant::now());
-    let mut lap = |k: usize, sp: &mut Option<&mut [f32; 3]>| { if let (Some(t), Some(sp)) = (t.as_mut(), sp.as_mut()) { let n = std::time::Instant::now(); sp[k] += n.duration_since(*t).as_secs_f32() * 1000.0; *t = n; } };
-    if !c.caps.is_empty() {
-        let width = (c.caps[4] * 2. * v.scale).max(1.0);
-        let rpx = width / 2.;
-        // a dot (a round pad, a via, a hole) is a zero-length capsule: a butt-capped stroke of no length draws nothing, so it is a filled circle;
-        // a stroke wide enough to see gets round ends the same way
-        let round_ends = width >= 3.0;
-        let n = ((6. + rpx * 2.) as usize).clamp(8, 32);
-        let circle = |pb: &mut PathBuilder, x: f32, y: f32| {
-            for k in 0..n { let t = std::f32::consts::TAU * k as f32 / n as f32; let q = point(o.x + px(x + rpx * t.cos()), o.y + px(y + rpx * t.sin())); if k == 0 { pb.move_to(q) } else { pb.line_to(q) } }
-            pb.close();
-        };
-        let mut pb = PathBuilder::stroke(px(width)); let mut any = false;
-        let mut dots = PathBuilder::fill(); let mut any_dot = false;
-        let margin = 50. + rpx;
-        let near = |x: f32, y: f32| x >= -margin && x <= w + margin && y >= -margin && y <= h + margin;
-        for s in c.caps.chunks_exact(5) {
-            let (a, b) = (v.to_px(s[0], s[1], w, h), v.to_px(s[2], s[3], w, h));
-            if s[0] == s[2] && s[1] == s[3] { if near(a.0, a.1) { circle(&mut dots, a.0, a.1); any_dot = true; } continue; }
-            if !near(a.0, a.1) && !near(b.0, b.1) { continue; }
-            pb.move_to(point(o.x + px(a.0), o.y + px(a.1)));
-            pb.line_to(point(o.x + px(b.0), o.y + px(b.1)));
-            any = true;
-            if round_ends { circle(&mut dots, a.0, a.1); circle(&mut dots, b.0, b.1); any_dot = true; }
-        }
-        lap(0, &mut sp);
-        if any { if let Ok(path) = pb.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
-        if any_dot { if let Ok(path) = dots.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
+    let mut lap = |k: usize, sp: &mut Option<&mut [f32; 4]>| { if let (Some(t), Some(sp)) = (t.as_mut(), sp.as_mut()) { let n = std::time::Instant::now(); sp[k] += n.duration_since(*t).as_secs_f32() * 1000.0; *t = n; } };
+    // make what is missing, then take the chunks in view as runs of one colour: (colour, entries, triangles in view)
+    cache.make_all(&order.iter().filter_map(|&(i, _)| chunks.get(i)).collect::<Vec<_>>(), s);
+    for &(i, _) in order { if let Some(c) = chunks.get(i) { cache.get(c, s); } }
+    lap(1, &mut sp);
+    let mut runs: Vec<(Hsla, Vec<&super::plotgeom::Entry>, usize)> = Vec::new();
+    for &(i, factor) in order {
+        let Some(c) = chunks.get(i) else { continue };
+        let Some(e) = cache.peek(c) else { continue };
+        if !seen(&e.bbox) { continue }
+        let n: usize = [&*e.fill, &e.stroke].iter().flat_map(|g| g.groups.iter().filter(|q| seen(&q.bbox)).map(|q| q.end - q.at)).sum();
+        if n == 0 { continue }
+        let col = color(c, factor);
+        match runs.last_mut() { Some(r) if r.0 == col => { r.1.push(e); r.2 += n; } _ => runs.push((col, vec![e], n)) }
     }
-    if !c.polys.is_empty() {
-        let mut pb = PathBuilder::fill(); let mut any = false;
-        for poly in &c.polys {
-            let pts: Vec<(f32, f32)> = poly.chunks_exact(2).map(|p| v.to_px(p[0], p[1], w, h)).collect();
-            let (minx, maxx) = pts.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
-            let (miny, maxy) = pts.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));
-            if maxx < -50. || minx > w + 50. || maxy < -50. || miny > h + 50. { continue; }
-            for (i, p) in pts.iter().enumerate() { let q = point(o.x + px(p.0), o.y + px(p.1)); if i == 0 { pb.move_to(q) } else { pb.line_to(q) } }
-            pb.close(); any = true;
-        }
-        lap(0, &mut sp);
-        if any { if let Ok(path) = pb.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
-    }
+    let build = |es: &[&super::plotgeom::Entry]| -> Option<Path<Pixels>> {
+        let st = point(0., 1.);
+        let mut path: Option<Path<Pixels>> = None;
+        for e in es { for g in [&*e.fill, &e.stroke] { for q in g.groups.iter().filter(|q| seen(&q.bbox)) { for t in &g.tris[q.at..q.end] {
+            let p = |k: usize| point(px(t[2 * k] * s + tx), px(t[2 * k + 1] * s + ty));
+            let (a, b2, c2) = (p(0), p(1), p(2));
+            path.get_or_insert_with(|| Path::new(a)).push_triangle((a, b2, c2), (st, st, st));
+        } } } }
+        path
+    };
+    let total: usize = runs.iter().map(|r| r.2).sum();
+    let threads = if total < 40_000 { 1 } else { std::thread::available_parallelism().map_or(4, |n| n.get()).min(6) };
+    let paths: Vec<Option<Path<Pixels>>> = if threads == 1 { runs.iter().map(|r| build(&r.1)).collect() } else {
+        // runs split into consecutive shares of about equal triangles, one per core, built at once and kept in order
+        let mut cuts = vec![0usize]; let mut acc = 0;
+        for (k, r) in runs.iter().enumerate() { acc += r.2; if acc * threads >= total * cuts.len() && k + 1 < runs.len() && cuts.len() < threads { cuts.push(k + 1); } }
+        cuts.push(runs.len());
+        std::thread::scope(|sc| {
+            let hs: Vec<_> = cuts.windows(2).map(|wd| { let part = &runs[wd[0]..wd[1]]; sc.spawn(move || part.iter().map(|r| build(&r.1)).collect::<Vec<_>>()) }).collect();
+            hs.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+        })
+    };
+    lap(0, &mut sp);
+    for (r, p) in runs.iter().zip(paths) { if let Some(p) = p { window.paint_path(p, r.0); } }
+    lap(2, &mut sp);
+    if let Some(sp) = sp.as_mut() { sp[3] += total as f32; }
 }
 
 /// A tap at window position `at` on canvas `slot`: the piece under it is lit and its info asked of the hub (the answer is the card), or, on nothing, the card goes.
@@ -138,7 +147,7 @@ fn paint_lit(window: &mut Window, p: &super::plot::Pick, v: &View, o: Point<Pixe
 
 /// The canvas for a frame; its size comes from the layout, the camera from `Screens.plotview`.
 /// `slot` is the camera this canvas drives: 0 the Board/Schematic page, 1 and 2 a Split's schematic and board panes (`Screens::pv`).
-pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHandle>, light: bool, frame: &Frame, view: Option<View>, masks: crate::viewers::layers::Masks) -> AnyElement {
+pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHandle>, geom: std::rc::Rc<std::cell::RefCell<super::plotgeom::Cache>>, light: bool, frame: &Frame, view: Option<View>, masks: crate::viewers::layers::Masks) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let chunks = frame.chunks.clone();
     // the hub's masks decide which chunks are drawn, dimmed, and which one is painted last
@@ -150,10 +159,15 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         this.update(cx, |app, _| { app.screens.pv(slot).bounds = Some(b); });
         let Some(v) = view else { return };
         let measure = this.update(cx, |app, _| app.screens.pv(slot).measure);
-        let t0 = measure.then(std::time::Instant::now); let mut sp = [0f32; 3];
+        let t0 = measure.then(std::time::Instant::now); let mut sp = [0f32; 4];
         let (lit, probe) = this.update(cx, |app, _| { let pv = app.screens.pv(slot); (pv.picked.clone(), pv.lit.clone()) });
         window.with_content_mask(Some(ContentMask { bounds: b }), |window| {
-            for &(i, factor) in &order { paint_chunk(window, &chunks[i], factor, &v, b.origin, w, h, measure.then_some(&mut sp)); }
+            let mut cache = geom.borrow_mut();
+            if cache.len() > chunks.len() * 4 + 64 { cache.prune(); }
+            let made0 = cache.made;
+            paint_chunks(window, &mut cache, &chunks, &order, &v, b, measure.then_some(&mut sp));
+            // (script mode) a paint that made triangles (a first paint, a zoom past a quarter octave): what it cost
+            if let (Some(t0), true) = (t0, cache.made != made0) { eprintln!("GPUI_METRIC {}", serde_json::json!({"event": "plot_paint_made", "slot": slot, "chunks_made": cache.made - made0, "ms": t0.elapsed().as_secs_f64() * 1e3, "tessellate_ms": sp[1], "build_ms": sp[0], "paint_path_ms": sp[2], "triangles": sp[3]})); }
             if !probe.is_empty() { paint_probe(window, &chunks, &probe, &v, b.origin, w, h); }
             if let Some(p) = &lit { paint_lit(window, p, &v, b.origin, w, h); }
         });

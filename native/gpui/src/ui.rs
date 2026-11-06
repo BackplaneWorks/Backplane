@@ -569,7 +569,7 @@ impl Render for Backplane {
                     .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette, &self.local, &self.selected))
                     .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref()))
                 )
-                .children(crate::screens::viewer::view(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))
+                .children(crate::screens::viewer::view(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), (self.screens.rail_pending.as_deref(), &self.screens.seen_viewers, crate::screens::viewer::thread_of(&self.data))))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
