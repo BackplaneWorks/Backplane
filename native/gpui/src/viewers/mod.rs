@@ -8,4 +8,5 @@ pub mod cef;
 pub mod cef_page;
 pub mod demo;
 pub mod layers;
+pub mod raster;
 pub mod solid;

@@ -4,14 +4,19 @@
 //! product's free orbit (solid.js `Orbit`): the model follows the pointer in any direction, the wheel zooms at the pointer between 1/60 and 20 times
 //! the fitted distance, a right/middle or shift drag moves it. The image is as big as the panel in device pixels. Nothing repaints while idle.
 use gpui::{prelude::*, *};
+use super::raster::{self, render, BG};
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Condvar, Mutex};
 
 pub const MAX_TRIANGLES: usize = (64 << 20) / 84;
 pub const MAX_PIXELS: usize = 2880 * 1800;
-const FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
+/// the most pixels a draft covers: beyond it the draft is drawn smaller and stretched
+const DRAFT_PIXELS: usize = 1600 * 1000;
+/// Samples a pixel a side: 1 for a draft, then as many as the panel's size leaves cheap (3 x 3 up to ~0.5 MP, 2 x 2 up to ~3 MP, none beyond).
+pub fn samples(w: usize, h: usize, draft: bool) -> usize { if draft { 1 } else if w * h <= 520_000 { 3 } else if w * h <= 3_000_000 { 2 } else { 1 } }
+pub(super) const FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Mesh { pub tris: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32 }
+pub struct Mesh { pub tris: Vec<[f32; 9]>, pub normals: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32 }
 
 struct Varints<'a> { b: &'a [u8], at: usize, valid: bool }
 impl<'a> Varints<'a> {
@@ -35,7 +40,7 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
     if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized model".into()) }
     let mut v = Varints::new(bytes);
     let (mut color, mut p) = (0u32, [0i32; 3]);
-    let (mut tris, mut colors) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let (mut tris, mut colors, mut keys) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n * 3));
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
     for _ in 0..n {
         color ^= v.next();
@@ -44,6 +49,7 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
             // 10 micrometres -> millimetres; the wire is board axes (x right, y down, z up), the orbit is right-handed: (x, -y, z), as the web's `mesh()` does (without it silk text reads mirrored)
             for a in 0..3 { p[a] = p[a].wrapping_add(v.signed()); t[3 * k + a] = if a == 1 { -(p[a] as f32 * 0.01) } else { p[a] as f32 * 0.01 }; }
             for a in 0..3 { lo[a] = lo[a].min(t[3 * k + a]); hi[a] = hi[a].max(t[3 * k + a]); }
+            keys.push(p);
         }
         if !v.valid { return Err("Incomplete model".into()) }
         tris.push(t); colors.push(color);
@@ -51,7 +57,8 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
     if v.more() || !v.valid { return Err("Unexpected model bytes".into()) }
     let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
     let radius = (0..3).map(|a| (hi[a] - lo[a]) * (hi[a] - lo[a])).sum::<f32>().sqrt() / 2.0;
-    Ok(Mesh { tris, colors, center, radius: radius.max(1e-3) })
+    let normals = raster::smooth_normals(&tris, &keys);
+    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3) })
 }
 
 // ---- the frame: a minimal CBOR map reader (text keys, or the wire dictionary's integer keys; byte strings) ------
@@ -191,75 +198,6 @@ impl Camera {
     }
 }
 
-// ---- rasterizer -----------------------------------------------------------------------------------------------------
-const BG: [u8; 4] = [18, 15, 13, 255]; // BGRA of the page background (#0d0f12)
-struct Proj { p: [[f32; 3]; 3], bgra: [u8; 4], miny: usize, maxy: usize }
-
-/// Render into BGRA (w x h x 4), z-buffered, two-sided lambert with a headlight, triangles clipped at the near plane. In horizontal bands on all
-/// cores. `alive` is polled every few thousand triangles: a superseded render stops and returns None.
-pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> {
-    let mut px = vec![0u8; w * h * 4];
-    for c in px.chunks_exact_mut(4) { c.copy_from_slice(&BG); }
-    let mut z = vec![f32::INFINITY; w * h];
-    let (f, near) = (1.0 / (FOV / 2.0).tan(), (cam.dist * 0.02).max(1e-3));
-    let eye = cam.eye();
-    let (cxp, cyp, scale) = (w as f32 / 2.0, h as f32 / 2.0, h as f32 / 2.0 * f);
-    let to_cam = |p: [f32; 3]| { let d = sub(p, eye); [dot(d, cam.right), dot(d, cam.up), dot(d, cam.fwd)] };
-    let mut projs: Vec<Proj> = Vec::with_capacity(mesh.tris.len());
-    for (i, (t, &color)) in mesh.tris.iter().zip(&mesh.colors).enumerate() {
-        if i % 4096 == 0 && !alive() { return None }
-        let (a, b, c) = ([t[0], t[1], t[2]], [t[3], t[4], t[5]], [t[6], t[7], t[8]]);
-        let n = norm(cross(sub(b, a), sub(c, a)));
-        let shade = 0.3 + 0.7 * dot(n, cam.fwd).abs();
-        let bgra = [(((color & 255) as f32) * shade) as u8, ((((color >> 8) & 255) as f32) * shade) as u8, ((((color >> 16) & 255) as f32) * shade) as u8, 255];
-        // clip the camera-space triangle against z >= near (Sutherland-Hodgman against one plane): 0, 1 or 2 triangles
-        let v = [to_cam(a), to_cam(b), to_cam(c)];
-        let mut poly: Vec<[f32; 3]> = Vec::with_capacity(4);
-        for k in 0..3 {
-            let (p, q) = (v[k], v[(k + 1) % 3]);
-            let (pin, qin) = (p[2] >= near, q[2] >= near);
-            if pin { poly.push(p); }
-            if pin != qin { let s = (near - p[2]) / (q[2] - p[2]); poly.push([p[0] + (q[0] - p[0]) * s, p[1] + (q[1] - p[1]) * s, near]); }
-        }
-        if poly.len() < 3 { continue }
-        let scr: Vec<[f32; 3]> = poly.iter().map(|p| [cxp + p[0] / p[2] * scale, cyp - p[1] / p[2] * scale, p[2]]).collect();
-        for k in 1..scr.len() - 1 {
-            let tri = [scr[0], scr[k], scr[k + 1]];
-            let (lo, hi) = (tri.iter().map(|p| p[1]).fold(f32::MAX, f32::min), tri.iter().map(|p| p[1]).fold(f32::MIN, f32::max));
-            if hi < 0.0 || lo >= h as f32 { continue }
-            projs.push(Proj { p: tri, bgra, miny: lo.floor().max(0.0) as usize, maxy: (hi.ceil() as i64).clamp(0, h as i64 - 1) as usize });
-        }
-    }
-    let bands = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8).min(h.max(1));
-    let rows = (h + bands - 1) / bands;
-    std::thread::scope(|s| {
-        for (bi, (pb, zb)) in px.chunks_mut(rows * w * 4).zip(z.chunks_mut(rows * w)).enumerate() {
-            let projs = &projs; let (y0, y1) = (bi * rows, (bi * rows + rows).min(h));
-            s.spawn(move || {
-                for (i, t) in projs.iter().enumerate() {
-                    if i % 8192 == 0 && !alive() { return }
-                    if t.maxy < y0 || t.miny >= y1 { continue }
-                    let (pa, pb_, pc) = (t.p[0], t.p[1], t.p[2]);
-                    let area = (pb_[0] - pa[0]) * (pc[1] - pa[1]) - (pb_[1] - pa[1]) * (pc[0] - pa[0]);
-                    if area.abs() < 1e-6 { continue }
-                    let (minx, maxx) = (pa[0].min(pb_[0]).min(pc[0]).floor().max(0.0) as usize, (pa[0].max(pb_[0]).max(pc[0]).ceil() as i64).clamp(0, w as i64 - 1) as usize);
-                    for y in t.miny.max(y0)..=t.maxy.min(y1 - 1) { for x in minx..=maxx {
-                        let (sx, sy) = (x as f32 + 0.5, y as f32 + 0.5);
-                        let w0 = ((pb_[0] - sx) * (pc[1] - sy) - (pb_[1] - sy) * (pc[0] - sx)) / area;
-                        let w1 = ((pc[0] - sx) * (pa[1] - sy) - (pc[1] - sy) * (pa[0] - sx)) / area;
-                        let w2 = 1.0 - w0 - w1;
-                        if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 { continue }
-                        let depth = w0 * pa[2] + w1 * pb_[2] + w2 * pc[2];
-                        let i = (y - y0) * w + x;
-                        if depth < zb[i] { zb[i] = depth; pb[i * 4..i * 4 + 4].copy_from_slice(&t.bgra); }
-                    } }
-                }
-            });
-        }
-    });
-    if alive() { Some(px) } else { None }
-}
-
 pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
     let buf = image::RgbaImage::from_raw(w as u32, h as u32, bgra)?; // gpui takes BGRA in this container
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
@@ -267,7 +205,9 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 
 // ---- the worker: latest request wins -------------------------------------------------------------------------------
 enum Msg { Mesh(SolidFrame), Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize } }
-#[derive(Default)] struct Pending { frame: Option<Vec<u8>>, render: Option<(Arc<Mesh>, Camera, usize, usize, u64)>, shutdown: bool }
+/// What to render: the model, the camera, the size, the samples a pixel a side, the ticket.
+type Job = (Arc<Mesh>, Camera, usize, usize, usize, u64);
+#[derive(Default)] struct Pending { frame: Option<Vec<u8>>, render: Option<Job>, shutdown: bool }
 struct Worker { slot: Arc<(Mutex<Pending>, Condvar)>, ticket: Arc<AtomicU64> }
 impl Worker {
     fn spawn(tx: async_channel::Sender<Msg>) -> Worker {
@@ -279,10 +219,10 @@ impl Worker {
                 while p.frame.is_none() && p.render.is_none() && !p.shutdown { p = cv.wait(p).unwrap(); }
                 if p.shutdown { return } (p.frame.take(), p.render.take()) };
             if let (Some(bytes), _) = &job { if let Some(f) = parse_frame(bytes) { if tx.send_blocking(Msg::Mesh(f)).is_err() { return } } }
-            if let (_, Some((mesh, cam, w, h, my))) = job {
+            if let (_, Some((mesh, cam, w, h, ss, my))) = job {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
-                if let Some(px) = render(&mesh, &cam, w, h, &move || g.load(Ordering::Relaxed) == my) {
+                if let Some(px) = render(&mesh, &cam, w, h, ss, &move || g.load(Ordering::Relaxed) == my) {
                     if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris.len(), w, h }).is_err() { return } }
                 }
             }
@@ -291,9 +231,9 @@ impl Worker {
     }
     fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frame = Some(bytes); cv.notify_one(); }
     /// Ask for an image of `mesh`; any earlier request still rendering is abandoned.
-    fn submit_render(&self, mesh: Arc<Mesh>, cam: Camera, w: usize, h: usize) -> u64 {
+    fn submit_render(&self, mesh: Arc<Mesh>, cam: Camera, w: usize, h: usize, ss: usize) -> u64 {
         let ticket = self.ticket.fetch_add(1, Ordering::Relaxed) + 1;
-        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, cam, w, h, ticket)); cv.notify_one(); ticket
+        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, cam, w, h, ss, ticket)); cv.notify_one(); ticket
     }
 }
 impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
@@ -360,9 +300,10 @@ impl SolidPage {
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
         let (mut w, mut h) = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48));
         if w * h > MAX_PIXELS { let k = (MAX_PIXELS as f32 / (w * h) as f32).sqrt(); w = (w as f32 * k) as usize; h = (h as f32 * k) as usize; }
-        if draft { w = (w / 2).max(32); h = (h / 2).max(24); }
+        // a draft while moving: one sample a pixel, and half size only on a very large panel; the rest at rest: smooth outlines
+        if draft && w * h > DRAFT_PIXELS { let k = (DRAFT_PIXELS as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
         self.asked = (w, h);
-        self.want_gen = self.worker.submit_render(mesh.clone(), cam, w, h);
+        self.want_gen = self.worker.submit_render(mesh.clone(), cam, w, h, samples(w, h, draft));
     }
     /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
     pub fn set_view(&mut self, name: &str) {
@@ -462,6 +403,7 @@ mod tests {
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
     use super::{decode_mesh, parse_frame, render, Camera, Mesh, SolidFrame, BG};
+    use super::super::raster::smooth_normals;
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
     fn zig(v: i32) -> u32 { ((v << 1) ^ (v >> 31)) as u32 }
     fn encode(tris: &[([i32; 9], u32)]) -> Vec<u8> {
@@ -515,16 +457,16 @@ mod tests {
         let _ = decode_mesh(2, &big); // overflowing deltas wrap (no debug-mode panic)
     }
     #[test] fn renders_the_model_in_the_middle_and_background_at_the_corners() {
-        let m = mesh(); let (w, h) = (96, 64); let px = render(&m, &Camera::fitted(&m), w, h, ALIVE).unwrap();
+        let m = mesh(); let (w, h) = (96, 64); let px = render(&m, &Camera::fitted(&m), w, h, 2, ALIVE).unwrap();
         let at = |x: usize, y: usize| { let i = (y * w + x) * 4; [px[i], px[i + 1], px[i + 2]] };
         assert_eq!(at(1, 1), [BG[0], BG[1], BG[2]]); assert_ne!(at(w / 2, h / 2), [BG[0], BG[1], BG[2]]);
     }
     #[test] fn free_orbit_has_no_pole_and_keeps_an_orthonormal_basis_and_zoom_is_bounded() {
-        let m = mesh(); let a = render(&m, &Camera::fitted(&m), 64, 64, ALIVE).unwrap();
+        let m = mesh(); let a = render(&m, &Camera::fitted(&m), 64, 64, 2, ALIVE).unwrap();
         let mut c = Camera::fitted(&m); for _ in 0..400 { c.orbit(3.0, 7.0); } // many turns over the pole
         let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
         assert!(dot(c.right, c.up).abs() < 1e-3 && dot(c.right, c.fwd).abs() < 1e-3 && (dot(c.fwd, c.fwd) - 1.0).abs() < 1e-3);
-        assert_ne!(a, render(&m, &c, 64, 64, ALIVE).unwrap());
+        assert_ne!(a, render(&m, &c, 64, 64, 2, ALIVE).unwrap());
         let mut z = Camera::fitted(&m); for _ in 0..500 { z.zoom_at(5.0, 0.0, 0.0, 1.5); } assert!((z.dist - z.fit / 60.0).abs() < 1e-3, "in-bound 1/60");
         for _ in 0..500 { z.zoom_at(-5.0, 0.0, 0.0, 1.5); } assert!((z.dist - z.fit * 20.0).abs() < 1e-1, "out-bound 20x");
     }
@@ -546,10 +488,10 @@ mod tests {
     }
     #[test] fn a_triangle_behind_the_near_plane_is_clipped_not_dropped() {
         let m = mesh(); let mut c = Camera::fitted(&m); c.dist = c.fit / 60.0 * 2.0; // inside the cube: faces cross the near plane
-        let px = render(&m, &c, 48, 48, ALIVE).unwrap();
+        let px = render(&m, &c, 48, 48, 2, ALIVE).unwrap();
         assert!(px.chunks_exact(4).any(|p| [p[0], p[1], p[2]] != [BG[0], BG[1], BG[2]]), "the near faces still cover the view");
     }
-    #[test] fn a_superseded_render_is_abandoned() { let m = mesh(); assert!(render(&m, &Camera::fitted(&m), 32, 32, &|| false).is_none()); }
+    #[test] fn a_superseded_render_is_abandoned() { let m = mesh(); assert!(render(&m, &Camera::fitted(&m), 32, 32, 1, &|| false).is_none()); }
     #[test] fn frame_parser_reads_model_note_and_ignores_other_frames() {
         let bytes = encode(&cube());
         let text = |f: &mut Vec<u8>, s: &str| { f.push(0x60 | s.len() as u8); f.extend(s.as_bytes()) };
@@ -562,5 +504,53 @@ mod tests {
         // a tag wraps ONE value: tag 6 over the map's text key must not eat the next item
         let mut tagged = vec![0xa1, 0xc6, 0x03]; text(&mut tagged, "x"); // key = tag(6, 3) then value "x"... the value after the tag number is the 3
         let _ = parse_frame(&tagged);
+    }
+    #[test] fn a_curved_surface_shades_smoothly_and_a_hard_edge_stays_sharp() {
+        // a flat strip folded by 20 degrees at the middle shares its vertices: the fold is smoothed; folded by 90 degrees it is not
+        let fold = |deg: f32| {
+            let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
+            let t = [[0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0], [10.0, 0.0, 0.0, 10.0 + 10.0 * c, 0.0, 10.0 * s, 10.0, 10.0, 0.0]];
+            (t, [[0, 0, 0], [1000, 0, 0], [0, 1000, 0], [1000, 0, 0], [2000, 0, 0], [1000, 1000, 0]])
+        };
+        let (t, k) = fold(20.0); let n = smooth_normals(&t, &k);
+        assert!((n[0][3] - n[1][0]).abs() < 1e-4 && (n[0][5] - n[1][2]).abs() < 1e-4, "the shared vertex has one normal on both faces");
+        assert!(n[0][5].abs() > 1e-3, "and it is tilted between them");
+        let (t, k) = fold(90.0); let n = smooth_normals(&t, &k);
+        assert!((n[0][5] - 1.0).abs() < 1e-4 && n[1][2].abs() < 0.9, "a 90 degree fold keeps each face's own normal");
+    }
+    #[test] fn shared_edges_leave_no_gaps_and_the_picture_is_stable() {
+        // a fan of thin triangles tiling a disc in front of the camera: every pixel inside is covered, whatever the sample count
+        let n = 97; let mut t = Vec::new();
+        for i in 0..n { let (a, b) = (i as f32 / n as f32 * 6.2831855, (i + 1) as f32 / n as f32 * 6.2831855);
+            t.push(([0, 0, 0, (a.cos() * 4000.0) as i32, (a.sin() * 4000.0) as i32, 0, (b.cos() * 4000.0) as i32, (b.sin() * 4000.0) as i32, 0], 0xc0c0c0)); }
+        let m = { let bytes = encode(&t); decode_mesh(t.len(), &bytes).unwrap() };
+        let c = Camera::fitted(&m).named("top");
+        for ss in [1, 2, 3] {
+            let (w, h) = (120, 90); let px = render(&m, &c, w, h, ss, ALIVE).unwrap();
+            let bg = [BG[0], BG[1], BG[2]];
+            for y in 0..h { for x in 0..w {
+                let (dx, dy) = (x as f32 + 0.5 - w as f32 / 2.0, y as f32 + 0.5 - h as f32 / 2.0);
+                let i = (y * w + x) * 4; let on = [px[i], px[i + 1], px[i + 2]] != bg;
+                if dx * dx + dy * dy < 12.0 * 12.0 { assert!(on, "ss {ss}: a hole at {x},{y}"); }
+            } }
+            assert_eq!(px, render(&m, &c, w, h, ss, ALIVE).unwrap(), "ss {ss}: same picture twice");
+        }
+    }
+    #[test] fn samples_a_pixel_follow_the_panel_and_a_draft_is_one() {
+        assert_eq!(super::samples(800, 600, true), 1); assert_eq!(super::samples(640, 480, false), 3);
+        assert_eq!(super::samples(1600, 1000, false), 2); assert_eq!(super::samples(2880, 1800, false), 1);
+    }
+    #[test] #[ignore] fn bench_png() {
+        let (frame, n) = super::super::demo::sphere_frame(std::env::var("TRIS").ok().and_then(|t| t.parse().ok()).unwrap_or(200_000));
+        let t0 = std::time::Instant::now();
+        let Some(SolidFrame::Model(_, m)) = parse_frame(&frame) else { panic!() };
+        eprintln!("decode+normals {n} tris: {:?}", t0.elapsed());
+        let (w, h) = (1200, 800);
+        for (name, ss) in [("draft", 1), ("full2", 2), ("full3", 3)] {
+            let c = Camera::fitted_for(&m, 1.5); let t0 = std::time::Instant::now();
+            let px = render(&m, &c, w, h, ss, ALIVE).unwrap(); eprintln!("{name}: {:?}", t0.elapsed());
+            let mut rgba = px.clone(); for p in rgba.chunks_exact_mut(4) { p.swap(0, 2); }
+            image::RgbaImage::from_raw(w as u32, h as u32, rgba).unwrap().save(format!("/tmp/solid-{name}.png")).unwrap();
+        }
     }
 }
