@@ -1211,7 +1211,7 @@ fn stored(e: &Value) -> Value {
     let rec: Value = serde_json::from_str(include_str!("../../../../test/bots/fixtures/js-ledger-calls.json")).unwrap();
     let js: Vec<Value> = include_str!("../../../../test/bots/fixtures/js-ledger.jsonl").lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let (hub, bots, inbox) = start("ledger", "").await;
-    let work = std::env::temp_dir().join(format!("bp-ledger-{}", std::process::id())); let _ = std::fs::remove_dir_all(&work); std::fs::create_dir_all(&work).unwrap();
+    let work = std::env::temp_dir().join(format!("bp-ledger-{}", std::process::id())); let _ = std::fs::remove_dir_all(&work); std::fs::create_dir_all(&work).unwrap(); let work = work.canonicalize().unwrap();
     std::fs::write(work.join("afile"), "x").unwrap(); let w = work.to_str().unwrap().to_string();
     let (mut done, mut n) = (0usize, 0); let mut ids: Vec<(String, String)> = vec![];
     for c in rec["calls"].as_array().unwrap() {

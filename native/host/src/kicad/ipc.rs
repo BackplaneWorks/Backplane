@@ -388,7 +388,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         // the real server's answer to GetVersion (bp.4), and one with no message for what is not asked about
         let version: Vec<u8> = { let h = "0a040a02746b120208011a5c0a3c747970652e676f6f676c65617069732e636f6d2f6b696170692e636f6d6d6f6e2e636f6d6d616e64732e47657456657273696f6e526573706f6e7365121c0a1a080a1063221431302e39392e302d756e6b6e6f776e2d62702e34"; (0..h.len() / 2).map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap()).collect() };
-        let root = std::env::temp_dir().join(format!("ipc-actor-{}", std::process::id())); let _ = std::fs::remove_dir_all(&root); std::fs::create_dir_all(&root).unwrap();
+        let root = std::path::PathBuf::from("/tmp").join(format!("ipc-actor-{}", std::process::id())); // short: a unix socket path must fit SUN_LEN (104 on macOS) let _ = std::fs::remove_dir_all(&root); std::fs::create_dir_all(&root).unwrap();
         let (rt, project) = (root.to_string_lossy().to_string(), "/p/a.kicad_pro".to_string());
         let dir = ks::dir(&rt, "", &project); std::fs::create_dir_all(&dir).unwrap();
         let sock = format!("{dir}/api.sock"); let l = tokio::net::UnixListener::bind(&sock).unwrap();

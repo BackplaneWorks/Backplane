@@ -1,6 +1,6 @@
 #!/bin/sh
 # Ship the committed tree (git archive of HEAD; the Mac has only openrsync) (native, assets, docs, test, i18n) to the Mac and build the hub and the client there. Never compiles locally.
-# usage: scripts/mac-hub-build.sh [hub|gpui|both] [test]   (default both)   -> ~/bp-e2e/dist/{backplane-hub,backplane-gpui}
+# usage: scripts/mac-hub-build.sh [hub|gpui|both] [test | test:FILTER]   (default both; test:FILTER runs the matching tests only and prints their output)   -> ~/bp-e2e/dist/{backplane-hub,backplane-gpui}
 # Takes the Mac-side lock itself: lockf -k /tmp/bp-mac-heavy.lockf (the Mac has no flock; the hub has no named locks). Needs ~/.cargo or /opt/homebrew/bin cargo on the Mac.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,6 +19,7 @@ export CARGO_TARGET_DIR=$HOME/bp-e2e/target CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:
 df -h /System/Volumes/Data | tail -1; rustc --version
 build() { # crate dir, binary
   cd ~/bp-e2e/src/native/$1
+  case "$TEST" in test:*) F=${TEST#test:}; cargo test --release --lib "$F" -- --nocapture --test-threads=1 2>&1 | grep -v "^warning\|^ *|\|^ *=\|^ *-->\|^$" | tail -60; return 0;; esac
   if [ -n "$TEST" ]; then cargo test --release --no-fail-fast > ~/bp-e2e/logs/test-$1.log 2>&1 || echo "tests failed: $1 (logs/test-$1.log)"; grep -E "^test result|FAILED|failed" ~/bp-e2e/logs/test-$1.log | tail -15; fi
   cargo build --release > ~/bp-e2e/logs/build-$1.log 2>&1 || { tail -60 ~/bp-e2e/logs/build-$1.log; exit 1; }
   cp "$CARGO_TARGET_DIR/release/$2" ~/bp-e2e/dist/; ls -l ~/bp-e2e/dist/$2

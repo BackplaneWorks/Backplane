@@ -110,7 +110,7 @@ mod tests {
             assert!(std_cmd(k, p).output().is_err(), "{k:?} {p} ran on a copy");
             assert!(tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(tokio_cmd(k, p).output()).is_err(), "{k:?} {p} ran on a copy (tokio)");
         }
-        assert!(std_cmd(Kind::Local, "/bin/true").output().map_or(false, |o| o.status.success()), "a local tool still runs");
+        assert!(std_cmd(Kind::Local, "true").output().map_or(false, |o| o.status.success()), "a local tool still runs");
     }
     #[test] fn a_copy_run_does_nothing_outside_its_home() {
         let me = std::env::current_exe().unwrap();
