@@ -1,7 +1,15 @@
 #!/bin/sh
 # reference-transaction hook, installed by scripts/install-hooks.sh into <common .git>/hooks/, which serves every worktree.
 # When refs/heads/main moves, make sure the main builder is running: it builds the new tip (tests, hub, window) and publishes it for the app to relaunch on.
-# It blocks nothing and always exits 0; any ref other than main is ignored.
+# It blocks only moves of the retired branches gpui and gpui-next ("use main"); everything else exits 0.
+if [ "$1" = prepared ]; then
+  z=0000000000000000000000000000000000000000; bad=
+  while read -r old new ref; do
+    case "$ref" in refs/heads/gpui|refs/heads/gpui-next) [ "$new" = "$z" ] || [ "$new" = "$old" ] || bad="$ref" ;; esac
+  done
+  [ -z "$bad" ] || { echo "refused: ${bad#refs/heads/} is retired; use main (commit on your own branch from origin/main, merge to main)" >&2; exit 1; }
+  exit 0
+fi
 [ "$1" = committed ] || { cat > /dev/null; exit 0; }
 hit=
 while read -r old new ref; do [ "$ref" = refs/heads/main ] && hit=1; done
