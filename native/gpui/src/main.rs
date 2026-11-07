@@ -4,6 +4,7 @@ mod delta;
 mod hub;
 mod input;
 mod keys;
+mod launch;
 mod local;
 mod pairing;
 mod perf;
@@ -50,7 +51,7 @@ impl Backplane {
         if !(self.selected==thread||self.selected.ends_with(&format!("|{thread}"))||thread.is_empty()) {return}
         let _=self.tx.try_send(screens::viewer::view_kind(&match part {Some(p)=>format!("{k}\t{p}"),None=>k})); cx.notify();
     }
-    fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
+    pub(crate) fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
         let (swatches,gallery,fonts,theme)=(config.swatches,config.gallery,config.fonts,config.theme.clone());let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
         // a client that never gets projects says so (a hub with a canned presenter, a refused token ...) instead of leaving a script waiting silently
         cx.spawn(async move |weak,cx|{cx.background_executor().timer(Duration::from_secs(10)).await;let _=weak.update(cx,|this,_|{if !this.usable {this.m("not_usable",serde_json::json!({"after_s":10,"status":this.status,"error":this.error,"projects":this.data["projects"].as_array().map_or(0,|p|p.len())}));}});}).detach();
@@ -196,7 +197,7 @@ impl Backplane {
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     /// Ctrl/Cmd-C with no text field focused (a click in the timeline leaves none): copy what is selected there.
     fn copy_selection(&mut self,_:&CopySelection,_:&mut Window,cx:&mut Context<Self>){self.timeline_copy(cx);}
-    fn close_popup(&mut self,_:&ClosePopup,window:&mut Window,cx:&mut Context<Self>){if self.pad_escape(window,cx){return;}if self.ctx_close(cx){return;}if screens::filesui::escape(self,window,cx){return;}if self.palette_close(cx){return;}if self.screens.lightbox.take().is_some(){cx.notify();return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if screens::improvements::escape(self,cx){return;}if self.term_hide(cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}cx.notify();}
+    fn close_popup(&mut self,_:&ClosePopup,window:&mut Window,cx:&mut Context<Self>){if self.pad_escape(window,cx){return;}if self.ctx_close(cx){return;}if screens::filesui::escape(self,window,cx){return;}if self.palette_close(cx){return;}if self.screens.lightbox.take().is_some(){cx.notify();return;}if self.screens.picker_open{self.screens.picker_open=false;cx.notify();return;}if self.screens.acct.menu{self.screens.acct.menu=false;cx.notify();return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if self.data["tour"].is_object(){screens::settings::flush_fields(self);let _=self.tx.try_send(Command::Action("ob-skip".into(),String::new()));cx.notify();return;}if screens::improvements::escape(self,cx){return;}if self.term_hide(cx){return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}cx.notify();}
 }
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
 pub fn bind_all(cx:&mut App,l:&local::Local){keys::bind_all(cx,l);}
@@ -221,7 +222,14 @@ fn main()->anyhow::Result<()> {
             cx.open_window(opts,move|_,cx|cx.new(|cx|viewers::demo::Demo::new(cx,&source,steps,started))).expect("open GPUI window");
         } else {
             let measure=config.script.is_some();
+            if config.pending { // no --url: this device's own hub, or the chooser
+                let mut c=config.clone();c.launched=true;let saved=launch::load();
+                let env=std::env::var_os("BACKPLANE_HOME").filter(|h|!h.is_empty()).map(std::path::PathBuf::from);
+                if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).expect("open GPUI window");}
+                else {let auto=env.or_else(||(!saved.home.is_empty()).then(||saved.home.clone().into()));cx.open_window(opts,move|window,cx|cx.new(|cx|screens::first::First::new(window,cx,c,started,auto))).expect("open GPUI window");}
+            } else {
             cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).expect("open GPUI window");
+            }
         }
         cx.activate(true);
         if let Some(secs)=exit_after {cx.spawn(async move|cx|{cx.background_executor().timer(Duration::from_secs_f64(secs)).await;let _=cx.update(|cx|cx.quit());}).detach();}

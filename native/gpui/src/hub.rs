@@ -18,11 +18,11 @@ pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Som
     #[test] fn a_refused_view_or_command_leaves_the_connection_label_alone(){assert_eq!(status_for(&Event::Refused("View request refused: \"PRESENTER_UNAVAILABLE\"".into())),None);assert_eq!(status_for(&Event::Error("Hub disconnected".into())),Some("Disconnected"));assert_eq!(status_for(&Event::Accepted),None);}}
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, the body's size, and when its frame arrived.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool, pub at:Option<std::time::Instant> }
-#[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String>, /** a pairing credential is what connects: a 401 means this device was revoked */ pub paired:bool, /** no hub to connect to: the client starts at pairing */ pub unpaired:bool, /** a link from outside, to ask about */ pub pair_link:Option<String> }
+#[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String>, /** a pairing credential is what connects: a 401 means this device was revoked */ pub paired:bool, /** no hub to connect to: the client starts at pairing */ pub unpaired:bool, /** a link from outside, to ask about */ pub pair_link:Option<String>, /** no --url, no pairing: the launcher (launch.rs) finds or starts this machine's hub, or the chooser asks */ pub pending:bool, /** this client started or found its own hub */ pub launched:bool }
 impl Config {
     pub fn parse() -> Result<Self> {
         let home=std::env::var("HOME")?;
-        let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token"),exit_after:None,swatches:false,gallery:false,fonts:false,solid_demo:None,theme:None,paired:false,unpaired:false,pair_link:None,script:std::env::var_os("BACKPLANE_GPUI_SCRIPT").map(PathBuf::from)};
+        let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token"),exit_after:None,swatches:false,gallery:false,fonts:false,solid_demo:None,theme:None,paired:false,unpaired:false,pair_link:None,pending:false,launched:false,script:std::env::var_os("BACKPLANE_GPUI_SCRIPT").map(PathBuf::from)};
         let (mut args,mut named,mut keyed)=(std::env::args().skip(1),false,false);
         while let Some(arg)=args.next() { match arg.as_str() {
             "--hub"|"--url"=>{config.hub=args.next().context("--url needs a URL")?;named=true;},
@@ -41,6 +41,7 @@ impl Config {
         // no hub named: the one this client paired with, or (no hub's token here either) pairing
         match unnamed(named,keyed,crate::pairing::load(),config.token_file.exists()) {
             Start::Paired(hub)=>{config.hub=hub;config.token_file=crate::pairing::token_path().context("no config folder")?;config.paired=true;return Ok(config);}
+            Start::Unpaired if config.pair_link.is_none()&&config.script.is_none()&&!(config.swatches||config.gallery||config.fonts||config.solid_demo.is_some())=>{config.pending=true;return Ok(config);} // a first launch: setup's chooser (screens/first.rs); a link or a script goes to pairing, where the script runner is
             Start::Unpaired=>{config.hub.clear();config.token_file=crate::pairing::token_path().context("no config folder")?;config.unpaired=true;return Ok(config);}
             Start::Named=>{}
         }
@@ -80,6 +81,7 @@ fn refused(paired:bool,e:&anyhow::Error)->bool {
 fn unqualify(id:&str)->String {id.rsplit_once('|').map_or(id,|(_,id)|id).into()}
 fn millis()->u64 {SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64}
 struct View {
+    launcher:bool,
     rpcs:HashMap<u64,&'static str>, asks:HashMap<u64,u64>,
     hub:String, cid:String, greeting:Value, target:Value, session:Value,
     view_id:String, revision:u64, next:u64, pending:HashMap<u64,(u64,Value,String)>,
@@ -91,7 +93,7 @@ struct View {
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
     fn new(config:&Config)->Self {let mut v=Self::fresh(config);let reopen=crate::local::Local::load().default_view!="list"; let saved_view=crate::screens::place::take_view(); if let (true,Some((target,session)))=(reopen,saved_view){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=Restore::First;}v}
-    fn fresh(config:&Config)->Self {Self {restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:crate::pairing::http_of(&config.hub),cid:format!("gpui-{}-{}",std::process::id(),millis()),
+    fn fresh(config:&Config)->Self {Self {launcher:config.launched,restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:crate::pairing::http_of(&config.hub),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
         view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     /// the session key the composer's text goes under: the thread on show (a bot's target shows its chat thread), else the target
@@ -105,6 +107,7 @@ impl View {
         if ["view.open","view.page","view.update","view.action"].contains(&method) {
             p["nativeSidebar"]=json!(1);
             p["accountProfiles"]=json!(1); // the account page: the hub offers its `accounts` grant only to a view that declares this version
+            p["client"]=json!({"kind":"desktop","os":match std::env::consts::OS{"macos"=>"darwin",o=>o},"launcher":self.launcher}); // setup's words for keys, and whether another home can be chosen
             // Offer keyed deltas against the newest body held; the hub answers whole or with ops from it.
             p["viewDelta"]=json!({"version":1,"token":self.bases.newest});
             self.offered.insert(self.next,self.bases.newest.clone());

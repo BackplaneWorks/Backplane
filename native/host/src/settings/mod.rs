@@ -26,6 +26,7 @@ pub mod keys;
 mod e2e;
 pub mod mask;
 pub mod misc;
+pub mod onboard;
 pub mod models;
 pub mod proposal;
 pub mod secret;
@@ -91,6 +92,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_ticker(Arc::new(driver::ResumeTicker));
     hub.register_rpc(Arc::new(misc::SettingsMisc));
     crate::update::svc::install(&hub);
+    hub.register_rpc(Arc::new(onboard::OnboardRpc));
     hub.register_rpc(Arc::new(improvements::ImprovementsRpc));
     hub.register_http(Arc::new(diagnostics_http::DiagnosticsJson));
     hub.register_rpc(Arc::new(secret::SecretRpc { agents }));

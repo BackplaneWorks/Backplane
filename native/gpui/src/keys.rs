@@ -208,7 +208,7 @@ impl Backplane {
         let _ = self.tx.try_send(cmd); cx.notify();
     }
     /// A bare key does nothing while something covers the page.
-    fn covered(&self) -> bool { self.screens.palette.open || self.screens.lightbox.is_some() || self.screens.picker_open || self.screens.acct.menu || crate::screens::settings::is_open(self) }
+    fn covered(&self) -> bool { self.screens.palette.open || self.screens.lightbox.is_some() || self.screens.picker_open || self.screens.acct.menu || crate::screens::settings::is_open(self) || self.data["tour"].is_object() }
     fn key_rail(&mut self, a: &str, v: &str, cx: &mut Context<Self>) { if !self.covered() && self.data["thread"].is_object() { self.rail_press(a, v, cx); } }
     /// Ctrl+H: the plot on show cycles its focus; on Split, the pane with the keyboard (the board when neither has it, as from the composer). The hub is told which layers that plot has.
     /// With no plot to act on the key is not spent: it goes on to whatever has the keyboard.
