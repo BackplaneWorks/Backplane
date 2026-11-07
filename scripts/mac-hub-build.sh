@@ -23,7 +23,7 @@ build() { # crate dir, binary
   case "$TEST" in test:*) F=${TEST#test:}; cargo test --release --bin backplane-hub "$F" -- --nocapture --test-threads=1 2>&1 | grep -v "^warning\|^ *|\|^ *=\|^ *-->\|^$" | tail -60; return 0;; esac
   if [ -n "$TEST" ]; then cargo test --release --no-fail-fast > ~/bp-e2e/logs/test-$1.log 2>&1 || echo "tests failed: $1 (logs/test-$1.log)"; grep -E "^test result|FAILED|failed" ~/bp-e2e/logs/test-$1.log | tail -15; fi
   cargo build --release > ~/bp-e2e/logs/build-$1.log 2>&1 || { tail -60 ~/bp-e2e/logs/build-$1.log; exit 1; }
-  cp "$CARGO_TARGET_DIR/release/$2" ~/bp-e2e/dist/; ls -l ~/bp-e2e/dist/$2
+  rm -f ~/bp-e2e/dist/$2; cp "$CARGO_TARGET_DIR/release/$2" ~/bp-e2e/dist/; codesign -s - -f ~/bp-e2e/dist/$2 >/dev/null 2>&1 || true; ls -l ~/bp-e2e/dist/$2
 }
 # separate target dirs: the two crates are not in one workspace
 case $WHAT in hub|both) CARGO_TARGET_DIR=$HOME/bp-e2e/target-hub build host backplane-hub;; esac
