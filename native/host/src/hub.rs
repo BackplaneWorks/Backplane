@@ -495,7 +495,8 @@ impl Hub {
         if m == "fab.look" {
             let reply = crate::settings::fab::reply(&self.arc(), &id, "fab.look", msg.get("p").unwrap_or(&Value::Null)).await; // settings/fab.rs: the project card
             // the hub's own read, applied to this view's held state by the policy on its next V (Fab.reply)
-            if !c.view_id.is_empty() { crate::session::record_read(c.client, &c.view_id, "fab.look", id.as_u64().unwrap_or(0), reply["ok"].as_bool().unwrap_or(true), reply["result"].clone()); }
+            // bound to the view that asked, so the one view update the window asks for after this answer carries it (Buy it in the header)
+            if !c.view_id.is_empty() { crate::session::record_read_bound(c.client, &c.view_id, &c.target, "fab.look", id.as_u64().unwrap_or(0), reply["ok"].as_bool().unwrap_or(true), reply["result"].clone()); }
             return vec![reply];
         }
         if let Some(handler) = self.rpc_for(m) {
@@ -680,11 +681,11 @@ mod tests {
         let _ = crate::session::take_reads(c.client, &c.view_id, &c.target); // whatever the open itself recorded
         let out = h.request(&mut c, &json!({"id": 77, "m": "fab.look", "p": {"thread": "t1"}})).await;
         assert_eq!(out[0]["ok"], true);
-        // like a job-answered request's marks, the read joins the view with the next served view request and is carried by the one after
-        assert!(crate::session::take_reads(c.client, &c.view_id, &c.target).is_empty());
+        // bound to the view that asked: the very next view request carries it (the window asks for one update after the answer)
         let reads = crate::session::take_reads(c.client, &c.view_id, &c.target);
         assert_eq!(reads.len(), 1, "{reads:?}");
         assert_eq!(reads[0]["kind"], "fab.look"); assert_eq!(reads[0]["result"]["thread"], "t1");
+        assert!(crate::session::take_reads(c.client, &c.view_id, &c.target).is_empty(), "carried once");
     }
 
     // soak finding: ids built from store.len() before the commit collided under concurrent project.add: id numbers are handed out past any given

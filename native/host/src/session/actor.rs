@@ -333,6 +333,13 @@ pub fn mask_page_reply(req: &Value, reply: &mut Value) {
 /// clears its `@rp.req:N` differently); `result` is the reply's `result` (for a failure, what the hub sent in its place);
 /// `result` is the RPC reply's `result` as the hub sent it. The
 /// reply is the hub's own, never the client's.
+/// `record_read` bound at once to the view and target it was asked for: delivered with that view's next request. The window asks for one view update after
+/// a job's answer; an unbound read would only bind to that one and wait for another request that may never come (Buy it never showed).
+pub fn record_read_bound(client: u64, view: &str, target: &Value, kind: &str, id: u64, ok: bool, result: Value) {
+    let mut m = ACTORS.lock().unwrap(); let a = m.entry(client).or_default();
+    a.record_read(kind, id, ok, result);
+    if let Some(last) = a.reads.last_mut() { last.0 = Some((view.to_string(), target.clone())); }
+}
 pub fn record_read(client: u64, _view_id: &str, kind: &str, id: u64, ok: bool, result: Value) {
     ACTORS.lock().unwrap().entry(client).or_default().record_read(kind, id, ok, result);
 }

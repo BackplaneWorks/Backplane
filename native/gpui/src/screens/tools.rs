@@ -40,12 +40,15 @@ pub fn close_question(data: &Value) -> Option<Command> {
 }
 pub fn rename_save(id: &str, text: &str) -> Option<Command> { let t = text.trim(); if t.is_empty() { None } else { Some(Command::Action("rename-save".into(), format!("{id}{SEP}{t}"))) } }
 
+/// A thread tool whose answer is a new thread the window goes to (Fork thread, Buy it): the window arms for it before sending, as New thread does.
+pub fn makes_thread(action: &str) -> bool { matches!(action, "fork" | "fab-buy") }
 fn small(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, danger: bool, cmd: Command, tip: (String, String)) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let (a, v) = match cmd { Command::Action(a, v) => (a, v), _ => (String::new(), String::new()) };
-    let d = div().id(SharedString::from(id)).px_2().h_full().flex().items_center().text_size(px(11.)).cursor_pointer().border_l_1().border_color(c("line")).hover(|s| s.bg(c("raise")));
+    let rect = format!("tool:{a}"); // a header tool reports its rectangle (tool:<action>), so a run can press Buy it as a person would
+    let d = crate::ui::with_rect(div().id(SharedString::from(id)), move || rect).px_2().h_full().flex().items_center().text_size(px(11.)).cursor_pointer().border_l_1().border_color(c("line")).hover(|s| s.bg(c("raise")));
     let d = if danger { d.text_color(c("bad")) } else if on { d.text_color(c("accent")) } else { d.text_color(c("dim")) };
-    d.child(label).tooltip(super::super::keys::tip(&tip.0, &tip.1, light)).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); if a == "fork" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element()
+    d.child(label).tooltip(super::super::keys::tip(&tip.0, &tip.1, light)).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); if makes_thread(&a) { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element()
 }
 
 /// The header's strip: each tool. The rest of the thread's actions are in the header's right-click menu (`context_items`). Returned as elements for the header row's right side.
@@ -133,6 +136,7 @@ pub fn questions(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn buy_it_and_fork_make_a_thread_the_window_goes_to() { assert!(makes_thread("fab-buy") && makes_thread("fork")); assert!(!makes_thread("pin") && !makes_thread("settle")); }
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
     #[test] fn the_hubs_tools_and_menu_parse_with_options_and_danger() {
         let t = j(r#"{"tools":[{"label":"Pin","tip":"t","action":"pin","value":"","on":false,"danger":false},{"label":"Archive","action":"archive","value":"","on":false,"danger":false}],

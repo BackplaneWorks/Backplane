@@ -109,7 +109,7 @@ impl Backplane {
         self.screens.palette.open = false; self.want_focus = true;
         match it.what {
             Do::Thread(id) => { let _ = self.tx.try_send(Command::Action("select".into(), id)); }
-            Do::Action(a, v) => { if a == "fork" { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a, v)); }
+            Do::Action(a, v) => { if super::tools::makes_thread(&a) { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a, v)); }
             Do::Settings => self.open_settings(cx),
             Do::Sidebar => self.sidebar_toggle(cx),
             Do::Models => self.models_pending = true,

@@ -255,6 +255,9 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     } }
     // Dv.sync: an open Diff follows its thread
     if !thread.is_empty() { crate::session::pages::dv_sync(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds); }
+    // Fab.sync for every request on a thread, view.open included: the window opens a thread with view.open (no select action), and the card
+    // (Buy it in the header) comes only from fab.look. fab_tail asks only when where the thread stands changed since the last ask (@fab.at).
+    if !thread.is_empty() { crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds); }
     // A thread is drawn only when the async session seam supplied a native window and indexed page.
     // Composer fields are drawn from the same adopted draft that the action dispatcher patches.
     let shown_thread=if thread.is_empty() { Value::Null }else{
@@ -403,6 +406,21 @@ mod state_tests {
     fn params() -> Value { json!({"target":{"kind":"recent","id":""},"nativeSidebar":1,"nativeKey":"00112233445566778899aabbccddeeff",
         "hub":"h","generation":"g","epoch":"e","viewId":"v","revision":1,"now":1_000_000,"session":{"rid":1,"open":{},"drafts":{}}}) }
     fn event(st: &mut State,e: Value) { assert!(st.apply(&e)); }
+    /// The window opens a thread with view.open (no select action): the card's look (Buy it in the header) is asked for then, once, and again only when the turn moves.
+    #[test] fn opening_a_thread_asks_for_its_card_once() {
+        let mut st=State::new(); st.lean=true;
+        event(&mut st,json!({"$":"ProjectCreated","id":"p1","title":"lamp","root":"/w/lamp","at":1}));
+        event(&mut st,json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"Lamp board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}));
+        let looks=|c: &[Value]| c.iter().filter(|c| c["text"].as_str().map_or(false,|t| t.contains("\"m\":\"fab.look\"") && t.contains("\"t1\""))).count();
+        let mut session=json!({"sel":"t1","rid":0,"info":{},"drafts":{}}); let mut cmds=vec![];
+        crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(&st),"h",&mut session,&mut cmds);
+        assert_eq!(looks(&cmds),1,"the open asks for the card: {cmds:?} {session}");
+        let mut again=vec![]; crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(&st),"h",&mut session,&mut again);
+        assert_eq!(looks(&again),0,"the same place asks nothing more");
+        // and the presenter runs it on a thread's view (view.open has no action): whatever it answers, its session has asked
+        let mut p=params(); p["target"]=json!({"kind":"thread","id":"t1"}); p["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
+        if let Some(v)=recent(&st,&p) { assert_eq!(looks(v["cmds"].as_array().unwrap()),1,"{}",v["cmds"]); } else { eprintln!("REFUSED (see the not ported line)"); }
+    }
     #[test] fn recent_reads_the_existing_policy_copy_only_after_boot() {
         use crate::state::fam::policy::{Core,Policy};
         let policy=Policy::new(); assert!(policy.with_state(|st|st.seq).is_none());
@@ -553,7 +571,10 @@ mod thread_binding_tests {
             let bare=|mut t:Value|{ for k in ["allowance","pickerAgents"] { t.as_object_mut().unwrap().remove(k); } t };
             assert_eq!(bare(out["shown"]["thread"].clone()),expected); assert_eq!(bare(out["overlay"]["j"]["thread"].clone()),expected);
             assert_eq!(out["session"]["sel"],p["target"]["id"]); assert_eq!(out["window"],p["window"]);
-            assert_eq!(out["shown"]["nativeSidebar"],1); assert_eq!(out["cmds"],json!([]));
+            assert_eq!(out["shown"]["nativeSidebar"],1);
+            // approved difference from the recording: opening a thread asks for its card (fab.look), as the select action does, so Buy it can show in the window
+            let th=p["target"]["id"].as_str().unwrap();
+            assert_eq!(out["cmds"],json!([{"type":"send","hub":"h","text":format!("{{\"id\":1,\"m\":\"fab.look\",\"p\":{{\"thread\":\"{th}\"}}}}")}]));
         }
     }
     #[test] fn thread_root_keeps_drafts_and_refuses_missing_indexed_inputs_and_unported_config() {
