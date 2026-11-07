@@ -1,0 +1,45 @@
+# Setup's installs, proven on a real Windows runner: Backplane KiCad through the hub's own kicad.install path (the real download, the pinned digest and the
+# release's SHA256SUMS, unpacked under a user folder with a space in its name) ending in kicad.status ok; Claude Code and Codex through setup's own
+# installers, each answering --version; and the onboarding presenter tests. Its own file, so it does not collide with ci.yml (the ci-matrix branch edits that).
+name: windows-install
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['native/host/src/kicad/install.rs', 'native/host/src/settings/tools_install.rs', 'native/host/src/present/onboard.rs', 'native/host/src/kicad/ipc.rs', '.github/workflows/windows-install.yml']
+  push:
+    branches: [main]
+    paths: ['native/host/src/kicad/install.rs', 'native/host/src/settings/tools_install.rs', '.github/workflows/windows-install.yml']
+jobs:
+  windows-install:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    # non-blocking until it is green once on a real runner
+    continue-on-error: true
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/host
+          shared-key: windows-install
+      - name: onboarding presenter tests
+        working-directory: native/host
+        shell: bash
+        run: cargo test --locked onboard -- --test-threads=1
+      - name: install tool and path unit tests
+        working-directory: native/host
+        shell: bash
+        run: cargo test --locked -- kicad::install:: settings::tools_install:: kicad::ipc::tests::a_managed_runtime
+      - name: Backplane KiCad, the real install (status ok)
+        working-directory: native/host
+        shell: bash
+        run: cargo test --locked real_kicad_install_ends_with_status_ok -- --ignored --nocapture --test-threads=1
+      - name: Claude Code and Codex, the real installs (--version runs)
+        working-directory: native/host
+        shell: bash
+        run: cargo test --locked real_agent_installs_answer_version -- --ignored --nocapture --test-threads=1
+      - name: the links a step shows are live
+        working-directory: native/host
+        shell: bash
+        run: cargo test --locked links_are_live -- --ignored --nocapture

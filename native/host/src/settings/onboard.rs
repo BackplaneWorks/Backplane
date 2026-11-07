@@ -46,7 +46,9 @@ fn first_of(typed: &str, setting: &str, env: &str, names: &[&str], places: Vec<P
 async fn kicad(hub: &Arc<Hub>, typed: &str) -> Value {
     let set = hub.setting("kicad.path").await.unwrap_or_default();
     let pf = crate::present::onboard::platform(&hub.cfg.os);
-    let Some(cli) = first_of(typed, &set, "BACKPLANE_KICAD_CLI", pf.kicad_names, pf.kicad_places.iter().map(PathBuf::from).collect()) else { return json!({"path": "", "runs": false}) };
+    let mut places: Vec<PathBuf> = pf.kicad_places.iter().map(PathBuf::from).collect();
+    let managed = crate::files::kicad::ipc::runtime(hub).await.cli; if !managed.is_empty() { places.insert(0, managed.into()); }
+    let Some(cli) = first_of(typed, &set, "BACKPLANE_KICAD_CLI", pf.kicad_names, places) else { return json!({"path": "", "runs": false}) };
     let path = cli.to_string_lossy().into_owned();
     match run(Kind::Local, &cli, &["--version"], TIMEOUT).await {
         Some((0, out, _)) => json!({"path": path, "version": version_of(&out), "runs": true}),
@@ -106,16 +108,42 @@ impl OnboardRpc {
         let cli = crate::agents::proc::Cli::from_env();
         let (typed_k, typed_f) = (g("kicad"), g("freecad"));
         let (a, k, f) = tokio::join!(agents(&cli), kicad(hub, &typed_k), freecad(hub, &typed_f));
+        let (winget, node) = Self::have(&hub.cfg.os).await;
         let devices = crate::net::start::routes().map_or(0, |r| r.reg.list()["devices"].as_array().map_or(0, |d| d.iter().filter(|x| x["revoked"] != true && x["revoked"] != "true").count()));
         let exe = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
         let on_path = on_path(crate::present::onboard::platform(&hub.cfg.os).launcher).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        let checks = json!({"exe": exe, "onPath": on_path, "agents": a, "accounts": accounts(&info), "kicad": k, "freecad": f, "devices": devices, "tailscale": info["tailscale"]});
+        let checks = json!({"exe": exe, "onPath": on_path, "agents": a, "accounts": accounts(&info), "kicad": k, "freecad": f, "devices": devices, "tailscale": info["tailscale"], "winget": winget, "node": node});
         // a path typed here goes where FreeCAD is looked for, then Settings, CAD reads the same machine
         if checks["freecad"]["runs"] == true && !g("freecad").is_empty() { let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), g("freecad")); }
         crate::files::kicad::ipc::publish_cad(hub).await;
+        Self::auto_kicad(hub).await;
         // a setting, not info: its log line redraws every client, and the answer outlives a restart. Only a change is logged.
         let text = checks.to_string();
         if hub.setting("onboard.checks").await.as_deref() != Some(text.as_str()) { let _ = hub.commit(&json!({"$":"SettingSet","key":"onboard.checks","value":text,"at":now_ms() / 1000})).await; }
+    }
+    /// Whether winget (Windows only) and Node answer: Windows' buttons and the Codex fallback read them.
+    async fn have(os: &str) -> (bool, bool) {
+        let w = async { os == "windows" && run(Kind::Local, Path::new("winget"), &["--version"], TIMEOUT).await.map_or(false, |r| r.0 == 0) };
+        let n = async { run(Kind::Local, Path::new("node"), &["--version"], TIMEOUT).await.map_or(false, |r| r.0 == 0) };
+        tokio::join!(w, n)
+    }
+    /// `onboard.install {tool}`: the press on a tool's Install button.
+    async fn install(hub: &Arc<Hub>, tool: &str) -> Result<String, String> {
+        let checks: Value = hub.setting("onboard.checks").await.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+        super::tools_install::start(hub, tool, checks["winget"] == true, checks["node"] == true, |h| Box::pin(async move { OnboardRpc::check(&h, &json!({})).await })).await
+    }
+    /// On the KiCad step with no KiCad found and a package for this computer, the install starts by itself, once per version (a failure shows Try again
+    /// and is not retried): the person reached the step, the step says what is downloaded, and the install checks the digest and stages as before.
+    async fn auto_kicad(hub: &Arc<Hub>) {
+        use crate::files::kicad::install::{decide, package, Action};
+        if hub.setting("onboard.step").await.as_deref() != Some("kicad") { return }
+        let info = hub.info_now();
+        let state: Value = serde_json::from_str(info["kicad.install"].as_str().unwrap_or("")).unwrap_or_default();
+        let Some(p) = package() else { return };
+        if decide(Some(p), info["kicad.status"].as_str().unwrap_or(""), state["state"].as_str().unwrap_or("")) != Action::Auto { return }
+        if hub.setting("onboard.kicad.auto").await.as_deref() == Some(p.version) { return }
+        let _ = hub.commit(&json!({"$":"SettingSet","key":"onboard.kicad.auto","value":p.version,"at":now_ms() / 1000})).await;
+        if let Err(why) = crate::files::kicad::install::install(hub, true).await { eprintln!("setup: KiCad install not started: {why}"); }
     }
     async fn inner(hub: &Arc<Hub>, who: &Caller, m: &'static str, p: Value) -> Value {
         let Some(h) = hub.rpc_for(m) else { return json!({"ok": false, "error": "not available on this hub"}) };
@@ -145,12 +173,13 @@ impl OnboardRpc {
     }
 }
 impl RpcHandler for OnboardRpc {
-    fn methods(&self) -> &'static [&'static str] { &["onboard.check", "onboard.uber", "onboard.view", "onboard.act"] }
+    fn methods(&self) -> &'static [&'static str] { &["onboard.check", "onboard.install", "onboard.uber", "onboard.view", "onboard.act"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let ok = json!({"t":"reply","id":id,"ok":true});
             match method {
                 "onboard.check" => { let (h, q) = (hub.clone(), p.clone()); tokio::spawn(async move { OnboardRpc::check(&h, &q).await }); vec![ok] }
+                "onboard.install" => match OnboardRpc::install(hub, p["tool"].as_str().unwrap_or("")).await { Ok(m) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"message":m}})], Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":e})] },
                 "onboard.uber" => { OnboardRpc::uber(hub, who).await; vec![ok] }
                 _ => vec![json!({"t":"reply","id":id,"ok":true,"result":OnboardRpc::phone(hub, who, p, method == "onboard.act").await})],
             }

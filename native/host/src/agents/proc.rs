@@ -36,7 +36,7 @@ impl Cli {
                 if exec && cp.starts_with(&cd) { Ok(cp) } else { Err(format!("{} has no runnable {cli}", d.display())) }
             }
             None if self.copy => Err(format!("a copy of a log runs agents only as stand-ins: {cli} refused")),
-            None => search_dirs().iter().map(|d| d.join(cli)).find(|c| c.is_file()).ok_or_else(|| format!("{cli} is not installed (looked in the hub's PATH, the login shell's and the usual install directories)")),
+            None => search_dirs().iter().flat_map(|d| [d.join(cli), d.join(format!("{cli}.exe"))]).find(|c| c.is_file()).ok_or_else(|| format!("{cli} is not installed (looked in the hub's PATH, the login shell's and the usual install directories)")),
         }
     }
 }
@@ -70,8 +70,9 @@ static SEARCH: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
 pub fn search_dirs() -> &'static [PathBuf] {
     SEARCH.get_or_init(|| {
         let cur: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-        merge_dirs(&[cur, login_dirs(), usual_dirs(&home)])
+        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
+        // what setup installs itself comes last, and is listed whether or not it exists yet: the list is worked out once, before the first install
+        merge_dirs(&[cur, login_dirs(), usual_dirs(&home), vec![crate::settings::tools_install::tools_dir(), home.join(".local/bin")]])
     })
 }
 

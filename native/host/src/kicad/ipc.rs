@@ -239,7 +239,7 @@ pub fn servers() -> String { IPC.get().map(|i| i.lines.lock().unwrap().clone()).
 fn newest_in(dir: &Path) -> Vec<PathBuf> {
     let mut v: Vec<String> = std::fs::read_dir(dir).map(|d| d.flatten().filter_map(|e| e.file_name().into_string().ok()).collect()).unwrap_or_default();
     v.sort_by(|a, b| if a == b { std::cmp::Ordering::Equal } else if ks::version_ge(a, b) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
-    v.into_iter().map(|n| dir.join(n).join("bin/kicad-cli")).collect()
+    v.into_iter().flat_map(|n| [dir.join(&n).join("bin/kicad-cli"), dir.join(n).join("bin/kicad-cli.exe")]).collect()
 }
 /// Publish what this machine has for Settings > CAD: info `kicad.cli`, `kicad.version`, `kicad.status`, `kicad.source` and `freecad` (empty when absent).
 pub async fn publish_cad(hub: &Arc<Hub>) {
@@ -272,16 +272,16 @@ pub async fn runtime(hub: &Arc<Hub>) -> Env {
     if let Some(s) = hub.setting("kicad.path").await.filter(|s| !s.is_empty()) {
         // the field takes the command line itself, or a folder that holds it (an install's bin/, or a macOS KiCad.app)
         let p = PathBuf::from(&s);
-        if p.is_dir() { for r in ["kicad-cli", "bin/kicad-cli", "Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"] { c.push(p.join(r)) } } else { c.push(p) }
+        if p.is_dir() { for r in ["kicad-cli", "kicad-cli.exe", "bin/kicad-cli", "bin/kicad-cli.exe", "Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"] { c.push(p.join(r)) } } else { c.push(p) }
     }
     if let Some(s) = std::env::var_os("BACKPLANE_KICAD_CLI").filter(|s| !s.is_empty()) { c.push(s.into()) }
     if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kicad/bin/kicad-cli"))) { c.push(d) }
     let home = std::env::var("HOME").unwrap_or_default();
     let data = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()).unwrap_or(format!("{home}/.local/share"));
-    for d in [PathBuf::from(&data).join("backplane/kicad"), PathBuf::from(&home).join(".backplane-bend/kicad"), hub.cfg.home.join("kicad")] { c.extend(newest_in(&d)) }
+    for d in [PathBuf::from(&data).join("backplane/kicad"), PathBuf::from(&home).join(".backplane-bend/kicad"), super::install::parent(&hub.cfg.home), hub.cfg.home.join("kicad")] { c.extend(newest_in(&d)) }
     // BACKPLANE_KICAD_NO_SYSTEM=1 (rigs that try Install KiCad on a machine that has one): the system's own copies (PATH, /usr/bin, the macOS app) are not looked at
     if std::env::var("BACKPLANE_KICAD_NO_SYSTEM").map_or(true, |v| v != "1") {
-        for d in std::env::var("PATH").unwrap_or_default().split(':').filter(|d| !d.is_empty()) { c.push(Path::new(d).join("kicad-cli")) }
+        for d in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).filter(|d| !d.as_os_str().is_empty()) { c.push(d.join("kicad-cli")); c.push(d.join("kicad-cli.exe")) }
         c.push("/usr/bin/kicad-cli".into());
         c.extend(super::stepglb::kicad_mac_clis().into_iter().map(PathBuf::from)); // macOS: the app bundle, system-wide or in ~/Applications
     }
@@ -380,6 +380,14 @@ impl RpcHandler for IpcRpc {
 
 #[cfg(test)]
 mod tests {
+    /// A managed install on Windows has `bin\kicad-cli.exe`: the newest version's is found, with a space in the folder name.
+    #[test] fn a_managed_runtime_is_found_by_its_exe_name_in_a_folder_with_spaces() {
+        let d = std::env::temp_dir().join(format!("bp kicad {}", std::process::id())).join("kicad"); let _ = std::fs::remove_dir_all(&d);
+        for v in ["10.99.0-bp.4", "10.99.0-bp.6"] { std::fs::create_dir_all(d.join(v).join("bin")).unwrap(); std::fs::write(d.join(v).join("bin/kicad-cli.exe"), "MZ").unwrap(); }
+        let found = newest_in(&d).into_iter().find(|p| p.is_file()).unwrap();
+        assert!(found.ends_with("10.99.0-bp.6/bin/kicad-cli.exe"), "{found:?}");
+        let _ = std::fs::remove_dir_all(d.parent().unwrap());
+    }
     use super::*;
     /// bp.4's kicad-cli --version prints `10.99.0`: its manifest says what it is, so Settings > CAD shows ok and 10.99.0-bp.4, not stock
     #[test] fn cad_status_trusts_a_backplane_manifest() {
