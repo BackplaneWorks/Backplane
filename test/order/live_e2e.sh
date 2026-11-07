@@ -10,6 +10,8 @@ OUT=${OUT:-$HOME/.cache/bp-tmp/order-live}; DISP=${DISP:-:183}; XV=${XV:-$MAIN/b
 rm -rf "$OUT"; mkdir -p "$OUT/home" "$OUT/bin" "$OUT/fakehome/.cache"; mkdir -m 700 "$OUT/run"
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > "$OUT/bin/claude"; chmod +x "$OUT/bin/claude"
 # Buy now's browser: the link is recorded, then opened as a browser would (following the order server's redirect through the Stripe double's checkout)
+# the window's desktop notifications: recorded (a show prints an id, as notify-send --print-id does; a close names the alert's key)
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> %s/notify.log\ncase "$1" in --close) ;; *) echo 7 ;; esac\n' "$OUT" > "$OUT/bin/notify"; chmod +x "$OUT/bin/notify"
 printf '#!/bin/sh\nprintf "%%s\\n" "$1" > %s/opened.txt\nexec curl -sS -L -o /dev/null "$1"\n' "$OUT" > "$OUT/bin/xdg-open"; chmod +x "$OUT/bin/xdg-open"
 env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE -u DBUS_SESSION_BUS_ADDRESS -u CLAUDE_CONFIG_DIR GVFS_DISABLE_FUSE=1 GIO_USE_VFS=local GIO_USE_VOLUME_MONITOR=unix HOME="$OUT/fakehome" XDG_RUNTIME_DIR="$OUT/run" XDG_CACHE_HOME="$OUT/fakehome/.cache" DISPLAY="$DISP" LC_ALL=C \
   dbus-run-session -- python3 -I "$HERE/live_e2e.py" "$(realpath "$1")" "$(realpath "$2")" "$OUT" "$DISP" "$XV" "$ASSETS" "$ROOT" "$3" > "$OUT/session.log" 2>&1 && rc=0 || rc=$?

@@ -59,7 +59,8 @@
 //   lostend      each command answers and has its result, but its lifecycle
 //                never completes (the line lost); the process stays, silent
 //   mcpcalls     the first command makes each call of BP_MCP_CALLS (JSON: [{name, arguments}]) of the
-//                hub's MCP tools in turn (a buy thread's order_quote, say), then ends; later commands as plain
+//                hub's MCP tools in turn (a buy thread's order_quote, say), then ends; later commands as plain, answered as a buy
+//                thread's agent would ("The quote is on the Order card…"), not echoed
 //   deploy       the first command calls the hub's deploy_restart (the MCP
 //                URL, BP_DEPLOY_ARGS, JSON, as its arguments), then ends
 // BP_STANDIN_IMAGES=<dir>: each image block received is written there (0, 1, ...), and
@@ -296,6 +297,7 @@ async function run(c: Cmd, firstOne: boolean) {
     return;
   }
   if (firstOne && mode === "mcpcalls") {
+    await sleep(Number(process.env.BP_MCP_DELAY_MS ?? 0)); // a run may look away first (a need raised on a thread the window is not watching)
     // BP_MCP_CALLS: a JSON list of {name, arguments}, each a real call of the hub's MCP tool in turn, each shown as a tool row
     for (const t of JSON.parse(process.env.BP_MCP_CALLS ?? "[]") as { name: string; arguments: object }[]) {
       let got = "";
@@ -533,7 +535,8 @@ async function run(c: Cmd, firstOne: boolean) {
     lc(c.uuid, "cancelled");
     return;
   }
-  const reply = c.text.includes("two") ? "TWO" : c.text.includes("one") ? "ONE" : `REPLY ${c.text.slice(0, 40)}`;
+  // mcpcalls (a buy thread's agent): Backplane's notes about the quote get an agent's short answer, not an echo the screenshots would show
+  const reply = mode === "mcpcalls" ? "The quote is on the Order card: Buy now there when you are ready." : c.text.includes("two") ? "TWO" : c.text.includes("one") ? "ONE" : `REPLY ${c.text.slice(0, 40)}`;
   say(reply);
   result(reply);
   lc(c.uuid, "completed");
