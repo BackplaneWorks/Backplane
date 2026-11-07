@@ -65,5 +65,30 @@ mod tests {
         let (typed, moved) = (format!("XX{text}"), mark + 2); let e = p.words(false, false, "then.", "");
         assert_eq!(apply(&typed, moved, &e).0, "XXab now then.");
     }
+    /// test/fixtures/voice-edits.json is what every client checks itself against: its `want`s are the hub's own (VOICE_BLESS=1 writes them).
+    #[test] fn the_clients_fixture_is_the_hubs_own_edits() {
+        use serde_json::{json, Value};
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/fixtures/voice-edits.json");
+        let mut f: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let bless = std::env::var_os("VOICE_BLESS").is_some();
+        for c in f["edits"].as_array_mut().unwrap() {
+            let (draft, caret) = (c["draft"].as_str().unwrap().to_string(), c["caret"].as_u64().unwrap() as usize);
+            let (mut p, mut text, mut mark, mut at, mut out) = (Place::new(&draft, caret), draft.clone(), caret, caret, vec![]);
+            for s in c["steps"].as_array().unwrap() {
+                let e = p.words(s["first"] == true, s["firm"] == true, s["commit"].as_str().unwrap(), s["tail"].as_str().unwrap());
+                out.push(json!({"del": e.del, "ins": e.ins, "adv": e.adv, "to": e.to}));
+                (text, mark, at) = apply(&text, mark, &e);
+                assert_eq!(text, p.draft, "{}", c["name"]);
+            }
+            let want = json!({"edits": out, "text": text, "mark": mark, "caret": at});
+            if bless { c["want"] = want } else { assert_eq!(c["want"], want, "{} (VOICE_BLESS=1 rewrites the fixture)", c["name"]) }
+        }
+        for c in f["apply"].as_array().unwrap() {
+            let e = &c["edit"]; let n = |k: &str| e[k].as_u64().unwrap() as usize;
+            let (text, mark, at) = apply(c["text"].as_str().unwrap(), c["mark"].as_u64().unwrap() as usize, &Edit { del: n("del"), ins: e["ins"].as_str().unwrap().into(), adv: n("adv"), to: n("to") });
+            assert_eq!(c["want"], json!({"text": text, "mark": mark, "caret": at}), "{}", c["name"]);
+        }
+        if bless { std::fs::write(path, serde_json::to_string_pretty(&f).unwrap() + "\n").unwrap() }
+    }
     #[test] fn a_mark_past_the_end_is_the_end() { assert_eq!(apply("ab", 9, &Edit { del: 3, ins: "c".into(), adv: 1, to: 1 }), ("abc".into(), 3, 3)); }
 }

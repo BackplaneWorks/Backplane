@@ -1,0 +1,328 @@
+{
+  "about": "Dictation's draft edits, shared by the hub (native/host/src/voice/place.rs generates `want`; VOICE_BLESS=1 rewrites it) and every client: GPUI (screens/voice.rs), iOS (VoiceEdit.swift), Android. A client applies each edit at its mark (replace `del` characters with `ins`, mark += adv, caret = old mark + to; a mark past the end is the end) and must reach `want`. `shift` is how the mark moves when the draft changes under it (typing, or a fix chip's `draft` frame): the common prefix p; a mark at or before p stays, else it moves by the change in length, never below p. Lengths are Unicode scalars.",
+  "edits": [
+    {
+      "name": "a segment reads on from an empty draft, its tail rewritten in place",
+      "draft": "",
+      "caret": 0,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "",
+          "tail": "Open the"
+        },
+        {
+          "first": true,
+          "firm": false,
+          "commit": "Open",
+          "tail": "the board"
+        },
+        {
+          "first": false,
+          "firm": false,
+          "commit": "the board",
+          "tail": "in Kai"
+        },
+        {
+          "first": false,
+          "firm": false,
+          "commit": "in KiCad.",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": "Open the",
+            "adv": 0,
+            "to": 8
+          },
+          {
+            "del": 8,
+            "ins": "Open the board",
+            "adv": 4,
+            "to": 14
+          },
+          {
+            "del": 10,
+            "ins": " the board in Kai",
+            "adv": 10,
+            "to": 17
+          },
+          {
+            "del": 7,
+            "ins": " in KiCad.",
+            "adv": 10,
+            "to": 10
+          }
+        ],
+        "text": "Open the board in KiCad.",
+        "mark": 24,
+        "caret": 24
+      }
+    },
+    {
+      "name": "mid-sentence after typed text: the capital goes",
+      "draft": "fix the regulator",
+      "caret": 17,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "",
+          "tail": "Hello from"
+        },
+        {
+          "first": true,
+          "firm": false,
+          "commit": "Hello from voice.",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": " hello from",
+            "adv": 0,
+            "to": 11
+          },
+          {
+            "del": 11,
+            "ins": " hello from voice.",
+            "adv": 18,
+            "to": 18
+          }
+        ],
+        "text": "fix the regulator hello from voice.",
+        "mark": 35,
+        "caret": 35
+      }
+    },
+    {
+      "name": "words said at the caret leave what follows alone",
+      "draft": "open board",
+      "caret": 5,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "The",
+          "tail": "KiCad"
+        },
+        {
+          "first": false,
+          "firm": false,
+          "commit": "KiCad.",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": "the KiCad ",
+            "adv": 3,
+            "to": 9
+          },
+          {
+            "del": 6,
+            "ins": " KiCad",
+            "adv": 6,
+            "to": 6
+          }
+        ],
+        "text": "open the KiCad board",
+        "mark": 14,
+        "caret": 14
+      }
+    },
+    {
+      "name": "before a comma",
+      "draft": "open, then",
+      "caret": 4,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "The board",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": " the board",
+            "adv": 10,
+            "to": 10
+          }
+        ],
+        "text": "open the board, then",
+        "mark": 14,
+        "caret": 14
+      }
+    },
+    {
+      "name": "a second segment follows the first",
+      "draft": "",
+      "caret": 0,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "One two.",
+          "tail": ""
+        },
+        {
+          "first": true,
+          "firm": false,
+          "commit": "Three four.",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": "One two.",
+            "adv": 8,
+            "to": 8
+          },
+          {
+            "del": 0,
+            "ins": " Three four.",
+            "adv": 12,
+            "to": 12
+          }
+        ],
+        "text": "One two. Three four.",
+        "mark": 20,
+        "caret": 20
+      }
+    },
+    {
+      "name": "a dictionary term keeps its capital",
+      "draft": "open",
+      "caret": 4,
+      "steps": [
+        {
+          "first": true,
+          "firm": true,
+          "commit": "Backplane now",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": " Backplane now",
+            "adv": 14,
+            "to": 14
+          }
+        ],
+        "text": "open Backplane now",
+        "mark": 18,
+        "caret": 18
+      }
+    },
+    {
+      "name": "characters, not bytes",
+      "draft": "café",
+      "caret": 4,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "Ça marche.",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": " Ça marche.",
+            "adv": 11,
+            "to": 11
+          }
+        ],
+        "text": "café Ça marche.",
+        "mark": 15,
+        "caret": 15
+      }
+    }
+  ],
+  "apply": [
+    {
+      "name": "a mark past the end is the end",
+      "text": "ab",
+      "mark": 9,
+      "edit": {
+        "del": 3,
+        "ins": "c",
+        "adv": 1,
+        "to": 1
+      },
+      "want": {
+        "text": "abc",
+        "mark": 3,
+        "caret": 3
+      }
+    }
+  ],
+  "shift": [
+    {
+      "name": "typing before the mark moves it",
+      "old": "ab now",
+      "new": "XXab now",
+      "mark": 6,
+      "want": 8
+    },
+    {
+      "name": "typing after the mark leaves it",
+      "old": "ab now",
+      "new": "ab now!",
+      "mark": 2,
+      "want": 2
+    },
+    {
+      "name": "deleting before the mark pulls it back",
+      "old": "hello world",
+      "new": "hello",
+      "mark": 11,
+      "want": 5
+    },
+    {
+      "name": "a fix chip rewrites words before the mark",
+      "old": "Hello seg1 8000ms",
+      "new": "Hello Seg One",
+      "mark": 17,
+      "want": 13
+    },
+    {
+      "name": "a change at the mark leaves it",
+      "old": "abc",
+      "new": "xbc",
+      "mark": 0,
+      "want": 0
+    },
+    {
+      "name": "characters, not bytes",
+      "old": "é ok",
+      "new": "éé ok",
+      "mark": 4,
+      "want": 5
+    },
+    {
+      "name": "a cut across the mark leaves it at the cut",
+      "old": "abcdef",
+      "new": "ab",
+      "mark": 4,
+      "want": 2
+    }
+  ]
+}
