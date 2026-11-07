@@ -68,18 +68,25 @@ if(!url) row('S11 person.tz',false,'no MCP url in the stand-in agent argv');
 else{
   await c.rpc('bots.routine',{bot,routine:'ro1',name:'morning',schedule:'daily 09:30',prompt:'p'}); await sleep(500);
   const zones=['Asia/Tokyo','America/New_York','Europe/Helsinki']; const res=[];
-  for(const z of zones){await c.rpc('zone.set',{zone:z}); await sleep(400); const r=await tool('person_timezone'); const want=new Intl.DateTimeFormat('en-GB',{timeZone:z,hour:'2-digit',hour12:false}).format(new Date());
+  for(const z of zones){await c.rpc('setting.set',{key:'person.tz',value:z}); await sleep(400); const r=await tool('person_timezone'); const want=new Intl.DateTimeFormat('en-GB',{timeZone:z,hour:'2-digit',hour12:false}).format(new Date());
     if(!r.zone)console.log("RAW",JSON.stringify(r).slice(0,400));const rl=await tool('routine_list'); if(process.env.RAW)console.log('ROUTINES',JSON.stringify(rl).slice(0,500)); const got=String(r.iso||r.localTime||'').match(/T(\d\d):/)?.[1]||String(r.localTime||'').match(/(\d\d):\d\d/)?.[1];
     res.push({z,next:(rl.find?.(x=>x.id==='ro1')||{}).next,zone:r.zone,source:r.source,offset:r.offset,iso:r.iso,want,got,ok:r.zone===z&&r.source==='set'&&got===want.padStart(2,'0')&&String((rl.find?.(x=>x.id==='ro1')||{}).next).includes('T09:30')})}
   row('S11 person.tz',res.every(x=>x.ok),res.map(x=>`${x.z}: zone=${x.zone} source=${x.source} offset=${x.offset} iso=${x.iso}, a daily 09:30 routine next fires ${x.next} (hour ${x.got}, expected ${x.want})`).join(' | '));
 }
-// telemetry.share: whether the hub opens any non-loopback connection or sends anything, with it on and off
+// telemetry.share: whether the hub opens any non-loopback connection or sends anything, in all three states (setting.set refuses On on purpose, settings/telemetry.rs `reserved`:
+// the Settings On button sends telemetry.choice with the token of what the page showed, so the probe does the same)
 const conns=()=>{try{return execFileSync('lsof',['-nP','-a','-p',String(pid),'-i'],{stdio:['ignore','pipe','ignore']}).toString().split('\n').filter(l=>/->/.test(l)&&!/->(127\.0\.0\.1|\[::1\]|localhost)/.test(l))}catch{return []}};
-const seen={};
-for(const v of ['off','on','']){ await set('telemetry.share',v); const found=new Set(); for(let i=0;i<20;i++){conns().forEach(l=>found.add(l.trim().split(/\s+/).slice(-2).join(' ')));await sleep(500)} seen[v||'unset']=[...found]; }
-const stored=()=>events().filter(e=>e.$==='SettingSet'&&e.key==='telemetry.share').map(e=>e.value);
+const tmState=()=>{const g=k=>{let v='';for(const e of events())if(e.$==='SettingSet'&&e.key===k)v=e.value;return v};return JSON.stringify([g('telemetry.share'),g('telemetry.asked'),g('telemetry.usage.asked'),g('telemetry.usage.generation'),g('telemetry.choice.revision')])};
+const share=()=>{let v='';for(const e of events())if(e.$==='SettingSet'&&e.key==='telemetry.share')v=e.value;return v};
+const seen={},stored={};
+const watch=async n=>{const found=new Set(); for(let i=0;i<20;i++){conns().forEach(l=>found.add(l.trim().split(/\s+/).slice(-2).join(' ')));await sleep(500)} seen[n]=[...found]};
+await c.rpc('setting.set',{key:'telemetry.share',value:'off'}); await sleep(400); stored.off=share(); await watch('off');
+const refused=await c.rpc('setting.set',{key:'telemetry.share',value:'on'}); await sleep(300); const stillOff=share()==='off';
+const on=await c.rpc('telemetry.choice',{value:'on',expected:tmState(),decision:'',popup:false}); await sleep(400); stored.on=share(); await watch('on');
+await c.rpc('setting.set',{key:'telemetry.share',value:'off'}); await sleep(300);
 const logTxt=readFileSync(OUT+'/hub.log','utf8');
-row('S14 telemetry.share',Object.values(seen).every(a=>a.length===0)&&!/telemetry.*(send|post|upload)/i.test(logTxt),`non-loopback connections of the hub over 10 s each: off ${seen.off.length}, on ${seen.on.length}, unset ${seen.unset.length} (${Object.values(seen).flat().join('; ')||'none'}); the build has no sender or endpoint (settings/telemetry.rs may_send is false), so on and off differ only in the stored choice (${stored().join(',')})`);
+const quiet=Object.values(seen).every(a=>a.length===0)&&!/telemetry.*(send|post|upload)/i.test(logTxt);
+row('S14 telemetry.share',quiet&&stored.off==='off'&&stillOff&&stored.on==='on',`states walked: Off via setting.set (stored ${stored.off}); On via setting.set refused (still ${share()===''?'unset':'off'}: ${stillOff}); On via telemetry.choice with the page's token (ok=${on.ok}, stored ${stored.on}); non-loopback connections of the hub over 10 s each: off ${seen.off.length}, on ${seen.on.length} (${Object.values(seen).flat().join('; ')||'none'}). This build has no sender or endpoint (settings/telemetry.rs may_send is false), so On and Off differ only in the stored choice`);
 c.ws.close(); try{process.kill(pid,'SIGTERM')}catch{}
 writeFileSync(OUT+'/effects.json',JSON.stringify(out_rows,null,1));
 process.exit(out_rows.every(r=>r.ok)?0:1);

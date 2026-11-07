@@ -16,6 +16,8 @@ impl RpcHandler for SettingSet {
             let (key, value) = (p.get("key").and_then(Value::as_str).unwrap_or(""), p.get("value").and_then(Value::as_str).unwrap_or(""));
             if key.starts_with("account.") || key.starts_with("accounts.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":ACCOUNT_GATE})] }
             if key.starts_with("peer.own.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that setting is the hub's own"})] }
+            // a zone is only right once its rule is known: person.tz goes through zone.set (settings/zone.rs), which looks the rule up and refuses a name that is not a zone
+            if key == "person.tz" { if let Some(z) = hub.rpc_for("zone.set") { return z.call(hub, _who, id, "zone.set", &json!({"zone": value})).await } }
             if telemetry::reserved(key) { return vec![telemetry::legacy(hub, id, key, value).await] }
             let at = now_ms() / 1000;
             let mut batch = vec![json!({"$":"SettingSet","key":key,"value":value,"at":at})];
@@ -59,6 +61,18 @@ mod tests {
         // the telemetry answer: Off applies at once and is remembered
         let r = call(&again, "telemetry.choice", json!({"value":"off","expected":"","decision":"d1","popup":true})).await;
         assert_eq!(r["ok"], true); assert_eq!(again.setting("telemetry.share").await.as_deref(), Some("off")); assert_eq!(again.setting("telemetry.asked").await.as_deref(), Some("1"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // setting.set person.tz is zone.set: the rule is looked up and stored with the zone, a name that is no zone is refused and nothing is written
+    #[tokio::test(flavor = "multi_thread")] async fn setting_set_person_tz_resolves_the_rule_like_zone_set() {
+        let home = std::env::temp_dir().join(format!("bp-set-tz-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let hub = start(&home).await; hub.register_rpc(Arc::new(super::super::zone::ZoneRpc));
+        let r = call(&hub, "setting.set", json!({"key":"person.tz","value":"Not/AZone"})).await; assert_eq!(r["ok"], false, "{r}"); assert_eq!(hub.setting("person.tz").await, None);
+        let r = call(&hub, "setting.set", json!({"key":"person.tz","value":"Asia/Tokyo"})).await;
+        if r["ok"] == true { assert_eq!(hub.setting("person.tz").await.as_deref(), Some("Asia/Tokyo")); assert_eq!(hub.setting("tz.rule.Asia/Tokyo").await.as_deref(), Some("JST-9"), "the rule came with the zone") }
+        else { assert!(r["error"].as_str().unwrap().contains("time zone"), "no zoneinfo on this machine: {r}"); assert_eq!(hub.setting("person.tz").await, None) }
+        let r = call(&hub, "setting.set", json!({"key":"person.tz","value":""})).await; assert_eq!(r["ok"], true); assert_eq!(hub.setting("person.tz").await, None);
         let _ = std::fs::remove_dir_all(&home);
     }
 
