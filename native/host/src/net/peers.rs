@@ -53,11 +53,12 @@ impl Peers {
     }
     /// Far.own.how: "approved" (made by a pairing the person approved on the machine that made the code), "owner" (the
     /// person marked an existing link Mine), "no" (the person said it is not theirs), "" (a pasted invite), or "pair" /
-    /// "tailnet" (links made before pairing needed a code: they keep working, unpaired, until confirmed or paired again).
+    /// "tailnet" (links made before pairing needed a code: they stay trusted, see `verified`).
     pub fn own_how(&self, link: &str) -> &str { self.setting(&format!("peer.own.{link}")) }
-    /// Far.verified: the link was made by an approved pairing, or the person marked it Mine. Being on the same Tailscale
-    /// account is not this: a link a hub made by itself ("pair", "tailnet") is not verified until the person says so.
-    pub fn verified(&self, link: &str) -> bool { matches!(self.own_how(link), "approved" | "owner") }
+    /// Far.verified: the link was made by an approved pairing, or the person marked it Mine, or it was linked before pairing
+    /// needed a code ("pair", "tailnet": the person's decision, so nothing already linked breaks). Nothing writes those two any
+    /// more: a new link is "approved" or, from a pasted invite, unvouched ("") until the person says Mine.
+    pub fn verified(&self, link: &str) -> bool { matches!(self.own_how(link), "approved" | "owner" | "pair" | "tailnet") }
     /// A link that works but nobody has vouched for: shown as Unpaired.
     pub fn unpaired(&self, link: &str) -> bool { !self.verified(link) && self.own_how(link) != "no" }
 }
@@ -158,7 +159,10 @@ mod tests {
         p.fold(&json!({"$":"SettingSet","key":"peer.own.p2","value":"pair","at":1}));
         p.fold(&json!({"$":"SettingSet","key":"other","value":"x","at":1}));
         assert!(p.sync_off("Desk") && p.verified("p1") && p.setting("other").is_empty());
-        assert!(!p.verified("p2") && p.unpaired("p2") && !p.verified("p3") && p.unpaired("p3"), "a link made before codes, or a pasted invite, is not verified");
+        assert!(p.verified("p2") && !p.unpaired("p2"), "a link made before pairing needed a code stays trusted");
+        p.fold(&json!({"$":"SettingSet","key":"peer.own.p4","value":"tailnet","at":1}));
+        assert!(p.verified("p4"), "so does one the tailnet vouched for back then");
+        assert!(!p.verified("p3") && p.unpaired("p3"), "a pasted invite nobody vouched for is not");
         p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"no","at":2}));
         assert!(!p.verified("p1"), "the owner said it is not theirs");
         p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"","at":3}));
