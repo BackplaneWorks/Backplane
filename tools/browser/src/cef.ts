@@ -64,6 +64,7 @@ export class CefEngine extends EventEmitter {
   downloads = "";
   downloadSession: CDPSession | null = null;
   downloadError = "";
+  resumer: WebSocket | null = null;
   constructor(public options: CefOptions) { super(); }
   async start(): Promise<BrowserContext> {
     this.executable = findCef(this.options.cef) ?? await installCef();
@@ -123,9 +124,25 @@ export class CefEngine extends EventEmitter {
         this.downloadSession = await this.browser.newBrowserCDPSession();
         await this.downloadSession.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: this.downloads, eventsEnabled: true });
       } catch (e) { this.downloadError = `download unavailable in CEF: ${e}`; }
+      this.resumer = this.resumePaused(endpoint);
       if (proc.exitCode !== null || !this.browser.isConnected()) throw new Error("CEF host exited during startup");
       return this.context;
     } catch (e) { await this.stop(); throw e; }
+  }
+  /** A window the page opens (window.open) is a new target the host creates paused, waiting for a debugger; Playwright's attach to it waits on the target in turn, so
+   *  neither goes on and the popup stays blank (its opener and the person's tab are fine). A second session of ours resumes every new target at once: harmless for one
+   *  that is not waiting. */
+  resumePaused(endpoint: string): WebSocket {
+    const ws = new WebSocket(endpoint); let n = 0;
+    const send = (method: string, params: object = {}, sessionId?: string) => ws.send(JSON.stringify({ id: ++n, method, params, ...(sessionId ? { sessionId } : {}) }));
+    ws.onopen = () => send("Target.setDiscoverTargets", { discover: true });
+    ws.onmessage = (e) => {
+      let m: any; try { m = JSON.parse(String(e.data)); } catch { return; }
+      if (m.method === "Target.targetCreated" && m.params?.targetInfo?.type === "page") send("Target.attachToTarget", { targetId: m.params.targetInfo.targetId, flatten: true });
+      if (m.id && m.result?.sessionId) { send("Runtime.runIfWaitingForDebugger", {}, m.result.sessionId); setTimeout(() => { try { send("Target.detachFromTarget", { sessionId: m.result.sessionId }); } catch {} }, 1500); }
+    };
+    ws.onerror = () => {};
+    return ws;
   }
   command(cmd: string, key = "", args = ""): Promise<Event> {
     const proc = this.proc;
@@ -253,6 +270,7 @@ export class CefEngine extends EventEmitter {
       (this.proc.stdin as any).write("quit\n"); (this.proc.stdin as any).end();
       await this.proc.exited;
     }
+    try { this.resumer?.close(); } catch {}
     delete process.env.PW_CHROMIUM_ATTACH_TO_OTHER;
     // The host owns Chromium. Its exit disconnects CDP; never Browser.close().
     if (this.downloads) rmSync(this.downloads, { recursive: true, force: true });

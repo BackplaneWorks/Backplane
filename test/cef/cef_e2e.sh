@@ -112,16 +112,18 @@ T4=$(title); check "file dialog answered and the page got the file (title '$T4')
 python3 "$HERE/xinput.py" click $((WX+VX+300)) $((WY+VY+500)); sleep 0.5; python3 "$HERE/xinput.py" key F12; sleep 3
 titles > "$OUT/targets-devtools.txt"; check "F12 opened DevTools in its own window ($(grep -ci devtools "$OUT/targets-devtools.txt") target)" "$(grep -qi devtools "$OUT/targets-devtools.txt" && echo 1 || echo 0)" "$(head -3 "$OUT/targets-devtools.txt")"
 python3 "$HERE/xinput.py" key F12; sleep 1
-# teach: start recording, a real native click, then the draft holds a click step
-bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.teach","p":{"bot":"t1","op":"start"},"wait":1500}]' > "$OUT/teach-start.txt" 2>&1 || true
-python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+104)); sleep 1.5
-bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.teach","p":{"bot":"t1","op":"stop"}}]' >/dev/null 2>&1 || true
-TD=$(cat "$OUT/home/bots/t1/tasks/.draft.jsonl" 2>/dev/null | head -3)
-echo "$TD" | cut -c1-300
-check "teach mode recorded the native click in the hub's draft" "$(echo "$TD" | grep -q '"do":"click".*Click me' && echo 1 || echo 0)" "$TD"
+# teach: start recording, a real native click, then the draft (the `teach.draft.t1` info the hub tells connected clients) holds a click step: one hub_rpc connection listens for 7 s after the start while the click happens
+bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.teach","p":{"bot":"t1","op":"start"},"wait":7000}]' > "$OUT/teach-start.txt" 2>&1 & TP=$!
+sleep 2.5; python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+104)); wait $TP || true
+bun "$HERE/hub_rpc.mjs" $HPORT "$HTOK" '[{"m":"bots.teach","p":{"bot":"t1","op":"stop"},"wait":500}]' > "$OUT/teach-stop.txt" 2>&1 || true
+TD=$(grep DRAFT "$OUT/teach-start.txt" | tail -1 | cut -c1-600)
+check "teach mode recorded the native click in the hub's draft" "$(echo "$TD" | grep -q 'do.*click.*Click me' && echo 1 || echo 0)" "$TD"
 # popup keeps its opener
 python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+328)); sleep 7
-titles > "$OUT/targets-after-popup.txt"; T5=$(title); check "window.open popup kept its opener (opener title '$T5')" "$([ "$T5" = msg:hi-from-popup ] && echo 1 || echo 0)" "$T5"
+titles > "$OUT/targets-after-popup.txt"
+# the popup (a window.open target the host creates paused) loads, and its page sees window.opener: evaluated in the popup itself once it has run
+bun "$HERE/cdp_eval.mjs" $CDP 'JSON.stringify([location.pathname, !!window.opener])' > "$OUT/popup-opener.txt" 2>&1 || true
+check "window.open popup loaded and kept its opener ($(grep popup.html "$OUT/popup-opener.txt" | head -1 | cut -c1-120))" "$(grep -q 'popup.html.*true' "$OUT/popup-opener.txt" && echo 1 || echo 0)" "$(cat "$OUT/popup-opener.txt" | head -3)"
 # a real layout change resizes the page: fold the sidebar (the chevron at the window's top left), measured from the change to the first painted frame of the new size
 python3 "$HERE/xinput.py" click 16 59; sleep 1
 wait $CP || true

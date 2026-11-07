@@ -23,7 +23,7 @@ pub enum Goal { Frame, Changed(u64), Reconnected, Home, Thread(String), Popup, T
 pub struct Pending { pub label: String, pub started: Instant, pub goal: Goal, pub armed: bool, pub seq: u64 }
 
 /// Steps: {"select":N} {"home":N} {"popup":"/"} {"type":"text"} {"send":true} {"wait":ms}; e2e hooks: {"record":"start","name":"x"} {"record":"stop"}
-/// {"click":"<control id>"} {"scroll":px} {"net_sleep":secs}; {"open_viewer":"files"} {"files":"select:N|open:N|key:down|filter:text|new:name|rename:N:name|delete:N|confirm_delete|menu:N|upload:PATH|download:N|zip|copy:N|up|back|cancel"} {"files_download":N|"name"}; {"paste_image"|"open_settings"} answer ok:false, error:not_implemented.
+/// {"click":"<control id>"} {"scroll":px} {"net_sleep":secs}; {"open_viewer":"files"} {"files":"select:N|open:N|key:down|filter:text|new:name|rename:N:name|delete:N|confirm_delete|menu:N|upload:PATH|download:N|zip|copy:N|up|back|cancel"} {"files_download":N|"name"}; {"open_settings":true} opens Settings (a click on `ui:Settings`); {"paste_image"} answers ok:false, error:not_implemented (the e2e pastes a real clipboard with Ctrl+V instead).
 pub fn load(path: &Path) -> VecDeque<Step> {
     let list: Vec<Value> = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     list.iter().filter_map(|v| {
@@ -63,7 +63,8 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(k) = v["open_viewer"].as_str() { Some(Step::View(k.into())) }
         else if let Some(f) = v["files"].as_str() { Some(Step::Files(f.into())) }
         else if let Some(n) = v["files_download"].as_str().map(String::from).or_else(|| v["files_download"].as_u64().map(|n| n.to_string())) { Some(Step::Files(format!("download:{n}"))) }
-        else if let Some(k) = ["paste_image", "open_settings"].iter().find(|k| v.get(**k).is_some()) { Some(Step::Unsupported((*k).to_string())) }
+        else if v["open_settings"].as_bool() == Some(true) || v["open_settings"].is_string() { Some(Step::Click("ui:Settings".into())) } // the gear in the title bar, as a click on its control
+        else if let Some(k) = ["paste_image"].iter().find(|k| v.get(**k).is_some()) { Some(Step::Unsupported((*k).to_string())) }
         else { None }
     }).collect()
 }
@@ -417,5 +418,18 @@ impl Backplane {
     pub fn popup_local(&self) -> bool { false }
     fn set_text(&mut self, text: String, cx: &mut Context<Self>) {
         self.input.update(cx, |i, cx| i.set(text, cx));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test] fn open_settings_is_a_click_on_the_gear_and_paste_image_is_still_not_implemented() {
+        let p = std::env::temp_dir().join(format!("bp-script-{}.json", std::process::id()));
+        std::fs::write(&p, r#"[{"open_settings":true},{"paste_image":true},{"click":"ui:Settings"}]"#).unwrap();
+        let steps = load(&p); let _ = std::fs::remove_file(&p);
+        assert_eq!(steps.len(), 3);
+        assert!(matches!(&steps[0], Step::Click(id) if id == "ui:Settings"), "{:?}", steps[0]);
+        assert!(matches!(&steps[1], Step::Unsupported(k) if k == "paste_image"), "{:?}", steps[1]);
     }
 }
