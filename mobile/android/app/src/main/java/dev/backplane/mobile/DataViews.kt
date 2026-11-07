@@ -119,7 +119,9 @@ private fun PairScreen() {
     var address by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+    // centred when it fits; scrolls when it does not (a phone in landscape, a large font, the keyboard up): the short code and its button stay reachable
+    Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.Center) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)) {
         DMono("BACKPLANE", dcs.primary, 13, bold = true)
         Spacer(Modifier.height(8.dp))
         Text(if (DataClient.needsRepair) "Re-pair this device" else "Pair with a hub", color = dcs.onSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
@@ -144,6 +146,7 @@ private fun PairScreen() {
             val l = Pairing.codeLink(address.trim(), code)
             if (l == null) DataClient.pairingError = "Check the hub address and the eight-character code." else DataClient.pair(l)
         }
+    }
     }
 }
 
