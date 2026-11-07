@@ -18,6 +18,7 @@ fn git(d: &Path, a: &[&str]) { let o = std::process::Command::new("git").args(["
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_turn_started_the_moment_the_last_one_ends_is_not_inside_the_earlier_checkpoint() {
+    super::super::CKPT_SAY_MS.store(1, std::sync::atomic::Ordering::Relaxed); // say so as soon as a turn has to wait
     let bin = dir("ckpt-bin"); script(&bin, "claude", WRITER);
     let (hub, ag, _home, work) = start("ckpt", |w| { std::fs::write(w.join("a.txt"), "one\n").unwrap();
         // a work tree big enough that a capture takes longer than the test's polling: the earlier turn's end capture is still running when the next message is sent
@@ -35,5 +36,7 @@ async fn a_turn_started_the_moment_the_last_one_ends_is_not_inside_the_earlier_c
     assert_eq!(crate::files::git::checkpoint_revert(&wp, T1, 1).await, "");
     assert!(work.join("first.txt").exists(), "checkpoint 1 has what turn 1 wrote");
     assert!(!work.join("second.txt").exists(), "checkpoint 1 does not have what turn 2 wrote");
+    let said = hub.store.range(0, usize::MAX).unwrap().iter().any(|l| l.contains("\"ActivityLogged\"") && l.contains("Saving the last turn's checkpoint"));
+    assert!(said, "a turn that waits for the earlier checkpoint says so in the thread");
     ag.shutdown();
 }

@@ -380,9 +380,17 @@ pub(crate) async fn hist_worker<F, Fut>(mut rx: mpsc::Receiver<(Option<JobGuard>
 /// The turn-end captures (step and checkpoint) not yet finished: the next turn's agent is not started while one is, so the files it writes are never inside the earlier turn's checkpoint.
 #[derive(Default)]
 pub(crate) struct HistEnds { n: std::sync::atomic::AtomicUsize, done: tokio::sync::Notify }
-/// Waits (at most HIST_JOB) for the earlier turn's end captures: called before a turn's input reaches the agent.
-async fn ends_settled(e: Arc<HistEnds>) {
-    let _ = tokio::time::timeout(HIST_JOB, async { loop { let w = e.done.notified(); tokio::pin!(w); w.as_mut().enable(); if e.n.load(Relaxed) == 0 { return } w.await } }).await;
+/// How long a turn waits for the earlier one's checkpoint before saying so (milliseconds; a test shortens it).
+pub(crate) static CKPT_SAY_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(2000);
+/// Waits (at most HIST_JOB) for the earlier turn's end captures: called before a turn's input reaches the agent. Past CKPT_SAY_MS it logs an activity, so a queued turn
+/// waiting on a huge work tree does not look stuck.
+async fn ends_settled(e: Arc<HistEnds>, ag: Arc<Agents>, th: String) {
+    let wait = |e: Arc<HistEnds>| async move { loop { let w = e.done.notified(); tokio::pin!(w); w.as_mut().enable(); if e.n.load(Relaxed) == 0 { return } w.await } };
+    let say = Duration::from_millis(CKPT_SAY_MS.load(Relaxed));
+    if tokio::time::timeout(say, wait(e.clone())).await.is_ok() { return }
+    let now = now_s();
+    ag.commit_events(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", now, ag.seq()),"tone":"info","kind":"checkpoint","summary":"Saving the last turn's checkpoint\u{2026}","at":now})]).await;
+    let _ = tokio::time::timeout(HIST_JOB.saturating_sub(say), wait(e)).await;
 }
 struct EndDone(Arc<HistEnds>);
 impl Drop for EndDone { fn drop(&mut self) { self.0.n.fetch_sub(1, Relaxed); self.0.done.notify_waiters() } }
@@ -524,7 +532,7 @@ impl Actor {
         if let Some(ph) = first_title { let (ag, th2) = (self.ag.clone(), th.clone()); tokio::spawn(async move { if let Err(e) = ag.retitle(&th2, Some(&ph), false).await { eprintln!("titles: {th2}: kept the first line: {e}") } }); }
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
-        self.jobs_start(&cwd, &msg); ends_settled(self.hist_ends.clone()).await;
+        self.jobs_start(&cwd, &msg); ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone()).await;
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
         let text_ref = { let w = self.ag.world().await; let model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
@@ -569,7 +577,7 @@ impl Actor {
         let handed = if taken { String::new() } else { self.handed(&mut ev, now).await }; // what was queued is `text` when it is all taken; otherwise the hand-overs go with this turn and the rest stays
         let text = if handed.is_empty() { text } else { format!("{handed}\n\n{text}") };
         self.commit(ev).await;
-        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); ends_settled(self.hist_ends.clone()).await;
+        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone()).await;
         if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
         Ok(())
     }
@@ -675,7 +683,7 @@ impl Actor {
         // Ride.start: an idle thread starts a turn with the waiting rides
         self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone();
         let mut ev = codex::ride_done(&th, &v, "with a new turn", now); ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); ends_settled(self.hist_ends.clone()).await;
+        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone()).await;
         let input = codex::ride_input(&v);
         if self.codex { self.codex_run(&t, &cwd, &input).await } else { let msg = hub_id("w", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &input, &input, now).await }
         Ok(())
@@ -689,7 +697,7 @@ impl Actor {
         let Some(t) = t else { return }; if ride.is_empty() || t.archived || t.deleted || providers::driver(&t.provider).is_none() { return }
         let now = now_s(); let mut ev = codex::ride_done(&th, &ride, "with a new turn", now);
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); ends_settled(self.hist_ends.clone()).await;
+        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone()).await;
         self.codex_run(&t, &cwd, &codex::ride_input(&ride)).await;
     }
 
