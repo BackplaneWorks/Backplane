@@ -18,6 +18,7 @@ data class DEntry(
     val sending: Boolean = false, val failed: Boolean = false,
     val localImages: List<ByteArray> = emptyList(), // phone-only: the pictures of a message this phone is sending
     val label: String = "", // a design step: what changed; a note: its name
+    val agentOnly: Boolean = false, // a message only the agent reads (data/1 `agentOnly`): never shown
     val tone: String = "",  // a note: error, info…
 )
 data class DProject(val id: String, val title: String, val root: String, val threadCount: Int, val updatedAt: Long, val waiting: Int, val icon: String = "folder", val css: String = "")
@@ -45,7 +46,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     o.optJSONObject("tool")?.let { DTool(it.str("name"), it.str("summary"), it.str("state")) },
     o.optJSONObject("ask")?.let(::parseAsk),
     o.optJSONArray("attachments").list { DAttachment(it.str("id"), it.str("name"), it.str("mime"), it.lng("bytes")) },
-    label = o.str("label"), tone = o.str("tone"),
+    label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"))
 fun parseThread(o: JSONObject) = DThread(

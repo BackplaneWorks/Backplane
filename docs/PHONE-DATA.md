@@ -16,8 +16,9 @@ natively with typed Codable structs, cache-first. Fresh-home screens only: proje
 Project = {id, title, root, threadCount, updatedAt, waiting, icon, color, css}
 Thread  = {id, project, title, state, updatedAt, pinned, settled, archived, provider, model, preview, waiting, parent}
           state ∈ "idle" | "working" | "asking" | "failed"; preview ≤ 140 chars; waiting = open asks
-Entry   = {id, kind, text, at, clientId?, live?, tool?, ask?}
+Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?}
           kind ∈ "user" | "assistant" | "tool" | "ask" | "note" | "step"
+          agentOnly: true on a message only the agent reads (the hub's note about a quote it posted): a client does not show it
           live: true on the assistant entry still streaming (its text so far; later `k:"text"` pushes append to it)
           tool = {name, summary, state ∈ "running" | "done" | "failed"}
           ask  = {id, state ∈ "open" | "answered", question, options:[{id,label}], answered?:<option id or text>}

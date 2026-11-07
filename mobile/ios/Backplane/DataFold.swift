@@ -40,7 +40,8 @@ enum DataFold {
     }
 
     /// `running`: the thread's turn runs, so a run at the very end of the thread is still growing.
-    static func rows(_ entries: [DEntry], running: Bool) -> [DRow] {
+    static func rows(_ all: [DEntry], running: Bool) -> [DRow] {
+        let entries = all.filter { !$0.agentOnly }   // the hub's note to the agent is not the person's to read
         var out: [DRow] = []; var i = 0
         while i < entries.count {
             guard folds(entries[i]) else { out.append(.entry(entries[i])); i += 1; continue }
