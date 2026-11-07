@@ -1,0 +1,11 @@
+#!/bin/sh
+# pre-push hook, installed by scripts/install-hooks.sh into <common .git>/hooks/, which serves every worktree.
+# Refuses a push of commits (not yet on any remote) whose author or committer is not build@amemb.com.
+z=0000000000000000000000000000000000000000
+root=$(git worktree list --porcelain 2>/dev/null | awk 'NR==1{print substr($0,10)}')
+chk=$root/scripts/check-author.sh; [ -x "$chk" ] || chk=$(git rev-parse --show-toplevel)/scripts/check-author.sh
+while read -r lref lsha rref rsha; do
+  [ "$lsha" = "$z" ] && continue
+  "$chk" "$lsha" --not --remotes || exit 1
+done
+exit 0

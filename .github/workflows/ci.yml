@@ -61,6 +61,23 @@ jobs:
               - '.github/workflows/ci.yml'
 
   # `backplane`, the guard: it has to work where the hub is restarted from, so it runs on all three systems (docs/HUB-RESILIENCE.md).
+  author:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit is authored and committed by build@amemb.com
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          z=0000000000000000000000000000000000000000
+          if [ -n "$BASE" ]; then range="$BASE..HEAD"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "$z" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE..HEAD"
+          else range="-n 1 HEAD"; fi
+          scripts/check-author.sh $range
+
   guard:
     needs: changes
     if: needs.changes.outputs.guard == 'true'
