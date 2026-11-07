@@ -19,7 +19,12 @@ pub fn open(t: &AcpTurn) -> String {
     if t.session.is_empty() { new_rpc(2, &t.cwd, &t.mcp) } else { acp::rpc(2, "session/resume", json!({"sessionId":t.session,"cwd":t.cwd,"mcpServers":acp::mcp(&t.mcp)})) }
 }
 /// Ocp.rel: a path in the thread's folder, from it.
-pub fn rel(cwd: &str, p: &str) -> String { if !cwd.is_empty() && p.starts_with(&format!("{cwd}/")) { p[cwd.len() + 1..].to_string() } else { p.into() } }
+pub fn rel(cwd: &str, p: &str) -> String {
+    if cwd.is_empty() { return p.into() }
+    // Windows: the folder as the agent may write it too (C:/x, or /c/x from Git's shell)
+    for c in crate::plat::fs::path_forms(cwd) { if p.starts_with(&format!("{c}/")) { return p[c.len() + 1..].to_string() } }
+    p.into()
+}
 fn mark(id: &str) -> String { format!("\n{id}\n") }
 
 fn signin(low: &str) -> bool { low.contains("auth") || low.contains("login") || low.contains("no models are available") || low.contains("api key") }

@@ -29,6 +29,12 @@ pub mod fs {
         if !name.contains(['<', '>', ':', '"', '|', '?', '*']) { return name.into() }
         name.chars().map(|c| if "<>:\"|?*".contains(c) { format!("%{:02X}", c as u32) } else { c.to_string() }).collect::<String>().into()
     }
+    /// The ways a folder's path may be written: as it is, with forward slashes (C:/x), and as Git's shell writes it (/c/x).
+    pub fn path_forms(p: &str) -> Vec<String> {
+        let f = p.replace('\\', "/"); let mut v = vec![p.to_string()]; if f != p { v.push(f.clone()) }
+        let b = f.as_bytes(); if b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic() { v.push(format!("/{}{}", (b[0] as char).to_ascii_lowercase(), &f[2..])) }
+        v
+    }
     /// What separates a path's parts in text: either slash.
     pub const SEPS: &[char] = &['/', '\\'];
     /// A path as written into a script or a string literal: forward slashes (Windows takes them, and no `\t` in it turns into a tab).
