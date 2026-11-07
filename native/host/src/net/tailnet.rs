@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 /// A machine a client can switch to.
 #[derive(Debug, PartialEq, Clone)]
-pub struct Machine { pub name: String, pub ip: String, pub online: bool }
+pub struct Machine { pub name: String, pub ip: String, pub online: bool, pub same_user: bool }
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 /// The login that owns a node, from `tailscale whois --json <ip>`.
@@ -19,23 +19,24 @@ fn host(p: &Value) -> String {
     let h = s(p, "HostName");
     if !h.is_empty() { h.to_string() } else { s(p, "DNSName").split('.').next().unwrap_or("").to_string() }
 }
-fn machine(p: &Value) -> Machine {
-    Machine { name: host(p), ip: p["TailscaleIPs"].as_array().and_then(|a| a.first()).and_then(Value::as_str).unwrap_or("").to_string(), online: p["Online"].as_bool().unwrap_or(false) }
+fn machine(p: &Value, same_user: bool) -> Machine {
+    Machine { name: host(p), ip: p["TailscaleIPs"].as_array().and_then(|a| a.first()).and_then(Value::as_str).unwrap_or("").to_string(), online: p["Online"].as_bool().unwrap_or(false), same_user }
 }
 fn raw(v: &Value) -> String { match v { Value::Null => String::new(), Value::String(x) => x.clone(), o => o.to_string() } }
-/// The owner's other machines, from `tailscale status --json`: the peers whose UserID is this node's.
+/// The machines this node can reach on its tailnet, from `tailscale status --json`: every peer, whoever owns it (`same_user`
+/// says whether it is this node's account). Sharing an account is not trust: this only lists where a hub may be, to suggest
+/// pairing (with a code, approved on the other machine).
 pub fn peers(status: &str) -> Vec<Machine> {
     let Ok(j) = serde_json::from_str::<Value>(status) else { return vec![] };
     let uid = raw(&j["Self"]["UserID"]);
-    if uid.is_empty() { return vec![] }
-    j["Peer"].as_object().into_iter().flatten().filter(|(_, p)| raw(&p["UserID"]) == uid).map(|(_, p)| machine(p)).collect()
+    j["Peer"].as_object().into_iter().flatten().map(|(_, p)| machine(p, !uid.is_empty() && raw(&p["UserID"]) == uid)).collect()
 }
 /// Only machines that are up (and have an address) are worth asking.
 pub fn online(ms: Vec<Machine>) -> Vec<Machine> { ms.into_iter().filter(|m| m.online && !m.ip.is_empty()).collect() }
 /// This node itself (its name and first address).
 pub fn this(status: &str) -> Machine {
     let j: Value = serde_json::from_str(status).unwrap_or(Value::Null);
-    let mut m = machine(&j["Self"]); m.online = true; m
+    let mut m = machine(&j["Self"], true); m.online = true; m
 }
 /// The tailnet's MagicDNS domain ("box.tail1.ts.net." → "tail1.ts.net").
 pub fn domain(status: &str) -> String {
@@ -75,19 +76,19 @@ pub fn serve(status: &str, port: &str) -> String {
 
 /// A hub that may be there: a name and its base URL.
 #[derive(Debug, PartialEq, Clone)]
-pub struct Cand { pub name: String, pub url: String, pub named: bool }
-pub fn cands(ms: &[Machine], port: u16) -> Vec<Cand> { ms.iter().map(|m| Cand { name: m.name.clone(), url: format!("http://{}:{port}", m.ip), named: false }).collect() }
+pub struct Cand { pub name: String, pub url: String, pub named: bool, pub same_user: bool }
+pub fn cands(ms: &[Machine], port: u16) -> Vec<Cand> { ms.iter().map(|m| Cand { name: m.name.clone(), url: format!("http://{}:{port}", m.ip), named: false, same_user: m.same_user }).collect() }
 /// Hubs named in BACKPLANE_PEERS ("http://host:port,..."), for machines that are not on the tailnet.
 pub fn named(extra: &str) -> Vec<Cand> {
     extra.split(',').map(str::trim).filter(|u| !u.is_empty()).map(|u| Cand {
-        name: u.strip_prefix("http://").unwrap_or(u).split(':').next().unwrap_or(u).to_string(), url: u.to_string(), named: true }).collect()
+        name: u.strip_prefix("http://").unwrap_or(u).split(':').next().unwrap_or(u).to_string(), url: u.to_string(), named: true, same_user: true }).collect()
 }
 /// `{"self": {name, url, domain}, "peers": [{name, url, version, named}]}` (self's url is its loopback address
 /// when it has no tailnet one, so two hubs named in each other's BACKPLANE_PEERS still agree which asks to pair).
 pub fn machines_json(status: &str, port: u16, found: &[(Cand, String)]) -> Value {
     let me = this(status);
     json!({"self": {"name": me.name, "url": format!("http://{}:{port}", if me.ip.is_empty() { "127.0.0.1" } else { &me.ip }), "domain": domain(status)},
-        "peers": found.iter().filter(|(_, v)| !v.is_empty()).map(|(c, v)| json!({"name": c.name, "url": c.url, "version": v, "named": c.named})).collect::<Vec<_>>()})
+        "peers": found.iter().filter(|(_, v)| !v.is_empty()).map(|(c, v)| json!({"name": c.name, "url": c.url, "version": v, "named": c.named, "same_user": c.same_user})).collect::<Vec<_>>()})
 }
 
 /// GET /hello on a hub: the version it names (CBOR; JSON from a hub not updated yet); "" for no answer. http only.
@@ -142,17 +143,19 @@ mod tests {
         assert_eq!(login(r#"{"UserProfile":{"LoginName":"me@x.com"},"Node":{}}"#), "me@x.com");
         assert_eq!((login("not json"), login("{}")), (String::new(), String::new()));
     }
-    #[test] fn tailnet_peers_are_the_owners_own() {
+    #[test] fn tailnet_peers_are_listed_whoever_owns_them_and_say_whose() {
         let ps = peers(STATUS);
-        assert_eq!(ps.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), ["desk", "phone", "nas"], "friend (another user) is not the owner's");
+        let mut names: Vec<_> = ps.iter().map(|m| (m.name.as_str(), m.same_user)).collect(); names.sort();
+        assert_eq!(names, [("desk", true), ("friend", false), ("nas", true), ("phone", true)], "another user's machine is found too, and marked as theirs");
         let on = online(ps);
-        assert_eq!(on, vec![Machine { name: "desk".into(), ip: "100.2.0.1".into(), online: true }], "offline and addressless ones are not asked");
-        assert!(peers(r#"{"Self":{},"Peer":{"k":{"UserID":1}}}"#).is_empty(), "no self user: no owner's machines");
+        let mut on: Vec<_> = on.into_iter().map(|m| (m.name, m.ip, m.same_user)).collect(); on.sort();
+        assert_eq!(on, vec![("desk".to_string(), "100.2.0.1".to_string(), true), ("friend".to_string(), "100.4.0.1".to_string(), false)], "offline and addressless ones are not asked");
+        assert!(peers(r#"{"Self":{},"Peer":{"k":{"UserID":1}}}"#).iter().all(|m| !m.same_user), "no self user: none is known to be the same person's");
         assert!(peers("garbage").is_empty());
     }
     #[test] fn tailnet_domain_and_self() {
         assert_eq!(domain(STATUS), "tail1.ts.net");
-        assert_eq!(this(STATUS), Machine { name: "laptop".into(), ip: "100.1.0.1".into(), online: true });
+        assert_eq!(this(STATUS), Machine { name: "laptop".into(), ip: "100.1.0.1".into(), online: true, same_user: true });
         assert_eq!(dns_name(STATUS), "laptop.tail1.ts.net");
         assert_eq!(domain("{}"), "");
     }
@@ -171,13 +174,15 @@ mod tests {
     }
     #[test] fn tailnet_named_peers_and_machines_json() {
         let n = named(" http://127.0.0.1:4002, ,http://box:3787 ");
-        assert_eq!(n[0], Cand { name: "127.0.0.1".into(), url: "http://127.0.0.1:4002".into(), named: true });
+        assert_eq!(n[0], Cand { name: "127.0.0.1".into(), url: "http://127.0.0.1:4002".into(), named: true, same_user: true });
         assert_eq!(n[1].name, "box"); assert_eq!(n.len(), 2);
-        let found = vec![(cands(&online(peers(STATUS)), 3787).remove(0), "0.14.0".to_string()), (n[0].clone(), String::new()), (n[1].clone(), "0.13".into())];
+        let mut desk = cands(&online(peers(STATUS)), 3787); desk.retain(|c| c.name == "desk");
+        let found = vec![(desk.remove(0), "0.14.0".to_string()), (n[0].clone(), String::new()), (n[1].clone(), "0.13".into())];
         let j = machines_json(STATUS, 3787, &found);
         assert_eq!(j["self"], json!({"name":"laptop","url":"http://100.1.0.1:3787","domain":"tail1.ts.net"}));
         assert_eq!(j["peers"].as_array().unwrap().len(), 2, "a hub that did not answer is not listed");
         assert_eq!(j["peers"][1]["named"], true);
+        assert_eq!(j["peers"][0]["same_user"], true);
         assert_eq!(machines_json("", 4001, &[])["self"]["url"], "http://127.0.0.1:4001", "no tailnet address: loopback");
     }
     #[tokio::test] async fn tailnet_hello_reads_cbor_and_json() {

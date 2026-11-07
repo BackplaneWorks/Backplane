@@ -24,9 +24,12 @@ const KEEP: usize = 100;
 const OPEN_LIMIT: usize = 16;
 const DEVICE_LIMIT: usize = 256;
 const INVITE_MS: u64 = 600_000;
+const ALPHA: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+/// A machine code claimed with less than this left is refused: the person needs time to approve, and the link to be made.
+pub const CLAIM_MIN_MS: u64 = 180_000;
 
 struct Inner {
-    devices: Vec<Value>, invites: Vec<Value>, attempts: Vec<u64>,
+    devices: Vec<Value>, invites: Vec<Value>, attempts: Vec<u64>, claims: Vec<u64>,
     clients: HashMap<u64, String>, retired: HashSet<u64>, swept: HashSet<String>,
 }
 pub struct Registry {
@@ -60,7 +63,7 @@ impl Registry {
     /// A registry that holds nothing and persists nothing: what the routes get when the real file cannot be read. The file is not touched.
     pub fn empty(home: &Path) -> Registry {
         let file = home.join("guard").join("devices-unreadable.json");
-        Registry { home: home.into(), root: String::new(), file, now: Box::new(|| 0), random: Box::new(urandom), inner: Mutex::new(Inner { devices: vec![], invites: vec![], attempts: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) }
+        Registry { home: home.into(), root: String::new(), file, now: Box::new(|| 0), random: Box::new(urandom), inner: Mutex::new(Inner { devices: vec![], invites: vec![], attempts: vec![], claims: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) }
     }
     pub fn with(home: &Path, root: &str, now: Box<dyn Fn() -> u64 + Send + Sync>, random: Box<dyn Fn(usize) -> Vec<u8> + Send + Sync>) -> Result<Registry, String> {
         let file = home.join("devices-v1.json");
@@ -75,9 +78,11 @@ impl Registry {
             use crate::plat::fs::PermissionsExt;
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).map_err(|_| "Cannot read or initialize device registry; existing pairings were preserved".to_string())?;
         }
-        Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { devices, invites, attempts: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
+        Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { devices, invites, attempts: vec![], claims: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
     }
     fn rand_hex(&self, n: usize) -> String { hex::encode((self.random)(n)) }
+    /// Eight characters of the code alphabet (no 0, 1, I, O): a device code and a machine code look alike.
+    fn short_code(&self) -> String { (self.random)(8).iter().map(|x| ALPHA[(*x & 31) as usize] as char).collect() }
 
     /// Atomic write: temp file (0600, exclusive), fsync, rename, fsync the folder. State changes only after.
     fn persist(&self, g: &mut Inner, devices: Vec<Value>, invites: Vec<Value>) -> Result<(), String> {
@@ -129,8 +134,7 @@ impl Registry {
         let at = (self.now)();
         if g.invites.iter().filter(|x| !is_machine(x) && open(x, at)).count() >= OPEN_LIMIT { return Self::err("too_many_invitations") }
         let token = self.rand_hex(16);
-        const ALPHA: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-        let code: String = (self.random)(8).iter().map(|x| ALPHA[(*x & 31) as usize] as char).collect();
+        let code = self.short_code();
         let mut unique: Vec<String> = vec![];
         for r in routes { if good_route(r) && !unique.contains(r) { unique.push(r.clone()) } }
         if unique.is_empty() { return Self::err("no_reachable_address") }
@@ -188,6 +192,38 @@ impl Registry {
         self.sweep(&mut g);
         json!({"ok": true, "id": entry["id"], "expiresAt": entry["expiresAt"]})
     }
+    /// A machine CODE: a machine invite for the link `peer` that a person can type (eight characters, ten minutes, once). The code
+    /// is claimed by `machine_claim`; the link itself is made only after the person approves the claim here. Only its hash is kept.
+    pub fn machine_code(&self, peer: &str) -> Value {
+        let mut g = self.inner.lock().unwrap();
+        let at = (self.now)();
+        if !is_peer(peer) || g.invites.iter().any(|x| is_machine(x) && x["peer"] == peer) { return Self::err("invalid_request") }
+        if g.invites.iter().filter(|x| is_machine(x) && open(x, at)).count() >= OPEN_LIMIT { return Self::err("too_many_invitations") }
+        let code = self.short_code();
+        let entry = json!({"id": self.rand_hex(16), "kind": "machine", "peer": peer, "hash": digest(&self.rand_hex(32)), "codeHash": digest(&code), "createdAt": at, "expiresAt": at + INVITE_MS, "used": false, "revoked": false, "claimed": false});
+        let mut next = g.invites.clone(); next.push(entry.clone());
+        let (devs, next) = (g.devices.clone(), self.trim(next));
+        if let Err(e) = self.persist(&mut g, devs, next) { return Self::err(&e) }
+        self.sweep(&mut g);
+        json!({"ok": true, "id": entry["id"], "code": code, "expiresAt": entry["expiresAt"]})
+    }
+    /// A machine asks to pair with a code: the link `peer` it stands for, once. Ten tries a minute hub-wide, right or wrong.
+    pub fn machine_claim(&self, code: &str) -> Value {
+        let mut g = self.inner.lock().unwrap();
+        let at = (self.now)();
+        g.claims.retain(|x| *x + 60000 > at);
+        if g.claims.len() >= 10 { return Self::err("rate_limited") }
+        g.claims.push(at);
+        let compact: String = code.chars().filter(|c| *c != ' ' && *c != '-').collect::<String>().to_uppercase();
+        let hc = digest(&compact);
+        let Some(inv) = g.invites.iter().find(|x| is_machine(x) && same(x["codeHash"].as_str().unwrap_or(""), &hc)).cloned() else { return Self::err("wrong_code") };
+        if inv["revoked"] == true { return Self::err("revoked_code") }
+        if inv["used"] == true || inv["claimed"] == true { return Self::err("used_code") }
+        if inv["expiresAt"].as_f64().unwrap_or(0.0) <= (at + CLAIM_MIN_MS) as f64 { return Self::err("expired_code") }
+        let invs = g.invites.iter().map(|x| if x["id"] == inv["id"] { let mut y = x.clone(); y["claimed"] = json!(true); y } else { x.clone() }).collect();
+        let devs = g.devices.clone();
+        match self.persist(&mut g, devs, invs) { Ok(()) => json!({"ok": true, "peer": inv["peer"], "id": inv["id"]}), Err(e) => Self::err(&e) }
+    }
     /// A machine links with the invite for `peer` once, before it expires, unless revoked.
     pub fn link(&self, peer: &str, name: &str) -> Value {
         let mut g = self.inner.lock().unwrap();
@@ -210,7 +246,7 @@ impl Registry {
     }
 
     fn state(x: &Value, at: u64) -> &'static str {
-        if x["revoked"] == true { "revoked" } else if x["used"] == true { "used" } else if x["expiresAt"].as_f64().unwrap_or(0.0) <= at as f64 { "expired" } else { "open" }
+        if x["revoked"] == true { "revoked" } else if x["used"] == true || x["claimed"] == true { "used" } else if x["expiresAt"].as_f64().unwrap_or(0.0) <= at as f64 { "expired" } else { "open" }
     }
     /// GET /auth/devices: devices without their hashes, invitations newest first with what they paired.
     pub fn list(&self) -> Value {
@@ -325,13 +361,14 @@ pub fn known(origin: &str, routes: &[String], machines: &Value, peers: &[String]
     let key = |s: &str, h: &str, p: Option<u16>| format!("{s}//{h}{}", p.map_or(String::new(), |p| format!(":{p}")));
     let selfm = &machines["self"];
     let mut urls: Vec<String> = routes.iter().cloned().chain(selfm["url"].as_str().map(str::to_string)).collect();
-    for m in machines["peers"].as_array().into_iter().flatten() { if let Some(u) = m["url"].as_str() { urls.push(u.into()) } }
+    // (a machine found on the tailnet that another person owns is a suggestion to pair with, not one of the owner's hubs)
+    for m in machines["peers"].as_array().into_iter().flatten().filter(|m| m["same_user"] != false) { if let Some(u) = m["url"].as_str() { urls.push(u.into()) } }
     urls.extend(peers.iter().cloned());
     let want = key(scheme, &host, port);
     if urls.iter().filter(|u| !u.is_empty()).filter_map(|u| parse_origin(u)).any(|(s, h, p)| key(s, &h, p) == want) { return true }
     let domain = selfm["domain"].as_str().unwrap_or("").to_lowercase(); let domain = domain.trim_end_matches('.');
     let mut names: Vec<String> = selfm["name"].as_str().into_iter().map(str::to_lowercase).collect();
-    for m in machines["peers"].as_array().into_iter().flatten() { if let Some(n) = m["name"].as_str() { names.push(n.to_lowercase()) } }
+    for m in machines["peers"].as_array().into_iter().flatten().filter(|m| m["same_user"] != false) { if let Some(n) = m["name"].as_str() { names.push(n.to_lowercase()) } }
     !domain.is_empty() && host.ends_with(&format!(".{domain}")) && host.split('.').next().map_or(false, |first| names.iter().any(|n| !n.is_empty() && n == first))
 }
 

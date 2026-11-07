@@ -1,16 +1,8 @@
-//! The hub-to-hub handshake and signed intake (server: `Hub.bot.pair*`, `Pair.*`, `Hub.bot.link`,
-//! `Conn.bot.signed`, `Hub.bot_verified`/`Hub.bot.seen`):
-//!
-//! * `POST /bots/pair?name=&url=` — one of the owner's machines asks to link, admitted by (a) a credential,
-//!   (b) `Auth.owner.pair` (the whois-verified socket peer, an exact own authority, no Origin or proxy identity), or
-//!   (c) a pairing proof (`&to=&at=&proof=`) with no credential, which this hub checks by calling the asker back at
-//!   the address ITS machines list has for it (`POST /bots/pair/check`), never the one the ask names.
-//!   The answer is a fresh invite `{"invite":"bp1:<url>:<peer>:<secret>"}`, or 403/409 with the reason.
-//! * `POST /bots/pair/check` — 204 when this hub made that proof within the last minute, else 403.
+//! The hub-to-hub link: signed intake and the `bp1:` invite. A link is made only by pairing (`pairflow.rs`): a machine code,
+//! a request that waits for the person's approval, then the invite below. Nothing pairs by itself.
 //! * `POST /bots/link` — signed with the invite's secret: the machine holding the invite says where it is; once.
 //! * `signed_in` — the intake every other signed route shares (checked, fresh, not seen before).
-//! Auth and owner-trust decisions are `owner.rs`'s; nothing here weakens them.
-use super::{botnet, machines::{self, Peer}, owner, pairing::Registry, peers::PeerTable, routes::AuthRoutes, sign};
+use super::{botnet, machines, owner, pairflow::PairFlow, pairing::Registry, peers::PeerTable, routes::AuthRoutes, sign};
 use crate::{api::HttpReply, hub::Hub};
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::{Arc, Mutex}};
@@ -28,12 +20,12 @@ impl PReq {
 pub struct Peering {
     pub home: PathBuf, pub reg: Arc<Registry>, pub table: Arc<PeerTable>, pub routes: Arc<AuthRoutes>,
     pub tailnet: bool, pub host: String, pub port: u16,
-    own_hosts: Mutex<Vec<String>>, seen: Mutex<sign::Seen>,
-    now: Box<dyn Fn() -> u64 + Send + Sync>,
+    own_hosts: Mutex<Vec<String>>, seen: Mutex<sign::Seen>, pub flow: PairFlow,
+    pub(crate) now: Box<dyn Fn() -> u64 + Send + Sync>,
 }
 
-fn text(status: &'static str, body: &str) -> HttpReply { HttpReply::text(status, body) }
-fn json(status: &'static str, v: &Value) -> HttpReply { HttpReply { status, ctype: "application/json".into(), extra: String::new(), body: v.to_string().into_bytes() } }
+pub(crate) fn text(status: &'static str, body: &str) -> HttpReply { HttpReply::text(status, body) }
+pub(crate) fn json(status: &'static str, v: &Value) -> HttpReply { HttpReply { status, ctype: "application/json".into(), extra: String::new(), body: v.to_string().into_bytes() } }
 /// Att.unpct: a percent-encoded text, bytes as UTF-8.
 pub fn unpct(s: &str) -> String {
     let b = s.as_bytes(); let mut out = Vec::with_capacity(b.len()); let mut i = 0;
@@ -49,7 +41,7 @@ fn hexv(c: u8) -> Option<u8> { (c as char).to_digit(16).map(|d| d as u8) }
 
 impl Peering {
     pub fn new(home: PathBuf, reg: Arc<Registry>, table: Arc<PeerTable>, routes: Arc<AuthRoutes>, tailnet: bool, host: &str, port: u16) -> Peering {
-        Peering { home, reg, table, routes, tailnet, host: host.into(), port, own_hosts: Mutex::new(vec![]), seen: Mutex::new(sign::Seen::default()),
+        Peering { home, reg, table, routes, tailnet, host: host.into(), port, own_hosts: Mutex::new(vec![]), seen: Mutex::new(sign::Seen::default()), flow: PairFlow::default(),
             now: Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())) }
     }
     pub fn with_clock(mut self, now: Box<dyn Fn() -> u64 + Send + Sync>) -> Peering { self.now = now; self }
@@ -57,8 +49,8 @@ impl Peering {
     pub fn set_own_hosts(&self, ip: &str, dns: &str) { *self.own_hosts.lock().unwrap() = owner::owner_hosts(ip, dns, &self.port.to_string()) }
     #[cfg(test)]
     pub fn own_hosts_for_test(&self) -> Vec<String> { self.own_hosts.lock().unwrap().clone() }
-    fn token(&self) -> String { std::fs::read_to_string(self.home.join("token")).unwrap_or_default().trim().to_string() }
-    fn credential(&self, r: &PReq) -> bool {
+    pub(crate) fn token(&self) -> String { std::fs::read_to_string(self.home.join("token")).unwrap_or_default().trim().to_string() }
+    pub(crate) fn credential(&self, r: &PReq) -> bool {
         let secret = bearer_or_cookie_or_query(r);
         let t = self.reg.resolve(&secret, 0, r.route());
         owner::allowed(&r.headers, &r.target, &t)
@@ -68,66 +60,14 @@ impl Peering {
     pub async fn handle(&self, hub: &Arc<Hub>, r: &PReq) -> Option<HttpReply> {
         if r.method != "POST" { return None }
         match r.route() {
-            "/bots/pair" => Some(self.pair(hub, r).await),
-            "/bots/pair/check" => Some(self.check(r)),
+            "/bots/pair/request" => Some(self.request(hub, r).await),
+            "/bots/pair/poll" => Some(self.poll(r)),
+            "/bots/pair/local" => Some(self.local(hub, r).await),
             "/bots/link" => Some(self.link(hub, r).await),
             _ => None,
         }
     }
 
-    // ----- /bots/pair -----
-
-    /// Conn.owner.gate / Conn.route.bot case 11: a credential or the whois-verified owner is `own`; a proof with no
-    /// credential is `lan`; anything else is refused.
-    async fn pair(&self, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
-        let own_hosts = self.own_hosts.lock().unwrap().clone();
-        let own = self.credential(r) || owner::owner_pair(r.own_device, &own_hosts, &r.headers, &r.method, r.route());
-        let asked = owner::browser(&r.headers) && r.header("origin").is_empty() && !r.param("proof").is_empty();
-        if !own && !asked { return text("401 Unauthorized", "this Backplane needs its pairing token") }
-        let (name, url) = (botnet::clean(&unpct(&r.param("name"))), unpct(&r.param("url")));
-        let (j, peers, sync_off, own_no) = self.view();
-        let code = machines::answer(&j, &peers, &|n| sync_off.contains(&n.to_lowercase()), &|id| own_no.contains(id), &name, &url);
-        match (code, own) {
-            (0, true) => self.invite(hub, true).await,
-            (0, false) => {
-                // the asker is called back at the address this hub's machines list has for it
-                let found = machines::machine(&j, &name, &url).unwrap_or_default();
-                let (to, at, proof) = (r.param("to"), r.param("at"), r.param("proof"));
-                let ok = plain(&to, &at, &proof) && !found.is_empty() && machines::port(&to) == self.port.to_string();
-                if !ok { return text("403 Forbidden", "not a pairing request for this hub") }
-                let q = format!("/bots/pair/check?to={to}&at={at}&proof={proof}");
-                let resp = botnet::plain(&format!("{}{q}", botnet::url_base(&found))).await;
-                if resp.code == 204 { self.invite(hub, false).await } else { text("403 Forbidden", "the asking hub did not confirm this request") }
-            }
-            (1, _) => text("403 Forbidden", "sync with that machine is off here"),
-            (3, _) => text("403 Forbidden", "not one of the machines this hub found"),
-            _ => text("409 Conflict", "already linked"),
-        }
-    }
-    /// The machines list, live peers, and the two settings the rules read.
-    fn view(&self) -> (Value, Vec<Peer>, std::collections::HashSet<String>, std::collections::HashSet<String>) {
-        let j = self.routes.machines_value();
-        self.table.with(|p| {
-            let live = p.live();
-            let peers = live.iter().map(|x| Peer { id: x.id.clone(), name: x.name.clone(), url: x.url.clone() }).collect();
-            let sync_off = p.sync_off_names();
-            let own_no = live.iter().filter(|x| p.own_how(&x.id) == "no").map(|x| x.id.clone()).collect();
-            (j, peers, sync_off, own_no)
-        })
-    }
-    /// Pair.invite: a new peer id and secret, recorded and kept here; the answer carries the invite. `own`: the link is
-    /// recorded as one of the owner's machines before the answer goes.
-    async fn invite(&self, hub: &Arc<Hub>, own: bool) -> HttpReply {
-        let here = botnet::url_here(self.tailnet, &self.host, self.port).await;
-        let peer = format!("p{}", hex::encode(super::pairing::urandom(8)));
-        let secret = botnet::fresh_secret();
-        let now = (self.now)();
-        let rec = self.reg.machine(&peer);
-        let why = if rec["ok"] == true { "" } else { "could not record the invite" };
-        if why.is_empty() && own { let _ = hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{peer}"),"value":"pair","at":now})).await; }
-        let kept = why.is_empty() && botnet::peer_save(&self.home, &peer, &secret);
-        if kept { json("200 OK", &json!({"invite": sign::invite_make(&here, &peer, &secret)})) } else { text("500 Internal Server Error", "could not keep the invite's secret") }
-    }
     /// BotJob.invite (bots.invite): an invite for another machine to paste: a new peer id and secret, recorded (ten minutes,
     /// once) and kept here. `given` is the address to name instead of this hub's own. Ok((invite, peer)) or why not.
     pub async fn invite_for(&self, given: &str) -> Result<(String, String), String> {
@@ -143,14 +83,6 @@ impl Peering {
     }
     /// BotJob.unpeer: the link's secret goes, and the invite that made it shows as unlinked in Settings > Devices.
     pub fn unpeered(&self, peer: &str) { botnet::peer_forget(&self.home, peer); let _ = self.reg.unlinked(peer); }
-    /// Conn.pair.check: 204 when this hub made that proof within the last minute, else 403 (and it says nothing more).
-    fn check(&self, r: &PReq) -> HttpReply {
-        let at = r.param("at").parse::<u64>().unwrap_or(0);
-        if owner::pair_checked(&self.token(), &r.param("to"), at, (self.now)(), &r.param("proof")) {
-            HttpReply { status: "204 No Content", ctype: "text/plain".into(), extra: "Cache-Control: no-store\r\n".into(), body: vec![] }
-        } else { text("403 Forbidden", "not a pairing request of this hub's") }
-    }
-
     // ----- signed intake -----
 
     /// A signed request from a linked machine, checked: the sender is a plain id, the body within 256 KB, the
@@ -175,6 +107,8 @@ impl Peering {
         let url = o["url"].as_str().unwrap_or("").to_string();
         if !botnet::url_ok(&url) { return text("400 Bad Request", "no http address") }
         let name = botnet::clean(o["name"].as_str().unwrap_or(""));
+        let here = botnet::url_here(self.tailnet, &self.host, self.port).await;
+        if let Some(why) = refuse_loopback(&url, &here) { return text("403 Forbidden", why) }
         let res = self.reg.link(&peer, &name);
         if res["ok"] == true {
             let me = botnet::name().await;
@@ -190,27 +124,16 @@ impl Peering {
         }
     }
 
-    // ----- the asking side -----
+    // ----- the joining side -----
 
-    /// Pair.ask: POST /bots/pair at `url` with a proof made from this hub's token, then join the invite it answers.
-    pub async fn ask(&self, hub: &Arc<Hub>, url: &str, announced: &str, own: bool) {
-        let here = if announced.is_empty() { botnet::url_here(self.tailnet, &self.host, self.port).await } else { announced.to_string() };
-        let me = botnet::name().await;
-        let now = (self.now)();
-        let to = botnet::url_base(url).to_string();
-        let q = format!("{to}/bots/pair?name={me}&url={here}&to={to}&at={now}&proof={}", owner::pair_proof(&self.token(), &to, now));
-        let r = botnet::plain(&q).await;
-        if r.code != 200 { return }
-        let inv = serde_json::from_str::<Value>(&r.body).ok().and_then(|j| sign::invite_parse(j["invite"].as_str().unwrap_or("")));
-        if let Some(i) = inv { let _ = self.join(hub, &i, own).await; }
-    }
     /// BotJob.join: keep the invite's secret, tell the inviter where we are (signed POST /bots/link), and link once
     /// it answers with its name. Err: why it did not link.
-    pub async fn join(&self, hub: &Arc<Hub>, i: &sign::Inv, own: bool) -> Result<(String, String), String> {
+    pub async fn join(&self, hub: &Arc<Hub>, i: &sign::Inv, how: &str) -> Result<(String, String), String> {
         if !botnet::url_ok(&i.url) || !botnet::safe(&i.id) { return Err("not a usable invite".into()) }
         if self.table.with(|p| p.peer(&i.id).map_or(false, |x| !x.revoked)) { return Err("already linked to that machine".into()) }
-        if !botnet::peer_save(&self.home, &i.id, &i.secret) { return Err("not a usable invite".into()) }
         let here = botnet::url_here(self.tailnet, &self.host, self.port).await;
+        if let Some(why) = refuse_loopback(&here, &i.url) { return Err(why.into()) }
+        if !botnet::peer_save(&self.home, &i.id, &i.secret) { return Err("not a usable invite".into()) }
         let me = botnet::name().await;
         let now = (self.now)();
         let body = json!({"url": here, "name": me}).to_string();
@@ -219,7 +142,7 @@ impl Peering {
         if r.code == 200 {
             let shown = if name.is_empty() { i.id.clone() } else { name };
             let mut evs = vec![];
-            if own { evs.push(json!({"$":"SettingSet","key":format!("peer.own.{}", i.id),"value":"pair","at":now})) }
+            if !how.is_empty() { evs.push(json!({"$":"SettingSet","key":format!("peer.own.{}", i.id),"value":how,"at":now})) }
             evs.push(json!({"$":"PeerSet","id":i.id,"name":shown,"url":i.url,"revoked":false,"at":now}));
             let _ = hub.commit_many(&evs).await;
             Ok((i.id.clone(), shown))
@@ -236,11 +159,10 @@ fn bearer_or_cookie_or_query(r: &PReq) -> String {
     let c = r.header("cookie").split(';').find_map(|c| c.trim().strip_prefix("bp_token=").map(str::to_string)).unwrap_or_default();
     if c.is_empty() { r.param("token") } else { c }
 }
-/// Pair.plain: the proof's fields as the asker sent them: an http address with no query or fragment of its own, a
-/// time, a hex digest.
-pub fn plain(to: &str, at: &str, proof: &str) -> bool {
-    botnet::url_ok(to) && !to.contains(['?', '&', '#']) && at.parse::<u64>().map_or(false, |n| n.to_string() == at)
-        && proof.len() == 64 && botnet::safe(proof)
+/// Why a hub may not announce `here` to the hub at `target`: it would hand a machine across the network an address that is
+/// only this computer ("127.0.0.1"), a link that could never reach back.
+pub fn refuse_loopback(here: &str, target: &str) -> Option<&'static str> {
+    (machines::loopback(here) && !machines::loopback(target)).then_some("this hub is only reachable on its own loopback address (127.0.0.1), so the other machine could not link back: start it with Tailscale on, or set BACKPLANE_URL to an address that machine can reach")
 }
 
 #[cfg(test)]

@@ -20,7 +20,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -171,6 +171,9 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         "mentions.list" => mentions(hub, p).await,
         "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
         "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" => voice(hub, c, m, p).await,
+        "machines.page" | "machines.page.act" => {
+            rpc(hub, c, m, p.clone()).await.map(|mut r| { if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } } r })
+        }
         "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
         "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(s(p, "thread"))})),
         "locks.list" => Ok(json!({"locks":locks_now(hub).await})),
