@@ -58,6 +58,8 @@
 //                between them, outside any tool call, then answers
 //   lostend      each command answers and has its result, but its lifecycle
 //                never completes (the line lost); the process stays, silent
+//   mcpcalls     the first command makes each call of BP_MCP_CALLS (JSON: [{name, arguments}]) of the
+//                hub's MCP tools in turn (a buy thread's order_quote, say), then ends; later commands as plain
 //   deploy       the first command calls the hub's deploy_restart (the MCP
 //                URL, BP_DEPLOY_ARGS, JSON, as its arguments), then ends
 // BP_STANDIN_IMAGES=<dir>: each image block received is written there (0, 1, ...), and
@@ -290,6 +292,22 @@ async function run(c: Cmd, firstOne: boolean) {
     await call(2);
     say("GAPPED");
     result("GAPPED");
+    lc(c.uuid, "completed");
+    return;
+  }
+  if (firstOne && mode === "mcpcalls") {
+    // BP_MCP_CALLS: a JSON list of {name, arguments}, each a real call of the hub's MCP tool in turn, each shown as a tool row
+    for (const t of JSON.parse(process.env.BP_MCP_CALLS ?? "[]") as { name: string; arguments: object }[]) {
+      let got = "";
+      try {
+        const r = await fetch(mcpUrl, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: t.name, arguments: t.arguments } }) });
+        got = await r.text();
+      } catch (e) { got = String(e); }
+      log(`MCPCALL ${t.name} ${got.slice(0, 400)}`);
+    }
+    say("ASKED");
+    result("ASKED");
     lc(c.uuid, "completed");
     return;
   }

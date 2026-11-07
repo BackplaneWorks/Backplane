@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """The real order server (order/fabsrv) on a private port, for a test hub: the stand-in fab pack and a Stripe double in this process.
 
-    python test/order/local_server.py --port 3871 --data DIR [--pilot] [--export DIR]
+    python test/order/local_server.py --port 3871 --data DIR [--pilot] [--stripe-port N] [--export DIR]
+
+--stripe-port fixes the Stripe double's port (a phone reaches it through a forwarded port); 0, the default, takes any free one.
 
 --export writes an order's folder (a small board's gerbers and manifest.json) and exits. Point a test hub at the server with
 BACKPLANE_ORDER_SERVER or the order.server setting. It never reaches a real service: it refuses to start unless Stripe's address is
@@ -67,11 +69,11 @@ class Stripe(BaseHTTPRequestHandler):
 
 
 def main():
-    a = argparse.ArgumentParser(); a.add_argument("--port", type=int, default=3871); a.add_argument("--data"); a.add_argument("--pilot", action="store_true"); a.add_argument("--export")
+    a = argparse.ArgumentParser(); a.add_argument("--port", type=int, default=3871); a.add_argument("--data"); a.add_argument("--pilot", action="store_true"); a.add_argument("--export"); a.add_argument("--stripe-port", type=int, default=0)
     o = a.parse_args()
     if o.export:
         return export(o.export)
-    stripe = ThreadingHTTPServer(("127.0.0.1", 0), Stripe); threading.Thread(target=stripe.serve_forever, daemon=True).start()
+    stripe = ThreadingHTTPServer(("127.0.0.1", o.stripe_port), Stripe); threading.Thread(target=stripe.serve_forever, daemon=True).start()
     os.environ.update({"FAB_DATA": o.data, "FAB_VENDOR": str(ROOT / "order/tests/fakevendor"), "FAB_ENV_FILE": "/nonexistent", "FAB_ADMIN_TOKEN": "admin-token-for-local-tests-0123",
                        "FAB_PUBLIC_URL": f"http://127.0.0.1:{o.port}", "STRIPE_KEY": "sk_test_double_not_a_real_key", "FAB_PILOT": "1" if o.pilot else "0"})
     sys.path.insert(0, str(ROOT / "order"))

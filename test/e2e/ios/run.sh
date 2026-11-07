@@ -37,7 +37,7 @@ for id in $IDS; do
     MEM=$!
   else MEM=; fi
   TEST_RUNNER_HUB_HOST=$HUB_HOST TEST_RUNNER_HUB_PORT=$HUB_PORT TEST_RUNNER_HUB_TOKEN_FILE=$HUB_TOKEN_FILE TEST_RUNNER_OUT=$OUT \
-  TEST_RUNNER_HUB_INVITE_FILE=${HUB_INVITE_FILE:-} TEST_RUNNER_HUB_PAIR_LINK=${HUB_PAIR_LINK:-} TEST_RUNNER_HUB_ALREADY_PAIRED=${HUB_ALREADY_PAIRED:-} TEST_RUNNER_HUB_PROJECT_PATH=${HUB_PROJECT_PATH:-} TEST_RUNNER_HUB_FIRST_PROMPT=${HUB_FIRST_PROMPT:-} TEST_RUNNER_HUB_FIRST_EXPECT=${HUB_FIRST_EXPECT:-} TEST_RUNNER_HUB_ASK_PROMPT=${HUB_ASK_PROMPT:-} TEST_RUNNER_HUB_ASK_EXPECT=${HUB_ASK_EXPECT:-} TEST_RUNNER_HUB_REPLY_WAIT=${HUB_REPLY_WAIT:-} TEST_RUNNER_HUB_CTL=${HUB_CTL:-} TEST_RUNNER_LONG_SECS=${LONG_SECS:-300} TEST_RUNNER_VIDEO_START_EPOCH_MS=$VS \
+  TEST_RUNNER_BUY_THREAD=${BUY_THREAD:-} TEST_RUNNER_HUB_INVITE_FILE=${HUB_INVITE_FILE:-} TEST_RUNNER_HUB_PAIR_LINK=${HUB_PAIR_LINK:-} TEST_RUNNER_HUB_ALREADY_PAIRED=${HUB_ALREADY_PAIRED:-} TEST_RUNNER_HUB_PROJECT_PATH=${HUB_PROJECT_PATH:-} TEST_RUNNER_HUB_FIRST_PROMPT=${HUB_FIRST_PROMPT:-} TEST_RUNNER_HUB_FIRST_EXPECT=${HUB_FIRST_EXPECT:-} TEST_RUNNER_HUB_ASK_PROMPT=${HUB_ASK_PROMPT:-} TEST_RUNNER_HUB_ASK_EXPECT=${HUB_ASK_EXPECT:-} TEST_RUNNER_HUB_REPLY_WAIT=${HUB_REPLY_WAIT:-} TEST_RUNNER_HUB_CTL=${HUB_CTL:-} TEST_RUNNER_LONG_SECS=${LONG_SECS:-300} TEST_RUNNER_VIDEO_START_EPOCH_MS=$VS \
   xcodebuild test-without-building -resultBundlePath "$OUT/$id.xcresult" -project "$HERE/E2E.xcodeproj" -scheme BackplaneE2E -sdk iphonesimulator \
     -destination "platform=iOS Simulator,id=$SIM_UDID" -derivedDataPath "$DD" CODE_SIGNING_ALLOWED=NO \
     -only-testing:"BackplaneE2E/Journeys/test_$fn" > "$OUT/$id.xcodebuild.log" 2>&1
@@ -54,7 +54,7 @@ done
 /usr/bin/python3 - "$OUT" <<'PY'
 import json,glob,os,sys,datetime
 out=sys.argv[1]; res=[]
-items={"pair":"Pair","projects-threads":"Open projects and threads","send-image":"Send, reply and paste an image","stream":"Watch a running turn stream","switch-fast":"Switch threads fast","popups":"Mention and command popups","composer-keys":"Return, Shift+Return and autocorrect","bots-rooms":"Bots and rooms","viewers":"Open Board, Schematic and 3D viewers","downloads":"Download files","settings":"Settings","reconnect":"Reconnect after sleep","long-session":"Long session with 20 simulated agents"}
+items={"order-card":"Order card and Buy now on a live buy thread","pair":"Pair","projects-threads":"Open projects and threads","send-image":"Send, reply and paste an image","stream":"Watch a running turn stream","switch-fast":"Switch threads fast","popups":"Mention and command popups","composer-keys":"Return, Shift+Return and autocorrect","bots-rooms":"Bots and rooms","viewers":"Open Board, Schematic and 3D viewers","downloads":"Download files","settings":"Settings","reconnect":"Reconnect after sleep","long-session":"Long session with 20 simulated agents"}
 for f in sorted(glob.glob(out+"/*.json")):
     if f.endswith("summary.json"): continue
     r=json.load(open(f)); r["item"]=items.get(r["journey"],r["journey"]); res.append(r)
