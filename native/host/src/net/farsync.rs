@@ -15,6 +15,10 @@ pub fn own_link(p: &Peers, machines_json: &Value, link: &str) -> bool {
     let Some(row) = p.peer(link).filter(|r| !r.revoked) else { return false };
     p.verified(link) && !p.sync_off(&row.name) && machines::machine(machines_json, &row.name, &row.url).is_some()
 }
+/// The links whose mirrors the sidebar shows, with the machine's name: verified (the owner's own), not revoked, sync not set off.
+pub fn shown_names(peering: &Peering) -> Vec<(String, String)> {
+    peering.table.with(|p| p.live().into_iter().filter(|r| p.verified(&r.id) && !p.sync_off(&r.name)).map(|r| (r.id, r.name)).collect())
+}
 fn items_of(o: &Value) -> Vec<Item> { o["items"].as_array().into_iter().flatten().map(Item::of).collect() }
 fn forbidden() -> HttpReply { HttpReply::text("403 Forbidden", "threads are shared with the owner's own machines") }
 
@@ -34,13 +38,14 @@ impl FarSync {
         // log folded again) and given every mirror, this link's new one included, by the feed (`Hub::forget_mirror`)
         if t.reset {
             eprintln!("far: the mirror of {link} started over (another history)");
+            hub.mirrors().forget(link);
             drop(gate); // (the rebuild takes the gate itself; its replay gives the new history)
             if !hub.forget_mirror().await {
                 // the presenter would not restart: its old rows stay, the new ones are folded anyway, and it is said
                 eprintln!("far: the presenter did not restart; the old rows of {link} stay beside the new history");
-                fold_in_chunks(hub, &t.events).await;
+                fold_in_chunks(hub, link, &t.events).await;
             }
-        } else if !t.events.is_empty() { for c in t.events.chunks(500) { hub.fold_mirror_held(c).await } }
+        } else if !t.events.is_empty() { for c in t.events.chunks(500) { hub.fold_mirror_held(link, c).await } }
         Ok(t.got.gap)
     }
 
@@ -103,9 +108,9 @@ impl FarSync {
 }
 
 /// Events to the presenter a chunk at a time, so one frame is never a whole history.
-pub async fn fold_in_chunks(hub: &Arc<Hub>, events: &[Value]) { for c in events.chunks(500) { hub.fold_mirror(c).await } }
+pub async fn fold_in_chunks(hub: &Arc<Hub>, link: &str, events: &[Value]) { for c in events.chunks(500) { hub.fold_mirror(link, c).await } }
 /// (the caller holds the mirror gate: the replay after a rebuild)
-pub async fn fold_held(hub: &Arc<Hub>, events: &[Value]) { for c in events.chunks(500) { hub.fold_mirror_held(c).await } }
+pub async fn fold_held(hub: &Arc<Hub>, link: &str, events: &[Value]) { for c in events.chunks(500) { hub.fold_mirror_held(link, c).await } }
 
 /// Re-feeds every mirror (state and the last message of each thread) to the presenter after it lost them.
 pub struct Refeed(pub Arc<FarStore>);
@@ -115,7 +120,7 @@ impl crate::api::MirrorFeed for Refeed {
             for l in self.0.links() {
                 let (s, link) = (self.0.clone(), l.clone());
                 let ev = tokio::task::spawn_blocking(move || s.replay_events(&link)).await.unwrap_or_default();
-                fold_held(hub, &ev).await; // (called by the hub with the gate held)
+                fold_held(hub, &l, &ev).await; // (called by the hub with the gate held)
             }
         })
     }
