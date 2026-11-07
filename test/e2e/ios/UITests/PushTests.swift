@@ -20,10 +20,17 @@ final class Push: XCTestCase {
     func num(_ k: String) -> Int { state()[k] as? Int ?? -1 }
     func banner(_ text: String) -> XCUIElement { sb.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", text)).firstMatch }
     func home() { XCUIDevice.shared.press(.home); sleep(1) }
-    func arrives(_ name: String, _ text: String, act: () -> Void) -> XCUIElement {
+    /// taps the alert: its banner while it is up, else its entry in Notification Center (a banner hides after a few seconds)
+    func open(_ text: String) {
+        let b = banner(text); if b.exists { b.tap(); return }
+        let top = sb.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.005)); top.press(forDuration: 0.1, thenDragTo: sb.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)))
+        let n = banner(text); if n.waitForExistence(timeout: 5) { n.tap() }
+    }
+    /// `shot: false` when the next step taps the banner: a screenshot takes long enough for it to hide
+    func arrives(_ name: String, _ text: String, shot: Bool = true, act: () -> Void) -> XCUIElement {
         let b = banner(text)
         d.step(name, timeout: 45, act: act, expect: { b.exists })
-        d.shot(name.replacingOccurrences(of: " ", with: "-"))
+        if shot { d.shot(name.replacingOccurrences(of: " ", with: "-")) }
         return b
     }
     func silent(_ name: String, _ text: String, act: () -> Void) {
@@ -46,13 +53,14 @@ final class Push: XCTestCase {
         d.note("device \(state()["envs"] ?? "")"); home()
 
         let first = "Approve the deploy to staging?"
-        let b = arrives("the uberbot's notify_person arrives", first) { _ = ctl("/uber", ["text": first]) }
+        let b = arrives("the uberbot's notify_person arrives", first, shot: false) { _ = ctl("/uber", ["text": first]) }
+        _ = b
+        d.step("the tap opens its thread", timeout: 20, act: { self.open(first) }, expect: { self.d.app.state == .runningForeground && self.d.el("thread.send").exists })
+        d.shot("deep-link-thread"); home()
         // its source is the uberbot: the hub's own record of the push names the uberbot's thread and the uberbot as its title
         let st = state(); let sent = st["lastSent"] as? [String: Any] ?? [:]
         d.step("the alert came from the uberbot", timeout: 1, act: {}, expect: { (sent["thread"] as? String) == (st["bubThread"] as? String) && (sent["title"] as? String) == "Bub" })
         d.note("source: \(sent["title"] ?? "") on \(sent["thread"] ?? ""), uberbot thread \(st["bubThread"] ?? "")")
-        d.step("the tap opens its thread", timeout: 20, act: { if b.exists { b.tap() } }, expect: { self.d.app.state == .runningForeground && self.d.el("thread.send").exists })
-        d.shot("deep-link-thread"); home()
 
         silent("a duplicate is suppressed", first) { let r = ctl("/uber", ["text": first]); d.note("repeat: \(String(describing: r["said"]).prefix(160))") }
 
@@ -70,8 +78,9 @@ final class Push: XCTestCase {
         d.step("a worker's approval is open", timeout: 1, act: {}, expect: { !id.isEmpty })
         silent("the approval alone does not push", "rm -rf") {}
         let text = "The worker needs your approval"
-        let ab = arrives("the uberbot's approval alert arrives", text) { _ = ctl("/uber", ["text": text, "ask": id]) }
-        d.step("the tap opens the exact approval", timeout: 20, act: { if ab.exists { ab.tap() } }, expect: { self.d.app.state == .runningForeground && self.d.el("data.entry.ask").exists })
+        let ab = arrives("the uberbot's approval alert arrives", text, shot: false) { _ = ctl("/uber", ["text": text, "ask": id]) }
+        _ = ab
+        d.step("the tap opens the exact approval", timeout: 20, act: { self.open(text) }, expect: { self.d.app.state == .runningForeground && self.d.el("data.entry.ask").exists })
         d.shot("deep-link-approval"); home()
         let cleared = num("cleared")
         _ = ctl("/answer", ["ask": id])
@@ -79,8 +88,9 @@ final class Push: XCTestCase {
         d.note("cleared \(String(describing: state()["lastCleared"]))"); d.shot("cleared")
 
         _ = ctl("/setting", ["k": "push.burst.s", "v": "15"]); sleep(1)
-        _ = arrives("the first of a burst arrives", "Burst one") { _ = ctl("/uber", ["text": "Burst one"]) }
-        sleep(1); _ = ctl("/uber", ["text": "Burst two"]); sleep(1); _ = ctl("/uber", ["text": "Burst three"])
+        let wt = state()["worker"] as? String ?? ""
+        _ = arrives("the first of a burst arrives", "Burst one") { _ = ctl("/uber", ["text": "Burst one", "thread": wt]) }
+        sleep(1); _ = ctl("/uber", ["text": "Burst two", "thread": wt]); sleep(1); _ = ctl("/uber", ["text": "Burst three", "thread": wt])
         _ = arrives("the rest collapse into one", "2 of 2 need you") {}
         d.note("after burst \(String(describing: state()["lastSent"]))")
         d.finish()
