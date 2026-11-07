@@ -270,9 +270,12 @@ pub async fn runtime(hub: &Arc<Hub>) -> Env {
     let home = std::env::var("HOME").unwrap_or_default();
     let data = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()).unwrap_or(format!("{home}/.local/share"));
     for d in [PathBuf::from(&data).join("backplane/kicad"), PathBuf::from(&home).join(".backplane-bend/kicad"), hub.cfg.home.join("kicad")] { c.extend(newest_in(&d)) }
-    for d in std::env::var("PATH").unwrap_or_default().split(':').filter(|d| !d.is_empty()) { c.push(Path::new(d).join("kicad-cli")) }
-    c.push("/usr/bin/kicad-cli".into());
-    c.extend(super::stepglb::kicad_mac_clis().into_iter().map(PathBuf::from)); // macOS: the app bundle, system-wide or in ~/Applications
+    // BACKPLANE_KICAD_NO_SYSTEM=1 (rigs that try Install KiCad on a machine that has one): the system's own copies (PATH, /usr/bin, the macOS app) are not looked at
+    if std::env::var("BACKPLANE_KICAD_NO_SYSTEM").map_or(true, |v| v != "1") {
+        for d in std::env::var("PATH").unwrap_or_default().split(':').filter(|d| !d.is_empty()) { c.push(Path::new(d).join("kicad-cli")) }
+        c.push("/usr/bin/kicad-cli".into());
+        c.extend(super::stepglb::kicad_mac_clis().into_iter().map(PathBuf::from)); // macOS: the app bundle, system-wide or in ~/Applications
+    }
     match c.into_iter().find(|p| p.is_file()) { Some(p) => read_runtime(&p), None => Env { status: "missing".into(), ..Default::default() } }
 }
 /// Rt.manifest + KH.status from the runtime's manifest.json (no version probe: `runs` is taken as true when a manifest is read).
