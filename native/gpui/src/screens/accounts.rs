@@ -258,7 +258,7 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     let al = allowance(p); if !al.is_empty() { sub.push(al) }
     let head = div().flex().items_center().gap_3()
         .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w_0()
-            .child(div().flex().items_center().gap_2().child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(string(p, "label")))
+            .child(div().flex().items_center().gap_2().child(super::picker::logo(if p["provider"] == "codex" { "codex" } else { "claude" })).child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(string(p, "label")))
                 .when(default, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(px(11.)).text_color(c("dim")).child("New threads"))))
             .child(div().text_size(px(12.)).text_color(c("dim")).child(sub.join("  ·  "))))
         .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(px(12.)).text_color(c(tok)).child(word)));

@@ -145,14 +145,16 @@ pub fn shown(thread: &Value, pick: &Pick, favs: &[String]) -> Option<Shown> {
     Some(Shown { own, cur, all, rows })
 }
 
-/// A provider's mark: a square of its colour with its initial. (The hub sends no artwork; these stand in.)
+/// A provider's colour and fallback initial: a square of its colour with its initial. (The hub sends no artwork; these stand in.)
 pub fn mark(provider: &str) -> (u32, &'static str) {
     match provider { "claude" => (0xd97757, "A"), "codex" => (0x10a37f, "O"), "grok" => (0x6b7280, "X"), "muse" => (0x8b5cf6, "M"), "opencode" => (0x2563eb, "C"),
         "pi" => (0xdb2777, "π"), "omp" => (0xc026d3, "Ω"), "antigravity" | "agy" => (0x4285f4, "G"), _ => (0x64748b, "?") }
 }
-pub fn logo(provider: &str) -> Div {
-    let (rgb_, letter) = mark(bare(provider));
-    div().w(px(16.)).h(px(16.)).flex_shrink_0().flex().items_center().justify_center().bg(rgb(rgb_)).text_color(rgb(0xffffff)).text_size(px(10.)).font_weight(FontWeight::BOLD).child(letter)
+pub fn logo(provider: &str) -> AnyElement {
+    let provider = bare(provider);
+    let (rgb_, letter) = mark(provider);
+    if let Some(segs) = crate::art::mark_path(provider) { return crate::art::mark(segs, 16., rgb_).into_any_element(); }
+    div().w(px(16.)).h(px(16.)).flex_shrink_0().flex().items_center().justify_center().bg(rgb(rgb_)).text_color(rgb(0xffffff)).text_size(px(10.)).font_weight(FontWeight::BOLD).child(letter).into_any_element()
 }
 
 /// The thumb of a scroll bar: (top, height) in px inside a track of `track` px, for a view `view` px tall holding `max + view` px, scrolled `y` (>= 0).
