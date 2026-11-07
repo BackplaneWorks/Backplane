@@ -1189,7 +1189,8 @@ An agent (Claude, Codex, Grok or Muse, through the hub's MCP tools) works with t
 the way it works with its own project. `src/core/fmcp` is the whole of it.
 
 - `machine_list` (every agent): this machine first, then each linked machine (`here` or `away`) with its
-  projects, ids as clients name them (`<link>~<id>`). Every hub starts an agent's prompt with the
+  projects, ids as clients name them (`<link>~<id>`), each with its folder and `origin` (the normalized git origin remote,
+  `github.com/o/r`; "" for none: one repository on two machines is one sidebar project). Every hub starts an agent's prompt with the
   machines linked then (`<machines>`), and the orchestration paragraph says how to address them.
 - `thread_list` and `thread_launch` take a `machine` (its name or link id; a project there by name or id,
   or its `<link>~<id>` as `project`). `thread_send` (auto, queue, steer), `thread_wait`,

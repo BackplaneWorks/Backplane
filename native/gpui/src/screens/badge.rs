@@ -40,6 +40,20 @@ pub fn editor(cx: &mut Context<Backplane>, light: bool, pid: &str, look: &Value)
     div().id(SharedString::from(format!("look-{pid}"))).flex().flex_col().gap_2().px_3().py_2().border_b_1().border_color(c("line")).bg(c("panel")).child(colors).child(icons).into_any_element()
 }
 
+/// A thread's machine marker as the hub gives it (`mark` {name, short, away}; none on this machine's threads): the text drawn (`short` on
+/// a row, `name` in the header; an away machine's says so), its opacity (dimmer when away) and the hover text (the full name).
+pub fn machine_text(mark: &Value, full: bool) -> Option<(String, f32, String)> {
+    let name = mark["name"].as_str().filter(|n| !n.is_empty())?;
+    let away = mark["away"].as_bool().unwrap_or(false);
+    let t = if full { name } else { mark["short"].as_str().filter(|s| !s.is_empty()).unwrap_or(name) };
+    Some((if away && full { format!("{t} · away") } else { t.to_string() }, if away { 0.5 } else { 1.0 }, if away { format!("{name} · away") } else { name.to_string() }))
+}
+/// The marker drawn: dim text, small, quieter than the state dots; the full name on hover. `id` makes the hover's element unique.
+pub fn machine_mark(light: bool, mark: &Value, full: bool, id: &str) -> Option<AnyElement> {
+    let (t, o, hover) = machine_text(mark, full)?;
+    Some(div().id(SharedString::from(format!("mark-{id}"))).flex_shrink_0().max_w(px(if full { 200. } else { 80. })).overflow_hidden().text_ellipsis().whitespace_nowrap()
+        .text_size(px(11.)).text_color(theme::color(light, "faint")).opacity(o).tooltip(crate::keys::tip(&hover, "", light)).child(t).into_any_element())
+}
 #[cfg(test)]
 mod tests {
     use super::*; use core::prelude::v1::test;
@@ -51,5 +65,13 @@ mod tests {
         let look: Value = serde_json::from_str(r##"{"colors":[{"label":"blue","css":"#5b9cf5","on":true,"value":"project.color.p=blue"}],"icons":[{"label":"cpu","on":false,"value":"project.icon.p=cpu"}]}"##).unwrap();
         assert_eq!(choices(&look, "colors"), [("blue".to_string(), "project.color.p=blue".to_string(), true, "#5b9cf5".to_string())]);
         assert_eq!(choices(&look, "icons")[0].1, "project.icon.p=cpu"); assert!(choices(&Value::Null, "colors").is_empty());
+    }
+    #[test] fn a_machine_marker_is_short_on_rows_full_in_the_header_and_dim_when_away() {
+        let m = serde_json::json!({"name":"framework-1.tail.ts.net","short":"framework-1","away":false});
+        assert_eq!(machine_text(&m, false), Some(("framework-1".into(), 1.0, "framework-1.tail.ts.net".into())));
+        assert_eq!(machine_text(&m, true), Some(("framework-1.tail.ts.net".into(), 1.0, "framework-1.tail.ts.net".into())));
+        let a = serde_json::json!({"name":"desk","short":"desk","away":true});
+        assert_eq!(machine_text(&a, false), Some(("desk".into(), 0.5, "desk · away".into()))); assert_eq!(machine_text(&a, true).unwrap().0, "desk · away");
+        assert_eq!(machine_text(&Value::Null, false), None, "this machine's threads look as they always did");
     }
 }
