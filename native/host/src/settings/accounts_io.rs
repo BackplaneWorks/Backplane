@@ -68,6 +68,18 @@ pub fn sign_in_url(value: &str, provider: &str) -> String {
     value.to_string()
 }
 
+/// A provider CLI's spawn, again for a moment when exec says ETXTBSY: a CLI written just before it runs (an update in place, a test's stand-in) is "busy" while any
+/// fork made in that instant still holds the writer's descriptor, until that fork execs or exits. Under load other threads fork all the time, and the sign-in
+/// failed with "could not start" (accounts_io tests in parallel: 3 of 24 runs before, 0 of 88 after, one ETXTBSY retry seen).
+async fn spawn(c: &mut tokio::process::Command) -> std::io::Result<Child> {
+    let mut n = 0;
+    loop {
+        match c.spawn() {
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && n < 40 => { n += 1; if cfg!(test) { eprintln!("accounts_io: ETXTBSY on spawn, retry {n}") } tokio::time::sleep(Duration::from_millis(25)).await }
+            r => { if let Err(e) = &r { if cfg!(test) { eprintln!("accounts_io: spawn {:?} failed: {e} (os {:?})", c.as_std().get_program(), e.raw_os_error()) } } return r }
+        }
+    }
+}
 fn unset_env(k: &str) -> bool {
     const EXACT: &[&str] = &["CODEX_HOME", "CODEX_SQLITE_HOME", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ACCESS_TOKEN", "OPENAI_IDENTITY_TOKEN_FILE", "OPENAI_FEDERATION_RULE_ID", "OPENAI_ORGANIZATION_ID", "CODEX_AUTH_TOKEN",
         "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS",
@@ -117,7 +129,7 @@ impl Rpc {
         c.args(["-c", "cli_auth_credentials_store=\"file\"", "-c", "features.daemon_auto_start=false", "-c", "analytics.enabled=false", "app-server", "--listen", "stdio://"]);
         apply_env(&mut c, env, named);
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
-        let mut child = c.spawn().map_err(|_| ())?;
+        let mut child = spawn(&mut c).await.map_err(|_| ())?;
         let (stdin, stdout) = (child.stdin.take().ok_or(())?, child.stdout.take().ok_or(())?);
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, ()>>>>> = Default::default();
         let (tx, notes) = mpsc::unbounded_channel();
@@ -230,7 +242,7 @@ impl Accounts {
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
         c.args(args); c.current_dir(&self.root); apply_env(&mut c, &self.environment(p)?, p.is_some());
         c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
-        let mut child = c.spawn().map_err(|_| ())?;
+        let mut child = spawn(&mut c).await.map_err(|_| ())?;
         let mut out = child.stdout.take().ok_or(())?;
         let mut buf = Vec::new();
         let read = tokio::time::timeout(Duration::from_secs(12), async { let mut chunk = [0u8; 8192]; loop { let n = out.read(&mut chunk).await.map_err(|_| ())?; if n == 0 { break } buf.extend_from_slice(&chunk[..n]); if buf.len() > 131072 { return Err(()) } } Ok::<(), ()>(()) }).await;
@@ -249,7 +261,7 @@ impl Accounts {
         c.args(["--setting-sources", "user", "--settings", "{\"forceLoginMethod\":\"claudeai\"}", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
         c.current_dir(&self.root); apply_env(&mut c, &self.environment(p).map_err(|_| "This account's private folder could not be verified.".to_string())?, p.is_some());
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
-        let mut child = c.spawn().map_err(|_| "The Claude CLI could not be started.".to_string())?;
+        let mut child = spawn(&mut c).await.map_err(|_| "The Claude CLI could not be started.".to_string())?;
         let (mut stdin, stdout) = (child.stdin.take().ok_or("The Claude CLI could not be started.")?, child.stdout.take().ok_or("The Claude CLI could not be started.")?);
         let first = json!({"type":"control_request","request_id":if want == "models" { "models" } else { "init" },"request":{"subtype":"initialize"}}).to_string();
         stdin.write_all(format!("{first}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?;
@@ -594,7 +606,7 @@ impl Accounts {
             let Ok(mut env) = self.environment(Some(&cand)) else { return self.cancel(&aid, "failed", "cli_start") }; env.push(("BROWSER".into(), "/bin/true".into())); // the CLI prints its own authorization link; no browser is opened here
             apply_env(&mut c, &env, true);
             c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
-            let Ok(mut child) = c.spawn() else { return self.cancel(&aid, "failed", "cli_start") };
+            let Ok(mut child) = spawn(&mut c).await else { return self.cancel(&aid, "failed", "cli_start") };
             let (mut stdin, so, se) = (child.stdin.take().unwrap(), child.stdout.take().unwrap(), child.stderr.take().unwrap());
             let (otx, mut orx) = mpsc::unbounded_channel::<Vec<u8>>();
             let readers: [Box<dyn tokio::io::AsyncRead + Unpin + Send>; 2] = [Box::new(so), Box::new(se)];
@@ -811,7 +823,12 @@ for l in sys.stdin:
     }
     fn mgr(home: &Path, sd: &Path) -> Arc<Accounts> { let cli = crate::agents::proc::Cli::standin(sd); Arc::new(Accounts::open(home, Arc::new(move |p: &str| cli.resolve(p)))) }
     async fn add(a: &Arc<Accounts>, provider: &str, lab: &str) -> String { let s = a.request(&json!({"op":"add","provider":provider,"label":lab})).await; assert_eq!(s["error"], "", "{s}"); s["profiles"].as_array().unwrap().last().unwrap()["id"].as_str().unwrap().to_string() }
-    async fn until(a: &Arc<Accounts>, f: impl Fn(&Value) -> bool) -> Value { for _ in 0..200 { let s = a.snapshot(); if f(&s) { return s } tokio::time::sleep(Duration::from_millis(50)).await } panic!("timed out: {}", a.snapshot()) }
+    /// Waits on the manager's state, never on a time: the deadline is only there so a real hang fails, far above what a stand-in CLI takes on a loaded machine
+    /// (a full gate at load 32 outlasted the old 10 s while a python stand-in started).
+    const PATIENCE: Duration = Duration::from_secs(120);
+    /// `f` holds, waited for on the state up to [`PATIENCE`]; the caller's own assert says what it wanted.
+    async fn soon(f: impl Fn() -> bool) { let end = std::time::Instant::now() + PATIENCE; while !f() && std::time::Instant::now() < end { tokio::time::sleep(Duration::from_millis(20)).await } }
+    async fn until(a: &Arc<Accounts>, f: impl Fn(&Value) -> bool) -> Value { let end = std::time::Instant::now() + PATIENCE; loop { let s = a.snapshot(); if f(&s) { return s } if std::time::Instant::now() >= end { panic!("timed out: {}", a.snapshot()) } tokio::time::sleep(Duration::from_millis(50)).await } }
     fn prof<'a>(s: &'a Value, id: &str) -> &'a Value { s["profiles"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap() }
 
     #[test] fn sign_in_links_are_https_on_the_providers_hosts_without_credentials() {
@@ -894,7 +911,7 @@ for l in sys.stdin:
         let gate = launch_gate(&a, &id); let hold = gate.lock().await; // a launch is running
         let (a1, i1) = (a.clone(), id.clone()); let one = tokio::spawn(async move { a1.launch_plan(&i1, "2", "claude").await });
         let (a2, i2) = (a.clone(), id.clone()); let two = tokio::spawn(async move { a2.launch_plan(&i2, "2", "claude").await });
-        for _ in 0..100 { if queued(&a, &id) == 2 { break } tokio::time::sleep(Duration::from_millis(20)).await }
+        soon(|| queued(&a, &id) == 2).await;
         assert_eq!(queued(&a, &id), 2, "both are queued behind the one running");
         for op in ["status", "login", "disconnect", "remove"] { assert_eq!(a.request(&json!({"op":op,"profile":id})).await["error"], GENERIC, "{op} is refused while launches are queued"); }
         assert_eq!(prof(&a.snapshot(), &id)["state"], "connected", "and none of them changed it");
@@ -913,13 +930,13 @@ for l in sys.stdin:
         let (h, sd) = dirs("lr"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await; connect(&a, &id).await;
         let gate = launch_gate(&a, &id); let hold = gate.lock().await;
         let (a1, i1) = (a.clone(), id.clone()); let waits = tokio::spawn(async move { a1.launch_plan(&i1, "2", "claude").await });
-        for _ in 0..100 { if queued(&a, &id) == 1 { break } tokio::time::sleep(Duration::from_millis(20)).await }
+        soon(|| queued(&a, &id) == 1).await;
         // while it waits, the identity behind the profile moves (what the launch ahead of it would have found)
         a.update(&id, |p| p.epoch = 3).unwrap();
         drop(hold);
         assert!(waits.await.unwrap().is_err(), "the epoch it was asked for is gone: refused on the profile as it is now");
         let hold = gate.lock().await; let (a2, i2) = (a.clone(), id.clone()); let dropped = tokio::spawn(async move { a2.launch_plan(&i2, "3", "claude").await });
-        for _ in 0..100 { if queued(&a, &id) == 1 { break } tokio::time::sleep(Duration::from_millis(20)).await }
+        soon(|| queued(&a, &id) == 1).await;
         dropped.abort(); let _ = dropped.await; assert_eq!(queued(&a, &id), 0, "a dropped launch does not strand the profile"); drop(hold);
         assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "");
         let _ = std::fs::remove_dir_all(&h);
@@ -970,7 +987,8 @@ for l in sys.stdin:
         let store = h.join("providers/accounts-v1").join(&id).join(&aid); assert!(store.exists(), "the candidate store exists while the CLI runs");
         a.cancel(&aid, "cancelled", ""); // the attempt is over for the person; the child is only now told to go (the command channel closes)
         assert!(store.exists(), "cancel itself removes nothing: its child may still write to the store");
-        for _ in 0..100 { if !store.exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+        // the attempt's task kills the child, waits for its exit (tokio's own waitpid on that pid: nothing in the hub reaps another's child since 4c37b42a02), then discards
+        let end = std::time::Instant::now() + PATIENCE; while store.exists() && std::time::Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
         assert!(!store.exists(), "removed once the child is gone");
         let _ = std::fs::remove_dir_all(&h);
     }
