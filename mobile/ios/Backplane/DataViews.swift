@@ -350,13 +350,14 @@ struct DataNewThreadSheet: View {
 
 // MARK: one thread
 
+// The list's one bottom anchor (it opens at the end and keeps the end in view as rows grow), and on iOS 18 whether the reader is at the end.
 private struct DStick: ViewModifier {
     @Binding var atEnd: Bool
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
-            content.defaultScrollAnchor(.bottom, for: .sizeChanges)
-                .onScrollGeometryChange(for: Bool.self) { g in g.contentOffset.y + g.containerSize.height >= g.contentSize.height - 80 } action: { _, v in atEnd = v }
-        } else { content }
+            content.defaultScrollAnchor(.bottom)
+                .onScrollGeometryChange(for: Bool.self) { g in g.contentOffset.y + g.containerSize.height >= g.contentSize.height - 80 } action: { _, v in if atEnd != v { atEnd = v } }
+        } else { content.defaultScrollAnchor(.bottom) }
     }
 }
 
@@ -392,8 +393,15 @@ struct DataThreadView: View {
             stateStrip
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        if client.older[id] != nil { ProgressView().frame(maxWidth: .infinity).onAppear { client.loadOlder(id) } }
+                    // A VStack, not a LazyVStack: once a message with a picture and words was sent, the lazy stack's placement never settled
+                    // (the main thread at 100% in LazySubviewPlacements, no view of ours re-run, the screen frozen). A page is 40 entries with
+                    // tool runs folded, so the rows are few; older pages come only when asked, by the row below, never by a row appearing.
+                    VStack(alignment: .leading, spacing: 8) {
+                        // a tap, as on Android: in a VStack every row appears at once, so an onAppear here would pull the whole history page by page
+                        if client.older[id] != nil {
+                            Button { client.loadOlder(id) } label: { Text("load earlier").dmono(12).foregroundStyle(BackplaneDesign.dim).frame(maxWidth: .infinity, minHeight: 36) }
+                                .buttonStyle(.plain).accessibilityIdentifier("data.thread.older")
+                        }
                         ForEach(DataFold.rows(list, running: working)) { r in
                             switch r {
                             case .entry(let e): DataEntryRow(client: client, thread: id, entry: e).id(e.id)
@@ -406,7 +414,6 @@ struct DataThreadView: View {
                     }
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 6)
                 }
-                .defaultScrollAnchor(.bottom)
                 .modifier(DStick(atEnd: $atEnd))
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: list.last?.id) { _, _ in if atEnd { proxy.scrollTo("end", anchor: .bottom) } }
