@@ -103,7 +103,7 @@ pub fn source(src: &str) -> Result<PathBuf, &'static str> {
     let file = match src.strip_prefix("~/") { Some(rest) => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(rest), None => PathBuf::from(src) };
     let l = file.to_string_lossy().to_lowercase();
     if !file.is_absolute() || !(l.ends_with(".png") || l.ends_with(".jpg") || l.ends_with(".jpeg") || l.ends_with(".gif") || l.ends_with(".webp") || l.ends_with(".bmp")) { return Err("Invalid image path") }
-    if std::fs::canonicalize(&file).map_err(|_| "Invalid image path")? != file { return Err("Image symlink") }
+    if crate::plat::fs::canonicalize(&file).map_err(|_| "Invalid image path")? != file { return Err("Image symlink") }
     Ok(file)
 }
 fn valid_name(n: &str) -> bool { n.len() > 65 && n.as_bytes()[64] == b'.' && n[..64].bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')) && matches!(&n[65..], "png" | "jpg" | "gif" | "webp" | "bmp") }
@@ -159,7 +159,7 @@ pub fn snapshot(home: &Path, entry: &str, src: &str, thread: &str) -> Result<Sna
 mod tests {
     use super::*;
     // canonical: `source()` refuses a path with a link anywhere on it, so a TMPDIR that is itself a link (h@backplane, macOS /var) must be resolved first
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-mi-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); std::fs::canonicalize(&p).unwrap() }
+    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-mi-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); crate::plat::fs::canonicalize(&p).unwrap() }
     fn png(w: u32, h: u32) -> Vec<u8> { let mut v = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R']; v.extend(w.to_be_bytes()); v.extend(h.to_be_bytes()); v.extend([8, 6, 0, 0, 0]); v.extend([0u8; 16]); v }
     // images laws: Img.paths finds each image path once, in order; words over 1024 chars are no path
     #[test] fn img_paths() {

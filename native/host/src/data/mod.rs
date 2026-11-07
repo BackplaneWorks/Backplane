@@ -204,7 +204,7 @@ fn attachments_of(hub: &Hub, line: usize, msg: &str) -> Option<Value> {
 
 fn dirs(p: &Value) -> Result<Value, Value> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-    let want = s(p, "path"); let path = std::fs::canonicalize(if want.is_empty() { home.as_str() } else { want }).map_err(|_| err("no such folder"))?;
+    let want = s(p, "path"); let path = crate::plat::fs::canonicalize(if want.is_empty() { home.as_str() } else { want }).map_err(|_| err("no such folder"))?;
     let mut names: Vec<String> = std::fs::read_dir(&path).map_err(|_| err("cannot read that folder"))?.flatten()
         .filter(|e| e.file_type().map_or(false, |t| t.is_dir()) || e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with('.')).collect();
     names.sort_by_key(|n| n.to_lowercase()); names.truncate(1000);
@@ -308,7 +308,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         "dirs.list" => dirs(p),
         "project.add" => {
             let path = s(p, "path"); if path.is_empty() { return Err(err("path")) }
-            let want = std::fs::canonicalize(path).map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string());
+            let want = crate::plat::fs::canonicalize(path).map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string());
             rpc(hub, c, "project.add", json!({"path":path})).await?;
             for _ in 0..40 {
                 { let g = hub.model().await; let asks = HashMap::new();

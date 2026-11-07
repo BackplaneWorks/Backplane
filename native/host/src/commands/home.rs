@@ -19,7 +19,7 @@ impl Home {
     /// file(): a regular file inside the project (links resolved), else None.
     fn file(&self, rel: &str) -> Option<F> {
         if rel.is_empty() { return None }
-        let p = std::fs::canonicalize(self.real.join(rel)).ok()?;
+        let p = crate::plat::fs::canonicalize(self.real.join(rel)).ok()?;
         if !(p == self.real || p.starts_with(&self.real)) { return None }
         let m = std::fs::metadata(&p).ok()?; if !m.is_file() { return None }
         Some(F { path: p, mtime: ms(m.modified().ok()?), size: m.len() })
@@ -98,7 +98,7 @@ fn fab_row(h: &Home, art: &mut Vec<Value>, issues: &mut Vec<String>, rel: &str) 
 /// bp_project_home, blocking part: everything but the git and gh calls.
 #[cfg(test)] pub fn read_files_pub(root: &str, req: &Value) -> (Value, bool, PathBuf) { read_files(root, req) }
 fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
-    let real = match std::fs::canonicalize(root) { Ok(r) => r, Err(_) => return (json!({"project_home": req.get("project"), "root": root, "artifacts": [], "error": "Project folder is unavailable."}), false, PathBuf::new()) };
+    let real = match crate::plat::fs::canonicalize(root) { Ok(r) => r, Err(_) => return (json!({"project_home": req.get("project"), "root": root, "artifacts": [], "error": "Project folder is unavailable."}), false, PathBuf::new()) };
     let h = Home { real: real.clone() };
     let project = req.get("project").cloned().unwrap_or(Value::Null);
     let (mut art, mut issues): (Vec<Value>, Vec<String>) = (vec![], vec![]);
@@ -109,7 +109,7 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
         let dest = real.join(".backplane/intent.md"); let parent = dest.parent().unwrap().to_path_buf();
         let fail = |m: &str| (json!({"error": m, "project_home": project}), false, real.clone());
         if std::fs::create_dir_all(&parent).is_err() { return fail("Intent directory leaves this project.") }
-        match std::fs::canonicalize(&parent) { Ok(p) if p.starts_with(&real) => {}, _ => return fail("Intent directory leaves this project.") }
+        match crate::plat::fs::canonicalize(&parent) { Ok(p) if p.starts_with(&real) => {}, _ => return fail("Intent directory leaves this project.") }
         if h.digest(".backplane/intent.md") != st(req, "revision") { return fail("Goal and notes changed. Reload before saving; your edit is retained.") }
         let prior = h.file(".backplane/intent.md"); let size = prior.as_ref().map_or(0, |f| f.size);
         let (offset, remove) = (num(req, "editor"), num(req, "removeBytes"));

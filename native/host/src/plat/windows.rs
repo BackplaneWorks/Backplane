@@ -19,6 +19,11 @@ pub mod fs {
         for c in b.chunks_mut(1 << 20) { if unsafe { BCryptGenRandom(std::ptr::null_mut(), c.as_mut_ptr(), c.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) } != 0 { return Err(io::Error::other("BCryptGenRandom failed")) } }
         Ok(())
     }
+    /// The full path with links resolved, as Windows writes it for people: without the `\\?\` prefix std gives.
+    pub fn canonicalize<P: AsRef<Path>>(p: P) -> io::Result<std::path::PathBuf> {
+        let c = fs::canonicalize(p)?; let s = c.to_string_lossy();
+        Ok(if let Some(r) = s.strip_prefix(r"\\?\UNC\") { format!(r"\\{r}").into() } else if let Some(r) = s.strip_prefix(r"\\?\") { r.into() } else { c })
+    }
     /// A file's mode bits as a test compares them: Windows keeps none, so the wanted ones stand.
     pub fn mode_bits(_actual: u32, want: u32) -> u32 { want }
     /// Flush a folder: Windows opens one only with backup semantics, and flushes it with write access.
@@ -36,7 +41,7 @@ pub mod fs {
     /// Modes: only the write bits mean anything (read-only or not).
     pub trait PermissionsExt { fn mode(&self) -> u32; fn set_mode(&mut self, mode: u32); fn from_mode(mode: u32) -> Self; }
     impl PermissionsExt for fs::Permissions {
-        fn mode(&self) -> u32 { if self.readonly() { 0o555 } else { 0o755 } }
+        fn mode(&self) -> u32 { if self.readonly() { 0o500 } else { 0o700 } } // the owner's alone: a profile's folders are private, and anything may run
         fn set_mode(&mut self, mode: u32) { self.set_readonly(mode & 0o222 == 0) }
         fn from_mode(mode: u32) -> Self {
             // Permissions has no constructor on Windows: take a plain file's attributes (this program's) and set read-only from the mode
@@ -179,7 +184,7 @@ pub mod hub {
     /// What to start for `p`, and the arguments that go before the caller's: a `#!` script (no Windows program by itself) runs through the
     /// interpreter its first line names, as a Unix kernel would; `sh`, `bash` and `/usr/bin/env sh` are Git for Windows' shell.
     pub fn launch(p: &std::ffi::OsStr) -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
-        let mapped = program(p); if mapped != p { return (mapped, vec![]) }
+        let mapped = program(p); if mapped != p { return through_bp_sh(mapped, vec![]) }
         let path = std::path::Path::new(p);
         let script = if path.components().count() > 1 || path.is_absolute() { Some(path.to_path_buf()).filter(|f| shebang(f).is_some()) } else {
             // a bare name: the first PATH folder that has it as a program or as a script decides
@@ -192,7 +197,14 @@ pub mod hub {
         let Some(interp) = t.first().map(|x| x.rsplit('/').next().unwrap_or(x).to_string()) else { return (p.to_os_string(), vec![]) };
         let prog = match interp.as_str() { "sh" | "bash" | "dash" => program(std::ffi::OsStr::new(if interp == "bash" { "bash" } else { "sh" })), other => other.into() };
         let mut pre: Vec<std::ffi::OsString> = t[1..].iter().map(|x| x.into()).collect(); pre.push(f.into_os_string());
-        (prog, pre)
+        if matches!(interp.as_str(), "sh" | "bash" | "dash") { through_bp_sh(prog, pre) } else { (prog, pre) }
+    }
+    /// Git's sh by way of `bp-sh` (beside this program, or one folder up for a test binary in target/*/deps), which passes its arguments
+    /// unchanged; without it the shell is started directly.
+    fn through_bp_sh(sh: std::ffi::OsString, pre: Vec<std::ffi::OsString>) -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
+        static BP_SH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+        let t = BP_SH.get_or_init(|| { let me = std::env::current_exe().ok()?; let d = me.parent()?; [d.join("bp-sh.exe"), d.parent()?.join("bp-sh.exe")].into_iter().find(|f| f.is_file()) });
+        match t { Some(t) => { let mut a = vec![sh]; a.extend(pre); (t.clone().into_os_string(), a) } None => (sh, pre) }
     }
     /// A file's `#!` line, without the `#!`.
     fn shebang(f: &std::path::Path) -> Option<String> {
@@ -242,6 +254,13 @@ pub mod time {
 }
 
 pub mod net {
+    /// After an answer that refused a request whose body was not read: Windows resets a connection closed with unread input, and the
+    /// client loses the answer, so the write side ends first and what the client still sends is read and dropped (2 s, 1 MB at most).
+    pub async fn refused_close(s: &mut tokio::net::TcpStream) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let _ = s.shutdown().await; let mut b = vec![0u8; 16384]; let mut n = 0usize;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), async { while n < (1 << 20) { match s.read(&mut b).await { Ok(0) | Err(_) => break, Ok(k) => n += k } } }).await;
+    }
     /// The machine's IPv4 addresses that are not loopback, of adapters that are up.
     pub fn non_loopback_v4() -> Vec<String> {
         use windows_sys::Win32::{NetworkManagement::{IpHelper::*, Ndis::IfOperStatusUp}, Networking::WinSock::{AF_INET, SOCKADDR_IN}};

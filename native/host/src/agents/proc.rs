@@ -31,7 +31,7 @@ impl Cli {
         match &self.dir {
             Some(d) => {
                 let p = d.join(cli);
-                let (cd, cp) = (std::fs::canonicalize(d).map_err(|_| format!("{} has no runnable {cli}", d.display()))?, std::fs::canonicalize(&p).map_err(|_| format!("{} has no runnable {cli}", d.display()))?);
+                let (cd, cp) = (crate::plat::fs::canonicalize(d).map_err(|_| format!("{} has no runnable {cli}", d.display()))?, crate::plat::fs::canonicalize(&p).map_err(|_| format!("{} has no runnable {cli}", d.display()))?);
                 let exec = std::fs::metadata(&cp).map(|m| { use crate::plat::fs::PermissionsExt; m.is_file() && m.permissions().mode() & 0o111 != 0 }).unwrap_or(false);
                 if exec && cp.starts_with(&cd) { Ok(cp) } else { Err(format!("{} has no runnable {cli}", d.display())) }
             }

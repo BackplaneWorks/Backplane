@@ -33,6 +33,7 @@ pub fn send(path: &str, ctype: &str, range_header: &str) -> HttpReply {
     let f = std::fs::OpenOptions::new().read(true).custom_flags(crate::plat::fs::O_NONBLOCK | crate::plat::fs::O_NOFOLLOW).open(path);
     let mut f = match f { Ok(f) => f, Err(e) => return match e.kind() {
         std::io::ErrorKind::NotFound => fail("404 Not Found", "not found", ""),
+        std::io::ErrorKind::PermissionDenied if cfg!(windows) && std::path::Path::new(path).is_dir() => fail("404 Not Found", "not a regular file", ""), // Windows opens no folder as a file
         std::io::ErrorKind::PermissionDenied => fail("403 Forbidden", "cannot read preview", ""),
         _ if e.raw_os_error() == Some(crate::plat::errno::ENOTDIR) => fail("404 Not Found", "not found", ""),
         _ => fail("500 Internal Server Error", "cannot read preview", "") } };

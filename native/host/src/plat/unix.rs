@@ -13,6 +13,7 @@ pub mod fs {
     pub fn name_from(b: &[u8]) -> std::ffi::OsString { use std::os::unix::ffi::OsStrExt; std::ffi::OsStr::from_bytes(b).to_os_string() }
     /// A file's mode bits as a test compares them: the real ones.
     pub fn mode_bits(actual: u32, _want: u32) -> u32 { actual }
+    pub use std::fs::canonicalize;
     /// Flush a folder (a rename in it is on disk).
     pub fn sync_dir(d: &std::path::Path) -> std::io::Result<()> { std::fs::File::open(d)?.sync_all() }
     /// Random bytes from the OS (no fallback).
@@ -99,6 +100,8 @@ pub mod time {
 }
 
 pub mod net {
+    /// After an answer that refused a request whose body was not read: the connection just closes (as it always has here).
+    pub async fn refused_close(_s: &mut tokio::net::TcpStream) {}
     /// The machine's IPv4 addresses that are not loopback.
     pub fn non_loopback_v4() -> Vec<String> {
         let mut out = vec![];

@@ -132,7 +132,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test] fn only_assistant_messages_make_snapshots() {
-        let home = std::env::temp_dir().join(format!("bp-ir-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap(); let home = std::fs::canonicalize(&home).unwrap();
+        let home = std::env::temp_dir().join(format!("bp-ir-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap(); let home = crate::plat::fs::canonicalize(&home).unwrap();
         let src = home.join("src"); std::fs::create_dir_all(&src).unwrap();
         let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 0, 4, 0, 0, 0, 4, 8, 6, 0, 0, 0]; png.extend([0u8; 16]);
         std::fs::write(src.join("a.png"), &png).unwrap(); let p = src.join("a.png").to_string_lossy().into_owned();
@@ -151,7 +151,7 @@ mod tests {
     // Hub.thread: a message committed live is snapshotted by the loop; one that is only in the log (no ref) is found by the bounded scan;
     // deleted threads, other entries, other spellings and a wrong credential get nothing
     #[tokio::test] async fn message_images_live_scanned_and_refused() {
-        let home = std::env::temp_dir().join(format!("bp-mih-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap(); let home = std::fs::canonicalize(&home).unwrap();
+        let home = std::env::temp_dir().join(format!("bp-mih-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap(); let home = crate::plat::fs::canonicalize(&home).unwrap();
         let (a, b) = (home.join("src/a.png"), home.join("src/b.png")); std::fs::create_dir_all(a.parent().unwrap()).unwrap(); std::fs::write(&a, png()).unwrap(); std::fs::write(&b, png()).unwrap();
         let (pa, pb) = (a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned());
         let ev = |v: Value| v.to_string();

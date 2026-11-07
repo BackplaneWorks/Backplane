@@ -19,10 +19,10 @@ fn under(p: &Path, root: &Path) -> bool { p == root || p.starts_with(root) }
 /// home (`~/.backplane-bend`: scratch and bot threads live there) nor the copy's own home itself or its control files.
 pub fn check_folder(cwd: &str, roots: &[String], copy_home: &Path, live_home: Option<&Path>) -> Result<PathBuf, String> {
     if cwd.is_empty() { return Err("the thread has no folder".into()) }
-    let real = std::fs::canonicalize(cwd).map_err(|_| format!("the thread's folder {cwd} is gone"))?;
+    let real = crate::plat::fs::canonicalize(cwd).map_err(|_| format!("the thread's folder {cwd} is gone"))?;
     if !real.is_dir() { return Err(format!("{cwd} is not a folder")) }
     if real == Path::new("/") { return Err("the thread's folder is /".into()) }
-    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let canon = |p: &Path| crate::plat::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     if let Some(l) = live_home { let l = canon(l); if under(&real, &l) { return Err(format!("{cwd} is inside the live Backplane's home ({})", l.display())) } }
     let ch = canon(copy_home);
     let scratch = ch.join("scratch");
@@ -56,7 +56,7 @@ impl LiveFold {
 }
 /// Check 5: a live turn running in the same folder, or one under or over it. `me`: the thread asking (its own live turn is not a conflict with itself in the copy).
 pub fn live_conflict(f: &LiveFold, folder: &Path) -> Option<String> {
-    let canon = |p: &str| std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p));
+    let canon = |p: &str| crate::plat::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p));
     for t in &f.running {
         let Some(other) = f.folder.get(t) else { return Some(format!("a turn of the live Backplane is running in thread {t}, whose folder is not known here: refused rather than guessed")) }; let o = canon(other);
         if under(folder, &o) || under(&o, folder) { return Some(format!("a turn of the live Backplane is running in {} (thread {t}): don't run the same folder in both apps", o.display())) }
@@ -102,7 +102,7 @@ pub const CLAUDE_STRICT: [&str; 3] = ["--strict-mcp-config", "--setting-sources"
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn dir(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-person-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); std::fs::canonicalize(&p).unwrap() }
+    fn dir(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-person-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); crate::plat::fs::canonicalize(&p).unwrap() }
     #[test] fn the_folder_must_be_a_project_folder_of_the_copy_and_nothing_of_the_live_home_or_root() {
         let (proj, home, live, other) = (dir("proj"), dir("home"), dir("live"), dir("other")); std::fs::create_dir_all(proj.join("sub")).unwrap(); std::fs::create_dir_all(home.join("scratch/t1")).unwrap(); std::fs::create_dir_all(live.join("scratch/t9")).unwrap();
         let roots = vec![proj.to_string_lossy().into_owned()];

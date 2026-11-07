@@ -171,7 +171,7 @@ fn apply_env(c: &mut tokio::process::Command, env: &[(String, String)], named: b
 
 impl Accounts {
     pub fn open(home: &Path, resolve: Arc<dyn Fn(&str) -> Result<PathBuf, String> + Send + Sync>) -> Accounts {
-        let canon = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+        let canon = crate::plat::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
         let root = canon.join("providers").join("accounts-v1");
         let mut inner = Inner::default();
         if private_dir(&canon.join("providers")).and_then(|_| private_dir(&root)).is_err() { inner.load_error = "The private account registry could not be verified.".into() }
@@ -346,7 +346,7 @@ impl Accounts {
             let (code, data) = self.cli(Some(&p), "claude", &["auth", "status"]).await.map_err(|_| "Claude subscription sign-in could not be verified".to_string())?;
             if code != 0 || data["loggedIn"] != true || data["authMethod"] != "claude.ai" { return Err("Claude subscription sign-in could not be verified; Console profiles and API credentials use a different store.".into()) }
             let dir = self.directory(&p).map_err(|e| e.to_string())?;
-            if data["configDirectory"].as_str().map(|d| std::fs::canonicalize(d).unwrap_or_else(|_| PathBuf::from(d))) != Some(std::fs::canonicalize(&dir).unwrap_or(dir)) { return Err(DIRECTORY_ERR.into()) }
+            if data["configDirectory"].as_str().map(|d| crate::plat::fs::canonicalize(d).unwrap_or_else(|_| PathBuf::from(d))) != Some(crate::plat::fs::canonicalize(&dir).unwrap_or(dir)) { return Err(DIRECTORY_ERR.into()) }
             identity = json!({"email":label(data["email"].as_str().unwrap_or("")),"plan":label(data["subscriptionType"].as_str().unwrap_or("")),"auth":"claude.ai"});
             fp_identity = json!([identity["email"], label(data["accountUuid"].as_str().or(data["userId"].as_str()).unwrap_or("")), label(data["orgUuid"].as_str().or(data["organizationId"].as_str()).unwrap_or(""))]);
             catalog = if p.catalog.is_empty() { self.claude_models(&p).await } else { p.catalog.clone() };

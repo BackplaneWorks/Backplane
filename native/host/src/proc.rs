@@ -89,16 +89,19 @@ mod tests {
         for k in ["BACKPLANE_BUILDS", "BACKPLANE_COMMIT", "BACKPLANE_GUARD", "BACKPLANE_GUARD_STABLE", "BACKPLANE_SAFE", "BACKPLANE_UPDATE_FEED", "BACKPLANE_HTTPS_PORT", "BACKPLANE_URL", "BACKPLANE_APNS_KEY_ID"] { assert!(hub_only(k), "{k}"); }
         for k in ["BACKPLANE_NO_UPDATE", "BACKPLANE_AGENT_OWNER", "BACKPLANE_AGENTS", "PATH", "BACKPLANE_GUARDIAN"] { assert!(!hub_only(k), "{k}"); }
     }
+    /// What prints the environment: /usr/bin/env, or on Windows Git's shell's `env`.
+    const ENV: (&str, &[&str]) = if cfg!(windows) { ("sh", &["-c", "env"]) } else { ("/usr/bin/env", &[]) };
+    fn env_cmd(mut c: tokio::process::Command) -> tokio::process::Command { c.args(ENV.1); c }
     #[tokio::test] async fn hub_env_probe_child() { // run by the test below with the hub's variables set, as a guarded dev hub has them
         if std::env::var("BP_HUB_ENV_PROBE").is_err() { return }
         let leaked = |out: &[u8]| String::from_utf8_lossy(out).lines().filter(|l| l.split('=').next().map_or(false, hub_only)).map(str::to_string).collect::<Vec<_>>();
         for k in [Kind::Agent, Kind::PersonTurn, Kind::Shell, Kind::Terminal] {
-            let o = tokio_cmd(k, "/usr/bin/env").output().await.unwrap(); assert!(o.status.success(), "{k:?}");
+            let o = env_cmd(tokio_cmd(k, ENV.0)).output().await.unwrap(); assert!(o.status.success(), "{k:?}");
             assert!(leaked(&o.stdout).is_empty(), "{k:?} saw {:?}", leaked(&o.stdout));
             assert!(String::from_utf8_lossy(&o.stdout).lines().any(|l| l == "BACKPLANE_NO_UPDATE=1"), "{k:?}: the hold on updates stays");
-            let o = std_cmd(k, "/usr/bin/env").output().unwrap(); assert!(leaked(&o.stdout).is_empty(), "std {k:?} saw {:?}", leaked(&o.stdout));
+            let o = { let mut c = std_cmd(k, ENV.0); c.args(ENV.1); c }.output().unwrap(); assert!(leaked(&o.stdout).is_empty(), "std {k:?} saw {:?}", leaked(&o.stdout));
         }
-        let o = std_cmd(Kind::Local, "/usr/bin/env").output().unwrap(); assert!(!leaked(&o.stdout).is_empty(), "our own helpers still get them");
+        let o = { let mut c = std_cmd(Kind::Local, ENV.0); c.args(ENV.1); c }.output().unwrap(); assert!(!leaked(&o.stdout).is_empty(), "our own helpers still get them");
         println!("hub_env_probe_ok");
     }
     #[test] fn an_agent_shell_or_terminal_never_sees_the_guards_or_updaters_variables() {
@@ -175,7 +178,7 @@ mod tests {
         for f in files {
             if f.ends_with("proc.rs") { continue }
             let text = std::fs::read_to_string(&f).unwrap();
-            let name = f.to_string_lossy();
+            let name = f.to_string_lossy().replace('\\', "/");
             if name.ends_with("tests.rs") || name.contains("/tests/") { continue }
             // everything after the first #[cfg(test)] line is test code
             let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
@@ -193,7 +196,7 @@ mod tests {
         let mut files = vec![]; walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
         let mut bad = vec![];
         for f in files {
-            let name = f.to_string_lossy().into_owned();
+            let name = f.to_string_lossy().replace('\\', "/");
             if name.ends_with("tests.rs") || name.ends_with("e2e.rs") || name.contains("/tests/") || ALLOWED.iter().any(|a| name.ends_with(a)) { continue }
             let text = std::fs::read_to_string(&f).unwrap();
             let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);

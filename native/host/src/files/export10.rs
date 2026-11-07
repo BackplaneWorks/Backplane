@@ -94,7 +94,7 @@ impl RpcHandler for Export10 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> String { let p = std::env::temp_dir().join(format!("bp-kx-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); std::fs::canonicalize(p).unwrap().to_string_lossy().into_owned() }
+    fn tmp(n: &str) -> String { let p = std::env::temp_dir().join(format!("bp-kx-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); crate::plat::fs::canonicalize(p).unwrap().to_string_lossy().into_owned() }
     /// a stand-in kicad-cli for `project downgrade`: the report it writes comes from $REPORT
     fn rt(dir: &str, report: &str) -> ipc::Env {
         let p = format!("{dir}/kicad-cli");

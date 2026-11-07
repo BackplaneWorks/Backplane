@@ -1426,7 +1426,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let pm = argv.iter().position(|a| a == "--permission-mode").map(|i| argv[i + 1].clone()).unwrap(); assert_eq!(pm, "default", "approval-required, whatever the copied thread said");
     assert!(argv.iter().any(|a| a == "--permission-prompt-tool"), "approvals reach the person: {argv:?}");
     let env = read("env"); assert!(env.lines().any(|l| l == format!("HOME={}", person.display())), "the person's HOME"); assert!(!env.lines().any(|l| l.starts_with("BACKPLANE_")), "no BACKPLANE_* reaches the agent:\n{env}");
-    assert_eq!(std::fs::canonicalize(read("cwd").trim()).unwrap(), std::fs::canonicalize(&work).unwrap());
+    assert_eq!(crate::plat::fs::canonicalize(read("cwd").trim()).unwrap(), crate::plat::fs::canonicalize(&work).unwrap());
     assert_eq!(std::fs::read_to_string(rec.join("starts")).unwrap().matches("START").count(), 1, "exactly the person's stand-in ran");
     // (4) the one-shot helpers keep Kind::Agent, refused on a copy (proc.rs tests)
     ag.shutdown();

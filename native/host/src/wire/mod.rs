@@ -82,12 +82,12 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
     // the body of a POST to a route that decides for itself (an own_auth handler, /auth/*): Content-Length only, capped; never buffered for the rest
     // a streaming upload: credential first (unless the handler decides itself), then the size, then the handler reads the body
     if let Some(h) = hub.http_for(req.route()).filter(|h| h.takes_body()) {
-        if req.method != "POST" { s.write_all(&response("405 Method Not Allowed", "text/plain; charset=utf-8", "", b"POST only")).await.ok(); return Ok(()) }
-        if !(h.own_auth() || hub.auth.allowed(&req)) { s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await.ok(); return Ok(()) }
+        if req.method != "POST" { s.write_all(&response("405 Method Not Allowed", "text/plain; charset=utf-8", "", b"POST only")).await.ok(); crate::plat::net::refused_close(&mut s).await; return Ok(()) }
+        if !(h.own_auth() || hub.auth.allowed(&req)) { s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await.ok(); crate::plat::net::refused_close(&mut s).await; return Ok(()) }
         let len = req.header("content-length").trim().parse::<u64>().ok();
         // only the framing is the wire's: the handler refuses a size it will not take (with its own JSON answer) before `proceed()`
         let st = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else { None };
-        if let Some(st) = st { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); return Ok(()) }
+        if let Some(st) = st { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); crate::plat::net::refused_close(&mut s).await; return Ok(()) }
         let expect = req.header("expect").eq_ignore_ascii_case("100-continue");
         let r = h.call_body(&hub.arc(), &req, crate::api::Body::new(&mut s, len.unwrap(), expect)).await;
         let out = response_for(r.status, &r.ctype, &r.extra, &r.body);
@@ -97,12 +97,12 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         // no Content-Length and no Transfer-Encoding is an empty body; chunked is refused
         let len = if req.header("content-length").trim().is_empty() && req.header("transfer-encoding").is_empty() { Some(0) } else { req.header("content-length").trim().parse::<usize>().ok() };
         let status = if !req.header("transfer-encoding").is_empty() || len.is_none() { Some("411 Length Required") } else if len.unwrap() > hub.http_for(req.route()).map_or(crate::auth::BODY_MAX, |h| h.body_max()) { Some("413 Payload Too Large") } else { None };
-        if let Some(st) = status { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); return Ok(()) }
+        if let Some(st) = status { s.write_all(&response(st, "text/plain; charset=utf-8", "", st.as_bytes())).await.ok(); crate::plat::net::refused_close(&mut s).await; return Ok(()) }
         if len.unwrap() > 0 && req.header("expect").eq_ignore_ascii_case("100-continue") { s.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").await.ok(); }
         let mut body = vec![0u8; len.unwrap()];
         match tokio::time::timeout(Duration::from_secs(10), s.read_exact(&mut body)).await {
             Ok(Ok(_)) => req.body = body,
-            _ => { s.write_all(&response("408 Request Timeout", "text/plain; charset=utf-8", "", b"408 Request Timeout")).await.ok(); return Ok(()) }
+            _ => { s.write_all(&response("408 Request Timeout", "text/plain; charset=utf-8", "", b"408 Request Timeout")).await.ok(); crate::plat::net::refused_close(&mut s).await; return Ok(()) }
         }
     }
     // the /auth routes decide for themselves (enrollment proves itself with its invitation); nothing else does

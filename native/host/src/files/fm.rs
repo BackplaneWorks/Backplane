@@ -71,8 +71,8 @@ pub fn from_uri(s: &str) -> String {
 /// real root or below it). Symlinks that leave the root, `..`, absolute and NUL paths all yield None.
 pub fn contained(root: &Path, rel: &str) -> Option<PathBuf> {
     if !safe(rel) { return None }
-    let rr = std::fs::canonicalize(root).ok()?;
-    let target = if rel.is_empty() { rr.clone() } else { std::fs::canonicalize(rr.join(rel)).ok()? };
+    let rr = crate::plat::fs::canonicalize(root).ok()?;
+    let target = if rel.is_empty() { rr.clone() } else { crate::plat::fs::canonicalize(rr.join(rel)).ok()? };
     // case "$(pwd -P)/" in "$rr"/*) : the root itself, or a path below it, by whole components
     if target == rr || target.starts_with(&rr) { Some(target) } else { None }
 }
