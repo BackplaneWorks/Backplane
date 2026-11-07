@@ -113,7 +113,9 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
     assert!(!own_link(&p, &j, "p1"), "unverified");
     p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"approved","at":1})); assert!(own_link(&p, &j, "p1"));
     assert!(!own_link(&p, &j, "p2"), "unknown"); assert!(!own_link(&p, &json!({"self":{},"peers":[]}), "p1"), "not found by this hub");
-    p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"off","at":2})); assert!(!own_link(&p, &j, "p1"));
+    assert!(own_link(&p, &json!({}), "p1"), "a restart: the machine finder has not published yet, an approved link still is the owner's own");
+    assert!(!own_link(&p, &json!({}), "p2"), "unknown stays unknown while it has not");
+    p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"off","at":2})); assert!(!own_link(&p, &j, "p1")); assert!(!own_link(&p, &json!({}), "p1"), "sync off holds before the finder too");
     p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"","at":3})); p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"no","at":3})); assert!(!own_link(&p, &j, "p1"), "the owner said it is not theirs");
     p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"tailnet","at":4})); p.fold(&ps("p1", "", true)); assert!(!own_link(&p, &j, "p1"), "revoked");
 }
