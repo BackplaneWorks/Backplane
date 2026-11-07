@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The iOS data app's pairing on a simulator. There are no tap tools on the Mac: a debug hook calls what the form's Pair calls, BACKPLANE_ASK answers the question,
-and an outside link goes through `simctl openurl`. So this proves the app and the protocol on a simulator, not its buttons and not a real phone.
+an outside link is offered through `simctl openurl` (iOS then asks its own "Open in …?", which no tap answers here) and driven through
+BACKPLANE_OPEN_URL, the same route() as onOpenURL. So this proves the app and the protocol on a simulator, not its buttons and not a real phone.
 
   ios_sim.py --base http://HOST:PORT --token-file T --sim UDID --app PATH --sockets 'CMD' [--restart 'CMD'] [--expire 'CMD'] [--mac hs-mac-mini]
 """
@@ -25,7 +26,8 @@ class Sim:
         self.sh(f"{e} xcrun simctl launch {self.u} {BID}")
     def log(self):
         out = self.sh(f"xcrun simctl spawn {self.u} log show --last 2m --style compact --predicate 'eventMessage CONTAINS \"BPPAIR\"'")
-        return re.sub(r"(invite|code)=[^ &]+", r"\1=<secret>", "\n".join(l.split("BPPAIR", 1)[1].strip() for l in out.splitlines() if "BPPAIR" in l))
+        return re.sub(r"(invite|code)=[^ &]+", r"\1=<secret>", "\n".join(l.split("BPPAIR", 1)[1].strip() for l in out.splitlines() if "BPPAIR" in l and "Filtering the log" not in l and "log run noninteractively" not in l))
+    def springboard(self): return self.sh(f"xcrun simctl spawn {self.u} log show --last 30s --style compact --predicate 'process == \"SpringBoard\" AND eventMessage CONTAINS \"Open in\"'")
     def open(self, url): self.sh(f"xcrun simctl openurl {self.u} {shlex.quote(url)}")
 
 
@@ -66,10 +68,15 @@ def main():
     # a link from outside
     time.sleep(61)
     n0 = live(hub); st, inv = hub.invite(); url = "backplane-gpui://pair?url=" + urllib.parse.quote(inv["link"], safe="")
-    s.fresh(); s.launch(BACKPLANE_ASK="cancel"); time.sleep(3); s.open(url); time.sleep(6)
+    # iOS asks first ("Open in “Backplane GPUI”?", SpringBoard's own alert) and a simulator has no taps to answer it: the link is offered to this app,
+    # then the app's route is driven by its debug hook (BACKPLANE_OPEN_URL, the same route() as onOpenURL)
+    s.fresh(); s.launch(); time.sleep(3); s.open(url); time.sleep(3)
+    check("the system offers the link to this app (its own Open in … question)", "Open in “Backplane GPUI”?" in s.springboard(), "no alert in SpringBoard's log")
+    report("iOS's Open in … answered", "not run", "a simulator has no taps; the person's TestFlight check")
+    s.fresh(); s.launch(BACKPLANE_ASK="cancel", BACKPLANE_OPEN_URL=url); time.sleep(7)
     check("an outside link names its hub and asks", f"ask {hub.base}" in s.log(), last(s.log()))
     check("Cancel pairs nothing", live(hub) == n0)
-    s.launch(BACKPLANE_ASK="yes"); time.sleep(3); s.open(url); time.sleep(8)
+    s.launch(BACKPLANE_ASK="yes", BACKPLANE_OPEN_URL=url); time.sleep(9)
     check("confirming the question pairs", live(hub) == n0 + 1, last(s.log()))
     # revoke while connected, re-pair
     n = sockets(o.sockets)

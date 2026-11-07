@@ -36,13 +36,21 @@ struct DataRoot: View {
             #if DEBUG
             // a check without hands: BACKPLANE_SELECT opens a thread, or a page by @name
             if let t = ProcessInfo.processInfo.environment["BACKPLANE_SELECT"], !t.isEmpty { if t.hasPrefix("@") { path.append(DPage(name: String(t.dropFirst()))) } else { path.append(t) } }
+            // a link as if opened from outside, through the same route as onOpenURL: a simulator cannot answer iOS's own "Open in …?" before it
+            if let s = ProcessInfo.processInfo.environment["BACKPLANE_OPEN_URL"], let u = URL(string: s) { try? await Task.sleep(for: .seconds(1)); route(u) }
             #endif
         }
         .onChange(of: phase) { _, p in if p == .active { client.foreground() } }
         .onChange(of: client.pendingThread) { _, id in if let id { path.append(id); client.pendingThread = nil } }
-        .onOpenURL { url in if (url.scheme == "backplane" || url.scheme == AppIdentity.scheme), url.host == "thread", let id = url.pathComponents.dropFirst().first { path.append(id) } }
+        .onOpenURL { route($0) }
         // a newly paired (or forgotten) hub starts again on the list
         .onChange(of: client.links.isEmpty) { _, _ in path = NavigationPath() }
+    }
+
+    /// This app's links, its one handler: backplane://thread/<id> opens that thread; any other (a pairing link) asks first (DataClient.opened).
+    private func route(_ url: URL) {
+        guard url.scheme == "backplane" || url.scheme == AppIdentity.scheme else { return }
+        if url.host == "thread" { if let id = url.pathComponents.dropFirst().first { path.append(id) } } else { client.opened(url) }
     }
 }
 
