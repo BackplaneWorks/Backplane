@@ -60,7 +60,7 @@ fn mic_row(p: &Prefs, info: &Value) -> Value {
     let now = if cur.is_empty() { if def.is_empty() { "default microphone".to_string() } else { format!("default microphone ({})", label(def)) } } else { label(cur) };
     let mut b = vec![btn("Default", "setting", "voice.device=", cur.is_empty())];
     for x in &list { let n = x["name"].as_str().unwrap_or(""); b.push(btn(&label(n), "setting", &format!("voice.device={n}"), n == cur)) }
-    row("Microphone", &format!("The mic button in the composer records this machine's {now}."), b)
+    row("Microphone", &format!("A window on the hub's own machine records its {now}. Phones and windows on other machines record their own."), b)
 }
 /// The Voice page's rows. `term`: the Add a term field as typed; `key_err`: why the last key was refused.
 pub fn rows(p: &Prefs, info: &Value, term: &str, key_err: &str) -> Vec<Value> {
@@ -109,7 +109,7 @@ mod tests {
     }
     #[test] fn microphones_are_chips_by_their_labels() {
         let i = json!({"voice.devices": json!({"default":"a","devices":[{"name":"a","label":"Desk"},{"name":"b","label":""}]}).to_string()});
-        let r = rows(&prefs(&[]), &i, "", ""); let m = find(&r, "Microphone"); assert_eq!(labels(m), ["Default", "Desk", "b"]); assert_eq!(m["note"], "The mic button in the composer records this machine's default microphone (Desk)."); assert_eq!(m["buttons"][0]["on"], true);
+        let r = rows(&prefs(&[]), &i, "", ""); let m = find(&r, "Microphone"); assert_eq!(labels(m), ["Default", "Desk", "b"]); assert_eq!(m["note"], "A window on the hub's own machine records its default microphone (Desk). Phones and windows on other machines record their own."); assert_eq!(m["buttons"][0]["on"], true);
         let r = rows(&prefs(&[("voice.device", "b")]), &i, "", ""); assert_eq!(find(&r, "Microphone")["buttons"][2]["on"], true);
     }
     #[test] fn entries_and_learned_fixes_can_each_be_taken_out() {
