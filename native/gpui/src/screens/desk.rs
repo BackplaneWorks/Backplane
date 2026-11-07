@@ -28,12 +28,38 @@ pub fn tick(this: &mut Backplane, window: &mut Window, _cx: &mut Context<Backpla
 pub fn command(f: &Value) -> (String, Vec<String>) {
     let title = f["title"].as_str().unwrap_or("Backplane"); let body = f["body"].as_str().unwrap_or("");
     let prog = std::env::var("BACKPLANE_GPUI_NOTIFY_CMD").unwrap_or_else(|_| "notify-send".into());
-    (prog, vec!["--app-name=Backplane".into(), "--".into(), title.chars().take(200).collect(), body.chars().take(400).collect()])
+    (prog, vec!["--app-name=Backplane".into(), "--print-id".into(), "--".into(), title.chars().take(200).collect(), body.chars().take(400).collect()])
 }
-/// Shows the notification; a missing notify-send is not an error.
+/// The notifications shown, by the alert's key: the id notify-send printed, so an answered need can close its own (bounded).
+static SHOWN: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+/// Shows the notification and keeps its id under the alert's key; a missing notify-send is not an error.
 pub fn show(f: &Value) {
     let (prog, args) = command(f);
     eprintln!("GPUI_LOG {}", json!({"notify": f["kind"], "thread": f["thread"]}));
+    let key = f["key"].as_str().unwrap_or("").to_string();
+    let _ = std::process::Command::new(prog).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().map(|c| {
+        std::thread::spawn(move || {
+            let Ok(o) = c.wait_with_output() else { return };
+            let id = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if key.is_empty() { return }
+            let mut v = SHOWN.lock().unwrap(); v.retain(|(k, _)| *k != key); v.push((key, id)); if v.len() > 64 { v.remove(0); }
+        });
+    });
+}
+/// The command that closes a shown notification: the session bus's CloseNotification for its id, or, with BACKPLANE_GPUI_NOTIFY_CMD (a test's
+/// recorder), that program with `--close <key>`.
+pub fn close_command(key: &str, id: &str) -> Option<(String, Vec<String>)> {
+    if let Ok(p) = std::env::var("BACKPLANE_GPUI_NOTIFY_CMD") { return Some((p, vec!["--close".into(), key.into()])) }
+    let id: u32 = id.parse().ok()?;
+    Some(("gdbus".into(), ["call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method",
+        "org.freedesktop.Notifications.CloseNotification", &id.to_string()].iter().map(|s| s.to_string()).collect()))
+}
+/// `{"t":"notify.clear","key"}`: the need it told about was answered, so its notification goes.
+pub fn clear(f: &Value) {
+    let key = f["key"].as_str().unwrap_or("");
+    let id = { let mut v = SHOWN.lock().unwrap(); let i = v.iter().position(|(k, _)| k == key); i.map(|i| v.remove(i).1) };
+    eprintln!("GPUI_LOG {}", json!({"notify_clear": key, "shown": id.is_some()}));
+    let Some((prog, args)) = id.as_deref().and_then(|id| close_command(key, id)).or_else(|| std::env::var("BACKPLANE_GPUI_NOTIFY_CMD").ok().map(|p| (p, vec!["--close".into(), key.to_string()]))) else { return };
     let _ = std::process::Command::new(prog).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(|mut c| { std::thread::spawn(move || { let _ = c.wait(); }); });
 }
 
@@ -45,5 +71,10 @@ pub fn show(f: &Value) {
         assert!(due(&s, 10, "t2", true, 11), "another thread"); assert!(due(&s, 10, "t1", false, 11), "lost the focus");
         assert!(!due(&said("t1", false), 10, "t1", false, 500), "unfocused: no beat");
     }
-    #[test] fn the_command_carries_title_and_body() { let (_, a) = command(&json!({"title":"T","body":"B"})); assert_eq!(a[2..], ["T".to_string(), "B".to_string()]); }
+    #[test] fn the_command_carries_title_and_body() { let (_, a) = command(&json!({"title":"T","body":"B"})); assert_eq!(a[3..], ["T".to_string(), "B".to_string()]); assert!(a.contains(&"--print-id".to_string()), "the id, to close it later"); }
+    #[test] fn an_answered_need_closes_its_notification_by_id() {
+        if std::env::var("BACKPLANE_GPUI_NOTIFY_CMD").is_ok() { return }
+        let (p, a) = close_command("ask-t1", "42").unwrap(); assert_eq!(p, "gdbus"); assert_eq!(a.last().unwrap(), "42"); assert!(a.contains(&"org.freedesktop.Notifications.CloseNotification".to_string()));
+        assert!(close_command("ask-t1", "").is_none(), "no id printed: nothing to close");
+    }
 }

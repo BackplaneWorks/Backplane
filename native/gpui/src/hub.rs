@@ -293,7 +293,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     let reset=x["reset"].as_array().and_then(|r|Some((r.first()?.as_u64()? as usize,r.get(1)?.as_u64()? as usize)));
                     if !key.is_empty() {let _=events.send(Event::Term(key,pid,b,reset)).await;}},
                 "info"=>{if let Some(m)=x["info"].as_object(){for(k,val) in m{if let Some(owner)=k.strip_prefix("browser.tabs."){let _=events.send(Event::BrowserTabs(owner.to_string(),val.as_str().unwrap_or("").to_string())).await;}}}},
-                "notify"=>{crate::screens::desk::show(&x);},
+                "notify"=>{crate::screens::desk::show(&x);},"notify.clear"=>{crate::screens::desk::clear(&x);},
                 "sheets"=>{let _=events.send(Event::Sheets(x["rows"].as_str().unwrap_or("").to_string())).await;},
                 "hb"=>{sink.send(Message::Binary(wire::encode(&json!({"id":0,"m":"ping","p":{}})).into())).await?;},
                 _=>{}

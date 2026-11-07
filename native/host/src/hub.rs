@@ -584,6 +584,19 @@ mod tests {
         }
     }
 
+    // Alerts: a desk not watching the thread is told about a need, and once the need is answered it is told to close that notification
+    #[tokio::test] async fn an_answered_need_clears_the_desktop_notification_it_raised() {
+        let h = Hub::start(cfg(&home("needclear")), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let desks = crate::settings::alerts::start(&h);
+        let mut o = h.attach(3); desks.say(3, "t-other", false, now_ms() / 1000);
+        async fn frame(o: &mut Outbox) -> Value { loop { match tokio::time::timeout(std::time::Duration::from_secs(5), o.recv()).await { Ok(Some(Out::Value(v))) if v["t"].as_str().map_or(false, |t| t.starts_with("notify")) => return v, Ok(Some(_)) => continue, _ => return Value::Null } } }
+        h.commit(&json!({"$":"AskOpened","id":"q1","thread":"t1","kind":"approval","tool":"order_quote","detail":"Send 1 file?","options":"","at":1})).await.unwrap();
+        h.commit(&json!({"$":"SettingSet","key":"alert.t1","value":"ask\task-t1\t\t1.1\tSend 1 file?","at":1})).await.unwrap();
+        let shown = frame(&mut o).await; assert_eq!((shown["t"].as_str(), shown["key"].as_str()), (Some("notify"), Some("ask-t1")), "{shown}");
+        h.commit(&json!({"$":"AskClosed","id":"q1","answer":"accept","at":2})).await.unwrap();
+        let cleared = frame(&mut o).await; assert_eq!(cleared, json!({"t":"notify.clear","thread":"t1","key":"ask-t1"}), "the answered need's notification goes");
+    }
+
     // Hub::set_info: stored for joiners, pushed to every client, empty removes, bounded
     #[tokio::test] async fn set_info_is_stored_pushed_removed_and_bounded() {
         let h = Hub::start(cfg(&home("setinfo")), Arc::new(Canned { reply: json!({}) })).await.unwrap();
