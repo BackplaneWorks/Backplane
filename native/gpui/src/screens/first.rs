@@ -23,7 +23,7 @@ const CONNECT: &str = "Connect";
 const BACK: &str = "Back";
 const HAS_DATA: &str = "This folder already has a hub's data. Backplane opens it as it is.";
 const OLD_NOTE: &str = "Backplane 0.14 data is in that folder. This version leaves it alone. To copy your threads here, see the install guide.";
-const GUIDE: &str = "https://github.com/i2cjak/Backplane/blob/main/docs/onboarding.md";
+const GUIDE: &str = "https://github.com/BackplaneWorks/Backplane/blob/main/docs/onboarding.md";
 
 impl First {
     pub fn new(window: &mut Window, cx: &mut Context<Self>, config: Config, started: Instant, auto: Option<PathBuf>) -> Self {

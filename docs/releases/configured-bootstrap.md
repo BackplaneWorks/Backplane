@@ -49,7 +49,7 @@ credentials never appear in the URL or the packet. Retain the packet until the
 run ends. Root-selected URL/digest are data, never shell or executable code.
 
 ```sh
-gh workflow run release-bootstrap.yml --repo i2cjak/Backplane \
+gh workflow run release-bootstrap.yml --repo BackplaneWorks/Backplane \
   --ref main \
   -f ref="$FROZEN_COMMIT" -f operation=unix-native \
   -f packet_url="$PUBLIC_PACKET_URL" -f packet_sha256="$PACKET_SHA256"

@@ -132,5 +132,6 @@ jobs:
         run: |
           pre=; case "$TAG" in *-*) pre=--prerelease;; esac
           gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz
-          gh release upload "$TAG" manifest.json manifest.json.sig
+          # all three signed files, or the updater counts the release as half published and never offers it (update/run.rs SIGNED)
+          gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
           gh release edit "$TAG" --draft=false

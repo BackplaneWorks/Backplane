@@ -1628,7 +1628,7 @@
                 {
                   "label": "Report an issue",
                   "action": "open-url",
-                  "value": "http://127.0.0.1:3820|https://github.com/i2cjak/Backplane/issues/new?body=Version%3A%20unknown%0AOS%3A%20linux%20x64%0A%0AWhat%20happened%3A%0A"
+                  "value": "http://127.0.0.1:3820|https://github.com/BackplaneWorks/Backplane/issues/new?body=Version%3A%20unknown%0AOS%3A%20linux%20x64%0A%0AWhat%20happened%3A%0A"
                 }
               ]
             },
@@ -1945,7 +1945,7 @@
                   {
                     "label": "Report an issue",
                     "action": "open-url",
-                    "value": "http://127.0.0.1:3820|https://github.com/i2cjak/Backplane/issues/new?body=Version%3A%20unknown%0AOS%3A%20linux%20x64%0A%0AWhat%20happened%3A%0A"
+                    "value": "http://127.0.0.1:3820|https://github.com/BackplaneWorks/Backplane/issues/new?body=Version%3A%20unknown%0AOS%3A%20linux%20x64%0A%0AWhat%20happened%3A%0A"
                   }
                 ]
               },

@@ -51,4 +51,4 @@ rm -f ~/.local/share/applications/backplane.desktop \
 
 Your threads, settings and keys stay in `~/.backplane-bend` and the model cache in `~/.cache/backplane-bend`; remove them too to start over. A package install (`.deb`, AUR) uninstalls through its package manager.
 
-Nightly builds of `main` are prereleases on the [Releases](https://github.com/i2cjak/Backplane/releases) page, each with its own installer: `curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/download/<tag>/install.sh | sh`.
+Nightly builds of `main` are prereleases on the [Releases](https://github.com/BackplaneWorks/Backplane/releases) page, each with its own installer: `curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/download/<tag>/install.sh | sh`.

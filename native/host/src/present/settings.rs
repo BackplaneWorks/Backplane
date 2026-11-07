@@ -318,7 +318,7 @@ fn bug_url(info: &Value) -> String {
     let enc = |s: &str| -> String { s.bytes().map(|b| if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') { (b as char).to_string() } else { format!("%{b:02X}") }).collect() };
     let v = VERSION.get().map(String::as_str).filter(|v| !v.is_empty()).unwrap_or("unknown");
     let known = |k: &str, ok: &[&str]| { let s = info[k].as_str().unwrap_or(""); if ok.contains(&s) { s.to_string() } else { "unknown".to_string() } };
-    format!("https://github.com/i2cjak/Backplane/issues/new?body={}", enc(&format!("Version: {v}\nOS: {} {}\n\nWhat happened:\n", known("os", &["linux", "darwin", "windows"]), known("arch", &["x64", "arm64"]))))
+    format!("https://github.com/BackplaneWorks/Backplane/issues/new?body={}", enc(&format!("Version: {v}\nOS: {} {}\n\nWhat happened:\n", known("os", &["linux", "darwin", "windows"]), known("arch", &["x64", "arm64"]))))
 }
 
 /// Settings > Voice: the same rows the phones get (voice/page.rs), with the Add a term field as typed here.
@@ -489,7 +489,7 @@ mod tests {
         let b = r[1]["buttons"].as_array().unwrap();
         let open: Vec<&Value> = b.iter().filter(|x| x["action"] == "open-url").collect();
         assert_eq!(open.len(), 2); assert_eq!(open[0]["value"], "https://backplane.works/privacy");
-        let u = open[1]["value"].as_str().unwrap(); assert!(u.starts_with("https://github.com/i2cjak/Backplane/issues/new?body=Version%3A") && u.contains("OS%3A%20linux%20x64"), "{u}");
+        let u = open[1]["value"].as_str().unwrap(); assert!(u.starts_with("https://github.com/BackplaneWorks/Backplane/issues/new?body=Version%3A") && u.contains("OS%3A%20linux%20x64"), "{u}");
         assert!(bug_url(&json!({"os": "plan9"})).contains("OS%3A%20unknown%20unknown"));
     }
     #[test] fn api_keys_list_names_only_and_forgetting_asks_once() {
