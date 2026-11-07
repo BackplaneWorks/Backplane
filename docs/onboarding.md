@@ -1,6 +1,6 @@
 # Setting up Backplane
 
-This guide follows the setup Backplane runs the first time you open it, on Linux and macOS. Windows comes later. Every step can be skipped, and setup resumes where you left it.
+This guide follows the setup Backplane runs the first time you open it, on Linux, macOS and Windows. Every step can be skipped, and setup resumes where you left it.
 
 ## Install
 
@@ -66,11 +66,7 @@ Backplane runs command-line agents on the machine with the hub. You need one to 
 
 ### Claude
 
-Install Claude Code:
-
-```sh
-curl -fsSL https://claude.ai/install.sh | bash
-```
+Press Install in the step. It runs Claude's own installer, with no terminal: `install.sh` on Linux and macOS, `install.ps1` through PowerShell on Windows. By hand, that is `curl -fsSL https://claude.ai/install.sh | bash`, or `irm https://claude.ai/install.ps1 | iex`.
 
 Then add an account in the Claude step. Name it, press Connect, open the link, sign in and paste the code Claude shows. If Claude Code is signed in already, the step finds that and shows as done. If a sign-in fails or the code expires, press Connect again. Use for new threads picks the account that new threads start on, and threads you already have keep theirs. Backplane never copies your keys and never runs a paid request to check a sign-in.
 
@@ -78,9 +74,7 @@ You can add several Claude accounts, for example Work and Personal. Each one sig
 
 ### Codex
 
-```sh
-npm install -g @openai/codex
-```
+Press Install in the step. Codex needs no Node: Backplane downloads Codex's standalone release for your system, checks it against the checksum GitHub lists for it and places it in Backplane's own tools folder (`~/.local/share/backplane/tools/bin`, or `%LOCALAPPDATA%\Backplane\tools\bin` on Windows), which agents search. npm is used only where no standalone build exists and Node is already installed.
 
 Add an account in the Codex step and press Connect. Backplane shows a link and a code to enter there.
 
@@ -97,6 +91,10 @@ Add an account in the Codex step and press Connect. Backplane shows a link and a
 These agents sign in within a terminal, and Backplane cannot check that sign-in. An agent that is not signed in says so in its first reply. This build cannot install Antigravity yet.
 
 ## KiCad and FreeCAD
+
+Setup installs Backplane KiCad by itself when no KiCad is found and a package exists for the computer: Linux x64, macOS on Apple silicon and Windows x64. It checks the download against the pinned checksum and the release's list, unpacks it in a staging folder and moves it into `<home>/kicad/<version>` (`%LOCALAPPDATA%\Backplane\kicad\<version>` on Windows), with no administrator password. The step shows the progress and ends with status ok and the version; a failure shows its reason and Try again. Where no package exists (Linux ARM64, Intel Macs) the step says so and offers the path field and the stock download. With stock KiCad found, one press installs Backplane KiCad beside it. Releases: <https://github.com/i2cjak/Backplane_KiCad/releases>.
+
+On Windows, Tailscale and FreeCAD install with one press through winget when it is there, and open their download pages when it is not.
 
 Stock KiCad 9 or later is enough to plot and export. Agents edit a board in a running KiCad only with Backplane KiCad, our build with an editing API; the KiCad step says whether the one it found is that build and links to the downloads. With stock KiCad, agents edit the files.
 
