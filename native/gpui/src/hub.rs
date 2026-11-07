@@ -39,10 +39,11 @@ impl Config {
             _=>anyhow::bail!("usage: backplane-gpui [LINK] [--pair LINK] [--url http://HOST:PORT] [--token-file FILE] [--exit-after SECONDS] [--script FILE] [--swatches] [--gallery] [--fonts] [--solid-demo TRIS[,STEPS]] [--theme light|dark]")
         }}
         // no hub named: the one this client paired with, or (no hub's token here either) pairing
-        match unnamed(named,keyed,crate::pairing::load(),config.token_file.exists()) {
-            Start::Paired(hub)=>{config.hub=hub;config.token_file=crate::pairing::token_path().context("no config folder")?;config.paired=true;return Ok(config);}
+        let (saved,saved_token)=match crate::hubs::target_saved() {crate::hubs::Target::Remote{key,ws}=>(Some(ws),crate::hubs::credential_saved(&key)),crate::hubs::Target::Local=>(None,None)};
+        match unnamed(named,keyed,saved,config.token_file.exists()) {
+            Start::Paired(hub)=>{config.hub=hub;config.token_file=saved_token.context("no config folder")?;config.paired=true;return Ok(config);}
             Start::Unpaired if config.pair_link.is_none()&&config.script.is_none()&&!(config.swatches||config.gallery||config.fonts||config.solid_demo.is_some())=>{config.pending=true;return Ok(config);} // a first launch: setup's chooser (screens/first.rs); a link or a script goes to pairing, where the script runner is
-            Start::Unpaired=>{config.hub.clear();config.token_file=crate::pairing::token_path().context("no config folder")?;config.unpaired=true;return Ok(config);}
+            Start::Unpaired=>{config.hub.clear();config.token_file=crate::hubs::credential_saved("unpaired").context("no config folder")?;config.unpaired=true;return Ok(config);}
             Start::Named=>{}
         }
         config.hub=config.hub.trim_end_matches('/').to_string();

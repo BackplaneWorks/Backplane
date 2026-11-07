@@ -81,7 +81,7 @@ impl Echo {
 
 /// The settings dialog's own state (the hub keeps the page; this keeps the list the left nav shows and what is typed in its search).
 #[derive(Default)]
-pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool }
+pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool, /** the Hubs page of this device */ pub hubs: bool }
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
 const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
@@ -192,7 +192,7 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
 
 /// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
 /// A hub page of the nav, chosen (a click, or the e2e `click` on `set-nav:<page>`): what is typed goes first, then the hub is asked for the page.
-pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.page = p.to_string(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string())); }
+pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.page = p.to_string(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string())); }
 pub fn flush_fields(this: &mut Backplane) {
     let names: Vec<String> = this.screens.fields.iter().filter(|(_, s)| !s.vault && s.pending.is_some()).map(|(n, _)| n.clone()).collect();
     for n in names {
@@ -307,7 +307,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
                 let j = line * CHIPS_PER_LINE + k; let b2 = b.clone();
                 let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer();
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
-                d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if super::onboard::press(this, &b2, cx) { return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
+                d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if super::onboard::press(this, &b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
             }).collect::<Vec<_>>()));
         }
     }
@@ -320,7 +320,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
 /// Settings shut (the ×, Esc, a click outside): this device's page and the accounts page at once, and the hub's pages when it has them open.
 pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let hub = this.data["settings"].is_object();
-    let ui = &mut this.screens.settings_ui; ui.open_local = false; ui.device = false; ui.accounts = false;
+    let ui = &mut this.screens.settings_ui; ui.open_local = false; ui.device = false; ui.accounts = false; ui.hubs = false;
     this.screens.acct.menu = false;
     if hub { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); }
     cx.notify();
@@ -328,18 +328,20 @@ pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
 /// Whether any settings page is up (the hub's, or this device's and the accounts page, which the hub need not serve).
 pub fn is_open(this: &Backplane) -> bool { this.data["settings"].is_object() || this.screens.settings_ui.open_local }
 
-pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts, fit: Fit) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts, fit: Fit, hub_list: &[crate::hubs::Hub]) -> Option<AnyElement> {
     let hub_on = settings.is_object();
     if !hub_on && !ui.open_local { return None; }
     let on_acct = ui.accounts;
-    let on_device = (ui.device || !hub_on) && !on_acct;
+    let on_hubs = ui.hubs && !on_acct;
+    let on_device = (ui.device || !hub_on) && !on_acct && !on_hubs;
     let c = |n: &str| theme::color(light, n);
     let rows = parse(settings);
-    let on_page = hub_on && !on_device && !on_acct && matches!(shown(&rows), Shown::Page);
+    let on_page = hub_on && !on_device && !on_acct && !on_hubs && matches!(shown(&rows), Shown::Page);
     let skip = if on_page { 1 } else { 0 };
     let dev_rows = device_rows(local);
-    let mut els: Vec<AnyElement> = if on_acct { super::accounts::page(cx, light, acct) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() };
-    if !on_device && !on_acct && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS - skip)).into_any_element()); }
+    let hub_rows = super::hubpick::rows(hub_list);
+    let mut els: Vec<AnyElement> = if on_hubs { hub_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() } else if on_acct { super::accounts::page(cx, light, acct) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() };
+    if !on_device && !on_acct && !on_hubs && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS - skip)).into_any_element()); }
     // the left nav
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
     if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
@@ -347,11 +349,14 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let item = if on_device { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("THIS DEVICE"))
-            .child(item.child(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" }))).child("This device").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; cx.notify(); })));
+            .child(item.child(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" }))).child("This device").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = false; cx.notify(); })));
+        let hubs_item = div().id("set-nav-hubs").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
+        let hubs_item = if on_hubs { hubs_item.bg(c("raise")) } else { hubs_item.hover(|s| s.bg(c("panel"))) };
+        nav = nav.child(hubs_item.child(crate::art::icon("globe", 16., c(if on_hubs { "text" } else { "dim" }))).child("Hubs").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = true; cx.notify(); })));
         let acct_item = div().id("set-nav-accounts").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let acct_item = if on_acct { acct_item.bg(c("raise")) } else { acct_item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("ALL DEVICES (HUB)"))
-            .child(acct_item.child(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" }))).child("Accounts").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
+            .child(acct_item.child(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" }))).child("Accounts").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
         if !hub_on { nav = nav.child(div().px_3().pt_2().text_size(px(11.)).text_color(c("dim")).child("The hub's other settings open here when it serves them.")); }
     }
     let mut last = usize::MAX;
@@ -361,13 +366,13 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let g = group_of(page);
         if last != usize::MAX && g != last { nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))); }
         last = g;
-        let (p2, on) = (page.clone(), !on_device && !on_acct && if on_page { title_now == *t_nav } else { *page == ui.page });
+        let (p2, on) = (page.clone(), !on_device && !on_acct && !on_hubs && if on_page { title_now == *t_nav } else { *page == ui.page });
         let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let item = if on { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(item.child(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" }))).child(title.clone())
             .on_click(cx.listener(move |this, _, _, cx| { go_page(this, &p2); cx.notify(); })));
     }
-    let title = if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
+    let title = if on_hubs { "Hubs".to_string() } else if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
     let dialog = div().id("settings-dialog").flex().flex_col().w(px(1040.)).max_w_full().h(px(760.)).max_h_full().border_1().border_color(c("line")).bg(c("bg")).overflow_hidden().on_mouse_down_out(cx.listener(|this, _, _, cx| close(this, cx)))
         .child(div().h(px(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
             .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(14.)).child("Settings"))
@@ -376,7 +381,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         .child(div().flex().flex_1().min_h_0().child(nav)
             .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().px_6().py_3().flex().flex_col()
                 .child(div().pb_1().text_size(px(15.)).font_weight(FontWeight::BOLD).child(title))
-                .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device { "accent" } else { "dim" })).child(if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." })).children(els)));
+                .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device || on_hubs { "accent" } else { "dim" })).child(if on_hubs { "Kept on this computer only. Each hub has its own credential here." } else if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." })).children(els)));
     Some(div().id("settings").absolute().inset_0().occlude().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p(px(fit.pad)).child(dialog).into_any_element())
 }
 

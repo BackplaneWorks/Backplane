@@ -8,7 +8,7 @@ const SCHEMES: [&str; 2] = ["backplane://", "bpgpui://"];
 pub fn is_link(s: &str) -> bool { SCHEMES.iter().any(|p| s.starts_with(p)) }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Invitation { pub origin: String, pub secret: String }
+pub struct Invitation { pub origin: String, pub secret: String, /** every address to try, in order (the link's own first) */ pub routes: Vec<String>, /** a link, not an address typed by the person */ pub from_link: bool }
 
 fn unpct(s: &str) -> String {
     let b = s.as_bytes(); let (mut out, mut i) = (Vec::with_capacity(b.len()), 0);
@@ -25,7 +25,7 @@ fn unwrapped(text: &str) -> String {
     raw.split_once('?').map_or("", |(_, q)| q).split('&').find_map(|kv| kv.strip_prefix("url=")).map(unpct).unwrap_or_default()
 }
 /// `scheme://authority` of an http(s) URL with a host and no userinfo.
-fn origin_of(raw: &str) -> Option<String> {
+pub fn origin_of(raw: &str) -> Option<String> {
     let (scheme, rest) = raw.split_once("://")?;
     let scheme = scheme.to_ascii_lowercase();
     if scheme != "http" && scheme != "https" { return None }
@@ -44,18 +44,43 @@ pub fn invitation(text: &str) -> Option<Invitation> {
     let raw = unwrapped(text);
     let origin = origin_of(&raw)?;
     let secret = fields(&raw).into_iter().find(|(k, _)| k == "invite" || k == "code")?.1;
-    good_secret(&secret).then_some(Invitation { origin, secret })
+    good_secret(&secret).then(|| Invitation { routes: routes(text), origin, secret, from_link: true })
+}
+/// The addresses to try an invitation at, in order: the link's own, then each other plain http(s) address its `routes` field names (the phones' rule).
+pub fn routes(text: &str) -> Vec<String> {
+    let raw = unwrapped(text);
+    let mut out: Vec<String> = origin_of(&raw).into_iter().collect();
+    for (k, v) in fields(&raw) {
+        if k != "routes" { continue }
+        let Ok(Value::Array(xs)) = serde_json::from_str::<Value>(&v) else { continue };
+        for o in xs.iter().filter_map(|x| x.as_str()).filter_map(origin_of) { if !out.contains(&o) { out.push(o) } }
+    }
+    out
+}
+/// Whether an address is the hub's own computer, which a different machine can never reach.
+pub fn loopback(origin: &str) -> bool {
+    let (host, _) = host_port(origin);
+    let h = host.rsplit_once(':').map_or(host.as_str(), |(h, _)| h);
+    h == "localhost" || h == "[::1]" || (h.starts_with("127.") && h.bytes().all(|c| c.is_ascii_digit() || c == b'.'))
+}
+pub fn only_local(routes: &[String]) -> bool { !routes.is_empty() && routes.iter().all(|r| loopback(r)) }
+/// Why a link cannot pair a hub on another machine (None: it can). An address the person typed is their word.
+pub fn refusal(i: &Invitation) -> Option<&'static str> {
+    (i.from_link && only_local(&i.routes)).then_some("This invitation names only its hub's own computer (127.0.0.1), so this device cannot reach it. Start the hub with Tailscale on, or on an address this device can reach, then make a new invitation.")
 }
 /// A hub address and a short code, spaces, dashes and case forgiven.
 pub fn from_code(address: &str, code: &str) -> Option<Invitation> {
     let code: String = code.chars().filter(|c| *c != ' ' && *c != '-').collect::<String>().to_uppercase();
     let address = address.trim();
     let origin = origin_of(&if address.contains("://") { address.to_string() } else { format!("http://{address}") })?;
-    (code.len() == 8 && good_secret(&code)).then_some(Invitation { origin, secret: code })
+    (code.len() == 8 && good_secret(&code)).then(|| Invitation { routes: vec![origin.clone()], origin, secret: code, from_link: false })
 }
 /// What the form holds: the link if there is one, else the address and code. Err: what to say.
 pub fn submit(link: &str, address: &str, code: &str) -> Result<Invitation, &'static str> {
-    if !link.trim().is_empty() { return invitation(link).ok_or("That is not a pairing link. Copy it again from Settings → Devices.") }
+    if !link.trim().is_empty() {
+        let i = invitation(link).ok_or("That is not a pairing link. Copy it again from Settings → Devices.")?;
+        return match refusal(&i) { Some(why) => Err(why), None => Ok(i) };
+    }
     if address.trim().is_empty() || code.trim().is_empty() { return Err("Paste a pairing link, or enter the hub address and short code.") }
     from_code(address, code).ok_or("Check the hub address and the eight-character code.")
 }
@@ -103,42 +128,30 @@ pub fn enroll_answer(status: u16, body: &[u8]) -> Result<String, String> {
     if status == 200 && token.len() == 32 && token.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')) { return Ok(token.to_string()) }
     Err(message(j["error"].as_str().unwrap_or("hub_unreachable")).to_string())
 }
-/// Trade the invitation for a device credential. Blocking.
-pub fn exchange(i: &Invitation, name: &str) -> Result<String, String> {
-    let (addr, tls) = host_port(&i.origin);
+/// Trade the invitation for a device credential at one address. Blocking.
+fn exchange_at(origin: &str, i: &Invitation, name: &str) -> Result<String, String> {
+    let (addr, tls) = host_port(origin);
+    let one = Invitation { origin: origin.to_string(), ..i.clone() };
     let run = || -> io::Result<Vec<u8>> {
         let mut s = open(&addr, tls)?; s.set_timeouts(Duration::from_secs(8))?;
-        s.write_all(enroll_request(i, name).as_bytes())?;
+        s.write_all(enroll_request(&one, name).as_bytes())?;
         let mut b = Vec::new(); s.take(65536).read_to_end(&mut b)?; Ok(b)
     };
     let b = run().map_err(|_| message("hub_unreachable").to_string())?;
     let (status, body) = crate::screens::images::split(&b).ok_or_else(|| message("hub_unreachable").to_string())?;
     enroll_answer(status, body)
 }
+/// Trade the invitation for a device credential: each address it names is tried in order; the first that answers decides. Answers the address that worked and the credential. Blocking.
+pub fn exchange(i: &Invitation, name: &str) -> Result<(String, String), String> {
+    let mut last = message("hub_unreachable").to_string();
+    let list = if i.routes.is_empty() { vec![i.origin.clone()] } else { i.routes.clone() };
+    for o in list {
+        match exchange_at(&o, i, name) { Ok(t) => return Ok((o, t)), Err(e) if e == message("hub_unreachable") => last = e, Err(e) => return Err(e) }
+    }
+    Err(last)
+}
 
-fn dir() -> Option<PathBuf> { crate::local::path()?.parent().map(PathBuf::from) }
-pub fn token_path() -> Option<PathBuf> { Some(dir()?.join("device-token")) }
-fn hub_path() -> Option<PathBuf> { Some(dir()?.join("pairing.json")) }
-/// The hub this client paired with (ws:// or wss://), when its credential is here too.
-pub fn load() -> Option<String> {
-    let j: Value = serde_json::from_str(&std::fs::read_to_string(hub_path()?).ok()?).ok()?;
-    let hub = j["hub"].as_str().filter(|h| h.starts_with("ws://") || h.starts_with("wss://"))?.to_string();
-    token_path()?.is_file().then_some(hub)
-}
-fn write_private(path: &PathBuf, body: &str) -> io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    let mut o = std::fs::OpenOptions::new(); o.write(true).create(true).truncate(true);
-    #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; o.mode(0o600); }
-    let mut f = o.open(&tmp)?; f.write_all(body.as_bytes())?; f.sync_all()?; drop(f);
-    std::fs::rename(&tmp, path)
-}
-/// Keep the pairing: the credential first, so `load` never finds a hub without one.
-pub fn save(origin: &str, token: &str) -> io::Result<()> {
-    let (t, h) = (token_path().ok_or(io::ErrorKind::NotFound)?, hub_path().ok_or(io::ErrorKind::NotFound)?);
-    if let Some(d) = t.parent() { std::fs::create_dir_all(d)?; }
-    write_private(&t, token)?;
-    write_private(&h, &json!({"hub": ws_of(origin)}).to_string())
-}
+pub(crate) fn dir() -> Option<PathBuf> { crate::local::path()?.parent().map(PathBuf::from) }
 /// The arguments to start again with once paired: what named the old hub or drove this run goes, so the saved pairing is what connects.
 pub fn relaunch_args(args: &[String]) -> Vec<String> {
     let (mut out, mut it) = (vec![], args.iter());
@@ -199,7 +212,8 @@ pub fn open(addr: &str, tls: bool) -> io::Result<Stream> {
 mod tests {
     use super::*;
     const SECRET: &str = "0123456789abcdef0123456789abcdef";
-    fn inv(origin: &str, secret: &str) -> Option<Invitation> { Some(Invitation { origin: origin.into(), secret: secret.into() }) }
+    fn inv(origin: &str, secret: &str) -> Option<Invitation> { Some(Invitation { origin: origin.into(), secret: secret.into(), routes: vec![origin.into()], from_link: true }) }
+    fn code(origin: &str, secret: &str) -> Option<Invitation> { inv(origin, secret).map(|i| Invitation { from_link: false, ..i }) }
     #[test] fn a_link_gives_its_hub_and_secret() {
         assert_eq!(invitation(&format!("http://100.1.2.3:3801/pair#invite={SECRET}&routes=%5B%5D")), inv("http://100.1.2.3:3801", SECRET));
         assert_eq!(invitation(&format!("  https://box.tail1.ts.net:8461/pair#invite={SECRET}\n")), inv("https://box.tail1.ts.net:8461", SECRET));
@@ -218,13 +232,13 @@ mod tests {
         }
     }
     #[test] fn a_short_code_forgives_spaces_dashes_and_case() {
-        assert_eq!(from_code("100.1.2.3:3801", "abcd-2345"), inv("http://100.1.2.3:3801", "ABCD2345"));
-        assert_eq!(from_code(" https://box.ts.net:8461/ ", "ABCD 2345"), inv("https://box.ts.net:8461", "ABCD2345"));
+        assert_eq!(from_code("100.1.2.3:3801", "abcd-2345"), code("http://100.1.2.3:3801", "ABCD2345"));
+        assert_eq!(from_code(" https://box.ts.net:8461/ ", "ABCD 2345"), code("https://box.ts.net:8461", "ABCD2345"));
         assert_eq!(from_code("h:1", "ABCD234"), None); assert_eq!(from_code("h:1", "ABCD1234"), None, "1 is not in the alphabet"); assert_eq!(from_code("", "ABCD2345"), None);
     }
     #[test] fn the_form_prefers_the_link_and_says_what_is_missing() {
         assert_eq!(submit(&format!("http://h:1/pair#invite={SECRET}"), "other:2", "ABCD2345"), Ok(inv("http://h:1", SECRET).unwrap()));
-        assert_eq!(submit("", "h:1", "ABCD2345"), Ok(inv("http://h:1", "ABCD2345").unwrap()));
+        assert_eq!(submit("", "h:1", "ABCD2345"), Ok(code("http://h:1", "ABCD2345").unwrap()));
         assert!(submit("nonsense", "h:1", "ABCD2345").is_err(), "a bad link is not passed over for the code");
         assert!(submit("", "", "").is_err() && submit("", "h:1", "").is_err() && submit("", "h:1", "x").is_err());
     }
@@ -259,6 +273,27 @@ mod tests {
     #[test] fn a_relaunch_drops_what_named_the_old_hub() {
         let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(relaunch_args(&v(&["--url", "http://h:1", "--token-file", "/t", "--theme", "dark", "--script", "/s", "backplane://pair?url=x", "--pair", "l", "--exit-after", "9"])), v(&["--theme", "dark", "--exit-after", "9"]));
+    }
+    #[test] fn a_link_naming_only_the_hubs_own_computer_is_refused_for_a_remote_hub_with_the_reason() {
+        let l = format!("http://127.0.0.1:3797/pair#invite={SECRET}&routes=%5B%22http%3A%2F%2F127.0.0.1%3A3797%22%5D");
+        assert!(submit(&l, "", "").unwrap_err().contains("own computer"));
+        let ok = format!("http://127.0.0.1:3797/pair#invite={SECRET}&routes=%5B%22http%3A%2F%2F100.64.1.2%3A3797%22%5D");
+        assert_eq!(submit(&ok, "", "").unwrap().routes, vec!["http://127.0.0.1:3797", "http://100.64.1.2:3797"], "one reachable address is enough");
+        assert!(submit("", "127.0.0.1:3801", "ABCD2345").is_ok(), "an address the person typed is their word");
+        assert!(!loopback("http://localhost.evil.com:1") && loopback("http://localhost:1") && loopback("http://[::1]:1") && !loopback("http://127.evil.com:1"));
+    }
+    #[test] fn every_address_is_tried_in_order_and_only_an_unreachable_one_moves_on() {
+        // nothing listens on the first (a closed port); the second is a one-shot hub answering the exchange
+        let closed = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap(); let port = l.local_addr().unwrap().port();
+        let h = std::thread::spawn(move || { let (mut s, _) = l.accept().unwrap(); let mut b = [0u8; 2048]; let _ = s.read(&mut b);
+            let body = format!(r#"{{"token":"{SECRET}"}}"#); let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()); });
+        let mut i = invitation(&format!("http://127.0.0.1:{closed}/pair#invite={SECRET}")).unwrap();
+        i.routes = vec![format!("http://127.0.0.1:{closed}"), format!("http://127.0.0.1:{port}")];
+        assert_eq!(exchange(&i, "t"), Ok((format!("http://127.0.0.1:{port}"), SECRET.to_string())));
+        h.join().unwrap();
+        i.routes = vec![format!("http://127.0.0.1:{closed}")];
+        assert_eq!(exchange(&i, "t"), Err(message("hub_unreachable").to_string()));
     }
     #[test] fn a_device_name_can_go_in_a_header() { let n = name(); assert!(!n.is_empty() && n.is_ascii() && !n.contains(['\r', '\n'])); }
 }

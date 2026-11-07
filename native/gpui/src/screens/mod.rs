@@ -7,6 +7,7 @@ pub mod attach;
 pub mod desk;
 pub mod devbar;
 pub mod hubbar;
+pub mod hubpick;
 pub mod ctxmenu;
 pub mod badge;
 pub mod bar;
