@@ -63,7 +63,7 @@ mod tests {
         let id = inv["peer"].as_str().unwrap().to_string();
         assert!(a.p.table.with(|t| t.peer(&id).map_or(false, |r| !r.revoked)) && b.p.table.with(|t| t.peer(&id).map_or(false, |r| !r.revoked)), "both hold the link");
         // a pasted invite is anyone's: not the owner's until the owner says so
-        assert!(!a.p.table.with(|t| t.verified(&id)));
+        assert!(!a.p.table.with(|t| t.verified(&id)), "a pasted invite is not a pairing");
         assert_eq!(call(&rb, &b.hub, "bots.join", json!({"invite": invite})).await["error"], "already linked to that machine");
         assert_eq!(call(&rb, &b.hub, "bots.join", json!({"invite": "nonsense"})).await["error"], "not an invite");
         // the owner says Mine / Not mine

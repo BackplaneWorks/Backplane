@@ -120,6 +120,14 @@ pub async fn name() -> String {
     clean(&h)
 }
 
+/// An unsigned POST with no body (tests: a route that must refuse it).
+#[cfg(test)]
+pub async fn plain(url: &str) -> Resp {
+    if !url_ok(url) { return Resp { code: 0, body: "not an http address".into() } }
+    let a = ["-sS", "--proto", "=http,https", "-m", "15", "--max-filesize", "65536", "-X", "POST", "-H", "@-", "-w", "\n%{http_code}", "--url"].map(String::from).into_iter().chain([url.to_string()]).collect();
+    curl(a, "Content-Length: 0\n".into()).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
