@@ -59,7 +59,7 @@ impl Backplane {
         cx.spawn(async move |weak,cx|{cx.background_executor().timer(Duration::from_secs(10)).await;let _=weak.update(cx,|this,_|{if !this.usable {this.m("not_usable",serde_json::json!({"after_s":10,"status":this.status,"error":this.error,"projects":this.data["projects"].as_array().map_or(0,|p|p.len())}));}});}).detach();
         let input=cx.new(screens::composer::Composer::new);input.focus_handle(cx).focus(window);
         let local=local::Local::load();
-        let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=config.token_file.with_file_name("gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
+        let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=screens::place::beside_credential(&config.token_file,"gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
         eprintln!("GPUI_LOG {}",serde_json::json!({"hub_in_use":pairing::host_port(&config.hub).0}));let pair=screens::pair::start(config.unpaired,config.pair_link.as_deref(),cx);let paired=config.paired;let has_hub=!config.unpaired;
         cx.spawn(async move |weak,cx|{while let Ok(link)=OPENED.1.recv().await {if weak.update(cx,|this,cx|screens::pair::incoming(this,&link,cx)).is_err(){break;}}}).detach();
         let(hub_at,token_file)=(screens::attach::Target::from(&config.hub,&config.token_file),config.token_file.clone());

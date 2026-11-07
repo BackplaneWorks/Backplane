@@ -85,6 +85,16 @@ impl Writer {
     fn flush(&self) { let (a, r) = mpsc::channel(); if self.send(Msg::Flush(a)) { let _ = r.recv_timeout(Duration::from_secs(1)); } }
 }
 
+/// A file kept beside the hub's credential. A paired hub's credential is `hubs/<key>.token`, shared folder: its files carry the hub's key
+/// (`hubs/<key>.gpui-place.json`), so one hub's saved place (a bot or thread of that hub) is never opened on another.
+pub fn beside_credential(token_file: &Path, name: &str) -> PathBuf {
+    let in_hubs = token_file.parent().and_then(|d| d.file_name()).is_some_and(|d| d == "hubs");
+    match (in_hubs, token_file.file_stem().and_then(|s| s.to_str())) {
+        (true, Some(stem)) => token_file.with_file_name(format!("{stem}.{name}")),
+        _ => token_file.with_file_name(name),
+    }
+}
+
 static WRITER: OnceLock<Writer> = OnceLock::new();
 /// What was saved, until each part has been handed over: the view to the hub worker, the rest to the window.
 static SAVED_VIEW: Mutex<Option<(Value, Value)>> = Mutex::new(None);
@@ -94,7 +104,7 @@ static TERM: AtomicBool = AtomicBool::new(false);
 /// Called once, before the hub worker starts.
 pub fn open(config: &Config) {
     if config.script.is_some() && std::env::var_os("BACKPLANE_GPUI_PLACE").is_none() { return; }
-    let path = config.token_file.with_file_name("gpui-place.json");
+    let path = beside_credential(&config.token_file, "gpui-place.json");
     let saved = load(&path);
     if let Some(p) = &saved {
         eprintln!("GPUI_LOG {}", json!({"place": {"target": p.target["kind"], "offsets": p.offsets.len(), "sidebar": p.sidebar}}));
@@ -154,6 +164,12 @@ impl Backplane {
 mod tests {
     use super::*;
     fn file(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("gpui-place-{n}-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap(); d.join("gpui-place.json") }
+    #[test] fn each_paired_hub_keeps_its_own_place() {
+        let (a, b, local) = (Path::new("/c/hubs/desk.ts.net_3797.token"), Path::new("/c/hubs/other_3797.token"), Path::new("/h/home/token"));
+        assert_ne!(beside_credential(a, "gpui-place.json"), beside_credential(b, "gpui-place.json"));
+        assert_eq!(beside_credential(a, "gpui-place.json"), Path::new("/c/hubs/desk.ts.net_3797.gpui-place.json"));
+        assert_eq!(beside_credential(local, "gpui-place.json"), Path::new("/h/home/gpui-place.json"));
+    }
     fn place() -> Place {
         let mut offsets = HashMap::new(); offsets.insert("t1".to_string(), ("m7".to_string(), 12.5));
         Place { target: json!({"kind": "thread", "id": "t1"}), session: json!({"sel": "t1", "panel": true, "open": {"fold:a": "1"}, "info": {"view.kind:t1": "board"}}), offsets, sidebar: false }
