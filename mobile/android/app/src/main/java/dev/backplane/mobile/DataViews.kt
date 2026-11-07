@@ -333,6 +333,11 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
     var stick by remember(id) { mutableStateOf(true) }
     LaunchedEffect(state) { snapshotFlow { state.isScrollInProgress to state.canScrollForward }.collect { (moving, more) -> if (moving) stick = !more } }
     LaunchedEffect(rows.size, list.lastOrNull()?.text?.length, thread?.state) { if (stick && state.layoutInfo.totalItemsCount > 0) state.scrollToItem(state.layoutInfo.totalItemsCount - 1, Int.MAX_VALUE) }
+    // a tapped notification lands on its approval, once it is loaded
+    LaunchedEffect(rows.size, DataClient.pendingAsk) {
+        val at = rows.indexOfFirst { DataClient.pendingAsk.isNotEmpty() && it.id == "ask:" + DataClient.pendingAsk }
+        if (at >= 0) { stick = false; state.scrollToItem(at + if (DataClient.older[id] != null) 1 else 0); DataClient.pendingAsk = "" }
+    }
     val field = DataClient.field(id); val draft = field.text
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val pending = remember(id) { mutableStateListOf<ByteArray>() }
@@ -492,7 +497,22 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, improve: () -> Uni
             DMono("ALERTS", dfaint)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(true to "on", false to "off").forEach { (v, l) -> DBtn(l, alerts == v, modifier = Modifier.testTag("settings.alerts.$l")) { alerts = v; AppSettings.putAlerts(v) } } }
-            DMono("a turn that ends or asks, while the app is not on screen", dcs.onSurfaceVariant, 11)
+            DMono("off: only what you let through reaches this phone. alerts come from your uberbot", dcs.onSurfaceVariant, 11)
+            if (DataClient.has("push")) {
+                val quietOn = DataClient.quiet.isNotEmpty() && DataClient.quiet != "off"
+                DMono("QUIET HOURS")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DBtn("on", quietOn, modifier = Modifier.testTag("settings.quiet.on")) { if (!quietOn) DataClient.putQuiet("22:00-07:00") }
+                    DBtn("off", !quietOn, modifier = Modifier.testTag("settings.quiet.off")) { DataClient.putQuiet("off") }
+                }
+                if (quietOn) DMono(DataClient.quiet.replace("-", " to "), dcs.onSurfaceVariant, 12)
+                DMono("URGENT ASKS COME THROUGH")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DBtn("on", DataClient.quietUrgent, modifier = Modifier.testTag("settings.urgent.on")) { DataClient.putQuietUrgent(true) }
+                    DBtn("off", !DataClient.quietUrgent, modifier = Modifier.testTag("settings.urgent.off")) { DataClient.putQuietUrgent(false) }
+                }
+                DMono("in your time zone, on every phone", dcs.onSurfaceVariant, 11)
+            }
             DLine()
             DMono("APPEARANCE", dfaint)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

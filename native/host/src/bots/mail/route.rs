@@ -164,6 +164,8 @@ impl<'a> Ctx<'a> {
         let on = self.mail_on(); let m = &body.mail;
         // a header a run is already bound to is routed: the owner's outbox walk routes pending tickets again and again
         if self.w.mail.runs.values().any(|r| r.mail == m.id) { return Step::none() }
+        // Triage.thread.end: an unmanaged thread's end is filed for the uberbot to read when it next looks; it starts no run (one per worker turn would be noise and cost)
+        if m.want == "fyi" && m.id.starts_with("triage-end:") { return Step::none() }
         match of_addr(&m.to) {
             Some((k, bot)) if k == "bot" => if on { self.route_bot(body, &bot) } else { let act = self.triage_owner(&bot) && Self::inbound(m, &bot); self.route_bot_want(act, body, &bot) },
             Some((k, _)) if k == "room" => self.route_parts(body),

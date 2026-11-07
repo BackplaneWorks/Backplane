@@ -389,6 +389,14 @@
     "reason": {
      "type": "string",
      "description": "needs_you, done, reminder or digest."
+    },
+    "thread": {
+     "type": "string",
+     "description": "Optional: the thread the alert opens, when it is about another thread's work. Default: yours."
+    },
+    "ask": {
+     "type": "string",
+     "description": "Optional: the open approval's id, so the alert opens it and clears when it is answered."
     }
    },
    "required": [

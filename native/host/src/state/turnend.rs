@@ -171,7 +171,7 @@ pub fn policy_end(post: &State, seq: u64, now: u64, thread: &str, state: &str) -
 /// Alert.clean / Alert.text: a text as one line (tab and newline become a space), cut to max characters after trimming
 fn alert_text(t: &str, max: usize) -> String { take(trim_ws(t), max).chars().map(|c| if c == '\t' || c == '\n' { ' ' } else { c }).collect() }
 /// Alert.ask.say: what an ask's alert says: a paused browser task its one-line question, an order's question or approval its detail, any other its tool and detail
-fn ask_say(tool: &str, detail: &str) -> String {
+pub fn ask_say(tool: &str, detail: &str) -> String {
     if tool == "task_pause" { return gstr(&parse_or_null(detail), "question", "").to_string() }
     let plain = tool.starts_with("order_ask") || tool == "order_quote" || tool == "checks_ok";
     if plain || tool.is_empty() { detail.to_string() } else { format!("{tool} {detail}") }

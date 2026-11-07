@@ -2,7 +2,7 @@
 //! the webhook (settings::webhook) is posted, and the desk used last gets `{"t":"notify"}` as a desktop notification, unless a focused desk in use
 //! is showing the thread and the kind is one a watching desk holds (ask, done, fail, merged: never a note or a reminder).
 //! A desk (the GPUI window, the web page) says where it is with `desk.look {thread, focused}` on connect, on a change and every `BEAT_S` seconds
-//! while in use. Not ported here: the phones' APNs push and the Live Activity (they need Apple's credentials), and the owner's other machines
+//! while in use. This record never reaches a phone: a phone hears only what the uberbot orders (push/mod.rs). Not ported here: the Live Activity, and the owner's other machines
 //! (`Far.note.*`, the net lane). The body of a done/fail alert with no text of its own is "Finished"/"Failed".
 use crate::{api::{Caller, Fut, Observer, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};

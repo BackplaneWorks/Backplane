@@ -16,10 +16,11 @@
 //! `review.list {thread}` → `{comments:[{id, text, by, at, parent, resolved, file, layer, x, y, item}]}` (the thread's review acts folded, oldest first).
 //! Picker (feature "picker"): `thread.picker {thread?, provider?, model?, effort?, runtime?}` → `{picker:{chip, sections:[{title, action, choices:[{label, value, on, ok, why}]}]}}` (a thread's own, or a new thread's from what is given) ·
 //! `thread.pick {thread, action: model|effort|provider|runtime, value}` → `{thread}`: the desktop's picker, the same requests it sends.
-//! Pushes on a `lists` subscription: `{"k":"notify","kind":"done"|"fail"|"ask","thread","title","body"}` when a turn ends or an ask opens.
+//! Pushes on a `lists` subscription: `{"k":"notify","kind":"needs_you"|"done"|"reminder"|"digest","thread","ask","key","title","body","badge","through"}` when the uberbot's gate lets one
+//! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -66,6 +67,12 @@ fn contains(hay: &str, needle: &str) -> bool { hay.to_lowercase().contains(needl
 pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Result<Value, Value>> {
     Some(match m {
         "thread.act" => thread_act(hub, c, p).await,
+        "device.register" | "device.drop" | "device.prefs" | "push.seen" => rpc(hub, c, m, p.clone()).await.map(|_| json!({})),
+        "push.state" => rpc(hub, c, m, p.clone()).await.map(|r| r["result"].clone()),
+        "push.prefs" => {
+            for k in [crate::push::QUIET, crate::push::QUIET_URGENT] { if let Some(v) = p[k].as_str() { if let Err(e) = rpc(hub, c, "setting.set", json!({"key":k,"value":v})).await { return Some(Err(e)) } } }
+            Ok(json!({}))
+        }
         "project.act" => {
             let (id, act) = (s(p, "project"), s(p, "action"));
             if !hub.model().await.projects.get(id).map_or(false, |x| !x.removed) { return Some(Err(err("unknown project"))) }
@@ -173,13 +180,7 @@ async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
 }
 
 /// Notifications for a `lists` subscription: an ask opened, a turn that ended (done or failed).
-pub fn notify_for(e: &Value, thread: &str, title: &str, ask_text: &str) -> Option<Value> {
-    match s(e, "$") {
-        "AskOpened" => Some(json!({"kind":"ask","thread":thread,"title":title,"body":if ask_text.is_empty() { "Waiting for your answer" } else { ask_text }})),
-        "TurnChanged" => match s(e, "state") { "failed" => Some(json!({"kind":"fail","thread":thread,"title":title,"body":"The turn failed"})), "running" | "" | "interrupted" | "cancelled" | "stopped" => None, _ => Some(json!({"kind":"done","thread":thread,"title":title,"body":"Finished"})) },
-        _ => None,
-    }
-}
+pub fn notify_of(e: &Value) -> Value { json!({"kind":e["kind"],"thread":e["thread"],"ask":e["ask"],"key":e["key"],"title":e["title"],"body":e["body"],"badge":e["badge"],"through":e["through"]}) }
 
 
 // ---- viewers, files, browser (each the hub's own request, for the folder of the thread) ----

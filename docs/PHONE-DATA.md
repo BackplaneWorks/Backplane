@@ -42,7 +42,8 @@ On reconnect the app resubscribes and re-reads lists and the open thread (no res
 - `models.list` → `{models:{provider:[{value,label,ok,why}]}}` (the hub's `models.all`); `thread.model {thread, provider, model, effort?}` → `{thread}` (the same provider: `thread.modes`; another provider: `thread.provider`, between turns only). A thread's `model` is the one chosen (ModesSet) else the provider's.
 - `mentions.list {q?, kind?: @|>|%|#|&, limit?=12}` → `{items:[{sigil,id,label,detail}]}`: bots, threads, projects, rooms, models.
 - `bots.list` → `{bots:[{id,name,thread,uber}], rooms:[{id,name,members}]}` (a bot's conversation is its `thread`: read and send it like any thread); `bot.say {bot,text,clientId?}`; `room.posts {room,limit?}` → `{posts:[{id,from,text,at}]}`; `room.post {room,text,clientId?}`.
-- Push on a `lists` subscription: `{k:"notify", kind:"done"|"fail"|"ask", thread, title, body}` when a turn ends (not interrupted) or an ask opens.
+- Push on a `lists` subscription: `{k:"notify", kind:"needs_you"|"done"|"reminder"|"digest", thread, ask, key, title, body, badge, through}` when the uberbot's gate lets one through, never for a turn's end or an ask by themselves, and `{k:"clear", keys, badge}` when one is dealt with (`phone-push.md`).
+- Feature `push`: `device.register {token, platform, kind, env, bundle}`, `device.drop {token}`, `device.prefs {token, mute}`, `push.seen {thread}`, `push.state` → `{keys, badge, quiet, urgent}`, `push.prefs {"notify.quiet"?, "notify.quiet.urgent"?}`.
 - Pictures: the agents' `turn.start` keeps `attachments` (a `MessageAttached` event in the same commit) and `agentText`; the message's text carries the `[Attached image: <path>]` lines for the agent and the phone data API strips them from what it shows.
 Viewer, files and browser requests are not here: the lanes adding them in `native/host` (viewers, files, cef) define them; the phones will take them as further features.
 

@@ -99,7 +99,7 @@ const KNOWN: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadCreated", "T
     "TodosSet", "UsageSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
     "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped",
     "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged",
-    "RunSet", "CharterSet", "DecisionLogged", "TurnUsage", "DeployAsked", "DeployBuilt", "ThreadParentSet", "ThreadWoke", "TodosChanged"];
+    "RunSet", "CharterSet", "DecisionLogged", "TurnUsage", "DeployAsked", "DeployBuilt", "ThreadParentSet", "ThreadWoke", "TodosChanged", "DevicePrefs", "PushOrdered", "PushSent", "PushCleared"];
 
 /// Link.from: the sender in a link id "t:<from>:<n>" ("" for any other id): the second ':'-field when the first is "t" and a third follows
 fn link_from(id: &str) -> &str {

@@ -15,6 +15,7 @@ impl RpcHandler for SettingSet {
         Box::pin(async move {
             let (key, value) = (p.get("key").and_then(Value::as_str).unwrap_or(""), p.get("value").and_then(Value::as_str).unwrap_or(""));
             if key.starts_with("account.") || key.starts_with("accounts.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":ACCOUNT_GATE})] }
+            if crate::push::reserved(key) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that setting is the hub's own"})] }
             if key.starts_with("peer.own.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that setting is the hub's own"})] }
             // a zone is only right once its rule is known: person.tz goes through zone.set (settings/zone.rs), which looks the rule up and refuses a name that is not a zone
             if key == "person.tz" { if let Some(z) = hub.rpc_for("zone.set") { return z.call(hub, _who, id, "zone.set", &json!({"zone": value})).await } }

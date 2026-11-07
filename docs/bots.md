@@ -201,9 +201,10 @@ phone with several hubs each row also carries its machine.
 Settings’ **Notify me for** section controls Needs me, Settled, Reminders
 and Everything on the window, web, iOS and Android.
 
-The person is alerted (the phones' APNs push, the phones' own alerts,
-desktop notifications, and the same relayed to the owner's other machines)
-in three cases only (`src/core/notice`, `Policy.*`, laws `policy_*`,
+A phone is alerted by the uberbot alone: see `phone-push.md`. What follows is the record every alert writes and what a desk shows.
+
+A desk is alerted (desktop notifications, and the same relayed to the owner's
+other machines) in three cases only (`src/core/notice`, `Policy.*`, laws `policy_*`,
 `notify_*`):
 
 1. **Needs you.** An ask opens for the person (any kind: a tool approval,
@@ -243,21 +244,16 @@ kind `ask`, `done`, `fail`, `merged`, `note` (`notify_person`) or empty (a
 settle whose setting is off, which still counts as settled). Every step
 passes through `Alerts.changes` (an `AskOpened` gets its record) and
 `Alerts.outs` (a record with a kind raises the `Alerted` out) before it is
-stored, so alerts come from one place. The server's `Alerted` pushes to the
-phones (`Push.note.*`, collapse id the record's key), shows the desktop
-notification on the desk used last and tells the owner's other machines;
-`TurnEnded` only updates the island. A phone alerts for a thread when its
-record changed in the frame it folded and the new kind is not empty
-(`Note.ralerts`; never at a cold join or a saved state). The apps show the
-record's text (a note, an ask's tool and detail, a merge's url) or the
-thread's last reply.
+stored, so alerts come from one place. The record shows the desktop
+notification on the desk used last and tells the owner's other machines.
+It never reaches a phone.
 
 **Settings** (hub settings, `on`/`off`): `notify.needs` (on), `notify.settled`
 (on), `notify.reminders` (on), `notify.all` (off: also alert whatever the
 older rule `Notice.of` alerted, room exchanges and every turn of a plain
 thread, as before this policy).
 
-**Bots.** `notify_person {text, reason}`: `needs_you` (once per turn),
+**Bots.** `notify_person {text, reason, thread?, ask?}` (`thread` and `ask` choose what the phone opens): `needs_you` (once per turn),
 `done` (work the person gave the bot in its own thread, once per message;
 the turn's end then alerts nothing more), `reminder` or `digest` (only in a
 turn a routine started, once per turn). Anything else is refused with the

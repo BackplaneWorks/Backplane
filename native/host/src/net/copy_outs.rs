@@ -2,7 +2,7 @@
 //!
 //! What exists in Rust today: the alert records themselves (`state/turnend.rs` writes `alert.<thread>` into the copy's own log; nothing leaves) and the webhook
 //! sender `settings::webhook::deliver` (gated twice: its own `copy::on()` and the process gate's `Kind::Net` refusal of curl). Nothing calls `deliver` yet (the
-//! pipeline that decides *when* is net's, not ported). APNs push, the Live Activity/island sync and desk notices (`{"t":"notify"}`) are NOT PORTED: no code sends them.
+//! pipeline that decides *when* is net's, not ported). APNs push (push/apns.rs) refuses on a copy, checked below. The Live Activity/island sync is NOT PORTED: no code sends it.
 //! The flag is read once per process, so the probe runs in a child, in both modes: with the flag the local listener sees nothing; without it the same child
 //! posts and the listener sees the POST (so the harness can see a send at all).
 use crate::net::peering::tests::node_extra;
@@ -22,6 +22,10 @@ use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
     let r = crate::settings::webhook::deliver(&n.hub, "t1", "done", "completed", "", "", "hi", "T").await;
     tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     if copy {
+        use crate::push::{apns::{Apns, Frame}, Carrier, Sent};
+        let f = Frame::clear(&[], 0);
+        let sent = Arc::new(Apns::new()).send(n.hub.clone(), crate::bots::world::Device { token: "t".into(), platform: "ios".into(), kind: "alert".into(), env: "sandbox".into(), bundle: "b".into(), mute: false }, f).await;
+        assert!(matches!(&sent, Sent::Later(e) if e.contains("copy")), "{sent:?}");
         assert!(matches!(&r, Err(e) if e.contains("copy")), "{r:?}");
         assert_eq!(hits.load(Ordering::SeqCst), 0, "nothing reached the listener on a copy");
         // and a raw curl by the same gate is refused too

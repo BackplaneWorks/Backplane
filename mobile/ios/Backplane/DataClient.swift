@@ -39,6 +39,13 @@ final class DataClient {
     private(set) var links: [String] = PairingStore.load()
     var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "data.drafts") as? [String: String]) ?? [:]
 
+    // a tapped notification: the thread to open and the approval to land on. The views follow these
+    var pushThread = ""
+    var pendingAsk = ""
+    // the hub's quiet hours, as push.state says them
+    private(set) var quiet = ""
+    private(set) var quietUrgent = false
+
     // the hub being used (one in this build)
     var link: String? { links.first }
     var hubName: String { link.flatMap { Pairing.key($0) } ?? "" }
@@ -56,6 +63,7 @@ final class DataClient {
     @ObservationIgnored private var open: String?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var listNext: String?
+    @ObservationIgnored private var pushToken: String?
 
     init() {
         #if DEBUG || BP_MEASURE
@@ -158,7 +166,7 @@ final class DataClient {
     // the app came back to the front: a socket that died while suspended is replaced at once
     func foreground() {
         guard link != nil else { return }
-        if conn != .online || Date().timeIntervalSince(heard) > 20 { connect() }
+        if conn != .online || Date().timeIntervalSince(heard) > 20 { connect() } else { Task { await syncPush() } }
     }
     private func receive(_ t: URLSessionWebSocketTask, _ g: Int) {
         t.receive { [weak self] r in
@@ -245,6 +253,7 @@ final class DataClient {
             _ = try await (p, t)
             await loadBots()
             await voice.resync()
+            await enablePush(); await registerPush(); await syncPush()
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
@@ -263,6 +272,7 @@ final class DataClient {
         open = id
         guard conn == .online else { return }
         let g = gen
+        if has("push") { Task { _ = try? await self.call("push.seen", ["thread": id], as: DEmpty.self); await self.syncPush() } }
         // the subscribe and the newest page go out back to back on the one socket (it keeps their order): no round trip between them
         Task {
             async let sub: Void? = try? await self.subscribeThread(id, g)
@@ -359,21 +369,19 @@ final class DataClient {
                 l[i].text += add; l[i].live = true; entries[tid] = l
             }
         case "notify":
-            if let tid = o["thread"] as? String, let kind = o["kind"] as? String { notifyLocal(tid, kind, title: o["title"] as? String ?? "", body: o["body"] as? String ?? "") }
+            notified(o)
+        case "clear":
+            Task { await self.cleared(o["keys"] as? [String] ?? [], badge: o["badge"] as? Int) }
         case "turn":
             if let tid = o["thread"] as? String, let s = o["state"] as? String, let i = threads.firstIndex(where: { $0.id == tid }) {
-                let was = threads[i].state
                 threads[i].state = s
-                if !features.contains("notify"), was == "working" || was == "asking", s == "idle" || s == "asking" || s == "failed" { alert(threads[i], s) }
             }
         default: break
         }
     }
     private func upsert(_ t: DThread) {
         if let i = threads.firstIndex(where: { $0.id == t.id }) {
-            let was = threads[i].state
             threads[i] = t
-            if !features.contains("notify"), (was == "working"), t.state == "idle" || t.state == "asking" || t.state == "failed" { alert(t, t.state) }
         } else { threads.append(t) }
         threads.sort { $0.updatedAt > $1.updatedAt }
         scheduleSave()
@@ -517,28 +525,72 @@ final class DataClient {
     func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }
 
-    // MARK: alerts: while the app still runs (iOS keeps the socket a short while in the background), a turn that ended or asks tells the person
-    private func alert(_ t: DThread, _ state: String) {
-        guard AppSettings.shared.alerts, UIApplication.shared.applicationState != .active else { return }
+    // MARK: alerts: only what the hub's gate lets through reaches here (native/host/src/push): an APNs push, or the same on the socket for a phone with no token
+    private func notified(_ o: [String: Any]) {
+        guard pushToken == nil, UIApplication.shared.applicationState != .active else { return }
+        guard AppSettings.shared.alerts || o["through"] as? Bool == true else { return }
         let n = UNMutableNotificationContent()
-        n.title = t.title
-        n.body = state == "asking" ? "Waiting for your answer" : state == "failed" ? "The turn failed" : (t.preview.isEmpty ? "Finished" : t.preview)
+        n.title = (o["title"] as? String ?? "").isEmpty ? "Backplane" : o["title"] as? String ?? ""
+        n.body = o["body"] as? String ?? ""
+        let thread = o["thread"] as? String ?? "", key = o["key"] as? String ?? ""
+        n.threadIdentifier = thread
+        n.userInfo = ["thread": thread, "ask": o["ask"] as? String ?? "", "key": key]
+        if let b = o["badge"] as? Int { n.badge = NSNumber(value: b) }
         if AppSettings.shared.alertSound { n.sound = .default }
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "turn-" + t.id, content: n, trigger: nil))
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: key, content: n, trigger: nil))
     }
-    // the hub's own `notify` push (a turn ended, failed, or an ask opened): a local notification while the app is not on screen
-    private func notifyLocal(_ tid: String, _ kind: String, title: String, body: String) {
-        guard AppSettings.shared.alerts, UIApplication.shared.applicationState != .active else { return }
-        let n = UNMutableNotificationContent()
-        n.title = title.isEmpty ? "Backplane" : title
-        n.body = kind == "ask" ? "Waiting for your answer" + (body.isEmpty ? "" : ": " + body) : kind == "fail" ? "The turn failed" : "Finished"
-        n.userInfo = ["thread": tid]
-        if AppSettings.shared.alertSound { n.sound = .default }
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "turn-" + tid, content: n, trigger: nil))
+    /// A clear from the hub: what was dealt with leaves this phone, by its key.
+    func cleared(_ keys: [String], badge: Int?) async {
+        let c = UNUserNotificationCenter.current()
+        if let badge { try? await c.setBadgeCount(badge) }
+        let gone = await c.deliveredNotifications().filter { keys.contains($0.request.content.userInfo["key"] as? String ?? "") }.map(\.request.identifier)
+        if !gone.isEmpty { c.removeDeliveredNotifications(withIdentifiers: gone) }
     }
-    func askNotificationPermission() async {
-        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+    private struct PushState: Decodable { var keys: [String]; var badge: Int; var quiet: String; var urgent: Bool }
+    /// What is waiting, on connect and on coming to the front: the badge, and whatever was dealt with while this phone slept leaves it.
+    func syncPush() async {
+        guard has("push"), let s = try? await call("push.state", as: PushState.self) else { return }
+        quiet = s.quiet; quietUrgent = s.urgent
+        let c = UNUserNotificationCenter.current()
+        try? await c.setBadgeCount(s.badge)
+        let stale = await c.deliveredNotifications().filter { !s.keys.contains($0.request.content.userInfo["key"] as? String ?? "") }.map(\.request.identifier)
+        if !stale.isEmpty { c.removeDeliveredNotifications(withIdentifiers: stale) }
     }
+    /// Launch, and once a hub can use it: ask once, after the first screen is up, then take a token.
+    func enablePush() async {
+        guard has("push") else { return }
+        let c = UNUserNotificationCenter.current()
+        var status = await c.notificationSettings().authorizationStatus
+        if status == .notDetermined, AppSettings.shared.alerts {
+            _ = try? await c.requestAuthorization(options: [.alert, .sound, .badge])
+            status = await c.notificationSettings().authorizationStatus
+        }
+        if status == .authorized || status == .provisional || status == .ephemeral { UIApplication.shared.registerForRemoteNotifications() }
+    }
+    func tokenGot(_ token: String) { pushToken = token; Task { await registerPush() } }
+    private func registerPush() async {
+        guard has("push"), let t = pushToken else { return }
+        #if DEBUG
+        let env = "sandbox"
+        #else
+        let env = "production"
+        #endif
+        _ = try? await call("device.register", ["token": t, "platform": "ios", "kind": "alert", "env": env, "bundle": Bundle.main.bundleIdentifier ?? ""], as: DEmpty.self)
+        await pushMute()
+    }
+    /// This phone's switch: off, only what the person let through reaches it.
+    func pushMute() async {
+        guard has("push"), let t = pushToken else { return }
+        _ = try? await call("device.prefs", ["token": t, "mute": !AppSettings.shared.alerts], as: DEmpty.self)
+    }
+    func setQuiet(_ spec: String) async { quiet = spec; _ = try? await call("push.prefs", ["notify.quiet": spec], as: DEmpty.self) }
+    func setQuietUrgent(_ on: Bool) async { quietUrgent = on; _ = try? await call("push.prefs", ["notify.quiet.urgent": on ? "on" : "off"], as: DEmpty.self) }
+    /// A tapped notification opens its thread, at its approval when it has one.
+    func openPush(thread: String, ask: String) {
+        guard !thread.isEmpty else { return }
+        pendingAsk = ask; pushThread = thread
+    }
+    var viewing: String? { open }
 
     // MARK: cache (paints at launch, replaced as soon as the hub answers)
     private struct Cache: Codable { var hub: String; var projects: [DProject]; var threads: [DThread]; var entries: [String: [DEntry]]; var older: [String: String] }

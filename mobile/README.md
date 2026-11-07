@@ -37,3 +37,9 @@ ASC_KEY_PATH=<path to the .p8 key>     # archive only
 Detail: docs/ios-build.md.
 
 Improvement reports: `mobile/IMPROVEMENTS.md`.
+
+Push: a phone is alerted only by the uberbot, and only when the person is
+needed, work they gave finished, or a reminder or digest they scheduled is
+due. iOS gets it through APNs (the app registers its token with
+`device.register`), Android on its socket while the app lives. Rules, quiet
+hours and the APNs settings: `docs/phone-push.md`.
