@@ -1016,7 +1016,8 @@ impl mcp::ToolSet for TestTools {
     let w = tokio::spawn(hist_worker(rx, Duration::from_millis(400), Duration::from_millis(100), move |j| { let d = d2.clone(); async move {
         if matches!(j, HistJob::Start(..)) { tokio::time::sleep(Duration::from_secs(60)).await } d.lock().unwrap().push(format!("{j:?}")); } }));
     tx.send((None, HistJob::Start("/w".into(), "m1".into()))).await.unwrap(); tx.send((None, HistJob::End("/w".into()))).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await; assert_eq!(*done.lock().unwrap(), vec![r#"End("/w")"#], "the hung start was given up; the end ran");
+    let end = Instant::now() + Duration::from_secs(30); while done.lock().unwrap().is_empty() && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await } // the end runs once the start is given up: waited for, not timed
+    assert_eq!(*done.lock().unwrap(), vec![r#"End("/w")"#], "the hung start was given up; the end ran");
     assert!(tokio::time::timeout(Duration::from_secs(3), w).await.is_ok(), "an idle worker ends by itself (a deleted thread's sends nothing more)"); let _ = tx;
 }
 #[tokio::test(flavor = "multi_thread")] async fn delta_end_is_sent_where_sends_it_one_per_assistant_line_and_none_at_a_turns_end() { // Claude.assistant's Broadcast is only delta_end
