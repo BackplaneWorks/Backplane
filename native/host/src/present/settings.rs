@@ -9,9 +9,10 @@ use std::sync::OnceLock;
 static VERSION: OnceLock<String> = OnceLock::new();
 /// The hub's version, said on the About page (set once when the presenter binds to the hub).
 pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
+pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("about", "About"), ("privacy", "Privacy")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("setup", "Setup"), ("about", "About"), ("privacy", "Privacy")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -333,7 +334,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -431,7 +432,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "About", "Privacy"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "Setup", "About", "Privacy"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn devices_lists_what_the_registry_says_and_offers_revoke_on_the_live_ones() {

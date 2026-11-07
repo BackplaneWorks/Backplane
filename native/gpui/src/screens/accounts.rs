@@ -27,6 +27,8 @@ pub struct Accounts {
     pub polling: bool,
     /// Attempts whose code was sent and not yet answered (the hub checks the sign-in before it says).
     pub checking: std::collections::HashSet<String>,
+    /// Which provider the add box makes an account for ("" is Claude).
+    pub add_provider: String,
 }
 
 // ---- pure: what the snapshot says -----------------------------------------------------------------------------------------------------------------------
@@ -115,6 +117,7 @@ pub fn got(this: &mut Backplane, v: Value, cx: &mut Context<Backplane>) {
     let said: Vec<String> = v["attempts"].as_array().into_iter().flatten().filter(|a| !a["message"].as_str().unwrap_or("").is_empty()).filter_map(|a| a["id"].as_str().map(str::to_string)).collect();
     this.screens.acct.checking.retain(|k| live.contains(k) && !said.contains(k));
     this.screens.acct.snap = v;
+    super::onboard::accounts_changed(this);
     poll(this, cx);
 }
 /// An answer to one of the requests: a refusal is said; a success asks for the snapshot again where the request has none of its own.
@@ -153,7 +156,8 @@ fn add(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(input) = this.screens.acct.label.clone() else { return };
     let label = input.read(cx).content.to_string();
     if label.trim().is_empty() { this.screens.acct.notice = "Name the account first, e.g. Work or Personal.".into(); return }
-    ask(this, json!({"op": "add", "provider": "claude", "label": label.trim()}));
+    let provider = if this.screens.acct.add_provider == "codex" { "codex" } else { "claude" };
+    ask(this, json!({"op": "add", "provider": provider, "label": label.trim()}));
     input.update(cx, |i, cx| i.set(String::new(), cx));
 }
 fn respond(this: &mut Backplane, attempt: &str, cx: &mut Context<Backplane>) {
@@ -261,6 +265,20 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> Vec<AnyE
         out.push(div().flex().items_center().gap_2().mt_2()
             .child(div().flex_1().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone()))
             .child(button(cx, light, "acct-add".into(), "Add Claude account", true, false, |this, cx| add(this, cx))).into_any_element());
+    }
+    out
+}
+
+/// The same sign-in rows for one provider, inside a setup step.
+pub fn panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provider: &str) -> Vec<AnyElement> {
+    let c = |n: &str| theme::color(light, n);
+    let mut out: Vec<AnyElement> = vec![];
+    if !st.notice.is_empty() { out.push(div().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("bad")).child(st.notice.clone()).into_any_element()); }
+    for (i, p) in profiles(&st.snap).iter().enumerate().filter(|(_, p)| p["provider"] == provider) { out.push(card(cx, light, st, p, i)); }
+    if let Some(input) = &st.label {
+        let word = if provider == "codex" { "Add Codex account" } else { "Add Claude account" };
+        out.push(div().flex().items_center().gap_2().child(div().flex_1().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone()))
+            .child(button(cx, light, "acct-add".into(), word, true, false, |this, cx| add(this, cx))).into_any_element());
     }
     out
 }

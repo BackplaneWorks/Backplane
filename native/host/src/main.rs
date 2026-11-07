@@ -150,7 +150,7 @@ async fn run(a: Args) -> Result<()> {
     let listen = format!("{}:{}", a.host, a.port);
     startup::mark("home ready");
     session::composer::mention::set_models(settings::models::all);
-    let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: "linux".into(), arch: "x64".into() }, presenter).await?;
+    let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: match std::env::consts::OS { "macos" => "darwin", o => o }.into(), arch: match std::env::consts::ARCH { "x86_64" => "x64", "aarch64" => "arm64", a => a }.into() }, presenter).await?;
     startup::mark("hub started");
     ckptrun::start(hub.clone());
     recent.bind(&hub);

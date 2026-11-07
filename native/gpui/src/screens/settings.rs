@@ -83,7 +83,7 @@ impl Echo {
 #[derive(Default)]
 pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool }
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
-const GROUPS: [&[&str]; 4] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["usage", "about", "privacy"]];
+const GROUPS: [&[&str]; 4] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["usage", "setup", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
@@ -114,7 +114,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let rows = parse(&this.data["settings"]);
     sync_nav(this, &rows, cx);
     let mut want: Vec<Field> = rows.into_iter().flat_map(|r| r.fields).collect();
-    want.extend(super::bots::form_fields(&this.data)); want.extend(super::panels::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data));
+    want.extend(super::bots::form_fields(&this.data)); want.extend(super::panels::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data)); want.extend(super::onboard::form_fields(&this.data));
     this.screens.fields.retain(|n, _| want.iter().any(|f| f.name == *n));
     for f in want {
         if let Some(slot) = this.screens.fields.get_mut(&f.name) {
@@ -202,6 +202,7 @@ pub fn send_todo(this: &mut Backplane, cx: &mut Context<Backplane>) {
 
 /// Enter in a typed field: a room's or a remote bot's post box sends, as on the window.
 pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
+    if name.starts_with("ob") && super::onboard::submit(this, name, cx) { return }
     match name { "rpost" => super::bots::send_post(this, "rpost", "room-post", cx), "rtext" => super::bots::send_post(this, "rtext", "remote-send", cx), "title" => { // Enter in the rename box saves, as its Rename button does (nothing for a blank title)
             let id = string(&this.data["renaming"], "id");
             let text = this.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();
@@ -272,7 +273,7 @@ pub fn structure(settings: &Value) -> String {
 const CHIPS_PER_LINE: usize = 6;
 /// A hub row as a dialog row: label and muted note on the left, the controls on the right, a hairline under it. A row that is only a label is a
 /// section heading; a label and a note with nothing to press or type is a paragraph.
-fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize) -> AnyElement {
+pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let controls = !r.buttons.is_empty() || r.fields.iter().any(|f| fields.contains_key(&f.name)) || !r.qr.is_empty();
     if !controls && r.note.is_empty() {
@@ -293,7 +294,7 @@ fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fie
                 let j = line * CHIPS_PER_LINE + k; let b2 = b.clone();
                 let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer();
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
-                d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
+                d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if super::onboard::press(this, &b2, cx) { return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
             }).collect::<Vec<_>>()));
         }
     }

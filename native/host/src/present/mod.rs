@@ -10,6 +10,7 @@ pub mod picker;
 pub mod thread;
 pub mod viewer;
 pub mod settings;
+pub mod onboard;
 pub mod botforms;
 pub mod ready;
 pub mod badge;

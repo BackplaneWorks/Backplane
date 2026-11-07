@@ -25,7 +25,8 @@ impl super::Screen for Recent {
         if !mine(params) { return refused("target.or-native-sidebar") }
         let Some(_hub)=self.hub.get().and_then(Weak::upgrade) else { return refused("screen.hub-not-bound") };
         let Some(policies)=crate::statehost::policies() else { return refused("state.not-started") };
-        let withinfo; let params=if super::settings::is_open(&params["session"]) || params["target"]["kind"]=="thread" { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); if super::settings::page(&params["session"])=="devices" { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.reg.list(); } } withinfo=c; &withinfo } else { params };
+        let setup=text(params,"action").starts_with("ob-") || policies.with_state(|st|super::onboard::due(st,&params["session"])).unwrap_or(false);
+        let withinfo; let params=if super::settings::is_open(&params["session"]) || params["target"]["kind"]=="thread" || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if super::settings::page(&params["session"])=="devices" { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.reg.list(); } } withinfo=c; &withinfo } else { params };
         match policies.with_state(|st|recent(st,params)) { Some(out)=>out,None=>refused("state.booting") }
     }
 }
@@ -111,6 +112,8 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
             return Some(json!({"remoteReady":false,"nextTarget":target,"session":session,"cmds":cmds,
                 "local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
         }
+    } else if let Some(o)=super::onboard::act(st,hub,&session,p.get("hubInfo").unwrap_or(&Value::Null),&super::onboard::Client::of(p),&super::onboard::home_dir(),action,value) {
+        crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else if let Some(o)=super::botforms::act(st,hub,&session,action,value) {
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else if let Some(o)=super::settings::act(hub,&session,action,value) {
@@ -328,6 +331,8 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         shown["bot"]=b;
     }
     if room_page.is_object() { shown["bot"]=room_page.clone(); }
+    if let Some(t)=super::onboard::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null),&super::onboard::Client::of(p),&super::onboard::home_dir()) { shown["tour"]=t; }
+    { let r=super::onboard::resume(st,&session); if !r.is_null() { shown["setup"]=r; } }
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});

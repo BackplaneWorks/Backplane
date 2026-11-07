@@ -197,6 +197,7 @@ impl Backplane {
             if hub_on == p || self.screens.rail_at.map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(2)) { self.screens.rail_pending = None; self.screens.rail_at = None; }
         }
         super::settings::sync(self, cx);
+        super::onboard::sync(self, cx);
         super::projects::sync(self, cx);
         super::plotview::report_state(self);
         super::histbar::follow_focus(self);
