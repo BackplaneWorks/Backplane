@@ -33,7 +33,8 @@ object DataFold {
     }
 
     /** `running`: the thread's turn runs, so a run at the very end of the thread is still growing. */
-    fun rows(entries: List<DEntry>, running: Boolean): List<DRow> {
+    fun rows(all: List<DEntry>, running: Boolean): List<DRow> {
+        val entries = all.filterNot { it.agentOnly } // the hub's note to the agent is not the person's to read
         val out = ArrayList<DRow>(); var i = 0
         while (i < entries.size) {
             if (!folds(entries[i])) { out += DRow.Entry(entries[i]); i++; continue }

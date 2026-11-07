@@ -65,6 +65,7 @@ struct DEntry: Codable, Equatable, Identifiable {
     var clientId: String?
     var replaces: String?   // the final entry that ends a stream names the live entry it replaces
     var live: Bool
+    var agentOnly = false   // a message only the agent reads (data/1 `agentOnly`): never shown
     var tool: DTool?
     var ask: DAsk?
     var attachments: [DAttachment] = []
@@ -72,7 +73,7 @@ struct DEntry: Codable, Equatable, Identifiable {
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, tool, ask, attachments }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, attachments }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -82,6 +83,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         clientId = try? c.decode(String.self, forKey: .clientId)
         replaces = try? c.decode(String.self, forKey: .replaces)
         live = c.bool(.live)
+        agentOnly = c.bool(.agentOnly)
         tool = try? c.decode(DTool.self, forKey: .tool)
         ask = try? c.decode(DAsk.self, forKey: .ask)
         attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []

@@ -137,7 +137,9 @@ fn row_entry(r: &crate::model::Row) -> Option<Value> {
     if r.kind == "msg" {
         let kind = match r.role.as_str() { "user" => "user", "assistant" => "assistant", _ => "note" };
         if kind == "assistant" && r.text.trim().is_empty() { return None }
-        return Some(json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { crate::settings::order::pay_shown(&r.text) },"at":at}));
+        let mut en = json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { crate::settings::order::pay_shown(&r.text) },"at":at});
+        if crate::present::thread::agent_only(&r.role, &r.text) { en["agentOnly"] = json!(true) }
+        return Some(en);
     }
     act_entry(&r.id, &r.role, &r.akind, &r.text, at)
 }
@@ -353,7 +355,9 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
             "MessagePosted" => {
                 let (id, role) = (s(&e, "msg"), s(&e, "role"));
                 let kind = match role { "user" => "user", "assistant" => "assistant", _ => "note" };
-                let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(s(&e, "text")) } else { s(&e, "text").to_string() },"at":ms(e["at"].as_u64().unwrap_or(0))});
+                // as a page has it: a quote's Buy now link ready to open, and the hub's note to the agent marked so no phone shows it
+                let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(s(&e, "text")) } else { crate::settings::order::pay_shown(s(&e, "text")) },"at":ms(e["at"].as_u64().unwrap_or(0))});
+                if crate::present::thread::agent_only(role, s(&e, "text")) { en["agentOnly"] = json!(true) }
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
                 let replaced = kind == "assistant" && subs.live.remove(&th);

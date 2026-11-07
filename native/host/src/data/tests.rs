@@ -318,6 +318,25 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 2, "thread.order", json!({"thread":"t1"})).await; assert_eq!(r["result"]["order"], Value::Null, "{r}");
     let r = ask(&mut ws, 3, "thread.order", json!({})).await; assert!(r["error"].is_string() || r["result"].is_null(), "a thread is needed: {r}");
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_hubs_note_to_the_agent_is_marked_agent_only_on_a_page_and_live() {
+    let (hub, port) = up("agentonly").await;
+    crate::settings::order::test_link("q_live", "http://127.0.0.1:3871/q/q_live?t=tok");
+    let note = "[Backplane] The quote is posted in this thread. {\"status\":\"ready\",\"total\":27.2}";
+    hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"n1","role":"system","text":note,"at":1700000041})).await.unwrap();
+    hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"n2","role":"system","text":"[Backplane] Watched work \"build\" ended: exit 0","at":1700000042})).await.unwrap();
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t2"})).await; let es = r["result"]["entries"].as_array().unwrap().clone();
+    let by = |id: &str| es.iter().find(|e| e["id"] == id).cloned().unwrap_or_else(|| panic!("{id}: {r}"));
+    assert_eq!(by("n1")["agentOnly"], true, "the quote note is the agent's"); assert!(by("n2").get("agentOnly").is_none(), "other notes are the person's too");
+    // live: a quote and its note posted while the thread is open
+    let sub = ask(&mut ws, 2, "subscribe", json!({"topic":"thread","thread":"t2"})).await["result"]["sub"].as_u64().unwrap();
+    hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"q:q_live","role":"assistant","text":"**Your quote: $27.20**\n\n[Buy now · $27.20](order:q_live)","at":1700000043})).await.unwrap();
+    hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"n3","role":"system","text":note,"at":1700000044})).await.unwrap();
+    let (mut quote, mut live_note) = (Value::Null, Value::Null);
+    for _ in 0..20 { let v = next(&mut ws).await; if v["k"] == "entry" && v["sub"] == sub { match v["entry"]["id"].as_str() { Some("q:q_live") => quote = v["entry"].clone(), Some("n3") => live_note = v["entry"].clone(), _ => {} } } if !quote.is_null() && !live_note.is_null() { break } }
+    assert!(quote["text"].as_str().unwrap_or("").contains("](http://127.0.0.1:3871/q/q_live?t=tok)"), "a live quote has the link to open too: {quote}");
+    assert_eq!(live_note["agentOnly"], true, "{live_note}");
+}
 #[test] fn data_a_messages_attachment_lines_are_not_shown() {
     assert_eq!(shown_text("hi\n\n[attachment: /a/x.png]\n[attachment: /a/y.jpg]"), "hi");
     assert_eq!(shown_text("hi\n\n[Attached image: /a/x.png]"), "hi", "a message from before the change still hides its paths");
