@@ -184,10 +184,13 @@ impl Cache {
 
 /// Worker count: clamp(cores / 4, 1, 8), at most `jobs`.
 pub fn workers(jobs: usize) -> usize {
+    #[cfg(test)] { let n = TEST_WORKERS.load(Ordering::Relaxed); if n > 0 { return n.min(jobs.max(1)) } }
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
     (cores / 4).clamp(1, 8).min(jobs.max(1))
 }
 
+/// Tests: a fixed worker count (a runner with 4 cores gets one worker, and a test of completion order needs two).
+#[cfg(test)] static TEST_WORKERS: AtomicUsize = AtomicUsize::new(0);
 type Job = (String, PathBuf);
 type Failed = Vec<(Job, String)>;
 
@@ -665,6 +668,7 @@ mod tests {
         std::fs::set_permissions(&t, std::fs::Permissions::from_mode(0o755)).unwrap(); t.to_string_lossy().into_owned()
     }
     #[test] fn convert_streams_in_completion_order_and_caches() {
+        TEST_WORKERS.store(2, Ordering::Relaxed); // never reset: more workers only make the other tests faster
         let d = dir("conv"); let tool = fake_tool(&d); let c = Cache::new(d.join("parts"));
         let mk = |n: &str, body: &str| { let p = d.join(n); std::fs::write(&p, body).unwrap(); (n.to_string(), p) };
         let jobs = vec![mk("slow", "1500"), mk("fast", "10"), mk("bad", "bad"), mk("wrl", ""), ];
