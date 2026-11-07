@@ -27,8 +27,12 @@ pub fn pick(os: &str, arch: &str) -> Option<&'static Package> {
 }
 /// This hub's package (the hub's own OS, never a connecting client's).
 pub fn package() -> Option<&'static Package> { pick(std::env::consts::OS, std::env::consts::ARCH) }
-/// Where installs go: the folder `ipc::runtime` searches newest first.
-pub fn parent(home: &Path) -> PathBuf { home.join("kicad") }
+/// Where installs go: the folder `ipc::runtime` searches newest first. Windows: %LOCALAPPDATA%\Backplane\kicad, because the hub's home is in the
+/// roaming profile and a runtime of about a gigabyte does not belong there; everywhere else `<home>/kicad`.
+pub fn parent(home: &Path) -> PathBuf { managed_parent(cfg!(windows), std::env::var_os("LOCALAPPDATA").as_deref(), home) }
+pub fn managed_parent(windows: bool, local_app_data: Option<&std::ffi::OsStr>, home: &Path) -> PathBuf {
+    match local_app_data.filter(|d| windows && !d.is_empty()) { Some(d) => Path::new(d).join("Backplane").join("kicad"), None => home.join("kicad") }
+}
 /// This computer in words, for "none is published for …".
 pub fn this_computer() -> String { format!("{} {}", std::env::consts::OS, std::env::consts::ARCH) }
 
@@ -41,6 +45,8 @@ case "$platform:$format:$cli" in
   linux-x86_64:tar.gz:bin/kicad-cli|darwin-arm64:tar.gz:bin/kicad-cli|windows-x86_64:zip:bin/kicad-cli.exe) ;;
   *) fail 'No published Backplane KiCad package for this hub platform' ;;
 esac
+# Windows: the hub hands over a native path (C:\Users\Some Name\...): the shell works on its unix form, and every use below is quoted
+case "$platform" in windows-*) parent=$(cygpath -u "$parent") || fail 'cygpath could not read the install folder' ;; esac
 case "$version" in ''|*[!0-9A-Za-z.-]*) fail 'Invalid runtime version' ;; esac
 [ "$release" = "backplane-kicad-v$version" ] || fail 'Invalid runtime release'
 root=backplane-kicad-$platform-$version
@@ -129,10 +135,36 @@ echo "Installed in $dir"
 pub fn args(parent: &Path, p: &Package) -> Vec<String> {
     [parent.to_string_lossy().as_ref(), p.platform, p.version, p.release, p.asset, p.sha256, p.format, p.cli].iter().map(|s| s.to_string()).collect()
 }
-/// Why a request is refused, None when it may run. `found`: the KiCad `ipc::runtime` found ("" for none).
-pub fn refusal(found: &str, consent: bool, running: bool, p: Option<&Package>) -> Option<String> {
+/// What setup does about KiCad, from the package this computer has (`pick`), the status of the KiCad found (`ipc::publish_cad`: ok, old, stock,
+/// broken, missing, checking) and the install's own state in info `kicad.install` ("", running, failed, done).
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Action {
+    /// Nothing to do yet: still looking, or an install is running.
+    Wait,
+    /// A compatible Backplane KiCad is there.
+    Nothing,
+    /// None found and a package exists: setup starts the install by itself, once.
+    Auto,
+    /// A KiCad is there that is not a compatible Backplane KiCad (stock, old, broken), or a first try failed: one press installs the fork.
+    Offer,
+    /// No package for this computer: say so, offer the path field and the stock download.
+    NoPackage,
+}
+pub fn decide(pkg: Option<&Package>, status: &str, install_state: &str) -> Action {
+    if install_state == "running" { return Action::Wait }
+    match (status, pkg) {
+        ("ok", _) => Action::Nothing,
+        ("" | "checking", _) => Action::Wait,
+        (_, None) => Action::NoPackage,
+        ("missing", Some(_)) if install_state != "failed" => Action::Auto,
+        _ => Action::Offer,
+    }
+}
+/// Why a request is refused, None when it may run. `found`: the KiCad `ipc::runtime` found ("" for none); `status` its status. Only a compatible
+/// Backplane KiCad refuses: a stock or old one is what the install replaces as the runtime the hub picks (the managed folder is searched first).
+pub fn refusal(found: &str, status: &str, consent: bool, running: bool, p: Option<&Package>) -> Option<String> {
     if running { return Some("KiCad is being installed already".into()) }
-    if !found.is_empty() { return Some(format!("KiCad is already installed: {found}")) }
+    if status == "ok" { return Some(format!("Backplane KiCad is already installed: {found}")) }
     let Some(p) = p else { return Some(format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path in Settings, CAD", this_computer())) };
     if !consent { return Some(format!("Installing needs your consent: it downloads Backplane KiCad {} from {FROM}. Press Install in Settings, CAD", p.version)) }
     None
@@ -173,8 +205,8 @@ async fn say(hub: &Arc<Hub>, state: &str, version: &str, note: &str) { hub.set_i
 /// `kicad.install {consent}`: refused, or started (the reply says so; the info key says the rest).
 pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
     if crate::copy::on() { return Err("a copy of the log installs nothing".into()) }
-    let found = super::ipc::runtime(hub).await.cli;
-    if let Some(why) = refusal(&found, consent, RUNNING.load(Ordering::SeqCst), package()) { return Err(why) }
+    let env = super::ipc::runtime(hub).await;
+    if let Some(why) = refusal(&env.cli, &env.status, consent, RUNNING.load(Ordering::SeqCst), package()) { return Err(why) }
     let p = package().expect("refusal checks the package");
     if RUNNING.swap(true, Ordering::SeqCst) { return Err("KiCad is being installed already".into()) }
     let parent = parent(&hub.cfg.home);
@@ -215,18 +247,44 @@ mod tests {
         assert_eq!(pick("linux", "aarch64"), None); assert_eq!(pick("macos", "x86_64"), None);
         for p in [&LINUX, &MAC, &WINDOWS] { assert_eq!(p.release, format!("backplane-kicad-v{}", p.version)); assert_eq!(p.asset, format!("backplane-kicad-{}-{}.{}", p.platform, p.version, p.format)); assert_eq!(p.sha256.len(), 64) }
     }
+    #[test] fn windows_installs_under_local_app_data_and_others_beside_the_home() {
+        let home = Path::new("/h/hub");
+        assert_eq!(managed_parent(true, Some(std::ffi::OsStr::new("C:\\Users\\Some Name\\AppData\\Local")), home), Path::new("C:\\Users\\Some Name\\AppData\\Local").join("Backplane").join("kicad"));
+        assert_eq!(managed_parent(true, None, home), home.join("kicad"), "no LOCALAPPDATA: beside the home");
+        assert_eq!(managed_parent(false, Some(std::ffi::OsStr::new("/x")), home), home.join("kicad"), "LOCALAPPDATA means nothing off Windows");
+    }
+    #[test] fn the_script_turns_a_windows_folder_into_a_shell_path_before_using_it() {
+        let (c, u) = (SCRIPT.find("cygpath -u \"$parent\"").expect("cygpath -u"), SCRIPT.find("dir=$parent/$version").unwrap());
+        assert!(c < u, "converted before the first use");
+        assert!(SCRIPT.contains("windows-*)"), "only on Windows");
+    }
     #[test] fn nothing_privileged_ever_runs() {
         for w in ["sudo", "pkexec", "doas", "apt", "dnf", "yum", "pacman", "zypper", "brew", "flatpak", "snap", "winget", "choco", "/usr", "/opt", "/Applications"] {
             assert!(!SCRIPT.split(|c: char| !(c.is_alphanumeric() || c == '/')).any(|t| t == w), "{w} in the script");
         }
     }
     #[test] fn refused_when_found_running_unpublished_or_without_consent() {
-        assert_eq!(refusal("/usr/bin/kicad-cli", true, false, Some(&LINUX)), Some("KiCad is already installed: /usr/bin/kicad-cli".into()));
-        assert_eq!(refusal("", true, true, Some(&LINUX)), Some("KiCad is being installed already".into()));
-        assert!(refusal("", true, false, None).unwrap().starts_with("No Backplane KiCad is published for this computer"));
-        let no = refusal("", false, false, Some(&LINUX)).unwrap();
+        assert_eq!(refusal("/k/bin/kicad-cli", "ok", true, false, Some(&LINUX)), Some("Backplane KiCad is already installed: /k/bin/kicad-cli".into()));
+        assert_eq!(refusal("", "missing", true, true, Some(&LINUX)), Some("KiCad is being installed already".into()));
+        assert!(refusal("", "missing", true, false, None).unwrap().starts_with("No Backplane KiCad is published for this computer"));
+        for s in ["stock", "old", "broken"] { assert_eq!(refusal("/usr/bin/kicad-cli", s, true, false, Some(&LINUX)), None, "{s}: the fork is installed beside it"); }
+        let no = refusal("", "missing", false, false, Some(&LINUX)).unwrap();
         assert!(no.starts_with("Installing needs your consent") && no.contains("10.99.0-bp.4") && no.contains(FROM), "{no}");
-        assert_eq!(refusal("", true, false, Some(&LINUX)), None);
+        assert_eq!(refusal("", "missing", true, false, Some(&LINUX)), None);
+    }
+    /// The decision setup makes for each computer and each KiCad it finds: (os, arch, status, install state) -> action.
+    #[test] fn setup_decides_by_computer_and_what_it_found() {
+        use Action::*;
+        let table: &[(&str, &str, &str, &str, Action)] = &[
+            ("linux", "x86_64", "missing", "", Auto), ("macos", "aarch64", "missing", "", Auto), ("windows", "x86_64", "missing", "", Auto),
+            ("linux", "x86_64", "ok", "", Nothing), ("macos", "aarch64", "ok", "done", Nothing), ("windows", "x86_64", "ok", "", Nothing),
+            ("linux", "x86_64", "stock", "", Offer), ("macos", "aarch64", "old", "", Offer), ("windows", "x86_64", "broken", "", Offer),
+            ("linux", "x86_64", "missing", "failed", Offer), ("linux", "x86_64", "missing", "running", Wait), ("linux", "x86_64", "stock", "running", Wait),
+            ("linux", "x86_64", "checking", "", Wait), ("linux", "x86_64", "", "", Wait),
+            ("linux", "aarch64", "missing", "", NoPackage), ("macos", "x86_64", "missing", "", NoPackage), ("linux", "aarch64", "stock", "", NoPackage), ("macos", "x86_64", "stock", "", NoPackage),
+            ("linux", "aarch64", "ok", "", Nothing), ("linux", "aarch64", "checking", "", Wait),
+        ];
+        for (os, arch, status, state, want) in table { assert_eq!(decide(pick(os, arch), status, state), *want, "{os} {arch} {status} {state}"); }
     }
 
     /// A disposable package for the real script: its archive and SHA256SUMS, served by a stand-in `curl` on PATH.
@@ -289,5 +347,62 @@ mod tests {
         exe(&s, "#!/bin/sh\necho done\n");
         let got = rt().block_on(run(Some(&s), &r.join("kicad"), &LINUX, &r.join("log"), |_| {}));
         assert!(got.unwrap_err().starts_with("the installer ended without"));
+    }
+
+    // ---- the real thing, for CI (windows-latest) and any machine with a network: `cargo test real_ -- --ignored --nocapture --test-threads=1` ----
+    /// A hub on a temp home whose "user folder" is a temp folder with a space in its name (so Windows' %LOCALAPPDATA% and the home hold one too).
+    async fn real_hub(name: &str) -> (Arc<Hub>, PathBuf) {
+        let root = std::env::temp_dir().join(format!("bp real {name} {}", std::process::id())); let _ = std::fs::remove_dir_all(&root);
+        let user = root.join("Some Name"); let local = user.join("AppData").join("Local"); std::fs::create_dir_all(&local).unwrap();
+        // SAFETY of the process env: these tests run one at a time (--test-threads=1) and nothing else reads them
+        for (k, v) in [("HOME", &user), ("USERPROFILE", &user), ("LOCALAPPDATA", &local), ("XDG_DATA_HOME", &user.join(".local/share"))] { std::env::set_var(k, v); }
+        std::env::set_var("BACKPLANE_KICAD_NO_SYSTEM", "1");
+        let home = root.join("hub home"); std::fs::create_dir_all(&home).unwrap();
+        let os = match std::env::consts::OS { "macos" => "darwin", o => o };
+        let arch = match std::env::consts::ARCH { "x86_64" => "x64", "aarch64" => "arm64", a => a };
+        let cfg = crate::hub::Cfg { home: home.clone(), version: "0.0.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: os.into(), arch: arch.into() };
+        (Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap(), root)
+    }
+    async fn wait_state(hub: &Arc<Hub>, key: &str, tool: Option<&str>, secs: u64) -> (String, String) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        loop {
+            let v: serde_json::Value = serde_json::from_str(hub.info_now()[key].as_str().unwrap_or("")).unwrap_or_default();
+            let v = match tool { Some(t) => v[t].clone(), None => v };
+            let (s, n) = (v["state"].as_str().unwrap_or("").to_string(), v["note"].as_str().unwrap_or("").to_string());
+            if s == "done" || s == "failed" || std::time::Instant::now() > end { return (s, n) }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+    /// kicad.install through the hub's own path with the real download and both checksums, then the hub reports status ok and the version.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)] #[ignore]
+    async fn real_kicad_install_ends_with_status_ok() {
+        let (hub, root) = real_hub("kicad").await;
+        super::super::ipc::publish_cad(&hub).await;
+        assert_eq!(hub.info_now()["kicad.status"], "missing", "a clean machine");
+        let p = package().expect("a package for this runner");
+        let parent = parent(&hub.cfg.home);
+        if cfg!(windows) { assert!(parent.to_string_lossy().contains("Some Name") && parent.ends_with("Backplane/kicad"), "{parent:?}"); }
+        install(&hub, true).await.expect("started");
+        let (state, note) = wait_state(&hub, "kicad.install", None, 25 * 60).await;
+        assert_eq!(state, "done", "{note}");
+        let info = hub.info_now();
+        assert_eq!(info["kicad.status"], "ok", "{info}"); assert_eq!(info["kicad.version"], p.version);
+        assert!(parent.join(p.version).join(p.cli).is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    /// Claude Code and Codex through setup's own installers; each then answers --version from where the hub looks for it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)] #[ignore]
+    async fn real_agent_installs_answer_version() {
+        let (hub, root) = real_hub("agents").await;
+        for tool in ["claude", "codex"] {
+            crate::settings::tools_install::start(&hub, tool, false, false, |_| Box::pin(async {})).await.expect("started");
+            let (state, note) = wait_state(&hub, "onboard.installs", Some(tool), 15 * 60).await;
+            assert_eq!(state, "done", "{tool}: {note}");
+            let found = crate::agents::proc::Cli::from_env().resolve(tool).unwrap_or_else(|e| panic!("{tool}: {e}"));
+            let out = std::process::Command::new(&found).arg("--version").output().unwrap();
+            assert!(out.status.success(), "{tool} --version at {found:?}: {}", String::from_utf8_lossy(&out.stderr));
+            println!("{tool}: {}", String::from_utf8_lossy(&out.stdout).trim());
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

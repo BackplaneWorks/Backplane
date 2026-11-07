@@ -71,6 +71,11 @@ pub const PLATFORMS: &[Platform] = &[
         path_fix: "Add ~/.local/bin to your PATH to run backplane from a terminal.", launcher: "backplane",
         kicad: &[("Homebrew", "brew install --cask kicad")], freecad: &[("Homebrew", "brew install --cask freecad")],
         kicad_names: &["kicad-cli"], kicad_places: &["/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"], freecad_names: &["freecadcmd", "FreeCADCmd"] },
+    Platform { id: "windows", name: "Windows",
+        installed: "Backplane runs from the folder where you unpacked it. Closing the window leaves the hub running, so agents finish their work. Windows may ask for permission once when a tool's own installer starts.",
+        path_fix: "Backplane is not on your PATH. Open it from its folder or the Start menu.", launcher: "backplane.exe",
+        kicad: &[("winget", "winget install --id KiCad.KiCad -e")], freecad: &[("winget", "winget install --id FreeCAD.FreeCAD -e")],
+        kicad_names: &["kicad-cli.exe"], kicad_places: &["C:\\Program Files\\KiCad\\10.0\\bin\\kicad-cli.exe", "C:\\Program Files\\KiCad\\9.0\\bin\\kicad-cli.exe"], freecad_names: &["FreeCADCmd.exe", "freecadcmd.exe"] },
 ];
 /// The entry for this hub's system; one with no entry yet reads the first.
 pub fn platform(os: &str) -> &'static Platform { PLATFORMS.iter().find(|p| p.id == os).unwrap_or(&PLATFORMS[0]) }
@@ -78,9 +83,9 @@ pub fn platform(os: &str) -> &'static Platform { PLATFORMS.iter().find(|p| p.id 
 /// An agent the setup looks for: how to install it per system (a system with no line follows the guide), where to read more, and how it signs in.
 pub struct Agent { pub id: &'static str, pub name: &'static str, pub install: &'static [(&'static str, &'static str)], pub guide: &'static str, pub sign_in: &'static str }
 pub const AGENTS: &[Agent] = &[
-    Agent { id: "claude", name: "Claude Code", install: &[("linux", "curl -fsSL https://claude.ai/install.sh | bash"), ("darwin", "curl -fsSL https://claude.ai/install.sh | bash")], guide: "https://code.claude.com/docs/en/setup", sign_in: "" },
-    Agent { id: "codex", name: "Codex", install: &[("linux", "npm install -g @openai/codex"), ("darwin", "npm install -g @openai/codex")], guide: "https://developers.openai.com/codex/cli", sign_in: "" },
-    Agent { id: "grok", name: "Grok Build", install: &[("linux", "curl -fsSL https://x.ai/cli/install.sh | bash"), ("darwin", "curl -fsSL https://x.ai/cli/install.sh | bash")], guide: "https://x.ai/cli", sign_in: "grok login" },
+    Agent { id: "claude", name: "Claude Code", install: &[("linux", "curl -fsSL https://claude.ai/install.sh | bash"), ("darwin", "curl -fsSL https://claude.ai/install.sh | bash"), ("windows", "irm https://claude.ai/install.ps1 | iex")], guide: "https://code.claude.com/docs/en/setup", sign_in: "" },
+    Agent { id: "codex", name: "Codex", install: &[], guide: "https://developers.openai.com/codex/cli", sign_in: "" },
+    Agent { id: "grok", name: "Grok Build", install: &[("linux", "curl -fsSL https://x.ai/cli/install.sh | bash"), ("darwin", "curl -fsSL https://x.ai/cli/install.sh | bash"), ("windows", "irm https://x.ai/cli/install.ps1 | iex")], guide: "https://x.ai/cli", sign_in: "grok login" },
     Agent { id: "muse", name: "Muse Code", install: &[], guide: "https://dev.meta.ai/docs/muse-code/auth", sign_in: "muse login" },
     Agent { id: "opencode", name: "OpenCode", install: &[], guide: "https://opencode.ai", sign_in: "opencode auth login" },
     Agent { id: "pi", name: "Pi", install: &[], guide: "https://pi.dev", sign_in: "pi, then /login" },
@@ -89,14 +94,29 @@ pub const AGENTS: &[Agent] = &[
 fn install_cmd<'a>(a: &'a Agent, os: &str) -> &'a str { a.install.iter().find(|(p, _)| *p == os).map_or("", |(_, c)| *c) }
 
 /// What the checks found, and the state's own answers.
-struct Facts<'a> { st: &'a State, info: &'a Value, os: String, home: String, listen: String, exe: String, on_path: String, checks: Value, checked: bool, tailscale: String, peers: usize, devices: usize, version: String, machines: Value, update: String }
+struct Facts<'a> { st: &'a State, info: &'a Value, os: String, home: String, listen: String, exe: String, on_path: String, checks: Value, checked: bool, tailscale: String, peers: usize, devices: usize, version: String, machines: Value, installs: Value, arch: String, update: String }
 impl<'a> Facts<'a> {
     fn of(st: &'a State, info: &'a Value) -> Facts<'a> {
         let checks: Value = st.settings.get("onboard.checks").and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
         let tailscale = { let t = s(&checks, "tailscale"); if t.is_empty() { s(info, "tailscale").to_string() } else { t.to_string() } };
         let peers = st.settings.keys().filter(|k| k.starts_with("peer.own.")).count();
         Facts { st, info, os: { let o = s(info, "os"); if o.is_empty() { "linux".into() } else { o.to_string() } }, home: s(info, "home").into(), listen: s(info, "listen").into(), exe: s(&checks, "exe").into(), on_path: s(&checks, "onPath").into(),
-            checked: checks.is_object(), tailscale, peers, devices: checks["devices"].as_u64().unwrap_or(0) as usize, version: super::settings::version().to_string(), machines: info["machines"].clone(), update: s(info, "update").into(), checks }
+            checked: checks.is_object(), tailscale, peers, devices: checks["devices"].as_u64().unwrap_or(0) as usize, version: super::settings::version().to_string(), machines: info["machines"].clone(), installs: serde_json::from_str(s(info, "onboard.installs")).unwrap_or(Value::Null), arch: s(info, "arch").into(), update: s(info, "update").into(), checks }
+    }
+    /// The rows for a tool that lives outside Backplane: its Install button (or page), how an install is going, and a retry. `tools_install::plan` decides.
+    fn install_rows(&self, tool: &str, label: &str) -> Vec<Value> {
+        use crate::settings::tools_install::{plan, Plan};
+        let st = &self.installs[tool];
+        let page = |p: &Option<Plan>| match p { Some(Plan::Link(u)) => Some(link("Download", u)), _ => None };
+        let p = plan(tool, &self.os, &self.arch, self.checks["winget"] == true, self.checks["node"] == true);
+        match (s(st, "state"), &p) {
+            ("running", _) => vec![row(&format!("Installing {label}"), if s(st, "note").is_empty() { "Starting." } else { s(st, "note") }, vec![])],
+            ("failed", _) => { let mut b = vec![btn("Try again", "ob-install", tool, true)]; b.extend(page(&p)); let mut r = row(&format!("{label} did not install"), &format!("{}.", s(st, "note").trim_end_matches('.')), b); r["tone"] = json!("warn"); vec![r] }
+            (_, Some(Plan::Winget(_))) => vec![row(&format!("Install {label}"), "Installs with winget. Windows may ask for permission once.", vec![btn("Install", "ob-install", tool, true)])],
+            (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) => vec![row(&format!("Install {label}"), &format!("Downloads and runs {}.", if tool == "codex" { "Codex's own release, checked against its published checksum" } else { "its vendor's own installer" }), vec![btn("Install", "ob-install", tool, true)])],
+            (_, Some(Plan::Link(u))) => vec![row(&format!("Get {label}"), "Opens its download page.", vec![link("Download", u)])],
+            (_, None) => vec![],
+        }
     }
     fn agent(&self, id: &str) -> &Value { &self.checks["agents"][id] }
     fn found(&self, id: &str) -> bool { !s(self.agent(id), "path").is_empty() }
@@ -154,9 +174,11 @@ fn agent_note(f: &Facts, a: &Agent) -> String {
     } else if !f.checked { looking(f).to_string() } else { "Not installed.".to_string() }
 }
 fn agent_rows(f: &Facts, a: &Agent) -> Vec<Value> {
-    let mut r = vec![row(a.name, &agent_note(f, a), vec![link("Guide", a.guide)])];
-    let cmd = install_cmd(a, &f.os);
-    if !f.found(a.id) && f.checked { r.push(if cmd.is_empty() { row("Install", &format!("Follow the guide, then make sure {} is on your PATH.", a.id), vec![]) } else { row("Install", cmd, vec![copy(cmd)]) }); }
+    let mut r = vec![row(a.name, &agent_note(f, a), vec![link("Install guide", a.guide)])];
+    if !f.found(a.id) && f.checked {
+        let rows = f.install_rows(a.id, a.name);
+        if !rows.is_empty() { r.extend(rows); let cmd = install_cmd(a, &f.os); if !cmd.is_empty() { r.push(row("Or in a terminal", cmd, vec![copy(cmd)])); } } else { r.push(row("Install", &format!("No install button yet. Follow the guide, then make sure {} is on your PATH.", a.id), vec![])) }
+    }
     r
 }
 
@@ -199,38 +221,64 @@ fn tool_note(f: &Facts, tool: &str, name: &str) -> String {
     else if !s(t, "path").is_empty() { format!("Found at {}, but it does not run: {}.", s(t, "path"), s(t, "why")) }
     else if f.checked { format!("{name} was not found.") } else { looking(f).to_string() }
 }
-/// What the KiCad found means for editing a board in a running KiCad (info `kicad.status`: ok, old, stock, broken, missing).
-fn live_note(ipc: &str, status: &str) -> String {
-    if ipc == "off" { return "Off in Settings, CAD. Agents edit the files.".into() }
-    match status {
-        "ok" => "Backplane KiCad is installed. Agents can edit a board in a running KiCad.",
-        "old" => "This Backplane KiCad is too old. Download the newest, then press Check again.",
-        "stock" => "This is stock KiCad, so agents edit the files. Download Backplane KiCad for live edits, then use Locate it below if it is not found.",
-        "missing" | "broken" => "Not available until a KiCad runs here.",
-        _ => "Checking this machine.",
-    }.into()
-}
-fn kicad(f: &Facts, st: &State, session: &Value, c: &Client) -> Step {
-    let done = f.runs("kicad");
-    if c.phone { return Step { id: "kicad", group: "CAD tools", title: "KiCad".into(), body: "KiCad runs on the computer that runs the hub. This phone shows boards and schematics the hub draws.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
-    let body = "Agents use KiCad to read, change and check boards and schematics. Backplane draws boards itself, but it needs kicad-cli to plot and export them, and KiCad 9 or later works for that. For live edits in a running KiCad, agents need Backplane KiCad, our build of KiCad with an editing API. Stock KiCad works too, and agents then edit the files. With no KiCad found, Install KiCad below downloads Backplane KiCad for you.".to_string();
+/// Where Backplane KiCad's releases are: the fallback when the install cannot run here.
+pub const KICAD_RELEASES: &str = "https://github.com/i2cjak/Backplane_KiCad/releases";
+pub const APK_RELEASES: &str = "https://github.com/BackplaneWorks/Backplane/releases/latest";
+pub const IOS_GUIDE: &str = "https://github.com/BackplaneWorks/Backplane/blob/main/docs/install.md#phones";
+pub const TS_IOS: &str = "https://apps.apple.com/app/tailscale/id1470499037";
+pub const TS_ANDROID: &str = "https://play.google.com/store/apps/details?id=com.tailscale.ipn";
+pub const KICAD_STOCK: &str = "https://www.kicad.org/download/";
+fn kicad(f: &Facts, st: &State, session: &Value, c: &Client) -> Step { kicad_with(f, st, session, c, crate::files::kicad::install::package()) }
+/// The KiCad step for a computer with this package (None: none is published for it). What happens is `install::decide`'s; the hub starts the
+/// `Auto` install itself (`settings/onboard.rs`), this only says how it goes: progress from info `kicad.install`, status and version from the checks.
+fn kicad_with(f: &Facts, st: &State, session: &Value, c: &Client, pkg: Option<&crate::files::kicad::install::Package>) -> Step {
+    use crate::files::kicad::install::{decide, Action};
+    let i = |k: &str| s(f.info, k);
+    let (status, version) = (i("kicad.status"), i("kicad.version"));
+    let prog: Value = serde_json::from_str(i("kicad.install")).unwrap_or_default();
+    let (pstate, note) = (s(&prog, "state"), s(&prog, "note"));
+    let action = decide(pkg, status, pstate);
+    let done = f.runs("kicad") || matches!(status, "ok" | "stock" | "old");
+    if c.phone { return Step { id: "kicad", group: "CAD tools", title: "KiCad".into(), body: "KiCad runs on the computer that runs the hub, and the hub installs Backplane KiCad there by itself. This phone shows boards and schematics the hub draws.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
+    let body = "Agents use KiCad to read, change and check boards and schematics. Backplane draws boards itself, but it needs kicad-cli to plot and export them. Backplane KiCad is our build of KiCad with an editing API, so agents can edit a board in a running KiCad. Setup downloads it for you when no KiCad is found: it checks the download against its checksum and installs it in Backplane's own folder, with no administrator password. Stock KiCad 9 or later works for viewing and export.".to_string();
     let path = if session["drafts"]["@f.obkicad"].is_string() { draft(session, "@f.obkicad").to_string() } else { set(st, "kicad.path").to_string() };
-    let mut rows = vec![row("KiCad", &tool_note(f, "kicad", "KiCad"), vec![link("Download", "https://www.kicad.org/download/")])];
-    // none found: the same Install row as Settings, CAD (consent, progress, Try again); its presses are Settings' own
-    if !done { if let Some(r) = super::settings::install_row(session, f.info, crate::files::kicad::install::package()) { rows.push(r); } }
-    if !done && f.checked { for (name, cmd) in platform(&f.os).kicad { rows.push(row(name, cmd, vec![copy(cmd)])); } }
-    rows.push(row("Live editing", &live_note(set(f.st, "kicad.ipc"), s(f.info, "kicad.status")), vec![link("Get Backplane KiCad", "https://github.com/BackplaneWorks/Backplane_KiCad/releases")]));
+    let mut rows = vec![];
+    let version_of = |v: &str| if v.is_empty() { String::new() } else { format!(" {v}") };
+    let fork = match action {
+        Action::Nothing => row("Backplane KiCad", &format!("Status ok. Backplane KiCad{} runs from {}. Agents can edit a board in a running KiCad.", version_of(version), i("kicad.cli")), vec![]),
+        Action::Wait if pstate == "running" => row(&format!("Installing Backplane KiCad{}", version_of(s(&prog, "version"))), if note.is_empty() { "Starting." } else { note }, vec![]),
+        Action::Wait => row("Backplane KiCad", "Checking this machine.", vec![link("Releases", KICAD_RELEASES)]),
+        Action::Auto => row("Backplane KiCad", &format!("Starting the download of Backplane KiCad {}. This takes a few minutes.", pkg.map_or("", |p| p.version)), vec![link("Releases", KICAD_RELEASES)]),
+        Action::Offer if pstate == "failed" => { let mut r = row("Backplane KiCad", &format!("{note}."), vec![btn("Try again", "ob-kicad-install", "", true), link("Releases", KICAD_RELEASES)]); r["tone"] = json!("warn"); r }
+        Action::Offer => row("Backplane KiCad", &format!("{} Backplane KiCad adds editing: agents change a board in a running KiCad. Install it beside this one in one press, or keep what you have.", offer_lead(status, version)),
+            vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true), link("Releases", KICAD_RELEASES)]),
+        Action::NoPackage => row("Backplane KiCad", &format!("No Backplane KiCad is published for this computer ({}). Install stock KiCad below, or set the path of a Backplane KiCad you have.", crate::files::kicad::install::this_computer()), vec![link("Releases", KICAD_RELEASES)]),
+    };
+    rows.push(fork);
+    let found = if i("kicad.cli").is_empty() { tool_note(f, "kicad", "KiCad") } else { format!("{} {} at {}.", if status == "stock" { "Stock KiCad" } else { "KiCad" }, version, i("kicad.cli")).replace("  ", " ") };
+    rows.push(row("KiCad found", &found, vec![]));
+    if matches!(action, Action::NoPackage) && !done && f.checked { for (name, cmd) in platform(&f.os).kicad { rows.push(row(name, cmd, vec![copy(cmd)])); } }
+    if matches!(action, Action::NoPackage) { rows.push(row("Stock KiCad", "Works for viewing and export. Agents then edit the files.", vec![link("Download KiCad", KICAD_STOCK)])); }
     let mut located = row("Locate it", "If KiCad is somewhere else, give the full path to kicad-cli.", vec![btn("Use this path", "ob-kicad", "", false), btn("Check again", "ob-check", "", false)]);
     located["fields"] = json!([{"name": "obkicad", "hint": "Path to kicad-cli", "secret": false, "value": path}]);
     rows.push(located);
     Step { id: "kicad", group: "CAD tools", title: "KiCad".into(), body, rows, choices: vec![], panel: "", done, task: true }
+}
+fn offer_lead(status: &str, version: &str) -> String {
+    let v = if version.is_empty() { String::new() } else { format!(" {version}") };
+    match status {
+        "stock" => format!("Stock KiCad{v} works for viewing and export."),
+        "old" => format!("The Backplane KiCad{v} found is too old for editing."),
+        _ => format!("The KiCad found{v} does not run."),
+    }
 }
 fn freecad(f: &Facts, st: &State, session: &Value, c: &Client) -> Step {
     let done = f.runs("freecad");
     if c.phone { return Step { id: "freecad", group: "CAD tools", title: "FreeCAD".into(), body: "FreeCAD runs on the computer that runs the hub. This phone shows the parts it makes.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
     let body = "Agents use FreeCAD to model enclosures, brackets and other parts. Skip this step if you only design boards. To check it, Backplane runs FreeCAD's console program and asks for its version.".to_string();
     let path = if session["drafts"]["@f.obfreecad"].is_string() { draft(session, "@f.obfreecad").to_string() } else { set(st, "freecad.path").to_string() };
-    let mut rows = vec![row("FreeCAD", &tool_note(f, "freecad", "FreeCAD"), vec![link("Download", "https://www.freecad.org/downloads.php")])];
+    let mut rows = vec![row("FreeCAD", &tool_note(f, "freecad", "FreeCAD"), vec![])];
+    if !done && f.checked { rows.extend(f.install_rows("freecad", "FreeCAD")); }
     if !done && f.checked { for (name, cmd) in platform(&f.os).freecad { rows.push(row(name, cmd, vec![copy(cmd)])); } }
     let mut located = row("Locate it", "If FreeCAD is somewhere else, give the full path to freecadcmd.", vec![btn("Use this path", "ob-freecad", "", false), btn("Check again", "ob-check", "", false)]);
     located["fields"] = json!([{"name": "obfreecad", "hint": "Path to freecadcmd", "secret": false, "value": path}]);
@@ -241,14 +289,20 @@ fn freecad(f: &Facts, st: &State, session: &Value, c: &Client) -> Step {
 /// The warning for a code that names only this computer (the Machines page's code row, `code.address`).
 pub const LOCAL_CODE: &str = "This code names only this computer (127.0.0.1): another computer cannot reach it. Start the hub with Tailscale on, or set BACKPLANE_URL to an address the other machine can reach, then make a new code.";
 
+/// The phones' links to their own Tailscale install: the store of their system, or both when the app did not say.
+fn phone_ts(c: &Client) -> Vec<Value> {
+    let (ios, android) = (choice("Tailscale on the App Store", "open-url", TS_IOS), choice("Tailscale on Google Play", "open-url", TS_ANDROID));
+    match c.os.as_str() { "ios" => vec![ios], "android" => vec![android], _ => vec![ios, android] }
+}
 fn machine(f: &Facts, session: &Value, c: &Client) -> Step {
     let paired = f.machines["linked"].as_array().into_iter().flatten().filter(|l| l["state"] == "paired").count();
     let done = paired > 0 || f.peers > 0;
-    if c.phone { return Step { id: "machine", group: "Devices", title: "Another machine".into(), body: "Each computer runs its own hub. Hubs link only after you pair them with a code and approve the request, in Settings, Machines on a computer. Linked hubs show each other's projects and threads, and a linked machine appears in the list on this phone too. The phone's Settings, Hubs lists the hubs it is paired with.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
+    if c.phone { return Step { id: "machine", group: "Devices", title: "Another machine".into(), body: "Each computer runs its own hub. Hubs link only after you pair them with a code and approve the request, in Settings, Machines on a computer. Linked hubs show each other's projects and threads, and a linked machine appears in the list on this phone too. The phone's Settings, Hubs lists the hubs it is paired with.".into(), rows: vec![], choices: phone_ts(c), panel: "", done, task: false } }
     let on = matches!(f.tailscale.as_str(), "on" | "reachable");
     let body = "Each computer you use runs its own hub. Linked hubs show each other's projects and threads in one sidebar, and work stays on the computer that owns it. Hubs never link by themselves, even on one Tailscale account. To link two: make a code here, enter it with this address on the other computer, then approve its request here. You can also run backplane pair --machine over ssh. Both computers need a network route to each other, usually Tailscale. A code works once, for ten minutes. To look at another hub without linking, use the hub list at the top of the sidebar or Settings, Hubs.".to_string();
     let ts_note = if on { "On. This hub listens on your tailnet." } else if f.tailscale == "off" { "Off. This hub started with --no-tailscale." } else { "Not connected. Sign in to Tailscale, then restart Backplane." };
-    let mut rows = vec![row("Tailscale", ts_note, vec![link("Get Tailscale", "https://tailscale.com/download")])];
+    let mut rows = vec![row("Tailscale", ts_note, vec![])];
+    if !on { rows.extend(f.install_rows("tailscale", "Tailscale")); }
     if f.machines.is_object() {
         let draft_of = |k: &str| draft(session, &format!("@f.{k}")).to_string();
         rows.extend(crate::net::machinespage::rows(&f.machines, &draft_of));
@@ -259,7 +313,7 @@ fn machine(f: &Facts, session: &Value, c: &Client) -> Step {
 
 fn phone(f: &Facts, session: &Value, c: &Client) -> Step {
     let done = f.devices > 0;
-    if c.phone { return Step { id: "phone", group: "Devices", title: "This phone".into(), body: "This phone is paired. To add another device, open Settings, Devices, Add a device on the computer that runs the hub.".into(), rows: vec![], choices: vec![], panel: "", done: true, task: false } }
+    if c.phone { return Step { id: "phone", group: "Devices", title: "This phone".into(), body: "This phone is paired. To add another device, open Settings, Devices, Add a device on the computer that runs the hub.".into(), rows: vec![], choices: [phone_ts(c), vec![choice("Android app on the release page", "open-url", APK_RELEASES), choice("iPhone app: install guide", "open-url", IOS_GUIDE)]].concat(), panel: "", done: true, task: false } }
     let body = "Install the Backplane app: iOS through TestFlight, Android from the signed file on the release page. Then scan the QR code with the app, or type the short code and this hub's address. Each invitation works once, for ten minutes. The phone needs a network route to this hub, usually Tailscale on the same tailnet. Treat the QR code and the link as passwords.".to_string();
     let inv: Value = serde_json::from_str(draft(session, "@invite")).unwrap_or(Value::Null);
     let mut rows = vec![];
@@ -271,6 +325,9 @@ fn phone(f: &Facts, session: &Value, c: &Client) -> Step {
         if inv["localOnly"] == true { let mut w = row("Only this computer", super::settings::LOCAL_DEVICE, vec![]); w["tone"] = json!("warn"); rows.push(w); }
     } else if let Some(e) = inv["error"].as_str() { rows.push(row("Add a device", &format!("Backplane could not make an invitation: {e}."), vec![btn("Try again", "device-invite", "", false)])); }
     else { rows.push(row("Add a device", "Makes a QR code, a link and a short code for one device.", vec![btn("Show the QR code", "device-invite", "", true)])); }
+    rows.push(row("Android app", "The signed file on the release page. Open it on the phone and allow the install.", vec![link("Download the APK", APK_RELEASES)]));
+    rows.push(row("iPhone app", "Installed through a TestFlight invitation. The install guide says how to get one.", vec![link("Install guide", IOS_GUIDE)]));
+    rows.push(row("Tailscale on the phone", "The phone and this computer need to reach each other, usually on one tailnet.", vec![link("App Store", TS_IOS), link("Google Play", TS_ANDROID)]));
     rows.push(row("Paired devices", &if f.devices == 0 { "None yet.".to_string() } else { format!("{} paired. Settings, Devices lists and revokes them.", f.devices) }, vec![btn("Check again", "ob-check", "", false)]));
     Step { id: "phone", group: "Devices", title: "A phone".into(), body, rows, choices: vec![], panel: "", done, task: true }
 }
@@ -500,10 +557,12 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         // Settings, Developer: setup's progress forgotten, opened at the first step as on a new hub
         "ob-replay" => {
             let first = steps[0].id;
-            for (k, v) in [("onboard.done", ""), ("onboard.skipped", ""), ("onboard.seen", ""), ("onboard.step", first)] { put(hub, &mut rid, &mut cmds, k, v); }
+            for (k, v) in [("onboard.done", ""), ("onboard.skipped", ""), ("onboard.seen", ""), ("onboard.kicad.auto", ""), ("onboard.step", first)] { put(hub, &mut rid, &mut cmds, k, v); }
             send(hub, &mut rid, &mut cmds, "onboard.check", json!({}));
             json!({"drafts": {"@ob.open": "1", "@ob.closed": "", "@ob.step": first}, "open": {"settings": false}})
         }
+        "ob-install" => { if value.is_empty() { return None } send(hub, &mut rid, &mut cmds, "onboard.install", json!({"tool": value})); json!({}) }
+        "ob-kicad-install" => { send(hub, &mut rid, &mut cmds, "kicad.install", json!({"consent": true})); json!({}) }
         "ob-check" => { send(hub, &mut rid, &mut cmds, "onboard.check", json!({})); json!({}) }
         "ob-usage" => {
             if value != "on" && value != "off" { return None }
@@ -556,6 +615,7 @@ mod tests {
     /// A state whose checks found `checks`, with these settings.
     fn cst(checks: Value, kv: &[(&str, &str)]) -> State { let mut x = st(kv); x.settings.insert("onboard.checks".into(), checks.to_string()); x }
     fn blank() -> Value { json!({"exe": "/opt/bp/backplane-hub", "onPath": "", "agents": {}, "accounts": {}, "kicad": {}, "freecad": {}, "devices": 0, "tailscale": "off"}) }
+    fn s_(v: &Value, k: &str) -> String { s(v, k).to_string() }
     fn ids(v: &Value) -> Vec<String> { v["steps"].as_array().unwrap().iter().map(|x| s(x, "id").to_string()).collect() }
     fn at(st_: &State, id: &str, i: &Value, c: &Client) -> Value { page(st_, &sess(json!({"@ob.step": id})), i, c, "/h") }
     fn setting_of(o: &Out, key: &str) -> Option<String> { o.cmds.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).find(|v| v["m"] == "setting.set" && v["p"]["key"] == key).map(|v| s(&v["p"], "value").to_string()) }
@@ -592,17 +652,77 @@ mod tests {
         assert_eq!(at(&s0, "machine", &blank_i, &desk())["state"], "todo", "no pairing data yet: not done, not a dead end");
         assert!(at(&s0, "machine", &blank_i, &phone_c())["body"].as_str().unwrap().contains("Settings, Machines"));
     }
-    /// What the step says about KiCad follows what the hub found.
-    #[test] fn the_kicad_step_says_what_live_editing_needs() {
-        let live = |status: &str, ipc: &str| { let mut i = info("linux"); i["kicad.status"] = json!(status); let p = at(&cst(blank(), &[("kicad.ipc", ipc)]), "kicad", &i, &desk()); p["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Live editing").unwrap()["note"].as_str().unwrap().to_string() };
-        assert!(live("ok", "on").contains("installed") && live("stock", "on").contains("stock KiCad") && live("old", "on").contains("too old") && live("missing", "on").contains("until a KiCad runs"));
-        assert!(live("ok", "off").contains("Settings, CAD"));
-        let mut none = info("linux"); none["kicad.status"] = json!("missing");
-        let q = at(&cst(blank(), &[]), "kicad", &none, &desk());
-        assert!(q["rows"].as_array().unwrap().iter().any(|r| r["label"] == "Install KiCad"), "no KiCad found: the same Install row as Settings, CAD");
-        let p = at(&cst(blank(), &[]), "kicad", &info("linux"), &desk());
-        assert!(p["body"].as_str().unwrap().contains("Backplane KiCad"));
-        assert!(p["rows"].as_array().unwrap().iter().any(|r| r["buttons"].as_array().unwrap().iter().any(|b| s(b, "value").contains("Backplane_KiCad"))));
+    /// What the KiCad step does for each computer and each KiCad found: the same decision `install::decide` is tested on, as the person sees it.
+    #[test] fn the_kicad_step_installs_offers_or_explains_by_what_was_found() {
+        use crate::files::kicad::install::{pick, LINUX};
+        let step = |os: &str, arch: &str, status: &str, ins: Option<&str>| {
+            let mut i = info(os); i["kicad.status"] = json!(status);
+            if status != "missing" { i["kicad.cli"] = json!("/k/bin/kicad-cli"); i["kicad.version"] = json!(if status == "ok" { "10.99.0-bp.4" } else { "10.0.6" }); }
+            if let Some(s) = ins { i["kicad.install"] = json!(s); }
+            let s0 = cst(blank(), &[]);
+            kicad_with(&Facts::of(&s0, &i), &s0, &sess(json!({})), &desk(), pick(os, arch))
+        };
+        let row = |s: &Step, l: &str| s.rows.iter().find(|r| r["label"].as_str().unwrap().starts_with(l)).cloned().unwrap_or_else(|| panic!("no {l} row in {:?}", s.rows));
+        let actions = |s: &Step| -> Vec<String> { s.rows.iter().flat_map(|r| r["buttons"].as_array().into_iter().flatten()).map(|b| s_(b, "action")).collect() };
+        // nothing found, a package: the hub starts it, the step shows it start, then progress, then ok with the version
+        let a = step("linux", "x86_64", "missing", None); assert!(row(&a, "Backplane KiCad")["note"].as_str().unwrap().contains("Starting the download of Backplane KiCad 10.99.0-bp.4"));
+        assert!(!actions(&a).contains(&"ob-kicad-install".to_string()), "no button to press: it starts by itself");
+        let r = step("windows", "x86_64", "missing", Some(r#"{"state":"running","version":"10.99.0-bp.6","note":"Unpacking"}"#)); assert_eq!(row(&r, "Installing Backplane KiCad 10.99.0-bp.6")["note"], "Unpacking");
+        let ok = step("linux", "x86_64", "ok", Some(r#"{"state":"done","version":"10.99.0-bp.4","note":"x"}"#)); assert!(ok.done); let n = row(&ok, "Backplane KiCad")["note"].as_str().unwrap().to_string(); assert!(n.contains("Status ok") && n.contains("10.99.0-bp.4"), "{n}");
+        // failed: a reason and one retry, never an automatic loop
+        let bad = step("linux", "x86_64", "missing", Some(r#"{"state":"failed","note":"KiCad install failed: KiCad archive checksum mismatch"}"#)); assert!(actions(&bad).contains(&"ob-kicad-install".to_string()) && row(&bad, "Backplane KiCad")["note"].as_str().unwrap().contains("checksum mismatch"));
+        // stock KiCad: works, and one press installs the fork beside it
+        let stock = step("macos", "aarch64", "stock", None); assert!(stock.done); let n = row(&stock, "Backplane KiCad")["note"].as_str().unwrap().to_string();
+        assert!(n.contains("works for viewing and export") && n.contains("adds editing"), "{n}"); assert!(actions(&stock).contains(&"ob-kicad-install".to_string()));
+        // no package: say so, the path field, the stock download
+        let none = step("linux", "aarch64", "missing", None); assert!(row(&none, "Backplane KiCad")["note"].as_str().unwrap().contains("No Backplane KiCad is published for this computer"));
+        assert!(row(&none, "Locate it")["fields"][0]["name"] == "obkicad" && row(&none, "Stock KiCad").to_string().contains("kicad.org"));
+        // the release page is always one press away when an install is not
+        for x in [&a, &bad, &stock, &none] { assert!(x.rows.iter().any(|r| r["buttons"].as_array().into_iter().flatten().any(|b| s_(b, "value") == KICAD_RELEASES)), "release page link"); }
+        assert!(LINUX.version.contains("bp."));
+    }
+    /// Every URL a step can show, on each system and for desktop and phone.
+    fn all_urls() -> Vec<String> {
+        fn walk(v: &Value, out: &mut Vec<String>) { match v { Value::String(t) if t.starts_with("https://") && !t.contains(' ') => out.push(t.clone()), Value::Array(a) => a.iter().for_each(|x| walk(x, out)), Value::Object(o) => o.values().for_each(|x| walk(x, out)), _ => {} } }
+        let mut out = vec![];
+        for os in ["linux", "darwin", "windows"] { for c in [desk(), phone_c(), Client { phone: true, os: "ios".into(), launcher: false }] { for winget in [false, true] {
+            let mut ch = blank(); ch["winget"] = json!(winget);
+            let (s0, mut i) = (cst(ch, &[]), info(os)); i["arch"] = json!("x64");
+            for id in ids(&at(&s0, "welcome", &i, &c)) { walk(&at(&s0, &id, &i, &c), &mut out); }
+            i["kicad.status"] = json!("stock"); walk(&at(&s0, "kicad", &i, &c), &mut out);
+        } } }
+        out.sort(); out.dedup(); out
+    }
+    /// Everything that lives outside Backplane has a button or a page, on each system, and the phones' links are choices they decode.
+    #[test] fn every_step_that_needs_something_outside_backplane_links_or_installs_it() {
+        for os in ["linux", "darwin", "windows"] {
+            let (s0, mut i) = (cst(blank(), &[]), info(os)); i["arch"] = json!("x64");
+            let has = |id: &str, what: &dyn Fn(&Value) -> bool| { let p = at(&s0, id, &i, &desk()); assert!(p["rows"].as_array().unwrap().iter().flat_map(|r| r["buttons"].as_array().into_iter().flatten()).any(|b| what(b)), "{os}: {id} has no link or install button: {p}"); };
+            let any = |b: &Value| matches!(s(b, "action"), "open-url" | "ob-install" | "ob-kicad-install");
+            for id in ["claude", "codex", "freecad", "machine", "phone"] { has(id, &any); }
+            let o = at(&s0, "others", &i, &desk()); assert!(o.to_string().contains("ob-install") == (os != "windows") || o.to_string().contains("ob-install"), "grok installs on {os}");
+            has("kicad", &|b| s(b, "value") == KICAD_RELEASES);
+        }
+        let ob = |os: &str, id: &str, tool: &str| { let mut i = info(os); i["arch"] = json!("x64"); at(&cst(blank(), &[]), id, &i, &desk())["rows"].to_string().contains(&format!("\"ob-install\",\"value\":\"{tool}\"")) };
+        for os in ["linux", "darwin", "windows"] { assert!(ob(os, "claude", "claude") && ob(os, "codex", "codex") && ob(os, "others", "grok"), "{os}"); }
+        // Windows: winget buttons only when the checks found winget, the download page otherwise
+        let w = |winget: bool| { let mut ch = blank(); ch["winget"] = json!(winget); let mut i = info("windows"); i["arch"] = json!("x64"); at(&cst(ch, &[]), "freecad", &i, &desk())["rows"].to_string() };
+        assert!(w(true).contains("\"ob-install\",\"value\":\"freecad\"") && w(true).contains("winget")); assert!(!w(false).contains("ob-install") && w(false).contains("freecad.org"));
+        // the phones decode choices: Tailscale for their own system, the APK and the iPhone guide
+        let phone_ios = Client { phone: true, os: "ios".into(), launcher: false };
+        let m = at(&cst(blank(), &[]), "machine", &info("linux"), &phone_ios); let c = m["choices"].as_array().unwrap(); assert_eq!(c.len(), 1); assert_eq!((s(&c[0], "action"), s(&c[0], "value")), ("open-url", TS_IOS));
+        let m = at(&cst(blank(), &[]), "machine", &info("linux"), &phone_c()); assert_eq!(m["choices"].as_array().unwrap().len(), 2, "both stores when the app did not say");
+        let p = at(&cst(blank(), &[]), "phone", &info("linux"), &phone_c()); assert!(p["choices"].to_string().contains(APK_RELEASES) && p["choices"].to_string().contains(IOS_GUIDE));
+        assert!(all_urls().iter().all(|u| u.starts_with("https://")));
+    }
+    /// Run by hand or in CI with network: `cargo test links_are_live -- --ignored`. Every URL a step shows answers.
+    #[test] #[ignore] fn links_are_live() {
+        let mut bad = vec![];
+        for u in all_urls() {
+            let o = std::process::Command::new("curl").args(["-s", "-o", "/dev/null", "-L", "--max-time", "30", "-A", "Mozilla/5.0 (X11; Linux x86_64) Chrome/120", "-w", "%{http_code}", &u]).output().unwrap();
+            let code = String::from_utf8_lossy(&o.stdout).to_string(); if !code.starts_with('2') { bad.push(format!("{code} {u}")); }
+        }
+        assert!(bad.is_empty(), "{bad:?}");
     }
     /// No internal word reaches a new person, and the Settings tour names every Settings page.
     #[test] fn no_internal_words_and_the_settings_step_lists_every_page() {
@@ -643,7 +763,7 @@ mod tests {
     #[test] fn a_step_the_checks_find_done_is_done_and_says_next() {
         let mut c = blank(); c["kicad"] = json!({"path": "/usr/bin/kicad-cli", "version": "10.0.7", "runs": true}); c["agents"]["claude"] = json!({"path": "/x/claude", "version": "2.1", "signed": "yes", "who": "a@b.c"});
         let (i, s0) = (info("linux"), cst(c, &[]));
-        let p = at(&s0, "kicad", &i, &desk()); assert_eq!(p["next"], "Next"); assert_eq!(p["state"], "done"); assert!(p["rows"][0]["note"].as_str().unwrap().contains("10.0.7"));
+        let p = at(&s0, "kicad", &i, &desk()); assert_eq!(p["next"], "Next"); assert_eq!(p["state"], "done"); assert!(p["rows"].as_array().unwrap().iter().any(|r| r["label"] == "KiCad found" && r["note"].as_str().unwrap().contains("10.0.7")));
         assert_eq!(at(&s0, "claude", &i, &desk())["state"], "done");
         let mut named = blank(); named["accounts"]["claude"] = json!(["Work"]); assert_eq!(at(&cst(named, &[]), "claude", &i, &desk())["state"], "done", "a connected named account counts");
     }
@@ -653,15 +773,18 @@ mod tests {
         assert_eq!(p["state"], "todo"); assert!(p["rows"][0]["note"].as_str().unwrap().contains("exit code 1"));
     }
     #[test] fn install_words_follow_the_hubs_system() {
-        for (os, want) in [("linux", "sudo apt install kicad"), ("darwin", "brew install --cask kicad")] {
-            let p = at(&cst(blank(), &[]), "kicad", &info(os), &desk()); assert!(p.to_string().contains(want), "{os}");
+        // a computer with no published package: stock KiCad's own commands, per system
+        for (os, want) in [("linux", "sudo apt install kicad"), ("darwin", "brew install --cask kicad"), ("windows", "winget install --id KiCad.KiCad")] {
+            let (s0, mut i) = (cst(blank(), &[]), info(os)); i["kicad.status"] = json!("missing");
+            let p = kicad_with(&Facts::of(&s0, &i), &s0, &sess(json!({})), &desk(), None); assert!(Value::Array(p.rows).to_string().contains(want), "{os}");
         }
         assert!(at(&cst(blank(), &[]), "install", &info("darwin"), &desk())["body"].as_str().unwrap().contains("notarized"));
+        assert!(at(&cst(blank(), &[]), "install", &info("windows"), &desk())["body"].as_str().unwrap().contains("Windows"));
     }
     #[test] fn every_platform_says_how_to_install_each_tool_and_the_agents_with_a_command() {
         for pf in PLATFORMS {
             assert!(!pf.name.is_empty() && !pf.installed.is_empty() && !pf.path_fix.is_empty() && !pf.kicad.is_empty() && !pf.freecad.is_empty() && !pf.kicad_names.is_empty() && !pf.freecad_names.is_empty(), "{}", pf.id);
-            for a in &AGENTS[..3] { assert!(!install_cmd(a, pf.id).is_empty(), "{} on {}", a.id, pf.id); }
+            for a in ["claude", "codex", "grok"] { assert!(crate::settings::tools_install::plan(a, pf.id, "x64", false, false).is_some(), "{a} on {}", pf.id); }
         }
         assert_eq!(platform("beos").id, PLATFORMS[0].id, "a system with no entry yet reads the first");
     }

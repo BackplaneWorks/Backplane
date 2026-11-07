@@ -30,6 +30,7 @@ mod failover_e2e;
 pub mod mask;
 pub mod misc;
 pub mod onboard;
+pub mod tools_install;
 pub mod models;
 pub mod proposal;
 pub mod secret;
