@@ -124,7 +124,7 @@ impl Agents {
         tokio::task::spawn_blocking(move || {
             let f = inputs::read(&root); let keys_path = home.join("secrets/api.env");
             let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
-            prompt::build(&prompt::PromptEnv { fc: Some(crate::kicad::stepglb::freecad_setting()).filter(|s| !s.is_empty()).unwrap_or_else(|| host.fc.clone()), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders,
+            prompt::build(&prompt::PromptEnv { fc: Some(crate::files::kicad::stepglb::freecad_setting()).filter(|s| !s.is_empty()).unwrap_or_else(|| host.fc.clone()), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders,
                 root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines: String::new(), buy, lang })
         }).await.unwrap_or_default()
     }
