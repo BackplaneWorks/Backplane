@@ -479,6 +479,13 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             send(hub, &mut rid, &mut cmds, "onboard.check", json!({}));
             json!({"drafts": {"@ob.open": "1", "@ob.closed": "", "@ob.step": first}, "open": {"settings": false}})
         }
+        // Settings, Developer: setup's progress forgotten, opened at the first step as on a new hub
+        "ob-replay" => {
+            let first = steps[0].id;
+            for (k, v) in [("onboard.done", ""), ("onboard.skipped", ""), ("onboard.seen", ""), ("onboard.step", first)] { put(hub, &mut rid, &mut cmds, k, v); }
+            send(hub, &mut rid, &mut cmds, "onboard.check", json!({}));
+            json!({"drafts": {"@ob.open": "1", "@ob.closed": "", "@ob.step": first}, "open": {"settings": false}})
+        }
         "ob-check" => { send(hub, &mut rid, &mut cmds, "onboard.check", json!({})); json!({}) }
         "ob-usage" => {
             if value != "on" && value != "off" { return None }
@@ -610,6 +617,17 @@ mod tests {
         let r = act(&fin, "h", &sess(json!({})), &i, &desk(), "/h", "ob-open", "start").unwrap();
         assert_eq!(r.patch["drafts"]["@ob.open"], "1"); assert_eq!(r.patch["drafts"]["@ob.step"], "welcome"); assert_eq!(r.patch["open"]["settings"], false);
         assert_eq!(sent(&r, "onboard.check").len(), 1, "a rerun detects what is done again");
+    }
+    #[test] fn replay_forgets_the_progress_and_opens_the_first_step() {
+        let i = info("linux");
+        let fin = cst(blank(), &[("onboard.done", "1"), ("onboard.skipped", "kicad"), ("onboard.seen", "palette"), ("onboard.step", "")]);
+        let r = act(&fin, "h", &sess(json!({"@ob.closed": "1"})), &i, &desk(), "/h", "ob-replay", "").unwrap();
+        for k in ["onboard.done", "onboard.skipped", "onboard.seen"] { assert_eq!(setting_of(&r, k).as_deref(), Some(""), "{k}"); }
+        assert_eq!(setting_of(&r, "onboard.step").as_deref(), Some("welcome"));
+        assert_eq!((r.patch["drafts"]["@ob.open"].as_str(), r.patch["drafts"]["@ob.closed"].as_str(), r.patch["drafts"]["@ob.step"].as_str()), (Some("1"), Some(""), Some("welcome")));
+        assert_eq!(r.patch["open"]["settings"], false); assert_eq!(sent(&r, "onboard.check").len(), 1);
+        let fresh = cst(blank(), &[("onboard.done", ""), ("onboard.skipped", ""), ("onboard.seen", ""), ("onboard.step", "welcome")]);
+        assert!(due(&fresh, &sess(json!({}))), "every client opens it, as on a new hub");
     }
     #[test] fn the_last_step_lists_what_is_still_open_with_a_way_there() {
         let p = at(&cst(blank(), &[("onboard.skipped", "kicad")]), "done", &info("linux"), &desk());

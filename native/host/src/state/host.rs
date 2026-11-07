@@ -137,9 +137,18 @@ async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>, _folding: crate::guard::F
 /// is then told to hide it (`{"t":"star","offer":null}`). star.offer: `{offer}`, what a (re)connecting client shows (`star::offer`).
 struct StarRpc { policy: Arc<Policy> }
 impl RpcHandler for StarRpc {
-    fn methods(&self) -> &'static [&'static str] { &["star.nudge", "star.offer"] }
+    fn methods(&self) -> &'static [&'static str] { &["star.nudge", "star.offer", "star.replay"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, params: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
+            // Settings, Developer: offered again now, to every client (the other devices show it too)
+            if method == "star.replay" {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                let ev = self.policy.star_replay(now);
+                if ev.is_empty() { return vec![serde_json::json!({"t":"reply","id":id,"ok":false,"error":"the hub is still starting"})] }
+                if hub.commit_many(&ev).await.is_err() { return vec![serde_json::json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
+                hub.push_all(&crate::state::fam::star::frame(self.policy.star_offer()));
+                return vec![serde_json::json!({"t":"reply","id":id,"ok":true})]
+            }
             if method == "star.offer" { return vec![serde_json::json!({"t":"reply","id":id,"ok":true,"result":{"offer":self.policy.star_offer()}})] }
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             let ev = self.policy.star_decide(params.get("token").and_then(|v| v.as_str()).unwrap_or(""), params.get("action").and_then(|v| v.as_str()).unwrap_or(""), now);

@@ -135,6 +135,8 @@ impl Policy {
         let g = self.lock();
         if g.booting.is_some() { Value::Null } else { super::star::offer(&g.core.st.get(super::star::KEY, "")) }
     }
+    /// star.replay: the offer made again (Settings, Developer)
+    pub fn star_replay(&self, now_s: u64) -> Vec<Value> { if self.lock().booting.is_some() { vec![] } else { super::star::replay(now_s) } }
     /// star.nudge {token, action}: the decision (opened / dismissed), terminal, only for the offered token
     pub fn star_decide(&self, token: &str, action: &str, now_s: u64) -> Vec<Value> {
         let g = self.lock();
