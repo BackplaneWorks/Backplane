@@ -54,7 +54,11 @@ struct DataSearchResults: View {
             if let r = result {
                 if r.threads.isEmpty && r.projects.isEmpty { Text("Nothing matches “\(query)”").dmono(12).foregroundStyle(BackplaneDesign.dim).padding(12).dataRow() }
                 ForEach(r.projects) { p in Label { Text(p.title).dmono(13) } icon: { Image(systemName: "folder").foregroundStyle(BackplaneDesign.ok) }.padding(.horizontal, 12).frame(minHeight: 40).dataRow().accessibilityIdentifier("data.search.project." + p.id) }
-                ForEach(r.threads) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
+                ForEach(r.threads.filter { !$0.history }) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
+                // the old Scratch chats the search found, under their group's name (feature history)
+                let old = r.threads.filter(\.history)
+                if !old.isEmpty { DHeading(text: "Conversation history").padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.history") }
+                ForEach(old) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
             } else { ProgressView().frame(maxWidth: .infinity).dataRow() }
         }
         .listStyle(.plain).scrollContentBackground(.hidden).background(BackplaneDesign.panel)
@@ -139,7 +143,7 @@ struct DataMentionBar: View {
                     ForEach(items.prefix(6)) { m in
                         Button {
                             let name = (m.sigil == "@" || m.sigil == "#" || m.sigil == "&") ? m.label : m.mid
-                            pick(String(text[..<t.range.lowerBound]) + m.sigil + name + " ")
+                            pick(String(text[..<t.range.lowerBound]) + (m.word.isEmpty ? m.sigil + name : m.word) + " ")
                         } label: { HStack { Text(m.sigil + m.label).dmono(12); Spacer(); Text(m.detail).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle()) }
                         .buttonStyle(.plain)
                         DLine()

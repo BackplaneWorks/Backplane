@@ -20,7 +20,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines", "history"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -137,6 +137,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         "badge.list" => Ok(crate::present::badge::list()),
         "accounts.page" | "account.view" | "account.act" => accounts(hub, c, m, p).await,
         "search" => search(hub, p).await,
+        "history.list" => history(hub, p).await,
         // setup on a phone (present/onboard.rs): the hub's own step list, `step` held by the app
         "onboard.view" | "onboard.act" => rpc(hub, c, m, p.clone()).await.map(|r| r["result"].clone()),
         "composer.run" => composer_run(hub, c, p).await,
@@ -220,7 +221,7 @@ async fn search(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let q = s(p, "q").trim().to_lowercase(); let lim = limit_of(p, 30, 100); let arch = p["archived"] == true;
     if q.is_empty() { return Ok(json!({"threads":[],"projects":[]})) }
     let g = hub.model().await; let asks = open_ask_counts(hub);
-    let mut ts: Vec<(u64, String)> = g.threads.iter().filter(|(_, t)| !t.deleted && (arch || !t.archived) && (contains(&t.title, &q) || g.projects.get(&t.project).map_or(false, |x| contains(&x.title, &q)))).map(|(i, t)| (ms(t.activity.max(t.created)), i.clone())).collect();
+    let mut ts: Vec<(u64, String)> = g.threads.iter().filter(|(_, t)| !t.deleted && (arch || !t.archived) && (contains(&t.title, &q) || (t.project != crate::sidebar::SCRATCH && g.projects.get(&t.project).map_or(false, |x| contains(&x.title, &q))))).map(|(i, t)| (ms(t.activity.max(t.created)), i.clone())).collect();
     ts.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1))); ts.truncate(lim);
     let threads: Vec<Value> = ts.iter().filter_map(|(_, i)| thread_json(hub, &g, i, &asks)).collect();
     let mut ps: Vec<(u64, String)> = g.projects.iter().filter(|(_, x)| !x.removed && (contains(&x.title, &q) || contains(&x.root, &q))).map(|(i, _)| (0, i.clone())).collect(); ps.truncate(lim);
@@ -228,21 +229,47 @@ async fn search(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     Ok(json!({"threads":threads,"projects":projects}))
 }
 
+/// `history.list {q?, limit?, before?}` → `{live, threads, next, count}`: Conversation history, the old Scratch chats (the sidebar's group, `sidebar::scratch_chats`).
+/// `live` are the chats that want attention (an ask, a running turn, still on the Pinned or Active shelf): always shown. `threads` the rest, newest first, paged
+/// like `threads.list`. `q` keeps the chats whose title has every word of it, as the sidebar's search does. `count` is every chat, the search aside.
+async fn history(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
+    let (q, lim) = (s(p, "q").trim().to_string(), limit_of(p, 50, 200));
+    let now = now_ms() / 1000;
+    let g = hub.model().await; let asks = open_ask_counts(hub);
+    let all: Vec<(String, bool)> = crate::statehost::policies().and_then(|x| x.with_state(|st| crate::sidebar::scratch_chats(st, now, "").into_iter().map(|(i, _, l)| (i.to_string(), l)).collect::<Vec<_>>()))
+        // without the policy state (a hub that has not started it): the model's chats, none of them live
+        .unwrap_or_else(|| g.threads.iter().filter(|(_, t)| t.project == crate::sidebar::SCRATCH && !t.deleted && !t.archived).map(|(i, _)| (i.clone(), false)).collect());
+    let all: Vec<(String, bool)> = all.into_iter().filter(|(i, _)| g.threads.get(i).map_or(false, |t| !t.deleted)).collect();
+    let count = all.len();
+    let hit = |i: &str| q.is_empty() || g.threads.get(i).map_or(false, |t| crate::sidebar::word_hit(&t.title, &q));
+    let live: Vec<Value> = all.iter().filter(|(i, l)| *l && hit(i)).filter_map(|(i, _)| thread_json(hub, &g, i, &asks)).collect();
+    let rest: Vec<(u64, String, Value)> = all.iter().filter(|(i, l)| !*l && hit(i)).filter_map(|(i, _)| thread_json(hub, &g, i, &asks).map(|v| (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v))).collect();
+    let (threads, next) = page_of(rest, lim, s(p, "before"));
+    Ok(json!({"live":live,"threads":threads,"next":next,"count":count}))
+}
+
 async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let q = s(p, "q").trim().to_lowercase(); let kind = s(p, "kind"); let lim = limit_of(p, 12, 50);
     let want = |k: &str| kind.is_empty() || kind == k;
     let mut items: Vec<Value> = vec![];
-    let mut push = |sigil: &str, id: &str, label: &str, detail: &str| { if q.is_empty() || contains(label, &q) { items.push(json!({"sigil":sigil,"id":id,"label":label,"detail":detail})) } };
-    if want("@") { let d = crate::bots::api::directory(hub).await; for b in d["bots"].as_array().into_iter().flatten() { push("@", s(b, "id"), s(b, "name"), if b["uber"] == true { "uberbot" } else { "bot" }) } }
-    if want("#") { let d = crate::bots::api::directory(hub).await; for r in d["rooms"].as_array().into_iter().flatten() { push("#", s(r, "id"), s(r, "name"), "room") } }
+    // `word` is what the desktop's popup puts in the draft (session/mention.rs): a name's slug, which `/give` and the reference cards read; a thread whose slug is not unique gets its id after it
+    use crate::session::composer::mention::slug;
+    let mut push = |sigil: &str, id: &str, label: &str, detail: &str, word: String| { if q.is_empty() || contains(label, &q) { items.push(json!({"sigil":sigil,"id":id,"label":label,"detail":detail,"word":word})) } };
+    if want("@") { let d = crate::bots::api::directory(hub).await; for b in d["bots"].as_array().into_iter().flatten() { push("@", s(b, "id"), s(b, "name"), if b["uber"] == true { "uberbot" } else { "bot" }, format!("@{}", slug(s(b, "name")))) } }
+    if want("#") { let d = crate::bots::api::directory(hub).await; for r in d["rooms"].as_array().into_iter().flatten() { push("#", s(r, "id"), s(r, "name"), "room", format!("#{}", slug(s(r, "name")))) } }
     if want(">") || want("%") {
         let g = hub.model().await;
-        if want(">") { let mut ts: Vec<_> = g.threads.iter().filter(|(_, t)| !t.deleted && !t.archived).collect(); ts.sort_by(|a, b| b.1.activity.cmp(&a.1.activity)); for (i, t) in ts.into_iter().take(200) { push(">", i, &t.title, g.projects.get(&t.project).map_or("", |x| x.title.as_str())) } }
-        if want("%") { for (i, x) in g.projects.iter().filter(|(_, x)| !x.removed) { push("%", i, &x.title, &x.root) } }
+        if want(">") {
+            let mut seen: HashMap<String, usize> = HashMap::new(); for t in g.threads.values().filter(|t| !t.deleted) { *seen.entry(slug(&t.title)).or_default() += 1 }
+            let mut ts: Vec<_> = g.threads.iter().filter(|(_, t)| !t.deleted && !t.archived && !slug(&t.title).is_empty()).collect(); ts.sort_by(|a, b| b.1.activity.cmp(&a.1.activity));
+            for (i, t) in ts.into_iter().take(200) { let w = slug(&t.title); let w = if seen.get(&w).copied().unwrap_or(0) > 1 { format!("{w}-{}", i.rsplit('-').next().unwrap_or("")) } else { w };
+                push(">", i, &t.title, g.projects.get(&t.project).map_or("", |x| x.title.as_str()), format!(">{w}")) }
+        }
+        if want("%") { for (i, x) in g.projects.iter().filter(|(i, x)| !x.removed && i.as_str() != crate::sidebar::SCRATCH) { push("%", i, &x.title, &x.root, format!("%{}", slug(&x.title))) } }
     }
     if want("&") {
         let all: Value = serde_json::from_str(&crate::settings::models::all()).unwrap_or(json!({}));
-        for (prov, rows) in all.as_object().into_iter().flatten() { for r in rows.as_array().into_iter().flatten() { if r["ok"] == true { push("&", &format!("{prov}/{}", s(r, "value")), &format!("{prov}/{}", s(r, "value")), s(r, "label")) } } }
+        for (prov, rows) in all.as_object().into_iter().flatten() { for r in rows.as_array().into_iter().flatten() { if r["ok"] == true { push("&", &format!("{prov}/{}", s(r, "value")), &format!("{prov}/{}", s(r, "value")), s(r, "label"), format!("&{prov}/{}", s(r, "value"))) } } }
     }
     items.truncate(lim);
     Ok(json!({"items":items}))

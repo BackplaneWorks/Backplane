@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -77,6 +77,8 @@ pub(crate) fn shelf_flags(t: &crate::state::Thread) -> (bool, bool, u64) {
 fn flags_of(id: &str) -> (bool, bool, u64) { crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(shelf_flags))).flatten().unwrap_or((false, false, 0)) }
 /// A setting of the policy state ("" when unset or the state is not up).
 fn setting_of(k: &str) -> String { crate::statehost::policies().and_then(|p| p.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default() }
+/// Why `thread.create` refuses the Scratch project: its chats are kept (Conversation history) and open as they were, but no new one starts there.
+pub(crate) const SCRATCH_CLOSED: &str = "Conversation history takes no new chats. Start one in a project.";
 fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let t = m.threads.get(id).filter(|t| !t.deleted)?;
     let waiting = asks.get(id).copied().unwrap_or(0);
@@ -88,10 +90,11 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let (model, effort, runtime) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default()))).unwrap_or_default();
     let model = if model.is_empty() { t.model.clone() } else { model };
     Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"settledAt":settled_at,"archived":t.archived,
-        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":ext::chip(&t.provider, &model, &effort),"preview":preview,"waiting":waiting,"parent":setting_of(&format!("thread.parent.{id}"))}))
+        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":ext::chip(&t.provider, &model, &effort),"preview":preview,"waiting":waiting,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && flags_of(i).1).count();
+    if id == crate::sidebar::SCRATCH { return None } // Conversation history (`history.list`), not a project to start a thread in
     let p = m.projects.get(id).filter(|p| !p.removed)?;
     let ts: Vec<_> = m.threads.iter().filter(|(_, t)| t.project == id && !t.deleted).collect();
     let count = ts.iter().filter(|(_, t)| !t.archived).count();
@@ -292,7 +295,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             let want = p.get("settled").and_then(Value::as_bool);
             let (mut items, lim) = (vec![], limit_of(p, 50, 200));
             // only the page's threads are built in full (the preview reads the log)
-            let mut keyed: Vec<(u64, String)> = g.threads.iter().filter(|(_, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj)).filter_map(|(i, t)| {
+            let mut keyed: Vec<(u64, String)> = g.threads.iter().filter(|(_, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj) && t.project != crate::sidebar::SCRATCH).filter_map(|(i, t)| {
                 let (_, settled, at) = flags_of(i);
                 if want.map_or(false, |w| w != settled) { return None }
                 Some((if want == Some(true) { at } else { ms(t.activity.max(t.created)) }, i.clone())) }).collect();
@@ -321,6 +324,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         }
         "thread.create" => {
             let project = s(p, "project"); if project.is_empty() { return Err(err("project")) }
+            if project == crate::sidebar::SCRATCH { return Err(err(SCRATCH_CLOSED)) }
             // like the desktop's +: the env follows the thread.env setting (auto: a worktree in a git project) unless the phone names one
             let mut q = json!({"project":project});
             if !s(p, "env").is_empty() { if !matches!(s(p, "env"), "auto" | "worktree" | "local") { return Err(err("env: auto, worktree or local")) } q["env"] = p["env"].clone() }

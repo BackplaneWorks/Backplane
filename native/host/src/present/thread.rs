@@ -100,9 +100,12 @@ const CARRY: &str = "Backplane restarted while you were working. Continue where 
 fn api_err(x: &str) -> bool { x.starts_with("API Error") }
 fn white(s: &str) -> bool { s.chars().all(|c| matches!(c, ' ' | '\n' | '\r' | '\t')) }
 /// A message only the agent reads: the hub's note to a buy thread's agent about the quote it posted (or could not), which the person sees as the
-/// quote itself. The window leaves it out; data/1 marks it `agentOnly` so the phones leave it out too, without reading its words.
+/// quote itself, and the note that a secret was saved (`/secret`, or an agent's request): the person saved it in a box, they posted nothing.
+/// The window leaves it out; data/1 marks it `agentOnly` so the phones leave it out too, without reading its words.
+/// What the agent is told once a secret is saved (settings/secret.rs), after the secret's handle `{"secret":…,"set":true}`.
+pub const SAVED_NOTE: &str = " The person saved this secret in Backplane's vault. Use it by name with secret_run; you will never see its value.";
 pub fn agent_only(role: &str, text: &str) -> bool {
-    role == "system" && ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."].iter().any(|h| text.starts_with(&format!("[Backplane] {h}")))
+    (role == "user" && text.starts_with("{\"secret\":") && text.ends_with(SAVED_NOTE)) || role == "system" && ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."].iter().any(|h| text.starts_with(&format!("[Backplane] {h}")))
 }
 fn blank(e: &Ent) -> bool { e.msg && ((e.role == "assistant" && white(&e.text)) || agent_only(&e.role, &e.text)) }
 /// Fold.shown: blank messages left out, an error row an API error reply already says, and the restart row its continue message stands for

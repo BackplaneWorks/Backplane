@@ -67,7 +67,7 @@ object DataClient {
         app = ctx.applicationContext
         MeshDisk.dir = java.io.File(app.cacheDir, "models")
         links = HubList.decode(prefs().getString("links", null), prefs().getString("link", null))
-        settledOpen = prefs().getStringSet("settled.open", emptySet())!!.toSet()
+        settledOpen = prefs().getStringSet("settled.open", emptySet())!!.toSet(); historyOpen = prefs().getBoolean("history.open", false)
         System.getenv("BACKPLANE_LINK")?.let { links = it.split(' ').filter(String::isNotBlank) }
         loadCache()
         if (link != null) connect()
@@ -197,12 +197,25 @@ object DataClient {
         try {
             listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
             if (g != gen) return
-            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } } }
+            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { loadHistory() } }
             syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
     }
-    suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks() } } }
+    suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks(); loadHistory() } } }
+    // ---- Conversation history (feature history): the old Scratch chats, found and opened, never a place to start one
+    var history by mutableStateOf(DHistory()); private set
+    var historyOpen by mutableStateOf(false); private set
+    fun showHistory(on: Boolean) { historyOpen = on; prefs().edit().putBoolean("history.open", on).apply() }
+    suspend fun loadHistory(more: Boolean = false) {
+        if (!has("history")) return
+        val cursor = history.next; if (more && cursor == null) return
+        val r = runCatching { call("history.list", JSONObject().put("limit", 50).also { if (more) it.put("before", cursor) }) }.getOrNull() ?: return
+        history = DHistory.parse(r, if (more) history else null)
+    }
+    private var historyDue = false
+    /** A chat of the group moved (a push): ask the hub for the group again, once for a burst. */
+    private fun historyMoved() { if (historyDue) return; historyDue = true; scope.launch { kotlinx.coroutines.delay(300); historyDue = false; loadHistory() } }
     var work by mutableStateOf<Map<String, DWork>>(emptyMap()); private set
     var locks by mutableStateOf<List<DLock>>(emptyList()); private set
     private suspend fun loadStar() { if (has("star")) star = DStarOffer.of(call("star.offer").optJSONObject("offer")) }
@@ -295,7 +308,7 @@ object DataClient {
     // ---- pushes
     private fun push(o: JSONObject) {
         when (o.optString("k")) {
-            "thread" -> o.optJSONObject("thread")?.let { upsert(parseThread(it)) }
+            "thread" -> o.optJSONObject("thread")?.let { val t = parseThread(it); upsert(t); if (t.history) historyMoved() }
             "btw" -> { val tid = o.optString("thread"); if (btw[tid]?.q == o.optString("q")) btw = btw + (tid to Btw(o.optString("q"), o.optString("a"))) }
             "secret" -> scope.launch { refreshSecretAsks(o.optString("thread")) }
             "thread.removed" -> { val id = o.optString("id"); threads = threads.filter { it.id != id }; entries = entries - id; save() }
@@ -460,10 +473,11 @@ object DataClient {
         return parsePicker(call("thread.picker", p).getJSONObject("picker"))
     }
     suspend fun pick(tid: String, action: String, value: String) { call("thread.pick", JSONObject().put("thread", tid).put("action", action).put("value", value)).optJSONObject("thread")?.let { upsert(parseThread(it)) } }
-    data class Mention(val sigil: String, val id: String, val label: String, val detail: String)
+    /** `word`: what goes in the draft, the desktop's word (`>bom-review`, `%demo`), which /give and the reference cards read; "" from an older hub. */
+    data class Mention(val sigil: String, val id: String, val label: String, val detail: String, val word: String = "")
     suspend fun mentions(q: String, kind: String): List<Mention> {
         val a = call("mentions.list", JSONObject().put("q", q).put("kind", kind).put("limit", 8)).optJSONArray("items") ?: return emptyList()
-        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Mention(it.optString("sigil"), it.optString("id"), it.optString("label"), it.optString("detail")) }
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Mention(it.optString("sigil"), it.optString("id"), it.optString("label"), it.optString("detail"), it.optString("word")) }
     }
     data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean)
     data class Room(val id: String, val name: String)
