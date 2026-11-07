@@ -783,6 +783,7 @@ if a[:2] == ["auth", "status"]:
 elif a[:2] == ["auth", "logout"]:
     if os.path.exists(login()): os.remove(login())
 elif a[:2] == ["auth", "login"]:
+    if d: open(d.rstrip("/") + ".pid", "w").write(str(os.getpid()))
     print("Open https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123 to sign in", flush=True)
     line = sys.stdin.readline().strip()
     if line == "CODE#STATE123":
@@ -998,9 +999,15 @@ for l in sys.stdin:
         a.request(&json!({"op":"login","profile":id})).await; let s = until(&a, |s| s["attempts"][0]["state"] == "waiting").await; let aid = s["attempts"][0]["id"].as_str().unwrap().to_string();
         let store = h.join("providers/accounts-v1").join(&id).join(&aid); assert!(store.exists(), "the candidate store exists while the CLI runs");
         a.cancel(&aid, "cancelled", ""); // the attempt is over for the person; the child is only now told to go (the command channel closes)
-        assert!(store.exists(), "cancel itself removes nothing: its child may still write to the store");
-        // the attempt's task kills the child, waits for its exit (tokio's own waitpid on that pid: nothing in the hub reaps another's child since 4c37b42a02), then discards
-        let end = std::time::Instant::now() + PATIENCE; while store.exists() && std::time::Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
+        // the invariant, whatever the timing: the store is never gone while its child still runs (read the store first: it is removed only after the exit)
+        let pidf = PathBuf::from(format!("{}.pid", store.display())); soon(|| pidf.exists()).await;
+        let pid: u32 = std::fs::read_to_string(&pidf).unwrap().trim().parse().unwrap();
+        let end = std::time::Instant::now() + PATIENCE;
+        loop {
+            let gone = !store.exists();
+            if gone { assert!(!crate::agents::proc::alive(pid), "the store went while its child ran"); break }
+            assert!(std::time::Instant::now() < end, "the store was never removed"); tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         assert!(!store.exists(), "removed once the child is gone");
         let _ = std::fs::remove_dir_all(&h);
     }

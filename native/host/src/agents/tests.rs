@@ -563,7 +563,9 @@ async fn replay(name: &str, messages: &[&str], gap_ms: u64) -> (Vec<String>, Vec
     std::fs::write(sd.join("replay.ndjson"), match name { "lifecycle" => include_str!("../../../../test/agents/fixtures/replay-lifecycle.ndjson"), "todos" => include_str!("../../../../test/agents/fixtures/replay-todos.ndjson"),
         "agents" => include_str!("../../../../test/agents/fixtures/replay-agents.ndjson"), _ => include_str!("../../../../test/agents/fixtures/replay-pair.ndjson") }).unwrap();
     let (hub, ag, _h, _w) = start(&format!("rp-{name}"), |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
-    for m in messages { assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":m})).await["ok"], true); tokio::time::sleep(Duration::from_millis(gap_ms)).await }
+    // the next command goes in once the previous one's session is logged (the log's order, not a time: gap_ms only says the commands are sent one after the other)
+    for (i, m) in messages.iter().enumerate() { assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":m})).await["ok"], true);
+        if gap_ms > 0 && i + 1 < messages.len() { until(&hub, from, 30, |ev| ev.iter().filter(|e| is(e, "SessionSet")).count() > i).await; } }
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await; tokio::time::sleep(Duration::from_millis(1500)).await;
     let mut ev = log_from(&hub, from).await; if ev.len() < 2 { ev = ev.clone() } ag.shutdown();
     let want_raw = match name { "lifecycle" => include_str!("../../../../test/agents/fixtures/js-lifecycle.jsonl"), "todos" => include_str!("../../../../test/agents/fixtures/js-todos.jsonl"), "agents" => include_str!("../../../../test/agents/fixtures/js-agents.jsonl"), _ => include_str!("../../../../test/agents/fixtures/js-pair.jsonl") };
@@ -1382,9 +1384,10 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
 
 #[tokio::test(flavor = "multi_thread")] async fn viewer_show_answers_with_what_the_viewer_then_shows() {
     let sd = dir("vs-bin"); perf_standin(&sd, 1);
-    let (_hub, ag, _h, _w) = start("vs", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
-    // a client that reports in time: the answer carries its state, settled
-    let late = tokio::spawn(async { tokio::time::sleep(std::time::Duration::from_millis(120)).await; crate::files::kicad::watch::viewer_report(T1, json!({"open": "mech", "part": "mech/a.step", "selection": null})); });
+    let (hub, ag, _h, _w) = start("vs", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    // a client that reports in time: the answer carries its state, settled. It reports when the hub's `view` frame reaches it, not after a time
+    let mut client = hub.attach(hub.fresh_client());
+    let late = tokio::spawn(async move { while let Some(o) = client.recv().await { if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 { break } } } crate::files::kicad::watch::viewer_report(T1, json!({"open": "mech", "part": "mech/a.step", "selection": null})); });
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"mech","path":"mech/a.step"}})).await; late.await.unwrap();
     let t = tool_text(&r); assert_eq!(t["settled"], true); assert_eq!(t["viewer"]["part"], "mech/a.step"); assert_eq!(t["shown"], "mech/a.step");
     // a client that says nothing: the last report, marked unsettled

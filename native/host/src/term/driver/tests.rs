@@ -111,7 +111,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 }
 
 #[tokio::test] async fn a_runs_pictures_are_served_only_from_the_bots_own_tasks_folder() {
-    let (hub, d, _log) = setup("shot").await; let run = "look-up-5";
+    let (hub, d, _log) = setup("shot-run").await; let run = "look-up-5";
     let dir = d.run_dir("b1", run); std::fs::create_dir_all(&dir).unwrap(); std::fs::write(dir.join("pause-3.jpg"), b"JPEG3").unwrap(); std::fs::write(dir.join("1.jpg"), b"JPEG1").unwrap(); std::fs::write(d.dir("b1").join("secret.jpg"), b"NO").unwrap();
     let get = |t: &str| Req::new("GET", t, vec![]);
     let call = |t: String| { let hub = hub.clone(); async move { hub.http_for("/bots/b1/tasks/shot").unwrap().call(&hub, &get(&t)).await } };
