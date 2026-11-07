@@ -1,7 +1,7 @@
 //! The secrets vault (server/effects/vault.js, docs/secrets.md). Values the person pasted into the secret box are sealed in
 //! `<home>/secrets/vault.json` (0600, folder 0700) with AES-256-GCM, the name as associated data, under a 32-byte master key kept in the
-//! OS keychain (Secret Service through `secret-tool`, the login keychain through `security`), else `<home>/secrets/vault.key` (0600).
-//! The file format is the JS hub's: a vault written by either hub opens in the other. Windows DPAPI is not ported.
+//! OS keychain (Secret Service through `secret-tool`, the login keychain through `security`, Windows' Credential Manager), else `<home>/secrets/vault.key` (0600).
+//! The file format is the JS hub's: a vault written by either hub opens in the other. The JS hub's Windows DPAPI key is not read.
 //!
 //! Fail closed: a vault.json that cannot be read, is not JSON, has another version or shape, names a secret twice, or holds a value that
 //! does not open with the key, makes the vault "locked": it keeps what it read (names for Settings, every value that did open for masking)
@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{io::{Read, Write}, path::{Path, PathBuf}, sync::Mutex}; use crate::plat::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 
-const BACKENDS: [&str; 4] = ["keyring", "keychain", "dpapi", "file"];
+const BACKENDS: [&str; 5] = ["keyring", "keychain", "dpapi", "file", "wincred"];
 
 #[derive(Clone)]
 struct Item { name: String, purpose: String, by: String, at: String, used_at: String, used_by: String, iv: String, ct: String, value: Option<String> }
@@ -61,6 +61,7 @@ fn offer_with(copy: bool) -> String {
     if copy { return "file".into() }
     if std::env::var("BACKPLANE_VAULT_KEYRING").as_deref() == Ok("file") { return "file".into() }
     if cfg!(target_os = "macos") && which("security") { return "keychain".into() }
+    if cfg!(windows) { return "wincred".into() }
     if cfg!(target_os = "linux") && which("secret-tool") && (std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() || std::env::var_os("XDG_RUNTIME_DIR").is_some()) { return "keyring".into() }
     "file".into()
 }
@@ -74,6 +75,7 @@ fn key_get_with(copy: bool, v: &Vault, backend: &str) -> Option<[u8; 32]> {
         "file" => hex_key(&std::fs::read_to_string(spath(v, "vault.key")).ok()?),
         "keyring" => { let (ok, o) = sh("secret-tool", &["lookup", "service", "backplane-vault", "home", &vault_id(v)], None); if ok { hex_key(&o) } else { None } }
         "keychain" => { let (ok, o) = sh("security", &["find-generic-password", "-s", "backplane-vault", "-a", &vault_id(v), "-w"], None); if ok { hex_key(&o) } else { None } }
+        "wincred" => hex_key(&crate::plat::creds::get(&format!("backplane-vault/{}", vault_id(v)))?),
         _ => None,
     }
 }
@@ -87,6 +89,7 @@ fn key_put_with(copy: bool, v: &Vault, backend: &str, key: &[u8; 32]) -> bool {
         "keyring" => sh("secret-tool", &["store", "--label=Backplane vault", "service", "backplane-vault", "home", &vault_id(v)], Some(&h)).0,
         // through security's own prompt on stdin, so the key is never in argv
         "keychain" => sh("security", &["-i"], Some(&format!("add-generic-password -s backplane-vault -a {} -l \"Backplane vault\" -w {h}\n", vault_id(v)))).0,
+        "wincred" => crate::plat::creds::put(&format!("backplane-vault/{}", vault_id(v)), &h),
         _ => false,
     };
     stored && key_get(v, backend) == Some(*key)
@@ -455,6 +458,20 @@ mod tests {
     use super::*;
     fn env_file() { std::env::set_var("BACKPLANE_VAULT_KEYRING", "file"); }
 
+    /// Windows: the master key goes to the Credential Manager and comes back, and a copy of a log neither reads nor writes it there.
+    #[cfg(windows)]
+    #[test] fn the_windows_credential_manager_keeps_the_key_and_a_copy_never_touches_it() {
+        let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("bp-wincred-{}-{}", std::process::id(), iso_now().replace([':', '.'], "-"))); std::fs::create_dir_all(&dir).unwrap();
+        let v = Vault { home: dir.clone(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };
+        std::env::remove_var("BACKPLANE_VAULT_KEYRING"); assert_eq!(offer_with(false), "wincred");
+        let target = format!("backplane-vault/{}", vault_id(&v));
+        assert!(!key_put_with(true, &v, "wincred", &[9u8; 32]) && key_get_with(true, &v, "wincred").is_none(), "a copy: nothing written or read");
+        assert!(crate::plat::creds::get(&target).is_none());
+        assert!(key_put_with(false, &v, "wincred", &[7u8; 32]), "stored and read back"); assert_eq!(key_get_with(false, &v, "wincred"), Some([7u8; 32]));
+        assert!(crate::plat::creds::delete(&target)); assert!(key_get_with(false, &v, "wincred").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     #[test] fn a_copy_never_touches_the_real_keyring() {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("bp-fakekr-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();

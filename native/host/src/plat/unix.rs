@@ -62,6 +62,12 @@ pub mod proc {
     pub fn signal(s: &std::process::ExitStatus) -> Option<i32> { use std::os::unix::process::ExitStatusExt; s.signal() }
 }
 
+/// The OS credential store Windows has; Unix has none here (its keyrings are reached through their own tools, settings/vault.rs).
+pub mod creds {
+    pub fn get(_target: &str) -> Option<String> { None }
+    pub fn put(_target: &str, _secret: &str) -> bool { false }
+}
+
 /// The hub process itself.
 pub mod hub {
     /// One hub per home: an exclusive flock, not waited for. False if another process holds it.

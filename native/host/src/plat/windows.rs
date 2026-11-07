@@ -185,6 +185,30 @@ pub mod proc {
     }
 }
 
+/// Windows' Credential Manager: a generic credential per target, kept for this user on this machine (the vault's master key).
+pub mod creds {
+    use super::wide;
+    use windows_sys::Win32::Security::Credentials::*;
+    pub fn get(target: &str) -> Option<String> {
+        let t = wide(target); let mut c: *mut CREDENTIALW = std::ptr::null_mut();
+        unsafe {
+            if CredReadW(t.as_ptr(), CRED_TYPE_GENERIC, 0, &mut c) == 0 || c.is_null() { return None }
+            let b = std::slice::from_raw_parts((*c).CredentialBlob, (*c).CredentialBlobSize as usize).to_vec(); CredFree(c as *const _);
+            String::from_utf8(b).ok()
+        }
+    }
+    pub fn put(target: &str, secret: &str) -> bool {
+        let (mut t, mut user) = (wide(target), wide("backplane"));
+        let mut blob = secret.as_bytes().to_vec();
+        let mut c: CREDENTIALW = unsafe { std::mem::zeroed() };
+        c.Type = CRED_TYPE_GENERIC; c.TargetName = t.as_mut_ptr(); c.UserName = user.as_mut_ptr(); c.Persist = CRED_PERSIST_LOCAL_MACHINE;
+        c.CredentialBlobSize = blob.len() as u32; c.CredentialBlob = blob.as_mut_ptr();
+        unsafe { CredWriteW(&c, 0) != 0 }
+    }
+    /// Gone from the store (tests).
+    pub fn delete(target: &str) -> bool { let t = wide(target); unsafe { CredDeleteW(t.as_ptr(), CRED_TYPE_GENERIC, 0) != 0 } }
+}
+
 /// The hub process itself.
 pub mod hub {
     /// One hub per home: an exclusive lock on the file, not waited for. False if another process holds it.
