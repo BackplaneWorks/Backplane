@@ -13,7 +13,7 @@ From your own worktree, once your tests pass: `git rebase main`, then fast-forwa
 
 ## The builder
 
-- Follows the `main` ref. Builds in its own checkout (`~/Documents/i2cjak/main-build`, detached at the tip) with one target directory per crate (`~/.cache/main-build`), so nobody's untracked files are in a build and every build is incremental.
+- Follows the `main` ref. Builds in its own checkout (`~/Documents/Backplane-main-build`, detached at the tip) with one target directory per crate (`~/.cache/main-build`), so nobody's untracked files are in a build and every build is incremental.
 - Per new tip: the tests of both crates (minus `scripts/gate-skip.txt`), then builds of `backplane-hub` and `backplane-gpui`, then `dev-cut.sh`. A red test or a failed compile publishes nothing, marks that tip bad and leaves the bar red with the reason until a newer tip lands. So a bad merge never reaches the app, and the next merge fixes it.
 - Coalesces, never drops: a merge while a build runs lets that build finish and publish (if it passed), then the newest tip is built.
 - Waits (bar red) when under 20 GB is free (`MAIN_MIN_FREE_GB`), after trying `scripts/worktree-gc.sh --apply`. Takes one build slot like every `dev-build.sh` and `scripts/cargo-q` (`scripts/lib-buildslot.sh`), `-j` from free memory, at low priority; compiled dependencies come from `sccache`.
