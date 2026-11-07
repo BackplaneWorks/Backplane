@@ -2,6 +2,7 @@
 // usage (on the machine): node test/e2e/mac-effects.mjs HUB_BIN OUT_DIR [PORT]   -> one line per check on stdout, OUT_DIR/effects.json
 // A check passes only from events in the hub's own log (events.jsonl) or the HTTP answer; nothing here stands in for the client.
 import {spawn,execFileSync} from 'node:child_process';
+import net from 'node:net';
 import {mkdirSync,rmSync,writeFileSync,readFileSync,chmodSync,existsSync,openSync,readdirSync} from 'node:fs';
 import {encode,decode} from '../wire.mjs';
 import {standinScript} from '../tools/perf_standin.ts';
@@ -45,11 +46,12 @@ const P=events().find(e=>e.$==='ProjectCreated').id;
 const T=(await c.rpc('thread.create',{project:P,title:'effects',env:'local'})).thread;
 const set=async(k,v)=>{await c.rpc('setting.set',{key:k,value:v});await sleep(300)};
 // files.max.mb: POST /attach with a body over / under the limit
-const up=async(mb,name)=>{const body=Buffer.alloc(Math.round(mb*1048576),97);
-  const r=await fetch(`http://127.0.0.1:${PORT}/attach?thread=${T}&key=k${name}&name=${name}.bin`,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'},body});
-  return {status:r.status,body:(await r.text()).slice(0,160)}};
-await set('files.max.mb','1');
-const over=await up(2,'over'), under=await up(0.5,'under');
+const up=(mb,name)=>new Promise(res=>{ // like the client: Expect: 100-continue, so a refusal comes before the body is sent
+  const body=Buffer.alloc(Math.round(mb*1048576),97); const sock=net.connect(PORT,'127.0.0.1'); let buf='',sent=false;
+  const done=()=>{const m=/^HTTP\/1\.1 (\d+)/.exec(buf);const k=buf.indexOf('\r\n\r\n');res({status:m?Number(m[1]):0,body:k>0?buf.slice(k+4,k+164):buf.slice(0,160)});sock.destroy()};
+  sock.on('data',d=>{buf+=d; if(/^HTTP\/1\.1 100/.test(buf)&&!sent){sent=true;buf='';sock.write(body);return} if(buf.includes('\r\n\r\n')&&!/^HTTP\/1\.1 100/.test(buf)){setTimeout(done,150)}});
+  sock.on('error',()=>res({status:0,body:'socket error '+buf.slice(0,80)})); setTimeout(done,20000);
+  sock.write(`POST /attach?thread=${T}&key=k${name}&name=${name}.bin HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${token}\r\nContent-Type: application/octet-stream\r\nContent-Length: ${body.length}\r\nExpect: 100-continue\r\n\r\n`)});
 const onDisk=n=>{try{return execFileSync('find',[HOME+'/attachments','-name',`*${n}.bin*`]).toString().trim().length>0}catch{return false}};
 row('S02 files.max.mb=1',over.status===413&&under.status===200&&onDisk('under')&&!onDisk('over'),`2 MB upload -> ${over.status} ${over.body}; 0.5 MB -> ${under.status}, stored ${onDisk('under')}, over-limit stored ${onDisk('over')}`);
 await set('files.max.mb','3');
