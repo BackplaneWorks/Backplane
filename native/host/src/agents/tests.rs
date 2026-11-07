@@ -1288,7 +1288,7 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
     assert!(free(&f), "a raw flock from outside");
     let (_, r) = ag.tool_lock_acquire(T1, &json!({"name":"x"})).await; assert_eq!(r, json!({"held":false,"position":0,"holder":T1}), "reserved, held back by the flock");
     let (_, j) = ag.tool_work_run(T2, &json!({"command":"true","lock":"x"})).await; assert_eq!(j["state"], "waiting for lock x (1st)");
-    let l = lock_now(&ag, "x").await; assert_eq!(l["ready"], false); assert_eq!(l["outside"]["pid"], std::process::id(), "{l}");
+    let l = lock_now(&ag, "x").await; assert_eq!(l["ready"], false); if cfg!(target_os = "linux") { assert_eq!(l["outside"]["pid"], std::process::id(), "{l}") } // the holder is named from /proc/locks: elsewhere nobody is named (locks.rs)
     ag.locks_tick().await; assert!(!said(&log_from(&hub, from).await, T1, "is yours"));
     unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_UN); } ag.locks_tick().await;
     until(&hub, from, 20, |ev| said(ev, T1, "Lock x is yours")).await; let l = lock_now(&ag, "x").await; assert_eq!(l["ready"], true); assert!(l.get("outside").is_none(), "{l}");

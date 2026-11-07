@@ -73,6 +73,8 @@ mod tests {
         std::fs::write(bin.join("kicad"), format!("#!/bin/sh\necho \"$1 $(pwd)\" > '{}'\n", out.display())).unwrap(); std::fs::set_permissions(bin.join("kicad"), std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(open_in(&format!("{root}/bin/kicad-cli"), root), Ok(format!("kicad {root}/hw/m.kicad_pro")));
         for _ in 0..100 { if out.exists() && !std::fs::read_to_string(&out).unwrap().is_empty() { break } std::thread::sleep(std::time::Duration::from_millis(20)) }
-        assert_eq!(std::fs::read_to_string(&out).unwrap().trim(), format!("{root}/hw/m.kicad_pro {root}/hw"));
+        // the program's own `pwd` is the physical folder (macOS temp is /var -> /private/var): same folder, whichever spelling
+        let got = std::fs::read_to_string(&out).unwrap(); let (file, cwd) = got.trim().split_once(' ').unwrap();
+        assert_eq!(file, format!("{root}/hw/m.kicad_pro")); assert_eq!(std::fs::canonicalize(cwd).unwrap(), std::fs::canonicalize(format!("{root}/hw")).unwrap());
     }
 }
