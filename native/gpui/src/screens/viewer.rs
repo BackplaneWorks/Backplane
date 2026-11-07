@@ -281,7 +281,7 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if solid_ready(&want, &have) => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => div().p_3().text_color(c("dim")).child("Loading the model…").into_any_element() } };
             if open == "mech" { div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, key_empty)).child(model).into_any_element() } else { div().size_full().flex().flex_col().child(model).into_any_element() }
         }
-        else if open == "browser" { match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => div().p_3().text_color(c("dim")).child("The browser page needs a hub on plain http://.").into_any_element() } }
+        else if open == "browser" { match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => div().p_3().text_color(c("dim")).child("The browser page needs a connected hub.").into_any_element() } }
         else { div().p_3().text_color(c("dim")).child("Opening…").into_any_element() };
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
