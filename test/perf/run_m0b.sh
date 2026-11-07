@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/h/Documents/i2cjak/backplane-gpui/test/perf
+cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"/test/perf
 mkdir -p ../../../build/gpui/results/perf/m0
 rm -f ../../../build/gpui/results/perf/m0/m0.json
 df -h / | tail -1 > ../../../build/gpui/results/perf/m0-df.txt

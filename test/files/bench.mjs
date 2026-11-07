@@ -1,8 +1,9 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun bench.mjs RUST_BIN JS_BIN PLOT_BIN OUT.json : latency and memory of files.dir, /img and the first plot on both hubs (ports 3858/3859)
 import {mkdirSync,rmSync,writeFileSync,cpSync,readFileSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,rssKb,hwmKb,sleep} from '../perf/lib.mjs';
 const [rustBin,jsBin,plotBin,out]=process.argv.slice(2);
-const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/files-run/bench';rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
+const R=`${BP_ROOT}/build/gpui/files-run/bench`;rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
 const proj=R+'/ecc83';cpSync('/home/h/.backplane-bend/kicad/10.99.0-bp.4/share/kicad/demos/ecc83',proj,{recursive:true});
 const log=[{$:'ProjectCreated',id:'p1',title:'e',root:proj,at:1},{$:'ThreadCreated',id:'t1',project:'p1',title:'T',env:'local',branch:'',worktree:'',provider:'claude',model:'',at:2}].map(x=>JSON.stringify(x)).join('\n')+'\n';
 const q=(xs,p)=>{const s=[...xs].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor(p*s.length))]};

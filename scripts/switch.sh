@@ -28,7 +28,7 @@
 # side-by-side mode agents run in real folders; with stand-ins only, none). Nothing flows back into ~/.backplane-bend, and nothing done
 # in today's app after the copy was made shows up here (a start makes a fresh copy every time).
 set -eu
-ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
+ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SW=${SWITCH_DIR:-$HOME/.backplane-gpui-switch}
 PORT=${SWITCH_PORT:-3790}

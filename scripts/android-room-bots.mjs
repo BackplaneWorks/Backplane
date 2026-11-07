@@ -1,6 +1,6 @@
 // Each bot posts into the room "den" (stand-in agents calling room_post): bun android-room-bots.mjs HOME HOST:PORT
 import {readFileSync} from 'node:fs';
-import {encode} from '/home/h/Documents/i2cjak/backplane-gpui/test/wire.mjs';
+import {encode} from '../test/wire.mjs';
 const [home,hp]=process.argv.slice(2);
 const token=readFileSync(home+'/token','utf8').trim();
 const ev=k=>readFileSync(home+'/events.jsonl','utf8').split('\n').filter(l=>l.includes(`"$":"${k}"`)).map(l=>JSON.parse(l));

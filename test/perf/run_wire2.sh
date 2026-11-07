@@ -1,5 +1,5 @@
 #!/bin/bash
-R=/home/h/Documents/i2cjak/backplane-gpui; cd $R/test/perf; OUT=$R/build/gpui/results/perf/wire; export OUT
+R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); cd $R/test/perf; OUT=$R/build/gpui/results/perf/wire; export OUT
 port=3803
 for T in 22 300; do NAME=wireops-t$T; port=$((port+1))
   (THREADS=$T bun m2_server.mjs 127.0.0.1 $port 0 $NAME > $OUT/$NAME.srv 2>&1 &)

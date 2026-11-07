@@ -1,10 +1,11 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun e2e_plot_big.mjs RUST_HUB_BIN OUT.json: the Rust hub alone (its port 3866, stand-in agents, no plot child: BACKPLANE_PLOT_BIN names nothing) reading the 85 MB demo board:
 // time to the first plot frame after kicad.watch, frame size, hub RSS and peak before, right after and 3 s after (malloc_trim). The JS hub's child cannot read this board under the 3.7 GiB cap.
 import {mkdirSync,rmSync,writeFileSync,copyFileSync,readFileSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,sleep} from '../perf/lib.mjs';
 import {encode,decode} from '../wire.mjs';
 const [bin,out]=process.argv.slice(2);
-const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/files-run/plotbig';rmSync(R,{recursive:true,force:true});mkdirSync(R+'/proj',{recursive:true});makeStandins(R+'/bin');
+const R=`${BP_ROOT}/build/gpui/files-run/plotbig`;rmSync(R,{recursive:true,force:true});mkdirSync(R+'/proj',{recursive:true});makeStandins(R+'/bin');
 const name='jetson-agx-thor-baseboard';copyFileSync(`/home/h/.backplane-bend/kicad/10.99.0-bp.4/share/kicad/demos/${name}/${name}.kicad_pcb`,`${R}/proj/${name}.kicad_pcb`);writeFileSync(`${R}/proj/${name}.kicad_pro`,'{}');
 const home=R+'/home';mkdirSync(home);writeFileSync(home+'/events.jsonl',[{$:'ProjectCreated',id:'p1',title:'b',root:R+'/proj',at:1},{$:'ThreadCreated',id:'t1',project:'p1',title:'T',env:'local',branch:'',worktree:'',provider:'claude',model:'',at:2}].map(x=>JSON.stringify(x)).join('\n')+'\n');
 const h=await startHub({bin,home,port:3866,standins:R+'/bin',extraEnv:{BACKPLANE_PLOT_BIN:'/nonexistent/backplane-serve'}});

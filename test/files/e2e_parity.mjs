@@ -1,10 +1,11 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // node/bun e2e_parity.mjs RUST_HUB_BIN JS_HUB_BIN OUT.json
 // Starts both hubs (own ports 3850/3851, temp homes, stand-in agents) on the same tiny project, asks both the same
 // files.dir and /img questions (hostile ones included) and reports every difference. Desktop-safe: finished binaries only.
 import {mkdirSync,rmSync,writeFileSync,symlinkSync,existsSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,sleep} from '../perf/lib.mjs';
 const [rustBin,jsBin,out]=process.argv.slice(2);
-const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/files-run';rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});
+const R=`${BP_ROOT}/build/gpui/files-run`;rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});
 makeStandins(R+'/bin');
 const proj=R+'/proj',outside=R+'/outside';
 for(const d of [proj+'/sub/deep',proj+'/zdir',proj+'/.git',outside])mkdirSync(d,{recursive:true});

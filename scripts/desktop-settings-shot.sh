@@ -3,7 +3,7 @@
 # opens Settings, prints its structure (read:settings: labels, button actions, field names, no values) and takes a shot of the first page
 # and of five others. THEME=dark|light. usage: desktop-settings-shot.sh CLIENT_BIN ASSETS_DIR OUTNAME BOARD -> results/desktop/OUTNAME.*, shots/desktop/OUTNAME-s-*.png
 set -eu
-ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; CLIENT=$1; ASSETS=$2; N=${3:-plotbig}; BOARD=$4; MODES=${MODES:-current}
+ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; CLIENT=$1; ASSETS=$2; N=${3:-plotbig}; BOARD=$4; MODES=${MODES:-current}
 R=$ROOT/build/gpui/desktop-plot-cache; OUT=$ROOT/build/gpui/results/desktop; SH=$ROOT/build/gpui/shots/desktop
 X=$ROOT/build/gpui/xvfb; HUB=$ROOT/build/gpui/hub/new
 FIX=$ROOT/test/files/fixtures/plot; PORT=3841; DISP=:${GPUI_DISP:-71}

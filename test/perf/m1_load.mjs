@@ -1,7 +1,8 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // Milestone 1: hub under load. node/bun m1_load.mjs N [secs] [outdir]
 import {mkdirSync,writeFileSync,rmSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,sleep,pct,f1,rssKb,hwmKb,cpuTicks,fds,sockets,threads,tree,treeRssKb,dirSizes,debugPerf} from './lib.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';
+const REPO=BP_ROOT;
 const n=Number(process.argv[2]||20),secs=Number(process.argv[3]||60),port=Number(process.argv[4]||3801);
 const warm=10;
 const bin=process.env.HUB_BIN||REPO+'/build/gpui/backplane-serve';

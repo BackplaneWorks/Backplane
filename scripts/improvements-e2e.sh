@@ -7,7 +7,7 @@
 # Pictures: build/gpui/shots/desktop/improvements-NN-*.png (this window only). Checks: improvements-e2e-check.py on the log, the events and the files.
 # usage: improvements-e2e.sh CLIENT_BIN HUB_BIN ASSETS_DIR            (binaries come from a build job, never built here)
 set -eu
-ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/.." && pwd)
+ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/.." && pwd)
 CLIENT=$1; HUBBIN=$2; ASSETS=$3
 R=$ROOT/build/gpui/imp-e2e; OUT=$ROOT/build/gpui/results/improvements; SH=$ROOT/build/gpui/shots/desktop
 X=$ROOT/build/gpui/xvfb; PORT=3834; DISP=${IMP_DISPLAY:-:61}

@@ -1,7 +1,7 @@
 #!/bin/sh
 # desktop side: stage the inputs and launch the Boat job (work_run this). usage from the repo root.
 set -eu
-rm -rf pstage; mkdir -p pstage; B=${GPUI_BUILD:-/home/h/Documents/i2cjak/backplane-gpui/build/gpui}; cp $B/backplane-serve-960 pstage/backplane-serve; cp $B/slim/bp-policy-page $B/hub/new/window pstage/
+rm -rf pstage; mkdir -p pstage; B=${GPUI_BUILD:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)/build/gpui}; cp $B/backplane-serve-960 pstage/backplane-serve; cp $B/slim/bp-policy-page $B/hub/new/window pstage/
 { git ls-files -co --exclude-standard native/host | grep -v '^native/host/target'
   ls test/parity/*.mjs test/parity/*.sh test/wire.mjs test/perf/lib.mjs test/slim/check_agents.sh test/tools/perf_standin.ts src/web/wire.js src/web/view-delta.js src/core/cbor
   git ls-files -co --exclude-standard test/agents/fixtures test/files/hostile_paths.tsv test/commands

@@ -3,7 +3,7 @@
 # swiftc compiles VoiceEdit.swift with mobile/ios/Tests/VoiceEditTests.swift (no app, no simulator) and runs it.
 # usage: scripts/mobile/ios-voice-edit-test.sh        (needs the ssh wrapper build/gpui/mac-ssh of the main checkout)
 set -u
-ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; M=${M:-$MAIN/build/gpui/mac-ssh}; D=${D:-bp-voice-edit-test}
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; M=${M:-$MAIN/build/gpui/mac-ssh}; D=${D:-bp-voice-edit-test}
 $M hs-mac-mini "mkdir -p $D" || exit 1
 RSYNC_RSH=$M rsync -a $ROOT/mobile/ios/Backplane/VoiceEdit.swift $ROOT/test/fixtures/voice-edits.json hs-mac-mini:$D/ || exit 1
 # top-level code must be main.swift when swiftc gets several files

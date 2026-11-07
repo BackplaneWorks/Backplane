@@ -1,5 +1,5 @@
 #!/bin/bash
-R=/home/h/Documents/i2cjak/backplane-gpui; cd $R/test/perf; D=$R/build/gpui/results/perf/cmp
+R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); cd $R/test/perf; D=$R/build/gpui/results/perf/cmp
 mkdir -p $D/run2-contaminated-idle; for f in idle latency load latencyLoad; do mv $D/$f.json $D/run2-contaminated-idle/ 2>/dev/null; done
 (bun cmp_hub.mjs 3807 > $D/hub.out 2>&1 &)
 sleep 8; for i in $(seq 120); do grep -q ready $D/hub.out && break; sleep 1; done

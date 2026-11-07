@@ -1,3 +1,4 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun reconnect_ref.mjs BIN PORT AGENTS : the JS-hub "dropped link" experiment, with the missing items named.
 // reference client sees every item; `first` joins, holds N items, drops; a new socket resumes with since=N&origin=.
 // Capped (3.5 GiB, no swap), stand-in agents only.
@@ -5,7 +6,7 @@ import {mkdirSync,rmSync,writeFileSync,readFileSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,sleep} from '../perf/lib.mjs';
 import {decode} from '../wire.mjs';
 const [bin,port,agentsArg]=process.argv.slice(2);const agents=Number(agentsArg||5);
-const R='/home/h/Documents/i2cjak/backplane-gpui',root=R+`/build/gpui/hub-run/reconnect-${port}`;rmSync(root,{recursive:true,force:true});mkdirSync(root+'/proj',{recursive:true});makeStandins(root+'/bin');
+const R=BP_ROOT,root=R+`/build/gpui/hub-run/reconnect-${port}`;rmSync(root,{recursive:true,force:true});mkdirSync(root+'/proj',{recursive:true});makeStandins(root+'/bin');
 const h=await startHub({bin,home:root+'/home',port:Number(port),standins:root+'/bin',cap:'3500M',extraEnv:{FAKE_SECS:'60',FAKE_PER:'2',FAKE_CYCLE:'20'}});
 const refLog=[];const ref=await client(h,{onMsg:(o)=>{if(o.t==='log'||o.t==='changes')refLog.push(...(o.items||[]))}});const c=await client(h,{});
 c.send('project.add',{path:root+'/proj'});const pc=await c.until(10000,()=>c.seen.find(x=>x.$==='ProjectCreated'));

@@ -1,10 +1,11 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun windows_ref.mjs : the JS hub's `window` (and the exact request) for several threads of the pages fixture,
 // the reference the native window computation must equal. Synthetic log, stand-ins only,
 // 3.5 GiB cap.
 import {mkdirSync,rmSync,copyFileSync,writeFileSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,sleep} from '../perf/lib.mjs';
 import {viewClient} from '../perf/view.mjs';
-const R='/home/h/Documents/i2cjak/backplane-gpui',root=R+'/build/gpui/hub-run/windows-ref';rmSync(root,{recursive:true,force:true});mkdirSync(root+'/home',{recursive:true});makeStandins(root+'/bin');
+const R=BP_ROOT,root=R+'/build/gpui/hub-run/windows-ref';rmSync(root,{recursive:true,force:true});mkdirSync(root+'/home',{recursive:true});makeStandins(root+'/bin');
 copyFileSync(R+'/test/hub/fixtures/pages.jsonl',root+'/home/events.jsonl');
 const h=await startHub({bin:R+'/build/gpui/backplane-serve',home:root+'/home',port:3818,standins:root+'/bin',cap:'3500M'});
 const v=await viewClient(h,{mobile:true,delta:false});await v.open();

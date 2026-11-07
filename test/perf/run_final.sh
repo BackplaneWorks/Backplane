@@ -1,6 +1,6 @@
 #!/bin/bash
 # seeded-hub churn (hub), GPUI churn with reconnects, 2-hour GPUI soak, one after another; detached
-cd /home/h/Documents/i2cjak/backplane-gpui/test/perf; D=../../../build/gpui/results/perf
+cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"/test/perf; D=../../../build/gpui/results/perf
 bun m4_churn.mjs 20 3806 > $D/m4-churn.stdout 2>&1; echo hubchurn rc=$? >> $D/final.status
 sleep 5
 bun cmp_churn.mjs 20 > $D/gpui-churn.stdout 2>&1; echo gpuichurn rc=$? >> $D/final.status

@@ -1,7 +1,7 @@
 // Put seeded bots in moods on a stand-in hub: bun android-bots-moods.mjs HOME HOST:PORT
 // work = a turn the stand-in holds (mode:pair, BP_WORK_MS), error = the agent exits (mode:exit-now), idle = a finished turn.
 import {readFileSync} from 'node:fs';
-import {encode} from '/home/h/Documents/i2cjak/backplane-gpui/test/wire.mjs';
+import {encode} from '../test/wire.mjs';
 const [home,hp]=process.argv.slice(2);
 const token=readFileSync(home+'/token','utf8').trim();
 const ev=readFileSync(home+'/events.jsonl','utf8').split('\n').filter(l=>l.includes('"$":"BotSet"')).map(l=>JSON.parse(l));

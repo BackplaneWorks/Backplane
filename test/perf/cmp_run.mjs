@@ -1,9 +1,10 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // Electron (installed 0.13.0 desktop) vs GPUI on one fixture hub (3807), isolated display :62, RTX 5080 via Vulkan.
 // bun cmp_run.mjs PHASE   PHASE: startup | idle | latency | load   (writes build/gpui/results/perf/cmp/<phase>.json)
 import {readFileSync,writeFileSync,mkdirSync,rmSync,existsSync,readdirSync} from 'node:fs';
 import {spawn,execSync} from 'node:child_process';
 import {cdp} from './cdp.mjs';import {tree,pct,sleep} from './lib.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';const ROOT=REPO+'/build/gpui/perf-run/cmp';const OUT=REPO+'/build/gpui/results/perf/cmp';mkdirSync(OUT,{recursive:true});
+const REPO=BP_ROOT;const ROOT=REPO+'/build/gpui/perf-run/cmp';const OUT=REPO+'/build/gpui/results/perf/cmp';mkdirSync(OUT,{recursive:true});
 const st=JSON.parse(readFileSync(ROOT+'/state.json','utf8'));
 const HOME=ROOT+'/home';const ELHOME=ROOT+'/fakehome-el',GPHOME=ROOT+'/fakehome-gp';mkdirSync(GPHOME,{recursive:true});
 const CAP=['--user','--scope','--quiet','-p','MemoryMax=3700M','-p','MemorySwapMax=0'];

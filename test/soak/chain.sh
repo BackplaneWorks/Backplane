@@ -3,7 +3,7 @@
 # in the background (work_run). Each hop: upload carry.tar.gz (hub home + chain/ with samples and ledgers), run SECS, SIGKILL the hub,
 # verify the whole log against every acked write, tar the home forward. Stops at the first hop that fails, with the failure kept.
 HOPS=${1:-16}; SECS=${2:-5400}; N=${3:-1}
-RES=${RES:-/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/soak/m7-hubonly-24h}
+RES=${RES:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)/build/gpui/results/soak/m7-hubonly-24h}
 CARRY=test/soak/carry/carry.tar.gz
 mkdir -p $RES test/soak/carry; FAIL=0
 while [ $N -le $HOPS ]; do

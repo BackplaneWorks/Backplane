@@ -6,7 +6,7 @@
 # NOT the GPU), every process in one scope capped at 3700M with swap 0, nice 19. The client binary comes from a Boat job (never built here).
 # usage: desktop-plot-run.sh CLIENT_BIN ASSETS_DIR OUTNAME          ->  build/gpui/shots/desktop/OUTNAME-*.png, build/gpui/results/desktop/OUTNAME.*
 set -eu
-ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; CLIENT=$1; ASSETS=$2; N=${3:-plotbig}; BOARD=$4
+ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; CLIENT=$1; ASSETS=$2; N=${3:-plotbig}; BOARD=$4
 R=$ROOT/build/gpui/desktop-plot; OUT=$ROOT/build/gpui/results/desktop; SH=$ROOT/build/gpui/shots/desktop
 X=$ROOT/build/gpui/xvfb; HUB=$ROOT/build/gpui/hub/new
 FIX=$ROOT/test/files/fixtures/plot; PORT=3833; DISP=:61

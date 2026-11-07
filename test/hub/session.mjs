@@ -1,3 +1,4 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // node/bun session.mjs NAME BIN PORT LOG OUT [POLICY_BIN]
 // Starts BIN (the JS hub or backplane-hub) on a fresh home holding LOG as events.jsonl, with stand-in
 // agents only, then speaks the GPUI client's view protocol: greeting, view.open recent, view.update,
@@ -6,7 +7,7 @@ import {mkdirSync,rmSync,copyFileSync,writeFileSync,existsSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,sleep,rssKb,treeRssKb} from '../perf/lib.mjs';
 import {decode,encode} from '../wire.mjs';
 const [name,bin,port,logPath,out,policy]=process.argv.slice(2);
-const R='/home/h/Documents/i2cjak/backplane-gpui';
+const R=BP_ROOT;
 const root=`${R}/build/gpui/hub-run/${name}`;rmSync(root,{recursive:true,force:true});mkdirSync(root+'/home',{recursive:true});
 makeStandins(root+'/bin');
 if(logPath&&existsSync(logPath))copyFileSync(logPath,root+'/home/events.jsonl');

@@ -1,3 +1,4 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun e2e_plot.mjs RUST_HUB_BIN JS_HUB_BIN PLOT_BIN OUT.json   (env PLOT_DEMO: a demo folder, default ecc83; PLOT_PORTS: two ports, default 3860,3861)
 // PLOT_BIN goes to the Rust hub only: a path that does not exist proves it spawns no plot child.
 // Both hubs (stand-in agents) watch the same KiCad demo project; the first plot frame, a delta after a
@@ -6,7 +7,7 @@ import {mkdirSync,rmSync,writeFileSync,readFileSync,cpSync,utimesSync,appendFile
 import {makeStandins,startHub,stopHub,sleep} from '../perf/lib.mjs';
 import {decode,encode} from '../wire.mjs';
 const [rustBin,jsBin,plotBin,out]=process.argv.slice(2);
-const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/files-run/plot';rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
+const R=`${BP_ROOT}/build/gpui/files-run/plot`;rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
 const demoName=process.env.PLOT_DEMO||'ecc83';const [portA,portB]=(process.env.PLOT_PORTS||'3860,3861').split(',').map(Number);
 const demo='/home/h/.backplane-bend/kicad/10.99.0-bp.4/share/kicad/demos/'+demoName;
 const proj=R+'/'+demoName;cpSync(demo,proj,{recursive:true});

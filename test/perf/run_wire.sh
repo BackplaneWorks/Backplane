@@ -1,5 +1,5 @@
 #!/bin/bash
-R=/home/h/Documents/i2cjak/backplane-gpui; cd $R/test/perf; OUT=$R/build/gpui/results/perf/wire; export OUT; mkdir -p $OUT
+R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); cd $R/test/perf; OUT=$R/build/gpui/results/perf/wire; export OUT; mkdir -p $OUT
 port=3802
 for T in 22 300; do for A in 0 5; do
   NAME=wire-t$T-a$A; port=$((port+1))

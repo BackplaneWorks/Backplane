@@ -1,8 +1,9 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // GPUI churn: one client selects/pops over all threads for N minutes while the seeded hub sees reconnecting plain clients,
 // thread create/delete, and two hub restarts (the client must reconnect). bun cmp_churn.mjs MINUTES
 import {readFileSync,writeFileSync,mkdirSync,appendFileSync,existsSync,readdirSync,openSync,rmSync} from 'node:fs';
 import {spawn,execSync} from 'node:child_process';import {tree,sleep} from './lib.mjs';import {startHub,client} from './lib.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';const ROOT=REPO+'/build/gpui/perf-run/cmp';const OUT=REPO+'/build/gpui/results/perf/gpui-churn';mkdirSync(OUT,{recursive:true});
+const REPO=BP_ROOT;const ROOT=REPO+'/build/gpui/perf-run/cmp';const OUT=REPO+'/build/gpui/results/perf/gpui-churn';mkdirSync(OUT,{recursive:true});
 const mins=Number(process.argv[2]||20);const rd=p=>{try{return readFileSync(p,'utf8')}catch{return ''}};
 const X=REPO+'/build/gpui/xvfb';
 const xv=spawn(X+'/usr/bin/Xvfb',[':62','-screen','0','1440x900x24','-xkbdir','/usr/share/X11/xkb','-nolisten','tcp'],{stdio:'ignore',env:{...process.env,LD_LIBRARY_PATH:X+'/usr/lib/x86_64-linux-gnu'}});await sleep(2000);

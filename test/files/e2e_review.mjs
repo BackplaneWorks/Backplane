@@ -1,3 +1,4 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun e2e_review.mjs RUST_HUB_BIN JS_HUB_BIN KICAD_RUNTIME OUT.json [js|rust]: review.*, kicad.export10 on both hubs, one after the other on the
 // same paths (ports 3880/3881), so path hashes and commit ids match. Stand-in agents; real kicad-cli from the runtime, read-only, with temp config.
 // Safety: GIT_CEILING_DIRECTORIES keeps git out of this repository; push and gh reach only a local bare repo and a stand-in; DISPLAY is empty and the
@@ -6,7 +7,7 @@ import {mkdirSync,rmSync,writeFileSync,readFileSync,existsSync,readdirSync,cpSyn
 import {execFileSync} from 'node:child_process';
 import {makeStandins,startHub,stopHub,client} from '../perf/lib.mjs';
 const [rustBin,jsBin,runtime,out]=process.argv.slice(2);
-const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/files-run/review',PLAIN=(process.env.TMPDIR||'/tmp')+'/bp-files-review-plain';
+const R=`${BP_ROOT}/build/gpui/files-run/review`,PLAIN=(process.env.TMPDIR||'/tmp')+'/bp-files-review-plain';
 const when='2026-01-02T03:04:05Z',G={GIT_AUTHOR_NAME:'t',GIT_AUTHOR_EMAIL:'t@t',GIT_COMMITTER_NAME:'t',GIT_COMMITTER_EMAIL:'t@t',GIT_AUTHOR_DATE:when,GIT_COMMITTER_DATE:when,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_SYSTEM:'/dev/null',GIT_CEILING_DIRECTORIES:R};
 const g=(cwd,...a)=>execFileSync('git',a,{cwd,env:{...process.env,...G}}).toString().trim();
 // a board without its (model ...) forms, by balanced parentheses outside strings

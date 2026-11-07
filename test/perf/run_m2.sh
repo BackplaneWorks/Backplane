@@ -1,6 +1,6 @@
 #!/bin/bash
 # M2 network driver. Usage: run_m2.sh   (desktop; drives the Mac clients over ssh)
-R=/home/h/Documents/i2cjak/backplane-gpui; cd $R/test/perf
+R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); cd $R/test/perf
 export RSYNC_RSH=$R/build/gpui/mac-ssh; MAC="$R/build/gpui/mac-ssh hs-mac-mini"
 OUT=$R/build/gpui/results/perf/m2; export OUT; mkdir -p $OUT
 TS=100.64.84.41

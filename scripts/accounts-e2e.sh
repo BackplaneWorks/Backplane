@@ -7,7 +7,7 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/.." && pwd)
 CLIENT=$1; HUBBIN=$2; ASSETS=$3
 R=${ACCOUNTS_E2E_DIR:-/tmp/accounts-e2e-$$}; PORT=${ACCOUNTS_E2E_PORT:-3841}; DISP=${ACCOUNTS_E2E_DISPLAY:-:93}
-X=${XVFB_ROOT:-$HOME/.local/xvfb-root}; XLIB=${XVFB_LIB:-/home/h/Documents/i2cjak/backplane-gpui/build/gpui/xvfb/usr/lib/x86_64-linux-gnu}
+X=${XVFB_ROOT:-$HOME/.local/xvfb-root}; XLIB=${XVFB_LIB:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)/build/gpui/xvfb/usr/lib/x86_64-linux-gnu}
 [ -x "$CLIENT" ] && [ -x "$HUBBIN" ] || { echo "need the client and hub binaries"; exit 2; }
 [ ! -e "/tmp/.X11-unix/X${DISP#:}" ] || { echo "display $DISP is in use"; exit 2; }
 if ss -ltn 2>/dev/null | grep -q ":$PORT "; then echo "port $PORT is in use"; exit 2; fi

@@ -2,7 +2,7 @@
 # From the repo root, on the desktop: copies the JS hub binary beside this script,
 # runs the ignored two-implementation test on Boat, and removes the copy. Stand-in agents only (none), temp homes, ports 3915-3916.
 set -u
-BIN=${1:-/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve}
+BIN=${1:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)/build/gpui/backplane-serve}
 mkdir -p test/net/bin && cp "$BIN" test/net/bin/backplane-serve && chmod +x test/net/bin/backplane-serve
 scripts/boat-job.sh --size default --timeout 1500 --idle 3600 --artifact out/net \
   --exclude 'mobile/**' --exclude 'desktop/**' --exclude 'build/**' --exclude 'docs/**' --exclude 'tools/**' \

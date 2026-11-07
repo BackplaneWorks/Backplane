@@ -2,7 +2,7 @@
 # From the repo root, under the mac-heavy lock (work_run lock:"mac-heavy"): cargo test of the commands module on the Mac (Boat is the first choice; this is for when its daily start limit is used up).
 # Fixtures and stand-in agents only. usage: sh test/commands/mac-test.sh [FILTER]
 set -eu
-ROOT=$(cd "$(dirname "$0")/../.." && pwd); SSH="$ROOT/../../../build/gpui/mac-ssh"; [ -x "$SSH" ] || SSH=/home/h/Documents/i2cjak/backplane-gpui/build/gpui/mac-ssh
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); SSH="$ROOT/../../../build/gpui/mac-ssh"; [ -x "$SSH" ] || SSH=$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")/build/gpui/mac-ssh
 HOST=hs-mac-mini; DEST=bp-gpui-commands; F=${1:-commands::}
 export RSYNC_RSH="$SSH"
 $SSH $HOST "mkdir -p ~/$DEST/src/core ~/$DEST/target"

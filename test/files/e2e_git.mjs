@@ -1,9 +1,10 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun e2e_git.mjs RUST_HUB_BIN JS_HUB_BIN OUT.json : git.status, git.diff, git.revert, history.refs on both hubs (ports 3856/3857)
 import {mkdirSync,rmSync,writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {makeStandins,startHub,stopHub,client} from '../perf/lib.mjs';
 const [rustBin,jsBin,out]=process.argv.slice(2);
-const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/files-run/git';rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
+const R=`${BP_ROOT}/build/gpui/files-run/git`;rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
 const g=(cwd,...a)=>execFileSync('git',a,{cwd,env:{...process.env,GIT_AUTHOR_NAME:'t',GIT_AUTHOR_EMAIL:'t@t',GIT_COMMITTER_NAME:'t',GIT_COMMITTER_EMAIL:'t@t',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_SYSTEM:'/dev/null'}}).toString();
 const repo=R+'/repo',plain=R+'/plain';mkdirSync(repo);mkdirSync(plain);g(repo,'init','-q');writeFileSync(repo+'/a.txt','one\n');writeFileSync(repo+'/b.kicad_pcb','(kicad_pcb)\n');g(repo,'add','.');g(repo,'commit','-qm','init');g(repo,'tag','v1');
 writeFileSync(repo+'/a.txt','two\n');writeFileSync(repo+'/new.txt','n\n');

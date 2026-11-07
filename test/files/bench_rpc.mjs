@@ -1,9 +1,10 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun bench_rpc.mjs RUST_BIN JS_BIN OUT.json : files.dir round trip with an event-driven client (no polling), ports 3858/3859
 import {mkdirSync,rmSync,writeFileSync,cpSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,sleep} from '../perf/lib.mjs';
 import {decode,encode} from '../wire.mjs';
 const [rustBin,jsBin,out]=process.argv.slice(2);
-const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/files-run/rpc';rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
+const R=`${BP_ROOT}/build/gpui/files-run/rpc`;rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
 const proj=R+'/p';mkdirSync(proj+'/d',{recursive:true});writeFileSync(proj+'/a.txt','x');
 const log=[{$:'ProjectCreated',id:'p1',title:'e',root:proj,at:1},{$:'ThreadCreated',id:'t1',project:'p1',title:'T',env:'local',branch:'',worktree:'',provider:'claude',model:'',at:2}].map(x=>JSON.stringify(x)).join('\n')+'\n';
 const q=(xs,p)=>{const s=[...xs].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor(p*s.length))]};

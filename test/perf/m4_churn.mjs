@@ -1,7 +1,8 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // M4 churn: reconnect, open/leave threads, create/delete threads, on a hub with no streaming agents. bun m4_churn.mjs MINUTES PORT
 import {execSync} from 'node:child_process';import {mkdirSync,writeFileSync,appendFileSync,rmSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,sleep,rssKb,fds,sockets,threads,tree,dirSizes} from './lib.mjs';import {viewClient} from './view.mjs';
-const REPO=process.env.PERF_REPO||'/home/h/Documents/i2cjak/backplane-gpui';const mins=Number(process.argv[2]||20),port=Number(process.argv[3]||3806);
+const REPO=process.env.PERF_REPO||BP_ROOT;const mins=Number(process.argv[2]||20),port=Number(process.argv[3]||3806);
 const root=REPO+'/build/gpui/perf-run/m4-churn';rmSync(root,{recursive:true,force:true});mkdirSync(root+'/proj',{recursive:true});makeStandins(root+'/bin');execSync('git init -q',{cwd:root+'/proj'});
 const out=process.env.PERF_OUT||REPO+'/build/gpui/results/perf/m4-churn';mkdirSync(out,{recursive:true});writeFileSync(out+'/samples.jsonl','');
 const h=await startHub({bin:process.env.HUB_BIN||REPO+'/build/gpui/backplane-serve',home:root+'/home',port,standins:root+'/bin',log:out+'/hub.log'});

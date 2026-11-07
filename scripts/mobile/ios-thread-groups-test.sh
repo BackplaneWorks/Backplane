@@ -3,7 +3,7 @@
 # swiftc compiles ThreadGroups.swift with mobile/ios/Tests/ThreadGroupsTests.swift (no app, no simulator) and runs it.
 # usage: scripts/mobile/ios-thread-groups-test.sh        (needs the ssh wrapper build/gpui/mac-ssh of the main checkout)
 set -u
-ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; M=${M:-$MAIN/build/gpui/mac-ssh}; D=${D:-bp-thread-groups-test}
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; M=${M:-$MAIN/build/gpui/mac-ssh}; D=${D:-bp-thread-groups-test}
 $M hs-mac-mini "mkdir -p $D" || exit 1
 RSYNC_RSH=$M rsync -a $ROOT/mobile/ios/Backplane/ThreadGroups.swift hs-mac-mini:$D/ || exit 1
 # top-level code must be main.swift when swiftc gets several files
