@@ -390,6 +390,7 @@ mod tests {
     }
     #[test] fn every_other_shortcut_is_the_shells_inside_the_terminal() {
         for k in ["ctrl-c", "ctrl-k", "ctrl-n", "ctrl-b", "ctrl-d", "ctrl-p", "ctrl-.", "ctrl-m", "ctrl-h", "ctrl-shift-p", "ctrl-shift-f", "ctrl-shift-s", "ctrl-shift-u", "ctrl-shift-[", "alt-1", "ctrl-1", "ctrl-z", "ctrl-a", "enter", "tab", "backspace", "delete", "/", "b", "s", "3", "w", "`"] {
+            if mac() && k == "ctrl-c" { continue } // Cmd+C copies in the terminal on a Mac (the secondary chord is its own)
             assert_eq!(d(k, &["Terminal"]), "", "{k} must reach the shell");
         }
     }
@@ -454,7 +455,7 @@ mod tests {
     }
     #[test] fn the_menu_keys_are_listed_and_none_is_missing() {
         for id in ["menu-up", "menu-down", "menu-left", "menu-right", "menu-tab", "menu-back", "menu-enter"] { let x = find(id).unwrap(); assert_eq!(x.kind, Fixed); assert!(Keystroke::parse(x.key).is_ok(), "{id}"); }
-        assert_eq!(hint(&Local::default(), "menu-up"), "Up"); assert_eq!(hint(&Local::default(), "menu-back"), "Shift+Tab"); assert_eq!(show("shift-tab", true), "⇧Tab");
+        assert_eq!(hint(&Local::default(), "menu-up"), "Up"); assert_eq!(hint(&Local::default(), "menu-back"), show("shift-tab", mac())); assert_eq!(show("shift-tab", true), "⇧Tab");
         assert!(MISSING.iter().all(|(k, _)| !k.contains("picker")));
     }
     #[test] fn a_rebound_shortcut_moves_and_reset_restores_it() {
@@ -474,6 +475,6 @@ mod tests {
     }
     #[test] fn hints_follow_the_hubs_actions() {
         assert_eq!(id_for("diff", "", ""), "diff"); assert_eq!(id_for("interrupt", "", ""), "stop"); assert_eq!(id_for("new-thread", "p1", "p1"), "new"); assert_eq!(id_for("new-thread", "p2", "p1"), "");
-        assert_eq!(hint(&Local::default(), "stop"), "Ctrl+."); assert_eq!(rail_letter("3d"), "3");
+        assert_eq!(hint(&Local::default(), "stop"), show("ctrl-.", mac())); assert_eq!(rail_letter("3d"), "3");
     }
 }
