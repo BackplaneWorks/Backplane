@@ -148,7 +148,7 @@ impl Backplane {
                 let before = held[i..].to_vec();
                 let rows = history::merge(held, fresh);
                 let (a, b) = history::changed(&before, &rows[i..], 0);
-                self.timeline.splice(a.start + i..a.end + i, b.len());
+                splice_keeping(&self.timeline, a.start + i..a.end + i, b.len());
                 let top = if i > 0 { crate::string(&prev, "historyOlder") } else { older };
                 (rows, top)
             }
@@ -168,7 +168,7 @@ impl Backplane {
         let old = match self.data["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
         let merged = history::splice(old.clone(), rows);
         let (x, y) = history::changed(&old, &merged, 0);
-        self.timeline.splice(x, y.len());
+        splice_keeping(&self.timeline, x, y.len());
         if self.data["thread"]["historyOlder"] == cursor.as_str() {
             let next = history::next_older(&cursor, r["window"]["older"].as_str().unwrap_or(""), r["window"]["hasMore"] == true, merged.len());
             self.data["thread"]["historyOlder"] = Value::String(next);
@@ -260,5 +260,33 @@ mod tests {
         assert_eq!(browser_owner(&d(r#"{"bot":null}"#), "t1"), "t1");
         assert_eq!(browser_owner(&d(r#"{}"#), "127.0.0.1:3833|t1"), "t1", "a qualified thread id is stripped");
         assert_eq!(browser_owner(&d(r#"{"bot":{"kind":"bot","id":"h:1|b7"}}"#), "t1"), "b7");
+    }
+}
+
+/// Rows `old` replaced by `count` new ones. The list resets the offset inside the top row to 0 when that row is among those replaced, which threw a reader
+/// scrolled inside a streaming message back to its top on every delta (they could never scroll down). A row replaced in place keeps its offset.
+pub(crate) fn splice_keeping(list: &ListState, old: std::ops::Range<usize>, count: usize) {
+    let top = list.logical_scroll_top();
+    let was = list.item_count();
+    list.splice(old.clone(), count);
+    if top.item_ix < was && old.contains(&top.item_ix) && top.item_ix < old.start + count { list.scroll_to(top); }
+}
+
+#[cfg(test)]
+mod splice_tests {
+    use super::*;
+    fn list(n: usize) -> ListState { ListState::new(n, ListAlignment::Bottom, px(100.)) }
+    #[core::prelude::v1::test] fn a_row_grown_in_place_keeps_the_reader_inside_it() {
+        let l = list(5); l.scroll_to(ListOffset { item_ix: 4, offset_in_item: px(30.) });
+        for _ in 0..3 { splice_keeping(&l, 4..5, 1); }
+        let t = l.logical_scroll_top(); assert_eq!((t.item_ix, f32::from(t.offset_in_item)), (4, 30.));
+        l.scroll_by(px(10.)); splice_keeping(&l, 4..5, 1);
+        assert_eq!(f32::from(l.logical_scroll_top().offset_in_item), 40., "scrolled down stays");
+    }
+    #[core::prelude::v1::test] fn following_the_end_stays_following_and_rows_above_shift_the_top() {
+        let l = list(5); splice_keeping(&l, 4..5, 1); splice_keeping(&l, 5..5, 1);
+        assert_eq!(l.logical_scroll_top().item_ix, l.item_count(), "at the end it follows");
+        l.scroll_to(ListOffset { item_ix: 3, offset_in_item: px(7.) }); splice_keeping(&l, 0..0, 2);
+        assert_eq!(l.logical_scroll_top().item_ix, 5);
     }
 }
