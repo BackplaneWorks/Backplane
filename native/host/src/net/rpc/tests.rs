@@ -170,3 +170,31 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
     let lk = Link { sync: fb, hub: Arc::downgrade(&b.hub), copy: true };
     assert_eq!(lk.post(&l, json!({"m":"owner.mail","p":{}}).to_string()).await, None);
 }
+
+/// A side's agents, as far as /far/rpc sees them: records what it was asked to run and answers
+struct Srv(Mutex<Vec<(String, String, String, Value)>>);
+impl crate::api::FarMcp for Srv {
+    fn serve<'a>(&'a self, link: &'a str, from: &'a str, tool: &'a str, args: &'a Value) -> Fut<'a, (bool, Value)> {
+        Box::pin(async move { self.0.lock().unwrap().push((link.into(), from.into(), tool.into(), args.clone())); (true, json!({"threadId":"t9","state":"started"})) })
+    }
+}
+#[tokio::test] async fn far_mcp_a_tool_call_for_a_thread_runs_on_the_other_machine_for_its_caller_and_only_over_an_own_link() {
+    let (a, _fa) = side("rm1", true, false).await; let (b, _fb) = side("rm2", false, false).await;
+    let srv = Arc::new(Srv(Default::default())); a.hub.set_far_mcp(srv.clone());
+    let l = link(&a, &b, false).await; // linked, not the owner's: nothing is asked and nothing is taken
+    assert_eq!(b.hub.far_machines(), vec![], "a link that is not the owner's is no machine");
+    assert!(b.hub.far_call(&l, "tb", "thread_launch", &json!({"prompt":"x"})).await.unwrap_err().contains("no machine of yours is linked"));
+    let r = signed(&b, &a, &l, json!({"id":0,"m":"mcp.call","p":{"tool":"thread_launch","from":"tb","args":{"prompt":"x"}}})).await; assert_eq!(r.code, 403, "{}", r.body);
+    let r = signed(&b, &a, &l, json!({"id":0,"m":"bots.room_post","p":{"room":"r","msg":"m","from":"x","text":"y"}})).await; assert_eq!(r.code, 403, "{}", r.body);
+    assert!(srv.0.lock().unwrap().is_empty());
+    // the owner's own: B's thread tb launches on A; A runs it for "<link>~tb"
+    for n in [&a, &b] { n.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{l}"),"value":"pair","at":1})).await.unwrap(); }
+    assert_eq!(b.hub.far_machines().len(), 1);
+    let (ok, body) = b.hub.far_call(&l, "tb", "thread_launch", &json!({"prompt":"build it","project":"p1"})).await.unwrap();
+    assert!(ok); assert_eq!(body["threadId"], "t9");
+    assert_eq!(srv.0.lock().unwrap().clone(), vec![(l.clone(), format!("{l}~tb"), "thread_launch".to_string(), json!({"prompt":"build it","project":"p1"}))]);
+    // only the tools the owner's machines may call, and only on behalf of a thread there (not one that is itself elsewhere)
+    let r = signed(&b, &a, &l, json!({"id":0,"m":"mcp.call","p":{"tool":"secret_run","from":"tb","args":{}}})).await; assert_eq!(r.code, 403, "{}", r.body);
+    let r = signed(&b, &a, &l, json!({"id":0,"m":"mcp.call","p":{"tool":"thread_send","from":"x~tb","args":{}}})).await; assert_eq!(r.code, 400, "{}", r.body);
+    assert_eq!(srv.0.lock().unwrap().len(), 1);
+}

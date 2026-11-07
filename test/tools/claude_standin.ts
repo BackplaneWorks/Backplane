@@ -44,6 +44,7 @@
 //                Bash approval, both through permission_prompt, waiting;
 //                "edit:" moves the board's first footprint 2.54 mm;
 //                "delegate:" calls delegate_task (a plain child);
+//                "mcpcall:{json}" makes one Backplane MCP call, {"name":..,"arguments":..}, and says its answer;
 //                "fail:" starts, then fails the turn (an API error result)
 //   delegate     the first command calls the hub's delegate_task (its MCP
 //                URL from --mcp-config) for a child "mode:plain child
@@ -436,6 +437,23 @@ async function run(c: Cmd, firstOne: boolean) {
       } catch (e) { got = String(e); }
       log(`DELEGATED ${got.slice(0, 300)}`);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.slice(0, 400) }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "mcpcall:{json}": one Backplane MCP call, {"name":"thread_launch","arguments":{..}} (a thread elsewhere, a room...), its answer posted as the reply
+    if (c.text.includes("mcpcall:") && mcpUrl) {
+      const id = `toolu_${rnd()}`;
+      let call: { name: string; arguments: unknown } = { name: "", arguments: {} };
+      try { call = JSON.parse(c.text.slice(c.text.indexOf("mcpcall:") + 8)); } catch (e) { log(`MCPCALL bad json ${e}`); }
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: `mcp__backplane__${call.name}`, input: call.arguments }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      let got = "";
+      try {
+        const r = await fetch(mcpUrl, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: call.name, arguments: call.arguments } }) });
+        got = await r.text();
+      } catch (e) { got = String(e); }
+      log(`MCPCALL ${call.name} ${got.slice(0, 600)}`);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.slice(0, 600) }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      say(`MCPCALL ${call.name} ${got.slice(0, 600)}`);
     }
     // "fail:": streams a little, then the API fails the turn (an error result)
     if (c.text.includes("fail:")) {
