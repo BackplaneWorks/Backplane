@@ -7,8 +7,8 @@ set -u
 MODE=${1:?sink or apns}; HUB=${2:?hub binary}; ROOT=$(cd "$(dirname "$0")/../../.." && pwd); OUT=${3:-$ROOT/build/push-e2e/$MODE}
 mkdir -p "$HOME/.cache/respectful-push"; T=$(mktemp -d "$HOME/.cache/respectful-push/e2e.XXXXXX"); PORT=${PORT:-3860}; MAC_DIR=${MAC_DIR:-backplane-ios-push}; SIM=${SIM:-bp-push}; APP_ID=${APP_ID:-dev.backplane.works}
 M=${MAC_SSH:-$HOME/.cache/respectful-push/mac-ssh}; mkdir -p "$OUT"
-pids=(); stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; }
-trap stop EXIT
+pids=(); stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; pkill -f -- "--home $T/home" 2>/dev/null; }
+trap stop EXIT; trap "exit 143" INT TERM HUP
 cd "$ROOT/test/e2e/push"
 MODE=$MODE PERF_REPO=$ROOT bun ctl.mjs "$T" "$HUB" "$PORT" > "$OUT/ctl.log" 2>&1 & pids+=($!)
 for _ in $(seq 60); do grep -q '^ready' "$OUT/ctl.log" && break; sleep 1; done
@@ -37,6 +37,7 @@ TEST_RUNNER_APP_ID=$APP_ID TEST_RUNNER_HUB_HOST=127.0.0.1 TEST_RUNNER_HUB_PORT=$
   xcodebuild test-without-building -resultBundlePath e2e-out/push.xcresult -project e2e/E2E.xcodeproj -scheme BackplaneE2E -sdk iphonesimulator -destination 'platform=iOS Simulator,id=$U' -derivedDataPath e2e-dd CODE_SIGNING_ALLOWED=NO -only-testing:BackplaneE2E/Push/test_push > e2e-out/xcodebuild.log 2>&1
 rc=\$?; kill -INT \$REC 2>/dev/null; wait \$REC 2>/dev/null
 xcrun simctl spawn $U log show --last 15m --predicate 'process == \"Backplane\" AND eventMessage CONTAINS \"push\"' --style compact > e2e-out/app-push.log 2>/dev/null
+xcrun simctl spawn $U log show --last 15m --predicate '(process == \"Backplane\" AND NOT eventMessage CONTAINS \"InterfaceStyle\") OR (process == \"runningboardd\" AND eventMessage CONTAINS \"dev.backplane\" AND (eventMessage CONTAINS[c] \"terminat\" OR eventMessage CONTAINS[c] \"kill\" OR eventMessage CONTAINS[c] \"watchdog\" OR eventMessage CONTAINS[c] \"exit\"))' --style compact > e2e-out/app.log 2>/dev/null
 rm -f e2e-token; rm -rf e2e-out/push.xcresult; xcrun simctl shutdown $U 2>/dev/null; exit \$rc
 " 2>&1 | tail -20 | tee -a "$OUT/run.log"; rc=${PIPESTATUS[0]}
 rsync -a hs-mac-mini:$MAC_DIR/e2e-out/ "$OUT/"
@@ -57,4 +58,5 @@ python3 -c "
 import json,sys
 r=json.load(open('$OUT/push.json')); st=r['metrics']['steps']; ok=[s for s in st if s.get('ok')]; bad=[s for s in st if not s.get('ok')]
 print('status',r.get('status'),'steps ok',len(ok),'failed',len(bad)); [print(' FAIL',s['do']) for s in bad]; [print(' note',n[:170]) for n in r.get('notes',[])]" 2>&1 | tee -a "$OUT/run.log"
+[ -f "$OUT/push.json" ] || { echo "no push.json: the journey did not run"; [ "$rc" = 0 ] && rc=5; }
 rm -rf "$T"; echo "xcodebuild exit $rc"; exit "$rc"

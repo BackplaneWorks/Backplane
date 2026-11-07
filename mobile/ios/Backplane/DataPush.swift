@@ -22,15 +22,16 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
         await DataClient.shared.cleared(keys, badge: badge)
         return .newData
     }
-    // in front: quiet for the thread on screen
-    nonisolated func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification) async -> UNNotificationPresentationOptions {
+    // in front: quiet for the thread on screen. Completion-handler forms, finished on the main thread: UIKit asserts that its completion runs there, and the async forms
+    // run off it (a tapped alert crashed the app with "Call must be made on main thread")
+    nonisolated func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
         let thread = n.request.content.userInfo["thread"] as? String ?? ""
-        return await MainActor.run { DataClient.shared.viewing == thread ? [] : [.banner, .list] }
+        DispatchQueue.main.async { MainActor.assumeIsolated { done(DataClient.shared.viewing == thread ? [] : [.banner, .list]) } }
     }
-    nonisolated func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse) async {
+    nonisolated func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse, withCompletionHandler done: @escaping () -> Void) {
         let i = r.notification.request.content.userInfo
         let (thread, ask) = (i["thread"] as? String ?? "", i["ask"] as? String ?? "")
-        await MainActor.run { DataClient.shared.openPush(thread: thread, ask: ask) }
+        DispatchQueue.main.async { MainActor.assumeIsolated { DataClient.shared.openPush(thread: thread, ask: ask); done() } }
     }
 }
 

@@ -8,8 +8,8 @@ SERIAL=${1:?adb serial}; HUB=$(realpath "${2:?hub binary}"); APK=$(realpath "${3
 PKG=dev.backplane.mobile.gpui; PORT=${PORT:-3870}; CTL=http://127.0.0.1:$((PORT+1)); QUIET=${QUIET:-10}
 mkdir -p "$HOME/.cache/respectful-push" "$OUT"; T=$(mktemp -d "$HOME/.cache/respectful-push/and.XXXXXX"); rm -f "$OUT"/*.png
 A() { adb -s "$SERIAL" "$@"; }
-pids=(); stop() { curl -s -m3 "$CTL/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; A reverse --remove tcp:$PORT >/dev/null 2>&1; rm -rf "$T"; }
-trap stop EXIT
+pids=(); stop() { curl -s -m3 "$CTL/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; pkill -f -- "--home $T/home" 2>/dev/null; A reverse --remove tcp:$PORT >/dev/null 2>&1; rm -rf "$T"; }
+trap stop EXIT; trap "exit 143" INT TERM HUP
 cd "$ROOT/test/e2e/push"
 MODE=sink PERF_REPO=$ROOT bun ctl.mjs "$T" "$HUB" "$PORT" > "$OUT/ctl.log" 2>&1 & pids+=($!)
 for _ in $(seq 60); do grep -q '^ready' "$OUT/ctl.log" && break; sleep 1; done
@@ -44,11 +44,11 @@ A shell pm clear $PKG >/dev/null; A shell pm grant $PKG android.permission.POST_
 A shell cmd notification allow_listener >/dev/null 2>&1
 LINK=$(python3 -c "import urllib.parse,sys;print('bpgpui://pair?url='+urllib.parse.quote('http://127.0.0.1:$PORT/#token=$TOK',safe=''))")
 A shell am start -W -a android.intent.action.VIEW -d "'$LINK'" $PKG > /dev/null
-sleep 3; A shell uiautomator dump /sdcard/bp-ui.xml >/dev/null 2>&1; A shell cat /sdcard/bp-ui.xml 2>/dev/null | grep -o 'text="Pair"' | head -1 | grep -q . && { # the question before an outside link pairs
-  xy=$(A shell cat /sdcard/bp-ui.xml | python3 -c "import sys,re;s=sys.stdin.read();m=[x for x in re.finditer(r'<node[^>]*text=\"Pair\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"',s)];b=m[-1].groups();print((int(b[0])+int(b[2]))//2,(int(b[1])+int(b[3]))//2)"); A shell input tap $xy; }
-A shell rm -f /sdcard/bp-ui.xml
-# paired: the app's own screen lists the test hub's worker thread
+# the question before an outside link pairs: tap its Pair once it is on screen
 ui() { A shell uiautomator dump /sdcard/bp-ui.xml >/dev/null 2>&1; A shell cat /sdcard/bp-ui.xml 2>/dev/null; A shell rm -f /sdcard/bp-ui.xml; }
+for _ in $(seq 20); do x=$(ui); if grep -q 'Pair with this hub' <<<"$x"; then
+  xy=$(python3 -c "import sys,re;s=sys.stdin.read();m=list(re.finditer(r'text=\"Pair\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"',s));b=m[-1].groups();print((int(b[0])+int(b[2]))//2,(int(b[1])+int(b[3]))//2)" <<<"$x"); A shell input tap $xy; break; fi; sleep 1; done
+# paired: the app's own screen lists the test hub's worker thread
 ok=no; for _ in $(seq 30); do ui | grep -q 'Worker thread' && { ok=ok; break; }; sleep 1; done
 shot paired; step "the phone pairs with the test hub" $ok "its list shows the hub's Worker thread"
 home

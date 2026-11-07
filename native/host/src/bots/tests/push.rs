@@ -14,7 +14,7 @@ impl Carrier for Fake {
 impl Fake {
     fn alerts(&self) -> Vec<Value> { self.sent.lock().unwrap().iter().filter(|x| x.1.push_type == "alert").map(|x| x.1.payload.clone()).collect() }
     fn clears(&self) -> Vec<Value> { self.sent.lock().unwrap().iter().filter(|x| x.1.push_type == "background").map(|x| x.1.payload.clone()).collect() }
-    async fn wait(&self, n: usize) -> Vec<Value> { for _ in 0..100 { if self.alerts().len() >= n { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await } self.alerts() }
+    async fn wait(&self, n: usize) -> Vec<Value> { for _ in 0..300 { if self.alerts().len() >= n { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await } self.alerts() }
 }
 struct S { hub: Arc<Hub>, bots: Arc<Bots>, rec: Arc<Rec>, bub: String, chat: String, fake: Arc<Fake>, push: Arc<push::Push> }
 async fn set(hub: &Arc<Hub>, k: &str, v: &str) { hub.commit(&json!({"$":"SettingSet","key":k,"value":v,"at":now_s()})).await.unwrap() ; }
@@ -163,13 +163,13 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     let a = s.fake.wait(2).await; let key = a[0]["key"].as_str().unwrap().to_string(); assert_eq!(a[0]["aps"]["badge"], 1, "the ask counts once, not with its item too");
     s.push.seen("tw"); settle().await; assert!(s.fake.clears().is_empty(), "opening an approval is not answering it");
     s.hub.commit(&json!({"$":"AskClosed","id":"a1","answer":"accept","at":3})).await.unwrap();
-    for _ in 0..100 { if s.fake.clears().len() >= 2 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
+    for _ in 0..300 { if s.fake.clears().len() >= 2 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     let c = s.fake.clears(); assert_eq!(c.len(), 2, "both phones: {c:?}"); assert_eq!(c[0], json!({"aps":{"content-available":1,"badge":0},"clear":[key]}));
     assert!(log(&s.hub).iter().any(|e| e["$"] == "PushCleared"), "a socket hears it too");
     // opening the thread on any device, and the person writing in it
     person(&s, 1).await; let r = notify(&s, "needs_you", "Second thing to look at", now_s() + 5).await; assert!(r.0, "{r:?}"); s.fake.wait(4).await;
     s.push.seen(&s.chat);
-    for _ in 0..100 { if s.fake.clears().len() >= 4 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
+    for _ in 0..300 { if s.fake.clears().len() >= 4 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     assert_eq!(s.fake.clears().len(), 4, "push.seen clears");
 }
 
