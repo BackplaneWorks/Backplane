@@ -75,6 +75,8 @@ check() {
   fi
   if hello; then
     [ "$(get fails)" = 0 ] || log "the hub answers again"
+    # a healthy check says so on the first one and then hourly, so the log shows the watchdog is alive without a line every 30 s
+    [ $(( $(now) - $(get said-ok) )) -lt 3600 ] || { log "healthy: /hello on $PORT answers ($(health)), fresh-watch.sh $(watcher_up && echo alive || echo not running)"; put said-ok "$(now)"; }
     put fails 0; put started-at 0
     if [ "$(get step)" != 0 ] && [ $(( $(now) - $(get last-restart) )) -ge "$CALM" ]; then log "calm for $CALM s: backoff reset"; put step 0; put after 0; fi
     return
@@ -98,10 +100,10 @@ check() {
 
 case "${1:-}" in
   check) check;;
-  status) mkdir -p "$ST"; echo "fails: $(get fails), restarts in a row: $(get step), next no sooner than: $(date -d "@$(get after)" 2>/dev/null)"; systemctl --user is-active backplane-hub-watchdog.timer 2>/dev/null; tail -5 "$LOG" 2>/dev/null;;
+  status) mkdir -p "$ST"; echo "fails: $(get fails), restarts in a row: $(get step), next no sooner than: $( [ "$(get after)" -gt "$(now)" ] && date -d "@$(get after)" || echo now)"; systemctl --user is-active backplane-hub-watchdog.timer 2>/dev/null; tail -5 "$LOG" 2>/dev/null;;
   install) mkdir -p "$UNITS"
     for u in service timer; do sed -e "s|@SCRIPT@|$HERE/hub-watchdog.sh|g" -e "s|@MEM@|${FRESH_MEM:-20G}|g" -e "s|@TAILNET@|${FRESH_TAILNET_PORT:-8451}|g" -e "s|@DISPLAY@|${DISPLAY:-:0}|g" "$HERE/systemd/backplane-hub-watchdog.$u" > "$UNITS/backplane-hub-watchdog.$u"; done
-    systemctl --user daemon-reload && systemctl --user enable --now backplane-hub-watchdog.timer && echo "the watchdog is on: log in $LOG";;
-  uninstall) systemctl --user disable --now backplane-hub-watchdog.timer; rm -f "${UNITS:?}/backplane-hub-watchdog.service" "${UNITS:?}/backplane-hub-watchdog.timer"; systemctl --user daemon-reload; echo "the watchdog is off";;
+    systemctl --user daemon-reload && systemctl --user enable --now backplane-hub-watchdog.timer && { mkdir -p "$ST"; put said-ok 0; log "installed: a check every 30 s ($HERE/hub-watchdog.sh)"; echo "the watchdog is on: log in $LOG"; };;
+  uninstall) systemctl --user disable --now backplane-hub-watchdog.timer; log "uninstalled"; rm -f "${UNITS:?}/backplane-hub-watchdog.service" "${UNITS:?}/backplane-hub-watchdog.timer"; systemctl --user daemon-reload; echo "the watchdog is off";;
   *) sed -n 2,14p "$0"; exit 2;;
 esac
