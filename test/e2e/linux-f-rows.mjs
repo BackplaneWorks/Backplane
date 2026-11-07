@@ -109,8 +109,13 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const stored=j.attached&&existsSync(j.attached)&&readFileSync(j.attached).equals(png);
  const t=await c.rpc('turn.start',{thread:T,text:'zqecho look at this',agentText:`zqecho look at this [image: ${j.attached}]`,attachments:[{name:'pic.png',path:j.attached,mime:'image/png',size:png.length}]});await finished(T);
  const posted=events().find(e=>e.$==='MessagePosted'&&e.thread===T&&e.role==='user');const att=events().find(e=>e.$==='MessageAttached'&&e.thread===T);
- const bigR=await fetch(`http://127.0.0.1:${PORT}/attach?thread=${T}&key=k2&name=big.bin&token=${token()}`,{method:'POST',body:Buffer.alloc(60<<20),headers:{'content-type':'application/octet-stream'}}).then(async r=>r.status+' '+JSON.stringify(await r.json().catch(()=>({}))).slice(0,90)).catch(e=>'conn '+e.message.slice(0,20));const big=bigR;
- log('F15',r.status===200&&stored&&t.ok&&!!att&&/look at this/.test(posted?.text||'')&&fake().includes(`[image: ${j.attached}]`),`POST /attach ${r.status} stored ${j.attached?.replace(OUT,'')} bytes match=${stored}; MessageAttached logged=${!!att}; the agent was told the path=${fake().includes(j.attached||'#')}; an oversize upload answered ${big}`)}
+ const up=async(n,key,mb)=>{try{const r=await fetch(`http://127.0.0.1:${PORT}/attach?thread=${T}&key=${key}&name=${key}.bin&token=${token()}`,{method:'POST',body:Buffer.alloc(mb<<20),headers:{'content-type':'application/octet-stream'}});const j=await r.json().catch(()=>({}));return {status:r.status,err:j.uiError||'',stored:!!j.attached,text:(j.text||'').slice(0,50)}}catch(e){return {status:'conn',err:e.message.slice(0,30),stored:false,text:''}}};
+ const under=await up(0,'k2',60);                                   // under the default cap (512 MB, files.max.mb unset)
+ const over=await up(0,'k3',513);                                   // over the default cap
+ await c.rpc('setting.set',{key:'files.max.mb',value:'1'});await sleep(500);const low=await up(0,'k4',2);await c.rpc('setting.set',{key:'files.max.mb',value:''});
+ const cap=under.stored&&!over.stored&&!low.stored&&/cap|limit/i.test(over.err+over.text)&&/cap|limit/i.test(low.err+low.text);
+ const big=`60 MB at the default accepted=${under.stored}; 513 MB refused=${!over.stored} (${over.status} ${over.err||over.text}); with files.max.mb=1 a 2 MB upload refused=${!low.stored} (${low.status} ${low.err||low.text})`;
+ log('F15',cap&&r.status===200&&stored&&t.ok&&!!att&&/look at this/.test(posted?.text||'')&&fake().includes(`[image: ${j.attached}]`),`POST /attach ${r.status} stored ${j.attached?.replace(OUT,'')} bytes match=${stored}; MessageAttached logged=${!!att}; the agent was told the path=${fake().includes(j.attached||'#')}; the cap (files.max.mb, default 512 MB in files/attach.rs): ${big}`)}
 
 // F21 resume, outbox (the same message id is one message), long session
 {const T=await mk('outbox');const mid='m-outbox-1';const a=await c.rpc('turn.start',{thread:T,text:'zqshort once',msg:mid});const b=await c.rpc('turn.start',{thread:T,text:'zqshort once',msg:mid});await finished(T);
