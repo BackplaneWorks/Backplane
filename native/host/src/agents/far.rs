@@ -81,7 +81,7 @@ impl Agents {
         let mut out = vec![json!({"name":"this machine","here":true,"projects":self.local_projects().await})];
         for (id, name, url) in self.hub.far_machines() {
             let r = self.hub.far_call(&id, "machine_list", "machine_list", &json!({})).await;
-            out.push(match r { Ok((true, b)) => json!({"link":id,"name":name,"url":url,"away":false,"projects":b["projects"]}), _ => json!({"link":id,"name":name,"url":url,"away":true,"projects":[]}) });
+            out.push(machine_row(&id, &name, &url, r));
         }
         (true, json!({"machines":out}))
     }
@@ -134,5 +134,28 @@ impl Agents {
             }
             eprintln!("agents: report to {to} could not be sent");
         });
+    }
+}
+
+/// One linked machine's row in machine_list, from what asking it for its projects gave: its projects; up but on an older
+/// Backplane (`older`, with why, so it is not called away); or away.
+pub fn machine_row(id: &str, name: &str, url: &str, r: Result<(bool, Value), String>) -> Value {
+    match r {
+        Ok((true, b)) => json!({"link":id,"name":name,"url":url,"away":false,"projects":b["projects"]}),
+        Err(e) if e.starts_with(crate::net::rpc::OLDER) => json!({"link":id,"name":name,"url":url,"away":false,"older":true,"why":e,"projects":[]}),
+        _ => json!({"link":id,"name":name,"url":url,"away":true,"projects":[]}),
+    }
+}
+#[cfg(test)]
+mod machine_row_tests {
+    use super::*;
+    #[test] fn a_machine_that_answers_on_an_older_build_is_not_away() {
+        let older = machine_row("p1", "desktop", "http://d:3797", Err(format!("{}: mcp.call is not ported on this hub yet", crate::net::rpc::OLDER)));
+        assert_eq!((older["away"].as_bool(), older["older"].as_bool()), (Some(false), Some(true)), "{older}");
+        assert!(older["why"].as_str().unwrap().contains("update it there"));
+        let away = machine_row("p1", "desktop", "http://d:3797", Err("that machine is away".into()));
+        assert_eq!(away["away"], true); assert!(away.get("older").is_none());
+        let up = machine_row("p1", "desktop", "http://d:3797", Ok((true, json!({"projects":[{"id":"x"}]}))));
+        assert_eq!((up["away"].as_bool(), up["projects"][0]["id"].as_str()), (Some(false), Some("x")));
     }
 }

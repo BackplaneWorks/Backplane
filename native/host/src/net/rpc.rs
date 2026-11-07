@@ -70,6 +70,8 @@ impl FarRouter for Router {
             let (code, text) = post(&self.sync, hub, link, &body).await;
             match code {
                 0 => Err("that machine is away".into()),
+                // an older Backplane there answers but cannot run this yet (it predates mcp.call): it is not away, it needs the update
+                501 => Err(format!("{OLDER}: {}", text.chars().take(160).collect::<String>())),
                 200 => { let v: Value = serde_json::from_str(&text).map_err(|_| "invalid reply from that machine".to_string())?; Ok((v["ok"].as_bool().unwrap_or(false), v.get("body").cloned().unwrap_or(Value::Null))) }
                 _ => Err(format!("that machine did not take it: {}", text.chars().take(160).collect::<String>())),
             }
@@ -77,6 +79,8 @@ impl FarRouter for Router {
     }
     fn machines(&self) -> Vec<(String, String, String)> { machines_of(&self.sync) }
 }
+/// The start of the error `mcp` gives when the machine answered 501: it is up, on a build that cannot take the request.
+pub const OLDER: &str = "that machine runs an older Backplane: update it there";
 /// The owner's own machines this hub is linked to: (link id, name, address)
 pub fn machines_of(sync: &FarSync) -> Vec<(String, String, String)> {
     let j = sync.peering.routes.machines_value();
