@@ -6,6 +6,7 @@ use std::{os::unix::fs::PermissionsExt, sync::OnceLock};
 const HELPER: &str = r#"#!/bin/sh
 here=$(dirname "$0")
 case "$1" in
+probe) exit 0;;
 devices) echo '{"event":"devices","default":"m","devices":[{"name":"m","label":"Desk mic"}]}'; echo '{"event":"end"}';;
 local-status) echo '{"event":"local","platform":"linux-x64","supported":true,"runtime":false,"vad":false,"models":[{"id":"parakeet-v2","label":"Parakeet v2","size":1000000,"installed":false}]}'; echo '{"event":"end"}';;
 local-install)
@@ -33,6 +34,14 @@ fn bin() -> &'static Path {
     DIR.get_or_init(|| {
         let d = std::env::temp_dir().join(format!("bp-voice-helper-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
         let f = d.join("backplane-voice"); std::fs::write(&f, HELPER).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Another test's fork while the script was open for writing keeps it open in that child until its exec, and an exec meanwhile fails
+        // "Text file busy". Wait until one exec works: no writer is left after that, so no later exec can fail so.
+        for _ in 0..1000 {
+            match crate::proc::std_cmd(crate::proc::Kind::Local, &f).arg("probe").output() {
+                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                r => { r.expect("the stand-in helper runs"); break }
+            }
+        }
         std::env::set_var("BACKPLANE_VOICE_BIN", &f); d
     })
 }
@@ -148,7 +157,7 @@ fn replay(fs: &[Value], draft: &str) -> String {
     assert_eq!(ring(&r.hub, "n1", "multipart/form-data; boundary=x", body, body.as_bytes()).await, body, "no engine: the form as it came");
     r.key(); commit(&r.hub, &[("voice.e.kicad".to_string(), "KiCad = key cad".to_string())]).await.unwrap();
     let f = ring(&r.hub, "n2", "multipart/form-data; boundary=x", body, b"bytes \xff").await;
-    assert_eq!(crate::voice::ring::text(&f), "Open KiCad now."); assert_eq!(crate::voice::ring::part(&f, "heard"), "gpt-live-transcribe");
+    assert_eq!(crate::voice::ring::text(&f), "Open KiCad now.", "the form as heard: {f}"); assert_eq!(crate::voice::ring::part(&f, "heard"), "gpt-live-transcribe");
     assert_eq!(std::fs::read(bin().join("form")).unwrap(), b"bytes \xff"); assert!(std::fs::read_to_string(bin().join("file-args")).unwrap().contains("multipart/form-data; boundary=x"));
     assert!(!dir(&r.home).join("ring-n2.form").exists(), "the recording does not stay");
 }
