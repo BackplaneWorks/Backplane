@@ -57,6 +57,10 @@ jobs:
           (cd native/host && cargo build --release --bin backplane-hub) & a=$!
           (cd native/gpui && cargo build --release) & b=$!
           wait $a; ra=$?; wait $b; rb=$?; exit $((ra | rb))
+      - name: no test trust in a release
+        run: |
+          # feature e2e-trust (test/update's feed) trusts a key from the environment; its code carries this mark, so a release that has it is refused
+          if grep -aq backplane-e2e-trust-enabled native/host/target/release/backplane-hub; then echo "::error::backplane-hub was built with feature e2e-trust"; exit 1; fi
       - uses: oven-sh/setup-bun@v2
       - name: package
         run: |

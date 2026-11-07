@@ -89,17 +89,46 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, String> {
 /// The release key (`release.pub`, PEM SPKI: the raw key is the DER's last 32 bytes) under its ID (`release.keyid`). None when the ID is not the first 16 hex of
 /// SHA-256 over the key: the two files disagree, so neither is trusted.
 pub fn pem_key(pem: &str, keyid: &str) -> Option<(String, [u8; 32])> {
-    use base64::Engine; use sha2::Digest;
+    let k = spki(pem)?; let id = keyid.trim();
+    (key_id(&k) == id).then(|| (id.to_string(), k))
+}
+/// The raw key in an ed25519 public key PEM (SPKI: SEQUENCE { SEQUENCE { OID 1.3.101.112 }, BIT STRING 0 || key }, 44 bytes).
+fn spki(pem: &str) -> Option<[u8; 32]> {
+    use base64::Engine;
     let b64: String = pem.lines().filter(|l| !l.starts_with("-----")).map(str::trim).collect();
     let der = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
-    // SPKI for ed25519: SEQUENCE { SEQUENCE { OID 1.3.101.112 }, BIT STRING 0 || key }, 44 bytes
     if der.len() != 44 || der[..12] != [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00] { return None }
-    let k: [u8; 32] = der[12..].try_into().ok()?;
-    let id = keyid.trim();
-    (hex::encode(sha2::Sha256::digest(k))[..16] == *id).then(|| (id.to_string(), k))
+    der[12..].try_into().ok()
 }
-/// The one key a release is checked against. There is no other, and no way to add one at run time or at build time: a test passes its own keys to `verify`.
-pub fn keys() -> Vec<(String, [u8; 32])> { pem_key(include_str!("release.pub"), include_str!("release.keyid")).into_iter().collect() }
+/// A key's ID: the first 16 hex of SHA-256 over the raw key.
+fn key_id(k: &[u8; 32]) -> String { use sha2::Digest; hex::encode(sha2::Sha256::digest(k))[..16].to_string() }
+
+/// Feature `e2e-trust`, for test/update's feed only: one more public key, read from the PEM file `BACKPLANE_E2E_TRUST_KEY` names, which the E2E makes fresh in its
+/// private home for each run. Default and release builds have none of this code (release.yml refuses a binary carrying `E2E_MARK`). A release under this key must
+/// be below `E2E_CEILING`, under anything real, so a leaked one would offer nothing even to a hub built with the feature.
+#[cfg(feature = "e2e-trust")] pub const E2E_MARK: &str = "backplane-e2e-trust-enabled";
+#[cfg(feature = "e2e-trust")] pub const E2E_CEILING: &str = "0.1.0";
+#[cfg(feature = "e2e-trust")]
+fn e2e_key() -> Option<(String, [u8; 32])> {
+    static K: std::sync::OnceLock<Option<(String, [u8; 32])>> = std::sync::OnceLock::new();
+    K.get_or_init(|| {
+        let k = spki(&std::fs::read_to_string(std::env::var_os("BACKPLANE_E2E_TRUST_KEY")?).ok()?)?;
+        eprintln!("backplane-hub: {E2E_MARK}: trusting the test key {} for updates below {E2E_CEILING}", key_id(&k)); Some((key_id(&k), k))
+    }).clone()
+}
+/// Whether a manifest verified under `keyid` may name `version`. Always, but for the E2E key (feature `e2e-trust`).
+pub fn ceiling_ok(keyid: &str, version: &str) -> Result<(), String> {
+    #[cfg(feature = "e2e-trust")]
+    if e2e_key().map_or(false, |(id, _)| id == keyid.trim()) && !Ver::parse(E2E_CEILING).newer(&Ver::parse(version)) { return Err(format!("a test-key release must be below {E2E_CEILING}")) }
+    let _ = (keyid, version); Ok(())
+}
+/// The one key a release is checked against. There is no other in a default or release build, and no way to add one at run time: a unit test passes its own keys to
+/// `verify`; only a hub built with feature `e2e-trust` adds the E2E's key.
+pub fn keys() -> Vec<(String, [u8; 32])> {
+    #[allow(unused_mut)] let mut k: Vec<_> = pem_key(include_str!("release.pub"), include_str!("release.keyid")).into_iter().collect();
+    #[cfg(feature = "e2e-trust")] k.extend(e2e_key());
+    k
+}
 
 /// `manifest.json`'s bytes against `manifest.json.sig` (64 raw bytes) under the key `manifest.json.keyid` names. The bytes are checked before they are read as anything.
 pub fn verify(bytes: &[u8], sig: &[u8], keyid: &str, keys: &[(String, [u8; 32])]) -> Result<(), String> {
@@ -232,5 +261,18 @@ mod tests {
         let k = keys(); assert_eq!((k.len(), k[0].0.as_str()), (1, "6c899f869be656d3"), "release.pub and release.keyid agree, and nothing else is trusted");
         assert!(pem_key(include_str!("release.pub"), "0000000000000000").is_none(), "a key ID that is not this key's is no key");
         assert!(pem_key("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n", "x").is_none());
+    }
+    /// A default build (this one, unless the tests run with `e2e-trust`) refuses a release signed by an E2E key, whatever the environment points at.
+    #[cfg(not(feature = "e2e-trust"))] #[test] fn a_default_build_ignores_the_e2e_key() {
+        let d = std::env::temp_dir().join(format!("bp-e2e-key-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let p = pair(); let mut der = vec![0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]; der.extend_from_slice(p.pk.as_ref());
+        use base64::Engine; let pem = format!("-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n", base64::engine::general_purpose::STANDARD.encode(&der));
+        assert_eq!(spki(&pem), Some(*p.pk), "the PEM the E2E writes is read right");
+        let f = d.join("e2e.pub"); std::fs::write(&f, &pem).unwrap();
+        // the variable is never set in this process (it would reach the other tests); without the feature nothing reads it anyway
+        let body = br#"{"schema":1}"#; let sig = p.sk.sign(body, None);
+        assert!(verify(body, sig.as_ref(), &key_id(&p.pk), &keys()).unwrap_err().contains("does not trust"));
+        assert_eq!(keys().len(), 1); assert!(ceiling_ok(&key_id(&p.pk), "9.0.0").is_ok(), "no ceiling without the feature: nothing but release.pub is trusted anyway");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

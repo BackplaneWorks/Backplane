@@ -8,6 +8,10 @@ description = "Backplane hub in Rust. Native clients only (GPUI desktop, iOS, An
 name = "backplane-hub"
 path = "src/main.rs"
 
+[features]
+# test/update only: trust one more update key, read at run time (update/rel.rs). Never in a release: release.yml refuses a binary carrying it.
+e2e-trust = []
+
 [dependencies]
 anyhow = "1"
 libc = "0.2"

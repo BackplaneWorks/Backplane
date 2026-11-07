@@ -46,8 +46,8 @@ pub fn find(ask: &Ask, list: &[Listed], dir: &Path, get: Get) -> Result<Option<F
         fs::read(&p).map_err(|e| format!("{n}: {e}"))
     };
     let (body, sig, id) = (read(SIGNED[0])?, read(SIGNED[1])?, read(SIGNED[2])?);
-    rel::verify(&body, &sig, &String::from_utf8_lossy(&id), ask.keys)?;
-    let m = rel::parse(&body)?;
+    let id = String::from_utf8_lossy(&id); rel::verify(&body, &sig, &id, ask.keys)?;
+    let m = rel::parse(&body)?; rel::ceiling_ok(&id, &m.version)?;
     let a = rel::pick(&m, &r.tag, ask.channel, ask.target)?.clone();
     let url = l.urls.get(&a.name).ok_or("the release does not carry the file its manifest names")?.clone();
     Ok(Some(Found { tag: r.tag.clone(), asset: a, url, version: m.version.clone(), commit: m.commit.clone() }))
