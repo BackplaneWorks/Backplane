@@ -179,6 +179,14 @@ pub fn convert(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_freecad_path_setting_is_tried_first() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = std::env::temp_dir().join(format!("bp-fcset-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("mycad"); std::fs::write(&f, "#!/bin/sh\n").unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        set_freecad_setting(&format!(" {} ", f.display())); assert_eq!(freecad_cmd(&d), f.to_string_lossy());
+        set_freecad_setting("/no/such/freecad"); assert_ne!(freecad_cmd(&d), "/no/such/freecad", "a path that does not run is skipped");
+        set_freecad_setting(""); let _ = std::fs::remove_dir_all(&d);
+    }
     fn fc() -> Mesher { Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() } }
     #[test] fn the_mesher_is_an_explicit_choice() {
         let s = |p: &str| Mesher::Step2glb(p.into());
