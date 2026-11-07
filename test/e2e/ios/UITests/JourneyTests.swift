@@ -304,6 +304,64 @@ final class Journeys: XCTestCase {
         d.shot("picture-again")
     }
 
+    /// The drawing pad (mobile/ios/Backplane/DataPad.swift): draw a stroke and a box, type a side's length, undo it, attach the drawing and send it.
+    /// The paper is checked by its pixels: how much of it is not white, from a screenshot of it.
+    func test_data_pad() {
+        d = Driver("data-pad"); defer { d.finish() }
+        func env(_ k: String) -> String? { let v = d.env[k]; return (v?.isEmpty ?? true) ? nil : v }
+        let path = env("HUB_PROJECT_PATH") ?? "~/bp-stub-projects/e2e1"
+        let title = path.split(separator: "/").last.map(String.init) ?? "e2e1"
+        d.app.terminate(); d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+        let rows = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.thread.row.'"))
+        guard d.step("threads tab", act: {}, expect: { d.el("data.project.add").waitForExistence(timeout: 20) }) else { return }
+        if !d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 6) {
+            d.tap(d.el("data.project.add")); let f = d.el("data.project.path"); _ = f.waitForExistence(timeout: 10); d.tap(f)
+            f.press(forDuration: 1.0); if d.app.menuItems["Select All"].waitForExistence(timeout: 2) { d.app.menuItems["Select All"].tap() }; f.typeText(path)
+            d.tap(d.el("data.project.add.confirm")); _ = d.app.buttons["New thread in \(title)"].waitForExistence(timeout: 15)
+        }
+        if rows.count == 0 {
+            let b = d.app.buttons["New thread in \(title)"]; for _ in 0..<40 where !b.isHittable { usleep(250_000) }; b.tap()
+            let t = d.el("data.thread.new.text"); _ = t.waitForExistence(timeout: 10); d.tap(t); t.typeText("drawing thread"); d.tap(d.el("data.thread.new.start"))
+            _ = rows.firstMatch.waitForExistence(timeout: 30) // a new thread takes a moment to reach the list
+        }
+        guard d.step("open a thread", act: { for _ in 0..<40 where !(rows.firstMatch.exists && rows.firstMatch.isHittable) { usleep(250_000) }; d.tap(rows.firstMatch) }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
+        let paper = d.el("data.pad.paper")
+        guard d.step("open the pad", act: { d.tap(d.el("data.draw")) }, expect: { paper.exists && paper.isHittable }) else { return }
+        // the share of the paper that is not white, sampled every 2 px
+        func ink() -> Int {
+            guard let cg = paper.screenshot().image.cgImage, let data = cg.dataProvider?.data, let p = CFDataGetBytePtr(data) else { return -1 }
+            let bpp = cg.bitsPerPixel / 8; var n = 0
+            for y in stride(from: 4, to: cg.height - 4, by: 2) { for x in stride(from: 4, to: cg.width - 4, by: 2) {
+                let i = y * cg.bytesPerRow + x * bpp; if p[i] < 235 || p[i + 1] < 235 || p[i + 2] < 235 { n += 1 } } }
+            return n
+        }
+        func at(_ x: CGFloat, _ y: CGFloat) -> XCUICoordinate { paper.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y)) }
+        let blank = ink()
+        d.step("the pen draws", act: { at(0.1, 0.17).press(forDuration: 0.1, thenDragTo: at(0.42, 0.17)) }, expect: { ink() > blank + 20 })
+        let stroked = ink()
+        d.step("the Box tool", act: { d.tap(d.el("data.pad.box")) }, expect: { d.label("tap a side").exists })
+        d.step("a box is dragged out", act: { at(0.52, 0.42).press(forDuration: 0.1, thenDragTo: at(0.83, 0.83)) }, expect: { ink() > stroked + 200 })
+        d.shot("box")
+        let boxed = ink()
+        let alert = d.app.alerts["Length, e.g. 40 mm"]
+        guard d.step("a tap on its right side asks its width", act: { at(0.833, 0.62).tap() }, expect: { alert.exists }) else { return }
+        let field = alert.textFields.firstMatch
+        d.step("40 mm narrows the box", act: {
+            d.tap(field); field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8) + "40 mm"); d.tap(alert.buttons["Set"])
+        }, expect: { !alert.exists && ink() < boxed - 100 })
+        d.shot("length")
+        let narrowed = ink()
+        // undo also drops the selection's dashes, so the paper is compared with the narrowed box, not with the picked one before it
+        d.step("undo brings the width back", act: { d.tap(d.el("data.pad.undo")) }, expect: { ink() > narrowed + 100 })
+        d.step("attach: the pad closes and the drawing waits in the composer", act: { d.tap(d.el("data.pad.attach")) }, expect: { !paper.exists && d.el("data.pending.images").exists })
+        d.shot("attached")
+        d.step("send it", act: { d.tap(d.el("thread.send")) }, expect: {
+            // a picture with no words is the message's only child, and SwiftUI gives it the message's identifier
+            (d.el("data.entry.image").exists || d.app.images["data.entry.user"].exists) && !d.el("data.pending.images").exists
+        })
+        d.shot("sent")
+    }
+
     func test_bots_rooms() {
         d = Driver("bots-rooms"); defer { d.finish() }
         d.launch(); tab("Bots")
