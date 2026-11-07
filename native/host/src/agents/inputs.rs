@@ -27,7 +27,7 @@ pub fn found(root: &Path) -> Vec<String> {
     let key = |p: &String| { let parts: Vec<&str> = p.split('/').collect(); let c = parts[..parts.len() - 1].iter().any(|d| copies(d)) as u8; (c, parts.len(), p.clone()) };
     v.sort_by_key(key); v.truncate(50); v
 }
-fn abs(root: &str, rel: &str) -> String { if rel.is_empty() { String::new() } else if rel.starts_with('/') { rel.into() } else { format!("{root}/{rel}") } }
+fn abs(root: &str, rel: &str) -> String { if rel.is_empty() { String::new() } else if crate::plat::fs::is_abs(rel) { rel.into() } else { format!("{root}/{rel}") } }
 fn dir_of(p: &str) -> &str { p.rsplit_once('/').map_or("", |x| x.0) }
 fn last(p: &str) -> &str { p.rsplit('/').next().unwrap_or(p) }
 fn named(ns: &[String], stem: &str, ext: &str) -> String { let want = format!("{stem}{ext}"); if ns.contains(&want) { want } else { ns.iter().find(|n| n.ends_with(ext)).cloned().unwrap_or_default() } }

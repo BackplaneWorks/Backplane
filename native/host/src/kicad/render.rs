@@ -63,7 +63,7 @@ fn views(ts: &[glb::Tri3], model: &str, say: &mut Vec<String>) -> bool {
 }
 /// Render.run: one model
 fn one(model: &str, cwd: &str, cache: &str, tools: &[Mesher], say: &mut Vec<String>) -> bool {
-    let path = if model.starts_with('/') { model.to_string() } else { format!("{cwd}/{model}") };
+    let path = if crate::plat::fs::is_abs(model) { model.to_string() } else { format!("{cwd}/{model}") };
     let mut failed = |why: String| { say.push(format!("backplane --render: {why}")); false };
     let _ = std::fs::create_dir_all(cache);
     let Some(file) = model_glb(&path, cache, tools) else { return failed(format!("could not mesh {path} (a STEP or GLB file; a large STEP needs FreeCAD installed). Nothing was drawn.")) };

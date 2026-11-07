@@ -114,7 +114,7 @@ pub fn read(kind: u32, path: &str) -> Read {
 pub struct Kids { pub file: String, pub sheets: Vec<(String, String)> }
 /// Hier.dir: the folder of a path, with its trailing slash ("" for a bare name)
 fn dir(p: &str) -> &str { p.rfind('/').map(|i| &p[..=i]).unwrap_or("") }
-fn resolve(parent: &str, f: &str) -> String { if f.starts_with('/') { f.to_string() } else { format!("{}{f}", dir(parent)) } }
+fn resolve(parent: &str, f: &str) -> String { if crate::plat::fs::is_abs(f) { f.to_string() } else { format!("{}{f}", dir(parent)) } }
 fn sheet_forms<'b>(fs: &'b Option<Vec<&'b [u8]>>) -> impl Iterator<Item = &'b [u8]> + 'b { fs.iter().flatten().copied().filter(|f| head(f) == b"sheet") }
 pub fn kids(file: &str, b: &[u8]) -> Kids {
     let fs = forms(b);

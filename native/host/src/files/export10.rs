@@ -31,7 +31,7 @@ async fn command(home: &str, pro: &str, cli: &str, mode: &str, flags: &[&str]) -
 fn report_at(home: &str, pro: &str) -> Option<J> { std::fs::read(kx::paths(home, pro).report).ok().and_then(|b| bj::parse(&super::kicad::sexpr::decode(&b))) }
 /// KExport.project
 async fn project_export(home: &str, pro: &str, cli: &str, anyway: bool, expected: &str, agent: bool) -> J {
-    if !(pro.starts_with('/') && pro.ends_with(".kicad_pro") && !pro.starts_with(&format!("{home}/exports/"))) { return result(home, pro, &J::Null, "error", "Export needs an absolute .kicad_pro path outside the managed export folder.") }
+    if !(crate::plat::fs::is_abs(pro) && pro.ends_with(".kicad_pro") && !pro.starts_with(&format!("{home}/exports/"))) { return result(home, pro, &J::Null, "error", "Export needs an absolute .kicad_pro path outside the managed export folder.") }
     let r = command(home, pro, cli, "dry", &["--dry-run"]).await;
     let report = report_at(home, pro).unwrap_or(J::Null);
     if r.code != 0 { return result(home, pro, &report, "error", &r.out) }

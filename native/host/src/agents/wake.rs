@@ -29,7 +29,7 @@ pub fn error(by: &str, kind: &str, target: &str, events: &[String]) -> String {
     if target.is_empty() || events.is_empty() || !events.iter().all(|e| allowed(kind).contains(&e.as_str())) { return "target and valid nonempty events are required".into() }
     if kind == "thread" && target.contains('~') { return "wake on a thread elsewhere is not supported yet".into() }
     if kind == "thread" && target == by { return "a subscriber cannot wake itself".into() }
-    if kind == "file" && !target.starts_with('/') { return "file target must be an absolute path".into() }
+    if kind == "file" && !crate::plat::fs::is_abs(target) { return "file target must be an absolute path".into() }
     if kind == "pr" && !pr_valid(target) { return "PR target must be owner/repo#N; bots must give owner/repo".into() }
     String::new()
 }

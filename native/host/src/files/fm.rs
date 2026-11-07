@@ -24,7 +24,7 @@ pub fn preview(name: &str) -> &'static str {
 }
 
 /// Fm.safe: from the root, no ".." part, never absolute. (NUL is refused as well: no path holds one.)
-pub fn safe(rel: &str) -> bool { !rel.starts_with('/') && !rel.contains('\0') && rel.split('/').all(|p| p != "..") }
+pub fn safe(rel: &str) -> bool { !crate::plat::fs::is_abs(rel) && !rel.contains('\0') && rel.split('/').all(|p| p != "..") }
 /// Fm.drive: "C:" at the start.
 fn drive(rel: &str) -> bool { rel.chars().nth(1) == Some(':') }
 /// Fm.files.safe: Fm.safe, and nothing Windows would read as another place.
@@ -39,7 +39,7 @@ pub fn parent(dir: &str) -> String {
 }
 
 /// Img.is_image / Img.viewable's path half: absolute or `~/`, with an image extension.
-fn abs_or_home(p: &str) -> bool { p.starts_with('/') || p.starts_with("~/") }
+fn abs_or_home(p: &str) -> bool { crate::plat::fs::is_abs(p) || p.starts_with("~/") }
 pub fn is_image(p: &str) -> bool { abs_or_home(p) && ends(&[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"], &p.to_lowercase()) }
 /// Img.viewable: what /img serves.
 pub fn viewable(p: &str) -> bool {

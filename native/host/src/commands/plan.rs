@@ -164,7 +164,7 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         // Roots.move: a project pointed at its folder's new place; its worktrees under the old root move with it
         "project.move" => {
             let pid = s(p, "project", ""); let raw = s(p, "path", ""); let t = raw.trim(); let path = if t.ends_with('/') && t.len() > 1 { &t[..t.len() - 1] } else { t };
-            if !path.starts_with('/') { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, act: None }) }
+            if !crate::plat::fs::is_abs(path) { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, act: None }) }
             if pid.contains('~') || pid == "scratch" { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, act: None }) }
             let Some(pr) = f.projects.get(&pid).filter(|x| !x.removed) else { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, act: None }) };
             let mut ev = vec![json!({"$":"ProjectCreated","id":pid,"title":pr.title,"root":path,"at":at})];

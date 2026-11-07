@@ -14,6 +14,8 @@ pub mod fs {
     /// A file's mode bits as a test compares them: the real ones.
     pub fn mode_bits(actual: u32, _want: u32) -> u32 { actual }
     pub use std::fs::canonicalize;
+    /// Whether a path in text is absolute: it starts at /.
+    pub fn is_abs(p: &str) -> bool { p.starts_with('/') }
     /// The ways a folder's path may be written: as it is.
     pub fn path_forms(p: &str) -> Vec<String> { vec![p.to_string()] }
     /// What separates a path's parts in text.
