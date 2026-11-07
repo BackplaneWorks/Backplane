@@ -1223,3 +1223,37 @@ the way it works with its own project. `src/core/fmcp` is the whole of it.
   with the owner's machines (see "Shared rooms").
 
 Laws `fmc_*`; tests `test/fmcp_test`, `bun test/tools/agents_far_e2e.ts`.
+
+### Bots across machines
+
+Everything here goes over `/far/rpc` as signed requests and only over a link the hub counts as one of the owner's own machines
+(`PeerTable::verified`, then `Far.own.id`). An unverified, revoked or away link is refused (403) or told "away"; nothing is
+queued for it.
+
+- **Tools of agents and bots** (`agents/far.rs`). `thread_list` and `thread_launch` take `machine` (name or link id);
+  `thread_send`, `thread_read`, `thread_wait`, `thread_interrupt`, `thread_update`, `thread_settle` take a thread's `<link>~<id>`.
+  The hub sends `mcp.call {tool, from, args}`; the owning hub runs the tool for the caller `<link>~<thread>`, which is no thread of
+  its project and may reach any of them. `thread_wait` asks `thread_wait_now` once a second. `machine_list` shows this machine and the
+  linked ones with their projects. Ids in answers come back as `<link>~<id>`.
+- **Reports.** A thread launched from another machine has the launcher `<link>~<thread>`. When its turn ends or it asks the person,
+  its hub sends `launch_report {to, text, thread}` (four tries, 2 s then doubling) and the launcher gets the same message a local
+  launcher gets, from `<link>~<thread>`.
+- **plane_read with `machine`.** Asks the other hub (`mcp.call plane_read`) for its plane as text; its thread, bot, room and
+  routine ids are named `<link>~<id>`.
+- **Rooms.** A room may have members on one other linked machine, written `name@machine` (the machine's name or its link id;
+  `room_create`, `bots.room`, `bot_send` to `name@machine`). Each hub keeps its own copy of the room under the same id, so Bots shows
+  it on both. The copy is kept in step with `bots.room_sync {room, name, members, deleted}`: made, changed (a join or leave) and
+  deleted rooms reach the other hub, which stores a bot of the sender as `name@<link>` and its own as bot ids; a room with none of its
+  bots is dropped there. A change that came from a machine is not sent back. A hub never changes a room of its own by another
+  machine naming its id (409), nor takes a post for one it does not share (403).
+- **Posts.** A post here (a bot's or the person's) is sent as `bots.room_post {room, msg, from, text, hop}`; the other hub logs it as
+  from `name@<machine>`, wakes its own members, and never sends it back. The depth bound counts as for local posts.
+- **Joining and leaving.** `room_join` and `room_leave` change the caller's own membership; with `machine` they ask the machine the
+  room lives on (`bots.room_join`, `bots.room_leave`), and the room is copied back. `bot_list` shows the bots of linked machines as
+  `name@machine`.
+- **Limits.** One other machine per room. A private message (`direct`) to a bot elsewhere is refused: give a `topic`. A report or post
+  to a machine that is away is lost after its retries (posts: the next change of the room is the retry); there is no queue.
+
+Tests: `bots::tests::a_room_with_a_bot_on_another_machine…` and its neighbours (two hubs, a transport that calls the other's
+`far_received`), `net::rpc::tests::far_mcp_…` (the gate, over signed HTTP), and `test/e2e/pairing/bots.py` (two real hubs with the
+stand-in agent: launch, report, `thread_send`, a shared room both ways, `plane_read`, then the link un-verified).
