@@ -275,11 +275,11 @@ Rig: Boat sandbox (4 vCPU, 8 GB, Ubuntu 24.04), source `26ba50a0ba49496a9baf89cb
 |---|---|---|---|---|
 | S12 | pass, part: page in the menu, totals by unit test | b0e0aa023c | Linux desktop, debug hub | `test/e2e/settings-walk.mjs`: the hub menu lists 15 pages, `usage` and `voice` among them; `present::settings::tests::usage_adds_the_thread_totals_per_provider` |
 | S09 | persists, effect not proven | b0e0aa023c | Linux desktop, debug hub | the stale "voice not in the menu" is gone (846d94c44f); the walk applied and persisted 12 voice controls |
-| S03 | pass, part: provider and model | see log | Linux desktop, debug hub | `test/e2e/mac-effects.mjs`: a new thread starts on `agent.provider`/`agent.model` (claude -> codex/gpt-5.6-sol -> claude/opus); thinking and fallback not probed |
-| S06 | pass, part: Ordering on/off | see log | Linux desktop, debug hub | `mac-effects.mjs`: with `order.enabled` off the next turn's prompt says "Ordering from Backplane is off", with it on it does not; Buy it not driven |
-| S08 | pass, part: update channel | see log | Linux desktop, debug hub | `mac-effects.mjs`: `update.status` reports beta, then stable, after the chips; no update run (R02) |
-| S02, S11, S14 | pass | see log | Linux desktop, debug hub | the same `mac-effects.mjs` run: upload limit 413/200, zone offsets, telemetry states |
-| C03 | pass, part: install not run | see log | Linux desktop, FreeCAD at /usr/local/bin/FreeCAD | `test/e2e/mac-c03.mjs` (now Linux-aware): default search finds freecadcmd on PATH, the typed path is stored and run by the hub (wrapper logged), a bad path falls back, survives a restart. FreeCAD was already installed; the hub has no installer, and the Boat AppImage install was not rerun |
-| F23 | pass | see log | Linux and macOS | `agents::tests::a_killed_hub_leaves_no_agent_behind` passes on both (CI macOS included once its skip was removed); Mac rows run `b3ecb1d730` |
+| S03 | pass, part: provider and model | 4c8a1c578a | Linux desktop, debug hub | `test/e2e/mac-effects.mjs`: a new thread starts on `agent.provider`/`agent.model` (claude -> codex/gpt-5.6-sol -> claude/opus); thinking and fallback not probed |
+| S06 | pass, part: Ordering on/off | 4c8a1c578a | Linux desktop, debug hub | `mac-effects.mjs`: with `order.enabled` off the next turn's prompt says "Ordering from Backplane is off", with it on it does not; Buy it not driven |
+| S08 | pass, part: update channel | 4c8a1c578a | Linux desktop, debug hub | `mac-effects.mjs`: `update.status` reports beta, then stable, after the chips; no update run (R02) |
+| S02, S11, S14 | pass | 4c8a1c578a | Linux desktop, debug hub | the same `mac-effects.mjs` run: upload limit 413/200, zone offsets, telemetry states |
+| C03 | pass, part: install not run | 4c8a1c578a | Linux desktop, FreeCAD at /usr/local/bin/FreeCAD | `test/e2e/mac-c03.mjs` (now Linux-aware): default search finds freecadcmd on PATH, the typed path is stored and run by the hub (wrapper logged), a bad path falls back, survives a restart. FreeCAD was already installed; the hub has no installer, and the Boat AppImage install was not rerun |
+| F23 | pass | 4c8a1c578a | Linux and macOS | `agents::tests::a_killed_hub_leaves_no_agent_behind` passes on both (CI macOS included once its skip was removed); Mac rows run `b3ecb1d730` |
 
 Still not proven: S01 (theme is drawn by the clients), S04 (title provider/model) and the S03 thinking/fallback chips.
