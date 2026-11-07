@@ -384,7 +384,7 @@ pub fn menu(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> AnyEleme
 pub fn chip(cx: &mut Context<Backplane>, light: bool, st: &Accounts, key: &str) -> Div {
     let c = |n: &str| theme::color(light, n);
     let wrap = div().relative();
-    let btn = div().id("acct-chip").h(px(30.)).px_3().flex().items_center().justify_center().gap_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().cursor_pointer()
+    let btn = div().id("acct-chip").h(px(30.)).min_w_0().overflow_hidden().px_3().flex().items_center().justify_center().gap_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().cursor_pointer()
         .hover(|s| s.bg(c("raise")))
         .child(crate::art::icon("user", 16., c("text"))).child(chip_label(&st.snap))
         .tooltip(crate::keys::tip("Account", key, light))
@@ -459,7 +459,7 @@ fn limits_menu(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> AnyEl
 /// The composer's limits chip: the thread's least remaining window, opening the per-account menu.
 pub fn limits_chip(cx: &mut Context<Backplane>, light: bool, st: &Accounts, text: String) -> Div {
     let c = |n: &str| theme::color(light, n);
-    let btn = div().id("limits-chip").h(px(30.)).px_3().flex().items_center().gap_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().cursor_pointer()
+    let btn = div().id("limits-chip").h(px(30.)).min_w_0().overflow_hidden().px_3().flex().items_center().gap_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().cursor_pointer()
         .hover(|s| s.bg(c("raise"))).child(crate::art::icon("gauge", 14., c("dim"))).child(text)
         .on_click(cx.listener(|this, _, _, cx| { this.screens.acct.limits = !this.screens.acct.limits; if this.screens.acct.limits { list(this); refresh_usage(this) } cx.notify(); }));
     let wrap = div().relative().child(btn);
