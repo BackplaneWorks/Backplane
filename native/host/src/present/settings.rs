@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("setup", "Setup"), ("about", "About"), ("privacy", "Privacy")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("usage", "Usage"), ("setup", "Setup"), ("about", "About"), ("privacy", "Privacy")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -327,6 +327,26 @@ fn voice(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     crate::voice::page::rows(&p, info, draft(session, "@f.vterm"), draft(session, "@key.err"))
 }
 
+/// Settings > Usage: the thread totals the agents lane counts (`tok.<epoch>.t.<thread>`: "turns/in/cread/cwrite/out/reasoning/cost/costTurns/knownTurns"), added up per provider.
+fn usage(st: &State) -> Vec<Value> {
+    use super::tokstats::{num, usd};
+    let ep = format!("{}{}", set(st, "tok.epoch", ""), set(st, "tok.recount", ""));
+    let pre = if ep.is_empty() { "tok.".to_string() } else { format!("tok.{ep}.") };
+    let mut per: std::collections::BTreeMap<String, [u64; 7]> = Default::default();
+    for (id, t) in st.threads.iter().filter(|(_, t)| !t.deleted) {
+        let Some(v) = st.settings.get(&format!("{pre}t.{id}")) else { continue };
+        let n: Vec<u64> = v.split('/').map(|x| x.parse().unwrap_or(0)).collect();
+        if n.first().copied().unwrap_or(0) == 0 { continue }
+        let a = per.entry(t.provider.clone()).or_default();
+        for (i, k) in [0usize, 1, 2, 3, 4, 6, 7].into_iter().enumerate() { a[i] += n.get(k).copied().unwrap_or(0); }
+    }
+    let line = |a: &[u64; 7]| format!("{} turn{} · input {} · cache read {} · cache write {} · output {} · {}", num(a[0]), if a[0] == 1 { "" } else { "s" }, num(a[1]), num(a[2]), num(a[3]), num(a[4]), if a[6] == 0 { "cost not reported".to_string() } else { usd(a[5]) });
+    if per.is_empty() { return vec![row("Tokens and cost", "No turns counted yet.", vec![])] }
+    let mut all = [0u64; 7]; for a in per.values() { for i in 0..7 { all[i] += a[i]; } }
+    let mut v: Vec<Value> = per.iter().map(|(p, a)| row(if p.is_empty() { "Unknown provider" } else { p }, &line(a), vec![])).collect();
+    v.push(row("All threads", &line(&all), vec![])); v
+}
+
 /// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back.
 pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     let p = page(session);
@@ -335,7 +355,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -439,7 +459,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "Setup", "About", "Privacy"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "Usage", "Setup", "About", "Privacy"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn devices_lists_what_the_registry_says_and_offers_revoke_on_the_live_ones() {
@@ -508,6 +528,19 @@ mod tests {
         let s = json!({"rid": 3, "drafts": {"@f.fpath": " /opt/fc/bin/freecadcmd "}}); let o = act("h", &s, "freecad-path", "").unwrap();
         assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"freecad.path","value":"/opt/fc/bin/freecadcmd""#));
     }
+    #[test] fn usage_adds_the_thread_totals_per_provider() {
+        let mut s = st(&[("tok.t.a", "2/100/50/0/30/0/2000000000/2/2"), ("tok.t.b", "1/10/0/0/5/0/0/0/1"), ("tok.t.c", "3/1/1/1/1/0/0/0/3")]);
+        for (id, p) in [("a", "claude"), ("b", "claude"), ("c", "codex"), ("d", "codex")] { s.apply(&json!({"$":"ThreadCreated","id":id,"project":"p","title":id,"at":1,"env":"local","branch":"","worktree":"","provider":p,"model":"m"})); }
+        let v = view(&s, &json!({"drafts": {"@settings.page": "usage"}}), &json!({}));
+        let rows = v["rows"].as_array().unwrap();
+        assert_eq!(rows[1..].iter().map(|r| r["label"].as_str().unwrap()).collect::<Vec<_>>(), ["claude", "codex", "All threads"]);
+        let note = |l: &str| rows.iter().find(|r| r["label"] == l).unwrap()["note"].as_str().unwrap().to_string();
+        assert_eq!(note("claude"), "3 turns · input 110 · cache read 50 · cache write 0 · output 35 · $2.00");
+        assert!(note("codex").starts_with("3 turns") && note("codex").ends_with("cost not reported"));
+        assert!(note("All threads").starts_with("6 turns · input 111"), "{}", note("All threads"));
+        assert_eq!(note_of_empty(), "No turns counted yet.");
+    }
+    fn note_of_empty() -> String { view(&st(&[]), &json!({"drafts": {"@settings.page": "usage"}}), &json!({}))["rows"][1]["note"].as_str().unwrap().to_string() }
     #[test] fn a_page_leads_with_the_way_back_and_marks_the_current_chip() {
         let v = view(&st(&[("settle.idle.minutes", "30"), ("restart.continue", "off")]), &json!({"drafts": {"@settings.page": "threads"}}), &json!({}));
         assert_eq!(v["rows"][0]["buttons"][0]["value"], ""); assert_eq!(v["rows"][0]["buttons"][0]["action"], "settings-page");
@@ -526,7 +559,7 @@ mod tests {
         assert_eq!(act("h", &json!({}), "flag", "settings").unwrap().patch["open"]["settings"], true);
         assert_eq!(act("h", &json!({"open": {"settings": true}}), "flag", "settings").unwrap().patch["open"]["settings"], false);
         assert_eq!(act("h", &json!({}), "settings-page", "nonsense").unwrap().patch["drafts"]["@settings.page"], "");
-        assert_eq!(page(&json!({"drafts": {"@settings.page": "usage"}})), "", "an unported page is the menu");
+        assert_eq!(page(&json!({"drafts": {"@settings.page": "usage"}})), "usage"); assert_eq!(page(&json!({"drafts": {"@settings.page": "nope"}})), "", "an unknown page is the menu");
     }
     #[test] fn the_webhook_address_saves_only_when_http_or_empty() {
         let bad = act("h", &json!({"rid": 1, "drafts": {"@f.whurl": "ftp://x"}}), "hook-url", "").unwrap();
