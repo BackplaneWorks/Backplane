@@ -91,6 +91,8 @@ pub fn freecad_cmd(home: &Path) -> String {
     cands.extend(mac_apps("FreeCAD.app/Contents/Resources/bin/freecadcmd"));
     cands.iter().filter(|c| !c.is_empty()).find_map(|c| on_path(c)).unwrap_or_default()
 }
+/// The FreeCAD an agent is told about: the one the hub would launch (a setting that does not run is skipped), else what the host found at start.
+pub fn told_freecad(home: &Path, host_fc: &str) -> String { let c = freecad_cmd(home); if c.is_empty() { host_fc.to_string() } else { c } }
 /// freecadGui: the GUI program beside its console one, else on PATH
 pub fn freecad_gui(cmd: &str) -> String {
     let dir = cmd.rsplit_once('/').map(|d| d.0.to_string()).unwrap_or_default();
@@ -185,6 +187,8 @@ mod tests {
         let f = d.join("mycad"); std::fs::write(&f, "#!/bin/sh\n").unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
         set_freecad_setting(&format!(" {} ", f.display())); assert_eq!(freecad_cmd(&d), f.to_string_lossy());
         set_freecad_setting("/no/such/freecad"); assert_ne!(freecad_cmd(&d), "/no/such/freecad", "a path that does not run is skipped");
+        set_freecad_setting(&f.display().to_string()); assert_eq!(told_freecad(&d, "/host/found"), f.to_string_lossy(), "an agent is told the configured path");
+        set_freecad_setting("/no/such/freecad"); assert_ne!(told_freecad(&d, "/host/found"), "/no/such/freecad", "an agent is not told a path that does not run");
         set_freecad_setting(""); let _ = std::fs::remove_dir_all(&d);
     }
     fn fc() -> Mesher { Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() } }
