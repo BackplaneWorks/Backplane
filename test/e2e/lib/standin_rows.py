@@ -74,5 +74,5 @@ for line in sys.stdin:
         for i in range(int(float(os.environ.get("FAKE_SECS", "600")) * 10)):
             if i % 10 == 0: out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "working "}}, "session_id": sid})
             time.sleep(0.1)
-    out({"type": "assistant", "message": {"id": "m%d-%d" % (os.getpid(), n), "role": "assistant", "content": [{"type": "text", "text": say}]}, "session_id": sid})
-    out({"type": "result", "subtype": "success", "is_error": False, "result": say, "session_id": sid, "modelUsage": {"fake": {"contextWindow": 200000}}, "usage": {"input_tokens": 1200, "output_tokens": 80}})
+    out({"type": "assistant", "message": {"id": "m%d-%d" % (os.getpid(), n), "role": "assistant", "content": [{"type": "text", "text": say}], "model": "claude-fake", "usage": {"input_tokens": 1200, "cache_read_input_tokens": 30000, "cache_creation_input_tokens": 500, "output_tokens": 80}}, "session_id": sid})
+    out({"type": "result", "subtype": "success", "is_error": False, "result": say, "session_id": sid, "modelUsage": {"claude-fake": {"inputTokens": 1200, "outputTokens": 80, "cacheReadInputTokens": 30000, "cacheCreationInputTokens": 500, "costUSD": 0.01, "contextWindow": 200000}}, "total_cost_usd": 0.01, "uuid": "u-%d-%d" % (os.getpid(), n), "duration_ms": 900, "num_turns": 1, "usage": {"input_tokens": 1200, "cache_read_input_tokens": 30000, "cache_creation_input_tokens": 500, "output_tokens": 80}})
