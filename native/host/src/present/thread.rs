@@ -164,7 +164,7 @@ fn img_paths(text: &str) -> Vec<String> {
         let b = w.strip_prefix("file://").unwrap_or(w);
         let b = if b.ends_with(['.', ':', '!', '?']) { &b[..b.len() - 1] } else { b };
         let l = b.to_lowercase();
-        if (b.starts_with('/') || b.starts_with("~/")) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"].iter().any(|e| l.ends_with(e)) && !out.iter().any(|o| o == b) { out.push(b.to_string()) }
+        if (crate::plat::fs::is_abs(b) || b.starts_with("~/")) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"].iter().any(|e| l.ends_with(e)) && !out.iter().any(|o| o == b) { out.push(b.to_string()) }
     }
     out
 }

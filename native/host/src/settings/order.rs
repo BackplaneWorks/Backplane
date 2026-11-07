@@ -214,7 +214,7 @@ fn records(home: &Path) -> Vec<(Rec, String)> {
 // ---- asking to send ----
 
 /// Od.safe: a path from the order's folder that stays inside it, plain characters only (no `"`, `\`, `;`: they end up in curl's config).
-pub fn safe(p: &str) -> bool { !p.is_empty() && !p.starts_with('/') && !p.contains("..") && p.chars().all(|c| c as u32 >= 32 && !matches!(c, '"' | '\\' | ';' | '\u{7f}')) }
+pub fn safe(p: &str) -> bool { !p.is_empty() && !crate::plat::fs::is_abs(p) && !p.contains("..") && p.chars().all(|c| c as u32 >= 32 && !matches!(c, '"' | '\\' | ';' | '\u{7f}')) }
 /// A link anywhere on the way: a link named like a design file could carry any file of the person's out, under a name they would approve.
 fn linked(cwd: &Path, dir: &str) -> bool {
     fn below(d: &Path) -> bool { std::fs::read_dir(d).map_or(false, |r| r.flatten().any(|e| e.file_type().map_or(true, |t| t.is_symlink() || (t.is_dir() && below(&e.path()))))) }

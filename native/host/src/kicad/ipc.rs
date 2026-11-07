@@ -299,7 +299,7 @@ async fn argv_on(i: &Ipc, project: &str, env: &Env) -> String { let (t, r) = one
 
 /// KIpc.pro: the project of a path: the .kicad_pro itself, or the one beside a board or schematic ("" for none).
 pub fn pro_of(path: &str) -> String {
-    if !path.starts_with('/') { return String::new() }
+    if !crate::plat::fs::is_abs(path) { return String::new() }
     if path.ends_with(".kicad_pro") { return path.to_string() }
     Path::new(path).parent().map(|d| project::read(&d.to_string_lossy()).pro).unwrap_or_default()
 }
@@ -311,7 +311,7 @@ fn err_of(o: &Value) -> String {
 /// KIpc.check: what is wrong with the request itself ("" when nothing).
 pub fn check(ty: &str, path: &str, pro: &str, msg: &Value, caps: &[String]) -> String {
     if ty.is_empty() { return "type is required: the protobuf command, e.g. kiapi.board.commands.GetItems".into() }
-    if !path.starts_with('/') { return "path must be the absolute path of the project's .kicad_pro, .kicad_pcb or .kicad_sch".into() }
+    if !crate::plat::fs::is_abs(path) { return "path must be the absolute path of the project's .kicad_pro, .kicad_pcb or .kicad_sch".into() }
     if pro.is_empty() { return format!("no KiCad project (.kicad_pro) found for {path}") }
     if ks::headless_refused(ty) { return ks::REFUSAL.into() }
     ks::guard(ty, msg, caps)

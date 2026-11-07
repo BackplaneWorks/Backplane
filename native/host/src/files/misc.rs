@@ -60,7 +60,7 @@ impl RpcHandler for Misc {
                 "pdf.page" => {
                     let path = s("path"); let page = match p.get("page") { Some(Value::Number(n)) => n.to_string(), Some(Value::String(x)) => x.clone(), _ => "1".into() };
                     let ok_page = !page.is_empty() && page.len() <= 6 && page.bytes().all(|b| b.is_ascii_digit());
-                    if !(path.starts_with('/') && path.to_lowercase().ends_with(".pdf")) || path.contains('\0') || !ok_page {
+                    if !(crate::plat::fs::is_abs(&path) && path.to_lowercase().ends_with(".pdf")) || path.contains('\0') || !ok_page {
                         return reply(true, json!({"pdfPath":path,"pdfPage":page,"pdfErr":"not a PDF path"}))
                     }
                     let dir = hub.cfg.home.join("pdf");
