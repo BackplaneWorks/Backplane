@@ -8,6 +8,7 @@ pub mod cef;
 #[cfg(feature = "cef")]
 pub mod cef_page;
 pub mod demo;
+pub mod downloads;
 pub mod layers;
 pub mod raster;
 pub mod solid;

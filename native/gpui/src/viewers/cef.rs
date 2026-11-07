@@ -7,6 +7,7 @@
 //! plus the input methods the gpui page calls (mouse, wheel, key, text, IME, focus, resize, navigation).
 use cef::{rc::Rc as _, *};
 pub use cef::{CefStringList, ImplFileDialogCallback};
+use super::downloads::{bring_to_downloads, safe_name, unique_path};
 use std::{path::{Path, PathBuf}, sync::{atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering}, Arc, Mutex, OnceLock}};
 
 /// The CEF version the `cef` crate in Cargo.toml was generated for; the runtime directory is `<cache>/backplane/cef-runtime/<VERSION>`.
@@ -148,23 +149,6 @@ wrap_download_handler! {
             self.tab.st.lock().unwrap().download = msg; let _ = self.tab.wake.try_send(());
         }
     }
-}
-/// The person's Downloads folder: XDG_DOWNLOAD_DIR, else ~/Downloads.
-pub fn downloads_folder() -> PathBuf { std::env::var_os("XDG_DOWNLOAD_DIR").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads"))).unwrap_or_else(std::env::temp_dir) }
-/// A finished download at `file` (named by the engine, e.g. a guid in a temp folder) moved into the Downloads folder as `suggested`; the file already there, or a failure, leaves `file` as it was.
-pub fn bring_to_downloads(file: &Path, suggested: &str) -> PathBuf { bring_to(&downloads_folder(), file, suggested) }
-fn bring_to(dir: &Path, file: &Path, suggested: &str) -> PathBuf {
-    if file.parent() == Some(dir) || suggested.trim().is_empty() || !file.is_file() { return file.to_path_buf() }
-    let _ = std::fs::create_dir_all(dir);
-    let to = unique_path(dir, &safe_name(suggested));
-    if std::fs::rename(file, &to).is_ok() || std::fs::copy(file, &to).is_ok() { to } else { file.to_path_buf() }
-}
-fn safe_name(n: &str) -> String { let n: String = n.chars().map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c }).collect(); let n = n.trim_matches('.').trim().to_string(); if n.is_empty() { "download".into() } else { n } }
-/// `dir/name`, or `dir/name (2)`... when that file exists
-pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
-    let first = dir.join(name); if !first.exists() { return first }
-    let (stem, ext) = match name.rsplit_once('.') { Some((a, b)) if !a.is_empty() => (a.to_string(), format!(".{b}")), _ => (name.to_string(), String::new()) };
-    (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
 }
 wrap_client! {
     struct ClientH { render: RenderHandler, display: DisplayHandler, load: LoadHandler, life: LifeSpanHandler, dialog: DialogHandler, download: DownloadHandler }
@@ -347,20 +331,4 @@ mod tests {
     }
     #[test] fn key_codes() { assert_eq!(vk("a"), Some(65)); assert_eq!(vk("7"), Some(55)); assert_eq!(vk("enter"), Some(13)); assert_eq!(vk("f5"), Some(116)); assert_eq!(vk("é"), None); }
     #[test] fn event_flags() { assert_eq!(flags(true, false, false, true, false, false), 2 | 16); assert_eq!(flags(false, true, true, false, false, true), 4 | 8 | 64); }
-}
-
-#[cfg(test)]
-mod download_tests {
-    use super::*;
-    use core::prelude::v1::test;
-    #[test] fn a_finished_download_named_by_the_engine_is_brought_to_downloads_under_its_own_name() {
-        let d = std::env::temp_dir().join(format!("bp-dl-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
-        let (tmp, dl) = (d.join("artifacts"), d.join("Downloads")); std::fs::create_dir_all(&tmp).unwrap();
-        let f = tmp.join("461feba6-guid"); std::fs::write(&f, "bytes").unwrap();
-        let to = bring_to(&dl, &f, "report.txt"); assert_eq!(to, dl.join("report.txt")); assert_eq!(std::fs::read_to_string(&to).unwrap(), "bytes"); assert!(!f.exists());
-        let g = tmp.join("second-guid"); std::fs::write(&g, "again").unwrap(); let to2 = bring_to(&dl, &g, "report.txt"); assert_eq!(to2, dl.join("report (2).txt"), "never over a file");
-        assert_eq!(bring_to(&dl, &to, "report.txt"), to, "a file already in Downloads stays");
-        assert_eq!(bring_to(&dl, &tmp.join("nothing"), "x.txt"), tmp.join("nothing"), "a missing file is left alone");
-        let _ = std::fs::remove_dir_all(&d);
-    }
 }

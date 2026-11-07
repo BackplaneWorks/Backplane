@@ -60,7 +60,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  await c.rpc('turn.start',{thread:T,text:'zqapprove please'});
  const op=await until(()=>has(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval'),15000);const ask=events().find(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval');
  const an=ask?await c.rpc('ask.answer',{id:ask.id,answer:'accept'}):{ok:false};const fin=await finished(T);
- log('F06',m.ok&&op&&an.ok&&fin&&/PERM Bash -> .*allow/i.test(fake())&&has(e=>e.$==='AskClosed'&&e.id===ask?.id),`runtime approval-required: Bash approval opened (${ask?.detail?.slice(0,40)}), accepted, the agent got allow=${/PERM Bash -> .*allow/i.test(fake())}, ask closed`);
+ log('F06',m.ok&&op&&an.ok&&fin&&/PERM Bash -> .*allow/i.test(fake())&&has(e=>e.$==='AskClosed'&&e.id===ask?.id),`runtime approval-required: Bash approval opened (${ask?.detail?.slice(0,40)}), accepted (reply ok=${an.ok} ${an.error||''}), the agent got allow=${/PERM Bash -> .*allow/i.test(fake())}, ask closed`);
  await c.rpc('turn.start',{thread:T,text:'zqapprove again'});await until(()=>events().filter(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval').length>=2,15000);
  const ask2=events().filter(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval').at(-1);await c.rpc('ask.answer',{id:ask2.id,answer:'decline'});await finished(T,2);
  log('F06',/PERM Bash -> .*deny/i.test(fake()),`a declined approval reaches the agent as deny=${/PERM Bash -> .*deny/i.test(fake())}`);
@@ -79,6 +79,15 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const runs=()=>turnStates(H).filter(s=>s==='running').length;const before=runs();
  const rs=await c.rpc('queue.resume',{thread:H});await sleep(1500);const cleared=settingOf(`thread.config.hold.${H}`)==='';
  log('F07-held',hold==='on'&&rs.ok&&cleared,`interrupted turn, then a model choice: thread.config.hold=${hold}; queue.resume ok=${rs.ok} and cleared the hold=${cleared}; the thread ran no turn of its own in between (running turns ${before} -> ${runs()})`)}
+
+// F06/F07 a question asked in the turn after a Stop: the hub logs the ask, pushes it to a connected client, and the agent hears the answer (the CLI keeps its process after an interrupt)
+{const T=await mk('stop-then-ask');await c.rpc('turn.start',{thread:T,text:'a long turn'});await until(()=>turnStates(T).includes('running'),10000);
+ const it=await c.rpc('turn.interrupt',{thread:T});await until(()=>turnStates(T).at(-1)==='interrupted',10000);
+ const seen0=JSON.stringify(c.frames).length;await c.rpc('turn.start',{thread:T,text:'zqask'});
+ const logged=await until(()=>has(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='input'),20000);const ask=events().find(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='input');
+ const pushed=await until(()=>JSON.stringify(c.frames.slice(-400)).includes(ask?.id||'#none#'),8000);
+ const an=ask?await c.rpc('ask.answer',{id:ask.id,answer:'Barrel'}):{ok:false};await finished(T,2);
+ log('F06-ask-after-stop',it.ok&&logged&&pushed&&an.ok&&/PERM AskUserQuestion -> .*Barrel/.test(fake())&&/INTERRUPTED turn/.test(fake()),`Stop on a long turn (the stand-in answers the hub's interrupt and keeps its process=${/INTERRUPTED turn/.test(fake())}); the next turn's question: AskOpened in the hub log=${logged}, pushed to the connected client=${pushed}, the answer reached the agent=${/PERM AskUserQuestion -> .*Barrel/.test(fake())}`)}
 
 // F08 bring back, after a fork
 {const A=await mk('forkme');await c.rpc('turn.start',{thread:A,text:'zqshort fork source'});await finished(A);

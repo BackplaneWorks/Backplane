@@ -7,7 +7,7 @@
 #   zqecho     answers with the text it was given, so attachments and agentText can be checked
 #   zqquote D  calls order_quote for folder D
 #   zqshort    a short turn; anything else a turn of FAKE_SECS seconds
-import sys, os, json, time, urllib.request
+import sys, os, json, time, select, urllib.request
 log = os.environ.get("FAKE_LOG", "/dev/null")
 def L(s):
     open(log, "a").write(s + "\n")
@@ -27,7 +27,20 @@ if "-p" in a and "--input-format" not in a:  # one-shot text generation (titles,
     print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "Stand-in title for the thread"}), flush=True); sys.exit(0)
 sid = "fake-%d" % os.getpid()
 n = 0
-for line in sys.stdin:
+_buf = b""
+def readline(timeout=None):
+    """One line of stdin, or None at EOF; with a timeout, "" when nothing arrived (a long turn keeps listening, as the real CLI does, for the hub's interrupt)."""
+    global _buf
+    while b"\n" not in _buf:
+        if timeout is not None and not select.select([0], [], [], timeout)[0]: return ""
+        d = os.read(0, 65536)
+        if not d: return None
+        _buf += d
+    line, _buf = _buf.split(b"\n", 1); return line.decode("utf-8", "replace")
+interrupted = False
+while True:
+    line = readline()
+    if line is None: break
     try: r = json.loads(line)
     except Exception: continue
     if r.get("type") != "user":
@@ -73,6 +86,14 @@ for line in sys.stdin:
     if "zqshort" not in text and not any(k in text for k in ["zqask", "zqapprove", "zqplan", "zqtool", "zqquote", "zqecho", "zqwrite"]):
         for i in range(int(float(os.environ.get("FAKE_SECS", "600")) * 10)):
             if i % 10 == 0: out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "working "}}, "session_id": sid})
-            time.sleep(0.1)
+            l2 = readline(0.1)
+            if l2 is None: sys.exit(0)
+            if l2:
+                try: r2 = json.loads(l2)
+                except Exception: continue
+                if r2.get("type") == "control_request" and r2.get("request", {}).get("subtype") == "interrupt":   # the hub's Stop: the CLI answers and ends the turn, the process stays
+                    out({"type": "control_response", "response": {"request_id": r2.get("request_id"), "subtype": "success", "response": {}}}); L("INTERRUPTED turn %d" % n); interrupted = True; break
+    if interrupted:
+        interrupted = False; say = "interrupted"; out({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": "interrupted", "session_id": sid}); continue
     out({"type": "assistant", "message": {"id": "m%d-%d" % (os.getpid(), n), "role": "assistant", "content": [{"type": "text", "text": say}], "model": "claude-fake", "usage": {"input_tokens": 1200, "cache_read_input_tokens": 30000, "cache_creation_input_tokens": 500, "output_tokens": 80}}, "session_id": sid})
     out({"type": "result", "subtype": "success", "is_error": False, "result": say, "session_id": sid, "modelUsage": {"claude-fake": {"inputTokens": 1200, "outputTokens": 80, "cacheReadInputTokens": 30000, "cacheCreationInputTokens": 500, "costUSD": 0.01, "contextWindow": 200000}}, "total_cost_usd": 0.01, "uuid": "u-%d-%d" % (os.getpid(), n), "duration_ms": 900, "num_turns": 1, "usage": {"input_tokens": 1200, "cache_read_input_tokens": 30000, "cache_creation_input_tokens": 500, "output_tokens": 80}})
