@@ -308,6 +308,8 @@ extension Pairing {
     struct Invitation {
         let origin: URL
         let secret: String
+        /// every address to try it at, the link's own first (HubList.routes)
+        var routes: [String] = []
     }
     static func invitation(_ text: String) -> Invitation? {
         var raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -319,7 +321,10 @@ extension Pairing {
               secret.range(of: "^(?:[a-f0-9]{32}|[A-Z2-9]{8})$", options: .regularExpression) != nil else { return nil }
         c.path = ""; c.query = nil; c.fragment = nil
         guard let origin = c.url else { return nil }
-        return Invitation(origin: origin, secret: secret)
+        let own = origin.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var routes = [own]
+        for r in HubList.routes(raw) where !routes.contains(r) { routes.append(r) }
+        return Invitation(origin: origin, secret: secret, routes: routes)
     }
     static func malformedInvitation(_ text: String) -> Bool {
         var raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -350,8 +355,19 @@ extension Pairing {
         default: "Hub unreachable. Check its address, LAN or tailnet connection."
         }
     }
+    /// The invitation tried at each of its addresses in turn: one that cannot be reached gives way to the next; the first hub that answers decides
+    /// (a refusal is final: the next address is the same hub, and every guess counts against its limit). The link kept names the address that answered.
     static func exchange(_ invite: Invitation, name: String) async throws -> String {
-        var request = URLRequest(url: invite.origin.appendingPathComponent("auth/enroll"))
+        let at = invite.routes.compactMap(URL.init(string:))
+        var last: Error = NSError(domain: "BackplanePairing", code: 1, userInfo: [NSLocalizedDescriptionKey: message("hub_unreachable")])
+        for origin in at.isEmpty ? [invite.origin] : at {
+            do { return try await exchange(invite, at: origin, name: name) }
+            catch let e as NSError where e.domain == NSURLErrorDomain { last = e }
+        }
+        throw last
+    }
+    private static func exchange(_ invite: Invitation, at origin: URL, name: String) async throws -> String {
+        var request = URLRequest(url: origin.appendingPathComponent("auth/enroll"))
         request.httpMethod = "POST";request.timeoutInterval = 8
         request.setValue("Bearer " + invite.secret, forHTTPHeaderField: "Authorization")
         request.setValue("native", forHTTPHeaderField: "X-Backplane-Client")
@@ -365,6 +381,6 @@ extension Pairing {
               token.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
             throw NSError(domain: "BackplanePairing", code: 1, userInfo: [NSLocalizedDescriptionKey: message(json["error"] as? String ?? "hub_unreachable")])
         }
-        return invite.origin.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/#token=" + token
+        return origin.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/#token=" + token
     }
 }

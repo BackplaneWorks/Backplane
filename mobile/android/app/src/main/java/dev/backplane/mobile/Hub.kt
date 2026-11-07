@@ -27,7 +27,8 @@ import javax.net.SocketFactory
 // A pairing link as the desktop shows it (http://host:3787/#token=abc)
 // becomes the hub's socket address (ws://host:3787/ws?token=abc).
 object Pairing {
-    data class Invitation(val origin: String, val secret: String)
+    /** routes: every address to try it at, the link's own first (HubList.routes) */
+    data class Invitation(val origin: String, val secret: String, val routes: List<String> = emptyList())
     fun invitation(text: String): Invitation? {
         var raw = text.trim()
         if ((raw.startsWith("backplane://") || raw.startsWith(BuildConfig.URL_SCHEME + "://"))) raw = Uri.parse(raw).getQueryParameter("url") ?: return null
@@ -36,7 +37,8 @@ object Pairing {
         val f = Uri.parse("https://pair/?" + (u.encodedFragment ?: ""))
         val secret = f.getQueryParameter("invite") ?: f.getQueryParameter("code") ?: return null
         if (!Regex("(?:[a-f0-9]{32}|[A-Z2-9]{8})").matches(secret)) return null
-        return Invitation(u.buildUpon().path("").clearQuery().fragment(null).build().toString().trimEnd('/'), secret)
+        val origin = u.buildUpon().path("").clearQuery().fragment(null).build().toString().trimEnd('/')
+        return Invitation(origin, secret, (listOf(origin) + HubList.routes(raw)).distinct())
     }
     fun malformedInvitation(text: String): Boolean {
         var raw = text.trim()
@@ -63,8 +65,17 @@ object Pairing {
         "pairing_required" -> "Re-pair this device with a new invitation."
         else -> "Hub unreachable. Check its address, LAN or tailnet connection."
     }
-    suspend fun exchange(invite: Invitation): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val r = okhttp3.Request.Builder().url(invite.origin + "/auth/enroll")
+    /** The invitation tried at each address in turn: one that cannot be reached gives way to the next; the first hub that answers decides
+     *  (a refusal is final: the next address is the same hub, and every guess counts against its limit). The link kept names the address that answered. */
+    suspend fun exchange(invite: Invitation, at: List<String> = listOf(invite.origin)): String {
+        var last: Exception = IllegalArgumentException(message("hub_unreachable"))
+        for (origin in at.ifEmpty { listOf(invite.origin) }) {
+            try { return exchangeAt(invite, origin) } catch (e: java.io.IOException) { last = IllegalArgumentException(message("hub_unreachable")) }
+        }
+        throw last
+    }
+    private suspend fun exchangeAt(invite: Invitation, origin: String): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val r = okhttp3.Request.Builder().url(origin + "/auth/enroll")
             .post(okhttp3.RequestBody.create(null, ByteArray(0))).header("Authorization", "Bearer " + invite.secret)
             .header("X-Backplane-Client", "native").header("X-Backplane-Name", android.os.Build.MODEL.filter { it.code in 32..126 }).build()
         val client = okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).callTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build()
@@ -72,7 +83,7 @@ object Pairing {
             val json = org.json.JSONObject(response.body?.string() ?: "{}")
             val token = json.optString("token")
             if (!response.isSuccessful || !Regex("[a-f0-9]{32}").matches(token)) throw IllegalArgumentException(message(json.optString("error")))
-            invite.origin + "/#token=" + token
+            origin + "/#token=" + token
         }
     }
     fun socket(link: String): String? {

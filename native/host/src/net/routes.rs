@@ -232,6 +232,19 @@ mod tests {
         let r = c.create_routes("evil host;", false); assert!(r.iter().all(|x| !x.contains("evil")), "{r:?}");
         let _ = (std::fs::remove_dir_all(dir), std::fs::remove_dir_all(dir2));
     }
+    /// Settings → Add a device on a hub bound to 127.0.0.1 with no tailnet listener (`--no-tailscale`): the link names only this computer, and says so
+    /// (`localOnly`, which Settings and Setup turn into a warning); once the tailnet listener confirms its address, the link names that first.
+    #[test] fn pair_a_loopback_hub_invites_with_local_only_until_it_has_a_tailnet_address() {
+        let dir = std::env::temp_dir().join(format!("bp-net-routes-local-{}-{}", std::process::id(), hex::encode(pairing::urandom(4))));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = AuthRoutes::new(Arc::new(Registry::open(&dir, "root").unwrap()), "127.0.0.1", 3797, |l| format!("QR:{l}"));
+        let j = a.invite();
+        assert_eq!(j["localOnly"], true, "{j}"); assert_eq!(j["routes"], json!(["http://127.0.0.1:3797"]));
+        a.address("http://100.64.84.41:3797");
+        let j = a.invite();
+        assert_eq!(j["localOnly"], false, "{j}"); assert!(j["link"].as_str().unwrap().starts_with("http://100.64.84.41:3797/pair#invite="), "{j}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
     #[test] fn pair_known_over_http() {
         let (a, dir) = setup("known", "127.0.0.1");
         a.machines(json!({"self":{"url":"https://me.tail.ts.net","name":"me","domain":"tail.ts.net"}}), vec![]);

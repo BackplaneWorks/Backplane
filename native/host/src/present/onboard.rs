@@ -233,7 +233,10 @@ fn machine(f: &Facts, session: &Value, c: &Client) -> Step {
     let mut rows = vec![row("Tailscale", ts_note, vec![link("Get Tailscale", "https://tailscale.com/download")]), row("Linked machines", &if f.peers == 0 { "None yet.".to_string() } else { format!("{} linked.", f.peers) }, vec![])];
     let invite = f.invite.as_str();
     if invite.is_empty() { rows.push(row("Invite another machine", "Makes an invite to paste on the other machine.", vec![btn("Make an invite", "ob-machine-invite", "", false)])); }
-    else { rows.push(row("Invite", invite, vec![copy(invite)])); }
+    else {
+        rows.push(row("Invite", invite, vec![copy(invite)]));
+        if super::settings::loopback_invite(invite) { let mut w = row("Only this computer", super::settings::LOCAL_MACHINE, vec![]); w["tone"] = json!("warn"); rows.push(w); }
+    }
     let mut join = row("Join another machine", &if f.join_err.is_empty() { "Paste an invite made on the other machine.".to_string() } else { f.join_err.clone() }, vec![btn("Link", "ob-machine-join", "", false)]);
     join["fields"] = json!([{"name": "objoin", "hint": "bp1:...", "secret": false, "value": draft(session, "@f.objoin")}]);
     rows.push(join);
@@ -251,6 +254,7 @@ fn phone(f: &Facts, session: &Value, c: &Client) -> Step {
         r["qr"] = json!(s(&inv, "qr").lines().map(str::to_string).collect::<Vec<_>>());
         r["qrnote"] = json!(format!("Short code {}, for ten minutes", s(&inv, "code")));
         rows.push(r);
+        if inv["localOnly"] == true { let mut w = row("Only this computer", super::settings::LOCAL_DEVICE, vec![]); w["tone"] = json!("warn"); rows.push(w); }
     } else if let Some(e) = inv["error"].as_str() { rows.push(row("Add a device", &format!("Backplane could not make an invitation: {e}."), vec![btn("Try again", "device-invite", "", false)])); }
     else { rows.push(row("Add a device", "Makes a QR code, a link and a short code for one device.", vec![btn("Show the QR code", "device-invite", "", true)])); }
     rows.push(row("Paired devices", &if f.devices == 0 { "None yet.".to_string() } else { format!("{} paired. Settings, Devices lists and revokes them.", f.devices) }, vec![btn("Check again", "ob-check", "", false)]));
@@ -546,6 +550,19 @@ mod tests {
     fn setting_of(o: &Out, key: &str) -> Option<String> { o.cmds.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).find(|v| v["m"] == "setting.set" && v["p"]["key"] == key).map(|v| s(&v["p"], "value").to_string()) }
     fn sent(o: &Out, m: &str) -> Vec<Value> { o.cmds.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).filter(|v| v["m"] == m).map(|v| v["p"].clone()).collect() }
 
+    /// A hub on 127.0.0.1 with Tailscale off makes invites and links that name only this computer: the step says so beside them.
+    #[test] fn invites_and_links_that_name_only_this_computer_carry_a_warning() {
+        let sec = "e4af8fb618176ac9cd1bf9fe7d62e765f20914b4d3d3aeae60ae3bf5ac91571a";
+        let warned = |v: &Step| v.rows.iter().any(|r| r["label"] == "Only this computer" && r["tone"] == "warn");
+        let mut i = info("linux");
+        i["onboard.invite"] = json!(format!("bp1:http://127.0.0.1:3800:pd0302ba9e290b6e4:{sec}"));
+        assert!(warned(&machine(&Facts::of(&st(&[]), &i), &sess(json!({})), &desk())), "a loopback machine invite");
+        i["onboard.invite"] = json!(format!("bp1:http://desktop.tail.ts.net:3800:pd0302ba9e290b6e4:{sec}"));
+        assert!(!warned(&machine(&Facts::of(&st(&[]), &i), &sess(json!({})), &desk())), "a tailnet one");
+        let link = |local: bool| sess(json!({"@invite": json!({"link": "http://127.0.0.1:3800/pair#invite=x", "code": "ABCD2345", "qr": "", "localOnly": local}).to_string()}));
+        assert!(warned(&phone(&Facts::of(&st(&[]), &info("linux")), &link(true), &desk())), "a loopback device link");
+        assert!(!warned(&phone(&Facts::of(&st(&[]), &info("linux")), &link(false), &desk())), "a reachable one");
+    }
     #[test] fn it_comes_up_on_a_blank_home_and_leaves_an_old_home_alone() {
         assert!(due(&st(&[]), &sess(json!({}))));
         let mut old = st(&[]); old.apply(&json!({"$":"ProjectCreated","id":"p1","title":"x","root":"/x","at":1}));
