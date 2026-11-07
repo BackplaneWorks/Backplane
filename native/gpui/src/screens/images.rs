@@ -164,10 +164,13 @@ mod tests {
         im.retry(); assert!(matches!(im.get(Some(&Target { addr: "127.0.0.1:1".into(), token: "t".into(), tls: false }), "/x.png"), Slot::Loading));
     }
     #[test] fn many_images_use_a_fixed_pool_and_never_evict_what_is_drawn() {
-        let im = Images::default(); let t = Target { addr: "127.0.0.1:1".into(), token: "t".into(), tls: false };   // connection refused: every fetch fails fast
+        // a server that hangs up on every request: each fetch fails fast (a refused connection takes Windows about 2 s, on every try)
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let addr = l.local_addr().unwrap().to_string();
+        std::thread::spawn(move || { for c in l.incoming() { drop(c) } });
+        let im = Images::default(); let t = Target { addr, token: "t".into(), tls: false };
         im.frame();
         for i in 0..200 { let _ = im.get(Some(&t), &format!("/img?path={i}")); }
-        for _ in 0..2400 { if !im.loading() { break; } std::thread::sleep(Duration::from_millis(25)); } // Windows takes about 2 s to refuse a connection
+        for _ in 0..200 { if !im.loading() { break; } std::thread::sleep(Duration::from_millis(25)); }
         assert!(!im.loading(), "loading must end, or the window repaints forever");
         assert!(im.s.0.lock().unwrap().workers <= WORKERS);
         assert_eq!(im.s.0.lock().unwrap().items.len(), 200, "everything drawn this frame is kept");

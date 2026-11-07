@@ -29,7 +29,7 @@ pub fn found(root: &Path) -> Vec<String> {
 fn names(dir: &Path) -> Vec<String> { let mut v: Vec<String> = std::fs::read_dir(dir).map(|r| r.flatten().filter_map(|e| e.file_name().to_str().map(str::to_string)).collect()).unwrap_or_default(); v.sort(); v }
 fn dir_of(p: &str) -> &str { p.rsplit_once('/').map(|(d, _)| d).unwrap_or("") }
 fn last_of(p: &str) -> &str { p.rsplit('/').next().unwrap_or(p) }
-fn abs(root: &str, rel: &str) -> String { if rel.is_empty() { String::new() } else if rel.starts_with('/') { rel.into() } else { format!("{root}/{rel}") } }
+fn abs(root: &str, rel: &str) -> String { if rel.is_empty() { String::new() } else if crate::plat::fs::is_abs(rel) { rel.into() } else { format!("{root}/{rel}") } }
 fn pick(ns: &[String], ext: &str) -> String { ns.iter().find(|n| n.ends_with(ext)).cloned().unwrap_or_default() }
 fn named(ns: &[String], stem: &str, ext: &str) -> String { let w = format!("{stem}{ext}"); if ns.contains(&w) { w } else { pick(ns, ext) } }
 fn in_dir(dir: &str, name: &str) -> String { if dir.is_empty() || name.is_empty() { name.into() } else { format!("{dir}/{name}") } }

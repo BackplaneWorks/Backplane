@@ -15,7 +15,7 @@ const EXTS: [&str; 6] = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"];
 
 // ---- core/images: which paths a message names
 fn sep(c: char) -> bool { matches!(c, ' ' | '\n' | '\t' | '\r' | '(' | ')' | '[' | ']' | '<' | '>' | '`' | '"' | '\'' | ',' | ';' | '|') }
-fn abs_or_home(p: &str) -> bool { p.starts_with('/') || p.starts_with("~/") }
+fn abs_or_home(p: &str) -> bool { crate::plat::fs::is_abs(p) || p.starts_with("~/") }
 /// Img.is_image
 pub fn is_image(p: &str) -> bool { abs_or_home(p) && { let l = p.to_lowercase(); EXTS.iter().any(|e| l.ends_with(e)) } }
 /// Img.bare: "file://" dropped, one trailing . : ! ? dropped.

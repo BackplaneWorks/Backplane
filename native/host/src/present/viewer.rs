@@ -30,7 +30,7 @@ fn default_part(ps: &[String]) -> Option<&String> {
 }
 /// The part on show: the one chosen (`@mech.part:<thread>`) while the listing still has it, else the default.
 pub fn mech_current(ps: &[String], chosen: &str) -> Option<String> { ps.iter().find(|p| p.as_str() == chosen).or_else(|| default_part(ps)).cloned() }
-fn abs_of(root: &str, rel: &str) -> String { if rel.starts_with('/') { rel.to_string() } else { format!("{root}/{rel}") } }
+fn abs_of(root: &str, rel: &str) -> String { if crate::plat::fs::is_abs(rel) { rel.to_string() } else { format!("{root}/{rel}") } }
 /// The source a Mech page asks the hub for: the part as a 3D model ("" with no part).
 fn mech_want(root: &str, ps: &[String], chosen: &str) -> (String, String) {
     match mech_current(ps, chosen) { Some(p) if !root.is_empty() => { let a = abs_of(root, &p); (format!("2|{root}|{a}"), a) }, _ => (String::new(), String::new()) }
