@@ -123,11 +123,17 @@ impl Rig {
     r.tick(rp + 1).await; r.rest(T, "completed", 3).await; let ts = r.turns();
     assert_eq!(ts[2]["who"], "p@x.com", "the account that reset first, wherever the thread stood"); assert_eq!(r.binding(T, "claude").await, p.0); let _ = w;
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn every_account_out_with_no_reset_known_waits_for_the_person_and_says_so() {
-    let r = rig("noreset", "claude").await; r.two("claude").await; r.mode("w@x.com", "limit-noreset"); r.mode("p@x.com", "limit-noreset");
-    r.say(T, "m1", "GO").await; r.rest(T, "interrupted", 2).await; tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(r.turns().len(), 2); assert!(r.lines(T).iter().any(|l| l == "Every claude account is out (Work, Personal) and no reset time is known. Waiting for you."), "{:?}", r.lines(T));
-    r.tick(now() + 99999).await; assert_eq!(r.turns().len(), 2, "an unknown reset is never invented");
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn every_account_out_with_no_reset_known_says_when_it_tries_again_and_a_turn_is_the_test() {
+    let r = rig("noreset", "claude").await; let (_w, p) = r.two("claude").await; r.mode("w@x.com", "limit-noreset"); r.mode("p@x.com", "limit-noreset");
+    let t0 = now(); r.say(T, "m1", "GO").await; r.rest(T, "interrupted", 2).await; tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(r.turns().len(), 2);
+    assert!(r.lines(T).iter().any(|l| l.starts_with("Every claude account is out (Work, Personal). Continuing at ")), "a limit that named no reset is tried again an hour after it was met: {:?}", r.lines(T));
+    r.tick(t0 + 600).await; assert_eq!(r.turns().len(), 2, "not before then");
+    std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); // Personal has allowance again
+    r.tick(t0 + fb::UNKNOWN_HOLD_S + 5).await; r.rest(T, "completed", 4).await;
+    let ts = r.turns(); assert_eq!((ts[2]["who"].as_str().unwrap(), ts[3]["who"].as_str().unwrap()), ("w@x.com", "p@x.com"), "both are tried again: Work, first in saved order, is still out and held again; Personal works: {ts:#?}");
+    assert_eq!(r.binding(T, "claude").await, p.0);
+    assert_eq!(r.hub.setting(&fb::hold_key("claude", &p.0, p.1)).await.unwrap_or_default(), "", "the completed turn ended its hold");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_failed_login_mid_turn_moves_the_thread_and_a_later_check_clears_it() {
     let r = rig("auth", "claude").await; let (w, p) = r.two("claude").await; r.mode("w@x.com", "auth");
@@ -280,4 +286,30 @@ impl Rig {
     assert_eq!(r.hub.setting(&accounts_hub::alert_key("claude")).await.unwrap_or_default(), "", "the alert is dealt with");
     assert_eq!(alerts(&r.log()).len(), 1, "one alert in all");
     assert_eq!(r.hub.setting(&format!("provider.resume.{T}")).await.unwrap_or_default(), "");
+}
+
+/// Nov 7: after a restart every Claude login was held. A named account and the CLI's own login each kept a weekly-limit hold with no reset from the day before, though both had
+/// allowance and turns on them had gone on working; account_list said held, heldUntil 0. Here: stale holds on both, readings with allowance left: the tick ends both; and a
+/// hold met minutes ago ends when a turn completes on that login.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn stale_holds_end_on_a_reading_with_allowance_or_a_completed_turn_and_never_hold_every_login() {
+    let r = rig("stale", "claude").await;
+    let al = |used: f64| json!({"provider":"claude","state":"ok","phase":"complete","at":now(),"attempted_at":now(),"source":"claude-cli-usage","windows":[{"scope":"five_hour","used_percent":used},{"scope":"seven_day","used_percent":30.0}]});
+    let w = r.mgr.plant("claude", "kellyhlord", "k@x.com", al(20.0)).await; r.settled(&[&w.0]).await; r.bind(T, "claude", &w).await;
+    let old = now() - 86_000; // "You've hit your weekly limit · resets Nov 12, 3am (America/New_York)", written with reset 0 the day before
+    let stale = json!({"scope":"claude","reason":"You've hit your weekly limit","reset":0,"at":old}).to_string();
+    let (kw, kd) = (fb::hold_key("claude", &w.0, w.1), fb::hold_key("claude", "", 0));
+    for k in [&kw, &kd] { r.hub.commit(&json!({"$":"SettingSet","key":k,"value":stale,"at":old})).await.unwrap(); }
+    r.hub.commit(&json!({"$":"SettingSet","key":"allowance.claude","value":al(28.0).to_string(),"at":now()})).await.unwrap(); // the default login: 72% left
+    let (_, list) = r.tool(T, "account_list", json!({})).await;
+    let rows = list["accounts"].as_array().cloned().unwrap_or_default(); assert!(!rows.is_empty(), "{list}");
+    assert!(rows.iter().all(|a| a["held"] != true), "a hold a day old with no reset is over by itself, whatever the tick did: {list}");
+    r.tick(now()).await;
+    assert_eq!(r.hub.setting(&kw).await.unwrap_or_default(), "", "the named account's reading shows allowance");
+    assert_eq!(r.hub.setting(&kd).await.unwrap_or_default(), "", "so does the CLI's own login's");
+    // a hold met just now, with no reading newer than it: the next turn that completes on the login ends it
+    let fresh = json!({"scope":"claude","reason":"You've hit your limit","reset":0,"at":now() + 5}).to_string();
+    r.hub.commit(&json!({"$":"SettingSet","key":kw,"value":fresh,"at":now()})).await.unwrap();
+    r.tick(now()).await; assert!(!r.hub.setting(&kw).await.unwrap_or_default().is_empty(), "nothing newer has been learned");
+    r.say(T, "m1", "WORKS-AGAIN").await; r.rest(T, "completed", 1).await;
+    let end = Instant::now() + Duration::from_secs(5); while !r.hub.setting(&kw).await.unwrap_or_default().is_empty() { assert!(Instant::now() < end, "the completed turn did not end the hold"); tokio::time::sleep(Duration::from_millis(50)).await }
 }

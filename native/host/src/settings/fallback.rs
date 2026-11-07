@@ -52,7 +52,7 @@ pub fn limit_active(o: &Value, now: u64) -> bool { !o["scope"].as_str().unwrap_o
 /// Target.held: the provider or the `provider/model` is held (`get` reads a setting).
 pub fn target_held(get: &dyn Fn(&str) -> String, t: &Target, now: u64) -> bool {
     let rec = |scope: &str| serde_json::from_str::<Value>(&get(&Limit::key(scope))).unwrap_or(Value::Null);
-    limit_active(&rec(&t.provider), now) || limit_active(&rec(&t.key()), now)
+    hold_active(&rec(&t.provider), now) || hold_active(&rec(&t.key()), now)
 }
 /// Chain.pick: the first target that is offered and not held, or None (an exhausted chain holds work; it never wraps).
 pub fn pick(xs: &[Target], get: &dyn Fn(&str) -> String, caps: &Value, now: u64) -> Option<Target> { xs.iter().find(|t| caps_valid(caps, t) && !target_held(get, t, now)).cloned() }
@@ -76,7 +76,38 @@ pub fn reason(o: &Value) -> String {
     parts.join("; ")
 }
 /// Error.reset: the provider's reset time (0 unknown): its own field, else the time Claude Code puts after a bar ("Claude AI usage limit reached|1700000000").
-pub fn reset_of(o: &Value) -> u64 { o["error"]["resets_at"].as_u64().or(o["resets_at"].as_u64()).or(o["rate_limit_info"]["resetsAt"].as_u64()).or_else(|| reason(o).rsplit_once('|').and_then(|(_, t)| t.trim().parse().ok())).unwrap_or(0) }
+pub fn reset_of(o: &Value) -> u64 {
+    o["error"]["resets_at"].as_u64().or(o["resets_at"].as_u64()).or(o["rate_limit_info"]["resetsAt"].as_u64()).or_else(|| reason(o).rsplit_once('|').and_then(|(_, t)| t.trim().parse().ok()))
+        .unwrap_or_else(|| reset_words(&reason(o), crate::hub::now_ms() / 1000, &|z| crate::bots::clock::TzRule::parse(&super::zone::rule(z))))
+}
+/// Reset.words: the time Claude Code writes after "resets" ("You've hit your weekly limit · resets Nov 12, 3am (America/New_York)", "resets 4:30pm (Europe/Paris)"), in
+/// unix seconds; 0 when there is none or its zone is not known here (no zone is guessed). A date-less time is the next one to come; a date earlier than now is next year's.
+pub fn reset_words(text: &str, now: u64, zone: &dyn Fn(&str) -> Option<crate::bots::clock::TzRule>) -> u64 {
+    use crate::bots::clock::days;
+    let low = text.to_lowercase();
+    let Some(i) = low.rfind("resets ") else { return 0 };
+    let rest = &low[i + 7..];
+    let (z_name, body) = match (rest.find('('), rest.find(')')) { (Some(a), Some(b)) if b > a => (&text[i + 7 + a + 1..i + 7 + b], rest[..a].trim()), _ => return 0 };
+    let Some(rule) = zone(z_name.trim()) else { return 0 };
+    const MON: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    let (date, clock) = match body.split_once(',') { Some((d, c)) => (Some(d.trim()), c.trim()), None => (None, body) };
+    let pm = clock.ends_with("pm"); let am = clock.ends_with("am");
+    let digits = clock.trim_end_matches("am").trim_end_matches("pm").trim();
+    let (h, m): (u64, u64) = match digits.split_once(':') { Some((h, m)) => (h.parse().unwrap_or(99), m.parse().unwrap_or(99)), None => (digits.parse().unwrap_or(99), 0) };
+    if m > 59 || (am || pm) && !(1..=12).contains(&h) || h > 23 { return 0 }
+    let h = if pm && h != 12 { h + 12 } else if am && h == 12 { 0 } else { h };
+    let wall_now = rule.wall(now); let (y, _, _) = crate::bots::clock::civil(wall_now / 86400);
+    let at = |d: u64| rule.at(d * 86400 + h * 3600 + m * 60);
+    match date {
+        Some(d) => {
+            let mut it = d.split_whitespace(); let (Some(mo), Some(day)) = (it.next(), it.next()) else { return 0 };
+            let Some(mi) = MON.iter().position(|x| mo.starts_with(x)) else { return 0 };
+            let Ok(day) = day.parse::<u64>() else { return 0 };
+            let t = at(days(y, mi as u64 + 1, day)); if t + 86400 < now { at(days(y + 1, mi as u64 + 1, day)) } else { t }
+        }
+        None => { let today = wall_now / 86400; let t = at(today); if t > now { t } else { at(today + 1) } }
+    }
+}
 /// Error.scope: an account-wide limit holds the provider; a model limit holds `provider/model`. An explicit protocol scope wins over wording.
 pub fn scope_of(p: &str, m: &str, o: &Value) -> String {
     let explicit = o["error"]["scope"].as_str().or(o["scope"].as_str()).unwrap_or("");
@@ -127,15 +158,25 @@ pub fn part(s: &str) -> String { format!("{}:{s}", s.chars().count()) }
 pub fn hold_key(provider: &str, id: &str, epoch: u64) -> String { format!("account.limit.{}{}{epoch}:", part(provider), part(id)) }
 pub fn hold_model_key(provider: &str, id: &str, epoch: u64, model: &str) -> String { format!("{}model:{}", hold_key(provider, id, epoch), part(model)) }
 fn rec(get: &dyn Fn(&str) -> String, key: &str) -> Value { serde_json::from_str(&get(key)).unwrap_or(Value::Null) }
+/// How long a limit that named no reset holds before a turn is let try again (a turn is the test: still out, it is held again). A failed sign-in has no such end: the
+/// account's own sign-in state ends it (accounts_io `after`).
+pub const UNKNOWN_HOLD_S: u64 = 3600;
+/// Hold.end: when a hold ends: its reset, else an hour after it was met; 0 for a failed sign-in (until a sign-in or a proof).
+pub fn hold_end(o: &Value) -> u64 {
+    let r = o["reset"].as_u64().unwrap_or(0);
+    if r > 0 { r } else if o["auth"] == true { 0 } else { o["at"].as_u64().unwrap_or(0) + UNKNOWN_HOLD_S }
+}
+/// Hold.active: a record holds from when it was met until its end (`hold_end`).
+pub fn hold_active(o: &Value, now: u64) -> bool { !o["scope"].as_str().unwrap_or("").is_empty() && { let e = hold_end(o); e == 0 || now < e } }
 /// Hold.current: the profile (or this model on it) is held now.
 pub fn hold_current(get: &dyn Fn(&str) -> String, provider: &str, id: &str, epoch: u64, model: &str, now: u64) -> bool {
-    limit_active(&rec(get, &hold_key(provider, id, epoch)), now) || limit_active(&rec(get, &hold_model_key(provider, id, epoch, model)), now)
+    hold_active(&rec(get, &hold_key(provider, id, epoch)), now) || hold_active(&rec(get, &hold_model_key(provider, id, epoch, model)), now)
 }
-/// Hold.until: when the holds on this profile and model end (0: unknown, held until cleared).
+/// Hold.until: when the holds on this profile and model end (0: a failed sign-in, held until it is signed in again).
 pub fn hold_until(get: &dyn Fn(&str) -> String, provider: &str, id: &str, epoch: u64, model: &str) -> u64 {
     let (a, b) = (rec(get, &hold_key(provider, id, epoch)), rec(get, &hold_model_key(provider, id, epoch, model)));
-    let unknown = |o: &Value| !o["scope"].as_str().unwrap_or("").is_empty() && o["reset"].as_u64().unwrap_or(0) == 0;
-    if unknown(&a) || unknown(&b) { 0 } else { a["reset"].as_u64().unwrap_or(0).max(b["reset"].as_u64().unwrap_or(0)) }
+    let end = |o: &Value| if o["scope"].as_str().unwrap_or("").is_empty() { Some(0) } else { match hold_end(o) { 0 => None, e => Some(e) } };
+    match (end(&a), end(&b)) { (Some(x), Some(y)) => x.max(y), _ => 0 }
 }
 /// Hold.mark: the setting a limit on this thread's login writes (the provider hold, or the model's).
 pub fn hold_mark(provider: &str, id: &str, epoch: u64, lim: &Limit, now: u64, at: u64) -> Value {
@@ -198,18 +239,30 @@ pub fn window_reset(profile: &Value, model: &str, now: u64) -> u64 {
     }
     best.1
 }
-/// Hold.clearable: of `keys` (the hold records there are), the ones on this profile with no reset that a newer fact has ended: a limit once a reading taken after it shows allowance
-/// left, a failed login once the account's sign-in was checked after it. A hold with a reset ends by itself and is left alone.
+/// Hold.clearable: of `keys` (the hold records there are), the ones on this profile that are over or that a newer fact has ended: a hold past its end; a limit once a
+/// reading taken after it shows allowance left in every window that applies (a weekly window still full keeps it); a failed login once the account's sign-in was checked
+/// after it. The CLI's own login is the profile with id "" at epoch 0, its reading the default allowance (`allowance.claude`): its holds end the same ways.
 pub fn clearable(profile: &Value, keys: &[String], get: &dyn Fn(&str) -> String, now: u64) -> Vec<String> {
     let (provider, id, epoch) = (profile["provider"].as_str().unwrap_or(""), profile["id"].as_str().unwrap_or(""), profile["epoch"].as_u64().unwrap_or(0));
-    if id.is_empty() || profile["state"] != "connected" { return vec![] }
+    if profile["state"] != "connected" { return vec![] }
     let mine = hold_key(provider, id, epoch);
     keys.iter().filter(|k| k.starts_with(&mine)).filter(|k| {
         let o = rec(get, k);
-        if o["scope"].as_str().unwrap_or("").is_empty() || o["reset"].as_u64().unwrap_or(0) != 0 { return false }
+        if o["scope"].as_str().unwrap_or("").is_empty() { return false }
+        // one with no reset is gone once over; one past its known reset is left: it holds nothing, and the thread's return to its account reads when it ended (`preference_ready`)
+        if !hold_active(&o, now) { return o["reset"].as_u64().unwrap_or(0) == 0 }
         let at = o["at"].as_u64().unwrap_or(0);
-        if o["auth"] == true { profile["checkedAt"].as_u64().unwrap_or(0) > at } else { profile["allowance"]["at"].as_u64().unwrap_or(0) > at && usage_score(profile, now, "").map_or(false, |s| s > 0) }
+        let model = k.split_once("model:").map(|(_, m)| m.split_once(':').map_or(m, |(_, x)| x)).unwrap_or("");
+        if o["auth"] == true { profile["checkedAt"].as_u64().unwrap_or(0) > at } else { profile["allowance"]["at"].as_u64().unwrap_or(0) > at && usage_score(profile, now, model).map_or(false, |s| s > 0) }
     }).cloned().collect()
+}
+/// The CLI's own login as a profile, for `clearable`: its reading is the default allowance the hub keeps (`allowance.claude`).
+pub fn default_profile(provider: &str, allowance: &str) -> Value {
+    json!({"provider":provider,"id":"","epoch":0,"state":"connected","allowance":serde_json::from_str::<Value>(allowance).unwrap_or(Value::Null)})
+}
+/// Hold.proven: a turn that completed on this login (and model) proves it is not out: every limit hold on it is over. A failed sign-in is left to the sign-in state.
+pub fn proven(keys: &[String], get: &dyn Fn(&str) -> String, provider: &str, id: &str, epoch: u64, model: &str) -> Vec<String> {
+    [hold_key(provider, id, epoch), hold_model_key(provider, id, epoch, model)].into_iter().filter(|k| keys.contains(k)).filter(|k| { let o = rec(get, k); !o["scope"].as_str().unwrap_or("").is_empty() && o["auth"] != true }).collect()
 }
 /// Pick.may_cross: a thread may leave its provider only when no account of it is eligible.
 pub fn may_cross(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &str) -> bool { pick_account(profiles, get, now, provider, model).is_none() }
@@ -247,6 +300,46 @@ pub fn preference_ready(rec_raw: &str, provider: &str, binding: &str, inventory:
 #[cfg(test)]
 mod outage_tests {
     use super::*;
+    fn ny(z: &str) -> Option<crate::bots::clock::TzRule> { (z == "America/New_York").then(|| crate::bots::clock::TzRule::parse("EST5EDT,M3.2.0,M11.1.0")).flatten() }
+    #[test] fn a_reset_in_claude_codes_words_is_read_in_its_zone() {
+        let now = 1794092090; // 2026-11-07 17:54:50 EST
+        assert_eq!(reset_words("You've hit your weekly limit · resets Nov 12, 3am (America/New_York)", now, &ny), 1794470400, "Nov 12 03:00 EST is 08:00 UTC");
+        assert_eq!(reset_words("You've hit your limit · resets 8pm (America/New_York)", now, &ny), 1794099600, "today, still to come");
+        assert_eq!(reset_words("You've hit your limit · resets 4:30pm (America/New_York)", now, &ny), 1794087000 + 86400, "passed today: tomorrow");
+        assert_eq!(reset_words("You've hit your limit · resets Jan 2, 12am (America/New_York)", now, &ny), 1798866000, "a date already past is next year's");
+        for t in ["You've hit your limit", "resets soon (America/New_York)", "resets 3am (Mars/Base)", "resets 13pm (America/New_York)", "resets 3am"] { assert_eq!(reset_words(t, now, &ny), 0, "{t}: no guess") }
+    }
+    #[test] fn a_hold_ends_at_its_reset_and_one_with_none_an_hour_after_it_was_met() {
+        let get = |k: &str| match k { k if k == hold_key("claude", "w", 2) => json!({"scope":"claude","reset":0,"at":1000}).to_string(), k if k == hold_key("claude", "r", 1) => json!({"scope":"claude","reset":5000,"at":1000}).to_string(),
+            k if k == hold_key("claude", "a", 1) => json!({"scope":"claude","reset":0,"at":1000,"auth":true}).to_string(), _ => String::new() };
+        assert!(hold_current(&get, "claude", "w", 2, "", 1000 + UNKNOWN_HOLD_S - 1)); assert!(!hold_current(&get, "claude", "w", 2, "", 1000 + UNKNOWN_HOLD_S), "a turn may try again");
+        assert_eq!(hold_until(&get, "claude", "w", 2, ""), 1000 + UNKNOWN_HOLD_S, "a waiting thread knows when");
+        assert!(hold_current(&get, "claude", "r", 1, "", 4999) && !hold_current(&get, "claude", "r", 1, "", 5000), "its own reset"); assert_eq!(hold_until(&get, "claude", "r", 1, ""), 5000);
+        assert!(hold_current(&get, "claude", "a", 1, "", 9_999_999), "a failed sign-in waits for the sign-in"); assert_eq!(hold_until(&get, "claude", "a", 1, ""), 0);
+    }
+    #[test] fn a_reading_with_allowance_or_a_completed_turn_ends_a_hold_on_any_login_the_default_too() {
+        let now = 100_000;
+        let ok = |used: f64| json!({"provider":"claude","state":"ok","at":now - 10,"windows":[{"scope":"five_hour","used_percent":used},{"scope":"seven_day","used_percent":40.0}]});
+        let (named, dflt) = (hold_key("claude", "w", 2), hold_key("claude", "", 0));
+        let rec = |reset: u64| json!({"scope":"claude","reset":reset,"at":now - 600}).to_string();
+        let keys = vec![named.clone(), dflt.clone()];
+        let get = |k: &str| if k == named || k == dflt { rec(0) } else { String::new() };
+        let w = json!({"id":"w","provider":"claude","epoch":2,"state":"connected","allowance":ok(10.0)});
+        assert_eq!(clearable(&w, &keys, &get, now), [named.clone()]);
+        assert_eq!(clearable(&default_profile("claude", &ok(28.0).to_string()), &keys, &get, now), [dflt.clone()], "the CLI's own login: on Nov 7 it had 72% left and was held all the same");
+        assert!(clearable(&default_profile("claude", &ok(100.0).to_string()), &keys, &get, now).is_empty(), "a window still full keeps it");
+        assert!(clearable(&json!({"id":"w","provider":"claude","epoch":2,"state":"unchecked","allowance":ok(10.0)}), &keys, &get, now).is_empty(), "an unchecked login proves nothing yet");
+        let far = |k: &str| if k == named { rec(now + 86400 * 4) } else { String::new() };
+        assert_eq!(clearable(&w, &keys, &far, now), [named.clone()], "a weekly reset days away ends early when every window shows allowance");
+        let gone = |k: &str| if k == named { json!({"scope":"claude","reset":0,"at":now - UNKNOWN_HOLD_S - 1}).to_string() } else { String::new() };
+        assert_eq!(clearable(&json!({"id":"w","provider":"claude","epoch":2,"state":"connected"}), &keys, &gone, now), [named.clone()], "past its end, with no reading at all");
+        let reset_past = |k: &str| if k == named { json!({"scope":"claude","reset":now - 1,"at":now - 9000}).to_string() } else { String::new() };
+        assert!(clearable(&json!({"id":"w","provider":"claude","epoch":2,"state":"connected"}), &keys, &reset_past, now).is_empty() && !hold_current(&reset_past, "claude", "w", 2, "", now), "past a known reset it holds nothing, and its record is left for the thread's return");
+        let model = hold_model_key("claude", "w", 2, "opus"); let mk = vec![named.clone(), model.clone(), hold_key("claude", "a", 1)];
+        let mixed = |k: &str| if k == named || k == model { rec(0) } else if k == hold_key("claude", "a", 1) { json!({"scope":"claude","reset":0,"at":1,"auth":true}).to_string() } else { String::new() };
+        assert_eq!(proven(&mk, &mixed, "claude", "w", 2, "opus"), [named.clone(), model.clone()], "a completed turn ends the login's and its model's holds");
+        assert!(proven(&mk, &mixed, "claude", "a", 1, "").is_empty(), "never a failed sign-in");
+    }
     fn none(_: &str) -> String { String::new() }
     #[test] fn fallback_empty_exhausted() { assert_eq!(pick(&[], &none, &json!({}), 5), None); }
     #[test] fn fallback_auth_is_not_quota() { assert_eq!(classify("codex", "gpt-6.1-sol", &json!({"type":"turn.failed","message":"login keyring is locked"})), None); }
@@ -306,7 +399,7 @@ mod outage_tests {
         assert!(clearable(&p(0, 950, 100.0), &ks, &lim, now).is_empty(), "still full"); assert!(clearable(&p(0, 850, 10.0), &ks, &lim, now).is_empty(), "the reading is older than the limit");
         let auth = hold(json!({"scope":"claude","reset":0,"at":900,"auth":true}));
         assert_eq!(clearable(&p(950, 950, 10.0), &ks, &auth, now), ks, "the sign-in was checked after it failed"); assert!(clearable(&p(850, 950, 10.0), &ks, &auth, now).is_empty(), "allowance says nothing of a login");
-        assert!(clearable(&p(950, 950, 10.0), &ks, &hold(json!({"scope":"claude","reset":2000,"at":900})), now).is_empty(), "a known reset ends by itself");
+        assert_eq!(clearable(&p(950, 950, 10.0), &ks, &hold(json!({"scope":"claude","reset":2000,"at":900})), now), ks, "a known reset days away ends early too when a newer reading shows allowance in every window");
         assert!(clearable(&p(950, 950, 10.0), &[hold_key("claude", "other", 2)], &auth, now).is_empty(), "another account's hold is not this one's");
     }
     #[test] fn a_request_never_goes_back_to_an_account_it_ran_out_on() {
@@ -358,7 +451,7 @@ mod outage_tests {
         let ps = vec![prof("a", 1, Some(10.0)), off, other, prof("e", 2, Some(10.0))];
         let ids: Vec<&str> = ps.iter().filter(|p| eligible(&get, 100, "claude", "opus", p)).map(|p| p["id"].as_str().unwrap()).collect(); assert_eq!(ids, ["e"]);
         assert_eq!(next_reset(&ps, &get, 100, "claude", "opus", "", 0), 500); assert_eq!(hold_until(&get, "claude", "a", 1, "opus"), 500);
-        let unknown = |k: &str| if k == hold_key("claude", "a", 1) { json!({"scope":"claude","reset":0}).to_string() } else { String::new() }; assert_eq!(hold_until(&unknown, "claude", "a", 1, "opus"), 0, "an unknown reset stays unknown");
+        let unknown = |k: &str| if k == hold_key("claude", "a", 1) { json!({"scope":"claude","reset":0,"at":500}).to_string() } else { String::new() }; assert_eq!(hold_until(&unknown, "claude", "a", 1, "opus"), 500 + UNKNOWN_HOLD_S, "an unknown reset is tried again an hour after it was met");
     }
     #[test] fn a_hold_is_marked_on_the_provider_or_the_model_with_length_prefixed_keys() {
         assert_eq!(hold_key("claude", "w", 3), "account.limit.6:claude1:w3:"); assert_eq!(hold_model_key("claude", "w", 3, "opus"), "account.limit.6:claude1:w3:model:4:opus");

@@ -200,6 +200,12 @@ pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> { sta
 pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents::proc::Cli) -> Arc<Accounts> {
     let mgr = Arc::new(Accounts::open(&hub.cfg.home, Arc::new(move |p: &str| cli.resolve(p))));
     if let Some(a) = &agents { let _ = a.accounts.set(mgr.clone()); }
+    else {
+        // the agents' start overran its budget (guard::step answers None and the agents go on starting in the background): they still get the manager once they are up. On
+        // Nov 7 they did not, and every start on a named account waited its minute and failed with "Accounts are not available" until the next restart.
+        let (h, m) = (hub.clone(), mgr.clone());
+        tokio::spawn(async move { for _ in 0..1200 { if let Some(a) = crate::agents::handle().filter(|a| Arc::ptr_eq(&a.hub, &h)) { let _ = a.accounts.set(m); return } tokio::time::sleep(std::time::Duration::from_millis(250)).await } });
+    }
     hub.register_rpc(Arc::new(AccountsRpc::new(mgr.clone())));
     let (h, m) = (hub.clone(), mgr.clone());
     tokio::spawn(async move {
