@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod hub; mod md; mod model; mod net; mod present;
+mod agents; mod api; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod model; mod net; mod present;
 mod presenter; mod proc; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
 use anyhow::{Context, Result};
@@ -31,11 +31,16 @@ fn tailnet_only(host: &str, https_port: Option<&str>, copy: bool) -> std::result
     match https_port { Some(v) if net::listener::https_port_of(Some(v)).is_some() => Ok(()), _ => Err("--tailnet-only needs BACKPLANE_HTTPS_PORT, the port tailscale serve takes for HTTPS (a free one: 443 may be another hub's)") }
 }
 
+/// The commit this hub was built from: set when it was compiled (dev-build.sh, release.yml), so a check of it proves which build runs. The environment counts only for a build compiled without it (a plain `cargo build`).
+fn commit_of(built: Option<&str>, env: Option<String>) -> String {
+    built.filter(|s| !s.trim().is_empty()).map(|s| s.trim().to_string()).or_else(|| env.filter(|s| !s.trim().is_empty())).unwrap_or_else(|| "unknown".into())
+}
+
 fn parse() -> std::result::Result<Args, i32> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let (mut home, mut port, mut host, mut window) = (None, None, "127.0.0.1".to_string(), None::<PathBuf>);
     let (mut no_tailscale, mut https, mut only) = (false, false, false);
-    let (mut version, mut commit) = (env!("CARGO_PKG_VERSION").to_string(), std::env::var("BACKPLANE_COMMIT").unwrap_or_else(|_| option_env!("BACKPLANE_COMMIT").unwrap_or("unknown").into())); // a launch can name it; a build stamps it (BACKPLANE_COMMIT at compile time)
+    let (mut version, mut commit) = (env!("CARGO_PKG_VERSION").to_string(), commit_of(option_env!("BACKPLANE_COMMIT"), std::env::var("BACKPLANE_COMMIT").ok()));
     let mut i = 0;
     while i < a.len() {
         let value = |i: usize| a.get(i + 1).cloned().ok_or_else(|| { eprint!("{USAGE}"); 2 });
@@ -72,7 +77,7 @@ fn take_lock(home: &std::path::Path, port: u16) -> Result<std::fs::File> {
         let said = std::fs::read_to_string(&path).unwrap_or_default();
         let mut it = said.split_whitespace();
         eprintln!("a hub already serves {} (pid {}, port {})", home.display(), it.next().unwrap_or("?"), it.next().unwrap_or("?"));
-        std::process::exit(1);
+        std::process::exit(guard::EXIT_MACHINE);
     }
     f.set_len(0)?;
     use std::io::Write; (&f).write_all(format!("{} {} flock\n", std::process::id(), port).as_bytes())?;
@@ -130,72 +135,106 @@ async fn main() {
         if n != 15 && signal_ignored(n) { continue }
         if let Ok(mut sig) = tokio::signal::unix::signal(kind) { tokio::spawn(async move { sig.recv().await; eprintln!("backplane-hub: {name} received, exiting"); std::process::exit(128 + n) }); }
     }
-    if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(1) }
+    if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(exit_code(&e)) }
+}
+
+/// A start that cannot go on: the machine's fault (nothing a build can do: the disk, the port) or not. The guard blames a build only for the second.
+fn exit_code(e: &anyhow::Error) -> i32 {
+    let machine = e.chain().any(|c| c.downcast_ref::<std::io::Error>().map_or(false, |io| matches!(io.raw_os_error(), Some(libc::ENOSPC | libc::EDQUOT | libc::EROFS | libc::EACCES | libc::EADDRINUSE | libc::EADDRNOTAVAIL | libc::EMFILE | libc::ENFILE | libc::EIO))));
+    if machine { guard::EXIT_MACHINE } else { 1 }
 }
 
 async fn run(a: Args) -> Result<()> {
     startup::begin();
     let _ = rejected; // reserved for the handshake callback once the query rules grow
     // the safety gate, before the home is touched: a home that looks like a copy of a real hub's data needs BACKPLANE_COPY=1
-    if let Err(why) = copy::gate(&a.home, copy::on()) { eprintln!("{why}"); std::process::exit(1); }
-    if let Err(why) = copy::side_by_side_gate(copy::on(), copy::side_by_side_requested()) { eprintln!("{why}"); std::process::exit(1); }
+    if let Err(why) = copy::gate(&a.home, copy::on()) { eprintln!("{why}"); std::process::exit(guard::EXIT_REFUSED); }
+    if let Err(why) = copy::side_by_side_gate(copy::on(), copy::side_by_side_requested()) { eprintln!("{why}"); std::process::exit(guard::EXIT_REFUSED); }
     if copy::on() { eprintln!("{}", copy::NOTE); }
     std::fs::create_dir_all(&a.home)?;
+    guard::begin(&a.home);
+    if guard::safe() { eprintln!("backplane-hub: SAFE MODE: agents, routines, bots and the policies do nothing by themselves"); }
     let _lock = take_lock(&a.home, a.port)?;
     copy::mark(&a.home);
     ensure_token(&a.home)?;
+    // the port first: a port that is taken must end the start before anything else happens (it used to be bound last, after every interrupted agent had been started again)
+    let listen = format!("{}:{}", a.host, a.port);
+    let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
+    guard::listening(&listen);
+    startup::mark("listening");
+    eprintln!("Backplane listening on http://{listen}");
+    // what the listener gives connections to: the start until the hub can take them, then the hub
+    let serving: Arc<std::sync::OnceLock<Arc<Hub>>> = Default::default();
+    { let serving = serving.clone(); tokio::spawn(async move { loop {
+        let (s, _) = match l.accept().await { Ok(x) => x, Err(e) => { eprintln!("backplane-hub: accept: {e}"); tokio::time::sleep(Duration::from_millis(200)).await; continue } }; // out of files, for one: the hub stays
+        s.set_nodelay(true).ok();
+        match serving.get().cloned() {
+            // loopback peers are trusted; a tailnet listener (net lane) passes its whois verdict with serve_with
+            Some(h) => { let trusted = s.peer_addr().map_or(false, |p| p.ip().is_loopback()); tokio::spawn(async move { let _ = serve_with(h, s, trusted).await; }); }
+            None => { tokio::spawn(guard::answer_early(s)); }
+        }
+    } }); }
     let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::NotPorted);
     let recent = present::screen::Recent::new();
     let presenter: Arc<dyn presenter::Presenter> = Arc::new(present::Routed::new(presenter, vec![Box::new(recent.clone())], &a.home, false));
-    let listen = format!("{}:{}", a.host, a.port);
     startup::mark("home ready");
     session::composer::mention::set_models(settings::models::all);
     let hub = Hub::start(hub::Cfg { home: a.home.clone(), version: a.version, commit: a.commit, listen: listen.clone(), os: match std::env::consts::OS { "macos" => "darwin", o => o }.into(), arch: match std::env::consts::ARCH { "x86_64" => "x64", "aarch64" => "arm64", a => a }.into() }, presenter).await?;
     startup::mark("hub started");
     ckptrun::start(hub.clone());
     recent.bind(&hub);
+    guard::start(&hub);
     session::start(&hub);
     startup::mark("session started");
     // pairing and the /auth routes, before the listener accepts (net lane)
     let _routes = net::start::start_full(&hub, &a.host, a.port, a.tailscale, a.https);
     startup::mark("net started");
-    files::start(hub.clone());
+    // each part below may panic or hang without taking the hub, the views or the restart route with it
+    guard::step_now("files", || files::start(hub.clone()));
     startup::mark("files started");
-    settings::open(&hub.cfg.home);
+    guard::step_now("settings", || settings::open(&hub.cfg.home));
     startup::mark("settings open started");
-    term::start(hub.clone());
+    guard::step_now("term", || term::start(hub.clone()));
     startup::mark("term started");
-    let agents = agents::Agents::start(hub.clone()).await?;
-    settings::order::resume(agents.clone()); // Od.resume: follow every order not yet delivered (a copy follows none)
-    files::tools::register(&hub, &agents);
+    let agents = { let h = hub.clone(); guard::step("agents", guard::step_budget(), async move { agents::Agents::start(h).await }).await };
+    let agents = match agents { Some(Ok(a)) => Some(a), Some(Err(e)) => { guard::degraded("agents", &format!("{e:#}")); None } None => None };
+    if let Some(ag) = &agents {
+        settings::order::resume(ag.clone()); // Od.resume: follow every order not yet delivered (a copy follows none)
+        files::tools::register(&hub, ag);
+        let a2 = ag.clone(); guard::watch("agents", move || { let a = a2.clone(); Box::pin(async move { drop(a.world().await); }) });
+    }
     startup::mark("agents started");
-    let _bots = bots::start(hub.clone(), agents.clone()).await;
+    let bots = match &agents { Some(ag) => { let (h, ag) = (hub.clone(), ag.clone()); guard::step("bots", guard::step_budget(), async move { bots::start(h, ag).await }).await } None => None };
     startup::mark("bots started");
     let _voice = voice::session::start(&hub); // bots.voice and /voice/in, before settings::start (which then leaves bots.voice alone)
-    settings::start(hub.clone(), Some(agents));
+    guard::step_now("settings-start", || settings::start(hub.clone(), agents));
     startup::mark("settings start started");
-    commands::start(hub.clone());
+    guard::step_now("commands", || commands::start(hub.clone()));
     startup::mark("commands started");
     if let Some(w) = &a.window { let _ = hub.window_bin.set(w.clone()); }
-    let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
-    startup::mark("listening");
-    eprintln!("Backplane listening on http://{listen}");
-    // the policies (autosettle, alerts, told, summaries, liveness, star nudge...): keep the Arc, the view lane reads it
-    let _policies = statehost::start_with(hub.clone(), copy::passive_from(copy::person_turn_allowed()));
-    { let p = _policies.clone(); _bots.set_star(std::sync::Arc::new(move |msg: &str, now: u64| p.star_prompt(msg, now))); } // the star nudge counts a person's bots.say / bots.post
+    // the policies (autosettle, alerts, told, summaries, liveness, star nudge...): keep the Arc, the view lane reads it. Safe mode runs them passive
+    let passive = if guard::safe() { Some(true) } else { copy::passive_from(copy::person_turn_allowed()) };
+    let _policies = statehost::start_with(hub.clone(), passive);
+    if let Some(b) = &bots { let p = _policies.clone(); b.set_star(std::sync::Arc::new(move |msg: &str, now: u64| p.star_prompt(msg, now))); } // the star nudge counts a person's bots.say / bots.post
     let (events, torn) = (hub.store.len(), hub.store.torn_bytes);
     eprintln!("presenter: {}; events: {}; torn tail bytes: {}", hub.presenter.name(), events, torn);
-    loop {
-        let (s, _) = l.accept().await?; s.set_nodelay(true).ok();
-        let h = hub.clone();
-        // loopback peers are trusted; a tailnet listener (net lane) passes its whois verdict with serve_with
-        let trusted = s.peer_addr().map_or(false, |p| p.ip().is_loopback());
-        tokio::spawn(async move { let _ = serve_with(h, s, trusted).await; });
-    }
+    let _ = serving.set(hub.clone());
+    guard::ready();
+    startup::mark("serving");
+    // a log that already had a life is a restart: the uberbot is told, once this start has held
+    if events > 0 { if let Some(b) = &bots { b.restarted(guard::carry_wait().max(guard::WAKE_HOLD_S), guard::last_why(&hub.cfg.home)); } }
+    std::future::pending::<()>().await;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_commit_compiled_in_wins_over_the_environment() {
+        use super::commit_of as c;
+        assert_eq!(c(Some("abc123"), Some("evil".into())), "abc123", "a guard or a shell cannot make a build claim another commit");
+        assert_eq!(c(None, Some("dev1".into())), "dev1", "a plain cargo build takes it from the environment");
+        assert_eq!(c(Some(" "), None), "unknown");
+    }
     #[test] fn tailnet_only_binds_nothing_public_and_picks_its_serve_port() {
         use super::tailnet_only as t;
         assert_eq!(t("127.0.0.1", Some("8451"), false), Ok(()));

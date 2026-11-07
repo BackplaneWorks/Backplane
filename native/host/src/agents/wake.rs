@@ -107,7 +107,7 @@ impl Wakes {
     }
     fn catch_up(&self) {
         let store = &self.ag.hub.store; let total = store.len(); let mut b = self.book.lock().unwrap();
-        while b.at < total { let e = (b.at + 4096).min(total); match store.range(b.at, e) { Ok(ls) => for l in ls { b.apply(&l) }, Err(_) => break } b.at = e; }
+        while b.at < total { let e = (b.at + 4096).min(total); match store.range(b.at, e) { Ok(ls) => { let from = b.at; for (i, l) in ls.iter().enumerate() { store.fold(from + i, l, |l| b.apply(l)) } } Err(_) => break } b.at = e; }
     }
     /// New log lines: fold them, and fire for the turn ends and asks among them.
     async fn tail(&self) {
@@ -134,6 +134,7 @@ impl Wakes {
         for (th, end, at, ask) in ends { self.fire(&th, end, at, ask).await }
     }
     async fn fire(&self, th: &str, end: u8, at: u64, ask: Option<(String, u64)>) {
+        if crate::guard::safe() { return } // the wake stays in the book for the normal start that follows
         if crate::copy::on() { return }
         let subs: Vec<Wake> = self.book.lock().unwrap().on("thread", th).into_iter().cloned().collect(); if subs.is_empty() { return }
         let (title, reply, idle, live, asked) = { let w = self.ag.world().await;

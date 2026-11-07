@@ -70,7 +70,8 @@ impl Model {
     pub fn build(store: &Store) -> Result<Model> { Self::fold_from(Model::default(), store) }
     /// The checkpoint (ckpt/model.bin) when it is of this log, then only the lines past it; else the whole log.
     pub fn open(store: &Store) -> Result<Model> {
-        let from = Self::load(store);
+        // a checkpoint is only ever a shortcut: one that cannot be read, however badly, is one that is not there
+        let from = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::load(store))).unwrap_or_else(|_| { eprintln!("model: the checkpoint broke its reader: folding the log"); None });
         if from.is_some() { crate::startup::mark(&format!("model checkpoint loaded ({} lines)", from.as_ref().map_or(0, |m| m.lines))); }
         let loaded = from.is_some();
         let m = Self::fold_from(from.unwrap_or_default(), store)?;
@@ -87,7 +88,7 @@ impl Model {
     fn fold_from(mut m: Model, store: &Store) -> Result<Model> {
         let from = m.lines as usize;
         for a in (from..store.len()).step_by(4096) {
-            for (i, l) in store.range(a, a + 4096)?.iter().enumerate() { m.apply_line((a + i + 1) as u32, l); }
+            for (i, l) in store.range(a, a + 4096)?.iter().enumerate() { store.fold(a + i, l, |l| m.apply_line((a + i + 1) as u32, l)); }
         }
         Ok(m)
     }
@@ -104,6 +105,7 @@ impl Model {
         let mut bin = Vec::with_capacity(self.all.len() * 4 + (self.own.values().chain(self.sent.values()).map(Vec::len).sum::<usize>()) * 8);
         for s in &self.all { bin.extend(s.to_le_bytes()); }
         for (_, v) in own.iter().chain(sent.iter()) { for e in v.iter() { bin.extend(e.seq.to_le_bytes()); bin.extend(e.ord.to_le_bytes()); } }
+        let mut header: Value = serde_json::from_slice(&header)?; header["sum"] = json!(crate::ckpt::fnv(&[&meta[..], &bin[..]].concat())); let header = serde_json::to_vec(&header)?;
         crate::ckpt::write_atomic(&Self::path(store), &[&header, b"\n", &meta, &bin])?;
         Ok(true)
     }
@@ -115,17 +117,18 @@ impl Model {
         let lines = h["lines"].as_u64()? as usize;
         if lines > store.len() || h["fp"].as_u64()? != crate::ckpt::fingerprint(store, lines) { return None }
         let (meta_len, all_len) = (h["meta"].as_u64()? as usize, h["all"].as_u64()? as usize);
+        if let Some(sum) = h["sum"].as_u64() { if crate::ckpt::fnv(raw.get(nl + 1..)?) != sum { return None } } // files from before the sum have only the checks below
         #[derive(Deserialize)] struct Meta { threads: HashMap<String, ThreadMeta>, projects: HashMap<String, ProjectMeta>, settings: std::collections::BTreeMap<String, u32> }
-        let meta: Meta = serde_json::from_slice(raw.get(nl + 1..nl + 1 + meta_len)?).ok()?;
+        let meta: Meta = serde_json::from_slice(raw.get(nl + 1..(nl + 1).checked_add(meta_len)?)?).ok()?;
         let mut at = nl + 1 + meta_len;
         let bin = &raw[at..]; at = 0;
-        if bin.len() < all_len * 4 { return None }
+        if bin.len() < all_len.checked_mul(4)? { return None }
         let all: Vec<u32> = (0..all_len).map(|i| crate::ckpt::le32(bin, i * 4)).collect(); at += all_len * 4;
         let mut read = |list: &Value| -> Option<HashMap<String, Vec<Ent>>> {
             let mut out = HashMap::new();
             for pair in list.as_array()? {
                 let (name, n) = (pair[0].as_str()?.to_string(), pair[1].as_u64()? as usize);
-                if bin.len() < at + n * 8 { return None }
+                if bin.len() < at.checked_add(n.checked_mul(8)?)? { return None }
                 out.insert(name, (0..n).map(|i| Ent { seq: crate::ckpt::le32(bin, at + i * 8), ord: crate::ckpt::le32(bin, at + i * 8 + 4) }).collect()); at += n * 8;
             }
             Some(out)

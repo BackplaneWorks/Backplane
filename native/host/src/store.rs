@@ -28,11 +28,29 @@ pub fn clean(line: &str) -> std::borrow::Cow<'_, str> {
                 Some(h) if (0xDC00..0xE000).contains(&h) => { out.push_str("\\ufffd"); i += 6; changed = true }
                 _ => { out.push_str(&line[i..(i + 2).min(line.len())]); i += 2 }
             },
-            Some(_) => { out.push_str(&line[i..i + 2]); i += 2 }
+            // (a backslash before a character of several bytes is not valid JSON, and the line is about to be refused for it, not panicked on)
+            Some(_) => { let n = 1 + line[i + 1..].chars().next().map_or(0, char::len_utf8); out.push_str(&line[i..i + n]); i += n }
             None => { out.push('\\'); i += 1 }
         }
     }
     if changed { std::borrow::Cow::Owned(out) } else { std::borrow::Cow::Borrowed(line) }
+}
+
+fn quarantine_dir(log: &Path) -> Option<PathBuf> { log.parent().map(|d| d.join("quarantine")) }
+/// The lines earlier starts quarantined.
+fn held_lines(log: &Path) -> std::collections::HashSet<usize> {
+    let Some(q) = quarantine_dir(log) else { return Default::default() };
+    std::fs::read_to_string(q.join("lines.jsonl")).unwrap_or_default().lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter_map(|v| v["line"].as_u64()).filter(|n| *n > 0).map(|n| n as usize - 1).collect()
+}
+/// A line that is not JSON: it stays in the log, skipped as it always was, and is now also written down, once, with where it is, so what it held can be looked at.
+fn note_bad(log: &Path, at: u64, body: &[u8]) {
+    let Some(q) = quarantine_dir(log) else { return };
+    let f = q.join("bad-lines.jsonl");
+    if std::fs::read_to_string(&f).unwrap_or_default().contains(&format!("\"offset\":{at},")) { return }
+    let _ = std::fs::create_dir_all(&q);
+    let head: String = String::from_utf8_lossy(&body[..body.len().min(4096)]).into_owned();
+    if let Ok(mut w) = OpenOptions::new().create(true).append(true).open(&f) { let _ = writeln!(w, "{}", serde_json::json!({"offset": at, "len": body.len(), "head": head})); }
+    eprintln!("store: a line at byte {at} of the log is not JSON: skipped, noted in quarantine/bad-lines.jsonl");
 }
 
 /// The log is never held as text: an index of (offset, length) per whole line, lines read back on demand.
@@ -40,7 +58,15 @@ pub fn clean(line: &str) -> std::borrow::Cow<'_, str> {
 /// the bytes; they never wait for a writer's fsync.
 #[derive(Clone)]
 pub struct Store { inner: std::sync::Arc<Inner>, pub torn_bytes: usize, pub bad: usize }
-struct Inner { path: PathBuf, read: File, w: std::sync::Mutex<W>, idx: std::sync::RwLock<Vec<(u64, u32)>> }
+struct Inner { path: PathBuf, read: File, w: std::sync::Mutex<W>, idx: std::sync::RwLock<Vec<(u64, u32)>>, held: std::sync::RwLock<std::collections::HashSet<usize>> }
+/// What a quarantined line reads as: an event no fold knows, so every fold passes over it. The log itself is never changed: the line keeps its place and its bytes.
+pub const QUARANTINED: &str = "{\"$\":\"Quarantined\"}";
+/// Tells the person a line was quarantined (set by guard.rs in the hub).
+pub static ON_QUARANTINE: std::sync::OnceLock<fn(usize)> = std::sync::OnceLock::new();
+/// Lines read and folded so far: while it moves, a long start is working, not hung (the guard reads the age of `guard/phase`, which guard.rs keeps fresh from this).
+pub static PROGRESS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// (`BACKPLANE_FAULT=panic-line:<text>`, for test/guard/faults.sh: a fold panics on a line holding the text.)
+fn fault_line() -> Option<&'static str> { static F: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new(); F.get_or_init(|| std::env::var("BACKPLANE_FAULT").ok().and_then(|v| v.strip_prefix("panic-line:").map(str::to_string))).as_deref() }
 struct W { file: File, size: u64, torn: bool }
 
 impl Store {
@@ -59,16 +85,36 @@ impl Store {
                 if n == 0 { break }
                 if buf.last() != Some(&b'\n') { torn_bytes = n; size += n as u64; break } // after the last newline: not a line
                 let body = &buf[..n - 1];
+                PROGRESS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if !body.is_empty() {
-                    if serde_json::from_str::<IgnoredAny>(&clean(&String::from_utf8_lossy(body))).is_err() { bad += 1 } else { idx.push((size, body.len() as u32)) }
+                    if body.len() > u32::MAX as usize || serde_json::from_str::<IgnoredAny>(&clean(&String::from_utf8_lossy(body))).is_err() { bad += 1; note_bad(path, size, body); } else { idx.push((size, body.len() as u32)) }
                 }
                 size += n as u64;
             }
         }
         let file = OpenOptions::new().create(true).read(true).append(true).open(path).with_context(|| format!("append {}", path.display()))?;
         let read = File::open(path)?;
-        Ok(Store { inner: std::sync::Arc::new(Inner { path: path.to_path_buf(), read, w: std::sync::Mutex::new(W { file, size, torn: torn_bytes > 0 }), idx: std::sync::RwLock::new(idx) }), torn_bytes, bad })
+        let held = held_lines(path);
+        if !held.is_empty() { eprintln!("store: {} log line(s) are quarantined (see quarantine/ in the home)", held.len()); }
+        Ok(Store { inner: std::sync::Arc::new(Inner { path: path.to_path_buf(), read, w: std::sync::Mutex::new(W { file, size, torn: torn_bytes > 0 }), idx: std::sync::RwLock::new(idx), held: std::sync::RwLock::new(held) }), torn_bytes, bad })
     }
+    /// Run a fold over line `at` (0-based). A line that panics its fold is quarantined and the fold goes on: one bad record must not stop every start from here on, and this holds for
+    /// every fold of the log, whichever thread it is on.
+    pub fn fold(&self, at: usize, line: &str, f: impl FnOnce(&str)) {
+        PROGRESS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { if fault_line().map_or(false, |t| line.contains(t)) { panic!("BACKPLANE_FAULT: a fold panicked on line {}", at + 1) } f(line) }));
+        if r.is_err() { self.quarantine(at, line); }
+    }
+    /// From now on this line reads as `QUARANTINED`, here and in every later start. A copy of it goes to `quarantine/lines.jsonl`; the log keeps the original.
+    pub fn quarantine(&self, at: usize, line: &str) {
+        if !self.inner.held.write().unwrap_or_else(|e| e.into_inner()).insert(at) { return }
+        eprintln!("store: line {} of the log broke a fold: quarantined, the fold goes on", at + 1);
+        let Some(q) = quarantine_dir(&self.inner.path) else { return };
+        let _ = std::fs::create_dir_all(&q);
+        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(q.join("lines.jsonl")) { let _ = writeln!(f, "{}", serde_json::json!({"line": at + 1, "text": line})); }
+        if let Some(f) = ON_QUARANTINE.get() { f(at + 1) }
+    }
+    fn is_held(&self, i: usize) -> bool { let h = self.inner.held.read().unwrap_or_else(|e| e.into_inner()); !h.is_empty() && h.contains(&i) }
 
     fn index_path(log: &Path) -> PathBuf { crate::ckpt::dir(log).join("index.bin") }
     /// The saved index, when it is the index of this log's first bytes: its head and the bytes it ended on hash as they did, and the log is not shorter.
@@ -80,7 +126,9 @@ impl Store {
         let (lines, scanned, bad) = (h["lines"].as_u64()? as usize, h["scanned"].as_u64()?, h["bad"].as_u64()? as usize);
         if h["v"].as_u64()? != crate::ckpt::VERSION { return None }
         let body = &raw[nl + 1..];
-        if body.len() != lines * 12 { return None }
+        if Some(body.len()) != lines.checked_mul(12) { return None }
+        // a bit flipped in the middle of the file would point every read at the wrong bytes; files from before the sum still have to pass the walk below
+        if let Some(sum) = h["sum"].as_u64() { if crate::ckpt::fnv(body) != sum { return None } }
         let f = File::open(log).ok()?;
         if f.metadata().ok()?.len() < scanned { return None }
         let take = |at: u64, n: usize| -> Option<Vec<u8>> { let mut b = vec![0u8; n]; f.read_exact_at(&mut b, at).ok()?; Some(b) };
@@ -88,7 +136,8 @@ impl Store {
         if crate::ckpt::fnv(&take(0, k)?) != h["head"].as_u64()? || crate::ckpt::fnv(&take(scanned - k as u64, k)?) != h["tail"].as_u64()? { return None }
         let (offs, lens) = body.split_at(lines * 8);
         let idx: Vec<(u64, u32)> = (0..lines).map(|i| (crate::ckpt::le64(offs, i * 8), crate::ckpt::le32(lens, i * 4))).collect();
-        if let Some((o, l)) = idx.last() { if o + *l as u64 + 1 > scanned { return None } }
+        let mut end = 0u64;
+        for (o, l) in &idx { if *o < end || o.checked_add(*l as u64 + 1).map_or(true, |e| e > scanned) { return None } end = o + *l as u64 + 1; }
         Some((idx, scanned, bad))
     }
     /// Save the index of the log as it is now (nothing when a torn tail waits for the next write). Appends wait only while the index is copied.
@@ -102,9 +151,10 @@ impl Store {
         let take = |at: u64| -> Result<Vec<u8>> { let mut b = vec![0u8; k]; self.inner.read.read_exact_at(&mut b, at)?; Ok(b) };
         let (head, tail) = (crate::ckpt::fnv(&take(0)?), crate::ckpt::fnv(&take(size - k as u64)?));
         let bad = self.bad;
-        let header = format!("{{\"v\":{},\"lines\":{},\"scanned\":{},\"bad\":{},\"head\":{},\"tail\":{}}}\n", crate::ckpt::VERSION, idx.len(), size, bad, head, tail);
         let (mut offs, mut lens) = (Vec::with_capacity(idx.len() * 8), Vec::with_capacity(idx.len() * 4));
         for (o, l) in &idx { offs.extend(o.to_le_bytes()); lens.extend(l.to_le_bytes()); }
+        let sum = crate::ckpt::fnv(&[&offs[..], &lens[..]].concat());
+        let header = format!("{{\"v\":{},\"lines\":{},\"scanned\":{},\"bad\":{},\"head\":{},\"tail\":{},\"sum\":{}}}\n", crate::ckpt::VERSION, idx.len(), size, bad, head, tail, sum);
         crate::ckpt::write_atomic(&Self::index_path(&self.inner.path), &[header.as_bytes(), &offs, &lens])?;
         Ok(idx.len())
     }
@@ -112,6 +162,7 @@ impl Store {
     pub fn path(&self) -> &Path { &self.inner.path }
     pub fn get(&self, i: usize) -> Result<String> {
         let (off, len) = *self.inner.idx.read().unwrap().get(i).ok_or_else(|| anyhow::anyhow!("no line {i}"))?;
+        if self.is_held(i) { return Ok(QUARANTINED.to_string()) }
         let mut b = vec![0u8; len as usize]; self.inner.read.read_exact_at(&mut b, off)?;
         Ok(clean(&String::from_utf8_lossy(&b)).into_owned())
     }
@@ -120,7 +171,7 @@ impl Store {
         let spans: Vec<(u64, u32)> = { let idx = self.inner.idx.read().unwrap(); let b = b.min(idx.len()); if a >= b { return Ok(vec![]) } idx[a..b].to_vec() };
         let (start, last) = (spans[0].0, *spans.last().unwrap());
         let mut buf = vec![0u8; (last.0 + last.1 as u64 - start) as usize]; self.inner.read.read_exact_at(&mut buf, start)?;
-        Ok(spans.iter().map(|(off, len)| clean(&String::from_utf8_lossy(&buf[(off - start) as usize..(off - start) as usize + *len as usize])).into_owned()).collect())
+        Ok(spans.iter().enumerate().map(|(k, (off, len))| if self.is_held(a + k) { QUARANTINED.to_string() } else { clean(&String::from_utf8_lossy(&buf[(off - start) as usize..(off - start) as usize + *len as usize])).into_owned() }).collect())
     }
     pub fn all(&self) -> Vec<String> { self.range(0, self.len()).unwrap_or_default() }
     /// Durable before it returns; blocking (an fsync): call it from a blocking thread. Returns the index of the
@@ -160,6 +211,31 @@ mod tests {
         let s = Store::open(&p).unwrap(); s.append("{\"$\":\"D\",\"at\":3}").unwrap();
         let again = Store::open(&p).unwrap(); assert_eq!(again.len(), 2); assert_eq!(again.bad, 1);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"$\":\"A\",\"at\":1}\n{\"$\":\"B\"\n{\"$\":\"D\",\"at\":3}\n");
+    }
+    // a backslash before a multi-byte character used to panic here, in the first scan of the log, on every start
+    #[test] fn a_corrupt_line_cannot_panic_the_scan() {
+        for bad in ["\\é \\u0041", "\\", "\\u", "\\ud83d\\", "\\ud83dé", "é\\", "\\🙂\\u0041"] { let _ = clean(bad); }
+        let p = tmp("corrupt"); std::fs::write(&p, "{\"$\":\"A\",\"at\":1}\n{\"x\":\"\\é \\u0041\"}\n\0\0\0\0\n{\"$\":\"B\",\"at\":2}\n").unwrap();
+        let s = Store::open(&p).unwrap(); assert_eq!(s.len(), 2, "the good lines"); assert_eq!(s.bad, 2);
+    }
+    #[test] fn a_flipped_index_is_not_trusted() {
+        let d = std::env::temp_dir().join(format!("bp-store-idx-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("events.jsonl"); let s = Store::open(&p).unwrap(); for i in 0..200 { s.append(&format!("{{\"$\":\"X\",\"at\":{i}}}")).unwrap(); } s.save_index().unwrap();
+        let f = crate::ckpt::dir(&p).join("index.bin"); let mut b = std::fs::read(&f).unwrap(); let n = b.len(); b[n - 900] ^= 0x40; std::fs::write(&f, b).unwrap();
+        let again = Store::open(&p).unwrap(); assert_eq!(again.len(), 200); assert_eq!(again.get(150).unwrap(), "{\"$\":\"X\",\"at\":150}", "scanned from the log itself");
+        std::fs::write(&f, "not an index at all").unwrap(); assert_eq!(Store::open(&p).unwrap().len(), 200);
+    }
+    #[test] fn a_line_that_breaks_a_fold_is_quarantined_for_good_and_the_log_keeps_it() {
+        let d = std::env::temp_dir().join(format!("bp-store-q-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("events.jsonl"); std::fs::write(&p, "{\"$\":\"A\"}\n{\"$\":\"Poison\"}\n{\"$\":\"C\"}\n").unwrap();
+        let before = std::fs::read(&p).unwrap();
+        let s = Store::open(&p).unwrap(); let mut seen = vec![];
+        for (i, l) in s.range(0, 3).unwrap().iter().enumerate() { s.fold(i, l, |l| { if l.contains("Poison") { panic!("no") } seen.push(l.to_string()) }); }
+        assert_eq!(seen.len(), 2, "the fold went on past it");
+        assert_eq!(s.get(1).unwrap(), QUARANTINED); assert_eq!(s.range(0, 3).unwrap()[1], QUARANTINED);
+        let again = Store::open(&p).unwrap(); assert_eq!(again.len(), 3); assert_eq!(again.get(1).unwrap(), QUARANTINED, "a later start knows it");
+        assert_eq!(std::fs::read(&p).unwrap(), before, "not a byte of the log moved");
+        assert!(std::fs::read_to_string(d.join("quarantine/lines.jsonl")).unwrap().contains("Poison"), "and a copy is kept");
     }
     #[test] fn appended_lines_survive_reopen() {
         let p = tmp("dur"); let s = Store::open(&p).unwrap(); for i in 0..50 { s.append(&format!("{{\"$\":\"X\",\"at\":{i}}}")).unwrap(); }

@@ -148,7 +148,7 @@ impl Bots {
     pub(super) async fn inbox_deliver(&self, k: &super::routines::Wake) -> Result<(), String> { self.inbox.deliver(&k.thread, &k.msg, &k.text, k.origin.clone()).await }
     /// B.Hub.id(prefix, now, seq) with seq the log's length. A Step is atomic, so two ids of one second never share a length; here a request decides
     /// before it commits, so a second id asked for in the same second while the log has not grown gets the next number (an id stays what it was otherwise).
-    fn id(&self, prefix: &str, now: u64) -> String {
+    pub(crate) fn id(&self, prefix: &str, now: u64) -> String {
         let len = self.hub.store.len() as u64; let mut l = self.last_id.lock().unwrap();
         let seq = if l.0 == now && len <= l.1 { l.1 + 1 } else { len };
         *l = (now, seq); hub_id(prefix, now, seq)

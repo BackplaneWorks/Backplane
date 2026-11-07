@@ -60,8 +60,9 @@ impl Backplane {
         let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=config.token_file.with_file_name("gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
         let pair=screens::pair::start(config.unpaired,config.pair_link.as_deref(),cx);let paired=config.paired;
         cx.spawn(async move |weak,cx|{while let Ok(link)=OPENED.1.recv().await {if weak.update(cx,|this,cx|screens::pair::incoming(this,&link,cx)).is_err(){break;}}}).detach();
+        let(hub_at,token_file)=(screens::attach::Target::from(&config.hub,&config.token_file),config.token_file.clone());
         let(tx,events)=hub::connect(config);
-        screens::place::watch(cx);screens::devbar::watch(cx);
+        screens::place::watch(cx);screens::devbar::watch(cx);screens::hubbar::watch(cx,hub_at,&token_file);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
         cx.observe(&input,|this,_,cx|{
             let text=this.input.read(cx).content.to_string();

@@ -2,9 +2,10 @@
 # Publish a test build: every dev-reload.sh watching picks it up within seconds.
 #   scripts/dev-cut.sh DIR      DIR holds backplane-hub, backplane-gpui, optionally COMMIT (first line names the build) and assets/
 #   scripts/dev-cut.sh list     the builds kept; the one marked * is current
-#   scripts/dev-cut.sh back     point CURRENT at the build before it (dev-reload.sh then goes back to it)
+#   scripts/dev-cut.sh back     point CURRENT at the build before it that is not marked bad (dev-reload.sh then goes back to it)
 # A build is copied whole into $GPUI_DEV_DIR/builds/<id>, then one rename of CURRENT publishes it, so a watcher never sees half a build.
-# The last GPUI_DEV_KEEP (default 4) are kept, for going back. Nothing here starts, stops or reads anything else.
+# The last GPUI_DEV_KEEP (default 4) are kept, for going back, and so are CURRENT and whatever a running guard pinned (.pins/: the build it runs and the last good ones), however many lanes cut.
+# BAD lists the builds a guard gave up on: `list` marks them !, `back` passes over them. Nothing here starts or stops anything.
 set -eu
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}
 KEEP=${GPUI_DEV_KEEP:-4}
@@ -12,10 +13,12 @@ die() { echo "dev-cut: $*" >&2; exit 1; }
 builds() { ls -1 "$DEV/builds" 2>/dev/null | grep -v '^\.' | sort || true; }
 publish() { printf '%s\n' "$1" > "$DEV/.CURRENT.$$"; mv -f "$DEV/.CURRENT.$$" "$DEV/CURRENT"; }
 current() { head -1 "$DEV/CURRENT" 2>/dev/null || true; }
+bad() { cut -f1 "$DEV/BAD" 2>/dev/null || true; }
+kept() { current; cat "$DEV"/.pins/* 2>/dev/null || true; }
 case "${1:-}" in
   ""|-h|--help) sed -n 2,7p "$0"; exit 2;;
-  list) c=$(current); for b in $(builds); do if [ "$b" = "$c" ]; then echo "* $b"; else echo "  $b"; fi; done; exit 0;;
-  back) c=$(current); p=$(builds | grep -B1 -xF -- "$c" | head -1 || true); [ -n "$p" ] && [ "$p" != "$c" ] || die "no build before $c"; publish "$p"; echo "current: $p"; exit 0;;
+  list) c=$(current); for b in $(builds); do m=" "; if bad | grep -qxF -- "$b"; then m="!"; fi; if [ "$b" = "$c" ]; then echo "*$m$b"; else echo " $m$b"; fi; done; exit 0;;
+  back) c=$(current); p=$(builds | grep -B100000 -xF -- "$c" | grep -vxF -f <(bad; echo "$c") | tail -1 || true); [ -n "$p" ] || die "no good build before $c"; publish "$p"; echo "current: $p"; exit 0;;
 esac
 src=$1
 for f in backplane-hub backplane-gpui; do
@@ -30,11 +33,12 @@ tmp=$DEV/builds/.cut-$$; trap 'rm -rf "${tmp:?}"' EXIT
 mkdir "$tmp"; cp "$src/backplane-hub" "$src/backplane-gpui" "$tmp/"
 [ ! -x "$src/backplane-browser" ] || cp "$src/backplane-browser" "$tmp/"
 [ ! -x "$src/backplane-voice" ] || cp "$src/backplane-voice" "$tmp/"
+[ ! -x "$src/backplane" ] || cp "$src/backplane" "$tmp/"
 [ ! -e "$src/libcef.so" ] || cp -P "$src/libcef.so" "$tmp/"   # a link to the shared stripped libcef (dev-build.sh)
 [ ! -f "$src/COMMIT" ] || cp "$src/COMMIT" "$tmp/"
 [ ! -f "$src/HAIKU" ] || cp "$src/HAIKU" "$tmp/"
 [ ! -d "$src/assets" ] || cp -r "$src/assets" "$tmp/"
 mv "$tmp" "$DEV/builds/$id"; trap - EXIT
 publish "$id"
-builds | head -n "-$KEEP" | while read -r old; do rm -rf "${DEV:?}/builds/${old:?}"; done
+builds | head -n "-$KEEP" | grep -vxF -f <(kept; echo "$id") | while read -r old; do rm -rf "${DEV:?}/builds/${old:?}"; done
 echo "cut $id"

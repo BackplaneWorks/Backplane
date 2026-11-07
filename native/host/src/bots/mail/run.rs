@@ -115,7 +115,7 @@ impl Bots {
     /// Run.recover, at a start: `cut` are the threads the restart interrupted. A run among them is told as cut off; a bound run whose end no step answered (a crash between the turn's end and
     /// its answer: answering again changes nothing once answered) is answered now; with the carry on a queue with nothing live goes on (Run.queue.recover).
     pub async fn run_recover(self: &Arc<Self>, cut: &[String]) {
-        if crate::copy::on() { return }
+        if crate::copy::on() || crate::guard::safe() { return }
         let (carry, runs): (bool, Vec<_>) = { let w = self.world().await; let on = w.setting("mail.on", "off") == "on" || !w.uber_bot().is_empty(); if !on { return } (self.hub.setting("restart.continue").await.map_or(true, |v| v != "off"), w.mail.runs.values().cloned().collect()) };
         let report: Vec<String> = cut.to_vec();
         let outs = self.decide(&report, |c| {

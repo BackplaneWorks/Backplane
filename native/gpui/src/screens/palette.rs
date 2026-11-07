@@ -8,7 +8,7 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Do { Thread(String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts }
+pub enum Do { Thread(String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, Hub(String) }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do }
 /// The key that does what an item does, as the person reads it ("" for none).
@@ -56,6 +56,8 @@ pub fn items(data: &Value) -> Vec<Item> {
     v.push(Item { label: "Keyboard shortcuts".into(), place: String::new(), kind: "action", what: Do::Shortcuts });
     v.push(Item { label: "Settings".into(), place: String::new(), kind: "action", what: Do::Settings });
     v.push(Item { label: "Fold or unfold the sidebar".into(), place: String::new(), kind: "action", what: Do::Sidebar });
+    // always here, whatever the hub sends or fails to send: these do not go through it (hubbar.rs)
+    for a in ["restart", "safe", "rollback"] { v.push(Item { label: super::hubbar::label_of(a).into(), place: String::new(), kind: "action", what: Do::Hub(a.into()) }); }
     for p in data["projects"].as_array().into_iter().flatten() {
         let (pid, ptitle) = (string(p, "id"), string(p, "title"));
         let raw = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
@@ -114,6 +116,7 @@ impl Backplane {
             Do::Prev | Do::Next => { let n = crate::keys::neighbour(&self.data, &self.selected, it.what == Do::Next); if let Some(id) = n { self.select_id(id, cx); } }
             Do::Uber => { let id = self.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"] == true).map(|b| crate::string(b, "id")); if let Some(id) = id { let _ = self.tx.try_send(Command::Action("bot".into(), id)); } }
             Do::Shortcuts => self.open_settings(cx),
+            Do::Hub(a) => self.hub_click(&a, cx),
         }
         cx.notify();
     }

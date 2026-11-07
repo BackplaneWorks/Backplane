@@ -57,6 +57,11 @@ impl Registry {
     pub fn open(home: &Path, root: &str) -> Result<Registry, String> {
         Self::with(home, root, Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)), Box::new(urandom))
     }
+    /// A registry that holds nothing and persists nothing: what the routes get when the real file cannot be read. The file is not touched.
+    pub fn empty(home: &Path) -> Registry {
+        let file = home.join("guard").join("devices-unreadable.json");
+        Registry { home: home.into(), root: String::new(), file, now: Box::new(|| 0), random: Box::new(urandom), inner: Mutex::new(Inner { devices: vec![], invites: vec![], attempts: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) }
+    }
     pub fn with(home: &Path, root: &str, now: Box<dyn Fn() -> u64 + Send + Sync>, random: Box<dyn Fn(usize) -> Vec<u8> + Send + Sync>) -> Result<Registry, String> {
         let file = home.join("devices-v1.json");
         let (mut devices, mut invites) = (vec![], vec![]);

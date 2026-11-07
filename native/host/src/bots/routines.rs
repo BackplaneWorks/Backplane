@@ -167,7 +167,7 @@ impl Bots {
 
     /// The minute tick, and a wake for a routine whose time comes between two ticks
     pub fn start_ticker(self: &Arc<Self>) {
-        if crate::copy::on() { return } // nothing runs by itself on a copy of a log
+        if crate::copy::on() || crate::guard::safe() { return } // nothing runs by itself on a copy of a log, or in safe mode
         let me = Arc::downgrade(self);
         tokio::spawn(async move {
             loop {

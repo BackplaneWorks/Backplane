@@ -27,7 +27,7 @@ pub struct Fold {
     pub home_msgs: std::collections::HashSet<String>,
 }
 
-const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default.", "accounts.inventory", "account.session.", "account.seen."];
+const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "carry.wait.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default.", "accounts.inventory", "account.session.", "account.seen."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) }
 
 impl Fold {
@@ -46,7 +46,7 @@ impl Fold {
     pub fn sync_to(&mut self, store: &Store, total: usize) -> Result<()> {
         while self.seen < total {
             let b = (self.seen + 4096).min(total);
-            for l in store.range(self.seen, b)? { self.apply(&l) }
+            let from = self.seen; for (i, l) in store.range(from, b)?.iter().enumerate() { store.fold(from + i, l, |l| self.apply(l)) }
             self.seen = b;
         }
         Ok(())

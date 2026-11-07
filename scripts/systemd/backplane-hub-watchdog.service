@@ -1,0 +1,12 @@
+[Unit]
+Description=Backplane hub watchdog: one check of the fresh hub and its watcher
+
+[Service]
+Type=oneshot
+ExecStart=@SCRIPT@ check
+# what it restarts must outlive this check: the hub and the window keep running when the check ends
+KillMode=process
+TimeoutStartSec=600
+Environment=FRESH_MEM=@MEM@ FRESH_TAILNET_PORT=@TAILNET@ DISPLAY=@DISPLAY@
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+UnsetEnvironment=BACKPLANE_AGENT_OWNER

@@ -60,7 +60,7 @@ impl World {
     pub fn sync_to(&mut self, store: &Store, total: usize) -> Result<()> {
         while self.seen < total {
             let b = (self.seen + 4096).min(total);
-            for l in store.range(self.seen, b)? { self.apply(&l) }
+            let from = self.seen; for (i, l) in store.range(from, b)?.iter().enumerate() { store.fold(from + i, l, |l| self.apply(l)) }
             self.seen = b;
         }
         Ok(())

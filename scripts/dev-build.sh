@@ -2,6 +2,7 @@
 # Build the hub and window and publish them with dev-cut.sh, keeping the app's progress strip (screens/devbar.rs) up to date.
 #   scripts/dev-build.sh [--no-cut] [--gate]    release builds of native/host (backplane-hub), native/voice (backplane-voice) and native/gpui (backplane-gpui), then dev-cut.sh
 #   --gate   run the tests of all three crates first (minus scripts/gate-skip.txt); a red test stops the build and nothing is published
+# Whatever the flags, a build whose hub cannot start on a real-shaped home is not published (scripts/smoke-start.sh; SKIP_SMOKE=1 only when that script itself is what is broken).
 # The strip's bar is time against the last build's time ($DEV/.build-secs, one per mode; a first build guesses 150 s): an incremental build compiles one crate, a full one
 # hundreds, so counting crates says nothing. The bar stops at 95% until the build is done.
 # Env: GPUI_DEV_DIR (default ~/.backplane-gpui-dev), BACKPLANE_DEV_STATUS (the status file; default $DEV/BUILD), BUILD_ROOT (the checkout to build; default this one),
@@ -19,7 +20,7 @@ if [ -z "${BQ_HELD:-}" ]; then . "$HERE/lib-buildslot.sh"; export BQ_HELD=1
 PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
 GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;; esac; done
 SECS=$DEV/.build-secs$([ "$GATE" = 1 ] && echo -gate)
-HT=${HOST_TARGET:-$ROOT/native/host/target}; GT=${GPUI_TARGET:-$ROOT/native/gpui/target}; VT=${VOICE_TARGET:-$ROOT/native/voice/target}
+HT=${HOST_TARGET:-$ROOT/native/host/target}; GT=${GPUI_TARGET:-$ROOT/native/gpui/target}; VT=${VOICE_TARGET:-$ROOT/native/voice/target}; UT=${GUARD_TARGET:-$HT-guard}
 mkdir -p "$DEV"
 est=$(cat "$SECS" 2>/dev/null || echo 150); start=$(date +%s); PH=$(mktemp "$DEV/.phase.XXXX"); echo "hub" > "$PH"; LOG=$(mktemp "$DEV/.buildlog.XXXX")
 status() { printf '{"phase":"%s","text":"%s","done":%s,"total":%s}\n' "$1" "$2" "${3:-0}" "${4:-0}" > "$ST.$$" && mv -f "$ST.$$" "$ST"; }
@@ -42,6 +43,8 @@ fail() { kill $TK 2>/dev/null; why=$(grep -m1 -E '^(error|test .* FAILED)' "$LOG
 skips=(); while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) skips+=(--skip "$l");; esac; done < "$HERE/gate-skip.txt"
 # cargo runs the tests and the builds one after another; here the tests of both crates are compiled at once (--no-run), then every test program runs at the same time, then the two fast builds
 # (a running test program holds no cargo lock). Every test still runs and a red one still stops the build before anything is published.
+# the hub says which commit it was compiled from (main.rs commit_of): the guard checks an update against it, so it is set here, not when the build is started
+export BACKPLANE_COMMIT=$(git -C "$ROOT" rev-parse --short HEAD)
 CG() { ( cd "$1" && CARGO_TARGET_DIR="$2" taskset -c 0-27 nice -n 10 cargo "${@:3}" ) 9>&-; }  # fd 9 is the build slot (lib-buildslot.sh): this shell keeps it, no child may
 # The window is built WITH the embedded Chromium (feature cef; docs/browser-gpui-cef.md) unless GPUI_FEATURES is set to something else (empty: none). CEF's distribution is cached once in
 # CEF_PATH (the cef crate downloads it on the first build); if that build fails the window is built without it and says so in the Browser tab ("embedded browser unavailable").
@@ -55,7 +58,10 @@ winstep() {
   fi
   if [ -z "$FEATURES" ]; then CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" --offline -j "$J" > "$LOG" 2>&1 || fail window; fi
 }
+# `backplane`, the guard (native/guard): a small crate of its own, built first
+guardstep() { echo "guard" > "$PH"; CG "$ROOT/native/guard" "$UT" build --profile "$PROFILE" --offline -j "$J" > "$LOG" 2>&1 || fail guard; }
 if [ "$GATE" = 1 ]; then
+  echo "guard tests" > "$PH"; CG "$ROOT/native/guard" "$UT" test --offline -j "$J" > "$LOG" 2>&1 || fail "guard tests"
   echo "compiling tests" > "$PH"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX"); LV=$(mktemp "$DEV/.t.XXXX")
   CG "$ROOT/native/host" "$HT" test --offline -j "$J" --no-run > "$LH" 2>&1 & ph=$!
   CG "$ROOT/native/gpui" "$GT" test --offline -j "$J" --no-run > "$LW" 2>&1 & pw=$!
@@ -75,17 +81,19 @@ if [ "$GATE" = 1 ]; then
   if [ -n "$bad" ]; then cp "${logs[$bad]}" "$LOG"; rm -f "${logs[@]}"; fail "${names[$bad]}"; fi
   rm -f "${logs[@]}"
   # the builds come after the tests, not beside them: a build at -j28 starves the timing-sensitive hub tests (reconnect_loses_nothing_under_streaming_load and others fail under that load)
+  guardstep
   echo "hub" > "$PH"; CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
   voicestep
   winstep
 else
+  guardstep
   echo "hub" > "$PH";    CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" --offline -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
   voicestep
   winstep
 fi
 kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"; rm -f "$DEV/.last-failure" "$DEV/.last-failure.log"
 D=$(mktemp -d "$DEV/.stage.XXXX")
-cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$VT/$PROFILE/backplane-voice" "$D/"
+cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$VT/$PROFILE/backplane-voice" "$UT/$PROFILE/backplane" "$D/"
 # the embedded Chromium: libcef.so beside the window (it is linked with RUNPATH $ORIGIN); the rest of CEF's runtime (paks, icudtl.dat, locales, snapshot) is found in
 # ~/.cache/backplane/cef-runtime/<version>, which is made once here from the build (libcef stripped: 1.4 GB with symbols, ~270 MB without), and builds link to that one libcef.
 if [ -n "$FEATURES" ] && [ -f "$GT/$PROFILE/libcef.so" ]; then
@@ -102,6 +110,11 @@ else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-browser; [
 A=${ASSETS:-$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/assets}; [ -d "$A" ] && cp -r "$A" "$D/assets"
 git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
 [ -z "$HKP" ] || wait "$HKP" 2>/dev/null; [ -s "$HK" ] && cp "$HK" "$D/HAIKU"
+# the last gate: this hub, under this guard, starts and restarts on a real-shaped home, and the build now current can still read what it wrote. Nothing is published otherwise.
+if [ -z "${SKIP_SMOKE:-}" ]; then
+  status building "Smoke start of $(cat "$D/COMMIT")" "$est" "$est"
+  SMOKE_DIR="$DEV" "$HERE/smoke-start.sh" "$D" "$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)" > "$LOG" 2>&1 || fail "smoke start"
+fi
 [ "$CUT" = 0 ] && { echo "built in $D"; D=; exit 0; }
 status ready "Build $(cat "$D/COMMIT") ready: publishing" "$est" "$est"
 "$HERE/dev-cut.sh" "$D" 9>&-

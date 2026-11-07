@@ -5,6 +5,7 @@
 #   scripts/fresh.sh [start]     start (or reopen the window on) the fresh hub, on your screen ($DISPLAY)
 #   scripts/fresh.sh stop        stop the window and the hub (the home stays: your projects and threads)
 #   scripts/fresh.sh status
+#   scripts/fresh.sh restart|safe|rollback [--now]    through the guard (`backplane hub ...`, docs/HUB-RESILIENCE.md): normally, with agents paused, or back to the last good build
 #   scripts/fresh.sh pair        a pairing link for your phone (with FRESH_TAILNET_PORT: the https tailnet address first, the tailnet IP second); single use, short lived
 #   scripts/fresh.sh reset       stop and delete the fresh home (asks first)
 #   scripts/fresh.sh log         where the logs are
@@ -21,10 +22,14 @@ pid() { cat "$D/$1.pid" 2>/dev/null || true; }
 case "$PORT" in 3787|3788) die "port $PORT is Backplane's";; esac
 case "$(realpath -m "$D")" in "$HOME/.backplane-bend"*|"$HOME/.backplane-gpui"|"$HOME/.backplane-gpui/"*|"$HOME/.backplane-gpui-copy"*|"$HOME/.backplane-gpui-side"*|"$HOME/.local/share/backplane"*) die "$D is another install's folder";; esac
 cmd=${1:-start}
+# one stop or start at a time: the watcher and the outside watchdog (hub-watchdog.sh) both come through here
+if [ -z "${FRESH_LOCKED:-}" ] && command -v flock >/dev/null; then case "$cmd" in start|stop) mkdir -p "$D"; export FRESH_LOCKED=1; exec flock -w 60 "$D/.lifecycle.lock" "$0" "$@";; esac; fi
 case "$cmd" in
   status) for w in hub client; do p=$(pid $w); if alive "$p"; then echo "$w: running, pid $p"; else echo "$w: not running"; fi; done
           [ -f "$H/token" ] && { printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -s -m2 -H @- "http://127.0.0.1:$PORT/hello" | head -c 200; echo; }
-          [ -f "$D/tailnet.port" ] && { grep -a "on your tailnet:" "$D/hub.log" | tail -1 || echo "tailnet: not up (see $D/hub.log)"; }; exit 0;;
+          [ -f "$D/tailnet.port" ] && { grep -a "on your tailnet:" "$D/hub.log" | tail -1 || echo "tailnet: not up (see $D/hub.log)"; }
+          [ ! -x "$BIN/backplane" ] || "$BIN/backplane" hub status --home "$H"; exit 0;;
+  restart|safe|rollback) [ -x "$BIN/backplane" ] || die "this build has no guard: use stop, then start"; exec "$BIN/backplane" hub "$cmd" --home "$H" "${@:2}";;
   pair) alive "$(pid hub)" || die "the hub is not running"
         inv=$(printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -sf -m5 -X POST -H @- "http://127.0.0.1:$PORT/auth/invitations") || die "the hub gave no invitation"
         link=$(printf %s "$inv" | python3 -c "import json,sys;d=json.load(sys.stdin);print('routes:',', '.join(d['routes']),file=sys.stderr);print('code:',d['code'],file=sys.stderr);print(d['link'])") || die "the hub gave no invitation"
@@ -35,7 +40,9 @@ case "$cmd" in
         else echo "(no qrencode here: install it for a QR; the link above works as it is)"; fi
         exit 0;;
   log) echo "$D/hub.log  $D/client.log"; exit 0;;
-  stop) for w in client hub; do p=$(pid $w); alive "$p" && kill "$p"; rm -f "$D/$w.pid"; done; rm -f "$D/pair-qr.png"
+  # FRESH_RESTART=1: this stop is half of a restart. Any other stop is the person's, and the outside watchdog leaves a stopped hub stopped.
+  stop) [ -n "${FRESH_RESTART:-}" ] || : > "$D/.stopped"
+        for w in client hub; do p=$(pid $w); if alive "$p"; then kill "$p"; i=0; while alive "$p" && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done; fi; rm -f "${D:?}/${w:?}.pid"; done; rm -f "${D:?}/pair-qr.png"
         [ -f "$D/tailnet.port" ] && { tp=$(cat "$D/tailnet.port")
           # only our own entry: it must still proxy to this hub's port; if another process took the port over, it is theirs and stays
           if tailscale serve status 2>/dev/null | awk -v p=":$tp " -v t="http://127.0.0.1:$PORT" 'index($0,"ts.net"p){on=1;next} /^https:/{on=0} on&&$NF==t{f=1} END{exit f?0:1}'; then tailscale serve --https="$tp" off >/dev/null 2>&1 || true; echo "removed the tailscale serve entry on $tp"; else echo "left the tailscale serve entry on $tp alone (it does not proxy to this hub)"; fi
@@ -44,13 +51,13 @@ case "$cmd" in
   reset) printf 'Delete %s (all fresh projects and threads)? [y/N] ' "$D"; read -r a; [ "$a" = y ] || exit 1
          for w in client hub; do p=$(pid $w); alive "$p" && kill "$p"; done; sleep 1; rm -rf "$D"; echo deleted; exit 0;;
   start) ;;
-  *) sed -n 2,13p "$0"; exit 2;;
+  *) sed -n 2,14p "$0"; exit 2;;
 esac
 [ -x "$BIN/backplane-hub" ] && [ -x "$BIN/backplane-gpui" ] || die "no hub and window in $BIN"
 [ -n "${DISPLAY:-}" ] || die "no \$DISPLAY"
 mkdir -p "$H"; chmod 700 "$D" "$H"
 if [ -s "$H/events.jsonl" ] && [ ! -f "$D/.fresh" ]; then die "$H holds a log that fresh mode did not make: pick another FRESH_DIR"; fi
-touch "$D/.fresh"; [ -e "$H/hub.owner" ] || echo "fresh.sh" > "$H/hub.owner"   # this home is ours (the hub refuses an unmarked log over a megabyte as someone else's data)
+rm -f "${D:?}/.stopped"; touch "$D/.fresh"; [ -e "$H/hub.owner" ] || echo "fresh.sh" > "$H/hub.owner"   # this home is ours (the hub refuses an unmarked log over a megabyte as someone else's data)
 if ! alive "$(pid hub)"; then
   ! curl -s -m1 -o /dev/null "http://127.0.0.1:$PORT/hello" || die "port $PORT already answers (another hub): set FRESH_PORT"
   if [ ! -s "$H/events.jsonl" ] && [ -n "$AGENT" ]; then   # a new home: new threads start on this provider and model
@@ -58,9 +65,17 @@ if ! alive "$(pid hub)"; then
   fi
   # the hub: your own HOME (the agents' sign-ins are yours), no copy switches, in its own memory-capped scope
   TN=; if [ -n "${FRESH_TAILNET_PORT:-}" ]; then case "$FRESH_TAILNET_PORT" in 443|3787|3788|"$PORT") die "FRESH_TAILNET_PORT $FRESH_TAILNET_PORT is not free to use";; esac; if tailscale serve status 2>/dev/null | grep -q "ts.net:$FRESH_TAILNET_PORT "; then die "tailscale serve port $FRESH_TAILNET_PORT is already used on this machine (tailscale serve status): pick another FRESH_TAILNET_PORT"; fi; TN="--tailnet-only"; echo "$FRESH_TAILNET_PORT" > "$D/tailnet.port"; fi
-  ( exec setsid env BACKPLANE_NO_UPDATE=1 ${FRESH_TAILNET_PORT:+BACKPLANE_HTTPS_PORT=$FRESH_TAILNET_PORT} ${BACKPLANE_COMMIT:+BACKPLANE_COMMIT=$BACKPLANE_COMMIT} \
-      systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- "$BIN/backplane-hub" --home "$H" --port "$PORT" --host 127.0.0.1 ${TN:---no-tailscale} --foreground \
-      > "$D/hub.log" 2>&1 < /dev/null ) &
+  # under the guard when the build has one (it keeps the hub up: docs/HUB-RESILIENCE.md). hub.pid is then the guard's, and stopping it stops the hub. The log is kept across starts: a crash's last words are what matters.
+  if [ -x "$BIN/backplane" ]; then
+    case "$(realpath -m "$BIN")" in "$(realpath -m "$DEV/builds")"/*) WHICH=(--builds "$DEV" --build "$(basename "$BIN")");; *) WHICH=(--bin "$BIN");; esac
+    ( exec setsid env -u BACKPLANE_AGENT_OWNER BACKPLANE_NO_UPDATE=1 ${FRESH_TAILNET_PORT:+BACKPLANE_HTTPS_PORT=$FRESH_TAILNET_PORT} ${BACKPLANE_COMMIT:+BACKPLANE_COMMIT=$BACKPLANE_COMMIT} \
+        systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- "$BIN/backplane" hub run --home "$H" --port "$PORT" --host 127.0.0.1 "${WHICH[@]}" --log "$D/hub.log" --pidfile "$D/hub.pid" --mem "$MEM" --default -- ${TN:---no-tailscale} --foreground \
+        >> "$D/hub.log" 2>&1 < /dev/null ) &
+  else
+    ( exec setsid env BACKPLANE_NO_UPDATE=1 ${FRESH_TAILNET_PORT:+BACKPLANE_HTTPS_PORT=$FRESH_TAILNET_PORT} ${BACKPLANE_COMMIT:+BACKPLANE_COMMIT=$BACKPLANE_COMMIT} \
+        systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- "$BIN/backplane-hub" --home "$H" --port "$PORT" --host 127.0.0.1 ${TN:---no-tailscale} --foreground \
+        >> "$D/hub.log" 2>&1 < /dev/null ) &
+  fi
   echo $! > "$D/hub.pid"
   for i in $(seq 1 100); do curl -sf -m1 "http://127.0.0.1:$PORT/hello" > /dev/null 2>&1 && break; alive "$(pid hub)" || { tail -5 "$D/hub.log"; die "the hub exited"; }; sleep 0.1; done
   echo "hub on 127.0.0.1:$PORT, home $H"

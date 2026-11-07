@@ -80,6 +80,22 @@ pub fn made_lanes(texts: &[String], root: &str, skip_wt: &str) -> Vec<(String, S
 
 fn ours(wt: &str) -> bool { wt.contains("/.backplane/worktrees/") && !wt.contains("..") }
 
+/// Whether a merged thread still lives in its worktree. A merge is not the thread's end: a turn the restart cut goes on there, background work and watches run there, a queued message or an open
+/// ask will start a turn there. `running` alone is not enough: a restart turns a running thread `interrupted` first, and this ticker used to take its folder before it could carry on.
+pub fn in_use(f: &Fold, th: &str) -> bool {
+    let Some(t) = f.threads.get(th) else { return false };
+    // (`settled` is no help here: ThreadMerged settles a thread the moment the merge is seen, whatever it is doing)
+    matches!(t.turn.as_str(), "running" | "interrupted") || !f.setting(&format!("carry.wait.{th}")).is_empty() || !f.queue(th).is_empty()
+        || f.asks.values().any(|a| a.thread == th)
+        || ["bg", "watch"].iter().any(|k| f.setting(&format!("{k}.{th}")).split('\n').any(|l| !l.is_empty() && !crate::agents::bg::ended(l)))
+}
+/// Whether a process works in this folder (a shell, a build, a monitor the log knows nothing of). Linux only: elsewhere the log's word stands.
+fn process_in(wt: &str) -> bool {
+    let Ok(d) = std::fs::read_dir("/proc") else { return false };
+    let inside = |p: &std::path::Path| p.starts_with(wt);
+    d.flatten().filter(|e| e.file_name().to_string_lossy().bytes().all(|b| b.is_ascii_digit())).any(|e| std::fs::read_link(e.path().join("cwd")).map_or(false, |c| inside(&c)))
+}
+
 /// Removes a landed lane's worktree and branch: nothing when the worktree has uncommitted work. True when it went.
 async fn clean_up(root: &str, th: &str, branch: &str, wt: &str) -> bool {
     let mut branches = vec![branch.to_string()];
@@ -145,7 +161,10 @@ impl Ticker for MergeTicker {
                     let ev = { let f = self.fold.lock().await; plan::merged(&f, &th, "", now) };
                     if ev.is_empty() || hub.commit_many(&ev).await.is_err() { continue }
                 }
+                // the merge is recorded; the folders wait until the thread is done with them (this ticker comes back every minute while a worktree stands)
+                { let mut f = self.fold.lock().await; let _ = f.sync(&hub.store); if in_use(&f, &th) { continue } }
                 for ((b, w), s) in lanes.iter().zip(&states) {
+                    if !w.is_empty() && process_in(w) { continue }
                     let went = match s { Lane::Pending => false, Lane::Empty if w.is_empty() => false, _ => clean_up(&root, &th, b, w).await };
                     if went && *w == wt && !wt.is_empty() {
                         let ev = vec![json!({"$":"WorktreeRemoved","id":th,"at":now}),
@@ -236,5 +255,25 @@ mod tests {
         sh(&d, &["merge", "-q", "--ff-only", "keys"]);
         assert!(clean_up(r, "t1", "keys", &own).await && clean_up(r, "t1", "given", &given).await);
         assert!(!Path::new(&own).exists() && !Path::new(&given).exists());
+    }
+    fn fold(lines: &[&str]) -> Fold { let mut f = Fold::default(); f.threads.insert("t1".into(), Default::default()); for l in lines { f.apply(l); } f }
+    fn set(k: &str, v: &str) -> String { json!({"$":"SettingSet","key":k,"value":v,"at":1}).to_string() }
+    #[test] fn a_merged_thread_keeps_its_folder_while_it_still_lives_there() {
+        let turn = |s: &str| json!({"$":"TurnChanged","thread":"t1","state":s,"at":1}).to_string();
+        assert!(!in_use(&fold(&[&turn("completed")]), "t1"), "done with it: the folder may go");
+        assert!(in_use(&fold(&[&turn("running")]), "t1"));
+        assert!(in_use(&fold(&[&turn("interrupted")]), "t1"), "the restart cut it: it goes on here (the Bub storage thread's folder went this way)");
+        assert!(in_use(&fold(&[&json!({"$":"ThreadMerged","id":"t1","url":"","at":5}).to_string(), &turn("interrupted")]), "t1"), "a merge settles the thread; the cut turn still goes on here");
+        assert!(in_use(&fold(&[&turn("completed"), &set("carry.wait.t1", "1")]), "t1"), "waiting its turn to carry on");
+        assert!(in_use(&fold(&[&turn("completed"), &set("watch.t1", "w1\trunning\tsleep 9")]), "t1"), "monitoring: its turn is over, its work is not");
+        assert!(in_use(&fold(&[&turn("completed"), &set("bg.t1", "b1\trunning\tmake")]), "t1"));
+        assert!(!in_use(&fold(&[&turn("completed"), &set("watch.t1", &format!("w1\t{}done\tsleep 9", crate::agents::bg::ENDED))]), "t1"), "that work ended");
+        let ask = json!({"$":"AskOpened","id":"a1","thread":"t1","kind":"approval","tool":"Bash"}).to_string();
+        assert!(in_use(&fold(&[&turn("completed"), &ask]), "t1"), "an open ask comes back to this folder");
+        assert!(!in_use(&fold(&[]), "nobody"));
+    }
+    #[test] fn a_process_in_the_folder_counts() {
+        let d = std::env::current_dir().unwrap(); assert!(process_in(d.to_str().unwrap()), "this test runs here");
+        assert!(!process_in("/no/such/folder"));
     }
 }

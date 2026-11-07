@@ -25,6 +25,9 @@ pub enum Kind {
     PersonTurn,
 }
 
+/// Set once in safe mode (guard.rs): no agent starts, for this reason.
+pub static PAUSED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 /// Why a copy does not run this, or None. `on` is the copy switch (a parameter so the rule is testable).
 pub fn refusal_with(on: bool, kind: Kind, program: &str, agents_dir: Option<&str>) -> Option<String> {
     if !on { return None }
@@ -37,6 +40,7 @@ pub fn refusal_with(on: bool, kind: Kind, program: &str, agents_dir: Option<&str
     }
 }
 fn refusal(kind: Kind, program: &str) -> Option<String> {
+    if let (Some(why), Kind::Agent | Kind::PersonTurn) = (PAUSED.get(), kind) { return Some(why.clone()) }
     if !copy::on() { return None }
     if kind == Kind::PersonTurn && copy::person_turn_allowed() { return None }
     refusal_with(true, kind, program, std::env::var("BACKPLANE_AGENTS").ok().as_deref())

@@ -1,0 +1,25 @@
+[package]
+name = "backplane-guard"
+version = "0.15.0"
+edition = "2021"
+description = "`backplane`: keeps a Backplane hub running and restarts it on Windows, Linux and macOS. Shares no code with the hub, so a broken hub build cannot break its own recovery."
+
+[[bin]]
+name = "backplane"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = 2
+strip = true
+panic = "unwind"
+
+[profile.fast]
+inherits = "release"
+incremental = true

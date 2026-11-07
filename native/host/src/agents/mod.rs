@@ -110,7 +110,7 @@ impl Agents {
         crate::startup::mark("agents: before recover");
         ag.recover().await;
         crate::startup::mark("agents: recovered");
-        let _ = HANDLE.set(ag.clone()); tasks::watch(&ag); { let a = ag.clone(); tokio::spawn(async move { a.work_rearm().await }); } if !repair.is_empty() { let a = ag.clone(); tokio::spawn(async move { a.task_repair_run(repair).await }); }
+        let _ = HANDLE.set(ag.clone()); tasks::watch(&ag); if !crate::guard::safe() { let a = ag.clone(); tokio::spawn(async move { a.work_rearm().await }); } if !repair.is_empty() { let a = ag.clone(); tokio::spawn(async move { a.task_repair_run(repair).await }); }
         hub.register_rpc(Arc::new(Rpc(ag.clone())));
         hub.register_http(Arc::new(devturns::DevTurns(ag.clone())));
         wake::Wakes::start(ag.clone()).await; // wake_on / wake_list / wake_cancel
@@ -248,11 +248,12 @@ impl Agents {
                 ev.push(json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now})); cut_threads.push(th.clone());
                 if !t.last_user.is_empty() { ev.push(set(format!("stopped.{}", t.last_user), "1".into(), now)) }
                 let will = world::carry_will(t, w.setting("restart.continue")) && !th.starts_with("run") && !th.starts_with("mailcoord-"); // Ephemeral.is: nothing carries a mail run on
-                if will && !crate::copy::on() { carry.push((t.running_at, th.clone())) } // a hub on a copy of a log resumes no turn, whatever restart.continue says
+                if will && !crate::copy::on() && !crate::guard::safe() { carry.push((t.running_at, th.clone())) } // a hub on a copy of a log resumes no turn, whatever restart.continue says
             }
             // those the last restart left waiting: stopped already, nothing to mark, still owed their turn
             for (th, t) in w.threads.iter().filter(|(th, t)| t.turn != "running" && w.setting(&wait_key(th)) == "1") {
                 if t.turn != "interrupted" { ev.push(set(wait_key(th), String::new(), now)); continue } // the person's own turn came and went: nothing is owed
+                if crate::guard::safe() { continue } // safe mode starts nothing, and keeps the place in line for the normal start that follows
                 if !crate::copy::on() && world::carry_may(t, w.setting("restart.continue")) && !th.starts_with("run") && !th.starts_with("mailcoord-") { carry.push((t.running_at, th.clone())) }
                 else { ev.push(set(wait_key(th), String::new(), now)); cut_threads.push(th.clone()) }
             }
@@ -264,6 +265,17 @@ impl Agents {
         if !cut.is_empty() { if let Err(e) = self.hub.commit_many(&cut).await { eprintln!("agents: recovery: {e:#}") } }
         *self.cut.lock().unwrap() = cut_threads.clone();
         for th in &cut_threads { if !carry.contains(th) { self.task_end(th, "interrupted").await; self.launch_tell(th, &[json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now_s()})], "").await } } // Rec.turn.k: a cut turn that will not carry on ends its task (a carried one is still its business)
+        // the guard's last start of this hub failed: live a while before any agent starts again, so a build that dies at once does not start them every time
+        let hold = crate::guard::carry_wait();
+        if hold > 0 && !carry.is_empty() {
+            eprintln!("agents: {} cut turn(s) carry on in {hold} s, if this start holds", carry.len());
+            let (me, carry) = (Arc::downgrade(self), carry.clone());
+            tokio::spawn(async move { tokio::time::sleep(std::time::Duration::from_secs(hold)).await; if let Some(ag) = me.upgrade() { ag.carry_all(carry).await } });
+            return
+        }
+        self.carry_all(carry).await
+    }
+    async fn carry_all(self: &Arc<Self>, carry: Vec<String>) {
         let rest = carry.iter().skip(BURST).cloned().collect::<Vec<_>>();
         for th in carry.iter().take(BURST) { self.carry_on(th).await }
         if rest.is_empty() { return }
