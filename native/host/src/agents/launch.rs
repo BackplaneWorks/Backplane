@@ -9,7 +9,7 @@ fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 
 impl Agents {
     pub async fn tool_launch(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
-        let launcher = match self.mailroom() { Some(m) => m.launcher(thread).await, None => thread.to_string() }; let thread = launcher.as_str(); // a back office launches as its owner
+        let launcher = match self.mailroom() { Some(m) if !crate::net::far::is(thread) => m.launcher(thread).await, _ => thread.to_string() }; let thread = launcher.as_str(); // a back office launches as its owner
         let prompt = s(a, "prompt").to_string();
         let (caller, proj, default_prov, default_model, scratch_ok) = { let w = self.world().await;
             let c = w.threads.get(thread).cloned();
@@ -19,7 +19,8 @@ impl Agents {
         if scratch_ok { return fail("Scratch is retired: name a project (machine_list), or ask the uberbot") }
         let Some(proj) = proj.filter(|p| !p.is_empty()) else { return fail("name an existing project (project_list shows them)") };
         // Mcp.launch.parent: a bot works across the person's projects and has no local parent; it hears from what it launched all the same
-        let as_bot = match self.mailroom() { Some(m) => m.reach(thread, "").await == Some(true), None => false };
+        let far_by = crate::net::far::is(thread); // a launcher on another machine has no thread here; it hears from what it launched through launch_report
+        let as_bot = match self.mailroom() { Some(m) if !far_by => m.reach(thread, "").await == Some(true), _ => false };
         let parent = if a.get("subthread").and_then(Value::as_bool).unwrap_or(true) && caller.is_some() && !as_bot { thread.to_string() } else { String::new() };
         if !parent.is_empty() { let ok = caller.as_ref().map_or(false, |c| !c.archived && !c.deleted && c.project == proj); if !ok { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } }
         if !parent.is_empty() && !self.world().await.tree_chain_ok(&parent) { return fail("A subthread needs its launcher in the same project (maximum depth 64). Use subthread false only for an explicitly requested top-level conversation.") } // ST.Tree.chain
@@ -34,7 +35,7 @@ impl Agents {
         let (now, report) = (now_s(), a.get("report").and_then(Value::as_bool).unwrap_or(true));
         let seq = self.seq_n(); let th = hub_id("t", now, seq);
         let title = if s(a, "title").is_empty() { rules::title_of(&prompt) } else { s(a, "title").to_string() };
-        let by = if caller.is_some() { thread.to_string() } else { String::new() }; // Mcp.launch.go: the launcher, parent or not
+        let by = if caller.is_some() || far_by { thread.to_string() } else { String::new() }; // Mcp.launch.go: the launcher, parent or not
         let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":proj,"title":title,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now})];
         ev.extend(self.thread_account(thread, &th, &provider, chosen.as_ref(), now).await);
         if !by.is_empty() { ev.push(json!({"$":"ThreadLaunched","id":th,"by":by,"report":report,"at":now})) }
@@ -74,7 +75,7 @@ pub fn report_plan(w: &super::world::World, thread: &str, events: &[Value], from
 pub fn report_plan_to(w: &super::world::World, thread: &str, events: &[Value], from: &str, now: u64, to: &str, coordinated: bool) -> Option<Report> {
     let (by, on) = w.launched.get(thread).cloned()?; if !on || by.is_empty() { return None }
     let to = to.to_string();
-    if to == thread || !w.threads.contains_key(&to) { return None }
+    if to == thread || (!crate::net::far::is(&to) && !w.threads.contains_key(&to)) { return None }
     if !from.is_empty() && from == by { return None } // a launcher stopping its own thread is not told
     let ask = events.iter().find(|e| e["$"] == "AskOpened" && e["thread"] == thread).map(|e| {
         let (k, tool, d) = (e["kind"].as_str().unwrap_or(""), e["tool"].as_str().unwrap_or(""), e["detail"].as_str().unwrap_or(""));
@@ -101,9 +102,14 @@ impl Agents {
     /// Launch.tell for the events just committed about `thread`: the report goes to the launcher as a message from the thread (kind "launch"), one per end.
     pub async fn launch_tell(self: &Arc<Self>, thread: &str, events: &[Value], from: &str) {
         let by = { let w = self.world().await; w.launched.get(thread).map(|x| x.0.clone()) }; let Some(by) = by else { return };
-        let (to, coordinated) = match self.mailroom() { Some(m) => { let to = m.dest(&by).await; let c = m.chat_is(&to).await; (to, c) } None => (by, false) };
+        let far_by = crate::net::far::is(&by);
+        let (to, coordinated) = if far_by { (by.clone(), false) } else { match self.mailroom() { Some(m) => { let to = m.dest(&by).await; let c = m.chat_is(&to).await; (to, c) } None => (by, false) } };
         let plan = { let w = self.world().await; report_plan_to(&w, thread, events, from, now_s(), &to, coordinated) };
         let Some(r) = plan else { return };
+        if far_by { // the launcher is on another machine: its settings move here, the report goes there
+            if !r.before.is_empty() { self.commit_events(r.before.clone()).await }
+            self.send_far_report(thread, &r.to, &r.text); return
+        }
         let msg = format!("t:{thread}:lr-{}", hub_id("r", now_s(), self.seq_n()));
         let _ = self.inbound("user", &r.to, &msg, &r.text, (thread.to_string(), "launch".into(), String::new()), r.before).await;
     }

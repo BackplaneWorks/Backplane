@@ -15,6 +15,8 @@ use std::sync::Arc;
 /// every call in bounded time (the walk waits for it; it also cuts a call off after `POST_TIMEOUT`).
 pub trait OwnerLink: Send + Sync {
     fn post<'a>(&'a self, link: &'a str, body: String) -> Fut<'a, Option<(u16, String)>>;
+    /// The owner's machines this one is linked to: (link id, name, address). Empty for a transport with none.
+    fn machines(&self) -> Vec<(String, String, String)> { vec![] }
 }
 
 /// longest a walk waits on one request

@@ -377,6 +377,46 @@
   }
  },
  {
+  "name": "room_join",
+  "description": "Join a room: yourself added to its members. With `machine`, a room that lives on another linked machine; it is copied here once you are in it, and its posts reach you like any room's.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "room": {
+     "type": "string",
+     "description": "The room's name or id."
+    },
+    "machine": {
+     "type": "string",
+     "description": "With a room on another linked machine: that machine's name (machine_list shows them). Leave out for a room here."
+    }
+   },
+   "required": [
+    "room"
+   ]
+  }
+ },
+ {
+  "name": "room_leave",
+  "description": "Leave a room: you are removed from its members, here or (with `machine`) on the machine it lives on.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "room": {
+     "type": "string",
+     "description": "The room's name or id."
+    },
+    "machine": {
+     "type": "string",
+     "description": "With a room on another linked machine: that machine's name (machine_list shows them). Leave out for a room here."
+    }
+   },
+   "required": [
+    "room"
+   ]
+  }
+ },
+ {
   "name": "notify_person",
   "description": "Alert the person on their phone and desktop. Allowed only for: needs_you (you are blocked until they decide, approve, log in, enter a code or answer; prefer asking in your turn's question or an approval when that fits), done (work the person gave you in your own thread is finished; at most once per thing they asked), reminder or digest (only in a turn that a routine they scheduled started). Anything else is refused: post it in a room, put it in your Space or on the task board, where it shows in the app without an alert.",
   "inputSchema": {

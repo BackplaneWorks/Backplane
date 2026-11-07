@@ -6,6 +6,7 @@ pub mod api;
 pub mod mail;
 pub mod clock;
 pub mod hooks;
+pub mod far;
 pub mod ledger;
 pub mod plane;
 pub mod post;

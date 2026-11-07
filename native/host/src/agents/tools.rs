@@ -15,7 +15,7 @@ impl Agents {
     pub fn set_gen(&self, thread: &str, gen: &str) { self.gens.lock().unwrap().insert(thread.into(), gen.into()); }
     pub async fn commit_events(&self, ev: Vec<Value>) { if let Err(e) = self.hub.commit_many(&ev).await { self.stats.commit_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed); eprintln!("agents: could not write {} events: {e:#}", ev.len()) } }
 
-    async fn same_project(&self, a: &str, b: &str) -> bool { if let Some(m) = self.mailroom() { if let Some(v) = m.reach(a, b).await { return v } } let w = self.world().await; match (w.threads.get(a), w.threads.get(b)) { (Some(x), Some(y)) => !y.deleted && x.project == y.project, _ => false } }
+    async fn same_project(&self, a: &str, b: &str) -> bool { if crate::net::far::is(a) { return true } /* a thread of another of the owner's machines (net/rpc.rs vouched for the link) */ if let Some(m) = self.mailroom() { if let Some(v) = m.reach(a, b).await { return v } } let w = self.world().await; match (w.threads.get(a), w.threads.get(b)) { (Some(x), Some(y)) => !y.deleted && x.project == y.project, _ => false } }
 
     /// Mcp.phase: approval > input > by the turn (tasks and owned work are not ported).
     async fn phase(&self, th: &str, turn: &str, pending: u64) -> &'static str {
@@ -24,7 +24,7 @@ impl Agents {
         else { match turn { "running" => "working", "failed" => "failed", _ if busy > 0 => "monitoring", "completed" => "complete", "interrupted" => "stopped", _ => "idle" } }
     }
     /// Mcp.thread_json.w (without `parent`: the JS binary the fixtures come from does not write it)
-    async fn thread_json(&self, id: &str) -> Option<Value> {
+    pub(super) async fn thread_json(&self, id: &str) -> Option<Value> {
         let m = self.hub.model().await; let t = m.threads.get(id)?.clone(); drop(m);
         let phase = self.phase(id, &t.turn, t.pending).await;
         let parent = { let w = self.world().await; let p = w.setting(&format!("thread.parent.{id}")).to_string(); // Tree.raw: a link to a live thread of the same project, never to itself
@@ -72,6 +72,7 @@ impl Agents {
     }
     pub async fn tool_update(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
+        if crate::net::far::is(target) { return fail("name the thread (threadId)") }
         if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         if a.get("provider").is_some() || a.get("model").is_some() { return fail("changing a thread's provider or model is not available in the Rust hub yet") }
         if a.get("account").is_some() { if a.get("title").is_some() || a.get("report").is_some() || a.get("parent").is_some() { return fail("account cannot be combined with title, report or parent") } return self.tool_update_account(thread, target, a).await }
@@ -97,13 +98,14 @@ impl Agents {
     /// The Settle button for an agent: this thread (or another of the project) is settled, as `thread.settle` does.
     pub async fn tool_settle(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
+        if crate::net::far::is(target) { return fail("name the thread (threadId)") }
         if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         self.commit_events(vec![json!({"$":"ThreadSettled","id":target,"manual":true,"at":now_s()})]).await;
         (true, json!({"threadId":target,"settled":true}))
     }
     pub async fn tool_wait(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); if !self.same_project(thread, target).await { return fail(NOT_HERE) }
-        let end = tokio::time::Instant::now() + Duration::from_secs(wait_clamp(a.get("timeoutMs").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(30000)));
+        let end = tokio::time::Instant::now() + if a.get("_now").and_then(Value::as_bool).unwrap_or(false) { Duration::ZERO } else { Duration::from_secs(wait_clamp(a.get("timeoutMs").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(30000))) };
         loop {
             let (running, (busy, titles)) = { let w = self.world().await; (w.running(target), w.work(target)) }; let done = !running && busy == 0; // Mcp.done.w: nothing out of hand either
             if done || tokio::time::Instant::now() >= end {

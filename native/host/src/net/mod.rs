@@ -68,7 +68,7 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
             let (hub, sync) = (hub.clone(), sync.clone());
             tokio::spawn(async move {
                 for _ in 0..300 {
-                    if let Some(b) = crate::bots::api::of(&hub) { b.set_owner_link(std::sync::Arc::new(rpc::Link { sync, hub: std::sync::Arc::downgrade(&hub), copy: crate::copy::on() })); return }
+                    if let Some(b) = crate::bots::api::of(&hub) { b.set_owner_link(std::sync::Arc::new(rpc::Link { sync, hub: std::sync::Arc::downgrade(&hub), copy: crate::copy::on() })); b.far_start(); return }
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });
