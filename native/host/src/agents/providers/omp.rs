@@ -262,7 +262,7 @@ mod tests {
             "--append-system-prompt", &format!("{}/system-prompt.txt", launch.display()), "--thinking", "auto"]);
         assert!(!v.iter().any(|x| x == "THE PROMPT")); // never in argv
         assert_eq!(std::fs::read_to_string(launch.join("system-prompt.txt")).unwrap(), "THE PROMPT"); assert_eq!(std::fs::read_to_string(launch.join("backplane.js")).unwrap(), EXT);
-        { use crate::plat::fs::PermissionsExt; assert_eq!(std::fs::metadata(launch.join("system-prompt.txt")).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777, 0o700); }
+        { use crate::plat::fs::PermissionsExt; assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(launch.join("system-prompt.txt")).unwrap().permissions().mode() & 0o777, 0o600), 0o600); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777, 0o700), 0o700); }
         assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://m".to_string())]);
         drop(d); assert!(!launch.exists());
         a.model = "openai/gpt".into(); a.effort = "turbo".into(); let d2 = OmpDriver::new(); let v2 = d2.argv(&a); assert_eq!(&v2[v2.len() - 2..], ["--model", "openai/gpt"]); drop(d2);

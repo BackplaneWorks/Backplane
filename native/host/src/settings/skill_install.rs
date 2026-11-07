@@ -51,10 +51,10 @@ mod tests {
         let h = std::env::temp_dir().join(format!("bp-inst-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); let hs = h.to_string_lossy().into_owned();
         let url = serve("---\nname: unslop-zq\ndescription: cut filler\n---\nSteps.");
         let (n, p) = install(&hs, &url, "claude", false).unwrap(); assert_eq!(n, "unslop-zq"); assert!(std::fs::read_to_string(format!("{p}/SKILL.md")).unwrap().contains("Steps."));
-        assert!(p.contains("/.claude/skills/")); assert!(install(&hs, &url, "claude", false).unwrap_err().contains("already installed"));
+        assert!(p.replace('\\', "/").contains("/.claude/skills/")); assert!(install(&hs, &url, "claude", false).unwrap_err().contains("already installed"));
         assert!(install(&hs, "http://example.com/x/SKILL.md", "claude", false).is_err(), "plain http elsewhere is refused");
         assert!(install(&hs, &url, "claude", true).is_ok(), "a confirmed replace overwrites");
-        let (_, p2) = install(&hs, &url, "codex", false).unwrap(); assert!(p2.contains("/.agents/skills/"));
+        let (_, p2) = install(&hs, &url, "codex", false).unwrap(); assert!(p2.replace('\\', "/").contains("/.agents/skills/"));
         std::fs::remove_dir_all(&h).ok();
     }
 }

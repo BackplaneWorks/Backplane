@@ -167,7 +167,7 @@ fn write(v: &Vault, items: &[Item], backend: &str) -> Result<String, String> {
     })();
     if let Err(e) = r { let _ = std::fs::remove_file(&tmp); return Err(e) }
     // the rename is committed: from here the new items are what is on disk. The folder flush decides only what is claimed.
-    let flushed = fault("dirsync").and_then(|_| std::fs::File::open(&dir)).and_then(|d| d.sync_all());
+    let flushed = fault("dirsync").and_then(|_| crate::plat::fs::sync_dir(&dir));
     Ok(match flushed {
         Ok(()) => "durable".into(),
         Err(e) => { let code = match e.raw_os_error() { Some(c) if c == crate::plat::errno::EINVAL => "EINVAL".to_string(), Some(c) if c == crate::plat::errno::ENOTSUP => "ENOTSUP".to_string(), Some(c) if c == crate::plat::errno::EISDIR => "EISDIR".to_string(), _ => "EIO".to_string() };
@@ -478,8 +478,8 @@ mod tests {
         assert_eq!(put("tailscale-bub", "tskey-auth-ABCDEF123456", "join the tailnet", "person"), "ok");
         let raw = std::fs::read_to_string(h.join("secrets/vault.json")).unwrap();
         assert!(!raw.contains("tskey-auth"), "the value is not in the file");
-        assert_eq!(std::fs::metadata(h.join("secrets/vault.json")).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(std::fs::metadata(h.join("secrets/vault.key")).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(h.join("secrets/vault.json")).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
+        assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(h.join("secrets/vault.key")).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
         // a fresh open (a restart) opens it and masks it
         let s = open(&h); assert_eq!((s["locked"].clone(), s["n"].clone()), (json!(false), json!(1)));
         assert_eq!(super::super::mask::mask_with(&super::super::mask::all(), "key tskey-auth-ABCDEF123456 end"), format!("key {} end", "\u{2022}".repeat(23)));

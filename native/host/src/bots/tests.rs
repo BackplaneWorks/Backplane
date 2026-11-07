@@ -746,7 +746,7 @@ mod store_tests {
         use crate::plat::fs::PermissionsExt;
         let h = home("hdr"); store::append(&h, &body("c", "m1")).unwrap(); store::append(&h, &body("c", "m2")).unwrap();
         let hs = store::headers(&store::path(&h, "c")); assert_eq!(hs.iter().map(|(_, m)| m.id.as_str()).collect::<Vec<_>>(), vec!["m1", "m2"]);
-        assert_eq!(std::fs::metadata(store::path(&h, "c")).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(store::path(&h, "c")).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
     }
 }
 

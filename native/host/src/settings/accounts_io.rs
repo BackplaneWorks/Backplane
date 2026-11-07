@@ -872,7 +872,7 @@ for l in sys.stdin:
         assert_eq!(a.request(&json!({"op":"add","provider":"grok","label":"x"})).await["error"], GENERIC); assert_eq!(a.request(&json!({"op":"add","provider":"claude","label":"  "})).await["error"], GENERIC);
         let id = add(&a, "claude", "Work\u{7}").await; let s = a.snapshot(); assert_eq!((prof(&s, &id)["label"].clone(), prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("Work"), json!("disconnected"), json!(1)));
         let root = h.join("providers/accounts-v1");
-        assert_eq!(std::fs::metadata(root.join("profiles.json")).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(root.join(&id)).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(root.join("profiles.json")).unwrap().permissions().mode() & 0o777, 0o600), 0o600); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(root.join(&id)).unwrap().permissions().mode() & 0o777, 0o700), 0o700);
         assert_eq!(a.request(&json!({"op":"rename","profile":id,"label":"Home"})).await["profiles"][0]["label"], "Home"); assert_eq!(a.request(&json!({"op":"rename","profile":id,"label":""})).await["error"], GENERIC);
         let b = mgr(&h, &sd); assert_eq!(prof(&b.snapshot(), &id)["state"], "unchecked", "after a restart a profile is unchecked until asked"); assert_eq!(prof(&b.snapshot(), &id)["label"], "Home");
         assert_eq!(b.request(&json!({"op":"remove","profile":id})).await["profiles"], json!([])); assert!(!root.join(&id).exists());

@@ -11,6 +11,10 @@ pub mod fs {
     /// Raw bytes of a file name, and back.
     pub fn name_bytes(s: &std::ffi::OsStr) -> Vec<u8> { use std::os::unix::ffi::OsStrExt; s.as_bytes().to_vec() }
     pub fn name_from(b: &[u8]) -> std::ffi::OsString { use std::os::unix::ffi::OsStrExt; std::ffi::OsStr::from_bytes(b).to_os_string() }
+    /// A file's mode bits as a test compares them: the real ones.
+    pub fn mode_bits(actual: u32, _want: u32) -> u32 { actual }
+    /// Flush a folder (a rename in it is on disk).
+    pub fn sync_dir(d: &std::path::Path) -> std::io::Result<()> { std::fs::File::open(d)?.sync_all() }
     /// Random bytes from the OS (no fallback).
     pub fn random(b: &mut [u8]) -> std::io::Result<()> { use std::io::Read; std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(b)) }
 }
@@ -70,6 +74,8 @@ pub mod hub {
     }
     /// A shell or other program by its Unix name: itself.
     pub fn program(p: &std::ffi::OsStr) -> std::ffi::OsString { p.to_os_string() }
+    /// What to start for `p` and the arguments before the caller's: the program itself (the kernel reads `#!`).
+    pub fn launch(p: &std::ffi::OsStr) -> (std::ffi::OsString, Vec<std::ffi::OsString>) { (p.to_os_string(), vec![]) }
 }
 
 pub mod time {

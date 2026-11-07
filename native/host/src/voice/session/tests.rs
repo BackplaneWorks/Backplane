@@ -117,7 +117,7 @@ fn replay(fs: &[Value], draft: &str) -> String {
     let _g = ONE.lock().await; let r = rig("key").await;
     assert_eq!(r.rpc(json!({"op":"api-add","name":"@voice","value":"not a key"})).await["error"], "that is not an OpenAI API key (they start with sk-)");
     let a = r.rpc(json!({"op":"api-add","name":"@voice","value":"sk-abcdefghijklmnopqrstuvwxyz"})).await; assert_eq!(a["voiceKey"], "sk-…wxyz"); assert!(!a.to_string().contains("sk-abc"));
-    assert_eq!(std::fs::metadata(key_path(&r.home)).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(key_path(&r.home)).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
     assert!(crate::settings::keys::names_kept(&r.home).is_empty(), "dictation's key is not one of the agents' API keys");
     assert_eq!(r.hub.info_now()["voice.key"], "sk-…wxyz");
     assert_eq!(r.rpc(json!({"op":"unkey"})).await["ok"], true); assert!(!key_path(&r.home).exists()); assert_eq!(r.hub.info_now().get("voice.key"), None);

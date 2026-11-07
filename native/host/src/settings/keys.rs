@@ -137,8 +137,8 @@ mod tests {
         let h = std::env::temp_dir().join(format!("bp-keys-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h);
         add(&h, "TOKEN_A", "s3cret-value").unwrap(); add(&h, "TOKEN_B", "other-value-1").unwrap(); add(&h, "TOKEN_A", "replaced-val").unwrap();
         assert_eq!(names_kept(&h), "TOKEN_B\nTOKEN_A");
-        assert_eq!(std::fs::metadata(path(&h)).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(std::fs::metadata(h.join("secrets")).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(path(&h)).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
+        assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(h.join("secrets")).unwrap().permissions().mode() & 0o777, 0o700), 0o700);
         del(&h, "TOKEN_B").unwrap(); assert_eq!(names_kept(&h), "TOKEN_A");
         assert!(add(&h, "bad name", "v").is_err());
         let _ = std::fs::remove_dir_all(&h);

@@ -222,7 +222,7 @@ mod tests {
     #[test] fn a_new_home_starts_on_with_private_storage_and_a_closed_status() {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner()); let h = fresh("start"); let s = bind(&h);
         assert_eq!((s["ok"].clone(), s["started"].clone(), s["enabled"].clone(), s["error"].clone()), (json!(true), json!(true), json!(true), json!("")));
-        assert_eq!(std::fs::metadata(h.join("diagnostics")).unwrap().permissions().mode() & 0o777, 0o700); assert_eq!(std::fs::metadata(h.join("diagnostics/control")).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(h.join("diagnostics")).unwrap().permissions().mode() & 0o777, 0o700), 0o700); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(h.join("diagnostics/control")).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
         let keys: Vec<&str> = s.as_object().unwrap().keys().map(String::as_str).collect(); assert_eq!(keys, ["version", "ok", "started", "enabled", "error", "stored_bytes", "allocated_bytes", "cap_bytes", "retention_seconds", "pending", "dropped"]);
         assert_eq!(start(&h), status(), "a second start changes nothing");
     }

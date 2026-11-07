@@ -298,7 +298,7 @@ mod tests {
         let keys: Vec<&str> = c.as_object().unwrap().keys().map(String::as_str).collect(); assert_eq!(keys, ["thread","intent","goal","parts","boards","label","estimate_problems","error","estimates","board_files","board_default","order"]);
         // the intent the person writes: the file, then the card
         let r = call("fab.intent", json!({"thread":"t1","text":"  # Goal\n\nAn amplifier for the desk.  "})).await; assert_eq!(r["result"]["goal"], "An amplifier for the desk.");
-        assert_eq!(std::fs::read_to_string(work.join(".backplane/intent.md")).unwrap(), "# Goal\n\nAn amplifier for the desk.\n"); assert_eq!(std::fs::metadata(work.join(".backplane/intent.md")).unwrap().permissions().mode() & 0o777, 0o644);
+        assert_eq!(std::fs::read_to_string(work.join(".backplane/intent.md")).unwrap(), "# Goal\n\nAn amplifier for the desk.\n"); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(work.join(".backplane/intent.md")).unwrap().permissions().mode() & 0o777, 0o644), 0o644);
         // estimates off: nothing is asked, the card has no error
         hub.commit(&json!({"$":"SettingSet","key":"order.estimates","value":"off","at":3})).await.unwrap();
         let c = call("fab.look", json!({"thread":"t1"})).await["result"].clone(); assert_eq!((c["error"].clone(), c["estimates"].clone()), (json!(""), json!(false)));

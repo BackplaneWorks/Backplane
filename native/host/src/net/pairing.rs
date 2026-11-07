@@ -88,7 +88,7 @@ impl Registry {
             let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
             f.write_all(body.as_bytes())?; f.sync_all()?; drop(f);
             std::fs::rename(&tmp, &self.file)?;
-            std::fs::File::open(&self.home)?.sync_all()
+            crate::plat::fs::sync_dir(&self.home)
         })();
         if r.is_err() { let _ = std::fs::remove_file(&tmp); return Err("storage_unavailable".into()) }
         g.devices = devices; g.invites = invites; Ok(())

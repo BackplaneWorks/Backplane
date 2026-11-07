@@ -100,7 +100,7 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
     assert!(!text.contains(&tok), "the credential is not stored");
     assert!(text.contains(&digest(&tok)));
     use crate::plat::fs::PermissionsExt;
-    assert_eq!(std::fs::metadata(e.dir.join("devices-v1.json")).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(e.dir.join("devices-v1.json")).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
     let r2 = e.reg(); assert_eq!(r2.resolve(&tok, 1, "/x"), tok);
     assert!(r2.list()["devices"][0].get("hash").is_none(), "a listing never carries a hash");
 }

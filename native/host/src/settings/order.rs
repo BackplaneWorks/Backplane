@@ -472,7 +472,7 @@ mod tests {
     #[test] fn a_record_is_private_and_a_server_id_cannot_leave_the_folder() {
         for id in ["../x", "q_../x", "q_a/b", "x", "", "q_a.b"] { assert!(!id_ok(id), "{id}") } assert!(id_ok("q_Ab-1_c"));
         let h = tmp("rec"); let r = Rec { id: "q_rec".into(), token: "tok".into(), thread: "t1".into(), server: "http://s".into() }; keep(&h, &r, "quoting").unwrap();
-        let f = h.join("orders/q_rec.json"); assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(h.join("orders")).unwrap().permissions().mode() & 0o777, 0o700);
+        let f = h.join("orders/q_rec.json"); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600), 0o600); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(h.join("orders")).unwrap().permissions().mode() & 0o777, 0o700), 0o700);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), r#"{"id":"q_rec","token":"tok","thread":"t1","server":"http://s","status":"quoting"}"#, "the shape fab.look's search and 0.14's records have");
         keep(&h, &r, "quoted").unwrap(); let v = records(&h); assert_eq!((v.len(), v[0].1.as_str()), (1, "quoted")); assert_eq!(pay_link("q_rec").unwrap(), "http://s/q/q_rec?t=tok");
         std::fs::write(h.join("orders/q_bad.json"), r#"{"id":"../../x","token":"t"}"#).unwrap(); assert_eq!(records(&h).len(), 1, "a record with a bad id is not followed");

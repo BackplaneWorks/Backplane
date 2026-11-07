@@ -19,6 +19,13 @@ pub mod fs {
         for c in b.chunks_mut(1 << 20) { if unsafe { BCryptGenRandom(std::ptr::null_mut(), c.as_mut_ptr(), c.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) } != 0 { return Err(io::Error::other("BCryptGenRandom failed")) } }
         Ok(())
     }
+    /// A file's mode bits as a test compares them: Windows keeps none, so the wanted ones stand.
+    pub fn mode_bits(_actual: u32, want: u32) -> u32 { want }
+    /// Flush a folder: Windows opens one only with backup semantics, and flushes it with write access.
+    pub fn sync_dir(d: &Path) -> io::Result<()> {
+        use std::os::windows::fs::OpenOptionsExt as W;
+        let mut o = fs::OpenOptions::new(); o.write(true); W::custom_flags(&mut o, 0x0200_0000 /* FILE_FLAG_BACKUP_SEMANTICS */); o.open(d)?.sync_all()
+    }
     /// A link to a folder or to a file (Windows makes them differently).
     pub fn symlink<P: AsRef<Path>, Q: AsRef<Path>>(original: P, link: Q) -> io::Result<()> {
         let dir = link.as_ref().parent().map_or_else(|| original.as_ref().to_path_buf(), |p| p.join(original.as_ref())).is_dir();
@@ -168,6 +175,31 @@ pub mod hub {
         static FOUND: std::sync::OnceLock<Vec<(String, std::ffi::OsString)>> = std::sync::OnceLock::new();
         let found = FOUND.get_or_init(|| ["sh.exe", "bash.exe"].iter().filter_map(|n| shell_path(n).map(|f| (n.to_string(), f.into_os_string()))).collect());
         found.iter().find(|(n, _)| n == name).map_or_else(|| name.into(), |(_, f)| f.clone())
+    }
+    /// What to start for `p`, and the arguments that go before the caller's: a `#!` script (no Windows program by itself) runs through the
+    /// interpreter its first line names, as a Unix kernel would; `sh`, `bash` and `/usr/bin/env sh` are Git for Windows' shell.
+    pub fn launch(p: &std::ffi::OsStr) -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
+        let mapped = program(p); if mapped != p { return (mapped, vec![]) }
+        let path = std::path::Path::new(p);
+        let script = if path.components().count() > 1 || path.is_absolute() { Some(path.to_path_buf()).filter(|f| shebang(f).is_some()) } else {
+            // a bare name: the first PATH folder that has it as a program or as a script decides
+            let pathv = std::env::var_os("PATH").unwrap_or_default();
+            std::env::split_paths(&pathv).find_map(|d| { let exe = ["exe", "com", "cmd", "bat"].iter().any(|x| d.join(path).with_extension(x).is_file()); if exe { Some(None) } else { let f = d.join(path); shebang(&f).map(|_| Some(f)) } }).flatten()
+        };
+        let Some(f) = script else { return (p.to_os_string(), vec![]) };
+        let line = shebang(&f).unwrap_or_default(); let mut t: Vec<&str> = line.split_whitespace().collect();
+        if t.first().is_some_and(|x| x.ends_with("/env")) { t.remove(0); if t.first() == Some(&"-S") { t.remove(0); } }
+        let Some(interp) = t.first().map(|x| x.rsplit('/').next().unwrap_or(x).to_string()) else { return (p.to_os_string(), vec![]) };
+        let prog = match interp.as_str() { "sh" | "bash" | "dash" => program(std::ffi::OsStr::new(if interp == "bash" { "bash" } else { "sh" })), other => other.into() };
+        let mut pre: Vec<std::ffi::OsString> = t[1..].iter().map(|x| x.into()).collect(); pre.push(f.into_os_string());
+        (prog, pre)
+    }
+    /// A file's `#!` line, without the `#!`.
+    fn shebang(f: &std::path::Path) -> Option<String> {
+        if f.extension().is_some_and(|x| ["exe", "com", "cmd", "bat"].iter().any(|e| x.eq_ignore_ascii_case(e))) { return None }
+        let mut b = [0u8; 256]; let n = std::io::Read::read(&mut std::fs::File::open(f).ok()?, &mut b).ok()?;
+        let l = b[..n].strip_prefix(b"#!")?; let end = l.iter().position(|c| *c == b'\n').unwrap_or(l.len());
+        Some(String::from_utf8_lossy(&l[..end]).trim_end_matches('\r').trim().to_string())
     }
     fn shell_path(name: &str) -> Option<std::path::PathBuf> {
         let path = std::env::var_os("PATH").unwrap_or_default();

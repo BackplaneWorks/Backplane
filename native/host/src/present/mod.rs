@@ -150,7 +150,7 @@ mod tests {
         assert!(Routed::open_dump(Some(d2.clone()), true, false, 1000).is_none() && !d2.exists(), "no helper, nothing to record");
         assert!(Routed::open_dump(Some(d2.clone()), true, true, crate::copy::BIG_LOG + 1).is_none() && !d2.exists(), "a log of real size is never dumped");
         use crate::plat::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(d.join("views.jsonl")).unwrap().permissions().mode() & 0o777, 0o600, "the dump is private");
+        assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(d.join("views.jsonl")).unwrap().permissions().mode() & 0o777, 0o600), 0o600, "the dump is private");
     }
     #[tokio::test] async fn a_fab_look_answer_does_not_send_the_view_to_the_helper_but_another_read_does() {
         let r = Routed { helper: helper(), screens: vec![Box::new(Mine)], dump: None };
