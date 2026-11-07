@@ -11,6 +11,7 @@ Status at 8d15bbb8ab, from the source: requests, tools, routes, settings pages a
 - **missing**: not on `main`.
 - **unchecked**: code exists, nobody has driven it end to end on the Rust hub. The audit lane moves these.
 - **dropped**: gone on purpose. The row says why.
+- **needs a person or another machine**: built and tested in rigs; what is left is a check only a person (a real microphone, a real phone) or another machine can do. The row says which.
 
 Each lane updates its own rows in the commit that lands the work.
 
@@ -38,6 +39,11 @@ Each lane updates its own rows in the commit that lands the work.
 | Personal dictionary, learned words, `voice_dictionary_add`: `voice.e.`/`voice.l.` settings, the correction pass and settle as pure Rust with 0.14's test vectors (`voice/vdict.rs`, `words.rs`), the bot tool writes a `voice.e.` entry | done | voice |
 | Local engine: Parakeet TDT through sherpa-onnx's C API, in `backplane-voice` (its own process, opened at run time), runtime and models downloaded by `local-install` with pinned checksums; real audio decodes on Linux (`native/voice/tests/local_e2e.rs`), macOS and Windows not yet run | partial | voice |
 | Voice helper in Rust (`native/voice`, `scripts/build-voice.sh`, built and tested by dev-build); `tools/voice` (Bun) removed | done | voice |
+| Dictation through a real microphone, desktop: the window's Dictate on Linux with PipeWire, PulseAudio or ALSA (rigs used the mock and a stand-in helper) | needs a person or another machine | voice |
+| Dictation through a real microphone, Android: a phone's own mic (the emulator's is silent; the rig used a debug-only 440 Hz tone against the mock) | needs a person or another machine | voice |
+| Dictation through a real microphone, iOS: a phone's own mic (the Mac mini has no input; the rig used a debug-only 440 Hz tone against the mock) | needs a person or another machine | voice |
+| Local engine on macOS and Windows: `local-install` and real-audio decode (`native/voice/tests/local_e2e.rs`; sherpa-onnx's C API symbols there are unchecked) | needs a person or another machine | voice |
+| Android pairing through the pairing screen with dictation after it (the rig paired by writing the app's link preference with `run-as`) | needs a person or another machine | voice |
 | **Commerce** | | |
 | Card and Ready to order data (`fab.look`, `fab.intent`) | partial | commerce |
 | Buy it: `order.buy` starts a buy thread in the source's folder, "Buy: <project> · 2" naming, the person's Buy it as its first message; only for fab files or a KiCad project's own board. Tested on the hub with stand-ins; not yet driven in the window or on a phone | partial | commerce |
