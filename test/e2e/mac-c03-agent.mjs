@@ -27,7 +27,8 @@ await rpc('project.add',{path:out+'/proj'});for(let i=0;i<50&&!events().some(e=>
 const P=events().find(e=>e.$==='ProjectCreated').id;
 const dumps=()=>readdirSync(out+'/dumps').filter(f=>f.endsWith('.fcpath'));
 const turn=async name=>{const before=new Set(dumps());const T=(await rpc('thread.create',{project:P,title:name,env:'local'})).thread;await rpc('turn.start',{thread:T,text:'hello zqshort'});
-  let f='';for(let i=0;i<150&&!f;i++){await sleep(200);f=dumps().find(x=>!before.has(x))||'';if(f&&!existsSync(out+'/dumps/'+f.replace('.fcpath','.version')))await sleep(1500)}
+  let f='';for(let i=0;i<150&&!f;i++){await sleep(200);f=dumps().find(x=>!before.has(x))||'';}
+  for(let i=0;f&&i<150;i++){const v=out+'/dumps/'+f.replace('.fcpath','.version');if(existsSync(v)&&readFileSync(v,'utf8').trim())break;await sleep(200)}
   if(!f)return null;const b=out+'/dumps/'+f.replace('.fcpath','');const rd=x=>existsSync(b+x)?readFileSync(b+x,'utf8'):'';
   return {told:rd('.fcpath').trim(),args:rd('.args'),env:rd('.env'),version:rd('.version').trim()}};
 const app=real;
