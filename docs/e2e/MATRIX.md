@@ -39,9 +39,9 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | pass | pass, part: ERC and DRC, no export | deferred, no VM |
 | C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | fail | pass, part: install not run | deferred, no VM |
 | | **Remote operation** | | | |
-| R01 | Restart the hub from another machine | not run | not run | deferred, no VM |
-| R02 | Update: channel, Check now, download, checksum, swap, restart | not run | not run | deferred, no VM |
-| R03 | Rollback after a bad update | not run | not run | deferred, no VM |
+| R01 | Restart the hub from another machine | pass, part: from a phone (Pixel 9), not from another desktop | not run | deferred, no VM |
+| R02 | Update: channel, Check now, download, checksum, swap, restart | pass | not run | deferred, no VM |
+| R03 | Rollback after a bad update | pass | not run | deferred, no VM |
 | | **Settings: each control persists across restart and takes effect** | | | |
 | S01 | Appearance | persists, effect not proven | not run | deferred, no VM |
 | S02 | Threads | persists, effect not proven | not run | deferred, no VM |
@@ -261,3 +261,6 @@ Rig: Boat sandbox (4 vCPU, 8 GB, Ubuntu 24.04), source `26ba50a0ba49496a9baf89cb
 | P19 | pass (22/22) | e905f8b095 | macOS hub ↔ Pixel 9, a real phone, LAN (routed) | android.py --device; ~/.cache/e2e-pair/logs/phone-m-lan.log |
 | P20 | not run | — | macOS hub ↔ Pixel 9, tailnet | no Tailscale on the phone |
 | P21 | not run | — | macOS hub ↔ real iPhone, LAN and tailnet | waits on TestFlight; the person tests it |
+| R01 | pass, part: from a phone; another desktop not run | 2912d8437d (efffc2f813 + the update.status fix) | desktop, Ubuntu 26.04 x86_64; Pixel 9 52220DLAQ001FC (USB, `adb reverse`) | `test/update/feed.sh` (log `build/lane/e2e-main2.log`, `e2e-phone.log` in the remote-op worktree): real guard + hub built from the commit with `--features e2e-trust`, private home and port, feed on loopback signed by a keypair made for the run (deleted at its end), every release below 0.1.0. Phone case: the Android app (`dev.backplane.mobile.gpui` only) paired by link, its Hub screen's Restart hub restarted v0.0.2 (new pid, proven again) |
+| R02 | pass | 2912d8437d (efffc2f813 + the update.status fix) | desktop, Ubuntu 26.04 x86_64; Pixel 9 52220DLAQ001FC (USB, `adb reverse`) | `test/update/feed.sh` (log `build/lane/e2e-main2.log`, `e2e-phone.log` in the remote-op worktree): real guard + hub built from the commit with `--features e2e-trust`, private home and port, feed on loopback signed by a keypair made for the run (deleted at its end), every release below 0.1.0. `good`: v0.0.1 -> v0.0.2 staged, swapped, proven; `/hello` says `0.0.2 <commit>`. `older`: v0.0.0 not offered, nothing fetched. `wrongkey`: signature read, archive never fetched. `ceiling`: v0.1.0 under the test key refused. Phone: Check now in Settings > Updates installed v0.0.2 and the line said "Updated to v0.0.2." `healthz`: through what `tailscale serve` forwards (loopback, no credential, its headers) no version or commit; the hub token sees both |
+| R03 | pass | 2912d8437d (efffc2f813 + the update.status fix) | desktop, Ubuntu 26.04 x86_64; Pixel 9 52220DLAQ001FC (USB, `adb reverse`) | `test/update/feed.sh` (log `build/lane/e2e-main2.log`, `e2e-phone.log` in the remote-op worktree): real guard + hub built from the commit with `--features e2e-trust`, private home and port, feed on loopback signed by a keypair made for the run (deleted at its end), every release below 0.1.0. Automatic, on probation: `panic` (panic:bots: came up without bots, which v0.0.1 had), `die` (abort in the agents step), `mismatch` (answered as 0.0.9, manifest said 0.0.4): each marked bad with its reason, back on v0.0.1. By hand: the phone's Hub screen "Roll back to v0.0.1" marked v0.0.2 bad ("rolled back by remote") and went back |
