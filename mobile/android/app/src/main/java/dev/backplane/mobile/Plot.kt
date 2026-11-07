@@ -238,6 +238,39 @@ class PlotMesh(val verts: FloatArray, val colors: IntArray, val box: FloatArray)
             require(!v.more && v.valid) { "Unexpected model bytes" }
             return PlotMesh(verts, colors, if (b.size == 6) b.toFloatArray() else FloatArray(0))
         }
+        /** A model's id: FNV-1a, 64 bits, of its wire bytes, as 16 hex digits (the hub's plot::mesh_id); `viewer.watch {kept}` names the cached model with it. */
+        fun id(d: ByteArray): String {
+            var h = -0x340d631b7bdddcdbL // 0xcbf29ce484222325
+            for (b in d) { h = (h xor (b.toLong() and 255)) * 0x100000001b3L }
+            return java.lang.Long.toUnsignedString(h, 16).padStart(16, '0')
+        }
+    }
+}
+
+/** The last model each view showed (hub, thread, kind, path), as the hub sent it, in the app's cache folder: shown at once when the view opens
+ *  again, on another launch or offline, and not downloaded again while the hub's model is the same. The newest few are kept. */
+object MeshDisk {
+    private const val MOST = 8
+    var dir: java.io.File? = null
+    private fun file(slot: String) = dir?.let { java.io.File(it, PlotMesh.id(slot.toByteArray()) + ".bin") }
+    /** {key, n, box3, mesh}: the frame's own fields, so PlotMesh.decode reads it as it reads the wire */
+    fun load(slot: String): Map<String, Any?>? = runCatching {
+        val f = file(slot)?.takeIf { slot.isNotEmpty() && it.isFile } ?: return null
+        java.io.DataInputStream(f.inputStream().buffered()).use { i ->
+            val key = i.readUTF(); val n = i.readInt(); val box = List(i.readInt()) { i.readLong() }; val mesh = ByteArray(i.readInt()).also { i.readFully(it) }
+            f.setLastModified(System.currentTimeMillis())
+            mapOf("key" to key, "n" to n.toLong(), "box3" to box, "mesh" to mesh)
+        }
+    }.getOrNull()
+    fun save(slot: String, key: String, n: Int, box3: List<Long>, mesh: ByteArray) {
+        val f = file(slot)?.takeIf { slot.isNotEmpty() } ?: return
+        runCatching {
+            f.parentFile?.mkdirs()
+            val tmp = java.io.File(f.path + ".tmp")
+            java.io.DataOutputStream(tmp.outputStream().buffered()).use { o -> o.writeUTF(key); o.writeInt(n); o.writeInt(box3.size); box3.forEach { o.writeLong(it) }; o.writeInt(mesh.size); o.write(mesh) }
+            tmp.renameTo(f)
+            f.parentFile?.listFiles { x -> x.name.endsWith(".bin") }?.sortedByDescending { it.lastModified() }?.drop(MOST)?.forEach { it.delete() }
+        }
     }
 }
 
@@ -251,7 +284,7 @@ class PlotFrame(
     val none: String, val at: Long, val fam: String = key,
 )
 
-class MeshFrame(val key: String, val mesh: PlotMesh?, val none: String, val at: Long)
+class MeshFrame(val key: String, val mesh: PlotMesh?, val none: String, val at: Long, val decoding: Boolean = false)
 
 // Exact bytes identify a revision; no hash collision can reuse old geometry.
 // The demultiplexer stays free to cancel work while one mesh is being built.
@@ -290,6 +323,25 @@ class PlotStore {
     private val assets = PlotMeshAssets()
     private val meshQueue = Executors.newSingleThreadExecutor()
     fun cachedMesh(key: String): MeshFrame? = assets.frame(key)
+    /** The view the models now arriving are for (MeshDisk's slot), set by `cached` */
+    @Volatile private var slot = ""
+
+    /** A 3D view opens: the model it showed last (MeshDisk) is drawn at once, and its id returned for `viewer.watch {kept}` ("" for none).
+     *  The models that arrive from now on are kept for this view. Main thread. */
+    fun cached(slot: String): String {
+        this.slot = slot
+        val o = MeshDisk.load(slot) ?: return ""
+        val key = o["key"] as String; val bytes = o["mesh"] as ByteArray
+        val ticket = assets.issue(key, assets.epoch()) ?: return ""
+        val gen = generation
+        meshQueue.execute {
+            if (!assets.current(key, ticket)) return@execute
+            val m = runCatching { PlotMesh.decode(o) { !assets.current(key, ticket) } }.getOrNull() ?: return@execute
+            assets.put(key, o.int("n"), bytes, m, ticket)
+            main.post { if (gen == generation && assets.current(key, ticket)) mesh = MeshFrame(key, m, "", System.currentTimeMillis()) }
+        }
+        return PlotMesh.id(bytes)
+    }
     fun cachedFrame(key: String): PlotFrame? = frame?.takeIf { it.key == key } ?: splitFrames[key]
     private fun keepFrame() {
         val f = frame ?: return
@@ -316,6 +368,7 @@ class PlotStore {
     fun receive(b: ByteArray) {
         val gen = generation
         val epoch = assets.epoch()
+        val slot = slot
         queue.execute {
             val o = runCatching { Cbor.decode(b) as? Map<String, Any?> }.getOrNull() ?: return@execute
             val key = o["key"] as? String ?: ""
@@ -345,7 +398,7 @@ class PlotStore {
                 val previous = assets.frame(key)?.mesh
                 main.post {
                     if (gen == generation && assets.current(key, ticket))
-                        mesh = MeshFrame(key, previous, "Received model; decoding…" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis())
+                        mesh = MeshFrame(key, previous, "Received model; decoding…" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis(), decoding = true)
                 }
                 meshQueue.execute meshJob@ {
                     if (!assets.current(key, ticket)) return@meshJob
@@ -354,7 +407,7 @@ class PlotStore {
                     val result = runCatching { assets.same(key, n, bytes) ?: PlotMesh.decode(o) { !assets.current(key, ticket) } }
                     if (!assets.current(key, ticket)) return@meshJob
                     val m = result.getOrNull()
-                    if (m != null) assets.put(key, n, bytes, m, ticket)
+                    if (m != null) { assets.put(key, n, bytes, m, ticket); MeshDisk.save(slot, key, n, (o["box3"] as? List<*>)?.map { (it as? Long) ?: 0L }.orEmpty(), bytes) }
                     main.post {
                         if (gen != generation || !assets.current(key, ticket)) return@post
                         mesh = MeshFrame(key, m ?: previous,

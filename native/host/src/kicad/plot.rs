@@ -98,6 +98,9 @@ pub fn frame(key: &str, fam: &str, base: &str, p: &Plot, rs: &[Ref]) -> Vec<u8> 
     } }
     o
 }
+/// A model's id on the wire: FNV-1a, 64 bits, of its `mesh` bytes. A phone keeps the model it last showed and names it (as 16 hex digits,
+/// `viewer.watch {kept}`); the hub then sends that model only if it changed. The phones compute the same over the bytes they received.
+pub fn mesh_id(d: &[u8]) -> u64 { d.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)) }
 /// Plot.msg.solid: `{1: "plot", 31: key, box3, n, mesh}`.
 pub fn solid_frame(key: &str, so: &Solid) -> Vec<u8> {
     let mut o = Vec::with_capacity(64 + so.d.len());
@@ -149,5 +152,12 @@ mod tests {
         let s = String::from_utf8_lossy(&f).into_owned(); assert!(s.contains("fam") && s.contains("base") && s.contains("thick"));
         assert!(f.windows(3).any(|w| w == [0x41, 0x01, 0x02] || w == [0x42, 0x01, 0x02])); // d as a byte string
         let m = solid_frame("2|/p|", &Solid { n: 1, b: [1, 2, 3, 4, 5, 6], d: vec![9] }); assert_eq!(m[0], 0xa5);
+    }
+    #[test] fn a_models_id_is_fnv1a_64_of_its_bytes() {
+        // the phones (Plot.swift, Plot.kt) compute the same: these are their tests' values too
+        assert_eq!(mesh_id(b""), 0xcbf29ce484222325);
+        assert_eq!(mesh_id(b"a"), 0xaf63dc4c8601ec8c);
+        assert_eq!(mesh_id(&[0, 255, 128]), mesh_id(&[0, 255, 128]));
+        assert_ne!(mesh_id(&[1, 2]), mesh_id(&[2, 1]));
     }
 }

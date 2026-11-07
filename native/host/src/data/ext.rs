@@ -205,6 +205,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 let path = if path.is_empty() || path.starts_with('/') { path.to_string() } else { format!("{root}/{path}") };
                 let mut q = json!({"kind":kind,"root":root,"path":path});
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
+                if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() } // the model the phone has cached (plot::mesh_id, hex): not sent again
                 rpc(hub, c, "kicad.watch", q).await?; Ok(json!({"root":root}))
             }
             // the Layers menu and Compare (feature "layers"): the hub's own focus rules and comparison paths, so the phones decide nothing

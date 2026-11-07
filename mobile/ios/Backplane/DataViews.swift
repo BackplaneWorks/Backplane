@@ -35,7 +35,7 @@ struct DataRoot: View {
             if !client.links.isEmpty, client.conn == .offline { client.connect() }
             #if DEBUG
             // a check without hands: BACKPLANE_SELECT opens a thread, or a page by @name
-            if let t = ProcessInfo.processInfo.environment["BACKPLANE_SELECT"], !t.isEmpty { if t.hasPrefix("@") { path.append(DPage(name: String(t.dropFirst()))) } else { path.append(t) } }
+            if let t = ProcessInfo.processInfo.environment["BACKPLANE_SELECT"], !t.isEmpty { if t.hasPrefix("@") { path.append(DPage(name: String(t.dropFirst()))) } else if t.hasPrefix("viewer:") { let id = String(t.dropFirst(7)); path.append(id); path.append(DViewerRoute(id: id)) } else { path.append(t) } }
             // a link as if opened from outside, through the same route as onOpenURL: a simulator cannot answer iOS's own "Open in …?" before it
             if let s = ProcessInfo.processInfo.environment["BACKPLANE_OPEN_URL"], let u = URL(string: s) { try? await Task.sleep(for: .seconds(1)); route(u) }
             #endif
@@ -110,7 +110,10 @@ struct DataThreadsView: View {
         }
         .navigationDestination(for: String.self) { DataThreadView(client: client, id: $0) }
         .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
-        .navigationDestination(for: DViewerRoute.self) { r in if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t) } }
+        .navigationDestination(for: DViewerRoute.self) { r in
+            if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t) }
+            else { DLoading(text: client.conn == .online ? "Loading the thread…" : "Connecting to the hub…") } // never a blank page while the thread list comes
+        }
         .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else { DataImprovementsView(client: client) } }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
         .alert("Rename project", isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {

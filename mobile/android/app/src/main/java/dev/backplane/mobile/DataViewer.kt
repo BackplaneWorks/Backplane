@@ -46,7 +46,12 @@ fun ViewerScreen(thread: DThread, back: () -> Unit) {
     var tab by remember { mutableStateOf("Files") }
     var target by remember { mutableStateOf<Target?>(null) }
     var files by remember { mutableStateOf<DataClient.ProjectFiles?>(null) }
-    LaunchedEffect(thread.id) { files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files?.pcb?.isNotEmpty() == true) tab = "Board" }
+    val online = DataClient.conn == DataClient.Conn.ONLINE
+    LaunchedEffect(thread.id, online) {
+        if (files != null) return@LaunchedEffect
+        files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files?.pcb?.isNotEmpty() == true && tab == "Files") tab = "Board"
+        DataClient.openViewerTab?.takeIf { it in tabs }?.let { tab = it; DataClient.openViewerTab = null }
+    }
     DisposableEffect(thread.id) { onDispose { DataClient.stopWatch(thread.id) } }
     Column(Modifier.fillMaxSize()) {
         DBar("Viewer · ${thread.title.ifEmpty { "New thread" }}", back)
@@ -58,9 +63,9 @@ fun ViewerScreen(thread: DThread, back: () -> Unit) {
         DLine()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
-                "Board" -> PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: "", files?.pcb.orEmpty().isNotEmpty() || target != null, "No board in this project yet")
-                "Schematic" -> PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: "", files?.sch.orEmpty().isNotEmpty() || target != null, "No schematic in this project yet")
-                "3D" -> PlotTab(thread, "3d", "", files?.pcb.orEmpty().isNotEmpty(), "No board in this project yet")
+                "Board" -> PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: "", files == null || files?.pcb.orEmpty().isNotEmpty() || target != null, "No board in this project yet")
+                "Schematic" -> PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: "", files == null || files?.sch.orEmpty().isNotEmpty() || target != null, "No schematic in this project yet")
+                "3D" -> PlotTab(thread, "3d", "", files == null || files?.pcb.orEmpty().isNotEmpty(), "No board in this project yet")
                 "Split" -> SplitTab(thread, files)
                 "Diff" -> DiffTab(thread)
                 "Review" -> ReviewTab(thread)
@@ -84,7 +89,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     var refs by remember { mutableStateOf<List<DataClient.Ref>?>(null) }
     var comparing by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
-    LaunchedEffect(thread.id, kind, path, has) {
+    LaunchedEffect(thread.id, kind, path, has, DataClient.conn == DataClient.Conn.ONLINE) {
         if (!has) return@LaunchedEffect
         error = ""; layers = null; refs = null; comparing = ""; info = ""
         runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" }
@@ -125,11 +130,13 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             !has -> none
             error.isNotEmpty() -> error
             frame != null && frame.none.isNotEmpty() -> frame.none
-            three && mesh != null && mesh.none.isNotEmpty() -> mesh.none
+            three && mesh != null && !mesh.decoding && mesh.none.isNotEmpty() -> mesh.none
             else -> ""
         }
-        if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
-        else if (frame == null && (!three || mesh == null)) CircularProgressIndicator(Modifier.align(Alignment.Center))
+        if (say.isNotEmpty() && three && mesh?.mesh != null) DMono(say, dcs.onSurfaceVariant, 11, Modifier.align(Alignment.TopStart).padding(8.dp).background(dcs.surfaceVariant.copy(alpha = 0.85f)).padding(8.dp).testTag("viewer.note"))
+        else if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
+        else if (three && (mesh?.mesh == null || mesh.decoding)) Loading("Loading 3D model…", Modifier.align(Alignment.Center))
+        else if (frame == null && !three) CircularProgressIndicator(Modifier.align(Alignment.Center))
         val l = layers
         if (!three && layersPresent.isNotEmpty() && l != null) {
             Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -216,9 +223,18 @@ private fun MechSolid(thread: DThread, path: String) {
             val c = bgArgb; s.renderer.bg = floatArrayOf(((c shr 16) and 255) / 255f, ((c shr 8) and 255) / 255f, (c and 255) / 255f)
             s.mesh(mesh)
         })
-        val say = if (error.isNotEmpty()) error else mesh?.none.orEmpty()
+        val say = if (error.isNotEmpty()) error else mesh?.takeIf { !it.decoding }?.none.orEmpty()
         if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
-        else if (mesh == null) CircularProgressIndicator(Modifier.align(Alignment.Center))
+        else if (mesh?.mesh == null || mesh.decoding) Loading("Loading 3D model…", Modifier.align(Alignment.Center))
+    }
+}
+
+/** A model on its way: a spinner and what it waits for, over the board's plain slab while the parts come (never a blank view) */
+@Composable
+private fun Loading(text: String, modifier: Modifier) {
+    Column(modifier.background(dcs.surfaceVariant.copy(alpha = 0.85f)).padding(16.dp).testTag("viewer.loading"), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        CircularProgressIndicator()
+        DMono(text, dcs.onSurfaceVariant, 12)
     }
 }
 

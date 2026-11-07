@@ -32,7 +32,8 @@ pub fn fnv(s: &str) -> u32 { s.chars().fold(2166136261u32, |h, c| (h ^ c as u32)
 
 #[derive(Default)]
 struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool }
-struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String }
+/// `kept`: the id (`plot::mesh_id`) of the model the client already holds from an earlier visit; that model is not sent again
+struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64 }
 #[derive(Default)]
 struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String> }
 
@@ -48,8 +49,8 @@ impl Plots {
 
     /// kicad.watch: kind "board", "schematic", "3d", "3d-bare" or "3d-full" shows it, anything else stops. The client's
     /// other views are dropped; a new plot view starts from the chunks of the one it replaces (Sub.carry), a 3D view also
-    /// watches the board's plot beside the model.
-    pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str) {
+    /// watches the board's plot beside the model. `kept` names the model the client has cached (0: none).
+    pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str, kept: u64) {
         let Some(kind) = kind else { self.stop(client); return };
         let board = |k: u32| if path.is_empty() { let f = project::read(root); if k == 1 { f.sch } else { f.pcb } } else { path.to_string() };
         let file = board(kind);
@@ -67,7 +68,7 @@ impl Plots {
           st.subs.remove(&client);
           for (i, (k, ky, f)) in views.into_iter().enumerate() {
               let carries = i == 0 && !solid_kind(k);
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh: vec![], fresh: true, base: if carries { carry.1.clone() } else { String::new() } });
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh: vec![], fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if solid_kind(k) { kept } else { 0 } });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: f.clone(), ..Default::default() });
               s.file = f;
               if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None } // Pv.fresh: a plot of an older file is not sent
@@ -90,7 +91,7 @@ impl Plots {
         { let mut st = self.st.lock().unwrap();
           st.subs.remove(&client);
           for (k, ky, file) in views {
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new() });
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: file.clone(), ..Default::default() });
               s.file = file;
               if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None }
@@ -154,7 +155,9 @@ impl Plots {
               if only.map_or(false, |o| o != *client) { continue }
               for sub in subs.iter_mut().filter(|s| s.key == ky) {
                   let ok = if let Some(so) = &p.solid { // Pv.send.solid
-                      if so.d == sub.mesh { true } else { let ok = hub.push_raw(*client, plot::solid_frame(ky, so)); sub.mesh = so.d.clone(); ok }
+                      if so.d == sub.mesh { true }
+                      else if sub.kept != 0 && plot::mesh_id(&so.d) == sub.kept { sub.mesh = so.d.clone(); sub.kept = 0; true } // the client's cached model is this one
+                      else { let ok = hub.push_raw(*client, plot::solid_frame(ky, so)); sub.mesh = so.d.clone(); sub.kept = 0; ok }
                   } else {
                       let rs = plot::delta(&p.cs, &sub.held);
                       let ok = if !sub.fresh && plot::quiet(&rs, sub.held.len()) { true } else { hub.push_raw(*client, plot::frame(ky, &family(ky), &sub.base, p, &rs)) };
@@ -338,7 +341,7 @@ impl RpcHandler for KicadRpc {
                     if !kind.is_empty() && !(crate::files::threadpath::absolute(&root) || crate::files::threadpath::absolute(&path)) { return vec![crate::files::threadpath::refusal(id)] }
                     if !kind.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
                     if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree")) }
-                    else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree")); }
+                    else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), u64::from_str_radix(&s("kept"), 16).unwrap_or(0)); }
                     vec![json!({"t":"reply","id":id,"ok":true})]
                 }
                 "kicad.warm" => { // the saved versions before and after a step, plotted ahead
