@@ -13,7 +13,10 @@ pub struct FarSync { pub store: Arc<FarStore>, pub peering: Arc<Peering>, pub fe
 /// Far.own.id: a live link that is one of the owner's machines (verified, not off, found by this hub).
 pub fn own_link(p: &Peers, machines_json: &Value, link: &str) -> bool {
     let Some(row) = p.peer(link).filter(|r| !r.revoked) else { return false };
-    p.verified(link) && !p.sync_off(&row.name) && machines::machine(machines_json, &row.name, &row.url).is_some()
+    // (right after a start nothing is published yet, until the first pass of the machine finder has asked every machine /hello: a link the
+    // person approved does not stop being theirs for those seconds, so the machine list only decides once it exists)
+    let finding = machines_json.as_object().map_or(true, |o| o.is_empty());
+    p.verified(link) && !p.sync_off(&row.name) && (finding || machines::machine(machines_json, &row.name, &row.url).is_some())
 }
 /// The links whose mirrors the sidebar shows, with the machine's name: verified (the owner's own), not revoked, sync not set off.
 pub fn shown_names(peering: &Peering) -> Vec<(String, String)> {
