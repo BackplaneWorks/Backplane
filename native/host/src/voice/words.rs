@@ -146,12 +146,13 @@ pub fn gap(before: &str) -> bool { before.chars().last().map_or(false, |c| !spac
 pub fn starts(before: &str) -> bool { before.ends_with('\n') || before.trim_end().chars().last().map_or(true, |c| matches!(c, '.' | '!' | '?')) }
 /// The first word is a plain capitalised word.
 fn plain(s: &str) -> bool {
-    let mut it = s.chars(); if !it.next().map_or(false, |c| c.is_ascii_uppercase()) { return false }
-    for c in it { if c.is_ascii_lowercase() || c == '\'' || c == '’' { continue } return !alnum(c) }
+    let mut it = s.chars(); if !it.next().map_or(false, |c| c.is_uppercase()) { return false }
+    for c in it { if c.is_lowercase() || c == '\'' || c == '’' { continue } return !alnum(c) }
     true
 }
 /// "I", "I'm", "I've": the capital stays.
-fn own(s: &str) -> bool { let mut it = s.chars(); it.next() == Some('I') && !it.next().map_or(false, |c| c.is_ascii_lowercase()) }
+fn own(s: &str) -> bool { let mut it = s.chars(); it.next() == Some('I') && !it.next().map_or(false, |c| c.is_lowercase()) }
+/// The first character lower-cased; it may become more than one ("İ" is "i" and a combining dot).
 fn lower1(s: &str) -> String { let mut it = s.chars(); it.next().map_or(String::new(), |c| c.to_lowercase().chain(it).collect()) }
 /// The segment as it reads after `before`: mid-sentence its first word loses the capital the transcriber gives every segment, unless it is "I", a dictionary term (`firm`) or not a plain word.
 pub fn casing(firm: bool, before: &str, s: &str) -> String { if !starts(before) && !firm && plain(s) && !own(s) { lower1(s) } else { s.to_string() } }
@@ -162,7 +163,7 @@ pub fn put(firm: bool, draft: &str, at: usize, text: &str) -> Ins {
     let cs = chars(draft); let at = at.min(cs.len()); let seg = text.trim();
     if seg.is_empty() { return Ins { text: draft.to_string(), caret: at } }
     let (before, after): (String, String) = (cs[..at].iter().collect(), cs[at..].iter().collect());
-    let s = unstop(after.trim_start().chars().next().map_or(false, |c| c.is_ascii_lowercase()), casing(firm, &before, seg));
+    let s = unstop(after.trim_start().chars().next().map_or(false, |c| c.is_lowercase()), casing(firm, &before, seg));
     let lead = if gap(&before) { " " } else { "" };
     let tail = if after.chars().next().map_or(false, alnum) { " " } else { "" };
     Ins { caret: at + lead.len() + len(&s), text: format!("{before}{lead}{s}{tail}{after}") }
@@ -191,6 +192,17 @@ mod tests {
         assert_eq!(dict_add(dict(), "kicad"), dict()); assert_eq!(dict_add(dict(), "  "), dict());
         assert_eq!(dict_remove(dict(), " backplane").join("\n"), "KiCad\nPebble Index\nSTM32");
         assert_eq!(keywords(&vec!["x".to_string(); 150]).len(), 100); assert_eq!(keywords(&dict()), &dict()[..]);
+    }
+    #[test] fn mid_sentence_casing_knows_every_alphabet() {
+        assert_eq!(put(false, "café", 4, "Ça marche.").text, "café ça marche.");
+        assert_eq!(put(false, "он сказал", 9, "Привет всем.").text, "он сказал привет всем.");
+        assert_eq!(put(false, "go to", 5, "İzmir later.").text, "go to i\u{307}zmir later.", "one capital, two characters");
+        assert_eq!(put(false, "so", 2, "Ich weiß es").text, "so ich weiß es");
+        assert_eq!(put(false, "so", 2, "I think").text, "so I think", "I stays");
+        assert_eq!(put(false, "so", 2, "ΑΒΓ now").text, "so ΑΒΓ now", "all capitals is not a plain word");
+        assert_eq!(put(true, "in", 2, "Ωmega board").text, "in Ωmega board", "a dictionary term keeps its capital");
+        assert_eq!(put(false, "", 0, "Done.").text, "Done.", "a sentence's start keeps it");
+        assert_eq!(put(false, "x ποτέ", 1, "Τέλος.").text, "x τέλος ποτέ", "the period goes before a lower-case word in any alphabet");
     }
     #[test] fn edit_distance() { assert_eq!((lev("kitten", "sitting"), lev("", "abc"), lev("abc", "abc")), (3, 3, 0)); }
     #[test] fn which_words_to_ask_about() {

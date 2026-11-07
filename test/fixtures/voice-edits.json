@@ -230,7 +230,7 @@
       }
     },
     {
-      "name": "characters, not bytes",
+      "name": "characters, not bytes; a capital in any alphabet goes mid-sentence",
       "draft": "café",
       "caret": 4,
       "steps": [
@@ -245,14 +245,130 @@
         "edits": [
           {
             "del": 0,
-            "ins": " Ça marche.",
+            "ins": " ça marche.",
             "adv": 11,
             "to": 11
           }
         ],
-        "text": "café Ça marche.",
+        "text": "café ça marche.",
         "mark": 15,
         "caret": 15
+      }
+    },
+    {
+      "name": "Greek: the capital goes mid-sentence, its tail rewritten",
+      "draft": "είπε",
+      "caret": 4,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "",
+          "tail": "Γεια"
+        },
+        {
+          "first": true,
+          "firm": false,
+          "commit": "Γεια σου.",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": " γεια",
+            "adv": 0,
+            "to": 5
+          },
+          {
+            "del": 5,
+            "ins": " γεια σου.",
+            "adv": 10,
+            "to": 10
+          }
+        ],
+        "text": "είπε γεια σου.",
+        "mark": 14,
+        "caret": 14
+      }
+    },
+    {
+      "name": "a capital that lower-cases to two characters (İ)",
+      "draft": "go to",
+      "caret": 5,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "İzmir later.",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": " i̇zmir later.",
+            "adv": 14,
+            "to": 14
+          }
+        ],
+        "text": "go to i̇zmir later.",
+        "mark": 19,
+        "caret": 19
+      }
+    },
+    {
+      "name": "I keeps its capital",
+      "draft": "so",
+      "caret": 2,
+      "steps": [
+        {
+          "first": true,
+          "firm": false,
+          "commit": "I think so.",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": " I think so.",
+            "adv": 12,
+            "to": 12
+          }
+        ],
+        "text": "so I think so.",
+        "mark": 14,
+        "caret": 14
+      }
+    },
+    {
+      "name": "a dictionary term keeps its capital in any alphabet",
+      "draft": "in",
+      "caret": 2,
+      "steps": [
+        {
+          "first": true,
+          "firm": true,
+          "commit": "Ωmega board",
+          "tail": ""
+        }
+      ],
+      "want": {
+        "edits": [
+          {
+            "del": 0,
+            "ins": " Ωmega board",
+            "adv": 12,
+            "to": 12
+          }
+        ],
+        "text": "in Ωmega board",
+        "mark": 14,
+        "caret": 14
       }
     }
   ],
