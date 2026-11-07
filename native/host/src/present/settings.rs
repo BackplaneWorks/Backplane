@@ -251,10 +251,11 @@ fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         _ => "KiCad was not found. Set its folder below, or install it from kicad.org.".to_string(),
     };
     let path = if session["drafts"]["@f.kpath"].is_string() { draft(session, "@f.kpath") } else { set(st, "kicad.path", "") };
-    let free = if i("freecad").is_empty() { "FreeCAD was not found. Mechanical parts are made with it.".to_string() } else { i("freecad").to_string() };
+    let free = if i("freecad").is_empty() { if set(st, "freecad.path", "").is_empty() { "FreeCAD was not found. Mechanical parts are made with it.".to_string() } else { "FreeCAD was not found at that path.".to_string() } } else { i("freecad").to_string() };
+    let fpath = if session["drafts"]["@f.fpath"].is_string() { draft(session, "@f.fpath") } else { set(st, "freecad.path", "") };
     vec![
         row_f("KiCad", &kicad, vec![field("kpath", "Path to KiCad's command line, empty for the one on PATH", path)], vec![btn("Set", "kicad-path", "", true)]),
-        row("FreeCAD", &free, vec![]),
+        row_f("FreeCAD", &free, vec![field("fpath", "Path to FreeCAD's command line (freecadcmd), empty to look for it", fpath)], vec![btn("Set", "freecad-path", "", true)]),
         row("KiCad over its API", "Lets agents edit a board in a running KiCad. Off uses the files only.", chips(&["on", "off"], set(st, "kicad.ipc", "on"), "kicad.ipc")),
     ]
 }
@@ -357,7 +358,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
             if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
-            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
+            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
         "update-check" => { send(session, hub, "update.check", json!({}), &mut cmds, &mut rid); json!({}) }
         // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
@@ -375,6 +376,12 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             send(session, hub, "setting.set", json!({"key": "kicad.path", "value": raw}), &mut cmds, &mut rid);
             json!({"drafts": {"@f.kpath": raw}})
         }
+        "freecad-path" => {
+            if !session["drafts"]["@f.fpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
+            let raw = draft(session, "@f.fpath").trim().to_string();
+            send(session, hub, "setting.set", json!({"key": "freecad.path", "value": raw}), &mut cmds, &mut rid);
+            json!({"drafts": {"@f.fpath": raw}})
+        }
         // an API key forgotten: the first press asks, the same again forgets it (ApiKeys.del)
         "key-del" => {
             if value.is_empty() { return None }
@@ -388,7 +395,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "kname" | "vterm") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }
@@ -494,6 +501,12 @@ mod tests {
         assert!(r[1]["note"].as_str().unwrap().contains("10.0.7")); assert_eq!(r[1]["fields"][0]["name"], "kpath");
         let s = json!({"rid": 3, "drafts": {"@f.kpath": " /opt/kicad/bin "}}); let o = act("h", &s, "kicad-path", "").unwrap();
         assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"kicad.path","value":"/opt/kicad/bin""#));
+    }
+    #[test] fn cad_sets_the_freecad_path_on_a_press() {
+        let r = pg_rows("cad", &[], json!({}), json!({}));
+        assert_eq!(r[2]["fields"][0]["name"], "fpath"); assert_eq!(r[2]["buttons"][0]["action"], "freecad-path");
+        let s = json!({"rid": 3, "drafts": {"@f.fpath": " /opt/fc/bin/freecadcmd "}}); let o = act("h", &s, "freecad-path", "").unwrap();
+        assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"freecad.path","value":"/opt/fc/bin/freecadcmd""#));
     }
     #[test] fn a_page_leads_with_the_way_back_and_marks_the_current_chip() {
         let v = view(&st(&[("settle.idle.minutes", "30"), ("restart.continue", "off")]), &json!({"drafts": {"@settings.page": "threads"}}), &json!({}));

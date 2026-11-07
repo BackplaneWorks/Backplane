@@ -79,11 +79,15 @@ pub fn mac_apps(rel: &str) -> Vec<String> {
 }
 /// KiCad's command line inside its macOS bundle: the unified installer's KiCad/KiCad.app, or a bare KiCad.app.
 pub fn kicad_mac_clis() -> Vec<String> { ["KiCad/KiCad.app/Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"].iter().flat_map(|r| mac_apps(r)).collect() }
-/// FreeCAD.find: BACKPLANE_FREECAD, the managed install under the hub's home, then FreeCAD's command names on PATH, then macOS's app
+/// FreeCAD.find: the `freecad.path` setting, BACKPLANE_FREECAD, the managed install under the hub's home, then FreeCAD's command names on PATH, then macOS's app
+/// The `freecad.path` setting (Settings > CAD), kept here by the watcher in ipc.rs so every launch of FreeCAD reads it without a hub in hand.
+static FC_SETTING: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+pub fn set_freecad_setting(v: &str) { *FC_SETTING.write().unwrap_or_else(|e| e.into_inner()) = v.trim().to_string() }
+pub fn freecad_setting() -> String { FC_SETTING.read().unwrap_or_else(|e| e.into_inner()).clone() }
 pub fn freecad_cmd(home: &Path) -> String {
     let managed = std::fs::read_to_string(home.join("freecad/command")).ok().and_then(|t| t.lines().next().map(str::to_string)).unwrap_or_default();
     let env = std::env::var("BACKPLANE_FREECAD").unwrap_or_default();
-    let mut cands: Vec<String> = vec![env, managed, "freecadcmd".into(), "FreeCADCmd".into(), "freecad.cmd".into()];
+    let mut cands: Vec<String> = vec![freecad_setting(), env, managed, "freecadcmd".into(), "FreeCADCmd".into(), "freecad.cmd".into()];
     cands.extend(mac_apps("FreeCAD.app/Contents/Resources/bin/freecadcmd"));
     cands.iter().filter(|c| !c.is_empty()).find_map(|c| on_path(c)).unwrap_or_default()
 }
