@@ -1028,21 +1028,11 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
   its cached mirror stays visible until then. Direct paired-owner Active rows and focused thread/bot headers keep the machine name too; an offline owner is marked away, and an already-marked mirror keeps its original title. When the paired owner differs from
   the focused hub, its machine badge remains visible. Hidden Older and Settled
   counts also drop duplicates.
-- Pairing. The owner's machines link by themselves; nobody pastes an
-  invite. Every two minutes a hub lists the
-  tailnet's online machines of its owner that answer `GET /hello`
-  (`Machines.*`), and each minute it asks those it is not linked to and
-  whose address is above its own (so of two hubs exactly one asks) with
-  `POST /bots/pair?name=<its name>&url=<its address>`. Only the owner's
-  own devices may call it (the tailnet listener's `tailscale whois`, the
-  same trust as the websocket); the answer is a fresh invite, joined like
-  a pasted one (`BotJob.join`), unless the asker is none of the machines
-  the hub found (403: its link could not reach back), sync with it is off
-  (403) or a live link already reaches it (409). A hub started with
-  `--no-tailscale` still lists the tailnet machines to switch to but pairs
-  only with hubs `BACKPLANE_PEERS` names (`named`), so a throwaway hub
-  never links itself to real ones. Laws `mate_*`; `test/tools/far_e2e.ts`
-  pairs its two hubs this way.
+- Pairing. Machines never link by themselves, whatever Tailscale account they are on. Every two minutes a hub lists the
+  tailnet machines that answer `GET /hello` (`Machines.*`, whoever owns them: `same_user` says which are the owner's) as
+  suggestions only. A link is made by `docs/pairing.md`'s machine pairing: a code made on one machine, a request that waits
+  there for the person's approval, then the signed `POST /bots/link`. `PeerTable::verified` is true only for a link made that
+  way (`peer.own.<id>` = `approved`) or one the person marked Mine (`owner`); older links keep working but are unpaired.
 - Pairing without Tailscale. Two hubs that name each other in
   `BACKPLANE_PEERS` (on one machine, or on a LAN) hold no credential of
   each other's, and Tailscale cannot say whose the asker is. The ask then

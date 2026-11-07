@@ -26,7 +26,7 @@ anything; revoking a used one also revokes the device it paired and closes that
 device's connections. A hub pairs only with a link it issued, recorded and has
 not revoked; one it cannot record is never issued. The newest hundred finished
 links stay listed. Hub-to-hub invites (`bp1:`, made in Bots to link a
-machine, and the ones hubs give each other when they pair by themselves) are
+machine, and the machine codes below) are
 recorded and listed here too, as machine invites: they expire after ten
 minutes and work once like a device invitation, and revoking a used one
 unlinks the machine it linked. A short code needs the hub
@@ -66,9 +66,49 @@ machine invite that names 127.0.0.1. `test/mobile/hubs_cases.json` holds both
 phones to the same list and address rules (`HubListTest`,
 `scripts/mobile/ios-hub-list-test.sh`, `test/mobile/hub_list_ref.py`).
 
-`test/e2e/pairing/link.py` links two running temp-home hubs the way Bots and Setup
-do (`bots.invite`, `bots.join`) and checks both logs hold the link, and that it
-survives a restart with `--restart-b`.
+`test/e2e/pairing/link.py` links two running temp-home hubs: first by a machine code and an
+approval (a wrong code, a denied request, a request that waits and links nothing until approved, both sides recording
+`approved`), then the way Bots and Setup paste an invite (`bots.invite`, `bots.join`: unpaired), and checks both logs hold the
+link and that it survives a restart with `--restart-b`.
+
+## Pairing two machines
+
+Being signed into the same Tailscale account is not trust, and hubs never link by themselves. A link exists only after a code
+and an approval:
+
+1. Machine A makes a machine code (Settings → Machines → Make a code, or `backplane pair --machine`): eight characters of the
+   device-code alphabet, recorded as a machine invite (hash only), ten minutes, once.
+2. Machine B enters A's address and the code (Settings → Machines → Pair a machine, or a found machine's Pair, or
+   `backplane pair --join ADDRESS CODE`; a `bp1:` invite pasted into the address field still works, as an unpaired link).
+   B shows a six-digit check code and asks `POST /bots/pair/request`. A wrong code is refused; ten tries a minute hub-wide, right
+   or wrong, then everything waits. A code that works is spent, even if the request is denied.
+3. The request waits on A (Settings → Machines → Requests, or `backplane pair --requests`) showing B's name, address and the
+   same check code. The person approves (the secret is then kept on both sides and the link made) or denies; two minutes without
+   an answer is a refusal. B polls `POST /bots/pair/poll` and receives its invite once.
+4. Both hubs record the link as made by an approved pairing (`peer.own.<id>` = `approved`). That, or the person pressing Mine
+   on an existing link (`owner`), is what `PeerTable::verified` means: thread sharing, `/far/rpc` forwarding and owner mail rest
+   on it. Links made before this (set `pair` or `tailnet`) and pasted invites keep working and show as Unpaired until marked Mine
+   or paired again with a code.
+
+A hub never announces a loopback address (127.x, localhost, [::1]) to a hub that is not on loopback: B refuses to ask, and A
+refuses a request or a link that names one. Start the hub with Tailscale on, or set `BACKPLANE_URL`.
+
+Found on the network lists every tailnet machine that answers `GET /hello`, with `same_user` false for another account's. It
+is a suggestion with a code field, never a link.
+
+`backplane pair` (the launcher; it finds the running hub through `--home`, `$BACKPLANE_HOME` or the `--default` home, and its
+port in `<home>/hub.lock`, `--port` overrides) talks to the hub on loopback with the hub's own token, which it never prints:
+
+    backplane pair                       link, short code and QR for a new device
+    backplane pair --machine             a machine code
+    backplane pair --join ADDR CODE      ask the hub at ADDR; prints the check code and waits for the approval
+    backplane pair --requests            requests waiting here, and attempts made from here
+    backplane pair --approve ID | --deny ID
+
+Hub routes: `POST /bots/pair/request` and `/bots/pair/poll` (admitted by the code), `POST /bots/pair/local` (the hub's
+token; what the CLI calls), `POST /bots/link` (signed, as before). Socket methods: `machines.page`, `machines.page.act`
+(`PHONE-DATA.md`), `machines.code`, `machines.pair {address, code}` → `{attempt, check}`, `machines.attempt {attempt}`,
+`machines.requests`, `machines.approve {request}`, `machines.deny {request}`.
 
 ## Access and preservation
 

@@ -1,10 +1,11 @@
 //! `backplane hub ...`: one command to look after a hub, the same on Windows, Linux and macOS.
-mod http; mod plan; mod run; mod store; mod sys;
+mod http; mod pair; mod plan; mod run; mod store; mod sys;
 use serde_json::{json, Value};
 use std::{fs::{self, File}, path::PathBuf, process::{Command, Stdio}, time::Duration};
 use store::{Dir, now};
 
-const USAGE: &str = "usage: backplane hub status                 what the hub is doing, what failed last
+const USAGE: &str = "usage: backplane pair [--machine | --join ADDRESS CODE | --requests | --approve ID | --deny ID]   pair a device or a machine (backplane pair --help)
+       backplane hub status                 what the hub is doing, what failed last
        backplane hub restart [--now]          restart it (--now: cut running turns; they carry on after)
        backplane hub safe [--now]             restart with agents, routines and bots paused
        backplane hub normal [--now]           restart out of safe mode
@@ -171,6 +172,7 @@ fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let code = match a.first().map(String::as_str) {
         Some("hub") => hub(&a[1..]),
+        Some("pair") => pair::run(&a[1..]),
         Some("--version") => { println!("backplane {}", env!("CARGO_PKG_VERSION")); 0 }
         _ => { eprint!("{USAGE}"); 2 }
     };
