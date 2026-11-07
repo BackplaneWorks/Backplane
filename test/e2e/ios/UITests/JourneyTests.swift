@@ -424,7 +424,7 @@ final class Journeys: XCTestCase {
         d = Driver("data-part-info"); defer { d.finish() }
         let thread = d.env["HUB_VIEWER_THREAD"] ?? ""
         d.app.terminate()
-        d.app.launchArguments = ["-app.alerts", "NO"] // no notification question over the board
+        d.app.launchArguments = ["-app.alerts", "<false/>"] // no notification question over the board
         d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1"].merging(thread.isEmpty ? [:] : ["BACKPLANE_SELECT": "viewer:" + thread, "BACKPLANE_VTAB": "Board"]) { a, _ in a }
         d.app.launch()
         if thread.isEmpty {
@@ -456,6 +456,68 @@ final class Journeys: XCTestCase {
             d.step("a tap on empty space deselects", act: { at(0.95, 0.12).tap() }, expect: { !info.exists && surface.exists && surface.frame == size })
         }
         d.shot("after")
+    }
+
+    // Switching viewers never shows the last viewer's content: right after a switch the surface holds nothing of the old file (its
+    // accessibility value is the hub's keys of what is drawn), then the new file's. Two boards (HUB_VIEWER_THREAD, HUB_VIEWER_THREAD2:
+    // threads of two projects with boards) and the kinds of one, tapped fast. (The person saw the previous viewer's files after a switch.)
+    func test_data_viewer_switch() {
+        d = Driver("data-viewer-switch"); defer { d.finish() }
+        let a = d.env["HUB_VIEWER_THREAD"] ?? "", b = d.env["HUB_VIEWER_THREAD2"] ?? ""
+        guard !a.isEmpty, !b.isEmpty else { d.block("needs HUB_VIEWER_THREAD and HUB_VIEWER_THREAD2 (two threads of projects with boards)"); return }
+        let surface = d.el("data.viewer.surface")
+        func shown() -> String { surface.exists ? ((surface.value as? String) ?? "") : "" }
+        func open(_ t: String) {
+            d.app.terminate(); d.app.launchArguments = ["-app.alerts", "<false/>"]
+            d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1", "BACKPLANE_SELECT": "viewer:" + t, "BACKPLANE_VTAB": "Board"]
+            d.app.launch()
+            // iOS's own notification question, if the app asks it, is answered so it does not cover the viewer
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let no = springboard.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Don'")).firstMatch
+            if no.waitForExistence(timeout: 4) { no.tap() }
+        }
+        open(a)
+        guard d.step("board A is drawn", timeout: 40, act: {}, expect: { shown().hasPrefix("0|") }) else { return }
+        let rootA = shown().split(separator: "|").dropFirst().first.map(String.init) ?? ""
+        d.metrics["root_a"] = rootA
+        // the kinds, fast: Schematic, 3D, Board, Schematic; each switch drops the last kind's content at once
+        var stale: [String] = []
+        for (tab, want) in [("Schematic", "1|"), ("3D", "2|"), ("Board", "0|"), ("Schematic", "1|")] {
+            d.tap(d.el("data.vtab." + tab))
+            let now = shown()
+            if now.split(separator: "\n").contains(where: { !$0.hasPrefix(want) && !(want == "2|" && $0.hasPrefix("0|")) }) { stale.append("\(tab): \(now)") }
+        }
+        d.metrics["stale_after_tab_switch"] = stale
+        d.step("no tab shows the last tab's content", act: {}, expect: { stale.isEmpty })
+        d.step("the last tab tapped (Schematic) is what shows", timeout: 30, act: {}, expect: { let v = shown(); return v.hasPrefix("1|\(rootA)|") && !v.contains("\n") })
+        d.shot("a-schematic")
+        // A's 3D model, then the other board's 3D view: B's model takes a while (its export), and A's must not stand in for it
+        d.tap(d.el("data.vtab.3D"))
+        guard d.step("A's model is drawn", timeout: 60, act: {}, expect: { shown().contains("2|\(rootA)|") }) else { return }
+        let rows = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.thread.row.'"))
+        func go(_ t: String, _ tab: String) {
+            d.tap(d.el("data.back")); d.tap(d.el("data.back"))
+            let row = d.app.buttons["data.thread.row." + t]
+            if !row.waitForExistence(timeout: 8) { _ = rows.firstMatch.waitForExistence(timeout: 2) }
+            d.tap(row); d.tap(d.el("data.thread.viewer")); d.tap(d.el("data.vtab." + tab))
+        }
+        go(b, "3D")
+        let right = shown(); d.metrics["b_3d_right_after"] = right
+        d.step("B's 3D view shows nothing of A right after the switch", act: {}, expect: { !right.contains("|\(rootA)|") })
+        d.shot("b-3d-right-after")
+        d.step("then B's own board or model", timeout: 60, act: {}, expect: { let v = shown(); return !v.isEmpty && !v.contains("|\(rootA)|") })
+        let rootB = shown().split(separator: "|").dropFirst().first.map(String.init) ?? "?"
+        d.metrics["root_b"] = rootB
+        d.shot("b-3d")
+        // fast between the two boards' Board tabs
+        for t in [a, b, a] {
+            go(t, "Board")
+            let other = t == a ? rootB : rootA
+            if shown().contains("|\(other)|") { stale.append("thread \(t): \(shown())") }
+        }
+        d.step("switching threads never shows the other thread's board", act: {}, expect: { stale.isEmpty })
+        d.step("the last thread (A) shows its own board", timeout: 40, act: {}, expect: { shown().hasPrefix("0|\(rootA)|") })
+        d.shot("a-again")
     }
 
     func test_downloads() {

@@ -112,6 +112,9 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     }; Unit }
     LaunchedEffect(kind, path, bits) { if (!three && bits != 0 && DataClient.has("layers")) act("", "") }
     val off = layers?.off ?: 0; val dim = layers?.dim ?: 0; val lift = layers?.lift ?: 255
+    // debug builds: what is on show, by the hub's keys, to logcat (tag bpview; the switch test reads it: an interop view's semantics do not reach uiautomator)
+    val onShow = listOfNotNull(frame?.key, mesh?.takeIf { it.mesh != null }?.key).joinToString(" + ").ifEmpty { "nothing" }
+    if (BuildConfig.DEBUG) LaunchedEffect(onShow) { android.util.Log.i("bpview", "$kind: $onShow") }
     Box(Modifier.fillMaxSize().background(dcs.background)) {
         AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize().testTag("viewer.surface"), update = { s ->
             s.bindSource(thread.id + "\u0000" + kind + "\u0000" + path)

@@ -370,12 +370,64 @@ final class PlotStore {
 
     func cachedMesh(_ key: String) -> MeshFrame? { assets.frame(key) }
 
-    /// A 3D view opens: the model it showed last (MeshDisk) is drawn at once, and its id returned for `viewer.watch {kept}` ("" for none).
-    /// The models that arrive from now on are kept for this view.
-    func cached(_ slot: String) -> String {
+    // The view on show: the hub's keys of the plots it shows (`viewer.watch` answers them), nil while its watch is on its way.
+    // A plot for another key came late for a view that was left and is dropped; one that comes before the answer waits for it.
+    @ObservationIgnored private var accept: Set<String>? = []
+    @ObservationIgnored private var parked: [(key: String, o: [String: Any]?, f: PlotFrame?)] = []
+    /// This view's cached model (MeshDisk), drawn once the hub names its key among the view's
+    @ObservationIgnored private var disk: [String: Any]?
+    /// A 3D model's frames other than the model (`parts`, `part`: kicad's native board mesher streams the parts after the board), already
+    /// gated to the view on show; the parts' decoding hooks in here. A `parts` frame may come alone when the phone's kept model was the board.
+    @ObservationIgnored var more: ((String, [String: Any]) -> Void)?
+    private func wanted(_ key: String) -> Bool? { accept.map { $0.contains(key) } }
+    private func park(_ key: String, _ o: [String: Any]?, _ f: PlotFrame?) {
+        // a newer plot or model replaces the parked one of its key; a model's parts all wait, in order
+        parked.removeAll { $0.key == key && (($0.f != nil && f != nil) || ($0.o?["mesh"] != nil && o?["mesh"] != nil)) }
+        parked.append((key, o, f))
+    }
+
+    /// A viewer switches (a tab, a file, a thread): what the last one showed goes at once, plots for it are dropped from now on, and the
+    /// view's own cached model (`slot`: hub, thread, kind, path) waits to be named. Returns `viewer.watch {kept}` ("" for no cached model).
+    func begin(_ slot: String) -> String {
         self.slot = slot
-        guard let o = MeshDisk.load(slot), let key = o["key"] as? String, let bytes = o["mesh"] as? Data,
-              let ticket = assets.issue(key, epoch: assets.epoch()) else { return "" }
+        accept = nil; parked = []; frame = nil; mesh = nil; parts.reset() // the last view's parts go with its model
+        _ = assets.issue("", epoch: assets.epoch()) // a model still decoding for the last view is not shown
+        disk = slot.isEmpty ? nil : MeshDisk.load(slot)
+        guard let o = disk, let key = o["key"] as? String, let bytes = o["mesh"] as? Data else { return "" }
+        return key + "\t" + PlotMesh.id(bytes)
+    }
+    /// The hub named the view's plots: what waited for them is shown, the rest dropped; the cached model shows if it is of this view's file.
+    func shown(_ keys: [String]) {
+        accept = Set(keys)
+        let waiting = parked; parked = []
+        for p in waiting where accept!.contains(p.key) {
+            if let f = p.f { frame = f; keepFrame() } else if let o = p.o { route(o) }
+        }
+        if let o = disk, let key = o["key"] as? String, accept!.contains(key), mesh?.key != key { showDisk(o, key) }
+        disk = nil
+    }
+    /// The watch failed (no hub): the view's own cached model is all there is to show.
+    func failed() {
+        accept = []; parked = []
+        if let o = disk, let key = o["key"] as? String { accept = [key]; showDisk(o, key) }
+        disk = nil
+    }
+    /// The keys a view shows by the hub's rule (kicad/watch.rs `key`), for a hub that does not answer them.
+    static func keys(kind: String, root: String, path: String) -> [String] {
+        let p = path.isEmpty || path.hasPrefix("/") ? path : root + "/" + path
+        let k = { (n: Int, q: String) in "\(n)|\(root)|\(q)" }
+        switch kind {
+        case "board": return [k(0, p)]
+        case "schematic": return [k(1, p)]
+        case "3d": return [k(2, p), k(0, p)]
+        case "3d-bare": return [k(3, p), k(0, p)]
+        case "3d-full": return [k(4, p), k(0, p)]
+        case "split": return [k(1, p), k(0, ""), k(2, "")]
+        default: return []
+        }
+    }
+    private func showDisk(_ o: [String: Any], _ key: String) {
+        guard let bytes = o["mesh"] as? Data, let ticket = assets.issue(key, epoch: assets.epoch()) else { return }
         let assets = self.assets, gen = generation
         meshQueue.async {
             guard assets.current(key, ticket), let m = try? PlotMesh.decode(o, cancelled: { !assets.current(key, ticket) }) else { return }
@@ -387,7 +439,6 @@ final class PlotStore {
                 }
             }
         }
-        return PlotMesh.id(bytes)
     }
     func cachedFrame(_ key: String) -> PlotFrame? {
         if frame?.key == key { return frame }
@@ -417,12 +468,15 @@ final class PlotStore {
         splitOrder = []
         frame = nil
         mesh = nil
+        accept = []; parked = []
     }
+
+    /// A plot as JSON (the data socket's own frames: `{t:"plot", key, none}`, why a view has nothing to show)
+    func receiveJSON(_ o: [String: Any]) { guard o["none"] is String else { return }; route(o) }
 
     // decoded off the main thread, applied in arrival order
     func receive(_ d: Data) {
         let gen = generation
-        let assets = self.assets, meshQueue = self.meshQueue, epoch = assets.epoch(), slot = self.slot
         #if DEBUG && targetEnvironment(simulator)
         let drop = qualificationDrop
         #else
@@ -444,64 +498,11 @@ final class PlotStore {
             }
             #endif
             guard drop != "all", !(drop == "mesh" && solid) else { return }
-            if let why = o["none"] as? String {
-                guard let ticket = solid ? assets.issue(key, epoch: epoch) : 0 else { return }
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        guard gen == self.generation else { return }
-                        if solid {
-                            guard assets.current(key, ticket) else { return }
-                            let previous = assets.frame(key)?.mesh
-                            self.mesh = MeshFrame(key: key, mesh: previous, none: why + (previous == nil ? "" : " — previous saved revision shown"), at: Date()); return
-                        }
-                        self.held = []
-                        self.frame = PlotFrame(key: key, fam: fam, box: [], edge: [], thick: 0, chunks: [], fresh: [], none: why, at: Date())
-                        self.keepFrame()
-                    }
-                }
-                return
-            }
-            // the parts of a board's model: not a model of their own
-            if solid, o["parts"] != nil || o["part"] != nil {
-                let box = o
-                DispatchQueue.main.async { MainActor.assumeIsolated { if gen == self.generation { self.parts.receive(key, box) } } }
-                return
-            }
             // a note about the model (parts with no 3D model) is not a model
-            if solid, o["mesh"] == nil { return }
-            if solid {
-                guard let ticket = assets.issue(key, epoch: epoch) else { return }
-                let previous = assets.frame(key)?.mesh
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        guard gen == self.generation, assets.current(key, ticket) else { return }
-                        self.parts.boardChanged(key)
-                        self.mesh = MeshFrame(key: key, mesh: previous, none: "Received model; decoding…" + (previous == nil ? "" : " — previous saved revision shown"), at: Date(), decoding: true)
-                    }
-                }
-                meshQueue.async {
-                    guard assets.current(key, ticket) else { return }
-                    do {
-                        let bytes = o["mesh"] as? Data ?? Data(), n = o["n"] as? Int ?? 0
-                        let m = try assets.same(key, n: n, bytes: bytes) ?? PlotMesh.decode(o, cancelled: { !assets.current(key, ticket) })
-                        guard assets.current(key, ticket) else { return }
-                        assets.put(key, n: n, bytes: bytes, mesh: m, ticket: ticket)
-                        MeshDisk.save(slot, key: key, n: n, box3: o["box3"] as? [Int] ?? [], mesh: bytes)
-                        DispatchQueue.main.async {
-                            MainActor.assumeIsolated {
-                                guard gen == self.generation, assets.current(key, ticket) else { return }
-                                self.mesh = MeshFrame(key: key, mesh: m, none: "", at: Date())
-                            }
-                        }
-                    } catch {
-                        DispatchQueue.main.async {
-                            MainActor.assumeIsolated {
-                                guard gen == self.generation, assets.current(key, ticket) else { return }
-                                self.mesh = MeshFrame(key: key, mesh: previous, none: "Unable to decode model" + (previous == nil ? "" : " — previous saved revision shown"), at: Date())
-                            }
-                        }
-                    }
-                }
+            if o["none"] is String || solid {
+                // a model's other frames (its parts streaming in after it, `parts`/`part`) pass the same gate to `more`; a bare note does not
+                if solid && o["none"] == nil && o["mesh"] == nil && o["parts"] == nil && o["part"] == nil { return }
+                DispatchQueue.main.async { MainActor.assumeIsolated { guard gen == self.generation else { return }; self.route(o) } }
                 return
             }
             let refs = o["cs"] as? [Any] ?? []
@@ -525,14 +526,63 @@ final class PlotStore {
                     }
                     guard cs.allSatisfy({ $0 != nil }) else {
                         self.held = []
+                        guard self.wanted(key) != false else { return }
                         self.frame = PlotFrame(key: key, fam: fam, box: [], edge: [], thick: 0, chunks: [], fresh: [], none: "Invalid geometry reference. Retry to reload this view.", at: Date())
                         self.keepFrame()
                         return
                     }
                     let all = cs.compactMap { $0 }
-                    self.held = all
-                    self.frame = PlotFrame(key: key, fam: fam, box: box, edge: edge, thick: thick, chunks: all, fresh: fresh, none: "", at: Date())
-                    self.keepFrame()
+                    self.held = all // the hub's deltas count on what it sent, shown or not
+                    let f = PlotFrame(key: key, fam: fam, box: box, edge: edge, thick: thick, chunks: all, fresh: fresh, none: "", at: Date())
+                    switch self.wanted(key) {
+                    case .some(true): self.frame = f; self.keepFrame()
+                    case .none: self.park(key, nil, f)
+                    case .some(false): break
+                    }
+                }
+            }
+        }
+    }
+
+    /// A model or a plot's absence, on the main thread: for the view on show, waiting for it, or dropped
+    private func route(_ o: [String: Any]) {
+        let key = o["key"] as? String ?? ""
+        switch wanted(key) { case .none: park(key, o, nil); return; case .some(false): return; default: break }
+        let fam = (o["fam"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key
+        let solid = key.hasPrefix("2|") || key.hasPrefix("3|") || key.hasPrefix("4|")
+        if solid && o["none"] == nil && o["mesh"] == nil { parts.receive(key, o); more?(key, o); return } // parts after (or without) the model: for the view on show only
+        let assets = self.assets, meshQueue = self.meshQueue, gen = generation, slot = self.slot
+        guard let ticket = solid ? assets.issue(key, epoch: assets.epoch()) : 0 else { return }
+        let previous = solid ? assets.frame(key)?.mesh : nil
+        if let why = o["none"] as? String {
+            if solid { mesh = MeshFrame(key: key, mesh: previous, none: why + (previous == nil ? "" : " — previous saved revision shown"), at: Date()); return }
+            held = []
+            frame = PlotFrame(key: key, fam: fam, box: [], edge: [], thick: 0, chunks: [], fresh: [], none: why, at: Date())
+            keepFrame()
+            return
+        }
+        parts.boardChanged(key)
+        mesh = MeshFrame(key: key, mesh: previous, none: "Received model; decoding…" + (previous == nil ? "" : " — previous saved revision shown"), at: Date(), decoding: true)
+        meshQueue.async {
+            guard assets.current(key, ticket) else { return }
+            do {
+                let bytes = o["mesh"] as? Data ?? Data(), n = o["n"] as? Int ?? 0
+                let m = try assets.same(key, n: n, bytes: bytes) ?? PlotMesh.decode(o, cancelled: { !assets.current(key, ticket) })
+                guard assets.current(key, ticket) else { return }
+                assets.put(key, n: n, bytes: bytes, mesh: m, ticket: ticket)
+                MeshDisk.save(slot, key: key, n: n, box3: o["box3"] as? [Int] ?? [], mesh: bytes)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard gen == self.generation, assets.current(key, ticket) else { return }
+                        self.mesh = MeshFrame(key: key, mesh: m, none: "", at: Date())
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard gen == self.generation, assets.current(key, ticket) else { return }
+                        self.mesh = MeshFrame(key: key, mesh: previous, none: "Unable to decode model" + (previous == nil ? "" : " — previous saved revision shown"), at: Date())
+                    }
                 }
             }
         }

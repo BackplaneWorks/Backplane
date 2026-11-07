@@ -224,7 +224,8 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 let mut q = json!({"kind":kind,"root":root,"path":path});
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() } // the model the phone has cached (plot::mesh_id, hex): not sent again
-                rpc(hub, c, "kicad.watch", q).await?; Ok(json!({"root":root}))
+                let r = result(rpc(hub, c, "kicad.watch", q).await?);
+                Ok(json!({"root":root,"keys":r.get("keys").cloned().unwrap_or(json!([]))})) // the plots this view shows: a phone drops what comes late for the one it left
             }
             // the Layers menu and Compare (feature "layers"): the hub's own focus rules and comparison paths, so the phones decide nothing
             "viewer.layers" => {

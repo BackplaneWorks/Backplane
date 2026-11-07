@@ -153,6 +153,7 @@ object DataClient {
             }
             "d" -> push(o)
             "voice" -> DataVoice.frame(o)
+            "plot" -> scope.launch(Dispatchers.Main) { plots.receiveJSON(o) } // why a view has nothing to show (plots themselves are binary)
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
         }
     }
@@ -479,10 +480,16 @@ object DataClient {
     data class ProjectFiles(val root: String, val pcb: String, val sch: String)
     suspend fun viewerFiles(tid: String): ProjectFiles { val r = call("viewer.files", JSONObject().put("thread", tid)); return ProjectFiles(r.optString("root"), r.optString("pcb"), r.optString("sch")) }
     fun stopWatch(tid: String) { scope.launch { runCatching { call("viewer.watch", JSONObject().put("thread", tid).put("kind", "")) } } }
+    /** A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
+     *  a 3D view shows its own cached model once the hub names that model's file among the view's. A stop changes nothing here. */
     suspend fun watch(tid: String, kind: String, path: String = "") {
-        // a 3D view shows the model it showed last at once, and the hub sends it again only if it changed
-        val kept = if (kind.startsWith("3d")) withContext(Dispatchers.Main) { plots.cached(listOf(hubName, tid, kind, path).joinToString("|")) } else ""
-        call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept) })
+        val slot = if (kind.startsWith("3d")) listOf(hubName, tid, kind, path).joinToString("|") else ""
+        val kept = if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.begin(slot) } else ""
+        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept) }) }
+            catch (e: Exception) { if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.failed() }; throw e }
+        if (kind.isEmpty()) return
+        val keys = r.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+        withContext(Dispatchers.Main) { plots.shown(keys.ifEmpty { PlotStore.keys(kind, r.optString("root"), path) }) }
     }
     /** `viewer.layers`: what a press does, and what to draw; the rules are the hub's (present/viewer.rs `layer_reply`). `rows`: the layers, then a comparison's marks. */
     data class LayerRow(val layer: Int, val name: String, val on: Boolean, val active: Boolean)

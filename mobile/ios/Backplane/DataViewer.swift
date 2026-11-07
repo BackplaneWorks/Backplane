@@ -24,6 +24,10 @@ struct DLayers: Decodable, Equatable {
     var own: UInt32; var focus: String; var off: UInt32; var dim: UInt32; var lift: Int; var layerBits: UInt32
     var layerHead: String; var layerMode: Int; var layerModes: Bool; var layerReset: Bool; var layerList: [DLayerRow]; var layerMarks: [DLayerRow]
 }
+/// `viewer.watch`: the thread's folder and the keys of the plots the view shows (an older hub names none)
+struct DWatch: Decodable { var root: String; var keys: [String]
+    enum CodingKeys: String, CodingKey { case root, keys }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); root = c.str(.root); keys = (try? c.decode([String].self, forKey: .keys)) ?? [] } }
 struct DRef: Decodable, Hashable { var kind: String; var label: String; var commit: String }
 struct DRefs: Decodable { var refs: [DRef] }
 struct DInfo: Decodable { var info: String
@@ -32,11 +36,17 @@ struct DInfo: Decodable { var info: String
 
 extension DataClient {
     func viewerFiles(_ thread: String) async -> DProjectFiles? { try? await call("viewer.files", ["thread": thread]) }
+    /// A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
+    /// a 3D view shows its own cached model once the hub names that model's file among the view's.
     func watch(_ thread: String, kind: String, path: String = "") async throws {
         var p: [String: Any] = ["thread": thread, "kind": kind]; if !path.isEmpty { p["path"] = path }
-        // a 3D view shows the model it showed last at once, and the hub sends it again only if it changed
-        if kind.hasPrefix("3d") { let kept = plots.cached([hubName, thread, kind, path].joined(separator: "|")); if !kept.isEmpty { p["kept"] = kept } }
-        _ = try await call("viewer.watch", p, as: DEmpty.self)
+        let slot = kind.hasPrefix("3d") ? [hubName, thread, kind, path].joined(separator: "|") : ""
+        // (a stop changes nothing here: it may come after the next viewer has begun, and that one drops the last one's plots itself)
+        if !kind.isEmpty { let kept = plots.begin(slot); if !kept.isEmpty { p["kept"] = kept } }
+        do {
+            let r: DWatch = try await call("viewer.watch", p)
+            if !kind.isEmpty { plots.shown(r.keys.isEmpty ? PlotStore.keys(kind: kind, root: r.root, path: path) : r.keys) }
+        } catch { if !kind.isEmpty { plots.failed() }; throw error }
     }
     func layers(_ kind: String, present: UInt32, own: UInt32, focus: String, action: String = "", value: String = "") async -> DLayers? {
         try? await call("viewer.layers", ["kind": kind, "present": present, "off": own, "focus": focus, "action": action, "value": value])
@@ -168,6 +178,7 @@ struct DataPlotTab: View {
                     Task { let t = await client.info(f.key, at: at, idx: idx); if picked == "\(at),\(idx)" { info = t.isEmpty ? "piece \(at),\(idx)" : t } }
                 })
                 .accessibilityIdentifier("data.viewer.surface")
+                .accessibilityValue([frame?.key, mesh?.mesh == nil ? nil : mesh?.key].compactMap { $0 }.joined(separator: "\n")) // what is on show, by the hub's keys (the switch tests read it)
             }
             let say = !has ? none : !error.isEmpty ? error : (frame?.none ?? "").isEmpty ? (mesh.map { $0.decoding ? "" : $0.none } ?? "") : frame!.none
             if let progress = parts?.progress, !progress.isEmpty {

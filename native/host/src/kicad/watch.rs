@@ -52,27 +52,29 @@ impl Plots {
 
     /// kicad.watch: kind "board", "schematic", "3d", "3d-bare" or "3d-full" shows it, anything else stops. The client's
     /// other views are dropped; a new plot view starts from the chunks of the one it replaces (Sub.carry), a 3D view also
-    /// watches the board's plot beside the model. `kept` names the model the client has cached (0: none).
-    pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str, kept: u64) {
-        let Some(kind) = kind else { self.stop(client); return };
+    /// watches the board's plot beside the model. `kept` names the model the client has cached: its key ("" for any of this view's) and id (0: none).
+    /// Returns the keys of the plots this view shows, so a client can drop what arrives late for the view it left.
+    pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str, kept: (&str, u64)) -> Vec<String> {
+        let Some(kind) = kind else { self.stop(client); return vec![] };
         let board = |k: u32| if path.is_empty() { let f = project::read(root); if k == 1 { f.sch } else { f.pcb } } else { path.to_string() };
         let file = board(kind);
         if file.is_empty() { // Pv.watch.k none: nothing to show
             self.drop_subs(client);
             hub.push(client, json!({"t":"plot","key":key(kind, root, path),"none": if kind == 1 { "No schematic in this project yet" } else { "No board in this project yet" }}));
-            return
+            return vec![key(kind, root, path)]
         }
         let is_board = file.ends_with(".kicad_pcb"); // Pv.watch.go: only a board's model has a board beside it
         if !solid_kind(kind) { self.prewarm(hub, &if is_board { file.clone() } else { project::read(root).pcb }) } // a 3D view converts its parts itself, at full speed
         let mut views = vec![(kind, key(kind, root, path), file)];
         if solid_kind(kind) && is_board { views.push((0, key(0, root, path), board(0))) }
+        let keys: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
           let carry = st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key.starts_with("0|") || s.key.starts_with("1|"))).map(|s| (s.held.clone(), s.base.clone())).unwrap_or_default();
           st.subs.remove(&client);
           for (i, (k, ky, f)) in views.into_iter().enumerate() {
               let carries = i == 0 && !solid_kind(k);
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh: vec![], fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if solid_kind(k) { kept } else { 0 }, parts_at: 0 });
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh: vec![], fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: f.clone(), ..Default::default() });
               s.file = f;
               if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None } // Pv.fresh: a plot of an older file is not sent
@@ -82,15 +84,17 @@ impl Plots {
           if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
         for ky in todo { self.fan_one(hub, &ky, Some(client)) }
         if kind == 1 { self.sheets(hub, client, root, path, tree) }
+        keys
     }
     /// kicad.watch kind "split": the schematic (`path` is its sheet, "" the root), the board and the board's 3D model at once, each its own
     /// plot (full chunks, no carry: the panes are separate sources) and the 3D model's board plot shared with the board pane.
-    pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str) {
+    pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str) -> Vec<String> {
         let f = project::read(root);
         let sch = if path.is_empty() { f.sch.clone() } else { path.to_string() };
         let mut views: Vec<(u32, String, String)> = vec![];
         if !sch.is_empty() { views.push((1, key(1, root, path), sch.clone())) }
         if !f.pcb.is_empty() { views.push((0, key(0, root, ""), f.pcb.clone())); views.push((2, key(2, root, ""), f.pcb.clone())) }
+        let keys: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
           st.subs.remove(&client);
@@ -105,6 +109,7 @@ impl Plots {
           if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
         for ky in todo { self.fan_one(hub, &ky, Some(client)) }
         if !sch.is_empty() { self.sheets(hub, client, root, path, tree) }
+        keys
     }
     pub fn stop(&self, client: u64) { self.drop_subs(client) }
     fn drop_subs(&self, client: u64) {
@@ -407,6 +412,8 @@ impl Plots {
     }
 }
 /// Every source is read in this process unless BACKPLANE_PLOT_NATIVE=0 sends it to child.
+/// `kept` of a watch: "<key>\t<model id in hex>", or an older phone's id alone (any of the view's models). A model is skipped only for that key.
+pub fn kept_of(k: &str) -> (&str, u64) { let (key, id) = k.rsplit_once('\t').unwrap_or(("", k)); (key, u64::from_str_radix(id, 16).unwrap_or(0)) }
 pub fn native() -> bool { std::env::var("BACKPLANE_PLOT_NATIVE").map_or(true, |v| v != "0") }
 /// Hist.kind: 0 a live file, 1 a file in a commit, 2 a comparison.
 pub fn hist_kind(p: &str) -> u8 { if p.starts_with("git\t") { 1 } else if p.starts_with("diff\n") { 2 } else { 0 } }
@@ -447,9 +454,11 @@ impl RpcHandler for KicadRpc {
                     // PR #960: an active request with neither an absolute root nor an absolute source has no folder and is refused (Hub.folder.out Watch)
                     if !kind.is_empty() && !(crate::files::threadpath::absolute(&root) || crate::files::threadpath::absolute(&path)) { return vec![crate::files::threadpath::refusal(id)] }
                     if !kind.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
-                    if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree")) }
-                    else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), u64::from_str_radix(&s("kept"), 16).unwrap_or(0)); }
-                    vec![json!({"t":"reply","id":id,"ok":true})]
+                    // kept: "<key>\t<id>" (an older phone sends the id alone)
+                    let k = s("kept");
+                    let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree")) }
+                    else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k)) };
+                    vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":keys}})]
                 }
                 "kicad.warm" => { // the saved versions before and after a step, plotted ahead
                     let (kind, root) = (s("kind"), s("root"));
@@ -486,6 +495,11 @@ impl RpcHandler for KicadRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn kept_names_a_key_and_a_model() {
+        assert_eq!(kept_of("2|/a|\t00000000000000ff"), ("2|/a|", 255));
+        assert_eq!(kept_of("ff"), ("", 255), "an older phone: the id alone");
+        assert_eq!(kept_of(""), ("", 0)); assert_eq!(kept_of("2|/a|\tzz"), ("2|/a|", 0));
+    }
     #[test] fn sheet_tree_roots() {
         assert_eq!(tree_root("/p/top.kicad_sch", "", ""), "/p/top.kicad_sch"); assert_eq!(tree_root("/p/top.kicad_sch", "/p/sub.kicad_sch", "/p/other.kicad_sch"), "/p/other.kicad_sch");
         assert_eq!(tree_root("", "/p/x.kicad_sch", ""), "/p/x.kicad_sch"); assert_eq!(tree_root("/p/top.kicad_sch", "diff\na\nb", ""), "/p/top.kicad_sch"); assert_eq!(tree_root("", "diff\na\nb", ""), "");

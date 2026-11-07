@@ -369,6 +369,20 @@ private class PlotMeshAssets {
     }
 }
 
+/** Which plots reach the view on show, pure so it is tested (PlotStoreGateTest): after `begin` (a viewer switches) what comes waits
+ *  until `shown` names the view's keys, then what waited for them is released and the rest dropped; a plot for a key the view does not
+ *  show (late, for the view that was left) is dropped. `same`: a newer parked item replaces an older one of the key. */
+class ViewGate<T>(private val same: (T, T) -> Boolean = { _, _ -> true }) {
+    var accept: Set<String>? = emptySet(); private set
+    private val parked = ArrayList<Pair<String, T>>()
+    fun begin() { accept = null; parked.clear() }
+    fun stop() { accept = emptySet(); parked.clear() }
+    /** true: show it; false: drop it; null: park it (the view's keys are not known yet) */
+    fun wanted(key: String): Boolean? = accept?.contains(key)
+    fun park(key: String, item: T) { parked.removeAll { it.first == key && same(it.second, item) }; parked.add(key to item) }
+    fun shown(keys: Collection<String>): List<T> { val a = keys.toSet(); accept = a; val out = parked.filter { it.first in a }.map { it.second }; parked.clear(); return out }
+}
+
 class PlotStore {
     var frame by mutableStateOf<PlotFrame?>(null)
         private set
@@ -376,7 +390,8 @@ class PlotStore {
         private set
     private var held: List<PlotChunk> = emptyList()
     val parts = PartsStore()
-    /** Where the gate hands the `parts` / `part` frames of the view on show (until the viewer-switch gate lands, receive hands them over itself) */
+    /** A 3D model's frames other than the model (`parts`, `part`: kicad's native board mesher streams the parts after the board), already
+     *  gated to the view on show (route), to the parts store. A `parts` frame may come alone when the phone's kept model was the board. */
     var more: ((String, Map<String, Any?>) -> Unit)? = { k, o -> parts.receive(k, o) }
     private val splitFrames = LinkedHashMap<String, PlotFrame>()
     private var generation = 0
@@ -386,13 +401,41 @@ class PlotStore {
     /** The view the models now arriving are for (MeshDisk's slot), set by `cached` */
     @Volatile private var slot = ""
 
-    /** A 3D view opens: the model it showed last (MeshDisk) is drawn at once, and its id returned for `viewer.watch {kept}` ("" for none).
-     *  The models that arrive from now on are kept for this view. Main thread. */
-    fun cached(slot: String): String {
+    // The view on show: the hub's keys of the plots it shows (`viewer.watch` answers them), null while its watch is on its way.
+    // A plot for another key came late for a view that was left and is dropped; one that comes before the answer waits for it. Main thread.
+    private class Parked(val o: Map<String, Any?>?, val f: PlotFrame?)
+    // a newer plot or model replaces the parked one of its key; a model's parts all wait, in order
+    private val gate = ViewGate<Parked> { a, b -> (a.f != null && b.f != null) || (a.o?.get("mesh") != null && b.o?.get("mesh") != null) }
+    /** This view's cached model (MeshDisk), drawn once the hub names its key among the view's */
+    private var disk: Map<String, Any?>? = null
+    private fun wanted(key: String): Boolean? = gate.wanted(key)
+    private fun park(key: String, o: Map<String, Any?>?, f: PlotFrame?) { gate.park(key, Parked(o, f)) }
+
+    /** A viewer switches (a tab, a file, a thread): what the last one showed goes at once, plots for it are dropped from now on, and the
+     *  view's own cached model (`slot`: hub, thread, kind, path) waits to be named. Returns `viewer.watch {kept}` ("" for no cached model). */
+    fun begin(slot: String): String {
         this.slot = slot
-        val o = MeshDisk.load(slot) ?: return ""
-        val key = o["key"] as String; val bytes = o["mesh"] as ByteArray
-        val ticket = assets.issue(key, assets.epoch()) ?: return ""
+        gate.begin(); frame = null; mesh = null; parts.reset() // the last view's parts go with its model
+        assets.issue("", assets.epoch()) // a model still decoding for the last view is not shown
+        disk = if (slot.isEmpty()) null else MeshDisk.load(slot)
+        val o = disk ?: return ""
+        return (o["key"] as String) + "\t" + PlotMesh.id(o["mesh"] as ByteArray)
+    }
+    /** The hub named the view's plots: what waited for them is shown, the rest dropped; the cached model shows if it is of this view's file. */
+    fun shown(keys: List<String>) {
+        for (p in gate.shown(keys)) { if (p.f != null) { frame = p.f; keepFrame() } else if (p.o != null) route(p.o) }
+        disk?.let { o -> val key = o["key"] as String; if (gate.wanted(key) == true && mesh?.key != key) showDisk(o, key) }
+        disk = null
+    }
+    /** The watch failed (no hub): the view's own cached model is all there is to show. */
+    fun failed() {
+        gate.stop()
+        disk?.let { o -> val key = o["key"] as String; gate.shown(listOf(key)); showDisk(o, key) }
+        disk = null
+    }
+    private fun showDisk(o: Map<String, Any?>, key: String) {
+        val bytes = o["mesh"] as ByteArray
+        val ticket = assets.issue(key, assets.epoch()) ?: return
         val gen = generation
         meshQueue.execute {
             if (!assets.current(key, ticket)) return@execute
@@ -400,8 +443,9 @@ class PlotStore {
             assets.put(key, o.int("n"), bytes, m, ticket)
             main.post { if (gen == generation && assets.current(key, ticket)) mesh = MeshFrame(key, m, "", System.currentTimeMillis()) }
         }
-        return PlotMesh.id(bytes)
     }
+    /** A plot as JSON (the data socket's own frames: `{t:"plot", key, none}`, why a view has nothing to show). Main thread. */
+    fun receiveJSON(o: org.json.JSONObject) { if (o.has("none")) route(mapOf("key" to o.optString("key"), "none" to o.optString("none"), "fam" to o.optString("fam"))) }
     fun cachedFrame(key: String): PlotFrame? = frame?.takeIf { it.key == key } ?: splitFrames[key]
     private fun keepFrame() {
         val f = frame ?: return
@@ -423,60 +467,23 @@ class PlotStore {
         splitFrames.clear()
         frame = null
         mesh = null
+        gate.stop()
     }
 
     @Suppress("UNCHECKED_CAST")
     fun receive(b: ByteArray) {
         val gen = generation
-        val epoch = assets.epoch()
-        val slot = slot
         queue.execute {
             val o = runCatching { Cbor.decode(b) as? Map<String, Any?> }.getOrNull() ?: return@execute
             val key = o["key"] as? String ?: ""
             val fam = (o["fam"] as? String)?.takeIf { it.isNotEmpty() } ?: key
             // a 3D model: with its parts (2) or the board alone (3)
             val solid = key.startsWith("2|") || key.startsWith("3|") || key.startsWith("4|")
-            val why = o["none"] as? String
-            if (why != null) {
-                val ticket = if (solid) assets.issue(key, epoch) ?: return@execute else 0L
-                main.post {
-                    if (gen != generation) return@post
-                    if (solid) {
-                        if (!assets.current(key, ticket)) return@post
-                        val previous = assets.frame(key)?.mesh
-                        mesh = MeshFrame(key, previous, why + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis()); return@post
-                    }
-                    held = emptyList()
-                    frame = PlotFrame(key, FloatArray(0), FloatArray(0), 0f, emptyList(), emptySet(), why, System.currentTimeMillis(), fam)
-                    keepFrame()
-                }
-                return@execute
-            }
-            if (solid && (o["parts"] != null || o["part"] != null)) { more?.invoke(key, o); return@execute }
-            if (solid && o["mesh"] != null) main.post { if (gen == generation) parts.reset() }
-            if (solid) {
-                // a note about the model (parts with no 3D model) is not a model
-                if (o["mesh"] == null) return@execute
-                val ticket = assets.issue(key, epoch) ?: return@execute
-                val previous = assets.frame(key)?.mesh
-                main.post {
-                    if (gen == generation && assets.current(key, ticket))
-                        mesh = MeshFrame(key, previous, "Received model; decoding…" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis(), decoding = true)
-                }
-                meshQueue.execute meshJob@ {
-                    if (!assets.current(key, ticket)) return@meshJob
-                    val bytes = o["mesh"] as? ByteArray ?: ByteArray(0)
-                    val n = o.int("n")
-                    val result = runCatching { assets.same(key, n, bytes) ?: PlotMesh.decode(o) { !assets.current(key, ticket) } }
-                    if (!assets.current(key, ticket)) return@meshJob
-                    val m = result.getOrNull()
-                    if (m != null) { assets.put(key, n, bytes, m, ticket); MeshDisk.save(slot, key, n, (o["box3"] as? List<*>)?.map { (it as? Long) ?: 0L }.orEmpty(), bytes) }
-                    main.post {
-                        if (gen != generation || !assets.current(key, ticket)) return@post
-                        mesh = MeshFrame(key, m ?: previous,
-                            if (m != null) "" else "Unable to decode model" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis())
-                    }
-                }
+            // a note about the model (parts with no 3D model) is not a model
+            if (o["none"] is String || solid) {
+                // a model's other frames (its parts streaming in after it, `parts`/`part`) pass the same gate to `more`; a bare note does not
+                if (solid && o["none"] == null && o["mesh"] == null && o["parts"] == null && o["part"] == null) return@execute
+                main.post { if (gen == generation) route(o) }
                 return@execute
             }
             val refs = o["cs"] as? List<Any?> ?: emptyList()
@@ -495,14 +502,59 @@ class PlotStore {
                     val c = decoded[i] ?: (refs[i] as? Long)?.let { k -> held.getOrNull(k.toInt()) }
                     if (c != null) all.add(c)
                 }
-                held = all
-                frame = PlotFrame(key, box, edge, thick, all, decoded.keys, "", System.currentTimeMillis(), fam)
-                keepFrame()
+                held = all // the hub's deltas count on what it sent, shown or not
+                val f = PlotFrame(key, box, edge, thick, all, decoded.keys, "", System.currentTimeMillis(), fam)
+                when (wanted(key)) { true -> { frame = f; keepFrame() }; null -> park(key, null, f); false -> {} }
+            }
+        }
+    }
+
+    /** A model or a plot's absence, on the main thread: for the view on show, waiting for it, or dropped */
+    private fun route(o: Map<String, Any?>) {
+        val key = o["key"] as? String ?: ""
+        when (wanted(key)) { null -> { park(key, o, null); return }; false -> return; true -> {} }
+        val fam = (o["fam"] as? String)?.takeIf { it.isNotEmpty() } ?: key
+        val solid = key.startsWith("2|") || key.startsWith("3|") || key.startsWith("4|")
+        if (solid && o["none"] == null && o["mesh"] == null) { more?.invoke(key, o); return } // parts after (or without) the model: for the view on show only
+        val gen = generation; val slot = slot
+        val ticket = if (solid) assets.issue(key, assets.epoch()) ?: return else 0L
+        val previous = if (solid) assets.frame(key)?.mesh else null
+        val why = o["none"] as? String
+        if (why != null) {
+            if (solid) { mesh = MeshFrame(key, previous, why + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis()); return }
+            held = emptyList()
+            frame = PlotFrame(key, FloatArray(0), FloatArray(0), 0f, emptyList(), emptySet(), why, System.currentTimeMillis(), fam)
+            keepFrame(); return
+        }
+        parts.reset() // a new board mesh: its parts come again after it
+        mesh = MeshFrame(key, previous, "Received model; decoding…" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis(), decoding = true)
+        meshQueue.execute meshJob@ {
+            if (!assets.current(key, ticket)) return@meshJob
+            val bytes = o["mesh"] as? ByteArray ?: ByteArray(0)
+            val n = o.int("n")
+            val result = runCatching { assets.same(key, n, bytes) ?: PlotMesh.decode(o) { !assets.current(key, ticket) } }
+            if (!assets.current(key, ticket)) return@meshJob
+            val m = result.getOrNull()
+            if (m != null) { assets.put(key, n, bytes, m, ticket); MeshDisk.save(slot, key, n, (o["box3"] as? List<*>)?.map { (it as? Long) ?: 0L }.orEmpty(), bytes) }
+            main.post {
+                if (gen != generation || !assets.current(key, ticket)) return@post
+                mesh = MeshFrame(key, m ?: previous,
+                    if (m != null) "" else "Unable to decode model" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis())
             }
         }
     }
 
     companion object {
+        /** The keys a view shows by the hub's rule (kicad/watch.rs `key`), for a hub that does not answer them. */
+        fun keys(kind: String, root: String, path: String): List<String> {
+            val p = if (path.isEmpty() || path.startsWith("/")) path else "$root/$path"
+            fun k(n: Int, q: String) = "$n|$root|$q"
+            return when (kind) {
+                "board" -> listOf(k(0, p)); "schematic" -> listOf(k(1, p))
+                "3d" -> listOf(k(2, p), k(0, p)); "3d-bare" -> listOf(k(3, p), k(0, p)); "3d-full" -> listOf(k(4, p), k(0, p))
+                "split" -> listOf(k(1, p), k(0, ""), k(2, "")); else -> emptyList()
+            }
+        }
         // a plot frame: a map whose first key is 1 ("t") and value "plot"
         fun isPlot(b: ByteArray) = b.size > 7 && (b[0].toInt() and 255) in 0xA0..0xB7 && b[1].toInt() == 1 &&
             b[2].toInt() == 0x64 && b[3].toInt() == 0x70 && b[4].toInt() == 0x6C && b[5].toInt() == 0x6F && b[6].toInt() == 0x74

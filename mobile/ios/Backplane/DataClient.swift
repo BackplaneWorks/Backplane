@@ -237,6 +237,7 @@ final class DataClient {
             } else { k.resume(throwing: DError(code: "ERROR", message: o["error"] as? String ?? "The hub refused")) }
         case "d": push(o)
         case "voice": voice.frame(o)
+        case "plot": plots.receiveJSON(o) // why a view has nothing to show (the plots themselves come as binary frames)
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
         default: break
         }
