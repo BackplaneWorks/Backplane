@@ -357,6 +357,7 @@ struct DataThreadView: View {
     @State private var openRuns: Set<String> = []
     @State private var atEnd = true
     @State private var order: DOrder?
+    @State private var caret: (at: Int, rev: Int)?
     @Environment(\.dismiss) private var dismiss
 
     init(client: DataClient, id: String) { self.client = client; self.id = id; client.touch(id) }
@@ -395,7 +396,16 @@ struct DataThreadView: View {
             }
             if let order { DataOrderCard(order: order) }
             DataMentionBar(client: client, text: text) { text = $0; client.setDraft(id, $0) }
+            DVoiceStrip(client: client, thread: id, draft: text)
             composer
+        }
+        .onChange(of: client.voice.caret.rev) { _, rev in
+            // the hub's dictation wrote this thread's draft: show it and put the caret where it said
+            let c = client.voice.caret
+            guard c.thread == id else { return }
+            let new = client.drafts[id] ?? ""
+            text = new
+            caret = (VoiceEdit.utf16(new, caret: c.at), rev)
         }
         .task(id: "\(list.count)|\(thread?.state ?? "")|\(client.conn == .online)") { if client.has("order"), let o = try? await client.order(id) { order = o } else if !client.has("order") { order = nil } }
         .background(BackplaneDesign.background)
@@ -481,7 +491,7 @@ struct DataThreadView: View {
                 UIKitField(text: text, placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw", editable: true,
                            onChange: { text = $0; client.setDraft(id, $0) },
                            onSend: { send() }, onPasteImages: { imgs in add(imgs.compactMap { $0.jpegData(compressionQuality: 0.95) }) },
-                           font: UIFontMetrics(forTextStyle: .body).scaledFont(for: Mono.uiFont(size: 14)))
+                           font: UIFontMetrics(forTextStyle: .body).scaledFont(for: Mono.uiFont(size: 14)), caret: caret)
                     .padding(.horizontal, 10).padding(.vertical, 9).frame(minHeight: 44, alignment: .topLeading).dbox(BackplaneDesign.accent)
                     .accessibilityLabel("Message")
                 HStack(spacing: 6) {
@@ -489,6 +499,13 @@ struct DataThreadView: View {
                         Button { modelSheet = true } label: { Text(chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
                             .buttonStyle(.plain).accessibilityLabel("Model: " + chip).accessibilityIdentifier("data.thread.model")
                     } else { Spacer(minLength: 0) }
+                    if client.has("voice") {
+                        let on = client.voice.listening(id)
+                        Button { micPress() } label: {
+                            Image(systemName: on ? "mic.fill" : "mic").font(.system(size: 15)).foregroundStyle(on ? BackplaneDesign.bad : BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
+                        }
+                        .buttonStyle(.plain).accessibilityLabel(on ? "Stop dictation" : "Dictate").accessibilityIdentifier("data.mic")
+                    }
                     PhotosPicker(selection: $picked, maxSelectionCount: max(0, 4 - pending.count), matching: .images) {
                         Image(systemName: "paperclip").font(.system(size: 15)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
                     }
@@ -511,12 +528,17 @@ struct DataThreadView: View {
         }
         .background(BackplaneDesign.background)
     }
+    private func micPress() {
+        let at = ComposerHandle.view.map { VoiceEdit.chars(text, utf16: $0.selectedRange.location) } ?? VoiceEdit.count(text)
+        client.voice.press(id, draft: text, caret: at)
+    }
     private func send() {
         let t = text
         guard !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pending.isEmpty else { return }
         let images = pending
         text = ""; pending = []; atEnd = true
         client.send(id, t, images: images)
+        client.voice.sent(id, draft: "")
     }
     // pictures chosen or pasted: shrunk off the main thread, at most four to a message
     private func add(_ raw: [Data]) {
@@ -730,6 +752,7 @@ struct DataSettingsView: View {
                 DLine()
                 DataUpdateSection(client: client)
                 DLine()
+                if client.has("voice") { DataVoiceSection(client: client); DLine() }
                 NavigationLink(value: DPage(name: "improvements")) { Text("Improvements") }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
                 DLine()
                 let i = Bundle.main.infoDictionary

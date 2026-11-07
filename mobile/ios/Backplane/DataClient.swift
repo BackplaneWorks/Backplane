@@ -24,6 +24,7 @@ final class DataClient {
     private(set) var loadedThreads: Set<String> = []
     private(set) var listsLoaded = false
     let plots = PlotStore()
+    let voice = VoiceModel()
     private(set) var shot = 0
     private(set) var shotBot = ""
     private(set) var bots: [DBot] = []
@@ -59,6 +60,7 @@ final class DataClient {
         if let l = ProcessInfo.processInfo.environment["BACKPLANE_LINK"] { links = l.split(separator: " ").map(String.init) }
         #endif
         loadCache()
+        voice.client = self
     }
 
     // MARK: pairing
@@ -182,6 +184,7 @@ final class DataClient {
                 k.resume(throwing: DError(code: e["code"] as? String ?? "ERROR", message: e["message"] as? String ?? ""))
             } else { k.resume(throwing: DError(code: "ERROR", message: o["error"] as? String ?? "The hub refused")) }
         case "d": push(o)
+        case "voice": voice.frame(o)
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
         default: break
         }
@@ -211,6 +214,7 @@ final class DataClient {
             async let p = loadProjects(g), t = loadThreads(g)
             _ = try await (p, t)
             await loadBots()
+            await voice.resync()
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
@@ -436,6 +440,11 @@ final class DataClient {
     }
     func dirs(_ path: String?) async throws -> DDirs { try await call("dirs.list", path.map { ["path": $0] } ?? [:]) }
     func setDraft(_ tid: String, _ text: String) {
+        voice.typed(tid, old: drafts[tid] ?? "", new: text)
+        putDraft(tid, text)
+    }
+    /// A draft the hub's dictation wrote (the mark was already placed by it).
+    func putDraft(_ tid: String, _ text: String) {
         drafts[tid] = text.isEmpty ? nil : text
         UserDefaults.standard.set(drafts, forKey: "data.drafts")
     }
