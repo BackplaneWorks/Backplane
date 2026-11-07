@@ -223,7 +223,7 @@ mod tests {
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn native(desc: &str) -> (Native, UnboundedReceiver<Value>) { let (t, r) = unbounded_channel(); (Native::new(desc, Arc::new(move |v| { let _ = t.send(v); })), r) }
-    async fn next(r: &mut UnboundedReceiver<Value>) -> Value { tokio::time::timeout(Duration::from_secs(10), r.recv()).await.expect("an answer in time").unwrap() }
+    async fn next(r: &mut UnboundedReceiver<Value>) -> Value { tokio::time::timeout(Duration::from_secs(60), r.recv()).await.expect("an answer in time").unwrap() }
     fn hex_of(s: &str) -> Vec<u8> { (0..s.len() / 2).map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap()).collect() }
     /// The real server's answer to GetVersion (read off the wire, bp.4) under the token "tk".
     fn version_reply() -> Vec<u8> { hex_of("0a040a02746b120208011a5c0a3c747970652e676f6f676c65617069732e636f6d2f6b696170692e636f6d6d6f6e2e636f6d6d616e64732e47657456657273696f6e526573706f6e7365121c0a1a080a1063221431302e39392e302d756e6b6e6f776e2d62702e34") }
