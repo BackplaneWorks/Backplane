@@ -5,7 +5,7 @@
 //! feeds when the hub has them.
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Map, Value};
-use std::{collections::BTreeMap, io::{Read, Write}, os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt}, path::{Path, PathBuf}, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{collections::BTreeMap, io::{Read, Write}, path::{Path, PathBuf}, sync::{Arc, Mutex}, time::{Duration, Instant}}; use crate::plat::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 
 const DISK: u64 = 1_048_576; const SEG: u64 = 65_536; const SEGMENTS: usize = 8; const RETAIN: u64 = 7 * 86400; const RECORD: usize = 512; const EXPORT: usize = 1_048_576;
 const FLUSH: Duration = Duration::from_secs(30); const RETRY: Duration = Duration::from_secs(60);
@@ -22,7 +22,7 @@ static ST: Mutex<Option<S>> = Mutex::new(None);
 #[cfg(test)] pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 fn uint(v: &Value, max: u64) -> bool { v.as_u64().map_or(false, |n| n <= max) }
-fn err_code(e: &std::io::Error) -> &'static str { match e.raw_os_error() { Some(c) if c == libc::ENOSPC || c == libc::EDQUOT => "full", _ => match e.kind() { std::io::ErrorKind::Other if e.to_string() == "UNSAFE" => "unsafe_storage", std::io::ErrorKind::Other if e.to_string() == "CAP" => "capacity", _ => "io" } } }
+fn err_code(e: &std::io::Error) -> &'static str { match e.raw_os_error() { Some(c) if c == crate::plat::errno::ENOSPC || c == crate::plat::errno::EDQUOT => "full", _ => match e.kind() { std::io::ErrorKind::Other if e.to_string() == "UNSAFE" => "unsafe_storage", std::io::ErrorKind::Other if e.to_string() == "CAP" => "capacity", _ => "io" } } }
 fn fault(m: &str) -> std::io::Error { std::io::Error::new(std::io::ErrorKind::Other, m.to_string()) }
 fn names() -> Vec<String> { let mut v = vec!["control".to_string()]; v.extend((0..SEGMENTS).map(|i| format!("segment-{i}.jsonl"))); v }
 
@@ -40,7 +40,7 @@ fn usage(s: &mut S) -> std::io::Result<u64> {
     s.bytes = b; s.allocated = a; Ok(b.max(a))
 }
 fn write_control(s: &mut S, on: bool) -> std::io::Result<()> {
-    let mut f = std::fs::OpenOptions::new().write(true).create(true).custom_flags(libc::O_NOFOLLOW).mode(0o600).open(s.dir.join("control"))?;
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).custom_flags(crate::plat::fs::O_NOFOLLOW).mode(0o600).open(s.dir.join("control"))?;
     f.set_len(0)?; f.write_all(if on { b"1" } else { b"0" })?; f.sync_all()?;
     if usage(s)? > DISK { return Err(fault("CAP")) } Ok(())
 }
@@ -106,9 +106,9 @@ fn flush_inner(s: &mut S) -> bool {
             _ => { let used: Vec<usize> = files.iter().map(|f| f.i).collect(); let i = (0..SEGMENTS).find(|k| !used.contains(k)).unwrap_or_else(|| files[0].i); if used.contains(&i) { std::fs::remove_file(s.dir.join(format!("segment-{i}.jsonl")))?; } (i, 0) }
         };
         if usage(s)? + data.len() as u64 + 8192 > DISK { return Err(fault("CAP")) }
-        let f = std::fs::OpenOptions::new().read(true).write(true).create(true).custom_flags(libc::O_NOFOLLOW).mode(0o600).open(s.dir.join(format!("segment-{idx}.jsonl")))?;
+        let f = std::fs::OpenOptions::new().read(true).write(true).create(true).custom_flags(crate::plat::fs::O_NOFOLLOW).mode(0o600).open(s.dir.join(format!("segment-{idx}.jsonl")))?;
         if f.metadata()?.len() != size { return Err(fault("UNSAFE")) }
-        use std::os::unix::fs::FileExt;
+        use crate::plat::fs::FileExt;
         let w = f.write_all_at(data.as_bytes(), size).and_then(|_| if usage(s)? > DISK { Err(fault("CAP")) } else { Ok(()) });
         if let Err(e) = w { if f.set_len(size).is_err() { let _ = std::fs::remove_file(s.dir.join(format!("segment-{idx}.jsonl"))); } return Err(e) }
         usage(s)?; s.flushed = Instant::now(); Ok(true)
@@ -254,7 +254,7 @@ mod tests {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let h = fresh("stray"); std::fs::create_dir_all(h.join("diagnostics")).unwrap(); std::fs::write(h.join("diagnostics/notes.txt"), "x").unwrap();
         let s = bind(&h); assert_eq!((s["ok"].clone(), s["error"].clone()), (json!(false), json!("unsafe_storage"))); assert!(h.join("diagnostics/notes.txt").exists(), "not deleted");
-        let h = fresh("link"); std::fs::create_dir_all(h.join("diagnostics")).unwrap(); std::fs::write(h.join("outside"), "x").unwrap(); std::os::unix::fs::symlink(h.join("outside"), h.join("diagnostics/control")).unwrap();
+        let h = fresh("link"); std::fs::create_dir_all(h.join("diagnostics")).unwrap(); std::fs::write(h.join("outside"), "x").unwrap(); crate::plat::fs::symlink(h.join("outside"), h.join("diagnostics/control")).unwrap();
         assert_eq!(bind(&h)["error"], "unsafe_storage");
     }
     #[test] fn a_torn_tail_is_cut_back_and_an_invalid_row_discards_the_segment() {

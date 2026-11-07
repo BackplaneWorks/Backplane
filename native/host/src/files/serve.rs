@@ -5,7 +5,7 @@
 //! is a 206 of the first piece with its Content-Range (valid HTTP), until the API streams bodies.
 use crate::api::HttpReply;
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::OpenOptionsExt;
+use crate::plat::fs::OpenOptionsExt;
 
 pub const PIECE: u64 = 32 << 20;
 
@@ -30,11 +30,11 @@ fn fail(status: &'static str, msg: &str, extra: &str) -> HttpReply { head(status
 /// `path` is already decoded, viewable-checked and `~/`-expanded.
 pub fn send(path: &str, ctype: &str, range_header: &str) -> HttpReply {
     if path.contains('\0') || ctype.contains(['\r', '\n']) { return fail("400 Bad Request", "invalid preview request", "") }
-    let f = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW).open(path);
+    let f = std::fs::OpenOptions::new().read(true).custom_flags(crate::plat::fs::O_NONBLOCK | crate::plat::fs::O_NOFOLLOW).open(path);
     let mut f = match f { Ok(f) => f, Err(e) => return match e.kind() {
         std::io::ErrorKind::NotFound => fail("404 Not Found", "not found", ""),
         std::io::ErrorKind::PermissionDenied => fail("403 Forbidden", "cannot read preview", ""),
-        _ if e.raw_os_error() == Some(libc::ENOTDIR) => fail("404 Not Found", "not found", ""),
+        _ if e.raw_os_error() == Some(crate::plat::errno::ENOTDIR) => fail("404 Not Found", "not found", ""),
         _ => fail("500 Internal Server Error", "cannot read preview", "") } };
     let Ok(md) = f.metadata() else { return fail("500 Internal Server Error", "cannot read preview", "") };
     if !md.is_file() { return fail("404 Not Found", "not a regular file", "") }
@@ -70,7 +70,7 @@ mod tests {
         let r = send(f.to_str().unwrap(), "image/png", "bytes=2-4"); assert_eq!((r.status, r.body.as_slice()), ("206 Partial Content", &b"234"[..])); assert!(r.extra.contains("Content-Range: bytes 2-4/10\r\n"));
         let r = send(f.to_str().unwrap(), "image/png", "bytes=20-"); assert_eq!(r.status, "416 Range Not Satisfiable"); assert!(r.extra.contains("bytes */10"));
         assert_eq!(send(d.to_str().unwrap(), "image/png", "").status, "404 Not Found");
-        std::os::unix::fs::symlink(&f, d.join("l.png")).unwrap(); assert_eq!(send(d.join("l.png").to_str().unwrap(), "image/png", "").status, "500 Internal Server Error"); // O_NOFOLLOW: ELOOP, as the JS hub
+        crate::plat::fs::symlink(&f, d.join("l.png")).unwrap(); assert_eq!(send(d.join("l.png").to_str().unwrap(), "image/png", "").status, "500 Internal Server Error"); // O_NOFOLLOW: ELOOP, as the JS hub
         assert_eq!(send(d.join("none.png").to_str().unwrap(), "image/png", "").status, "404 Not Found");
         assert_eq!(send("/etc/pass\0wd", "image/png", "").status, "400 Bad Request"); assert_eq!(send("/dev/null", "image/png", "").status, "404 Not Found");
         let _ = std::fs::remove_dir_all(&d);

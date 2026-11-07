@@ -9,7 +9,8 @@
 use crate::agents::{lines::hub_id, now_s, Agents};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, io::{Read, Write}, os::unix::{ffi::OsStrExt, fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt}}, path::{Path, PathBuf}, sync::{Arc, LazyLock, RwLock}, time::Duration};
+use std::{collections::HashMap, io::{Read, Write}, path::{Path, PathBuf}, sync::{Arc, LazyLock, RwLock}, time::Duration};
+use crate::plat::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 
 pub use super::order_view::*;
 fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
@@ -105,7 +106,7 @@ pub fn fingerprint(root: &Path) -> String {
     fn walk(dir: &Path, rel: &[u8], out: &mut Vec<Vec<u8>>) {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         for e in rd.flatten() {
-            let name = e.file_name(); let n = name.as_bytes();
+            let name = crate::plat::fs::name_bytes(&e.file_name()); let n = name.as_slice();
             let mut p = rel.to_vec(); p.push(b'/'); p.extend_from_slice(n);
             if [&b"./mfg"[..], b"./extra", b"./.git", b"./.backplane"].contains(&p.as_slice()) || n == b"node_modules" || n.windows(6).any(|w| w == b"backup") { continue }
             let Ok(ft) = e.file_type() else { continue };
@@ -117,7 +118,7 @@ pub fn fingerprint(root: &Path) -> String {
     let mut h = Sha256::new(); let mut buf = vec![0u8; 1 << 16];
     for p in files {
         h.update(&p); h.update(b"\n");
-        if let Ok(mut f) = std::fs::File::open(root.join(std::ffi::OsStr::from_bytes(&p[2..]))) { while let Ok(n) = f.read(&mut buf) { if n == 0 { break } h.update(&buf[..n]) } }
+        if let Ok(mut f) = std::fs::File::open(root.join(crate::plat::fs::name_from(&p[2..]))) { while let Ok(n) = f.read(&mut buf) { if n == 0 { break } h.update(&buf[..n]) } }
     }
     hex::encode(h.finalize())[..32].to_string()
 }
@@ -391,7 +392,7 @@ mod tests {
         let r = tmp("print");
         for (f, t) in [("boards/a/a.kicad_pcb", "pcb"), ("boards/a/a.kicad_sch", "sch"), ("mech/case.step", "step"), ("mech/case.STEP", "not this"), ("plate.dxf", "dxf"), ("a.fab.json", "{}"), ("Z.fab.json", "{}"), ("mfg/x.kicad_pcb", "out"), ("extra/j.step", "out"),
             (".git/h.step", "out"), (".backplane/b.step", "out"), ("node_modules/n/z.step", "out"), ("deep/node_modules/z.step", "out"), ("old-backup-1/a.kicad_pcb", "out"), ("backups.kicad_pcb", "out"), ("_autosave-a.kicad_sch", "out"), ("notes.txt", "out"), ("deep/.hidden/ok.step", "in")] { put(r.join(f), t) }
-        std::os::unix::fs::symlink(r.join("plate.dxf"), r.join("link.dxf")).unwrap();
+        crate::plat::fs::symlink(r.join("plate.dxf"), r.join("link.dxf")).unwrap();
         let o = std::process::Command::new("sh").args(["-c", PRINT_SH]).current_dir(&r).output().unwrap();
         assert_eq!(fingerprint(&r), String::from_utf8_lossy(&o.stdout).trim());
         let before = fingerprint(&r); put(r.join("notes.txt"), "changed"); put(r.join("mfg/x.kicad_pcb"), "changed"); assert_eq!(fingerprint(&r), before, "what is not the design does not stale a review");
@@ -464,8 +465,8 @@ mod tests {
         let (_, ps, h) = sendable(&r, "mfg/1").unwrap(); assert_eq!(ps, ["a.zip"]); assert_eq!(h.len(), 64);
         assert_eq!(ask_detail("mfg/1", &m, &ps), "Send 1 file from mfg/1 to Backplane's quote service? They are kept only to make what you order.\nShips to Germany · Main ×5 (2 assembled)\n\na.zip");
         assert!(sendable(&r, "mfg/../mfg/1").is_none()); assert!(sendable(&r, "mfg/2").is_none(), "no manifest");
-        std::os::unix::fs::symlink("/etc/passwd", r.join("mfg/1/b.zip")).unwrap(); assert!(sendable(&r, "mfg/1").is_none(), "a folder holding a link is refused, listed or not"); std::fs::remove_file(r.join("mfg/1/b.zip")).unwrap();
-        let o = tmp("elsewhere"); put(o.join("3/manifest.json"), &m.to_string()); put(o.join("3/a.zip"), "z"); std::os::unix::fs::symlink(&o, r.join("linked")).unwrap(); assert!(sendable(&r, "linked/3").is_none(), "nor a link on the way there");
+        crate::plat::fs::symlink("/etc/passwd", r.join("mfg/1/b.zip")).unwrap(); assert!(sendable(&r, "mfg/1").is_none(), "a folder holding a link is refused, listed or not"); std::fs::remove_file(r.join("mfg/1/b.zip")).unwrap();
+        let o = tmp("elsewhere"); put(o.join("3/manifest.json"), &m.to_string()); put(o.join("3/a.zip"), "z"); crate::plat::fs::symlink(&o, r.join("linked")).unwrap(); assert!(sendable(&r, "linked/3").is_none(), "nor a link on the way there");
         put(r.join("mfg/4/manifest.json"), r#"{"files":{"gone.zip":"h"}}"#); assert!(sendable(&r, "mfg/4").is_none(), "a listed file that is not there"); put(r.join("mfg/5/manifest.json"), r#"{"files":{}}"#); assert!(sendable(&r, "mfg/5").is_none());
     }
     #[test] fn a_record_is_private_and_a_server_id_cannot_leave_the_folder() {

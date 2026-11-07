@@ -40,6 +40,11 @@ bytemuck = { version = "1", features = ["derive"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
 
+# Windows: DirectX 11 and DirectWrite. A release build compiles gpui's HLSL shaders with fxc.exe (Windows SDK) on a Windows build host;
+# a debug build compiles them when the window opens (D3DCompile). The manifest (DPI awareness, common controls) needs the SDK's rc.exe.
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
+
 [patch.crates-io]
 xattr = { path = "vendor/xattr" }
 

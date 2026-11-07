@@ -1,7 +1,7 @@
 //! The session against a stand-in helper (a shell script that speaks the helper's NDJSON): no microphone, no network, no model.
 use super::*;
 use crate::{hub::{Cfg, Out}, presenter::Canned};
-use std::{os::unix::fs::PermissionsExt, sync::OnceLock};
+use std::sync::OnceLock; use crate::plat::fs::PermissionsExt;
 
 const HELPER: &str = r#"#!/bin/sh
 here=$(dirname "$0")
@@ -38,7 +38,7 @@ fn bin() -> &'static Path {
         // "Text file busy". Wait until one exec works: no writer is left after that, so no later exec can fail so.
         for _ in 0..1000 {
             match crate::proc::std_cmd(crate::proc::Kind::Local, &f).arg("probe").output() {
-                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(5)),
                 r => { r.expect("the stand-in helper runs"); break }
             }
         }

@@ -228,7 +228,7 @@ fn mime_ok(m: &str) -> bool { matches!(m, "image/jpeg" | "image/png" | "image/we
 fn mime_of(name: &str) -> &'static str { match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() { "jpg" | "jpeg" => "image/jpeg", "png" => "image/png", "webp" => "image/webp", "gif" => "image/gif", "heic" => "image/heic", "heif" => "image/heif", _ => "application/octet-stream" } }
 /// Stores a message's images under `<home>/attachments/<thread>/` (safe names, 0600) and returns their metadata and paths.
 fn store_attachments(hub: &Hub, thread: &str, list: &Value) -> Result<(Vec<Value>, Vec<String>), Value> {
-    use base64::Engine; use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt}; use std::io::Write;
+    use base64::Engine; use crate::plat::fs::{DirBuilderExt, OpenOptionsExt}; use std::io::Write;
     let Some(xs) = list.as_array() else { return Ok((vec![], vec![])) };
     if xs.len() > MAX_ATTACH { return Err(err(format!("at most {MAX_ATTACH} images in a message"))) }
     let dir = crate::files::attach::dir(&hub.cfg.home, thread);

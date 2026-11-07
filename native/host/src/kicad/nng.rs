@@ -11,7 +11,8 @@
 //! out the timeout and could send it again on a new pipe. The caller drops a failed connection and dials again next time.
 //! Nothing here signals a process.
 use std::{hash::{BuildHasher, Hasher}, time::Duration};
-use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWriteExt}, net::UnixStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use crate::plat::ipc::Stream;
 
 pub const REQ0: u16 = 0x30;
 pub const REP0: u16 = 0x31;
@@ -72,18 +73,18 @@ fn dial_words(e: &std::io::Error) -> String {
 }
 
 /// A connected REQ0 socket. One request at a time; a failed one leaves the connection unusable, so drop it.
-pub struct Req { s: UnixStream, id: u32 }
+pub struct Req { s: Stream, id: u32 }
 impl Req {
     /// Connect and exchange hellos, as `nng_dial` does before it returns.
     pub async fn dial(path: &str) -> Result<Req, String> {
         let say = |w: String| format!("dial ipc://{path}: {w}");
-        let s = UnixStream::connect(path).await.map_err(|e| say(dial_words(&e)))?;
+        let s = crate::plat::ipc::connect(path).await.map_err(|e| say(dial_words(&e)))?;
         match tokio::time::timeout(NEGOTIATE, Self::hellos(s)).await {
             Ok(r) => r.map_err(say),
             Err(_) => Err(say("Timed out".into())),
         }
     }
-    async fn hellos(mut s: UnixStream) -> Result<Req, String> {
+    async fn hellos(mut s: Stream) -> Result<Req, String> {
         s.write_all(&hello(REQ0)).await.map_err(|e| e.to_string())?;
         let mut h = [0u8; 8];
         s.read_exact(&mut h).await.map_err(|e| e.to_string())?;
@@ -105,19 +106,19 @@ impl Req {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use tokio::net::UnixListener;
+    use crate::plat::ipc::{Listener as UnixListener, Served as UnixStream};
 
     /// A unix REP server for tests: `answer` gets each request's id and body, and writes what it likes.
     pub async fn read_req(s: &mut UnixStream) -> Option<(u32, Vec<u8>)> { let m = read_message(s).await.ok()?; let (id, b) = split(&m)?; Some((id, b.to_vec())) }
     pub async fn write_rep(s: &mut UnixStream, id: u32, body: &[u8]) { s.write_all(&frame(id, body)).await.unwrap() }
     pub async fn accept(l: &UnixListener) -> (UnixStream, [u8; 8]) {
-        let (mut s, _) = l.accept().await.unwrap();
+        let mut s = crate::plat::ipc::accept(l).await.unwrap();
         s.write_all(&hello(REP0)).await.unwrap();
         let mut h = [0u8; 8]; s.read_exact(&mut h).await.unwrap(); (s, h)
     }
     pub fn sock(name: &str) -> (String, UnixListener) {
         let d = std::env::temp_dir().join(format!("nng-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
-        let p = d.join("api.sock"); let l = UnixListener::bind(&p).unwrap(); (p.to_string_lossy().into(), l)
+        let p = d.join("api.sock"); let p: String = p.to_string_lossy().into(); let l = crate::plat::ipc::bind(&p).unwrap(); (p, l)
     }
 
     #[test] fn hello_bytes() {
@@ -171,7 +172,7 @@ pub mod tests {
     }
     #[tokio::test] async fn dial_refuses_what_is_not_a_rep() {
         let (path, l) = sock("proto");
-        tokio::spawn(async move { loop { let (mut s, _) = l.accept().await.unwrap(); s.write_all(&hello(0x21)).await.unwrap(); let mut h = [0u8; 8]; let _ = s.read_exact(&mut h).await; } });
+        tokio::spawn(async move { loop { let mut s = crate::plat::ipc::accept(&l).await.unwrap(); s.write_all(&hello(0x21)).await.unwrap(); let mut h = [0u8; 8]; let _ = s.read_exact(&mut h).await; } });
         assert_eq!(Req::dial(&path).await.err().unwrap(), format!("dial ipc://{path}: Protocol error"));
         let e = Req::dial("/nonexistent/api.sock").await.err().unwrap();
         assert_eq!(e, "dial ipc:///nonexistent/api.sock: Connection refused");

@@ -7,6 +7,7 @@
 // the process gate (proc.rs, copy.rs): the helper makes its git / kicad-cli / step children through it like the hub
 #[path = "../copy.rs"] mod copy;
 #[path = "../proc.rs"] mod proc;
+#[path = "../plat/mod.rs"] #[allow(dead_code)] mod plat;
 #[path = "../kicad/fl.rs"] mod fl;
 #[path = "../kicad/sexpr.rs"] mod sexpr;
 #[path = "../kicad/strokefont.rs"] mod strokefont;

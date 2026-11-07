@@ -13,7 +13,7 @@ use aes_gcm::{aead::{Aead, KeyInit, Payload}, Aes256Gcm, Nonce};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{io::{Read, Write}, os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt}, path::{Path, PathBuf}, sync::Mutex};
+use std::{io::{Read, Write}, path::{Path, PathBuf}, sync::Mutex}; use crate::plat::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 
 const BACKENDS: [&str; 4] = ["keyring", "keychain", "dpapi", "file"];
 
@@ -35,7 +35,7 @@ fn spath(v: &Vault, f: &str) -> PathBuf { v.home.join("secrets").join(f) }
 fn vault_id(v: &Vault) -> String { hex::encode(Sha256::digest(v.home.to_string_lossy().as_bytes()))[..16].to_string() }
 
 fn which(cmd: &str) -> bool {
-    std::env::var_os("PATH").map_or(false, |p| std::env::split_paths(&p).any(|d| { let f = d.join(cmd); std::fs::metadata(&f).map_or(false, |m| m.is_file() && m.permissions().mode() & 0o111 != 0) }))
+    std::env::var_os("PATH").map_or(false, |p| std::env::split_paths(&p).any(|d| { let f = d.join(cmd); std::fs::metadata(&f).map_or(false, |m| crate::plat::fs::runnable(&m)) }))
 }
 
 /// Runs a key-store command (5 s), the input on its stdin. (ok, stdout).
@@ -95,7 +95,7 @@ fn key_put_with(copy: bool, v: &Vault, backend: &str, key: &[u8; 32]) -> bool {
 /// Random bytes from the OS. No fallback: a master key or an iv from anything weaker would be predictable (crypto.randomBytes throws too).
 fn random(n: usize) -> Result<Vec<u8>, String> {
     let mut b = vec![0u8; n];
-    std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b)).map_err(|_| "no secure random source".to_string())?;
+    crate::plat::fs::random(&mut b).map_err(|_| "no secure random source".to_string())?;
     Ok(b)
 }
 
@@ -132,7 +132,7 @@ pub fn iso_now() -> String {
 fn fault(step: &str) -> Result<(), std::io::Error> {
     if std::env::var("BACKPLANE_VAULT_TEST").as_deref() != Ok("1") { return Ok(()) }
     let f = std::env::var("BACKPLANE_VAULT_FAULT").unwrap_or_default();
-    if step == "dirsync" && (f == "dirsync" || f == "dirsync-unsupported") { return Err(std::io::Error::from_raw_os_error(if f == "dirsync" { libc::EIO } else { libc::EINVAL })) }
+    if step == "dirsync" && (f == "dirsync" || f == "dirsync-unsupported") { return Err(std::io::Error::from_raw_os_error(if f == "dirsync" { crate::plat::errno::EIO } else { crate::plat::errno::EINVAL })) }
     if f == step { return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("injected {step} failure"))) }
     Ok(())
 }
@@ -170,7 +170,7 @@ fn write(v: &Vault, items: &[Item], backend: &str) -> Result<String, String> {
     let flushed = fault("dirsync").and_then(|_| std::fs::File::open(&dir)).and_then(|d| d.sync_all());
     Ok(match flushed {
         Ok(()) => "durable".into(),
-        Err(e) => { let code = match e.raw_os_error() { Some(c) if c == libc::EINVAL => "EINVAL".to_string(), Some(c) if c == libc::ENOTSUP => "ENOTSUP".to_string(), Some(c) if c == libc::EISDIR => "EISDIR".to_string(), _ => "EIO".to_string() };
+        Err(e) => { let code = match e.raw_os_error() { Some(c) if c == crate::plat::errno::EINVAL => "EINVAL".to_string(), Some(c) if c == crate::plat::errno::ENOTSUP => "ENOTSUP".to_string(), Some(c) if c == crate::plat::errno::EISDIR => "EISDIR".to_string(), _ => "EIO".to_string() };
             format!("{} {code}", if ["EINVAL", "ENOTSUP", "EISDIR"].contains(&code.as_str()) { "unsupported" } else { "unflushed" }) }
     })
 }
@@ -326,7 +326,7 @@ fn env_names(o: &Value) -> Vec<(String, String)> {
 
 /// Signal a run's own process group: only a real child's pid (> 1); never 0, 1 or a missing pid.
 pub fn kill_group(pid: Option<u32>, sig: i32) -> bool {
-    match pid { Some(p) if p > 1 => unsafe { libc::kill(-(p as i32), sig) == 0 }, _ => false }
+    match pid { Some(p) if p > 1 => crate::plat::proc::kill_group(p, sig), _ => false }
 }
 
 struct Tail { bytes: Vec<u8>, cut: usize }
@@ -368,7 +368,7 @@ pub async fn run(spec: Value) -> Value {
     let mut dir: Option<PathBuf> = None;
     // dropped with the future (a cancelled MCP handler): the folder goes and the child's group is killed
     struct Guard { dir: Option<PathBuf>, pid: Option<u32> }
-    impl Drop for Guard { fn drop(&mut self) { if let Some(p) = self.pid { kill_group(Some(p), libc::SIGKILL); } if let Some(d) = &self.dir { let _ = std::fs::remove_dir_all(d); } } }
+    impl Drop for Guard { fn drop(&mut self) { if let Some(p) = self.pid { kill_group(Some(p), crate::plat::proc::KILL); } if let Some(d) = &self.dir { let _ = std::fs::remove_dir_all(d); } } }
     let mut guard = Guard { dir: None, pid: None };
     if !files.is_empty() {
         let home = with(|v| v.home.clone());
@@ -403,10 +403,10 @@ pub async fn run(spec: Value) -> Value {
     });
     let secs = spec.get("timeout").and_then(|t| t.as_f64().or_else(|| t.as_str().and_then(|s| s.parse().ok()))).filter(|t| *t > 0.0).unwrap_or(120.0).clamp(1.0, 600.0);
     // a group of its own, like the JS hub's `detached: true`
-    unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
+    crate::plat::proc::own_group_tokio(&mut cmd);
     let cleanup = |d: &Option<PathBuf>| { if let Some(d) = d { let _ = std::fs::remove_dir_all(d); } };
     let mut child = match cmd.spawn() { Ok(c) => c, Err(e) => { cleanup(&dir); return answer(json!({"error": format!("could not start: {}", errs(&e.to_string()))})) } };
-    let pid = child.id(); guard.pid = pid;
+    let pid = child.id(); guard.pid = pid; crate::plat::proc::adopt(pid.unwrap_or(0), false);
     let (out, err) = (std::sync::Arc::new(Mutex::new(Tail { bytes: vec![], cut: 0 })), std::sync::Arc::new(Mutex::new(Tail { bytes: vec![], cut: 0 })));
     let pump = |r: Option<tokio::process::ChildStdout>, t: std::sync::Arc<Mutex<Tail>>| tokio::spawn(async move {
         let Some(mut r) = r else { return };
@@ -425,19 +425,18 @@ pub async fn run(spec: Value) -> Value {
         s = child.wait() => s.ok(),
         _ = sleep((secs * 1000.0) as u64) => {
             timed_out = true;
-            kill_group(pid, libc::SIGTERM);
+            kill_group(pid, crate::plat::proc::TERM);
             tokio::select! {
                 s = child.wait() => s.ok(),
-                _ = sleep(2000) => { kill_group(pid, libc::SIGKILL); tokio::select! { s = child.wait() => s.ok(), _ = sleep(3000) => None } }
+                _ = sleep(2000) => { kill_group(pid, crate::plat::proc::KILL); tokio::select! { s = child.wait() => s.ok(), _ = sleep(3000) => None } }
             }
         }
     };
     // the command is done; its streams get 2 s, then the group goes
     let both = async { let _ = (&mut h_out).await; let _ = (&mut h_err).await; };
-    if tokio::time::timeout(std::time::Duration::from_millis(if timed_out { 100 } else { 2000 }), both).await.is_err() { kill_group(pid, libc::SIGKILL); h_out.abort(); h_err.abort(); }
+    if tokio::time::timeout(std::time::Duration::from_millis(if timed_out { 100 } else { 2000 }), both).await.is_err() { kill_group(pid, crate::plat::proc::KILL); h_out.abort(); h_err.abort(); }
     cleanup(&dir); guard.pid = None; guard.dir = None;
-    use std::os::unix::process::ExitStatusExt;
-    let code: i64 = if timed_out { 124 } else { match status { Some(s) => s.code().map(i64::from).unwrap_or_else(|| 128 + s.signal().unwrap_or(0) as i64), None => 255 } };
+    let code: i64 = if timed_out { 124 } else { match status { Some(s) => crate::plat::exit_code(&s) as i64, None => 255 } };
     let (o, e) = (tail_text(&out.lock().unwrap()), tail_text(&err.lock().unwrap()));
     answer(json!({"code": code, "timedOut": timed_out, "stdout": o, "stderr": e}))
 }

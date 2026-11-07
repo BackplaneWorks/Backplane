@@ -33,7 +33,7 @@ pub fn have(path: &str) -> bool { std::fs::metadata(path).map(|m| m.is_file() &&
 
 /// a folder of this attempt's own beside `out`: two writers of one model never touch each other's bytes
 pub fn stage(out: &str, tag: &str) -> std::io::Result<PathBuf> {
-    use std::os::unix::fs::DirBuilderExt;
+    use crate::plat::fs::DirBuilderExt;
     static N: AtomicU64 = AtomicU64::new(0);
     let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
     let dir = PathBuf::from(format!("{out}.{tag}{}-{}-{t}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
@@ -65,7 +65,7 @@ pub fn attempts(env: Option<&str>, gui: &str, cmd: &str, beside: &str) -> Vec<Me
     }
 }
 
-fn runnable(p: &Path) -> bool { use std::os::unix::fs::PermissionsExt; std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false) }
+fn runnable(p: &Path) -> bool { use crate::plat::fs::PermissionsExt; std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false) }
 fn on_path(c: &str) -> Option<String> {
     if c.contains('/') { return runnable(Path::new(c)).then(|| c.to_string()) }
     std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(c)).find(|f| runnable(f))).map(|f| f.to_string_lossy().into_owned())
@@ -182,7 +182,7 @@ pub fn convert(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>,
 mod tests {
     use super::*;
     #[test] fn the_freecad_path_setting_is_tried_first() {
-        use std::os::unix::fs::PermissionsExt;
+        use crate::plat::fs::PermissionsExt;
         let d = std::env::temp_dir().join(format!("bp-fcset-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
         let f = d.join("mycad"); std::fs::write(&f, "#!/bin/sh\n").unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
         set_freecad_setting(&format!(" {} ", f.display())); assert_eq!(freecad_cmd(&d), f.to_string_lossy());
@@ -205,7 +205,7 @@ mod tests {
     #[test] fn no_tool_says_what_is_missing() { let r = convert(&[], "/a.step", "/o.glb", Some(NORMAL), false); assert_eq!((r.code, r.out.as_str()), (127, NO_MESHER)); }
     fn dir(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-stepglb-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
     #[test] fn a_tool_gets_the_detail_and_the_next_is_tried_after_a_failure() {
-        use std::os::unix::fs::PermissionsExt;
+        use crate::plat::fs::PermissionsExt;
         let d = dir("tool"); let tool = d.join("t"); let log = d.join("log");
         std::fs::write(&tool, format!("#!/bin/sh\necho \"$@\" > {}\nprintf x > \"$2\"\necho said\n", log.display())).unwrap();
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();

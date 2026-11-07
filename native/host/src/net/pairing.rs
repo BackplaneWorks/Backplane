@@ -72,7 +72,7 @@ impl Registry {
             if data["version"] != 1 || data["owner"] != digest(root).as_str() || !ds.iter().all(valid_device) { return Err(bad()) }
             if let Some(is) = data.get("invitations") { if !is.as_array().map_or(false, |a| a.iter().all(valid_invite)) { return Err(bad()) } }
             devices = ds.clone(); invites = data["invitations"].as_array().cloned().unwrap_or_default();
-            use std::os::unix::fs::PermissionsExt;
+            use crate::plat::fs::PermissionsExt;
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).map_err(|_| "Cannot read or initialize device registry; existing pairings were preserved".to_string())?;
         }
         Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { devices, invites, attempts: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
@@ -81,7 +81,7 @@ impl Registry {
 
     /// Atomic write: temp file (0600, exclusive), fsync, rename, fsync the folder. State changes only after.
     fn persist(&self, g: &mut Inner, devices: Vec<Value>, invites: Vec<Value>) -> Result<(), String> {
-        use std::os::unix::fs::OpenOptionsExt;
+        use crate::plat::fs::OpenOptionsExt;
         let tmp = self.file.with_extension(format!("json.{}.tmp", self.rand_hex(8)));
         let body = json!({"version": 1, "owner": digest(&self.root), "devices": devices, "invitations": invites}).to_string();
         let r = (|| -> std::io::Result<()> {
