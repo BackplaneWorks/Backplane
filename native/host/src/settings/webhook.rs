@@ -7,7 +7,7 @@
 //! The entry point is `deliver`; the notification pipeline (net lane) calls it for every alert it raises: this lane does not decide *when*.
 use crate::hub::Hub;
 use serde_json::{json, Value};
-use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}, path::{Path, PathBuf}, sync::Arc};
+use std::{io::Write, path::{Path, PathBuf}, sync::Arc}; use crate::plat::fs::{DirBuilderExt, OpenOptionsExt};
 
 pub const URL_KEY: &str = "push.webhook.url";
 pub const SECRET_KEY: &str = "push.webhook.secret";

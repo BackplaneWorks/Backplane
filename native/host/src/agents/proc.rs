@@ -32,7 +32,7 @@ impl Cli {
             Some(d) => {
                 let p = d.join(cli);
                 let (cd, cp) = (std::fs::canonicalize(d).map_err(|_| format!("{} has no runnable {cli}", d.display()))?, std::fs::canonicalize(&p).map_err(|_| format!("{} has no runnable {cli}", d.display()))?);
-                let exec = std::fs::metadata(&cp).map(|m| { use std::os::unix::fs::PermissionsExt; m.is_file() && m.permissions().mode() & 0o111 != 0 }).unwrap_or(false);
+                let exec = std::fs::metadata(&cp).map(|m| { use crate::plat::fs::PermissionsExt; m.is_file() && m.permissions().mode() & 0o111 != 0 }).unwrap_or(false);
                 if exec && cp.starts_with(&cd) { Ok(cp) } else { Err(format!("{} has no runnable {cli}", d.display())) }
             }
             None if self.copy => Err(format!("a copy of a log runs agents only as stand-ins: {cli} refused")),
@@ -125,11 +125,11 @@ pub fn reap_orphans(home: &str) -> usize {
         let Ok(env) = std::fs::read(format!("/proc/{pid}/environ")) else { continue };
         if !env.split(|b| *b == 0).any(|kv| kv == mark.as_slice()) { continue }
         if descends_from(pid, me) { continue } // this process's own agents are not orphans (only a previous hub's, reparented, are)
-        unsafe { libc::kill(pid as i32, libc::SIGKILL); } n += 1
+        crate::plat::proc::kill(pid, crate::plat::proc::KILL); n += 1
     }
     n
 }
-/// macOS and other Unix: no /proc, and no way to read another process's environment that is exact (`ps eww` joins argv and environment with spaces, so a
+/// macOS, other Unix and Windows: no /proc, and no way to read another process's environment that is exact (`ps eww` joins argv and environment with spaces, so a
 /// text match could end a process that only quotes the mark, or one whose home has a space). Until it reads KERN_PROCARGS2 entry by entry, or keeps a pid file with
 /// start times, this ends nothing: an orphan left running is better than killing the wrong process.
 #[cfg(not(target_os = "linux"))]
@@ -138,7 +138,7 @@ pub fn reap_orphans(_home: &str) -> usize { 0 }
 /// Off Linux nothing ends an agent when the hub is killed (no PDEATHSIG), so one small watcher process per hub does: the hub keeps the write end of a pipe to it
 /// (close-on-exec, so no agent holds it), registers each agent's process group, and when the pipe closes because the hub is gone the watcher kills every group still registered.
 /// The watcher is this binary with `--agent-reaper`; it is its own session, so the signal that killed the hub does not reach it.
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 mod reaper {
     use std::io::Write;
     static PIPE: std::sync::Mutex<Option<std::process::ChildStdin>> = std::sync::Mutex::new(None);
@@ -146,12 +146,11 @@ mod reaper {
         let mut g = PIPE.lock().unwrap();
         if g.is_none() {
             let Ok(exe) = std::env::current_exe() else { return false };
-            use std::os::unix::process::CommandExt;
             let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, exe);
             #[cfg(not(test))] c.arg("--agent-reaper");
             #[cfg(test)] c.args(["agents::tests::reaper_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_REAPER_CHILD", "1"); // a test binary takes no such flag: its watcher is a test that only runs as that child
             c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-            unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); }
+            crate::plat::proc::own_group(&mut c);
             match c.spawn() { Ok(mut ch) => { *g = ch.stdin.take(); std::thread::spawn(move || { let _ = ch.wait(); }); } Err(_) => return false }
         }
         let ok = g.as_mut().map_or(false, |w| w.write_all(line.as_bytes()).and_then(|_| w.flush()).is_ok());
@@ -161,7 +160,8 @@ mod reaper {
     pub fn add(pid: u32) { if pid > 0 && !send(&format!("+{pid}\n")) { send(&format!("+{pid}\n")); } }
     pub fn remove(pid: u32) { if pid > 0 { let mut g = PIPE.lock().unwrap(); if let Some(w) = g.as_mut() { let _ = w.write_all(format!("-{pid}\n").as_bytes()).and_then(|_| w.flush()); } } }
 }
-#[cfg(target_os = "linux")]
+/// Linux: PDEATHSIG; Windows: the agent's Job Object dies with the hub (plat::proc::adopt).
+#[cfg(any(target_os = "linux", windows))]
 mod reaper { pub fn add(_pid: u32) {} pub fn remove(_pid: u32) {} }
 
 /// `backplane-hub --agent-reaper`: read "+pid" / "-pid" lines from stdin; at end of input (the hub is gone) kill each process group still listed. Returns the exit code.
@@ -174,7 +174,7 @@ pub fn reaper_main() -> i32 {
         let Ok(pid) = n.trim().parse::<i32>() else { continue };
         match sign { "+" => { live.insert(pid); } "-" => { live.remove(&pid); } _ => {} }
     }
-    for pid in live { if pid > 1 { unsafe { libc::kill(-pid, libc::SIGKILL); libc::kill(pid, libc::SIGKILL); } } }
+    for pid in live { if pid > 1 { crate::plat::proc::kill_group(pid as u32, crate::plat::proc::KILL); crate::plat::proc::kill(pid as u32, crate::plat::proc::KILL); } }
     0
 }
 
@@ -195,10 +195,11 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
         None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); } }
         Some(p) => { let (remove, set) = super::person::child_env(&p.home, &p.path, std::env::vars_os()); for k in remove { c.env_remove(k); } for (k, v) in set { c.env(k, v); } } // no BACKPLANE_* (so no owner mark either: PDEATHSIG ends it with the hub)
     }
-    // Linux: the kernel kills the agent when the hub dies (PDEATHSIG). Elsewhere the `reaper` watcher does (the whole group, grandchildren included).
-    unsafe { c.pre_exec(|| { libc::setsid(); #[cfg(target_os = "linux")] libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); }
+    // Linux: the kernel kills the agent when the hub dies (PDEATHSIG); Windows: its Job Object does. Elsewhere the `reaper` watcher does (the whole group, grandchildren included).
+    crate::plat::proc::agent_group(&mut c);
     let mut child = c.spawn()?;
     let pid = child.id().unwrap_or(0);
+    crate::plat::proc::adopt(pid, true);
     reaper::add(pid);
     let mut stdin = child.stdin.take().expect("piped"); let stdout = child.stdout.take().expect("piped"); let mut stderr = child.stderr.take().expect("piped");
     let (in_tx, mut in_rx) = mpsc::channel::<String>(IN_QUEUE);
@@ -210,9 +211,8 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     tokio::spawn(async move {
         let st = child.wait().await; // always reaped
         let err = tail.await.unwrap_or_default();
-        use std::os::unix::process::ExitStatusExt;
-        let e = match st { Ok(s) => Exit { code: s.code(), signal: s.signal(), stderr: err }, Err(e) => Exit { code: None, signal: None, stderr: e.to_string() } };
-        if pid > 0 { unsafe { libc::kill(-(pid as i32), libc::SIGKILL); } } // the group: anything the agent left behind
+        let e = match st { Ok(s) => Exit { code: s.code(), signal: crate::plat::proc::signal(&s), stderr: err }, Err(e) => Exit { code: None, signal: None, stderr: e.to_string() } };
+        if pid > 0 { crate::plat::proc::kill_group(pid, crate::plat::proc::KILL); } // the group: anything the agent left behind
         reaper::remove(pid);
         let _ = exit_tx.send(e);
     });
@@ -222,12 +222,12 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
 /// Ask the process group to end; SIGKILL follows after `grace` if it is still there.
 pub fn terminate(pid: u32, grace: std::time::Duration) {
     if pid == 0 { return }
-    unsafe { libc::kill(-(pid as i32), libc::SIGTERM); }
-    tokio::spawn(async move { tokio::time::sleep(grace).await; unsafe { libc::kill(-(pid as i32), libc::SIGKILL); } });
+    crate::plat::proc::kill_group(pid, crate::plat::proc::TERM);
+    tokio::spawn(async move { tokio::time::sleep(grace).await; crate::plat::proc::kill_group(pid, crate::plat::proc::KILL); });
 }
 
 /// Whether a process is still there (kill 0): for tests that check nothing is left.
-pub fn alive(pid: u32) -> bool { pid > 0 && unsafe { libc::kill(pid as i32, 0) } == 0 }
+pub fn alive(pid: u32) -> bool { crate::plat::proc::alive(pid) }
 
 #[cfg(test)]
 mod tests {
@@ -245,7 +245,7 @@ mod tests {
     }
     use super::*;
     fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-agents-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
-    fn script(d: &Path, name: &str, body: &str) -> PathBuf { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p }
+    fn script(d: &Path, name: &str, body: &str) -> PathBuf { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p }
 
     #[test] fn test_mode_runs_only_the_standin_folder() {
         let d = dir("res"); script(&d, "claude", "exit 0"); let a = Cli::standin(&d);
@@ -253,7 +253,7 @@ mod tests {
         assert_eq!(a.resolve("codex").unwrap_err(), format!("{} has no runnable codex", d.display()));
         assert!(a.resolve("../claude").is_err()); assert!(a.resolve("/bin/sh").is_err());
         std::fs::write(d.join("grok"), "x").unwrap(); assert!(a.resolve("grok").is_err()); // not executable
-        let outside = dir("res-out"); script(&outside, "muse", "exit 0"); std::os::unix::fs::symlink(outside.join("muse"), d.join("muse")).unwrap();
+        let outside = dir("res-out"); script(&outside, "muse", "exit 0"); crate::plat::fs::symlink(outside.join("muse"), d.join("muse")).unwrap();
         assert!(a.resolve("muse").is_err()); // a link out of the folder is refused
     }
     #[test] fn a_copy_of_a_log_without_standins_runs_nothing() { let a = Cli { dir: None, copy: true }; assert!(a.resolve("claude").unwrap_err().contains("refused")); }

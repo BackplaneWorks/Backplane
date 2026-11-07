@@ -163,7 +163,7 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let id = at[0]["id"].as_str().unwrap().to_string(); assert!(id.starts_with("t2~") && !id.contains('/') && !id.contains(' '), "opaque and path-safe: {id}");
     // the file is in the thread's attachments folder, private, and the agent is told its path while the message keeps the person's words
     let dir = hub.cfg.home.join("attachments").join("t2"); let files: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect(); assert_eq!(files.len(), 2);
-    { use std::os::unix::fs::PermissionsExt; assert_eq!(files[0].metadata().unwrap().permissions().mode() & 0o777, 0o600); }
+    { use crate::plat::fs::PermissionsExt; assert_eq!(files[0].metadata().unwrap().permissions().mode() & 0o777, 0o600); }
     let log = (0..hub.store.len()).map(|i| hub.store.get(i).unwrap()).collect::<Vec<_>>();
     let posted: Value = serde_json::from_str(log.iter().rev().find(|l| l.contains("\"MessagePosted\"") && l.contains("img-1")).unwrap()).unwrap();
     let queued: Value = serde_json::from_str(log.iter().rev().find(|l| l.contains("\"TurnQueued\"") && l.contains("img-1")).unwrap()).unwrap();

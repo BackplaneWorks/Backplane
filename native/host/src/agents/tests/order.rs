@@ -1,7 +1,7 @@
 //! The order tools through the agent's own MCP path: what an agent asked to review for manufacturing calls, and what a buy thread's questions do.
 use super::*;
 use super::lost::rig;
-use std::os::unix::fs::PermissionsExt;
+use crate::plat::fs::PermissionsExt;
 
 const SESSION_OK: &str = "{\"$\":\"SessionSet\",\"id\":\"t1700000001-2\",\"session\":\"fresh-old\",\"at\":1700000060}\n";
 async fn call(ag: &Arc<Agents>, name: &str, a: Value) -> (bool, String) {
@@ -174,7 +174,7 @@ fn posted(ev: &[Value], msg: &str) -> usize { ev.iter().filter(|e| is(e, "Messag
 #[tokio::test(flavor = "multi_thread")] async fn what_must_not_go_is_refused_before_the_person_is_asked() {
     let (r, _f, d) = buy_rig("or-bad", 0).await; let from = len(&r.hub).await;
     for dir in ["", "/etc", "../..", "mfg/none"] { let (ok, t) = call(&r.ag, "order_quote", json!({"dir":dir})).await; assert!(!ok, "{dir}: {t}") }
-    std::os::unix::fs::symlink("/etc/hostname", d.join("mfg/1/x.zip")).unwrap(); let (ok, t) = call(&r.ag, "order_quote", json!({"dir":"mfg/1"})).await; assert!(!ok && t.contains("no links"), "{t}");
+    crate::plat::fs::symlink("/etc/hostname", d.join("mfg/1/x.zip")).unwrap(); let (ok, t) = call(&r.ag, "order_quote", json!({"dir":"mfg/1"})).await; assert!(!ok && t.contains("no links"), "{t}");
     tokio::time::sleep(Duration::from_millis(150)).await; assert!(!log_from(&r.hub, from).await.iter().any(|e| is(e, "AskOpened")));
     r.ag.shutdown();
 }

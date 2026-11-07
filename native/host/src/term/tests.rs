@@ -49,7 +49,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     while !String::from_utf8_lossy(&all).contains('\n') { all.extend(out.recv().await.unwrap()) }
     let child: i32 = String::from_utf8_lossy(&all).trim().parse().unwrap();
     p.hangup(); exit.await.unwrap();
-    assert!(wait(5, || unsafe { libc::kill(child, 0) } != 0).await, "the background sleep is still there");
+    assert!(wait(5, || !crate::plat::proc::alive(child as u32)).await, "the background sleep is still there");
 }
 #[tokio::test] async fn output_is_bounded_by_the_queue_not_memory() {
     // a flood the reader does not drain: the program blocks on its pty instead of us buffering without end
@@ -182,7 +182,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     tokio::time::sleep(Duration::from_millis(500)).await; t.kill(&key).await;
     // the module's own pty-wait thread reaps the shell; this test must never call waitpid itself (waitpid(-1) took other tests' children: their
     // Command::output() / tokio wait got ECHILD, so a project.add's `sh` failed and the side-by-side probe's child "had no child processes")
-    assert!(wait(10, || unsafe { libc::kill(pid, 0) } != 0).await, "the shell that ignores the hangup is killed and reaped");
+    assert!(wait(10, || !crate::plat::proc::alive(pid as u32)).await, "the shell that ignores the hangup is killed and reaped");
     assert!(wait(10, || t.inner.try_lock().map_or(false, |g| !g.shells.contains_key(&key))).await, "the shell is gone after the escalation to SIGKILL");
 }
 

@@ -76,7 +76,7 @@ pub fn members_ok(names: &str, long: &str) -> Result<(), String> {
 /// A build ready to run: the hub is there and runs, and nothing in it is a link of either kind (it could point outside its folder). Checked again after unpacking, whatever the listing said.
 fn check_tree(d: &Path) -> Result<(), String> {
     let hub = fs::metadata(d.join("backplane-hub")).map_err(|_| "the archive has no backplane-hub".to_string())?;
-    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; if hub.permissions().mode() & 0o111 == 0 { return Err("the archive's backplane-hub cannot run".into()) } }
+    #[cfg(unix)] { use crate::plat::fs::PermissionsExt; if hub.permissions().mode() & 0o111 == 0 { return Err("the archive's backplane-hub cannot run".into()) } }
     if !hub.is_file() { return Err("the archive has no backplane-hub".into()) }
     let mut todo = vec![d.to_path_buf()];
     while let Some(x) = todo.pop() {
@@ -84,7 +84,7 @@ fn check_tree(d: &Path) -> Result<(), String> {
             let e = e.map_err(|e| e.to_string())?; let t = e.file_type().map_err(|e| e.to_string())?;
             if t.is_symlink() { return Err("the archive holds a link".into()) }
             if t.is_dir() { todo.push(e.path()); continue }
-            #[cfg(unix)] { use std::os::unix::fs::MetadataExt; if e.metadata().map_err(|e| e.to_string())?.nlink() > 1 { return Err("the archive holds a hard link".into()) } }
+            #[cfg(unix)] { use crate::plat::fs::MetadataExt; if e.metadata().map_err(|e| e.to_string())?.nlink() > 1 { return Err("the archive holds a hard link".into()) } }
         }
     }
     Ok(())
@@ -172,7 +172,7 @@ mod tests {
     /// "unpacks" by writing a working build, or what `f` makes of the folder
     fn good_tree(_: &Path, d: &Path) -> Result<(), String> {
         fs::write(d.join("backplane-hub"), b"x").map_err(|e| e.to_string())?;
-        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; fs::set_permissions(d.join("backplane-hub"), fs::Permissions::from_mode(0o755)).unwrap(); }
+        #[cfg(unix)] { use crate::plat::fs::PermissionsExt; fs::set_permissions(d.join("backplane-hub"), fs::Permissions::from_mode(0o755)).unwrap(); }
         Ok(())
     }
 
@@ -241,7 +241,7 @@ mod tests {
     #[cfg(unix)] #[test] fn a_hub_that_cannot_run_or_a_link_is_refused() {
         let r = Rig::new("tree"); let mut f = Feed::new(); let x = found(&mut f, &r, b"archive");
         assert!(stage(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &|_, d| { fs::write(d.join("backplane-hub"), b"x").unwrap(); Ok(()) }).unwrap_err().contains("cannot run"));
-        let e = stage(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &|a, d| { good_tree(a, d)?; fs::create_dir(d.join("assets")).unwrap(); std::os::unix::fs::symlink("/etc", d.join("assets/x")).unwrap(); Ok(()) }).unwrap_err();
+        let e = stage(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &|a, d| { good_tree(a, d)?; fs::create_dir(d.join("assets")).unwrap(); crate::plat::fs::symlink("/etc", d.join("assets/x")).unwrap(); Ok(()) }).unwrap_err();
         assert!(e.contains("link")); assert!(left(&r).is_empty());
     }
     #[test] fn a_failed_fetch_leaves_nothing() {

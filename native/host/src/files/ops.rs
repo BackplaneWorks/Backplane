@@ -140,7 +140,7 @@ pub fn run(root: &Path, p: &serde_json::Value) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*; use std::os::unix::fs::symlink;
+    use super::*; use crate::plat::fs::symlink;
     fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-ops-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     #[test] fn mkdir_write_rename_delete_roundtrip() {
         let b = tmp("rt"); let r = b.join("r"); std::fs::create_dir_all(&r).unwrap();

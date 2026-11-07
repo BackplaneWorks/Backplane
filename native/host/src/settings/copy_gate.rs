@@ -5,7 +5,7 @@
 #[cfg(test)]
 use crate::{hub::{Cfg, Hub}, presenter::Canned};
 use serde_json::{json, Value};
-use std::{os::unix::fs::PermissionsExt, path::{Path, PathBuf}, sync::Arc};
+use std::{path::{Path, PathBuf}, sync::Arc}; use crate::plat::fs::PermissionsExt;
 
 const PROBE: &str = "BP_SETTINGS_COPY_PROBE";
 fn home(tag: &str) -> PathBuf { let h = std::env::temp_dir().join(format!("bp-scg-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h }

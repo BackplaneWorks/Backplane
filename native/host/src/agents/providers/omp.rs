@@ -146,7 +146,7 @@ static LAUNCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 /// so the prompt never enters argv. Removed by `remove` after the process exits.
 /// NOTE: masks the prompt (Vx.Vx.mask, the secret vault) before it is written; the Rust hub has no vault yet, so the actor must pass `TurnIn.prompt` masked once it does.
 pub fn prepare(home: &str, prompt: &str, extension: &str) -> std::io::Result<std::path::PathBuf> {
-    use std::io::Write; use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    use std::io::Write; use crate::plat::fs::{DirBuilderExt, OpenOptionsExt};
     let root = std::path::Path::new(home).join("omp"); std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&root)?;
     let n = LAUNCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = root.join(format!("launch-{}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0), n));
@@ -262,7 +262,7 @@ mod tests {
             "--append-system-prompt", &format!("{}/system-prompt.txt", launch.display()), "--thinking", "auto"]);
         assert!(!v.iter().any(|x| x == "THE PROMPT")); // never in argv
         assert_eq!(std::fs::read_to_string(launch.join("system-prompt.txt")).unwrap(), "THE PROMPT"); assert_eq!(std::fs::read_to_string(launch.join("backplane.js")).unwrap(), EXT);
-        { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(launch.join("system-prompt.txt")).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777, 0o700); }
+        { use crate::plat::fs::PermissionsExt; assert_eq!(std::fs::metadata(launch.join("system-prompt.txt")).unwrap().permissions().mode() & 0o777, 0o600); assert_eq!(std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777, 0o700); }
         assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://m".to_string())]);
         drop(d); assert!(!launch.exists());
         a.model = "openai/gpt".into(); a.effort = "turbo".into(); let d2 = OmpDriver::new(); let v2 = d2.argv(&a); assert_eq!(&v2[v2.len() - 2..], ["--model", "openai/gpt"]); drop(d2);

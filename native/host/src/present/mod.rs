@@ -39,7 +39,7 @@ impl Routed {
     }
     /// Refused (said once) unless: a copy run, the helper is running (nothing to record otherwise), and the log is small (`copy::BIG_LOG`): a dump of a real-size copy would hold real content.
     fn open_dump(dir: Option<PathBuf>, copy: bool, helper_running: bool, log_bytes: u64) -> Option<Mutex<std::fs::File>> {
-        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        use crate::plat::fs::{DirBuilderExt, OpenOptionsExt};
         let dir = dir?;
         if !copy || !helper_running || log_bytes > crate::copy::BIG_LOG {
             eprintln!("BACKPLANE_PRESENTER_DUMP ignored: it needs a copy run (BACKPLANE_COPY=1), a running helper and a log under {} bytes (synthetic logs only)", crate::copy::BIG_LOG);
@@ -149,7 +149,7 @@ mod tests {
         assert!(Routed::open_dump(Some(d2.clone()), false, true, 1000).is_none() && !d2.exists(), "a non-copy run writes no dump");
         assert!(Routed::open_dump(Some(d2.clone()), true, false, 1000).is_none() && !d2.exists(), "no helper, nothing to record");
         assert!(Routed::open_dump(Some(d2.clone()), true, true, crate::copy::BIG_LOG + 1).is_none() && !d2.exists(), "a log of real size is never dumped");
-        use std::os::unix::fs::PermissionsExt;
+        use crate::plat::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(d.join("views.jsonl")).unwrap().permissions().mode() & 0o777, 0o600, "the dump is private");
     }
     #[tokio::test] async fn a_fab_look_answer_does_not_send_the_view_to_the_helper_but_another_read_does() {

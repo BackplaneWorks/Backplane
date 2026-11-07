@@ -96,7 +96,7 @@ impl Actor {
     fn launch(&mut self, project: &str) { // KServe.launch: helper present, then the server is started and gets 30 s to say it listens
         let now = now_s();
         let dir = ks::dir(&self.rt, &self.home, project);
-        { use std::os::unix::fs::DirBuilderExt; let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir); }
+        { use crate::plat::fs::DirBuilderExt; let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir); }
         let argv = ks::argv(&self.env.cli, project, &dir, self.hub_pid, &self.env.caps);
         let envv: Map<String, Value> = ["BACKPLANE_KICAD_LIBRARY", "KICAD_CONFIG_HOME"].iter().map(|k| (k.to_string(), json!(std::env::var(k).unwrap_or_default()))).collect();
         self.sink(json!({"op":"spawn","key":project,"argv":argv,"memory":"1536M","env":envv}));
@@ -384,15 +384,16 @@ mod tests {
 
     /// The whole path through the actor on the default transport, no Bun: a request starts the server, waits while it starts,
     /// Ping and GetVersion hand it over, and only then the request goes out; its clean exit leaves the record stopped.
+    #[cfg(unix)]
     #[tokio::test] async fn actor_over_the_rust_transport() {
         use super::super::nng::tests as stand_in;
-        use std::os::unix::fs::PermissionsExt;
+        use crate::plat::fs::PermissionsExt;
         // the real server's answer to GetVersion (bp.4), and one with no message for what is not asked about
         let version: Vec<u8> = { let h = "0a040a02746b120208011a5c0a3c747970652e676f6f676c65617069732e636f6d2f6b696170692e636f6d6d6f6e2e636f6d6d616e64732e47657456657273696f6e526573706f6e7365121c0a1a080a1063221431302e39392e302d756e6b6e6f776e2d62702e34"; (0..h.len() / 2).map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap()).collect() };
         let root = std::path::PathBuf::from("/tmp").join(format!("ipc-actor-{}", std::process::id())); // short: a unix socket path must fit SUN_LEN (104 on macOS) let _ = std::fs::remove_dir_all(&root); std::fs::create_dir_all(&root).unwrap();
         let (rt, project) = (root.to_string_lossy().to_string(), "/p/a.kicad_pro".to_string());
         let dir = ks::dir(&rt, "", &project); std::fs::create_dir_all(&dir).unwrap();
-        let sock = format!("{dir}/api.sock"); let l = tokio::net::UnixListener::bind(&sock).unwrap();
+        let sock = format!("{dir}/api.sock"); let l = crate::plat::ipc::bind(&sock).unwrap();
         let cli = format!("{rt}/kicad-cli"); std::fs::write(&cli, "#!/bin/sh\necho \"KiCad API server listening at ipc://$4\"\nsleep 1\n").unwrap(); std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
         let answered = version.clone();
         let srv = tokio::spawn(async move { // Ping, GetVersion, then the request itself

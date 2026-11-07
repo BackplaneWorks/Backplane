@@ -62,7 +62,7 @@ pub fn builtin() -> Arc<Schema> {
 pub fn from_bytes(bytes: &[u8]) -> Result<Schema, String> { DescriptorPool::decode(bytes).map(|pool| Schema { pool, full: true }).map_err(|e| e.to_string()) }
 
 fn stamp(file: &str) -> Option<String> {
-    use std::os::unix::fs::MetadataExt;
+    use crate::plat::fs::MetadataExt;
     let m = std::fs::metadata(file).ok()?; Some(format!("{}:{}.{}", m.size(), m.mtime(), m.mtime_nsec()))
 }
 /// The schema for a descriptor-set file ("" or unreadable: the built-in one), read again when the file changes.

@@ -724,7 +724,7 @@ mod store_tests {
         assert!(store::read(&q).is_empty() && store::headers(&q).is_empty());
     }
     #[test] fn the_journal_is_not_opened_through_a_link() {
-        use std::os::unix::fs::symlink;
+        use crate::plat::fs::symlink;
         let h = home("links"); let outside = home("links-outside");
         // a link in the journal's place: refused, and what it points at is not written
         std::fs::create_dir_all(h.join("mail")).unwrap(); let target = outside.join("elsewhere"); std::fs::write(&target, b"").unwrap();
@@ -743,7 +743,7 @@ mod store_tests {
         assert!(!format!("{}", store::StoreError::Link).contains("c1"));
     }
     #[test] fn headers_drop_the_text_and_a_new_journal_is_private() {
-        use std::os::unix::fs::PermissionsExt;
+        use crate::plat::fs::PermissionsExt;
         let h = home("hdr"); store::append(&h, &body("c", "m1")).unwrap(); store::append(&h, &body("c", "m2")).unwrap();
         let hs = store::headers(&store::path(&h, "c")); assert_eq!(hs.iter().map(|(_, m)| m.id.as_str()).collect::<Vec<_>>(), vec!["m1", "m2"]);
         assert_eq!(std::fs::metadata(store::path(&h, "c")).unwrap().permissions().mode() & 0o777, 0o600);

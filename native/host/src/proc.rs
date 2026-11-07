@@ -64,14 +64,14 @@ fn dead(program: &str, why: &str) -> String { eprintln!("{why}"); format!("/none
 /// `tokio::process::Command::new`, gated.
 pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
-    let mut c = match refusal(kind, &p) { None => tokio::process::Command::new(program), Some(why) => tokio::process::Command::new(dead(&p, &why)) };
+    let mut c = match refusal(kind, &p) { None => tokio::process::Command::new(crate::plat::hub::program(program.as_ref())), Some(why) => tokio::process::Command::new(dead(&p, &why)) };
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     c
 }
 /// `std::process::Command::new`, gated.
 pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
-    let mut c = match refusal(kind, &p) { None => std::process::Command::new(program), Some(why) => std::process::Command::new(dead(&p, &why)) };
+    let mut c = match refusal(kind, &p) { None => std::process::Command::new(crate::plat::hub::program(program.as_ref())), Some(why) => std::process::Command::new(dead(&p, &why)) };
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     c
 }

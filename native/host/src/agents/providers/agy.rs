@@ -79,7 +79,7 @@ exit $r\n".into()
 }
 /// Agx.write: the runner script, written whole and renamed into place (turns may be starting from it).
 pub fn write_runner(root: &str) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    use crate::plat::fs::PermissionsExt;
     std::fs::create_dir_all(root)?;
     // a name of its own per call: two turns starting together never write the same file (pid + a counter, as pi.rs's write_atomic)
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

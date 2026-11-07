@@ -7,7 +7,7 @@
 //! the file read once with O_NOFOLLOW and checked unchanged. Older messages that no ref names answer 404 (hub looks their text up in
 //! store.db; this hub keeps no entry-id index) - stated limitation.
 use sha2::{Digest, Sha256};
-use std::{io::Read, os::unix::fs::{MetadataExt, OpenOptionsExt}, path::{Path, PathBuf}};
+use std::{io::Read, path::{Path, PathBuf}}; use crate::plat::fs::{MetadataExt, OpenOptionsExt};
 
 pub const MI_BYTES: u64 = 24 * 1024 * 1024;
 pub const MI_PIXELS: u64 = 32 * 1024 * 1024;
@@ -78,7 +78,7 @@ pub fn image_type(b: &[u8]) -> Result<&'static str, &'static str> {
 pub fn read_image(file: &Path) -> Result<Vec<u8>, &'static str> {
     let before = std::fs::symlink_metadata(file).map_err(|_| "Image unavailable")?;
     if !before.is_file() || before.file_type().is_symlink() || before.len() == 0 || before.len() > MI_BYTES { return Err("Image unavailable") }
-    let mut f = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW).open(file).map_err(|_| "Image unavailable")?;
+    let mut f = std::fs::OpenOptions::new().read(true).custom_flags(crate::plat::fs::O_NONBLOCK | crate::plat::fs::O_NOFOLLOW).open(file).map_err(|_| "Image unavailable")?;
     let st = f.metadata().map_err(|_| "Image unavailable")?;
     if !st.is_file() || st.dev() != before.dev() || st.ino() != before.ino() || st.len() != before.len() { return Err("Image changed") }
     let mut b = Vec::with_capacity(st.len() as usize);
@@ -92,9 +92,9 @@ pub fn read_image(file: &Path) -> Result<Vec<u8>, &'static str> {
 fn snapshot_dir(home: &Path) -> Result<PathBuf, &'static str> {
     let dir = home.join("message-images");
     std::fs::create_dir_all(&dir).map_err(|_| "Private image directory unavailable")?;
-    { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)); } // mkdirSync(mode) + umask: made 0700 here
+    { use crate::plat::fs::PermissionsExt; let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)); } // mkdirSync(mode) + umask: made 0700 here
     let st = std::fs::symlink_metadata(&dir).map_err(|_| "Private image directory unavailable")?;
-    if !st.is_dir() || st.file_type().is_symlink() || (st.mode() & 0o077) != 0 || st.uid() != unsafe { libc::getuid() } { return Err("Private image directory unavailable") }
+    if !st.is_dir() || st.file_type().is_symlink() || (st.mode() & 0o077) != 0 || st.uid() != crate::plat::fs::uid() { return Err("Private image directory unavailable") }
     Ok(dir)
 }
 /// mi_source: the source path to read: absolute or ~/, an image extension, no "." or ".." part, no NUL CR LF or backslash, and no symlink anywhere on it.
@@ -193,8 +193,8 @@ mod tests {
         // a different message naming it has no ref and the source is gone
         assert!(snapshot(&home, "m2", &fs, "t1").is_err());
         // refusals: a link anywhere on the path, a non-raster, a relative path, "..", a big file
-        let real = src.join("real"); std::fs::create_dir_all(&real).unwrap(); std::fs::write(real.join("a.png"), png(4, 4)).unwrap(); std::os::unix::fs::symlink(&real, src.join("ln")).unwrap();
-        std::os::unix::fs::symlink(real.join("a.png"), src.join("l.png")).unwrap(); std::fs::write(src.join("x.png"), b"<svg/>").unwrap(); std::fs::write(src.join("big.png"), vec![0u8; 25 << 20]).unwrap();
+        let real = src.join("real"); std::fs::create_dir_all(&real).unwrap(); std::fs::write(real.join("a.png"), png(4, 4)).unwrap(); crate::plat::fs::symlink(&real, src.join("ln")).unwrap();
+        crate::plat::fs::symlink(real.join("a.png"), src.join("l.png")).unwrap(); std::fs::write(src.join("x.png"), b"<svg/>").unwrap(); std::fs::write(src.join("big.png"), vec![0u8; 25 << 20]).unwrap();
         for bad in [src.join("ln/a.png"), src.join("l.png"), src.join("x.png"), src.join("big.png"), src.join("none.png"), PathBuf::from("rel/a.png"), src.join("real/../real/a.png")] { assert!(snapshot(&home, "m3", &bad.to_string_lossy(), "t").is_err(), "{bad:?}") }
         assert!(snapshot(&home, "m3", &real.join("a.png").to_string_lossy(), "t").is_ok());
         // a ref pointing at something that is not its own hash is refused; ref names are hub's hash of entry NUL path

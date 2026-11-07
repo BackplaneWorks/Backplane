@@ -284,7 +284,7 @@ mod tests {
         g(&d, &["checkout", "-q", "--detach"]).await; assert_eq!(act(&d, "push", "", "", "").await, "error: push: detached HEAD");
         // the pull request goes through gh: a stand-in on PATH answers
         let fake = tmp("fakegh"); std::fs::write(format!("{fake}/gh"), "#!/bin/sh\necho creating\necho https://example.invalid/pr/7\n").unwrap();
-        use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(format!("{fake}/gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        use crate::plat::fs::PermissionsExt; std::fs::set_permissions(format!("{fake}/gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
         g(&d, &["checkout", "-q", "work"]).await; std::env::set_var("PATH", format!("{fake}:{}", std::env::var("PATH").unwrap()));
         assert_eq!(act(&d, "create_pr", "", "", "").await, "pr: https://example.invalid/pr/7");
     }

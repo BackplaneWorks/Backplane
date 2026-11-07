@@ -22,7 +22,7 @@ done
 "#;
 
 pub(crate) async fn hub_with_helper(name: &str) -> (Arc<Hub>, PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
+    use crate::plat::fs::PermissionsExt;
     let d = std::env::temp_dir().join(format!("bp-br-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
     let exe = d.join("backplane-browser"); std::fs::write(&exe, STANDIN).unwrap(); std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut log = String::from("{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":\"/tmp\",\"at\":1700000000}\n");

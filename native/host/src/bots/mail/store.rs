@@ -5,7 +5,7 @@
 //! A failed commit after an append leaves a body whose retry appends it again; recovery and the box (by id) make that harmless.
 //! Errors say what kind of failure it was, never which conversation: a conversation id is an address.
 use super::{body_line, body_parse, pct, Body, Conv, Hdr};
-use std::{fs::OpenOptions, io::{BufRead, Read, Seek, SeekFrom, Write}, os::unix::fs::{MetadataExt, OpenOptionsExt}, path::{Path, PathBuf}};
+use std::{fs::OpenOptions, io::{BufRead, Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}}; use crate::plat::fs::{MetadataExt, OpenOptionsExt};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum StoreError { Io, Link, NotRegular, Hardlink, Malformed }
@@ -32,9 +32,9 @@ fn dir(home: &Path) -> Result<PathBuf, StoreError> {
 }
 /// open a journal without following a link; a regular file, and for a write exactly one link
 pub fn open(p: &Path, write: bool) -> Result<std::fs::File, StoreError> {
-    let mut o = OpenOptions::new(); o.read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    let mut o = OpenOptions::new(); o.read(true).custom_flags(crate::plat::fs::O_NOFOLLOW | crate::plat::fs::O_NONBLOCK);
     if write { o.append(true).create(true).mode(0o600); }
-    let f = o.open(p).map_err(|e| match e.raw_os_error() { Some(libc::ELOOP) => StoreError::Link, Some(libc::EISDIR) => StoreError::NotRegular, _ => StoreError::Io })?;
+    let f = o.open(p).map_err(|e| match e.raw_os_error() { Some(crate::plat::errno::ELOOP) => StoreError::Link, Some(crate::plat::errno::EISDIR) => StoreError::NotRegular, _ => StoreError::Io })?;
     let m = f.metadata().map_err(|_| StoreError::Io)?;
     if !m.is_file() { return Err(StoreError::NotRegular) }
     if write && m.nlink() != 1 { return Err(StoreError::Hardlink) }

@@ -26,7 +26,7 @@ pub fn is_step(p: &str) -> bool { let l = p.to_lowercase(); l.ends_with(".step")
 
 /// Parts.out: where the model's GLB is kept (a .glb is its own)
 fn glb_path(src: &str, cache: &str) -> String {
-    use std::os::unix::fs::MetadataExt;
+    use crate::plat::fs::MetadataExt;
     if src.ends_with(".glb") { return src.to_string() }
     let size = std::fs::metadata(src).map_or("0".to_string(), |m| format!("{}.{}", m.len() as u32, m.mtime() as u32));
     format!("{cache}/{}.glb", stepglb::fnv(&format!("step2|{src}|{size}")))

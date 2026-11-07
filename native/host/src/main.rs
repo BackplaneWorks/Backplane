@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod model; mod net; mod present;
+mod agents; mod api; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod model; mod net; mod plat; mod present;
 mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
 use anyhow::{Context, Result};
@@ -70,10 +70,9 @@ fn parse() -> std::result::Result<Args, i32> {
 
 /// One hub per home: an exclusive flock on <home>/hub.lock, which says "<pid> <port> flock".
 fn take_lock(home: &std::path::Path, port: u16) -> Result<std::fs::File> {
-    use std::os::fd::AsRawFd;
     let path = home.join("hub.lock");
     let f = std::fs::OpenOptions::new().create(true).read(true).write(true).truncate(false).open(&path)?;
-    if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    if !plat::hub::lock(&f) {
         let said = std::fs::read_to_string(&path).unwrap_or_default();
         let mut it = said.split_whitespace();
         eprintln!("a hub already serves {} (pid {}, port {})", home.display(), it.next().unwrap_or("?"), it.next().unwrap_or("?"));
@@ -87,14 +86,12 @@ fn take_lock(home: &std::path::Path, port: u16) -> Result<std::fs::File> {
 fn ensure_token(home: &std::path::Path) -> Result<()> {
     let p = home.join("token");
     if !p.exists() {
-        let mut b = [0u8; 24]; std::fs::File::open("/dev/urandom")?.read_exact_sync(&mut b)?;
-        use std::os::unix::fs::OpenOptionsExt; use std::io::Write;
+        let mut b = [0u8; 24]; plat::fs::random(&mut b)?;
+        use crate::plat::fs::OpenOptionsExt; use std::io::Write;
         std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&p)?.write_all(hex::encode(b).as_bytes())?;
     }
     Ok(())
 }
-trait ReadExactSync { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()>; }
-impl ReadExactSync for std::fs::File { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()> { std::io::Read::read_exact(self, b) } }
 
 /// `backplane-hub --render MODEL...` (what the agent prompt tells agents to run): each model's standard views as PNGs beside it
 ///. Returns the exit code.
@@ -108,39 +105,20 @@ fn render_cli() -> i32 {
     r.code
 }
 
-/// True when the signal is currently ignored (inherited SIG_IGN from nohup or a background job).
-fn signal_ignored(sig: i32) -> bool {
-    unsafe { let mut old: libc::sigaction = std::mem::zeroed(); libc::sigaction(sig, std::ptr::null(), &mut old) == 0 && old.sa_sigaction == libc::SIG_IGN }
-}
-
-/// Every agent, terminal and socket is a few descriptors; macOS starts a process with a soft limit of 256. Raise it to the hard limit (macOS refuses more than 10240).
-fn raise_nofile() {
-    unsafe {
-        let mut l = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut l) != 0 { return }
-        let want = if cfg!(target_os = "macos") { l.rlim_max.min(10240) } else { l.rlim_max };
-        if l.rlim_cur < want { l.rlim_cur = want; libc::setrlimit(libc::RLIMIT_NOFILE, &l); }
-    }
-}
 
 #[tokio::main]
 async fn main() {
-    raise_nofile();
+    plat::hub::raise_nofile();
     if std::env::args().nth(1).as_deref() == Some("--agent-reaper") { std::process::exit(agents::proc::reaper_main()) }
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
-    // a signal that ends the hub says so in hub.log and exits nonzero (128 + the signal); SIGKILL cannot be caught.
-    // SIGHUP and SIGINT stay as the parent left them when it ignored them (nohup, a background `&`): registering would override that.
-    for (kind, name, n) in [(tokio::signal::unix::SignalKind::terminate(), "SIGTERM", 15), (tokio::signal::unix::SignalKind::interrupt(), "SIGINT", 2), (tokio::signal::unix::SignalKind::hangup(), "SIGHUP", 1)] {
-        if n != 15 && signal_ignored(n) { continue }
-        if let Ok(mut sig) = tokio::signal::unix::signal(kind) { tokio::spawn(async move { sig.recv().await; eprintln!("backplane-hub: {name} received, exiting"); std::process::exit(128 + n) }); }
-    }
+    plat::hub::exit_on_signals();
     if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(exit_code(&e)) }
 }
 
 /// A start that cannot go on: the machine's fault (nothing a build can do: the disk, the port) or not. The guard blames a build only for the second.
 fn exit_code(e: &anyhow::Error) -> i32 {
-    let machine = e.chain().any(|c| c.downcast_ref::<std::io::Error>().map_or(false, |io| matches!(io.raw_os_error(), Some(libc::ENOSPC | libc::EDQUOT | libc::EROFS | libc::EACCES | libc::EADDRINUSE | libc::EADDRNOTAVAIL | libc::EMFILE | libc::ENFILE | libc::EIO))));
+    let machine = e.chain().any(|c| c.downcast_ref::<std::io::Error>().map_or(false, |io| matches!(io.raw_os_error(), Some(plat::errno::ENOSPC | plat::errno::EDQUOT | plat::errno::EROFS | plat::errno::EACCES | plat::errno::EADDRINUSE | plat::errno::EADDRNOTAVAIL | plat::errno::EMFILE | plat::errno::ENFILE | plat::errno::EIO))));
     if machine { guard::EXIT_MACHINE } else { 1 }
 }
 
@@ -514,7 +492,8 @@ mod wire_private_tests {
         }
     }
     // a signal that was ignored when the hub started (nohup, `&`) reads as ignored, and one that was not does not; the disposition is restored
-    #[test] fn an_ignored_signal_reads_as_ignored() {
+    #[cfg(unix)] #[test] fn an_ignored_signal_reads_as_ignored() {
+        use crate::plat::hub::signal_ignored;
         let sig = libc::SIGUSR2;
         unsafe {
             let mut old: libc::sigaction = std::mem::zeroed(); libc::sigaction(sig, std::ptr::null(), &mut old);

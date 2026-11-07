@@ -14,7 +14,7 @@ fn fail(text: String) -> Got { Got { code: 3, text, plot: None } }
 pub fn is_step(p: &str) -> bool { [".step", ".stp", ".STEP", ".STP"].iter().any(|e| p.ends_with(e)) }
 /// FS.revision with Pv.cache.revision: the exact revision of a file as a name ("" when it has none)
 fn revision(path: &str) -> String {
-    use std::os::unix::fs::MetadataExt;
+    use crate::plat::fs::MetadataExt;
     match std::fs::metadata(path) { Ok(m) => format!("{}.{}.{}.{}.{}.{}.{}", m.dev(), m.ino(), m.len(), m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec()), Err(_) => String::new() }
 }
 /// Pv.step.out, Pv.board.out.recipe: a model's name in the cache, with the source's exact revision unhashed

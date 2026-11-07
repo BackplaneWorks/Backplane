@@ -89,7 +89,7 @@ fn read(home: &Path) -> String { std::fs::read_to_string(path(home)).unwrap_or_d
 
 /// Ak.write: the secrets folder (0700) and the file (0600), written through a temporary file and renamed.
 fn write(home: &Path, text: &str) -> Result<(), String> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    use crate::plat::fs::{OpenOptionsExt, PermissionsExt};
     let dir = home.join("secrets");
     std::fs::create_dir_all(&dir).map_err(|_| "error: the keys file could not be written".to_string())?;
     let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
@@ -133,7 +133,7 @@ mod tests {
     }
     #[test] fn values_are_read_back_with_their_quotes() { assert_eq!(values("A='it'\\''s'\n# c\nB='2'\nlower='x'\n"), vec!["it's", "2"]); }
     #[test] fn a_key_is_kept_under_0600_and_only_its_name_is_listed() {
-        use std::os::unix::fs::PermissionsExt;
+        use crate::plat::fs::PermissionsExt;
         let h = std::env::temp_dir().join(format!("bp-keys-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h);
         add(&h, "TOKEN_A", "s3cret-value").unwrap(); add(&h, "TOKEN_B", "other-value-1").unwrap(); add(&h, "TOKEN_A", "replaced-val").unwrap();
         assert_eq!(names_kept(&h), "TOKEN_B\nTOKEN_A");

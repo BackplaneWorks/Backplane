@@ -43,8 +43,7 @@ fn snoozed(until: u64, now: u64) -> bool { now < until }
 
 /// Snooze.tomorrow: 9:00 local time tomorrow, from the machine's zone.
 fn tomorrow(now: u64) -> u64 {
-    let t = now as libc::time_t; let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    let off = unsafe { libc::localtime_r(&t, &mut tm); tm.tm_gmtoff } as i64;
+    let off = crate::plat::time::local_offset(now);
     let day = (now as i64 + off).div_euclid(86400);
     ((day + 1) * 86400 + 32400 - off).max(0) as u64
 }

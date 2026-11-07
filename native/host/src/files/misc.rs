@@ -127,7 +127,7 @@ impl RpcHandler for Misc {
                             let (m, c, home) = (path.clone(), cwd.clone(), hub.cfg.home.clone());
                             let r = tokio::task::spawn_blocking(move || { use crate::files::kicad::{render, stepglb};
                                 let r = std::panic::catch_unwind(|| render::run(&[m.as_str()], &c, &stepglb::machine(&home)));
-                                #[cfg(target_env = "gnu")] unsafe { libc::malloc_trim(0); }
+                                #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); }
                                 r }).await;
                             match r { Ok(Ok(r)) => (r.code, r.out), _ => (1, "backplane --render: the renderer stopped".to_string()) }
                         } else {

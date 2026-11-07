@@ -14,7 +14,7 @@ fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-se
 /// A `claude` that records every line it is sent and says the secret in every way an agent can: streamed text, a message, a tool call,
 /// its own stderr.
 fn standin(sd: &Path, got: &Path) {
-    use std::os::unix::fs::PermissionsExt;
+    use crate::plat::fs::PermissionsExt;
     let body = format!(r#"#!/bin/sh
 while IFS= read -r line; do
   printf '%s\n' "$line" >> '{got}'
@@ -172,7 +172,7 @@ elif "-p" in a:
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_and_the_default_one_does_not() {
-    use std::os::unix::fs::PermissionsExt;
+    use crate::plat::fs::PermissionsExt;
     let home = dir("acct-home"); let work = dir("acct-work"); let sd = dir("acct-bin"); let log = sd.join("turns.jsonl");
     let p = sd.join("claude"); std::fs::write(&p, ACCOUNT_CLAUDE).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::env::set_var("STANDIN_LOG", &log);
@@ -226,7 +226,7 @@ async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_a
 /// account in that gap waits for the manager and then runs under the account, instead of failing with "Accounts are not available".
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_start_on_a_named_account_before_the_hub_has_its_account_manager_waits_for_it() {
-    use std::os::unix::fs::PermissionsExt;
+    use crate::plat::fs::PermissionsExt;
     let home = dir("acct-late-home"); let work = dir("acct-late-work"); let sd = dir("acct-late-bin");
     // the same stand-in, minus its turn log (the other account test owns STANDIN_LOG): the session id it reports names the folder it ran under
     let p = sd.join("claude"); std::fs::write(&p, ACCOUNT_CLAUDE.replace(r#"open(os.environ["STANDIN_LOG"], "a").write(json.dumps({"dir": d, "args": a}) + "\n")"#, "pass")).unwrap();

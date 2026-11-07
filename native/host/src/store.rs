@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde::de::IgnoredAny;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::fs::FileExt;
+use crate::plat::fs::FileExt;
 use std::path::{Path, PathBuf};
 
 /// A lone surrogate escape (\\ud83d with no partner, a pasted half emoji) is not valid JSON text for a Rust
@@ -315,6 +315,7 @@ mod tests {
 
     // A write that fails part way must not lose the next acknowledged write (soak finding: ENOSPC glued the next line onto a fragment).
     // RLIMIT_FSIZE makes write_all fail after a partial write; it is process-wide, so the test runs in a child process.
+    #[cfg(unix)] // RLIMIT_FSIZE
     #[test] fn a_failed_partial_write_is_cut_back_and_the_next_append_is_whole() {
         if std::env::var("BP_STORE_FSIZE_CHILD").is_err() {
             let o = std::process::Command::new(std::env::current_exe().unwrap()).args(["store::tests::a_failed_partial_write_is_cut_back_and_the_next_append_is_whole", "--exact", "--nocapture", "--test-threads=1"])

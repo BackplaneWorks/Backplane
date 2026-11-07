@@ -8,7 +8,7 @@
 //! copy of a log, and on a test hub (stand-in agents, no BACKPLANE_ORDER_SERVER), where the address is a dead local one.
 use crate::{api::{Caller, Fut, RpcHandler}, files::kicad, hub::Hub};
 use serde_json::{json, Map, Value};
-use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt}, path::{Path, PathBuf}, sync::Arc};
+use std::{io::Write, path::{Path, PathBuf}, sync::Arc}; use crate::plat::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 
 pub const DEFAULT_SERVER: &str = "https://2.29.106.88";
 /// What the person is told when the server cannot be reached at all (curl's 000), not curl's own words.
