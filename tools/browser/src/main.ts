@@ -19,6 +19,7 @@ import { defaultEngine, saveTab, restoreTab } from "./session.ts";
 import { findChromium, installChrome, INSTALL_HINT } from "./chromium.ts";
 import { decodePng } from "./png.ts";
 import { RECORDER_SCRIPT } from "./recorder.ts";
+import { resumePaused } from "./resume.ts";
 
 type Json = Record<string, any>;
 
@@ -1026,7 +1027,9 @@ async function attachExternal(a: Json, name: string): Promise<Json> {
     useBunWs(); process.env.PW_CHROMIUM_ATTACH_TO_OTHER = "1";
     b = await pwChromium.connectOverCDP(ep, { timeout: 15000 });
     external.set(ep, b);
-    b.on("disconnected", () => { external.delete(ep); for (const o of owners.values()) { o.tabs = o.tabs.filter((t) => !externalPages.has(t) || !t.isClosed()); } });
+    // a window the page opens is created paused for a debugger, and Playwright's own attach to it waits on it: resume it (see resume.ts)
+    const rs = await fetch(`${ep.replace(/\/$/, "")}/json/version`).then((r) => r.json()).then((j: any) => resumePaused(String(j.webSocketDebuggerUrl))).catch(() => null);
+    b.on("disconnected", () => { try { rs?.close(); } catch {} external.delete(ep); for (const o of owners.values()) { o.tabs = o.tabs.filter((t) => !externalPages.has(t) || !t.isClosed()); } });
   }
   const urls: string[] = Array.isArray(a.urls) ? a.urls.map(String) : [];
   const want = urls[Number(a.active) | 0] ?? "";

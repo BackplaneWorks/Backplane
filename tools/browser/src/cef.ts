@@ -1,4 +1,5 @@
 // CEF runtime discovery/installation and the stdin host/CDP connection.
+import { resumePaused } from "./resume.ts";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -124,31 +125,10 @@ export class CefEngine extends EventEmitter {
         this.downloadSession = await this.browser.newBrowserCDPSession();
         await this.downloadSession.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: this.downloads, eventsEnabled: true });
       } catch (e) { this.downloadError = `download unavailable in CEF: ${e}`; }
-      this.resumer = this.resumePaused(endpoint);
+      this.resumer = resumePaused(endpoint);
       if (proc.exitCode !== null || !this.browser.isConnected()) throw new Error("CEF host exited during startup");
       return this.context;
     } catch (e) { await this.stop(); throw e; }
-  }
-  /** A window the page opens (window.open) is a new target the host creates paused, waiting for a debugger; Playwright's attach to it waits on the target in turn, so
-   *  neither goes on and the popup stays blank (its opener and the person's tab are fine). A second session of ours resumes every new target at once: harmless for one
-   *  that is not waiting. */
-  resumePaused(endpoint: string): WebSocket {
-    const ws = new WebSocket(endpoint); let n = 0;
-    const send = (method: string, params: object = {}, sessionId?: string) => ws.send(JSON.stringify({ id: ++n, method, params, ...(sessionId ? { sessionId } : {}) }));
-    ws.onopen = () => send("Target.setDiscoverTargets", { discover: true });
-    const seen = new Set<string>();
-    const resume = (targetId: string) => send("Target.attachToTarget", { targetId, flatten: true });
-    ws.onmessage = (e) => {
-      let m: any; try { m = JSON.parse(String(e.data)); } catch { return; }
-      const ti = m.params?.targetInfo;
-      if ((m.method === "Target.targetCreated" || m.method === "Target.targetInfoChanged") && ti && (ti.type === "page" || ti.type === "other")) {
-        const key = `${ti.targetId}|${ti.type}|${ti.url}`;
-        if (!seen.has(key)) { seen.add(key); resume(ti.targetId); for (const ms of [300, 1500]) setTimeout(() => { try { resume(ti.targetId); } catch {} }, ms); }
-      }
-      if (m.id && m.result?.sessionId) { send("Runtime.runIfWaitingForDebugger", {}, m.result.sessionId); setTimeout(() => { try { send("Target.detachFromTarget", { sessionId: m.result.sessionId }); } catch {} }, 1200); }
-    };
-    ws.onerror = () => {};
-    return ws;
   }
   command(cmd: string, key = "", args = ""): Promise<Event> {
     const proc = this.proc;
