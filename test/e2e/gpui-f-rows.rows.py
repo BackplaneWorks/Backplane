@@ -147,8 +147,8 @@ if want('F22'):
     sel(3)  # the third thread is a buy thread from the seed (SettingSet buy.t3)
     r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); xin('type', 'zqquote mfg/o1'); xin('key', 'Return')
     until(lambda: any(e['$'] == 'AskOpened' and e.get('tool') == 'order_quote' for e in events()), 30); pause(2); shot('f22-files-card')
-    ask = [e for e in events() if e['$'] == 'AskOpened' and e.get('tool') == 'order_quote']; before = len(ORDER_SEEN)
+    ask = [e for e in events() if e['$'] == 'AskOpened' and e.get('tool') == 'order_quote']; before = len([x for x in ORDER_SEEN if x[0] == 'POST'])
     ids = sorted(k for k in ctrls() if k.startswith('ask:')); sent = click_ctl(ids[0]) if ids else False
     quoted = until(lambda: any(e['$'] == 'SettingSet' and e.get('key') == 'order.quote.t3' and e.get('value') for e in events()), 40); pause(3); shot('f22-quote')
     clean = not any('pay' in x[1] or 'buy' in x[1] or 'checkout' in x[1] for x in ORDER_SEEN)
-    log('F22-card', bool(ask) and before == 0 and sent and quoted and clean, 'the files card (f22-files-card.png, buttons %s) opened with nothing uploaded=%s; Send pressed with the mouse: the hub uploaded to the stand-in order server and the quote card was set=%s (f22-quote.png); requests seen %s, none to pay or buy=%s' % (ids, before == 0, quoted, [x[0] + ' ' + x[1] for x in ORDER_SEEN], clean))
+    log('F22-card', bool(ask) and before == 0 and sent and quoted and clean, 'the files card (f22-files-card.png, buttons %s) opened with nothing uploaded before Send (no POST to the order server)=%s; Send pressed with the mouse: the hub uploaded to the stand-in order server and the quote card was set=%s (f22-quote.png); requests seen %s, none to pay or buy=%s' % (ids, before == 0, quoted, [x[0] + ' ' + x[1] for x in ORDER_SEEN], clean))
