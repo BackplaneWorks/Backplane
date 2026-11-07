@@ -90,7 +90,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"); let mut files = vec![]; walk(&root, &mut files);
     let allowed = ["push/mod.rs", "bots/tools.rs", "bots/routines.rs", "bots/mail/escalate.rs", "state/mod.rs", "bots/tests/push.rs"];
     for f in files {
-        let rel = f.strip_prefix(&root).unwrap().to_string_lossy().to_string();
+        let rel = f.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
         if allowed.contains(&rel.as_str()) { continue }
         let t = std::fs::read_to_string(&f).unwrap();
         assert!(!t.contains("PushOrdered") && !t.contains("Source::notify") && !t.contains("Source::reminder"), "{rel} names the push gate");

@@ -13,7 +13,7 @@ fn now() -> u64 { crate::hub::now_ms() / 1000 }
 async fn rig(name: &str, provider: &str) -> Rig {
     use crate::plat::fs::PermissionsExt;
     let (dir, home, work, bin) = (fresh(&format!("{name}-rec")), fresh(&format!("{name}-home")), fresh(&format!("{name}-work")), fresh(&format!("{name}-bin")));
-    for cli in ["claude", "codex"] { let p = bin.join(cli); std::fs::write(&p, STANDIN.replace("@DIR@", &dir.to_string_lossy())).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    for cli in ["claude", "codex"] { let p = bin.join(cli); std::fs::write(&p, STANDIN.replace("@DIR@", &crate::plat::fs::script_path(&dir))).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     let log = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":{root},\"at\":1700000000}}\n{{\"$\":\"ThreadCreated\",\"id\":\"{T}\",\"project\":\"p1\",\"title\":\"Fixture\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"{provider}\",\"model\":\"\",\"at\":1700000001}}\n", root = serde_json::to_string(&work.to_string_lossy()).unwrap());
     std::fs::write(home.join("events.jsonl"), log).unwrap();
     std::fs::write(home.join("token"), "tok").unwrap(); // a phone's socket (data/1) presents it

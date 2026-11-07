@@ -29,12 +29,31 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     for v in rx.take() { { if v["t"] == "term" && v["thread"] == key { acc.extend(v["b"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as u8)); if v.get("reset").is_some() { resets.push(v["reset"].clone()) } } } }
 }
 
+#[cfg(unix)] // stty, $!, pwd: a POSIX terminal
 #[tokio::test] async fn a_program_on_a_pty_sees_a_terminal_and_its_exit_code() {
     let sp = pty::Pty::spawn("/bin/sh", &["-c".into(), "stty size; echo $TERM $COLORTERM; tput cols 2>/dev/null; exit 7".into()], "/tmp", 100, 30).unwrap();
     let (mut out, exit) = (sp.output, sp.exit); let mut all = vec![];
     while let Some(c) = out.recv().await { all.extend(c) }
     let s = String::from_utf8_lossy(&all).into_owned();
     assert!(s.contains("30 100"), "{s}"); assert!(s.contains("xterm-256color truecolor"), "{s}"); assert_eq!(exit.await.unwrap(), 7);
+}
+// Windows: the pseudo console (ConPTY) runs a program, carries its output and its exit code, takes a resize, and a hang-up ends what it started.
+#[cfg(windows)]
+#[tokio::test] async fn a_program_on_a_pseudo_console_prints_and_exits_with_its_code() {
+    let sp = pty::Pty::spawn("cmd.exe", &["/d".into(), "/c".into(), "echo hello-conpty& exit 7".into()], &std::env::temp_dir().to_string_lossy(), 100, 30).unwrap();
+    sp.pty.resize(90, 20);
+    let (mut out, exit) = (sp.output, sp.exit); let mut all = vec![];
+    while let Ok(Some(c)) = tokio::time::timeout(Duration::from_secs(20), out.recv()).await { all.extend(c) }
+    assert!(String::from_utf8_lossy(&all).contains("hello-conpty"), "{}", String::from_utf8_lossy(&all));
+    assert_eq!(tokio::time::timeout(Duration::from_secs(20), exit).await.unwrap().unwrap(), 7);
+}
+#[cfg(windows)]
+#[tokio::test] async fn a_hangup_on_windows_ends_the_program_and_what_it_started() {
+    let sp = pty::Pty::spawn("cmd.exe", &["/d".into(), "/c".into(), "ping -n 300 127.0.0.1".into()], "", 80, 24).unwrap();
+    let pid = sp.pty.pid as u32; assert!(crate::plat::proc::alive(pid));
+    tokio::time::sleep(Duration::from_millis(500)).await; sp.pty.hangup();
+    assert!(tokio::time::timeout(Duration::from_secs(20), sp.exit).await.is_ok(), "the program ended");
+    assert!(wait(10, || !crate::plat::proc::alive(pid)).await);
 }
 #[tokio::test] async fn an_unknown_command_is_enoent() { let e = pty::Pty::spawn("/no/such/prog", &[], "", 80, 24).err().unwrap(); assert_eq!(e.kind(), std::io::ErrorKind::NotFound) }
 #[tokio::test] async fn cat_echoes_and_a_resize_reaches_the_program() {
@@ -43,6 +62,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     while let Some(c) = out.recv().await { all.extend(c) }
     let s = String::from_utf8_lossy(&all).into_owned(); assert!(s.contains("got:hello"), "{s}"); assert!(s.contains("10 50"), "{s}"); exit.await.unwrap();
 }
+#[cfg(unix)] // stty, $!, pwd: a POSIX terminal
 #[tokio::test] async fn a_hangup_ends_the_whole_process_group() {
     let sp = pty::Pty::spawn("/bin/sh", &["-c".into(), "sleep 300 & echo $!; wait".into()], "", 80, 24).unwrap();
     let (mut out, exit, p) = (sp.output, sp.exit, sp.pty); let mut all = vec![];
@@ -59,12 +79,13 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     assert!(n <= (64 + 1) * pty::CHUNK, "{n} bytes queued"); sp.pty.hangup();
 }
 
+#[cfg(unix)] // stty, $!, pwd: a POSIX terminal
 #[tokio::test] async fn a_threads_shell_runs_in_its_folder_streams_bytes_and_takes_keys() {
     let (hub, _home, work) = hub_in("shell").await; let rx = Tap::new(&hub, 1);
     assert_eq!(rpc(&hub, "term.open", json!({"thread":"t1","cols":90,"rows":20})).await["ok"], true);
     let (mut all, mut rs) = (vec![], vec![]);
     assert_eq!(rpc(&hub, "term.input", json!({"thread":"t1","b":"pwd\n".bytes().collect::<Vec<u8>>()})).await["ok"], true);
-    let w = work.canonicalize().unwrap().to_string_lossy().into_owned();
+    let w = crate::plat::fs::canonicalize(&work).unwrap().to_string_lossy().into_owned();
     assert!(wait(10, || { drain(&rx, "t1", &mut all, &mut rs); String::from_utf8_lossy(&all).contains(&w) }).await, "{}", String::from_utf8_lossy(&all));
     // reopening only takes the new size, and does not start a second shell
     rpc(&hub, "term.open", json!({"thread":"t1","cols":100,"rows":30})).await; assert_eq!(get(&hub).unwrap().shell_count().await, 1);
@@ -100,8 +121,8 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     let (ok, o) = tools::call(&hub, "t1", "terminal_read", &json!({"id":"nope"})).await.unwrap(); assert!(!ok && o == "There is no such terminal in this thread.");
     // close hangs it up: stopped
     let (ok, o) = tools::call(&hub, "t1", "terminal_close", &json!({"id":id})).await.unwrap(); assert!(ok && o["state"] == "stopped");
-    assert!(wait(10, || std::fs::read_to_string(home.join("terms").join(&key)).map_or(false, |f| f.starts_with("60x10\t"))).await, "the last screen is written when the program exits");
-    let f = std::fs::read_to_string(home.join("terms").join(&key)).unwrap(); assert!(f.starts_with("60x10\tstopped\n") || f.starts_with("60x10\texited"), "{}", f.lines().next().unwrap());
+    assert!(wait(10, || std::fs::read_to_string(home.join("terms").join(&*crate::plat::fs::file_name((&key).as_ref()))).map_or(false, |f| f.starts_with("60x10\t"))).await, "the last screen is written when the program exits");
+    let f = std::fs::read_to_string(home.join("terms").join(&*crate::plat::fs::file_name((&key).as_ref()))).unwrap(); assert!(f.starts_with("60x10\tstopped\n") || f.starts_with("60x10\texited"), "{}", f.lines().next().unwrap());
 }
 
 #[tokio::test] async fn the_next_message_note_lists_unseen_terminals_once_and_stops_the_unpinned() {
@@ -147,7 +168,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
 
 #[tokio::test] async fn a_screen_on_disk_answers_after_the_hub_starts_again() {
     let (hub, home, _work) = hub_in("disk").await; let key = "x:t1:xdisk-1";
-    let mut vt = Vt::new(30, 4); vt.feed(b"saved screen\r\nline2"); let mut b = b"30x4\tdone 0\n".to_vec(); b.extend(emb::snap(&vt)); std::fs::write(home.join("terms").join(key), b).unwrap();
+    let mut vt = Vt::new(30, 4); vt.feed(b"saved screen\r\nline2"); let mut b = b"30x4\tdone 0\n".to_vec(); b.extend(emb::snap(&vt)); std::fs::write(home.join("terms").join(&*crate::plat::fs::file_name((key).as_ref())), b).unwrap();
     let t = get(&hub).unwrap(); let (state, report) = t.read(key).await.unwrap();
     assert_eq!(state, "done 0"); assert!(report.contains("saved screen\nline2"), "{report}");
     assert!(t.read("../../etc/passwd").await.is_none(), "keys never leave the terms folder");
@@ -189,7 +210,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
 #[tokio::test] async fn a_restart_of_a_finished_terminal_counts_against_the_limits_and_old_screens_read_back_are_capped() {
     let (hub, home, _work) = hub_in("limits").await; let t = get(&hub).unwrap();
     // 40 finished screens on disk: reading each back keeps at most KEEP_FINISHED in memory
-    for i in 0..40 { let k = format!("x:t1:xold-{i}"); std::fs::write(home.join("terms").join(&k), b"30x4\texited 0\nold\n").unwrap(); assert!(t.read(&k).await.is_some()) }
+    for i in 0..40 { let k = format!("x:t1:xold-{i}"); std::fs::write(home.join("terms").join(&*crate::plat::fs::file_name((&k).as_ref())), b"30x4\texited 0\nold\n").unwrap(); assert!(t.read(&k).await.is_some()) }
     assert!(t.inner.lock().await.screens.len() <= KEEP_FINISHED);
     // a finished terminal restarted with the chat already full is refused
     for i in 0..MAX_PER_THREAD { let (ok, _) = tools::call(&hub, "t1", "terminal_open", &json!({"command":"sleep 60","title":format!("s{i}")})).await.unwrap(); assert!(ok) }

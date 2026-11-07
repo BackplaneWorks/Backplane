@@ -148,13 +148,13 @@ impl Terms {
     fn save(&self, key: &str, sc: &Screen) {
         if !emb::key_ok(key) { return }
         let mut b = format!("{}x{}\t{}\n", sc.vt.cols(), sc.vt.rows(), sc.state).into_bytes(); b.extend(emb::snap(&sc.vt));
-        let (path, tmp) = (self.home.join("terms").join(key), self.home.join("terms").join(format!("{key}.tmp")));
+        let name = crate::plat::fs::file_name(key); let (path, tmp) = (self.home.join("terms").join(&*name), self.home.join("terms").join(format!("{name}.tmp")));
         if std::fs::write(&tmp, b).is_ok() { let _ = std::fs::rename(&tmp, &path); }
     }
     /// Et.load: the screen from its file when the actor does not hold it (the hub started again since it ran).
     fn load(&self, g: &mut Inner, key: &str) {
         if g.screens.contains_key(key) || !emb::key_ok(key) { return }
-        let Ok(b) = std::fs::read(self.home.join("terms").join(key)) else { return };
+        let Ok(b) = std::fs::read(self.home.join("terms").join(&*crate::plat::fs::file_name(key))) else { return };
         if b.len() > 4 << 20 { return }
         let nl = b.iter().position(|&x| x == 10).unwrap_or(b.len()); let head = String::from_utf8_lossy(&b[..nl]).into_owned(); let body = if nl < b.len() { &b[nl + 1..] } else { &[][..] };
         let mut it = head.split('\t'); let mut xy = it.next().unwrap_or("").split('x');

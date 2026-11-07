@@ -207,7 +207,7 @@ mod tests {
     #[test] fn a_tool_gets_the_detail_and_the_next_is_tried_after_a_failure() {
         use crate::plat::fs::PermissionsExt;
         let d = dir("tool"); let tool = d.join("t"); let log = d.join("log");
-        std::fs::write(&tool, format!("#!/bin/sh\necho \"$@\" > {}\nprintf x > \"$2\"\necho said\n", log.display())).unwrap();
+        std::fs::write(&tool, format!("#!/bin/sh\necho \"$@\" > {}\nprintf x > \"$2\"\necho said\n", crate::plat::fs::script_path(&log))).unwrap();
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
         let out = d.join("o.glb"); let out = out.to_string_lossy();
         let t = tool.to_string_lossy();

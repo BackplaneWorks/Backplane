@@ -86,7 +86,7 @@ mod tests {
         let h = tmp("h");
         let data: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
         let (st, j) = receive(&h, "t1", "k", "a.bin", data.len() as u64, "", 1 << 28, &mut &data[..]).await;
-        assert_eq!(st, "200 OK"); let p = j["attached"].as_str().unwrap(); assert!(p.ends_with("/attachments/t1/k-a.bin")); assert_eq!(std::fs::read(p).unwrap(), data);
+        assert_eq!(st, "200 OK"); let p = j["attached"].as_str().unwrap(); assert!(p.replace('\\', "/").ends_with("/attachments/t1/k-a.bin")); assert_eq!(std::fs::read(p).unwrap(), data);
         // the body ends before its length: refused, nothing left behind
         let short = &data[..1000]; let (st, j) = receive(&h, "t1", "k", "short.bin", 5000, "", 1 << 28, &mut &short[..]).await;
         assert_eq!(st, "400 Bad Request"); assert_eq!(j["uiError"], "upload.incomplete"); assert!(!h.join("attachments/t1/k-short.bin").exists());

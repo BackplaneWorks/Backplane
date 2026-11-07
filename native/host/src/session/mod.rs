@@ -264,7 +264,7 @@ mod nohelper_tests {
         let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"x\",\"root\":\"/tmp\",\"at\":1}\n{\"$\":\"ThreadCreated\",\"id\":\"t1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1}\n").unwrap();
         let spy = home.join("spy-ran"); let script = home.join("window-spy.sh");
-        std::fs::write(&script, format!("#!/bin/sh\ntouch {}\n", spy.display())).unwrap();
+        std::fs::write(&script, format!("#!/bin/sh\ntouch {}\n", crate::plat::fs::script_path(&spy))).unwrap();
         { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap(); }
         let cfg = crate::hub::Cfg { home: home.clone(), version: "0.1.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let h = Hub::start(cfg, std::sync::Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();

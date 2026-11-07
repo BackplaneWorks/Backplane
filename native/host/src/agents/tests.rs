@@ -371,7 +371,7 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_carries_a_codex_thread_on_in_its_own_session() {
     let sd = dir("cx-bin"); let args = sd.join("args");
-    script(&sd, "codex", &format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n", args.display()));
+    script(&sd, "codex", &format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n", crate::plat::fs::script_path(&args)));
     let (hub, ag, _h, _w) = start("cx", |w| { let l = cut_log(w, 1).replace("\"provider\":\"claude\"", "\"provider\":\"codex\""); l + &format!("{{\"$\":\"SessionSet\",\"id\":\"{T1}\",\"session\":\"S-cut\",\"at\":1700000120}}\n") }, |_| Cli::standin(&sd)).await;
     let ev = until(&hub, 0, 10, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert_eq!(carried(&ev).len(), 1, "{ev:?}");
@@ -525,7 +525,7 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     use crate::plat::fs::PermissionsExt;
     let sd = dir("a-bin"); let argfile = sd.join("argv.json");
     // a stand-in that writes its own argv as JSON, then behaves as a Claude that answers once
-    std::fs::write(sd.join("claude"), format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > {a}.tmp\nmv {a}.tmp {a}\nread l\nsleep 600\n", a = argfile.display())).unwrap();
+    std::fs::write(sd.join("claude"), format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > {a}.tmp\nmv {a}.tmp {a}\nread l\nsleep 600\n", a = crate::plat::fs::script_path(&argfile))).unwrap();
     std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
     let (hub, ag, home, work) = {
         let home = dir("a-home"); let work = dir("a-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
@@ -1439,7 +1439,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
 #[test] fn kind_person_turn_is_named_only_where_the_person_spawn_lives() {
-    fn walk(root: &Path, d: &Path, hits: &mut Vec<String>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { walk(root, &p, hits) } else if p.extension().map_or(false, |x| x == "rs") && !p.ends_with("tests.rs") { if std::fs::read_to_string(&p).unwrap().lines().any(|l| !l.trim_start().starts_with("//") && l.contains("Kind::PersonTurn")) { hits.push(p.strip_prefix(root).unwrap().to_string_lossy().into_owned()) } } } }
+    fn walk(root: &Path, d: &Path, hits: &mut Vec<String>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { walk(root, &p, hits) } else if p.extension().map_or(false, |x| x == "rs") && !p.ends_with("tests.rs") { if std::fs::read_to_string(&p).unwrap().lines().any(|l| !l.trim_start().starts_with("//") && l.contains("Kind::PersonTurn")) { hits.push(p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/")) } } } }
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src"); let mut hits = vec![]; walk(&src, &src, &mut hits); hits.sort();
     assert_eq!(hits, ["agents/proc.rs", "proc.rs"], "only the two proc.rs files (core and agents) name Kind::PersonTurn: {hits:?}");
 }
@@ -1491,7 +1491,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_turns_text_starts_with_the_standing_rules_and_ends_with_what_it_references() {
     let sd = dir("rl-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
-    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", rec.display(), inner.display()));
+    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", crate::plat::fs::script_path(&rec), crate::plat::fs::script_path(&inner)));
     let rule = r#"{"id":"r1","text":"Never push to main","tool":"Bash","enforce":true,"word":"ship it","at":5}"#;
     let (hub, ag, _h, _w) = start("rl", |w| base_log(w, 1, &format!("{}\n", json!({"$":"SettingSet","key":"rule.r1","value":rule,"at":1700000005}))), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort hello &claude/nonesuch"})).await;
@@ -1504,7 +1504,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
 }
 async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note() {
     let sd = dir("sk-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
-    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", rec.display(), inner.display()));
+    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", crate::plat::fs::script_path(&rec), crate::plat::fs::script_path(&inner)));
     let uh = dir("sk-userhome"); // a fake user: a Claude skill, a Codex-only skill
     for (rel, name) in [(".claude/skills/unslop-zq", "unslop-zq"), (".agents/skills/codexonly-zq", "codexonly-zq")] { std::fs::create_dir_all(uh.join(rel)).unwrap(); std::fs::write(uh.join(rel).join("SKILL.md"), format!("---\nname: {name}\ndescription: d\n---\nbody")).unwrap(); }
     let home = dir("sk-home"); let work = dir("sk-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
@@ -1565,7 +1565,7 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
 }
 #[tokio::test(flavor = "multi_thread")] async fn the_references_in_a_message_are_named_to_the_agent_once_each() {
     let sd = dir("rf-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
-    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", rec.display(), inner.display()));
+    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", crate::plat::fs::script_path(&rec), crate::plat::fs::script_path(&inner)));
     let extra = [json!({"$":"ProjectCreated","id":"p2","title":"Radio board","root":"/r/radio","at":1700000002}), json!({"$":"ThreadCreated","id":"t1700000009-7","project":"p2","title":"Fix the perf lag","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000003}),
         json!({"$":"SettingSet","key":"summary.t1700000009-7","value":"Profiling the render loop","at":1700000004}), json!({"$":"BotSet","id":"b1","name":"Ada","thread":"t1700000050-9","at":1700000005}), json!({"$":"RoomSet","id":"r1","name":"Ops Room","members":"b1","at":1700000006})];
     let extra = extra.iter().map(|e| e.to_string() + "\n").collect::<String>();

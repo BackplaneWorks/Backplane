@@ -14,6 +14,12 @@ pub mod fs {
     /// A file's mode bits as a test compares them: the real ones.
     pub fn mode_bits(actual: u32, _want: u32) -> u32 { actual }
     pub use std::fs::canonicalize;
+    /// What separates a path's parts in text.
+    pub const SEPS: &[char] = &['/'];
+    /// A name the hub made (a terminal's key) as a file name: itself.
+    pub fn file_name(name: &str) -> std::borrow::Cow<'_, str> { name.into() }
+    /// A path as written into a script or a string literal: as it is.
+    pub fn script_path(p: &std::path::Path) -> String { p.to_string_lossy().into_owned() }
     /// Flush a folder (a rename in it is on disk).
     pub fn sync_dir(d: &std::path::Path) -> std::io::Result<()> { std::fs::File::open(d)?.sync_all() }
     /// Random bytes from the OS (no fallback).

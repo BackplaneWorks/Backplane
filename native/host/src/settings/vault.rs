@@ -459,7 +459,7 @@ mod tests {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("bp-fakekr-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
         let mark = dir.join("called");
-        for n in ["secret-tool", "security"] { let f = dir.join(n); std::fs::write(&f, format!("#!/bin/sh\necho $0 >> {}\nexit 1\n", mark.display())).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        for n in ["secret-tool", "security"] { let f = dir.join(n); std::fs::write(&f, format!("#!/bin/sh\necho $0 >> {}\nexit 1\n", crate::plat::fs::script_path(&mark))).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
         let old = std::env::var_os("PATH").unwrap_or_default(); let mut p = vec![dir.clone()]; p.extend(std::env::split_paths(&old)); std::env::set_var("PATH", std::env::join_paths(p).unwrap());
         std::env::remove_var("BACKPLANE_VAULT_KEYRING");
         let v = Vault { home: dir.clone(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };

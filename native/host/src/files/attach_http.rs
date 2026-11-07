@@ -80,7 +80,7 @@ mod tests {
         let data: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
         let (head, j) = post("thread=t1&key=k9&name=pic.png".into(), data.len(), data.clone(), true).await;
         assert!(head.starts_with("HTTP/1.1 200") && head.contains("Content-Length:") && !head.to_ascii_lowercase().contains("transfer-encoding"), "{head}");
-        assert_eq!(j["attached"].as_str().unwrap(), home.join("attachments/t1/k9-pic.png").to_string_lossy()); assert_eq!(j["thread"], "t1");
+        assert_eq!(j["attached"].as_str().unwrap().replace('\\', "/"), home.join("attachments/t1/k9-pic.png").to_string_lossy().replace('\\', "/")); assert_eq!(j["thread"], "t1");
         assert_eq!(std::fs::read(home.join("attachments/t1/k9-pic.png")).unwrap(), data);
         // the setting says 1 MB: 2 MB is refused before the client is told to send it
         let (head, j) = post("thread=t1&key=k&name=big".into(), 2 << 20, vec![], false).await; assert!(head.starts_with("HTTP/1.1 413"), "{head}"); assert_eq!((j["uiError"].as_str().unwrap(), j["uiDetail"].as_str().unwrap()), ("upload.cap", "1")); assert!(!home.join("attachments/t1/k-big").exists());

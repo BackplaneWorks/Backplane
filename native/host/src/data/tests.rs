@@ -110,7 +110,7 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_writes_make_a_project_a_thread_and_a_message_once() {
     let (hub, port) = up("writes").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
-    let d = ask(&mut ws, 1, "dirs.list", json!({"path":"/"})).await; assert_eq!(d["result"]["path"], "/"); assert!(d["result"]["parent"].is_null()); assert!(!d["result"]["dirs"].as_array().unwrap().is_empty());
+    let d = ask(&mut ws, 1, "dirs.list", json!({"path":"/"})).await; if cfg!(unix) { assert_eq!(d["result"]["path"], "/"); } assert!(d["result"]["parent"].is_null()); // Windows: "/" is the drive's root assert!(!d["result"]["dirs"].as_array().unwrap().is_empty());
     let dir = std::env::temp_dir().join(format!("bp-data-proj-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
     let r = ask(&mut ws, 2, "project.add", json!({"path":dir.to_string_lossy()})).await; assert_eq!(r["ok"], true, "{r}");
     let pid = r["result"]["project"]["id"].as_str().unwrap().to_string();

@@ -13,7 +13,7 @@ async fn hub_in(h: &Path) -> Arc<Hub> { Hub::start(Cfg { home: h.to_path_buf(), 
 /// Fake tools on PATH (returns the marker file they append to). Restore PATH with the returned guard value.
 fn fakes(h: &Path) -> (PathBuf, std::ffi::OsString) {
     let dir = h.join("fakebin"); std::fs::create_dir_all(&dir).unwrap(); let mark = h.join("called");
-    for n in ["claude", "codex", "curl", "secret-tool", "security"] { let f = dir.join(n); std::fs::write(&f, format!("#!/bin/sh\necho {n} >> {}\nexit 1\n", mark.display())).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    for n in ["claude", "codex", "curl", "secret-tool", "security"] { let f = dir.join(n); std::fs::write(&f, format!("#!/bin/sh\necho {n} >> {}\nexit 1\n", crate::plat::fs::script_path(&mark))).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     let old = std::env::var_os("PATH").unwrap_or_default(); let mut p = vec![dir]; p.extend(std::env::split_paths(&old)); std::env::set_var("PATH", std::env::join_paths(p).unwrap());
     (mark, old)
 }

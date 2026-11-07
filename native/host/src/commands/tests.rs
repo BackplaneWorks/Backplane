@@ -223,7 +223,7 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
     let h = hub("scratch").await;
     h.commit(&json!({"$":"ProjectCreated","id":"scratch","title":"Scratch","root":h.cfg.home.join("scratch").to_string_lossy(),"at":9})).await.unwrap();
     let (e, r) = ask(&h, "thread.create", json!({"project":"scratch"})).await; let th = r["thread"].as_str().unwrap();
-    assert_eq!(e[0]["env"], "local"); assert_eq!(e[0]["worktree"], format!("{}/scratch/{th}", h.cfg.home.display()));
+    assert_eq!(e[0]["env"], "local"); assert_eq!(e[0]["worktree"].as_str().unwrap().replace('\\', "/"), format!("{}/scratch/{th}", h.cfg.home.display()).replace('\\', "/"));
     assert!(h.cfg.home.join("scratch").join(th).is_dir());
 }
 

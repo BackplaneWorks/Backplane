@@ -257,7 +257,7 @@ mod e2e {
     const TH: &str = "t1700000009-9";
     macro_rules! fx { ($n:literal) => { include_str!(concat!("../../../../../test/agents/fixtures/acp-", $n, ".json")) } }
 
-    fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-acp-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p.canonicalize().unwrap() } // canonical: macOS /var is /private/var
+    fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-acp-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); crate::plat::fs::canonicalize(&p).unwrap() } // canonical: macOS /var is /private/var
     fn script(d: &Path, name: &str, body: &str) { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
     async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m).expect("handler"); h.call(hub, &caller(), &json!(7), m, &p).await.remove(0) }
@@ -304,7 +304,7 @@ mod e2e {
     /// One scenario: a thread on `prov` with `runtime` (and an old session), `msgs` sent in order (each after the last turn ended); for an ask, the answer.
     async fn run(prov: &str, name: &str, runtime: &str, model: &str, session: &str, env: &str, msgs: &[&str], answer: Option<&str>) -> Run {
         let sd = dir(&format!("{name}-bin")); let work = dir(&format!("{name}-work")); let home = dir(&format!("{name}-home")); let fake = home.join("fake.log");
-        script(&sd, prov, &STANDIN.replacen('\n', &format!("\nexport FAKE_LOG={} {env}\n", fake.display()), 1));
+        script(&sd, prov, &STANDIN.replacen('\n', &format!("\nexport FAKE_LOG='{}' {env}\n", crate::plat::fs::script_path(&fake)), 1));
         let mut log = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1700000000-1\",\"title\":\"fixture\",\"root\":{},\"at\":1700000000}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap());
         log += &format!("{{\"$\":\"ThreadCreated\",\"id\":\"{TH}\",\"project\":\"p1700000000-1\",\"title\":\"Acp\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"{prov}\",\"model\":\"{model}\",\"at\":1700000005}}\n");
         if runtime != "full-access" { log += &format!("{{\"$\":\"ModesSet\",\"id\":\"{TH}\",\"runtime\":\"{runtime}\",\"interaction\":\"default\",\"model\":\"{model}\",\"at\":1700000006}}\n") }

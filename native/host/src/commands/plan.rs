@@ -498,7 +498,7 @@ pub fn project_create(f: &Fold, at: u64, id: &Value, p: &Value, root: &str) -> P
     if root.trim().is_empty() { return refuse("no folder given".into()) }
     let root_n = norm_root(root);
     if f.projects.values().any(|x| !x.removed && norm_root(&x.root) == root_n) { return refuse(format!("already a project: {root}")) }
-    let title = p.get("title").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| { let b = root.trim_end_matches('/').rsplit('/').next().unwrap_or(root); b.to_string() });
+    let title = p.get("title").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| { let b = root.trim_end_matches(crate::plat::fs::SEPS).rsplit(crate::plat::fs::SEPS).next().unwrap_or(root); b.to_string() });
     let n = f.n();
     let old = f.projects.iter().find(|(_, x)| x.removed && norm_root(&x.root) == root_n).map(|(i, _)| i.clone());
     let mut pl = match old {

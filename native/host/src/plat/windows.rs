@@ -24,6 +24,15 @@ pub mod fs {
         let c = fs::canonicalize(p)?; let s = c.to_string_lossy();
         Ok(if let Some(r) = s.strip_prefix(r"\\?\UNC\") { format!(r"\\{r}").into() } else if let Some(r) = s.strip_prefix(r"\\?\") { r.into() } else { c })
     }
+    /// A name the hub made (a terminal's key, `x:t1:...`) as a file name: Windows refuses `<>:"|?*` in one (`:` names a stream), so each is `%XX`.
+    pub fn file_name(name: &str) -> std::borrow::Cow<'_, str> {
+        if !name.contains(['<', '>', ':', '"', '|', '?', '*']) { return name.into() }
+        name.chars().map(|c| if "<>:\"|?*".contains(c) { format!("%{:02X}", c as u32) } else { c.to_string() }).collect::<String>().into()
+    }
+    /// What separates a path's parts in text: either slash.
+    pub const SEPS: &[char] = &['/', '\\'];
+    /// A path as written into a script or a string literal: forward slashes (Windows takes them, and no `\t` in it turns into a tab).
+    pub fn script_path(p: &Path) -> String { p.to_string_lossy().replace('\\', "/") }
     /// A file's mode bits as a test compares them: Windows keeps none, so the wanted ones stand.
     pub fn mode_bits(_actual: u32, want: u32) -> u32 { want }
     /// Flush a folder: Windows opens one only with backup semantics, and flushes it with write access.
