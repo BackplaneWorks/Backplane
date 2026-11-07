@@ -85,7 +85,10 @@ object DataClient {
         if (changed) reset()
         connect()
     }
-    fun unpair() { link = null; prefs().edit().remove("link").apply(); reset(); close(); conn = Conn.OFFLINE }
+    /** bumped by unpair(): the pairing screen starts again with empty fields */
+    var pairEpoch by mutableStateOf(0); private set
+    // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
+    fun unpair() { link = null; prefs().edit().remove("link").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
     private fun reset() { notice = HubNotice(); projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
