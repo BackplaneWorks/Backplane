@@ -51,8 +51,9 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
             let s = store.clone(); let link = l.clone();
             let _g = hub.mirror_gate().await; // (snapshot and fold together, against the pushes and a rebuild)
             let ev = tokio::task::spawn_blocking(move || s.replay_events(&link)).await.unwrap_or_default();
-            farsync::fold_held(&hub, &ev).await;
+            farsync::fold_held(&hub, &l, &ev).await;
         }
+        { let p = peering.clone(); hub.mirrors().set_names(std::sync::Arc::new(move || farsync::shown_names(&p))); } // (the machines the sidebar shows)
         let sync = farsync::FarSync::new(store, peering.clone());
         // the owner's side: the feed index (built from the log off the workers) answers pulls and drives the pushes
         let feed = feed::Feed::new();

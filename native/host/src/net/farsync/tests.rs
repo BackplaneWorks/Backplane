@@ -199,3 +199,88 @@ async fn spy_hub(tag: &str, fail_restart: bool) -> (Arc<Hub>, Arc<Spy>, Arc<Mute
     assert_eq!(spy.restarts.load(Ordering::SeqCst), before + 1);
     let _ = std::fs::remove_dir_all(h);
 }
+
+// ---- the sidebar's display-only mirror state (crate::mirror) ----
+fn proj_item(n: u64, id: &str, title: &str) -> Item { Item { n, c: json!({"$":"ProjectCreated","id":id,"title":title,"root":"/r","at":n}) } }
+fn thr_item(n: u64, id: &str, project: &str) -> Item { Item { n, c: json!({"$":"ThreadCreated","id":id,"project":project,"title":"T","env":"","branch":"","worktree":"","provider":"claude","model":"","at":n}) } }
+fn side_params() -> Value { json!({"target":{"kind":"recent","id":""},"nativeSidebar":1,"nativeKey":"00112233445566778899aabbccddeeff","hub":"h","generation":"g","epoch":"e","viewId":"v","revision":1,"now":1_000_000_000u64,"session":{"rid":1,"open":{},"drafts":{}}}) }
+fn side(hub: &Arc<Hub>, own: &crate::state::State) -> Vec<Value> {
+    let v = hub.mirrors().shown(|far| crate::present::screen::recent_far(own, far, &side_params())).expect("the sidebar is drawn");
+    v["shown"]["projects"].as_array().unwrap().clone()
+}
+fn own_state() -> crate::state::State {
+    let mut st = crate::state::State::new(); st.lean = true;
+    for e in [json!({"$":"ProjectCreated","id":"mine","title":"Mine","root":"/m","at":5}), json!({"$":"ThreadCreated","id":"t1","project":"mine","title":"M1","at":6})] { assert!(st.apply(&e)); }
+    st
+}
+fn names_of(list: Vec<(&str, &str)>) -> crate::mirror::Names { let l: Vec<(String, String)> = list.into_iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(); Arc::new(move || l.clone()) }
+
+/// (a) + (b): a mirrored project reaches the sidebar after this hub's own, labelled by machine, and nothing reaches the log.
+#[tokio::test] async fn far_mirrored_projects_reach_the_sidebar_labelled_by_machine_and_not_the_log() {
+    let (hub, _spy, _order, h) = spy_hub("side", false).await;
+    let b = node("fs1", false).await;
+    let store = FarStore::open(&h).unwrap(); hub.set_mirror_feed(Arc::new(Refeed(store.clone())));
+    let fs = FarSync::new(store, b.p.clone());
+    hub.mirrors().set_names(names_of(vec![("L", "desktop")]));
+    let n0 = hub.store.len();
+    fs.take(&hub, "L", "e", 0, 2, vec![proj_item(1, "p1", "Far board"), thr_item(2, "t9", "p1")]).await.unwrap();
+    let own = own_state();
+    let ps = side(&hub, &own);
+    let titles: Vec<(&str, &str)> = ps.iter().map(|p| (p["title"].as_str().unwrap(), p["machine"].as_str().unwrap())).collect();
+    assert_eq!(titles, vec![("Mine", ""), ("Far board", "desktop")], "this machine's first, then the linked one's: {ps:?}");
+    assert_eq!(ps[1]["id"], "h|L~p1", "qualified as the mirror names it");
+    assert_eq!(ps[1]["threads"][0]["id"], "h|L~t9");
+    assert_eq!(hub.store.len(), n0, "nothing is committed to this hub's log because of a mirrored event");
+    assert_eq!(own.threads.len(), 1, "this hub's own state is untouched");
+    assert_eq!(hub.mirrors().counts(), vec![("L".to_string(), 1, 1)]);
+    let _ = std::fs::remove_dir_all(h);
+}
+/// (b) the policies never see a mirrored thread: a long-idle, unsettled one is not auto-settled by this hub.
+#[tokio::test] async fn far_a_mirrored_idle_thread_is_not_autosettled_here() {
+    let (hub, _spy, _order, h) = spy_hub("side-auto", false).await;
+    let b = node("fs2", false).await;
+    let fs = FarSync::new(FarStore::open(&h).unwrap(), b.p.clone());
+    fs.take(&hub, "L", "e", 0, 2, vec![proj_item(1, "p1", "Far"), thr_item(2, "t9", "p1")]).await.unwrap();
+    let mut policy_side = crate::state::fam::policy::Core::new();
+    policy_side.fold_line(&json!({"$":"ProjectCreated","id":"mine","title":"Mine","root":"/m","at":5}).to_string());
+    let week = 30 * 86_400;
+    assert!(crate::state::fam::autosettle::changes(&policy_side.st, week).iter().all(|e| !e.to_string().contains("L~")), "no decision about the other machine's thread");
+    assert!(!policy_side.st.threads.contains_key("L~t9") && hub.mirrors().counts()[0].1 == 1, "it is in the display mirror only");
+    if let Some(p) = crate::statehost::policies() { assert_ne!(p.with_state(|st| st.threads.contains_key("L~t9")), Some(true)); }
+    let _ = std::fs::remove_dir_all(h);
+}
+/// (c) a link that is not verified, or whose sync is off, is not shown.
+#[tokio::test] async fn far_an_unverified_or_sync_off_link_is_not_shown() {
+    let a = node("fa3", false).await; let (b, fs) = mirror("fb3").await;
+    let link = linked(&a, &b).await;
+    let name = b.p.table.with(|p| p.peer(&link).unwrap().name.clone());
+    assert_eq!(shown_names(&b.p), vec![(link.clone(), name.clone())], "the owner's verified link is shown");
+    b.hub.mirrors().set_names({ let p = b.p.clone(); Arc::new(move || shown_names(&p)) });
+    fs.store.take(&link, "e", 0, 0, &[]).unwrap(); // (the epoch is known, as in the pushes above)
+    fs.take(&b.hub, &link, "e", 0, 1, vec![proj_item(999_000, "p1", "Far")]).await.unwrap(); // (recent: older projects are folded away)
+    let own = crate::state::State::new();
+    assert_eq!(side(&b.hub, &own).len(), 1);
+    b.hub.commit(&json!({"$":"SettingSet","key":format!("sync.{}", name.to_lowercase()),"value":"off","at":2})).await.unwrap(); settle().await;
+    assert!(shown_names(&b.p).is_empty() && side(&b.hub, &own).is_empty(), "sync off hides the machine");
+    b.hub.commit(&json!({"$":"SettingSet","key":format!("sync.{}", name.to_lowercase()),"value":"","at":3})).await.unwrap(); settle().await;
+    assert_eq!(side(&b.hub, &own).len(), 1, "and back on");
+    b.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{link}"),"value":"no","at":4})).await.unwrap(); settle().await;
+    assert!(side(&b.hub, &own).is_empty(), "a link the owner says is not theirs is not shown");
+}
+/// (d) the mirror state is rebuilt after a presenter restart / forget_mirror, and a new epoch drops the old history.
+#[tokio::test] async fn far_the_display_mirror_is_rebuilt_after_forget_mirror_and_replaced_by_a_new_epoch() {
+    let (hub, _spy, _order, h) = spy_hub("side-rebuild", false).await;
+    let b = node("fs4", false).await;
+    let store = FarStore::open(&h).unwrap(); hub.set_mirror_feed(Arc::new(Refeed(store.clone())));
+    let fs = FarSync::new(store, b.p.clone());
+    hub.mirrors().set_names(names_of(vec![("L", "desktop")]));
+    fs.take(&hub, "L", "old", 0, 2, vec![proj_item(1, "p1", "Far"), thr_item(2, "t9", "p1")]).await.unwrap();
+    assert_eq!(hub.mirrors().counts(), vec![("L".to_string(), 1, 1)]);
+    assert!(hub.forget_mirror().await);
+    assert_eq!(hub.mirrors().counts(), vec![("L".to_string(), 1, 1)], "cleared, then given again by the feed (not doubled, not lost)");
+    fs.take(&hub, "L", "new", 0, 3, vec![proj_item(1, "q1", "Other"), thr_item(2, "u1", "q1"), thr_item(3, "u2", "q1")]).await.unwrap();
+    assert_eq!(hub.mirrors().counts(), vec![("L".to_string(), 2, 1)], "another history replaces the old rows");
+    let ps = side(&hub, &crate::state::State::new());
+    assert_eq!(ps.len(), 1); assert_eq!(ps[0]["title"], "Other");
+    let _ = std::fs::remove_dir_all(h);
+}

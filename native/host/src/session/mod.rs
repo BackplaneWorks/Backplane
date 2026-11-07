@@ -184,13 +184,15 @@ impl Hub {
     async fn window_for(&self, p: &Value, before: u64, thread: Option<&str>) -> Option<(Value, crate::model::Page)> {
         let t = p.get("target")?;
         let thread = thread?;
-        if !self.model.lock().await.threads.contains_key(thread) { return None }
-        let page = { let m = self.model.lock().await; m.page(&self.store, thread, before, 32).ok()? };
+        // a thread of a linked machine: its page and context come from the mirror (net/farstore.rs), not from this hub's model
+        let far = self.far().filter(|f| f.has(thread));
+        if far.is_none() && !self.model.lock().await.threads.contains_key(thread) { return None }
+        let page = match &far { Some(f) => f.page(thread, before, 32)?, None => { let m = self.model.lock().await; m.page(&self.store, thread, before, 32).ok()? } };
         let mut req = Map::new(); req.insert("target".into(), t.clone());
         if let Some(a) = p.get("anchor") { req.insert("anchor".into(), a.clone()); }
         let req = Value::Object(req);
         // an older page still names the thread's latest human prompt and assistant text
-        let ctx = if before == 0 { vec![] } else { let m = self.model.lock().await; m.latest_context(&self.store, thread).unwrap_or_default() };
+        let ctx = if before == 0 { vec![] } else if let Some(f) = &far { f.latest_context(thread) } else { let m = self.model.lock().await; m.latest_context(&self.store, thread).unwrap_or_default() };
         // the Rust window first (present::window), computed here because the model lock is async and a presenter Screen cannot take it
         if let Some(w) = crate::present::window::window(&page, &ctx, &self.epoch, before, &req) { return Some((w, page)) }
         // what Rust does not answer (None) is the helper's, and only while the policy helper runs: the window helper is a child process the policy's V needs. A hub without the helper

@@ -27,12 +27,12 @@ impl super::Screen for Recent {
         let Some(policies)=crate::statehost::policies() else { return refused("state.not-started") };
         let setup=text(params,"action").starts_with("ob-") || policies.with_state(|st|super::onboard::due(st,&params["session"])).unwrap_or(false);
         let withinfo; let params=if super::settings::is_open(&params["session"]) || params["target"]["kind"]=="thread" || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if super::settings::page(&params["session"])=="devices" { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.reg.list(); } } if super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { params };
-        match policies.with_state(|st|recent(st,params)) { Some(out)=>out,None=>refused("state.booting") }
+        match policies.with_state(|st|_hub.mirrors().shown(|far|recent_far(st,far,params))) { Some(out)=>out,None=>refused("state.booting") }
     }
 }
 fn mine(p: &Value) -> bool {
     let id=text(&p["target"],"id");
-    p["nativeSidebar"]==json!(1) && match text(&p["target"],"kind") { "recent"=>id.is_empty(), "thread"=>!id.is_empty() && !id.contains('~'), "bot"=>p["botPage"].is_object(), "room"=>p["roomPage"].is_object(), _=>false }
+    p["nativeSidebar"]==json!(1) && match text(&p["target"],"kind") { "recent"=>id.is_empty(), "thread"=>!id.is_empty(), "bot"=>p["botPage"].is_object(), "room"=>p["roomPage"].is_object(), _=>false }
 }
 fn setting<'a>(st: &'a State,k: &str) -> &'a str { st.settings.get(k).map(String::as_str).unwrap_or("") }
 pub use crate::sidebar::fuzzy_hit;
@@ -80,8 +80,11 @@ fn find_go(st: &State,p: &Value) -> Option<Value> {
     c["session"]["drafts"]["@f.pq"]=json!("");
     Some(c)
 }
-pub fn recent(st: &State,p: &Value) -> Option<Value> {
-    if text(p,"action")=="proj-go" { match find_go(st,p) { Some(c)=>return recent(st,&c), None=>{ let mut c=p.clone(); c["action"]=json!("proj-find-q"); c["value"]=json!(""); return recent(st,&c) } } }
+pub fn recent(st: &State,p: &Value) -> Option<Value> { recent_far(st,&[],p) }
+/// `recent` with the linked machines' display-only states (`crate::mirror`): `(machine, state)`, their projects after this hub's own, each labelled by machine.
+/// Nothing of theirs is read for a decision: every action and the open thread are this hub's (`st`).
+pub fn recent_far(st: &State,far: &[(String,&State)],p: &Value) -> Option<Value> {
+    if text(p,"action")=="proj-go" { match find_go(st,p) { Some(c)=>return recent_far(st,far,&c), None=>{ let mut c=p.clone(); c["action"]=json!("proj-find-q"); c["value"]=json!(""); return recent_far(st,far,&c) } } }
     if !mine(p) { return refused("target.or-native-sidebar") }
     let mut session=p.get("session").filter(|s|s.is_object()).cloned().unwrap_or(json!({}));
     // Ui.blank + Target.bind(recent). The actor reshapes this adopted session after presentation.
@@ -125,7 +128,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         "flag" | "side-older" | "side-settled" => {
             let raw=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
             let key=match action { "side-older"=>"old-projects", "side-settled"=>"active-settled", _=>raw };
-            let known=key=="old-projects" || key=="active-settled" || key=="conversation-history" || st.projects.contains_key(key.strip_prefix("arch:").unwrap_or(key));
+            let known=key=="old-projects" || key=="active-settled" || key=="conversation-history" || { let k=key.strip_prefix("arch:").unwrap_or(key); st.projects.contains_key(k) || far.iter().any(|(_,f)|f.projects.contains_key(k)) };
             if !known { return refused("action.sidebar-flag") }
             if !session["open"].is_object() { session["open"]=json!({}); }
             let was=flag(&session,key); session["open"][key]=json!(!was);
@@ -265,26 +268,31 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     if !thread.is_empty() { crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds); }
     // A thread is drawn only when the async session seam supplied a native window and indexed page.
     // Composer fields are drawn from the same adopted draft that the action dispatcher patches.
+    // a thread of a linked machine is drawn from that machine's display state (its page and window come from the mirror)
+    let tst: &State=far.iter().map(|(_,f)|*f).find(|f|thread.contains('~') && f.threads.contains_key(thread)).unwrap_or(st);
+    if thread.contains('~') && std::ptr::eq(tst,st) { return refused("thread.far-unknown") }
     let shown_thread=if thread.is_empty() { Value::Null }else{
         if !p["window"].is_object() { return refused("window.missing") }
         let mut params=p.clone(); params["session"]=session.clone();
-        match super::thread::thread_object_checked(st,hub,thread,&params,text(&session["drafts"],thread)) {
+        match super::thread::thread_object_checked(tst,hub,thread,&params,text(&session["drafts"],thread)) {
             Ok(value)=>value, Err(reason)=>return refused(reason),
         }
     };
     let local_mode=text(&session["drafts"],"@local.view");
     let mode: &'static str=if local_mode=="projects" { "projects" } else if local_mode=="active" || setting(st,"sidebar.view")=="active" { "active" } else { "projects" };
     let query=text(&session["drafts"],"@f.pq").trim().to_string();
-    let Some(mut ns)=NativeSidebar::prepare(p,mode,&query,&session["open"],st.projects.keys().cloned().collect()) else { return refused("sidebar.key-or-capability") };
+    let Some(mut ns)=NativeSidebar::prepare(p,mode,&query,&session["open"],st.projects.keys().cloned().chain(far.iter().flat_map(|(_,f)|f.projects.keys().cloned())).collect()) else { return refused("sidebar.key-or-capability") };
     if action=="native-sidebar-page" && !ns.accept(value) { return Some(json!({"refused":true,"local":p.get("local").cloned().unwrap_or(json!({}))})) }
     if action=="native-sidebar-page" { session["drafts"]["@menu"]=json!(""); session["drafts"]["@del"]=json!(""); }
     let open: HashSet<String>=session["open"].as_object().into_iter().flatten().filter(|(_,v)|v.as_bool()==Some(true)).map(|(k,_)|k.clone()).collect();
     // a search unfolds the older projects too (Side.unfolded)
     let opts=sidebar::Opts { hub,now:p["now"].as_u64().unwrap_or(0)/1000,selected:thread,open:&open,older_open:flag(&session,"old-projects") || !query.is_empty(),query:&query };
     let plan=sidebar::plan(st,&opts);
+    let fplans: Vec<(&str,&State,sidebar::Plan)>=far.iter().map(|(m,f)|(m.as_str(),*f,sidebar::plan(f,&opts))).collect();
     let selected_project=st.threads.get(thread).map(|t|t.project.as_str()).unwrap_or("");
     // Find.rows: the projects whose name fuzzy-matches, and those holding a thread the search finds; the one holding the open thread stays (Side.cur.held)
-    let ids: Vec<&str>=plan.ids().into_iter().filter(|id| query.is_empty() || *id==selected_project || st.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || plan.has_hit(id)).collect();
+    let mut ids: Vec<&str>=plan.ids().into_iter().filter(|id| query.is_empty() || *id==selected_project || st.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || plan.has_hit(id)).collect();
+    for (_,f,fp) in &fplans { ids.extend(fp.ids().into_iter().filter(|id| query.is_empty() || f.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || fp.has_hit(id))); }
     let project_limit=ns.project_limit();
     // For now an explicitly opened thread in a folded Older project is unported. The recent list
     // already offers only visible projects; forcing an excluded project needs the filter exception port.
@@ -294,18 +302,21 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let (mut indices,projects_page)=ns.slice_ids(&ids,"projects","",project_limit,selected_project);
     indices.sort_unstable(); // Mob.native.keep_projects keeps source order, including the selected exception.
     let selected: Vec<&str>=indices.into_iter().map(|i|ids[i]).collect();
-    let row_limit=(ns.row_budget()/plan.list_count(&selected).max(1)).max(1);
+    let row_limit=(ns.row_budget()/(plan.list_count(&selected)+fplans.iter().map(|(_,_,fp)|fp.list_count(&selected)).sum::<usize>()).max(1)).max(1);
     let projects: Vec<Value>=selected.into_iter().filter_map(|owner| {
-        let mut project=plan.project(owner,&mut |kind,ids| {
+        // the plan (and state) that holds this project: this hub's, else the linked machine's it came from
+        let (pst,pplan,machine)=match fplans.iter().find(|(_,f,_)|f.projects.contains_key(owner)) { Some((m,f,fp)) if !st.projects.contains_key(owner) => (*f,fp,*m), _ => (st,&plan,"") };
+        let mut project=pplan.project(owner,&mut |kind,ids| {
             let (mut indices,pager)=ns.slice_ids(ids,kind,owner,row_limit,thread);
             indices.sort_unstable(); // Mob.native.tree_rows filters in tree order.
             (indices,pager)
         })?;
-        let icon=setting(st,&format!("project.icon.{owner}"));
+        let icon=setting(pst,&format!("project.icon.{owner}"));
         project["icon"]=json!(super::badge::icon_of(icon));
-        let color=super::badge::color_of(setting(st,&format!("project.color.{owner}")),owner);
+        let color=super::badge::color_of(setting(pst,&format!("project.color.{owner}")),owner);
         project["color"]=json!(color); project["css"]=json!(super::badge::css_of(color));
-        if text(&session["drafts"],"@look")==owner { project["look"]=super::badge::editor(owner,setting(st,&format!("project.color.{owner}")),icon); }
+        project["machine"]=json!(machine);
+        if machine.is_empty() && text(&session["drafts"],"@look")==owner { project["look"]=super::badge::editor(owner,setting(st,&format!("project.color.{owner}")),icon); }
         Some(project)
     }).collect();
     let ren=text(&session["drafts"],"@ren");
@@ -318,7 +329,9 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     let mut shown=shown;
     // the Active view: what needs the person first, then the recently settled folded under "Settled N" (a search shows them)
     if mode=="active" {
-        let (live,faded)=plan.active(&|title,proj| query.is_empty() || fuzzy_hit(title,&query) || fuzzy_hit(proj,&query));
+        let keep=|title:&str,proj:&str| query.is_empty() || fuzzy_hit(title,&query) || fuzzy_hit(proj,&query);
+        let (mut live,mut faded)=plan.active(&keep);
+        for (_,_,fp) in &fplans { let (l,f)=fp.active(&keep); live.extend(l); faded.extend(f); }
         let open=flag(&session,"active-settled") || !query.is_empty();
         shown["active"]=json!(live);
         shown["activeSettled"]=json!({"count":faded.len(),"open":open,"rows":if open { faded } else { vec![] }});
@@ -330,11 +343,12 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
       let live=rows.iter().filter(|r| !history.iter().any(|h| h["id"]==r["id"])).count();
       if !history.is_empty() || live>0 { shown["conversationHistory"]=json!({"count":history.len()+live,"open":open,"toggle":query.is_empty(),"jump":history}); } }
     // the Older group: a row that opens or shuts it (a search opens it by itself)
-    if mode!="active" && query.is_empty() && plan.older_count()>0 { shown["olderProjects"]=json!({"count":plan.older_count(),"open":flag(&session,"old-projects")}); }
+    let older=plan.older_count()+fplans.iter().map(|(_,_,fp)|fp.older_count()).sum::<usize>();
+    if mode!="active" && query.is_empty() && older>0 { shown["olderProjects"]=json!({"count":older,"open":flag(&session,"old-projects")}); }
     // the query in force, said back once the box has been used (the client takes it when it is not what it sent: Enter clears it)
     if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search projects and threads"}); }
     { let f=picker::folders(&session["drafts"],&std::env::var("HOME").unwrap_or_default(),&st.projects.values().filter(|p|!p.removed).map(|p|p.root.as_str()).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
-    if !thread.is_empty() { shown["stats"]=super::keys::stats(st,thread); } // the Context panel's rows (beside the thread: its object is the helper's, key for key)
+    if !thread.is_empty() { shown["stats"]=super::keys::stats(tst,thread); } // the Context panel's rows (beside the thread: its object is the helper's, key for key)
     if bot_page.is_object() {
         let id=text(&p["target"],"id"); let key=format!("{hub}|{id}");
         let mut b=bot_page.clone();
