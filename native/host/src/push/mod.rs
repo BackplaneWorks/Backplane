@@ -233,8 +233,9 @@ impl Worker {
         let badge = self.book.badge(self.asks());
         let devices = { let w = self.bots.world().await; w.devices.values().cloned().collect::<Vec<_>>() };
         let frame = apns::Frame::clear(&keys, badge);
-        self.send(devices.iter().filter(|d| d.kind == "alert" && d.platform == "ios"), &frame).await;
+        // recorded first: a socket (Android, the desktop) hears the clear no later than an iOS phone does
         let _ = self.hub.commit(&json!({"$":"PushCleared","keys":keys,"badge":badge,"at":now_s()})).await;
+        self.send(devices.iter().filter(|d| d.kind == "alert" && d.platform == "ios"), &frame).await;
     }
     fn asks(&self) -> u64 { crate::data::open_ask_total(&self.hub) }
     async fn send(&self, devices: impl Iterator<Item = &Device>, frame: &apns::Frame) -> u64 {
