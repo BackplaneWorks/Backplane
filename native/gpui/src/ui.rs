@@ -502,6 +502,9 @@ impl Render for Backplane {
         if let Some(o) = crate::screens::order::parse(&thread["order"]).filter(crate::screens::order::payable) { ctl.push(CtlEntry { id: "ui:Buy now".into(), label: if o.label.is_empty() { "Buy now".into() } else { o.label }, ctl: Ctl::None }); }
         // the Mechanical page's parts are controls too (the harness presses them by index)
         for (i, p) in crate::screens::viewer::mech_parts(&thread["viewer"]).into_iter().enumerate() { ctl.push(CtlEntry { id: format!("mech-part-{i}"), label: p.label, ctl: Ctl::Node("mech-part".into(), p.value) }); }
+        // the viewer bar's Open in KiCad, and the Subagents panel's row buttons (Release, Cancel, Stop: `<act>-<value>`, as the rows name them)
+        if crate::screens::viewer::is_open(thread) && crate::screens::viewer::has_design(&thread["viewer"]) { ctl.push(CtlEntry { id: "ui:Open in KiCad".into(), label: "Open in KiCad".into(), ctl: Ctl::Node("kicad-open".into(), String::new()) }); }
+        for r in thread["subs"]["rows"].as_array().into_iter().flatten().filter(|r| !string(r, "act").is_empty()) { ctl.push(CtlEntry { id: format!("{}-{}", string(r, "act"), string(r, "value")), label: string(r, "label"), ctl: Ctl::Node(string(r, "act"), string(r, "value")) }); }
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
         for (id, label, c) in crate::screens::tools::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
         ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });

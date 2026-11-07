@@ -31,12 +31,18 @@ fn watch_rows(st: &State, thread: &str) -> Vec<Value> {
         acting(format!("watch: {}", bg::work_title(l)), "watch", if ended { "ended" } else { "working" }, word, if stop { "work-cancel" } else { "" }, &bg::field(l, 0), if stop { "Stop" } else { "" })
     }).collect()
 }
+/// Who holds a lock, in words: its thread's title (a job's: "a job in <title>"), a shell helper's note, else its id.
+fn holder_name(st: &State, l: &Lock) -> String {
+    let Some(h) = &l.holder else { return String::new() };
+    let title = st.threads.get(&h.thread).map(|t| t.title.clone()).filter(|t| !t.is_empty());
+    match (h.kind.as_str(), title) { ("work", Some(t)) => format!("a job in {t}"), (_, Some(t)) => t, _ if !h.note.is_empty() => h.note.clone(), _ => h.id.clone() }
+}
 /// Subs.lock.row: a thread's own place on each lock, held (Release) or queued (Cancel). A job's place shows on its watch row.
 fn lock_rows(st: &State, thread: &str) -> Vec<Value> {
     bg::lines(set(st, "locks.names".into())).iter().filter_map(|name| {
         let l = Lock::read(set(st, format!("lock.{name}"))); if !l.has(thread) { return None }
         let held = l.owner() == thread && l.ready;
-        let doing = if held { "Release when done".to_string() } else if l.owner() == thread { "waiting for a flock outside Backplane".to_string() } else { format!("position {} · held by {}", l.position(thread), l.owner()) };
+        let doing = if held { "Release when done".to_string() } else if l.owner() == thread { "waiting for a flock outside Backplane".to_string() } else { format!("position {} · held by {}", l.position(thread), holder_name(st, &l)) };
         Some(acting(format!("lock: {name}"), "lock", if held { "held" } else { "waiting" }, doing, if l.owner() == thread { "lock-release" } else { "lock-cancel" }, name, if l.owner() == thread { "Release" } else { "Cancel" }))
     }).collect()
 }
@@ -88,6 +94,14 @@ mod tests {
         assert_eq!((v["rows"][1]["state"].as_str(), v["rows"][1]["kind"].as_str()), (Some("completed"), Some("shell")));
         let done = subs(&st(&[("bg.t1", &bg::line("b1", &format!("{}completed", bg::ENDED)))]), "t1"); assert_eq!((done["busy"].as_str(), done["word"].as_str()), (Some(""), Some("1 done")));
         assert!(subs(&st(&[]), "t1").is_null());
+    }
+    #[test] fn a_waiter_reads_who_holds_by_name() {
+        let lock = |h: &str| format!(r#"{{"holder":{h},"waiters":[{{"id":"t2","kind":"thread","thread":"t2","note":"","since":1,"lease":0}}],"ready":true}}"#);
+        let mut s = st(&[("locks.names", "a"), ("lock.a", &lock(r#"{"id":"t1","kind":"thread","thread":"t1","note":"","since":1,"lease":0}"#))]);
+        s.threads.entry("t1".into()).or_insert_with(crate::state::Thread::blank).title = "Board work".into();
+        assert_eq!(subs(&s, "t2")["rows"][0]["doing"], "position 1 · held by Board work");
+        s.settings.insert("lock.a".into(), lock(r#"{"id":"w-1","kind":"work","thread":"t1","note":"","since":1,"lease":0}"#)); assert_eq!(subs(&s, "t2")["rows"][0]["doing"], "position 1 · held by a job in Board work");
+        s.settings.insert("lock.a".into(), lock(r#"{"id":"pid:9","kind":"client","thread":"","note":"render","since":1,"lease":0}"#)); assert_eq!(subs(&s, "t2")["rows"][0]["doing"], "position 1 · held by render");
     }
     #[test] fn a_threads_locks_and_jobs_carry_what_their_buttons_send() {
         let held = r#"{"holder":{"id":"t1","kind":"thread","thread":"t1","note":"","since":1,"lease":0},"waiters":[{"id":"t2","kind":"thread","thread":"t2","note":"","since":2,"lease":0}],"ready":true}"#;
