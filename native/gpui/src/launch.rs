@@ -55,6 +55,13 @@ pub fn home_problem(path: &str, old: Option<&Path>) -> &'static str {
 /// Whether a folder already holds a hub's data.
 pub fn has_data(home: &Path) -> bool { home.join("events.jsonl").is_file() }
 
+/// The home of the local hub used before, when `home` is empty and that one holds data: a new hub there would look like lost data.
+pub fn expected_elsewhere(home: &Path, list: &[crate::hubs::Hub]) -> Option<PathBuf> {
+    let tf = list.iter().find(|h| h.is_local())?.token_file.as_str();
+    let prev = Path::new(tf).parent().filter(|p| !tf.is_empty())?;
+    (prev != home && !has_data(home) && has_data(prev)).then(|| prev.to_path_buf())
+}
+
 /// `<home>/hub.lock`: "<pid> <port> flock". The port of the hub the lock names.
 pub fn lock_port(text: &str) -> Option<u16> { text.split_whitespace().nth(1)?.parse().ok() }
 fn answering(port: u16) -> bool {
@@ -91,6 +98,7 @@ pub fn ensure_hub(home: &Path) -> Result<(String, PathBuf)> {
     std::fs::create_dir_all(home).with_context(|| format!("Backplane could not make {}", home.display()))?;
     let (lock, token) = (home.join("hub.lock"), home.join("token"));
     if let Some(port) = std::fs::read_to_string(&lock).ok().as_deref().and_then(lock_port) { if answering(port) && token.is_file() { return Ok((format!("http://127.0.0.1:{port}"), token)) } }
+    if let Some(other) = expected_elsewhere(home, &crate::hubs::load()) { bail!("Not starting a new hub in {}: this computer's hub is the one in {}. Start Backplane on that hub.", home.display(), other.display()) }
     let me = std::env::current_exe()?;
     let guarded = guarded_install(&me).filter(|_| std::env::var_os("BACKPLANE_HUB_BIN").is_none());
     let bin = match &guarded { Some((g, _)) => g.clone(), None => hub_bin()? };
@@ -180,6 +188,17 @@ mod tests {
         assert!(home_problem("hub", None).contains("full path"));
         if cfg!(unix) { assert!(home_problem("/h/.backplane-bend/x", Some(old)).contains("0.14")); }
         else { assert!(home_problem(r"C:\h\.backplane-bend\x", Some(Path::new(r"C:\h\.backplane-bend"))).contains("0.14")); }
+    }
+    #[test] fn a_new_hub_on_an_empty_home_is_refused_when_another_local_home_has_data() {
+        let d = std::env::temp_dir().join(format!("bp-launch-expect-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let (old, new) = (d.join("fresh/home"), d.join("default/hub")); std::fs::create_dir_all(&old).unwrap(); std::fs::create_dir_all(&new).unwrap();
+        let mut l = crate::hubs::Hub::local(); l.origin = "http://127.0.0.1:3797".into(); l.token_file = old.join("token").to_string_lossy().into_owned();
+        assert_eq!(expected_elsewhere(&new, &[l.clone()]), None, "the earlier home has no data either");
+        std::fs::write(old.join("events.jsonl"), "x").unwrap();
+        assert_eq!(expected_elsewhere(&new, &[l.clone()]), Some(old.clone()));
+        assert_eq!(expected_elsewhere(&old, &[l.clone()]), None, "the home itself");
+        assert_eq!(expected_elsewhere(&new, &[crate::hubs::Hub::local()]), None, "never given a local hub");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn the_lock_says_the_port() {
         assert_eq!(lock_port("1234 3801 flock\n"), Some(3801));

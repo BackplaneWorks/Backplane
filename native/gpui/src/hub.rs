@@ -44,7 +44,7 @@ impl Config {
             Start::Paired(hub)=>{config.hub=hub;config.token_file=saved_token.context("no config folder")?;config.paired=true;return Ok(config);}
             Start::Unpaired if config.pair_link.is_none()&&config.script.is_none()&&!(config.swatches||config.gallery||config.fonts||config.solid_demo.is_some())=>{config.pending=true;return Ok(config);} // a first launch: setup's chooser (screens/first.rs); a link or a script goes to pairing, where the script runner is
             Start::Unpaired=>{config.hub.clear();config.token_file=crate::hubs::credential_saved("unpaired").context("no config folder")?;config.unpaired=true;return Ok(config);}
-            Start::Named=>{}
+            Start::Named=>{ if named&&keyed {crate::hubs::remember_saved(&config.hub,&config.token_file.to_string_lossy());} }
         }
         config.hub=config.hub.trim_end_matches('/').to_string();
         config.hub=crate::pairing::ws_of(&config.hub);
