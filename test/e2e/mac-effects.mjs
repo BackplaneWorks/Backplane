@@ -87,6 +87,21 @@ await c.rpc('setting.set',{key:'telemetry.share',value:'off'}); await sleep(300)
 const logTxt=readFileSync(OUT+'/hub.log','utf8');
 const quiet=Object.values(seen).every(a=>a.length===0)&&!/telemetry.*(send|post|upload)/i.test(logTxt);
 row('S14 telemetry.share',quiet&&stored.off==='off'&&stillOff&&stored.on==='on',`states walked: Off via setting.set (stored ${stored.off}); On via setting.set refused (still ${share()===''?'unset':'off'}: ${stillOff}); On via telemetry.choice with the page's token (ok=${on.ok}, stored ${stored.on}); non-loopback connections of the hub over 10 s each: off ${seen.off.length}, on ${seen.on.length} (${Object.values(seen).flat().join('; ')||'none'}). This build has no sender or endpoint (settings/telemetry.rs may_send is false), so On and Off differ only in the stored choice`);
+// agents page (S03): agent.provider and agent.model are what a new thread starts on when the request names neither
+{ const made=async(p)=>{const r=await c.rpc('thread.create',{project:P,title:'default-'+p,env:'local',provider:null,model:null}); await sleep(300); return events().find(e=>e.$==='ThreadCreated'&&e.id===r.thread)};
+  const before=await made('before'); await set('agent.provider','codex'); await set('agent.model','gpt-5.6-sol'); const after=await made('after');
+  await set('agent.provider','claude'); await set('agent.model','opus'); const back=await made('back');
+  row('S03 agent.provider, agent.model',before?.provider==='claude'&&after?.provider==='codex'&&after?.model==='gpt-5.6-sol'&&back?.provider==='claude'&&back?.model==='opus',`new thread by default: ${before?.provider}/${before?.model||''}; after Set codex gpt-5.6-sol: ${after?.provider}/${after?.model}; after Set claude opus: ${back?.provider}/${back?.model}`)}
+// network page (S08): update.channel is the channel the hub's update service reports and checks
+{ const chan=async()=>{const r=await c.rpc('update.status',{});return r?.result?.channel??r?.channel};
+  await set('update.channel','beta'); const b=await chan(); await set('update.channel','stable'); const st=await chan();
+  row('S08 update.channel',b==='beta'&&st==='stable',`update.status reports ${b} after Beta and ${st} after Stable`)}
+// ordering page (S06): order.enabled changes what the next agent is told about ordering (its system prompt, in the stand-in agent's argv)
+{ const argv=()=>readFileSync(OUT+'/fake.log.argv','utf8');
+  const told=async(state)=>{ await set('order.enabled',state); const n=argv().length; const th=(await c.rpc('thread.create',{project:P,title:'order-'+state,env:'local'})).thread;
+    await c.rpc('turn.start',{thread:th,text:'hello zqshort'}); await until(()=>argv().length>n+200,10000); await sleep(300); return argv().slice(n) };
+  const on=await told('on'), off=await told('off'); const phrase='Ordering from Backplane is off';
+  row('S06 order.enabled',!on.includes(phrase)&&off.includes(phrase),`next turn's prompt says "${phrase}": with Ordering On ${on.includes(phrase)}, with Off ${off.includes(phrase)}`) }
 c.ws.close(); try{process.kill(pid,'SIGTERM')}catch{}
 writeFileSync(OUT+'/effects.json',JSON.stringify(out_rows,null,1));
 process.exit(out_rows.every(r=>r.ok)?0:1);
