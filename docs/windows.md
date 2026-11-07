@@ -1,29 +1,45 @@
 # Windows
 
-> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+The hub (`native/host`, `backplane-hub.exe`) and the GPUI client (`native/gpui`, `backplane-gpui.exe`) build and run on Windows x64. They are proven on GitHub's hosted `windows-latest` runners, not yet on a machine of our own. What has run there is in `docs/e2e/MATRIX.md` (Windows).
 
-> The text that used to be here described the Electron app over `backplane-serve.exe`, built with `scripts/build-js.sh`, released with `scripts/service-release.py` and set up with `scripts/build-windows-helpers.sh`, `scripts/install-windows-providers.ps1` and `scripts/setup-windows.ps1`. None of those scripts or `desktop/` exist in this checkout any more, so those steps are gone.
+## What runs where
 
-What the current files confirm:
+- CI (`.github/workflows/ci.yml`), blocking: `hub windows-latest 1/2` and `2/2` (the hub's tests, less the named skips in `scripts/ci-hub-windows-filter.sh`), `window windows-latest` (the client's tests), `guard windows-latest`, and `windows smoke` (`test/windows/smoke.sh`: a hub on a temp home, the client connected to it on the runner's desktop over WARP, the hub's data drawn, both end cleanly).
+- Release (`.github/workflows/release.yml`): `windows-x64` builds on `windows-latest` and ships `backplane-<tag>-windows-x64.zip` (the hub, the client, the guard `backplane.exe`, `bp-sh.exe`, `assets/`, `COMMIT`). Its sha256 is in the signed `manifest.json` with the other archives. The client is a release build: gpui's HLSL shaders are compiled there by the Windows SDK's `fxc.exe`, its manifest by `rc.exe`.
+- `windows-debug` (by hand): chosen hub or client tests on a Windows runner with their output.
 
-- The hub is `native/host` (`backplane-hub`) and the window is `native/gpui` (`backplane-gpui`), both Rust. The release workflow (`.github/workflows/release.yml`) builds them with `cargo build --release` for `linux-x64`, `linux-arm64` and `darwin-arm64` only. **There is no Windows target in it.**
-- `scripts/dev-build.sh` builds the same two crates and publishes them with `scripts/dev-cut.sh`, which accepts ELF programs only (it checks for the `\x7fELF` header), so it does not publish a Windows build.
+## Needs on the Windows machine
 
-## Status: Windows was never built (the requirement is dropped for now)
+- Git for Windows. The hub's scripts are POSIX shell (git, folders, exports); `sh` and `bash` mean Git's (on PATH, or beside `git.exe`, or under Program Files). Agents on Windows need it anyway.
+- `bp-sh.exe` beside `backplane-hub.exe`. A Cygwin/MSYS program started by a Windows program splits its command line by its own rules, so every `sh` goes through `bp-sh`, which quotes for them (`src/bin/bp-sh.rs`).
 
-The Windows E2E lane (thread t1793985962-58) was stopped before it compiled or ran anything: its `cargo check` for `x86_64-pc-windows-msvc` was cancelled while queued, and nothing landed. What follows comes from reading the source at `ed50df6d35`, not from compile errors. **Whether either crate builds on Windows is unknown**, but the findings say it will not without a port.
+## How the hub differs on Windows
 
-Hub (`native/host`) blockers:
+All of it is in `native/host/src/plat/` (`unix.rs` is the calls the hub always made; `windows.rs` the nearest Windows meaning):
 
-- Terminal is a POSIX pty only (`term/pty.rs`, `term/mod.rs`); it needs ConPTY.
-- Unix sockets for KiCad IPC (`kicad/nng.rs`, `kicad/kipc.rs`, `kicad/ipc.rs`, `proc.rs`).
-- Signals and process groups (`kill`, `setsid`, `pre_exec`) in `agents/proc.rs`, `agents/work.rs`, `term/pty.rs`, `settings/vault.rs`, `main.rs`, `copy.rs`, `agents/providers/mod.rs`; shutdown uses `tokio::signal::unix`.
-- Unix-only file APIs (`PermissionsExt`, `symlink`, `MetadataExt` and others) and about 79 direct `libc` uses (`flock`, `getifaddrs`, `localtime_r`, `setrlimit`, `getuid`), tests included.
-- Hard-coded Unix paths and tools in at least 25 files (worst: `files/git.rs`, `agents/providers/opencode.rs`, `proc.rs`, `files/misc.rs`).
-- The secrets vault detects only a macOS keychain and a Linux keyring (`settings/vault.rs`); 18 `HOME`/`XDG_` uses.
+- Process groups are Job Objects named per leader (`Local\backplane-group-<pid>`); an agent's and a terminal's die with the hub (kill on close). Every signal ends the group: Windows has no SIGTERM.
+- Terminals are ConPTY (`term/pty_windows.rs`); a terminal's key (`x:t1:...`) is saved as a file name with `%XX` for what Windows refuses.
+- KiCad's nng `ipc://<path>` socket is the named pipe `\\.\pipe\<path>`.
+- A `#!` script runs through the interpreter its first line names.
+- The vault's master key is kept in the Credential Manager (`backplane-vault/<id>`).
+- Paths: `\\?\` is dropped from resolved paths, a path is absolute as `C:\`, `C:/`, `\\host` or `/`, a relative one may not climb through `\` or name a drive, agent paths are recognised as `C:\x`, `C:/x` or `/c/x`.
+- Ctrl+C, Ctrl+Break, closing the console, logoff and shutdown end the hub (exit 130).
+- The client keeps its settings in `%APPDATA%\backplane-gpui`, its default hub home is `%APPDATA%\Backplane\hub`, its home is `%USERPROFILE%` when `HOME` is not set.
 
-Client (`native/gpui`) blockers: `Cargo.toml` declares `gpui` for Linux and macOS only; the vendored `gpui-0.2.2/build.rs` compiles the Windows shaders only on a Windows build host, so a Linux cross check proves little; `screens/place.rs` has a `cfg(unix)`-only `on_term`, `screens/improvements.rs` opens links with `open`/`xdg-open`, and `screens/capture.rs` and `screens/timeline.rs` have Linux-only paths. CEF is pinned at 154.5.0 and its packaging is unproven on Windows.
+## Building on Linux for a Windows machine
 
-Packaging: `tools/cef/CMakeLists.txt` and the `tools/*/build.ts` files have no Windows handling, and `scripts/` has no Windows packaging apart from a Windows target mention in `build-step2glb.sh`. CI has no Windows job.
+```sh
+rustup target add x86_64-pc-windows-gnu x86_64-pc-windows-gnullvm
+# llvm-mingw (github.com/mstorsjo/llvm-mingw, ucrt-ubuntu-*-x86_64) unpacked into ~/.local/opt, or WIN_LLVM_MINGW=<dir>
+scripts/windows-check.sh            # cargo check --target x86_64-pc-windows-gnu --all-targets, both crates
+scripts/windows-check.sh --build    # build/windows: backplane-hub.exe, bp-sh.exe, backplane-gpui.exe, libunwind.dll (debug)
+```
 
-Still unknown (needs a real Windows build): the real compile-error count for either crate (unresolved imports can hide later errors), and whether the hub needs the Windows SDK (its lock shows none of `ring`, `aws-lc-sys`, `openssl-sys`, `cc`, `cmake`, `bindgen`; the GPUI lock has `ring`, `cc`, `cmake`, `bindgen`). Toolchain notes: `clang-cl` is on the desktop; `mingw`, `xwin`, `lld-link` and `wine` are not, and `h@backplane` has no `rustup`. Do not treat a Linux build as Windows validation.
+Copy `build/windows/` to the Windows machine (over the tailnet) and keep the four files together. These are debug builds linked for `x86_64-pc-windows-gnullvm` (llvm-mingw has no libgcc, which the `-gnu` target links). A client built this way compiles its shaders when its window opens (gpui compiles HLSL at build time only on a Windows host, and only in release) and has no embedded manifest; a release client comes from the release workflow or a build on Windows.
+
+## Not done yet
+
+- The updater picks archives by `.tar.gz`; a Windows install does not update itself from the zip yet.
+- KiCad on Windows: the IPC transport and socket discovery are written and unit-tested, not run against a real KiCad. KiCad 10 export and the release scripts take POSIX paths (their tests are skipped).
+- Tests skipped on Windows, each group with why: `scripts/ci-hub-windows-filter.sh`. "Debt" groups are to be ported; the others are Unix by design (Git sh's own pids and signals, symlinks and hard links, mode bits).
+- CEF (the browser tab) is not packaged for Windows.

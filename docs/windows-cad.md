@@ -1,92 +1,10 @@
 # Windows CAD tools
 
-The current Backplane hub runs on native Windows Bun and ships a portable
-Cygwin shell for subprocesses. KiCad, FreeCAD and the Bun helpers are native
-Windows programs. Filesystem paths cross that boundary explicitly; message
-text is never rewritten globally.
+What the Rust hub does for KiCad and FreeCAD on Windows, and what is proven (see `docs/windows.md` for the port as a whole).
 
-Build the native helper from Linux with Bun 1.4.3 or newer:
+- KiCad's API: the hub speaks KiCad's IPC itself (pure-Rust nng and protobuf, `native/host/src/kicad/`). nng's `ipc://<path>` is the named pipe `\\.\pipe\<path>` on Windows (`plat::ipc`), and a server's socket is found by listing the pipe namespace (`kicad/kipc.rs`). Unit-tested on the Windows runner against a stand-in server; not yet run against a real KiCad.
+- Set `BACKPLANE_KICAD` (or Settings → CAD) to the Backplane KiCad runtime root or its `bin\kicad-cli.exe`; a stock KiCad does not provide all of Backplane's IPC capabilities.
+- The hub's scripts around kicad-cli run in Git for Windows' sh (`docs/windows.md`). KiCad 10 export (`files/export10.rs`) and the release scripts (`files/rv.rs`) still take POSIX paths: their tests are skipped on Windows (`scripts/ci-hub-windows-filter.sh`), so treat export and release as not working there yet.
+- FreeCAD: not run on Windows.
 
-```sh
-BUN=/path/to/bun scripts/build-windows-helpers.sh
-```
-
-`build/windows-helpers/` contains `backplane-step2glb.exe`,
-a dependency license and a checksum manifest. Keep the helper beside
-`backplane.exe`, and ship the license directory with it.
-The hub speaks KiCad's IPC itself (no KiCad helper): pure-Rust nng and protobuf, with the selected runtime's descriptor set.
-
-Set `BACKPLANE_KICAD` to the Backplane KiCad runtime root or its
-`bin/kicad-cli.exe`; a stock KiCad installation does not provide all of
-Backplane's IPC capabilities. The runtime's own manifest and handshake
-remain authoritative. Windows runtime builds are prepared in the public
-Backplane_KiCad repository; validate a downloaded package before treating
-that platform as supported.
-
-Settings' KiCad path and `BACKPLANE_KICAD` accept a runtime root (including
-`C:\backplane_kicad\`) or an explicit `bin/kicad-cli.exe` path. Backslashes
-are literal filesystem separators, including `\b`, `\n` and `\t` sequences;
-normalization to forward slashes happens only for filesystem candidates.
-Native Windows PATH entries use semicolons; a Cygwin colon PATH remains
-supported. Discovery checks explicit overrides first, then bundled/managed
-runtimes, PATH and standard version directories below `%ProgramFiles%/KiCad`.
-Older managed runtimes remain discoverable. Stock KiCad is identified as stock
-and does not gain Backplane IPC capabilities by being found.
-
-The in-app installer converts its Windows staging root with `cygpath -u`,
-hashes archive bytes through stdin (avoiding checksum filename escaping),
-and passes native ZIP/extraction paths to PowerShell as environment values.
-Existing installations and failed-install cleanup follow the same guards.
-
-Set `BACKPLANE_FREECAD` to the installed `FreeCADCmd.exe`. For a portable
-FreeCAD archive, select the actual `bin/freecadcmd.exe`. The GUI executable
-must be beside it. Some bundles also provide root-level Chocolatey shims;
-the STEP helper prefers the real GUI below `bin` because the shim can return
-before its child starts. Native Windows
-paths and Cygwin paths are accepted for this setting. Restart Backplane after
-changing its environment.
-
-From Cygwin, native CAD programs need native filesystem arguments. Use
-`cygpath -w` for absolute script/file paths passed directly to FreeCAD. A
-relative `mech/part.py` beside the current project works with both runtimes.
-Within a native FreeCAD script, use Python's pathlib and native paths; do not
-hard-code `/cygdrive` paths. Backplane's STEP helper performs path conversion
-for its own input/output arguments and preserves colors through the GUI
-FreeCAD fallback.
-
-Native checks include `test/native/native_pid` and
-`test/native/windows_paths`. They use the hub's effects, so they build
-as the hub does, on Bun:
-`BACKPLANE_JS_TARGET=windows-x64 scripts/build-js.sh test/native/windows_paths build/windows-paths`
-writes `build/windows-paths.exe`. Require the printed path checks to pass: the
-Check helper reports failures in its output. Compare the PID test to the
-actual native process ID.
-
-`test/fixtures/windows-cad/mech/native_box.py` is a disposable real FreeCAD
-GUI fixture. Run it with `QT_QPA_PLATFORM=offscreen`; it validates geometry,
-FCStd save/reopen, colored STEP export/reimport and volume. Its generated
-files belong in an isolated acceptance directory. Test the resulting STEP
-with the native helper on Windows. Linux output does not establish Windows
-acceptance.
-
-After creating the orange FreeCAD STEP fixture,
-exercise the GUI fallback and process/pipe completion with:
-
-```sh
-BACKPLANE_FREECAD='C:\FreeCAD\FreeCADCmd.exe' python3 test/tools/windows-freecad.py /path/to/backplane-step2glb.exe /path/to/native_box.step
-```
-
-The test pads a disposable copy above the native fallback threshold and
-requires the actual FreeCAD GLB generator and the original orange material.
-
-`scripts/build-windows-helpers.sh` builds these helpers with pinned Bun 1.4.3
-and writes their checksum manifest, WINDOWS-HELPERS.json, beside their
-dependency licenses. FreeCAD and the Backplane KiCad runtime are installed
-separately.
-
-The offline regressions for issue #927 are `test/kicad_paths_test`,
-`test/tools/kicad_discovery_test.py`, and `test/tools/kicad_install_test.py`.
-They exercise the production resolver and installer with disposable filesystem
-entries and archives. Linux fixtures with Windows uname/path text do not
-establish native Windows acceptance; the PowerShell cases run for real on
-Cygwin and are otherwise explicit stand-ins.
+The 0.14 text that was here described the Bun hub, a portable Cygwin shell and `scripts/build-windows-helpers.sh`; none of those exist in this tree.
