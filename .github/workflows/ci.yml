@@ -24,6 +24,7 @@ jobs:
       guard: ${{ steps.f.outputs.guard }}
       android: ${{ steps.f.outputs.android }}
       windows: ${{ steps.f.outputs.windows }}
+      ios: ${{ steps.f.outputs.ios }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -44,9 +45,19 @@ jobs:
               - '.github/workflows/ci.yml'
             android:
               - 'mobile/android/**'
+              - 'test/mobile/**'
               - '.github/workflows/ci.yml'
             windows:
               - 'native/**'
+              - 'skills/**'
+              - 'assets/**'
+              - 'test/**'
+              - '.github/workflows/ci.yml'
+            ios:
+              - 'mobile/ios/**'
+              - 'scripts/mobile/ios-unit-tests.sh'
+              - 'test/mobile/**'
+              - 'test/fixtures/voice-edits.json'
               - '.github/workflows/ci.yml'
 
   # `backplane`, the guard: it has to work where the hub is restarted from, so it runs on all three systems (docs/HUB-RESILIENCE.md).
@@ -76,11 +87,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         partition: [1, 2]
     name: hub ${{ matrix.os }} ${{ matrix.partition }}/2
     runs-on: ${{ matrix.os }}
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: rui314/setup-mold@v1
@@ -93,8 +105,11 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: tests
         working-directory: native/host
+        shell: bash
         run: |
-          cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.partition }}/2
+          args=(--locked --no-fail-fast --partition count:${{ matrix.partition }}/2)
+          if [ "$RUNNER_OS" = Windows ]; then args+=(-E "$(sh ../../scripts/ci-hub-windows-filter.sh)"); fi
+          cargo nextest run "${args[@]}"
 
   window:
     needs: changes
@@ -102,10 +117,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     name: window ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: rui314/setup-mold@v1
@@ -123,50 +139,9 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: tests
         working-directory: native/gpui
-        run: |
-          cargo nextest run --locked
-
-  # The Windows port (docs/e2e/MATRIX.md, Windows): both crates built and tested on Windows. Non-blocking until it is green.
-  windows:
-    needs: changes
-    if: needs.changes.outputs.windows == 'true'
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        crate: [host, gpui]
-    name: windows ${{ matrix.crate }}
-    runs-on: windows-latest
-    steps:
-      - run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: native/${{ matrix.crate }}
-          shared-key: windows-${{ matrix.crate }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@nextest
-      - name: build
-        working-directory: native/${{ matrix.crate }}
-        shell: bash
-        run: cargo build --locked --all-targets
-      - name: tests
-        working-directory: native/${{ matrix.crate }}
         shell: bash
         run: |
-          if [ "${{ matrix.crate }}" = gpui ]; then cargo nextest run --locked --no-fail-fast; exit; fi
-          # the hub's tests that do not hold on Windows, each group with why (docs/e2e/MATRIX.md, Windows); "debt" is to be ported, the rest is Unix by design
-          skip='test(=agents::tests::sbs_child_probe)'
-          # POSIX processes: the stand-ins report Git sh's own pids and signals, which no Windows call reaches
-          skip="$skip | test(=agents::proc::tests::terminate_kills_the_whole_group_and_leaves_no_zombie) | test(=agents::tests::a_killed_process_is_named_as_probably_out_of_memory) | test(=agents::tests::interrupting_a_codex_turn_ends_its_process_and_keeps_the_ride) | test(=agents::tests::shutdown_leaves_no_process_behind)"
-          # POSIX files: exec bits, symlinks and hard links refused by O_NOFOLLOW, mode bits, names Windows cannot hold
-          skip="$skip | test(=agents::proc::tests::test_mode_runs_only_the_standin_folder) | test(=bots::tests::mail_tests::mail_recover_gives_a_journaled_body_its_header_once) | test(=bots::tests::store_tests::the_journal_is_not_opened_through_a_link) | test(=files::attach::tests::receives_whole_files_and_refuses_short_big_and_linked_ones) | test(=files::dir::tests::lists_folders_then_files_hides_dotfiles_and_symlinked_folders) | test(=files::rv::tests::a_snapshot_with_a_link_or_an_escaping_sheet_is_refused) | test(=files::serve::tests::serves_ranges_and_refuses_non_files_and_links) | test(=settings::accounts_io::tests::the_registry_adds_renames_removes_and_survives_a_restart_and_a_bad_file_is_not_trusted) | test(=update::run::tests::a_hard_link_found_after_unpacking_is_refused)"
-          # Windows debt, path text: the test compares Unix-shaped path strings (C:\\x\\y against C:\\x/y, /tmp, /c/...)
-          skip="$skip | test(=agents::providers::pi::tests::the_command_line_is_the_hubs) | test(=agents::skills::tests::every_provider_place_is_read_with_its_source) | test(=agents::tests::design_history_steps_are_logged_as_the_js_hub_logs_them) | test(=agents::tests::the_agent_is_started_with_the_arguments_and_prompt_the_js_hub_gives_it) | test(=agents::tests::the_reply_depends_on_what_the_picked_skill_says_for_claude_and_codex) | test(=bots::tests::bots_create_logs_thread_and_bot_and_refuses_bad_or_taken_names) | test(=bots::tests::js_ledger_tools) | test(=bots::tests::js_parity) | test(=bots::tests::js_parity_mail_filing) | test(=bots::tests::js_parity_routines) | test(=bots::tests::js_parity_uber) | test(=bots::tests::js_parity_uber_first_ops_of_a_bot_with_memories_and_routines) | test(=bots::tests::triage::a_bots_agent_is_told_who_it_is_and_a_run_only_its_role) | test(=present::viewer::tests::a_project_with_several_boards_lists_them_and_a_pick_watches_that_board) | test(=present::viewer::tests::a_viewer_show_of_a_part_opens_mech_on_it) | test(=present::viewer::tests::fm_actions_walk_folders_open_files_and_refuse_escapes) | test(=settings::e2e::a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_and_the_default_one_does_not) | test(=skills_::tests::every_provider_place_is_read_with_its_source) | test(=viewer::tests::a_project_with_several_boards_lists_them_and_a_pick_watches_that_board) | test(=viewer::tests::a_viewer_show_of_a_part_opens_mech_on_it) | test(=viewer::tests::fm_actions_walk_folders_open_files_and_refuse_escapes)"
-          # Windows debt, not ported: KiCad 10 export and release scripts take POSIX paths; muse/agy stand-ins; gh found ahead of the fake on the runner; terminal flood, thread tools, side-by-side and copy-outs probes not yet diagnosed
-          skip="$skip | test(=agents::providers::agy::standin_tests::agy_permission_matches_the_js_hub) | test(=agents::providers::muse::standin_tests::a_resumed_muse_session_sets_its_mode_first_and_repeats_no_command_id) | test(=agents::tests::side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards) | test(=agents::tests::thread_tools_read_send_wait_update_and_interrupt) | test(=files::export10::tests::an_empty_report_exports_at_once_and_a_bad_one_is_an_error) | test(=files::export10::tests::an_unmarked_folder_is_never_adopted_and_a_link_never_followed) | test(=files::export10::tests::consent_follows_the_report_and_agents_may_force) | test(=files::git::tests::stacked_actions_against_a_local_bare_remote) | test(=files::imgroutes::tests::message_images_live_scanned_and_refused) | test(=files::imgroutes::tests::only_assistant_messages_make_snapshots) | test(=files::rv::tests::a_failed_gate_stops_a_release_unless_forced_and_an_execution_failure_always) | test(=files::rv::tests::a_release_tags_exports_and_publishes_only_when_asked) | test(=net::copy_outs::no_alert_driven_out_leaves_on_a_copy_and_the_same_probe_posts_without_the_flag) | test(=term::tests::a_flood_skips_a_client_that_does_not_read_keeps_it_and_snaps_it_when_it_catches_up)"
-          cargo nextest run --locked --no-fail-fast -E "not ($skip)"
+          cargo nextest run --locked --no-fail-fast
 
   # A hub on a temp home and the GPUI client connected to it, on the runner's desktop (WARP, no GPU): test/windows/smoke.sh.
   windows-smoke:
@@ -204,6 +179,23 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
-      - name: debug build
+      - name: unit tests and debug build
         working-directory: mobile/android
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+
+  # The phone app: Xcode builds it for the simulator (no signing), then the Swift unit tests (swiftc, no app) run.
+  ios:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: simulator build
+        working-directory: mobile/ios
+        run: |
+          xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG GPUI_NATIVE DATA_APP" build
+      - name: unit tests
+        run: scripts/mobile/ios-unit-tests.sh
