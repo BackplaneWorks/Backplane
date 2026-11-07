@@ -1,11 +1,13 @@
 #!/bin/bash
 # First run from a blank home, in a private window: Xvfb + i3, a temp HOME, stand-in agents, real clicks and keys. Nothing here touches the person's screen, home or sign-ins.
 #   test/onboarding/run.sh BIN_DIR ASSETS_DIR OUT_DIR [XVFB]      BIN_DIR holds backplane-hub and backplane-gpui side by side
-# DISP (:243) and PORT (3861) pick the display and the hub's port. Screenshots land in OUT_DIR, one per step. Prints PASS/FAIL lines; exit 1 on any FAIL.
+# DISP (:243) and PORT (a free one) pick the display and the hub's port. Screenshots land in OUT_DIR, one per step. Prints PASS/FAIL lines; exit 1 on any FAIL.
 # Temp files stay under OUT_DIR/rig, on the same disk as OUT_DIR: /tmp is a shared tmpfs with a quota.
 set -u
 BIN=$1; ASSETS=$2; OUT=$3; XVFB=${4:-/tmp/xvfb-root/usr/bin/Xvfb}; D=$(cd "$(dirname "$0")" && pwd)
-export DISPLAY=${DISP:-:243}; PORT=${PORT:-3861}
+export DISPLAY=${DISP:-:243}
+# a port nobody holds (other lanes run hubs and servers on this machine); PORT overrides
+PORT=${PORT:-$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')}
 R=$OUT/rig; rm -rf "$R"; mkdir -p "$R/home" "$R/run" "$R/agents" "$R/noagents" "$OUT/shots"; chmod 700 "$R/run"
 fails=0; pids=(); client=
 cleanup() { [ -n "$client" ] && kill "$client" 2>/dev/null; [ -f "$R/hub.pid" ] && kill "$(cat "$R/hub.pid")" 2>/dev/null; kill "${pids[@]}" 2>/dev/null; }
