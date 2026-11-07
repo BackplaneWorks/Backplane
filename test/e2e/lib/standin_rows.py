@@ -63,11 +63,14 @@ for line in sys.stdin:
             t = d.get("result", {}).get("content", [{}])[0].get("text", "")
             L("TOOL order_quote -> %s" % t[:400].replace("\n", " "))
             say = "quote: " + t[:200]
+        elif "zqwrite" in text:
+            name = text.split("zqwrite", 1)[1].split()[0]
+            open(os.path.join(os.getcwd(), name), "w").write("written by turn %d\n" % n); L("WROTE %s in %s" % (name, os.getcwd())); say = "wrote " + name
         elif "zqecho" in text:
             say = "echo: " + text
     except Exception as e:
         L("ERR %r" % (e,)); say = "error %r" % (e,)
-    if "zqshort" not in text and not any(k in text for k in ["zqask", "zqapprove", "zqplan", "zqtool", "zqquote", "zqecho"]):
+    if "zqshort" not in text and not any(k in text for k in ["zqask", "zqapprove", "zqplan", "zqtool", "zqquote", "zqecho", "zqwrite"]):
         for i in range(int(float(os.environ.get("FAKE_SECS", "600")) * 10)):
             if i % 10 == 0: out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "working "}}, "session_id": sid})
             time.sleep(0.1)

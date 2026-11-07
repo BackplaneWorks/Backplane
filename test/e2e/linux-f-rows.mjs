@@ -135,5 +135,51 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const quoted=await until(()=>!!settingOf(`order.quote.${T}`),30000);
  log('F22',op&&noUpload&&an.ok&&quoted&&orderSeen.some(s=>s.m==='POST'&&s.manifest)&&!orderSeen.some(s=>/pay|buy|checkout/.test(s.u)),`approval card for the files opened (${ask?.detail?.split('\n')[0]?.slice(0,50)}), nothing uploaded before the answer=${noUpload}, after it POST /v1/quotes carried the manifest, quote card set=${quoted} (${(settingOf('order.quote.'+T)||'').slice(0,60)}); requests seen ${orderSeen.map(s=>s.m+' '+s.u).join(', ')}; no pay or buy request`)}
 
+
+// F09 the context meter: a finished turn leaves its token and context readings in the hub's settings (the meter itself is drawn by the client)
+{const T=await mk('meter');await c.rpc('turn.start',{thread:T,text:'zqshort meter'});await finished(T);await sleep(800);
+ const keys=[...new Set(events().filter(e=>e.$==='SettingSet'&&e.key.includes(T)&&/tok|ctx|context|usage|turn\./.test(e.key)).map(e=>e.key.replace(T,'<t>')))];
+ const ev=events().filter(e=>e.thread===T&&/Usage|Context|Tokens/.test(e.$||'')).map(e=>e.$);
+ log('F09-meter',keys.length>0||ev.length>0,`readings after a turn: settings ${JSON.stringify(keys)} events ${JSON.stringify([...new Set(ev)])}`)}
+
+// F12 checkpoints, revert, push to a remote (a local bare one), PR without gh
+{const G=OUT+'/gitproj2',R=OUT+'/remote.git';mkdirSync(G,{recursive:true});const {execFileSync}=await import('node:child_process');
+ const git=(cwd,...a)=>execFileSync('git',['-c','user.name=e2e','-c','user.email=e2e@example.invalid',...a],{cwd}).toString();
+ git(OUT,'init','-q','--bare',R);git(G,'init','-q','-b','main');writeFileSync(G+'/a.txt','one\n');git(G,'add','.');git(G,'commit','-qm','init');git(G,'remote','add','origin',R);git(G,'push','-q','origin','main');
+ await c.rpc('project.add',{path:G});await until(()=>events().filter(e=>e.$==='ProjectCreated').some(e=>e.root===G),5000);const GP=events().filter(e=>e.$==='ProjectCreated').find(e=>e.root===G).id;
+ const t=(await c.rpc('thread.create',{project:GP,title:'wt2',env:'worktree'})).thread;await sleep(2500);const wt=events().find(e=>e.$==='WorktreeSet'&&e.id===t)?.worktree;
+ await c.rpc('turn.start',{thread:t,text:'zqwrite first.txt'});await finished(t);await sleep(3000);await c.rpc('turn.start',{thread:t,text:'zqwrite second.txt'});await finished(t,2);
+ const both=existsSync(wt+'/first.txt')&&existsSync(wt+'/second.txt');
+ const rv=await c.rpc('git.revert',{thread:t,turn:1});await sleep(1500);
+ const after={first:existsSync(wt+'/first.txt'),second:existsSync(wt+'/second.txt')};
+ const cm=await c.rpc('git.act',{thread:t,action:'commit',message:'e2e work'});
+ const ps=await c.rpc('git.act',{thread:t,action:'push'});
+ let remote='';try{remote=git(R,'branch','--list')}catch{}
+ const pr=await c.rpc('git.act',{thread:t,action:'create_pr'});
+ log('F12-checkpoint',both&&rv.ok&&after.first&&!after.second,`two turns wrote first.txt and second.txt (both present=${both}); git.revert to checkpoint 1 (after the first turn) ok=${rv.ok} (${(rv.result?.text||rv.error||'').slice(0,60)}); then first.txt=${after.first}, second.txt=${after.second}`);
+ log('F12-push',cm.ok&&ps.ok&&/backplane\//.test(remote),`commit ok=${cm.ok}; push ok=${ps.ok} (${(ps.result?.text||'').slice(0,60)}); the bare remote lists ${JSON.stringify(remote.trim()).slice(0,80)}`);
+ log('F12-pr',!pr.ok,`create_pr with no gh or forge remote is refused, not faked: ok=${pr.ok} ${(pr.result?.text||pr.error||'').slice(0,100)}`)}
+
+// F19 a bot answers a message in its chat
+{const b=await c.rpc('bots.create',{name:'Echo',persona:'zqecho persona',provider:'claude',model:''});await sleep(1000);
+ const bid=[...new Set(events().filter(e=>/Bot/.test(e.$||'')&&e.name==='Echo').map(e=>e.id))][0];
+ const n0=events().filter(e=>e.$==='MessagePosted').length;const sy=await c.rpc('bots.say',{bot:bid,text:'zqecho hello bot'});
+ const got=await until(()=>events().slice(n0).some(e=>e.$==='MessagePosted'&&e.role==='assistant'&&/echo: .*hello bot/.test(e.text||'')),30000);
+ log('F19-bot',b.ok&&sy.ok&&got,`bots.create ok=${b.ok}; bots.say ok=${sy.ok}; the bot's turn ran on the stand-in and its answer was posted=${got}`)}
+
+// F20 downloads: a file and a folder as a zip, through the HTTP routes the client's browser uses
+{const T=await mk('dl');mkdirSync(OUT+'/proj/dl',{recursive:true});writeFileSync(OUT+'/proj/dl/x.txt','download me\n');
+ const g=await fetch(`http://127.0.0.1:${PORT}/files/get?thread=${T}&path=dl/x.txt&token=${token()}`);const gt=await g.text();
+ const z=await fetch(`http://127.0.0.1:${PORT}/files/zip?thread=${T}&path=dl&token=${token()}`);const zb=Buffer.from(await z.arrayBuffer());
+ const bad=await fetch(`http://127.0.0.1:${PORT}/files/get?thread=${T}&path=../../etc/passwd&token=${token()}`);
+ const noauth=await fetch(`http://127.0.0.1:${PORT}/files/get?thread=${T}&path=dl/x.txt`);
+ log('F20-download',g.status===200&&gt==='download me\n'&&/attachment/.test(g.headers.get('content-disposition')||'')&&z.status===200&&zb.slice(0,2).toString()==='PK'&&bad.status===400&&noauth.status===401,`GET /files/get ${g.status} body ok, Content-Disposition ${g.headers.get('content-disposition')}; /files/zip ${z.status} ${zb.length} bytes PK; a path outside the project ${bad.status}; no token ${noauth.status}`)}
+
+// F17 the viewers' hub side: a STEP rendered to PNG views by the hub
+{const T=await mk('mech');mkdirSync(OUT+'/proj/mech',{recursive:true});copyFileSync(HERE+'../files/fixtures/mesh/bracket.step',OUT+'/proj/mech/bracket.step');
+ const ls=await c.rpc('mech.list',{thread:T});const r=await c.rpc('mech.render',{thread:T,path:'mech/bracket.step'});await sleep(500);
+ const pngs=existsSync(OUT+'/proj/mech/renders')?readdirSync(OUT+'/proj/mech/renders').filter(f=>f.endsWith('.png')):[];
+ log('F17-mech',ls.ok&&r.ok&&pngs.length>0,`mech.list ok=${ls.ok} (${JSON.stringify(ls.result||ls.error).slice(0,70)}); mech.render ok=${r.ok} ${(r.result?.text||r.error||'').slice(0,80)}; renders written ${pngs.join(',')}`)}
+
 writeFileSync(OUT+'/rows.json',JSON.stringify({rows,notDriven:['F09 context meter and crash drafts (client)','F16 keybindings (client key events)','F17 viewer frames (client)','F18 CEF browser (build not made here)']},null,1));
 try{process.kill(Number(/^(\d+)/.exec(readFileSync(HOME+'/hub.lock','utf8'))[1]),'SIGTERM')}catch{} srv.close(); await sleep(500); process.exit(0);
