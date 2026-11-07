@@ -53,6 +53,8 @@ const up=(mb,name)=>new Promise(res=>{ // like the client: Expect: 100-continue,
   sock.on('error',()=>res({status:0,body:'socket error '+buf.slice(0,80)})); setTimeout(done,20000);
   sock.write(`POST /attach?thread=${T}&key=k${name}&name=${name}.bin HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${token}\r\nContent-Type: application/octet-stream\r\nContent-Length: ${body.length}\r\nExpect: 100-continue\r\n\r\n`)});
 const onDisk=n=>{try{return execFileSync('find',[HOME+'/attachments','-name',`*${n}.bin*`]).toString().trim().length>0}catch{return false}};
+await set('files.max.mb','1');
+const over=await up(2,'over'), under=await up(0.5,'under');
 row('S02 files.max.mb=1',over.status===413&&under.status===200&&onDisk('under')&&!onDisk('over'),`2 MB upload -> ${over.status} ${over.body}; 0.5 MB -> ${under.status}, stored ${onDisk('under')}, over-limit stored ${onDisk('over')}`);
 await set('files.max.mb','3');
 const again=await up(2,'again');
