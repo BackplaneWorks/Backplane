@@ -1,0 +1,293 @@
+//! Install KiCad (0.14's `kicad-install` on Settings > CAD: core/kicad_install and server/kicad's `KiCad.install`). The published Backplane
+//! KiCad for this hub's OS and architecture, downloaded from its GitHub release, checked against the digest pinned here and the release's
+//! SHA256SUMS, unpacked beside the hub's data (`<home>/kicad/<version>`, where `ipc::runtime` looks) and only then moved into place.
+//! Nothing privileged ever runs: no sudo, no package manager, nothing outside that folder, so there is no password to ask for.
+//! `kicad.install {consent:true}` runs it detached (its own process group, its output into `<home>/kicad/.install.log`, so a hub
+//! restart neither kills it nor leaves it half-placed) and says how it goes in the info key `kicad.install` (Settings > CAD's row).
+//! It refuses without the person's consent, while one runs, on a hub with no published package, and when KiCad is already found.
+use crate::hub::Hub;
+use serde_json::json;
+use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ordering}, Arc}};
+
+#[derive(Debug, PartialEq)]
+pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str }
+/// 0.14's catalog: Linux keeps its accepted bp.4 pin; Windows and Apple Silicon have bp.6.
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.4", release: "backplane-kicad-v10.99.0-bp.4", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.4.tar.gz", sha256: "f60a71817d057f9dcf3faef632b2f85d06a613108dee23807c9de81aae97e0b4", format: "tar.gz", cli: "bin/kicad-cli" };
+pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.6", release: "backplane-kicad-v10.99.0-bp.6", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.6.tar.gz", sha256: "99584fb0ee490354098778d39e3aaed9e0f274ee39972851a9cbeabfb271462d", format: "tar.gz", cli: "bin/kicad-cli" };
+pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.6", release: "backplane-kicad-v10.99.0-bp.6", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.6.zip", sha256: "55f84153c3ba6f9a8e7e005558a02b9c2fa72dd5deeed0211f908336c830870c", format: "zip", cli: "bin/kicad-cli.exe" };
+/// Where the releases are (said in the consent note, and the script's download base).
+pub const FROM: &str = "github.com/i2cjak/Backplane_KiCad";
+
+/// Install.pick: the package for an OS and architecture (Rust's names or uname's), None where none is published.
+pub fn pick(os: &str, arch: &str) -> Option<&'static Package> {
+    let os = os.to_lowercase(); let arch = arch.to_lowercase();
+    let os = if ["cygwin_nt-", "mingw64_nt-", "msys_nt-"].iter().any(|p| os.starts_with(p)) || os == "windows_nt" || os == "win32" { "windows".to_string() } else if os == "macos" { "darwin".into() } else { os };
+    let arch = match arch.as_str() { "amd64" | "x64" => "x86_64", "aarch64" => "arm64", a => a };
+    match (os.as_str(), arch) { ("linux", "x86_64") => Some(&LINUX), ("darwin", "arm64") => Some(&MAC), ("windows", "x86_64") => Some(&WINDOWS), _ => None }
+}
+/// This hub's package (the hub's own OS, never a connecting client's).
+pub fn package() -> Option<&'static Package> { pick(std::env::consts::OS, std::env::consts::ARCH) }
+/// Where installs go: the folder `ipc::runtime` searches newest first.
+pub fn parent(home: &Path) -> PathBuf { home.join("kicad") }
+/// This computer in words, for "none is published for …".
+pub fn this_computer() -> String { format!("{} {}", std::env::consts::OS, std::env::consts::ARCH) }
+
+/// 0.14's install script (Install.script), with a line on stdout per step. Arguments come only from the catalog above, never a client.
+/// It never unpacks over an existing runtime, holds a lock folder, stages beside the destination and removes the stage however it ends.
+pub const SCRIPT: &str = r#"set -eu
+parent=$1; platform=$2; version=$3; release=$4; asset=$5; pinned=$6; format=$7; cli=$8
+fail() { echo "$*" >&2; exit 1; }
+case "$platform:$format:$cli" in
+  linux-x86_64:tar.gz:bin/kicad-cli|darwin-arm64:tar.gz:bin/kicad-cli|windows-x86_64:zip:bin/kicad-cli.exe) ;;
+  *) fail 'No published Backplane KiCad package for this hub platform' ;;
+esac
+case "$version" in ''|*[!0-9A-Za-z.-]*) fail 'Invalid runtime version' ;; esac
+[ "$release" = "backplane-kicad-v$version" ] || fail 'Invalid runtime release'
+root=backplane-kicad-$platform-$version
+[ "$asset" = "$root.$format" ] || fail 'Invalid runtime archive'
+case "$pinned" in ''|*[!0-9a-f]*) fail 'Invalid pinned digest' ;; esac
+[ "${#pinned}" -eq 64 ] || fail 'Invalid pinned digest'
+command -v curl >/dev/null 2>&1 || fail 'curl is needed to download KiCad and was not found'
+dir=$parent/$version
+# Never unpack over an existing runtime (including an incomplete old install).
+[ ! -e "$dir" ] && [ ! -L "$dir" ] || fail "$dir already exists; the installation there is kept. Set its path in Settings, CAD, or remove it and try again"
+umask 077
+mkdir -p "$parent" || fail "Could not make $parent"
+lock=$parent/.install-$version.lock
+mkdir "$lock" 2>/dev/null || fail 'Another KiCad installation is active; retry when it finishes'
+stage=
+cleanup() { if [ -n "$stage" ]; then rm -rf "$stage"; fi; rmdir "$lock"; }
+trap cleanup 0
+trap 'exit 1' 1 2 15
+stage=$(mktemp -d "$parent/.install-XXXXXX")
+pkg=$stage/$asset
+base=https://github.com/i2cjak/Backplane_KiCad/releases/download/$release/
+echo "Downloading $asset"
+curl --proto '=https' --tlsv1.2 -fsSL -o "$pkg" "$base$asset" || fail "Could not download $base$asset"
+curl --proto '=https' --tlsv1.2 -fsSL -o "$stage/SUMS" "${base}SHA256SUMS" || fail "Could not download ${base}SHA256SUMS"
+echo 'Checking the checksum'
+want=$(awk -v n="$asset" '{ f=$2; sub(/^\*/, "", f); sub(/^\.\//, "", f); if (f==n) print $1 }' "$stage/SUMS")
+if command -v sha256sum >/dev/null 2>&1; then
+  got=$(sha256sum "$pkg" | cut -d' ' -f1)
+else
+  got=$(shasum -a 256 "$pkg" | cut -d' ' -f1)
+fi
+[ "$want" = "$got" ] && [ "$got" = "$pinned" ] || fail 'KiCad archive checksum mismatch'
+magic=$(od -An -N4 -tx1 "$pkg" | tr -d ' \n')
+mkdir "$stage/unpack"
+echo 'Unpacking'
+case "$format:$magic" in
+  tar.gz:1f8b08*)
+    tar -tzf "$pkg" > "$stage/members"
+    while IFS= read -r member; do
+      case "$member" in ./*) member=${member#./} ;; esac
+      case "/$member/" in *'/../'*|*'/./'*) fail 'Unsafe runtime archive path' ;; esac
+      case "$member" in "$root"|"$root/"*) ;; *) fail 'Unexpected runtime archive root' ;; esac
+    done < "$stage/members"
+    tar -xzf "$pkg" -C "$stage/unpack"
+    ;;
+  zip:504b0304*)
+    # Windows ships PowerShell outside the packaged runtime PATH.
+    powershell=$(cygpath -S)/WindowsPowerShell/v1.0/powershell.exe
+    [ -x "$powershell" ] || fail 'Windows PowerShell is missing from the system directory'
+    # Pass native paths as environment values, never interpolate shell text.
+    BP_KICAD_ZIP=$(cygpath -w "$pkg") \
+    BP_KICAD_OUT=$(cygpath -w "$stage/unpack") \
+    BP_KICAD_ROOT=$root "$powershell" -NoProfile -NonInteractive -Command '
+      $ErrorActionPreference="Stop"
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      $zip=[IO.Compression.ZipFile]::OpenRead($env:BP_KICAD_ZIP)
+      try {
+        foreach($entry in $zip.Entries) {
+          $n=$entry.FullName.Replace("\", "/")
+          if (!$n.StartsWith($env:BP_KICAD_ROOT+"/", [StringComparison]::Ordinal) -or
+              @($n.Split("/") | Where-Object {$_ -eq ".." -or $_ -eq "."}).Count -gt 0 -or
+              $n.Contains(":")) { throw "Unsafe runtime archive path" }
+        }
+      } finally { $zip.Dispose() }
+      Expand-Archive -LiteralPath $env:BP_KICAD_ZIP -DestinationPath $env:BP_KICAD_OUT -ErrorAction Stop
+    '
+    ;;
+  *) fail 'KiCad archive header does not match its platform format' ;;
+esac
+runtime=$stage/unpack/$root
+[ -f "$runtime/$cli" ] && [ -s "$runtime/manifest.json" ] && [ -s "$runtime/share/backplane/api.desc" ] || fail 'KiCad archive runtime layout is incomplete'
+if [ "$platform" = windows-x86_64 ]; then
+  [ "$(od -An -N2 -tx1 "$runtime/$cli" | tr -d ' \n')" = 4d5a ] || fail 'Windows KiCad CLI is not a PE executable'
+else
+  [ -x "$runtime/$cli" ] || fail 'KiCad launcher is not executable'
+fi
+tr -d '[:space:]' < "$runtime/manifest.json" > "$stage/manifest"
+grep -Fq "\"version\":\"$version\"" "$stage/manifest" || fail 'KiCad manifest version mismatch'
+grep -Fq "\"platform\":\"$platform\"" "$stage/manifest" || fail 'KiCad manifest platform mismatch'
+[ ! -e "$dir" ] && [ ! -L "$dir" ] || fail 'Runtime destination appeared; existing installation preserved'
+mv "$runtime" "$dir"
+echo "Installed in $dir"
+"#;
+
+/// The installer's arguments (the script's $1..$8).
+pub fn args(parent: &Path, p: &Package) -> Vec<String> {
+    [parent.to_string_lossy().as_ref(), p.platform, p.version, p.release, p.asset, p.sha256, p.format, p.cli].iter().map(|s| s.to_string()).collect()
+}
+/// Why a request is refused, None when it may run. `found`: the KiCad `ipc::runtime` found ("" for none).
+pub fn refusal(found: &str, consent: bool, running: bool, p: Option<&Package>) -> Option<String> {
+    if running { return Some("KiCad is being installed already".into()) }
+    if !found.is_empty() { return Some(format!("KiCad is already installed: {found}")) }
+    let Some(p) = p else { return Some(format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path in Settings, CAD", this_computer())) };
+    if !consent { return Some(format!("Installing needs your consent: it downloads Backplane KiCad {} from {FROM}. Press Install in Settings, CAD", p.version)) }
+    None
+}
+/// The last line the installer wrote ("" for none).
+pub fn last_line(text: &str) -> String { text.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().take(300).collect() }
+
+/// Run the installer to its end: `standin` (a program given the same arguments) or the script under `sh`, detached, its output into `log`.
+/// `step` hears each new last line while it runs. Ok(the installed folder) or Err(why, the installer's own last words).
+pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path, mut step: impl FnMut(String)) -> Result<String, String> {
+    std::fs::create_dir_all(parent).map_err(|e| format!("could not make {}: {e}", parent.display()))?;
+    let out = std::fs::File::create(log).map_err(|e| format!("could not write {}: {e}", log.display()))?;
+    let err = out.try_clone().map_err(|e| e.to_string())?;
+    // Net: it downloads (a copy of the log runs none)
+    let mut c = match standin { Some(s) => crate::proc::tokio_cmd(crate::proc::Kind::Net, s), None => { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, "sh"); c.arg("-c").arg(SCRIPT).arg("sh"); c } };
+    c.args(args(parent, p)).current_dir(parent).stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err));
+    crate::plat::proc::own_group_tokio(&mut c);
+    let mut child = c.spawn().map_err(|e| format!("could not start the installer: {e}"))?;
+    if let Some(id) = child.id() { crate::plat::proc::adopt(id, false) }
+    let mut said = String::new();
+    let status = loop {
+        let done = tokio::time::timeout(std::time::Duration::from_millis(300), child.wait()).await;
+        let now = last_line(&std::fs::read_to_string(log).unwrap_or_default());
+        if !now.is_empty() && now != said { said = now.clone(); step(now) }
+        if let Ok(r) = done { break r.map_err(|e| e.to_string())? }
+    };
+    let dir = parent.join(p.version);
+    if status.success() && dir.join(p.cli).is_file() { Ok(dir.to_string_lossy().into()) }
+    else if status.success() { Err(format!("the installer ended without {}", dir.join(p.cli).display())) }
+    else { Err(if said.is_empty() { format!("the installer stopped ({status})") } else { said }) }
+}
+
+static RUNNING: AtomicBool = AtomicBool::new(false);
+/// What Settings > CAD's row says: `{"state":"running"|"failed"|"done","version","note"}` in info `kicad.install`.
+/// An info key is not in the log, so open views are told to ask again (`bump_views`): the row moves with each step.
+async fn say(hub: &Arc<Hub>, state: &str, version: &str, note: &str) { hub.set_info("kicad.install", &json!({"state": state, "version": version, "note": note}).to_string()).await; hub.bump_views(); }
+
+/// `kicad.install {consent}`: refused, or started (the reply says so; the info key says the rest).
+pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
+    if crate::copy::on() { return Err("a copy of the log installs nothing".into()) }
+    let found = super::ipc::runtime(hub).await.cli;
+    if let Some(why) = refusal(&found, consent, RUNNING.load(Ordering::SeqCst), package()) { return Err(why) }
+    let p = package().expect("refusal checks the package");
+    if RUNNING.swap(true, Ordering::SeqCst) { return Err("KiCad is being installed already".into()) }
+    let parent = parent(&hub.cfg.home);
+    // a stand-in installer (tests and rigs): the same arguments, so no real KiCad is downloaded or touched
+    let standin = std::env::var_os("BACKPLANE_KICAD_INSTALLER").filter(|s| !s.is_empty()).map(PathBuf::from);
+    eprintln!("kicad: installing Backplane KiCad {} into {}{}", p.version, parent.display(), standin.as_ref().map_or(String::new(), |s| format!(" (stand-in {})", s.display())));
+    say(hub, "running", p.version, &format!("Starting the download from {FROM}")).await;
+    let started = format!("installing Backplane KiCad {} into {}", p.version, parent.display());
+    let h = hub.clone();
+    tokio::spawn(async move {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let h2 = h.clone();
+        let relay = tokio::spawn(async move { while let Some(l) = rx.recv().await { say(&h2, "running", p.version, &l).await } });
+        let r = run(standin.as_deref(), &parent, p, &parent.join(".install.log"), |l| { let _ = tx.send(l); }).await;
+        drop(tx); let _ = relay.await;
+        match &r {
+            Ok(dir) => { eprintln!("kicad: installed Backplane KiCad {} in {dir}", p.version); say(&h, "done", p.version, &format!("Installed Backplane KiCad {} in {dir}", p.version)).await }
+            Err(why) => { eprintln!("kicad: install failed: {why}"); say(&h, "failed", p.version, &format!("KiCad install failed: {why}")).await }
+        }
+        RUNNING.store(false, Ordering::SeqCst);
+        super::ipc::publish_cad(&h).await; h.bump_views(); // Settings > CAD now names the new KiCad (and its Install row goes)
+    });
+    Ok(started)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)] use std::os::unix::fs::PermissionsExt;
+    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-kinst-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    #[cfg(unix)] fn exe(p: &Path, body: &str) { std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap() }
+    fn rt() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap() }
+
+    #[test] fn the_catalog_is_0_14s_by_the_hubs_own_os_and_arch() {
+        assert_eq!(pick("linux", "x86_64"), Some(&LINUX)); assert_eq!(pick("Linux", "amd64"), Some(&LINUX));
+        assert_eq!(pick("macos", "aarch64"), Some(&MAC)); assert_eq!(pick("Darwin", "arm64"), Some(&MAC));
+        assert_eq!(pick("windows", "x86_64"), Some(&WINDOWS)); assert_eq!(pick("MINGW64_NT-10.0", "x86_64"), Some(&WINDOWS));
+        assert_eq!(pick("linux", "aarch64"), None); assert_eq!(pick("macos", "x86_64"), None);
+        for p in [&LINUX, &MAC, &WINDOWS] { assert_eq!(p.release, format!("backplane-kicad-v{}", p.version)); assert_eq!(p.asset, format!("backplane-kicad-{}-{}.{}", p.platform, p.version, p.format)); assert_eq!(p.sha256.len(), 64) }
+    }
+    #[test] fn nothing_privileged_ever_runs() {
+        for w in ["sudo", "pkexec", "doas", "apt", "dnf", "yum", "pacman", "zypper", "brew", "flatpak", "snap", "winget", "choco", "/usr", "/opt", "/Applications"] {
+            assert!(!SCRIPT.split(|c: char| !(c.is_alphanumeric() || c == '/')).any(|t| t == w), "{w} in the script");
+        }
+    }
+    #[test] fn refused_when_found_running_unpublished_or_without_consent() {
+        assert_eq!(refusal("/usr/bin/kicad-cli", true, false, Some(&LINUX)), Some("KiCad is already installed: /usr/bin/kicad-cli".into()));
+        assert_eq!(refusal("", true, true, Some(&LINUX)), Some("KiCad is being installed already".into()));
+        assert!(refusal("", true, false, None).unwrap().starts_with("No Backplane KiCad is published for this computer"));
+        let no = refusal("", false, false, Some(&LINUX)).unwrap();
+        assert!(no.starts_with("Installing needs your consent") && no.contains("10.99.0-bp.4") && no.contains(FROM), "{no}");
+        assert_eq!(refusal("", true, false, Some(&LINUX)), None);
+    }
+
+    /// A disposable package for the real script: its archive and SHA256SUMS, served by a stand-in `curl` on PATH.
+    #[cfg(unix)] fn fixture(r: &Path, bad_manifest: bool) -> (Package, PathBuf) {
+        let (v, plat) = ("0.0.1-bp.1", "linux-x86_64"); let root = format!("backplane-kicad-{plat}-{v}");
+        let src = r.join("src").join(&root); std::fs::create_dir_all(src.join("bin")).unwrap(); std::fs::create_dir_all(src.join("share/backplane")).unwrap();
+        exe(&src.join("bin/kicad-cli"), "#!/bin/sh\necho 0.0.1-bp.1\n");
+        std::fs::write(src.join("manifest.json"), format!(r#"{{"version": "{}", "platform": "{plat}"}}"#, if bad_manifest { "9.9" } else { v })).unwrap();
+        std::fs::write(src.join("share/backplane/api.desc"), "x").unwrap();
+        let serve = r.join("serve"); std::fs::create_dir_all(&serve).unwrap(); let asset = format!("{root}.tar.gz");
+        assert!(std::process::Command::new("tar").arg("-czf").arg(serve.join(&asset)).arg("-C").arg(r.join("src")).arg(&root).status().unwrap().success());
+        let sum = String::from_utf8(std::process::Command::new("sha256sum").arg(serve.join(&asset)).output().unwrap().stdout).unwrap().split(' ').next().unwrap().to_string();
+        std::fs::write(serve.join("SHA256SUMS"), format!("{sum}  {asset}\n")).unwrap();
+        let bin = r.join("bin"); std::fs::create_dir_all(&bin).unwrap();
+        // curl -fsSL -o OUT URL: the file of that name from serve/ (fails like curl -f for anything else)
+        exe(&bin.join("curl"), &format!("#!/bin/sh\nwhile [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\nf={}/$(basename \"$1\")\n[ -f \"$f\" ] || exit 22\ncp \"$f\" \"$out\"\n", serve.display()));
+        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        (Package { platform: plat, version: v, release: leak(format!("backplane-kicad-v{v}")), asset: leak(asset), sha256: leak(sum), format: "tar.gz", cli: "bin/kicad-cli" }, bin)
+    }
+    #[cfg(unix)] fn script(bin: &Path, parent: &Path, p: &Package) -> (bool, String) {
+        let o = std::process::Command::new("sh").arg("-c").arg(SCRIPT).arg("sh").args(args(parent, p)).env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
+        (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+    }
+    #[cfg(unix)] #[test] fn the_real_script_installs_a_checked_package_and_says_each_step() {
+        let r = tmp("ok"); let (p, bin) = fixture(&r, false); let parent = r.join("home/kicad");
+        let (ok, out) = script(&bin, &parent, &p);
+        assert!(ok, "{out}");
+        assert_eq!(out.lines().collect::<Vec<_>>(), [format!("Downloading {}", p.asset).as_str(), "Checking the checksum", "Unpacking", &format!("Installed in {}/0.0.1-bp.1", parent.display())]);
+        assert!(parent.join("0.0.1-bp.1/bin/kicad-cli").is_file());
+        let left: Vec<_> = std::fs::read_dir(&parent).unwrap().flatten().map(|e| e.file_name()).collect(); assert_eq!(left.len(), 1, "no stage or lock is left: {left:?}");
+        // ipc::runtime finds it there (newest_in the hub's kicad folder reads its manifest)
+        let env = crate::files::kicad::ipc::read_runtime(&parent.join("0.0.1-bp.1/bin/kicad-cli")); assert_eq!(env.version, "0.0.1-bp.1");
+        // a second run keeps what is there
+        let (ok, out) = script(&bin, &parent, &p); assert!(!ok && out.contains("already exists; the installation there is kept"), "{out}");
+    }
+    #[cfg(unix)] #[test] fn the_real_script_refuses_a_digest_that_is_not_pinned_or_a_wrong_manifest_and_leaves_nothing() {
+        let r = tmp("bad"); let (mut p, bin) = fixture(&r, false); let parent = r.join("home/kicad");
+        p.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+        let (ok, out) = script(&bin, &parent, &p); assert!(!ok && out.trim_end().ends_with("KiCad archive checksum mismatch"), "{out}");
+        assert_eq!(std::fs::read_dir(&parent).unwrap().count(), 0, "the stage and the lock are gone");
+        let r = tmp("man"); let (p, bin) = fixture(&r, true); let parent = r.join("home/kicad");
+        let (ok, out) = script(&bin, &parent, &p); assert!(!ok && out.contains("KiCad manifest version mismatch"), "{out}");
+        assert!(!parent.join("0.0.1-bp.1").exists());
+    }
+
+    #[cfg(unix)] #[test] fn a_standin_installer_that_succeeds_is_reported_with_its_steps() {
+        let r = tmp("sok"); let s = r.join("standin");
+        exe(&s, "#!/bin/sh\necho \"Downloading $5\"\nsleep 0.4\necho Unpacking\nmkdir -p \"$1/$3/bin\" && touch \"$1/$3/$8\"\necho \"Installed in $1/$3\"\n");
+        let parent = r.join("kicad"); let mut steps = vec![];
+        let got = rt().block_on(run(Some(&s), &parent, &LINUX, &r.join("log"), |l| steps.push(l)));
+        assert_eq!(got, Ok(parent.join("10.99.0-bp.4").to_string_lossy().to_string()));
+        assert!(steps.first().unwrap().starts_with("Downloading backplane-kicad-linux") && steps.last().unwrap().starts_with("Installed in"), "{steps:?}");
+    }
+    #[cfg(unix)] #[test] fn a_standin_installer_that_fails_is_reported_in_its_own_words() {
+        let r = tmp("sfail"); let s = r.join("standin");
+        exe(&s, "#!/bin/sh\necho Downloading\necho 'Could not download https://x/y' >&2\nexit 1\n");
+        let got = rt().block_on(run(Some(&s), &r.join("kicad"), &LINUX, &r.join("log"), |_| {}));
+        assert_eq!(got, Err("Could not download https://x/y".into()));
+        // ending well without placing KiCad is a failure too
+        exe(&s, "#!/bin/sh\necho done\n");
+        let got = rt().block_on(run(Some(&s), &r.join("kicad"), &LINUX, &r.join("log"), |_| {}));
+        assert!(got.unwrap_err().starts_with("the installer ended without"));
+    }
+}

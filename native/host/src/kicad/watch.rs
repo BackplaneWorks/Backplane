@@ -444,7 +444,7 @@ pub fn viewer_state(thread: &str) -> (u64, Value) { vs().lock().unwrap().get(thr
 
 pub struct KicadRpc(pub Arc<Plots>);
 impl RpcHandler for KicadRpc {
-    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "viewer.state", "history.steps"] }
+    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "kicad.install", "viewer.state", "history.steps"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -471,6 +471,11 @@ impl RpcHandler for KicadRpc {
                 // Open in KiCad: the thread's design in the desktop KiCad (kicad/open.rs); the reply and a line in the thread say how it went
                 "kicad.open" => match super::open::open(hub, &s("thread")).await {
                     Ok(what) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"opened":what}})],
+                    Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
+                },
+                // Install KiCad (Settings > CAD): refused, or started; how it goes is the info key `kicad.install` (kicad/install.rs)
+                "kicad.install" => match super::install::install(hub, p.get("consent").and_then(Value::as_bool).unwrap_or(false)).await {
+                    Ok(what) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"started":what}})],
                     Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
                 },
                 "history.steps" => vec![json!({"t":"reply","id":id,"ok":true,"result": super::histsteps::steps(hub, &s("thread")).await})],

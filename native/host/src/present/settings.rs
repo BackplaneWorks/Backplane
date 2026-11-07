@@ -302,23 +302,47 @@ fn writing(st: &State, info: &Value) -> Vec<Value> {
     ]
 }
 
-/// Settings > CAD: the KiCad the hub found (what it told: `kicad.*`), the path field, the IPC switch, and FreeCAD. KiCad's install and update controls belong to the CAD tools lane; this page says what is there.
-fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> {
+/// Settings > CAD's Install KiCad row (0.14's `kicad-install`), only while no KiCad is found: what it would install and from where, the consent
+/// step (Install, Cancel), its progress and its failure, from info `kicad.install` (kicad/install.rs). None while KiCad is found or still looked for.
+fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Option<Value> {
+    use crate::files::kicad::install::FROM;
+    let i = |k: &str| info[k].as_str().unwrap_or("");
+    if !i("kicad.cli").is_empty() || i("kicad.status") == "checking" { return None }
+    let st: Value = serde_json::from_str(i("kicad.install")).unwrap_or_default();
+    let (state, note) = (st["state"].as_str().unwrap_or(""), st["note"].as_str().unwrap_or(""));
+    let Some(p) = pkg else { return Some(row("Install KiCad", &format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path above.", crate::files::kicad::install::this_computer()), vec![])) };
+    let home = i("home"); let into = if home.is_empty() { "Backplane's own folder".to_string() } else { format!("{home}/kicad") };
+    Some(match state {
+        "running" => row(&format!("Installing Backplane KiCad {}", p.version), if note.is_empty() { "Starting." } else { note }, vec![]),
+        _ if draft(session, "@kinstall") == "ask" => row("Install Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM}, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer.", p.version),
+            vec![btn("Install", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
+        "failed" => row("Install KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
+        _ => row("Install KiCad", &format!("Backplane KiCad {} for this computer, from {FROM}. Agents edit boards with it, and it runs the checks and exports.", p.version), vec![btn("Install KiCad", "kicad-install-ask", "", true)]),
+    })
+}
+
+/// Settings > CAD: the KiCad the hub found (what it told: `kicad.*`), Install KiCad while none is, the path field, the IPC switch, and FreeCAD.
+fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> { cad_with(st, session, info, crate::files::kicad::install::package()) }
+fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Vec<Value> {
     let i = |k: &str| info[k].as_str().unwrap_or("");
     let kicad = match (i("kicad.status"), i("kicad.version"), i("kicad.cli")) {
         (_, v, c) if !c.is_empty() => format!("{}{}", if v.is_empty() { "found".to_string() } else { format!("version {v}") }, format!(" · {c}")),
         ("checking", _, _) => "checking".to_string(),
-        _ => "KiCad was not found. Set its folder below, or install it from kicad.org.".to_string(),
+        _ => "KiCad was not found. Install it below, or set the folder of one you have.".to_string(),
     };
+    let done: Value = serde_json::from_str(i("kicad.install")).unwrap_or_default();
+    let kicad = if done["state"] == "done" && !i("kicad.cli").is_empty() { format!("{kicad}. Installed by Backplane just now.") } else { kicad };
     let path = if session["drafts"]["@f.kpath"].is_string() { draft(session, "@f.kpath") } else { set(st, "kicad.path", "") };
     let free = if i("freecad").is_empty() { if set(st, "freecad.path", "").is_empty() { "FreeCAD was not found. Mechanical parts are made with it.".to_string() } else { "FreeCAD was not found at that path.".to_string() } } else { i("freecad").to_string() };
     let fpath = if session["drafts"]["@f.fpath"].is_string() { draft(session, "@f.fpath") } else { set(st, "freecad.path", "") };
-    vec![
-        row_f("KiCad", &kicad, vec![field("kpath", "Path to KiCad's command line, empty for the one on PATH", path)], vec![btn("Set", "kicad-path", "", true)]),
+    let mut v = vec![row_f("KiCad", &kicad, vec![field("kpath", "Path to KiCad's command line, empty for the one on PATH", path)], vec![btn("Set", "kicad-path", "", true)])];
+    v.extend(install_row(session, info, pkg));
+    v.extend([
         row_f("FreeCAD", &free, vec![field("fpath", "Path to FreeCAD's command line (freecadcmd), empty to look for it", fpath)], vec![btn("Set", "freecad-path", "", true)]),
         row("KiCad over its API", "Lets agents edit a board in a running KiCad. Off uses the files only.", chips(&["on", "off"], set(st, "kicad.ipc", "on"), "kicad.ipc")),
         row("Board 3D", "How a board's 3D model is made: natively, the board at once and its parts as they convert, or by kicad-cli, all at the end.", chips(&["native", "kicad-cli"], set(st, "viewer.board3d", "native"), "viewer.board3d")),
-    ]
+    ]);
+    v
 }
 
 /// The API keys the hub keeps by name (never a value): a list with Forget (asks once), and a form: a name and the key, saved straight to the hub (the key is a vault field, never an action).
@@ -439,7 +463,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
             if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
-            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
+            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@kinstall": "", "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
         "dev-star" => { send(session, hub, "star.replay", json!({}), &mut cmds, &mut rid); json!({"open": {"settings": false}}) }
         "update-check" => { send(session, hub, "update.check", json!({}), &mut cmds, &mut rid); json!({}) }
@@ -468,6 +492,13 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             let raw = draft(session, "@f.kpath").trim().to_string();
             send(session, hub, "setting.set", json!({"key": "kicad.path", "value": raw}), &mut cmds, &mut rid);
             json!({"drafts": {"@f.kpath": raw}})
+        }
+        // Install KiCad: the first press asks (what, from where, into where); Install is the consent the hub needs; Cancel sends nothing
+        "kicad-install-ask" => json!({"drafts": {"@kinstall": "ask"}}),
+        "kicad-install-cancel" => json!({"drafts": {"@kinstall": ""}}),
+        "kicad-install" => {
+            if draft(session, "@kinstall") != "ask" { return Some(Out { patch: json!({"drafts": {"@kinstall": "ask"}}), cmds }) }
+            send(session, hub, "kicad.install", json!({"consent": true}), &mut cmds, &mut rid); json!({"drafts": {"@kinstall": ""}})
         }
         "freecad-path" => {
             if !session["drafts"]["@f.fpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
@@ -627,8 +658,46 @@ mod tests {
         let s = json!({"rid": 3, "drafts": {"@f.kpath": " /opt/kicad/bin "}}); let o = act("h", &s, "kicad-path", "").unwrap();
         assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"kicad.path","value":"/opt/kicad/bin""#));
     }
+    fn cad_rows(info: Value, drafts: Value, pkg: Option<&crate::files::kicad::install::Package>) -> Vec<Value> {
+        let r = cad_with(&st(&[]), &json!({"drafts": drafts}), &info, pkg); r
+    }
+    fn btns(r: &Value) -> Vec<(String, String)> { r["buttons"].as_array().unwrap().iter().map(|b| (b["label"].as_str().unwrap().to_string(), b["action"].as_str().unwrap().to_string())).collect() }
+    #[test] fn install_kicad_shows_only_while_kicad_is_not_found() {
+        use crate::files::kicad::install::LINUX;
+        let found = cad_rows(json!({"kicad.cli": "/usr/bin/kicad-cli", "kicad.version": "10.0.7"}), json!({}), Some(&LINUX));
+        assert!(!found.iter().any(|r| r["label"].as_str().unwrap().contains("Install")), "{found:?}");
+        assert!(!cad_rows(json!({"kicad.status": "checking"}), json!({}), Some(&LINUX)).iter().any(|r| r["label"].as_str().unwrap().contains("Install")));
+        let r = cad_rows(json!({"kicad.status": "missing", "home": "/h"}), json!({}), Some(&LINUX));
+        assert_eq!(r[0]["note"], "KiCad was not found. Install it below, or set the folder of one you have.");
+        assert_eq!(r[1]["label"], "Install KiCad"); assert_eq!(btns(&r[1]), [("Install KiCad".to_string(), "kicad-install-ask".to_string())]);
+        assert!(r[1]["note"].as_str().unwrap().contains("10.99.0-bp.4"));
+        // no package for this computer: said, nothing to press
+        let r = cad_rows(json!({"kicad.status": "missing"}), json!({}), None);
+        assert!(r[1]["note"].as_str().unwrap().starts_with("No Backplane KiCad is published for this computer") && btns(&r[1]).is_empty());
+    }
+    #[test] fn install_kicad_asks_first_then_shows_progress_failure_and_the_result() {
+        use crate::files::kicad::install::LINUX;
+        let ask = cad_rows(json!({"kicad.status": "missing", "home": "/h"}), json!({"@kinstall": "ask"}), Some(&LINUX));
+        assert_eq!(ask[1]["label"], "Install Backplane KiCad?");
+        let n = ask[1]["note"].as_str().unwrap(); assert!(n.contains("github.com/i2cjak/Backplane_KiCad") && n.contains("/h/kicad") && n.contains("no administrator password"), "{n}");
+        assert_eq!(btns(&ask[1]), [("Install".to_string(), "kicad-install".to_string()), ("Cancel".to_string(), "kicad-install-cancel".to_string())]);
+        let run = cad_rows(json!({"kicad.status": "missing", "kicad.install": r#"{"state":"running","version":"10.99.0-bp.4","note":"Unpacking"}"#}), json!({}), Some(&LINUX));
+        assert_eq!((run[1]["label"].as_str().unwrap(), run[1]["note"].as_str().unwrap()), ("Installing Backplane KiCad 10.99.0-bp.4", "Unpacking")); assert!(btns(&run[1]).is_empty());
+        let bad = cad_rows(json!({"kicad.status": "missing", "kicad.install": r#"{"state":"failed","note":"KiCad install failed: KiCad archive checksum mismatch"}"#}), json!({}), Some(&LINUX));
+        assert_eq!(bad[1]["note"], "KiCad install failed: KiCad archive checksum mismatch."); assert_eq!(btns(&bad[1])[0].1, "kicad-install-ask");
+        let done = cad_rows(json!({"kicad.cli": "/h/kicad/10.99.0-bp.4/bin/kicad-cli", "kicad.version": "10.99.0-bp.4", "kicad.install": r#"{"state":"done","note":"Installed Backplane KiCad 10.99.0-bp.4 in /h/kicad/10.99.0-bp.4"}"#}), json!({}), Some(&LINUX));
+        assert_eq!(done[0]["note"], "version 10.99.0-bp.4 · /h/kicad/10.99.0-bp.4/bin/kicad-cli. Installed by Backplane just now.");
+        assert_eq!(done[1]["label"], "FreeCAD");
+    }
+    #[test] fn install_is_sent_only_after_the_ask_and_cancel_sends_nothing() {
+        let o = act("h", &json!({"rid": 4, "drafts": {}}), "kicad-install-ask", "").unwrap(); assert!(o.cmds.is_empty()); assert_eq!(o.patch["drafts"]["@kinstall"], "ask");
+        let o = act("h", &json!({"rid": 4, "drafts": {"@kinstall": "ask"}}), "kicad-install-cancel", "").unwrap(); assert!(o.cmds.is_empty()); assert_eq!(o.patch["drafts"]["@kinstall"], "");
+        let o = act("h", &json!({"rid": 4, "drafts": {}}), "kicad-install", "").unwrap(); assert!(o.cmds.is_empty(), "no consent without the ask");
+        let o = act("h", &json!({"rid": 4, "drafts": {"@kinstall": "ask"}}), "kicad-install", "").unwrap();
+        assert_eq!(o.cmds[0]["text"].as_str().unwrap(), r#"{"id":4,"m":"kicad.install","p":{"consent":true}}"#); assert_eq!(o.patch["drafts"]["@kinstall"], "");
+    }
     #[test] fn cad_sets_the_freecad_path_on_a_press() {
-        let r = pg_rows("cad", &[], json!({}), json!({}));
+        let r = pg_rows("cad", &[], json!({}), json!({"kicad.cli": "/usr/bin/kicad-cli"}));
         assert_eq!(r[2]["fields"][0]["name"], "fpath"); assert_eq!(r[2]["buttons"][0]["action"], "freecad-path");
         let s = json!({"rid": 3, "drafts": {"@f.fpath": " /opt/fc/bin/freecadcmd "}}); let o = act("h", &s, "freecad-path", "").unwrap();
         assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"freecad.path","value":"/opt/fc/bin/freecadcmd""#));
