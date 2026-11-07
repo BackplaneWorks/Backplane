@@ -330,7 +330,7 @@ pub fn viewer_state(thread: &str) -> (u64, Value) { vs().lock().unwrap().get(thr
 
 pub struct KicadRpc(pub Arc<Plots>);
 impl RpcHandler for KicadRpc {
-    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "viewer.state", "history.steps"] }
+    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "viewer.state", "history.steps"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -352,6 +352,11 @@ impl RpcHandler for KicadRpc {
                     }
                     vec![json!({"t":"reply","id":id,"ok":true})]
                 }
+                // Open in KiCad: the thread's design in the desktop KiCad (kicad/open.rs); the reply and a line in the thread say how it went
+                "kicad.open" => match super::open::open(hub, &s("thread")).await {
+                    Ok(what) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"opened":what}})],
+                    Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
+                },
                 "history.steps" => vec![json!({"t":"reply","id":id,"ok":true,"result": super::histsteps::steps(hub, &s("thread")).await})],
                 "viewer.state" => { // the client says what its viewer shows (the thread is the raw id)
                     viewer_report(&s("thread"), p.get("state").cloned().unwrap_or(Value::Null));

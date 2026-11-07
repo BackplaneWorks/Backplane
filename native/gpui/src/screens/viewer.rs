@@ -24,6 +24,9 @@ pub const MAX_ROWS: usize = 1000;
 /// guesses its state: pressing twice before the reply asks for the same thing twice.
 pub fn view_kind(kind: &str) -> Command { Command::Action("view".into(), kind.to_string()) }
 pub fn close() -> Command { view_kind("") }
+/// Open in KiCad: the hub starts KiCad on the thread's design (kicad/open.rs), offered while the viewer has a board or schematic.
+pub fn kicad_open() -> Command { Command::Action("kicad-open".into(), String::new()) }
+pub fn has_design(viewer: &Value) -> bool { tabs(viewer).iter().any(|t| matches!(t.value.as_str(), "board" | "schematic")) }
 
 fn arr<'a>(v: &'a Value, k: &str) -> impl Iterator<Item = &'a Value> { v[k].as_array().into_iter().flatten() }
 pub fn tabs(viewer: &Value) -> Vec<Tab> { arr(viewer, "choices").map(|c| Tab { label: string(c, "label"), value: string(c, "value"), on: c["on"].as_bool().unwrap_or(false) }).collect() }
@@ -254,7 +257,8 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let diff_on = thread["diff"].is_object();
     let mut bar = div().h(px(34.)).flex_shrink_0().flex().items_center().gap_1().px_2().border_b_1().border_color(c("line"));
     for (i, t) in tabs(viewer).into_iter().enumerate() { bar = bar.child(btn(cx, light, format!("vtab-{i}"), t.label, t.on && !diff_on, view_kind(&t.value))); }
-    bar = bar.child(div().flex_1()).child(div().id("viewer-close").px_2().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("Close")
+    if has_design(viewer) { bar = bar.child(div().flex_1()).child(btn(cx, light, "kicad-open".into(), "Open in KiCad".into(), false, kicad_open())); } else { bar = bar.child(div().flex_1()); }
+    bar = bar.child(div().id("viewer-close").px_2().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("Close")
         .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close()); cx.notify(); })));
     let body: AnyElement = if diff_on { diff_page(cx, light, &thread["diff"]) }
         else if open == "files" && viewer["files"].is_object() { super::filesui::files_page(cx, light, &viewer["files"], files_ui) }
@@ -338,6 +342,12 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn open_in_kicad_is_offered_with_a_board_or_a_schematic() {
+        assert!(has_design(&serde_json::json!({"choices":[{"label":"Board","value":"board"},{"label":"Files","value":"files"}]})));
+        assert!(has_design(&serde_json::json!({"choices":[{"label":"Schematic","value":"schematic"}]})));
+        assert!(!has_design(&serde_json::json!({"choices":[{"label":"Files","value":"files"}]}))); assert!(!has_design(&serde_json::json!({})));
+        assert!(matches!(kicad_open(), Command::Action(a, v) if a == "kicad-open" && v.is_empty()));
+    }
     #[test] fn tabs_files_and_diff_parse_from_the_hubs_rows() {
         let v = j(r#"{"open":"files","choices":[{"label":"Board","value":"board","on":false},{"label":"Files","value":"files","on":true}],
             "files":{"trail":[{"label":"project","action":"fm-cd","value":""}],"rows":[{"label":"src","action":"fm-cd","value":"src","detail":"","kind":"folder","icon":"folder"},{"label":"a.rs","action":"fm-open","value":"a.rs","detail":"1 KB","kind":"text","icon":"file"}],"ready":true}}"#);

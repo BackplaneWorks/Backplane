@@ -7,11 +7,11 @@ its relative subfolder. An ordinary project folder is unchanged. Absolute
 `project`, `pcb` and `schematic` entries in the thread's `.backplane.json`
 override the main configuration, preserving explicit external designs.
 
-Open in KiCad compares the selected project, board and schematic bytes,
-including sheets below the root schematic. When the thread's copy differs,
-the shared web, desktop and phone UI offers **Open main** first (the default),
-**Open this thread's copy**, and Cancel. The initial request launches nothing
-until the person chooses. Each request resolves the paths again.
+Open in KiCad (the viewer bar's button, action `kicad-open`, RPC `kicad.open {thread}`; `kicad/open.rs`) starts the
+desktop KiCad beside the hub's `kicad-cli` on the thread's own design, detached: the project manager on its `.kicad_pro`,
+else the board editor on the board, else the schematic editor. It opens the files the viewer shows (a worktree thread's
+copy); 0.14's choice between main and the thread's copy (Open main, Open this thread's copy, Cancel) is not ported. How it
+went is a line in the thread ("Opened … in KiCad", or why not: no project, KiCad not found, no editor beside `kicad-cli`).
 
 Viewer defaults, `viewer_show`, `kicad_ipc` and `kicad_ipc_status` use the same
 canonical files. MCP document paths inside the thread's worktree map to main;

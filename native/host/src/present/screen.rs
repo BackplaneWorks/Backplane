@@ -181,6 +181,12 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
                 session["rid"]=json!(rid+1);
             }
         },
+        // Open in KiCad (the viewer bar's button): the hub starts KiCad on the thread's design (kicad/open.rs) and says how it went in the thread
+        "kicad-open" if !thread.is_empty() => {
+            let rid=session["rid"].as_u64().unwrap_or(0);
+            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"kicad.open","p":{"thread":thread}}).to_string()}));
+            session["rid"]=json!(rid+1);
+        },
         "routine-edit"|"routine-save" if bot_page.is_object() => {
             let Some(o)=super::botforms::routine_act(bot_page,text(&p["target"],"id"),hub,&session,action,value) else { return refused("action.routine-unknown") };
             crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();

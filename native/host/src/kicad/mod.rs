@@ -32,6 +32,7 @@ pub mod release;
 pub mod review;
 pub mod watch;
 pub mod histsteps;
+pub mod open;
 
 use crate::hub::Hub;
 use std::sync::Arc;
