@@ -12,8 +12,9 @@ const EVERY: u64 = 3600;
 /// A test hub never reads BACKPLANE_BUILDS: an agent's shell inherits the person's (the dev hub sets it), and a test hub would then take their builds folder for its
 /// own (update.check said "off", not "package", and the hourly check would look at the real builds). A test that wants one sets BACKPLANE_TEST_BUILDS.
 pub fn builds() -> Option<PathBuf> { std::env::var_os(if cfg!(test) { "BACKPLANE_TEST_BUILDS" } else { "BACKPLANE_BUILDS" }).filter(|v| !v.is_empty()).map(PathBuf::from) }
-/// `BACKPLANE_NO_UPDATE=1`, or a copy of a real log, which acts on nothing outside its home.
-fn off() -> bool { crate::copy::on() || std::env::var("BACKPLANE_NO_UPDATE").map_or(false, |v| v == "1") }
+/// `BACKPLANE_NO_UPDATE=1`, or a copy of a real log, which acts on nothing outside its home. A test build reads BACKPLANE_TEST_NO_UPDATE instead, for the same
+/// reason as `builds`: agent shells inherit BACKPLANE_NO_UPDATE=1 from the dev hub.
+fn off() -> bool { crate::copy::on() || std::env::var(if cfg!(test) { "BACKPLANE_TEST_NO_UPDATE" } else { "BACKPLANE_NO_UPDATE" }).map_or(false, |v| v == "1") }
 /// The feed. A flag or the environment may change it, never a setting: any paired client can write a setting, and this names what a hub runs next. The signature still has to match.
 fn feed() -> String { std::env::var("BACKPLANE_UPDATE_FEED").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| run::FEED.to_string()) }
 
@@ -176,6 +177,11 @@ mod tests {
         hub.commit(&json!({"$":"SettingSet","key":"update.channel","value":"beta","at":2})).await.unwrap(); assert_eq!(call("update.status").await["result"]["channel"], "beta");
         assert_eq!(call("app.update").await["ok"], true); assert!(!home.join("update").exists(), "a package install keeps no update files");
         let _ = fs::remove_dir_all(&home);
+    }
+    #[test] fn a_test_build_ignores_the_callers_update_environment() {
+        // nothing sets the TEST names, so whatever BACKPLANE_BUILDS and BACKPLANE_NO_UPDATE the caller's shell has, a test hub is a package install, updates on
+        assert_eq!(std::env::var_os("BACKPLANE_TEST_BUILDS"), None); assert_eq!(builds(), None, "BACKPLANE_BUILDS={:?} is not read", std::env::var_os("BACKPLANE_BUILDS"));
+        assert_eq!(off(), crate::copy::on(), "BACKPLANE_NO_UPDATE={:?} is not read", std::env::var_os("BACKPLANE_NO_UPDATE"));
     }
     #[test] fn a_running_turn_anywhere_holds_an_update() {
         assert!(busy(["idle", "running", "completed"].into_iter())); assert!(!busy(["idle", "completed", "interrupted", "failed", ""].into_iter())); assert!(!busy([].into_iter()));
