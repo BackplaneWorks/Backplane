@@ -86,7 +86,7 @@ settings.freecad.missing = FreeCAD：見つかりません
 settings.freecad.install = エージェントが機構部品のモデリングに使います。freecad.org/downloadsから入手してください
 settings.kicad.ipc.missing = KiCad IPC：Backplane KiCadが必要です
 settings.kicad.ipc.on = エージェントはBackplaneのヘッドレスサーバーを通じ、IPCでKiCadを編集します。
-settings.kicad.ipc.install = 上のボタン（Linux x86-64）か、github.com/i2cjak/Backplane_KiCadからインストールしてください
+settings.kicad.ipc.install = 上のボタン（Linux x86-64）か、github.com/BackplaneWorks/Backplane_KiCadからインストールしてください
 settings.update.packaged = パッケージで更新されます。
 settings.update.current = 最新です。1時間ごとに確認します。
 # ja? the version row's offer, terse
