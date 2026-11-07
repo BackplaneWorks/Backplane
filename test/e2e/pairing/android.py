@@ -17,16 +17,16 @@ class Phone:
     def __init__(self, adb): self.adb = shlex.split(adb)
     def sh(self, cmd, timeout=30): return subprocess.run(self.adb + ["shell", cmd], capture_output=True, text=True, timeout=timeout).stdout
     def fresh(self): self.sh(f"pm clear {PKG}"); self.sh(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS"); self.launch()  # (the first-run permission dialog would cover the app)
-    def launch(self): self.sh(f"am start -W -n {PKG}/{ACT}"); time.sleep(3)
+    def launch(self): self.sh("cmd statusbar collapse"); self.sh(f"am start -W -n {PKG}/{ACT}"); time.sleep(3)  # (a shade left down by another run would cover the app)
     def nodes(self):
         self.sh("uiautomator dump /sdcard/ui.xml >/dev/null 2>&1")
         try: return list(ET.fromstring(self.sh("cat /sdcard/ui.xml")).iter("node"))
         except ET.ParseError: return []
     # The pairing screen scrolls where it does not fit (a phone in landscape, the keyboard up): what is below the fold is not in a dump, so the
     # driver scrolls to it, with swipes sized from the window, as a person would.
-    def scrolls(self, ns=None): return any(n.get("scrollable") == "true" for n in (ns if ns is not None else self.nodes()))
+    def scrolls(self, ns=None): return any(n.get("scrollable") == "true" and n.get("package") == PKG for n in (ns if ns is not None else self.nodes()))
     def swipe(self, up, ns=None):  # inside the scrolling view: above the keyboard (imePadding), clear of the status bar's shade
-        sc = [n for n in (ns if ns is not None else self.nodes()) if n.get("scrollable") == "true"]
+        sc = [n for n in (ns if ns is not None else self.nodes()) if n.get("scrollable") == "true" and n.get("package") == PKG]
         if not sc: return
         x1, y1, x2, y2 = map(int, re.findall(r"\d+", sc[0].get("bounds"))); x, h = (x1 + x2) // 2, y2 - y1
         a, b = y1 + int(h * 0.8), y1 + int(h * 0.2)
@@ -76,15 +76,23 @@ class Phone:
         b = self.seek("Pair")  # with the keyboard up, as a person taps it: dismissing it moves the layout under the tap
         if b is None: return False
         self.tap(b); time.sleep(4); return True
+    def keyboard_up(self):  # the pairing screen keeps above the keyboard (imePadding): its scrolling view is then much shorter than the window
+        ns = self.nodes(); sc = [n for n in ns if n.get("scrollable") == "true" and n.get("package") == PKG]
+        if not ns or not sc: return False
+        h = lambda n: (lambda b: b[3] - b[1])(list(map(int, re.findall(r"\d+", n.get("bounds")))))
+        return h(sc[0]) < 0.7 * h(ns[0])
+    def hide_keyboard(self):  # Back only while the keyboard is up: without it, Back leaves the screen
+        if self.keyboard_up(): self.sh("input keyevent 4"); time.sleep(1)
     def code_and_pair(self, address, code):
         fs = self.code_fields()
         if len(fs) < 2: return False
         self.tap(fs[0]); time.sleep(0.6); self.sh("input text " + shlex.quote(address)); time.sleep(0.6)
-        fs = self.code_fields()
+        self.hide_keyboard(); fs = self.code_fields()  # (in landscape the keyboard leaves room for one field, and their label scrolls away)
         if len(fs) < 2: return False
         self.tap(fs[1]); time.sleep(0.6); self.sh("input text " + shlex.quote(code)); time.sleep(0.8)
+        self.hide_keyboard(); self.bottom()
         b = self.seek("Pair with code")
-        if b is None: self.sh("input keyevent 4"); time.sleep(1.2); b = self.seek("Pair with code")
+        if b is None: self.hide_keyboard(); b = self.seek("Pair with code")
         if b is None: return False
         self.tap(b); time.sleep(4); return True
     def open_link(self, url): self.sh("am start -W -a android.intent.action.VIEW -d " + shlex.quote(url) + f" {PKG}")  # (adb shell parses once: quoted twice, the data began with a quote and no app took it); time.sleep(5)
