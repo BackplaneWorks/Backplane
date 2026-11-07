@@ -6,34 +6,65 @@ use lyon::tessellation::{LineCap, LineJoin};
 use serde_json::Value;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-#[derive(Clone, Copy)] enum Seg { M(f32, f32), L(f32, f32), C(f32, f32, f32, f32, f32, f32), Q(f32, f32, f32, f32), A(f32, f32, f32, bool, bool, f32, f32), Z }
+#[derive(Clone, Copy)] pub enum Seg { M(f32, f32), L(f32, f32), C(f32, f32, f32, f32, f32, f32), Q(f32, f32, f32, f32), A(f32, f32, f32, bool, bool, f32, f32), Z }
 
-fn parse_d(d: &str) -> Vec<Seg> {
-    // absolute M L C Q Z (also comma separated, and "L" written with a leading letter glued to a number)
+pub(crate) fn parse_d(d: &str) -> Vec<Seg> {
+    // M L H V C S Q A Z, absolute or relative (also comma separated, numbers glued by a sign or a second dot)
     let mut toks: Vec<String> = Vec::new();
     let mut cur = String::new();
     for ch in d.chars() {
-        if ch.is_ascii_alphabetic() { if !cur.is_empty() { toks.push(std::mem::take(&mut cur)); } toks.push(ch.to_string()); }
+        if ch.is_ascii_alphabetic() && ch != 'e' && ch != 'E' { if !cur.is_empty() { toks.push(std::mem::take(&mut cur)); } toks.push(ch.to_string()); }
         else if ch == ',' || ch.is_whitespace() { if !cur.is_empty() { toks.push(std::mem::take(&mut cur)); } }
         else if ch == '-' && !cur.is_empty() && !cur.ends_with('e') { toks.push(std::mem::take(&mut cur)); cur.push(ch); }
+        else if ch == '.' && cur.contains('.') { toks.push(std::mem::take(&mut cur)); cur.push(ch); }
         else { cur.push(ch); }
     }
     if !cur.is_empty() { toks.push(cur); }
     let mut out = Vec::new();
     let (mut i, mut cmd) = (0, 'M');
+    let (mut x, mut y, mut sx, mut sy) = (0f32, 0f32, 0f32, 0f32);
+    let mut last_c: Option<(f32, f32)> = None; // the last cubic's second control point, for S
     let num = |i: usize| toks.get(i).and_then(|t| t.parse::<f32>().ok()).unwrap_or(0.0);
     while i < toks.len() {
-        if toks[i].len() == 1 && toks[i].chars().next().unwrap().is_ascii_alphabetic() { cmd = toks[i].chars().next().unwrap(); i += 1; if cmd == 'Z' || cmd == 'z' { out.push(Seg::Z); } continue; }
-        match cmd {
-            'M' => { out.push(Seg::M(num(i), num(i + 1))); i += 2; cmd = 'L'; }
-            'L' => { out.push(Seg::L(num(i), num(i + 1))); i += 2; }
-            'C' => { out.push(Seg::C(num(i), num(i + 1), num(i + 2), num(i + 3), num(i + 4), num(i + 5))); i += 6; }
-            'Q' => { out.push(Seg::Q(num(i), num(i + 1), num(i + 2), num(i + 3))); i += 4; }
-            'A' => { out.push(Seg::A(num(i), num(i + 1), num(i + 2), num(i + 3) != 0.0, num(i + 4) != 0.0, num(i + 5), num(i + 6))); i += 7; }
+        if toks[i].len() == 1 && toks[i].chars().next().unwrap().is_ascii_alphabetic() { cmd = toks[i].chars().next().unwrap(); i += 1; if cmd == 'Z' || cmd == 'z' { out.push(Seg::Z); x = sx; y = sy; } continue; }
+        let rel = cmd.is_ascii_lowercase();
+        let (ox, oy) = if rel { (x, y) } else { (0.0, 0.0) };
+        let mut next_c = None;
+        match cmd.to_ascii_uppercase() {
+            'M' => { x = ox + num(i); y = oy + num(i + 1); sx = x; sy = y; out.push(Seg::M(x, y)); i += 2; cmd = if rel { 'l' } else { 'L' }; }
+            'L' => { x = ox + num(i); y = oy + num(i + 1); out.push(Seg::L(x, y)); i += 2; }
+            'H' => { x = ox + num(i); out.push(Seg::L(x, y)); i += 1; }
+            'V' => { y = oy + num(i); out.push(Seg::L(x, y)); i += 1; }
+            'C' => { let (a, b, c2, d2) = (ox + num(i), oy + num(i + 1), ox + num(i + 2), oy + num(i + 3)); x = ox + num(i + 4); y = oy + num(i + 5); out.push(Seg::C(a, b, c2, d2, x, y)); next_c = Some((c2, d2)); i += 6; }
+            'S' => { let (a, b) = last_c.map_or((x, y), |(cx, cy)| (2.0 * x - cx, 2.0 * y - cy)); let (c2, d2) = (ox + num(i), oy + num(i + 1)); x = ox + num(i + 2); y = oy + num(i + 3); out.push(Seg::C(a, b, c2, d2, x, y)); next_c = Some((c2, d2)); i += 4; }
+            'Q' => { let (a, b) = (ox + num(i), oy + num(i + 1)); x = ox + num(i + 2); y = oy + num(i + 3); out.push(Seg::Q(a, b, x, y)); i += 4; }
+            'A' => { let (ex, ey) = (ox + num(i + 5), oy + num(i + 6)); out.push(Seg::A(num(i), num(i + 1), num(i + 2), num(i + 3) != 0.0, num(i + 4) != 0.0, ex, ey)); x = ex; y = ey; i += 7; }
             _ => i += 1,
         }
+        last_c = next_c;
     }
     out
+}
+
+/// A provider's vendor mark as path segments in its 24x24 viewBox (assets/providers/<provider>.svg), None for a provider without one.
+pub fn mark_path(provider: &str) -> Option<&'static [Seg]> {
+    static CLAUDE: std::sync::OnceLock<Vec<Seg>> = std::sync::OnceLock::new();
+    static OPENCODE: std::sync::OnceLock<Vec<Seg>> = std::sync::OnceLock::new();
+    let (cell, svg): (&'static std::sync::OnceLock<Vec<Seg>>, &'static str) = match provider {
+        "claude" => (&CLAUDE, include_str!("../../../assets/providers/claude.svg")),
+        "opencode" => (&OPENCODE, include_str!("../../../assets/providers/opencode.svg")),
+        _ => return None,
+    };
+    Some(cell.get_or_init(|| parse_d(attr(svg, "<path", "d").unwrap_or(""))).as_slice())
+}
+/// The mark drawn plain in `color` in a `size` px box (one paint, no repaint loop).
+pub fn mark(segs: &'static [Seg], size: f32, color: u32) -> impl IntoElement {
+    canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+        let (o, s) = (b.origin, size / 24.0);
+        let mut pb = PathBuilder::fill();
+        trace(&mut pb, segs, 1.0, |x, y| point(o.x + px(x * s), o.y + px(y * s)));
+        if let Ok(path) = pb.build() { window.paint_path(path, rgb(color)); }
+    }).size(px(size)).flex_shrink_0()
 }
 
 fn rgb_alpha(c: u32, a: f32) -> Rgba { rgba((c << 8) | (a.clamp(0.0, 1.0) * 255.0).round() as u32) }
