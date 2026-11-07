@@ -13,7 +13,7 @@ const T1: &str = "t1700000001-2";
 
 /// a folder per call: helpers shared by several tests (`deliveries`) ask by the same name, and tests run side by side
 fn dir(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-ag-{}-{}-{}", std::process::id(), name, N.fetch_add(1, Relaxed))); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
-fn script(d: &Path, name: &str, body: &str) { use std::os::unix::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+fn script(d: &Path, name: &str, body: &str) { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
 /// The JS test fleet's stand-in (test/tools/perf_standin.ts) with the settings the recordings used.
 fn perf_standin(d: &Path, secs: u32) { script(d, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS={secs} FAKE_LOG=/dev/null\n"), 1)); }
 
@@ -508,7 +508,7 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn the_agent_is_started_with_the_arguments_and_prompt_the_js_hub_gives_it() {
-    use std::os::unix::fs::PermissionsExt;
+    use crate::plat::fs::PermissionsExt;
     let sd = dir("a-bin"); let argfile = sd.join("argv.json");
     // a stand-in that writes its own argv as JSON, then behaves as a Claude that answers once
     std::fs::write(sd.join("claude"), format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > {a}.tmp\nmv {a}.tmp {a}\nread l\nsleep 600\n", a = argfile.display())).unwrap();
@@ -774,7 +774,7 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
     tokio::time::sleep(Duration::from_millis(200)).await;
     let rd = |n: &str| -> u32 { std::fs::read_to_string(d.join(n)).unwrap().trim().parse().unwrap() };
     let (child, grand) = (rd("child"), rd("grandchild")); assert!(proc::alive(child) && proc::alive(grand));
-    unsafe { libc::kill(h.id() as i32, libc::SIGKILL); } let _ = h.wait();
+    crate::plat::proc::kill(h.id(), crate::plat::proc::KILL); let _ = h.wait();
     let end = Instant::now() + Duration::from_secs(5); while proc::alive(child) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
     assert!(!proc::alive(child), "the agent dies with its hub (PDEATHSIG on Linux, the reaper watcher elsewhere)");
     // Linux: what the agent started outlives it and the next hub on the home ends it. Elsewhere the watcher kills the whole group.
@@ -1156,8 +1156,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); assert!(String::from_utf8_lossy(&o.stdout).contains("work_copy_child_probe ... ok"));
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_command_that_outlived_the_hub_is_watched_again_and_cancel_reaches_it_and_a_gone_one_ends_unknown() {
-    use std::os::unix::process::CommandExt;
-    let mut c = std::process::Command::new("sleep"); c.arg("60"); unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); } let mut child = c.spawn().unwrap(); let pid = child.id();
+    let mut c = std::process::Command::new("sleep"); c.arg("60"); crate::plat::proc::own_group(&mut c); let mut child = c.spawn().unwrap(); let pid = child.id(); crate::plat::proc::adopt(pid, false);
     let live = work::row("w-alive", "watching", "still going", "run", "sleep 60", &work::ident_of(pid), 0); let gone = work::row("w-gone", "watching", "went away", "run", "x", "4000000:1", 0);
     let sd = dir("rearm-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("rearm", |w| watch_log(w, &[live.clone(), gone.clone()], ""), |_| Cli::standin(&sd)).await; let from = 0;

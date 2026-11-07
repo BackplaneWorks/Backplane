@@ -99,7 +99,7 @@ mod tests {
     fn rt(dir: &str, report: &str) -> ipc::Env {
         let p = format!("{dir}/kicad-cli");
         std::fs::write(&p, format!("#!/bin/sh\nrep=; out=; prev=; for a in \"$@\"; do [ \"$prev\" = --report-json ] && rep=$a; [ \"$prev\" = -o ] && out=$a; prev=$a; done\nprintf '%s' '{report}' > \"$rep\"\ncase \" $* \" in *' --dry-run '*) ;; *) mkdir -p \"$out\"; echo \"$*\" > \"$out/args\";; esac\n")).unwrap();
-        use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         ipc::Env { cli: p, status: "ok".into(), caps: vec!["export-v10".into()], ..Default::default() }
     }
     const LOSSY: &str = r#"{"entries":[{"category":"lower","feature":"Text","detail":"Converted","count":2}]}"#;
@@ -130,7 +130,7 @@ mod tests {
         let (home, bin, proj) = (tmp("home4"), tmp("bin4"), tmp("proj4")); let pro = format!("{proj}/b.kicad_pro"); std::fs::write(&pro, "{}").unwrap(); let env = rt(&bin, r#"{"entries":[]}"#);
         let base = kx::paths(&home, &pro).base; std::fs::create_dir_all(format!("{base}/kicad10")).unwrap(); std::fs::write(format!("{base}/kicad10/keep"), "x").unwrap();
         let r = export(&env, &home, &pro, false, "", false).await; assert_eq!(r.get_str("export10", ""), "error"); assert!(r.get_str("text", "").contains("Unmarked export folder refused"), "{r:?}"); assert!(std::path::Path::new(&format!("{base}/kicad10/keep")).exists());
-        let (h2, victim) = (tmp("home5"), tmp("victim")); std::os::unix::fs::symlink(&victim, format!("{h2}/exports")).unwrap();
+        let (h2, victim) = (tmp("home5"), tmp("victim")); crate::plat::fs::symlink(&victim, format!("{h2}/exports")).unwrap();
         let r = export(&env, &h2, &pro, false, "", false).await; assert_eq!(r.get_str("export10", ""), "error"); assert!(r.get_str("text", "").contains("Symlinked exports folder refused"), "{r:?}"); assert!(std::fs::read_dir(&victim).unwrap().next().is_none());
     }
     #[test] fn put_replaces_at_the_front() { assert_eq!(put(J::obj(&[("a", J::str("1")), ("b", J::str("2"))]), "b", J::str("3")).show(), r#"{"b":"3","a":"1"}"#); assert_eq!(put(J::Null, "k", J::Null).show(), r#"{"k":null}"#) }

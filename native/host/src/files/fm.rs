@@ -82,7 +82,7 @@ pub fn plain(rel: &str) -> bool { Path::new(rel).components().all(|c| matches!(c
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
+    use crate::plat::fs::symlink;
     // laws fm_kind_board fm_kind_schematic fm_kind_model fm_kind_pdf fm_kind_image fm_kind_other
     #[test] fn fm_kind() {
         for (n, k) in [("a.kicad_pcb","board"),("A.KICAD_PCB","board"),("x.kicad_sch","schematic"),("m.step","3d"),("m.STP","3d"),("m.glb","3d"),("p.PDF","pdf"),("i.png","image"),("i.JpEg","image"),("n.txt",""),("Makefile",""),("",""),("a.kicad_pcb.bak","")] { assert_eq!(kind(n), k, "{n}") }

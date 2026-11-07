@@ -9,7 +9,8 @@
 pub mod browser;
 pub mod driver;
 pub mod emb;
-pub mod pty;
+#[cfg(unix)] pub mod pty;
+#[cfg(windows)] #[path = "pty_windows.rs"] pub mod pty;
 pub mod task;
 pub mod teach;
 pub mod tools;

@@ -422,7 +422,7 @@ async fn plan_of(h: &Arc<Hub>, method: &str, p: Value) -> Vec<Value> {
 
 // archive_running_stops, through the real agents module (a stand-in agent that never answers): archiving a running thread ends its turn and its process
 #[tokio::test] async fn archive_running_stops_through_the_real_agents_module() {
-    use std::os::unix::fs::PermissionsExt;
+    use crate::plat::fs::PermissionsExt;
     let base = std::env::temp_dir().join(format!("bp-cmds-real-{}", std::process::id())); let _ = std::fs::remove_dir_all(&base);
     let (home, bin, work) = (base.join("home"), base.join("bin"), base.join("work")); for d in [&home, &bin, &work] { std::fs::create_dir_all(d).unwrap() }
     std::fs::write(bin.join("claude"), "#!/bin/sh\nsleep 600\n").unwrap(); std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();

@@ -112,7 +112,7 @@ mod tests {
             assert!(check_folder(bad, &roots, &home, Some(&live)).is_err(), "{why}: {bad}");
         }
         std::fs::create_dir_all(home.join("attachments")).unwrap(); assert!(check_folder(home.join("attachments").to_str().unwrap(), &roots, &home, Some(&live)).is_err());
-        let link = proj.join("to-live"); std::os::unix::fs::symlink(live.join("scratch/t9"), &link).unwrap(); assert!(check_folder(link.to_str().unwrap(), &roots, &home, Some(&live)).is_err(), "a symlink into the live home is followed and refused");
+        let link = proj.join("to-live"); crate::plat::fs::symlink(live.join("scratch/t9"), &link).unwrap(); assert!(check_folder(link.to_str().unwrap(), &roots, &home, Some(&live)).is_err(), "a symlink into the live home is followed and refused");
     }
     #[test] fn permissions_are_forced_down_from_full_access_and_empty() { assert_eq!(runtime_for("full-access"), "approval-required"); assert_eq!(runtime_for(""), "approval-required"); for r in ["auto-accept-edits", "auto", "garbage", "", "full-access", "bypassPermissions"] { assert_eq!(runtime_for(r), "approval-required", "{r}") } assert_eq!(runtime_for("approval-required"), "approval-required") }
     #[test] fn a_live_turn_in_the_same_folder_or_one_over_or_under_it_conflicts_and_a_finished_one_does_not() {

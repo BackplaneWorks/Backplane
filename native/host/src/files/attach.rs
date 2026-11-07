@@ -51,7 +51,7 @@ pub async fn receive<R: AsyncRead + Unpin>(home: &std::path::Path, thread: &str,
     if let Err(e) = tokio::fs::create_dir_all(&d).await { return ("500 Internal Server Error", failed_plain(thread, &e.to_string())) }
     let path = d.join(stored(key, name));
     // O_NOFOLLOW: a link at the target is never followed, the open fails (500) and nothing is written; a plain file there is truncated and replaced
-    let mut f = match tokio::fs::OpenOptions::new().write(true).create(true).truncate(true).custom_flags(libc::O_NOFOLLOW).open(&path).await {
+    let mut f = match tokio::fs::OpenOptions::new().write(true).create(true).truncate(true).custom_flags(crate::plat::fs::O_NOFOLLOW as _).open(&path).await {
         Ok(f) => f, Err(e) => return ("500 Internal Server Error", failed_plain(thread, &e.to_string())) };
     let p = path.to_string_lossy().into_owned();
     if len == 0 { return ("200 OK", attached(thread, &p)) }
@@ -96,7 +96,7 @@ mod tests {
         assert!(!h.join("attachments/t1/k-big").exists());
         // an empty file is a file; a symlink at the target is not followed
         let (st, _) = receive(&h, "t1", "k", "empty", 0, "", 1 << 28, &mut &[][..]).await; assert_eq!(st, "200 OK"); assert!(h.join("attachments/t1/k-empty").exists());
-        std::fs::write(h.join("victim"), "keep").unwrap(); std::os::unix::fs::symlink(h.join("victim"), h.join("attachments/t1/k-link")).unwrap();
+        std::fs::write(h.join("victim"), "keep").unwrap(); crate::plat::fs::symlink(h.join("victim"), h.join("attachments/t1/k-link")).unwrap();
         let (st, _) = receive(&h, "t1", "k", "link", 3, "", 1 << 28, &mut &b"abc"[..]).await; assert_eq!(st, "500 Internal Server Error"); assert_eq!(std::fs::read_to_string(h.join("victim")).unwrap(), "keep");
         // a hostile thread id and name stay inside <home>/attachments
         let (st, j) = receive(&h, "../../etc", "../k", "../../passwd", 2, "", 1 << 28, &mut &b"hi"[..]).await; assert_eq!(st, "200 OK");

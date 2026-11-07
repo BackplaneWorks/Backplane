@@ -14,7 +14,6 @@ pub fn list(root: &Path, rel: &str) -> Result<String, &'static str> {
     let dir = fm::contained(root, rel).ok_or(UNAVAILABLE)?;
     let rd = std::fs::read_dir(&dir).map_err(|_| UNAVAILABLE)?;
     let mut names: Vec<std::ffi::OsString> = rd.filter_map(|e| e.ok().map(|e| e.file_name())).collect();
-    use std::os::unix::ffi::OsStrExt;
     names.sort_by(|a, b| a.to_string_lossy().encode_utf16().cmp(b.to_string_lossy().encode_utf16())); // JS string order (UTF-16 code units)
     let (mut dirs, mut files) = (String::new(), String::new());
     let (mut nd, mut nf) = (0, 0);
@@ -34,7 +33,7 @@ pub fn list(root: &Path, rel: &str) -> Result<String, &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::*; use std::os::unix::fs::symlink;
+    use super::*; use crate::plat::fs::symlink;
     fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-dir-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     #[test] fn lists_folders_then_files_hides_dotfiles_and_symlinked_folders() {
         let b = tmp("l"); let r = b.join("r"); std::fs::create_dir_all(r.join("zdir")).unwrap(); std::fs::create_dir_all(r.join("adir")).unwrap(); std::fs::create_dir_all(r.join(".git")).unwrap();

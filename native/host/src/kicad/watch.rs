@@ -18,7 +18,7 @@ const VERSIONS_KEPT: usize = 8; // saved versions no view watches: Src.versions.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Stamp { rev: String, ok: bool }
 pub fn stamp(path: &str) -> Stamp {
-    use std::os::unix::fs::MetadataExt;
+    use crate::plat::fs::MetadataExt;
     // FS.revision: "dev:ino:size:mtime s:ns:ctime s:ns" (a same-size save within a second still changes it)
     match std::fs::metadata(path) { Ok(m) => Stamp { rev: format!("{}:{}:{}:{}:{}:{}:{}", m.dev(), m.ino(), m.len(), m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec()), ok: true }, Err(_) => Stamp::default() }
 }
@@ -208,7 +208,7 @@ impl Plots {
                 let i = infos.to_string_lossy().into_owned();
                 let r = std::panic::catch_unwind(|| solidread::read(kind, &f, &cli, &stepglb::machine(&home), &i));
                 let o = match r { Ok(g) => (g.code, g.text, g.plot), Err(_) => (3, plotgen::UNREAD.to_string(), None) };
-                #[cfg(target_env = "gnu")] unsafe { libc::malloc_trim(0); }
+                #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); }
                 o
             }).await.ok()
         }
@@ -220,7 +220,7 @@ impl Plots {
                 Ok(plotgen::Read::Fail(m)) => (3, m, None),
                 Err(_) => (3, plotgen::UNREAD.to_string(), None),
             };
-            #[cfg(target_env = "gnu")] unsafe { libc::malloc_trim(0); }
+            #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); }
             o
         }).await.ok()
     }

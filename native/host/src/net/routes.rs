@@ -130,24 +130,7 @@ fn is_loopback(x: &str) -> bool {
     let r = x.strip_prefix("http://").or_else(|| x.strip_prefix("https://")).unwrap_or("");
     r.starts_with("localhost") || r.starts_with("127.") || r.starts_with("[::1]")
 }
-fn non_loopback_v4() -> Vec<String> {
-    let mut out = vec![];
-    unsafe {
-        let mut ifa: *mut libc::ifaddrs = std::ptr::null_mut();
-        if libc::getifaddrs(&mut ifa) != 0 { return out }
-        let mut p = ifa;
-        while !p.is_null() {
-            let a = &*p;
-            if !a.ifa_addr.is_null() && (*a.ifa_addr).sa_family as i32 == libc::AF_INET && a.ifa_flags & (libc::IFF_LOOPBACK as u32) == 0 {
-                let sin = &*(a.ifa_addr as *const libc::sockaddr_in);
-                out.push(std::net::Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr)).to_string());
-            }
-            p = a.ifa_next;
-        }
-        libc::freeifaddrs(ifa);
-    }
-    out
-}
+fn non_loopback_v4() -> Vec<String> { crate::plat::net::non_loopback_v4() }
 
 #[cfg(test)]
 mod tests {

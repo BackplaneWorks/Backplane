@@ -224,7 +224,7 @@ mod tests {
     }
     #[test] fn a_symlinked_log_is_refused_even_after_the_hub_marked_the_home() {
         let h = home("link"); let real = home("link-target"); log(&real, SYNTH);
-        std::os::unix::fs::symlink(real.join("events.jsonl"), h.join("events.jsonl")).unwrap();
+        crate::plat::fs::symlink(real.join("events.jsonl"), h.join("events.jsonl")).unwrap();
         assert!(gate(&h, false).unwrap_err().contains("symlink")); mark(&h);
         assert!(gate(&h, false).is_err(), "the marker does not clear a symlink");
         assert!(gate(&h, true).is_ok(), "BACKPLANE_COPY=1 allows it");

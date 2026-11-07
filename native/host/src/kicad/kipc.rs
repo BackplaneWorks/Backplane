@@ -125,8 +125,9 @@ fn wrap(argv: Vec<String>, memory: Option<&str>) -> Vec<String> {
     }
 }
 /// KiCad may choose api-<pid>.sock when the requested path is occupied. Each socket with what tells it from one bound before.
+#[cfg(unix)]
 fn sockets_at(requested: &str) -> HashMap<String, String> {
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    use crate::plat::fs::{FileTypeExt, MetadataExt};
     let mut out = HashMap::new();
     let at = Path::new(requested); let (Some(dir), Some(base)) = (at.parent(), at.file_name()) else { return out };
     let Ok(rd) = std::fs::read_dir(dir) else { return out }; // no socket directory yet
@@ -138,6 +139,22 @@ fn sockets_at(requested: &str) -> HashMap<String, String> {
         if let Ok(st) = std::fs::metadata(&p) { // the server can replace a stale socket during this scan
             if st.file_type().is_socket() { let born = st.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(st.ctime_nsec() as u128); out.insert(p.to_string_lossy().to_string(), format!("{}:{}:{born}", st.dev(), st.ino())); }
         }
+    }
+    out
+}
+/// Windows: nng's sockets are named pipes (`\\.\pipe\<path>`), listed in the pipe namespace; a pipe has no birth stamp, so its name is what tells it.
+#[cfg(windows)]
+fn sockets_at(requested: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let at = Path::new(requested); let (Some(dir), Some(base)) = (at.parent(), at.file_name()) else { return out };
+    let Ok(rd) = std::fs::read_dir(r"\\.\pipe\") else { return out };
+    for e in rd.flatten() {
+        let full = e.file_name().to_string_lossy().into_owned(); let p = Path::new(&full);
+        if p.parent() != Some(dir) { continue }
+        let Some(n) = p.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+        let fallback = n.strip_prefix("api-").and_then(|r| r.strip_suffix(".sock")).is_some_and(|d| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit()));
+        if n != base.to_string_lossy() && !fallback { continue }
+        out.insert(full.clone(), full);
     }
     out
 }
@@ -262,7 +279,7 @@ mod tests {
         let mut got: Vec<Value> = vec![next(&mut r).await, next(&mut r).await, next(&mut r).await]; got.sort_by_key(|o| o["id"].as_i64());
         assert_eq!(got, vec![json!({"id":1,"ok":false,"error":CONN_CLOSED}), json!({"id":2,"ok":false,"error":CONN_CLOSED}), json!({"id":3,"ok":true})]);
     }
-    fn script(d: &str, body: &str) -> String { let p = format!("{d}/fake"); std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap(); use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p }
+    fn script(d: &str, body: &str) -> String { let p = format!("{d}/fake"); std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap(); use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p }
     fn tmp(name: &str) -> String { let d = std::env::temp_dir().join(format!("kipc-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d.to_string_lossy().into() }
     #[tokio::test] async fn spawn_reports_lines_and_exit() {
         let d = tmp("spawn");
@@ -283,6 +300,7 @@ mod tests {
         let o = next(&mut r).await; assert_eq!((o["event"].as_str(), o["code"].as_i64()), (Some("exit"), Some(127)));
     }
     /// A server whose stdout is buffered (real KiCad's) is found by the socket it binds: only one bound after this launch counts.
+    #[cfg(unix)]
     #[tokio::test] async fn a_fresh_socket_stands_in_for_the_ready_line() {
         let d = tmp("fresh"); let sock = format!("{d}/api.sock"); let alt = format!("{d}/api-999.sock");
         let old = std::os::unix::net::UnixListener::bind(&sock).unwrap();
@@ -298,6 +316,7 @@ mod tests {
         std::fs::write(&go, "").unwrap();
         assert_eq!(next(&mut r).await["event"], json!("exit")); drop((old, new));
     }
+    #[cfg(unix)]
     #[test] fn sockets_at_sees_only_the_servers_names() {
         let d = tmp("names"); let p = |n: &str| format!("{d}/{n}");
         let _a = std::os::unix::net::UnixListener::bind(p("api.sock")).unwrap(); let _b = std::os::unix::net::UnixListener::bind(p("api-12.sock")).unwrap(); let _c = std::os::unix::net::UnixListener::bind(p("other.sock")).unwrap(); let _d = std::os::unix::net::UnixListener::bind(p("api-x.sock")).unwrap(); std::fs::write(p("api-13.sock"), "").unwrap();

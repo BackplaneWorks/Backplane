@@ -6,7 +6,7 @@
 //! Every child is a provider CLI resolved like the agents' (the stand-in folder in a test hub, else PATH) and made through the process gate (Kind::Agent).
 //! Any failure of an op answers the same generic message the JS hub gives; what a sign-in failed on is one of a few fixed sentences.
 use serde_json::{json, Value};
-use std::{collections::HashMap, os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt}, path::{Path, PathBuf}, sync::{Arc, Mutex}, time::Duration};
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex}, time::Duration}; use crate::plat::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, process::{Child, ChildStdin}, sync::{mpsc, oneshot}};
 
 pub const GENERIC: &str = "Account operation failed. Check its current status before retrying.";
@@ -75,7 +75,7 @@ async fn spawn(c: &mut tokio::process::Command) -> std::io::Result<Child> {
     let mut n = 0;
     loop {
         match c.spawn() {
-            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && n < 40 => { n += 1; if cfg!(test) { eprintln!("accounts_io: ETXTBSY on spawn, retry {n}") } tokio::time::sleep(Duration::from_millis(25)).await }
+            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && n < 40 => { n += 1; if cfg!(test) { eprintln!("accounts_io: ETXTBSY on spawn, retry {n}") } tokio::time::sleep(Duration::from_millis(25)).await }
             r => { if let Err(e) = &r { if cfg!(test) { eprintln!("accounts_io: spawn {:?} failed: {e} (os {:?})", c.as_std().get_program(), e.raw_os_error()) } } return r }
         }
     }
@@ -114,8 +114,8 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
     if let Some(parent) = dir.parent() { if !parent.exists() { std::fs::DirBuilder::new().recursive(true).mode(0o700).create(parent)?; } }
     match std::fs::DirBuilder::new().mode(0o700).create(dir) { Ok(()) => {} Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {} Err(e) => return Err(e) }
     let m = std::fs::symlink_metadata(dir)?;
-    use std::os::unix::fs::MetadataExt;
-    if !m.is_dir() || m.file_type().is_symlink() || m.uid() != unsafe { libc::getuid() } { return Err(std::io::Error::new(std::io::ErrorKind::Other, "Unsafe provider directory")) }
+    use crate::plat::fs::MetadataExt;
+    if !m.is_dir() || m.file_type().is_symlink() || m.uid() != crate::plat::fs::uid() { return Err(std::io::Error::new(std::io::ErrorKind::Other, "Unsafe provider directory")) }
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
 }
 
@@ -866,7 +866,7 @@ for l in sys.stdin:
         std::env::remove_var("STANDIN_USAGE"); let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn the_registry_adds_renames_removes_and_survives_a_restart_and_a_bad_file_is_not_trusted() {
-        use std::os::unix::fs::PermissionsExt as _;
+        use crate::plat::fs::PermissionsExt as _;
         let (h, sd) = dirs("reg"); let a = mgr(&h, &sd);
         assert_eq!(a.request(&json!({"op":"add","provider":"grok","label":"x"})).await["error"], GENERIC); assert_eq!(a.request(&json!({"op":"add","provider":"claude","label":"  "})).await["error"], GENERIC);
         let id = add(&a, "claude", "Work\u{7}").await; let s = a.snapshot(); assert_eq!((prof(&s, &id)["label"].clone(), prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("Work"), json!("disconnected"), json!(1)));

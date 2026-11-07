@@ -422,8 +422,8 @@ mod tests {
         assert!(t.starts_with("# Power\n- [ ] Every rail") && t.contains("- [x] Decoupling")); assert_eq!(std::fs::read_to_string(format!("{d}/.backplane/checklist.md")).unwrap(), t);
         let t2 = tick(&d, 1).unwrap(); assert!(t2.contains("- [ ] Decoupling"));
         let out = tmp("tick-out"); let l = tmp("tick-link"); std::fs::create_dir_all(format!("{l}/.backplane")).unwrap();
-        std::os::unix::fs::symlink(format!("{out}/victim"), format!("{l}/.backplane/checklist.md")).unwrap(); assert_eq!(tick(&l, 0), None); assert!(!std::path::Path::new(&format!("{out}/victim")).exists());
-        let l2 = tmp("tick-link2"); std::os::unix::fs::symlink(&out, format!("{l2}/.backplane")).unwrap(); assert_eq!(tick(&l2, 0), None); assert!(std::fs::read_dir(&out).unwrap().next().is_none());
+        crate::plat::fs::symlink(format!("{out}/victim"), format!("{l}/.backplane/checklist.md")).unwrap(); assert_eq!(tick(&l, 0), None); assert!(!std::path::Path::new(&format!("{out}/victim")).exists());
+        let l2 = tmp("tick-link2"); crate::plat::fs::symlink(&out, format!("{l2}/.backplane")).unwrap(); assert_eq!(tick(&l2, 0), None); assert!(std::fs::read_dir(&out).unwrap().next().is_none());
     }
     #[test] fn one_question_at_a_time_for_the_same_checks() {
         let (o, c) = (r#"{"$":"AskOpened","id":"checks:ab:1","thread":"t"}"#.to_string(), r#"{"$":"AskClosed","id":"checks:ab:1","answer":"Not now"}"#.to_string());
@@ -463,7 +463,7 @@ mod tests {
         g(vec!["add", "."], d.clone()).await; g(vec!["commit", "-qm", "i"], d.clone()).await;
         let c = g(vec!["rev-parse", "HEAD"], d.clone()).await.out.trim().to_string();
         let o = check_run("", &d, &c, &home, "manual").await; assert!(o.get_str("err", "").contains("release input"), "{o:?}");
-        std::os::unix::fs::symlink("/etc/passwd", format!("{d}/l")).unwrap(); g(vec!["add", "."], d.clone()).await; g(vec!["commit", "-qm", "l"], d.clone()).await;
+        crate::plat::fs::symlink("/etc/passwd", format!("{d}/l")).unwrap(); g(vec!["add", "."], d.clone()).await; g(vec!["commit", "-qm", "l"], d.clone()).await;
         let c = g(vec!["rev-parse", "HEAD"], d.clone()).await.out.trim().to_string();
         let o = check_run("", &d, &c, &home, "manual").await; assert!(o.get_str("err", "").contains("snapshot contains symlinks"), "{o:?}");
         assert_eq!(check_run("", &d, "nosuchcommit", &home, "manual").await.get("gate"), None);
@@ -472,7 +472,7 @@ mod tests {
     fn fake_cli(dir: &str) -> String {
         let p = format!("{dir}/kicad-cli");
         std::fs::write(&p, "#!/bin/sh\nout=; prev=; for a in \"$@\"; do [ \"$prev\" = -o ] && out=$a; prev=$a; done\ncase \"$1 $2\" in\n'sch erc') echo '{\"sheets\":[]}' > \"$out\";;\n'pcb drc') echo '{\"violations\":[],\"unconnected_items\":[],\"schematic_parity\":[]}' > \"$out\";;\n*) case \"$out\" in */) mkdir -p \"$out\"; echo x >> \"$out/$3.gbr\";; *) echo x > \"$out\";; esac;;\nesac\n").unwrap();
-        use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p
+        use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p
     }
     fn sym(r: &str, v: &str) -> String { format!("(symbol (lib_id \"Device:R\") (property \"Reference\" \"{r}\") (property \"Value\" \"{v}\") (property \"Footprint\" \"R_0603\"))\n") }
     #[tokio::test] async fn a_release_tags_exports_and_publishes_only_when_asked() {
@@ -496,7 +496,7 @@ mod tests {
         // the second release: notes carry the BOM change, the tag goes out by its object, gh is the stand-in
         std::fs::write(format!("{d}/b.kicad_sch"), format!("(kicad_sch {}{})", sym("R1", "2k"), sym("R2", "2k"))).unwrap(); g(&["add", "."]); g(&["commit", "-qm", "two"]);
         std::fs::write(format!("{bin}/gh"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\necho https://example.invalid/releases/v2\n").unwrap();
-        use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(format!("{bin}/gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        use crate::plat::fs::PermissionsExt; std::fs::set_permissions(format!("{bin}/gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("PATH", format!("{bin}:{}", std::env::var("PATH").unwrap()));
         let r = release_job(&cli, "t", &d, "v2", true, false, &home).await; assert_eq!(r["report"]["err"], "", "{r}");
         let md = r["report"]["md"].as_str().unwrap(); assert!(md.contains("Changes since v1.") && md.contains("## BOM changes") && md.contains("| R1 | changed | value: 1k | value: 2k |") && md.ends_with("Published: https://example.invalid/releases/v2"), "{md}");

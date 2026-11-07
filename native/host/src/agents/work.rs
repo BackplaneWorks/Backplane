@@ -29,13 +29,16 @@ pub const COPY_LINE: &str = "watched work is off on a copy of a log (BACKPLANE_C
 #[cfg(target_os = "linux")]
 pub fn start_time(pid: u32) -> Option<u64> { let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?; let rest = s.rsplit_once(')')?.1; rest.split_whitespace().nth(19)?.parse().ok() }
 /// No /proc: `ps -o lstart=` names the start second (the text is hashed); a pid that is not there prints nothing.
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 pub fn start_time(pid: u32) -> Option<u64> {
     let o = crate::proc::std_cmd(crate::proc::Kind::Local, "ps").args(["-o", "lstart=", "-p", &pid.to_string()]).env("LC_ALL", "C").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()?;
     let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
     if !o.status.success() || t.is_empty() { return None }
     Some(t.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3)))
 }
+/// Windows: the process's creation time.
+#[cfg(windows)]
+pub fn start_time(pid: u32) -> Option<u64> { crate::plat::proc::start_time(pid) }
 pub fn ident_of(pid: u32) -> String { start_time(pid).map_or_else(|| "-".into(), |st| format!("{pid}:{st}")) }
 /// Whether the process an ident names is still that process.
 pub fn ident_alive(ident: &str) -> bool { let Some((p, st)) = ident.split_once(':') else { return false }; match (p.parse::<u32>(), st.parse::<u64>()) { (Ok(p), Ok(st)) => start_time(p) == Some(st), _ => false } }
@@ -64,9 +67,9 @@ impl Agents {
         let outp = dir.join("out"); let _ = std::fs::write(dir.join("cmd"), &cmd);
         let (so, se) = match std::fs::File::create(&outp).and_then(|f| f.try_clone().map(|g| (f, g))) { Ok(x) => x, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not open the output file: {e}")).await; return } };
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Shell, "sh"); c.args(["-c", cmd.as_str()]).current_dir(if cwd.is_empty() { self.hub.cfg.home.clone() } else { PathBuf::from(&cwd) }).stdin(Stdio::null()).stdout(so).stderr(se).kill_on_drop(false);
-        unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); }
+        crate::plat::proc::own_group_tokio(&mut c);
         let mut child = match c.spawn() { Ok(c) => c, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not start: {e}")).await; return } };
-        let pid = child.id().unwrap_or(0);
+        let pid = child.id().unwrap_or(0); crate::plat::proc::adopt(pid, false);
         { let _g = self.work_lock.lock().await; let rows = self.watch_rows(&th).await;
           if let Some(l) = rows.iter().find(|l| bg::field(l, 0) == bg::clean(&id)) { if bg::doing(l) == "launching" { // only this row, only if it is still launching (a cancel meanwhile keeps "cancelling")
               let nr: Vec<String> = rows.iter().map(|x| if bg::field(x, 0) == bg::clean(&id) { row(&id, "watching", &bg::work_title(x), "run", &target(x), &ident_of(pid), deadline(x)) } else { x.clone() }).collect(); self.put_watch(&th, &nr).await } } }
@@ -74,13 +77,13 @@ impl Agents {
         let status = loop {
             let left = if timed_out { Duration::from_secs(3600) } else { Duration::from_secs(dl.saturating_sub(now_s()).max(1)) };
             tokio::select! {
-                r = child.wait() => break match r { Ok(st) => { use std::os::unix::process::ExitStatusExt; format!("exit {}", st.code().unwrap_or_else(|| 128 + st.signal().unwrap_or(0))) } Err(_) => "gone".into() },
-                r = stop.changed() => { if r.is_err() || !*stop.borrow() { let st = child.wait().await; break match st { Ok(st) => { use std::os::unix::process::ExitStatusExt; format!("exit {}", st.code().unwrap_or_else(|| 128 + st.signal().unwrap_or(0))) } Err(_) => "gone".into() } } // unwatched: the command goes on, nobody is told
-                    if pid > 0 { unsafe { libc::kill(-(pid as i32), libc::SIGTERM); } tokio::spawn(async move { tokio::time::sleep(Duration::from_secs(3)).await; unsafe { libc::kill(-(pid as i32), libc::SIGKILL); } }); } let _ = child.wait().await; break "gone".into() }
+                r = child.wait() => break match r { Ok(st) => format!("exit {}", crate::plat::exit_code(&st)), Err(_) => "gone".into() },
+                r = stop.changed() => { if r.is_err() || !*stop.borrow() { let st = child.wait().await; break match st { Ok(st) => format!("exit {}", crate::plat::exit_code(&st)), Err(_) => "gone".into() } } // unwatched: the command goes on, nobody is told
+                    if pid > 0 { crate::plat::proc::kill_group(pid, crate::plat::proc::TERM); tokio::spawn(async move { tokio::time::sleep(Duration::from_secs(3)).await; crate::plat::proc::kill_group(pid, crate::plat::proc::KILL); }); } let _ = child.wait().await; break "gone".into() }
                 _ = tokio::time::sleep(left), if !timed_out => { timed_out = true; self.work_end(&th, &id, "timeout", &tail(&outp)).await; }
             }
         };
-        if pid > 0 { unsafe { libc::kill(-(pid as i32), libc::SIGKILL); } } // anything the command left running in its group
+        if pid > 0 { crate::plat::proc::kill_group(pid, crate::plat::proc::KILL); } // anything the command left running in its group
         self.work_end(&th, &id, &status, &tail(&outp)).await;
     }
     /// Watch.end: the row is dropped and the thread told once (a timeout keeps the row, ended with the outcome unknown).
@@ -118,9 +121,9 @@ impl Agents {
             let mut noted = dl == 0;
             loop {
                 tokio::select! { r = stop.changed() => {
-                    if r.is_ok() && *stop.borrow() && kind == "run" { if let Some(p) = ident.split(':').next().and_then(|x| x.parse::<i32>().ok()) { if ident_alive(&ident) && p > 1 { unsafe { libc::kill(-p, libc::SIGTERM); } tokio::spawn(async move { tokio::time::sleep(Duration::from_secs(3)).await; unsafe { libc::kill(-p, libc::SIGKILL); } }); } } } // a re-armed command: cancel reaches its group
+                    if r.is_ok() && *stop.borrow() && kind == "run" { if let Some(p) = ident.split(':').next().and_then(|x| x.parse::<i32>().ok()) { if ident_alive(&ident) && p > 1 { crate::plat::proc::kill_group(p as u32, crate::plat::proc::TERM); tokio::spawn(async move { tokio::time::sleep(Duration::from_secs(3)).await; crate::plat::proc::kill_group(p as u32, crate::plat::proc::KILL); }); } } } // a re-armed command: cancel reaches its group
                     me.work_end(&th, &id, "gone", "").await; return } _ = tokio::time::sleep(Duration::from_secs(1)) => {} }
-                let done = match kind.as_str() { "run" => !ident_alive(&ident), "pid" => target.parse::<i32>().map_or(true, |p| p <= 0 || unsafe { libc::kill(p, 0) } != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EPERM)), _ => has_token(&target, &id) };
+                let done = match kind.as_str() { "run" => !ident_alive(&ident), "pid" => target.parse::<i32>().map_or(true, |p| p <= 0 || !crate::plat::proc::exists(p as u32)), _ => has_token(&target, &id) };
                 if done { me.work_end(&th, &id, if kind == "file" { "found" } else { "gone" }, "").await; return }
                 if !noted && now_s() >= dl { noted = true; me.work_end(&th, &id, "timeout", "").await }
             }
