@@ -63,11 +63,14 @@ fn foot(cx: &mut Context<Backplane>, light: bool, id: &'static str, label: Strin
     d.child(label).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); let _ = this.tx.try_send(Command::Action(action.into(), String::new())); cx.notify(); })).into_any_element()
 }
 
-pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, tour: &Value, acct: &super::accounts::Accounts, focus: &FocusHandle, scroll: &ScrollHandle) -> Option<AnyElement> {
+/// The setup screen in a window `w` px wide: the step list's width, and whether a row's controls go under its words (as in Settings).
+pub fn fit(w: f32) -> (f32, bool) { let rail = if w < 900. { 170. } else { 230. }; (rail, (w - rail - 48.).min(760.) < 620.) }
+pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, tour: &Value, acct: &super::accounts::Accounts, focus: &FocusHandle, scroll: &ScrollHandle, w: f32) -> Option<AnyElement> {
     if !tour.is_object() { return None }
     let c = |n: &str| theme::color(light, n);
     // the list of steps, under their groups
-    let mut rail = div().id("setup-rail").flex().flex_col().w(px(230.)).flex_shrink_0().p_3().gap(px(1.)).overflow_y_scroll().border_r_1().border_color(c("line"));
+    let (rail_w, stack) = fit(w);
+    let mut rail = div().id("setup-rail").flex().flex_col().w(px(rail_w)).flex_shrink_0().min_h_0().overflow_x_hidden().p_3().gap(px(1.)).overflow_y_scroll().border_r_1().border_color(c("line"));
     let (mut group, on) = (String::new(), string(tour, "id"));
     for (i, s) in tour["steps"].as_array().into_iter().flatten().enumerate() {
         let g = string(s, "group");
@@ -85,7 +88,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     body = body.child(div().text_size(px(12.)).text_color(c("faint")).child(format!("{} · {}", string(tour, "counter"), string(tour, "progress"))));
     body = body.child(div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(string(tour, "title")));
     body = body.child(div().flex_shrink_0().w_full().text_size(px(14.)).text_color(c("dim")).line_height(px(21.)).child(string(tour, "body"))); // measured at the width it is drawn at, so its rows start below its last line
-    for (i, r) in rows.iter().enumerate() { body = body.child(settings::row_el(cx, light, fields, r, 1000 + i)); }
+    for (i, r) in rows.iter().enumerate() { body = body.child(settings::row_el(cx, light, fields, r, 1000 + i, stack)); }
     let panel = string(tour, "panel");
     if !panel.is_empty() { body = body.child(div().pt_3().flex().flex_col().gap_2().children(super::accounts::panel(cx, light, acct, &panel))); }
     for (i, ch) in tour["choices"].as_array().into_iter().flatten().enumerate() {
@@ -114,6 +117,9 @@ pub fn resume_row(cx: &mut Context<Backplane>, light: bool, data: &Value) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn setup_fits_a_small_window() {
+        assert_eq!(fit(1400.), (230., false)); assert_eq!(fit(1024.), (230., false)); assert_eq!(fit(860.), (170., false)); assert_eq!(fit(800.), (170., true), "a narrow one stacks the controls under the words");
+    }
     use core::prelude::v1::test;
     #[test] fn only_the_steps_own_fields_are_kept() {
         let d = serde_json::json!({"tour": {"rows": [{"label": "x", "fields": [{"name": "obproject", "hint": "Folder", "secret": false, "value": "/a"}]}, {"label": "y"}]}});

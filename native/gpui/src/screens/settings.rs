@@ -85,6 +85,17 @@ pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub 
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
 const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
+/// How the dialog fits a window of `w` x `h` px: the margin around it, the page list's width, and whether a row's controls go under its words
+/// (a narrow page has no room beside them). The page list and the rows each scroll on their own, so nothing is out of reach on a short window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fit { pub pad: f32, pub nav: f32, pub stack: bool }
+pub fn fit(w: f32, h: f32) -> Fit {
+    let pad = if w < 900. || h < 640. { 8. } else { 24. };
+    let dialog = (w - 2. * pad).min(1040.);
+    let nav = if dialog < 640. { 150. } else if dialog < 860. { 180. } else { 220. };
+    // the rows' own width (less their 24 px margins) below what a label and the widest controls (up to 430 px) need side by side
+    Fit { pad, nav, stack: dialog - nav - 48. < 620. }
+}
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
     match page { "appearance" => "sun", "threads" => "message-square", "agents" => "cpu", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
@@ -275,7 +286,7 @@ pub fn structure(settings: &Value) -> String {
 const CHIPS_PER_LINE: usize = 6;
 /// A hub row as a dialog row: label and muted note on the left, the controls on the right, a hairline under it. A row that is only a label is a
 /// section heading; a label and a note with nothing to press or type is a paragraph.
-pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize) -> AnyElement {
+pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize, stack: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let controls = !r.buttons.is_empty() || r.fields.iter().any(|f| fields.contains_key(&f.name)) || !r.qr.is_empty();
     if !controls && r.note.is_empty() {
@@ -284,7 +295,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let mut left = div().flex().flex_col().gap_1().flex_1().min_w_0();
     if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(r.label.clone())); }
     if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(r.note.clone())); }
-    let mut right = div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(430.));
+    let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(430.)) };
     for f in &r.fields {
         if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(260.)).px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
     }
@@ -292,7 +303,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     if !r.buttons.is_empty() {
         // chips in lines of at most CHIPS_PER_LINE (a wrapping flex row does not grow its parent's height in gpui, and the next row would be drawn over it)
         for (line, chunk) in r.buttons.chunks(CHIPS_PER_LINE).enumerate() {
-            right = right.child(div().flex().justify_end().gap_1().children(chunk.iter().enumerate().map(|(k, b)| {
+            right = right.child(div().flex().when(!stack, |d| d.justify_end()).gap_1().children(chunk.iter().enumerate().map(|(k, b)| {
                 let j = line * CHIPS_PER_LINE + k; let b2 = b.clone();
                 let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer();
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
@@ -300,7 +311,8 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
             }).collect::<Vec<_>>()));
         }
     }
-    div().flex().items_center().gap_4().py_3().border_b_1().border_color(c("line")).child(left).child(right).into_any_element()
+    let line = if stack { div().flex().flex_col().gap_2() } else { div().flex().items_center().gap_4() };
+    line.py_3().border_b_1().border_color(c("line")).child(left).child(right).into_any_element()
 }
 
 /// The dialog while the hub has settings open; None when it has not: a title bar with a close ×, the pages on the left (search above, an icon and a
@@ -316,7 +328,7 @@ pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
 /// Whether any settings page is up (the hub's, or this device's and the accounts page, which the hub need not serve).
 pub fn is_open(this: &Backplane) -> bool { this.data["settings"].is_object() || this.screens.settings_ui.open_local }
 
-pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts, fit: Fit) -> Option<AnyElement> {
     let hub_on = settings.is_object();
     if !hub_on && !ui.open_local { return None; }
     let on_acct = ui.accounts;
@@ -326,10 +338,10 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let on_page = hub_on && !on_device && !on_acct && matches!(shown(&rows), Shown::Page);
     let skip = if on_page { 1 } else { 0 };
     let dev_rows = device_rows(local);
-    let mut els: Vec<AnyElement> = if on_acct { super::accounts::page(cx, light, acct) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i)).collect() };
+    let mut els: Vec<AnyElement> = if on_acct { super::accounts::page(cx, light, acct) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() };
     if !on_device && !on_acct && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS - skip)).into_any_element()); }
     // the left nav
-    let mut nav = div().flex().flex_col().gap(px(2.)).p_3().w(px(220.)).flex_shrink_0().border_r_1().border_color(c("line"));
+    let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
     if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
     {
         let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
@@ -362,10 +374,10 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             .child(div().id("settings-close").p_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise"))).child(crate::art::icon("x", 16., c("dim")))
                 .on_click(cx.listener(|this, _, _, cx| close(this, cx)))))
         .child(div().flex().flex_1().min_h_0().child(nav)
-            .child(div().id("settings-rows").flex_1().min_w_0().overflow_y_scroll().px_6().py_3().flex().flex_col()
+            .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().px_6().py_3().flex().flex_col()
                 .child(div().pb_1().text_size(px(15.)).font_weight(FontWeight::BOLD).child(title))
                 .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device { "accent" } else { "dim" })).child(if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." })).children(els)));
-    Some(div().id("settings").absolute().inset_0().occlude().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p_6().child(dialog).into_any_element())
+    Some(div().id("settings").absolute().inset_0().occlude().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p(px(fit.pad)).child(dialog).into_any_element())
 }
 
 /// The rows of the "This device" page: what only this computer decides. Every button is `local:<name>` with a value; none reaches the hub.
@@ -399,6 +411,12 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_dialog_fits_a_small_window() {
+        assert_eq!(fit(1400., 900.), Fit { pad: 24., nav: 220., stack: false }, "a desktop window: side by side");
+        let f = fit(1024., 600.); assert_eq!(f.pad, 8., "a short window keeps its height for the rows"); assert!(!f.stack);
+        let f = fit(800., 600.); assert_eq!((f.nav, f.stack), (180., true), "a narrow one stacks the controls under the words");
+        let f = fit(600., 500.); assert_eq!(f.nav, 150.); assert!(f.stack); assert!(600. - 2. * f.pad - f.nav - 48. > 300., "the rows keep room to read");
+    }
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
     #[test] fn the_device_page_lists_the_drawing_pads_keys_and_no_longer_says_they_are_missing() {
