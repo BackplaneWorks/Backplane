@@ -87,8 +87,8 @@ and an approval:
    an answer is a refusal. B polls `POST /bots/pair/poll` and receives its invite once.
 4. Both hubs record the link as made by an approved pairing (`peer.own.<id>` = `approved`). That, or the person pressing Mine
    on an existing link (`owner`), is what `PeerTable::verified` means: thread sharing, `/far/rpc` forwarding and owner mail rest
-   on it. Links made before this (set `pair` or `tailnet`) and pasted invites keep working and show as Unpaired until marked Mine
-   or paired again with a code.
+   on it. Links made before this (set `pair` or `tailnet`) stay trusted, so nothing already linked breaks; nothing writes those
+   values any more. A pasted invite links but shows as Unpaired until marked Mine or paired again with a code.
 
 A hub never announces a loopback address (127.x, localhost, [::1]) to a hub that is not on loopback: B refuses to ask, and A
 refuses a request or a link that names one. Start the hub with Tailscale on, or set `BACKPLANE_URL`.

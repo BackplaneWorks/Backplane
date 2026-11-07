@@ -152,25 +152,30 @@ fn clocked(n: &Node, host: &str, t: Arc<AtomicU64>) -> Peering {
     assert_eq!(r.code, 404);
 }
 
-#[tokio::test] async fn pair_links_made_before_codes_work_but_are_unpaired() {
+#[tokio::test] async fn pair_links_made_before_codes_stay_trusted_and_an_unvouched_one_is_unpaired() {
     let a = node("ua", false).await;
-    a.hub.commit_many(&[json!({"$":"PeerSet","id":"p0123456789abcdef","name":"old","url":"http://100.64.0.2:3787","revoked":false,"at":1}), json!({"$":"SettingSet","key":"peer.own.p0123456789abcdef","value":"pair","at":1})]).await.unwrap();
+    let (old, pasted) = ("p0123456789abcdef", "pfedcba9876543210");
+    a.hub.commit_many(&[json!({"$":"PeerSet","id":old,"name":"old","url":"http://100.64.0.2:3787","revoked":false,"at":1}), json!({"$":"SettingSet","key":format!("peer.own.{old}"),"value":"pair","at":1}),
+        json!({"$":"PeerSet","id":pasted,"name":"pasted","url":"http://100.64.0.3:3787","revoked":false,"at":1})]).await.unwrap();
     settle().await;
-    assert_eq!(live(&a).len(), 1, "kept");
-    assert!(!a.p.table.with(|p| p.verified("p0123456789abcdef")), "but not trusted");
+    assert_eq!(live(&a).len(), 2, "both kept");
+    assert!(a.p.table.with(|p| p.verified(old)), "a link made before pairing needed a code stays trusted (the person's decision)");
+    assert!(!a.p.table.with(|p| p.verified(pasted)), "a pasted invite nobody vouched for is not");
     let rows = crate::net::machinespage::rows(&a.p.page_data(), &|_| String::new());
     let r = rows.iter().find(|r| r["label"] == "old").unwrap();
-    assert!(r["note"].as_str().unwrap().contains("Unpaired") && r["buttons"][0]["action"] == "machine-mine" && r["buttons"][1]["action"] == "machine-remove");
+    assert!(r["note"].as_str().unwrap().ends_with("Paired"), "{r}");
+    let r = rows.iter().find(|r| r["label"] == "pasted").unwrap();
+    assert!(r["note"].as_str().unwrap().contains("Unpaired") && r["buttons"][0]["action"] == "machine-mine" && r["buttons"][1]["action"] == "machine-remove", "{r}");
     let p = crate::net::peerrpc::PeerRpc(a.p.clone());
     use crate::api::{Caller, RpcHandler};
     let c = Caller { gen: String::new(), client: 1 };
-    let ok = p.call(&a.hub, &c, &json!(1), "machines.page.act", &json!({"action": "machine-mine", "value": "p0123456789abcdef"})).await.remove(0);
+    let ok = p.call(&a.hub, &c, &json!(1), "machines.page.act", &json!({"action": "machine-mine", "value": pasted})).await.remove(0);
     assert_eq!(ok["ok"], true, "{ok}"); settle().await;
-    assert!(a.p.table.with(|p| p.verified("p0123456789abcdef")), "Mine confirms it");
+    assert!(a.p.table.with(|p| p.verified(pasted)), "Mine confirms it");
     let page = p.call(&a.hub, &c, &json!(2), "machines.page", &json!({})).await.remove(0);
-    assert!(page["rows"].as_array().unwrap().iter().any(|r| r["label"] == "old" && r["note"].as_str().unwrap().ends_with("Paired")));
-    let gone = p.call(&a.hub, &c, &json!(3), "machines.page.act", &json!({"action": "machine-remove", "value": "p0123456789abcdef"})).await.remove(0);
-    assert_eq!(gone["ok"], true); settle().await; assert!(live(&a).is_empty());
+    assert!(page["rows"].as_array().unwrap().iter().any(|r| r["label"] == "pasted" && r["note"].as_str().unwrap().ends_with("Paired")));
+    let gone = p.call(&a.hub, &c, &json!(3), "machines.page.act", &json!({"action": "machine-remove", "value": pasted})).await.remove(0);
+    assert_eq!(gone["ok"], true); settle().await; assert_eq!(live(&a).len(), 1);
 }
 
 #[tokio::test] async fn pair_the_cli_door_needs_the_hubs_token_and_makes_codes() {
