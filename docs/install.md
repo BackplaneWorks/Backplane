@@ -4,14 +4,14 @@
 
 ```sh
 curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
-backplane
+backplane-app
 ```
 
-x64 and arm64. It installs into `~/.local/share/backplane`, adds Backplane to your applications menu (`BACKPLANE_NO_DESKTOP=1` skips that) and keeps itself up to date (`BACKPLANE_NO_UPDATE=1` turns that off). Add `~/.local/bin` to your `PATH` if asked. Alternatives from the [release page](https://github.com/BackplaneWorks/Backplane/releases/latest): a `.deb` (`sudo apt install ./backplane_0.14.0_amd64.deb`, or `_arm64.deb`) or the AppImage. `backplane --headless` runs without a window.
+x64 and arm64. It lays the release out for the guard (docs/deploy.md): the build in `~/.local/share/backplane/builds/<tag>/`, `CURRENT` naming the one that runs, and the guard at `~/.local/share/backplane/backplane`, linked as `backplane` in `~/.local/bin` beside `backplane-app` (the desktop app). It adds Backplane to your applications menu (`BACKPLANE_NO_DESKTOP=1` skips that). The desktop app starts its home's hub under the guard, which keeps it up to date from signed releases, takes each new build on probation and goes back when one fails (`backplane hub status`, `restart`, `rollback`). `BACKPLANE_NO_DESKTOP_APP=1` installs the hub alone and starts the guard at once (home `BACKPLANE_HOME`, default `~/.backplane/hub`; port `BACKPLANE_PORT`, default the first free from 3800); `BACKPLANE_START=1` starts it with the desktop app too. Run the installer again while the guard runs and it hands the new build to the guard, on probation. Add `~/.local/bin` to your `PATH` if asked.
 
 ## macOS (Apple silicon)
 
-Run the install.sh one-liner above, or download `backplane-v0.14.0-darwin-arm64.tar.gz`, extract it and move `Backplane.app` to Applications. `BACKPLANE_NO_DESKTOP_APP=1` installs only the hub.
+Run the install.sh one-liner above: the same layout, with the default home in `~/Library/Application Support/Backplane/hub`. `BACKPLANE_NO_DESKTOP_APP=1` installs only the hub.
 
 **macOS builds are not notarized yet** (notarization will follow once an Apple Developer ID exists). If macOS refuses to open the downloaded app, once only: open it from Finder with right-click (or Control-click) → Open → Open; or on macOS 15+, try to open it, then System Settings → Privacy & Security → "Open Anyway"; or run `xattr -dr com.apple.quarantine /Applications/Backplane.app`. The installer checks the release checksum and signatures, and clears quarantine only on the payload it downloaded.
 
@@ -36,19 +36,18 @@ The hub preserves the existing `<home>/token` file byte for byte, including a sy
 
 A missing token is created exclusively at mode 0600, without requiring hard links. An interrupted creation keeps `token.backplane-creating` and refuses startup. Preserve both files and recover the original credential before resolving that marker; do not remove an existing token to silence the error. The normal home lock serializes startup. Filesystems must support exclusive creation and file flushing; Unix directory flushing is checked too. Windows power-loss durability, native ACL behavior and network filesystem guarantees require platform qualification.
 
-To uninstall what install.sh put in place, quit Backplane, then:
+To uninstall what install.sh put in place, stop the guard (`backplane hub stop`), then:
 
 For a custom installation, substitute your `BACKPLANE_PREFIX`,
 `BACKPLANE_BIN` and `XDG_DATA_HOME` paths in the commands below.
 
 ```sh
 rm -rf ~/.local/share/backplane
-rm -f ~/.local/bin/backplane ~/.local/bin/backplane-serve
+rm -f ~/.local/bin/backplane ~/.local/bin/backplane-app
 rm -f ~/.local/share/applications/backplane.desktop \
-  ~/.local/share/icons/hicolor/scalable/apps/backplane-desktop.svg \
-  ~/.local/share/icons/hicolor/256x256/apps/backplane-desktop.png
+  ~/.local/share/icons/hicolor/scalable/apps/backplane-desktop.svg
 ```
 
-Your threads, settings and keys stay in `~/.backplane-bend` and the model cache in `~/.cache/backplane-bend`; remove them too to start over. A package install (`.deb`, AUR) uninstalls through its package manager.
+Your threads, settings and keys stay in the home (`~/.backplane/hub`, or `~/Library/Application Support/Backplane/hub` on macOS); remove it too to start over. A package install (`.deb`, AUR) uninstalls through its package manager.
 
 Nightly builds of `main` are prereleases on the [Releases](https://github.com/BackplaneWorks/Backplane/releases) page, each with its own installer: `curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/download/<tag>/install.sh | sh`.

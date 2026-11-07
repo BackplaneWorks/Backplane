@@ -1,17 +1,20 @@
 #!/bin/sh
 # Installs Backplane: curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 #
-# The release fills in the version and the sha256 of each archive
-# (scripts/release-classic.sh), so this script vouches for what it downloads.
-# It unpacks the hub, its web client and the `backplane` launcher into
-# $BACKPLANE_PREFIX (~/.local/share/backplane), the desktop app into its
-# desktop/ folder (BACKPLANE_NO_DESKTOP_APP=1 skips it: a hub-only install),
-# and links the commands into ~/.local/bin. No sudo, no shell files edited.
-# Terminal downloads show a progress bar; --quiet or BACKPLANE_QUIET=1 uses
-# plain step results, as does NO_COLOR. Example: curl ... | sh -s -- --quiet.
+# The release fills in the version and the sha256 of each archive (release.yml, from deploy/install.sh.in), so this script vouches for what it
+# downloads. It lays the release out the way the guard runs and updates it (docs/deploy.md):
+#   $BACKPLANE_PREFIX (~/.local/share/backplane)/builds/<tag>/   the unpacked release: backplane-hub, backplane-gpui, backplane (the guard), assets
+#   $BACKPLANE_PREFIX/CURRENT                                    the build that runs
+#   $BACKPLANE_PREFIX/backplane                                  the guard, outside any build so an update never replaces the program running it
+# and links `backplane` (the guard's commands: backplane hub status|restart|rollback...) and `backplane-app` (the desktop app of CURRENT) into
+# ~/.local/bin. The desktop app starts its home's hub under the guard. With no desktop app (a server), or with BACKPLANE_START=1, this starts the guard
+# itself: home $BACKPLANE_HOME (~/.backplane/hub), port $BACKPLANE_PORT (the first free from 3800). Run again on a machine whose guard is running,
+# it hands the new build to that guard, which runs it on probation and goes back if it fails. No sudo, no shell files edited.
+# BACKPLANE_ARCHIVE=<file> installs that archive (still checked against its sha256) instead of downloading it.
+# Terminal downloads show a progress bar; --quiet or BACKPLANE_QUIET=1 uses plain step results, as does NO_COLOR. Example: curl ... | sh -s -- --quiet.
 set -eu
 
-REPO="BackplaneWorks/Backplane"
+REPO="@REPO@"
 VER="@VERSION@"
 SHA_LINUX_X64="@SHA_LINUX_X64@"
 SHA_LINUX_ARM64="@SHA_LINUX_ARM64@"
@@ -85,8 +88,6 @@ bp_extract() {
 # Progress helpers end.
 
 bp_begin 'Detect platform'
-
-
 case $(uname -s) in
   Linux) os=linux ;;
   Darwin) os=darwin ;;
@@ -104,61 +105,54 @@ case $os-$arch in
   *) fail "no build for $os-$arch yet" ;;
 esac
 [ -n "$sum" ] || fail "this release has no build for $os-$arch"
+case $VER in v[0-9]*) ;; *) fail "this installer was not filled in by a release" ;; esac
 bp_done
 
 prefix=${BACKPLANE_PREFIX:-$HOME/.local/share/backplane}
 bin=${BACKPLANE_BIN:-$HOME/.local/bin}
-# the hub, its web client, the launcher and the desktop app, in one archive
-# checked before anything is replaced
-name="backplane-$VER-classic-$os-$arch.tar.gz"
-mkdir -p "$prefix" "$bin"
-tmp=$(mktemp -d)
+name="backplane-$VER-$os-$arch.tar.gz"
+mkdir -p "$prefix/builds" "$bin"
+tmp=$(mktemp -d "$prefix/builds/.install.XXXXXX")   # beside the builds, on the same disk: the last step is a rename
 trap bp_cleanup 0
 trap 'exit 130' 2 15
-fetch() {
-  url="https://github.com/$REPO/releases/download/$VER/$1"
-  echo "downloading $url"
-  if [ "$bp_fancy" = 1 ]; then
-    curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/$1" "$url" || fail "download failed: $url"
-  else
-    curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$1" "$url" || fail "download failed: $url"
-  fi
-  if command -v sha256sum >/dev/null 2>&1; then
-    echo "$2  $tmp/$1" | sha256sum -c - >/dev/null 2>&1 || fail "$1 does not match its sha256; not installed"
-  else
-    echo "$2  $tmp/$1" | shasum -a 256 -c - >/dev/null 2>&1 || fail "$1 does not match its sha256; not installed"
-  fi
+sha_ok() { # file sum
+  if command -v sha256sum >/dev/null 2>&1; then echo "$2  $1" | sha256sum -c - >/dev/null 2>&1; else echo "$2  $1" | shasum -a 256 -c - >/dev/null 2>&1; fi
 }
 bp_begin 'Download and verify release'
-fetch "$name" "$sum"
-bp_done
-bp_begin 'Unpack release'
-bp_extract tar -xzf "$tmp/$name" -C "$tmp" || fail "could not unpack $name; not installed"
-app=
-if [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ]; then
-  [ -d "$tmp/backplane-$os-$arch/desktop" ] || fail "this release has no desktop app for $os-$arch (BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone)"
-  app=1
+if [ -n "${BACKPLANE_ARCHIVE:-}" ]; then
+  cp "$BACKPLANE_ARCHIVE" "$tmp/$name" || fail "cannot read $BACKPLANE_ARCHIVE"
+else
+  url="https://github.com/$REPO/releases/download/$VER/$name"
+  echo "downloading $url"
+  if [ "$bp_fancy" = 1 ]; then curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/$name" "$url" || fail "download failed: $url"
+  else curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$name" "$url" || fail "download failed: $url"; fi
 fi
+sha_ok "$tmp/$name" "$sum" || fail "$name does not match its sha256; not installed"
 bp_done
-bp_begin 'Install payload'
-BACKPLANE_INSTALL_DESKTOP=$app sh "$tmp/backplane-$os-$arch/install-release.sh" "$tmp/backplane-$os-$arch" "$prefix" || fail "payload installation failed"
+
+bp_begin 'Unpack release'
+mkdir "$tmp/build"
+bp_extract tar -xzf "$tmp/$name" -C "$tmp/build" --no-same-owner || fail "could not unpack $name; not installed"
+for f in backplane-hub backplane; do [ -x "$tmp/build/$f" ] || fail "this release has no $f for $os-$arch; not installed"; done
+if [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ] && [ ! -x "$tmp/build/backplane-gpui" ]; then fail "this release has no desktop app for $os-$arch (BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone)"; fi
 bp_done
-bp_begin 'Configure commands and desktop entry'
+
+bp_begin 'Install'
+# a build is only ever made whole, by one rename; one already there is the same release (its sha256 was checked when it came)
+[ -d "$prefix/builds/$VER" ] || mv "$tmp/build" "$prefix/builds/$VER"
+# the guard: replaced beside and renamed over, so a running guard keeps the program it started with
+cp "$prefix/builds/$VER/backplane" "$tmp/guard" && chmod 755 "$tmp/guard" && mv -f "$tmp/guard" "$prefix/backplane"
 ln -sf "$prefix/backplane" "$bin/backplane"
-ln -sf "$prefix/backplane-serve" "$bin/backplane-serve"
-# the applications menu entry and its icon (BACKPLANE_NO_DESKTOP=1 skips
-# them); Exec names the link itself, since a desktop session's PATH often
-# lacks ~/.local/bin
+printf '#!/bin/sh\n# the desktop app of the build the guard runs now\nP=%s\nexec "$P/builds/$(cat "$P/CURRENT")/backplane-gpui" "$@"\n' "'$(printf '%s' "$prefix" | sed "s/'/'\\\\''/g")'" > "$tmp/app"
+chmod 755 "$tmp/app" && mv -f "$tmp/app" "$bin/backplane-app"
+# Linux: the applications menu entry and its icon (BACKPLANE_NO_DESKTOP=1 skips them). Exec names the launcher by its full path, since a desktop
+# session's PATH often lacks ~/.local/bin; the path is quoted for the desktop file (escapes, then %), never handed to a shell as code.
 menu=
-pkg="$tmp/backplane-$os-$arch"
-if [ "$os" = linux ] && [ -z "${BACKPLANE_NO_DESKTOP:-}" ] && [ -f "$pkg/backplane.desktop" ]; then
+icons="$prefix/builds/$VER/assets/icon"
+if [ "$os" = linux ] && [ -z "${BACKPLANE_NO_DESKTOP:-}" ] && [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ]; then
   data=${XDG_DATA_HOME:-$HOME/.local/share}
-  mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps" "$data/icons/hicolor/256x256/apps"
-  # Exec has desktop-string escaping followed by quoting and percent expansion.
-  # Pass the path as an argument to a fixed exec command, never as shell code
-  # or a sed replacement. GIO checks the command before expanding literal %%,
-  # so a percent-bearing installation path cannot be the first Exec token.
-  BACKPLANE_DESKTOP_EXEC="$bin/backplane" awk '
+  mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps"
+  BACKPLANE_DESKTOP_EXEC="$bin/backplane-app" awk '
     function quote(path, quoted, i, c) {
       quoted = "\""
       for (i = 1; i <= length(path); i++) {
@@ -173,36 +167,42 @@ if [ "$os" = linux ] && [ -z "${BACKPLANE_NO_DESKTOP:-}" ] && [ -f "$pkg/backpla
       }
       return quoted "\""
     }
-    /^Exec=/ {
+    BEGIN {
+      print "[Desktop Entry]"; print "Type=Application"; print "Name=Backplane"; print "Comment=Agents for electronics and mechanical design"
+      print "Icon=backplane-desktop"; print "Terminal=false"; print "Categories=Development;Electronics;"
       print "Exec=/bin/sh -c " quote("exec \"$0\"") " " quote(ENVIRON["BACKPLANE_DESKTOP_EXEC"])
-      next
-    }
-    { print }
-  ' "$pkg/backplane.desktop" > "$data/applications/backplane.desktop"
-  [ -f "$pkg/icon/backplane-desktop.svg" ] && cp -f "$pkg/icon/backplane-desktop.svg" "$data/icons/hicolor/scalable/apps/"
-  [ -f "$pkg/icon/backplane-desktop-256.png" ] && cp -f "$pkg/icon/backplane-desktop-256.png" "$data/icons/hicolor/256x256/apps/backplane-desktop.png"
+    }' > "$data/applications/backplane.desktop"
+  [ -f "$icons/backplane-desktop.svg" ] && cp -f "$icons/backplane-desktop.svg" "$data/icons/hicolor/scalable/apps/"
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$data/applications" >/dev/null 2>&1 || true
-  command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$data/icons/hicolor" >/dev/null 2>&1 || true
   menu=1
 fi
-# Linux: the desktop app's sandbox needs user namespaces or a root-owned
-# chrome-sandbox (Ubuntu 23.10+ restricts namespaces); say how, never skip it
-sandbox_fix=
-if [ "$os" = linux ] && [ -n "$app" ]; then
-  helper="$prefix/desktop/runtime/chrome-sandbox"
-  if ! { command -v unshare >/dev/null 2>&1 && unshare -Ur true >/dev/null 2>&1; } \
-     && [ "$(stat -c '%u:%g:%a' "$helper" 2>/dev/null)" != "0:0:4755" ]; then
-    q=$(printf '%s' "$helper" | sed "s/'/'\\\\''/g")
-    sandbox_fix="sudo chown root:root '$q' && sudo chmod 4755 '$q'"
-  fi
+bp_done
+
+bp_begin 'Start'
+home=${BACKPLANE_HOME:-}
+if [ -z "$home" ]; then case $os in darwin) home="$HOME/Library/Application Support/Backplane/hub" ;; *) home="$HOME/.backplane/hub" ;; esac; fi
+running=
+if [ -f "$home/guard/lock" ] && ! "$prefix/backplane" hub status --home "$home" 2>/dev/null | grep -q 'No guard is running'; then running=1; fi
+how=
+if [ -n "$running" ]; then
+  # the guard that runs this home takes the new build on probation: one failure and it goes back (docs/deploy.md)
+  if [ "$(cat "$prefix/CURRENT" 2>/dev/null)" = "$VER" ]; then how="Backplane $VER already runs in $home."
+  else said=$("$prefix/backplane" hub update "$VER" --home "$home" 2>&1) || fail "the guard of $home did not take $VER: $(printf '%s' "$said" | tail -1)"
+    how="The guard of $home is moving to $VER; if it fails its health check, it goes back."; fi
+else
+  printf '%s\n' "$VER" > "$tmp/current" && mv -f "$tmp/current" "$prefix/CURRENT"
+  if [ -n "${BACKPLANE_START:-}" ] || [ -n "${BACKPLANE_NO_DESKTOP_APP:-}" ]; then
+    port=${BACKPLANE_PORT:-}
+    if [ -z "$port" ]; then p=3800; while [ $p -le 3899 ]; do curl -s -m1 -o /dev/null "http://127.0.0.1:$p/" || { port=$p; break; }; p=$((p+1)); done; fi
+    [ -n "$port" ] || fail "no free port between 3800 and 3899 (set BACKPLANE_PORT)"
+    mkdir -p "$home"
+    nohup "$prefix/backplane" hub run --home "$home" --port "$port" --builds "$prefix" --default --log "$home/hub.log" -- --foreground ${BACKPLANE_HUB_ARGS:-} >> "$home/guard.log" 2>&1 < /dev/null &
+    how="The guard runs the hub of $home on port $port (backplane hub status)."
+  else how="Run: backplane-app (it starts its hub under the guard)."; fi
 fi
 bp_done
 echo
-echo "  Backplane $VER is installed. Run: backplane"
-if [ -n "$sandbox_fix" ]; then
-  echo "  The desktop app needs its sandbox set up once on this system; run:"
-  echo "    $sandbox_fix"
-fi
+echo "  Backplane $VER is installed. $how"
 [ -n "$menu" ] && echo "  It is also in your applications menu."
 case ":$PATH:" in
   *":$bin:"*) ;;

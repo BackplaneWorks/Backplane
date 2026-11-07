@@ -4,6 +4,17 @@ A hub moves to a new build in one way only: its updater (`native/host/src/update
 
 Dev machines do not use this: `scripts/dev-build.sh` builds `native/host` and `native/gpui` and `scripts/dev-cut.sh` publishes them; `scripts/fresh.sh` sets `BACKPLANE_NO_UPDATE=1`.
 
+## Installing: the guard from the first start
+
+A release archive (`backplane-<tag>-<target>.tar.gz`) holds `backplane-hub`, `backplane-gpui`, `backplane` (the guard), `assets/` and `COMMIT`; `release.yml` builds the guard for every target and fails the job when it is missing. `install.sh` (`deploy/install.sh.in`, filled in by `release.yml` with the version and each archive's sha256, published beside the archives) checks the archive and lays it out as the guard expects, under `BACKPLANE_PREFIX` (`~/.local/share/backplane`):
+
+- `builds/<tag>/`: the unpacked release, made by one rename;
+- `CURRENT`: the build that runs;
+- `backplane`: the guard, copied out of the build, so an update never replaces the program running it; linked as `~/.local/bin/backplane`;
+- `~/.local/bin/backplane-app`: the desktop app of `CURRENT`.
+
+Nothing starts the hub directly. The desktop app finds this layout around itself (`launch::guarded_install`) and starts its home's hub with `backplane hub run --home <home> --port <port> --builds <prefix> --default`; a build tree with no such layout still starts `backplane-hub` beside it. With no desktop app (`BACKPLANE_NO_DESKTOP_APP=1`), or with `BACKPLANE_START=1`, the installer starts the guard itself for `BACKPLANE_HOME` on `BACKPLANE_PORT`. Run again while that home's guard runs, the installer asks it `backplane hub update <tag>`: the new build on probation.
+
 ## Who updates itself
 
 Only a hub the guard runs from a builds folder (`BACKPLANE_BUILDS`: `builds/<tag>/`, `CURRENT`, `BAD`, `.pins/`). Otherwise the updater says so and does nothing:

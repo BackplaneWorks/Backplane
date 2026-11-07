@@ -71,6 +71,16 @@ pub fn hub_bin() -> Result<PathBuf> {
     if p.is_file() { Ok(p) } else { bail!("The hub program is missing from {}. Install Backplane again.", me.parent().unwrap().display()) }
 }
 
+/// An install laid out for the guard (deploy/install.sh.in): this program in `<prefix>/builds/<tag>/`, `<prefix>/CURRENT`, the guard at `<prefix>/backplane`.
+/// Then a home's hub is started under the guard, which updates it and brings it back; None runs the hub beside this program, as a build tree does.
+pub fn guarded_install(me: &Path) -> Option<(PathBuf, PathBuf)> {
+    let tag_dir = me.parent()?; let builds = tag_dir.parent()?;
+    if builds.file_name()? != "builds" { return None }
+    let prefix = builds.parent()?;
+    let guard = prefix.join(if cfg!(windows) { "backplane.exe" } else { "backplane" });
+    (prefix.join("CURRENT").is_file() && guard.is_file()).then(|| (guard, prefix.to_path_buf()))
+}
+
 fn detached(cmd: &mut std::process::Command) {
     #[cfg(unix)] { use std::os::unix::process::CommandExt; cmd.process_group(0); }
 }
@@ -82,13 +92,20 @@ pub fn ensure_hub(home: &Path) -> Result<(String, PathBuf)> {
     std::fs::create_dir_all(home).with_context(|| format!("Backplane could not make {}", home.display()))?;
     let (lock, token) = (home.join("hub.lock"), home.join("token"));
     if let Some(port) = std::fs::read_to_string(&lock).ok().as_deref().and_then(lock_port) { if answering(port) && token.is_file() { return Ok((format!("http://127.0.0.1:{port}"), token)) } }
-    let bin = hub_bin()?;
+    let me = std::env::current_exe()?;
+    let guarded = guarded_install(&me).filter(|_| std::env::var_os("BACKPLANE_HUB_BIN").is_none());
+    let bin = match &guarded { Some((g, _)) => g.clone(), None => hub_bin()? };
     let want = std::env::var("BACKPLANE_PORT").ok().and_then(|p| p.parse::<u16>().ok());
     let port = want.or_else(|| free_port(PORT_FIRST, PORT_LAST)).context("No free port between 3800 and 3899.")?;
     let log_path = home.join("hub.log");
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
     let mut cmd = std::process::Command::new(&bin);
-    cmd.arg("--home").arg(home).arg("--port").arg(port.to_string()).arg("--host").arg("127.0.0.1").arg("--foreground").stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log);
+    match &guarded {
+        // the guard starts the hub of CURRENT and owns it from here: restarts, updates, rollback (docs/deploy.md)
+        Some((_, prefix)) => { cmd.args(["hub", "run", "--home"]).arg(home).args(["--port", &port.to_string(), "--host", "127.0.0.1", "--builds"]).arg(prefix).arg("--default").args(["--", "--foreground"]); }
+        None => { cmd.arg("--home").arg(home).arg("--port").arg(port.to_string()).arg("--host").arg("127.0.0.1").arg("--foreground"); }
+    }
+    cmd.stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log);
     if std::env::var_os("BACKPLANE_NO_TAILSCALE").is_some() { cmd.arg("--no-tailscale"); }
     detached(&mut cmd);
     let mut child = cmd.spawn().with_context(|| format!("Backplane could not start {}", bin.display()))?;
@@ -140,6 +157,17 @@ pub fn pair(addr: &str, code: &str) -> Result<(String, PathBuf)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// An installed release starts its hub under the guard; a build tree, or an install missing a piece of the layout, starts the hub beside it.
+    #[test] fn an_install_laid_out_for_the_guard_is_found() {
+        let d = std::env::temp_dir().join(format!("bp-launch-guard-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let tag = d.join("builds/v0.16.0"); std::fs::create_dir_all(&tag).unwrap(); let me = tag.join("backplane-gpui");
+        assert_eq!(guarded_install(&me), None, "no CURRENT, no guard");
+        std::fs::write(d.join("CURRENT"), "v0.16.0\n").unwrap(); assert_eq!(guarded_install(&me), None, "no guard");
+        let g = d.join(if cfg!(windows) { "backplane.exe" } else { "backplane" }); std::fs::write(&g, b"x").unwrap();
+        assert_eq!(guarded_install(&me), Some((g, d.clone())));
+        assert_eq!(guarded_install(&d.join("target/release/backplane-gpui")), None, "a build tree");
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn each_system_has_its_own_default_home() {
         assert_eq!(default_home("linux", Path::new("/home/a")), Path::new("/home/a/.backplane/hub"));
         assert_eq!(default_home("macos", Path::new("/Users/a")), Path::new("/Users/a/Library/Application Support/Backplane/hub"));

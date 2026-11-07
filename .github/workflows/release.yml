@@ -46,6 +46,7 @@ jobs:
           workspaces: |
             native/host
             native/gpui
+            native/guard
           shared-key: release-${{ matrix.target }}
       - name: stamp the version
         run: |
@@ -57,7 +58,8 @@ jobs:
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
           (cd native/host && cargo build --release --bin backplane-hub) & a=$!
           (cd native/gpui && cargo build --release) & b=$!
-          wait $a; ra=$?; wait $b; rb=$?; exit $((ra | rb))
+          (cd native/guard && cargo build --release) & g=$!   # the guard: it starts the hub, updates it and brings it back (docs/deploy.md)
+          wait $a; ra=$?; wait $b; rb=$?; wait $g; rg=$?; exit $((ra | rb | rg))
       - name: no test trust in a release
         run: |
           # feature e2e-trust (test/update's feed) trusts a key from the environment; its code carries this mark, so a release that has it is refused
@@ -68,7 +70,9 @@ jobs:
           set -e
           d=pkg; mkdir -p $d
           cp native/host/target/release/backplane-hub native/gpui/target/release/backplane-gpui $d/
-          [ ! -x native/guard/target/release/backplane ] || cp native/guard/target/release/backplane $d/
+          # the guard goes in every archive: an install without it can neither update nor recover (deploy/install.sh.in refuses one)
+          [ -x native/guard/target/release/backplane ] || { echo "::error::no guard (native/guard) for ${{ matrix.target }}"; exit 1; }
+          cp native/guard/target/release/backplane $d/
           (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser") || echo "no browser helper built"
           cp -r assets $d/assets
           git rev-parse HEAD > $d/COMMIT
@@ -87,6 +91,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy
       - uses: actions/download-artifact@v4
         with:
           pattern: archive-*
@@ -104,6 +111,15 @@ jobs:
               assets[t] = {"name": f, "sha256": hashlib.sha256(open(f, "rb").read()).hexdigest(), "size": os.path.getsize(f)}
           open("manifest.json", "w").write(json.dumps({"schema": 1, "tag": tag, "version": v, "channel": ch, "commit": sha, "assets": assets}, indent=1))
           PY
+      - name: installer
+        run: |
+          # deploy/install.sh.in with this release's version and each archive's sha256: the script vouches for what it downloads
+          set -e
+          sum() { f=backplane-$TAG-$1.tar.gz; [ -f "$f" ] && sha256sum "$f" | cut -d' ' -f1 || true; }
+          sed -e "s|@REPO@|${{ github.repository }}|" -e "s|@VERSION@|$TAG|" -e "s|@SHA_LINUX_X64@|$(sum linux-x64)|" \
+              -e "s|@SHA_LINUX_ARM64@|$(sum linux-arm64)|" -e "s|@SHA_DARWIN_ARM64@|$(sum darwin-arm64)|" deploy/install.sh.in > install.sh
+          if grep -q '@[A-Z_0-9]*@' install.sh; then echo "::error::install.sh still has a placeholder"; exit 1; fi
+          sh -n install.sh
       - name: sign
         id: sign
         env:
@@ -120,6 +136,7 @@ jobs:
           name: release-dry-run
           path: |
             backplane-*.tar.gz
+            install.sh
             manifest.json
             manifest.json.sig
             manifest.json.keyid
@@ -131,7 +148,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           pre=; case "$TAG" in *-*) pre=--prerelease;; esac
-          gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz
+          gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz install.sh
           # all three signed files, or the updater counts the release as half published and never offers it (update/run.rs SIGNED)
           gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
           gh release edit "$TAG" --draft=false
