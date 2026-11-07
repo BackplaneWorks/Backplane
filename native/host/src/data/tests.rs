@@ -34,9 +34,11 @@ const LOG: &str = r#"{"$":"ProjectCreated","id":"p1","title":"alpha","root":"/tm
 {"$":"AskOpened","id":"q1","thread":"t1","kind":"approval","tool":"Bash","detail":"rm -rf x","options":"","at":1700000014}
 {"$":"ThreadArchived","id":"t3","archived":true,"at":1700000031}
 "#;
-async fn up(name: &str) -> (Arc<Hub>, u16) {
+async fn up(name: &str) -> (Arc<Hub>, u16) { up_with(name, "").await }
+/// `up` with more of the log after LOG's lines.
+async fn up_with(name: &str, more: &str) -> (Arc<Hub>, u16) {
     let dir = std::env::temp_dir().join(format!("bp-data-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("token"), "tok").unwrap(); std::fs::write(dir.join("events.jsonl"), LOG).unwrap();
+    std::fs::write(dir.join("token"), "tok").unwrap(); std::fs::write(dir.join("events.jsonl"), format!("{LOG}{more}")).unwrap();
     let cfg = Cfg { home: dir, version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
     let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     hub.register_rpc(Arc::new(Fake(hub.clone())));
@@ -59,10 +61,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -245,6 +247,34 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!(h.store.len(), n);
 }
 
+// Conversation history (feature history): the old Scratch chats, found by search and opened as they were; nothing starts there
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn scratch_chats_are_history_found_by_search_and_never_a_place_to_start() {
+    let chat = |id: &str, title: &str, at: u64| format!("{{\"$\":\"ThreadCreated\",\"id\":\"{id}\",\"project\":\"scratch\",\"title\":\"{title}\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":{at}}}\n");
+    let more = format!("{{\"$\":\"ProjectCreated\",\"id\":\"scratch\",\"title\":\"Scratch\",\"root\":\"/tmp/scratch\",\"at\":1700000002}}\n{}{}{{\"$\":\"MessagePosted\",\"thread\":\"s1\",\"msg\":\"m9\",\"role\":\"user\",\"text\":\"which crossing\",\"at\":1700000041}}\n",
+        chat("s1", "zebra crossing chat", 1700000040), chat("s2", "old notes", 1700000050));
+    let (_h, port) = up_with("history", &more).await; let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await; assert!(hello["features"].as_array().unwrap().contains(&json!("history")));
+    let ids = |v: &Value| v.as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let r = ask(&mut ws, 1, "projects.list", json!({})).await; assert!(!ids(&r["result"]["projects"]).contains(&"scratch".to_string()), "Scratch is no project to start a thread in: {r}");
+    let r = ask(&mut ws, 2, "threads.list", json!({})).await; let t = ids(&r["result"]["threads"]); assert!(!t.contains(&"s1".into()) && !t.contains(&"s2".into()), "its chats are history, not a project's threads: {t:?}");
+    assert!(r["result"]["threads"].as_array().unwrap().iter().all(|t| t["history"] == false));
+    let r = ask(&mut ws, 3, "history.list", json!({})).await; let h = &r["result"];
+    assert_eq!((ids(&h["threads"]), h["count"].as_u64(), ids(&h["live"]).len()), (vec!["s2".to_string(), "s1".into()], Some(2), 0), "newest first, every chat counted: {h}");
+    assert!(h["threads"].as_array().unwrap().iter().all(|t| t["history"] == true && t["project"] == "scratch")); assert_eq!(h["threads"][1]["preview"], "which crossing");
+    let r = ask(&mut ws, 4, "history.list", json!({"q":"ZEBRA cross"})).await; assert_eq!((ids(&r["result"]["threads"]), r["result"]["count"].as_u64()), (vec!["s1".to_string()], Some(2)), "every word of the search, any case; the count is the group's");
+    assert!(ask(&mut ws, 5, "history.list", json!({"q":"nothing like it"})).await["result"]["threads"].as_array().unwrap().is_empty());
+    let r = ask(&mut ws, 6, "history.list", json!({"limit":1})).await; assert_eq!(ids(&r["result"]["threads"]), ["s2"]); let c = r["result"]["next"].as_str().unwrap().to_string();
+    let r = ask(&mut ws, 7, "history.list", json!({"limit":1,"before":c})).await; assert_eq!(ids(&r["result"]["threads"]), ["s1"]); assert!(r["result"]["next"].is_null());
+    let r = ask(&mut ws, 8, "search", json!({"q":"zebra"})).await; assert_eq!(ids(&r["result"]["threads"]), ["s1"]); assert_eq!(r["result"]["threads"][0]["history"], true, "a found chat says it is history");
+    let r = ask(&mut ws, 9, "search", json!({"q":"scratch"})).await; assert!(ids(&r["result"]["threads"]).is_empty() && ids(&r["result"]["projects"]).is_empty(), "Scratch's name is no project's: {r}");
+    let r = ask(&mut ws, 10, "mentions.list", json!({"q":"scr","kind":"%"})).await; assert!(r["result"]["items"].as_array().unwrap().is_empty());
+    // it opens as it was, read and write
+    let r = ask(&mut ws, 11, "thread.entries", json!({"thread":"s1"})).await; assert_eq!(r["result"]["thread"]["history"], true); assert_eq!(r["result"]["entries"][0]["text"], "which crossing");
+    let n = _h.store.len();
+    let r = ask(&mut ws, 12, "thread.create", json!({"project":"scratch","text":"hi"})).await; assert_eq!(r["error"], super::SCRATCH_CLOSED);
+    assert_eq!(_h.store.len(), n, "nothing was made");
+}
+
 // the phone additions (data/ext.rs)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_additions_search_models_mentions_directory_and_actions() {
     let (_h, port) = up("ext").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
@@ -254,6 +284,7 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 4, "models.list", json!({})).await; assert!(r["result"]["models"]["claude"].as_array().map_or(false, |a| !a.is_empty()), "claude's models are built in");
     let r = ask(&mut ws, 5, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["label"], "First"); assert_eq!(r["result"]["items"][0]["sigil"], ">");
     let r = ask(&mut ws, 6, "mentions.list", json!({"q":"alp","kind":"%"})).await; assert_eq!(r["result"]["items"][0]["id"], "p1");
+    assert_eq!((r["result"]["items"][0]["word"].as_str(), ask(&mut ws, 61, "mentions.list", json!({"q":"sec","kind":">"})).await["result"]["items"][0]["word"].as_str()), (Some("%alpha"), Some(">second")), "the word the desktop's popup puts in the draft, which /give reads");
     let r = ask(&mut ws, 7, "bots.list", json!({})).await; assert_eq!((r["result"]["bots"].as_array().unwrap().len(), r["result"]["rooms"].as_array().unwrap().len()), (0, 0), "no bots lane on this hub: empty, not an error");
     let r = ask(&mut ws, 8, "thread.act", json!({"thread":"t1","action":"pin"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["thread"]["id"], "t1");
     let r = ask(&mut ws, 9, "thread.act", json!({"thread":"t1","action":"explode"})).await; assert_eq!(r["ok"], false);
@@ -351,10 +382,14 @@ impl crate::api::RpcHandler for PushState {
     let note = "[Backplane] The quote is posted in this thread. {\"status\":\"ready\",\"total\":27.2}";
     hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"n1","role":"system","text":note,"at":1700000041})).await.unwrap();
     hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"n2","role":"system","text":"[Backplane] Watched work \"build\" ended: exit 0","at":1700000042})).await.unwrap();
+    // a secret saved (/secret): the agent is told its name; the person posted nothing, so no client shows it as theirs
+    let told = format!("{}{}", crate::settings::secret::handle("gh", true), crate::present::thread::SAVED_NOTE);
+    hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"n4","role":"user","text":told,"at":1700000042})).await.unwrap();
+    hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"n5","role":"user","text":"{\"secret\":\"gh\"} is what I typed","at":1700000042})).await.unwrap();
     let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
     let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t2"})).await; let es = r["result"]["entries"].as_array().unwrap().clone();
     let by = |id: &str| es.iter().find(|e| e["id"] == id).cloned().unwrap_or_else(|| panic!("{id}: {r}"));
-    assert_eq!(by("n1")["agentOnly"], true, "the quote note is the agent's"); assert!(by("n2").get("agentOnly").is_none(), "other notes are the person's too");
+    assert_eq!(by("n1")["agentOnly"], true, "the quote note is the agent's"); assert!(by("n2").get("agentOnly").is_none(), "other notes are the person's too"); assert_eq!(by("n4")["agentOnly"], true, "the saved secret's note is the agent's"); assert!(by("n5").get("agentOnly").is_none(), "the person's own words stay");
     // live: a quote and its note posted while the thread is open
     let sub = ask(&mut ws, 2, "subscribe", json!({"topic":"thread","thread":"t2"})).await["result"]["sub"].as_u64().unwrap();
     hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"q:q_live","role":"assistant","text":"**Your quote: $27.20**\n\n[Buy now · $27.20](order:q_live)","at":1700000043})).await.unwrap();

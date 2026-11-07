@@ -60,7 +60,7 @@ async fn saved(hub: &Arc<Hub>, agents: &Option<Arc<crate::agents::Agents>>, name
         if to.is_empty() { continue }
         let live = { let m = hub.model().await; m.threads.get(to).map_or(false, |t| !t.deleted) };
         if !live { continue }
-        let text = format!("{} The person saved this secret in Backplane's vault. Use it by name with secret_run; you will never see its value.", handle(name, true));
+        let text = format!("{}{}", handle(name, true), crate::present::thread::SAVED_NOTE);
         if let Some(a) = agents { let _ = a.deliver_as("user", to, &format!("t:{to}:sec-{name}-{at}"), &text, None, vec![]).await; }
     }
 }

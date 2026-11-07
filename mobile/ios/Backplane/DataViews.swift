@@ -102,7 +102,7 @@ struct DataThreadsView: View {
             if client.conn != .online { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
                 if client.has("search") {
-                    TextField("Search projects", text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Search projects and threads", text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(.horizontal, 10).frame(height: 36).dbox().accessibilityIdentifier("data.search")
                 } else { Spacer() }
                 Button { addingProject = true } label: { Image(systemName: "plus").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }
@@ -193,6 +193,21 @@ struct DataThreadsView: View {
                             }
                         }
                     }
+                }
+            }
+            // Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
+            if client.history.count > 0 {
+                let open = client.historyOpen
+                Button { client.setHistory(open: !open) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
+                        Text(ThreadGroups.historyTitle(client.history.count).uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(minLength: 0)
+                    }.padding(.leading, 10).frame(height: 40).contentShape(Rectangle())
+                }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history")
+                ForEach(ThreadGroups.history(live: client.history.live, rows: client.history.threads, open: open)) { threadRow($0) }
+                if open && client.history.next != nil {
+                    Button { Task { await client.loadHistory(more: true) } } label: { Text("More").dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
+                        .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history.more")
                 }
             }
             let bots = client.bots.filter { !$0.uber && !$0.thread.isEmpty }
@@ -428,7 +443,7 @@ private struct DataBtwCard: View {
             }
             ScrollView { Text(btw.a).font(.footnote).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 220)
         }
-        .padding(.horizontal).padding(.vertical, 8).background(BackplaneDesign.panel).accessibilityIdentifier("thread.btw")
+        .padding(.horizontal).padding(.vertical, 8).background(BackplaneDesign.panel).accessibilityElement(children: .contain).accessibilityIdentifier("thread.btw")
     }
 }
 
@@ -458,7 +473,7 @@ private struct DataSecretBox: View {
                 if let a = asked { Button("Not needed") { Task { await client.dismissSecret(thread, name: a.name); value = ""; shut() } } }
             }
         }
-        .padding(12).background(BackplaneDesign.panel).accessibilityIdentifier("thread.secret")
+        .padding(12).background(BackplaneDesign.panel).accessibilityElement(children: .contain).accessibilityIdentifier("thread.secret")
     }
 }
 

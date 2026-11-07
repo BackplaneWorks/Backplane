@@ -279,6 +279,15 @@ pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
     Plan { st, o, ix, kids_by, projects:ps, order, older_n }
 }
 
+/// The Scratch chats (Conversation history), newest first, each with whether it wants attention (Legacy.live): the open one, one with an ask or a running turn,
+/// or one still on the Pinned or Active shelf. The sidebar's group and the phones' `history.list` both read this, so they list the same chats.
+pub fn scratch_chats<'a>(st: &'a State, now: u64, selected: &str) -> Vec<(&'a str, &'a Thread, bool)> {
+    let mut all: Vec<(&str, &Thread)> = st.threads.iter().filter(|(i, t)| t.project == SCRATCH && !t.deleted && !t.archived && display_parent(st, i).is_empty() && !st.run_hidden(i)).map(|(i, t)| (i.as_str(), t)).collect();
+    all.sort_by(|a, b| b.1.activity.cmp(&a.1.activity).then(a.0.cmp(b.0)));
+    let wants = |id: &str, t: &Thread| { let until = st.snooze_until.get(id).copied().unwrap_or(0); id == selected || t.pending > 0 || t.turn == Turn::Running || matches!(shelf_at(t, until, now), Shelf::Pinned | Shelf::Active) };
+    all.into_iter().map(|(id, t)| (id, t, wants(id, t))).collect()
+}
+
 impl Plan<'_> {
     /// The sidebar's search on a thread: its title, or any below it in the tree (the row that shows it).
     fn tree_hit(&self, id: &str) -> bool {
@@ -298,12 +307,8 @@ impl Plan<'_> {
     /// `history` is the rest as `{id, title}`, newest first: what the group counts and the palette jumps to. No row starts a thread: only what exists is listed.
     pub fn legacy(&self, open: bool) -> (Vec<Value>, Vec<Value>) {
         let (st, o) = (self.st, self.o);
-        let mut all: Vec<(&str, &Thread)> = st.threads.iter().filter(|(i, t)| t.project == SCRATCH && !t.deleted && !t.archived && display_parent(st, i).is_empty() && !st.run_hidden(i)).map(|(i, t)| (i.as_str(), t)).collect();
-        all.sort_by(|a, b| b.1.activity.cmp(&a.1.activity).then(a.0.cmp(b.0)));
-        let wants = |id: &str, t: &Thread| { let until = st.snooze_until.get(id).copied().unwrap_or(0); id == o.selected || t.pending > 0 || t.turn == Turn::Running || matches!(shelf_at(t, until, o.now), Shelf::Pinned | Shelf::Active) };
         let (mut rows, mut history) = (vec![], vec![]);
-        for (id, t) in all {
-            let live = wants(id, t);
+        for (id, t, live) in scratch_chats(st, o.now, o.selected) {
             if !live { if history.len() < JUMP_MAX { history.push(json!({"id": q(o, id), "title": t.title})); } }
             if !word_hit(&t.title, o.query) || !(live || open) { continue }
             let r = Row { id, t, depth: 0, expanded: false, children: self.kids_by.get(id).map_or(0, |k| k.len()) };

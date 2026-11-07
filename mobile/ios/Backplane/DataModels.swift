@@ -126,12 +126,13 @@ struct DThread: Codable, Equatable, Identifiable, ShelvedThread {
     var preview: String
     var waiting: Int
     var parent: String   // the thread it is a subthread of; "" at the top level
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent }
+    var history: Bool    // an old Scratch chat (feature history): listed under Conversation history, never under a project
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); settled = c.bool(.settled); settledAt = c.int(.settledAt); archived = c.bool(.archived)
-        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent)
+        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history)
     }
 }
 
@@ -195,6 +196,11 @@ struct DPosts: Decodable { var posts: [DPost]
 struct DThreadOpt: Decodable { var thread: DThread?
     enum CodingKeys: String, CodingKey { case thread }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); thread = try? c.decode(DThread.self, forKey: .thread) } }
+/// `history.list`: Conversation history, the old Scratch chats (`live` always shown, `threads` the rest a page at a time, `count` every chat).
+struct DHistory: Decodable { var live: [DThread] = []; var threads: [DThread] = []; var next: String?; var count = 0
+    enum CodingKeys: String, CodingKey { case live, threads, next, count }
+    init() {}
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); live = (try? c.decode([DThread].self, forKey: .live)) ?? []; threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; next = try? c.decode(String.self, forKey: .next); count = (try? c.decode(Int.self, forKey: .count)) ?? 0 } }
 struct DSearch: Decodable { var threads: [DThread]; var projects: [DProject]
     enum CodingKeys: String, CodingKey { case threads, projects }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; projects = (try? c.decode([DProject].self, forKey: .projects)) ?? [] } }
@@ -244,8 +250,9 @@ struct DNewThreadChoice: Equatable {
 }
 struct DMention: Decodable, Identifiable {
     var sigil: String; var mid: String; var label: String; var detail: String; var id: String { sigil + mid }
-    enum CodingKeys: String, CodingKey { case sigil, id, label, detail }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); sigil = c.str(.sigil); mid = c.str(.id); label = c.str(.label); detail = c.str(.detail) }
+    var word: String   // what goes in the draft, the desktop's word (`>bom-review`, `%demo`): what /give and the reference cards read; "" from an older hub
+    enum CodingKeys: String, CodingKey { case sigil, id, label, detail, word }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); sigil = c.str(.sigil); mid = c.str(.id); label = c.str(.label); detail = c.str(.detail); word = c.str(.word) }
 }
 struct DMentions: Decodable { var items: [DMention]
     enum CodingKeys: String, CodingKey { case items }

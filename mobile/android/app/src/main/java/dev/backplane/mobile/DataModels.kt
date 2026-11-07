@@ -26,6 +26,7 @@ data class DThread(
     val id: String, val project: String, val title: String, val state: String, val updatedAt: Long, val pinned: Boolean, val settled: Boolean,
     val archived: Boolean, val provider: String, val model: String, val preview: String, val waiting: Int,
     val parent: String = "", val effort: String = "", val runtime: String = "", val chip: String = "", val settledAt: Long = 0, // chip: the composer's "claude / opus / high", in the hub's words
+    val history: Boolean = false, // an old Scratch chat (feature history): listed under Conversation history, never under a project
 )
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
 data class DChoice(val label: String, val value: String, val on: Boolean, val ok: Boolean, val why: String)
@@ -51,7 +52,7 @@ fun parseEntry(o: JSONObject) = DEntry(
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null)
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)
@@ -65,3 +66,15 @@ data class DWork(val word: String, val live: Int, val rows: List<DWorkRow>)
 data class DLock(val name: String, val holder: String, val thread: String, val line: String, val waiting: Int)
 fun parseWork(o: JSONObject) = DWork(o.str("word"), o.optInt("live", 0), o.optJSONArray("rows").list { DWorkRow(it.str("title"), it.str("kind"), it.str("state"), it.str("doing"), it.str("act"), it.str("value"), it.str("label")) })
 fun parseLocks(a: JSONArray?) = a.list { DLock(it.str("name"), it.str("holder"), it.str("thread"), it.str("line"), it.optInt("waiting", 0)) }
+
+/** Conversation history (`history.list`): the old Scratch chats. `live` always have a row; `rows` only while the group is open; `count` is every chat. */
+data class DHistory(val count: Int = 0, val live: List<DThread> = emptyList(), val rows: List<DThread> = emptyList(), val next: String? = null) {
+    /** What the home list shows under the group's row: the live chats, then the rest when it is open. No row here ever starts a chat. */
+    fun shown(open: Boolean): List<DThread> = live + (if (open) rows.filter { r -> live.none { it.id == r.id } } else emptyList())
+    /** The group's row: drawn while any chat is in it. */
+    val title get() = "Conversation history ($count)"
+    companion object {
+        fun parse(o: JSONObject, before: DHistory? = null) = DHistory(o.optInt("count"), parseThreads(o.optJSONArray("live")),
+            (before?.rows ?: emptyList()) + parseThreads(o.optJSONArray("threads")), if (o.isNull("next") || !o.has("next")) null else o.optString("next"))
+    }
+}

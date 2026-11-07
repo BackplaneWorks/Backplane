@@ -291,8 +291,8 @@ final class DataClient {
     private func synchronise(_ g: Int) async {
         do {
             let s: DSubReply = try await call("subscribe", ["topic": "lists"]); guard g == gen else { return }; listSub = s.sub
-            async let p = loadProjects(g), t = loadThreads(g)
-            _ = try await (p, t)
+            async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
+            _ = try await (p, t, h)
             await loadBots()
             await voice.resync()
             await enablePush(); await registerPush(); await syncPush()
@@ -301,7 +301,22 @@ final class DataClient {
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
-    func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks() }
+    func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks(); await loadHistory() }
+    // MARK: Conversation history (feature history): the old Scratch chats, found and opened, never a place to start one
+    private(set) var history = DHistory()
+    private(set) var historyOpen = UserDefaults.standard.bool(forKey: "data.history.open")
+    func setHistory(open on: Bool) { historyOpen = on; UserDefaults.standard.set(on, forKey: "data.history.open") }
+    func loadHistory(more: Bool = false) async {
+        guard has("history") else { return }
+        if more && history.next == nil { return }
+        var q: [String: Any] = ["limit": 50]; if more, let c = history.next { q["before"] = c }
+        guard var r: DHistory = try? await call("history.list", q) else { return }
+        if more { r.threads = history.threads + r.threads }
+        history = r
+    }
+    private var historyDue = false
+    /// a chat of the group moved (a push): ask for the group again, once for a burst
+    private func historyMoved() { guard !historyDue else { return }; historyDue = true; Task { try? await Task.sleep(nanoseconds: 300_000_000); historyDue = false; await loadHistory() } }
     func loadStar() async { guard has("star"), let r: DStarReply = try? await call("star.offer") else { return }; star = r.offer?.valid }
     /// open (the banner also opens the page) or dismiss: final, the banner goes at once
     func starDecide(_ action: String) {
@@ -429,7 +444,7 @@ final class DataClient {
             return try? JSONDecoder().decode(T.self, from: d)
         }
         switch k {
-        case "thread": if let t = decode("thread", DThread.self) { upsert(t) }
+        case "thread": if let t = decode("thread", DThread.self) { upsert(t); if t.history { historyMoved() } }
         case "thread.removed":
             if let id = o["id"] as? String { threads.removeAll { $0.id == id }; entries[id] = nil; scheduleSave() }
         case "project.removed":

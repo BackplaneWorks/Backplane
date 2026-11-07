@@ -29,4 +29,10 @@ check(ThreadGroups.split(rows, project: "none").active.isEmpty, "no threads", ""
 check(ThreadGroups.count(hub: 40, loaded: 3) == 40 && ThreadGroups.count(hub: nil, loaded: 3) == 3 && ThreadGroups.count(hub: 0, loaded: 2) == 2, "count", "")
 check(ThreadGroups.title(7) == "Settled (7)", "title", ThreadGroups.title(7))
 
+// Conversation history (Android: DHistoryTest, the same cases)
+let hl = [T(id: "live", project: "scratch")], hr = [T(id: "old1", project: "scratch"), T(id: "live", project: "scratch"), T(id: "old2", project: "scratch")]
+check(ids(ThreadGroups.history(live: hl, rows: hr, open: false)) == ["live"], "history shut: the live chat alone", ids(ThreadGroups.history(live: hl, rows: hr, open: false)))
+check(ids(ThreadGroups.history(live: hl, rows: hr, open: true)) == ["live", "old1", "old2"], "history open: live first, none twice", ids(ThreadGroups.history(live: hl, rows: hr, open: true)))
+check(ThreadGroups.historyTitle(3) == "Conversation history (3)", "history title", ThreadGroups.historyTitle(3))
+
 print("thread groups: \(passed) passed, \(failed) failed"); exit(failed == 0 ? 0 : 1)
