@@ -302,7 +302,7 @@ impl Bots {
         let (b, t) = (bot.to_string(), if thread.is_empty() { bot.to_string() } else { thread });
         let ran = tokio::task::spawn_blocking(move || crate::proc::std_cmd(crate::proc::Kind::Local, "sh").args(["-c", BACKUP_SH, "sh", &home, &now.to_string(), &b, &t, &broot]).current_dir("/").status().map(|s| s.success()).unwrap_or(false)).await.unwrap_or(false);
         if !ran { return Err("could not back the bot up; nothing changed".into()) }
-        let mut seed = [0u8; 4]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut seed); }
+        let mut seed = [0u8; 4]; let _ = crate::plat::fs::random(&mut seed);
         let uid = format!("u{now}-{}", hex::encode(seed));
         let _g = self.world().await;
         self.hub.commit(&json!({"$":"UberSet","bot":bot,"uid":uid,"at":now})).await.map_err(|e| format!("{e:#}"))?;

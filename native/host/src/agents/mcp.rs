@@ -108,7 +108,7 @@ pub struct Mcp { pub port: u16, secret: String, ag: Weak<Agents>, tools: Vec<Val
 impl Mcp {
     pub async fn start(ag: &Arc<Agents>) -> anyhow::Result<Arc<Mcp>> {
         let l = TcpListener::bind("127.0.0.1:0").await?; let port = l.local_addr()?.port();
-        let mut b = [0u8; 32]; std::fs::File::open("/dev/urandom")?.read_exact_sync(&mut b)?;
+        let mut b = [0u8; 32]; crate::plat::fs::random(&mut b)?;
         let all: Value = serde_json::from_str(TOOLS_JSON)?;
         let tools: Vec<Value> = all["result"]["tools"].as_array().cloned().unwrap_or_default().into_iter().filter(|t| IMPLEMENTED.contains(&sv(t, "name"))).collect();
         let m = Arc::new(Mcp { port, secret: hex::encode(b), ag: Arc::downgrade(ag), tools, sem: Arc::new(Semaphore::new(MAX_CONNS)) });
@@ -238,8 +238,6 @@ impl Mcp {
         let answer = answer?; Some(result(id, perm_text(&perm_verdict(&tool, &input, &answer))))
     }
 }
-trait ReadSync { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()>; }
-impl ReadSync for std::fs::File { fn read_exact_sync(&mut self, b: &mut [u8]) -> std::io::Result<()> { std::io::Read::read_exact(self, b) } }
 
 #[cfg(test)]
 mod tests {
