@@ -37,9 +37,41 @@ struct Commands { fold: Arc<tokio::sync::Mutex<fold::Fold>>, seam: Option<Arc<dy
 
 impl Commands { fn agents(&self) -> Option<Arc<dyn seam::Seam>> { self.seam.clone().or_else(seam::current) } }
 
+impl Commands {
+    /// accounts.move_all {provider, profile, epoch, default?}: every thread of that agent onto one account (the person's bulk action, when an account ran out
+    /// under many threads at once). Each thread goes through accounts.select as if the person picked it in its own menu: its session is kept per account, what
+    /// the account missed is handed over, and the pick is the person's. A thread with a turn running is left as it is and named (select refuses it too);
+    /// `default` also makes the account the default for new threads.
+    async fn move_all(&self, hub: &Arc<Hub>, who: &Caller, id: &Value, p: &Value) -> Value {
+        use crate::settings::accounts as ac;
+        let g = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let (provider, profile, epoch) = (g("provider"), g("profile"), p.get("epoch").and_then(Value::as_u64).unwrap_or(0));
+        let inventory = hub.setting("accounts.inventory").await.unwrap_or_default();
+        let ready = ac::supported(&provider) && ((profile.is_empty() && epoch == 0) || ac::ready(&ac::profile(&inventory, &profile), &provider, epoch));
+        if !ready { return json!({"t":"reply","id":id,"ok":false,"error":"Check and reconnect this account before moving threads to it."}) }
+        let target = ac::binding_show(&profile, epoch);
+        let threads: Vec<String> = { let m = hub.model().await; let mut v: Vec<String> = m.threads.iter().filter(|(_, t)| t.provider == provider && !t.deleted && !t.archived).map(|(k, _)| k.clone()).collect(); v.sort(); v };
+        let (mut moved, mut already, mut running, mut failed) = (0usize, 0usize, Vec::<String>::new(), Vec::<Value>::new());
+        for th in threads {
+            let raw = hub.setting(&ac::binding_key(&th, &provider)).await.unwrap_or_default();
+            if raw == target || (raw.is_empty() && profile.is_empty()) { already += 1; continue }
+            let r = self.call(hub, who, id, "accounts.select", &json!({"thread":th,"profile":profile,"epoch":epoch,"expected":raw})).await;
+            let r = r.into_iter().find(|v| v["t"] == "reply").unwrap_or(Value::Null);
+            if r["ok"] == true { moved += 1 }
+            else if r["error"].as_str().map_or(false, |e| e.starts_with("Finish or stop")) { running.push(th) }
+            else { failed.push(json!({"thread":th,"error":r["error"]})) }
+        }
+        if p.get("default").and_then(Value::as_bool).unwrap_or(false) {
+            let d = ac::make_default(hub, id, &json!({"provider":provider,"profile":profile,"epoch":epoch})).await;
+            if d["ok"] != true { return json!({"t":"reply","id":id,"ok":false,"error":d["error"],"result":{"moved":moved,"already":already,"running":running,"failed":failed}}) }
+        }
+        json!({"t":"reply","id":id,"ok":true,"result":{"moved":moved,"already":already,"running":running,"failed":failed}})
+    }
+}
+
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
-        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "accounts.select", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
+        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "accounts.select", "accounts.move_all", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
         "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "order.buy", "fs.list", "fs.mkdir", "fs.find"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
@@ -54,6 +86,7 @@ impl RpcHandler for Commands {
                 let r = home::read(&root, p).await;
                 return vec![json!({"t":"reply","id":id,"ok":true,"result":r})]; // GitJob.reply(..., True, r): the error is inside the result
             }
+            if method == "accounts.move_all" { if !crate::settings::accounts_hub::is_granted(who) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::settings::accounts::GATE})] } return vec![self.move_all(hub, who, id, p).await] }
             if method == "accounts.select" && !crate::settings::accounts_hub::is_granted(who) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::settings::accounts::GATE})] }
             // the hub's own requests: an agent's tool and the failover driver, which name who chose. A connection (client 1 and up) could say anything there, so it is never heard
             if matches!(method, "accounts.choose" | "fallback.switch") && who.client != 0 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})] }

@@ -24,6 +24,8 @@ pub struct Accounts {
     pub armed: String,
     /// The last refusal or hint, said where the person is looking.
     pub notice: String,
+    /// What a bulk move did (not a refusal: said in the plain colour).
+    pub info: String,
     pub label: Option<Entity<Composer>>,
     pub codes: HashMap<String, Entity<Composer>>,
     pub polling: bool,
@@ -155,7 +157,19 @@ pub fn done(this: &mut Backplane, tag: &str, ok: bool, why: &str, _cx: &mut Cont
         if !why.is_empty() { this.screens.acct.notice = why.to_string() } else if this.screens.acct.notice.is_empty() { this.screens.acct.notice = "The hub refused that.".into() }
         return
     }
+    if tag == "acct-moveall" { list(this); return }
     if tag == "acct-select" || tag == "acct-default" { if this.screens.acct.menu { this.want_focus = true } this.screens.acct.menu = false; this.screens.acct.notice.clear(); list(this); }
+}
+/// The answer to "Move all threads here": how many moved, and the running ones it left (a turn is never switched under itself; they can be moved when it ends).
+pub fn moved(this: &mut Backplane, v: &Value) { this.screens.acct.info = moved_text(v); }
+pub fn moved_text(v: &Value) -> String {
+    let n = |k: &str| v[k].as_u64().unwrap_or(0); let len = |k: &str| v[k].as_array().map_or(0, |a| a.len());
+    let (moved, already, running, failed) = (n("moved"), n("already"), len("running"), len("failed"));
+    let threads = |k: u64| if k == 1 { "1 thread".to_string() } else { format!("{k} threads") };
+    let mut s = if moved == 0 && already > 0 { format!("All {} were already on this account.", threads(already)) } else { format!("Moved {} to this account.", threads(moved)) };
+    if running > 0 { s += &format!(" {} with a turn running {} not moved; press again when {} done.", threads(running as u64), if running == 1 { "was" } else { "were" }, if running == 1 { "it is" } else { "they are" }) }
+    if failed > 0 { s += &format!(" {} could not be moved.", threads(failed as u64)) }
+    s
 }
 fn poll(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if !wants_poll(&this.screens.acct.snap) || this.screens.acct.polling { return }
@@ -257,6 +271,7 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
         if state == "connected" {
             btn("Refresh", "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid})) }));
             if !default { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn("Use for new threads", "default", false, false, Box::new(move |this, _| { if this.tx.try_send(Command::Rpc("accounts.default".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch})), "acct-default")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
+            { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn("Move all threads here", "moveall", false, false, Box::new(move |this, _| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
             btn("Sign out", "logout", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "disconnect", "profile": pid})) }));
         } else {
             btn(if state == "unchecked" { "Check sign-in" } else { "Connect" }, "login", state != "unchecked", false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": if state_of(&this.screens.acct.snap, &pid) == "unchecked" { "status" } else { "login" }, "profile": pid})) }));
@@ -282,6 +297,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> Vec<AnyE
     let mut out: Vec<AnyElement> = vec![];
     out.push(div().pb_3().text_size(px(12.)).text_color(c("dim")).child("Each account is a separate Claude subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.").into_any_element());
     if !st.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("bad")).child(st.notice.clone()).into_any_element()); }
+    if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
     // the CLI's own login is always there
     let def_default = !profiles(&st.snap).iter().any(|p| is_default(&st.snap, p));
     out.push(div().flex().items_center().gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
@@ -451,6 +467,14 @@ pub fn limits_chip(cx: &mut Context<Backplane>, light: bool, st: &Accounts, text
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_bulk_move_says_what_moved_and_what_waits() {
+        use serde_json::json;
+        assert_eq!(super::moved_text(&json!({"moved":3,"already":1,"running":[],"failed":[]})), "Moved 3 threads to this account.");
+        assert_eq!(super::moved_text(&json!({"moved":0,"already":2,"running":[],"failed":[]})), "All 2 threads were already on this account.");
+        assert_eq!(super::moved_text(&json!({"moved":1,"already":0,"running":["t2"],"failed":[]})), "Moved 1 thread to this account. 1 thread with a turn running was not moved; press again when it is done.");
+        assert_eq!(super::moved_text(&json!({"moved":0,"already":0,"running":["a","b"],"failed":[{"thread":"c"}]})), "Moved 0 threads to this account. 2 threads with a turn running were not moved; press again when they are done. 1 thread could not be moved.");
+    }
+
     use super::*;
     use core::prelude::v1::test; // gpui exports its own `test`
     fn snap() -> Value {
