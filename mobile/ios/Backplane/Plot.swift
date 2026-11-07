@@ -382,7 +382,7 @@ final class PlotStore {
     private func wanted(_ key: String) -> Bool? { accept.map { $0.contains(key) } }
     private func park(_ key: String, _ o: [String: Any]?, _ f: PlotFrame?) {
         // a newer plot or model replaces the parked one of its key; a model's parts all wait, in order
-        parked.removeAll { $0.key == key && (($0.f != nil && f != nil) || ($0.o?["mesh"] != nil && o?["mesh"] != nil)) }
+        parked.removeAll { $0.key == key && (($0.f != nil && f != nil) || ($0.o.map(PlotStore.isModel) == true && o.map(PlotStore.isModel) == true)) }
         parked.append((key, o, f))
     }
 
@@ -452,6 +452,11 @@ final class PlotStore {
         while splitOrder.count > 3 { splitFrames.removeValue(forKey: splitOrder.removeFirst()) }
     }
 
+    /// A frame of a board model's parts (`parts` starts them again, `part` is one model with its instances; the latter carries a `mesh` of
+    /// its own, which is not the board's). A model of the board is a `mesh` that is not one of these.
+    nonisolated static func isPart(_ o: [String: Any]) -> Bool { o["parts"] != nil || o["part"] != nil }
+    nonisolated static func isModel(_ o: [String: Any]) -> Bool { o["mesh"] != nil && !isPart(o) }
+
     // a plot frame: a map whose first key is 1 ("t") and value "plot"
     static func isPlot(_ d: Data) -> Bool {
         d.count > 7 && d[d.startIndex] >= 0xA0 && d[d.startIndex] <= 0xB7 &&
@@ -501,7 +506,7 @@ final class PlotStore {
             // a note about the model (parts with no 3D model) is not a model
             if o["none"] is String || solid {
                 // a model's other frames (its parts streaming in after it, `parts`/`part`) pass the same gate to `more`; a bare note does not
-                if solid && o["none"] == nil && o["mesh"] == nil && o["parts"] == nil && o["part"] == nil { return }
+                if solid && o["none"] == nil && o["mesh"] == nil && !PlotStore.isPart(o) { return }
                 DispatchQueue.main.async { MainActor.assumeIsolated { guard gen == self.generation else { return }; self.route(o) } }
                 return
             }
@@ -550,7 +555,7 @@ final class PlotStore {
         switch wanted(key) { case .none: park(key, o, nil); return; case .some(false): return; default: break }
         let fam = (o["fam"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key
         let solid = key.hasPrefix("2|") || key.hasPrefix("3|") || key.hasPrefix("4|")
-        if solid && o["none"] == nil && o["mesh"] == nil { parts.receive(key, o); more?(key, o); return } // parts after (or without) the model: for the view on show only
+        if solid && PlotStore.isPart(o) { parts.receive(key, o); more?(key, o); return } // parts after (or without) the model: for the view on show only
         let assets = self.assets, meshQueue = self.meshQueue, gen = generation, slot = self.slot
         guard let ticket = solid ? assets.issue(key, epoch: assets.epoch()) : 0 else { return }
         let previous = solid ? assets.frame(key)?.mesh : nil

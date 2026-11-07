@@ -67,6 +67,15 @@ check(throwsDecode(1, tri + [1], floats([identity])), "bytes left over are refus
 check(throwsDecode(1, tri, floats([[Float.nan] + identity.dropFirst()])), "a non-finite placement is refused")
 check(throwsDecode(0, tri, floats([identity])), "no triangles is refused")
 
+// ---- the gate tells a part frame (which carries a mesh of its own) from the board's model ----
+do {
+    let part = Cbor.decode(partFrame(key, id: "0123456789abcdef", n: 1, mesh: tri, at: floats([identity]), refs: ["R1"], done: 1)) as! [String: Any]
+    let start = Cbor.decode(partsFrame(key, of: 2, rev: "r1")) as! [String: Any]
+    var board: [String: Any] = ["key": key, "n": 1, "mesh": Data(tri)]; board["box3"] = [0, 0, 0, 1, 1, 1]
+    check(PlotStore.isPart(part) && PlotStore.isPart(start) && !PlotStore.isPart(board), "part and parts frames are parts, the board's model is not")
+    check(!PlotStore.isModel(part) && !PlotStore.isModel(start) && PlotStore.isModel(board), "a part's own mesh is not a board model")
+}
+
 // ---- frames through the CBOR reader, and the held list ----
 let key = "2|root|a.kicad_pcb"
 MainActor.assumeIsolated {
