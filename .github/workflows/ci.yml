@@ -3,6 +3,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -22,6 +23,7 @@ jobs:
       gpui: ${{ steps.f.outputs.gpui }}
       guard: ${{ steps.f.outputs.guard }}
       android: ${{ steps.f.outputs.android }}
+      windows: ${{ steps.f.outputs.windows }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -42,6 +44,9 @@ jobs:
               - '.github/workflows/ci.yml'
             android:
               - 'mobile/android/**'
+              - '.github/workflows/ci.yml'
+            windows:
+              - 'native/**'
               - '.github/workflows/ci.yml'
 
   # `backplane`, the guard: it has to work where the hub is restarted from, so it runs on all three systems (docs/HUB-RESILIENCE.md).
@@ -126,6 +131,36 @@ jobs:
         run: |
           # macOS: the keymap tests assume Linux's ctrl chords (secondary is cmd there)
           if [ "$RUNNER_OS" = macOS ]; then cargo nextest run --locked -E 'not (test(/^keys::tests::/) | test(/drawing_pads_keys/))'; else cargo nextest run --locked; fi
+
+  # The Windows port (docs/e2e/MATRIX.md, Windows): both crates built and tested on Windows. Non-blocking until it is green.
+  windows:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [host, gpui]
+    name: windows ${{ matrix.crate }}
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/${{ matrix.crate }}
+          shared-key: windows-${{ matrix.crate }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@nextest
+      - name: build
+        working-directory: native/${{ matrix.crate }}
+        shell: bash
+        run: cargo build --locked --all-targets
+      - name: tests
+        working-directory: native/${{ matrix.crate }}
+        shell: bash
+        run: cargo nextest run --locked --no-fail-fast
 
   android:
     needs: changes
