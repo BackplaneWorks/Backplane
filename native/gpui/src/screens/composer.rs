@@ -183,8 +183,9 @@ impl Composer {
         match target {
             Some(t) if self.index_at_local(t).is_some() => {
                 let i = self.index_at_local(t).unwrap();
-                // at the first or last row the key goes to the document edge, as in a textarea
-                let to = if dir < 0 && t.y < px(0.) { 0 } else if dir > 0 && i == self.ed.head() { self.ed.text().len() } else { i };
+                // at the first or last row the key goes to the document edge, as in a textarea; below the last row the hit test gives 0, not a place on that row
+                let below = self.rows.last().map_or(false, |r| t.y >= r.top + r.height(self.line_height));
+                let to = if dir < 0 && t.y < px(0.) { 0 } else if dir > 0 && (below || i == self.ed.head()) { self.ed.text().len() } else { i };
                 self.edit(cx, |e| e.place(to, extend));
             }
             _ => self.edit(cx, |e| if dir < 0 { e.up(extend) } else { e.down(extend) }),
