@@ -15,12 +15,12 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
         MainActor.assumeIsolated { DataClient.shared.tokenGot(hex) }
     }
     func application(_ app: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) { NSLog("push: %@", error.localizedDescription) }
-    // the silent clear
-    func application(_ app: UIApplication, didReceiveRemoteNotification info: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
-        guard let keys = info["clear"] as? [String] else { return .noData }
+    // the silent clear. The completion-handler form, finished on the main actor like the alert tap: the async form ran off it (UIKit asserts its completion runs there)
+    nonisolated func application(_ app: UIApplication, didReceiveRemoteNotification info: [AnyHashable: Any], fetchCompletionHandler done: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard let keys = info["clear"] as? [String] else { done(.noData); return }
         let badge = (info["aps"] as? [String: Any])?["badge"] as? Int
-        await DataClient.shared.cleared(keys, badge: badge)
-        return .newData
+        nonisolated(unsafe) let finish = done   // UIKit's closure, called once, on the main actor below
+        Task { @MainActor in await DataClient.shared.cleared(keys, badge: badge); finish(.newData) }
     }
     // in front: quiet for the thread on screen. Completion-handler forms, finished on the main thread: UIKit asserts that its completion runs there, and the async forms
     // run off it (a tapped alert crashed the app with "Call must be made on main thread")

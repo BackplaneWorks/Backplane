@@ -93,6 +93,14 @@ final class Push: XCTestCase {
         sleep(1); _ = ctl("/uber", ["text": "Burst two", "thread": wt]); sleep(1); _ = ctl("/uber", ["text": "Burst three", "thread": wt])
         _ = arrives("the rest collapse into one", "2 of 2 need you") {}
         d.note("after burst \(String(describing: state()["lastSent"]))")
+
+        // the silent clear (DataPush's didReceiveRemoteNotification): the person opens the worker's thread elsewhere, the hub clears its items, and only the
+        // app's handler can set the icon's badge to what the hub says
+        let icon = sb.icons["Backplane GPUI"]; let before = icon.value as? String ?? ""; let c0 = num("cleared")
+        d.note("badge before the clear: '\(before)'")
+        _ = ctl("/seen", ["thread": wt])
+        d.step("a silent clear runs the app's handler and changes the badge", timeout: 30, act: {}, expect: { self.num("cleared") > c0 && !before.isEmpty && (icon.value as? String ?? "") != before })
+        d.note("badge after the clear: '\(icon.value as? String ?? "")'"); d.shot("silent-clear")
         d.finish()
         XCTAssertFalse(d.failed, "a push step failed: see push.json")
     }
