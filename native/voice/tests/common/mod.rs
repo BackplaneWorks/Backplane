@@ -70,6 +70,8 @@ async fn read_body(s: &mut TcpStream, h: &Head) -> Vec<u8> {
 #[derive(Default)]
 pub struct Shared {
     pub ws: Mutex<Vec<Value>>,
+    /// rung for each message the socket records (`Mock::ws_wait`)
+    pub arrived: Condvar,
     pub rest: Mutex<Vec<Vec<Part>>>,
     pub reject_hints: AtomicBool,
     pub refuse_ws: AtomicBool,
@@ -103,6 +105,19 @@ impl Mock {
 
     pub fn ws(&self) -> Vec<Value> {
         self.s.ws.lock().unwrap().clone()
+    }
+
+    /// The socket's messages once there are at least N: the mock records them on its own thread, so a helper that has exited may
+    /// still be ahead of it. Waits for them, not for a time; ten seconds without them is a failure.
+    pub fn ws_wait(&self, n: usize) -> Vec<Value> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut g = self.s.ws.lock().unwrap();
+        while g.len() < n {
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(!left.is_zero(), "the mock had {} socket messages, not {n}: {:?}", g.len(), *g);
+            g = self.s.arrived.wait_timeout(g, left).unwrap().0;
+        }
+        g.clone()
     }
 
     pub fn of_type(&self, t: &str) -> Vec<Value> {
@@ -178,6 +193,7 @@ async fn socket(ws: tokio_tungstenite::WebSocketStream<TcpStream>, m: Arc<Shared
         let Message::Text(raw) = msg else { continue };
         let ev: Value = serde_json::from_str(raw.as_str()).unwrap();
         m.ws.lock().unwrap().push(ev.clone());
+        m.arrived.notify_all();
         match ev["type"].as_str().unwrap_or("") {
             "input_audio_buffer.append" => bytes += base64::engine::general_purpose::STANDARD.decode(ev["audio"].as_str().unwrap()).unwrap().len(),
             "input_audio_buffer.clear" => bytes = 0,
@@ -290,6 +306,8 @@ struct Log {
 }
 
 pub struct Run {
+    /// the helper's own TMPDIR, kept until the run is dropped
+    _tmp: tempfile::TempDir,
     child: Child,
     stdin: Option<ChildStdin>,
     log: Arc<Log>,
@@ -298,14 +316,15 @@ pub struct Run {
 }
 
 impl Run {
-    /// Only PATH, the key, the base and TMPDIR go through, each overridable
+    /// Only PATH, the key, the base and TMPDIR (a folder of the run's own) go through, each overridable
     /// (None takes one away).
     pub fn new(args: &[&str], base: &str, env: &[(&str, Option<&str>)]) -> Run {
         let mut vars: HashMap<String, String> = HashMap::new();
         vars.insert("PATH".into(), std::env::var("PATH").unwrap());
         vars.insert("OPENAI_API_KEY".into(), "good".into());
         vars.insert("OPENAI_BASE_URL".into(), base.into());
-        vars.insert("TMPDIR".into(), std::env::temp_dir().to_string_lossy().into_owned());
+        let tmp = tempfile::tempdir().unwrap();
+        vars.insert("TMPDIR".into(), tmp.path().to_string_lossy().into_owned());
         for (k, v) in env {
             match v {
                 Some(v) => vars.insert(k.to_string(), v.to_string()),
@@ -342,7 +361,7 @@ impl Run {
             String::from_utf8_lossy(&s).into_owned()
         });
         let stdin = child.stdin.take();
-        Run { child, stdin, log, reader: Some(reader), stderr: Some(stderr) }
+        Run { _tmp: tmp, child, stdin, log, reader: Some(reader), stderr: Some(stderr) }
     }
 
     pub fn write(&mut self, b: &[u8]) {

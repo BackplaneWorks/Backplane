@@ -390,7 +390,7 @@ fn a_keywords_file_that_cannot_be_read_goes_without() {
     let mut r = Run::new(&["live", "--source", "stdin", "--keywords-file", "/nonexistent/kw"], &m.base, &[]);
     r.close_stdin();
     assert_eq!(r.done(), 0);
-    assert_eq!(m.ws()[0]["session"]["audio"]["input"]["transcription"], json!({"model": "gpt-live-transcribe", "delay": "low"}));
+    assert_eq!(m.ws_wait(1)[0]["session"]["audio"]["input"]["transcription"], json!({"model": "gpt-live-transcribe", "delay": "low"}));
 }
 
 #[test]
@@ -410,7 +410,7 @@ fn file_multipart_audio_part_through_the_realtime_path_with_ffmpeg() {
     assert_eq!(e["item"], "file");
     let text = e["text"].as_str().unwrap();
     assert!(text.starts_with("seg1 3") && text.ends_with("ms") && text.len() == "seg1 3300ms".len(), "{text}");
-    assert_eq!(m.ws()[0]["session"]["audio"]["input"]["transcription"]["model"], "gpt-live-transcribe");
+    assert_eq!(m.ws_wait(1)[0]["session"]["audio"]["input"]["transcription"]["model"], "gpt-live-transcribe");
     assert!(m.rest().is_empty());
 }
 

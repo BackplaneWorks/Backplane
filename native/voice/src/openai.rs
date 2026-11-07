@@ -133,9 +133,9 @@ async fn open(o: &Opts) -> Result<Socket, String> {
 }
 
 impl Realtime {
-    /// Connects and sends the session update; Err is a human message.
+    /// Connects and writes the session update; Err is a human message.
     pub async fn connect(o: &Opts, hooks: Hooks) -> Result<Arc<Realtime>, String> {
-        let ws = match tokio::time::timeout(CONNECT_LIMIT, open(o)).await {
+        let mut ws = match tokio::time::timeout(CONNECT_LIMIT, open(o)).await {
             Ok(Ok(ws)) => ws,
             Ok(Err(e)) => {
                 crate::out::log(&format!("the realtime socket did not open: {e}"));
@@ -143,6 +143,13 @@ impl Realtime {
             }
             Err(_) => return Err(why_refused(o).await),
         };
+        // The session update is written (and flushed) before connect returns, not queued: a session stopped at once still has its
+        // settings on the socket however long the writer would take to get to them.
+        match tokio::time::timeout(CONNECT_LIMIT, ws.send(Message::text(session_update(o).to_string()))).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(format!("the realtime session could not be set up ({e})")),
+            Err(_) => return Err("the realtime session could not be set up (it timed out)".to_string()),
+        }
         let (mut sink, mut stream) = ws.split();
         let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
         let rt = Arc::new(Realtime { out: tx, state: Mutex::new(State { open: true, ..Default::default() }), changed: Notify::new(), hooks, writer: Mutex::new(None) });
@@ -170,7 +177,6 @@ impl Realtime {
                 f();
             }
         });
-        rt.send(&session_update(o));
         Ok(rt)
     }
 
