@@ -3,7 +3,7 @@
 # with a keypair made fresh for this run. Never the real key, never a real version: every release here is below 0.1.0, the ceiling the feature holds a test key to.
 #   test/update/feed.sh BIN_DIR [CASE...]
 #     BIN_DIR: backplane (the guard) and backplane-hub built with `--features e2e-trust`, and COMMIT, the commit compiled into it (BACKPLANE_COMMIT at build time)
-#     CASE: good panic die mismatch older wrongkey ceiling healthz phone (none: all). phone runs only with PHONE=<adb serial> (APK=<debug apk> installs it first).
+#     CASE: good panic die mismatch older wrongkey ceiling healthz phone hold (none: all but hold). phone runs only with PHONE=<adb serial> (APK=<debug apk> installs it first).
 # Env: UPD_DIR (scratch, default BIN_DIR; on disk), UPD_PORT (first port, default 3900).
 set -u
 BIN=$(cd "${1:?usage: feed.sh BIN_DIR [CASE...]}" && pwd); shift
@@ -61,7 +61,7 @@ served() { grep -c "GET /$1" "$T/$CUR/feed.log" 2>/dev/null || true; }
 # --- a home, the feed, and a guard on build v0.0.1 (the real hub saying 0.0.1)
 home() {
   H=$T/$CUR/home; B=$T/$CUR/builds; mkdir -p "$H" "$B/builds/v0.0.1" "$T/$CUR/feed"
-  PORT=$((PORT+1)); FPORT=$((PORT+500)); A=127.0.0.1:$PORT
+  PORT=$((PORT+1)); FPORT=$((PORT+500)); A=${UPD_HOST:-127.0.0.1}:$PORT
   python3 -I "$ROOT/test/guard/make-home.py" "$H" --small > /dev/null || { echo "no test/guard/make-home.py (it comes with native/guard)"; exit 2; }
   printf '#!/bin/sh\nexec "%s/backplane-hub" --version-string 0.0.1 "$@"\n' "$BIN" > "$B/builds/v0.0.1/backplane-hub"; chmod +x "$B/builds/v0.0.1/backplane-hub"
   echo v0.0.1 > "$B/CURRENT"; publish
@@ -69,32 +69,14 @@ home() {
 }
 tok() { tr -d '[:space:]' < "$H/token"; }
 guard() {
-  env BACKPLANE_UPDATE_FEED="http://127.0.0.1:$FPORT/releases.json" "$BIN/backplane" hub run --home "$H" --port "$PORT" --builds "$B" --build v0.0.1 --log "$T/$CUR/hub.log" \
+  env BACKPLANE_UPDATE_FEED="http://127.0.0.1:$FPORT/releases.json" "$BIN/backplane" hub run --home "$H" --port "$PORT" --host "${UPD_HOST:-127.0.0.1}" --builds "$B" --build v0.0.1 --log "$T/$CUR/hub.log" \
     -- --no-tailscale --foreground >> "$T/$CUR/hub.log" 2>&1 < /dev/null & GP=$!
 }
 st() { python3 -I -c 'import json,sys
 try: v=json.load(open(sys.argv[1])); print(v.get(sys.argv[2],""))
 except Exception: pass' "$H/guard/status.json" "$1"; }
 # /hello, as a remote client reads it (CBOR: a map of text to text or small ints)
-hello() { curl -s -m3 "http://$A/hello" | python3 -I -c '
-import sys
-b=sys.stdin.buffer.read(); i=0
-def n(ai):
-    global i
-    if ai<24: return ai
-    k={24:1,25:2,26:4,27:8}[ai]; v=int.from_bytes(b[i:i+k],"big"); i+=k; return v
-def item():
-    global i
-    h=b[i]; i+=1; mt, ai = h>>5, h&31
-    if mt==0: return n(ai)
-    if mt==1: return -1-n(ai)
-    if mt==3: l=n(ai); s=b[i:i+l].decode(); i+=l; return s
-    if mt==4: return [item() for _ in range(n(ai))]
-    if mt==5: return {item(): item() for _ in range(n(ai))}
-    if mt==7: return {20:False,21:True,22:None}.get(ai)
-    raise ValueError(mt)
-try: d=item(); print(d.get("backplane",""), d.get("commit",""))
-except Exception: print("")'; }
+hello() { curl -s -m3 "http://$A/hello" | python3 -I "$HERE/cbor_hello.py"; }
 says() { [ "$(hello)" = "$1 $COMMIT" ]; }
 on() { [ "$(st build)" = "$1" ] && [ "$(st stable)" = True ] && says "${1#v}"; }
 bad() { grep -q "^$1" "$B/BAD" 2>/dev/null; }
@@ -102,7 +84,7 @@ checked() { [ -s "$H/update/releases.json" ]; }   # the hub has asked the feed a
 # the hourly check runs within a minute of the start; a phone's Check now or `update.check` runs one at once
 up() { until_ 60 on v0.0.1; }
 
-want() { [ "${#WANT[@]}" = 0 ] || [[ " ${WANT[*]} " == *" $1 "* ]]; }
+want() { [ "${#WANT[@]}" = 0 ] && [ "$1" != hold ] || [[ " ${WANT[*]:-} " == *" $1 "* ]]; }
 WANT=("$@")
 go() { CUR=$1; want "$1" || return 1; mkdir -p "$T/$CUR"; home; return 0; }
 
@@ -163,6 +145,20 @@ if go healthz; then
   fi
 fi
 
+# hold: a guarded hub on v0.0.1 for clients on other machines (test/update/clients.sh drives them). It prints `READY <dir>` once up; in <dir>, a file `publish`
+# puts v0.0.2 on the feed, `stop` ends it. Never runs unless named. UPD_HOST: the address to listen on (a LAN address, so other machines reach it).
+if [[ " ${WANT[*]:-} " == *" hold "* ]] && go hold; then
+  release v0.0.2 0.0.2 "$T/keys/e2e.key"; guard
+  if ! up; then no "no start"; else
+    echo "READY $T/$CUR $A"; n=0; pub=
+    while [ ! -e "$T/$CUR/stop" ] && [ $n -lt 3600 ]; do
+      if [ -e "$T/$CUR/publish" ] && [ -z "$pub" ]; then publish v0.0.2; pub=1; echo "published v0.0.2"; fi
+      sleep 1; n=$((n+1))
+    done
+    ok "held for clients ($n s)"
+  fi
+fi
+
 # the phone: pair the Android app with this hub (adb reverse, so the hub stays on loopback), press Check now in Settings > Updates, see it install,
 # then restart it and roll back from the Hub screen. PHONE=<serial>, APK=<debug apk of dev.backplane.mobile.gpui>; only that app is touched.
 if [ -n "${PHONE:-}" ] && go phone; then
@@ -182,7 +178,8 @@ if [ -n "${PHONE:-}" ] && go phone; then
     elif ! { for _ in $(seq 30); do $P has "Pair with this hub?" || break; sleep 1; done; want_ Settings 30; }; then no "the app did not pair (no Settings on screen)"
     elif ! { $P tap Settings && want_ UPDATES && $P seek "Check now"; }; then no "no Updates section with Check now: $($P text 'Backplane' || echo '?') / $($P text 'Up' || echo '?')"
     else
-      $P shot "$SH/1-updates.png"; release v0.0.2 0.0.2 "$T/keys/e2e.key"; publish v0.0.2; $P tap "Check now"
+      $P shot "$SH/1-updates.png"; until_ 90 checked   # the hub's own first check is over: only Check now looks again before the hour
+      release v0.0.2 0.0.2 "$T/keys/e2e.key"; publish v0.0.2; $P tap "Check now"
       if ! until_ 150 on v0.0.2; then no "Check now did not install v0.0.2 (on $(st build))"
       elif ! { want_ UPDATES 60; $P seek "Updated to v0.0.2"; }; then no "the phone does not say it updated: $($P text 'Up' || $P text 'Inst' || echo '?')"
       else
