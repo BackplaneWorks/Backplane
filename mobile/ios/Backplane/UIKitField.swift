@@ -56,6 +56,7 @@ struct UIKitField: UIViewRepresentable {
     let onSend: () -> Void
     let onPasteImages: ([UIImage]) -> Void
     var font: UIFont? = nil   // the data app's mono; else the system's body
+    var caret: (at: Int, rev: Int)? = nil   // dictation puts the caret (UTF-16 offset); each rev once
 
     func makeUIView(context: Context) -> UITextView {
         let v = ComposerUITextView()
@@ -111,6 +112,11 @@ struct UIKitField: UIViewRepresentable {
             v.selectedRange = NSRange(location: min(sel.location, n), length: min(sel.length, max(0, n - min(sel.location, n))))
             v.undoManager?.removeAllActions()
         }
+        if let c = caret, c.rev != context.coordinator.caretRev {
+            context.coordinator.caretRev = c.rev
+            let n = (v.text as NSString).length
+            v.selectedRange = NSRange(location: min(c.at, n), length: 0)
+        }
         v.isEditable = editable
         v.viewWithTag(77)?.isHidden = !text.isEmpty
     }
@@ -149,6 +155,7 @@ struct UIKitField: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: UIKitField
         var applying = false
+        var caretRev = 0
         init(_ p: UIKitField) { parent = p }
         func textViewDidChange(_ v: UITextView) {
             if applying { v.viewWithTag(77)?.isHidden = !v.text.isEmpty; return }
