@@ -45,17 +45,31 @@ fn refusal(kind: Kind, program: &str) -> Option<String> {
     if kind == Kind::PersonTurn && copy::person_turn_allowed() { return None }
     refusal_with(true, kind, program, std::env::var("BACKPLANE_AGENTS").ok().as_deref())
 }
+/// The hub's own variables from its guard and updater: which builds folder it was started from, its commit, its guard, safe mode, injected faults, the update feed.
+/// An agent, a shell an agent or the person runs, or a terminal never gets them: a test hub started from one would take the person's builds folder for its own,
+/// and could update itself against it (or a `backplane hub` there would act on the person's hub). BACKPLANE_NO_UPDATE stays: it only ever holds an update back.
+pub const HUB_ONLY: &[&str] = &["BACKPLANE_BUILDS", "BACKPLANE_BUILD", "BACKPLANE_COMMIT", "BACKPLANE_GUARD", "BACKPLANE_HOME", "BACKPLANE_SAFE", "BACKPLANE_SAFE_SKIP",
+    "BACKPLANE_CARRY_WAIT", "BACKPLANE_FAULT", "BACKPLANE_STEP_BUDGET", "BACKPLANE_UPDATE_FEED", "BACKPLANE_RELEASE_KEY", "BACKPLANE_TEST_BUILDS", "BACKPLANE_TEST_NO_UPDATE"];
+pub fn hub_only(name: &str) -> bool { HUB_ONLY.contains(&name) || name.starts_with("BACKPLANE_GUARD_") }
+/// The kinds that run what an agent or a person supplies.
+fn scrubbed(kind: Kind) -> bool { matches!(kind, Kind::Agent | Kind::PersonTurn | Kind::Shell | Kind::Terminal) }
+fn hub_only_present() -> Vec<std::ffi::OsString> { std::env::vars_os().map(|(k, _)| k).filter(|k| k.to_str().map_or(false, hub_only)).collect() }
+
 fn dead(program: &str, why: &str) -> String { eprintln!("{why}"); format!("/nonexistent/backplane-copy-refused/{}", program.rsplit('/').next().unwrap_or(program)) }
 
 /// `tokio::process::Command::new`, gated.
 pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
-    match refusal(kind, &p) { None => tokio::process::Command::new(program), Some(why) => tokio::process::Command::new(dead(&p, &why)) }
+    let mut c = match refusal(kind, &p) { None => tokio::process::Command::new(program), Some(why) => tokio::process::Command::new(dead(&p, &why)) };
+    if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
+    c
 }
 /// `std::process::Command::new`, gated.
 pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
-    match refusal(kind, &p) { None => std::process::Command::new(program), Some(why) => std::process::Command::new(dead(&p, &why)) }
+    let mut c = match refusal(kind, &p) { None => std::process::Command::new(program), Some(why) => std::process::Command::new(dead(&p, &why)) };
+    if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
+    c
 }
 
 #[cfg(test)]
@@ -66,6 +80,30 @@ mod tests {
     #[test] fn a_person_turn_is_refused_on_a_copy_by_the_pure_rule_and_free_off_a_copy() {
         assert!(refusal_with(true, Kind::PersonTurn, "/home/u/.local/bin/claude", None).is_some(), "refused unless side-by-side lets it through (the global `refusal`)");
         assert!(refusal_with(false, Kind::PersonTurn, "claude", None).is_none(), "not a copy: no gate");
+    }
+    #[test] fn hub_only_names() {
+        for k in ["BACKPLANE_BUILDS", "BACKPLANE_COMMIT", "BACKPLANE_GUARD", "BACKPLANE_GUARD_STABLE", "BACKPLANE_SAFE", "BACKPLANE_UPDATE_FEED"] { assert!(hub_only(k), "{k}"); }
+        for k in ["BACKPLANE_NO_UPDATE", "BACKPLANE_AGENT_OWNER", "BACKPLANE_AGENTS", "PATH", "BACKPLANE_GUARDIAN"] { assert!(!hub_only(k), "{k}"); }
+    }
+    #[tokio::test] async fn hub_env_probe_child() { // run by the test below with the hub's variables set, as a guarded dev hub has them
+        if std::env::var("BP_HUB_ENV_PROBE").is_err() { return }
+        let leaked = |out: &[u8]| String::from_utf8_lossy(out).lines().filter(|l| l.split('=').next().map_or(false, hub_only)).map(str::to_string).collect::<Vec<_>>();
+        for k in [Kind::Agent, Kind::PersonTurn, Kind::Shell, Kind::Terminal] {
+            let o = tokio_cmd(k, "/usr/bin/env").output().await.unwrap(); assert!(o.status.success(), "{k:?}");
+            assert!(leaked(&o.stdout).is_empty(), "{k:?} saw {:?}", leaked(&o.stdout));
+            assert!(String::from_utf8_lossy(&o.stdout).lines().any(|l| l == "BACKPLANE_NO_UPDATE=1"), "{k:?}: the hold on updates stays");
+            let o = std_cmd(k, "/usr/bin/env").output().unwrap(); assert!(leaked(&o.stdout).is_empty(), "std {k:?} saw {:?}", leaked(&o.stdout));
+        }
+        let o = std_cmd(Kind::Local, "/usr/bin/env").output().unwrap(); assert!(!leaked(&o.stdout).is_empty(), "our own helpers still get them");
+        println!("hub_env_probe_ok");
+    }
+    #[test] fn an_agent_shell_or_terminal_never_sees_the_guards_or_updaters_variables() {
+        let me = std::env::current_exe().unwrap();
+        let mut c = std::process::Command::new(me); c.args(["proc::tests::hub_env_probe_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_HUB_ENV_PROBE", "1").env_remove("BACKPLANE_COPY");
+        for (k, v) in [("BACKPLANE_BUILDS", "/home/x/.backplane-gpui-dev"), ("BACKPLANE_BUILD", "20261106-1"), ("BACKPLANE_COMMIT", "abc1234"), ("BACKPLANE_GUARD", "1"), ("BACKPLANE_GUARD_STABLE", "60"),
+            ("BACKPLANE_SAFE", "1"), ("BACKPLANE_SAFE_SKIP", "bots"), ("BACKPLANE_CARRY_WAIT", "60"), ("BACKPLANE_FAULT", "panic:bots"), ("BACKPLANE_UPDATE_FEED", "http://x"), ("BACKPLANE_NO_UPDATE", "1")] { c.env(k, v); }
+        let o = c.output().unwrap();
+        assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).contains("hub_env_probe_ok"), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     }
     #[test] fn side_by_side_probe_child() { // run by the tests below with BACKPLANE_COPY=1 and the flag as given
         let Ok(mode) = std::env::var("BP_SBS_PROBE") else { return };
