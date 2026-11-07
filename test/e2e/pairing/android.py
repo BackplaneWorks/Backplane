@@ -2,7 +2,7 @@
 """The Android app's pairing on an emulator through its real UI: uiautomator finds the controls, `input` types and taps, and the hub says whether it worked.
 A simulator result: it counts for the app and the protocol, not for a real phone.
 
-  android.py --base http://HOST:PORT --token-file T --adb 'CMD' --sockets 'CMD' [--restart 'CMD'] [--expire 'CMD'] [--device 'a real Pixel 9 (USB)']
+  android.py --base http://HOST:PORT --token-file T --adb 'CMD' --sockets 'CMD' [--restart 'CMD'] [--expire 'CMD'] [--device 'a real Pixel 9 (USB)'] [--fresh 'CMD']
 
 --adb is the prefix that reaches your own emulator. --sockets prints how many sockets are established to the hub from outside, run where the hub is.
 """
@@ -14,9 +14,13 @@ PKG, ACT = "dev.backplane.mobile.gpui", "dev.backplane.mobile.DataActivity"
 
 
 class Phone:
-    def __init__(self, adb): self.adb = shlex.split(adb)
+    def __init__(self, adb, fresh_cmd=""): self.adb, self.fresh_cmd = shlex.split(adb), fresh_cmd
     def sh(self, cmd, timeout=30): return subprocess.run(self.adb + ["shell", cmd], capture_output=True, text=True, timeout=timeout).stdout
-    def fresh(self): self.sh(f"pm clear {PKG}"); self.sh(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS"); self.launch()  # (the first-run permission dialog would cover the app)
+    def fresh(self):
+        if self.fresh_cmd:  # the app resets itself in its own process (an emulator keeps each dead app process's rendering memory: scripts/android-emu.sh fresh)
+            subprocess.run(self.fresh_cmd, shell=True, capture_output=True); time.sleep(1); self.launch(); return
+        self.sh(f"pm clear {PKG}"); self.sh(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS"); self.launch()  # (the first-run permission dialog would cover the app)
+    def stored_link(self): return "link" in self.sh(f"run-as {PKG} cat shared_prefs/data.xml")  # (a debug build: its own prefs, read as the app)
     def launch(self):  # (a shade left down by another run, or a system crash dialog such as a fresh emulator's "Bluetooth keeps stopping", would cover the app)
         self.sh("cmd statusbar collapse"); b = self.button("Close app")
         if b is not None: self.tap(b); time.sleep(1)
@@ -111,11 +115,12 @@ def left_pairing(p): t = p.texts(); return bool(t) and "Pair with a hub" not in 
 def main():
     a = argparse.ArgumentParser()
     for n in ("--base", "--token-file", "--adb", "--sockets"): a.add_argument(n, required=True)
-    a.add_argument("--device", default="Android emulator (a simulator result)"); a.add_argument("--restart", default=""); a.add_argument("--expire", default="")
+    a.add_argument("--device", default="Android emulator (a simulator result)"); a.add_argument("--fresh", default="", help="a host command that resets the app in its process, instead of pm clear"); a.add_argument("--restart", default=""); a.add_argument("--expire", default="")
     o = a.parse_args()
-    hub, p = Hub(o.base, open(o.token_file).read().strip()), Phone(o.adb)
+    hub, p = Hub(o.base, open(o.token_file).read().strip()), Phone(o.adb, o.fresh)
     print(f"route {hub.base}, {o.device}", flush=True)
 
+    if o.fresh: p.sh(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS")  # once: fresh() no longer clears it
     p.fresh()
     check("a fresh app starts at pairing", on_pair_screen(p), p.texts()[:90])
     print("   screen offers:", p.texts()[:160], flush=True)
@@ -127,6 +132,8 @@ def main():
     check("link: the hub lists one more live device", live(hub) == n0 + 1, p.texts()[:90])
     check("link: the app holds a socket to the hub", sockets(o.sockets) >= 1)
     check("link: the app has left pairing", left_pairing(p), p.texts()[:90])
+    had = p.stored_link(); p.fresh()
+    check("a fresh start after pairing leaves no hub stored and shows pairing", had and not p.stored_link() and on_pair_screen(p) and "Re-pair" not in p.texts(), f"stored before {had}, after {p.stored_link()}")
 
     # a short code
     p.fresh(); n0 = live(hub); st, inv = hub.invite()
