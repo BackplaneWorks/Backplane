@@ -206,7 +206,8 @@ final class Journeys: XCTestCase {
         let before = rows.count
         guard d.step("new thread sheet", act: { let b = d.app.buttons["New thread in \(title)"]; _ = b.waitForExistence(timeout: 10); hittable(b); b.tap() }, expect: { d.el("data.thread.new.text").waitForExistence(timeout: 10) }) else { return }
         d.step("start the thread", act: { let t = d.el("data.thread.new.text"); d.tap(t); t.typeText(first); d.tap(d.el("data.thread.new.start")) },
-               expect: { rows.count > before || rows.firstMatch.waitForExistence(timeout: 15) })
+               // Start opens the new thread (DataViews' new-thread sheet appends it to the path): the list's new row, or the thread itself, open
+               expect: { rows.count > before || rows.firstMatch.exists || d.el("thread.composer").exists })
         // the thread whose preview or title is the prompt; else the first row
         let mine = rows.containing(NSPredicate(format: "label CONTAINS[c] %@", String(first.prefix(20)))).firstMatch
         guard d.step("open the thread", act: { d.tap(mine.exists ? mine : rows.firstMatch) }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
@@ -293,15 +294,17 @@ final class Journeys: XCTestCase {
         guard d.step("open a thread", act: { for _ in 0..<40 where !(rows.firstMatch.exists && rows.firstMatch.isHittable) { usleep(250_000) }; d.tap(rows.firstMatch) }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
         // a picture on the pasteboard, pasted with the system menu
         UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200)).image { c in UIColor.systemTeal.setFill(); c.fill(CGRect(x: 0, y: 0, width: 300, height: 200)) }
+        // the sent picture: its own identifier, or its message's (a row's identifier covers the picture inside it)
+        func picture(_ t: TimeInterval) -> Bool { d.el("data.entry.image").waitForExistence(timeout: t) || d.app.images["data.entry.user"].waitForExistence(timeout: 1) }
         let comp = d.el("thread.composer")
         d.step("paste the picture", act: { d.tap(comp); comp.press(forDuration: 1.0); if d.app.menuItems["Paste"].waitForExistence(timeout: 4) { d.app.menuItems["Paste"].tap() } }, expect: { d.el("data.pending.images").waitForExistence(timeout: 10) })
         d.shot("picture-pending")
-        d.step("send it with a message", act: { d.type(comp, "here is a picture"); d.tap(d.el("thread.send")) }, expect: { d.el("data.entry.image").waitForExistence(timeout: 20) && !d.el("data.pending.images").exists })
+        d.step("send it with a message", act: { d.type(comp, "here is a picture"); d.tap(d.el("thread.send")) }, expect: { picture(20) && !d.el("data.pending.images").exists })
         d.shot("picture-sent")
         // leave and come back: the picture shows again (this phone's copy, or fetched from the hub)
         let back = d.app.navigationBars.buttons.element(boundBy: 0); if back.exists { back.tap() }
         sleep(1)
-        d.step("open it again", act: { for _ in 0..<20 where !(rows.firstMatch.exists && rows.firstMatch.isHittable) { usleep(250_000) }; rows.firstMatch.tap() }, expect: { d.el("data.entry.image").waitForExistence(timeout: 15) })
+        d.step("open it again", act: { for _ in 0..<20 where !(rows.firstMatch.exists && rows.firstMatch.isHittable) { usleep(250_000) }; rows.firstMatch.tap() }, expect: { picture(15) })
         d.shot("picture-again")
     }
 
