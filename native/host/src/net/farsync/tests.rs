@@ -111,7 +111,7 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
     p.fold(&ps("p1", "desk", false));
     let j = json!({"self":{"name":"me","url":"http://100.1.0.1:3787","domain":""},"peers":[{"name":"desk","url":"http://100.2.0.1:3787"}]});
     assert!(!own_link(&p, &j, "p1"), "unverified");
-    p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"pair","at":1})); assert!(own_link(&p, &j, "p1"));
+    p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"approved","at":1})); assert!(own_link(&p, &j, "p1"));
     assert!(!own_link(&p, &j, "p2"), "unknown"); assert!(!own_link(&p, &json!({"self":{},"peers":[]}), "p1"), "not found by this hub");
     p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"off","at":2})); assert!(!own_link(&p, &j, "p1"));
     p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"","at":3})); p.fold(&json!({"$":"SettingSet","key":"peer.own.p1","value":"no","at":3})); assert!(!own_link(&p, &j, "p1"), "the owner said it is not theirs");

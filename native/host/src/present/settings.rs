@@ -538,7 +538,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "About", "Privacy", "Developer"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn developer_replays_setup_and_the_star_suggestion() {
