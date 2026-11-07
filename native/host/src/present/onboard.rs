@@ -213,9 +213,11 @@ fn live_note(ipc: &str, status: &str) -> String {
 fn kicad(f: &Facts, st: &State, session: &Value, c: &Client) -> Step {
     let done = f.runs("kicad");
     if c.phone { return Step { id: "kicad", group: "CAD tools", title: "KiCad".into(), body: "KiCad runs on the computer that runs the hub. This phone shows boards and schematics the hub draws.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
-    let body = "Agents use KiCad to read, change and check boards and schematics. Backplane draws boards itself, but it needs kicad-cli to plot and export them, and KiCad 9 or later works for that. For live edits in a running KiCad, agents need Backplane KiCad, our build of KiCad with an editing API. Stock KiCad works too, and agents then edit the files.".to_string();
+    let body = "Agents use KiCad to read, change and check boards and schematics. Backplane draws boards itself, but it needs kicad-cli to plot and export them, and KiCad 9 or later works for that. For live edits in a running KiCad, agents need Backplane KiCad, our build of KiCad with an editing API. Stock KiCad works too, and agents then edit the files. With no KiCad found, Install KiCad below downloads Backplane KiCad for you.".to_string();
     let path = if session["drafts"]["@f.obkicad"].is_string() { draft(session, "@f.obkicad").to_string() } else { set(st, "kicad.path").to_string() };
     let mut rows = vec![row("KiCad", &tool_note(f, "kicad", "KiCad"), vec![link("Download", "https://www.kicad.org/download/")])];
+    // none found: the same Install row as Settings, CAD (consent, progress, Try again); its presses are Settings' own
+    if !done { if let Some(r) = super::settings::install_row(session, f.info, crate::files::kicad::install::package()) { rows.push(r); } }
     if !done && f.checked { for (name, cmd) in platform(&f.os).kicad { rows.push(row(name, cmd, vec![copy(cmd)])); } }
     rows.push(row("Live editing", &live_note(set(f.st, "kicad.ipc"), s(f.info, "kicad.status")), vec![link("Get Backplane KiCad", "https://github.com/BackplaneWorks/Backplane_KiCad/releases")]));
     let mut located = row("Locate it", "If KiCad is somewhere else, give the full path to kicad-cli.", vec![btn("Use this path", "ob-kicad", "", false), btn("Check again", "ob-check", "", false)]);
@@ -595,6 +597,9 @@ mod tests {
         let live = |status: &str, ipc: &str| { let mut i = info("linux"); i["kicad.status"] = json!(status); let p = at(&cst(blank(), &[("kicad.ipc", ipc)]), "kicad", &i, &desk()); p["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Live editing").unwrap()["note"].as_str().unwrap().to_string() };
         assert!(live("ok", "on").contains("installed") && live("stock", "on").contains("stock KiCad") && live("old", "on").contains("too old") && live("missing", "on").contains("until a KiCad runs"));
         assert!(live("ok", "off").contains("Settings, CAD"));
+        let mut none = info("linux"); none["kicad.status"] = json!("missing");
+        let q = at(&cst(blank(), &[]), "kicad", &none, &desk());
+        assert!(q["rows"].as_array().unwrap().iter().any(|r| r["label"] == "Install KiCad"), "no KiCad found: the same Install row as Settings, CAD");
         let p = at(&cst(blank(), &[]), "kicad", &info("linux"), &desk());
         assert!(p["body"].as_str().unwrap().contains("Backplane KiCad"));
         assert!(p["rows"].as_array().unwrap().iter().any(|r| r["buttons"].as_array().unwrap().iter().any(|b| s(b, "value").contains("Backplane_KiCad"))));

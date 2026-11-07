@@ -304,7 +304,7 @@ fn writing(st: &State, info: &Value) -> Vec<Value> {
 
 /// Settings > CAD's Install KiCad row (0.14's `kicad-install`), only while no KiCad is found: what it would install and from where, the consent
 /// step (Install, Cancel), its progress and its failure, from info `kicad.install` (kicad/install.rs). None while KiCad is found or still looked for.
-fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Option<Value> {
+pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Option<Value> {
     use crate::files::kicad::install::FROM;
     let i = |k: &str| info[k].as_str().unwrap_or("");
     if !i("kicad.cli").is_empty() || i("kicad.status") == "checking" { return None }
