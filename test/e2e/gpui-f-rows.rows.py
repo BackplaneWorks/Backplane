@@ -88,3 +88,52 @@ if want('F09'):
     shot('m-draft'); from PIL import Image
     crop = px('m-draft').crop((367, 788, 1265, 848)); open_composer_has_text = crop.convert('L').getextrema()[1] > 150 and sum(1 for v in crop.convert('L').getdata() if v > 150) > 80
     log('F09-draft', open_composer_has_text, 'typed an unsent draft, killed the client process, started it again: the composer shows text again=%s (m-draft.png)' % open_composer_has_text)
+
+# ---- F06 cards in the client: the approval, question and plan cards of a thread, answered with the mouse; the agent hears each answer
+if want('F06'):
+    fake = lambda: open(P('fake.log')).read() if os.path.exists(P('fake.log')) else ''
+    asks = lambda th, kind: [e for e in events() if e['$'] == 'AskOpened' and e.get('thread') == th and e.get('kind') == kind]
+    closed = lambda a: any(e['$'] == 'AskClosed' and e.get('id') == a['id'] for e in events())
+    sel(1); say_ = lambda t: (xin('click', 815, 810), xin('type', t), xin('key', 'Return'))
+    say_('zqapprove now'); until(lambda: asks('t1', 'approval'), 20); pause(2); shot('f6-approval')
+    a1 = asks('t1', 'approval')[-1]; click_ctl('ask:0:0'); ok1 = until(lambda: closed(a1), 20); until(lambda: 'PERM Bash -> ' in fake(), 15)
+    allowed = bool(re.search(r'PERM Bash -> .*allow', fake(), re.I))
+    until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
+    n = len(asks('t1', 'approval')); say_('zqapprove again'); until(lambda: len(asks('t1', 'approval')) > n, 20); pause(2)
+    a2 = asks('t1', 'approval')[-1]; click_ctl('ask:0:2'); ok2 = until(lambda: closed(a2), 20); until(lambda: re.search(r'PERM Bash -> .*deny', fake(), re.I), 15)
+    denied = bool(re.search(r'PERM Bash -> .*deny', fake(), re.I))
+    log('F06-approval', ok1 and allowed and ok2 and denied, 'approval card (f6-approval.png) with Allow, Allow for session and Deny: Allow closed the ask and the agent got allow=%s; Deny closed the next and the agent got deny=%s' % (allowed, denied))
+    until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
+    say_('zqask'); until(lambda: asks('t1', 'input'), 20); pause(2); shot('f6-question'); q = asks('t1', 'input')[-1]
+    ids = sorted(k for k in ctrls() if k.startswith('ask:')); click_ctl(ids[0]) if ids else None; okq = until(lambda: closed(q), 20); until(lambda: 'PERM AskUserQuestion -> ' in fake(), 15)
+    heard = bool(re.search(r'PERM AskUserQuestion -> .*(USB-C|Barrel)', fake()))
+    log('F06-question', bool(ids) and okq and heard, 'question card "%s" (f6-question.png), option buttons %s: the first closed it and the agent got the answer=%s' % ((q.get('detail') or '')[:30].replace('\n', ' '), ids, heard))
+    sel(2); say_('zqplan'); until(lambda: asks('t2', 'plan'), 20); pause(2); shot('f6-plan'); pl = asks('t2', 'plan')
+    log('F06-plan', bool(pl) and 'Draw the board' in (pl[-1].get('detail') or ''), 'a thread in plan mode (ModesSet interaction=plan) asked to exit with the plan card (f6-plan.png), AskOpened kind=plan with the plan text=%s' % bool(pl))
+
+# ---- F07 stop, F08 fork, F14 terminal, F21 reconnect: through the buttons and keys of the window
+if want('F07'):
+    sel(1); say_ = lambda t: (xin('click', 815, 810), xin('type', t), xin('key', 'Return'))
+    n0 = len([e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'running'])
+    say_('a long turn'); until(lambda: len([e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'running']) > n0, 20); pause(1.5); shot('f7-running')
+    stopped = click_ctl('tool:interrupt'); ok = until(lambda: events()[-1]['$'] and any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'interrupted' for e in events()), 20)
+    log('F07-stop', stopped and ok, 'a running turn (f7-running.png) and the Stop button in the thread header: TurnChanged interrupted in the hub log=%s' % ok)
+if want('F08'):
+    sel(1); n = len([e for e in events() if e['$'] == 'ThreadCreated']); forked = click_ctl('tool:fork'); ok = until(lambda: len([e for e in events() if e['$'] == 'ThreadCreated']) > n, 20); pause(1.5); shot('f8-fork')
+    log('F08-fork', forked and ok, 'the Fork thread button: a new thread was created in the hub log=%s (f8-fork.png)' % ok)
+if want('F14'):
+    marker = P('term.marker'); chord('ctrl j'); pause(2.5); shot('f14-open')
+    xin('type', 'touch ' + marker); xin('key', 'Return'); ok = until(lambda: os.path.exists(marker), 15); pause(1); shot('f14-typed')
+    shown = differs(px('f14-open'), px('f14-typed'))
+    log('F14-terminal', ok and shown, 'the floating terminal (Ctrl+J): a command typed with the keyboard ran in a real shell (the marker file exists=%s) and the panel redrew=%s (f14-typed.png)' % (ok, shown))
+    chord('ctrl j')
+if want('F21'):
+    sel(1); shot('f21-up'); hub.terminate(); hub.wait(); pause(6); shot('f21-down')
+    hub = spawn([HUB, '--home', P('home'), '--port', str(PORT), '--host', '127.0.0.1', '--no-tailscale', '--foreground'], 'hub.log', cwd=P('proj'))
+    for _ in range(100):
+        if subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', 'http://127.0.0.1:%d/hello' % PORT]).returncode == 0: break
+        time.sleep(0.2)
+    pause(12); shot('f21-back'); xin('click', 815, 810); xin('type', 'zqshort after the reconnect'); xin('key', 'Return')
+    ok = until(lambda: any(e['$'] == 'MessagePosted' and 'after the reconnect' in e.get('text', '') for e in events()), 30)
+    ds = differs(px('f21-up'), px('f21-down'), (0, 870, 263, 900))
+    log('F21-reconnect', ok and ds, 'the hub was stopped and started again on the same home: the status line changed while it was down=%s, and after reconnecting a message typed in the window reached the new hub process=%s (f21-*.png)' % (ds, ok))

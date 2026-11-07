@@ -29,10 +29,11 @@ open(P('proj/ecc83.kicad_pro'), 'w').write('{}\n')
 open(P('proj/readme.txt'), 'w').write('rig fixture\n')
 now = int(time.time())
 seed = [{'$': 'ProjectCreated', 'id': 'p1', 'title': 'rows', 'root': P('proj'), 'at': now}] + [{'$': 'ThreadCreated', 'id': 't%d' % i, 'project': 'p1', 'title': 'Thread %d' % i, 'env': 'local', 'branch': '', 'worktree': '', 'provider': 'claude', 'model': '', 'at': now + i} for i in (1, 2)]
+seed += [{'$': 'ModesSet', 'id': 't1', 'runtime': 'approval-required', 'interaction': 'default', 'model': '', 'at': now + 3}, {'$': 'ModesSet', 'id': 't2', 'runtime': 'full-access', 'interaction': 'plan', 'model': '', 'at': now + 3}]
 open(P('home/events.jsonl'), 'w').write(''.join(json.dumps(e) + '\n' for e in seed))
 env = dict(os.environ)
 for k in ['I3SOCK', 'DBUS_SESSION_BUS_ADDRESS', 'WAYLAND_DISPLAY']: env.pop(k, None)
-env.update(XDG_RUNTIME_DIR=RUN, LC_ALL='C', BACKPLANE_AGENTS=P('bin'), BACKPLANE_NO_UPDATE='1', FAKE_LOG=P('fake.log'), FAKE_SECS='600', HOME=P('fakehome'), XDG_CACHE_HOME=P('fakehome/.cache'),
+env.update(XDG_RUNTIME_DIR=RUN, LC_ALL='C', BACKPLANE_AGENTS=P('bin'), BACKPLANE_NO_UPDATE='1', SHELL='/bin/sh', FAKE_LOG=P('fake.log'), FAKE_SECS='600', HOME=P('fakehome'), XDG_CACHE_HOME=P('fakehome/.cache'),
            XDG_CONFIG_HOME=P('fakehome/.config'), XDG_DATA_HOME=P('fakehome/.local/share'), PATH=P('bin') + ':' + os.environ['PATH'])
 def spawn(args, log_name, e=None, cwd=None):
     p = subprocess.Popen(args, env=e or env, cwd=cwd, stdout=open(P(log_name), 'ab'), stderr=subprocess.STDOUT); procs.append(p); return p
