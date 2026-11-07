@@ -812,8 +812,8 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
 
 const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \"$ans\"\nsleep 30\n";
 #[tokio::test(flavor = "multi_thread")] async fn a_drivers_permission_reaches_the_person_and_the_answer_goes_back() {
-    let sd = dir("dr-bin"); script(&sd, "testcli", TESTCLI);
-    let (hub, ag, _h, _w) = start("dr", |w| base_log(w, 1, "").replace("\"provider\":\"claude\"", "\"provider\":\"testprov\""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    let sd = dir("dr2-bin"); script(&sd, "testcli", TESTCLI);
+    let (hub, ag, _h, _w) = start("dr2", |w| base_log(w, 1, "").replace("\"provider\":\"claude\"", "\"provider\":\"testprov\""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await;
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "AskOpened"))).await;
     let ask = ev.iter().find(|e| is(e, "AskOpened")).unwrap(); assert_eq!((ask["kind"].as_str(), ask["tool"].as_str(), ask["detail"].as_str()), (Some("approval"), Some("Bash"), Some("ls")));
@@ -855,8 +855,8 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
 }
 
 #[tokio::test(flavor = "multi_thread")] async fn steering_claude_logs_running_and_starts_without_a_live_process() { // Steer.go for Claude
-    let sd = dir("sc-bin"); perf_standin(&sd, 2);
-    let (hub, ag, _h, _w) = start("sc", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    let sd = dir("sc2-bin"); perf_standin(&sd, 2);
+    let (hub, ag, _h, _w) = start("sc2", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
     assert!(ag.steer(T1, "zqshort steer").await.is_ok());
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert!(ev.iter().any(|e| turn_is(e, "running")), "TurnChanged running is logged"); assert_eq!(ag.stats.procs_spawned.load(Relaxed), 1, "a process was started for it"); ag.shutdown();
