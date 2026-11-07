@@ -1,5 +1,5 @@
 //! Setup's checks (`onboard.check`): what is installed, whether it runs, who is signed in. The answer is the info `onboard.checks`, which the pure step list
-//! in `present/onboard.rs` reads, kept in the setting `onboard.checks`. `onboard.machine` makes and uses machine invites and `onboard.uber` makes the uberbot.
+//! in `present/onboard.rs` reads, kept in the setting `onboard.checks`. `onboard.uber` makes the uberbot.
 //! `onboard.view` and `onboard.act` are the phones' way in (data/1 has no presenter).
 //! A check only reads: `--version`, `auth status`, `login status`. Nothing here signs in or installs.
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}, proc::{self, Kind}};
@@ -117,25 +117,9 @@ impl OnboardRpc {
         let text = checks.to_string();
         if hub.setting("onboard.checks").await.as_deref() != Some(text.as_str()) { let _ = hub.commit(&json!({"$":"SettingSet","key":"onboard.checks","value":text,"at":now_ms() / 1000})).await; }
     }
-    /// Redraw every client after an info change that has no log line of its own.
-    async fn ping(hub: &Arc<Hub>) { let _ = hub.commit(&json!({"$":"SettingSet","key":"onboard.ping","value":now_ms().to_string(),"at":now_ms() / 1000})).await; }
     async fn inner(hub: &Arc<Hub>, who: &Caller, m: &'static str, p: Value) -> Value {
         let Some(h) = hub.rpc_for(m) else { return json!({"ok": false, "error": "not available on this hub"}) };
         h.call(hub, who, &json!(0), m, &p).await.into_iter().next().unwrap_or(Value::Null)
-    }
-    async fn machine(hub: &Arc<Hub>, who: &Caller, p: &Value) {
-        if p["op"] == "invite" {
-            let r = Self::inner(hub, who, "bots.invite", json!({})).await;
-            if let Some(inv) = r["invite"].as_str() {
-                hub.set_info("onboard.invite", inv).await; hub.set_info("onboard.join.err", "").await;
-                // an invite lasts ten minutes, so it leaves the screen with its last use
-                let h = hub.clone(); tokio::spawn(async move { tokio::time::sleep(Duration::from_secs(600)).await; h.set_info("onboard.invite", "").await; Self::ping(&h).await; });
-            } else { hub.set_info("onboard.join.err", r["error"].as_str().unwrap_or("Backplane could not make an invite.")).await; }
-        } else {
-            let r = Self::inner(hub, who, "bots.join", json!({"invite": p["invite"]})).await;
-            hub.set_info("onboard.join.err", if r["ok"] == true { "" } else { r["error"].as_str().unwrap_or("That invite did not work.") }).await;
-        }
-        Self::ping(hub).await;
     }
     /// The uberbot for a home with no bots: Bub, or a name that is free.
     async fn uber(hub: &Arc<Hub>, who: &Caller) {
@@ -161,13 +145,12 @@ impl OnboardRpc {
     }
 }
 impl RpcHandler for OnboardRpc {
-    fn methods(&self) -> &'static [&'static str] { &["onboard.check", "onboard.machine", "onboard.uber", "onboard.view", "onboard.act"] }
+    fn methods(&self) -> &'static [&'static str] { &["onboard.check", "onboard.uber", "onboard.view", "onboard.act"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let ok = json!({"t":"reply","id":id,"ok":true});
             match method {
                 "onboard.check" => { let (h, q) = (hub.clone(), p.clone()); tokio::spawn(async move { OnboardRpc::check(&h, &q).await }); vec![ok] }
-                "onboard.machine" => { OnboardRpc::machine(hub, who, p).await; vec![ok] }
                 "onboard.uber" => { OnboardRpc::uber(hub, who).await; vec![ok] }
                 _ => vec![json!({"t":"reply","id":id,"ok":true,"result":OnboardRpc::phone(hub, who, p, method == "onboard.act").await})],
             }

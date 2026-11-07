@@ -203,56 +203,20 @@ tz.invalid = タイムゾーン名ではありません（例：Europe/Helsinki�
 nav.task.none = このタスクにはまだビューがありません
 nav.pr.norepo = PRリンクにはリポジトリが必要です
 # ja? uberbot term
-tour.uber.first = {name}を自分のメインボットにする
-tour.uber.make = {name}にする
 # ja? uberbot term
-tour.uber.create = 自分のメインボットを作成
-tour.uber.new = 新しく作成
 
 # first-run tour
-tour.title.welcome = Backplaneへようこそ
 tour.title.projects = プロジェクト
 tour.title.threads = スレッド
-tour.title.buttons = スレッドのボタン
 tour.title.bots = ボット
-tour.title.agents = エージェント
-tour.title.keys = キーと音声
-tour.title.machines = 他のマシン
-tour.title.phones = スマートフォンとブラウザ
 # ja? uberbot term
-tour.title.uber = メインボット
-tour.body.welcome.phone = どこに何があるかの簡単なツアーです。いつでもスキップできます。「その他」の「設定」からもう一度表示できます。
-tour.body.welcome.web = どこに何があるかの簡単なツアーです。Enterで次へ進み（ボタンにフォーカスがあるときはそのボタンを押します）、Escでスキップできます。設定からもう一度表示できます。
-tour.body.welcome.window = どこに何があるかの簡単なツアーです。Enterで次へ進み、Escでスキップできます。設定からもう一度表示できます。
-tour.body.projects.phone = プロジェクトはフォルダで、たいていはKiCadプロジェクトです。プロジェクト一覧のフォルダ追加ボタンで追加します。プロジェクトに属さない会話はウーバーボットとチャットします。以前の会話は会話履歴と検索から開けます。
-tour.body.projects.desktop = プロジェクトはフォルダで、たいていはKiCadプロジェクトです。サイドバー上部の＋で追加します。プロジェクトに属さない会話はウーバーボットとチャットします。以前の会話は会話履歴と検索から開けます。
-tour.body.threads = スレッドは、プロジェクトで作業するエージェントとの会話です。Gitプロジェクトでは既定で別々のワークツリーを使い、Gitがない場合やローカルモードでは、スレッドはプロジェクトのフォルダを共有します。ツールの呼び出しは1行にまとめられ、委任した作業はサブエージェントの下に表示されます。
-tour.body.buttons.phone = スレッドのツールバーメニューで、「完了」は進行中の一覧から外し、「スヌーズ」は後まで隠し、「フォーク」はそこから新しいスレッドを始めます。ビューアには基板、回路図、3D、ファイルが表示されます。ピン留め、アーカイブ、削除もここにあります。
-tour.body.buttons.desktop = 「完了」はスレッドを進行中の一覧から外し、「スヌーズ」は後まで隠し、「フォーク」はこのスレッドから新しいスレッドを始めます。「ビューア」は基板、回路図、3D、ファイルを横に開きます。ピン留め、アーカイブ、削除もここにあります。
-tour.body.bots.phone = ボットは、チャットをまたいで残るエージェントで、名前、猫、記憶を持ちます。一覧の「ボット」から追加し、メッセージで呼び出します：@scout BOMを見て
-tour.body.bots.desktop = ボットは、チャットをまたいで残るエージェントで、名前、猫、記憶を持ちます。サイドバーの「ボット」から追加し、メッセージで呼び出します：@scout BOMを見て
-tour.body.agents = Backplaneは、エージェントのコマンドラインプログラム（Claude Code、Codex、Grok、Muse Code、OpenCode、Pi、Oh My Pi）を実行します。このハブを動かすマシンにいずれかをインストールし、サインインしてください。設定には各プログラムが見つかったかどうかが表示されますが、サインイン状態は表示されません。GoogleのAntigravityエージェントは設定からインストールとサインインができます。プロバイダーとモデルは、スレッドの入力欄で、新しいスレッド用には設定で選びます。
-tour.body.keys.phone = 他のサービスのAPIキーは、ハブのマシン上のファイルに保管され、そこで動くエージェントなら読める可能性があります。出力しないよう指示してありますが、強制はされません。音声入力のOpenAIキーは、コンピューターまたはウェブページの設定で入力します。
-tour.body.keys.desktop = 他のサービスのAPIキーは、ハブのマシン上のファイルに保管され、そこで動くエージェントなら読める可能性があります。出力しないよう指示してありますが、強制はされません。音声入力にはOpenAIキーが必要で、設定の「音声」で入力します。
-tour.body.machines.phone = ホームフォルダごとに1つのハブが動きます。コンピューター上のハブはTailscale経由で互いを見つけ、プロジェクトとスレッドを裏で同期するので、どのハブからもすべて見えます。読み込み中のプロジェクトは薄く表示され、「同期中」と出ます。メッセージで>desktop:と書くと、desktopというマシンのスレッドを指します。「ハブ」ボタンには、このスマートフォンがペアリングしたハブが並びます。このスマートフォンも同じtailnetのTailscaleが必要です。
-tour.body.machines.desktop = ホームフォルダごとに1つのハブが動きます。Backplaneの起動時にTailscaleにサインインしていれば、ハブはtailnetで待ち受け、2分おきにオンラインの他のマシンでBackplaneが動いているか確認します。Tailscaleが自分のマシンであることを保証するので、ハブは自動でリンクし、プロジェクトとスレッドを裏でこのサイドバーに同期します。切り替えは不要です。読み込み中のプロジェクトは薄く表示され、「同期中」と出ますが、残りはその間も使えます。メッセージで>desktop:と書くと、desktopというマシンのスレッドを指します。設定の「自分のマシン」には各マシンが表示され、マシンごとに同期をオフにできます。設定にはTailscaleの状態も表示されます：オン、未接続（サインインしてからBackplaneを再起動）、オフ（--no-tailscaleで起動）。
-tour.body.phones.phone = ハブのコンピューターで、設定の「Devices」から「Add a device」を開きます。こちらでは「ハブ」の「QRコードをスキャン」でペアリングします。このスマートフォンも同じtailnetのTailscaleが必要です。ブラウザでもハブのウェブアドレスを開けます。
-tour.body.phones.desktop = スマートフォンをペアリングするには、Tailscaleをインストールして同じtailnetに参加します。次に設定の「Devices」で「Add a device」を押し、そのQRコードをBackplaneアプリかスマートフォンのカメラで読み取るか、短いコードを入力します。招待は1回だけ使えます。tailnet上の端末のブラウザでも、このハブのウェブアドレスを開けます。
 # ja? uberbot term
-tour.body.uber.have.phone = {name}が自分のメインボットです。一覧の先頭でタップすると、すべてのステータスを確認できます。
 # ja? uberbot term
-tour.body.uber.have.desktop = {name}が自分のメインボットです。サイドバーの先頭でクリックすると、すべてのステータスを確認できます。
 # ja? uberbot term
-tour.body.uber.join = 別のマシンにメインボット「{name}」があります。
 # ja? uberbot term
-tour.body.uber.pick = メインボットは最初に話しかける猫です。すべてのプロジェクト、スレッド、ボット、マシンを把握し、「ステータス」タブで実行中のものや対応待ちのものを確認できます。いずれかのボットをメインボットにしてください。{name}が一番よく使われています。あとから変更できます。
 # ja? uberbot term
-tour.body.uber.none = メインボットは最初に話しかける猫です。すべてのプロジェクト、スレッド、ボット、マシンを把握し、「ステータス」タブで実行中のものや対応待ちのものを確認できます。今作成しましょう。名前はあとから変更できます。
-tour.next = 次へ
 tour.done = 完了
-tour.counter = {n}／{total}
 tour.back = 戻る
-tour.skip = スキップ
 
 # status plane
 plane.lock.outside = ハブ外のpid {pid}（{cmd}）が保持
@@ -512,9 +476,7 @@ settings.pair = ペアリングリンク
 settings.pair.code = QRコード
 settings.sync = 同期
 settings.tour = ツアー
-settings.tour.welcome = 使い方ツアー
 settings.tour.show = ツアーを表示
-settings.tour.note = プロジェクト、スレッド、ボット、エージェント、マシンを紹介します。
 settings.settle = ワーカーの待機時間（分）
 settings.settle.note = ワーカーは正常終了後、報告が届き、作業や確認待ちがなくなると{plural, select, other {{minutes}分間}}の非活動で完了済みになります。個人宛ての未読返信は表示を保ち、履歴は保存されます。0で無効です。
 settings.settle.done = 既読の会話に短い待機時間を使う
@@ -903,7 +865,6 @@ web.settings.writing.note = スレッド名、ブランチ名、コミットメ�
 web.settings.writing.model = 文章生成：モデル
 settings.theme.phone.note = 未設定ならスマートフォンのシステムに従います。
 settings.pair.qr.tip = リンクを読み取り用コードで表示
-settings.tour.again = ツアーをもう一度表示
 settings.kicad.path = ランタイムのルート、またはkicad-cliのパス
 settings.kicad.path.save = パスを保存
 home.phone.start = プロジェクトを追加してください。
@@ -1013,9 +974,6 @@ files.download.failed = ダウンロードが完了しませんでした
 files.download.file = {name}をダウンロード
 files.download.folder = {name}をzipでダウンロード
 review.refresh.tip = 設計を再取得
-tour.back.tip = 前の手順（左矢印）
-tour.end.tip = ツアーを終了（Esc）
-tour.next.tip = 次の手順（Enterか右矢印）
 viewer.resize = ビューアーの幅：ドラッグまたは左右キーで変更・Homeまたはダブルクリックで元に戻す・Endで最大化
 web.bots.persona.placeholder = ペルソナ：役割や振る舞い
 bots.create.tip = ボットを作成
