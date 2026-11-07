@@ -25,6 +25,9 @@ pub const BATCH_BYTES: usize = 64 << 10; // "one read" of the agent's output (De
 pub const LIVE_CAP: usize = 262144;   // Live.cap: a thread's streamed-but-unposted text
 pub const BURST: usize = 4;           // Rec.burst: turns a restart carries on at once
 pub const CARRY_GAP_S: u64 = 3;       // the rest follow one at a time, this far apart
+/// How long a start on a named account waits for the account manager. A restart recovers threads and carries their turns on (Agents::start) before
+/// settings::start hands the agents the manager; a continue in that gap failed with "Accounts are not available". It is there within a second or so.
+pub const ACCOUNTS_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 pub const RECENT: usize = 256;        // message ids remembered per thread against a resend
 
 #[derive(Default)]
@@ -70,6 +73,15 @@ fn set(k: String, v: String, at: u64) -> Value { json!({"$":"SettingSet","key":k
 fn wait_key(th: &str) -> String { format!("carry.wait.{th}") }
 
 impl Agents {
+    /// The account manager, waiting for it while the hub is still starting (see [`ACCOUNTS_WAIT`]); None only if it never came.
+    pub async fn accounts_ready(&self) -> Option<Arc<crate::settings::accounts_io::Accounts>> {
+        let t0 = std::time::Instant::now();
+        loop {
+            if let Some(m) = self.accounts.get() { return Some(m.clone()) }
+            if t0.elapsed() >= ACCOUNTS_WAIT { return None }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
     pub async fn start(hub: Arc<Hub>) -> Result<Arc<Agents>> { let h = host::HostInfo::probe(&hub.cfg.home); Agents::start_host(hub, Cli::from_env(), h).await }
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
@@ -745,7 +757,7 @@ impl Actor {
             let b: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
             let id = b["id"].as_str().unwrap_or("").to_string();
             if !id.is_empty() {
-                let Some(mgr) = self.ag.accounts.get().cloned() else { return Err("Accounts are not available; select the default account".into()) };
+                let Some(mgr) = self.ag.accounts_ready().await else { return Err("Accounts are not available; select the default account".into()) };
                 let plan = mgr.launch_plan(&id, &b["epoch"].as_u64().unwrap_or(0).to_string(), "claude").await?;
                 prog = plan.program; acct_env = plan.env; acct_args = plan.args; busy = Some(crate::settings::accounts_hub::Busy::new(mgr, &id));
             }
