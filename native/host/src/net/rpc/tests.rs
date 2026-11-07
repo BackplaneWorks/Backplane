@@ -1,7 +1,7 @@
 //! Two throwaway hubs over loopback: A owns a thread "t" and answers /far/rpc; B is the machine whose client asks about "<link>~t". No real peers.
 use super::*;
 use crate::api::{Caller, RpcHandler};
-use crate::net::peering::tests::{know, live_ids, node_extra, settle, url, Extra, Node};
+use crate::net::peering::tests::{know, link_by_code, live_ids, node_extra, settle, url, Extra, Node};
 use crate::net::{botnet, farstore::FarStore, feed::Feed};
 use std::sync::Mutex;
 
@@ -33,10 +33,9 @@ async fn side_with(tag: &str, with_feed: bool, hang: bool, copy: bool) -> (Node,
 }
 async fn link(a: &Node, b: &Node, own: bool) -> String {
     know(a, b); know(b, a);
-    a.p.ask(&a.hub, &url(b), &url(a), false).await; settle().await;
-    let l = live_ids(b); assert_eq!(l.len(), 1, "linked: {l:?}");
-    if own { for n in [a, b] { n.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{}", l[0]),"value":"pair","at":1})).await.unwrap(); } }
-    l[0].clone()
+    let id = link_by_code(b, a).await; assert_eq!(live_ids(b), vec![id.clone()]);
+    if !own { for n in [a, b] { n.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{id}"),"value":"","at":3})).await.unwrap(); } settle().await; }
+    id
 }
 /// A client of `b` asks; the reply is the frame returned or, for a request sent on, the one pushed to its connection.
 async fn ask(b: &Node, id: u64, m: &str, p: Value) -> Value {

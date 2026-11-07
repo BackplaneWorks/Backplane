@@ -2,7 +2,7 @@
 //! loopback; no real peers. The routes B serves are `FarRoutes` behind the same front the peering tests use.
 use super::*;
 use std::path::PathBuf;
-use crate::net::peering::tests::{know, live_ids, node, node_extra, settle, url, Extra, Node};
+use crate::net::peering::tests::{know, link_by_code, live_ids, node, node_extra, settle, url, Extra, Node};
 use crate::net::{botnet, farstore::FarStore};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -25,11 +25,9 @@ async fn mirror(tag: &str) -> (Node, Arc<FarSync>) {
 /// A links with B (through the proof path) and both know each other.
 async fn linked(a: &Node, b: &Node) -> String {
     know(a, b); know(b, a);
-    a.p.ask(&a.hub, &url(b), &url(a), false).await; settle().await;
-    let l = live_ids(b); assert_eq!(l.len(), 1, "linked: {l:?}");
-    // the link is verified as the owner's (as a pairing over the tailnet would record it)
-    for n in [a, b] { n.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{}", l[0]),"value":"pair","at":1})).await.unwrap(); }
-    l[0].clone()
+    // (paired by a code and an approval: that is what makes it the owner's)
+    let l = link_by_code(b, a).await; assert_eq!(live_ids(b), vec![l.clone()]);
+    l
 }
 async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
@@ -60,7 +58,8 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
     let r = botnet::plain(&format!("{}/far/push", url(&b))).await; assert_eq!(r.code, 401, "{}", r.body);
     // not an owner's machine: a link that exists but is not verified
     let c = node("fc2", false).await; know(&c, &b); know(&b, &c);
-    c.p.ask(&c.hub, &url(&b), &url(&c), false).await; settle().await;
+    let paired = link_by_code(&b, &c).await;
+    for n in [&b, &c] { n.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{paired}"),"value":"","at":3})).await.unwrap(); } settle().await;
     let other: Vec<String> = live_ids(&b).into_iter().filter(|x| *x != link).collect(); assert_eq!(other.len(), 1);
     know(&b, &a); // (know replaces the list: B finds A again)
     let r = push(&c, &b, &other[0], body.clone()).await;
