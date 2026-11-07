@@ -248,14 +248,23 @@ pub async fn publish_cad(hub: &Arc<Hub>) {
     let probe = if cli.is_empty() { None } else {
         tokio::task::spawn_blocking(move || crate::proc::std_cmd(crate::proc::Kind::Local, &cli).arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()).await.ok().flatten()
     };
-    let (status, version) = match (&probe, env.cli.is_empty()) {
-        (_, true) => ("missing".to_string(), String::new()),
-        (Some(o), _) if o.status.success() => { let v = String::from_utf8_lossy(&o.stdout).trim().to_string(); (if v.contains("-bp.") { env.status.clone() } else { "stock".into() }, v) }
-        _ => ("broken".to_string(), String::new()),
-    };
+    let ran = probe.as_ref().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let (status, version) = cad_status(&env, ran.as_deref());
     let source = if hub.setting("kicad.path").await.map_or(false, |s| !s.is_empty()) { "setting" } else { "path" };
     let fc = super::stepglb::freecad_cmd(&hub.cfg.home);
     for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
+}
+/// What Settings > CAD says of a runtime: its status and version from the probe's `--version` (None: it did not run). A Backplane
+/// runtime's `--version` prints only KiCad's number (bp.4 prints `10.99.0`), so its manifest's version and status are taken when the
+/// manifest names a Backplane build; a CLI with no such manifest is stock KiCad.
+pub fn cad_status(env: &Env, ran: Option<&str>) -> (String, String) {
+    match ran {
+        _ if env.cli.is_empty() => ("missing".into(), String::new()),
+        None => ("broken".into(), String::new()),
+        Some(_) if env.version.contains("-bp.") => (env.status.clone(), env.version.clone()),
+        Some(v) if v.contains("-bp.") => (env.status.clone(), v.to_string()),
+        Some(v) => ("stock".into(), v.to_string()),
+    }
 }
 /// The runtime to use (Rt.candidates, trimmed): the `kicad.path` setting, BACKPLANE_KICAD_CLI, beside the hub, the install directories (newest first), PATH.
 pub async fn runtime(hub: &Arc<Hub>) -> Env {
@@ -372,6 +381,18 @@ impl RpcHandler for IpcRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// bp.4's kicad-cli --version prints `10.99.0`: its manifest says what it is, so Settings > CAD shows ok and 10.99.0-bp.4, not stock
+    #[test] fn cad_status_trusts_a_backplane_manifest() {
+        let s = |a: &str, b: &str| (a.to_string(), b.to_string());
+        let bp4 = Env { cli: "/k/bin/kicad-cli".into(), version: "10.99.0-bp.4".into(), status: "ok".into(), api: 2, ..Default::default() };
+        assert_eq!(cad_status(&bp4, Some("10.99.0")), s("ok", "10.99.0-bp.4"));
+        assert_eq!(cad_status(&bp4, None), s("broken", ""));
+        let stock = Env { cli: "/usr/bin/kicad-cli".into(), status: "stock".into(), ..Default::default() };
+        assert_eq!(cad_status(&stock, Some("10.0.7")), s("stock", "10.0.7"));
+        assert_eq!(cad_status(&Env::default(), Some("x")), s("missing", ""));
+        let old = Env { cli: "/k".into(), version: "10.99.0-bp.2".into(), status: "old".into(), api: 2, ..Default::default() };
+        assert_eq!(cad_status(&old, Some("10.99.0")), s("old", "10.99.0-bp.2"));
+    }
     #[test] fn check_orders_like_kipc_check() {
         assert!(check("", "/p/a.kicad_pro", "/p/a.kicad_pro", &json!({}), &[]).starts_with("type is required"));
         assert!(check("kiapi.board.commands.GetItems", "rel.kicad_pro", "x", &json!({}), &[]).starts_with("path must be the absolute path"));
