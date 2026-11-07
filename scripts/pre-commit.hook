@@ -1,0 +1,12 @@
+#!/bin/sh
+# pre-commit hook, installed by scripts/install-hooks.sh into <common .git>/hooks/, which serves every worktree.
+# Refuses a commit whose author or committer is not build@amemb.com (git var shows what this commit would use, env and config included).
+for k in GIT_AUTHOR_IDENT GIT_COMMITTER_IDENT; do
+  e=$(git var $k 2>/dev/null | sed -n 's/.*<\(.*\)>.*/\1/p')
+  if [ "$e" != build@amemb.com ]; then
+    echo "refused: $k is '$e', every Backplane commit is build@amemb.com (name i2cjak)." >&2
+    echo "fix: git config user.name i2cjak && git config user.email build@amemb.com   (this repo; leave the global config alone), and unset GIT_AUTHOR_*/GIT_COMMITTER_*" >&2
+    exit 1
+  fi
+done
+exit 0
