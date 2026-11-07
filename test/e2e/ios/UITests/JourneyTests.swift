@@ -417,6 +417,47 @@ final class Journeys: XCTestCase {
         }
     }
 
+    // a tap on a part opens its info over the board; the viewer keeps its size, and closing or tapping empty space deselects.
+    // (On the TestFlight build of Nov 6 the tap folded the viewer to its bar: the pick's JSON was pasted into the viewer's JSON.)
+    // HUB_VIEWER_THREAD: a thread of a project with a board with parts (the GNSS tracker); else the first thread of the list.
+    func test_data_part_info() {
+        d = Driver("data-part-info"); defer { d.finish() }
+        let thread = d.env["HUB_VIEWER_THREAD"] ?? ""
+        d.app.terminate()
+        d.app.launchArguments = ["-app.alerts", "NO"] // no notification question over the board
+        d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1"].merging(thread.isEmpty ? [:] : ["BACKPLANE_SELECT": "viewer:" + thread, "BACKPLANE_VTAB": "Board"]) { a, _ in a }
+        d.app.launch()
+        if thread.isEmpty {
+            let rows = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.thread.row.'"))
+            guard d.step("open a thread", timeout: 30, act: { _ = rows.firstMatch.waitForExistence(timeout: 20); d.tap(rows.firstMatch) }, expect: { d.el("data.thread.viewer").exists }) else { return }
+            guard d.step("open the viewer", act: { d.tap(d.el("data.thread.viewer")) }, expect: { d.el("data.vtab.Board").exists }) else { return }
+            d.tap(d.el("data.vtab.Board"))
+        }
+        let surface = d.el("data.viewer.surface"), info = d.el("data.viewer.info"), tabs = d.el("data.vtab.Board")
+        guard d.step("the board is drawn", timeout: 40, act: {}, expect: { surface.exists && surface.frame.height > 200 }) else { return }
+        Thread.sleep(forTimeInterval: 2) // the plot and the hub's layers settle
+        let size = surface.frame, strip = tabs.frame
+        func at(_ x: CGFloat, _ y: CGFloat) -> XCUICoordinate { surface.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y)) }
+        // a part somewhere on the board: the first point of a grid over its middle whose tap opens an info card
+        let spots: [(CGFloat, CGFloat)] = [(0.5, 0.46), (0.3, 0.6), (0.7, 0.6), (0.5, 0.7), (0.4, 0.8), (0.6, 0.8), (0.25, 0.75), (0.75, 0.75)]
+        var hit: (CGFloat, CGFloat)?
+        guard d.step("a tap on a part opens its info", timeout: 30, act: {
+            for s in spots { at(s.0, s.1).tap(); if info.waitForExistence(timeout: 3) { hit = s; break } }
+        }, expect: { info.exists }) else { d.shot("no-info"); return }
+        d.metrics["part_at"] = hit.map { "\($0.0),\($0.1)" } ?? ""
+        d.shot("part-info")
+        d.step("the viewer keeps its size", act: {}, expect: { surface.exists && surface.frame == size && tabs.frame == strip })
+        let rows = d.app.descendants(matching: .any).matching(identifier: "data.viewer.info.row")
+        d.step("its fields are listed", act: {}, expect: { rows.count >= 1 })
+        d.metrics["info_rows"] = (0..<rows.count).map { rows.element(boundBy: $0).label }
+        d.step("close deselects", act: { d.tap(d.el("data.viewer.info.close")) }, expect: { !info.exists && surface.frame == size })
+        if let h = hit {
+            d.step("the part again", act: { at(h.0, h.1).tap() }, expect: { info.waitForExistence(timeout: 5) })
+            d.step("a tap on empty space deselects", act: { at(0.95, 0.12).tap() }, expect: { !info.exists && surface.exists && surface.frame == size })
+        }
+        d.shot("after")
+    }
+
     func test_downloads() {
         d = Driver("downloads"); defer { d.finish() }
         d.launch(); tab("Threads")

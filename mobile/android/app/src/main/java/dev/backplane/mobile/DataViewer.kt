@@ -85,13 +85,14 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     val head = if (three) "2|" else if (kind == "schematic") "1|" else "0|"
     var error by remember { mutableStateOf("") }
     var info by remember { mutableStateOf("") }
+    var picked by remember { mutableStateOf("") }
     var layers by remember { mutableStateOf<DataClient.Layers?>(null) }
     var refs by remember { mutableStateOf<List<DataClient.Ref>?>(null) }
     var comparing by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     LaunchedEffect(thread.id, kind, path, has, DataClient.conn == DataClient.Conn.ONLINE) {
         if (!has) return@LaunchedEffect
-        error = ""; layers = null; refs = null; comparing = ""; info = ""
+        error = ""; layers = null; refs = null; comparing = ""; info = ""; picked = ""
         runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" }
     }
     val plots = DataClient.plots
@@ -118,11 +119,12 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             s.onPick = { p ->
                 val c = runCatching { org.json.JSONArray(p) }.getOrNull()
                 val best = c?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.minByOrNull { it.optLong("a") } }
-                if (best == null || frame == null) { info = ""; s.mark("") }
-                else { val at = best.optInt("c"); val idx = best.optInt("p"); s.mark("$at,$idx")
+                if (best == null || frame == null) { info = ""; picked = ""; s.mark("") }
+                else { val at = best.optInt("c"); val idx = best.optInt("p"); picked = "$at,$idx"; s.mark(picked)
                     scope.launch { info = runCatching { DataClient.info(frame.key, at, idx) }.getOrDefault("").ifEmpty { "piece $at,$idx" } } }
             }
             if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
+            s.mark(picked) // closing the card deselects
             if (three) s.mesh(mesh)
             if (s.renderer.off != off || s.renderer.dim != dim || s.renderer.lift != lift) { s.renderer.off = off; s.renderer.dim = dim; s.renderer.lift = lift; s.requestRender() }
         })
@@ -148,7 +150,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             refs?.let { rows -> RefMenu(rows, { c -> refs = null; scope.launch { runCatching { DataClient.compare(thread.id, kind, c, l.bits, path); comparing = c }.onFailure { error = it.message ?: "" } } }, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp)) }
         }
         if (info.isNotEmpty()) Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("viewer.info")) {
-            Row { DMono("PICKED", dcs.primary, 11, Modifier.weight(1f), bold = true); DMono("close", dcs.onSurfaceVariant, 11, Modifier.clickable { info = "" }) }
+            Row { DMono("PICKED", dcs.primary, 11, Modifier.weight(1f), bold = true); DMono("close", dcs.onSurfaceVariant, 11, Modifier.clickable { info = ""; picked = "" }.testTag("viewer.info.close")) }
             Text(info.replace("\u0000", "  ").replace(";", "\n").trim(), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 8)
         }
     }
