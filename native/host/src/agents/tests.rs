@@ -1397,7 +1397,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let person = PathBuf::from(std::env::var("BP_SBS_PERSON").unwrap()); let live = PathBuf::from(std::env::var("BP_SBS_LIVE").unwrap());
     let rec = person.join("rec"); let _ = std::fs::create_dir_all(&rec);
     let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
-    let wrapped = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\nprintf '%s\\n' \"$@\" > {rec}/argv; env > {rec}/env; pwd > {rec}/cwd\n", rec = rec.display()), 1);
+    let wrapped = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\nprintf '%s\\n' \"$@\" > {rec}/argv; env > {rec}/env; pwd > {rec}/cwd\n", rec = crate::plat::fs::script_path(&rec)), 1);
     script(&bin, "claude", &wrapped);
     let sd = dir("sbs-bin"); perf_standin(&sd, 1); // the hub's own stand-in: a PersonTurn must never use it, nor an Agent turn the person's
     let rows = vec![work::row("w-open-run", "watching", "a build", "run", "sleep 99", "123:456", 0), work::row("w-open-pid", "watching", "a pid", "pid", "999999", "-", 0)];
@@ -1475,7 +1475,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(crate::copy::on() && crate::copy::person_turn_allowed());
     let person = PathBuf::from(std::env::var("BP_SBS_PERSON").unwrap()); let rec = person.join("rec"); std::fs::create_dir_all(&rec).unwrap();
     let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
-    script(&bin, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\n", rec = rec.display()), 1));
+    script(&bin, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\n", rec = crate::plat::fs::script_path(&rec)), 1));
     let sd = dir("sbr-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("sbr", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let _bots = crate::bots::start(hub.clone(), ag.clone()).await;
     let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let bot = r["bot"].as_str().expect("a bot").to_string();

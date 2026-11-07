@@ -36,7 +36,7 @@ impl Rig {
 /// A thread with a session the CLI does not have and a little conversation before it.
 pub(super) async fn rig(name: &str, mode: &str, extra: &str) -> Rig {
     let sd = dir(&format!("{name}-bin")); let rec = sd.join("rec");
-    script(&sd, "claude", &LOST_CLAUDE.replacen("\n", &format!("\nexport FAKE_MODE={mode} FAKE_LOG={}\n", rec.display()), 1));
+    script(&sd, "claude", &LOST_CLAUDE.replacen("\n", &format!("\nexport FAKE_MODE={mode} FAKE_LOG={}\n", crate::plat::fs::script_path(&rec)), 1));
     let extra = extra.to_string();
     let (hub, ag, _h, _w) = start(name, move |w| base_log(w, 1, &format!("{{\"$\":\"SessionSet\",\"id\":\"{T1}\",\"session\":\"{GONE}\",\"at\":1700000050}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m0\",\"role\":\"user\",\"text\":\"earlier question\",\"at\":1700000051}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m0a\",\"role\":\"assistant\",\"text\":\"earlier answer\",\"at\":1700000052}}\n{extra}")), |_| Cli::standin(&sd)).await;
     Rig { hub, ag, rec }
@@ -86,7 +86,7 @@ async fn expect_recovered(r: &Rig, from: usize, text: &str) {
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_turn_the_restart_cut_continues_in_a_fresh_session() {
     let sd = dir("ls-cont-bin"); let rec = sd.join("rec");
-    script(&sd, "claude", &LOST_CLAUDE.replacen("\n", &format!("\nexport FAKE_MODE=result FAKE_LOG={}\n", rec.display()), 1));
+    script(&sd, "claude", &LOST_CLAUDE.replacen("\n", &format!("\nexport FAKE_MODE=result FAKE_LOG={}\n", crate::plat::fs::script_path(&rec)), 1));
     let (hub, ag, _h, _w) = start("ls-cont", |w| base_log(w, 1, &format!("{{\"$\":\"SessionSet\",\"id\":\"{T1}\",\"session\":\"{GONE}\",\"at\":1700000050}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m1\",\"role\":\"user\",\"text\":\"build it\",\"at\":1700000100}}\n{{\"$\":\"TurnChanged\",\"thread\":\"{T1}\",\"state\":\"running\",\"at\":1700000100}}\n")), |_| Cli::standin(&sd)).await;
     let ev = until(&hub, 0, 20, |ev| ev.iter().any(|e| turn_is(e, "completed") || (turn_is(e, "failed")))).await;
     assert!(!failed(&ev) && ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}");
