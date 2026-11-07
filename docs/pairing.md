@@ -54,7 +54,7 @@ there. `--tailscale-https` or `--tailnet-only` also puts it behind
 to a free port, because a hub never takes a port already mapped to something else.
 Every client reaches such a hub over TLS, checked against the system's roots.
 
-A phone keeps every hub it pairs with (Settings → Hubs: Use, Forget, Add a hub);
+A phone keeps every hub it pairs with (Settings → Hubs: Use, Forget, Add a hub; the thread list's top bar names the hub in use, and tapping it lists the others and Add a hub);
 the first is the one in use, and switching drops the phone's saved copy of the last
 one's threads. Pairing a hub again replaces only that hub's credential. A phone
 tries an invitation at each address it names, in order, and keeps the one that

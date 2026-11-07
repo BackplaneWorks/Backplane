@@ -48,6 +48,14 @@ struct DVoiceRow: Identifiable {
     var label = "", note = "", tone = ""
     var buttons: [(label: String, action: String, value: String, on: Bool)] = []
     var fields: [DVoiceField] = []
+    /// the hub's `rows` array (voice.page, machines.page)
+    static func parse(_ v: Any?) -> [DVoiceRow] {
+        (v as? [[String: Any]] ?? []).enumerated().map { i, r in
+            DVoiceRow(id: i, label: r["label"] as? String ?? "", note: r["note"] as? String ?? "", tone: r["tone"] as? String ?? "",
+                      buttons: (r["buttons"] as? [[String: Any]] ?? []).map { ($0["label"] as? String ?? "", $0["action"] as? String ?? "", $0["value"] as? String ?? "", $0["on"] as? Bool ?? false) },
+                      fields: (r["fields"] as? [[String: Any]] ?? []).map(DVoiceField.init))
+        }
+    }
 }
 
 @MainActor
@@ -156,13 +164,7 @@ final class VoiceModel {
     }
 
     // MARK: Settings, Voice
-    func setRows(_ v: Any?) {
-        rows = (v as? [[String: Any]] ?? []).enumerated().map { i, r in
-            DVoiceRow(id: i, label: r["label"] as? String ?? "", note: r["note"] as? String ?? "", tone: r["tone"] as? String ?? "",
-                      buttons: (r["buttons"] as? [[String: Any]] ?? []).map { ($0["label"] as? String ?? "", $0["action"] as? String ?? "", $0["value"] as? String ?? "", $0["on"] as? Bool ?? false) },
-                      fields: (r["fields"] as? [[String: Any]] ?? []).map(DVoiceField.init))
-        }
-    }
+    func setRows(_ v: Any?) { rows = DVoiceRow.parse(v) }
     func loadPage() async {
         guard let client, let r: DVoicePage = try? await client.call("voice.page") else { return }
         setRows(r.rows)
@@ -301,13 +303,28 @@ struct FlowRow: Layout {
 /// Settings, Voice: the hub's rows (voice.page); a press goes to voice.page.act, the OpenAI key's Save to voice.key.
 struct DataVoiceSection: View {
     @Bindable var client: DataClient
+    var body: some View {
+        DPageRows(title: "Voice", idPrefix: "voice", rows: client.voice.rows, empty: "Not connected") { _, b, fields in
+            await client.voice.pageAct(action: b.action, value: b.value, fields: fields)
+        }
+        .task(id: client.conn) { if client.conn == .online { await client.voice.loadPage() } }
+    }
+}
+
+/// The hub's rows {label, note, buttons, fields, tone} drawn the same for every page that has them (Voice, Machines); a press goes to `act`, which returns the hub's error for the row, if any.
+struct DPageRows: View {
+    let title: String
+    let idPrefix: String
+    let rows: [DVoiceRow]
+    var empty = ""
+    let act: (DVoiceRow, (label: String, action: String, value: String, on: Bool), [String: String]) async -> String
     @State private var typed: [String: String] = [:]
     @State private var errors: [Int: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            DHeading(text: "Voice")
-            ForEach(client.voice.rows) { r in
+            DHeading(text: title)
+            ForEach(rows) { r in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(r.label).dmono(13)
                     let note = errors[r.id] ?? r.note
@@ -318,27 +335,26 @@ struct DataVoiceSection: View {
                         }
                         .dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(.horizontal, 10).frame(minHeight: 40).dbox()
-                        .accessibilityIdentifier("voice.field." + f.name)
+                        .accessibilityIdentifier(idPrefix + ".field." + f.name)
                     }
                     if !r.buttons.isEmpty {
                         FlowRow(spacing: 6) {
                             ForEach(Array(r.buttons.enumerated()), id: \.offset) { _, b in
-                                Button(b.label) { press(r, b) }.buttonStyle(DButton(primary: b.on)).accessibilityIdentifier("voice.page." + b.action)
+                                Button(b.label) { press(r, b) }.buttonStyle(DButton(primary: b.on)).accessibilityIdentifier(idPrefix + ".page." + b.action)
                             }
                         }
                     }
                 }
             }
-            if client.voice.rows.isEmpty { Text("Not connected").dmono(11).foregroundStyle(BackplaneDesign.dim) }
+            if rows.isEmpty, !empty.isEmpty { Text(empty).dmono(11).foregroundStyle(BackplaneDesign.dim) }
         }
-        .task(id: client.conn) { if client.conn == .online { await client.voice.loadPage() } }
     }
     private func binding(_ f: DVoiceField) -> Binding<String> { Binding(get: { typed[f.name] ?? f.value }, set: { typed[f.name] = $0 }) }
     private func press(_ r: DVoiceRow, _ b: (label: String, action: String, value: String, on: Bool)) {
         var fields: [String: String] = [:]
         for f in r.fields { fields[f.name] = typed[f.name] ?? f.value }
         Task {
-            let err = await client.voice.pageAct(action: b.action, value: b.value, fields: fields)
+            let err = await act(r, b, fields)
             errors[r.id] = err.isEmpty ? nil : err
             if err.isEmpty { for f in r.fields { typed[f.name] = nil } }
         }

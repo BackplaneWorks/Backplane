@@ -98,11 +98,21 @@ fun DataRoot() {
 }
 
 @Composable
-internal fun DBar(title: String, back: (() -> Unit)?, trailing: @Composable RowScope.() -> Unit = {}) {
+internal fun DBar(title: String, back: (() -> Unit)?, titleMenu: (@Composable ColumnScope.(dismiss: () -> Unit) -> Unit)? = null, trailing: @Composable RowScope.() -> Unit = {}) {
     Column(Modifier.background(dcs.surfaceVariant)) {
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (back != null) IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = dcs.onSurfaceVariant) } else { Spacer(Modifier.width(10.dp)); BrandMark(DataClient.conn == DataClient.Conn.ONLINE); Spacer(Modifier.width(8.dp)) }
-            Text(title.ifEmpty { "New thread" }, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (titleMenu == null) Text(title.ifEmpty { "New thread" }, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            else {
+                var open by remember { mutableStateOf(false) }
+                Box(Modifier.weight(1f)) {
+                    Row(Modifier.clickable { open = true }.padding(vertical = 12.dp).testTag("home.hub"), verticalAlignment = Alignment.CenterVertically) {
+                        Text(title, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        Spacer(Modifier.width(4.dp)); Icon(Icons.Default.ArrowDropDown, null, tint = dcs.onSurfaceVariant)
+                    }
+                    DropdownMenu(open, { open = false }) { titleMenu { open = false } }
+                }
+            }
             trailing()
         }
         DLine()
@@ -229,7 +239,10 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
     LaunchedEffect(DataClient.conn) { DataClient.refresh(); if (DataClient.conn == DataClient.Conn.ONLINE && DataClient.has("bots")) runCatching { DataClient.loadBots() } }
     Column(Modifier.fillMaxSize().background(dcs.surfaceVariant)) {
-        DBar("Backplane", null) {
+        DBar(DataClient.hubName.ifEmpty { "Backplane" }, null, { dismiss ->
+            DataClient.links.drop(1).mapNotNull { Pairing.key(it) }.forEach { k -> DropdownMenuItem({ Text(k, fontFamily = BpMono) }, { dismiss(); DataClient.useHub(k) }, Modifier.testTag("home.hub.use.$k")) }
+            DropdownMenuItem({ Text("Add a hub", fontFamily = BpMono) }, { dismiss(); DataClient.pairingError = ""; DataClient.adding = true }, Modifier.testTag("home.hub.add"))
+        }) {
             IconButton(onClick = settings, modifier = Modifier.testTag("home.settings")) { Icon(Icons.Default.Settings, "Settings", tint = dcs.onSurfaceVariant) }
         }
         ConnBanner(hub)
@@ -620,6 +633,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             DBtn("Improvements", false, modifier = Modifier.testTag("settings.improve"), onClick = improve)
             DLine()
             if (DataVoice.available) VoiceSettings()
+            if (DataMachines.available) { MachinesSettings(); DLine() }
             DMono("ALERTS", dfaint)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(true to "on", false to "off").forEach { (v, l) -> DBtn(l, alerts == v, modifier = Modifier.testTag("settings.alerts.$l")) { alerts = v; AppSettings.putAlerts(v) } } }
