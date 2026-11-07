@@ -15,7 +15,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch }
+pub enum Ctl { /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -412,6 +412,7 @@ impl Backplane {
             Ctl::FocusSearch => { self.focus_search(cx); self.ui_epoch += 1; "focus search".into() }
             Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
             Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
+            Ctl::Bot(k, v) => { crate::screens::bots::press(self, k, v, cx); self.ui_epoch += 1; format!("bots {k}") }
             Ctl::Node(a, p) => { if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" || crate::screens::tools::makes_thread(&a) { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
         }
     }

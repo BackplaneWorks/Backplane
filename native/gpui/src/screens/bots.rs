@@ -373,6 +373,40 @@ fn chip(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, accen
     let d = if accent { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
     d.child(label.to_string()).on_click(cx.listener(move |this, _, _, cx| f(this, cx))).into_any_element()
 }
+/// The registered controls of the bots page (the e2e harness's `click`), named as the elements are: the new-bot form's `prov-<i>`, `form-go`, `form-cancel`;
+/// a bot's `btab-<i>` and `bsub-<i>`; the Webhooks tab's `hook-new` and each hook's `hook-tok-<i>`, `hook-new-tok-<i>`, `hook-no-tok-<i>`, `hook-<i>` (Revoke).
+pub fn controls(data: &Value) -> Vec<(String, String, crate::script::Ctl)> {
+    use crate::script::Ctl;
+    let mut out = vec![];
+    let a = |a: &str, v: &str| Ctl::Bot("act".into(), format!("{a}{SEP}{v}"));
+    let nb = &data["newBot"];
+    if nb.is_object() {
+        for (i, p) in providers(nb).iter().enumerate() { out.push((format!("prov-{i}"), p.label.clone(), a("bfield", &format!("provider{SEP}{}", p.provider)))); }
+        out.push(("form-go".into(), "Create".into(), a("bot-create", ""))); out.push(("form-cancel".into(), "Cancel".into(), a("form-close", "@bnew")));
+    }
+    let bot = &data["bot"];
+    if bot["kind"] != "bot" { return out }
+    for (k, key) in [("btab", "tabs"), ("bsub", "subtabs")] { for (i, t) in tabs(bot, key).into_iter().enumerate() { out.push((format!("{k}-{i}"), t.label, a("bot-tab", &t.id))); } }
+    if bot["tab"] == "hooks" {
+        out.push(("hook-new".into(), "New webhook".into(), Ctl::Bot("hook-new".into(), string(bot, "id"))));
+        for (i, h) in arr(bot, "hooks").enumerate() {
+            let id = string(h, "id");
+            for (c, label, op) in [("hook-tok", "Token", "show"), ("hook-new-tok", "New token", "new"), ("hook-no-tok", "No token", "off")] { out.push((format!("{c}-{i}"), label.into(), Ctl::Bot("hook-token".into(), format!("{op}{SEP}{id}")))); }
+            out.push((format!("hook-{i}"), "Revoke".into(), a("hook-revoke", &id)));
+        }
+    }
+    out
+}
+/// A registered control's press: what its element's click does.
+pub fn press(this: &mut Backplane, kind: &str, v: &str, cx: &mut Context<Backplane>) {
+    let (x, y) = v.split_once(SEP).unwrap_or((v, ""));
+    match kind {
+        "act" => { super::settings::flush_fields(this); let _ = this.tx.try_send(act(x, y)); cx.notify(); }
+        "hook-new" => new_hook(this, v, cx),
+        "hook-token" => hook_token(this, y, x, cx),
+        _ => {}
+    }
+}
 /// The Webhooks tab: a name and New webhook, what the last request revealed (a secret is shown once), then each hook with its token controls and Revoke.
 fn hooks_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
@@ -458,6 +492,19 @@ mod hook_tests {
         assert_eq!(a, json!({"tokenHook":"h1","token":"tok","tokenUrl":"http://hub/hook/h1"}));
         assert_eq!(hook_answer(&json!({"t":"reply","id":7,"ok":true,"secret":"s1","secretFor":"h1"}))["secret"], "s1");
         assert_eq!(hook_answer(&json!({"t":"reply","id":7,"ok":true,"result":{"token":"x"}}))["token"], "x");
+    }
+    #[test] fn the_webhooks_tab_and_the_bot_form_are_registered_controls() {
+        use crate::script::Ctl;
+        let d = json!({"bot":{"kind":"bot","id":"b1","tab":"hooks","tabs":[{"id":"chat","label":"Chat"},{"id":"settings","label":"Settings"}],"subtabs":[{"id":"hooks","label":"Webhooks"}],"hooks":[{"id":"h1","name":"ci","path":"/hook/h1"}]}});
+        let c = super::controls(&d);
+        let find = |id: &str| c.iter().find(|(i, _, _)| i == id).map(|(_, l, k)| (l.clone(), k.clone()));
+        assert!(matches!(find("bsub-0"), Some((l, Ctl::Bot(k, v))) if l == "Webhooks" && k == "act" && v == "bot-tab\u{1f}hooks"));
+        assert!(matches!(find("hook-new"), Some((_, Ctl::Bot(k, v))) if k == "hook-new" && v == "b1"));
+        assert!(matches!(find("hook-new-tok-0"), Some((l, Ctl::Bot(k, v))) if l == "New token" && k == "hook-token" && v == "new\u{1f}h1"));
+        assert!(matches!(find("hook-0"), Some((l, _)) if l == "Revoke"));
+        assert!(find("form-go").is_none(), "no form open");
+        let f = super::controls(&json!({"newBot":{"providers":[{"label":"Claude","provider":"claude","on":true}]}}));
+        assert_eq!(f.iter().map(|(i, _, _)| i.as_str()).collect::<Vec<_>>(), ["prov-0", "form-go", "form-cancel"]);
     }
 }
 
