@@ -82,24 +82,37 @@ internal fun VoiceStrip(tid: String) {
 }
 
 /** Settings, Voice: the hub's rows (label, note, buttons, fields); a press goes to the hub. */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun VoiceSettings() {
-    val scope = rememberCoroutineScope()
     LaunchedEffect(DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) DataVoice.loadPage() }
+    PageRows("VOICE", "voice", DataVoice.rows, DataVoice.pageError) { action, value, sent ->
+        DataVoice.pageAct(action, value, sent)
+        // the key and the term are spent once the hub has them
+        setOf("secret-save" to "kval", "voice-term" to "vterm").firstOrNull { it.first == action }?.second
+    }
+}
+
+/**
+ * The hub's rows {label, note, tone, buttons:[{label, action, value, on}], fields:[{name, hint, secret, value}]}, drawn the same for every page that has them (Voice, Machines).
+ * A press calls [act] with the button's action, value and the texts typed; it returns the name of a typed field to clear, if any.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun PageRows(title: String, tag: String, rows: List<org.json.JSONObject>, error: String, act: suspend (String, String, Map<String, String>) -> String?) {
+    val scope = rememberCoroutineScope()
     val typed = remember { mutableStateMapOf<String, String>() }
-    Column(Modifier.fillMaxWidth().testTag("settings.voice"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        DMono("VOICE", dfaint)
-        if (DataVoice.pageError.isNotEmpty()) DMono(DataVoice.pageError, dcs.error, 12)
-        DataVoice.rows.forEach { r ->
+    Column(Modifier.fillMaxWidth().testTag("settings.$tag"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        DMono(title, dfaint)
+        if (error.isNotEmpty()) DMono(error, dcs.error, 12)
+        rows.forEach { r ->
             val label = r.optString("label"); val bad = r.optString("tone") == "bad"
-            Column(Modifier.fillMaxWidth().testTag("voice.row.$label"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.fillMaxWidth().testTag("$tag.row.$label"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(label, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
                 if (r.optString("note").isNotEmpty()) Text(r.optString("note"), color = if (bad) dcs.error else dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp)
                 r.optJSONArray("fields").objs().forEach { f ->
                     val name = f.optString("name")
                     val v = typed[name] ?: f.optString("value")
-                    Box(Modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 10.dp).testTag("voice.field.$name")) {
+                    Box(Modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 10.dp).testTag("$tag.field.$name")) {
                         if (v.isEmpty()) Text(f.optString("hint"), color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
                         BasicTextField(v, { typed[name] = it }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), singleLine = true,
                             visualTransformation = if (f.optBoolean("secret")) PasswordVisualTransformation() else VisualTransformation.None, modifier = Modifier.fillMaxWidth())
@@ -107,13 +120,9 @@ internal fun VoiceSettings() {
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     r.optJSONArray("buttons").objs().forEachIndexed { i, b ->
-                        DBtn(b.optString("label"), b.optBoolean("on"), modifier = Modifier.testTag("voice.btn.$label.$i")) {
+                        DBtn(b.optString("label"), b.optBoolean("on"), modifier = Modifier.testTag("$tag.btn.$label.$i")) {
                             val action = b.optString("action"); val value = b.optString("value"); val sent = typed.toMap()
-                            scope.launch {
-                                DataVoice.pageAct(action, value, sent)
-                                // the key and the term are spent once the hub has them
-                                if (action == "secret-save") typed.remove("kval"); if (action == "voice-term") typed.remove("vterm")
-                            }
+                            scope.launch { act(action, value, sent)?.let { typed.remove(it) } }
                         }
                     }
                 }

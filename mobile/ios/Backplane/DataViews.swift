@@ -119,7 +119,18 @@ struct DataThreadsView: View {
         .toolbarBackground(BackplaneDesign.panel, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 8) { BrandMark(size: 20, conn: client.conn == .online); Text("Backplane").dmono(14, bold: true).foregroundStyle(BackplaneDesign.text) }.fixedSize()
+                Menu {
+                    ForEach(client.links.dropFirst().compactMap { Pairing.key($0) }, id: \.self) { k in
+                        Button(k) { client.useHub(k) }.accessibilityIdentifier("data.hub.use.\(k)")
+                    }
+                    Button("Add a hub") { client.pairingError = ""; client.adding = true }.accessibilityIdentifier("data.hub.add")
+                } label: {
+                    HStack(spacing: 8) {
+                        BrandMark(size: 20, conn: client.conn == .online)
+                        Text(client.hubName.isEmpty ? "Backplane" : client.hubName).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(BackplaneDesign.dim)
+                    }.fixedSize()
+                }.accessibilityIdentifier("data.hub")
             }.dflat()
             ToolbarItem(placement: .topBarTrailing) {
                 Button { path.append(DPage(name: "settings")) } label: { Image(systemName: "gearshape").foregroundStyle(BackplaneDesign.dim) }
@@ -943,6 +954,7 @@ struct DataSettingsView: View {
                 DataUpdateSection(client: client)
                 DLine()
                 if client.has("voice") { DataVoiceSection(client: client); DLine() }
+                if client.has("machines") { DataMachinesSection(client: client); DLine() }
                 NavigationLink(value: DPage(name: "improvements")) { Text("Improvements") }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
                 DLine()
                 let i = Bundle.main.infoDictionary

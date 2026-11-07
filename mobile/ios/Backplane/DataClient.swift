@@ -29,6 +29,7 @@ final class DataClient {
     private(set) var settledBusy: Set<String> = []
     let plots = PlotStore()
     let voice = VoiceModel()
+    let machines = MachinesModel()
     private(set) var shot = 0
     private(set) var shotBot = ""
     private(set) var bots: [DBot] = []
@@ -89,6 +90,7 @@ final class DataClient {
         #endif
         loadCache()
         voice.client = self
+        machines.client = self
         #if DEBUG
         // a simulator has no taps: what the form's Pair and the question's buttons call, from the environment
         let env = ProcessInfo.processInfo.environment
