@@ -289,7 +289,11 @@ pub async fn hear_file(hub: &Hub, path: &Path, ct: &str) -> (String, String, Str
     if engine == "local" { args.extend(["--engine".to_string(), "local".to_string(), "--local-dir".to_string(), p(local_dir(&home)), "--model".to_string(), vdict::model_id(&model).to_string()]) }
     else { args.extend(["--key-file".to_string(), p(key_path(&home)), "--keywords-file".to_string(), p(keywords_path(&home))]) }
     let mut c = proc::tokio_cmd(if engine == "local" { Kind::Local } else { Kind::Net }, &bin); c.args(args).current_dir("/").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
-    let Some(o) = tokio::time::timeout(Duration::from_secs(100), c.output()).await.ok().and_then(|r| r.ok()) else { return none };
+    let o = match tokio::time::timeout(Duration::from_secs(100), c.output()).await {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => { eprintln!("voice: a recording was not heard: {} did not run: {e}", bin.display()); return none }
+        Err(_) => { eprintln!("voice: a recording was not heard: the helper took over 100 s"); return none }
+    };
     let out = String::from_utf8_lossy(&o.stdout);
     let heard = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|o| o["event"] == "done").map_or(String::new(), |o| s(&o, "text").trim().to_string());
     let fx = d.fix(&vdict::words_text(&heard)); let text = vdict::text(&fx.words); let none: [&str; 0] = [];
