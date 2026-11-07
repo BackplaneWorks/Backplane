@@ -15,8 +15,10 @@ its original FIFO position, timestamp and note, and appends no event.
 note, since, lease, readiness and FIFO waiters. Empty locks remain listed.
 Names contain 1–64 letters, digits, hyphens or underscores.
 
-stores its work intent before starting anything. Its row says
-waiters leave. The work id holds the lock; the owning thread receives its
+`work_run {lock: "build"}` stores its work intent and its place in the queue
+in one commit before starting anything. Its row says `waiting for lock build
+(2nd)`, and moves up as waiters leave. Its timeout starts at its grant, not
+when it queued. The work id holds the lock; the owning thread receives its
 usual work outcome message, with no extra grant message. Cancelling a queued
 work item prevents its launch. An ended work item releases its lock. A timeout reports uncertainty but keeps
 watching and retains the lock until the command ends or is cancelled; locked
@@ -24,10 +26,12 @@ work cannot be unwatched. Locked
 work is checked and watched again after a restart; the hub does not declare a live command lost or release its exclusion merely because the hub restarted.
 An archived or deleted thread loses its held locks and queued requests through the normal retirement path.
 
-All four clients display held locks on the Status plane, with the holder's
-title, age and waiting count. Selecting a thread holder opens its thread.
-Its Subagents panel lists its own held/waiting locks with Release/Cancel.
-The rows use the existing light/dark themes.
+The desktop shows held locks on the Status plane; the phones show them at the
+top of the home list (`locks.list`, the `locks` push), with the holder's title,
+age and waiting count. Selecting a thread holder opens its thread. A thread's
+panel (the desktop's Subagents, the phones' Background work) lists its own
+held and waiting locks with Release and Cancel, and its jobs with Stop.
+The rows and what each button sends are the hub's (`present/panels.rs`).
 
 ## Shell commands
 
@@ -35,8 +39,9 @@ The rows use the existing light/dark themes.
 scripts/bp-lock.sh render -- blender --background scene.blend
 ```
 
-The helper uses loopback HTTP to the hub of its home (`BACKPLANE_HOME`,
-which the hub gives the programs it starts, else `~/.backplane-bend`): the
+The helper uses loopback HTTP to the hub of its home (`BACKPLANE_LOCK_HOME`,
+which the hub gives the agents and jobs it starts, else `BACKPLANE_HOME`, else
+`~/.backplane`; never `BACKPLANE_HOME` itself, which a test hub would take for its own): the
 port from `BACKPLANE_LOCK_URL`, `BACKPLANE_PORT` or the home's `hub.lock`,
 and the hub's pairing token from the home's `token` file, which the hub
 needs on every lock request. `/lock/acquire`, `/lock/status`,
@@ -63,13 +68,14 @@ passed literally.
 
 ## Raw flock interop
 
-Each hub reservation also owns `/tmp/bp-NAME.lock`. A captured child holds
-the POSIX flock, tied to the hub by a pipe. Release closes that pipe and
-returns immediately. A guard for owned work retains its flock until the
-captured process identity ends; it never sends a signal. Hub death closes the
-pipe too, and the same non-killing cleanup protects surviving work and shell
-helpers. Retired guards are reaped on the hub's minute tick. Existing raw
-and an existing raw flock prevents a hub grant until it is released.
+Each hub reservation also owns `/tmp/bp-NAME.lock`. The hub holds the flock on
+an open file, not blocking: an existing raw flock keeps the head of the queue
+at position 0 until it is gone, retried on each tick, and `lock_list` names
+the outside pid in `outside`. A job inherits the descriptor, so a job that
+outlives the hub keeps the flock until the command ends. Release is `LOCK_UN`
+on that file, so a stray process that inherited it holds nothing back while
+the hub lives. A thread's or a helper's flock goes with the hub and is taken
+again at the next tick; a raw flock taken in between is named in `outside`.
 
 `BACKPLANE_LOCK_DIR` changes the guard/fallback directory. Tests set it to a
 temporary directory for both the hub and helpers; they never operate on the
@@ -77,14 +83,12 @@ real `/tmp/bp-build.lock`. Raw callers in those tests use the same directory.
 
 ## Persistence
 
-`LockChanged` is a new append-only Change variant with a codec round trip.
-It records the complete holder, queue and readiness after a transition.
-`M.Locks.fold` projects it into a name index and one record per lock in the
-read model's settings map. Reads use those indexes, never timeline entries.
-The event variant preserves lock history explicitly and avoids changing the
-meaning of existing SettingSet or WorkSet events. Grant readiness and its
-wake message are committed together, so retrying a grant produces no second
-message.
+`LockChanged` records the complete holder, queue and readiness after a
+transition; the fold keeps it as `lock.<name>`, with the names in `locks.names`.
+A grant writes `ready` first and only then sends its message or launches its
+job, so a retry finds nothing to do and a grant is never sent twice. A hub that
+dies between the two leaves a thread holder untold: its lease warning tells it.
+A holder found not ready at start is granted then.
 
 ## Progress leases
 

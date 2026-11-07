@@ -90,6 +90,7 @@ struct DataThreadsView: View {
                     .accessibilityLabel("Add project").accessibilityIdentifier("data.project.add")
             }.padding(.horizontal, 10).padding(.vertical, 8)
             DLine()
+            if !client.locks.isEmpty { DataLocksStrip(client: client, path: $path) }
             if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 DataSearchResults(client: client, query: query) { path.append($0) }
             } else { list }
@@ -217,6 +218,22 @@ struct DataThreadsView: View {
             .accessibilityIdentifier("data.thread.row." + t.id)
     }
     struct Wrapped: Identifiable { var id: String }
+}
+
+// Who holds each lock, on the home list; a tap opens the holder's thread.
+struct DataLocksStrip: View {
+    @Bindable var client: DataClient
+    @Binding var path: NavigationPath
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("LOCKS").dmono(11).foregroundStyle(BackplaneDesign.dim)
+            ForEach(client.locks) { l in
+                Button { if !l.thread.isEmpty { path.append(l.thread) } } label: {
+                    HStack(spacing: 8) { Text(l.name).dmono(12).lineLimit(1); Text(l.line).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(); if l.waiting > 0 { Text("\(l.waiting) waiting").dmono(11).foregroundStyle(BackplaneDesign.dim) } }
+                }.accessibilityIdentifier("data.lock.\(l.name)")
+            }
+        }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.panel)
+    }
 }
 
 struct DataConnectionBanner: View {
@@ -446,6 +463,7 @@ struct DataThreadView: View {
             DataHubBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip
+            if let w = client.work[id], !w.rows.isEmpty { DataWorkPanel(client: client, thread: id, work: w) }
             ScrollViewReader { proxy in
                 ScrollView {
                     // A VStack, not a LazyVStack: once a message with a picture and words was sent, the lazy stack's placement never settled
@@ -663,6 +681,36 @@ struct DataThreadView: View {
 }
 
 /// A run of tool calls as one line (the desktop's fold row): a tap opens it, each call a line of its own.
+// The thread's background work: a head that folds, its rows, and the Release, Cancel or Stop a row offers. Open while any is at work.
+struct DataWorkPanel: View {
+    @Bindable var client: DataClient
+    let thread: String
+    let work: DWork
+    @State private var chosen: Bool?
+    private var open: Bool { chosen ?? (work.live > 0) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button { chosen = !open } label: { HStack { Text("BACKGROUND WORK · \(work.word.uppercased())").dmono(11).foregroundStyle(BackplaneDesign.dim); Spacer() } }
+                .accessibilityIdentifier("data.work.head")
+            if open {
+                ForEach(work.rows, id: \.self) { r in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(r.title).dmono(12).lineLimit(1)
+                            Text(r.doing.isEmpty ? "\(r.kind) · \(r.state)" : r.doing).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                        }
+                        Spacer()
+                        if let label = r.label, !label.isEmpty {
+                            Button { client.workAct(thread, r) } label: { Text(label).dmono(12) }.accessibilityIdentifier("data.work.\(r.act ?? "").\(r.value ?? "")")
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 6).background(BackplaneDesign.panel)
+    }
+}
+
 struct DataFoldRow: View {
     let fold: DFold
     @Binding var open: Bool

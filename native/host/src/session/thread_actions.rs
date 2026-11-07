@@ -164,6 +164,11 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
             b.rpc("thread.provider", q);
         }
         // Ui.fork.with: the next request makes a thread; the viewer on show is recorded for it (Viewer.record)
+        // the thread's panel: a lock's Release and Cancel, a job's Stop
+        "lock-release" | "lock-cancel" | "work-cancel" => {
+            if sel.is_empty() || value.is_empty() { return None }
+            match action { "lock-release" => b.rpc("lock.release", json!({"thread": sel, "name": value})), "lock-cancel" => b.rpc("lock.cancel", json!({"thread": sel, "name": value})), _ => b.rpc("work.cancel", json!({"thread": sel, "id": value})) };
+        }
         "fork" => {
             let th = if value.is_empty() { sel } else { value };
             if th.is_empty() || th.starts_with("http") || th.contains('~') || th.starts_with("project-home-") || th.starts_with('@') || !crate::session::select::Facts::thread_exists(f, th) { return None }

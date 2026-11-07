@@ -171,12 +171,19 @@ object DataClient {
         try {
             listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
             if (g != gen) return
-            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) } }
+            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } } }
             syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
     }
-    suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g) } } }
+    suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks() } } }
+    var work by mutableStateOf<Map<String, DWork>>(emptyMap()); private set
+    var locks by mutableStateOf<List<DLock>>(emptyList()); private set
+    private suspend fun loadLocks() { if (has("work")) locks = parseLocks(call("locks.list").optJSONArray("locks")) }
+    private suspend fun loadWork(id: String) { if (has("work")) setWork(id, call("thread.work", JSONObject().put("thread", id)).optJSONObject("subs")) }
+    private fun setWork(id: String, o: JSONObject?) { work = if (o == null) work - id else work + (id to parseWork(o)) }
+    /** A row's button; what it changes comes back as a push. */
+    fun workAct(id: String, r: DWorkRow) { scope.launch { runCatching { call("work.act", JSONObject().put("thread", id).put("act", r.act).put("value", r.value)) } } }
     private suspend fun loadProjects(g: Int) {
         val r = call("projects.list", JSONObject().put("limit", 100)); if (g != gen) return
         projects = parseProjects(r.optJSONArray("projects")).sortedByDescending { it.updatedAt }; listsLoaded = true; save()
@@ -235,6 +242,7 @@ object DataClient {
         val pending = (entries[id] ?: emptyList()).filter { (it.sending || it.failed) && fresh.none { f -> f.clientId != null && f.clientId == it.clientId } }
         entries = entries + (id to fresh + pending)
         older = if (r.isNull("next")) older - id else older + (id to r.optString("next"))
+        runCatching { loadWork(id) }
         r.optJSONObject("thread")?.let { upsert(parseThread(it)) }
         save()
     }
@@ -262,6 +270,8 @@ object DataClient {
             "project.removed" -> { val id = o.optString("id"); projects = projects.filter { it.id != id }; save() }
             "project" -> o.optJSONObject("project")?.let { val p = parseProject(it); projects = (projects.filter { x -> x.id != p.id } + p).sortedByDescending { x -> x.updatedAt }; save() }
             "entry" -> o.optJSONObject("entry")?.let { put(parseEntry(it), o.optString("thread")) }
+            "work" -> setWork(o.optString("thread"), o.optJSONObject("subs"))
+            "locks" -> locks = parseLocks(o.optJSONArray("locks"))
             "text" -> {
                 val tid = o.optString("thread"); val eid = o.optString("entry"); val add = o.optString("append")
                 val l = entries[tid] ?: return

@@ -32,6 +32,8 @@ final class DataClient {
     private(set) var shot = 0
     private(set) var shotBot = ""
     private(set) var bots: [DBot] = []
+    private(set) var work: [String: DWork] = [:]
+    private(set) var locks: [DLock] = []
     private(set) var rooms: [DRoom] = []
     // what the hub says it can do beyond the base of data/1 (hello.features); a hub that names none takes no pictures
     private(set) var features: Set<String> = []
@@ -266,10 +268,15 @@ final class DataClient {
             await loadBots()
             await voice.resync()
             await enablePush(); await registerPush(); await syncPush()
+            await loadLocks()
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
-    func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g) }
+    func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks() }
+    func loadLocks() async { guard has("work"), let r: DLocks = try? await call("locks.list") else { return }; locks = r.locks }
+    private func loadWork(_ id: String) async { guard has("work"), let r: DWorkReply = try? await call("thread.work", ["thread": id]) else { return }; work[id] = r.subs }
+    // a row's button; what it changes comes back as a push
+    func workAct(_ id: String, _ row: DWorkRow) { Task { _ = try? await call("work.act", ["thread": id, "act": row.act ?? "", "value": row.value ?? ""], as: DEmpty.self) } }
     private func loadProjects(_ g: Int) async throws {
         let r: DProjectsPage = try await call("projects.list", ["limit": 100]); guard g == gen else { return }
         projects = r.projects.sorted { $0.updatedAt > $1.updatedAt }; listsLoaded = true; scheduleSave()
@@ -363,6 +370,7 @@ final class DataClient {
         loadedThreads.insert(id)
         if let t = r.thread { upsert(t) }
         scheduleSave()
+        await loadWork(id)
     }
     func loadOlder(_ id: String) {
         guard let cursor = older[id], conn == .online else { return }
@@ -398,6 +406,10 @@ final class DataClient {
             }
         case "entry":
             if let tid = o["thread"] as? String, let e = decode("entry", DEntry.self) { put(e, in: tid) }
+        case "work":
+            if let tid = o["thread"] as? String { work[tid] = decode("subs", DWork.self) }
+        case "locks":
+            locks = decode("locks", [DLock].self) ?? []
         case "text":
             if let tid = o["thread"] as? String, let eid = o["entry"] as? String, let add = o["append"] as? String,
                var l = entries[tid], let i = l.firstIndex(where: { $0.id == eid }) {

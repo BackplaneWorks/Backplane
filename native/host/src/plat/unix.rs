@@ -27,6 +27,8 @@ pub mod proc {
     pub fn own_group_tokio(c: &mut tokio::process::Command) { unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); } }
     /// An agent: its own group, and on Linux the kernel kills it when the hub dies (PDEATHSIG).
     pub fn agent_group(c: &mut tokio::process::Command) { unsafe { c.pre_exec(|| { libc::setsid(); #[cfg(target_os = "linux")] libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL); Ok(()) }); } }
+    /// The child keeps `f` open (its descriptor survives exec), so a lock on it lives as long as the child.
+    pub fn inherit(c: &mut tokio::process::Command, f: &std::fs::File) { use std::os::fd::AsRawFd; let fd = f.as_raw_fd(); unsafe { c.pre_exec(move || { libc::fcntl(fd, libc::F_SETFD, 0); Ok(()) }); } }
     /// After the spawn of a child given `own_group` / `agent_group`: nothing to do on Unix (the group is the leader's pid).
     pub fn adopt(_pid: u32, _die_with_hub: bool) {}
     /// Signal the process group a leader made (`kill(-pid, sig)`). True if it was sent.

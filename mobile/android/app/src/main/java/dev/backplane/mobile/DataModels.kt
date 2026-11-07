@@ -57,3 +57,11 @@ fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)
 // an entry without an id (a hub that sent none) is keyed by its place, so a list never repeats a key
 fun parseEntries(a: JSONArray?) = a.list(::parseEntry).mapIndexed { i, e -> if (e.id.isEmpty()) e.copy(id = "~$i:${e.kind}:${e.at}") else e }
+
+// A thread's background work and locks (thread.work, the "work" push): the rows the hub decides, each with what its button sends.
+data class DWorkRow(val title: String, val kind: String, val state: String, val doing: String, val act: String, val value: String, val label: String)
+data class DWork(val word: String, val live: Int, val rows: List<DWorkRow>)
+// Who holds a lock (locks.list, the "locks" push): `line` is the hub's words for it.
+data class DLock(val name: String, val holder: String, val thread: String, val line: String, val waiting: Int)
+fun parseWork(o: JSONObject) = DWork(o.str("word"), o.optInt("live", 0), o.optJSONArray("rows").list { DWorkRow(it.str("title"), it.str("kind"), it.str("state"), it.str("doing"), it.str("act"), it.str("value"), it.str("label")) })
+fun parseLocks(a: JSONArray?) = a.list { DLock(it.str("name"), it.str("holder"), it.str("thread"), it.str("line"), it.optInt("waiting", 0)) }

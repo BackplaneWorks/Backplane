@@ -226,6 +226,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, "Add project", tint = dcs.onSurfaceVariant) }
         }
         DLine()
+        if (DataClient.locks.isNotEmpty()) LocksStrip(open)
         if (q.isNotBlank() && DataClient.has("search")) { SearchResults(q, open); return@Column }
         val botThreads = DataClient.bots.map { it.thread }.toSet()
         val projects = DataClient.projects; val threads = DataClient.threads.filter { !it.archived && it.id !in botThreads }
@@ -310,6 +311,35 @@ private fun ThreadRow(t: DThread, onClick: () -> Unit) {
 }
 
 // ---- thread
+// The thread's background work: a head that folds, its rows, and the Release, Cancel or Stop a row offers. Open while any is at work.
+@Composable
+private fun WorkPanel(id: String, w: DWork) {
+    var chosen by remember(id) { mutableStateOf<Boolean?>(null) }
+    val open = chosen ?: (w.live > 0)
+    Column(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("thread.work")) {
+        DMono("BACKGROUND WORK · ${w.word.uppercase()}", dcs.onSurfaceVariant, 11, Modifier.fillMaxWidth().clickable { chosen = !open }.testTag("thread.work.head"))
+        if (open) w.rows.forEach { r ->
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { DMono(r.title, dcs.onSurface, 12); DMono(r.doing.ifEmpty { "${r.kind} · ${r.state}" }, dfaint, 11) }
+                if (r.label.isNotEmpty()) DBtn(r.label, false, modifier = Modifier.testTag("thread.work.${r.act}.${r.value}")) { DataClient.workAct(id, r) }
+            }
+        }
+    }
+}
+
+// Who holds each lock, on the home list; a tap opens the holder's thread.
+@Composable
+private fun LocksStrip(open: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("home.locks")) {
+        DMono("LOCKS", dcs.onSurfaceVariant, 11)
+        DataClient.locks.forEach { l ->
+            Row(Modifier.fillMaxWidth().clickable(enabled = l.thread.isNotEmpty()) { open(l.thread) }.padding(top = 3.dp).testTag("home.lock.${l.name}"), verticalAlignment = Alignment.CenterVertically) {
+                DMono(l.name, dcs.onSurface, 12); Spacer(Modifier.width(8.dp)); DMono(l.line, dfaint, 11, Modifier.weight(1f)); if (l.waiting > 0) DMono("${l.waiting} waiting", dfaint, 11)
+            }
+        }
+    }
+}
+
 @Composable
 private fun StateStrip(t: DThread) {
     Column(Modifier.background(dcs.surfaceVariant)) {
@@ -378,6 +408,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
         }
         ConnBanner(hub)
         thread?.let { StateStrip(it) }
+        DataClient.work[id]?.takeIf { it.rows.isNotEmpty() }?.let { WorkPanel(id, it) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("thread.list"), state = state, contentPadding = PaddingValues(vertical = 8.dp)) {
             if (DataClient.older[id] != null) item("older") { Box(Modifier.fillMaxWidth().clickable { DataClient.loadOlder(id) }.padding(10.dp), contentAlignment = Alignment.Center) { DMono("load earlier", dfaint) } }
             items(rows, key = { it.id }) { r ->

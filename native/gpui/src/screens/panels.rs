@@ -81,7 +81,10 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
             let working = string(r, "state") == "working"; let doing = string(r, "doing");
             col = col.child(div().flex().gap_2().py(px(1.)).child(div().w(px(14.)).text_color(if working { c("accent") } else { c("faint") }).child(if working { "▸" } else { "✓" }))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(r, "title")))
-                .child(div().flex_shrink_0().text_color(c("faint")).child(if doing.is_empty() { format!("{} · {}", string(r, "kind"), string(r, "state")) } else { format!("{} · {}", string(r, "kind"), doing) })));
+                .child(div().flex_shrink_0().text_color(c("faint")).child(if doing.is_empty() { format!("{} · {}", string(r, "kind"), string(r, "state")) } else { format!("{} · {}", string(r, "kind"), doing) }))
+                .when(!string(r, "act").is_empty(), |d| { let (act, value) = (string(r, "act"), string(r, "value"));
+                    d.child(div().id(SharedString::from(format!("{act}-{value}"))).flex_shrink_0().px_1().cursor_pointer().text_color(c("accent")).child(string(r, "label"))
+                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(act.clone(), value.clone())); cx.notify(); }))) }));
         }
     }
     Some(col.into_any_element())

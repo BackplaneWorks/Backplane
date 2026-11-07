@@ -20,7 +20,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -55,6 +55,10 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     Ok(json!({"picker":picker_sections(&models, &provider, &model, &pick("effort", String::new()), &pick("runtime", "approval-required".into()))}))
 }
 
+/// A thread's background work and locks, the rows the desktop's panel shows.
+pub fn work_now(thread: &str) -> Value { crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::subs(st, thread))).unwrap_or(Value::Null) }
+/// Who holds what: every lock with a holder or a queue.
+pub async fn locks_now(hub: &Hub) -> Value { let g = hub.model().await; let now = crate::agents::now_s(); json!(crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::locks(st, now, |t| g.threads.get(t).map_or_else(|| t.to_string(), |x| x.title.clone())))).unwrap_or_default()) }
 async fn thread_now(hub: &Arc<Hub>, id: &str) -> Result<Value, Value> {
     // the planner's events are committed before its reply; read the model again for the thread as it is now
     let g = hub.model().await; let asks = open_ask_counts(hub);
@@ -124,6 +128,14 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
         "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" => voice(hub, c, m, p).await,
         "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
+        "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(s(p, "thread"))})),
+        "locks.list" => Ok(json!({"locks":locks_now(hub).await})),
+        // a row's button, as the row names it (present/panels.rs)
+        "work.act" => { let (th, v) = (s(p, "thread"), s(p, "value")); match s(p, "act") {
+            "lock-release" => rpc(hub, c, "lock.release", json!({"thread":th,"name":v})).await.map(|_| json!({})),
+            "lock-cancel" => rpc(hub, c, "lock.cancel", json!({"thread":th,"name":v})).await.map(|_| json!({})),
+            "work-cancel" => rpc(hub, c, "work.cancel", json!({"thread":th,"id":v})).await.map(|_| json!({})),
+            _ => Err(err("act: lock-release, lock-cancel or work-cancel")) } }
         "bots.list" => Ok(crate::bots::api::directory(hub).await),
         "bot.say" => {
             let (bot, text) = (s(p, "bot"), s(p, "text")); if text.trim().is_empty() { return Some(Err(err("empty message"))) }

@@ -99,6 +99,8 @@ pub mod proc {
     pub fn own_group(c: &mut std::process::Command) { use std::os::windows::process::CommandExt; c.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW); }
     pub fn own_group_tokio(c: &mut tokio::process::Command) { c.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW); }
     pub fn agent_group(c: &mut tokio::process::Command) { own_group_tokio(c) }
+    /// No handle is handed to the child: a lock stays with the hub, which holds it for the job until the job ends.
+    pub fn inherit(_c: &mut tokio::process::Command, _f: &std::fs::File) {}
     /// Put a just-started leader in its group's Job Object; with `die_with_hub` the job is killed when the hub exits (the PDEATHSIG of Linux).
     /// What the leader starts in the moment before this is not in the group.
     pub fn adopt(pid: u32, die_with_hub: bool) {

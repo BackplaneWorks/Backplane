@@ -253,3 +253,10 @@ struct DMentions: Decodable { var items: [DMention]
 
 /// `update.status`: the hub decides the words; a phone only shows them.
 struct DUpdate: Decodable { let current: String; let channel: String; let line: String; let canCheck: Bool }
+// A thread's background work and locks (thread.work, the "work" push): the rows the hub decides, each with what its button sends.
+struct DWorkRow: Decodable, Hashable { let title, kind, state, doing: String; let act, value, label: String? }
+struct DWork: Decodable { let word: String; let live: Int; let rows: [DWorkRow] }
+struct DWorkReply: Decodable { let subs: DWork? }
+// Who holds a lock (locks.list, the "locks" push): `line` is the hub's words for it.
+struct DLock: Decodable, Identifiable { let name, holder, thread, line: String; let waiting: Int; var id: String { name } }
+struct DLocks: Decodable { let locks: [DLock] }

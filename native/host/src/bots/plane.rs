@@ -152,7 +152,7 @@ fn locks(c: &Ctx, now: u64) -> Vec<Row> {
         let h = &l["holder"]; if !h.is_object() { continue }
         let g = |v: &Value, k: &str| v[k].as_str().unwrap_or("").to_string();
         let th = g(h, "thread"); let title = if th.is_empty() { g(h, "id") } else { c.thread(&th).title.clone() };
-        let who = if l["outside"].is_object() { format!("held outside the hub by pid {} ({})", g(&l["outside"], "id"), g(&l["outside"], "note")) } else { format!("held by {title} {}", ago_short(now, h["since"].as_u64().unwrap_or(0))) };
+        let who = if l["outside"].is_object() { format!("held outside the hub by pid {} ({})", l["outside"]["pid"], g(&l["outside"], "cmd")) } else { format!("held by {title} {}", ago_short(now, h["since"].as_u64().unwrap_or(0))) };
         let waiting = l["waiters"].as_array().map_or(0, Vec::len);
         out.push(Row { kind: "lock", id: name.into(), title: format!("{name} · {who} · {waiting} waiting"), sub: g(h, "note"), state: if l["ready"].as_bool().unwrap_or(false) { "working" } else { "waiting" }.into(), at: 0 });
     }

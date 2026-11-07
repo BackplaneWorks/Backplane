@@ -72,6 +72,11 @@ The phones draw a thread as the desktop does; the words are the hub's.
 - `thread.pick {thread, action: model|effort|provider|runtime, value}` → `{thread}`: the desktop's own request (`thread.modes`, `thread.effort`, `thread.provider`). A provider changes between turns only; the refusal comes back as the error, to show as it stands.
 - `thread.create` also takes `effort` and `runtime` (`runtime` wins over `permission`). `thread.model` stays for older apps.
 
+## Background work and locks (feature `work`; `native/host/src/data/ext.rs`)
+- `thread.work {thread}` → `{thread, subs}`: `subs` is the desktop panel's own data or null: `{word, live, rows:[{title, kind, state, doing, act?, value?, label?}]}`. A row with a `label` offers a button; `work.act {thread, act, value}` → `{}` sends it, `act` as the row names it: `lock-release`, `lock-cancel`, `work-cancel`.
+- `locks.list` → `{locks:[{name, holder, thread, line, waiting}]}`: every lock with a holder or a queue; `line` is the hub's words, `thread` the holder's to open ("" for a shell helper).
+- Pushes: `k:"work"` `{thread, subs}` on a thread subscription, when its rows or any lock move; `k:"locks"` `{locks}` on a `lists` subscription.
+
 ## Dictation (feature `voice`; `native/host/src/voice/`, docs/voice.md)
 The phone records itself; the engine is the hub's. The hub decides everything else, so the app keeps one number per thread (the mark) and draws what it is sent.
 - `voice.start {thread, draft, caret}` → `{path}`: `caret` is in characters. Start the recorder on the press, before the reply; what is heard before the path comes waits for it. An empty `path` means no session started: the `view` frame says why.

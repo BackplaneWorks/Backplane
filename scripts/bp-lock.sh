@@ -8,10 +8,10 @@ shift
 [ "${1:-}" = -- ] || { echo 'expected -- before command' >&2; exit 2; }
 shift
 [ "$#" -gt 0 ] || exit 2
-# The hub of this home (BACKPLANE_HOME, which the hub gives the programs it
-# starts, else ~/.backplane-bend): its port from its hub.lock, its pairing
+# The hub of this home (BACKPLANE_LOCK_HOME, which the hub gives the agents and
+# jobs it starts, else BACKPLANE_HOME, else ~/.backplane): its port from its hub.lock, its pairing
 # token from its token file (sent on curl's stdin, never on a command line)
-home=${BACKPLANE_HOME:-${HOME:-/tmp}/.backplane-bend}
+home=${BACKPLANE_LOCK_HOME:-${BACKPLANE_HOME:-${HOME:-/tmp}/.backplane}}
 lockport=$(sed -n 's/^[0-9][0-9]* \([0-9][0-9]*\) flock.*/\1/p' "$home/hub.lock" 2>/dev/null) || lockport=
 token=$(cat "$home/token" 2>/dev/null) || token=
 url=${BACKPLANE_LOCK_URL:-http://127.0.0.1:${BACKPLANE_PORT:-${lockport:-3787}}}

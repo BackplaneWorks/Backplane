@@ -32,7 +32,8 @@ mod present { pub use crate::ready; }
 #[path="../agents/bg.rs"] pub mod bg_;
 #[path="../agents/inputs.rs"] pub mod inputs_;
 #[path="../agents/skills.rs"] pub mod skills_;
-mod agents { pub use crate::bg_ as bg; pub use crate::inputs_ as inputs; pub use crate::skills_ as skills; }
+#[path="../agents/lockrec.rs"] pub mod lockrec_;
+mod agents { pub use crate::bg_ as bg; pub use crate::inputs_ as inputs; pub use crate::skills_ as skills; pub use crate::lockrec_ as lockrec; }
 use serde_json::json;
 use std::{collections::{BTreeMap,HashSet},path::Path};
 fn main() -> anyhow::Result<()> {

@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -357,6 +357,7 @@ fn turn_word(state: &str) -> &'static str { match state { "running" => "working"
 async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     if subs.subs.is_empty() { return vec![] }
     let mut out = vec![]; let (mut upsert, mut gone, mut projects): (Vec<String>, Vec<String>, Vec<(String, bool)>) = (vec![], vec![], vec![]);
+    let (mut worked, mut locks_moved): (Vec<String>, bool) = (vec![], false);
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
         let opened = if s(&e, "$") == "AskClosed" { ask_opened(hub, s(&e, "id")) } else { None };
@@ -364,6 +365,8 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
         let mut entry: Option<Value> = None;
         match s(&e, "$") {
             "ThreadDeleted" => gone.push(th.clone()),
+            "WorkSet" => { let w = s(&e, "thread").to_string(); if !worked.contains(&w) { worked.push(w) } }
+            "LockChanged" => locks_moved = true,
             "ProjectCreated" | "ProjectRenamed" => projects.push((s(&e, "id").to_string(), true)),
             "ProjectRemoved" => projects.push((s(&e, "id").to_string(), false)),
             "MessagePosted" => {
@@ -398,6 +401,10 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
         if !th.is_empty() && !matches!(s(&e, "$"), "ThreadDeleted") && !th.starts_with("remind") { if !upsert.contains(&th) { upsert.push(th.clone()) } }
         if let Some(en) = entry { for sub in subs.threads(&th) { out.push(d(sub, "entry", json!({"thread":th,"entry":en}))) } }
     }
+    // a lock moving changes the rows of every thread with a place on it, so each open thread is sent its own again
+    if locks_moved { for (_, t) in &subs.subs { if let Topic::Thread(th) = t { if !worked.contains(th) { worked.push(th.clone()) } } } }
+    for th in &worked { let subs_now = ext::work_now(th); for sub in subs.threads(th) { out.push(d(sub, "work", json!({"thread":th,"subs":subs_now}))) } }
+    if locks_moved { let l = ext::locks_now(hub).await; for sub in subs.lists() { out.push(d(sub, "locks", json!({"locks":l}))) } }
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
     let g = hub.model().await; let asks = open_ask_counts(hub);
     for th in &upsert { if let Some(t) = thread_json(hub, &g, th, &asks) { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread", json!({"thread":t}))) } } }

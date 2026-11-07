@@ -192,7 +192,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     if person.is_none() { for k in crate::settings::accounts_io::STORE_ENV { c.env_remove(k); } } // the default login is ~/.claude, never a profile store the hub itself inherited; a named account puts its own back below
     for (k, v) in env { c.env(k, v); }
     match person {
-        None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o); } }
+        None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o).env("BACKPLANE_LOCK_HOME", o); } } // scripts/bp-lock.sh finds its hub by it (never BACKPLANE_HOME: proc::HUB_ONLY)
         Some(p) => { let (remove, set) = super::person::child_env(&p.home, &p.path, std::env::vars_os()); for k in remove { c.env_remove(k); } for (k, v) in set { c.env(k, v); } } // no BACKPLANE_* (so no owner mark either: PDEATHSIG ends it with the hub)
     }
     // Linux: the kernel kills the agent when the hub dies (PDEATHSIG); Windows: its Job Object does. Elsewhere the `reaper` watcher does (the whole group, grandchildren included).

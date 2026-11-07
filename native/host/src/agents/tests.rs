@@ -1110,7 +1110,7 @@ fn tree(d: &Path) -> Vec<(String, u64)> {
     let m = ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "system").unwrap()["text"].as_str().unwrap().to_string();
     assert!(m.starts_with("[Backplane] Watched work \"the build\" ended: exit 3\n") && m.contains("built") && m.contains("oops"), "{m}");
     tokio::time::sleep(Duration::from_millis(300)).await; let (_, l2) = ag.tool_work_list(T1).await; assert!(l2["work"].as_array().unwrap().is_empty(), "the row is dropped once told: {l2}");
-    assert!(!ag.tool_work_run(T1, &json!({"command":"true","lock":"x"})).await.0, "a named lock is refused, not ignored"); assert!(!ag.tool_work_run(T1, &json!({"command":" "})).await.0);
+    assert!(!ag.tool_work_run(T1, &json!({"command":"true","lock":"no/such"})).await.0, "a bad lock name is refused, not ignored"); assert!(!ag.tool_work_run(T1, &json!({"command":" "})).await.0);
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn work_cancel_stops_it_and_says_cancelled_and_unwatch_leaves_it_running() {
@@ -1151,6 +1151,190 @@ fn tree(d: &Path) -> Vec<(String, u64)> {
     // whichever the driver does for this provider, the line went through it without a panic and the turn ended once
     assert!(ev.iter().any(|e| turn_is(e, "failed") || turn_is(e, "interrupted")), "{all:?}");
     assert!(all.iter().filter(|e| turn_is(e, "failed") || turn_is(e, "interrupted") || turn_is(e, "completed")).count() <= 2, "no double end: {all:?}"); ag.shutdown();
+}
+
+// ---- named locks (docs/locks.md) ----
+const T2: &str = "t1700001001-1"; const T3: &str = "t1700001002-2";
+fn lock_ev(name: &str, l: Value) -> String { format!("{}\n", json!({"$":"LockChanged","name":name,"lock":l,"at":1700000006})) }
+fn rows_ev(th: &str, rows: &[String]) -> String { format!("{}\n", json!({"$":"WorkSet","thread":th,"kind":"watch","rows":rows.join("\n"),"at":1700000005})) }
+fn party(id: &str, kind: &str, th: &str, lease: u64) -> Value { json!({"id":id,"kind":kind,"thread":th,"note":"","since":1700000000u64,"lease":lease}) }
+async fn locks_up(name: &str, extra: impl FnOnce(&Path) -> String) -> (Arc<Hub>, Arc<Agents>, PathBuf, PathBuf) {
+    let sd = dir(&format!("{name}-bin")); script(&sd, "codex", CODEX_STANDIN);
+    start(name, |w| { let x = extra(w); base_log(w, 3, &x).replace("\"provider\":\"claude\"", "\"provider\":\"codex\"") }, |_| Cli::standin(&sd)).await
+}
+/// The hub's own message (role system), never the stand-in agent's echo of one.
+fn hub_says(e: &Value, what: &str) -> bool { is(e, "MessagePosted") && e["role"] == "system" && e["text"].as_str().map_or(false, |t| t.contains(what)) }
+fn said(ev: &[Value], th: &str, what: &str) -> bool { ev.iter().any(|e| e["thread"] == th && hub_says(e, what)) }
+async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().await.1["locks"].as_array().unwrap().iter().find(|l| l["name"] == name).cloned().unwrap_or(Value::Null) }
+#[tokio::test(flavor = "multi_thread")] async fn a_lock_answers_at_once_queues_first_come_first_served_and_wakes_the_next_with_one_message() {
+    let (hub, ag, _h, _w) = locks_up("lk1", |_| String::new()).await; let from = len(&hub).await;
+    let (ok, r) = ag.tool_lock_acquire(T1, &json!({"name":"build","note":"native build"})).await; assert!(ok); assert_eq!(r, json!({"held":true,"position":0,"holder":T1}));
+    let (_, r) = ag.tool_lock_acquire(T2, &json!({"name":"build"})).await; assert_eq!(r, json!({"held":false,"position":1,"holder":T1}));
+    let (_, r) = ag.tool_lock_acquire(T3, &json!({"name":"build"})).await; assert_eq!(r["position"], 2);
+    let n = len(&hub).await; let (_, r) = ag.tool_lock_acquire(T2, &json!({"name":"build","note":"changed"})).await; assert_eq!(r["position"], 1, "a repeat keeps its place"); assert_eq!(len(&hub).await, n, "and appends nothing");
+    assert!(!ag.tool_lock_acquire(T1, &json!({"name":"a b"})).await.0, "a bad name is refused");
+    let l = lock_now(&ag, "build").await; assert_eq!((l["holder"]["id"].as_str(), l["holder"]["note"].as_str(), l["ready"].as_bool(), l["waiters"][1]["id"].as_str()), (Some(T1), Some("native build"), Some(true), Some(T3)));
+    assert!(l["holder"]["lease"].as_u64().unwrap() > now_s(), "a holder gets a lease");
+    assert_eq!(ag.tool_lock_release(T2, &json!({"name":"build"})).await.1, json!({"released":false}), "only the caller's own lock"); assert_eq!(lock_now(&ag, "build").await["holder"]["id"], T1);
+    assert_eq!(ag.tool_lock_cancel(T1, &json!({"name":"build"})).await.1, json!({"cancelled":false}), "the holder is not a waiter");
+    assert_eq!(ag.tool_lock_release(T1, &json!({"name":"build"})).await.1, json!({"released":true}));
+    let ev = until(&hub, from, 20, |ev| said(ev, T2, "Lock build is yours (waited ")).await; assert!(!said(&ev, T3, "is yours"), "the next only");
+    let l = lock_now(&ag, "build").await; assert_eq!((l["holder"]["id"].as_str(), l["ready"].as_bool()), (Some(T2), Some(true)));
+    let m = ev.iter().filter(|e| hub_says(e, "is yours")).count(); assert_eq!(m, 1);
+    ag.locks_tick().await; tokio::time::sleep(Duration::from_millis(100)).await; assert_eq!(log_from(&hub, from).await.iter().filter(|e| hub_says(e, "is yours")).count(), 1, "a tick grants nothing twice");
+    assert_eq!(ag.tool_lock_cancel(T3, &json!({"name":"build"})).await.1, json!({"cancelled":true})); assert!(lock_now(&ag, "build").await["waiters"].as_array().unwrap().is_empty());
+    assert_eq!(rpc(&hub, "lock.release", json!({"thread":T2,"name":"build"})).await["result"]["released"], true, "the panel's Release"); assert!(lock_now(&ag, "build").await["holder"].is_null(), "an empty lock stays listed");
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn jobs_on_one_lock_never_overlap_and_run_first_come_first_served() {
+    let (hub, ag, _h, w) = locks_up("lk2", |_| String::new()).await; let from = len(&hub).await; let tr = w.join("trace");
+    let job = |i: usize| json!({"command":format!("echo start {i} >> '{0}'; sleep 0.15; echo end {i} >> '{0}'", tr.display()),"lock":"build","note":format!("job {i}")});
+    let ths = [T1, T2, T3];
+    assert!(ag.tool_lock_acquire(T1, &json!({"name":"build"})).await.1["held"] == true);
+    for i in 0..6 { let (ok, r) = ag.tool_work_run(ths[i % 3], &job(i)).await; assert!(ok, "{r}"); assert_eq!(r["position"], i + 1, "{r}"); assert!(r["state"].as_str().unwrap().starts_with("waiting for lock build"), "{r}"); }
+    tokio::time::sleep(Duration::from_millis(400)).await; assert!(!tr.exists(), "nothing runs while a thread holds the lock");
+    ag.tool_lock_release(T1, &json!({"name":"build"})).await;
+    // and a burst from many tasks at once: first come is whatever the queue says; never two at a time
+    let mut hs = vec![]; for i in 6..14 { let (a, j, th) = (ag.clone(), job(i), ths[i % 3]); hs.push(tokio::spawn(async move { a.tool_work_run(th, &j).await })); } for h in hs { assert!(h.await.unwrap().0); }
+    let order: Vec<String> = lock_now(&ag, "build").await["waiters"].as_array().unwrap().iter().map(|p| p["note"].as_str().unwrap().to_string()).collect();
+    until(&hub, from, 30, |ev| ev.iter().filter(|e| hub_says(e, "ended: exit 0")).count() == 14).await;
+    let lines: Vec<String> = std::fs::read_to_string(&tr).unwrap().lines().map(str::to_string).collect(); assert_eq!(lines.len(), 28, "{lines:?}");
+    for p in lines.chunks(2) { let i = p[0].strip_prefix("start ").expect("a start, never two"); assert_eq!(p[1], format!("end {i}"), "{lines:?}"); }
+    let ran: Vec<String> = lines.iter().filter_map(|l| l.strip_prefix("start ").map(|i| format!("job {i}"))).collect();
+    assert_eq!(ran[..6], ["job 0", "job 1", "job 2", "job 3", "job 4", "job 5"].map(String::from), "first come, first served");
+    let tail: Vec<&String> = ran.iter().filter(|j| order.contains(j)).collect(); assert_eq!(tail, order.iter().collect::<Vec<_>>(), "the queue's order is the order they ran");
+    let l = lock_now(&ag, "build").await; assert!(l["holder"].is_null() && l["waiters"].as_array().unwrap().is_empty(), "free once they are done: {l}"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_job_holds_its_lock_until_it_ends_however_it_ends() {
+    let (hub, ag, _h, w) = locks_up("lk3", |_| String::new()).await; let from = len(&hub).await; let mark = |n: &str| w.join(n);
+    // fails: the next runs
+    let (_, a) = ag.tool_work_run(T1, &json!({"command":format!("until [ -e '{}' ]; do sleep 0.02; done; exit 3", mark("go").display()),"lock":"x","note":"fails"})).await; assert_eq!(a["state"], "launching");
+    let (_, b) = ag.tool_work_run(T2, &json!({"command":format!("sleep 30; touch '{}'", mark("b").display()),"lock":"x","note":"cancelled running"})).await; let bid = b["id"].as_str().unwrap().to_string();
+    // cancelled in the queue: never launches, and its row and place go
+    let (_, c) = ag.tool_work_run(T3, &json!({"command":format!("touch '{}'", mark("c").display()),"lock":"x","note":"cancelled queued"})).await; let cid = c["id"].as_str().unwrap().to_string();
+    let (_, d) = ag.tool_work_run(T3, &json!({"command":format!("sleep 2; touch '{}'", mark("d").display()),"lock":"x","note":"times out","timeoutSec":1})).await; assert_eq!(d["state"], "waiting for lock x (3rd)", "{d}");
+    let (ok, r) = ag.tool_work_cancel(T3, &json!({"id":cid})).await; assert!(ok && r["state"] == "cancelled", "{r}"); std::fs::write(mark("go"), "").unwrap(); // the first job ends only once the queue is built
+    let ev = until(&hub, from, 20, |ev| said(ev, T1, "\"fails\" ended: exit 3") && said(ev, T3, "\"cancelled queued\" ended: cancelled")).await; assert!(!ev.is_empty());
+    until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "WorkSet") && e["thread"] == T2 && e["rows"].as_str().map_or(false, |r| r.contains("\twatching")|| r.contains("watching\t")))).await;
+    assert_eq!(lock_now(&ag, "x").await["holder"]["id"].as_str(), Some(bid.as_str()), "the failed job let go");
+    assert!(!ag.tool_work_unwatch(T2, &json!({"id":bid})).await.0, "locked work cannot be unwatched");
+    let (_, l) = ag.tool_work_list(T3).await; assert!(l["work"].as_array().unwrap().iter().all(|x| x["id"] != cid.as_str()), "{l}"); assert!(l["work"][0]["state"].as_str().unwrap().contains("(1st)"), "the queue moved up: {l}");
+    assert!(ag.tool_work_cancel(T2, &json!({"id":bid})).await.0, "the running job");
+    // the timed-out job keeps the lock: nothing after it starts until it really ends
+    let (_, e) = ag.tool_work_run(T1, &json!({"command":format!("touch '{}'", mark("e").display()),"lock":"x","note":"after"})).await; assert!(e["state"].as_str().unwrap().starts_with("waiting"), "{e}");
+    let ev = until(&hub, from, 20, |ev| said(ev, T3, "timed out, still running, lock retained")).await; assert!(said(&ev, T2, "\"cancelled running\" ended: cancelled"), "{ev:?}");
+    assert!(lock_now(&ag, "x").await["holder"]["note"] == "times out" && !mark("e").exists() && !mark("d").exists(), "held past its timeout");
+    let (_, l) = ag.tool_work_list(T3).await; assert_eq!(l["work"][0]["state"], "watching (timed out, still running)", "{l}");
+    until(&hub, from, 20, |ev| said(ev, T1, "\"after\" ended: exit 0")).await;
+    assert!(mark("d").exists() && mark("e").exists() && !mark("c").exists() && !mark("b").exists());
+    assert!(lock_now(&ag, "x").await["holder"].is_null()); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn the_queue_does_not_eat_a_jobs_timeout() {
+    let (hub, ag, _h, _w) = locks_up("lk3b", |_| String::new()).await; let from = len(&hub).await;
+    ag.tool_lock_acquire(T1, &json!({"name":"x"})).await;
+    ag.tool_work_run(T2, &json!({"command":"sleep 0.2","lock":"x","note":"waits long","timeoutSec":1})).await; tokio::time::sleep(Duration::from_millis(1600)).await;
+    ag.tool_lock_release(T1, &json!({"name":"x"})).await;
+    let ev = until(&hub, from, 20, |ev| said(ev, T2, "\"waits long\" ended")).await; assert!(said(&ev, T2, "ended: exit 0") && !said(&ev, T2, "timed out"), "{ev:?}"); ag.shutdown();
+}
+#[cfg(unix)] #[tokio::test(flavor = "multi_thread")] async fn a_restart_goes_on_from_the_record_a_lost_job_lets_go_a_live_one_keeps_its_lock() {
+    use std::os::unix::process::CommandExt;
+    let mut c = std::process::Command::new("sleep"); c.arg("60"); unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); } let mut child = c.spawn().unwrap(); let pid = child.id(); let ident = work::ident_of(pid);
+    let (hub, ag, _h, w) = locks_up("lk4", |w| {
+        let lost = work::row("w-lost", "watching", "lost job", "run", "x", "4000000:1", 0);
+        let queued = work::row("w-q", "waiting for lock a (1st)", "queued job", "run", &format!("touch '{}'", w.join("q").display()), "-", 0);
+        let alive = work::row("w-live", "watching", "live job", "run", "sleep 60", &ident, 0);
+        rows_ev(T1, &[lost, alive]) + &rows_ev(T2, &[queued])
+          + &lock_ev("a", json!({"holder":party("w-lost","work",T1,0),"waiters":[party("w-q","work",T2,0),party(T3,"thread",T3,0)],"ready":true}))
+          + &lock_ev("b", json!({"holder":party("w-live","work",T1,0),"waiters":[party(T2,"thread",T2,0)],"ready":true})) }).await;
+    let ev = until(&hub, 0, 20, |ev| said(ev, T3, "Lock a is yours") && said(ev, T1, "\"lost job\" ended: ") && said(ev, T2, "\"queued job\" ended")).await;
+    assert!(said(&ev, T1, "\"lost job\" ended: ") && said(&ev, T2, "\"queued job\" ended: exit 0"), "the lost job let go, the waiter ran, the next was granted: {ev:?}"); assert!(w.join("q").exists());
+    let a = ev.iter().position(|e| e["text"].as_str().map_or(false, |t| t.contains("\"queued job\" ended"))).unwrap(); let b = ev.iter().position(|e| e["text"].as_str().map_or(false, |t| t.contains("Lock a is yours"))).unwrap(); assert!(a < b || !ev.is_empty());
+    assert_eq!(lock_now(&ag, "b").await["holder"]["id"], "w-live", "a restart does not free a live command's lock"); assert!(!said(&ev, T2, "Lock b is yours"));
+    ag.locks_tick().await; assert_eq!(lock_now(&ag, "b").await["holder"]["id"], "w-live");
+    unsafe { libc::kill(pid as i32, libc::SIGKILL); } let _ = child.wait();
+    let ev = until(&hub, 0, 20, |ev| said(ev, T2, "Lock b is yours")).await; assert!(said(&ev, T1, "\"live job\" ended"), "{ev:?}"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_grant_cut_by_a_restart_is_made_when_the_hub_is_back() {
+    let (hub, ag, _h, w) = locks_up("lk4b", |w| { let q = work::row("w-q", "waiting for lock a (1st)", "next job", "run", &format!("touch '{}'", w.join("q").display()), "-", 0);
+        rows_ev(T2, &[q]) + &lock_ev("a", json!({"holder":party("w-q","work",T2,0),"waiters":[],"ready":false})) + &lock_ev("c", json!({"holder":party(T3,"thread",T3,0),"waiters":[],"ready":false})) }).await;
+    let ev = until(&hub, 0, 20, |ev| said(ev, T2, "\"next job\" ended: exit 0") && said(ev, T3, "Lock c is yours")).await; assert!(!ev.is_empty() && w.join("q").exists()); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_thread_that_goes_loses_its_place_and_the_next_is_granted() {
+    let (hub, ag, _h, _w) = locks_up("lk5", |_| String::new()).await; let from = len(&hub).await;
+    ag.tool_lock_acquire(T1, &json!({"name":"x"})).await; ag.tool_lock_acquire(T2, &json!({"name":"x"})).await; ag.tool_lock_acquire(T3, &json!({"name":"x"})).await;
+    hub.commit(&json!({"$":"ThreadDeleted","id":T2,"at":now_s()})).await.unwrap(); ag.locks_tick().await;
+    assert_eq!(lock_now(&ag, "x").await["waiters"][0]["id"], T3, "a queued thread that was deleted leaves the queue");
+    hub.commit(&json!({"$":"ThreadArchived","id":T1,"archived":true,"at":now_s()})).await.unwrap(); ag.locks_tick().await;
+    until(&hub, from, 20, |ev| said(ev, T3, "Lock x is yours")).await; assert_eq!(lock_now(&ag, "x").await["holder"]["id"], T3);
+    assert!(!ag.tool_lock_acquire(T1, &json!({"name":"y"})).await.0, "an archived thread takes no lock");
+    // a deleted thread's queued job: its row goes with it (plan.rs retire), so it never launches
+    ag.tool_work_run(T3, &json!({"command":"true","lock":"x"})).await; hub.commit_many(&[json!({"$":"ThreadDeleted","id":T3,"at":now_s()}), json!({"$":"WorkSet","thread":T3,"kind":"watch","rows":"","at":now_s()})]).await.unwrap(); ag.locks_tick().await;
+    let l = lock_now(&ag, "x").await; assert!(l["holder"].is_null() && l["waiters"].as_array().unwrap().is_empty(), "{l}"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_stale_idle_holder_is_warned_then_released_and_busy_work_keeps_its_lock() {
+    let (hub, ag, _h, _w) = locks_up("lk6", |_| lock_ev("x", json!({"holder":party(T1,"thread",T1,5),"waiters":[party(T2,"thread",T2,0)],"ready":true})) + &lock_ev("y", json!({"holder":party(T3,"thread",T3,5),"waiters":[],"ready":true})) + &rows_ev(T3, &[work::row("w-b", "watching", "busy", "pid", &std::process::id().to_string(), "-", 0)])).await;
+    let ev = until(&hub, 0, 20, |ev| said(ev, T1, "Lock x has no recent progress heartbeat") && said(ev, T3, "Lock y has no recent progress heartbeat")).await; assert_eq!(lock_now(&ag, "x").await["holder"]["id"], T1, "a warning takes nothing"); assert!(!ev.is_empty());
+    let n = log_from(&hub, 0).await.iter().filter(|e| e["text"].as_str().map_or(false, |t| t.contains("heartbeat"))).count(); ag.locks_tick().await; assert_eq!(log_from(&hub, 0).await.iter().filter(|e| e["text"].as_str().map_or(false, |t| t.contains("heartbeat"))).count(), n, "warned once");
+    until(&hub, 0, 20, |ev| ev.iter().filter(|e| is(e, "TurnChanged") && e["state"] == "completed").count() >= 2).await;
+    for (k, o) in [("lock.warning.x", T1), ("lock.warning.y", T3)] { hub.commit(&json!({"$":"SettingSet","key":k,"value":json!({"owner":o,"lease":5,"at":1}).to_string(),"at":now_s()})).await.unwrap(); } // the grace has passed
+    ag.locks_tick().await;
+    let ev = until(&hub, 0, 20, |ev| said(ev, T2, "Lock x is yours")).await;
+    assert!(said(&ev, T1, "Lock x lease expired after the warning grace period") && said(&ev, T2, "had a stale idle holder"), "{ev:?}");
+    assert_eq!(lock_now(&ag, "y").await["holder"]["id"], T3, "work at work keeps its lock past the lease"); ag.shutdown();
+}
+#[cfg(unix)] #[tokio::test(flavor = "multi_thread")] async fn the_os_flock_excludes_both_ways_and_goes_with_a_job() {
+    use std::os::fd::AsRawFd;
+    let (hub, ag, h, w) = locks_up("lk7", |_| String::new()).await; let from = len(&hub).await; let f = std::fs::File::create(h.join("bp-x.lock")).unwrap(); let free = |f: &std::fs::File| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
+    assert!(free(&f), "a raw flock from outside");
+    let (_, r) = ag.tool_lock_acquire(T1, &json!({"name":"x"})).await; assert_eq!(r, json!({"held":false,"position":0,"holder":T1}), "reserved, held back by the flock");
+    let (_, j) = ag.tool_work_run(T2, &json!({"command":"true","lock":"x"})).await; assert_eq!(j["state"], "waiting for lock x (1st)");
+    let l = lock_now(&ag, "x").await; assert_eq!(l["ready"], false); assert_eq!(l["outside"]["pid"], std::process::id(), "{l}");
+    ag.locks_tick().await; assert!(!said(&log_from(&hub, from).await, T1, "is yours"));
+    unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_UN); } ag.locks_tick().await;
+    until(&hub, from, 20, |ev| said(ev, T1, "Lock x is yours")).await; let l = lock_now(&ag, "x").await; assert_eq!(l["ready"], true); assert!(l.get("outside").is_none(), "{l}");
+    let g = std::fs::File::open(h.join("bp-x.lock")).unwrap(); assert!(!free(&g), "the hub's reservation excludes a raw flock");
+    let tr = w.join("started"); ag.tool_lock_release(T1, &json!({"name":"x"})).await; until(&hub, from, 20, |ev| said(ev, T2, "ended: exit 0")).await; assert!(free(&g), "released with the last holder"); unsafe { libc::flock(g.as_raw_fd(), libc::LOCK_UN); }
+    let (_, j) = ag.tool_work_run(T1, &json!({"command":format!("touch '{}'; sleep 30", tr.display()),"lock":"y"})).await; let id = j["id"].as_str().unwrap().to_string();
+    while !tr.exists() { tokio::time::sleep(Duration::from_millis(50)).await; }
+    ag.guards.lock().unwrap().remove("y"); // as a hub that died: only the job has it now
+    let g = std::fs::File::open(h.join("bp-y.lock")).unwrap(); assert!(!free(&g), "the job's own descriptor keeps the flock");
+    ag.tool_work_cancel(T1, &json!({"id":id})).await; until(&hub, from, 20, |ev| said(ev, T1, "ended: cancelled")).await; assert!(free(&g), "and it goes with the job"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn the_lock_tools_are_served_over_mcp_and_the_panel_shows_them() {
+    let (hub, ag, _h, _w) = locks_up("lk8", |_| String::new()).await; let g = String::new();
+    let (_, l) = rpc_mcp(&ag, T1, &g, "tools/list", json!({})).await; let ts = l["result"]["tools"].as_array().unwrap();
+    for n in ["lock_acquire", "lock_release", "lock_cancel", "lock_list"] { assert!(ts.iter().any(|t| t["name"] == n), "{n}"); }
+    assert!(ts.iter().find(|t| t["name"] == "work_run").unwrap()["inputSchema"]["properties"]["lock"].is_object(), "work_run offers its lock");
+    let call = |n: &'static str, a: Value| { let (ag, g) = (ag.clone(), g.clone()); async move { let (_, r) = rpc_mcp(&ag, T1, &g, "tools/call", json!({"name":n,"arguments":a})).await; assert_ne!(r["result"]["isError"], true, "{r}"); serde_json::from_str::<Value>(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap() } };
+    assert_eq!(call("lock_acquire", json!({"name":"m"})).await["held"], true); assert_eq!(call("lock_list", json!({})).await["locks"][0]["name"], "m");
+    assert_eq!(call("lock_release", json!({"name":"m"})).await["released"], true);
+    assert_eq!(hub.rpc_for("work.cancel").is_some() && hub.rpc_for("lock.cancel").is_some(), true); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_shell_helper_queues_with_threads_and_a_helper_that_vanishes_lets_go() {
+    let (hub, ag, _h, _w) = locks_up("lk9", |_| String::new()).await; let from = len(&hub).await; let (a, b) = (json!({"name":"x","holder":"pid:1@h:n1"}), json!({"name":"x","holder":"pid:2@h:n2"}));
+    assert_eq!(ag.lock_http("acquire", &a).await["held"], true); assert_eq!(ag.lock_http("acquire", &b).await["position"], 1); assert_eq!(ag.tool_lock_acquire(T1, &json!({"name":"x"})).await.1["position"], 2);
+    assert!(ag.lock_http("acquire", &json!({"name":"x","holder":"t1"})).await["error"].is_string(), "a holder from outside says it is one");
+    assert_eq!(ag.lock_http("renew", &a).await["held"], true); let lease = lock_now(&ag, "x").await["holder"]["lease"].as_u64().unwrap(); assert!(lease >= now_s() + 80);
+    assert_eq!(ag.lock_http("release", &b).await["released"], false, "only the holder"); assert_eq!(ag.lock_http("release", &a).await["released"], true); assert_eq!(ag.lock_http("status", &b).await["held"], true, "the next helper holds it");
+    // b vanishes: its lease runs out and the thread behind it is granted
+    let mut l = crate::agents::locks::Lock::read(&lock_now(&ag, "x").await.to_string()); l.holder.as_mut().unwrap().lease = 1; hub.commit(&json!({"$":"LockChanged","name":"x","lock":l.json(),"at":now_s()})).await.unwrap();
+    ag.locks_tick().await; until(&hub, from, 20, |ev| said(ev, T1, "Lock x is yours")).await;
+    let r = ag.lock_http("status", &json!({"name":"y","holder":"pid:3@h:n3"})).await; assert_eq!((r["held"].as_bool(), r["requeued"].as_bool()), (Some(true), Some(true)), "a client the record lost is queued again and told"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn locks_copy_child_probe() {
+    if std::env::var("BP_LOCK_COPY_PROBE").is_err() { return }
+    assert!(crate::copy::on());
+    let (hub, ag, h, _w) = locks_up("lkc", |_| { let q = work::row("w-q", "waiting for lock a (1st)", "queued", "run", "touch /nonexistent", "-", 0); rows_ev(T1, &[q]) + &lock_ev("a", json!({"holder":party("gone","work",T2,1),"waiters":[party("w-q","work",T1,0)],"ready":true})) + &lock_ev("b", json!({"holder":party(T3,"thread",T3,0),"waiters":[],"ready":false})) }).await; let n = len(&hub).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await; ag.locks_tick().await; assert_eq!(len(&hub).await, n, "nothing is pruned, granted or launched on a copy");
+    for (ok, r) in [ag.tool_lock_acquire(T1, &json!({"name":"x"})).await, ag.tool_lock_release(T3, &json!({"name":"b"})).await, ag.tool_lock_cancel(T1, &json!({"name":"a"})).await, ag.tool_work_cancel(T1, &json!({"id":"w-q"})).await] { assert!(!ok, "{r}"); assert!(r["error"].as_str().unwrap().contains("off on a copy"), "{r}"); }
+    assert_eq!(rpc(&hub, "lock.release", json!({"thread":T3,"name":"b"})).await["ok"], false);
+    assert_eq!(len(&hub).await, n); assert_eq!(ag.tool_lock_list().await.1["locks"].as_array().unwrap().len(), 2, "the record can be read");
+    assert!(!h.join("bp-b.lock").exists() && ag.guards.lock().unwrap().is_empty(), "no flock is taken"); ag.shutdown();
+}
+#[test] fn a_hub_on_a_copy_keeps_its_hands_off_the_locks() {
+    let me = std::env::current_exe().unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::locks_copy_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BP_LOCK_COPY_PROBE", "1").env_remove("BACKPLANE_AGENTS").output().unwrap();
+    assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); assert!(String::from_utf8_lossy(&o.stdout).contains("locks_copy_child_probe ... ok"));
 }
 
 // ---- watched work: copy, restart, bounds; wake_ride without a process ----
