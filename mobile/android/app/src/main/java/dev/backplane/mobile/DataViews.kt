@@ -116,9 +116,9 @@ private fun ConnBanner(hub: () -> Unit) {
 
 @Composable
 private fun PairScreen() {
-    var text by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
+    var text by remember(DataClient.pairEpoch) { mutableStateOf("") }
+    var address by remember(DataClient.pairEpoch) { mutableStateOf("") }
+    var code by remember(DataClient.pairEpoch) { mutableStateOf("") }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // centred when it fits; scrolls when it does not (a phone in landscape, a large font, the keyboard up): the short code and its button stay reachable
     Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.Center) {
