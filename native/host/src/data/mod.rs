@@ -144,8 +144,10 @@ fn act_entry(id: &str, role: &str, akind: &str, text: &str, at: u64) -> Option<V
         _ => { let a = pt::plain_act(&e); json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}) }
     })
 }
-/// The paths of attached images are told to the agent in the message's text (`[Attached image: <path>]` lines); the phone shows the pictures instead.
-fn shown_text(t: &str) -> String { if !t.contains("[Attached image: ") { return t.to_string() } t.lines().filter(|l| !(l.starts_with("[Attached image: ") && l.ends_with(']'))).collect::<Vec<_>>().join("\n").trim_end().to_string() }
+/// The paths of attached images are told to the agent in the message's text (`[attachment: <path>]` lines, the ones agents/inputs.rs reads as image
+/// blocks; messages from before said `[Attached image: <path>]`, which the agent got as words only); the phone shows the pictures instead.
+fn is_attachment_line(l: &str) -> bool { (l.starts_with("[attachment: ") || l.starts_with("[Attached image: ")) && l.ends_with(']') }
+fn shown_text(t: &str) -> String { if !t.contains("[attachment: ") && !t.contains("[Attached image: ") { return t.to_string() } t.lines().filter(|l| !is_attachment_line(l)).collect::<Vec<_>>().join("\n").trim_end().to_string() }
 fn live_entry(thread: &str, text: &str) -> Value { json!({"id":format!("live:{thread}"),"kind":"assistant","text":text,"at":now_ms(),"live":true}) }
 
 async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
@@ -234,7 +236,7 @@ async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, cl
     if !client_id.is_empty() { if !safe_id(client_id) { return Err(err("clientId: letters, digits and - _ . : only, 64 at most")) } if let Some(e) = recalled(client_id) { return Ok(e) } }
     if !hub.model().await.threads.get(thread).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
     let (meta, paths) = store_attachments(hub, thread, attachments)?;
-    let agent_text = if paths.is_empty() { String::new() } else { format!("{}{}{}", text, if text.is_empty() { "" } else { "\n\n" }, paths.iter().map(|p| format!("[Attached image: {p}]")).collect::<Vec<_>>().join("\n")) };
+    let agent_text = if paths.is_empty() { String::new() } else { format!("{}{}{}", text, if text.is_empty() { "" } else { "\n\n" }, paths.iter().map(|p| format!("[attachment: {p}]")).collect::<Vec<_>>().join("\n")) };
     let msg = if client_id.is_empty() { format!("m{}-{}", now_ms(), hub.fresh_client()) } else { client_id.to_string() };
     let mut p = json!({"thread":thread,"text":text,"msg":msg});
     if !meta.is_empty() { p["attachments"] = json!(meta); p["agentText"] = json!(agent_text) }

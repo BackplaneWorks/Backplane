@@ -44,7 +44,7 @@ check("message.send with a picture answers its attachment", sent.entry.attachmen
 await new Promise(r => setTimeout(r, 1500));
 const hist = await call("thread.entries", { thread: t2, limit: 20 });
 const mine = hist.entries.find(x => x.id === sent.entry.id);
-check("thread.entries still has the attachment", mine && mine.attachments && mine.attachments.length === 1 && !(mine.text || "").includes("[Attached image"));
+check("thread.entries still has the attachment", mine && mine.attachments && mine.attachments.length === 1 && !(mine.text || "").includes("[Attached image") && !(mine.text || "").includes("[attachment: "));
 const got = mine && await call("attachment.get", { id: mine.attachments[0].id }); check("attachment.get returns the picture", got && got.data.length > 100);
 // viewers, files and the browser
 const vf = await call("viewer.files", { thread: t }); check("viewer.files names the board and the schematic", vf.pcb.endsWith(".kicad_pcb") && vf.sch.endsWith(".kicad_sch"));

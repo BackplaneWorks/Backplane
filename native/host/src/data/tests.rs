@@ -168,7 +168,13 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let posted: Value = serde_json::from_str(log.iter().rev().find(|l| l.contains("\"MessagePosted\"") && l.contains("img-1")).unwrap()).unwrap();
     let queued: Value = serde_json::from_str(log.iter().rev().find(|l| l.contains("\"TurnQueued\"") && l.contains("img-1")).unwrap()).unwrap();
     assert_eq!(posted["text"], "see this"); assert!(posted["attachments"].is_array());
-    assert!(queued["text"].as_str().unwrap().starts_with("see this\n\n[Attached image: ") && queued["text"].as_str().unwrap().contains(&dir.to_string_lossy().to_string()), "{queued}");
+    let told = queued["text"].as_str().unwrap();
+    assert!(told.starts_with("see this\n\n[attachment: ") && told.contains(&dir.to_string_lossy().to_string()), "{queued}");
+    // the agent gets the pictures themselves: its input reads the lines the phone's message ends with as image blocks, bytes and all
+    let imgs = crate::agents::inputs::read_images(told);
+    assert_eq!(imgs.iter().map(|i| i.0.as_str()).collect::<Vec<_>>(), ["image/png", "image/jpeg"], "{told}");
+    assert_eq!((imgs[0].1.as_str(), imgs[1].1.as_str()), (b64(&png).as_str(), b64(b"jpegbytes").as_str()));
+    assert_eq!(crate::agents::inputs::att_paths(told).len(), 2, "both lines are at the message's end, where the agent's input looks");
     // a thread read shows them, and attachment.get returns the bytes
     let en = ask(&mut ws, 2, "thread.entries", json!({"thread":"t2"})).await; let last = en["result"]["entries"].as_array().unwrap().iter().find(|x| x["id"] == "img-1").unwrap().clone();
     assert_eq!(last["attachments"].as_array().unwrap().len(), 2);
@@ -299,4 +305,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     assert!(q["text"].as_str().unwrap().contains("](http://127.0.0.1:3871/q/q_data?t=tok)"), "the phone gets the link it can open: {q}");
     let r = ask(&mut ws, 2, "thread.order", json!({"thread":"t1"})).await; assert_eq!(r["result"]["order"], Value::Null, "{r}");
     let r = ask(&mut ws, 3, "thread.order", json!({})).await; assert!(r["error"].is_string() || r["result"].is_null(), "a thread is needed: {r}");
+}
+#[test] fn data_a_messages_attachment_lines_are_not_shown() {
+    assert_eq!(shown_text("hi\n\n[attachment: /a/x.png]\n[attachment: /a/y.jpg]"), "hi");
+    assert_eq!(shown_text("hi\n\n[Attached image: /a/x.png]"), "hi", "a message from before the change still hides its paths");
+    assert_eq!(shown_text("[attachment: /a/x.png]"), "", "a picture alone has no words");
+    assert_eq!(shown_text("see [attachment: x] inline"), "see [attachment: x] inline", "only whole lines are attachment lines");
 }
