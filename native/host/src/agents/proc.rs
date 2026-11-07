@@ -238,9 +238,11 @@ mod tests {
     }
     #[cfg(target_os = "linux")]
     #[test] fn reaping_leftovers_never_takes_this_processs_own_agents() { // two hubs' tests in one binary: a marked child of ours is not a dead hub's orphan
-        let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "sleep"); c.arg("30").env("BACKPLANE_AGENT_OWNER", "reap-own-test-home");
+        // the mark names this process: another test binary running at once reaps by its own mark, never ours
+        let owner = format!("reap-own-test-home-{}", std::process::id());
+        let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "sleep"); c.arg("30").env("BACKPLANE_AGENT_OWNER", &owner);
         let mut child = c.spawn().unwrap(); let pid = child.id();
-        assert_eq!(reap_orphans("reap-own-test-home"), 0, "our own child is left alone"); assert!(alive(pid));
+        assert_eq!(reap_orphans(&owner), 0, "our own child is left alone"); assert!(alive(pid));
         let _ = child.kill(); let _ = child.wait();
     }
     use super::*;

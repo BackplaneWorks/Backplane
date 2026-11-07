@@ -69,7 +69,7 @@ jobs:
         working-directory: native/guard
         run: cargo test --locked
 
-  # The hub's tests, split over runners with nextest. Tests that start the real `claude` CLI are left out (scripts/gate-skip.txt).
+  # The hub's tests, split over runners with nextest.
   hub:
     needs: changes
     if: needs.changes.outputs.host == 'true'
@@ -94,12 +94,7 @@ jobs:
       - name: tests
         working-directory: native/host
         run: |
-          skip='test(agents::tests::side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards) | test(agents::tests::sbs_child_probe)'
-          # macOS: /var is /private/var, so the opencode e2e path assertions differ (a test bug, not the hub)
-          if [ "$RUNNER_OS" = macOS ]; then skip="$skip | test(/acp::e2e::opencode_/)"
-            # macOS test debt (each fails on macOS only): bun-backed js_ledger, process-group, copy-guard, kicad ipc and file-manager tests
-            skip="$skip | test(/dialog::e2e::pi_other_extensions_question/) | test(/bots::tests::js_ledger_tools/) | test(/a_command_that_outlived_the_hub/) | test(/a_killed_hub_leaves_no_agent_behind/) | test(/a_copy_run_does_nothing_outside_its_home/) | test(/actor_over_the_rust_transport/) | test(/fm_actions_walk_folders_open_files/) | test(/a_thread_bound_to_a_named_account_runs_under/)"; fi
-          cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.partition }}/2 -E "not ($skip)"
+          cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.partition }}/2
 
   window:
     needs: changes
@@ -129,8 +124,7 @@ jobs:
       - name: tests
         working-directory: native/gpui
         run: |
-          # macOS: the keymap tests assume Linux's ctrl chords (secondary is cmd there)
-          if [ "$RUNNER_OS" = macOS ]; then cargo nextest run --locked -E 'not (test(/^keys::tests::/) | test(/drawing_pads_keys/))'; else cargo nextest run --locked; fi
+          cargo nextest run --locked
 
   # The Windows port (docs/e2e/MATRIX.md, Windows): both crates built and tested on Windows. Non-blocking until it is green.
   windows:

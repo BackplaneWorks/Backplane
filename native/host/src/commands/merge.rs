@@ -273,7 +273,9 @@ mod tests {
         assert!(!in_use(&fold(&[]), "nobody"));
     }
     #[test] fn a_process_in_the_folder_counts() {
-        let d = std::env::current_dir().unwrap(); assert!(process_in(d.to_str().unwrap()), "this test runs here");
+        let d = std::env::current_dir().unwrap();
+        // Linux reads /proc; elsewhere there is no way to ask and the log's word stands (false)
+        assert_eq!(process_in(d.to_str().unwrap()), cfg!(target_os = "linux"), "this test runs here");
         assert!(!process_in("/no/such/folder"));
     }
 }
