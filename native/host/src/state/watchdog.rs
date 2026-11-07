@@ -69,15 +69,17 @@ fn active(st: &State, th: &str) -> bool {
 fn lease_seconds(st: &State) -> u64 { let m = num_digits(&st.get("locks.lease.minutes", "20")); (if m == 0 { 20 } else { m }) * 60 }
 fn num_digits(s: &str) -> u64 { if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) { s.parse().unwrap_or(0) } else { 0 } }
 /// Locks.heartbeat: progress renews the lease of every lock party the thread owns (not a client's), so a working holder is not told its lease went stale;
-/// a LockChanged is written only for a lock the renewal changes
+/// a party is renewed only once less than half its lease is left (or none, or one is unread), so a working thread writes a LockChanged about once a
+/// half-lease, not on every step; a holder at work at least once a half-lease never reaches its lease
 fn heartbeat(st: &State, now: u64, th: &str, out: &mut Vec<Value>) {
-    let lease = now + lease_seconds(st);
+    let span = lease_seconds(st); let lease = now + span;
     for name in st.get("locks.names", "").split('\n').filter(|l| !l.is_empty()) {
         let old = st.get(&format!("lock.{name}"), "");
         let mut l = parse_or_null(&old);
         let mut changed = false;
         let mut renew = |p: &mut Value| {
-            if gstr(p, "thread", "") == th && gstr(p, "kind", "thread") != "client" { if let Some(o) = p.as_object_mut() { o.insert("lease".into(), serde_json::Value::Number(lease.into())); changed = true; } }
+            let due = p["lease"].as_u64().map_or(true, |at| at < now + span / 2); // Locks.heartbeat.half: half the lease or less is left
+            if due && gstr(p, "thread", "") == th && gstr(p, "kind", "thread") != "client" { if let Some(o) = p.as_object_mut() { o.insert("lease".into(), serde_json::Value::Number(lease.into())); changed = true; } }
         };
         if let Some(o) = l.as_object_mut() {
             if let Some(h) = o.get_mut("holder") { if !h.is_null() { renew(h); } }
@@ -246,5 +248,38 @@ mod tests {
         assert_eq!(after(&st2, 1000, &[m("t1", "a1", "assistant", "x")]).iter().find(|e| e["$"] == "LockChanged").unwrap()["lock"]["holder"]["lease"], 1060);
         let st3 = fold(&[BASE[0], BASE[1], BASE[3], r#"{"$":"LockChanged","name":"merge","lock":{"holder":{"id":"a","kind":"thread","thread":"t1","note":"","since":1,"lease":2200},"waiters":[],"ready":false},"at":1}"#]);
         assert!(after(&st3, 1000, &[m("t1", "a1", "assistant", "x")]).iter().all(|e| e["$"] != "LockChanged"), "a lease already at now + 20 minutes is unchanged: no event");
+        let st4 = fold(&[BASE[0], BASE[1], BASE[3], &held("t1", 1601)]);
+        assert!(after(&st4, 1000, &[m("t1", "a1", "assistant", "x")]).iter().all(|e| e["$"] != "LockChanged"), "more than half the lease left: not renewed yet");
+    }
+    fn held(th: &str, lease: u64) -> String { json!({"$":"LockChanged","name":"merge","lock":{"holder":{"id":th,"kind":"thread","thread":th,"note":"","since":1,"lease":lease},"waiters":[],"ready":true},"at":1}).to_string() }
+    fn lock_events(ev: &[Value]) -> usize { ev.iter().filter(|e| e["$"] == "LockChanged").count() }
+    #[test] fn a_hundred_progress_steps_in_a_minute_write_at_most_one_lock_change() {
+        let mut st = fold(&[BASE[0], BASE[1], BASE[3], &held("t1", 5)]);
+        let mut n = 0;
+        for i in 0..100u64 {
+            let ev = after(&st, 1000 + i * 60 / 100, &[m("t1", &format!("a{i}"), "assistant", "x")]);
+            n += lock_events(&ev);
+            for e in &ev { st.apply_line(&e.to_string()); }
+        }
+        assert_eq!(n, 1, "the first step renews the stale lease, the other 99 leave it");
+        assert_eq!(parse_or_null(&st.get("lock.merge", ""))["holder"]["lease"], 1000 + 1200);
+    }
+    #[test] fn a_lease_near_expiry_is_renewed_and_a_working_holder_never_goes_stale() {
+        let st = fold(&[BASE[0], BASE[1], BASE[3], &held("t1", 1599)]);
+        let ev = after(&st, 1000, &[m("t1", "a1", "assistant", "x")]);
+        assert_eq!(lock_events(&ev), 1); assert_eq!(ev.iter().find(|e| e["$"] == "LockChanged").unwrap()["lock"]["holder"]["lease"], 2200, "under half left: renewed to now + 20 minutes");
+        // a step every 9 minutes for 3 hours: each lease is still running when the next step comes
+        let mut st = fold(&[BASE[0], BASE[1], BASE[3], &held("t1", 1000 + 1200)]);
+        for k in 1..=20u64 {
+            let now = 1000 + k * 540;
+            let lease = parse_or_null(&st.get("lock.merge", ""))["holder"]["lease"].as_u64().unwrap();
+            assert!(lease > now, "step {k}: the lease {lease} is still running at {now}");
+            for e in after(&st, now, &[m("t1", &format!("a{k}"), "assistant", "x")]) { st.apply_line(&e.to_string()); }
+        }
+    }
+    #[test] fn a_clients_or_another_threads_party_is_never_renewed() {
+        let lock = r#"{"$":"LockChanged","name":"merge","lock":{"holder":{"id":"c","kind":"thread","thread":"t2","note":"","since":3,"lease":7},"waiters":[{"id":"b","kind":"client","thread":"t1","note":"","since":2,"lease":6},{"id":"w","kind":"work","thread":"t2","note":"","since":3,"lease":0}],"ready":true},"at":1}"#;
+        let st = fold(&[BASE[0], BASE[1], BASE[3], lock]);
+        for now in [1000, 5000, 100_000] { assert_eq!(lock_events(&after(&st, now, &[m("t1", "a1", "assistant", "x")])), 0, "at {now}: t1 works, but none of these parties is its own"); }
     }
 }

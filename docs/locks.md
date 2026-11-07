@@ -94,8 +94,11 @@ A holder found not ready at start is granted then.
 
 Thread and owned-work reservations have a progress lease, default 20 minutes
 (`locks.lease.minutes`). Genuine tool output, a file write or growing work
-output renews the owner's reservations. A periodic hub tick or a watchdog
-message is not a heartbeat. Queued parties keep their FIFO place, and a new
+output renews the owner's reservations, once less than half of a lease is
+left: a working thread's lock record changes about every 10 minutes, not on
+every step, and a holder that shows progress at least that often never
+reaches its lease. A periodic hub tick or a watchdog message is not a
+heartbeat. Queued parties keep their FIFO place, and a new
 holder gets a fresh lease when promoted.
 
 After a holder's progress lease expires, the hub sends it one warning.
