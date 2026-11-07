@@ -59,10 +59,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "accounts"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "accounts"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -393,4 +393,26 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!(shelf_flags(&mk(Override::None, 30, 20, true, false)).1, false);
     assert_eq!(shelf_flags(&mk(Override::ForcedSettled, 30, 20, true, false)).1, true);
     assert_eq!(shelf_flags(&mk(Override::ForcedSettled, 30, 20, false, true)).1, false);
+}
+
+struct FakeStar(std::sync::Mutex<Vec<Value>>);
+impl RpcHandler for FakeStar {
+    fn methods(&self) -> &'static [&'static str] { &["star.offer", "star.nudge"] }
+    fn call<'a>(&'a self, _h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            if m == "star.offer" { return vec![json!({"t":"reply","id":id,"ok":true,"result":{"offer":{"token":"m5","text":"Like Backplane? Give us a star on GitHub!","url":"https://github.com/BackplaneWorks/Backplane","label":"Star on GitHub"}}})] }
+            self.0.lock().unwrap().push(p.clone()); vec![json!({"t":"reply","id":id,"ok":true})]
+        })
+    }
+}
+#[tokio::test] async fn a_phone_reads_the_star_offer_decides_it_and_hears_it_hidden() {
+    // feature "star": star.offer on (re)connect, star.nudge passes token and action through, and the hub's star frames (shown / hidden) reach the phone
+    let (hub, port) = up("star").await; let seen = Arc::new(FakeStar(Default::default())); hub.register_rpc(seen.clone());
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await;
+    assert!(hello["features"].as_array().unwrap().contains(&json!("star")));
+    let r = ask(&mut ws, 1, "star.offer", json!({})).await; assert_eq!(r["result"]["offer"]["token"], "m5", "{r}"); assert_eq!(r["result"]["offer"]["text"], "Like Backplane? Give us a star on GitHub!");
+    let r = ask(&mut ws, 2, "star.nudge", json!({"token":"m5","action":"dismiss"})).await; assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(*seen.0.lock().unwrap(), vec![json!({"token":"m5","action":"dismiss"})]);
+    hub.push_all(&json!({"t":"star","offer":null}));
+    loop { let v = next(&mut ws).await; if v["t"] == "star" { assert_eq!(v["offer"], Value::Null); break } }
 }

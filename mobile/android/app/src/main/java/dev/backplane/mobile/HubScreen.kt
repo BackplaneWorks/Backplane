@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -94,6 +95,25 @@ internal fun HubBanner(open: () -> Unit) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             DDot(if (n.warn) dwarn else dfaint, 8); Spacer(Modifier.width(8.dp))
             Text(n.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        DLine()
+    }
+}
+
+/** The GitHub star suggestion (DataClient.star), one line: the link opens the page and decides open; Dismiss decides dismiss. */
+@Composable
+internal fun StarBanner() {
+    val s = DataClient.star ?: return
+    val ctx = LocalContext.current
+    Column(Modifier.testTag("star.banner")) {
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(s.text, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.width(8.dp))
+            DMono(s.label.ifEmpty { "Star on GitHub" }, dcs.primary, 12, Modifier.testTag("star.open").clickable {
+                runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(s.url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                DataClient.starDecide("open")
+            }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
+            DMono("Dismiss", dcs.onSurfaceVariant, 12, Modifier.testTag("star.dismiss").clickable { DataClient.starDecide("dismiss") }.padding(horizontal = 4.dp, vertical = 4.dp))
         }
         DLine()
     }

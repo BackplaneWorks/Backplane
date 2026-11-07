@@ -127,8 +127,13 @@ impl Policy {
         if g.booting.is_some() { return (vec![], None) }
         let ev = super::star::accept(&g.core.st.get(super::star::KEY, ""), msg_id, now_s);
         let sent = ev.first().and_then(|e| e["value"].as_str()).map_or(false, |v| v.contains("\"status\":\"sent\""));
-        let offer = if sent { Some(serde_json::json!({"t": "info", "info": {"star.nudge.offer": msg_id}})) } else { None };
+        let offer = if sent { ev.first().and_then(|e| e["value"].as_str()).map(|v| super::star::frame(super::star::offer(v))) } else { None };
         (ev, offer)
+    }
+    /// star.offer: the offer while it is out and undecided (null otherwise, and while the log is folded)
+    pub fn star_offer(&self) -> Value {
+        let g = self.lock();
+        if g.booting.is_some() { Value::Null } else { super::star::offer(&g.core.st.get(super::star::KEY, "")) }
     }
     /// star.nudge {token, action}: the decision (opened / dismissed), terminal, only for the offered token
     pub fn star_decide(&self, token: &str, action: &str, now_s: u64) -> Vec<Value> {
@@ -384,10 +389,13 @@ mod tests {
         for i in 1..=4 { let (ev, offer) = p.star_prompt(&format!("m{i}"), 10 + i); assert_eq!(ev.len(), 1); assert!(offer.is_none()); apply(&p, &ev); }
         let (ev, offer) = p.star_prompt("m5", 20);
         assert!(ev[0]["value"].as_str().unwrap().contains(r#""status":"sent""#));
-        assert_eq!(offer.unwrap(), json!({"t":"info","info":{"star.nudge.offer":"m5"}}), "a targeted info frame, never broadcast");
+        assert_eq!(p.star_offer(), Value::Null, "not before the ledger commits");
+        assert_eq!(offer.unwrap(), json!({"t":"star","offer":{"token":"m5","text":"Like Backplane? Give us a star on GitHub!","url":"https://github.com/BackplaneWorks/Backplane","label":"Star on GitHub"}}), "the targeted frame");
         apply(&p, &ev);
+        assert_eq!(p.star_offer()["token"], "m5", "a reconnecting client asks and gets the same offer");
         assert_eq!(p.star_prompt("m6", 21), (vec![], None), "after the offer nothing more is counted or offered");
         let done = p.star_decide("m5", "open", 22); assert!(done[0]["value"].as_str().unwrap().contains("opened"));
         assert!(p.star_decide("stale", "open", 22).is_empty());
+        apply(&p, &done); assert_eq!(p.star_offer(), Value::Null, "decided: no client shows it again");
     }
 }

@@ -102,3 +102,23 @@ struct DataHubBanner: View {
         }
     }
 }
+
+/// The GitHub star suggestion (DataClient.star), one line: the link opens the page and decides open; Dismiss decides dismiss.
+struct DataStarBanner: View {
+    let client: DataClient
+    @Environment(\.openURL) private var openURL
+    var body: some View {
+        if let s = client.star {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Text(s.text).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2)
+                    Spacer(minLength: 0)
+                    Button(s.label.isEmpty ? "Star on GitHub" : s.label) { if let u = URL(string: s.url) { openURL(u) }; client.starDecide("open") }
+                        .buttonStyle(DButton(primary: true)).accessibilityIdentifier("star.open")
+                    Button("Dismiss") { client.starDecide("dismiss") }.dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("star.dismiss")
+                }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.raised)
+                DLine()
+            }
+        }
+    }
+}

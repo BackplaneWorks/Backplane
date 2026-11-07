@@ -260,3 +260,16 @@ struct DWorkReply: Decodable { let subs: DWork? }
 // Who holds a lock (locks.list, the "locks" push): `line` is the hub's words for it.
 struct DLock: Decodable, Identifiable { let name, holder, thread, line: String; let waiting: Int; var id: String { name } }
 struct DLocks: Decodable { let locks: [DLock] }
+
+/// The GitHub star suggestion while the hub says it is out and undecided (feature "star", native/host/src/state/star.rs). The hub decides
+/// when; the app shows exactly this: from star.offer at every (re)connect, and from a `{"t":"star","offer"}` frame (null hides it).
+struct DStarOffer: Codable, Equatable {
+    var token: String; var text: String; var url: String; var label: String
+    var valid: DStarOffer? { !token.isEmpty && !text.isEmpty && url.hasPrefix("https://") ? self : nil }
+    static func of(_ o: Any?) -> DStarOffer? {
+        guard let d = o as? [String: Any] else { return nil }
+        let g = { (k: String) in d[k] as? String ?? "" }
+        return DStarOffer(token: g("token"), text: g("text"), url: g("url"), label: g("label")).valid
+    }
+}
+struct DStarReply: Decodable { var offer: DStarOffer? }

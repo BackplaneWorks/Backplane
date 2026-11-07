@@ -533,7 +533,7 @@ fn record_cancel(this: &mut Backplane, cx: &mut Context<Backplane>) {
 
 /// The program that opens a link or a file: `BACKPLANE_GPUI_OPEN` (tests point it at a recorder), else xdg-open (open on a Mac).
 pub fn opener() -> String { std::env::var("BACKPLANE_GPUI_OPEN").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| if cfg!(target_os = "macos") { "open".into() } else { "xdg-open".into() }) }
-fn open_target(what: &str) -> Result<(), String> {
+pub(crate) fn open_target(what: &str) -> Result<(), String> {
     std::process::Command::new(opener()).arg(what).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(|_| ()).map_err(|_| "Could not open it. Copy the text and paste it into GitHub.".to_string())
 }
 /// Where a saved file goes: `BACKPLANE_GPUI_SAVE_DIR`, else ~/Downloads (else the home folder). Never over an existing file.

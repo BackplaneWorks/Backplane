@@ -98,6 +98,7 @@ impl Backplane {
             Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
             Event::Term(key,pid,b,reset)=>self.term_frame(&key,pid,&b,reset,cx),
             Event::Hello=>self.term_rejoin(),
+            Event::Star(v)=>self.star_offer(&v,cx),
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Refs(r)=>{ self.screens.plotview.hist.refs=screens::plot::refs_of(&r); cx.notify(); }
