@@ -45,12 +45,19 @@ pub fn missing_note(log: &str) -> String {
     if n == 0 { return String::new() }
     format!("{n} {} no 3D model on the hub's machine (KiCad's 3D library is not installed there, or the paths are wrong)", if n == 1 { "part has" } else { "parts have" })
 }
+/// The staged export's file name: the board's own, because kicad-cli writes its output's stem as the model's `pcb_name`, which names the
+/// board's layers (`<pcb_name>_soldermask`...). Other characters than a file name's plain ones become `_`.
+pub fn stage_name(path: &str) -> String {
+    let stem = std::path::Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' }).collect();
+    format!("{}.glb", if stem.is_empty() { "model" } else { &stem })
+}
 /// Pv.glb.staged: the export, in a folder of its own, promoted to `out` only when it worked; the folder goes either way
 fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, tools: &[Mesher]) -> Ran {
     if !step && cli.is_empty() { return Ran { code: 127, out: "KiCad is not installed on this machine (no kicad-cli): get it from kicad.org/download or its package manager".into() } }
     if let Some(d) = std::path::Path::new(out).parent() { let _ = std::fs::create_dir_all(d); }
     let Ok(dir) = stepglb::stage(out, "export-") else { return Ran { code: 3, out: "Unable to create model staging directory".into() } };
-    let stage = dir.join("model.glb"); let at = stage.to_string_lossy().into_owned();
+    let stage = dir.join(stage_name(path)); let at = stage.to_string_lossy().into_owned();
     let r = if step { stepglb::convert(tools, path, &at, Some(stepglb::NORMAL), true) } else {
         let a = flags(bare, full, &at, path);
         let mut argv = vec![cli]; argv.extend(a.iter().map(String::as_str));
@@ -94,6 +101,34 @@ mod tests {
         assert_eq!(flags(false, false, "o", "b").join(" "), "pcb export glb --subst-models --include-pads --include-soldermask --include-silkscreen -f -o o b");
         assert_eq!(flags(true, true, "o", "b").join(" "), "pcb export glb --no-components --include-pads --include-soldermask --include-silkscreen --include-tracks --include-zones --cut-vias-in-body -f -o o b");
     }
+    #[test] fn the_staged_export_is_named_for_the_board() {
+        assert_eq!(stage_name("/p/GNSS/design/Tracker_nRF9251/Tracker_nRF9251.kicad_pcb"), "Tracker_nRF9251.glb");
+        assert_eq!(stage_name("/p/a b/my board.kicad_pcb"), "my_board.glb");
+        assert_eq!(stage_name("/p/part.step"), "part.glb");
+        assert_eq!(stage_name(""), "model.glb");
+    }
+    /// A real board through the hub's export to what a phone receives. Opt in with the board and a KiCad that opens it:
+    /// BACKPLANE_TEST_BOARD=<.kicad_pcb> BACKPLANE_KICAD_CLI=<kicad-cli> cargo test real_board -- --ignored --nocapture
+    /// (the GNSS tracker: design/Tracker_nRF9251/Tracker_nRF9251.kicad_pcb with KiCad 10.99).
+    #[test] #[ignore] fn a_real_board_exports_to_a_model_a_phone_takes() {
+        let (Ok(board), Ok(cli)) = (std::env::var("BACKPLANE_TEST_BOARD"), std::env::var("BACKPLANE_KICAD_CLI")) else { eprintln!("skipped: no BACKPLANE_TEST_BOARD / BACKPLANE_KICAD_CLI"); return };
+        let dir = std::env::temp_dir().join(format!("bp-realboard-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("board.glb").to_string_lossy().into_owned();
+        let t = std::time::Instant::now();
+        let r = export(false, false, false, &board, &out, &cli, &[]);
+        assert_eq!(r.code, 0, "export: {}", r.out);
+        let bytes = std::fs::read(&out).unwrap(); let _ = std::fs::remove_dir_all(&dir);
+        let stem = std::path::Path::new(&board).file_stem().unwrap().to_string_lossy().into_owned();
+        assert_eq!(glb::kicad_board(&bytes), stem, "the board's layers are known, so their colours are decoded");
+        assert!(solid::fits(bytes.len() as u64), "{} bytes: the hub reads it", bytes.len());
+        let so = plot_of(&bytes, false).unwrap().solid.expect("triangles");
+        let frame = super::super::plot::solid_frame("2|/r|", &so);
+        eprintln!("export {:?}, GLB {} B, {} triangles to the phone, frame {} B", t.elapsed(), bytes.len(), so.n, frame.len());
+        assert!(so.n as usize <= (64 << 20) / 84, "within the phones' triangle limit (Plot.swift, Plot.kt)");
+        assert!(so.d.len() >= so.n as usize * 10, "the phones' sanity bound: at least 10 bytes a triangle");
+        assert!(frame.len() < crate_outbox_max() && frame.len() < 16 << 20, "fits a phone's socket (16 MB) and the hub's outbox");
+    }
+    fn crate_outbox_max() -> usize { 8 << 20 } // hub.rs OUTBOX_MAX (this module also builds into bp-plot, without the hub)
     #[test] fn parts_without_a_model_are_said() {
         assert_eq!(missing_note("ok\n"), "");
         assert_eq!(missing_note("Could not add 3D model for R1.\n"), "1 part has no 3D model on the hub's machine (KiCad's 3D library is not installed there, or the paths are wrong)");

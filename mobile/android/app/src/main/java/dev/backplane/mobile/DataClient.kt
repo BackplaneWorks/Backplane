@@ -53,6 +53,7 @@ object DataClient {
     fun init(ctx: Context) {
         if (this::app.isInitialized) return
         app = ctx.applicationContext
+        MeshDisk.dir = java.io.File(app.cacheDir, "models")
         link = prefs().getString("link", null)
         System.getenv("BACKPLANE_LINK")?.let { link = it }
         loadCache()
@@ -316,6 +317,8 @@ object DataClient {
     var openFromIntent by mutableStateOf<String?>(null)
     // a tapped notification's approval: the thread scrolls to it once it is loaded
     var pendingAsk by mutableStateOf("")
+    /** Debug builds: the viewer tab the opened thread's viewer starts on (the intent's `vtab`). */
+    var openViewerTab: String? = null
     val plots = PlotStore()
     var shot by mutableStateOf(0L); private set   // the browser page's newest frame announced by the hub (any thread: the tab compares the bot it shows)
     var shotBot by mutableStateOf(""); private set
@@ -405,7 +408,11 @@ object DataClient {
     data class ProjectFiles(val root: String, val pcb: String, val sch: String)
     suspend fun viewerFiles(tid: String): ProjectFiles { val r = call("viewer.files", JSONObject().put("thread", tid)); return ProjectFiles(r.optString("root"), r.optString("pcb"), r.optString("sch")) }
     fun stopWatch(tid: String) { scope.launch { runCatching { call("viewer.watch", JSONObject().put("thread", tid).put("kind", "")) } } }
-    suspend fun watch(tid: String, kind: String, path: String = "") { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path) }) }
+    suspend fun watch(tid: String, kind: String, path: String = "") {
+        // a 3D view shows the model it showed last at once, and the hub sends it again only if it changed
+        val kept = if (kind.startsWith("3d")) withContext(Dispatchers.Main) { plots.cached(listOf(hubName, tid, kind, path).joinToString("|")) } else ""
+        call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept) })
+    }
     /** `viewer.layers`: what a press does, and what to draw; the rules are the hub's (present/viewer.rs `layer_reply`). `rows`: the layers, then a comparison's marks. */
     data class LayerRow(val layer: Int, val name: String, val on: Boolean, val active: Boolean)
     data class Layers(val own: Int, val focus: String, val off: Int, val dim: Int, val lift: Int, val bits: Int, val head: String, val mode: Int, val modes: Boolean, val reset: Boolean, val rows: List<LayerRow>)

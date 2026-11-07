@@ -626,7 +626,26 @@ class PlotRenderer : GLSurfaceView.Renderer {
         for (k in 0..2) glDisableVertexAttribArray(k)
     }
 
+    // debug builds: frame times while something moves, to logcat (tag bp3d): the gap between frames and the GPU's time for one (glFinish)
+    private val gaps = ArrayList<Float>(); private val gpu = ArrayList<Float>(); private var last = 0L
+    private fun timed(t0: Long) {
+        if (!BuildConfig.DEBUG) return
+        glFinish(); val now = System.nanoTime()
+        if (last != 0L && now - last < 500_000_000L) { gaps.add((now - last) / 1e6f); gpu.add((now - t0) / 1e6f) }
+        last = now
+        if (gaps.size >= 60) {
+            fun pct(a: List<Float>, q: Float) = a.sorted()[((a.size - 1) * q).toInt()]
+            android.util.Log.i("bp3d", "frames=${gaps.size} gap p50=%.1f p95=%.1f ms draw p50=%.1f p95=%.1f ms tris=${meshCount / 3}".format(pct(gaps, .5f), pct(gaps, .95f), pct(gpu, .5f), pct(gpu, .95f)))
+            gaps.clear(); gpu.clear()
+        }
+    }
+
     override fun onDrawFrame(gl: GL10?) {
+        val t0 = System.nanoTime()
+        draw()
+        timed(t0)
+    }
+    private fun draw() {
         glBindVertexArray(vao[0])
         glViewport(0, 0, w, h)
         glDisable(GL_CULL_FACE)

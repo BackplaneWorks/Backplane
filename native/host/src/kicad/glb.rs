@@ -266,6 +266,15 @@ fn layer_of(name: &str, pcb: &str) -> (bool, bool) {
     (matches!(role, Some("soldermask" | "silkscreen" | "pad" | "copper" | "via" | "PCB")), role == Some("soldermask"))
 }
 
+/// The board's name in its meshes' names. KiCad's `pcb_name` is the output file's stem, so a board exported to a staging `model.glb` says
+/// "model" while its meshes are `<board>_PCB`, `<board>_soldermask`...: then the name is the one whose `_PCB` mesh has a `_soldermask`,
+/// `_pad` or `_silkscreen` beside it (a component's mesh never does).
+fn board_name<'a>(meshes: &Tbl<'a>, pcb: &'a str) -> &'a str {
+    let names: Vec<&'a str> = meshes.xs.iter().map(|m| m.get_str("name", "")).collect();
+    if pcb.is_empty() || names.iter().any(|n| n.strip_prefix(pcb) == Some("_PCB")) { return pcb }
+    names.iter().filter_map(|n| n.strip_suffix("_PCB")).find(|x| !x.is_empty() && names.iter().any(|n| n.strip_prefix(*x).is_some_and(|r| matches!(r, "_soldermask" | "_pad" | "_silkscreen")))).unwrap_or(pcb)
+}
+
 // Triangles ---------------------------------------------------------------------------------------------------------------------
 
 struct Gltf<'a> { accs: Tbl<'a>, views: Tbl<'a>, mats: Tbl<'a>, bin: Bin, pcb: &'a str }
@@ -288,6 +297,16 @@ fn prim(p: &J, name: &str, g: &Gltf, m: &M4, out: &mut Vec<Tri3>) -> Result<(), 
 }
 
 /// Glb.parse then Mesh.tris: every triangle of a GLB file in scene order; none when it is not a GLB.
+/// The KiCad board a GLB is of, by its meshes' names ("" for another exporter, or no board): what `tris` decodes the board's layers by.
+pub fn kicad_board(bs: &[u8]) -> String {
+    if word_at(bs, 0) != 1179937895 { return String::new() }
+    let jl = word_at(bs, 12) as usize;
+    let json = bs.get(20..).map(|r| &r[..jl.min(r.len())]).unwrap_or(&[]);
+    let Ok(Some(j)) = parse(&String::from_utf8_lossy(json)) else { return String::new() };
+    let extras = j.get_obj("asset").get_obj("extras");
+    if !extras.get_str("generator", "").starts_with("KiCad") { return String::new() }
+    board_name(&Tbl { xs: j.get_obj("meshes").elems() }, extras.get_str("pcb_name", "")).to_string()
+}
 pub fn tris(bs: &[u8]) -> Result<Vec<Tri3>, TooBig> {
     let u32_at = |at: u64| word_at(bs, at);
     if u32_at(0) != 1179937895 { return Ok(vec![]) }
@@ -300,7 +319,7 @@ pub fn tris(bs: &[u8]) -> Result<Vec<Tri3>, TooBig> {
     let bin = Bin { w: body.chunks_exact(4).take(n).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect() };
     let (nodes, meshes) = (Tbl { xs: j.get_obj("nodes").elems() }, Tbl { xs: j.get_obj("meshes").elems() });
     let extras = j.get_obj("asset").get_obj("extras");
-    let pcb = if extras.get_str("generator", "").starts_with("KiCad") { extras.get_str("pcb_name", "") } else { "" };
+    let pcb = if extras.get_str("generator", "").starts_with("KiCad") { board_name(&meshes, extras.get_str("pcb_name", "")) } else { "" };
     let g = Gltf { accs: Tbl { xs: j.get_obj("accessors").elems() }, views: Tbl { xs: j.get_obj("bufferViews").elems() }, mats: Tbl { xs: j.get_obj("materials").elems() }, bin, pcb };
     let scenes = Tbl { xs: j.get_obj("scenes").elems() };
     let roots = scenes.at(j.get_u32("scene", 0)).u32s("nodes");
@@ -396,6 +415,18 @@ pub mod tests {
         assert_eq!(kicad("tig_PCB", "KiCad 10.0.7", r#"{"pbrMetallicRoughness":{"baseColorFactor":[0.5,0.5,0.5,1]}}"#), 0x373737, "0.5 on the display is 0.214 of light");
         assert_eq!(kicad("R_0402_tig_PCB", "KiCad 10.0.7", MASK), 43 << 24 | 0x143324, "a component's mesh is linear already, whatever it is called");
         assert_eq!(kicad("tig_soldermask", "something else", MASK), 43 << 24 | 0x143324, "another exporter is taken at its word");
+    }
+    #[test] fn a_board_exported_under_another_file_name_is_known_by_its_meshes() {
+        // kicad-cli writes pcb_name from the output's stem: the hub's staging model.glb says "model", its meshes say the board's name
+        let two = |first: &str, mat: &str| {
+            let j = TRI.replace(r#""scenes":"#, r#""asset":{"extras":{"generator":"KiCad 10.0.7","pcb_name":"model"}},"scenes":"#)
+                .replace(r#""meshes":[{"primitives""#, &format!(r#""meshes":[{{"name":"tig_pad","primitives":[]}},{{"name":"{first}","primitives""#))
+                .replace(r#""materials":[{"pbrMetallicRoughness":{"baseColorFactor":[1,0,0.5,1]}}]"#, &format!(r#""materials":[{mat}]"#))
+                .replace(r#""mesh":0"#, r#""mesh":1"#);
+            tris(&glb(&j, &floats(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]))).unwrap()[0].color
+        };
+        assert_eq!(two("tig_soldermask", MASK), 43 << 24 | 0x143324, "no tig_PCB mesh: nothing is known to be the board");
+        assert_eq!(two("tig_PCB", r#"{"pbrMetallicRoughness":{"baseColorFactor":[0.5,0.5,0.5,1]}}"#), 0x373737, "tig_PCB beside tig_pad: tig is the board");
     }
     #[test] fn a_dark_mask_is_opaque_but_still_known_for_a_coat() {
         let black = r#"{"alphaMode":"BLEND","pbrMetallicRoughness":{"baseColorFactor":[0.08,0.08,0.08,0.83]}}"#;

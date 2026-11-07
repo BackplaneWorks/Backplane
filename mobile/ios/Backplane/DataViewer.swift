@@ -34,6 +34,8 @@ extension DataClient {
     func viewerFiles(_ thread: String) async -> DProjectFiles? { try? await call("viewer.files", ["thread": thread]) }
     func watch(_ thread: String, kind: String, path: String = "") async throws {
         var p: [String: Any] = ["thread": thread, "kind": kind]; if !path.isEmpty { p["path"] = path }
+        // a 3D view shows the model it showed last at once, and the hub sends it again only if it changed
+        if kind.hasPrefix("3d") { let kept = plots.cached([hubName, thread, kind, path].joined(separator: "|")); if !kept.isEmpty { p["kept"] = kept } }
         _ = try await call("viewer.watch", p, as: DEmpty.self)
     }
     func layers(_ kind: String, present: UInt32, own: UInt32, focus: String, action: String = "", value: String = "") async -> DLayers? {
@@ -88,9 +90,10 @@ struct DataViewerView: View {
             DLine()
             Group {
                 switch tab {
-                case "Board": DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : "", has: !(files?.pcb ?? "").isEmpty || target != nil, none: "No board in this project yet")
-                case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: target?.tab == "Schematic" ? target!.path : "", has: !(files?.sch ?? "").isEmpty || target != nil, none: "No schematic in this project yet")
-                case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: "", has: !(files?.pcb ?? "").isEmpty, none: "No board in this project yet")
+                case "Board": DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : "", has: files == nil || !(files?.pcb ?? "").isEmpty || target != nil, none: "No board in this project yet")
+                case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: target?.tab == "Schematic" ? target!.path : "", has: files == nil || !(files?.sch ?? "").isEmpty || target != nil, none: "No schematic in this project yet")
+                // unknown files (no hub yet) still open the 3D view: it shows the model it showed last
+                case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: "", has: files == nil || !(files?.pcb ?? "").isEmpty, none: "No board in this project yet")
                 case "Split": DataSplitTab(client: client, thread: thread, files: files)
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
@@ -102,7 +105,14 @@ struct DataViewerView: View {
         }
         .background(BackplaneDesign.background)
         .dataBar(thread.title.isEmpty ? "New thread" : thread.title)
-        .task { files = await client.viewerFiles(thread.id); if !(files?.pcb ?? "").isEmpty { tab = "Board" } }
+        .task(id: client.conn == .online) {
+            guard files == nil else { return }
+            files = await client.viewerFiles(thread.id); if !(files?.pcb ?? "").isEmpty && tab == "Files" { tab = "Board" }
+            #if DEBUG || BP_MEASURE
+            // a check without hands: BACKPLANE_VTAB opens that tab (BACKPLANE_SELECT=viewer:<thread> opens the viewer)
+            if let t = ProcessInfo.processInfo.environment["BACKPLANE_VTAB"], tabs.contains(t) { tab = t }
+            #endif
+        }
         .onDisappear { Task { try? await client.watch(thread.id, kind: "") } }
     }
 }
@@ -138,9 +148,14 @@ struct DataPlotTab: View {
                 })
                 .accessibilityIdentifier("data.viewer.surface")
             }
-            let say = !has ? none : !error.isEmpty ? error : (frame?.none ?? "").isEmpty ? (mesh?.none ?? "") : frame!.none
-            if !say.isEmpty { Text(say).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity) }
-            else if frame == nil && (!three || mesh == nil) { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+            let say = !has ? none : !error.isEmpty ? error : (frame?.none ?? "").isEmpty ? (mesh.map { $0.decoding ? "" : $0.none } ?? "") : frame!.none
+            if !say.isEmpty && three && mesh?.mesh != nil {
+                // a model on show stays; why it may be old is said above it
+                Text(say).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).padding(8).background(BackplaneDesign.panel.opacity(0.85)).padding(8).accessibilityIdentifier("data.viewer.note")
+            }
+            else if !say.isEmpty { Text(say).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if three && (mesh?.mesh == nil || mesh?.decoding == true) { DLoading(text: "Loading 3D model…") }
+            else if frame == nil && !three { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             if !three && !present.isEmpty && client.features.contains("layers"), let l = layers {
                 HStack(spacing: 6) {
                     chip(l.layerHead, id: "data.viewer.layers", on: l.layerMode > 0) { refs = nil; menu.toggle() }
@@ -161,7 +176,7 @@ struct DataPlotTab: View {
             }
         }
         .background(BackplaneDesign.panel.opacity(0.0))
-        .task(id: kind + "|" + path + "|\(has)") {
+        .task(id: kind + "|" + path + "|\(has)|\(client.conn == .online)") {
             guard has else { return }
             error = ""; layers = nil; refs = nil; comparing = ""; info = ""; picked = ""
             do { try await client.watch(thread.id, kind: kind, path: path) } catch { self.error = error.localizedDescription }
@@ -279,11 +294,21 @@ struct DataMechSolid: View {
             if let v = plainViewer(open: "mech", source: "mech|" + path, picked: "", off: 0, dim: 0, lift: 255) {
                 PlotCanvasView(frame: nil, mesh: mesh, scope: thread.id, viewer: v, pick: { _ in }).accessibilityIdentifier("data.mech.surface")
             }
-            let say = !error.isEmpty ? error : (mesh?.none ?? "")
+            let say = !error.isEmpty ? error : (mesh.map { $0.decoding ? "" : $0.none } ?? "")
             if !say.isEmpty { Text(say).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
-            else if mesh == nil { ProgressView() }
+            else if mesh?.mesh == nil || mesh?.decoding == true { DLoading(text: "Loading 3D model…") }
         }
         .task(id: path) { error = ""; do { try await client.watch(thread.id, kind: "3d-bare", path: path) } catch { self.error = error.localizedDescription } }
+    }
+}
+
+/// A model on its way: a spinner and what it waits for, over the board's plain slab while the parts come (never a blank view)
+struct DLoading: View {
+    let text: String
+    var body: some View {
+        VStack(spacing: 10) { ProgressView(); Text(text).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary) }
+            .padding(16).background(BackplaneDesign.panel.opacity(0.85))
+            .frame(maxWidth: .infinity, maxHeight: .infinity).allowsHitTesting(false).accessibilityIdentifier("data.viewer.loading")
     }
 }
 

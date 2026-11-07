@@ -230,25 +230,58 @@ struct PlotMesh: @unchecked Sendable {
         }
         let b = (o["box3"] as? [Int] ?? []).map { Float(Int32(truncatingIfNeeded: $0)) * 10 }
         var v = Varints(o["mesh"] as? Data ?? Data())
-        var verts: [Float] = [], colors: [UInt32] = []
-        verts.reserveCapacity(n * 18)
-        colors.reserveCapacity(n * 3)
+        // written in place: no array per triangle (a 45k-triangle board decodes in a few milliseconds on a phone)
+        var verts = [Float](repeating: 0, count: n * 18), colors = [UInt32](repeating: 0, count: n * 3)
         var color: UInt32 = 0, px: Int32 = 0, py: Int32 = 0, pz: Int32 = 0
         for triangle in 0..<n {
             if triangle % 256 == 0 && cancelled() { throw CancellationError() }
             color ^= v.next()
-            var p: [SIMD3<Float>] = []
-            for _ in 0..<3 {
-                px = px &+ v.signed(); py = py &+ v.signed(); pz = pz &+ v.signed()
-                p.append(SIMD3(Float(px), Float(py), Float(pz)) * 10)
-            }
+            @inline(__always) func corner() -> SIMD3<Float> { px = px &+ v.signed(); py = py &+ v.signed(); pz = pz &+ v.signed(); return SIMD3(Float(px), Float(py), Float(pz)) * 10 }
+            let a = corner(), b = corner(), c = corner()
             guard v.valid else { throw NSError(domain: "PlotMesh", code: 2, userInfo: [NSLocalizedDescriptionKey: "Incomplete model"]) }
-            let nrm = simd_normalize(simd_cross(p[1] - p[0], p[2] - p[0]))
+            let nrm = simd_normalize(simd_cross(b - a, c - a))
             let nn = nrm.x.isNaN ? SIMD3<Float>(0, 0, 1) : nrm
-            for q in p { verts += [q.x, q.y, q.z, nn.x, nn.y, nn.z]; colors.append(color) }
+            var at = triangle * 18
+            for q in [a, b, c] { verts[at] = q.x; verts[at + 1] = q.y; verts[at + 2] = q.z; verts[at + 3] = nn.x; verts[at + 4] = nn.y; verts[at + 5] = nn.z; at += 6 }
+            colors[triangle * 3] = color; colors[triangle * 3 + 1] = color; colors[triangle * 3 + 2] = color
         }
         guard !v.more, v.valid else { throw NSError(domain: "PlotMesh", code: 3, userInfo: [NSLocalizedDescriptionKey: "Unexpected model bytes"]) }
         return PlotMesh(verts: verts, colors: colors, box: b.count == 6 ? b : [])
+    }
+    /// A model's id: FNV-1a, 64 bits, of its wire bytes, as 16 hex digits (the hub's plot::mesh_id). `viewer.watch {kept}` names the
+    /// cached model with it, and the hub sends the model only if it is another.
+    static func id(_ d: Data) -> String {
+        var h: UInt64 = 0xcbf29ce484222325
+        for b in d { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return String(format: "%016llx", h)
+    }
+}
+
+/// The last model each view showed (hub, thread, kind, path), as the hub sent it, in the app's caches: shown at once when the view opens
+/// again, on another launch or offline, and not downloaded again while the hub's model is the same. The newest few are kept.
+enum MeshDisk {
+    private static let most = 8
+    private static var dir: URL? {
+        guard let c = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let d = c.appendingPathComponent("models", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+    private static func file(_ slot: String) -> URL? { dir?.appendingPathComponent(PlotMesh.id(Data(slot.utf8)) + ".plist") }
+    /// {key, n, box3, mesh}: the frame's own fields, so PlotMesh.decode reads it as it reads the wire
+    static func load(_ slot: String) -> [String: Any]? {
+        guard !slot.isEmpty, let f = file(slot), let d = try? Data(contentsOf: f),
+              let o = try? PropertyListSerialization.propertyList(from: d, format: nil) as? [String: Any], o["mesh"] is Data, o["key"] is String else { return nil }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: f.path)
+        return o
+    }
+    static func save(_ slot: String, key: String, n: Int, box3: [Int], mesh: Data) {
+        guard !slot.isEmpty, let f = file(slot), let dir,
+              let d = try? PropertyListSerialization.data(fromPropertyList: ["key": key, "n": n, "box3": box3, "mesh": mesh] as [String: Any], format: .binary, options: 0) else { return }
+        try? d.write(to: f, options: .atomic)
+        let fs = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let old = fs.sorted { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }.dropFirst(most)
+        for u in old { try? FileManager.default.removeItem(at: u) }
     }
 }
 
@@ -318,6 +351,8 @@ final class PlotStore {
     private(set) var generation = 0
     @ObservationIgnored private let assets = PlotMeshAssets()
     @ObservationIgnored private let meshQueue = DispatchQueue(label: "plot.mesh", qos: .userInitiated)
+    /// The view the models now arriving are for (MeshDisk's slot), set by `cached`
+    @ObservationIgnored private var slot = ""
     #if DEBUG && targetEnvironment(simulator)
     @ObservationIgnored private var qualificationDrop = ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION"] == "1"
         ? ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION_DROP_PLOTS"] ?? "" : ""
@@ -332,6 +367,26 @@ final class PlotStore {
     }
 
     func cachedMesh(_ key: String) -> MeshFrame? { assets.frame(key) }
+
+    /// A 3D view opens: the model it showed last (MeshDisk) is drawn at once, and its id returned for `viewer.watch {kept}` ("" for none).
+    /// The models that arrive from now on are kept for this view.
+    func cached(_ slot: String) -> String {
+        self.slot = slot
+        guard let o = MeshDisk.load(slot), let key = o["key"] as? String, let bytes = o["mesh"] as? Data,
+              let ticket = assets.issue(key, epoch: assets.epoch()) else { return "" }
+        let assets = self.assets, gen = generation
+        meshQueue.async {
+            guard assets.current(key, ticket), let m = try? PlotMesh.decode(o, cancelled: { !assets.current(key, ticket) }) else { return }
+            assets.put(key, n: o["n"] as? Int ?? 0, bytes: bytes, mesh: m, ticket: ticket)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard gen == self.generation, assets.current(key, ticket) else { return }
+                    self.mesh = MeshFrame(key: key, mesh: m, none: "", at: Date())
+                }
+            }
+        }
+        return PlotMesh.id(bytes)
+    }
     func cachedFrame(_ key: String) -> PlotFrame? {
         if frame?.key == key { return frame }
         return splitFrames[key]
@@ -364,7 +419,7 @@ final class PlotStore {
     // decoded off the main thread, applied in arrival order
     func receive(_ d: Data) {
         let gen = generation
-        let assets = self.assets, meshQueue = self.meshQueue, epoch = assets.epoch()
+        let assets = self.assets, meshQueue = self.meshQueue, epoch = assets.epoch(), slot = self.slot
         #if DEBUG && targetEnvironment(simulator)
         let drop = qualificationDrop
         #else
@@ -421,6 +476,7 @@ final class PlotStore {
                         let m = try assets.same(key, n: n, bytes: bytes) ?? PlotMesh.decode(o, cancelled: { !assets.current(key, ticket) })
                         guard assets.current(key, ticket) else { return }
                         assets.put(key, n: n, bytes: bytes, mesh: m, ticket: ticket)
+                        MeshDisk.save(slot, key: key, n: n, box3: o["box3"] as? [Int] ?? [], mesh: bytes)
                         DispatchQueue.main.async {
                             MainActor.assumeIsolated {
                                 guard gen == self.generation, assets.current(key, ticket) else { return }
