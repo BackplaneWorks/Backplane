@@ -148,7 +148,7 @@ precision mediump float;
 in vec3 vc; in vec3 vn; in vec3 vp; in vec3 vm;
 out vec4 o;
 uniform vec3 eye; uniform vec3 right; uniform vec3 up; uniform vec3 forward;
-uniform float exposure; uniform float orthographic; uniform vec3 thermal;
+uniform float exposure; uniform float orthographic; uniform vec3 thermal; uniform float alpha;
 const float PI = 3.14159265;
 vec3 fresnel(vec3 f0, float h) { return f0 + (1.0 - f0) * pow(1.0 - h, 5.0); }
 vec3 light(vec3 N, vec3 V, vec3 L, vec3 base, vec3 f0, float rough, float metal) {
@@ -194,7 +194,7 @@ void main() {
   rgb*=exp2(exposure);
   // Soft highlight shoulder; retain diffuse whites and dark material detail.
   rgb=rgb/(vec3(1.0)+max(rgb-vec3(0.8),vec3(0.0))*0.28);
-  o=vec4(clamp(srgb(rgb),0.0,1.0),1.0);
+  o=vec4(clamp(srgb(rgb),0.0,1.0),alpha);
 }"""
 
 private const val QUAD_V = """#version 300 es
@@ -472,23 +472,31 @@ class PlotRenderer : GLSurfaceView.Renderer {
         layers = out
     }
 
-    private fun solid(verts: FloatArray, colors: IntArray): FloatArray {
-        val n = colors.size
-        val out = FloatArray(n * 9)
-        for (k in 0 until n) {
-            System.arraycopy(verts, k * 6, out, k * 9, 6)
-            out[k * 9 + 6] = ((colors[k] shr 16) and 255) / 255f
-            out[k * 9 + 7] = ((colors[k] shr 8) and 255) / 255f
-            out[k * 9 + 8] = (colors[k] and 255) / 255f
-        }
-        return out
-    }
-
     // the 3D model (GL thread)
     fun mesh(m: PlotMesh?) {
         if (m == null || m.colors.isEmpty()) { meshCount = 0; return }
-        put(bufs[2], solid(m.verts, m.colors))
+        put(bufs[2], packSolid(m.verts, m.colors))
         meshCount = m.colors.size
+    }
+
+    // The parts that came after the board: one buffer a part frame, appended on
+    // arrival (the board's is never rebuilt), each fading in over FADE_MS from
+    // the frame it was uploaded in. GL thread.
+    private class Group(val buf: Int, val count: Int, val at: Long)
+    private val groups = ArrayList<Group>()
+    /** asks for another frame while a part is fading (set by the surface) */
+    @Volatile var onFade: (() -> Unit)? = null
+    fun partsReset() {
+        if (groups.isEmpty()) return
+        glDeleteBuffers(groups.size, groups.map { it.buf }.toIntArray(), 0)
+        groups.clear()
+    }
+    fun partAdd(g: PartGroup) {
+        if (g.count == 0) return
+        val b = IntArray(1)
+        glGenBuffers(1, b, 0)
+        put(b[0], g.packed)
+        groups.add(Group(b[0], g.count, android.os.SystemClock.uptimeMillis()))
     }
 
     // the board as a plain slab (before its model arrives; GL thread)
@@ -508,7 +516,7 @@ class PlotRenderer : GLSurfaceView.Renderer {
             val l = max(hypot(hypot(nx, ny), nz), 1e-6f)
             for (k in intArrayOf(0, 1, 2, 0, 2, 3)) { val q = p[f[k]]; v.add(q[0], q[1], q[2], nx / l, ny / l, nz / l); c.add(color) }
         }
-        put(bufs[3], solid(v.array(), c.toIntArray()))
+        put(bufs[3], packSolid(v.array(), c.toIntArray()))
         slabCount = c.size
     }
 
@@ -610,13 +618,14 @@ class PlotRenderer : GLSurfaceView.Renderer {
         layer(floatArrayOf(1f, 1f, 1f, 0.8f), bufs[4], listOf(0 until hiCaps to 1f), bufs[5], listOf(0 until hiTris to 1f))
     }
 
-    private fun model(buf: Int, count: Int) {
+    private fun model(buf: Int, count: Int, alpha: Float = 1f) {
         glUseProgram(meshP.id)
         glUniformMatrix4fv(meshP.at("mvp"), 1, false, mvp, 0)
         for ((name, v) in listOf("eye" to cam.eye(), "right" to cam.r, "up" to cam.u, "forward" to cam.f, "thermal" to thermal))
             glUniform3f(meshP.at(name), v[0], v[1], v[2])
         glUniform1f(meshP.at("exposure"), exposure)
         glUniform1f(meshP.at("orthographic"), 0f)
+        glUniform1f(meshP.at("alpha"), alpha)
         glBindBuffer(GL_ARRAY_BUFFER, buf)
         for (k in 0..2) { glEnableVertexAttribArray(k); glVertexAttribDivisor(k, 0) }
         glVertexAttribPointer(0, 3, GL_FLOAT, false, 36, 0)
@@ -668,7 +677,9 @@ class PlotRenderer : GLSurfaceView.Renderer {
             glEnable(GL_DEPTH_TEST)
             glDepthFunc(GL_LESS)
             glDisable(GL_BLEND)
+            val now = android.os.SystemClock.uptimeMillis()
             if (mc > 0) model(mb, mc)
+            for (g in groups) if (now - g.at >= PlotMesh.FADE_MS) model(g.buf, g.count)
             if (ms > 0) {
                 // resolve the colour; the layers test against depth drawn again
                 // single-sampled (cheaper on tilers than storing and resolving
@@ -680,6 +691,7 @@ class PlotRenderer : GLSurfaceView.Renderer {
                 glBindFramebuffer(GL_FRAMEBUFFER, fbo[0])
                 glColorMask(false, false, false, false)
                 if (mc > 0) model(mb, mc)
+                for (g in groups) if (now - g.at >= PlotMesh.FADE_MS) model(g.buf, g.count)
                 glColorMask(true, true, true, true)
             }
             glDisable(GL_DEPTH_TEST)
@@ -689,6 +701,21 @@ class PlotRenderer : GLSurfaceView.Renderer {
                 z = zz
                 if (meshCount == 0) for (id in face) for (l in layers) if (l.layer == id && shown(l.layer)) draw(l)
                 if (hiLayer in face) hi()
+            }
+            // the parts still fading, blended over everything: depth tested, no depth write
+            if (groups.any { now - it.at < PlotMesh.FADE_MS }) {
+                glEnable(GL_DEPTH_TEST)
+                glDepthFunc(GL_LESS)
+                glDepthMask(false)
+                glDisable(GL_STENCIL_TEST)
+                glEnable(GL_BLEND)
+                glBlendEquation(GL_FUNC_ADD)
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+                for (g in groups) if (now - g.at < PlotMesh.FADE_MS) model(g.buf, g.count, PlotMesh.fadeAt((now - g.at).toFloat()))
+                glDepthMask(true)
+                glDisable(GL_BLEND)
+                glDisable(GL_DEPTH_TEST)
+                onFade?.invoke()
             }
         } else {
             // the active layer on top, as KiCad draws it
@@ -752,9 +779,9 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
     fun bindSource(key: String) {
         if (key == stateKey) return
         savePose(); stateKey = key; pendingPose = poses[key]
-        fitted = false; box = FloatArray(0); edge = FloatArray(0); chunks = emptyList(); shown = null; shownMesh = null; picked = ""
+        fitted = false; box = FloatArray(0); edge = FloatArray(0); chunks = emptyList(); shown = null; shownMesh = null; picked = ""; shownGen = -1; shownParts = 0
         flingX = 0f; flingY = 0f
-        queueEvent { renderer.load(emptyList(), emptySet()); renderer.mesh(null); renderer.highlight(null, null); renderer.slab(FloatArray(0), 0) }
+        queueEvent { renderer.load(emptyList(), emptySet()); renderer.mesh(null); renderer.partsReset(); renderer.highlight(null, null); renderer.slab(FloatArray(0), 0) }
     }
     private fun restorePose() {
         val pose = pendingPose ?: return
@@ -775,6 +802,8 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         contentDescription = "Board and model viewer. Arrow keys orbit, shift arrows pan, plus and minus zoom, F fits."
         setRenderer(renderer)
         renderMode = RENDERMODE_WHEN_DIRTY
+        // frames only while a part is fading in
+        renderer.onFade = { super.requestRender() }
     }
 
     private val three get() = renderer.three
@@ -843,6 +872,26 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         fadeFrom = if (animate) f.at else 0
         renderer.fade = if (animate) 0f else 1f
         run()
+        requestRender()
+    }
+
+    private var shownParts = 0
+    private var shownGen = -1
+    private var shownPartsKey = ""
+    /** The parts held for the model on show: a new generation starts them again, within one the new groups are appended (never the board's buffer). */
+    fun parts(p: PartsFrame?) {
+        if (p == null) {
+            if (shownGen != -1) { shownGen = -1; shownParts = 0; queueEvent { renderer.partsReset() }; requestRender() }
+            return
+        }
+        if (p.gen != shownGen || p.key != shownPartsKey || p.groups.size < shownParts) {
+            shownGen = p.gen; shownPartsKey = p.key; shownParts = 0
+            queueEvent { renderer.partsReset() }
+        }
+        if (p.groups.size == shownParts) return
+        val add = p.groups.subList(shownParts, p.groups.size).toList()
+        shownParts = p.groups.size
+        for (g in add) queueEvent { renderer.partAdd(g) }
         requestRender()
     }
 

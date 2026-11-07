@@ -98,6 +98,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     val plots = DataClient.plots
     val frame = plots.frame?.takeIf { it.key.startsWith(if (three) "0|" else head) }
     val mesh = if (three) plots.mesh?.takeIf { it.key.startsWith("2|") } else null
+    val parts = if (three && mesh != null) plots.parts.parts?.takeIf { it.key == mesh.key } else null
     val bg = dcs.background.toArgb() and 0xFFFFFF
     val layersPresent = remember(frame) { frame?.chunks?.map { it.layer }?.distinct().orEmpty() }
     val bits = remember(layersPresent) { layersPresent.filter { it in 0..30 }.fold(0) { a, l -> a or (1 shl l) } }
@@ -125,7 +126,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             }
             if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
             s.mark(picked) // closing the card deselects
-            if (three) s.mesh(mesh)
+            if (three) { s.mesh(mesh); s.parts(parts) }
             if (s.renderer.off != off || s.renderer.dim != dim || s.renderer.lift != lift) { s.renderer.off = off; s.renderer.dim = dim; s.renderer.lift = lift; s.requestRender() }
         })
         val say = when {
@@ -139,6 +140,8 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
         else if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
         else if (three && (mesh?.mesh == null || mesh.decoding)) Loading("Loading 3D model…", Modifier.align(Alignment.Center))
         else if (frame == null && !three) CircularProgressIndicator(Modifier.align(Alignment.Center))
+        val progress = parts?.label.orEmpty()
+        if (progress.isNotEmpty() && mesh?.mesh != null) DMono(progress, dcs.onSurfaceVariant, 11, Modifier.align(Alignment.BottomStart).padding(8.dp).background(dcs.surfaceVariant.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp).testTag("viewer.parts"))
         val l = layers
         if (!three && layersPresent.isNotEmpty() && l != null) {
             Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -238,6 +238,63 @@ class PlotMesh(val verts: FloatArray, val colors: IntArray, val box: FloatArray)
             require(!v.more && v.valid) { "Unexpected model bytes" }
             return PlotMesh(verts, colors, if (b.size == 6) b.toFloatArray() else FloatArray(0))
         }
+        /** A part frame's model placed at each instance: `at` is 12 little-endian f32 an instance, a row-major 3x4 affine from the
+         *  mesh's integer coordinates to the board model's, applied to the integers before the 10 µm scale (as the board's mesh goes). */
+        fun decodePart(n: Int, bytes: ByteArray, at: ByteArray, cancelled: () -> Boolean = { false }): PlotMesh {
+            require(n > 0 && n <= (64 shl 20) / 84 && bytes.size >= n * 10) { "Invalid or oversized part" }
+            require(at.isNotEmpty() && at.size % 48 == 0) { "Invalid part placement" }
+            val k = at.size / 48
+            require(n.toLong() * k <= (64 shl 20) / 84) { "Too many part triangles" }
+            val v = Varints(bytes)
+            val raw = IntArray(n * 9)
+            val colors = IntArray(n)
+            var color = 0
+            val p = IntArray(3)
+            for (t in 0 until n) {
+                color = color xor v.next()
+                for (c in 0 until 3) for (a in 0 until 3) { p[a] += v.signed(); raw[t * 9 + 3 * c + a] = p[a] }
+                require(v.valid) { "Incomplete part" }
+                colors[t] = color
+            }
+            require(!v.more && v.valid) { "Unexpected part bytes" }
+            val verts = FloatArray(n * k * 18)
+            val cols = IntArray(n * k * 3)
+            val bb = java.nio.ByteBuffer.wrap(at).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            val a = FloatArray(12)
+            var w = 0
+            for (inst in 0 until k) {
+                if (cancelled()) throw java.util.concurrent.CancellationException()
+                for (i in 0 until 12) { a[i] = bb.getFloat(inst * 48 + i * 4); require(a[i].isFinite()) { "Invalid part placement" } }
+                val q = FloatArray(9)
+                for (t in 0 until n) {
+                    for (c in 0 until 3) {
+                        val x = raw[t * 9 + 3 * c].toFloat(); val y = raw[t * 9 + 3 * c + 1].toFloat(); val z = raw[t * 9 + 3 * c + 2].toFloat()
+                        q[3 * c] = (a[0] * x + a[1] * y + a[2] * z + a[3]) * 10f
+                        q[3 * c + 1] = (a[4] * x + a[5] * y + a[6] * z + a[7]) * 10f
+                        q[3 * c + 2] = (a[8] * x + a[9] * y + a[10] * z + a[11]) * 10f
+                    }
+                    val ux = q[3] - q[0]; val uy = q[4] - q[1]; val uz = q[5] - q[2]
+                    val vx = q[6] - q[0]; val vy = q[7] - q[1]; val vz = q[8] - q[2]
+                    var nx = uy * vz - uz * vy; var ny = uz * vx - ux * vz; var nz = ux * vy - uy * vx
+                    val l = sqrt(nx * nx + ny * ny + nz * nz)
+                    if (l > 0) { nx /= l; ny /= l; nz /= l } else { nx = 0f; ny = 0f; nz = 1f }
+                    for (c in 0 until 3) {
+                        verts[w * 6] = q[3 * c]; verts[w * 6 + 1] = q[3 * c + 1]; verts[w * 6 + 2] = q[3 * c + 2]
+                        verts[w * 6 + 3] = nx; verts[w * 6 + 4] = ny; verts[w * 6 + 5] = nz
+                        cols[w] = colors[t]
+                        w++
+                    }
+                }
+            }
+            return PlotMesh(verts, cols, FloatArray(0))
+        }
+
+        /** A part group's opacity `ms` after it showed (the desktop's fade_at). */
+        const val FADE_MS = 300f
+        fun fadeAt(ms: Float) = (ms / FADE_MS).coerceIn(0f, 1f)
+        /** "parts n/N" while parts stream, "" when there are none to wait for. */
+        fun progress(done: Int, of: Int) = if (of <= 0 || done >= of) "" else "parts $done/$of"
+
         /** A model's id: FNV-1a, 64 bits, of its wire bytes, as 16 hex digits (the hub's plot::mesh_id); `viewer.watch {kept}` names the cached model with it. */
         fun id(d: ByteArray): String {
             var h = -0x340d631b7bdddcdbL // 0xcbf29ce484222325
@@ -318,6 +375,9 @@ class PlotStore {
     var mesh by mutableStateOf<MeshFrame?>(null)
         private set
     private var held: List<PlotChunk> = emptyList()
+    val parts = PartsStore()
+    /** Where the gate hands the `parts` / `part` frames of the view on show (until the viewer-switch gate lands, receive hands them over itself) */
+    var more: ((String, Map<String, Any?>) -> Unit)? = { k, o -> parts.receive(k, o) }
     private val splitFrames = LinkedHashMap<String, PlotFrame>()
     private var generation = 0
     private val assets = PlotMeshAssets()
@@ -359,6 +419,7 @@ class PlotStore {
         generation += 1
         assets.reset()
         held = emptyList()
+        parts.reset()
         splitFrames.clear()
         frame = null
         mesh = null
@@ -391,6 +452,8 @@ class PlotStore {
                 }
                 return@execute
             }
+            if (solid && (o["parts"] != null || o["part"] != null)) { more?.invoke(key, o); return@execute }
+            if (solid && o["mesh"] != null) main.post { if (gen == generation) parts.reset() }
             if (solid) {
                 // a note about the model (parts with no 3D model) is not a model
                 if (o["mesh"] == null) return@execute
