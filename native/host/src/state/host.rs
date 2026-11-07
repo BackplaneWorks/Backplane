@@ -41,14 +41,14 @@ impl Ticker for Host {
 fn state_path(store: &crate::store::Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("state.json") }
 /// The saved fold (ckpt/state.json) and the number of log lines it covers, when it is of this log.
 fn load_state(store: &crate::store::Store) -> Option<(crate::state::State, usize)> {
-    #[derive(serde::Deserialize)] struct Snap { v: u64, lines: usize, fp: u64, st: crate::state::State }
+    #[derive(serde::Deserialize)] struct Snap { v: u64, #[serde(default)] stamp: u64, lines: usize, fp: u64, st: crate::state::State }
     let snap: Snap = serde_json::from_slice(&std::fs::read(state_path(store)).ok()?).ok()?;
-    if snap.v != crate::ckpt::VERSION || snap.lines > store.len() || snap.fp != crate::ckpt::fingerprint(store, snap.lines) { return None }
+    if snap.v != crate::ckpt::VERSION || snap.stamp != crate::ckpt::stamps::STATE || snap.lines > store.len() || snap.fp != crate::ckpt::fingerprint(store, snap.lines) { return None }
     Some((snap.st, snap.lines))
 }
 fn save_state(store: &crate::store::Store, st: &crate::state::State, lines: usize) {
-    #[derive(serde::Serialize)] struct Snap<'a> { v: u64, lines: usize, fp: u64, st: &'a crate::state::State }
-    let r = serde_json::to_vec(&Snap { v: crate::ckpt::VERSION, lines, fp: crate::ckpt::fingerprint(store, lines), st }).map_err(std::io::Error::from).and_then(|b| crate::ckpt::write_atomic(&state_path(store), &[&b]));
+    #[derive(serde::Serialize)] struct Snap<'a> { v: u64, stamp: u64, lines: usize, fp: u64, st: &'a crate::state::State }
+    let r = serde_json::to_vec(&Snap { v: crate::ckpt::VERSION, stamp: crate::ckpt::stamps::STATE, lines, fp: crate::ckpt::fingerprint(store, lines), st }).map_err(std::io::Error::from).and_then(|b| crate::ckpt::write_atomic(&state_path(store), &[&b]));
     if let Err(e) = r { eprintln!("checkpoint: state not saved: {e}") }
 }
 /// Fold the log lines [from, len) into `core`, `len` read first.

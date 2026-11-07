@@ -104,10 +104,10 @@ impl PeerTable {
         let local = tokio::task::spawn_blocking(move || {
             let len = h.store.len();
             let path = crate::ckpt::dir(h.store.path()).join("peers.json");
-            let mut local = crate::ckpt::load_json(&path, &h.store, |p: &Peers| p.applied as usize).unwrap_or_default();
+            let mut local = crate::ckpt::load_json(&path, &h.store, crate::ckpt::stamps::PEERS, |p: &Peers| p.applied as usize).unwrap_or_default();
             crate::ckpt::saved("peers", local.applied as usize);
             let mut at = local.applied as usize;
-            crate::ckpt::register(move |store| { let g = me.st.lock().unwrap(); let n = g.peers.applied as usize; if g.peers.replayed && crate::ckpt::due("peers", n) { crate::ckpt::save_json(&path, store, n, &g.peers); crate::ckpt::saved("peers", n) } });
+            crate::ckpt::register(move |store| { let g = me.st.lock().unwrap(); let n = g.peers.applied as usize; if g.peers.replayed && crate::ckpt::due("peers", n) { crate::ckpt::save_json(&path, store, n, crate::ckpt::stamps::PEERS, &g.peers); crate::ckpt::saved("peers", n) } });
             while at < len {
                 let to = (at + CHUNK).min(len);
                 for l in h.store.range(at, to).unwrap_or_default() { fold_line(&mut local, &l) }

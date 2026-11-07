@@ -164,10 +164,10 @@ impl World {
 
     fn ckpt_path(store: &Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("bots.json") }
     /// The saved world (ckpt/bots.json) when it is of this log; `sync` folds what is past it.
-    pub fn load(store: &Store) -> Option<World> { let w = crate::ckpt::load_json(&Self::ckpt_path(store), store, |w: &World| w.seen); if let Some(w) = &w { crate::ckpt::saved("bots", w.seen);
+    pub fn load(store: &Store) -> Option<World> { let w = crate::ckpt::load_json(&Self::ckpt_path(store), store, crate::ckpt::stamps::BOTS, |w: &World| w.seen); if let Some(w) = &w { crate::ckpt::saved("bots", w.seen);
         if crate::ckpt::check_on() { let (s, n, a) = (store.clone(), w.seen, serde_json::to_value(w).unwrap_or_default()); std::thread::spawn(move || { let mut f = World::default(); let _ = f.sync_to(&s, n); crate::ckpt::check("bots world", a, serde_json::to_value(&f).unwrap_or_default()) }); } } w }
     /// Save what is folded (the log lines `seen` covers, which the caller's `sync` has just brought up to date).
-    pub fn save(&self, store: &Store) { if crate::ckpt::due("bots", self.seen) { crate::ckpt::save_json(&Self::ckpt_path(store), store, self.seen, self); crate::ckpt::saved("bots", self.seen) } }
+    pub fn save(&self, store: &Store) { if crate::ckpt::due("bots", self.seen) { crate::ckpt::save_json(&Self::ckpt_path(store), store, self.seen, crate::ckpt::stamps::BOTS, self); crate::ckpt::saved("bots", self.seen) } }
     pub fn sync(&mut self, store: &Store) -> anyhow::Result<()> { self.sync_to(store, store.len()) }
     pub fn sync_to(&mut self, store: &Store, total: usize) -> anyhow::Result<()> {
         while self.seen < total {

@@ -11,7 +11,26 @@ The hub used to read the whole log several times at start (the line index, the r
 | `state.json` | the policies' lean fold (`State`), which the native sidebar draws from | `statehost::refresh_state` |
 | `agents.json`, `bots.json`, `commands.json`, `wakes.json`, `feed.json`, `peers.json` | the other folds | each module's `save`, registered with `ckpt::register` |
 
-A checkpoint is used only when its version matches, it covers no more lines than the log has, and the fingerprint of the log at its line count (the count, the first line, the line it ends on; for the index, hashes of the first and last 4 KB it covers) is what it was when saved. Anything else is ignored and the fold runs over the whole log as before. Files are written beside and renamed. Delete `ckpt/` any time; the next start folds everything and the files come back.
+A checkpoint is used only when its version and its fold stamp match, it covers no more lines than the log has, and the fingerprint of the log at its line count (the count, the first line, the line it ends on; for the index, hashes of the first and last 4 KB it covers) is what it was when saved. Anything else is ignored and the fold runs over the whole log as before. Files are written beside and renamed. Delete `ckpt/` any time; the next start folds everything and the files come back.
+
+## Which fold wrote a checkpoint
+
+`ckpt::VERSION` says what a file looks like. It says nothing about what is in it: two builds with different folds read the same log differently, and a checkpoint from the other one would be trusted for ever, losing whatever that fold did not keep. So each checkpoint also carries a stamp, a hash of the code its fold is made of, and a start ignores one that does not match and folds the log again. Nobody bumps anything. `build.rs` computes the stamps from the lists in `src/fold_inputs.rs`; comments, blank lines and test modules do not count.
+
+| Checkpoint | Stamp covers (from `src/`) |
+|---|---|
+| `model.bin` | `model.rs` |
+| `state.json` | `state/*.rs`, `shelf.rs`, `signal.rs` |
+| `commands.json` | `commands/fold.rs`, `session/event_type.rs` |
+| `agents.json` | `agents/world.rs`, `agents/lines.rs`, `agents/bg.rs`, `session/event_type.rs` |
+| `bots.json` | `bots/world.rs`, `bots/mail/mod.rs`, `bots/mail/mailbox.rs`, `session/event_type.rs`, and all of `state.json`'s |
+| `wakes.json` | `agents/wake.rs`, `session/event_type.rs` |
+| `feed.json` | `net/feed.rs`, `net/far.rs` |
+| `peers.json` | `net/peers.rs`, `net/machines.rs` |
+
+`index.bin` has no stamp: it records where lines are, and no fold is in it. A stamp must cover everything its fold's output depends on, and leans towards too much, since a needless refold costs seconds and a missed one loses state. `fold_inputs::tests::every_fold_reach_is_an_input_or_written_down` walks every input and fails on any `crate::`, `super::` or `mod` reach that is neither an input nor listed in `NOT_INPUT` with its reason, so a fold cannot take on a new helper unnoticed. It reads paths, so what it cannot see is a change of behaviour through a reach already written down as not an input: keep those lists to code the fold really does not run.
+
+A refold is a start without that checkpoint, and it costs what the log costs: on a copy of a real log, all folds took 1.7 s at 50 MB (113,000 lines) and 11.8 s at 1.55 GB (1.69 million lines), peaking at 533 MB. A change to one fold refolds that fold only.
 
 ## When they are written
 
