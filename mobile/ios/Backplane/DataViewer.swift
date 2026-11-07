@@ -64,9 +64,11 @@ private let tabs = ["Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff"
 
 /// The Viewer the Metal view wants, with the defaults the hub's own view would send; only what the data app decides (layers, the picked piece) varies.
 private func plainViewer(open: String, source: String, picked: String, off: UInt32, dim: UInt32, lift: Int) -> Viewer? {
+    // strings are encoded, never pasted in: a quote in one (a pick's candidates were JSON) made the whole Viewer nil and the canvas vanished
+    func q(_ s: String) -> String { (try? JSONSerialization.data(withJSONObject: [s])).flatMap { String(data: $0, encoding: .utf8) }.map { String($0.dropFirst().dropLast()) } ?? "\"\"" }
     let j = """
-    {"open":"\(open)","key":"","layers":"\(source)","choices":[],"bg":852754,"fade":220,"margin":0.9,"zmin":0.5,"zmax":0.5,"tap":14,"top":[],"bottom":[],"slab":2060099,"fov":35,
-     "picked":"\(picked)","off":\(off),"dim":\(dim),"lift":\(lift)}
+    {"open":\(q(open)),"key":"","layers":\(q(source)),"choices":[],"bg":852754,"fade":220,"margin":0.9,"zmin":0.5,"zmax":0.5,"tap":14,"top":[],"bottom":[],"slab":2060099,"fov":35,
+     "picked":\(q(picked)),"off":\(off),"dim":\(dim),"lift":\(lift)}
     """
     return try? JSONDecoder().decode(Viewer.self, from: Data(j.utf8))
 }
@@ -117,6 +119,23 @@ struct DataViewerView: View {
     }
 }
 
+/// A tap on the plot: the canvas's candidates `[{"c": chunk, "p": piece, "a": area, "l": layer}]` (PlotCanvas.tap), the smallest meant
+/// (a pad over its copper), as Android's DataViewer.kt picks; and the hub's info text (`name=value;...`) as rows.
+enum DPick {
+    static func best(_ json: String) -> (Int, Int)? {
+        guard let a = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] else { return nil }
+        let n = { (o: [String: Any], k: String) in (o[k] as? NSNumber)?.intValue }
+        guard let b = a.filter({ n($0, "c") != nil && n($0, "p") != nil }).min(by: { (n($0, "a") ?? .max) < (n($1, "a") ?? .max) }) else { return nil }
+        return (n(b, "c")!, n(b, "p")!)
+    }
+    static func rows(_ info: String) -> [(String, String)] {
+        info.replacingOccurrences(of: "\u{0}", with: ";").split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.prefix(10).map { f in
+            if let e = f.firstIndex(of: "=") { return (String(f[..<e]), String(f[f.index(after: e)...])) }
+            return ("", f)
+        }
+    }
+}
+
 // Board, Schematic and 3D: the hub's plot on the Metal view
 struct DataPlotTab: View {
     let client: DataClient
@@ -142,9 +161,10 @@ struct DataPlotTab: View {
         ZStack(alignment: .topLeading) {
             if let v = plainViewer(open: three ? "3d" : kind, source: kind + "|" + path, picked: picked, off: layers?.off ?? 0, dim: layers?.dim ?? 0, lift: layers?.lift ?? 255) {
                 PlotCanvasView(frame: (frame?.none.isEmpty ?? true) ? frame : nil, mesh: mesh, scope: thread.id, viewer: v, pick: { p in
-                    picked = p
-                    let ps = p.split(separator: ",").compactMap { Int($0) }
-                    if ps.count == 2, let f = frame { Task { info = await client.info(f.key, at: ps[0], idx: ps[1]) } }
+                    // the canvas says what lies under the finger as candidates; the smallest is what the tap means. Nothing there: deselect.
+                    guard let (at, idx) = DPick.best(p), let f = frame else { info = ""; picked = ""; return }
+                    picked = "\(at),\(idx)"
+                    Task { let t = await client.info(f.key, at: at, idx: idx); if picked == "\(at),\(idx)" { info = t.isEmpty ? "piece \(at),\(idx)" : t } }
                 })
                 .accessibilityIdentifier("data.viewer.surface")
             }
@@ -169,10 +189,18 @@ struct DataPlotTab: View {
                 if let rows = refs { DataRefMenu(rows: rows) { c in refs = nil; open(c) }.padding(.top, 44).padding(.leading, 8) }
             }
             if !info.isEmpty {
+                // a card over the viewer's foot: the viewer keeps its size and camera
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text("PICKED").font(.system(.caption, design: .monospaced).bold()).foregroundStyle(BackplaneDesign.accent); Spacer(); Button("close") { info = ""; picked = "" }.font(.caption) }
-                    Text(info.replacingOccurrences(of: "\u{0}", with: "  ")).font(.system(.footnote, design: .monospaced)).lineLimit(8)
-                }.padding(10).background(BackplaneDesign.panel).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).accessibilityIdentifier("data.viewer.info")
+                    HStack { Text("PICKED").font(.system(.caption, design: .monospaced).bold()).foregroundStyle(BackplaneDesign.accent); Spacer(); Button("close") { info = ""; picked = "" }.font(.caption).accessibilityIdentifier("data.viewer.info.close") }
+                    ForEach(Array(DPick.rows(info).enumerated()), id: \.offset) { _, r in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            if !r.0.isEmpty { Text(r.0).foregroundStyle(.secondary).frame(width: 84, alignment: .leading) }
+                            Text(r.1).textSelection(.enabled).lineLimit(2)
+                        }.font(.system(.footnote, design: .monospaced)).accessibilityElement(children: .combine).accessibilityIdentifier("data.viewer.info.row")
+                    }
+                }.padding(10).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4)))
+                .accessibilityElement(children: .contain).accessibilityIdentifier("data.viewer.info")
+                .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
         }
         .background(BackplaneDesign.panel.opacity(0.0))
