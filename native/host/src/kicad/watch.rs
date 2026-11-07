@@ -37,7 +37,8 @@ struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Op
 /// `parts_at`: how many of its source's part frames this watcher has been sent
 struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, parts_at: usize }
 #[derive(Default)]
-struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String> }
+/// `prewarmed`: each board whose part models were queued for conversion, by the revision it was then (pcb3d::stream::prewarm)
+struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String> }
 
 pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, home: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
 
@@ -62,6 +63,7 @@ impl Plots {
             return
         }
         let is_board = file.ends_with(".kicad_pcb"); // Pv.watch.go: only a board's model has a board beside it
+        if !solid_kind(kind) { self.prewarm(hub, &if is_board { file.clone() } else { project::read(root).pcb }) } // a 3D view converts its parts itself, at full speed
         let mut views = vec![(kind, key(kind, root, path), file)];
         if solid_kind(kind) && is_board { views.push((0, key(0, root, path), board(0))) }
         let mut todo = vec![];
@@ -210,6 +212,28 @@ impl Plots {
             eprintln!("pcb3d: {} parts: first {} ms, all {:.0} ms ({} part frames, {} instances boxed, {} models failed)", file, t.first.map_or("-".into(), |f| format!("{f:.0}")), t.all, t.models, t.boxes, t.failed);
         });
     }
+    /// A project's board opened (any of its views) or changed: its part models converted in the background, once a revision, so its 3D
+    /// view finds them ready. Not for a saved version, nor when kicad-cli makes the 3D models (`viewer.board3d`).
+    fn prewarm(self: &Arc<Self>, hub: &Arc<Hub>, pcb: &str) {
+        if !pcb.ends_with(".kicad_pcb") || is_version(pcb) { return }
+        let rev = stamp(pcb).rev;
+        if rev.is_empty() { return }
+        { let mut st = self.st.lock().unwrap();
+          if st.prewarmed.get(pcb) == Some(&rev) { return }
+          // a 3D view of this board is open: its own stream converts the parts, with every worker (a prewarm's one would hold it back)
+          if st.subs.values().flatten().any(|s| solid_kind(s.key.split('|').next().and_then(|k| k.parse().ok()).unwrap_or(0)) && st.srcs.get(&s.key).map_or(false, |x| x.file == pcb)) { return }
+          if st.prewarmed.len() > 64 { st.prewarmed.clear() }
+          st.prewarmed.insert(pcb.to_string(), rev); }
+        let (hub, pcb, home) = (hub.clone(), pcb.to_string(), self.home.clone());
+        tokio::spawn(async move {
+            if !Self::board3d_native(&hub).await { return }
+            let cli = super::ipc::runtime(&hub).await.cli;
+            let _ = tokio::task::spawn_blocking(move || {
+                let r = std::panic::catch_unwind(|| pcb3d::stream::prewarm(&std::fs::read(&pcb).unwrap_or_default(), &pcb, &cli, &stepglb::machine(&home), &pcb3d::models::Cache::standard()));
+                match r { Ok(Ok((n, fresh, ms))) if fresh > 0 => eprintln!("pcb3d: prewarm {pcb}: {fresh} of {n} part models converted in {ms:.0} ms"), Ok(Err(e)) => eprintln!("pcb3d: prewarm {pcb}: {e}"), _ => {} }
+            }).await;
+        });
+    }
     /// Whether a board's 3D model is made here (pcb3d) rather than by kicad-cli: the setting `viewer.board3d` (`native`, the default, or `kicad-cli`).
     async fn board3d_native(hub: &Arc<Hub>) -> bool { hub.setting("viewer.board3d").await.as_deref() != Some("kicad-cli") }
     /// pcb3d: the bare board from its file (a saved version's too), and for a model with parts the plan of its parts, with the note of the
@@ -329,7 +353,11 @@ impl Plots {
                   let now = stamp(&s.file);
                   if s.stamp.as_ref() != Some(&now) { changed.push(k.clone()) }
               } }
-            for k in changed { self.read(&hub, &k) }
+            for k in changed {
+                let file = { let st = self.st.lock().unwrap(); st.srcs.get(&k).map(|s| s.file.clone()).unwrap_or_default() };
+                self.prewarm(&hub, &file); // a board that changed may use new models
+                self.read(&hub, &k)
+            }
         }
     }
 

@@ -3,7 +3,7 @@
 # A private rig: the hub on a temp home (stand-in agents, loopback, port 3841, its own empty models cache so the parts convert cold),
 # Xvfb on :67, i3, the client scripted to open the 3D view; the root window is captured every SHOT_MS while the parts stream in.
 # usage: desktop-3d-parts.sh HUB_BIN CLIENT_BIN BOARD_DIR [NAME]   -> $BP_TMP/b3d-rig/NAME/shot-*.png, hub.log (pcb3d's timings)
-# GPU=0 draws with llvmpipe (the CPU raster path) instead of the NVIDIA ICD. WARM=1 keeps the models cache of the last run.
+# BOARD_FIRST_MS=N opens the board view first and the 3D view N ms later. GPU=0 draws with llvmpipe (the CPU raster path) instead of the NVIDIA ICD. WARM=1 keeps the models cache of the last run.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-bptmp.sh"
 MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
@@ -24,7 +24,11 @@ import json,sys,time
 R=sys.argv[1]; NOW=int(time.time())
 ev=[{"$":"ProjectCreated","id":"p1","title":"board","root":R+"/proj","at":NOW},{"$":"ThreadCreated","id":"t1","project":"p1","title":"3D board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW}]
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e)+"\n" for e in ev))
-json.dump([{"select":0},{"wait":3000},{"click":"rail:3D"},{"wait":60000}],open(R+"/script.json","w"))
+import os
+first=os.environ.get("BOARD_FIRST_MS")  # open the board first, then the 3D view this many ms later (what a prewarm is for)
+st=[{"select":0},{"wait":3000}]
+if first: st+=[{"click":"rail:Board"},{"wait":int(first)}]
+json.dump(st+[{"click":"rail:3D"},{"wait":60000}],open(R+"/script.json","w"))
 PY
 export LC_ALL=C
 systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 -- nice -n 10 sh -c '

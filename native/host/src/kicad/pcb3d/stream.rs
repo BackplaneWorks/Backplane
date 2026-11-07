@@ -6,7 +6,7 @@
 //! 10 um integers in board axes (y down): W = diag(100, -100, 100) from that space, so a model's mesh goes out as W v and its instance as
 //! W M W^-1, which takes the mesh's integers to the board model's.
 use super::{mesh, parse, Board, Footprint, Shape, Side, P2};
-use super::super::{glb::Tri3, plot::{Plot, Solid}, solid};
+use super::super::{glb::Tri3, plot::Plot, solid};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -165,6 +165,30 @@ pub fn plan(b: &Board, seat: (f64, f64), resolve: &dyn Fn(&str) -> Option<PathBu
     }
     p
 }
+/// What a prewarm converts: every shown model of the board's footprints that resolves, as (content key, file), each once.
+pub fn model_jobs(b: &Board, resolve: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<(String, PathBuf)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = vec![];
+    for m in b.footprints.iter().flat_map(|f| &f.models).filter(|m| !m.hide && !m.path.trim().is_empty()) {
+        if !seen.insert(m.path.clone()) { continue }
+        let Some(p) = resolve(&m.path) else { continue };
+        if let Ok(k) = super::models::key(&p) { if !out.iter().any(|(x, _): &(String, PathBuf)| *x == k) { out.push((k, p)) } }
+    }
+    out
+}
+/// A board's part models into the models cache, in the background (one FreeCAD at the lowest priority, its start-up paid once for the
+/// batch), so that its 3D view later finds them converted. Blocking; returns (models, converted now, ms).
+pub fn prewarm(bytes: &[u8], path: &str, kicad_cli: &str, tools: &[super::super::stepglb::Mesher], cache: &super::models::Cache) -> Result<(usize, usize, f64), String> {
+    let t = Instant::now();
+    let b = parse::board(bytes)?;
+    let env = super::models::Env::system((!kicad_cli.is_empty()).then(|| Path::new(kicad_cli)));
+    let dir = board_dir(path);
+    let jobs = model_jobs(&b, &|raw: &str| super::models::resolve(raw, &dir, &env));
+    let (n, fresh) = (jobs.len(), jobs.iter().filter(|(k, _)| cache.lookup(k).is_none()).count());
+    if fresh > 0 { super::models::convert_with(super::models::Opts::background(), cache, jobs, tools, &std::sync::atomic::AtomicBool::new(false), &|_: &str, _| {}) }
+    Ok((n, fresh, t.elapsed().as_secs_f64() * 1000.0))
+}
+
 /// A part model's id on the wire: 16 hex digits of its cache key (or of its path, when it has none).
 pub fn part_id(key: &str) -> String { let h = super::super::plot::mesh_id(key.as_bytes()); format!("{h:016x}") }
 

@@ -194,6 +194,39 @@ type Failed = Vec<(Job, String)>;
 /// Converts every (key, file) not in the cache and reports each (`on_ready(key, glb path or why not)`) the moment it is known: hits
 /// first, then misses in completion order. Blocks until done or `stop` is set (workers are then killed; unfinished jobs are not reported).
 pub fn convert<F: Fn(&str, Result<PathBuf, String>) + Send + Sync>(cache: &Cache, jobs: Vec<Job>, tools: &[Mesher], stop: &AtomicBool, on_ready: F) {
+    convert_with(Opts::default(), cache, jobs, tools, stop, &on_ready)
+}
+
+/// How a conversion runs: `workers` FreeCAD processes at most (None: `workers()`), each `nice` lower. A prewarm is one process at 19.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Opts { pub workers: Option<usize>, pub nice: i32 }
+impl Default for Opts { fn default() -> Self { Opts { workers: None, nice: 10 } } }
+impl Opts { pub fn background() -> Opts { Opts { workers: Some(1), nice: 19 } } }
+
+/// The models being converted now, in this process: a second caller of one waits for the first instead of starting FreeCAD for it again
+/// (a prewarm and the 3D view asking at once).
+fn inflight() -> &'static (std::sync::Mutex<std::collections::HashSet<String>>, std::sync::Condvar) {
+    static I: std::sync::OnceLock<(std::sync::Mutex<std::collections::HashSet<String>>, std::sync::Condvar)> = std::sync::OnceLock::new();
+    I.get_or_init(Default::default)
+}
+fn release(keys: &[String]) {
+    let (m, cv) = inflight(); let mut s = m.lock().unwrap_or_else(|e| e.into_inner());
+    for k in keys { s.remove(k); }
+    cv.notify_all();
+}
+/// The keys this call converts: let go as each is reported, and all of them when the call ends however it ends.
+struct Claim(Vec<String>);
+impl Drop for Claim { fn drop(&mut self) { release(&self.0) } }
+/// Whether `key` is still being converted by another caller (waits up to `ms` for it to finish).
+fn busy(key: &str, ms: u64) -> bool {
+    let (m, cv) = inflight(); let s = m.lock().unwrap_or_else(|e| e.into_inner());
+    if !s.contains(key) { return false }
+    let (s, _) = cv.wait_timeout(s, Duration::from_millis(ms)).unwrap_or_else(|e| e.into_inner());
+    s.contains(key)
+}
+
+/// `convert` with its options (`Opts`).
+pub fn convert_with(opts: Opts, cache: &Cache, jobs: Vec<Job>, tools: &[Mesher], stop: &AtomicBool, on_ready: &(dyn Fn(&str, Result<PathBuf, String>) + Send + Sync)) {
     let mut seen = std::collections::HashSet::new();
     let mut misses: Vec<Job> = vec![];
     for (k, p) in jobs {
@@ -201,11 +234,32 @@ pub fn convert<F: Fn(&str, Result<PathBuf, String>) + Send + Sync>(cache: &Cache
         match cache.lookup(&k) { Some(r) => on_ready(&k, r), None => misses.push((k, p)) }
     }
     if misses.is_empty() || stop.load(Ordering::Relaxed) { return }
+    let (mut mine, mut theirs): (Vec<Job>, Vec<Job>) = (vec![], vec![]);
+    { let (m, _) = inflight(); let mut s = m.lock().unwrap_or_else(|e| e.into_inner());
+      for j in misses { if s.insert(j.0.clone()) { mine.push(j) } else { theirs.push(j) } } }
+    let _claim = Claim(mine.iter().map(|j| j.0.clone()).collect());
+    let mine_ready = |k: &str, r: Result<PathBuf, String>| { release(&[k.to_string()]); on_ready(k, r) };
+    std::thread::scope(|s| {
+        // another caller's models: each waited for, then taken from the cache; one it gave up (stopped) is converted here after all
+        s.spawn(|| {
+            let mut left = vec![];
+            for (k, p) in theirs {
+                while busy(&k, 100) { if stop.load(Ordering::Relaxed) { return } }
+                match cache.lookup(&k) { Some(r) => on_ready(&k, r), None => left.push((k, p)) }
+            }
+            if !left.is_empty() && !stop.load(Ordering::Relaxed) { convert_with(opts, cache, left, tools, stop, on_ready) }
+        });
+        run(opts, cache, mine, tools, stop, &mine_ready);
+    });
+}
+
+/// The models not in the cache, converted: native VRML here, the rest by each tool in turn.
+fn run(opts: Opts, cache: &Cache, mut misses: Vec<Job>, tools: &[Mesher], stop: &AtomicBool, on_ready: &(dyn Fn(&str, Result<PathBuf, String>) + Sync)) {
+    if misses.is_empty() || stop.load(Ordering::Relaxed) { return }
     let _ = std::fs::create_dir_all(&cache.dir);
     misses.sort_by_key(|(_, p)| std::cmp::Reverse(std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)));
     let (wrl, mut rest): (Vec<Job>, Vec<Job>) = misses.into_iter().partition(|(_, p)| is_wrl(p));
     std::thread::scope(|s| {
-        let on_ready = &on_ready;
         s.spawn(move || for (k, p) in wrl {
             if stop.load(Ordering::Relaxed) { return }
             let r = std::fs::read(&p).map_err(|e| e.to_string()).and_then(|b| wrl_to_glb(&String::from_utf8_lossy(&b)))
@@ -222,7 +276,7 @@ pub fn convert<F: Fn(&str, Result<PathBuf, String>) + Send + Sync>(cache: &Cache
                     let mut left = std::mem::take(&mut rest);
                     for (mode, prog) in [(true, gui), (false, cmd)] {
                         if prog.is_empty() || left.is_empty() { continue }
-                        failed = freecad(cache, mode, prog, left, stop, on_ready);
+                        failed = freecad(opts, cache, mode, prog, left, stop, on_ready);
                         left = failed.iter().map(|(j, _)| j.clone()).collect();
                     }
                     failed
@@ -241,9 +295,9 @@ pub fn convert<F: Fn(&str, Result<PathBuf, String>) + Send + Sync>(cache: &Cache
     });
 }
 
-fn nice_cmd(program: &str) -> std::process::Command {
+fn nice_cmd(program: &str, nice: i32) -> std::process::Command {
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "nice");
-    c.args(["-n", "10", program]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).current_dir("/");
+    c.args(["-n", &nice.clamp(0, 19).to_string(), program]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).current_dir("/");
     // a group of its own: FreeCAD's AppImage forks a helper that holds its FUSE mount, and a stop must take that down too (`end`)
     #[cfg(unix)] { use std::os::unix::process::CommandExt; c.process_group(0); }
     c
@@ -266,7 +320,7 @@ fn end(kids: &mut [std::process::Child], grace: Duration) {
     #[cfg(unix)] for c in kids.iter() { unsafe { libc::kill(-(c.id() as i32), 15); } }
 }
 
-fn step2glb(cache: &Cache, tool: &str, jobs: Vec<Job>, stop: &AtomicBool, on_ready: &(impl Fn(&str, Result<PathBuf, String>) + Sync)) -> Failed {
+fn step2glb(cache: &Cache, tool: &str, jobs: Vec<Job>, stop: &AtomicBool, on_ready: &(dyn Fn(&str, Result<PathBuf, String>) + Sync)) -> Failed {
     let next = AtomicUsize::new(0); let failed = Mutex::new(vec![]);
     let jobs = &jobs;
     std::thread::scope(|s| for _ in 0..workers(jobs.len()) {
@@ -285,7 +339,7 @@ fn step2glb(cache: &Cache, tool: &str, jobs: Vec<Job>, stop: &AtomicBool, on_rea
 }
 
 /// One FreeCAD flavour over `jobs`: K worker processes sharing a job file, outputs polled and published as they appear.
-fn freecad(cache: &Cache, gui: bool, program: &str, jobs: Vec<Job>, stop: &AtomicBool, on_ready: &(impl Fn(&str, Result<PathBuf, String>) + Sync)) -> Failed {
+fn freecad(opts: Opts, cache: &Cache, gui: bool, program: &str, jobs: Vec<Job>, stop: &AtomicBool, on_ready: &(dyn Fn(&str, Result<PathBuf, String>) + Sync)) -> Failed {
     let Ok(stage) = stepglb::stage(&cache.dir.join("batch").to_string_lossy(), "b-") else { return jobs.into_iter().map(|j| (j, "cannot make a folder in the model cache".into())).collect() };
     let py = stage.join("batch.py"); let list = stage.join("jobs.txt");
     let outs: Vec<PathBuf> = jobs.iter().map(|(k, _)| stage.join(format!("{k}.glb"))).collect();
@@ -299,7 +353,7 @@ fn freecad(cache: &Cache, gui: bool, program: &str, jobs: Vec<Job>, stop: &Atomi
     let mut pending: Vec<usize> = (0..jobs.len()).collect();
     let spawn = |n: usize| -> Vec<std::process::Child> {
         (0..n).filter_map(|_| {
-            let mut c = nice_cmd(program);
+            let mut c = nice_cmd(program, opts.nice);
             if gui { c.arg(&py).env("QT_QPA_PLATFORM", "offscreen").env("BP_GUI", "1"); }
             else { c.args(["-c", "import os; exec(open(os.environ['BP_PY']).read())"]).env("BP_PY", &py); }
             c.env("BP_JOBS", &list).env("BP_TOL", &tol).spawn().ok()
@@ -308,7 +362,7 @@ fn freecad(cache: &Cache, gui: bool, program: &str, jobs: Vec<Job>, stop: &Atomi
     let mut rounds = 0;
     'rounds: while !pending.is_empty() && rounds < ROUNDS {
         rounds += 1;
-        let mut kids = spawn(workers(pending.len()));
+        let mut kids = spawn(opts.workers.unwrap_or_else(|| workers(pending.len())).clamp(1, pending.len().max(1)));
         if kids.is_empty() { for i in pending.drain(..) { failed.push((jobs[i].clone(), format!("could not start {program}"))) } break }
         let mut progress = Instant::now(); let mut got = 0;
         loop {
@@ -634,6 +688,26 @@ mod tests {
         let n = Mutex::new(0); let stop = AtomicBool::new(true);
         convert(&Cache::new(d.join("other")), vec![jobs[0].clone(), jobs[0].clone()], &tools, &stop, |_, _| *n.lock().unwrap() += 1);
         assert_eq!(*n.lock().unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn a_model_two_callers_want_at_once_is_converted_once() {
+        // a prewarm in the background and the 3D view asking for the same model: one conversion, both told
+        let d = dir("once"); let c = Cache::new(d.join("parts"));
+        use crate::plat::fs::PermissionsExt;
+        let t = d.join("count"); std::fs::write(&t, format!("#!/bin/sh\necho run >> {}\nsleep 0.6\nprintf glb > \"$2\"\n", d.join("runs").display())).unwrap();
+        std::fs::set_permissions(&t, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tools = [Mesher::Step2glb(t.to_string_lossy().into_owned())];
+        let src = d.join("m.step"); std::fs::write(&src, "x").unwrap();
+        let job = || vec![("k1-once".to_string(), src.clone())];
+        let (a, b) = (Mutex::new(None), Mutex::new(None));
+        std::thread::scope(|s| {
+            s.spawn(|| convert_with(Opts::background(), &c, job(), &tools, &AtomicBool::new(false), &|_, r| *a.lock().unwrap() = Some(r.is_ok())));
+            std::thread::sleep(Duration::from_millis(150));
+            s.spawn(|| convert(&c, job(), &tools, &AtomicBool::new(false), |_, r| *b.lock().unwrap() = Some(r.is_ok())));
+        });
+        assert_eq!((*a.lock().unwrap(), *b.lock().unwrap()), (Some(true), Some(true)));
+        assert_eq!(std::fs::read_to_string(d.join("runs")).unwrap().lines().count(), 1, "the second caller waited for the first");
+        assert!(!inflight().0.lock().unwrap().contains("k1-once"), "its claim let go");
         let _ = std::fs::remove_dir_all(&d);
     }
     fn real_tools() -> Vec<Mesher> { stepglb::machine(Path::new(&std::env::var("HOME").unwrap())) }
