@@ -402,7 +402,7 @@ mod tests {
     #[test] fn the_device_page_lists_the_drawing_pads_keys_and_no_longer_says_they_are_missing() {
         let rows = device_rows(&crate::local::Local::default());
         let note = |label: &str| rows.iter().find(|r| r.label == label).map(|r| r.note.clone());
-        assert_eq!(note("Undo the last stroke or change · Drawing pad").as_deref(), Some("Ctrl+Z. Fixed."));
+        assert_eq!(note("Undo the last stroke or change · Drawing pad").as_deref(), Some(format!("{}. Fixed.", crate::keys::show("secondary-z", crate::keys::mac())).as_str()));
         assert_eq!(note("Delete the selection, or clear the pad · Drawing pad").as_deref(), Some("Delete. Fixed."));
         assert_eq!(note("Delete (also) · Drawing pad").as_deref(), Some("Backspace. Fixed."));
         assert!(!rows.iter().any(|r| r.note.contains("Not yet") && r.label.to_lowercase().contains("drawing pad")));

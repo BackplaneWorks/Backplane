@@ -299,7 +299,12 @@ mod tests {
     use serde_json::json;
 
     /// The action a keystroke does with the given contexts open (outermost first): its name, "" for none.
+    /// The chords below are written as on Linux (Ctrl); on a Mac the secondary ones are Cmd. The keys the table spells `ctrl-` stay Ctrl, as do chords with Alt (a person's rebinding).
+    fn pk(key: &str) -> String {
+        if !mac() || !key.starts_with("ctrl-") || key.contains("alt") || key == "ctrl-enter" || TABLE.iter().any(|x| x.key == key) { key.to_string() } else { key.replacen("ctrl-", "cmd-", 1) }
+    }
     fn does(l: &Local, key: &str, ctx: &[&str]) -> String {
+        let key = &pk(key);
         let map = Keymap::new(bindings(l));
         let stack: Vec<KeyContext> = ["Backplane"].iter().chain(ctx.iter()).map(|c| KeyContext::parse(c).unwrap()).collect();
         let ks = [Keystroke::parse(key).unwrap()];
@@ -362,7 +367,7 @@ mod tests {
     }
     #[test] fn the_pads_keys_are_in_the_table_and_no_longer_missing() {
         assert_eq!((find("pad-undo").unwrap().kind, find("pad-delete").unwrap().kind), (Fixed, Fixed));
-        assert_eq!(hint(&Local::default(), "pad-undo"), "Ctrl+Z"); assert_eq!(hint(&Local::default(), "pad-delete"), "Delete"); assert_eq!(hint(&Local::default(), "pad-delete-alt"), "Backspace");
+        assert_eq!(hint(&Local::default(), "pad-undo"), show("secondary-z", mac())); assert_eq!(hint(&Local::default(), "pad-delete"), "Delete"); assert_eq!(hint(&Local::default(), "pad-delete-alt"), "Backspace");
         assert!(MISSING.iter().all(|(k, why)| !k.contains("drawing pad") && !why.contains("Drawing pad")));
     }
     #[test] fn ctrl_j_toggles_the_terminal_from_everywhere_including_inside_it() {
@@ -413,7 +418,7 @@ mod tests {
         assert!(MISSING.iter().all(|m| m.0 != "Ctrl+H"), "listed as done, not missing");
     }
     #[test] fn layer_focus_is_in_the_table_and_rebinds() {
-        let x = find("layers").unwrap(); assert_eq!((x.key, x.kind), ("ctrl-h", Rebind)); assert_eq!(hint(&Local::default(), "layers"), "Ctrl+H");
+        let x = find("layers").unwrap(); assert_eq!((x.key, x.kind), ("ctrl-h", Rebind)); assert_eq!(hint(&Local::default(), "layers"), show("ctrl-h", mac()));
         let mut l = Local::default();
         assert!(l.set("shortcut", "layers\u{1f}ctrl-alt-h")); assert_eq!(does(&l, "ctrl-alt-h", &["Viewer"]), "keys::CycleLayers"); assert_eq!(does(&l, "ctrl-h", &["Viewer"]), ""); assert_eq!(does(&l, "ctrl-alt-h", &["Composer"]), "keys::CycleLayers"); assert_eq!(does(&l, "ctrl-alt-h", &["AskInput"]), "");
     }
