@@ -29,6 +29,8 @@ pub mod fs {
         if !name.contains(['<', '>', ':', '"', '|', '?', '*']) { return name.into() }
         name.chars().map(|c| if "<>:\"|?*".contains(c) { format!("%{:02X}", c as u32) } else { c.to_string() }).collect::<String>().into()
     }
+    /// What tells a file's change: its modification time and its size (Windows stamps a write with a clock that can tick once in 16 ms, so two quick writes share a time).
+    pub fn change_stamp(p: &Path) -> u128 { fs::metadata(p).ok().map_or(0, |m| m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos()) ^ ((m.len() as u128) << 96)) }
     /// Whether no part of an absolute path is a link or junction (Windows' real path can differ by a short 8.3 name or case, so each part is asked).
     pub fn no_link_on(p: &Path) -> io::Result<bool> {
         fs::metadata(p)?;

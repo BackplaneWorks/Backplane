@@ -83,7 +83,7 @@ pub fn scan_all(env: &Env, cwd: &str) -> Vec<Found> {
 /// What the folders look like now (modified times of each folder, skill folder and SKILL.md): changes when a skill is added, edited or removed.
 fn fingerprint(env: &Env, cwd: &str) -> u64 {
     use std::hash::{Hash, Hasher}; let mut h = std::collections::hash_map::DefaultHasher::new();
-    let mt = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+    let mt = |p: &Path| crate::plat::fs::change_stamp(p);
     for f in ["settings.json", "plugins/installed_plugins.json"] { mt(&Path::new(&env.home).join(".claude").join(f)).hash(&mut h) }
     for r in roots(env, cwd) {
         r.dir.hash(&mut h); mt(&r.dir).hash(&mut h);

@@ -14,6 +14,8 @@ pub mod fs {
     /// A file's mode bits as a test compares them: the real ones.
     pub fn mode_bits(actual: u32, _want: u32) -> u32 { actual }
     pub use std::fs::canonicalize;
+    /// What tells a file's change: its modification time (ns since 1970), 0 when it has none.
+    pub fn change_stamp(p: &std::path::Path) -> u128 { std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos()) }
     /// Whether no part of an absolute path is a link (it is its own real path).
     pub fn no_link_on(p: &std::path::Path) -> std::io::Result<bool> { Ok(canonicalize(p)? == p) }
     /// Whether a path in text is absolute: it starts at /.
