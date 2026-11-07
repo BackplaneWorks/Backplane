@@ -59,7 +59,8 @@ if [ "$GATE" = 1 ]; then
   echo "compiling tests" > "$PH"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX"); LV=$(mktemp "$DEV/.t.XXXX")
   CG "$ROOT/native/host" "$HT" test --offline -j "$J" --no-run > "$LH" 2>&1 & ph=$!
   CG "$ROOT/native/gpui" "$GT" test --offline -j "$J" --no-run > "$LW" 2>&1 & pw=$!
-  CG "$ROOT/native/voice" "$VT" test --offline -j "$J" --no-run > "$LV" 2>&1 & pv=$!
+  # the voice tests take env!("CARGO_BIN_EXE_backplane-voice"), which came out undefined through sccache ("not defined at compile time") and is fine without it; its deps are already built in $VT
+  RUSTC_WRAPPER= CG "$ROOT/native/voice" "$VT" test --offline -j "$J" --no-run > "$LV" 2>&1 & pv=$!
   wait $ph || { cp "$LH" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "hub tests"; }
   wait $pw || { cp "$LW" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "window tests"; }
   wait $pv || { cp "$LV" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "voice tests"; }
