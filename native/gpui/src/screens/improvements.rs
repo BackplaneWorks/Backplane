@@ -72,17 +72,16 @@ impl Imp {
     fn file(&self, name: &str) -> PathBuf { self.dir.join(name) }
     /// The panel's own folder, private to this user.
     fn ensure_dir(&self) -> bool {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&self.dir).is_ok() && std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o700)).is_ok()
+        crate::plat::private_dir(&self.dir)
     }
     /// Write the draft through a temp file (0600). An error is said, not swallowed: a handoff never goes ahead on an unsaved receipt.
     fn write_draft(&self) -> Result<(), String> {
-        use std::{io::Write, os::unix::fs::OpenOptionsExt};
+        use std::io::Write;
         if !self.ensure_dir() { return Err("Could not keep this draft on this device. Retry.".into()); }
         let mut d = self.draft.clone(); d.scope = self.scope.clone();
         let text = serde_json::to_string(&d.to_json()).map_err(|_| "Could not keep this draft on this device. Retry.".to_string())?;
         let (tmp, dst) = (self.file("draft.tmp"), self.file("draft.json"));
-        std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(text.as_bytes())).and_then(|_| std::fs::rename(&tmp, &dst))
+        crate::plat::private_file(&tmp).and_then(|mut f| f.write_all(text.as_bytes())).and_then(|_| std::fs::rename(&tmp, &dst))
             .map_err(|_| "Could not keep this draft on this device. Retry.".to_string())
     }
     fn read_draft(&self) -> Option<Draft> {

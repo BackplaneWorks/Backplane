@@ -4,6 +4,7 @@ mod delta;
 mod hub;
 mod input;
 mod keys;
+mod plat;
 mod launch;
 mod local;
 mod pairing;

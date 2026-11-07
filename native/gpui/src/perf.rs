@@ -135,12 +135,10 @@ fn ms(v: f64) -> String { if v < 10.0 { format!("{v:.2}") } else if v < 100.0 { 
 /// Resident memory from /proc/self/status, in MB.
 fn rss_of(status: &str) -> Option<f64> { status.lines().find_map(|l| l.strip_prefix("VmRSS:"))?.split_whitespace().next()?.parse::<f64>().ok().map(|kb| kb / 1024.0) }
 fn sample() -> Sample {
-    let mut u: libc::rusage = unsafe { std::mem::zeroed() };
-    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut u) };
-    let tv = |t: libc::timeval| t.tv_sec as f64 * 1000.0 + t.tv_usec as f64 / 1000.0;
+    let (cpu_ms, peak_mb) = crate::plat::usage();
     // no cheap current figure on a Mac: its line gives the peak alone
     let rss_mb = if cfg!(target_os = "linux") { std::fs::read_to_string("/proc/self/status").ok().and_then(|s| rss_of(&s)) } else { None };
-    Sample { cpu_ms: tv(u.ru_utime) + tv(u.ru_stime), rss_mb, peak_mb: u.ru_maxrss as f64 / if cfg!(target_os = "macos") { 1048576.0 } else { 1024.0 }, wire_msgs: WIRE_MSGS.load(Relaxed), wire_bytes: WIRE_BYTES.load(Relaxed) }
+    Sample { cpu_ms, rss_mb, peak_mb, wire_msgs: WIRE_MSGS.load(Relaxed), wire_bytes: WIRE_BYTES.load(Relaxed) }
 }
 
 /// Whether the overlay is up.

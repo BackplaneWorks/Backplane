@@ -16,7 +16,7 @@ fn num(x: &Value) -> bool { x.as_f64().map_or(false, f64::is_finite) }
 fn clean(s: &str, max: usize) -> String { s.chars().filter(|c| !matches!(*c, '\u{0}'..='\u{1f}' | '\u{7f}')).take(max).collect() }
 pub fn urandom(n: usize) -> Vec<u8> {
     let mut b = vec![0u8; n];
-    std::fs::File::open("/dev/urandom").and_then(|mut f| std::io::Read::read_exact(&mut f, &mut b)).expect("/dev/urandom");
+    crate::plat::fs::random(&mut b).expect("/dev/urandom");
     b
 }
 

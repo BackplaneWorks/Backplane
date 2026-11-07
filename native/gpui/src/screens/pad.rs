@@ -301,10 +301,8 @@ pub fn png(rgba: &[u8]) -> Option<Vec<u8>> {
 }
 /// Now as it is named on a drawing: local time, 20261021-025300.
 pub fn stamp() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as libc::time_t;
-    // SAFETY: both pointers are to live locals; localtime_r writes only to `tm`.
-    let tm = unsafe { let mut tm: libc::tm = std::mem::zeroed(); libc::localtime_r(&secs, &mut tm); tm };
-    format!("{:04}{:02}{:02}-{:02}{:02}{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec)
+    let (y, mo, d, h, mi, s) = crate::plat::local_now();
+    format!("{y:04}{mo:02}{d:02}-{h:02}{mi:02}{s:02}")
 }
 
 /// The glyphs of the bundled bitmap font, 8 wide and 16 tall, for the typed lengths on the picture.

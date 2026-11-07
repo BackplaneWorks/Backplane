@@ -27,7 +27,7 @@ fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX
 pub fn label(v: &str) -> String { v.chars().filter(|c| !c.is_control()).take(64).collect::<String>().trim().to_string() }
 pub fn valid_id(s: &str) -> bool { s.len() == 36 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase() || b == b'-') }
 pub fn new_id() -> String {
-    let mut b = [0u8; 16]; if let Ok(mut f) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut f, &mut b); }
+    let mut b = [0u8; 16]; let _ = crate::plat::fs::random(&mut b);
     b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80; let h = hex::encode(b);
     format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
 }

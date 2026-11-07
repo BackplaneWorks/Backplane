@@ -543,6 +543,7 @@ dependencies = [
  "tokio-tungstenite",
  "unicode-segmentation",
  "ureq 2.12.1",
+ "windows-sys 0.61.2",
  "x11rb",
 ]
 

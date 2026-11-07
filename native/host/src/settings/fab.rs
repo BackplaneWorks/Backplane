@@ -128,7 +128,7 @@ pub(crate) fn server_of(setting: &str) -> String {
 pub(crate) fn install_id(home: &Path) -> String {
     let dir = home.join("secrets"); let f = dir.join("install-id");
     if let Ok(t) = std::fs::read_to_string(&f) { if t.trim().len() >= 16 { return t.trim().to_string() } }
-    let mut b = [0u8; 12]; if let Ok(mut r) = std::fs::File::open("/dev/urandom") { let _ = std::io::Read::read_exact(&mut r, &mut b); }
+    let mut b = [0u8; 12]; let _ = crate::plat::fs::random(&mut b);
     let id = hex::encode(b);
     let _ = std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&dir);
     let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
