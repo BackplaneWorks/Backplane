@@ -247,15 +247,16 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         }
         ConnBanner(hub)
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (DataClient.has("search")) Box(Modifier.weight(1f)) { DField(q, { q = it }, "Search projects", Modifier.testTag("home.searchfield")) } else Spacer(Modifier.weight(1f))
+            if (DataClient.has("search")) Box(Modifier.weight(1f)) { DField(q, { q = it }, "Search projects and threads", Modifier.testTag("home.searchfield")) } else Spacer(Modifier.weight(1f))
             IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, "Add project", tint = dcs.onSurfaceVariant) }
         }
         DLine()
         if (DataClient.locks.isNotEmpty()) LocksStrip(open)
         if (q.isNotBlank() && DataClient.has("search")) { SearchResults(q, open); return@Column }
         val botThreads = DataClient.bots.map { it.thread }.toSet()
-        val projects = DataClient.projects; val threads = DataClient.threads.filter { !it.archived && it.id !in botThreads }
-        if (projects.isEmpty() && threads.isEmpty()) {
+        val projects = DataClient.projects; val threads = DataClient.threads.filter { !it.archived && it.id !in botThreads && !it.history }
+        val hist = DataClient.history
+        if (projects.isEmpty() && threads.isEmpty() && hist.count == 0) {
             Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(if (DataClient.listsLoaded) "No projects yet" else "Loading…", color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
                 if (DataClient.listsLoaded) { Spacer(Modifier.height(12.dp)); DBtn("Add a project", true, true, onClick = addProject) }
@@ -301,6 +302,20 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             }
             val known = projects.map { it.id }.toSet()
             items(threads.filter { it.project !in known }, key = { "t:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+            // Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
+            if (hist.count > 0) {
+                item("history") {
+                    Row(Modifier.fillMaxWidth().height(40.dp).clickable { DataClient.showHistory(!DataClient.historyOpen) }.padding(start = 10.dp).testTag("home.history"), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(if (DataClient.historyOpen) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
+                        DMono(hist.title.uppercase(), dcs.onSurfaceVariant, 12, Modifier.weight(1f))
+                    }
+                }
+                items(hist.shown(DataClient.historyOpen), key = { "h:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+                if (DataClient.historyOpen && hist.next != null) item("history.more") {
+                    val more = rememberCoroutineScope()
+                    Row(Modifier.fillMaxWidth().height(32.dp).clickable { more.launch { DataClient.loadHistory(more = true) } }.padding(start = 34.dp).testTag("home.history.more"), verticalAlignment = Alignment.CenterVertically) { DMono("More", dfaint, 11) }
+                }
+            }
             val bots = DataClient.bots.filter { !it.uber }
             if (bots.isNotEmpty()) { item("bots") { DMono("BOTS", dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
                 items(bots, key = { "b:${it.id}" }) { b -> SidebarRow("@", b.name, "bot") { if (b.thread.isNotEmpty()) open(b.thread) } } }

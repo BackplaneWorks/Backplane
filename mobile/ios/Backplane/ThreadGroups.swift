@@ -26,4 +26,7 @@ enum ThreadGroups {
     /// The number on the row: the hub's count when it sends one (the list may hold only a page), else what is loaded.
     static func count(hub: Int?, loaded: Int) -> Int { max(hub ?? 0, loaded) }
     static func title(_ n: Int) -> String { "Settled (\(n))" }
+    /// Conversation history (`history.list`): what shows under the group's row. The live chats always; the rest only while it is open. No row here starts a chat.
+    static func history<T: ShelvedThread>(live: [T], rows: [T], open: Bool) -> [T] { live + (open ? rows.filter { r in !live.contains { $0.id == r.id } } : []) }
+    static func historyTitle(_ n: Int) -> String { "Conversation history (\(n))" }
 }

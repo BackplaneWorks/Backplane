@@ -126,7 +126,11 @@ fun SearchResults(q: String, open: (String) -> Unit) {
     if (r.first.isEmpty() && r.second.isEmpty()) { DMono("nothing matches “$q”", modifier = Modifier.padding(12.dp).testTag("search.none")); return }
     LazyColumn(Modifier.fillMaxSize().testTag("search.list")) {
         items(r.second, key = { "sp:${it.id}" }) { p -> Column { DMono("project · ${p.title}", dcs.onSurface, 12, Modifier.fillMaxWidth().padding(12.dp)); DLine() } }
-        items(r.first, key = { "st:${it.id}" }) { t -> ThreadRowPublic(t) { open(t.id) } }
+        items(r.first.filter { !it.history }, key = { "st:${it.id}" }) { t -> ThreadRowPublic(t) { open(t.id) } }
+        // the old Scratch chats the search found, under their group's name (feature history)
+        val old = r.first.filter { it.history }
+        if (old.isNotEmpty()) item("sh") { DMono("CONVERSATION HISTORY", dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp).testTag("search.history")) }
+        items(old, key = { "sh:${it.id}" }) { t -> ThreadRowPublic(t) { open(t.id) } }
     }
 }
 
@@ -184,7 +188,7 @@ fun MentionPopup(draft: String, pick: (String) -> Unit) {
     if (items.isEmpty()) return
     Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("mentions")) {
         items.take(6).forEach { it ->
-            Row(Modifier.fillMaxWidth().clickable { pick(draft.dropLast(m.value.trimStart().length) + it.sigil + (if (it.sigil == "@" || it.sigil == "#" || it.sigil == "&") it.label else it.id) + " ") }.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(Modifier.fillMaxWidth().clickable { pick(draft.dropLast(m.value.trimStart().length) + it.word.ifEmpty { it.sigil + (if (it.sigil == "@" || it.sigil == "#" || it.sigil == "&") it.label else it.id) } + " ") }.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 DMono(it.sigil + it.label, dcs.onSurface, 12, Modifier.weight(1f)); DMono(it.detail)
             }
         }

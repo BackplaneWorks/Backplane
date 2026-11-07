@@ -230,6 +230,67 @@ final class Journeys: XCTestCase {
         d.shot("relaunch")
     }
 
+    // The composer's own commands on a Rust hub seeded by the lane rig (project "demo": t1 "Fix the ecc83 board", t2 "BOM review"; stand-in agents):
+    // the Send button reads the hub's label, /btw answers in a card and posts nothing, /give hands over, /secret opens the masked box, /intent saves.
+    func test_data_commands() {
+        d = Driver("data-commands"); defer { d.finish() }
+        d.launch()
+        let row = d.el("data.thread.row.t1")
+        guard d.step("threads", timeout: 25, act: {}, expect: { row.exists }) else { return }
+        guard d.step("open t1", act: { d.tap(row) }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
+        let comp = d.el("thread.composer"), send = d.el("thread.send")
+        func draft() -> String { (comp.value as? String) ?? "" }
+        func clear() { d.tap(comp); let n = draft().count; if n > 0 { comp.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: n)) } }
+        d.step("/btw: Send reads Ask", act: { d.type(comp, "/btw what is an ECC83?") }, expect: { send.label == "Ask" })
+        d.shot("btw-typed")
+        d.step("/btw: the card shows the answer", timeout: 30, act: { d.tap(send) }, expect: { d.el("thread.btw").exists && d.label("No answer came back").exists })
+        d.step("/btw: the draft is empty", act: {}, expect: { draft().isEmpty || draft() == "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw" })
+        d.shot("btw-answer")
+        d.step("/btw: the card closes", act: { d.tap(d.el("thread.btw.close")) }, expect: { !d.el("thread.btw").exists })
+        clear()
+        d.step("/give: Send reads Give", act: { d.type(comp, "/give >bom-review look at the socket") }, expect: { send.label == "Give" })
+        d.shot("give-typed")
+        d.step("/give: handed over (the draft empties)", timeout: 20, act: { d.tap(send) }, expect: { !draft().contains("/give") })
+        d.shot("give-done")
+        clear()
+        d.step("/secret: Send reads Send", act: { d.type(comp, "/secret gh-token") }, expect: { send.label == "Send" && d.el("thread.send").isEnabled })
+        d.step("/secret: the masked box opens", act: { d.tap(send) }, expect: { d.el("thread.secret").exists })
+        d.step("/secret: a value typed", act: { let v = d.el("thread.secret.value"); d.tap(v); v.typeText("sk-phone-123") }, expect: { d.el("thread.secret.save").isEnabled })
+        d.shot("secret-box")
+        d.step("/secret: saved, the box shuts", timeout: 20, act: { d.tap(d.el("thread.secret.save")) }, expect: { !d.el("thread.secret").exists })
+        d.shot("secret-saved")
+        clear()
+        d.step("/intent: Send reads Save", act: { d.type(comp, "/intent") }, expect: { send.label == "Save" })
+        d.step("/intent alone: the composer takes the intent", timeout: 20, act: { d.tap(send) }, expect: { draft().contains("# Goal") })
+        d.shot("intent-edit")
+        clear()
+        d.step("/intent: saved", timeout: 20, act: { d.type(comp, "/intent A tube preamp, set from the iPhone."); d.tap(send) }, expect: { d.label("Intent saved").exists })
+        d.shot("intent-saved")
+    }
+
+    // Conversation history on the lane rig's hub: Scratch chats s1 "zebra crossing chat", s2 "kicad library question" (settled) and s3 "old notes" (recent):
+    // the group's row counts them and opens the list, the search finds them under its heading, a chat opens and takes a message, and nothing starts one.
+    func test_data_history() {
+        d = Driver("data-history"); defer { d.finish() }
+        d.launch()
+        let group = d.el("data.history")
+        guard d.step("the group's row", timeout: 25, act: {}, expect: { group.exists && d.label("CONVERSATION HISTORY (3)").exists }) else { return }
+        d.step("shut: only the live chat has its row", act: {}, expect: { d.el("data.thread.row.s3").exists && !d.el("data.thread.row.s1").exists })
+        d.step("no project to start a chat in", act: {}, expect: { !d.app.buttons["New thread in Scratch"].exists })
+        if d.el("data.thread.row.s2").exists { d.tap(group) } // the group remembers being open: start shut
+        d.shot("history-shut")
+        d.step("open: every chat", act: { d.tap(group) }, expect: { d.el("data.thread.row.s1").exists && d.el("data.thread.row.s2").exists })
+        d.shot("history-open")
+        d.tap(group)
+        let search = d.el("data.search")
+        d.step("search finds an old chat", act: { d.tap(search); search.typeText("zebra") }, expect: { d.el("data.search.history").exists && d.el("data.search.thread.s1").exists })
+        d.shot("history-search")
+        d.step("it opens as it was", act: { d.tap(d.el("data.search.thread.s1")) }, expect: { d.label("Which way is the zebra crossing?").waitForExistence(timeout: 10) })
+        let comp = d.el("thread.composer")
+        d.step("and takes a message", timeout: 30, act: { d.type(comp, "still there?"); d.tap(d.el("thread.send")) }, expect: { d.label("there?3").exists }) // the stand-in in stream mode answers "<last word>0 … 3"
+        d.shot("history-chat")
+    }
+
     // Opening threads one after another, again and again: the app logs "Backplane open cached=... ms=..." for each (touch to screen). Needs 3 threads:
     // it makes them (a first message each) when the project has fewer.
     func test_data_switch() {
