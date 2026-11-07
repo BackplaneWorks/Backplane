@@ -48,6 +48,12 @@ On reconnect the app resubscribes and re-reads lists and the open thread (no res
 - Pictures: the agents' `turn.start` keeps `attachments` (a `MessageAttached` event in the same commit) and `agentText`; the message's text carries the `[Attached image: <path>]` lines for the agent and the phone data API strips them from what it shows.
 Viewer, files and browser requests are not here: the lanes adding them in `native/host` (viewers, files, cef) define them; the phones will take them as further features.
 
+## Star suggestion (feature `star`; `native/host/src/state/star.rs`)
+- After a person's fifth prompt (counted once per hub home: `turn.start`, `bots.say`, `bots.post` from a client, never a retry, blank text or agent mail) the hub offers a GitHub star.
+- `star.offer` → `{offer}`: `null`, or `{token, text, url, label}` while the offer is out and undecided. Ask it on every (re)connect.
+- Frame `{"t":"star","offer":…}`: to the prompting socket when the offer is made, and `offer:null` to every socket once it is decided (hide the banner).
+- `star.nudge {token, action: open|dismiss}` → `{}`: final. `open` also opens `url`. The desktop shows the same strip from the same frames.
+
 ## Viewers, files, browser (2026-11-06; features `viewers`, `files`, `browser`; `native/host/src/data/ext.rs`)
 Each is the hub's own request (kicad.watch, files.dir, mech.list, bots.browser, kicad.info), run for the folder of the thread. `viewer.watch` makes plots arrive on this socket, so a phone subscribes to a source the way the desktop does.
 - `viewer.files {thread}` → `{root, pro, pcb, sch}`: the project's canonical KiCad files.

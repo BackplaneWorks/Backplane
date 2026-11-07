@@ -533,6 +533,8 @@ impl Render for Backplane {
             // the dev build strip, only while a build is being made or waits to relaunch
             .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
             .children({ let s = std::mem::take(&mut self.screens.hubbar); let e = crate::screens::hubbar::strip(cx, &s, light); self.screens.hubbar = s; e })
+            // the GitHub star suggestion, while the hub says it is out
+            .children(crate::screens::star::strip(cx, self.screens.star.clone().as_ref(), light))
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).children(crate::perf::mark("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()

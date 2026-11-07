@@ -112,6 +112,7 @@ internal fun DBar(title: String, back: (() -> Unit)?, trailing: @Composable RowS
 @Composable
 private fun ConnBanner(hub: () -> Unit) {
     HubBanner(hub)
+    StarBanner()
     if (DataClient.conn == DataClient.Conn.ONLINE) return
     Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         DDot(if (DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8); Spacer(Modifier.width(8.dp))

@@ -32,6 +32,7 @@ object DataClient {
     var listsLoaded by mutableStateOf(false); private set
     var features by mutableStateOf<Set<String>>(emptySet()); private set
     var notice by mutableStateOf(HubNotice()); private set   // hello `notice`, newer from /hub/status: the banner
+    var star by mutableStateOf<DStarOffer?>(null); private set   // the GitHub star suggestion (feature "star"): shown while the hub says so
     // the composer's own commands (hello.commands): the hub's table; none of them is ever a message
     data class Word(val word: String, val label: String, val desc: String)
     var commands by mutableStateOf<List<Word>>(emptyList()); private set
@@ -97,7 +98,7 @@ object DataClient {
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
     fun unpair() { link = null; prefs().edit().remove("link").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
-    private fun reset() { notice = HubNotice(); projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
+    private fun reset() { notice = HubNotice(); star = null; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
     fun connect() {
@@ -154,6 +155,7 @@ object DataClient {
             "d" -> push(o)
             "voice" -> DataVoice.frame(o)
             "plot" -> scope.launch(Dispatchers.Main) { plots.receiveJSON(o) } // why a view has nothing to show (plots themselves are binary)
+            "star" -> { star = DStarOffer.of(o.optJSONObject("offer")) }
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
         }
     }
@@ -172,7 +174,7 @@ object DataClient {
         try {
             listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
             if (g != gen) return
-            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } } }
+            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } } }
             syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
@@ -180,6 +182,12 @@ object DataClient {
     suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks() } } }
     var work by mutableStateOf<Map<String, DWork>>(emptyMap()); private set
     var locks by mutableStateOf<List<DLock>>(emptyList()); private set
+    private suspend fun loadStar() { if (has("star")) star = DStarOffer.of(call("star.offer").optJSONObject("offer")) }
+    /** open (the banner also opens the page) or dismiss: final, the banner goes at once */
+    fun starDecide(action: String) {
+        val s = star ?: return; star = null
+        scope.launch { runCatching { call("star.nudge", JSONObject().put("token", s.token).put("action", action)) } }
+    }
     private suspend fun loadLocks() { if (has("work")) locks = parseLocks(call("locks.list").optJSONArray("locks")) }
     private suspend fun loadWork(id: String) { if (has("work")) setWork(id, call("thread.work", JSONObject().put("thread", id)).optJSONObject("subs")) }
     private fun setWork(id: String, o: JSONObject?) { work = if (o == null) work - id else work + (id to parseWork(o)) }
@@ -587,6 +595,18 @@ object DataClient {
                     .put("entries", JSONObject().also { o -> es.forEach { (k, v) -> o.put(k, JSONArray(v.map(::J))) } })
                 runCatching { cacheFile().writeText(j.toString()) }
             }
+        }
+    }
+}
+
+/** The GitHub star suggestion while the hub says it is out and undecided (feature "star", native/host/src/state/star.rs): from star.offer at every
+ *  (re)connect and from a `{"t":"star","offer"}` frame (null hides it). The hub decides when; the app shows exactly this. */
+data class DStarOffer(val token: String, val text: String, val url: String, val label: String) {
+    companion object {
+        fun of(o: JSONObject?): DStarOffer? {
+            if (o == null) return null
+            val s = DStarOffer(o.optString("token"), o.optString("text"), o.optString("url"), o.optString("label"))
+            return if (s.token.isNotEmpty() && s.text.isNotEmpty() && s.url.startsWith("https://")) s else null
         }
     }
 }

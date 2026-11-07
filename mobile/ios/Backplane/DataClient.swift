@@ -39,6 +39,8 @@ final class DataClient {
     private(set) var features: Set<String> = []
     // hello `notice`, newer from /hub/status: the banner
     private(set) var notice = HubNotice()
+    // the GitHub star suggestion (feature "star"): shown while the hub says so, gone once decided on any device
+    private(set) var star: DStarOffer?
     var canSendImages: Bool { features.contains("images") }
     // the composer's own commands (hello.commands): the hub's table; none of them is ever a message
     struct Word: Equatable { let word, label, desc: String }
@@ -134,7 +136,7 @@ final class DataClient {
         links = []; PairingStore.save(links); reset(); close(); conn = .offline
     }
     private func reset() {
-        notice = HubNotice()
+        notice = HubNotice(); star = nil
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil
         try? FileManager.default.removeItem(at: cacheURL)
     }
@@ -239,6 +241,7 @@ final class DataClient {
         case "d": push(o)
         case "voice": voice.frame(o)
         case "plot": plots.receiveJSON(o) // why a view has nothing to show (the plots themselves come as binary frames)
+        case "star": star = DStarOffer.of(o["offer"])
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
         default: break
         }
@@ -271,10 +274,17 @@ final class DataClient {
             await voice.resync()
             await enablePush(); await registerPush(); await syncPush()
             await loadLocks()
+            await loadStar()
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
     func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks() }
+    func loadStar() async { guard has("star"), let r: DStarReply = try? await call("star.offer") else { return }; star = r.offer?.valid }
+    /// open (the banner also opens the page) or dismiss: final, the banner goes at once
+    func starDecide(_ action: String) {
+        guard let s = star else { return }; star = nil
+        Task { let _: DEmpty? = try? await call("star.nudge", ["token": s.token, "action": action]) }
+    }
     func loadLocks() async { guard has("work"), let r: DLocks = try? await call("locks.list") else { return }; locks = r.locks }
     private func loadWork(_ id: String) async { guard has("work"), let r: DWorkReply = try? await call("thread.work", ["thread": id]) else { return }; work[id] = r.subs }
     // a row's button; what it changes comes back as a push

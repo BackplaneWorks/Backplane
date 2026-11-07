@@ -83,6 +83,7 @@ struct DataThreadsView: View {
     var body: some View {
         VStack(spacing: 0) {
             DataHubBanner(client: client)
+            DataStarBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
                 if client.has("search") {
@@ -465,6 +466,7 @@ struct DataThreadView: View {
     var body: some View {
         VStack(spacing: 0) {
             DataHubBanner(client: client)
+            DataStarBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip
             if let w = client.work[id], !w.rows.isEmpty { DataWorkPanel(client: client, thread: id, work: w) }

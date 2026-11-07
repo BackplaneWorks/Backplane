@@ -20,7 +20,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "accounts"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -180,6 +180,10 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             "lock-cancel" => rpc(hub, c, "lock.cancel", json!({"thread":th,"name":v})).await.map(|_| json!({})),
             "work-cancel" => rpc(hub, c, "work.cancel", json!({"thread":th,"id":v})).await.map(|_| json!({})),
             _ => Err(err("act: lock-release, lock-cancel or work-cancel")) } }
+        // feature "star": the GitHub star suggestion. `star.offer` → `{offer}` (null, or {token,text,url,label}) on (re)connect; a `{"t":"star","offer"}` frame shows it
+        // (to this socket, at the fifth prompt) or hides it (every socket, once decided); `star.nudge {token, action: open|dismiss}` → `{}`
+        "star.offer" => rpc(hub, c, "star.offer", json!({})).await.map(|r| r["result"].clone()),
+        "star.nudge" => rpc(hub, c, "star.nudge", json!({"token":s(p, "token"),"action":s(p, "action")})).await.map(|_| json!({})),
         "bots.list" => Ok(crate::bots::api::directory(hub).await),
         "bot.say" => {
             let (bot, text) = (s(p, "bot"), s(p, "text")); if text.trim().is_empty() { return Some(Err(err("empty message"))) }
@@ -314,7 +318,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
 }
 /// Frames the hub pushes to this connection that a phone's viewer reads: a plot (binary CBOR, or JSON for "none") and a browser frame's announcement.
 pub fn wants_raw(b: &[u8]) -> bool { b.len() > 7 && (0xA0..=0xB7).contains(&b[0]) && b[1] == 1 && b[2..7] == [0x64, b'p', b'l', b'o', b't'] }
-pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice") || (s(v, "t") == "d" && s(v, "k") == "btw") }
+pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice" | "star") || (s(v, "t") == "d" && s(v, "k") == "btw") }
 
 /// `composer.run {thread, text}`: the draft is one of `hello.commands`, run the way the desktop runs it (session/composer.rs). The answer's `kind` says what became of it: `btw` (a side
 /// question, its answer comes as a push `{t:"d",k:"btw",thread,q,a}` to this socket only), `give`, `secret` (the app opens its masked box for `name`; `secret.set` saves), `intent`, or

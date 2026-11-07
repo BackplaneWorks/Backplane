@@ -1075,10 +1075,18 @@ impl mail::owner::OwnerLink for Held {
     let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
     assert_eq!(rpc(&hub, "bots.room", json!({"room":"r1","name":"lab","members":format!("{ada}\n{bob}")})).await["ok"], true);
     let calls: Arc<StdMutex<Vec<String>>> = Default::default(); let c2 = calls.clone();
-    bots.set_star(Arc::new(move |msg: &str, now: u64| { c2.lock().unwrap().push(msg.to_string()); (vec![json!({"$":"SettingSet","key":format!("star.seen.{msg}"),"value":"1","at":now})], None) }));
+    // the stand-in count offers at "p1", as the real one does at the fifth
+    bots.set_star(Arc::new(move |msg: &str, now: u64| { c2.lock().unwrap().push(msg.to_string()); (vec![json!({"$":"SettingSet","key":format!("star.seen.{msg}"),"value":"1","at":now})], (msg == "p1").then(|| json!({"t":"star","offer":{"token":msg}}))) }));
+    let (mut mine, mut other) = (hub.attach(caller().client), hub.attach(2));
     assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"hi","msg":"m1"})).await["ok"], true);
     assert_eq!(rpc(&hub, "bots.post", json!({"room":"r1","text":"hello room","msg":"p1"})).await["ok"], true);
     assert_eq!(*calls.lock().unwrap(), ["m1", "p1"], "one count each, the room's two members are not two prompts");
+    let frames = |o: &mut crate::hub::Outbox| { let mut v = vec![]; while let Ok(crate::hub::Out::Value(f)) = o.try_recv() { if f["t"] == "star" { v.push(f) } } v };
+    assert_eq!(frames(&mut mine), vec![json!({"t":"star","offer":{"token":"p1"}})], "the offer goes to the connection that typed the prompt");
+    assert!(frames(&mut other).is_empty(), "and to no other");
+    // a prompt with no client connection behind it (an agent, a routine, the hub itself) is no person's
+    let h = hub.rpc_for("bots.say").unwrap(); h.call(&hub, &Caller { gen: "agents".into(), client: 0 }, &json!(8), "bots.say", &json!({"bot":ada,"text":"from an agent","msg":"a1"})).await;
+    assert_eq!(*calls.lock().unwrap(), ["m1", "p1"]);
     assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"hi","msg":"m1"})).await["ok"], true); // the same msg again: already accepted
     assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"again","msg":"m2","retry":true})).await["ok"], true);
     assert_eq!(rpc(&hub, "bots.say", json!({"bot":ada,"text":"   ","msg":"m3"})).await["ok"], true);
