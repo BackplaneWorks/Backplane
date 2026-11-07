@@ -32,18 +32,26 @@ async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status:
     hub.set_info("machines", &j.to_string()).await;
     peering.routes.machines(j, verified);
 }
+/// Whether an approved link is not among the machines just found (both machines were restarting together, or it is away): the finder asks again sooner.
+fn missing_own(peering: &Peering, table: &PeerTable) -> bool {
+    let j = peering.routes.machines_value();
+    table.with(|p| p.live().into_iter().any(|r| p.verified(&r.id) && !p.sync_off(&r.name) && !super::farsync::own_link(p, &j, &r.id)))
+}
+/// How long until the next pass of the finder: every two minutes, every 15 seconds while an approved link is not found.
+fn next_find(missing: bool) -> Duration { Duration::from_secs(if missing { 15 } else { 120 }) }
 pub fn spawn_loops(hub: Arc<Hub>, table: Arc<PeerTable>, peering: Arc<Peering>) {
     let (t2, p2) = (table.clone(), peering.clone());
     tokio::spawn(async move {
         table.start(&hub).await; // the peer table first: the rules read it
         // (only the finder: it suggests machines; nothing here links to one by itself)
-        loop { find_once(&hub, &p2, &t2).await; tokio::time::sleep(Duration::from_secs(120)).await }
+        loop { find_once(&hub, &p2, &t2).await; tokio::time::sleep(next_find(missing_own(&p2, &t2))).await }
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_finder_asks_again_soon_while_an_approved_link_is_not_found() { assert_eq!(next_find(true), Duration::from_secs(15)); assert_eq!(next_find(false), Duration::from_secs(120)); }
     #[test] fn peer_routes_decide_for_themselves_and_cap_their_bodies() {
         let r = PeerRoutes(Arc::new(unsafe_peering()));
         assert!(r.own_auth() && r.body_max() == 262144 && r.routes() == ["/bots/pair", "/bots/link"]);
