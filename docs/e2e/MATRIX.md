@@ -240,4 +240,24 @@ Rig: Boat sandbox (4 vCPU, 8 GB, Ubuntu 24.04), source `26ba50a0ba49496a9baf89cb
 
 | ID | Result | Commit | Rig | Evidence |
 |---|---|---|---|---|
-
+| P01 | pass (19/19) | eb361e0041 | Linux hub (desktop, temp home) ↔ Linux GPUI client (backplane, private Xvfb rig), LAN 192.168.4.26 | test/e2e/pairing/gpui.sh; ~/.cache/e2e-pair/logs/gpui-x-lan.log |
+| P02 | pass (19/19) | eb361e0041 | same, tailnet 100.64.84.41 | gpui.sh; ~/.cache/e2e-pair/logs/gpui-x-ts.log |
+| P03 | pass (19/19) | eb361e0041 | same, tailscale serve (https/wss, desktop.tail9e0cf2.ts.net:8461) | gpui.sh; ~/.cache/e2e-pair/logs/gpui-x-serve.log |
+| P04 | not run | — | Linux hub ↔ macOS GPUI client, LAN and tailnet | no window may open on the Mac's console |
+| P05 | not run | — | Linux hub (desktop) ↔ iOS simulator (Mac), LAN | no route from the Mac's LAN (10.0.0.0/24) to the desktop's (192.168.4.0/22): ping and ssh from the Mac fail; the router passes only the other way |
+| P06 | pass (17/17, 1 not run) | eb361e0041 | Linux hub (desktop) ↔ iOS simulator (Mac), tailnet | test/e2e/pairing/ios_sim.py; ~/.cache/e2e-pair/logs/ios-d-ios-ts.log; not run: iOS's own "Open in Backplane GPUI?" answered (a simulator has no taps; the person's TestFlight check) |
+| P07 | pass (22/22) | e905f8b095 | Linux hub (backplane, temp home) ↔ Android emulator (desktop, bp-emu-5620, landscape and portrait runs), LAN 192.168.4.23 | test/e2e/pairing/android.py; ~/.cache/e2e-pair/logs/android-a-lan.log |
+| P08 | pass (22/22) | e905f8b095 | same, tailnet 100.96.192.111 | android.py; ~/.cache/e2e-pair/logs/android-a-ts.log |
+| P09 | pass (22/22) | hub eb361e0041, app e905f8b095 | Linux hub (desktop) ↔ Pixel 9, a real phone (USB adb, Wi-Fi, landscape), LAN | android.py --device; ~/.cache/e2e-pair/logs/phone-p-lan.log |
+| P10 | not run | — | Linux hub ↔ Pixel 9, tailnet | no Tailscale on the phone (the person decides) |
+| P11 | not run | — | Linux hub ↔ real iPhone, LAN and tailnet | waits on TestFlight (the notifications lane); the person tests it |
+| P12 | pass (19/19) | eb361e0041 | macOS hub (Mac mini, temp home) ↔ Linux GPUI client (backplane), LAN 10.0.0.166 (routed from 192.168.4.0/22) | gpui.sh; ~/.cache/e2e-pair/logs/gpui-m-lan.log |
+| P13 | pass (19/19) | eb361e0041 | same, tailnet 100.97.97.92 | gpui.sh; ~/.cache/e2e-pair/logs/gpui-m-ts.log |
+| P14 | not run | — | macOS hub ↔ macOS GPUI client, LAN and tailnet | no window may open on the Mac's console |
+| P15 | pass (17/17, 1 not run) | eb361e0041 | macOS hub ↔ iOS simulator on the same Mac, LAN address (traffic stays on the Mac) | ios_sim.py; ~/.cache/e2e-pair/logs/ios-m-lan.log; not run: iOS's own "Open in …?" answered |
+| P16 | pass (17/17, 1 not run) | eb361e0041 | same, tailnet address (traffic stays on the Mac) | ios_sim.py; ~/.cache/e2e-pair/logs/ios-m-ts.log |
+| P17 | pass (22/22) | e905f8b095 | macOS hub ↔ Android emulator (desktop), LAN | android.py; ~/.cache/e2e-pair/logs/android-m-lan.log |
+| P18 | pass (22/22) | e905f8b095 | same, tailnet | android.py; ~/.cache/e2e-pair/logs/android-m-ts.log |
+| P19 | pass (22/22) | e905f8b095 | macOS hub ↔ Pixel 9, a real phone, LAN (routed) | android.py --device; ~/.cache/e2e-pair/logs/phone-m-lan.log |
+| P20 | not run | — | macOS hub ↔ Pixel 9, tailnet | no Tailscale on the phone |
+| P21 | not run | — | macOS hub ↔ real iPhone, LAN and tailnet | waits on TestFlight; the person tests it |
