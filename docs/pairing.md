@@ -81,7 +81,7 @@ read/write failures fail closed and never rotate or rewrite the existing hub tok
 file.
 
 Native clients keep their credential privately: the phones in their own storage,
-the desktop client in `device-token` and `pairing.json` beside its local settings,
+the desktop client in `hubs/<host>_<port>.token` (one owner-only file per paired hub) with the list in `hubs.json` beside its local settings (the first hub is the one in use; an older `pairing.json` + `device-token` is migrated on first start),
 never in a hub's `token` file. A failed exchange does not replace an existing
 pairing, and exchanges reject redirects. Revoking a device, from Settings or
 `POST /auth/revoke`, rejects its future requests and closes its open connections,

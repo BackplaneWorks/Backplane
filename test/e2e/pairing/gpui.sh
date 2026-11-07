@@ -13,18 +13,19 @@ inv() { hub invite "$W/inv.json" >/dev/null; python3 -c "import json,sys;print(j
 fresh() { rm -rf "$W/rig/$1"; }
 run() { n=$1; s=$2; shift 2; "${LAUNCH_SH:-sh}" "$LAUNCH" "$n" "$s" "$@" >/dev/null 2>&1; }
 says() { grep -q "$2" "$L/gpui-$1.out"; echo $?; }
-saved() { [ -f "$W/rig/$1/config/backplane-gpui/pairing.json" ]; echo $?; }
+saved() { ls "$W/rig/$1/config/backplane-gpui/hubs/"*.token >/dev/null 2>&1; echo $?; }
 live() { hub devices | grep -c " live "; }
 addr=${BASE#*://}
 
 echo "route $BASE, client on ${CLIENT_HOST:-$(hostname)} (GPUI client result)"
+# a link naming loopback addresses is refused for a remote hub, so BASE must be an address another machine could use (or the cases below pair by address and code)
 # link
 fresh link; before=$(live); l=$(inv link); steps link "[{\"wait\":1500},{\"pair_fill\":[\"$l\",\"\",\"\"]},{\"click\":\"pair:go\"},{\"wait\":2500}]"
 RIG=link run link 9
 ok "link pairs and the client connects" "$(says link '"status":"Connected"')"
 ok "link: the hub lists one more live device" "$([ "$(live)" = $((before+1)) ]; echo $?)"
-ok "link: credential and hub saved privately" "$([ "$(stat -c %a "$W/rig/link/config/backplane-gpui/device-token" 2>/dev/null || stat -f %Lp "$W/rig/link/config/backplane-gpui/device-token")" = 600 ]; echo $?)"
-sec=$(python3 -c "print('$l'.split('invite=')[1].split('&')[0])"); tok=$(cat "$W/rig/link/config/backplane-gpui/device-token" 2>/dev/null)
+ok "link: credential and hub saved privately" "$([ "$(stat -c %a "$W/rig/link/config/backplane-gpui/hubs/$(ls "$W/rig/link/config/backplane-gpui/hubs" | head -1)" 2>/dev/null || stat -f %Lp "$W/rig/link/config/backplane-gpui/hubs/$(ls "$W/rig/link/config/backplane-gpui/hubs" | head -1)")" = 600 ]; echo $?)"
+sec=$(python3 -c "print('$l'.split('invite=')[1].split('&')[0])"); tok=$(cat "$W/rig/link/config/backplane-gpui/hubs/"*.token 2>/dev/null | head -1)
 ok "link: no secret or credential in the client's log" "$(grep -qE "$sec|${tok:-nothing-saved}" "$L/gpui-link.out"; [ $? = 1 ]; echo $?)"
 # short code
 fresh code; before=$(live); c=$(inv code); steps code "[{\"wait\":1500},{\"pair_fill\":[\"\",\"$BASE\",\"$c\"]},{\"click\":\"pair:go\"},{\"wait\":2500}]"
