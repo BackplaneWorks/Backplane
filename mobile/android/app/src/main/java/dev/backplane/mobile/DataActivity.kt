@@ -33,6 +33,9 @@ class DataActivity : ComponentActivity() {
     // backplane://thread/<id> opens that thread; any other link of this app's scheme asks before it pairs
     private fun route(u: android.net.Uri) {
         if (u.scheme != BuildConfig.URL_SCHEME || u.host == "google") return
+        // debug builds only: bpgpui://unpair forgets the hub in this process (a test's fresh start without pm clear or force-stop: on the emulator,
+        // every app process that draws and then dies leaves its rendering memory behind on the host; scripts/android-emu.sh fresh)
+        if (BuildConfig.DEBUG && u.host == "unpair") { DataClient.unpair(); return }
         if (u.host == "thread") u.pathSegments.firstOrNull()?.let { DataClient.openFromIntent = it } else DataClient.askLink = u.toString()
     }
     override fun onResume() { super.onResume(); DataClient.foreground = true; DataClient.foreground() }

@@ -1,6 +1,10 @@
 #!/bin/sh
 # Headless emulator on THIS desktop, own AVD, own capped user service, never on the screen.
-# usage: scripts/android-emu.sh create | start | stop | status | adb ARGS...
+# usage: scripts/android-emu.sh create | start | stop | status | fresh | ensure [MB] | adb ARGS...
+# Memory (measured, 2026-11-07): every guest app process that draws its screen and then dies (force-stop, pm clear, a reinstall) leaves about
+# 125 MB on the host in the emulator's renderer, in every software GPU mode; an app kept alive costs nothing. So: `fresh` resets the Backplane
+# debug app in its own process (the bpgpui://unpair link: no pm clear, no force-stop), and `ensure` restarts this emulator between runs when
+# it is over a threshold (default 5000 MB), for workloads that must restart processes. 2 GB guest RAM; Bluetooth off (no test uses it).
 # EMU_PORT (default 5584): each worktree that runs an emulator takes its own, or `adb` here reaches another thread's device.
 # EMU_AVD (default bp-gpui-android): the AVD's name, in this worktree's own AVD folder.
 # Only this instance is ever touched: it runs as its own user service (bp-emu-<port>), so it outlives the job that started it and one
@@ -20,12 +24,19 @@ start)
   systemctl --user reset-failed "$UNIT" 2>/dev/null || true; mkdir -p "$W"
   systemd-run --user --unit "$UNIT" -q -p MemoryMax=8G -p MemorySwapMax=0 -p Nice=10 --setenv=ANDROID_AVD_HOME="$ANDROID_AVD_HOME" --setenv=ANDROID_HOME="$ANDROID_HOME" \
     --setenv=ANDROID_SDK_ROOT="$ANDROID_HOME" -p StandardOutput=truncate:"$W/emulator.log" -p StandardError=append:"$W/emulator.log" \
-    $ANDROID_HOME/emulator/emulator -avd "$AVD" -port $PORT -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2560 -cores 4 \
+    $ANDROID_HOME/emulator/emulator -avd "$AVD" -port $PORT -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 -cores 4 \
       -netsim-args --instance=$NETSIM
   echo "started $UNIT (netsimd instance $NETSIM)"
   sleep 3; systemctl --user is-active -q "$UNIT" || { echo "the emulator exited:"; head -20 "$W/emulator.log"; exit 3; }
   $ADB wait-for-device
-  n=0; until booted; do n=$((n+1)); [ $n -gt 120 ] && { echo boot timeout; exit 2; }; sleep 2; done; echo booted ;;
+  n=0; until booted; do n=$((n+1)); [ $n -gt 120 ] && { echo boot timeout; exit 2; }; sleep 2; done
+  # no test here uses Bluetooth, and on a fresh AVD it crashes ("Bluetooth keeps stopping") over the dialog a run reads; off stays off (userdata)
+  $ADB shell settings put global bluetooth_on 0 >/dev/null 2>&1; $ADB shell cmd bluetooth_manager disable >/dev/null 2>&1 || true
+  echo booted ;;
+fresh) $ADB shell am start -W -a android.intent.action.VIEW -d bpgpui://unpair dev.backplane.mobile.gpui >/dev/null && echo "fresh: unpaired in its process" ;;
+ensure) MAX=${2:-5000}; cg=/sys/fs/cgroup$(systemctl --user show -p ControlGroup --value "$UNIT")
+  mb=$(awk '/^anon /{print int($2/1048576)}' "$cg/memory.stat" 2>/dev/null || echo 0)
+  if [ "${mb:-0}" -gt "$MAX" ]; then echo "$UNIT holds ${mb} MB (over $MAX): restarting it"; sh "$0" stop; sh "$0" start; else echo "$UNIT holds ${mb:-0} MB"; fi ;;
 status) systemctl --user is-active "$UNIT" || true; booted && echo booted || echo "not booted" ;;
 stop) $ADB emu kill 2>/dev/null || true
   for i in 1 2 3 4 5 6 7 8; do systemctl --user is-active -q "$UNIT" || break; sleep 1; done
