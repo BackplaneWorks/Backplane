@@ -1322,7 +1322,8 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
 #[tokio::test(flavor = "multi_thread")] async fn the_reply_depends_on_what_the_picked_skill_says_for_claude_and_codex() {
     a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note().await;
     // stand-ins that do what the real agents do with the note: open the SKILL.md named in it and answer with its secret word
-    let find = r#"p=$(printf '%s' "$X" | sed -n 's/.*read \\\?"\([^"\\]*SKILL.md\)\\\?".*/\1/p' | head -1); w=$(sed -n 's/^SECRET=//p' "$p" 2>/dev/null | head -1)"#;
+    // (\\* and not \\?: macOS's sed has no \? in a basic expression, and the stand-in then never found the file)
+    let find = r#"p=$(printf '%s' "$X" | sed -n 's/.*read \\*"\([^"\\]*SKILL.md\)\\*".*/\1/p' | head -1); w=$(sed -n 's/^SECRET=//p' "$p" 2>/dev/null | head -1)"#;
     let uh = dir("sc-userhome"); // the skill sits where the other provider's agent does not load it itself, so the turn text must hand over the file
     for rel in [".agents/skills/zqwhale", ".claude/skills/zqwhale"] { let d = uh.join(rel); std::fs::create_dir_all(&d).unwrap(); std::fs::write(d.join("SKILL.md"), "---\nname: zqwhale\ndescription: d\n---\nSECRET=PURPLE-OTTER-77\n").unwrap(); }
     std::fs::remove_dir_all(uh.join(".claude/skills/zqwhale")).unwrap(); // placeholder: each provider below gets only the foreign copy
