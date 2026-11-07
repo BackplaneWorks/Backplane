@@ -1382,6 +1382,7 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
 #[cfg(test)] mod lost;
 #[cfg(test)] mod note;
 #[cfg(test)] mod order;
+#[cfg(test)] mod checkpoint;
 
 #[tokio::test(flavor = "multi_thread")] async fn viewer_show_answers_with_what_the_viewer_then_shows() {
     let sd = dir("vs-bin"); perf_standin(&sd, 1);

@@ -148,7 +148,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  git(OUT,'init','-q','--bare',R);git(G,'init','-q','-b','main');writeFileSync(G+'/a.txt','one\n');git(G,'add','.');git(G,'commit','-qm','init');git(G,'remote','add','origin',R);git(G,'push','-q','origin','main');
  await c.rpc('project.add',{path:G});await until(()=>events().filter(e=>e.$==='ProjectCreated').some(e=>e.root===G),5000);const GP=events().filter(e=>e.$==='ProjectCreated').find(e=>e.root===G).id;
  const t=(await c.rpc('thread.create',{project:GP,title:'wt2',env:'worktree'})).thread;await sleep(2500);const wt=events().find(e=>e.$==='WorktreeSet'&&e.id===t)?.worktree;
- await c.rpc('turn.start',{thread:t,text:'zqwrite first.txt'});await finished(t);await sleep(3000);await c.rpc('turn.start',{thread:t,text:'zqwrite second.txt'});await finished(t,2);
+ await c.rpc('turn.start',{thread:t,text:'zqwrite first.txt'});await finished(t);await c.rpc('turn.start',{thread:t,text:'zqwrite second.txt'});await finished(t,2);
  const both=existsSync(wt+'/first.txt')&&existsSync(wt+'/second.txt');
  const rv=await c.rpc('git.revert',{thread:t,turn:1});await sleep(1500);
  const after={first:existsSync(wt+'/first.txt'),second:existsSync(wt+'/second.txt')};

@@ -377,7 +377,17 @@ pub(crate) async fn hist_worker<F, Fut>(mut rx: mpsc::Receiver<(Option<JobGuard>
         }
     }
 }
+/// The turn-end captures (step and checkpoint) not yet finished: the next turn's agent is not started while one is, so the files it writes are never inside the earlier turn's checkpoint.
+#[derive(Default)]
+pub(crate) struct HistEnds { n: std::sync::atomic::AtomicUsize, done: tokio::sync::Notify }
+/// Waits (at most HIST_JOB) for the earlier turn's end captures: called before a turn's input reaches the agent.
+async fn ends_settled(e: Arc<HistEnds>) {
+    let _ = tokio::time::timeout(HIST_JOB, async { loop { let w = e.done.notified(); tokio::pin!(w); w.as_mut().enable(); if e.n.load(Relaxed) == 0 { return } w.await } }).await;
+}
+struct EndDone(Arc<HistEnds>);
+impl Drop for EndDone { fn drop(&mut self) { self.0.n.fetch_sub(1, Relaxed); self.0.done.notify_waiters() } }
 struct Actor {
+    hist_ends: Arc<HistEnds>,
     hist_tx: Option<mpsc::Sender<(Option<JobGuard>, HistJob)>>, person: bool,
     ag: Arc<Agents>, th: String, cx: Cx, live_proc: Option<Live>,
     lines: Option<mpsc::Receiver<String>>, exit: Option<oneshot::Receiver<Exit>>,
@@ -406,7 +416,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, limit_seen: None } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_ends: Arc::new(HistEnds::default()), hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, limit_seen: None } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -514,7 +524,7 @@ impl Actor {
         if let Some(ph) = first_title { let (ag, th2) = (self.ag.clone(), th.clone()); tokio::spawn(async move { if let Err(e) = ag.retitle(&th2, Some(&ph), false).await { eprintln!("titles: {th2}: kept the first line: {e}") } }); }
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
-        self.jobs_start(&cwd, &msg);
+        self.jobs_start(&cwd, &msg); ends_settled(self.hist_ends.clone()).await;
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
         let text_ref = { let w = self.ag.world().await; let model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
@@ -559,7 +569,7 @@ impl Actor {
         let handed = if taken { String::new() } else { self.handed(&mut ev, now).await }; // what was queued is `text` when it is all taken; otherwise the hand-overs go with this turn and the rest stays
         let text = if handed.is_empty() { text } else { format!("{handed}\n\n{text}") };
         self.commit(ev).await;
-        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, "");
+        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); ends_settled(self.hist_ends.clone()).await;
         if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
         Ok(())
     }
@@ -665,7 +675,7 @@ impl Actor {
         // Ride.start: an idle thread starts a turn with the waiting rides
         self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone();
         let mut ev = codex::ride_done(&th, &v, "with a new turn", now); ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v));
+        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); ends_settled(self.hist_ends.clone()).await;
         let input = codex::ride_input(&v);
         if self.codex { self.codex_run(&t, &cwd, &input).await } else { let msg = hub_id("w", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &input, &input, now).await }
         Ok(())
@@ -679,7 +689,7 @@ impl Actor {
         let Some(t) = t else { return }; if ride.is_empty() || t.archived || t.deleted || providers::driver(&t.provider).is_none() { return }
         let now = now_s(); let mut ev = codex::ride_done(&th, &ride, "with a new turn", now);
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride));
+        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); ends_settled(self.hist_ends.clone()).await;
         self.codex_run(&t, &cwd, &codex::ride_input(&ride)).await;
     }
 
@@ -767,20 +777,22 @@ impl Actor {
         for attempt in 0..2 {
             if self.hist_tx.is_none() {
                 let (tx, rx) = mpsc::channel::<(Option<JobGuard>, HistJob)>(HIST_CAP); self.hist_tx = Some(tx);
-                let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned());
-                tokio::spawn(hist_worker(rx, HIST_IDLE, HIST_JOB, move |j| { let (hub, th, home) = (hub.clone(), th.clone(), home.clone()); async move {
+                let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned()); let ends = self.hist_ends.clone();
+                tokio::spawn(hist_worker(rx, HIST_IDLE, HIST_JOB, move |j| { let (hub, th, home, ends) = (hub.clone(), th.clone(), home.clone(), ends.clone()); async move {
                     match j {
                         HistJob::Start(cwd, entry) => { hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub, th, cwd, entry, home, "start").await }
                         HistJob::Step(cwd, entry) => hist::step(hub, th, cwd, entry, home, "").await,
-                        HistJob::End(cwd) => { hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; hist::checkpoint(cwd, th).await }
+                        HistJob::End(cwd) => { let _done = EndDone(ends); hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; hist::checkpoint(cwd, th).await }
                     } } }));
             }
             let tx = self.hist_tx.as_ref().unwrap();
             if is_step && tx.capacity() < HIST_CAP - HIST_STEPS_MAX { self.ag.stats.hist_dropped.fetch_add(1, Relaxed); return } // a burst of tool ends: the newest state is captured by the next step or the end
+            let is_end = matches!(j, HistJob::End(..)); if is_end { self.hist_ends.n.fetch_add(1, Relaxed); }
+            let unsent = |a: &Actor| if is_end { a.hist_ends.n.fetch_sub(1, Relaxed); }; // the capture will not run: nothing to wait for
             match tx.try_send((Some(JobGuard::new(&self.ag)), j.clone_job())) {
                 Ok(()) => return,
-                Err(mpsc::error::TrySendError::Closed(_)) if attempt == 0 => { self.hist_tx = None } // the worker ended while idle: start another
-                Err(_) => { self.ag.stats.hist_dropped.fetch_add(1, Relaxed); return }
+                Err(mpsc::error::TrySendError::Closed(_)) if attempt == 0 => { unsent(self); self.hist_tx = None } // the worker ended while idle: start another
+                Err(_) => { unsent(self); self.ag.stats.hist_dropped.fetch_add(1, Relaxed); return }
             }
         }
     }
