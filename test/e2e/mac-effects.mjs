@@ -37,9 +37,8 @@ async function connect(q=''){
   return c;
 }
 const kinds=()=>events().map(e=>e.$);
-const token=readFileSync(HOME+'/token','utf8').trim();
 const out_rows=[]; const row=(id,ok,ev)=>{out_rows.push({id,ok,ev});console.log(`${ok?'ok  ':'FAIL'} ${id} ${ev}`)};
-const pid=await start(600);
+const pid=await start(600); const token=readFileSync(HOME+'/token','utf8').trim();
 let c=await connect(); await sleep(1500);
 await c.rpc('project.add',{path:OUT+'/proj'}); await until(()=>has(e=>e.$==='ProjectCreated'));
 const P=events().find(e=>e.$==='ProjectCreated').id;
