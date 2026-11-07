@@ -29,7 +29,7 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
         r.push(x);
     }
     for q in d["requests"].as_array().into_iter().flatten() {
-        r.push(row(&format!("{} wants to pair", s(q, "name")), &format!("{} · check code {} (the same must show on that machine) · {}s left", s(q, "url"), s(q, "check"), q["left"].as_u64().unwrap_or(0)),
+        r.push(row(&format!("{} wants to pair", s(q, "name")), &format!("{} · check code {} (it must match the one on that machine) · {}s left", s(q, "url"), s(q, "check"), q["left"].as_u64().unwrap_or(0)),
             vec![btn("Approve", "machine-approve", s(q, "id"), true), btn("Deny", "machine-deny", s(q, "id"), false)]));
     }
     for o in d["outgoing"].as_array().into_iter().flatten() {
@@ -44,7 +44,7 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
         x["fields"] = json!([field("fcode", "Code from that machine", &draft("fcode"))]);
         r.push(x);
     }
-    let mut p = row("Pair a machine", "Enter the other machine's address and the code it made (a bp1: invite works in the address field). It asks you there to approve.", vec![btn("Pair", "machine-pair", "", true)]);
+    let mut p = row("Pair a machine", "Enter the other machine's address and the code it made. It then asks you there to approve.", vec![btn("Pair", "machine-pair", "", true)]);
     p["fields"] = json!([field("maddr", "Address (http://box.example:3787)", &draft("maddr")), field("mcode", "Code", &draft("mcode"))]);
     r.push(p);
     let c = &d["code"];

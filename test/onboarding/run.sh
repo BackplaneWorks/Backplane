@@ -69,7 +69,7 @@ hub_up && bad "a hub started before a home was chosen" || ok "no hub runs until 
 
 # the window is 1400x900 centred by i3 at full screen; First centres a 620 px column. The Start button is found by its rectangle in the client's log.
 pos() { python3 "$D/pos.py" "$R/win.log" "$1"; }
-X click $(pos first-use); wait_for hub_up 120 && ok "Start the hub here started a hub" || { bad "no hub answered"; date +%T.%N; cat "$HUB_HOME/hub.lock"; curl --noproxy "*" -sv -m 5 "http://127.0.0.1:$(hub_port)/hello" -o /dev/null 2>&1 | tail -5; }
+X click $(pos first-use); wait_for hub_up 120 && ok "Use this folder started a hub" || { bad "no hub answered"; date +%T.%N; cat "$HUB_HOME/hub.lock"; curl --noproxy "*" -sv -m 5 "http://127.0.0.1:$(hub_port)/hello" -o /dev/null 2>&1 | tail -5; }
 [ -f "$HUB_HOME/token" ] && ok "the hub made its home at the default path" || bad "no token in $HUB_HOME"
 wait_for "[ -f '$HOME_DIR/.config/backplane-gpui/launch.json' ]" 20 && ok "the choice was saved" || { bad "no launch.json"; date +%T.%N; grep launch_saved "$R/win.log"; ls -la "$HOME_DIR/.config/backplane-gpui"; }
 head -c 12 "$HUB_HOME/hub.lock" >"$R/hub.lock.head"; cut -d' ' -f1 "$HUB_HOME/hub.lock" >"$R/hub.pid"

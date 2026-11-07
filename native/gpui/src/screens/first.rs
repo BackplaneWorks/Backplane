@@ -13,12 +13,12 @@ pub struct First {
 }
 
 /// Words a person reads before a hub exists; every_word below checks them with the same rules as setup.
-const TITLE: &str = "Choose the hub's home";
-const INTRO: &str = "The hub is the program that keeps your threads, settings and keys and runs your agents. Its home is the folder where it stores them. The hub keeps running when you close this window, so agents finish their work.";
-const USE: &str = "Start the hub here";
+const TITLE: &str = "Where should Backplane keep your data?";
+const INTRO: &str = "Backplane keeps your threads, settings and keys in one folder on this computer. A background program, the hub, runs your agents from that folder. It keeps running when you close this window, so agents finish their work. The folder below is a good choice.";
+const USE: &str = "Use this folder";
 const PICK: &str = "Choose a folder";
-const OTHER: &str = "Use a hub on another machine";
-const OTHER_NOTE: &str = "On that machine, open Settings, Devices, Add a device. Paste its pairing link here, or type its address and short code. Each code works once, for ten minutes.";
+const OTHER: &str = "Connect to a hub on another computer";
+const OTHER_NOTE: &str = "A hub is the Backplane program on another computer. On that computer, open Settings, Devices, Add a device. Paste its pairing link here, or type its address and short code. Each code works once, for ten minutes.";
 const CONNECT: &str = "Connect";
 const BACK: &str = "Back";
 const HAS_DATA: &str = "This folder already has a hub's data. Backplane opens it as it is.";
@@ -69,9 +69,9 @@ impl First {
     }
     fn press_connect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (text, typed) = (self.addr.read(cx).content.to_string(), self.code.read(cx).content.to_string());
-        let Some((addr, secret)) = launch::parse_hub(&text) else { self.error = "Give the hub's address, for example desktop.example.ts.net:3800.".into(); cx.notify(); return };
+        let Some((addr, secret)) = launch::parse_hub(&text) else { self.error = "Give the other computer's address, for example desktop.example.ts.net:3800.".into(); cx.notify(); return };
         let code = secret.unwrap_or(typed);
-        if code.trim().is_empty() { self.error = "Type the short code from the other machine.".into(); cx.notify(); return }
+        if code.trim().is_empty() { self.error = "Type the short code from the other computer.".into(); cx.notify(); return }
         self.busy = format!("Pairing with {addr}."); self.error.clear();
         let (config, started) = (self.config.clone(), self.started);
         cx.spawn_in(window, async move |this, cx| {
