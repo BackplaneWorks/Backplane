@@ -87,6 +87,9 @@ fn threads(st: &State, session: &Value) -> Vec<Value> {
         row("Personal grace (minutes)", "Read, completed personal conversations settle after this quiet period (240 minutes is four hours). 0 disables the timer.", chips(&["0", "60", "120", "240", "480"], set(st, "settle.personal.minutes", "240"), "settle.personal.minutes")),
         row("Short grace for read conversations", "Use the worker grace for personal conversations once their reply is read and the work is complete.", chips(&["on", "off"], onoff(set(st, "settle.done", "off") == "on"), "settle.done")),
         row("Continue after a restart", "Turns a restart cuts short go on by themselves.", chips(&["on", "off"], onoff(set(st, "restart.continue", "on") != "off"), "restart.continue")),
+        // thread.env (commands/plan.rs): what the + and a phone's new thread get; a thread asked for with its own env keeps it
+        row("New threads work in", "auto: a thread in a git project gets its own worktree and branch, so threads do not edit the same files; elsewhere the project folder. local: always the project folder.",
+            chips(&["auto", "local"], if set(st, "thread.env", "auto") == "local" { "local" } else { "auto" }, "thread.env")),
         row("Largest attachment (MB)", &format!("A file sent with a message, or shown from this hub, may be up to {} MB. Files stream from disk, so a large one costs disk space, not memory.", files_mb(st)),
             chips(&["128", "512", "1024", "2048", "4000"], &files_mb(st).to_string(), "files.max.mb")),
         row("Webhook", "Posts when Notify me for would. A settle or a failure, an ask, a merge, a reminder or a note.", vec![]),
@@ -596,6 +599,10 @@ mod tests {
         assert_eq!(on, ["30"]); assert!(grace["note"].as_str().unwrap().contains("after 30 idle minutes"));
         let restart = v["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Continue after a restart").unwrap();
         assert_eq!(restart["buttons"][1]["on"], true, "off is lit");
+        let env = v["rows"].as_array().unwrap().iter().find(|r| r["label"] == "New threads work in").unwrap();
+        assert_eq!((env["buttons"][0]["value"].as_str(), env["buttons"][0]["on"].as_bool()), (Some("thread.env=auto"), Some(true)), "auto by default");
+        let v = view(&st(&[("thread.env", "local")]), &json!({"drafts": {"@settings.page": "threads"}}), &json!({}));
+        assert_eq!(v["rows"].as_array().unwrap().iter().find(|r| r["label"] == "New threads work in").unwrap()["buttons"][1]["on"], true, "local is lit");
     }
     #[test] fn a_chip_sends_setting_set_with_the_next_rid() {
         let o = act("h", &json!({"rid": 5}), "setting", "ui.theme=light").unwrap();

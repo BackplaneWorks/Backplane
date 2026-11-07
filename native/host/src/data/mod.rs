@@ -319,7 +319,9 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         }
         "thread.create" => {
             let project = s(p, "project"); if project.is_empty() { return Err(err("project")) }
-            let mut q = json!({"project":project,"env":"local"});
+            // like the desktop's +: the env follows the thread.env setting (auto: a worktree in a git project) unless the phone names one
+            let mut q = json!({"project":project});
+            if !s(p, "env").is_empty() { if !matches!(s(p, "env"), "auto" | "worktree" | "local") { return Err(err("env: auto, worktree or local")) } q["env"] = p["env"].clone() }
             for k in ["title", "provider", "model"] { if !s(p, k).is_empty() { q[k] = p[k].clone() } }
             let r = rpc(hub, c, "thread.create", q).await?;
             let id = r["thread"].as_str().unwrap_or("").to_string(); if id.is_empty() { return Err(err("no thread was made")) }

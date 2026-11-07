@@ -15,7 +15,7 @@ impl RpcHandler for Fake {
             let n = h.store.len();
             match m {
                 "project.add" => { let root = s(p, "path"); h.commit(&json!({"$":"ProjectCreated","id":format!("p{n}"),"title":root.rsplit('/').next().unwrap_or(""),"root":root,"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
-                "thread.create" => { let t = format!("t{n}"); h.commit(&json!({"$":"ThreadCreated","id":t,"project":s(p,"project"),"title":if s(p,"title").is_empty(){"New thread"}else{s(p,"title")},"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true,"thread":t})] }
+                "thread.create" => { let t = format!("t{n}"); h.commit(&json!({"$":"ThreadCreated","id":t,"project":s(p,"project"),"title":if s(p,"title").is_empty(){"New thread"}else{s(p,"title")},"env":if s(p,"env").is_empty(){"(setting)"}else{s(p,"env")},"branch":"","worktree":"","provider":"claude","model":"","at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true,"thread":t})] }
                 "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.modes" | "thread.effort" | "thread.provider" | "turn.interrupt" | "thread.pin" | "thread.rename" | "thread.detach" | "setting.set" => vec![json!({"t":"reply","id":id,"ok":true})],
                 _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"no"})],
@@ -97,6 +97,16 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let r = ask(&mut ws, 3, "thread.entries", json!({"thread":"t1"})).await; let last = r["result"]["entries"].as_array().unwrap().last().unwrap().clone();
     assert_eq!((last["id"].as_str(), last["live"].as_bool(), last["text"].as_str()), (Some("live:t1"), Some(true), Some("partial text")));
     assert_eq!(ask(&mut ws, 4, "thread.entries", json!({"thread":"nope"})).await["ok"], false);
+}
+/// A phone's new thread is made as the desktop's +: its env follows the thread.env setting (a worktree in a git project), or the one it names.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_phones_new_thread_gets_a_worktree_like_the_desktops() {
+    let (hub, port) = up("wtenv").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let dir = std::env::temp_dir().join(format!("bp-data-wtenv-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+    let pid = ask(&mut ws, 1, "project.add", json!({"path":dir.to_string_lossy()})).await["result"]["project"]["id"].as_str().unwrap().to_string();
+    let env = |r: &Value| r["result"]["thread"]["id"].as_str().unwrap().to_string();
+    let a = env(&ask(&mut ws, 2, "thread.create", json!({"project":pid})).await); let b = env(&ask(&mut ws, 3, "thread.create", json!({"project":pid,"env":"local"})).await);
+    let m = hub.model().await; assert_eq!((m.threads[&a].env.as_str(), m.threads[&b].env.as_str()), ("(setting)", "local"), "no env of its own: the setting decides");
+    let r = ask(&mut ws, 4, "thread.create", json!({"project":pid,"env":"elsewhere"})).await; assert_eq!(r["ok"], false, "{r}");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_writes_make_a_project_a_thread_and_a_message_once() {
     let (hub, port) = up("writes").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
