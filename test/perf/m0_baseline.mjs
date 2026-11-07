@@ -1,10 +1,11 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // M0 baselines of the JS hub on the one store copy (~/.backplane-gpui-copy). Content is never printed or stored: sizes and times only.
 // bun m0_baseline.mjs [phase] ; phases run in order: first, later, steady, load, click
 import {mkdirSync,writeFileSync,readFileSync,existsSync,appendFileSync,readdirSync} from 'node:fs';
 import {execSync} from 'node:child_process';
 import {makeStandins,startHub,stopHub,client,sleep,pct,rssKb,hwmKb,cpuTicks,fds,threads,tree,treeRssKb,dirSizes} from './lib.mjs';
 import {viewClient} from './view.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';
+const REPO=BP_ROOT;
 // The store copy ~/.backplane-gpui-copy is read-only and never written by a hub. Every run works on a throwaway copy under build/gpui/ (cp --reflink=auto), removed afterwards.
 const SRC=process.env.SRC_HOME||(process.env.HOME+'/.backplane-gpui-copy');const HOME=process.env.M0_HOME||(REPO+'/build/gpui/perf-run/m0/home'); // M0_HOME: the throwaway copy (under build/gpui or ~/.backplane-gpui-scratch), removed on exit
 import {rmSync,chmodSync,realpathSync} from 'node:fs';import {execFileSync} from 'node:child_process';import pathMod from 'node:path';

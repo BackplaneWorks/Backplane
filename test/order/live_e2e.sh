@@ -4,7 +4,7 @@
 # PYTHON has order/requirements.txt installed. Never the real order server or a real payment. Prints PASS/FAIL lines; screenshots in $OUT.
 # LIVE_KEEP=1 keeps the hub and order server up afterwards (ports in $OUT/rig.json) until $OUT/stop exists, for the phones.
 set -eu
-HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd); MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
+HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd); MAIN=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}
 OUT=${OUT:-$HOME/.cache/bp-tmp/order-live}; DISP=${DISP:-:183}; XV=${XV:-$MAIN/build/gpui/xvfb}; ASSETS=${BACKPLANE_GPUI_ASSETS:-$MAIN/build/gpui/linux/assets}
 [ ! -e "/tmp/.X11-unix/X${DISP#:}" ] || { echo "display $DISP in use"; exit 2; }
 rm -rf "$OUT"; mkdir -p "$OUT/home" "$OUT/bin" "$OUT/fakehome/.cache"; mkdir -m 700 "$OUT/run"

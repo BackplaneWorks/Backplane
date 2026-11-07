@@ -1,5 +1,5 @@
 #!/bin/bash
-R=/home/h/Documents/i2cjak/backplane-gpui; cd $R/test/perf
+R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); cd $R/test/perf
 mkdir -p $R/build/gpui/perf-run/gen; df -h / | tail -1 > $R/build/gpui/results/perf/m3-df-1m.txt
 export EVENTS=1000000
 python3 gen_log.py $R/build/gpui/perf-run/gen/e1m.jsonl 1000000; ls -la $R/build/gpui/perf-run/gen/e1m.jsonl >> $R/build/gpui/results/perf/m3-df-1m.txt

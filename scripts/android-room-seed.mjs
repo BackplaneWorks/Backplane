@@ -1,6 +1,6 @@
 // A room with bots and a post from the person on a stand-in hub: bun android-room-seed.mjs HOME HOST:PORT
 import {readFileSync} from 'node:fs';
-import {encode} from '/home/h/Documents/i2cjak/backplane-gpui/test/wire.mjs';
+import {encode} from '../test/wire.mjs';
 const [home,hp]=process.argv.slice(2);
 const token=readFileSync(home+'/token','utf8').trim();
 const ws=new WebSocket(`ws://${hp}/ws?token=${token}`);ws.binaryType='arraybuffer';

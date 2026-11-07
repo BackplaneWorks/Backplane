@@ -1,8 +1,9 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // Comparison hub: JS hub, stand-in agents only, 20 threads with short seeded history. bun cmp_hub.mjs PORT   (runs until <root>/stop)
 import {mkdirSync,writeFileSync,existsSync,rmSync,appendFileSync} from 'node:fs';
 import {execSync} from 'node:child_process';
 import {makeStandins,startHub,stopHub,client,sleep,rssKb,cpuTicks,fds} from './lib.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';const port=Number(process.argv[2]||3807);
+const REPO=BP_ROOT;const port=Number(process.argv[2]||3807);
 const root=REPO+'/build/gpui/perf-run/cmp';rmSync(root,{recursive:true,force:true});mkdirSync(root+'/proj',{recursive:true});makeStandins(root+'/bin');
 execSync('git init -q',{cwd:root+'/proj'});
 const out=REPO+'/build/gpui/results/perf/cmp';mkdirSync(out,{recursive:true});

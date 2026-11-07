@@ -4,7 +4,7 @@
 # `files`, `files_download`, `wait`), screenshots are taken by the client itself (`files: shot:PATH`).
 # usage: desktop-files-run.sh CLIENT_BIN HUB_BIN ASSETS_DIR OUTNAME   ->  build/gpui/shots/files/OUTNAME-*.png, build/gpui/results/files/OUTNAME.*
 set -eu
-ME=$(cd "$(dirname "$0")/.." && pwd); MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
+ME=$(cd "$(dirname "$0")/.." && pwd); MAIN=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}
 CLIENT=$1; HUBBIN=$2; ASSETS=$3; N=${4:-files}
 R=$ME/build/gpui/files-run-$N; OUT=$ME/build/gpui/results/files; SH=$ME/build/gpui/shots/files
 X=$MAIN/build/gpui/xvfb

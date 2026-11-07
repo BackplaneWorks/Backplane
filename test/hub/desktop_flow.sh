@@ -2,7 +2,7 @@
 # desktop_flow.sh : capped desktop test (3.5 GiB hub, 2 GiB GPUI, display :61, synthetic log, stand-in agents only).
 # Opens a thread in the GPUI binary against backplane-hub, types and sends; prints the GPUI_METRIC lines.
 # Needs build/gpui/hub/backplane-hub-full, build/gpui/hub/window, build/gpui/slim/bp-policy-serve-O2-v3, build/gpui/linux/backplane-gpui.
-R=/home/h/Documents/i2cjak/backplane-gpui; D=$R/build/gpui/hub-run/gpui-flow; mkdir -p /tmp/p0
+R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); D=$R/build/gpui/hub-run/gpui-flow; mkdir -p /tmp/p0
 rm -rf $D; mkdir -p $D/home $D/bin; cp $R/test/hub/fixtures/pages.jsonl $D/home/events.jsonl
 bun -e 'import {makeStandins} from "'$R'/test/perf/lib.mjs"; makeStandins(process.argv[1]+"/bin")' $D
 BACKPLANE_AGENTS=$D/bin BACKPLANE_NO_UPDATE=1 BACKPLANE_POLICY_BIN=$R/build/gpui/slim/bp-policy-serve-O2-v3 BACKPLANE_WINDOW_BIN=$R/build/gpui/hub/window FAKE_SECS=3 FAKE_PER=2 FAKE_CYCLE=5 \

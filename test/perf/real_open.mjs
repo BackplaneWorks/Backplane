@@ -1,3 +1,4 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // Lane 7: the real-log open test. A hub and the GPUI client on a THROWAWAY copy of a log, each in its own capped scope, stand-in agents only.
 // Measures: hub start to /hello, the client's first frame and `usable` (sidebar drawn, from its own GPUI_METRIC), memory per scope (cgroup anon/file, top processes),
 // client PSS, CPU, and classifies the outcome (opened / hub-exited / oom / no-usable / refused). A hub that is OOM-killed is a RESULT, not a harness error.
@@ -7,7 +8,7 @@ import {mkdirSync,writeFileSync,readFileSync,statSync,existsSync as _ex,existsSy
 import {realpathSync} from 'node:fs';import {execFileSync,spawn} from 'node:child_process';import pathMod from 'node:path';
 import {makeStandins,startHub,stopHub,sleep,client} from './lib.mjs';
 const argv=process.argv.slice(2);const arg=(k,d)=>{const i=argv.indexOf('--'+k);return i>=0?argv[i+1]:d};const args=k=>argv.flatMap((a,i)=>a==='--'+k?[argv[i+1]]:[]);
-const REPO=process.env.PERF_REPO||'/home/h/Documents/i2cjak/backplane-gpui';const HOMEDIR=process.env.HOME;
+const REPO=process.env.PERF_REPO||BP_ROOT;const HOMEDIR=process.env.HOME;
 const SCRATCH=HOMEDIR+'/.backplane-gpui-scratch',BUILD=REPO+'/build/gpui';
 const log=arg('log'),hubBin=arg('hub-bin'),gpuiBin=arg('gpui-bin');const AGENTS=Number(arg('agents','10')),VIEWS=Number(arg('views','5'));const cap=arg('cap','3700M'),steady=Number(arg('steady','60')),port=Number(arg('port','3831')),display=arg('display');
 const stamp=new Date().toISOString().replace(/[:.]/g,'-');

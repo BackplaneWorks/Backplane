@@ -186,7 +186,7 @@ pub fn assets_dir() -> PathBuf {
         if let Some(d) = std::env::var_os("BACKPLANE_GPUI_ASSETS") { c.push(PathBuf::from(d)); }
         if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("assets"))) { c.push(p); }
         #[cfg(debug_assertions)] // a debug build run from the repo; a release build never looks outside its own folder
-        if let Some(h) = std::env::var_os("HOME") { c.push(PathBuf::from(h).join("Documents/i2cjak/backplane-gpui/build/gpui/linux/assets")); }
+        c.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../build/gpui/linux/assets"));
         c.iter().find(|d| d.join("icons.json").is_file()).cloned().unwrap_or_else(|| c.into_iter().next().unwrap_or_default())
     }).clone()
 }

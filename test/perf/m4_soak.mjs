@@ -1,7 +1,8 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // Milestone 4: hub soak. bun m4_soak.mjs N HOURS port
 import {mkdirSync,writeFileSync,appendFileSync,rmSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,sleep,rssKb,cpuTicks,fds,sockets,threads,tree,treeRssKb,dirSizes,debugPerf} from './lib.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';
+const REPO=BP_ROOT;
 const n=Number(process.argv[2]||20),hours=Number(process.argv[3]||2.1),port=Number(process.argv[4]||3802);
 const root=`${REPO}/build/gpui/perf-run/m4-soak`;rmSync(root,{recursive:true,force:true});mkdirSync(root,{recursive:true});
 const out=`${REPO}/build/gpui/results/perf/m4-hub-soak`;mkdirSync(out,{recursive:true});

@@ -1,3 +1,4 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun e2e_solid.mjs RUST_HUB_BIN JS_HUB_BIN OUT.json RUNTIME FIXTURES [STEP2GLB]    (env SOLID_DEMO: a demo folder, default ecc83; SOLID_PORTS: two ports, default 3890,3891)
 // Both hubs (stand-in agents, temp HOME and cache) on the same project: a 3D watch of the board with parts and bare, a GLB of the project's own, a model too big, a board KiCad cannot
 // read, mech.render of a GLB with the same refusals as before, and a STEP when STEP2GLB names the tool both hubs then mesh with. Frames and PNG files compared by sha256.
@@ -13,13 +14,13 @@ import {makeStandins,startHub,stopHub,sleep} from '../perf/lib.mjs';
 import {decode,encode} from '../wire.mjs';
 const [rustBin,jsBin,out,runtime,fixtures,step2glb]=process.argv.slice(2);
 const sha=b=>createHash('sha256').update(b).digest('hex');
-const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/files-run/solid';rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
+const R=`${BP_ROOT}/build/gpui/files-run/solid`;rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
 const demoName=process.env.SOLID_DEMO||'ecc83';const [portA,portB]=(process.env.SOLID_PORTS||'3890,3891').split(',').map(Number);
 const demo=`${runtime}/share/kicad/demos/${demoName}`;const proj=R+'/'+demoName;
 const setup=()=>{rmSync(proj,{recursive:true,force:true});cpSync(demo,proj,{recursive:true});execSync(`chmod -R u+w ${JSON.stringify(proj)}`);mkdirSync(proj+'/mech',{recursive:true});
  for(const f of ['cube-u16','glass','sphere'])cpSync(`${fixtures}/${f}.glb`,`${proj}/mech/${f}.glb`);
  writeFileSync(proj+'/mech/huge.glb',Buffer.alloc(12582913));writeFileSync(proj+'/mech/broken.kicad_pcb','(kicad_pcb (version');writeFileSync(proj+'/mech/empty.glb','glTF');
- cpSync('/home/h/Documents/i2cjak/backplane-gpui/test/files/fixtures/mesh/bracket.step',proj+'/mech/bracket.step');
+ cpSync(`${BP_ROOT}/test/files/fixtures/mesh/bracket.step`,proj+'/mech/bracket.step');
  writeFileSync(R+'/outside.glb',readFileSync(`${fixtures}/tri.glb`));symlinkSync(R+'/outside.glb',proj+'/mech/link.glb')};
 setup();
 const log=[{$:'ProjectCreated',id:'p1',title:'p',root:proj,at:1},{$:'ThreadCreated',id:'t1',project:'p1',title:'T',env:'local',branch:'',worktree:'',provider:'claude',model:'',at:2}].map(x=>JSON.stringify(x)).join('\n')+'\n';

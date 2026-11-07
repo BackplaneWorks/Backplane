@@ -1,5 +1,5 @@
 #!/bin/bash
-R=/home/h/Documents/i2cjak/backplane-gpui; cd $R/test/perf
+R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); cd $R/test/perf
 until [ -f $R/build/gpui/results/perf/m2/tailnet-load20-viewers20-delta1.json ]; do sleep 10; done
 OUT=$R/build/gpui/results/perf/m2; export OUT
 # 1. valid 20-agent hub run

@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/h/Documents/i2cjak/backplane-gpui/test/perf; D=../../../build/gpui/results/perf
+cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"/test/perf; D=../../../build/gpui/results/perf
 PID=3569861
 # wait for the first-start import to finish (hello answered) or the hub to die (OOM at the cap)
 for i in $(seq 900); do

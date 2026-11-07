@@ -2,7 +2,7 @@
 # The phones' fold labels against test/mobile/fold_labels.json (the table the hub's test holds present/thread.rs to). Swift on the Mac; Android's is a Gradle unit test.
 # usage: scripts/mobile/fold-check.sh       (needs the ssh wrapper build/gpui/mac-ssh of the main checkout, or M=<ssh command>)
 set -eu
-ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; M=${M:-$MAIN/build/gpui/mac-ssh}; D=bp-fold-check
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; M=${M:-$MAIN/build/gpui/mac-ssh}; D=bp-fold-check
 $M hs-mac-mini "mkdir -p $D"
 RSYNC_RSH=$M rsync -a $ROOT/mobile/ios/Backplane/DataModels.swift $ROOT/mobile/ios/Backplane/DataFold.swift $ROOT/test/mobile/fold_labels.json hs-mac-mini:$D/
 $M hs-mac-mini "cd $D && cat > main.swift" <<'SW'

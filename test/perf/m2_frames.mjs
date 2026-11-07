@@ -1,5 +1,6 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 import {mkdirSync} from 'node:fs';import {makeStandins,startHub,stopHub,client,sleep} from './lib.mjs';import {viewClient} from './view.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';const root=REPO+'/build/gpui/perf-run/m2probe';mkdirSync(root,{recursive:true});makeStandins(root+'/bin');
+const REPO=BP_ROOT;const root=REPO+'/build/gpui/perf-run/m2probe';mkdirSync(root,{recursive:true});makeStandins(root+'/bin');
 const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:root+'/home2',port:3803,standins:root+'/bin',extraEnv:{FAKE_SECS:'30'}});
 const kinds={};
 const c=await client(h,{onMsg:(o,now,n)=>{const k=o.t+(o.items?'+items':'');kinds[k]=(kinds[k]||0)+1;if(o.t==='changes'||o.t==='log'||o.t==='live')console.log('KEYS',o.t,Object.keys(o),JSON.stringify(o).slice(0,200));if(kinds[k]<=0)console.log('PLAIN',JSON.stringify(o).slice(0,260))}});

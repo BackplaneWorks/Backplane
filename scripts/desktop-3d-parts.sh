@@ -6,7 +6,7 @@
 # BOARD_FIRST_MS=N opens the board view first and the 3D view N ms later. GPU=0 draws with llvmpipe (the CPU raster path) instead of the NVIDIA ICD. WARM=1 keeps the models cache of the last run.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-bptmp.sh"
-MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
+MAIN=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}
 HUB=$1; CLIENT=$2; BOARD_DIR=$3; N=${4:-gnss}
 R=$BP_TMP/b3d-rig/$N; X=$MAIN/build/gpui/xvfb; PORT=${PORT:-3841}; DISP=${DISP:-:67}; SHOT_MS=${SHOT_MS:-120}; SHOTS=${SHOTS:-90}
 [ -x "$HUB" ] && [ -x "$CLIENT" ] || { echo "no hub or client binary"; exit 2; }

@@ -1,5 +1,6 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 import {mkdirSync} from 'node:fs';import {makeStandins,startHub,stopHub,client,sleep} from './lib.mjs';import {viewClient} from './view.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';const root=REPO+'/build/gpui/perf-run/m2probe';mkdirSync(root,{recursive:true});makeStandins(root+'/bin');
+const REPO=BP_ROOT;const root=REPO+'/build/gpui/perf-run/m2probe';mkdirSync(root,{recursive:true});makeStandins(root+'/bin');
 const h=await startHub({bin:REPO+'/build/gpui/backplane-serve',home:root+'/home',port:3803,standins:root+'/bin',extraEnv:{FAKE_SECS:'30'}});
 const c=await client(h);mkdirSync(root+'/proj',{recursive:true});c.send('project.add',{path:root+'/proj'});const pc=await c.until(10000,()=>c.seen.find(x=>x.$==='ProjectCreated'));
 c.send('thread.create',{project:pc.id,title:'t',env:'local'});const th=await c.until(10000,()=>c.seen.find(x=>x.$==='ThreadCreated'));c.send('turn.start',{thread:th.id,text:'go'});

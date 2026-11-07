@@ -3,7 +3,7 @@
 # HOLD (COMMON.md): no Rust hub on a copy of the real log until the coordinator lifts it. This script therefore refuses the real copy and defaults to the synthetic
 # real-size log in ~/.backplane-gpui-scratch/synthetic-real-size. (m0_baseline.mjs refuses it too, unless HOLD_LIFTED=coordinator-lifted.)
 # usage: run_m0_rust.sh PHASES...   (first later steady load)   writes build/gpui/results/perf/m0-rust/
-R=/home/h/Documents/i2cjak/backplane-gpui; D=$R/build/gpui/perf-run/rust
+R=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); D=$R/build/gpui/perf-run/rust
 export HUB_BIN=$D/backplane-hub HUB_ARGS="[\"--policy-bin\",\"$D/bp-policy-pager\",\"--window-bin\",\"$D/window\"]" HUB_LABEL="Rust backplane-hub (gpui e086c32e2c, built on h@backplane)"
 export SRC_HOME=${SRC_HOME:-$HOME/.backplane-gpui-scratch/synthetic-real-size}
 case "$(readlink -f "$SRC_HOME")" in

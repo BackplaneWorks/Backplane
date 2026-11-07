@@ -5,7 +5,7 @@
 # written compact (the hub's fold reads the exact `{"$":"` prefix). The client binary comes from a Boat job (never built here).
 # usage: desktop-send-check.sh CLIENT_BIN ASSETS_DIR OUTNAME BOARD   ->  build/gpui/results/desktop/OUTNAME.*, build/gpui/shots/desktop/OUTNAME-after-send.png
 set -eu
-ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; CLIENT=$1; ASSETS=$2; N=${3:-plotbig}; BOARD=$4; MODES=${MODES:-current}
+ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; CLIENT=$1; ASSETS=$2; N=${3:-plotbig}; BOARD=$4; MODES=${MODES:-current}
 R=$ROOT/build/gpui/desktop-plot; OUT=$ROOT/build/gpui/results/desktop; SH=$ROOT/build/gpui/shots/desktop
 X=$ROOT/build/gpui/xvfb; HUB=$ROOT/build/gpui/hub/new
 FIX=$ROOT/test/files/fixtures/plot; PORT=3833; DISP=:61

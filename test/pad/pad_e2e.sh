@@ -2,7 +2,7 @@
 # pad_e2e.sh CLIENT_BIN HUB_BIN : the drawing pad end to end, on a private Xvfb with its own i3 and its own D-Bus, a temp-home hub and the stand-in Claude.
 # Nothing here can reach the person's screen, session bus or home. Prints PASS/FAIL lines, exit 0 when all pass; artifacts in $OUT (default /tmp/pad-e2e).
 set -eu
-HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd); MAIN=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
+HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd); MAIN=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}
 OUT=${OUT:-/tmp/pad-e2e}; DISP=${DISP:-:181}; XV=${XV:-$MAIN/build/gpui/xvfb}; ASSETS=${BACKPLANE_GPUI_ASSETS:-$MAIN/build/gpui/linux/assets}
 [ ! -e "/tmp/.X11-unix/X${DISP#:}" ] || { echo "display $DISP in use"; exit 2; }
 rm -rf "$OUT"; mkdir -p "$OUT/home" "$OUT/proj" "$OUT/bin" "$OUT/fakehome/.cache" "$OUT/images"; mkdir -m 700 "$OUT/run"

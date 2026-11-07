@@ -1,7 +1,8 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // bun m2_server.mjs HOST PORT AGENTS OUTNAME   (AGENTS=0 idle). Runs until <root>/stop exists.
 import {mkdirSync,writeFileSync,existsSync,appendFileSync,rmSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,sleep,rssKb,cpuTicks,fds} from './lib.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';
+const REPO=BP_ROOT;
 const [host,port,agents,name]=[process.argv[2],Number(process.argv[3]),Number(process.argv[4]),process.argv[5]];
 const root=`${REPO}/build/gpui/perf-run/m2-${name}`;rmSync(root,{recursive:true,force:true});mkdirSync(root,{recursive:true});makeStandins(root+'/bin');
 const out=`${REPO}/build/gpui/results/perf/m2-${name}`;mkdirSync(out,{recursive:true});

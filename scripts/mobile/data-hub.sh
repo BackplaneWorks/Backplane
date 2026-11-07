@@ -3,7 +3,7 @@
 # usage: scripts/mobile/data-hub.sh start | stop | link     (PORT default 3841; HUBBIN default the gpui checkout's release build)
 set -eu
 BUN=$(command -v bun)   # before PATH is cut down below
-ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-/home/h/Documents/i2cjak/backplane-gpui}
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}
 H=${H:-$ROOT/build/mobile/hub}; PORT=${PORT:-3841}; HUBBIN=${HUBBIN:-$ROOT/build/mobile/target/fast/backplane-hub}
 case "${1:-}" in
 start)

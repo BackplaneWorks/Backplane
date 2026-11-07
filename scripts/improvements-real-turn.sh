@@ -5,7 +5,7 @@
 # harmless (reply with one sentence; no edits, no tools). Nothing is pushed; nothing outside the scratch folder is written by the agent's task.
 # usage: improvements-real-turn.sh CLIENT_BIN HUB_BIN ASSETS_DIR
 set -eu
-ROOT=${GPUI_MAIN:-/home/h/Documents/i2cjak/backplane-gpui}; HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/.." && pwd)
+ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/.." && pwd)
 CLIENT=$1; HUBBIN=$2; ASSETS=$3
 R=$ROOT/build/gpui/imp-real; OUT=$ROOT/build/gpui/results/improvements-real; SH=$ROOT/build/gpui/shots/desktop
 X=$ROOT/build/gpui/xvfb; PORT=3835; DISP=${IMP_DISPLAY:-:61}

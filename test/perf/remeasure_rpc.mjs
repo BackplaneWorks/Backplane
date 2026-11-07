@@ -1,7 +1,8 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // Event-driven re-measure of ping and write acks (the earlier sleep(20) poll quantised them to 20 ms). bun remeasure_rpc.mjs OUT.json JS_BIN [RUST_BIN]
 import {mkdirSync,rmSync,writeFileSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,sleep,pct} from './lib.mjs';
-const [out,jsBin,rustBin]=process.argv.slice(2);const R='/home/h/Documents/i2cjak/backplane-gpui/build/gpui/perf-run/rpc2';rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
+const [out,jsBin,rustBin]=process.argv.slice(2);const R=`${BP_ROOT}/build/gpui/perf-run/rpc2`;rmSync(R,{recursive:true,force:true});mkdirSync(R,{recursive:true});makeStandins(R+'/bin');
 const proj=R+'/p';mkdirSync(proj,{recursive:true});
 const log=[{$:'ProjectCreated',id:'p1',title:'e',root:proj,at:1},{$:'ThreadCreated',id:'t1',project:'p1',title:'T',env:'local',branch:'',worktree:'',provider:'claude',model:'',at:2},{$:'SettingSet',key:'restart.continue',value:'off',at:3}].map(x=>JSON.stringify(x)).join('\n')+'\n';
 const st=a=>a.length?{n:a.length,p50:pct(a,50),p95:pct(a,95),p99:pct(a,99),max:Math.max(...a)}:null;

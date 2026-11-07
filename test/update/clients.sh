@@ -7,7 +7,7 @@
 # Each client gets a hub of its own (a rollback marks v0.0.2 bad). Runs on the desktop. Env: GPUI_LOCAL (the client binary here), APK (installed first when given).
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$HERE/../..; HUB=${1:?usage: clients.sh HUB CLIENT...}; shift
-MACSSH=${MACSSH:-/home/h/Documents/i2cjak/backplane-gpui/build/gpui/mac-ssh hs-mac-mini}
+MACSSH=${MACSSH:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)/build/gpui/mac-ssh hs-mac-mini}
 case $HUB in
   local) RUN="bash -c"; IP=$(ip -4 -o route get 192.168.4.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p'); SRC=$ROOT; BIN=$ROOT/build/e2e-bin; PRE=;;
   mac) RUN="$MACSSH"; IP=${MAC_IP:-10.0.0.166}; SRC='$HOME/bp-remote-op/src'; BIN='$HOME/bp-remote-op/bin'; PRE='export PATH=/opt/homebrew/bin:$PATH;';;

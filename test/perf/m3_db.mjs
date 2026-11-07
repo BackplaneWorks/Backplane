@@ -1,9 +1,10 @@
+const BP_ROOT=new URL('../..',import.meta.url).pathname.replace(/\/$/,'');
 // M3: bun m3_db.mjs EVENTS_JSONL LABEL PORT   (hub store at scale; synthetic log only)
 import {mkdirSync,rmSync,copyFileSync,writeFileSync,readFileSync,existsSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import {makeStandins,startHub,stopHub,client,sleep,pct,rssKb,hwmKb,cpuTicks,dirSizes,fds} from './lib.mjs';
 import {viewClient} from './view.mjs';
-const REPO='/home/h/Documents/i2cjak/backplane-gpui';
+const REPO=BP_ROOT;
 const [src,label,portS]=process.argv.slice(2);const port=Number(portS||3808);
 const root=`${REPO}/build/gpui/perf-run/m3`;rmSync(root,{recursive:true,force:true});mkdirSync(root+'/home',{recursive:true});makeStandins(root+'/bin');
 const out=`${REPO}/build/gpui/results/perf/m3-${label}`;mkdirSync(out,{recursive:true});
