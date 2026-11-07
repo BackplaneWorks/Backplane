@@ -1,5 +1,6 @@
 //! A local stand-in for the OpenAI API (the realtime transcription socket and
-//! POST /audio/transcriptions; only the key "good" is accepted), a file
+//! POST /audio/transcriptions; only the key "good", or for rigs a key starting
+//! "sk-mock-" (a hub saves only sk- keys), is accepted), a file
 //! server for downloads, and a way to run the helper and read its events.
 #![allow(dead_code)]
 
@@ -115,7 +116,8 @@ impl Mock {
 
 async fn serve(mut c: TcpStream, m: Arc<Shared>) {
     let Some(h) = peek_head(&c).await else { return };
-    if h.headers.get("authorization").map(String::as_str) != Some("Bearer good") {
+    let auth = h.headers.get("authorization").map(String::as_str).unwrap_or("");
+    if auth != "Bearer good" && !auth.starts_with("Bearer sk-mock-") {
         let _ = read_body(&mut c, &h).await;
         let _ = c.write_all(&http("401 Unauthorized", "application/json", json!({"error": {"message": "Incorrect API key"}}).to_string().as_bytes())).await;
         return;
