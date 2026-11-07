@@ -40,6 +40,7 @@ class Phone:
         if self.scrolls(ns):
             for _ in range(3): self.swipe(True, ns)
     def texts(self):
+        self.hide_keyboard()  # (in landscape the keyboard leaves a strip that shows neither an error line nor what is under it)
         ns = self.nodes(); out = [t for n in ns for t in (n.get("text"), n.get("content-desc")) if t]
         if self.scrolls(ns):  # the rest of the screen too, then back to the top
             self.bottom(); out += [t for n in self.nodes() for t in (n.get("text"), n.get("content-desc")) if t and t not in out]; self.top()
