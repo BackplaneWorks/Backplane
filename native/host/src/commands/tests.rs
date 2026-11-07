@@ -523,6 +523,35 @@ async fn ask_on(h: &Arc<Hub>, c: &mut crate::hub::Conn, m: &str, p: Value) -> (V
     (ev, out[0].clone())
 }
 // Hub.accounts.select: between turns, on a fresh menu, a connected profile of the thread's provider; the sessions are kept per account and what the new one missed is handed over
+#[tokio::test] async fn moving_all_threads_to_an_account_selects_it_for_each_idle_thread_of_that_agent_and_names_the_running_ones() {
+    use crate::settings::accounts as ac;
+    let h = hub("acct-move-all").await;
+    let inv = json!({"version":1,"revision":1,"profiles":[{"id":"w","provider":"claude","state":"connected","epoch":3,"label":"Work"},{"id":"d","provider":"claude","state":"disconnected","epoch":1,"label":"Old"}],"error":""}).to_string();
+    h.commit(&json!({"$":"SettingSet","key":"accounts.inventory","value":inv,"at":1})).await.unwrap();
+    h.commit(&json!({"$":"ThreadCreated","id":"t3","project":"p1","title":"Codex","env":"local","branch":"","worktree":"","provider":"codex","model":"","at":4})).await.unwrap();
+    h.commit(&json!({"$":"SessionSet","id":"t1","session":"sess-default","at":5})).await.unwrap();
+    say(&h, "t1", "user", "make a board", 6).await;
+    h.commit(&json!({"$":"TurnChanged","thread":"t2","state":"running","at":7})).await.unwrap();
+    let all = |profile: &str, epoch: u64| json!({"provider":"claude","profile":profile,"epoch":epoch,"default":true});
+    let (_, r) = ask(&h, "accounts.move_all", all("w", 3)).await; assert_eq!(r["error"], ac::GATE, "only a client granted account access");
+    let (mut c, _) = h.connect(true); crate::settings::accounts_hub::grant_client(&c.gen, c.client);
+    let (e, r) = ask_on(&h, &mut c, "accounts.move_all", all("d", 1)).await; assert_eq!(r["ok"], false, "a disconnected account takes no thread: {r}"); assert!(e.is_empty(), "and nothing is written: {e:?}");
+    let (e, r) = ask_on(&h, &mut c, "accounts.move_all", all("w", 3)).await; assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["result"], json!({"moved":1,"already":0,"running":["t2"],"failed":[]}), "t1 moves, t2 is running so it waits, t3 is Codex");
+    let set = |k: &str| e.iter().filter(|v| v["$"] == "SettingSet" && v["key"] == k).last().map(|v| v["value"].clone());
+    assert_eq!(set("account.thread.t1.claude"), Some(json!(ac::binding_show("w", 3))));
+    assert_eq!(set(&ac::session_key("t1", "claude", "", 0)), Some(json!("sess-default")), "each thread keeps its old account's session, as one select does");
+    assert!(set(&ac::chosen_key("t1", "claude")).map_or(false, |v| v.as_str().unwrap_or("").contains("person")), "the person chose it: {e:?}");
+    assert_eq!(set("account.thread.t2.claude"), None, "a running thread is not switched under its turn");
+    assert!(e.iter().all(|v| v["key"] != "account.thread.t3.codex" && v["key"] != "account.thread.t3.claude"), "another agent's thread is left alone");
+    assert_eq!(set("account.default.claude"), Some(json!(ac::binding_show("w", 3))), "and new threads start on it");
+    // the running one ends: moving again takes it and leaves the one already there
+    h.commit(&json!({"$":"TurnChanged","thread":"t2","state":"completed","at":8})).await.unwrap();
+    let (_, r) = ask_on(&h, &mut c, "accounts.move_all", json!({"provider":"claude","profile":"w","epoch":3})).await;
+    assert_eq!(r["result"], json!({"moved":1,"already":1,"running":[],"failed":[]}), "{r}");
+    assert_eq!(h.setting("account.thread.t2.claude").await.unwrap_or_default(), ac::binding_show("w", 3));
+    crate::settings::accounts_hub::revoke_client(c.client);
+}
 #[tokio::test] async fn selecting_an_account_keeps_each_accounts_session_and_hands_over_what_it_missed() {
     use crate::settings::accounts as ac;
     let h = hub("acct-select").await;

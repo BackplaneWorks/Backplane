@@ -92,7 +92,7 @@ impl Backplane {
             },
             Event::Plot(b)=>self.plot_received(b,cx),
             Event::Answer(id,reply)=>screens::improvements::answered(self,id,reply,cx),
-            Event::Data(_,v)=>screens::accounts::got(self,v,cx),
+            Event::Data(tag,v)=>if tag=="acct-moveall" {screens::accounts::moved(self,&v)} else {screens::accounts::got(self,v,cx)},
             Event::Voice(f)=>self.voice_frame(f,cx),
             Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
             Event::Term(key,pid,b,reset)=>self.term_frame(&key,pid,&b,reset,cx),
