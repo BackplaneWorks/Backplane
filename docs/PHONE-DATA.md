@@ -13,8 +13,10 @@ natively with typed Codable structs, cache-first. Fresh-home screens only: proje
 
 ## Types
 ```
-Project = {id, title, root, threadCount, updatedAt, waiting, icon, color, css}
-Thread  = {id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, preview, waiting, parent}
+Project = {id, title, root, origin, threadCount, updatedAt, waiting, icon, color, css}
+          origin = the folder's git origin remote, normalized (`github.com/o/r`; "" for none): the key that makes one repository on two machines one project
+Thread  = {id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, preview, waiting, parent, mark?}
+          mark? = {name, short, away}: the machine the thread runs on when it is another one (see One project across machines); absent for this hub's
           state ∈ "idle" | "working" | "asking" | "failed"; preview ≤ 140 chars; waiting = open asks
 Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?}
           kind ∈ "user" | "assistant" | "tool" | "ask" | "note" | "step"
@@ -130,3 +132,20 @@ The hub's Claude and Codex accounts and their sign-in, on a phone. A data/1 sock
 - `account.view {profile}` → `{account:{id, provider, title, label, email, plan, state, line, tone, message, limits:[line], hold, signin, actions:[{label, action, danger}], remove}}`. `signin` is null or the newest sign-in: `{attempt, state, url, code, paste, text, error, busy, done}`. `url` opens in the browser; `code` (Codex) is entered on that page; `paste` (Claude) asks for the code the page shows, sent back with `code`. While `busy`, ask again every 1.5 s.
 - `account.act {profile?, provider?, action, label?, code?}` → `{account}` (remove: the page): `signin` starts a sign-in, `add` {provider, label} adds an account and starts its sign-in, `code` {code} sends Claude's code, `cancel`, `check` (a status check), `remove` (confirm first with `remove`'s words).
 - A push may carry `link`: `account:<id>` (an expired sign-in's alert) opens that account with its sign-in started, instead of the thread. iOS reads it from the APNs payload, Android from `notify`. `backplane://account/<id>` does the same.
+
+## One project across machines (2026-11-07; `native/host/src/mirror.rs`, `present/screen.rs` `recent_unified`)
+A project folder that is the same git repository on two of the owner's linked machines (the same normalized origin: lower-case host, no
+user, port, `.git` or trailing slash; `git@github.com:o/r` = `https://github.com/o/r`) is one sidebar project. Each hub advertises its
+projects' `origin` in `machine_list` (agents) and asks each linked machine for theirs every minute (which also says whether it is away).
+In the native sidebar (`shown.projects`) this hub's project holds the linked machine's threads too, merged by shelf order; the project has
+`machines` (the linked machines whose threads it holds). A linked project of no shared repository keeps its own row (`machine` on it).
+
+The machine marker: a thread of ANOTHER machine has `mark = {name, short, away}` (and `machine` = name) on its row wherever threads are
+listed (project rows, the Active view, whose row also names this hub's project) and on the thread object (`shown.thread.mark`, the header).
+A thread of this machine has no `mark` and looks as it always did. Draw it quiet, below the state dots: `short` in dim text before the age on
+a row, `name` in the header and on hover; `away: true` draws it dimmer and says "away". GPUI: `screens/badge.rs` `machine_text`/`machine_mark`
+(the palette adds ` · short` to the place). Display only: the linked machine's threads never feed this hub's policies.
+
+data/1: `Project.origin`; `Thread.mark?` has the same shape and meaning (absent for this hub's threads). data/1's thread lists are still
+this hub's own threads, so the phones draw `mark` when present; listing, opening and sending to a linked machine's threads on the
+phones (and in the composer's `>thread` mentions, which read this hub's threads only) is not done yet.

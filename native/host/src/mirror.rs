@@ -10,7 +10,7 @@ use std::{collections::HashMap, sync::{Arc, OnceLock, RwLock}};
 pub type Names = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 
 #[derive(Default)]
-pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names> }
+pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>> }
 
 impl Mirrors {
     pub fn set_names(&self, n: Names) { let _ = self.names.set(n); }
@@ -34,5 +34,163 @@ impl Mirrors {
         let g = self.st.read().unwrap();
         let v: Vec<(String, &State)> = names.iter().filter_map(|(l, n)| g.get(l).map(|s| (n.clone(), s))).collect();
         f(&v)
+    }
+}
+
+// ---- one project across machines: the same git repository (its normalized origin remote) -------------------------------------
+/// A remote URL as one string for both forms and any user or port: `git@github.com:o/r.git`, `ssh://git@github.com:22/o/r`,
+/// `https://u@GitHub.com/o/r/` are all `github.com/o/r`. The host is lower-cased; the path keeps its case. A remote on this
+/// machine's disk (a path or `file://`) names nothing another machine can share: "".
+pub fn normalize_origin(url: &str) -> String {
+    let u = url.trim();
+    if u.is_empty() || u.starts_with('/') || u.starts_with('.') || u.starts_with("file:") { return String::new() }
+    let (host, path) = match u.split_once("://") {
+        Some((_, rest)) => { let (auth, path) = rest.split_once('/').unwrap_or((rest, "")); (auth.rsplit('@').next().unwrap_or("").split(':').next().unwrap_or("").to_string(), path.to_string()) }
+        None => match u.split_once(':') { // scp-like `[user@]host:path` (a Windows drive letter is a path, not a host)
+            Some((h, p)) if h.len() > 1 && !h.contains('/') => (h.rsplit('@').next().unwrap_or("").to_string(), p.to_string()),
+            _ => return String::new(),
+        },
+    };
+    let mut path = path.trim_matches('/').to_string();
+    while let Some(p) = path.strip_suffix(".git") { path = p.trim_end_matches('/').to_string() }
+    let host = host.trim().to_lowercase();
+    if host.is_empty() || path.is_empty() { return String::new() }
+    format!("{host}/{path}")
+}
+/// The `url` of `[remote "origin"]` in a git config file's text ("" when there is none).
+pub fn origin_in_config(text: &str) -> String {
+    let mut inside = false;
+    for l in text.lines() {
+        let t = l.trim();
+        if t.starts_with('[') { inside = t.replace(' ', "").to_lowercase() == "[remote\"origin\"]"; continue }
+        if inside { if let Some((k, v)) = t.split_once('=') { if k.trim().eq_ignore_ascii_case("url") { return v.trim().trim_matches('"').to_string() } } }
+    }
+    String::new()
+}
+/// The git config that holds a folder's remotes: the nearest `.git` above it (a worktree's or submodule's `.git` file leads to its
+/// git dir, whose `commondir` leads to the shared one).
+fn config_of(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut d = Some(root);
+    while let Some(dir) = d {
+        let g = dir.join(".git");
+        if g.is_dir() { return Some(g.join("config")) }
+        if g.is_file() {
+            let t = std::fs::read_to_string(&g).ok()?; let gd = t.trim().strip_prefix("gitdir:")?.trim();
+            let gd = if std::path::Path::new(gd).is_absolute() { std::path::PathBuf::from(gd) } else { dir.join(gd) };
+            let common = std::fs::read_to_string(gd.join("commondir")).ok().map(|c| { let c = c.trim(); if std::path::Path::new(c).is_absolute() { std::path::PathBuf::from(c) } else { gd.join(c) } }).unwrap_or(gd);
+            return Some(common.join("config"))
+        }
+        d = dir.parent();
+    }
+    None
+}
+/// A project folder's normalized origin ("" for none), read from its git config (no process), kept for a minute.
+pub fn origin_of_root(root: &str) -> String {
+    static CACHE: OnceLock<RwLock<HashMap<String, (std::time::Instant, String)>>> = OnceLock::new();
+    if root.is_empty() { return String::new() }
+    let c = CACHE.get_or_init(Default::default);
+    if let Some((at, o)) = c.read().unwrap().get(root) { if at.elapsed() < std::time::Duration::from_secs(60) { return o.clone() } }
+    let o = config_of(std::path::Path::new(root)).and_then(|p| std::fs::read_to_string(p).ok()).map(|t| normalize_origin(&origin_in_config(&t))).unwrap_or_default();
+    c.write().unwrap().insert(root.to_string(), (std::time::Instant::now(), o.clone()));
+    o
+}
+/// Which linked machines' projects are shown as one with a project of this machine: `far` project id -> `local` project id, when
+/// their origins are the same (and not ""). `local` and `far` are `(id, normalized origin)`; of several local projects of one
+/// repository, the first in `local`'s order takes the linked ones.
+pub fn unify(local: &[(String, String)], far: &[(String, String)]) -> HashMap<String, String> {
+    let mut by: HashMap<&str, &str> = HashMap::new();
+    for (id, o) in local { if !o.is_empty() { by.entry(o.as_str()).or_insert(id.as_str()); } }
+    far.iter().filter_map(|(f, o)| by.get(o.as_str()).map(|l| (f.clone(), l.to_string()))).collect()
+}
+
+impl Mirrors {
+    /// The origins a linked machine says its projects have (machine_list's `origin`), by the mirror's id `<link>~<id>`; replaces that link's.
+    pub fn set_origins(&self, link: &str, projects: &[(String, String)]) {
+        let mut g = self.origins.write().unwrap();
+        let pre = format!("{link}~"); g.retain(|k, _| !k.starts_with(&pre));
+        for (id, o) in projects { if !o.is_empty() { g.insert(format!("{pre}{id}"), o.clone()); } }
+    }
+    /// A mirrored project's origin ("" when its machine has not said).
+    pub fn origin(&self, far_id: &str) -> String { self.origins.read().unwrap().get(far_id).cloned().unwrap_or_default() }
+    /// Whether a linked machine answered when last asked (the origin watch asks each one every minute).
+    pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); if away { g.insert(link.to_string()); } else { g.remove(link); } }
+    /// The marker of a shown machine, by its name (`mark_of`).
+    pub fn mark(&self, machine: &str) -> Value {
+        let names = self.names.get().map(|n| n()).unwrap_or_default();
+        let away = names.iter().any(|(l, n)| n == machine && self.away.read().unwrap().contains(l));
+        mark_of(machine, away)
+    }
+}
+/// A machine's name as short as a sidebar row shows it: its first DNS label (`framework-1.tail.ts.net` -> `framework-1`); a long
+/// one is its initial.
+pub fn short_name(name: &str) -> String {
+    let first = name.split('.').next().unwrap_or("").trim();
+    if first.chars().count() <= 12 { first.to_string() } else { first.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default() }
+}
+/// The marker on a thread of another machine, wherever threads are listed (sidebar rows, the Active view, the thread header):
+/// `short` on the row, `name` in the header and on hover, `away` when that machine did not answer (drawn dimmer, "away" after it).
+/// A thread of this machine has none.
+pub fn mark_of(machine: &str, away: bool) -> Value {
+    if machine.is_empty() { return Value::Null }
+    serde_json::json!({"name": machine, "short": short_name(machine), "away": away})
+}
+
+/// Ask each linked machine for its projects' origins (machine_list) now and every minute, so the sidebar can show a repository
+/// that is on both machines as one project. Display only: nothing here is a decision.
+pub fn watch_origins(hub: Arc<crate::hub::Hub>) {
+    tokio::spawn(async move {
+        loop {
+            for (link, _, _) in hub.far_machines() {
+                let r = hub.far_call(&link, "machine_list", "machine_list", &serde_json::json!({})).await;
+                hub.mirrors().set_away(&link, r.is_err());
+                if let Ok((true, b)) = r {
+                    let ps: Vec<(String, String)> = b["projects"].as_array().into_iter().flatten().map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["origin"].as_str().unwrap_or("").to_string())).filter(|(i, _)| !i.is_empty()).collect();
+                    hub.mirrors().set_origins(&link, &ps);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
+    });
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+    #[test] fn every_form_of_one_remote_is_one_origin() {
+        let want = "github.com/BackplaneWorks/Backplane";
+        for u in ["git@github.com:BackplaneWorks/Backplane.git", "https://github.com/BackplaneWorks/Backplane", "https://github.com/BackplaneWorks/Backplane.git",
+                  "https://github.com/BackplaneWorks/Backplane/", "https://i2cjak@GitHub.com/BackplaneWorks/Backplane.git/", "ssh://git@github.com:22/BackplaneWorks/Backplane.git",
+                  "ssh://git@GITHUB.COM/BackplaneWorks/Backplane", "  git@github.com:/BackplaneWorks/Backplane.git\n", "https://u:pw@github.com:443/BackplaneWorks/Backplane"] {
+            assert_eq!(normalize_origin(u), want, "{u}");
+        }
+        assert_ne!(normalize_origin("git@github.com:BackplaneWorks/Other.git"), want);
+        for u in ["", "/home/h/repo.git", "../up", "file:///srv/r.git", "C:/r", "https://github.com/"] { assert_eq!(normalize_origin(u), "", "{u:?}"); }
+    }
+    #[test] fn the_origin_is_read_from_the_config_and_through_a_worktree() {
+        let cfg = "[core]\n\tbare = false\n[remote \"upstream\"]\n\turl = git@x.org:a/b\n[remote \"origin\"]\n\turl = https://github.com/BackplaneWorks/Backplane.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n";
+        assert_eq!(origin_in_config(cfg), "https://github.com/BackplaneWorks/Backplane.git"); assert_eq!(origin_in_config("[remote \"upstream\"]\nurl = a:b\n"), "");
+        let d = std::env::temp_dir().join(format!("bp-origin-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let (main, wt) = (d.join("main"), d.join("main/.backplane/worktrees/w"));
+        std::fs::create_dir_all(main.join(".git/worktrees/w")).unwrap(); std::fs::create_dir_all(wt.join("sub")).unwrap();
+        std::fs::write(main.join(".git/config"), cfg).unwrap(); std::fs::write(main.join(".git/worktrees/w/commondir"), "../..\n").unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", main.join(".git/worktrees/w").display())).unwrap();
+        for r in [main.clone(), wt.clone(), wt.join("sub")] { assert_eq!(origin_of_root(&r.to_string_lossy()), "github.com/BackplaneWorks/Backplane", "{r:?}"); }
+        assert_eq!(origin_of_root(&d.to_string_lossy()), ""); assert_eq!(origin_of_root(""), "");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn projects_of_one_repository_are_one_and_others_stay_apart() {
+        let s = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+        let u = unify(&s(&[("p1", "github.com/o/r"), ("p2", ""), ("p3", "github.com/o/r"), ("p4", "gitlab.com/o/x")]), &s(&[("L~a", "github.com/o/r"), ("L~b", ""), ("L~c", "github.com/o/q"), ("M~d", "gitlab.com/o/x")]));
+        assert_eq!(u.len(), 2); assert_eq!(u["L~a"], "p1"); assert_eq!(u["M~d"], "p4");
+        let m = Mirrors::default(); m.set_origins("L", &s(&[("a", "github.com/o/r"), ("b", "")])); assert_eq!((m.origin("L~a").as_str(), m.origin("L~b").as_str()), ("github.com/o/r", ""));
+        m.set_origins("L", &s(&[("c", "x/y")])); assert_eq!((m.origin("L~a").as_str(), m.origin("L~c").as_str()), ("", "x/y"));
+        m.set_names(Arc::new(|| vec![("L".to_string(), "framework-1".to_string())]));
+        assert_eq!(m.mark("framework-1"), serde_json::json!({"name":"framework-1","short":"framework-1","away":false}));
+        m.set_away("L", true); assert_eq!(m.mark("framework-1")["away"], true); m.set_away("L", false); assert_eq!(m.mark("framework-1")["away"], false);
+    }
+    #[test] fn a_marker_is_short_on_the_row_and_full_in_the_header_and_none_for_this_machine() {
+        assert_eq!(mark_of("", false), Value::Null);
+        assert_eq!(mark_of("framework-1.tail9e0cf2.ts.net", true), serde_json::json!({"name":"framework-1.tail9e0cf2.ts.net","short":"framework-1","away":true}));
+        assert_eq!(short_name("a-very-long-machine-name"), "A"); assert_eq!(short_name("desk"), "desk");
     }
 }

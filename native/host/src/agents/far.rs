@@ -87,7 +87,7 @@ impl Agents {
     }
     pub async fn local_projects(&self) -> Value {
         let w = self.world().await;
-        let mut v: Vec<_> = w.projects.iter().filter(|(_, p)| !p.1).map(|(id, p)| json!({"id":id,"name":p.0,"folder":w.roots.get(id).cloned().unwrap_or_default()})).collect();
+        let mut v: Vec<_> = w.projects.iter().filter(|(_, p)| !p.1).map(|(id, p)| { let folder = w.roots.get(id).cloned().unwrap_or_default(); let origin = crate::mirror::origin_of_root(&folder); json!({"id":id,"name":p.0,"folder":folder,"origin":origin}) }).collect();
         v.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
         Value::Array(v)
     }
