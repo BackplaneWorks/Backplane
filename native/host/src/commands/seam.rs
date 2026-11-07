@@ -11,6 +11,8 @@ pub trait Seam: Send + Sync {
     /// Queue.steer.k's idle branch: one queued message runs as a turn of its own (TurnChanged running, the run); nothing is stopped, no "Steered" note,
     /// the rest of the queue stays.
     fn start_one<'a>(&'a self, th: &'a str, text: &'a str) -> Fut<'a, ()>;
+    /// A thread was settled: everything it owns stops (agents/settle.rs).
+    fn settle_work<'a>(&'a self, _th: &'a str) -> Fut<'a, ()> { Box::pin(async {}) }
 }
 impl Seam for Arc<crate::agents::Agents> {
     fn stop<'a>(&'a self, th: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = crate::agents::Agents::stop(self, th).await; }) }
@@ -18,6 +20,7 @@ impl Seam for Arc<crate::agents::Agents> {
     fn start_queued<'a>(&'a self, th: &'a str, text: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = crate::agents::Agents::start_queued(self, th, text).await; }) }
     fn steer<'a>(&'a self, th: &'a str, text: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = crate::agents::Agents::steer(self, th, text).await; }) }
     fn start_one<'a>(&'a self, th: &'a str, text: &'a str) -> Fut<'a, ()> { Box::pin(async move { let _ = crate::agents::Agents::start_one(self, th, text).await; }) }
+    fn settle_work<'a>(&'a self, th: &'a str) -> Fut<'a, ()> { Box::pin(async move { crate::agents::Agents::settle_work(self, th).await }) }
 }
 
 static OVERRIDE: Mutex<Option<Arc<dyn Seam>>> = Mutex::new(None);

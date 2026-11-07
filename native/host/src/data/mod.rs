@@ -254,7 +254,7 @@ async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, cl
     let has = attachments.as_array().map_or(false, |a| !a.is_empty());
     if text.trim().is_empty() && !has { return Err(err("empty message")) }
     // a command of the composer is never a message: an app that does not know `composer.run` would post a side question to the thread, or a secret to the log
-    if crate::session::composer::word_of(text).is_some() { return Err(err("This app is too old for /btw, /give, /secret and /intent. Update it. Nothing was sent.")) }
+    if crate::session::composer::word_of(text).is_some() { return Err(err("This app is too old for /btw, /give, /secret, /intent and /settle. Update it. Nothing was sent.")) }
     if !client_id.is_empty() { if !safe_id(client_id) { return Err(err("clientId: letters, digits and - _ . : only, 64 at most")) } if let Some(e) = recalled(client_id) { return Ok(e) } }
     if !hub.model().await.threads.get(thread).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
     let (meta, paths) = store_attachments(hub, thread, attachments)?;

@@ -35,11 +35,14 @@ fn ok() -> Value { json!({"t":"reply","id":7,"ok":true}) }
 // Hub.request.k 5-10: the flag events, whatever thread the name says
 #[tokio::test] async fn the_flag_requests_log_their_event_and_acknowledge() {
     let h = hub("flags").await;
-    for (m, ev) in [("thread.settle", json!({"$":"ThreadSettled","id":"t1","manual":true,"at":0})), ("thread.unsettle", json!({"$":"ThreadUnsettled","id":"t1","at":0})),
+    for (m, ev) in [("thread.unsettle", json!({"$":"ThreadUnsettled","id":"t1","at":0})),
         ("thread.pin", json!({"$":"ThreadPinned","id":"t1","pinned":true,"at":0})), ("thread.unpin", json!({"$":"ThreadPinned","id":"t1","pinned":false,"at":0})),
         ("thread.unarchive", json!({"$":"ThreadArchived","id":"t1","archived":false,"at":0}))] {
         let (e, r) = ask(&h, m, json!({"thread":"t1"})).await; assert_eq!(e, vec![ev], "{m}"); assert_eq!(r, ok());
     }
+    // Settle also clears the background shells' rows (the seed has some); the agents module is asked to stop the rest
+    let (e, r) = ask(&h, "thread.settle", json!({"thread":"t1"})).await; assert_eq!(r, ok());
+    assert_eq!(e, vec![json!({"$":"ThreadSettled","id":"t1","manual":true,"at":0}), json!({"$":"WorkSet","thread":"t1","kind":"bg","rows":"","at":0})], "thread.settle");
     let (e, r) = ask(&h, "thread.pin", json!({"thread":"nope"})).await; assert_eq!(e.len(), 1); assert_eq!(r, ok());
 }
 // Rename.changes: trimmed, a blank title changes nothing

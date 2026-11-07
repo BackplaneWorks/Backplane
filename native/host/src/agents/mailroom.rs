@@ -2,7 +2,8 @@
 //! not a person's goes through `Agents::inbound`, which may file it for the uberbot instead of delivering it. With no mailroom installed (a test hub) everything is delivered.
 use super::Agents;
 use crate::api::Fut;
-use serde_json::Value;
+use serde_json::{json, Value};
+use super::now_s;
 use std::sync::Arc;
 
 /// What becomes of a message (Mail.funnel): delivered, filed instead (the result is the filing's), or delivered and filed
@@ -52,6 +53,12 @@ impl Agents {
     /// the same, filed under `r` (a wake's reference is not the one its delivery carries)
     #[allow(clippy::too_many_arguments)]
     pub async fn inbound_ref(self: &Arc<Self>, role: &str, thread: &str, msg: &str, text: &str, origin: Origin, r: &str, extra: Vec<Value>) -> Result<(), String> {
+        // a settled thread is not started again by what the hub sends it on its own (a work or lock end, a task result, a wake, a launched thread's report):
+        // the message is filed and the thread stays as it is; a person's message, or one from another thread, still reaches it
+        if matches!(origin.1.as_str(), "system" | "task" | "wake" | "launch") && self.world().await.threads.get(thread).map_or(false, |t| t.settled) {
+            let mut ev = extra; ev.push(json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"system","text":text,"at":now_s()}));
+            self.commit_events(ev).await; return Ok(())
+        }
         let Some(m) = self.mailroom() else { return self.deliver_as(role, thread, msg, text, Some(origin), extra).await };
         match m.funnel(role, thread, msg, text, &origin, r, &extra).await {
             Funnel::Deliver => self.deliver_as(role, thread, msg, text, Some(origin), extra).await,

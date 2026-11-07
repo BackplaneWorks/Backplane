@@ -67,6 +67,14 @@ impl Agents {
         l
     }
 
+    /// Every lock the thread holds or waits for (as itself: its own claims, not its work's, which work_cancel frees).
+    pub(super) async fn locks_drop(self: &Arc<Self>, th: &str) {
+        for n in self.lock_names().await {
+            if !self.lock_get(&n).await.has(th) { continue }
+            let _g = self.work_lock.lock().await;
+            if self.lock_get(&n).await.owner() == th { self.lock_free(&n, th).await; } else { self.lock_leave(&n, th).await; }
+        }
+    }
     pub async fn tool_lock_acquire(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         if crate::copy::on() { return fail(COPY_LINE) }
         let name = s(a, "name"); if !name_ok(name) { return fail(BAD_NAME) }

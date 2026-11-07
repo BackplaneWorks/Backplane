@@ -142,6 +142,8 @@ impl RpcHandler for Commands {
             // BotFx gone (thread.delete): the thread's browser page closes (the term lane's `browser.close`; no events)
             let wtc = pl.wt.clone().map(|(th, root, mode, src, op)| { let (pv, bd) = capture(&f, &th, &pl.events); (th, root, mode, src, pv, bd, op) });
             drop(f); // what follows may wait on an agent or a helper: the next command must not wait with it
+            // Settle: the log says settled first, then whatever the thread owns stops (a report that arrives meanwhile finds it settled)
+            if method == "thread.settle" { if let Some(s) = self.agents() { s.settle_work(p["thread"].as_str().unwrap_or("")).await } }
             // BotFx gone (thread.delete): the page closes after the reply, in a task (a slow helper must not hold anything)
             if method == "thread.delete" { if let Some(h) = hub.rpc_for("browser.close") { let (hub, th) = (hub.clone(), p["thread"].as_str().unwrap_or("").to_string()); tokio::spawn(async move { let _ = h.call(&hub, &Caller { gen: String::new(), client: 0 }, &json!(0), "browser.close", &json!({"thread": th})).await; }); } }
             // BotFx scratch (an out, so after the changes): the folder exists before the reply, and before anything runs in it

@@ -15,6 +15,8 @@ pub struct T {
     pub env: String, pub branch: String, pub last_assistant: String,
     /// when the running turn began (the turn that is running now): a restart carries on the oldest first. 0 from a checkpoint older than this field: they go by id
     #[serde(default)] pub running_at: u64,
+    /// settled and not woken since: nothing the hub does by itself (a report, a wake, a restart) starts it again
+    #[serde(default)] pub settled: bool,
 }
 
 /// A delegated task: its state is one of queued, running, done, failed, cancelled; a terminal state sticks (TaskState.next).
@@ -38,7 +40,7 @@ pub const CARRIES: [&str; 8] = ["claude", "codex", "grok", "muse", "antigravity"
 /// A thread that may go on: the setting is on, it is live, has made progress since the last carry, and its agent can resume. One of the process-per-turn providers
 /// needs a session to resume: with none the turn was cut before it began, and the note "continue where you left off" would reach an agent that knows nothing of it.
 pub fn carry_may(t: &T, restart_continue: &str) -> bool {
-    restart_continue != "off" && !t.archived && !t.deleted && !t.carry_text_last && CARRIES.contains(&t.provider.as_str()) && (t.provider == "claude" || !t.session.is_empty())
+    restart_continue != "off" && !t.archived && !t.deleted && !t.settled && !t.carry_text_last && CARRIES.contains(&t.provider.as_str()) && (t.provider == "claude" || !t.session.is_empty())
 }
 /// Carry.will: a turn the restart cut short carries on when it was running and may go on.
 pub fn carry_will(t: &T, restart_continue: &str) -> bool { t.turn == "running" && carry_may(t, restart_continue) }
@@ -68,7 +70,7 @@ impl World {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 37] = ["LockChanged", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
+        const READ: [&str; 40] = ["ThreadSettled", "ThreadUnsettled", "ThreadWoke", "LockChanged", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -105,6 +107,8 @@ impl World {
             "AskClosed" => if let Some(a) = self.asks.remove(&g("id")) { if a.kind == "approval" && g("answer") == "session" { self.sessions.insert((a.thread, a.tool)); } },
             "ThreadArchived" => if let Some(x) = self.threads.get_mut(&g("id")) { x.archived = v.get("archived").and_then(Value::as_bool).unwrap_or(false) },
             "ThreadDeleted" => if let Some(x) = self.threads.get_mut(&g("id")) { x.deleted = true },
+            "ThreadSettled" => if let Some(x) = self.threads.get_mut(&g("id")) { x.settled = true },
+            "ThreadUnsettled" | "ThreadWoke" => if let Some(x) = self.threads.get_mut(&g("id")) { x.settled = false },
             "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { let st = g("state"); if st == "running" && x.turn != "running" { x.running_at = v.get("at").and_then(Value::as_u64).unwrap_or(0) } x.turn = st },
             "MessagePosted" => if let Some(x) = self.threads.get_mut(&g("thread")) {
                 x.newest = g("msg");
