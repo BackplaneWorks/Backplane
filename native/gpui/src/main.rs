@@ -8,6 +8,7 @@ mod plat;
 mod launch;
 mod local;
 mod pairing;
+mod hubs;
 mod perf;
 mod screens;
 mod script;
@@ -26,7 +27,7 @@ use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
 use script::{Pending,Step};
 use hub::{Command,Event};
 actions!(backplane,[Send,ClosePopup,CopySelection,ToggleSidebarKey,FocusSearchKey,OpenPaletteKey]);
-pub struct Backplane { pub pair:Option<screens::pair::Ui>, pub paired:bool,
+pub struct Backplane { pub pair:Option<screens::pair::Ui>, pub paired:bool, /** the hubs this device knows (the first is in use) */ pub hubs:Vec<hubs::Hub>, /** the sidebar picker's menu is open */ pub hub_menu:bool, /** this window has a hub to go back to from the pairing form */ pub has_hub:bool,
     pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String, note:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, started:Instant, usable:bool,
@@ -59,7 +60,7 @@ impl Backplane {
         let input=cx.new(screens::composer::Composer::new);input.focus_handle(cx).focus(window);
         let local=local::Local::load();
         let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=config.token_file.with_file_name("gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
-        let pair=screens::pair::start(config.unpaired,config.pair_link.as_deref(),cx);let paired=config.paired;
+        eprintln!("GPUI_LOG {}",serde_json::json!({"hub_in_use":pairing::host_port(&config.hub).0}));let pair=screens::pair::start(config.unpaired,config.pair_link.as_deref(),cx);let paired=config.paired;let has_hub=!config.unpaired;
         cx.spawn(async move |weak,cx|{while let Ok(link)=OPENED.1.recv().await {if weak.update(cx,|this,cx|screens::pair::incoming(this,&link,cx)).is_err(){break;}}}).detach();
         let(hub_at,token_file)=(screens::attach::Target::from(&config.hub,&config.token_file),config.token_file.clone());
         let(tx,events)=hub::connect(config);
@@ -73,7 +74,7 @@ impl Backplane {
         }).detach();
         cx.subscribe(&input,|this,_,event:&screens::composer::ComposerEvent,cx|this.attach_event(event,cx)).detach();
         cx.on_app_quit(|this,_|{this.screens.drafts.flush();async{}}).detach();
-        Self{pair,paired,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
+        Self{pair,paired,hubs:hubs::load(),hub_menu:false,has_hub,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         let timed=perf::on().then(||(event.name(),Instant::now()));
