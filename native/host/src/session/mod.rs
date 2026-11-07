@@ -23,6 +23,8 @@ mod actor;
 #[allow(dead_code)] pub mod slash;
 pub mod thread_actions;
 pub mod pages;
+pub mod event_type;
+pub use event_type::event_type;
 pub use actor::{forget, is_job, record_answer, record_read, record_read_bound, record_reply, record_reply_bound, record_reply_bound_m, replied, replied_late, take_reads};
 pub fn start(_hub: &Arc<Hub>) {}
 
@@ -49,15 +51,6 @@ fn target_valid(t: &Value) -> bool {
     if o.len() != 2 { return false }
     let (Some(k), Some(i)) = (o.get("kind").and_then(Value::as_str), o.get("id").and_then(Value::as_str)) else { return false };
     within(i, 1024) && ((k == "recent" && i.is_empty()) || (!i.is_empty() && matches!(k, "project" | "thread" | "bot" | "room")))
-}
-
-/// The event type of a log line: `{"$":"Type",…}`, tolerant of JSON whitespace (`{ "$" : "Type"`), as the JSON parse of hub and `Model` are. A line
-/// that is not an object starting with a `$` string field gives None. The fast path is the compact form the hub writes itself; hand-written logs
-/// (Python's json.dumps puts a space after the colon) took the strict `strip_prefix` filters of agents/bots/commands to "no such event".
-pub fn event_type(line: &str) -> Option<&str> {
-    if let Some(r) = line.strip_prefix("{\"$\":\"") { return r.split('"').next() }
-    let r = line.trim_start().strip_prefix('{')?.trim_start().strip_prefix("\"$\"")?.trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
-    r.split('"').next()
 }
 
 /// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would

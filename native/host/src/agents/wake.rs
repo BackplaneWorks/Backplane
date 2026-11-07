@@ -64,9 +64,9 @@ pub fn signals(end: u8, at: u64, thread: &str, ask: Option<(&str, u64)>, idle: b
 pub struct Book { wakes: HashMap<String, Wake>, seen: HashMap<String, String>, at: usize }
 impl Book {
     fn path(store: &crate::store::Store) -> std::path::PathBuf { crate::ckpt::dir(store.path()).join("wakes.json") }
-    fn load(store: &crate::store::Store) -> Option<Book> { let b = crate::ckpt::load_json(&Self::path(store), store, |b: &Book| b.at); if let Some(b) = &b { crate::ckpt::saved("wakes", b.at);
+    fn load(store: &crate::store::Store) -> Option<Book> { let b = crate::ckpt::load_json(&Self::path(store), store, crate::ckpt::stamps::WAKES, |b: &Book| b.at); if let Some(b) = &b { crate::ckpt::saved("wakes", b.at);
         if crate::ckpt::check_on() { let (s, n, a) = (store.clone(), b.at, serde_json::to_value(b).unwrap_or_default()); std::thread::spawn(move || { let mut f = Book::default(); while f.at < n { let e = (f.at + 4096).min(n); if let Ok(ls) = s.range(f.at, e) { for l in ls { f.apply(&l) } } f.at = e; } crate::ckpt::check("wakes book", a, serde_json::to_value(&f).unwrap_or_default()) }); } } b }
-    fn save(&self, store: &crate::store::Store) { if crate::ckpt::due("wakes", self.at) { crate::ckpt::save_json(&Self::path(store), store, self.at, self); crate::ckpt::saved("wakes", self.at) } }
+    fn save(&self, store: &crate::store::Store) { if crate::ckpt::due("wakes", self.at) { crate::ckpt::save_json(&Self::path(store), store, self.at, crate::ckpt::stamps::WAKES, self); crate::ckpt::saved("wakes", self.at) } }
     fn apply(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
         if !matches!(t, "WakeSet" | "WakeDropped" | "SettingSet" | "ThreadDeleted") { return }

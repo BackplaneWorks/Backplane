@@ -100,7 +100,7 @@ impl Model {
         let meta = serde_json::to_vec(&json!({"threads": self.threads, "projects": self.projects, "settings": self.settings}))?;
         let mut own: Vec<(&String, &Vec<Ent>)> = self.own.iter().collect(); own.sort_by(|a, b| a.0.cmp(b.0));
         let mut sent: Vec<(&String, &Vec<Ent>)> = self.sent.iter().collect(); sent.sort_by(|a, b| a.0.cmp(b.0));
-        let header = serde_json::to_vec(&json!({"v": crate::ckpt::VERSION, "lines": self.lines, "fp": crate::ckpt::fingerprint(store, self.lines as usize), "next_ord": self.next_ord,
+        let header = serde_json::to_vec(&json!({"v": crate::ckpt::VERSION, "stamp": crate::ckpt::stamps::MODEL, "lines": self.lines, "fp": crate::ckpt::fingerprint(store, self.lines as usize), "next_ord": self.next_ord,
             "meta": meta.len(), "all": self.all.len(), "own": own.iter().map(|(k, v)| json!([k, v.len()])).collect::<Vec<_>>(), "sent": sent.iter().map(|(k, v)| json!([k, v.len()])).collect::<Vec<_>>()}))?;
         let mut bin = Vec::with_capacity(self.all.len() * 4 + (self.own.values().chain(self.sent.values()).map(Vec::len).sum::<usize>()) * 8);
         for s in &self.all { bin.extend(s.to_le_bytes()); }
@@ -113,7 +113,7 @@ impl Model {
         let raw = std::fs::read(Self::path(store)).ok()?;
         let nl = raw.iter().position(|b| *b == b'\n')?;
         let h: Value = serde_json::from_slice(&raw[..nl]).ok()?;
-        if h["v"].as_u64()? != crate::ckpt::VERSION { return None }
+        if h["v"].as_u64()? != crate::ckpt::VERSION || h["stamp"].as_u64() != Some(crate::ckpt::stamps::MODEL) { return None }
         let lines = h["lines"].as_u64()? as usize;
         if lines > store.len() || h["fp"].as_u64()? != crate::ckpt::fingerprint(store, lines) { return None }
         let (meta_len, all_len) = (h["meta"].as_u64()? as usize, h["all"].as_u64()? as usize);
@@ -267,6 +267,18 @@ mod tests {
         assert!(n >= 80, "{n} pages compared");
     }
     // a model saved and loaded is the model, and the lines past the save are folded onto it
+    #[test] fn a_model_saved_by_another_fold_is_folded_again() {
+        let d = std::env::temp_dir().join(format!("bp-model-st-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("events.jsonl"); std::fs::copy(fixtures().join("pages.jsonl"), &p).unwrap();
+        let s = Store::open(&p).unwrap(); let m = Model::open(&s).unwrap(); assert!(m.save(&s).unwrap()); assert!(Model::load(&s).is_some(), "its own fold: it loads");
+        let f = Model::path(&s); let raw = std::fs::read(&f).unwrap(); let nl = raw.iter().position(|b| *b == b'\n').unwrap();
+        let mut h: Value = serde_json::from_slice(&raw[..nl]).unwrap();
+        let rewrite = |h: &Value| { let mut b = serde_json::to_vec(h).unwrap(); b.extend_from_slice(&raw[nl..]); std::fs::write(&f, b).unwrap(); };
+        h["stamp"] = json!(2); rewrite(&h); assert!(Model::load(&s).is_none(), "another fold's");
+        h.as_object_mut().unwrap().shift_remove("stamp"); rewrite(&h); assert!(Model::load(&s).is_none(), "from before stamps");
+        assert_eq!(Model::open(&s).unwrap().digest(), m.digest(), "the log gives the same model");
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn a_saved_model_loads_and_takes_the_tail() {
         let d = std::env::temp_dir().join(format!("bp-model-ck-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
         let p = d.join("events.jsonl"); let all = std::fs::read_to_string(fixtures().join("pages.jsonl")).unwrap();

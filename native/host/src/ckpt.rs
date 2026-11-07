@@ -6,6 +6,9 @@ use crate::store::Store;
 use std::path::{Path, PathBuf};
 
 pub const VERSION: u64 = 1;
+/// One number per fold: a hash of the code it is made of (`fold_inputs.rs`, `build.rs`). `VERSION` says what a checkpoint's file looks like; this says which fold wrote what is in it.
+/// A fold that changes reads the same log differently, so its old checkpoint is ignored and the log folded again. No one has to remember to bump anything.
+pub mod stamps { include!(concat!(env!("OUT_DIR"), "/fold_stamps.rs")); }
 
 /// `<home>/ckpt` for a log at `<home>/events.jsonl`.
 pub fn dir(events: &Path) -> PathBuf { events.parent().unwrap_or(Path::new(".")).join("ckpt") }
@@ -52,16 +55,16 @@ pub mod pairs {
 }
 
 /// A fold saved as JSON with the number of log lines it covers and the log's fingerprint there.
-pub fn save_json<T: serde::Serialize>(path: &Path, store: &Store, lines: usize, v: &T) {
-    #[derive(serde::Serialize)] struct Snap<'a, T> { v: u64, lines: usize, fp: u64, data: &'a T }
-    let r = serde_json::to_vec(&Snap { v: VERSION, lines, fp: fingerprint(store, lines), data: v }).map_err(std::io::Error::from).and_then(|b| write_atomic(path, &[&b]));
+pub fn save_json<T: serde::Serialize>(path: &Path, store: &Store, lines: usize, stamp: u64, v: &T) {
+    #[derive(serde::Serialize)] struct Snap<'a, T> { v: u64, stamp: u64, lines: usize, fp: u64, data: &'a T }
+    let r = serde_json::to_vec(&Snap { v: VERSION, stamp, lines, fp: fingerprint(store, lines), data: v }).map_err(std::io::Error::from).and_then(|b| write_atomic(path, &[&b]));
     if let Err(e) = r { eprintln!("checkpoint: {} not saved: {e}", path.display()) }
 }
 /// `save_json`'s file, when it is of this log: the value, which `lines_of` says covers that many lines.
-pub fn load_json<T: serde::de::DeserializeOwned>(path: &Path, store: &Store, lines_of: impl Fn(&T) -> usize) -> Option<T> {
-    #[derive(serde::Deserialize)] struct Snap<T> { v: u64, lines: usize, fp: u64, data: T }
+pub fn load_json<T: serde::de::DeserializeOwned>(path: &Path, store: &Store, stamp: u64, lines_of: impl Fn(&T) -> usize) -> Option<T> {
+    #[derive(serde::Deserialize)] struct Snap<T> { v: u64, #[serde(default)] stamp: u64, lines: usize, fp: u64, data: T }
     let snap: Snap<T> = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    if snap.v != VERSION || snap.lines > store.len() || snap.fp != fingerprint(store, snap.lines) || lines_of(&snap.data) != snap.lines { return None }
+    if snap.v != VERSION || snap.stamp != stamp || snap.lines > store.len() || snap.fp != fingerprint(store, snap.lines) || lines_of(&snap.data) != snap.lines { return None }
     Some(snap.data)
 }
 
@@ -99,4 +102,30 @@ pub fn take<T: 'static>(name: &str, store: &Store, f: impl FnOnce() -> Option<T>
     let key = format!("{name}:{}", store.path().display());
     let h = { let mut p = PRE.lock().unwrap(); p.iter().position(|(n, _)| *n == key).map(|i| p.remove(i).1) };
     match h { Some(h) => h.join().ok().flatten().and_then(|b| b.downcast::<T>().ok()).map(|b| *b), None => f() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn rig(t: &str) -> (PathBuf, Store) {
+        let d = std::env::temp_dir().join(format!("bp-ckpt-{}-{t}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("events.jsonl"); std::fs::write(&p, "{\"$\":\"A\",\"at\":1}\n").unwrap(); let s = Store::open(&p).unwrap(); (d, s)
+    }
+    fn load(p: &Path, s: &Store, stamp: u64) -> Option<usize> { load_json(p, s, stamp, |n: &usize| *n) }
+    #[test] fn a_checkpoint_loads_only_for_the_fold_that_wrote_it() {
+        let (d, s) = rig("stamp"); let p = d.join("x.json"); save_json(&p, &s, 1, 11, &1usize);
+        assert_eq!(load(&p, &s, 11), Some(1), "the same fold: it must load, or every start would refold");
+        assert_eq!(load(&p, &s, 12), None, "another fold read this log differently: it folds the log itself");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn a_checkpoint_from_before_stamps_is_not_trusted() {
+        let (d, s) = rig("old"); let p = d.join("x.json");
+        std::fs::write(&p, format!("{{\"v\":{VERSION},\"lines\":1,\"fp\":{},\"data\":1}}", fingerprint(&s, 1))).unwrap();
+        assert_eq!(load(&p, &s, stamps::COMMANDS), None, "this is what repairs a home a stale checkpoint already lost state on");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn every_fold_has_its_own_stamp() {
+        let all = [stamps::MODEL, stamps::STATE, stamps::COMMANDS, stamps::AGENTS, stamps::BOTS, stamps::WAKES, stamps::FEED, stamps::PEERS];
+        let mut u = all.to_vec(); u.sort(); u.dedup(); assert_eq!(u.len(), all.len(), "one fold changing must not refold the others"); assert!(!all.contains(&0));
+    }
 }

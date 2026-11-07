@@ -127,10 +127,10 @@ impl Feed {
         let local = tokio::task::spawn_blocking(move || {
             let len = h.store.len();
             let path = crate::ckpt::dir(h.store.path()).join("feed.json");
-            let mut ix = crate::ckpt::load_json(&path, &h.store, |i: &Index| i.applied as usize).unwrap_or_default();
+            let mut ix = crate::ckpt::load_json(&path, &h.store, crate::ckpt::stamps::FEED, |i: &Index| i.applied as usize).unwrap_or_default();
             crate::ckpt::saved("feed", ix.applied as usize);
             let mut at = ix.applied as usize;
-            crate::ckpt::register(move |store| { let g = me.st.lock().unwrap(); let n = g.0.applied as usize; if g.0.built && crate::ckpt::due("feed", n) { crate::ckpt::save_json(&path, store, n, &g.0); crate::ckpt::saved("feed", n) } });
+            crate::ckpt::register(move |store| { let g = me.st.lock().unwrap(); let n = g.0.applied as usize; if g.0.built && crate::ckpt::due("feed", n) { crate::ckpt::save_json(&path, store, n, crate::ckpt::stamps::FEED, &g.0); crate::ckpt::saved("feed", n) } });
             while at < len {
                 let to = (at + CHUNK).min(len);
                 for (i, l) in h.store.range(at, to).unwrap_or_default().iter().enumerate() {
