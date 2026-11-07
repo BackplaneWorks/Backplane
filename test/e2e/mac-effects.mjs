@@ -60,16 +60,18 @@ await set('files.max.mb','3');
 const again=await up(2,'again');
 row('S02 files.max.mb=3',again.status===200&&onDisk('again'),`same 2 MB upload after raising the limit to 3 -> ${again.status}, stored ${onDisk('again')}`);
 // person.tz: the hub's own clock tool, called the way an agent calls it (MCP URL from the stand-in agent's argv)
-await c.rpc('turn.start',{thread:T,text:'hello zqshort'}); await until(()=>existsSync(OUT+'/fake.log.argv'),8000);
+const bot=(await c.rpc('bots.create',{name:'ada'})).bot; await until(()=>has(e=>e.$==='BotSet'&&e.id===bot)); const BT=events().find(e=>e.$==='BotSet'&&e.id===bot).thread;
+await c.rpc('turn.start',{thread:BT,text:'hello zqshort'}); await until(()=>existsSync(OUT+'/fake.log.argv'),8000);
 const url=/"url":"(http:\/\/127\.0\.0\.1:\d+\/mcp\/[^"]+)"/.exec(readFileSync(OUT+'/fake.log.argv','utf8'))?.[1];
 const tool=async(name,args={})=>{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});const j=await r.json();const t=j?.result?.content?.[0]?.text;try{return JSON.parse(t)}catch{return {raw:t,j}}};
 if(!url) row('S11 person.tz',false,'no MCP url in the stand-in agent argv');
 else{
+  await c.rpc('bots.routine',{bot,routine:'ro1',name:'morning',schedule:'daily 09:30',prompt:'p'}); await sleep(500);
   const zones=['Asia/Tokyo','America/New_York','Europe/Helsinki']; const res=[];
-  for(const z of zones){await set('person.tz',z); const r=await tool('person_timezone'); const want=new Intl.DateTimeFormat('en-GB',{timeZone:z,hour:'2-digit',hour12:false}).format(new Date());
-    const got=String(r.iso||r.localTime||'').match(/T(\d\d):/)?.[1]||String(r.localTime||'').match(/(\d\d):\d\d/)?.[1];
-    res.push({z,zone:r.zone,source:r.source,offset:r.offset,iso:r.iso,want,got,ok:r.zone===z&&r.source==='set'&&got===want.padStart(2,'0')})}
-  row('S11 person.tz',res.every(x=>x.ok),res.map(x=>`${x.z}: zone=${x.zone} source=${x.source} offset=${x.offset} iso=${x.iso} (hour ${x.got}, expected ${x.want})`).join(' | '));
+  for(const z of zones){await c.rpc('zone.set',{zone:z}); await sleep(400); const r=await tool('person_timezone'); const want=new Intl.DateTimeFormat('en-GB',{timeZone:z,hour:'2-digit',hour12:false}).format(new Date());
+    if(!r.zone)console.log("RAW",JSON.stringify(r).slice(0,400));const rl=await tool('routine_list'); if(process.env.RAW)console.log('ROUTINES',JSON.stringify(rl).slice(0,500)); const got=String(r.iso||r.localTime||'').match(/T(\d\d):/)?.[1]||String(r.localTime||'').match(/(\d\d):\d\d/)?.[1];
+    res.push({z,next:(rl.find?.(x=>x.id==='ro1')||{}).next,zone:r.zone,source:r.source,offset:r.offset,iso:r.iso,want,got,ok:r.zone===z&&r.source==='set'&&got===want.padStart(2,'0')&&String((rl.find?.(x=>x.id==='ro1')||{}).next).includes('T09:30')})}
+  row('S11 person.tz',res.every(x=>x.ok),res.map(x=>`${x.z}: zone=${x.zone} source=${x.source} offset=${x.offset} iso=${x.iso}, a daily 09:30 routine next fires ${x.next} (hour ${x.got}, expected ${x.want})`).join(' | '));
 }
 // telemetry.share: whether the hub opens any non-loopback connection or sends anything, with it on and off
 const conns=()=>{try{return execFileSync('lsof',['-nP','-a','-p',String(pid),'-i'],{stdio:['ignore','pipe','ignore']}).toString().split('\n').filter(l=>/->/.test(l)&&!/->(127\.0\.0\.1|\[::1\]|localhost)/.test(l))}catch{return []}};
