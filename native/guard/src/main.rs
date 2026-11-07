@@ -13,7 +13,7 @@ const USAGE: &str = "usage: backplane hub status                 what the hub is
        backplane hub update BUILD             run this build on probation; one failure goes back
        backplane hub stop                     stop the hub and its guard (only at the machine)
        backplane hub log                      where the logs are, and the last incidents
-       backplane hub run --home DIR --port N [--host A] [--builds DIR] [--build ID | --bin DIR] [--log F] [--pidfile F] [--mem 6G] [--safe] [--default] [-- HUB ARGS]
+       backplane hub run --home DIR --port N [--host A] [--builds DIR] [--build ID | --bin DIR] [--log F] [--pidfile F] [--safe] [--default] [-- HUB ARGS]
 Which hub: --home DIR, else $BACKPLANE_HOME, else the one started with --default.
 Another machine: --url http://HOST:PORT --token-file F (restart, safe, normal, rollback, status).
 ";
@@ -52,14 +52,14 @@ fn start_guard(d: &Dir, safe: bool) -> Result<(), String> {
     let me = std::env::current_exe().map_err(|e| e.to_string())?;
     let s = |k: &str| l[k].as_str().unwrap_or("").to_string();
     let mut args: Vec<String> = vec!["hub".into(), "run".into(), "--home".into(), s("home"), "--port".into(), l["port"].to_string(), "--host".into(), s("host")];
-    for (k, f) in [("builds", "--builds"), ("log", "--log"), ("pidfile", "--pidfile"), ("mem", "--mem")] { if !s(k).is_empty() { args.push(f.into()); args.push(s(k)); } }
+    for (k, f) in [("builds", "--builds"), ("log", "--log"), ("pidfile", "--pidfile")] { if !s(k).is_empty() { args.push(f.into()); args.push(s(k)); } }
     let st = d.json("status.json"); if let Some(b) = st["build"].as_str() { if !b.is_empty() { args.push("--build".into()); args.push(b.into()); } }
     if safe { args.push("--safe".into()) } if l["default"] == true { args.push("--default".into()) }
     let extra: Vec<String> = l["hubArgs"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
     if !extra.is_empty() { args.push("--".into()); args.extend(extra); }
-    let mem = s("mem");
-    let mut c = if !mem.is_empty() && cfg!(target_os = "linux") && Command::new("systemd-run").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(false, |x| x.success()) {
-        let mut c = Command::new("systemd-run"); c.args(["--user", "--scope", "-q", "-p", &format!("MemoryMax={mem}"), "-p", "MemorySwapMax=0", "--"]).arg(&me); c
+    // a scope of its own (not the guard's), with no memory cap: `--mem` is accepted and ignored
+    let mut c = if cfg!(target_os = "linux") && Command::new("systemd-run").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(false, |x| x.success()) {
+        let mut c = Command::new("systemd-run"); c.args(["--user", "--scope", "-q", "--"]).arg(&me); c
     } else { Command::new(&me) };
     c.args(&args).env_remove("BACKPLANE_AGENT_OWNER").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     for (k, v) in l["env"].as_object().into_iter().flatten() { if let Some(v) = v.as_str() { c.env(k, v); } }

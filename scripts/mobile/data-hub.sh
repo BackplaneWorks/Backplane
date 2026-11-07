@@ -1,5 +1,5 @@
 #!/bin/sh
-# A Rust hub of our own for the phone checks (stand-in agents, loopback only, capped scope), seeded with a project and two threads.
+# A Rust hub of our own for the phone checks (stand-in agents, loopback only, own scope), seeded with a project and two threads.
 # usage: scripts/mobile/data-hub.sh start | stop | link     (PORT default 3841; HUBBIN default the gpui checkout's release build)
 set -eu
 BUN=$(command -v bun)   # before PATH is cut down below
@@ -44,7 +44,7 @@ PY
   [ "${LIVE:-}" = 1 ] && { printf '#!/bin/sh\nexport BACKPLANE_CHROME=${CHROME:-/usr/bin/google-chrome}\nexec %s %s/tools/browser/src/main.ts "$@"\n' "$BUN" "$ROOT" > $H/bin/backplane-browser; chmod +x $H/bin/backplane-browser; export BACKPLANE_BROWSER=$H/bin/backplane-browser; }
   export BACKPLANE_AGENTS=$H/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=${STANDIN:-stream} BP_STREAM_N=8 BP_STREAM_MS=200
   cd $H/proj
-  nohup systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 nice -n 10 $HUBBIN --home $H/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground > $H/hub.log 2>&1 &
+  nohup systemd-run --user --scope -q nice -n 10 $HUBBIN --home $H/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground > $H/hub.log 2>&1 &
   echo $! > $H/pid; sleep 4; curl -s -m3 http://127.0.0.1:$PORT/hello | head -c 160; echo ;;
 link) echo "http://10.0.2.2:$PORT/#token=$(cat $H/home/token)" ;;
 stop) kill "$(cat $H/pid)" 2>/dev/null || true; rm -f $H/pid; echo stopped ;;

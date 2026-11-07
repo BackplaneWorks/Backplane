@@ -9,11 +9,11 @@
 #   scripts/fresh.sh pair        a pairing link for your phone (with FRESH_TAILNET_PORT: the https tailnet address first, the tailnet IP second); single use, short lived
 #   scripts/fresh.sh reset       stop and delete the fresh home (asks first)
 #   scripts/fresh.sh log         where the logs are
-# Env: FRESH_DIR (~/.backplane-gpui-fresh), FRESH_PORT (3797), FRESH_MEM (6G, the hub's cap), FRESH_AGENT ("claude:claude-sonnet-5-5": provider:model for new threads;
+# Env: FRESH_DIR (~/.backplane-gpui-fresh), FRESH_PORT (3797), FRESH_AGENT ("claude:claude-sonnet-5-5": provider:model for new threads;
 # empty for the hub's own default), FRESH_TAILNET_PORT (a free port, e.g. 8451: also serve the hub to your phone over HTTPS on your tailnet, `--tailnet-only`; needs a hub
 # build that has the flag; `stop` removes that one `tailscale serve --https=<port>` entry, never `serve reset`), BIN (a folder with backplane-hub, backplane-gpui, assets/; default: the dev build `dev-cut.sh` published last).
 set -eu
-D=${FRESH_DIR:-$HOME/.backplane-gpui-fresh}; PORT=${FRESH_PORT:-3797}; H=$D/home; MEM=${FRESH_MEM:-6G}; AGENT=${FRESH_AGENT-claude:claude-sonnet-5-5}
+D=${FRESH_DIR:-$HOME/.backplane-gpui-fresh}; PORT=${FRESH_PORT:-3797}; H=$D/home; AGENT=${FRESH_AGENT-claude:claude-sonnet-5-5}
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}
 if [ -z "${BIN:-}" ]; then [ -f "$DEV/CURRENT" ] && BIN=$DEV/builds/$(head -1 "$DEV/CURRENT") || { echo "no build: set BIN=<folder with backplane-hub and backplane-gpui>" >&2; exit 1; }; fi
 die() { echo "fresh: $*" >&2; exit 1; }
@@ -63,17 +63,17 @@ if ! alive "$(pid hub)"; then
   if [ ! -s "$H/events.jsonl" ] && [ -n "$AGENT" ]; then   # a new home: new threads start on this provider and model
     t=$(date +%s); printf '{"$":"SettingSet","key":"agent.provider","value":"%s","at":%s}\n{"$":"SettingSet","key":"agent.model","value":"%s","at":%s}\n' "${AGENT%%:*}" "$t" "${AGENT#*:}" "$t" > "$H/events.jsonl"
   fi
-  # the hub: your own HOME (the agents' sign-ins are yours), no copy switches, in its own memory-capped scope
+  # the hub: your own HOME (the agents' sign-ins are yours), no copy switches, in its own scope
   TN=; if [ -n "${FRESH_TAILNET_PORT:-}" ]; then case "$FRESH_TAILNET_PORT" in 443|3787|3788|"$PORT") die "FRESH_TAILNET_PORT $FRESH_TAILNET_PORT is not free to use";; esac; if tailscale serve status 2>/dev/null | grep -q "ts.net:$FRESH_TAILNET_PORT "; then die "tailscale serve port $FRESH_TAILNET_PORT is already used on this machine (tailscale serve status): pick another FRESH_TAILNET_PORT"; fi; TN="--tailnet-only"; echo "$FRESH_TAILNET_PORT" > "$D/tailnet.port"; fi
   # under the guard when the build has one (it keeps the hub up: docs/HUB-RESILIENCE.md). hub.pid is then the guard's, and stopping it stops the hub. The log is kept across starts: a crash's last words are what matters.
   if [ -x "$BIN/backplane" ]; then
     case "$(realpath -m "$BIN")" in "$(realpath -m "$DEV/builds")"/*) WHICH=(--builds "$DEV" --build "$(basename "$BIN")");; *) WHICH=(--bin "$BIN");; esac
     ( exec setsid env -u BACKPLANE_AGENT_OWNER BACKPLANE_NO_UPDATE=1 ${FRESH_TAILNET_PORT:+BACKPLANE_HTTPS_PORT=$FRESH_TAILNET_PORT} ${BACKPLANE_COMMIT:+BACKPLANE_COMMIT=$BACKPLANE_COMMIT} \
-        systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- "$BIN/backplane" hub run --home "$H" --port "$PORT" --host 127.0.0.1 "${WHICH[@]}" --log "$D/hub.log" --pidfile "$D/hub.pid" --mem "$MEM" --default -- ${TN:---no-tailscale} --foreground \
+        systemd-run --user --scope -q -- "$BIN/backplane" hub run --home "$H" --port "$PORT" --host 127.0.0.1 "${WHICH[@]}" --log "$D/hub.log" --pidfile "$D/hub.pid" --default -- ${TN:---no-tailscale} --foreground \
         >> "$D/hub.log" 2>&1 < /dev/null ) &
   else
     ( exec setsid env BACKPLANE_NO_UPDATE=1 ${FRESH_TAILNET_PORT:+BACKPLANE_HTTPS_PORT=$FRESH_TAILNET_PORT} ${BACKPLANE_COMMIT:+BACKPLANE_COMMIT=$BACKPLANE_COMMIT} \
-        systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- "$BIN/backplane-hub" --home "$H" --port "$PORT" --host 127.0.0.1 ${TN:---no-tailscale} --foreground \
+        systemd-run --user --scope -q -- "$BIN/backplane-hub" --home "$H" --port "$PORT" --host 127.0.0.1 ${TN:---no-tailscale} --foreground \
         >> "$D/hub.log" 2>&1 < /dev/null ) &
   fi
   echo $! > "$D/hub.pid"

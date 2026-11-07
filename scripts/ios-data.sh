@@ -1,7 +1,7 @@
 #!/bin/sh
 # The data/1 app's journeys on the simulator: against the stub hub (test/phone/stub-hub.ts, default) or a Rust hub binary (HUB=path to it).
 #   scripts/ios-data.sh [JOURNEY...]   default: data-flow     env: HUB (a Rust hub binary), APP (the Backplane.app on the Mac to install; default run.sh's)
-# Start with work_run {lock: "mac-heavy"}. The hub runs on h@backplane (tailnet address, 3700M cap) in a throwaway folder that is deleted at the end.
+# Start with work_run {lock: "mac-heavy"}. The hub runs on h@backplane (tailnet address) in a throwaway folder that is deleted at the end.
 cd "$(dirname "$0")/.." || exit 1
 B=$PWD/build/gpui; M=$B/mac-ssh; SB='ssh -o BatchMode:yes h@backplane'; SB='ssh -o BatchMode=yes h@backplane'; U=${SIM_UDID:-E3BC1B9E-AE4D-498C-97AF-B22FE897B41F}
 V=/home/h/bp-data-e2e; HOSTIP=100.96.192.111; PORT=3860; HOSTDNS=backplane.tail9e0cf2.ts.net; OUT=$B/results/ios/e2e-data; mkdir -p $OUT
@@ -26,7 +26,7 @@ $SB "rm -rf $V; mkdir -p $V/projects"
 if [ -n "${HUB:-}" ]; then
   rsync -a "$HUB" h@backplane:bp-data-e2e/hub; rsync -a test/tools/claude_standin.ts h@backplane:bp-data-e2e/claude_standin.ts
   # (a hub started inside the ssh session keeps it open: start it, wait inside the same command, and let the command end)
-  $SB "mkdir -p $V/home $V/bin; printf '#!/bin/sh\\nexec \$HOME/.bun/bin/bun $V/claude_standin.ts \"\\$@\"\\n' > $V/bin/claude; for n in codex grok muse; do printf '#!/bin/sh\\nexit 1\\n' > $V/bin/\$n; done; chmod +x $V/bin/*; cd $V; BACKPLANE_AGENTS=$V/bin BACKPLANE_NO_UPDATE=1 nohup systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 $V/hub --home $V/home --port $PORT --host $HOSTIP --no-tailscale --foreground > $V/hub.log 2>&1 < /dev/null & sleep 8; P=\$(ss -ltnp | grep ':$PORT ' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); echo hub pid \$P; tr '\\0' '\\n' < /proc/\$P/environ | grep BACKPLANE_AGENTS"
+  $SB "mkdir -p $V/home $V/bin; printf '#!/bin/sh\\nexec \$HOME/.bun/bin/bun $V/claude_standin.ts \"\\$@\"\\n' > $V/bin/claude; for n in codex grok muse; do printf '#!/bin/sh\\nexit 1\\n' > $V/bin/\$n; done; chmod +x $V/bin/*; cd $V; BACKPLANE_AGENTS=$V/bin BACKPLANE_NO_UPDATE=1 nohup systemd-run --user --scope -q $V/hub --home $V/home --port $PORT --host $HOSTIP --no-tailscale --foreground > $V/hub.log 2>&1 < /dev/null & sleep 8; P=\$(ss -ltnp | grep ':$PORT ' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); echo hub pid \$P; tr '\\0' '\\n' < /proc/\$P/environ | grep BACKPLANE_AGENTS"
   TOKFILE=$V/home/token
 else
   rsync -a test/phone/stub-hub.ts h@backplane:bp-data-e2e/stub-hub.ts

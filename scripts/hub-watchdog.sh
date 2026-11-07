@@ -12,7 +12,7 @@
 #   The hub's disk and the temp folder: either nearly full (under 1 GiB, or under 5 % and 10 GiB: the guard's rule) is logged and put on the desktop once, and again when there is room.
 #   A full /tmp (a RAM tmpfs shared by every agent) fails agents' writes with ENOSPC or EDQUOT just as a full disk does; restarting the hub does not free it.
 #   Every action goes to $D/watchdog.log.
-# Env: FRESH_DIR, FRESH_PORT, GPUI_DEV_DIR, FRESH_MEM, FRESH_TAILNET_PORT, DISPLAY (as fresh.sh), WATCHDOG_TRIES (3), WATCHDOG_BOOT (900 s), WATCHDOG_WAIT (120 s for a restart to answer), WATCHDOG_BACKOFF (120 s),
+# Env: FRESH_DIR, FRESH_PORT, GPUI_DEV_DIR, FRESH_TAILNET_PORT, DISPLAY (as fresh.sh), WATCHDOG_TRIES (3), WATCHDOG_BOOT (900 s), WATCHDOG_WAIT (120 s for a restart to answer), WATCHDOG_BACKOFF (120 s),
 #      WATCHDOG_BACKOFF_MAX (3600 s), WATCHDOG_CALM (600 s of health before the backoff resets), WATCHDOG_WATCHER (0: do not look after fresh-watch.sh).
 set -u
 unset BACKPLANE_AGENT_OWNER   # the hub reaps what carries its mark: nothing started from here may
@@ -102,7 +102,7 @@ case "${1:-}" in
   check) check;;
   status) mkdir -p "$ST"; echo "fails: $(get fails), restarts in a row: $(get step), next no sooner than: $( [ "$(get after)" -gt "$(now)" ] && date -d "@$(get after)" || echo now)"; systemctl --user is-active backplane-hub-watchdog.timer 2>/dev/null; tail -5 "$LOG" 2>/dev/null;;
   install) mkdir -p "$UNITS"
-    for u in service timer; do sed -e "s|@SCRIPT@|$HERE/hub-watchdog.sh|g" -e "s|@MEM@|${FRESH_MEM:-20G}|g" -e "s|@TAILNET@|${FRESH_TAILNET_PORT:-8451}|g" -e "s|@DISPLAY@|${DISPLAY:-:0}|g" "$HERE/systemd/backplane-hub-watchdog.$u" > "$UNITS/backplane-hub-watchdog.$u"; done
+    for u in service timer; do sed -e "s|@SCRIPT@|$HERE/hub-watchdog.sh|g" -e "s|@TAILNET@|${FRESH_TAILNET_PORT:-8451}|g" -e "s|@DISPLAY@|${DISPLAY:-:0}|g" "$HERE/systemd/backplane-hub-watchdog.$u" > "$UNITS/backplane-hub-watchdog.$u"; done
     systemctl --user daemon-reload && systemctl --user enable --now backplane-hub-watchdog.timer && { mkdir -p "$ST"; put said-ok 0; log "installed: a check every 30 s ($HERE/hub-watchdog.sh)"; echo "the watchdog is on: log in $LOG"; };;
   uninstall) systemctl --user disable --now backplane-hub-watchdog.timer; log "uninstalled"; rm -f "${UNITS:?}/backplane-hub-watchdog.service" "${UNITS:?}/backplane-hub-watchdog.timer"; systemctl --user daemon-reload; echo "the watchdog is off";;
   *) sed -n 2,14p "$0"; exit 2;;

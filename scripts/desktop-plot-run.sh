@@ -1,7 +1,7 @@
 #!/bin/sh
 # A real-hub check of the GPUI board and schematic viewers on this machine, kept small: the Rust hub on a temp home with the ecc83 demo
 # (never the store copy), stand-in agents only, loopback, isolated display :61 (Xvfb from build/gpui/xvfb, software rendering = llvmpipe,
-# NOT the GPU), every process in one scope capped at 3700M with swap 0, nice 19. The client binary comes from a Boat job (never built here).
+# NOT the GPU), every process in one scope, nice 19. The client binary comes from a Boat job (never built here).
 # usage: desktop-plot-run.sh CLIENT_BIN ASSETS_DIR OUTNAME          ->  build/gpui/shots/desktop/OUTNAME-*.png, build/gpui/results/desktop/OUTNAME.*
 set -eu
 ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; CLIENT=$1; ASSETS=$2; N=${3:-plot}
@@ -55,7 +55,7 @@ open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":")
 PY
 export LC_ALL=C
 # one scope for everything; the inner shell stops what it started (only its own pids) on any exit
-systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- nice -n 19 sh -c '
+systemd-run --user --scope -q -- nice -n 19 sh -c '
 set -eu
 cleanup() { for f in client i3 xvfb hub; do [ -f '$R'/$f.pid ] && kill $(cat '$R'/$f.pid) 2>/dev/null || true; done; sleep 1; }
 trap cleanup EXIT INT TERM

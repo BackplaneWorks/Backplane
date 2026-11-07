@@ -1,5 +1,5 @@
 #!/bin/sh
-# The settings dialog on a temp home (never the store copy), stand-in agents, loopback, isolated Xvfb display (llvmpipe), capped scope:
+# The settings dialog on a temp home (never the store copy), stand-in agents, loopback, isolated Xvfb display (llvmpipe), own scope:
 # opens Settings, prints its structure (read:settings: labels, button actions, field names, no values) and takes a shot of the first page
 # and of five others. THEME=dark|light. usage: desktop-settings-shot.sh CLIENT_BIN ASSETS_DIR OUTNAME BOARD -> results/desktop/OUTNAME.*, shots/desktop/OUTNAME-s-*.png
 set -eu
@@ -24,7 +24,7 @@ open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":")
 PY
 export LC_ALL=C
 # one scope for everything; the inner shell stops what it started (only its own pids) on any exit
-systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- nice -n 19 sh -c '
+systemd-run --user --scope -q -- nice -n 19 sh -c '
 set -eu
 cleanup() { for f in client i3 xvfb hub; do [ -f '$R'/$f.pid ] && kill $(cat '$R'/$f.pid) 2>/dev/null || true; done; sleep 1; }
 trap cleanup EXIT INT TERM

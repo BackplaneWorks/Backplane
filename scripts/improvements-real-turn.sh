@@ -1,7 +1,7 @@
 #!/bin/sh
 # ONE real Claude turn through the Improvements hand-off (the person's go, 2026-11-05): the GPUI client on the Rust hub, a throwaway Backplane home and
-# a scratch git repository named backplane-gpui (with a local main branch) under build/gpui/imp-real/, loopback, the isolated display :61, one scope capped at
-# 3700M with swap 0. NO stand-in folder and NO copy mode: the hub starts the real `claude` (the person's own sign-in, HOME as it is). The request is
+# a scratch git repository named backplane-gpui (with a local main branch) under build/gpui/imp-real/, loopback, the isolated display :61, one scope
+# NO stand-in folder and NO copy mode: the hub starts the real `claude` (the person's own sign-in, HOME as it is). The request is
 # harmless (reply with one sentence; no edits, no tools). Nothing is pushed; nothing outside the scratch folder is written by the agent's task.
 # usage: improvements-real-turn.sh CLIENT_BIN HUB_BIN ASSETS_DIR
 set -eu
@@ -23,7 +23,7 @@ ev=[{"$":"ProjectCreated","id":"p1","title":"Backplane (scratch)","root":R+"/pro
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))
 PY
 export LC_ALL=C
-systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- nice -n 19 sh -c '
+systemd-run --user --scope -q -- nice -n 19 sh -c '
 set -eu
 cleanup() { for f in client i3 xvfb hub; do [ -f '$R'/$f.pid ] && kill $(cat '$R'/$f.pid) 2>/dev/null || true; done; sleep 1; }
 trap cleanup EXIT INT TERM

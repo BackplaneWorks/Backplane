@@ -1,6 +1,6 @@
 #!/bin/sh
 # Real-hub check of the GPUI Files tab: the Rust hub (HUB_BIN) alone, no helper, on a temp home with a project of mixed files, stand-in agents only, loopback,
-# isolated Xvfb display, everything in one memory-capped scope. The client is driven by test/files/files-script.json (steps `open_viewer`,
+# isolated Xvfb display, everything in one scope. The client is driven by test/files/files-script.json (steps `open_viewer`,
 # `files`, `files_download`, `wait`), screenshots are taken by the client itself (`files: shot:PATH`).
 # usage: desktop-files-run.sh CLIENT_BIN HUB_BIN ASSETS_DIR OUTNAME   ->  build/gpui/shots/files/OUTNAME-*.png, build/gpui/results/files/OUTNAME.*
 set -eu
@@ -33,7 +33,7 @@ sed -e "s#@SHOTS@#$SH/$N#g" -e "s#@UP@#$R/up/dropped.txt#g" $ME/test/files/files
 export LC_ALL=C
 # FILES_XINPUT=1: the client only opens the Files tab; real X input (files-xinput.sh) does the rest
 XIN=; [ -n "${FILES_XINPUT:-}" ] && XIN="sleep 8; DISPLAY=$DISP R=$R SH=$SH N=$N sh $ME/test/files/files-xinput.sh; kill \$(cat $R/client.pid)"
-systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- nice -n 19 sh -c '
+systemd-run --user --scope -q -- nice -n 19 sh -c '
 set -eu
 cleanup() { for f in client i3 xvfb hub; do [ -f '$R'/$f.pid ] && kill $(cat '$R'/$f.pid) 2>/dev/null || true; done; sleep 1; }
 trap cleanup EXIT INT TERM

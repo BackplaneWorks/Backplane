@@ -116,14 +116,8 @@ async fn exchange(sock: &str, conn: &mut Option<nng::Req>, bytes: &[u8]) -> Resu
 // Starting a server -----------------------------------------------------------------------------------------------------
 
 fn which(cmd: &str) -> Option<String> { std::env::var("PATH").ok()?.split(':').map(|d| format!("{d}/{cmd}")).find(|f| Path::new(f).exists()) }
-/// Inside a systemd scope capped at `memory` when this machine has a user manager.
-fn wrap(argv: Vec<String>, memory: Option<&str>) -> Vec<String> {
-    let bus = std::env::var("XDG_RUNTIME_DIR").ok().filter(|r| !r.is_empty()).map(|r| format!("{r}/bus"));
-    match (memory, which("systemd-run"), bus) {
-        (Some(m), Some(sd), Some(b)) if cfg!(target_os = "linux") && Path::new(&b).exists() => { let mut v = vec![sd, "--user".into(), "--scope".into(), "--quiet".into(), "-p".into(), format!("MemoryMax={m}"), "--".into()]; v.extend(argv); v }
-        _ => argv,
-    }
-}
+/// KiCad runs as it is: no memory cap (the `memory` field of a spawn request is ignored).
+fn wrap(argv: Vec<String>, _memory: Option<&str>) -> Vec<String> { argv }
 /// KiCad may choose api-<pid>.sock when the requested path is occupied. Each socket with what tells it from one bound before.
 #[cfg(unix)]
 fn sockets_at(requested: &str) -> HashMap<String, String> {

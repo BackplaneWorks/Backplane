@@ -1,11 +1,11 @@
 #!/bin/sh
 # One short real-GPU latency run on the desktop: the Boat-built client on an isolated Xvfb display (:61, never :0) with the NVIDIA ICD, against a hub
-# already running on 127.0.0.1:3860 (scripts/try.sh start with GPUI_TRY_NOAPP=1). Everything of ours runs inside one scope capped at 3700M, no swap,
+# already running on 127.0.0.1:3860 (scripts/try.sh start with GPUI_TRY_NOAPP=1). Everything of ours runs inside one scope,
 # and is killed by captured PIDs at the end. Output: build/gpui/results/desktop/rtx/ (metrics only: no screenshots, no thread text).
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd); OUT=$ROOT/build/gpui/results/desktop/rtx; mkdir -p $OUT
 if [ -z "${RTX_INNER:-}" ]; then
-  RTX_INNER=1 exec systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 sh "$0" "$@"
+  RTX_INNER=1 exec systemd-run --user --scope -q sh "$0" "$@"
 fi
 X=$ROOT/build/gpui/xvfb
 python3 - > $OUT/script.json <<'PY'
