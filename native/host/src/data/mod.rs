@@ -98,7 +98,7 @@ fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) 
     let updated = ts.iter().map(|(_, t)| t.activity.max(t.created)).max().unwrap_or(0);
     let waiting: u64 = ts.iter().map(|(i, _)| asks.get(*i).copied().unwrap_or(0)).sum();
     let color = crate::present::badge::color_of(&setting_of(&format!("project.color.{id}")), id).to_string();
-    Some(json!({"id":id,"title":p.title,"root":p.root,"threadCount":count,"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
+    Some(json!({"id":id,"title":p.title,"root":p.root,"origin":crate::mirror::origin_of_root(&p.root),"threadCount":count,"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
         "icon":crate::present::badge::icon_of(&setting_of(&format!("project.icon.{id}"))),"css":crate::present::badge::css_of(&color),"color":color}))
 }
 /// A cursor is "<updatedAt>:<id>" over a list sorted newest first, ties by id.

@@ -414,6 +414,51 @@ pub fn projects(st: &State, o: &Opts) -> Vec<Value> {
     plan.order.iter().map(|(i,quiet)| { let p=&plan.projects[*i]; project_json(st,o,&plan.ix,p.id,&p.sh,&plan.kids_by,*quiet) }).collect()
 }
 
+// ---- one project across machines ----------------------------------------------------------------------------------------
+/// Where a thread's row stands among the rows of another machine on the same shelf, higher first: `threads` pinned then newest
+/// (rank), `settled` by settle time, `snoozed` soonest to wake, `archived` newest.
+pub fn row_key(st: &State, kind: &str, id: &str) -> i128 {
+    let Some(t) = st.threads.get(id) else { return 0 };
+    match kind {
+        "threads" => (i128::from(t.pinned) << 64) + i128::from(rank(t)),
+        "settled" => i128::from(t.settled_at),
+        "snoozed" => -i128::from(st.snooze_until.get(id).copied().unwrap_or(0)),
+        _ => i128::from(rank(t)),
+    }
+}
+/// Every thread row of another machine's project carries that machine's marker (`crate::mirror::mark_of`) and name; this machine's rows carry none.
+pub fn label_rows(project: &mut Value, mark: &Value) {
+    if mark.is_null() { return }
+    for k in ["threads", "snoozed", "settled", "archived"] { if let Some(a) = project[k].as_array_mut() { for r in a { r["machine"] = mark["name"].clone(); r["mark"] = mark.clone(); } } }
+}
+/// Two machines' rows of one shelf as one list: each machine's own order is kept (manual keys too) and a thread tree moves as one
+/// block (its root and the rows under it); at each step the block whose root `key` is higher goes first, `a`'s on a tie.
+pub fn merge_rows(a: Vec<Value>, b: Vec<Value>, key: &dyn Fn(&str) -> i128) -> Vec<Value> {
+    fn blocks(v: Vec<Value>) -> std::collections::VecDeque<Vec<Value>> {
+        let mut out: std::collections::VecDeque<Vec<Value>> = Default::default();
+        for r in v { if r["depth"].as_u64().unwrap_or(0) == 0 || out.is_empty() { out.push_back(vec![r]) } else { out.back_mut().unwrap().push(r) } }
+        out
+    }
+    let (mut x, mut y) = (blocks(a), blocks(b)); let mut out = vec![];
+    let k = |bl: &Vec<Value>| key(bl[0]["id"].as_str().unwrap_or(""));
+    loop {
+        let take_b = match (x.front(), y.front()) { (None, None) => break, (Some(_), None) => false, (None, Some(_)) => true, (Some(p), Some(q)) => k(q) > k(p) };
+        out.extend(if take_b { y.pop_front() } else { x.pop_front() }.unwrap());
+    }
+    out
+}
+/// A linked machine's project (`far`, its rows labelled) shown in this hub's project of the same repository: its rows merged into each
+/// shelf (`key(kind, row id)`), its counts added. This hub's pagers stay (the linked rows are their own first page).
+pub fn join_project(local: &mut Value, far: Value, key: &dyn Fn(&str, &str) -> i128) {
+    for (kind, page) in [("threads", "threadsPage"), ("snoozed", "snoozedPage"), ("settled", "settledPage"), ("archived", "archivedPage")] {
+        let a = local[kind].as_array().cloned().unwrap_or_default(); let b = far[kind].as_array().cloned().unwrap_or_default();
+        local[kind] = json!(merge_rows(a, b, &|id| key(kind, id)));
+        if local[page].is_null() && !far[page].is_null() { local[page] = far[page].clone(); }
+    }
+    for n in ["settledCount", "archivedCount"] { local[n] = json!(local[n].as_u64().unwrap_or(0) + far[n].as_u64().unwrap_or(0)); }
+    local["shelf"] = json!(format!("Settled {}", local["settledCount"].as_u64().unwrap_or(0)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +473,22 @@ mod tests {
         let set = r#"{"$":"SettingSet","key":"thread.parent.t2","value":"t1","at":13}"#;
         let s = fold(&[PC, &tc("t1", 11), &tc("t2", 12), set, d]); assert!(kids_hidden(&s).contains("t2"), "a person's thread hides its delegated child under it");
         let s = fold(&[r#"{"$":"BotSet","id":"b1","name":"Bub","thread":"t1","look":0,"persona":"","at":9}"#, PC, &tc("t1", 11), &tc("t2", 12), set, d]); assert!(!kids_hidden(&s).contains("t2"), "a bot's child is shown");
+    }
+    #[test] fn two_machines_rows_merge_by_shelf_order_keeping_each_ones_order_and_trees() {
+        let r = |id: &str, d: u64| json!({"id": id, "depth": d});
+        let keys: HashMap<&str, i128> = [("a1", 9), ("a2", 3), ("b1", 5), ("b2", 1), ("a0", 2)].into_iter().collect();
+        let key = |id: &str| keys.get(id).copied().unwrap_or(0);
+        let out = merge_rows(vec![r("a1", 0), r("a1k", 1), r("a0", 0), r("a2", 0)], vec![r("b1", 0), r("b1k", 1), r("b2", 0)], &key);
+        let ids: Vec<&str> = out.iter().map(|v| v["id"].as_str().unwrap()).collect();
+        // a0 stands before a2 here (a manual key), so it stays before it; b1's child moves with b1
+        assert_eq!(ids, ["a1", "a1k", "b1", "b1k", "a0", "a2", "b2"]);
+        let mut local = json!({"threads": [r("a1", 0)], "settled": [], "snoozed": [], "archived": [], "settledCount": 2, "archivedCount": 0, "threadsPage": null, "settledPage": null, "snoozedPage": null, "archivedPage": null, "shelf": "Settled 2"});
+        let mut far = json!({"threads": [r("b1", 0)], "settled": [r("b2", 0)], "snoozed": [], "archived": [], "settledCount": 3, "archivedCount": 1, "threadsPage": {"total": 1}, "settledPage": null, "snoozedPage": null, "archivedPage": null});
+        label_rows(&mut far, &json!({"name":"framework","short":"framework","away":false})); label_rows(&mut local, &Value::Null);
+        join_project(&mut local, far, &|_, id| key(id));
+        assert_eq!(local["threads"].as_array().unwrap().iter().map(|v| (v["id"].as_str().unwrap(), v["mark"]["short"].as_str())).collect::<Vec<_>>(), [("a1", None), ("b1", Some("framework"))], "this machine's rows look as before");
+        assert_eq!((local["settledCount"].as_u64(), local["archivedCount"].as_u64(), local["shelf"].as_str()), (Some(5), Some(1), Some("Settled 5")));
+        assert_eq!(local["settled"][0]["machine"], "framework"); assert_eq!(local["threadsPage"]["total"], 1);
     }
     #[test] fn ago_words() { assert_eq!(ago(100, 100), "now"); assert_eq!(ago(100, 40), "1m"); assert_eq!(ago(10000, 0), "2h"); assert_eq!(ago(200000, 0), "2d"); assert_eq!(ago(5, 9), "now"); }
     #[test] fn new_threads_sort_newest_first_and_a_quiet_project_is_marked() {

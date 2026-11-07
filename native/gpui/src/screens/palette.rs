@@ -63,14 +63,14 @@ pub fn items(data: &Value) -> Vec<Item> {
         let raw = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
         v.push(Item { label: format!("New thread in {ptitle}"), place: String::new(), kind: "action", what: Do::Action("new-thread".into(), raw) });
         for t in p["threads"].as_array().into_iter().flatten().chain(p["settled"].as_array().into_iter().flatten()) {
-            v.push(Item { label: string(t, "title"), place: ptitle.clone(), kind: "thread", what: Do::Thread(string(t, "id")) });
+            v.push(Item { label: string(t, "title"), place: on_machine(&ptitle, t), kind: "thread", what: Do::Thread(string(t, "id")) });
         }
     }
     for t in data["conversationHistory"]["jump"].as_array().into_iter().flatten().chain(data["legacy"].as_array().into_iter().flatten()) {
         v.push(Item { label: string(t, "title"), place: "Conversation history".into(), kind: "thread", what: Do::Thread(string(t, "id")) });
     }
     for t in data["active"].as_array().into_iter().flatten().chain(data["activeSettled"]["rows"].as_array().into_iter().flatten()) {
-        v.push(Item { label: string(t, "title"), place: string(t, "project"), kind: "thread", what: Do::Thread(string(t, "id")) });
+        v.push(Item { label: string(t, "title"), place: on_machine(&string(t, "project"), t), kind: "thread", what: Do::Thread(string(t, "id")) });
     }
     v
 }
@@ -173,5 +173,17 @@ mod tests {
         let mut d = data(); d["active"] = json!([{"id": "h|t1", "title": "Board layout review", "project": "Demo"}]);
         let r = found(items(&d), "", 100); assert_eq!(r.iter().filter(|i| i.label == "Board layout review").count(), 1, "the same thread from two lists shows once");
         assert!(found(items(&d), "", 3).len() == 3);
+    }
+}
+
+/// A thread's place in the palette: its project, and the machine it runs on when that is another one (its marker's short name).
+fn on_machine(place: &str, t: &serde_json::Value) -> String {
+    match super::badge::machine_text(&t["mark"], false) { Some((m, _, _)) => format!("{place} · {m}"), None => place.to_string() }
+}
+#[cfg(test)]
+mod machine_tests {
+    #[test] fn another_machines_thread_names_it_in_the_palette() {
+        assert_eq!(super::on_machine("Backplane", &serde_json::json!({"mark":{"name":"framework-1","short":"framework-1","away":false}})), "Backplane · framework-1");
+        assert_eq!(super::on_machine("Backplane", &serde_json::json!({})), "Backplane");
     }
 }
