@@ -1252,7 +1252,7 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
     assert_eq!(lock_now(&ag, "b").await["holder"]["id"], "w-live", "a restart does not free a live command's lock"); assert!(!said(&ev, T2, "Lock b is yours"));
     ag.locks_tick().await; assert_eq!(lock_now(&ag, "b").await["holder"]["id"], "w-live");
     unsafe { libc::kill(pid as i32, libc::SIGKILL); } let _ = child.wait();
-    let ev = until(&hub, 0, 20, |ev| said(ev, T2, "Lock b is yours")).await; assert!(said(&ev, T1, "\"live job\" ended"), "{ev:?}"); ag.shutdown();
+    let ev = until(&hub, 0, 60, |ev| said(ev, T2, "Lock b is yours") && said(ev, T1, "\"live job\" ended")).await; assert!(said(&ev, T2, "Lock b is yours") && said(&ev, T1, "\"live job\" ended"), "{ev:?}"); ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_grant_cut_by_a_restart_is_made_when_the_hub_is_back() {
     let (hub, ag, _h, w) = locks_up("lk4b", |w| { let q = work::row("w-q", "waiting for lock a (1st)", "next job", "run", &format!("touch '{}'", w.join("q").display()), "-", 0);
@@ -1274,7 +1274,7 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
 #[tokio::test(flavor = "multi_thread")] async fn a_stale_idle_holder_is_warned_then_released_and_busy_work_keeps_its_lock() {
     let (hub, ag, _h, _w) = locks_up("lk6", |_| lock_ev("x", json!({"holder":party(T1,"thread",T1,5),"waiters":[party(T2,"thread",T2,0)],"ready":true})) + &lock_ev("y", json!({"holder":party(T3,"thread",T3,5),"waiters":[],"ready":true})) + &rows_ev(T3, &[work::row("w-b", "watching", "busy", "pid", &std::process::id().to_string(), "-", 0)])).await;
     let ev = until(&hub, 0, 20, |ev| said(ev, T1, "Lock x has no recent progress heartbeat") && said(ev, T3, "Lock y has no recent progress heartbeat")).await; assert_eq!(lock_now(&ag, "x").await["holder"]["id"], T1, "a warning takes nothing"); assert!(!ev.is_empty());
-    let n = log_from(&hub, 0).await.iter().filter(|e| e["text"].as_str().map_or(false, |t| t.contains("heartbeat"))).count(); ag.locks_tick().await; assert_eq!(log_from(&hub, 0).await.iter().filter(|e| e["text"].as_str().map_or(false, |t| t.contains("heartbeat"))).count(), n, "warned once");
+    let n = log_from(&hub, 0).await.iter().filter(|e| hub_says(e, "heartbeat")).count(); ag.locks_tick().await; assert_eq!(log_from(&hub, 0).await.iter().filter(|e| hub_says(e, "heartbeat")).count(), n, "warned once");
     until(&hub, 0, 20, |ev| ev.iter().filter(|e| is(e, "TurnChanged") && e["state"] == "completed").count() >= 2).await;
     for (k, o) in [("lock.warning.x", T1), ("lock.warning.y", T3)] { hub.commit(&json!({"$":"SettingSet","key":k,"value":json!({"owner":o,"lease":5,"at":1}).to_string(),"at":now_s()})).await.unwrap(); } // the grace has passed
     ag.locks_tick().await;
