@@ -93,7 +93,10 @@ async fn a_requests_changes_come_before_its_reply() {
     c.send(json!({"id":1,"m":"project.add","p":{"path":proj.to_string_lossy()}})).await; for _ in 0..2000 { if c.frames.lock().unwrap()[before..].iter().any(|f| f["t"] == "reply") { break } tokio::time::sleep(Duration::from_millis(10)).await } // until the reply is in, not for a clock
     let frames: Vec<Value> = c.frames.lock().unwrap()[before..].to_vec();
     let at = |t: &str| frames.iter().position(|f| f["t"] == t).unwrap_or(usize::MAX);
-    assert!(at("changes") < at("reply"), "changes {} reply {}", at("changes"), at("reply"));
+    // a refused request commits nothing, so there is no `changes` to come first: say the refusal, not a position of usize::MAX
+    let reply = frames.iter().find(|f| f["t"] == "reply").unwrap_or_else(|| panic!("no reply to project.add: {frames:?}"));
+    assert_eq!(reply["ok"], true, "project.add was refused: {reply}");
+    assert!(at("changes") < at("reply"), "changes {} reply {}: {frames:?}", at("changes"), at("reply"));
     let first = frames[at("changes")]["items"].as_array().unwrap();
     assert_eq!(first[0]["$"], "ProjectCreated"); assert_eq!(first[1]["$"], "ThreadCreated");
     assert_eq!(frames[at("reply")]["ok"], true);

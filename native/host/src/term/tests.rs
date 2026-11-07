@@ -180,7 +180,9 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     let (_, o) = tools::call(&hub, "t1", "terminal_open", &json!({"command":"trap '' HUP; echo up; while true; do sleep 1; done"})).await.unwrap(); let key = emb::key("t1", o["id"].as_str().unwrap());
     let pid = { assert!(wait(10, || t.inner.try_lock().map_or(false, |g| g.shells.contains_key(&key))).await); t.inner.lock().await.shells[&key].pid };
     tokio::time::sleep(Duration::from_millis(500)).await; t.kill(&key).await;
-    assert!(wait(10, || unsafe { libc::kill(pid, 0) } != 0 || { let mut st = 0; unsafe { libc::waitpid(-1, &mut st, libc::WNOHANG); } false }).await || true);
+    // the module's own pty-wait thread reaps the shell; this test must never call waitpid itself (waitpid(-1) took other tests' children: their
+    // Command::output() / tokio wait got ECHILD, so a project.add's `sh` failed and the side-by-side probe's child "had no child processes")
+    assert!(wait(10, || unsafe { libc::kill(pid, 0) } != 0).await, "the shell that ignores the hangup is killed and reaped");
     assert!(wait(10, || t.inner.try_lock().map_or(false, |g| !g.shells.contains_key(&key))).await, "the shell is gone after the escalation to SIGKILL");
 }
 
