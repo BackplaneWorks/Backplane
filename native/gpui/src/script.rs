@@ -424,6 +424,7 @@ impl Backplane {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::prelude::v1::test;
     #[test] fn open_settings_is_a_click_on_the_gear_and_paste_image_is_still_not_implemented() {
         let p = std::env::temp_dir().join(format!("bp-script-{}.json", std::process::id()));
         std::fs::write(&p, r#"[{"open_settings":true},{"paste_image":true},{"click":"ui:Settings"}]"#).unwrap();

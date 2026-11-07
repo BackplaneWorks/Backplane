@@ -136,10 +136,16 @@ export class CefEngine extends EventEmitter {
     const ws = new WebSocket(endpoint); let n = 0;
     const send = (method: string, params: object = {}, sessionId?: string) => ws.send(JSON.stringify({ id: ++n, method, params, ...(sessionId ? { sessionId } : {}) }));
     ws.onopen = () => send("Target.setDiscoverTargets", { discover: true });
+    const seen = new Set<string>();
+    const resume = (targetId: string) => send("Target.attachToTarget", { targetId, flatten: true });
     ws.onmessage = (e) => {
       let m: any; try { m = JSON.parse(String(e.data)); } catch { return; }
-      if (m.method === "Target.targetCreated" && m.params?.targetInfo?.type === "page") send("Target.attachToTarget", { targetId: m.params.targetInfo.targetId, flatten: true });
-      if (m.id && m.result?.sessionId) { send("Runtime.runIfWaitingForDebugger", {}, m.result.sessionId); setTimeout(() => { try { send("Target.detachFromTarget", { sessionId: m.result.sessionId }); } catch {} }, 1500); }
+      const ti = m.params?.targetInfo;
+      if ((m.method === "Target.targetCreated" || m.method === "Target.targetInfoChanged") && ti && (ti.type === "page" || ti.type === "other")) {
+        const key = `${ti.targetId}|${ti.type}|${ti.url}`;
+        if (!seen.has(key)) { seen.add(key); resume(ti.targetId); for (const ms of [300, 1500]) setTimeout(() => { try { resume(ti.targetId); } catch {} }, ms); }
+      }
+      if (m.id && m.result?.sessionId) { send("Runtime.runIfWaitingForDebugger", {}, m.result.sessionId); setTimeout(() => { try { send("Target.detachFromTarget", { sessionId: m.result.sessionId }); } catch {} }, 1200); }
     };
     ws.onerror = () => {};
     return ws;
