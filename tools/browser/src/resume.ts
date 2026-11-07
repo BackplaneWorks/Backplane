@@ -5,7 +5,7 @@
 export function resumePaused(endpoint: string): WebSocket {
   const ws = new WebSocket(endpoint); let n = 0;
   const send = (method: string, params: object = {}, sessionId?: string) => ws.send(JSON.stringify({ id: ++n, method, params, ...(sessionId ? { sessionId } : {}) }));
-  ws.onopen = () => send("Target.setDiscoverTargets", { discover: true });
+  ws.onopen = () => { send("Target.setDiscoverTargets", { discover: true }); };
   const seen = new Set<string>();
   const resume = (targetId: string) => send("Target.attachToTarget", { targetId, flatten: true });
   ws.onmessage = (e) => {

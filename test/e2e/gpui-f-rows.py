@@ -13,6 +13,19 @@ HERE = os.path.dirname(os.path.abspath(__file__)); REPO = os.path.abspath(os.pat
 XV = os.environ.get('XVFB', os.path.expanduser('~/.cache/xvfb-root/usr/bin/Xvfb')); XLIB = os.environ.get('XVFB_LIB', os.path.expanduser('~/.cache/xvfb-root/usr/lib/x86_64-linux-gnu'))
 XIN = os.path.join(REPO, 'test/cef/xinput.py'); DISP = ':%d' % N
 rows = []; procs = []
+import threading, http.server
+ORDER_SEEN = []
+class OrderServer(http.server.BaseHTTPRequestHandler):  # a stand-in order server: the quote upload and the poll, recording every request; it has no pay or buy route
+    def log_message(self, *a): pass
+    def _send(self, code, obj):
+        b = json.dumps(obj).encode(); self.send_response(code); self.send_header('content-type', 'application/json'); self.send_header('content-length', str(len(b))); self.end_headers(); self.wfile.write(b)
+    def do_POST(self):
+        n = int(self.headers.get('content-length') or 0); body = self.rfile.read(n) if n else b''; ORDER_SEEN.append(('POST', self.path, len(body)))
+        self._send(200, {'id': 'q_rig1', 'token': 'tok-rig-1'}) if self.path.startswith('/v1/quotes') else self._send(404, {'error': 'no'})
+    def do_GET(self):
+        ORDER_SEEN.append(('GET', self.path, 0))
+        self._send(200, {'status': 'quoted', 'currency': 'USD', 'total': 12.5, 'lines': [{'name': 'Board', 'qty': 5, 'total': 12.5}]}) if self.path.startswith('/v1/quotes/q_rig1') else self._send(404, {'error': 'no'})
+order_srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), OrderServer); threading.Thread(target=order_srv.serve_forever, daemon=True).start()
 def log(i, ok, ev):
     rows.append({'id': i, 'ok': bool(ok), 'ev': ev}); print(('ok   ' if ok else 'FAIL ') + i + ' ' + ev, flush=True)
 shutil.rmtree(OUT, ignore_errors=True)
@@ -28,13 +41,13 @@ for ext in ('kicad_pcb', 'kicad_sch'): shutil.copy(os.path.join(REPO, 'test/file
 open(P('proj/ecc83.kicad_pro'), 'w').write('{}\n')
 open(P('proj/readme.txt'), 'w').write('rig fixture\n')
 now = int(time.time())
-seed = [{'$': 'ProjectCreated', 'id': 'p1', 'title': 'rows', 'root': P('proj'), 'at': now}] + [{'$': 'ThreadCreated', 'id': 't%d' % i, 'project': 'p1', 'title': 'Thread %d' % i, 'env': 'local', 'branch': '', 'worktree': '', 'provider': 'claude', 'model': '', 'at': now + i} for i in (1, 2)]
-seed += [{'$': 'ModesSet', 'id': 't1', 'runtime': 'approval-required', 'interaction': 'default', 'model': '', 'at': now + 3}, {'$': 'ModesSet', 'id': 't2', 'runtime': 'full-access', 'interaction': 'plan', 'model': '', 'at': now + 3}]
+seed = [{'$': 'ProjectCreated', 'id': 'p1', 'title': 'rows', 'root': P('proj'), 'at': now}] + [{'$': 'ThreadCreated', 'id': 't%d' % i, 'project': 'p1', 'title': 'Thread %d' % i, 'env': 'local', 'branch': '', 'worktree': '', 'provider': 'claude', 'model': '', 'at': now + i} for i in (1, 2, 3)]
+seed += [{'$': 'SettingSet', 'key': 'buy.t3', 'value': 't0', 'at': now + 3}, {'$': 'ModesSet', 'id': 't1', 'runtime': 'approval-required', 'interaction': 'default', 'model': '', 'at': now + 3}, {'$': 'ModesSet', 'id': 't2', 'runtime': 'full-access', 'interaction': 'plan', 'model': '', 'at': now + 3}]
 open(P('home/events.jsonl'), 'w').write(''.join(json.dumps(e) + '\n' for e in seed))
 env = dict(os.environ)
 for k in ['I3SOCK', 'DBUS_SESSION_BUS_ADDRESS', 'WAYLAND_DISPLAY']: env.pop(k, None)
 env.update(XDG_RUNTIME_DIR=RUN, LC_ALL='C', BACKPLANE_AGENTS=P('bin'), BACKPLANE_NO_UPDATE='1', SHELL='/bin/sh', FAKE_LOG=P('fake.log'), FAKE_SECS='600', HOME=P('fakehome'), XDG_CACHE_HOME=P('fakehome/.cache'),
-           XDG_CONFIG_HOME=P('fakehome/.config'), XDG_DATA_HOME=P('fakehome/.local/share'), PATH=P('bin') + ':' + os.environ['PATH'])
+           XDG_CONFIG_HOME=P('fakehome/.config'), XDG_DATA_HOME=P('fakehome/.local/share'), PATH=P('bin') + ':' + os.environ['PATH'], BACKPLANE_ORDER_SERVER='http://127.0.0.1:%d' % order_srv.server_address[1])
 def spawn(args, log_name, e=None, cwd=None):
     p = subprocess.Popen(args, env=e or env, cwd=cwd, stdout=open(P(log_name), 'ab'), stderr=subprocess.STDOUT); procs.append(p); return p
 def cleanup(*_):

@@ -138,3 +138,17 @@ if want('F21'):
     ok = until(lambda: any(e['$'] == 'MessagePosted' and 'after the reconnect' in e.get('text', '') for e in events()), 30)
     ds = differs(px('f21-up'), px('f21-down'), (0, 870, 263, 900))
     log('F21-reconnect', ok and ds, 'the hub was stopped and started again on the same home: the status line changed while it was down=%s, and after reconnecting a message typed in the window reached the new hub process=%s (f21-*.png)' % (ds, ok))
+
+# ---- F22 the order flow in the client, up to the quote: the agent offers a folder, the client shows the files card, Send is pressed with the mouse, the quote card follows; no order is placed
+if want('F22'):
+    import hashlib
+    os.makedirs(P('proj/mfg/o1'), exist_ok=True); gbr = b'G04*\nM02*\n'; open(P('proj/mfg/o1/board.gbr'), 'wb').write(gbr)
+    json.dump({'files': {'board.gbr': {'sha256': hashlib.sha256(gbr).hexdigest()}}}, open(P('proj/mfg/o1/manifest.json'), 'w'))
+    sel(3)  # the third thread is a buy thread from the seed (SettingSet buy.t3)
+    r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); xin('type', 'zqquote mfg/o1'); xin('key', 'Return')
+    until(lambda: any(e['$'] == 'AskOpened' and e.get('tool') == 'order_quote' for e in events()), 30); pause(2); shot('f22-files-card')
+    ask = [e for e in events() if e['$'] == 'AskOpened' and e.get('tool') == 'order_quote']; before = len(ORDER_SEEN)
+    ids = sorted(k for k in ctrls() if k.startswith('ask:')); sent = click_ctl(ids[0]) if ids else False
+    quoted = until(lambda: any(e['$'] == 'SettingSet' and e.get('key') == 'order.quote.t3' and e.get('value') for e in events()), 40); pause(3); shot('f22-quote')
+    clean = not any('pay' in x[1] or 'buy' in x[1] or 'checkout' in x[1] for x in ORDER_SEEN)
+    log('F22-card', bool(ask) and before == 0 and sent and quoted and clean, 'the files card (f22-files-card.png, buttons %s) opened with nothing uploaded=%s; Send pressed with the mouse: the hub uploaded to the stand-in order server and the quote card was set=%s (f22-quote.png); requests seen %s, none to pay or buy=%s' % (ids, before == 0, quoted, [x[0] + ' ' + x[1] for x in ORDER_SEEN], clean))

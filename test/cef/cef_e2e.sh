@@ -122,7 +122,7 @@ check "teach mode recorded the native click in the hub's draft" "$(echo "$TD" | 
 python3 "$HERE/xinput.py" click $((WX+VX+180)) $((WY+VY+328)); sleep 7
 titles > "$OUT/targets-after-popup.txt"
 # the popup (a window.open target the host creates paused) loads, and its page sees window.opener: evaluated in the popup itself once it has run
-bun "$HERE/cdp_eval.mjs" $CDP 'JSON.stringify([location.pathname, !!window.opener])' > "$OUT/popup-opener.txt" 2>&1 || true
+for i in 1 2 3 4 5 6 7 8 9 10; do bun "$HERE/cdp_eval.mjs" $CDP 'JSON.stringify([location.pathname, !!window.opener])' > "$OUT/popup-opener.txt" 2>&1 || true; grep -q 'popup.html' "$OUT/popup-opener.txt" && break; sleep 2; done
 check "window.open popup loaded and kept its opener ($(grep popup.html "$OUT/popup-opener.txt" | head -1 | cut -c1-120))" "$(grep -q 'popup.html.*true' "$OUT/popup-opener.txt" && echo 1 || echo 0)" "$(cat "$OUT/popup-opener.txt" | head -3)"
 # a real layout change resizes the page: fold the sidebar (the chevron at the window's top left), measured from the change to the first painted frame of the new size
 python3 "$HERE/xinput.py" click 16 59; sleep 1
