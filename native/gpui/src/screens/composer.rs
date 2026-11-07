@@ -314,8 +314,10 @@ impl gpui::Element for Element_ {
         let head = input.ed.head();
         let mut scroll = input.scroll_y;
         let caret_y = if empty { Some(px(0.)) } else { rows.iter().rev().find(|r| r.start <= head).map(|r| r.top + r.pos(head - r.start, lh).y) };
-        if let Some(y) = caret_y { if y < scroll { scroll = y; } else if y + lh > scroll + bounds.size.height { scroll = y + lh - bounds.size.height; } }
-        scroll = scroll.min((total - bounds.size.height).max(px(0.))).max(px(0.));
+        // a box squeezed under one row (a parent with a fixed height) never scrolls: that flipped the text 1-2 px every frame
+        let view = bounds.size.height.max(lh);
+        if let Some(y) = caret_y { if y < scroll { scroll = y; } else if y + lh > scroll + view { scroll = y + lh - view; } }
+        scroll = scroll.min((total - view).max(px(0.))).max(px(0.));
         let origin = point(bounds.left(), bounds.top() - scroll);
         let (accent, mut sel, mut carets) = (theme::color(light, "accent"), Vec::new(), Vec::new());
         let range = input.ed.selection();
