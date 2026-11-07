@@ -11,7 +11,7 @@ pub struct Opts { pub home: PathBuf, pub port: u16, pub host: String, pub builds
 struct Times { probe: u64, misses: u32, stable: u64, stall: u64, boot: u64, floor: u64 }
 fn env(n: &str, d: u64) -> u64 { std::env::var(n).ok().and_then(|v| v.parse().ok()).unwrap_or(d) }
 
-struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant> }
+struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, down: Vec<String>, down_before: Vec<String> }
 
 /// What a request changed.
 enum Move { Nothing, Restart, Exit }
@@ -183,7 +183,7 @@ impl Guard {
             Action::Use(b) => { if let Some(x) = &self.b { x.clear_bad(&b); } self.set_aside_checkpoints(); self.probation = None; self.build = b; self.mode = Mode::Normal; self.answer(&id, true, "switching build") }
             Action::Update(b) => {
                 if self.bad().contains(&b) { self.answer(&id, false, &format!("{b} is marked bad")); return Move::Nothing }
-                self.probation = Some(self.build.clone()); self.set_aside_checkpoints(); self.build = b; self.mode = Mode::Normal; self.answer(&id, true, "updating");
+                self.probation = Some(self.build.clone()); self.down_before = self.down.clone(); self.set_aside_checkpoints(); self.build = b; self.mode = Mode::Normal; self.answer(&id, true, "updating");
             }
         }
         self.hist.clear(); self.why.clear();
@@ -227,6 +227,16 @@ impl Guard {
             if last_probe.elapsed().as_secs() >= self.tm.probe {
                 last_probe = Instant::now(); self.watch_space();
                 let (answered, well, said, control) = self.probe();
+                if well {
+                    let down: Vec<String> = serde_json::from_str::<Value>(&said).ok().and_then(|v| v["degraded"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())).unwrap_or_default();
+                    // on probation, a part the build before had running and this one has not is the update failing: a start step panicked or ran out of time
+                    let lost = if self.probation.is_some() { plan::lost_parts(&self.down_before, &down) } else { vec![] };
+                    if !lost.is_empty() {
+                        let why = format!("came up without {} (a start step failed; the build before had it)", lost.join(", "));
+                        say(&format!("{}: {why}; ending it", Self::short(&self.build))); sys::stop_child(&mut child, 10_000); self.hub_pid = 0; return End::Failed(why)
+                    }
+                    self.down = down;
+                }
                 match ready_at {
                     None if well && self.probation.is_some() && self.wrong_build(&said).is_some() => {
                         let why = self.wrong_build(&said).unwrap_or_default(); say(&format!("{} is not the build it was staged as: {why}; ending it", Self::short(&self.build)));
@@ -405,7 +415,7 @@ pub fn run(o: Opts) -> i32 {
     let t = Tuning { tries: env("BACKPLANE_GUARD_TRIES", 3) as usize, window: env("BACKPLANE_GUARD_WINDOW", 600), pause: env("BACKPLANE_GUARD_PAUSE", 1), machine_pause: env("BACKPLANE_GUARD_MACHINE_PAUSE", 5), rescue_retry: env("BACKPLANE_GUARD_RESCUE_RETRY", 120) };
     let tm = Times { probe: env("BACKPLANE_GUARD_PROBE", 5), misses: env("BACKPLANE_GUARD_MISSES", 6) as u32, stable: env("BACKPLANE_GUARD_STABLE", 60), stall: env("BACKPLANE_GUARD_STALL", 300), boot: env("BACKPLANE_GUARD_BOOT", 900), floor: env("BACKPLANE_GUARD_MIN_FREE", 1 << 30) };
     let mode = if o.safe { Mode::Safe } else { Mode::Normal };
-    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, o };
+    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, down: vec![], down_before: vec![], o };
     // a build already marked bad is not started: the newest one that is not
     if bad.contains(&g.build) { if let Some(to) = g.rollback_to() { say(&format!("{} is marked bad: starting {to}", g.build)); g.build = to; } }
     g.pin(); g.go()

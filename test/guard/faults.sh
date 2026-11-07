@@ -165,6 +165,12 @@ if go update-identity; then
     if until_ 30 on third && [ "$(cat "$T/$CUR/builds/CURRENT")" = third ]; then ok "a build answering as another commit goes straight back, marked bad; the right one ($V/$C) sticks"; else no "the right build did not stick ($(st state) on $(st build))"; fi
   fi
 fi
+if go update-degraded; then
+  # an update whose start loses a part the build before had (a step panics: the hub serves, degraded) goes back like one that dies
+  build good; printf 'good\n' > "$T/$CUR/builds/CURRENT"; guard good; until_ 30 on good
+  build next "$(real panic:bots)"; "$G" hub update next --home "$H" --now > /dev/null
+  if ! until_ 40 eval 'on good && grep -q "^next" "$T/$CUR/builds/BAD"'; then no "kept it ($(st state) on $(st build); BAD: $(cat "$T/$CUR/builds/BAD" 2>/dev/null))"; elif ! grep -q 'came up without bots' "$T/$CUR/builds/BAD"; then no "marked bad for something else: $(cat "$T/$CUR/builds/BAD")"; elif [ "$(cat "$T/$CUR/builds/CURRENT")" != good ]; then no "CURRENT moved"; else ok "an update that comes up without bots goes back and is marked bad"; fi
+fi
 if go healthz-private; then
   # which build runs is told to a caller the hub knows, never to the open network
   build good; guard good; until_ 30 on good
