@@ -877,7 +877,7 @@ struct DataOrderCard: View {
             if let u = order.payURL { Button(order.label.isEmpty ? "Buy now" : order.label) { openURL(u) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("thread.order.pay") }
         }
         .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
-        .padding(.horizontal, 12).padding(.vertical, 6).accessibilityIdentifier("thread.order")
+        .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("thread.order") // a container: Buy now keeps its own identifier
     }
 }
 
