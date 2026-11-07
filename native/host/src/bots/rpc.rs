@@ -43,7 +43,7 @@ impl Inbox for Arc<Agents> {
     fn note<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::ride_note(self, thread, id, text).await }) }
 }
 
-pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, pub(super) inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashSet<String>>, pub(crate) mail_lists: std::sync::RwLock<std::collections::HashMap<String, Vec<&'static str>>> }
+pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, pub(super) inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashSet<String>>, pub(crate) mail_lists: std::sync::RwLock<std::collections::HashMap<String, Vec<&'static str>>>, pub(super) far: super::far::FarState }
 /// the state lane's star-nudge count for a human prompt (statehost::policies()?.star_prompt): the events to commit with the prompt and, on the fifth, the offer for its connection
 pub type StarPrompt = dyn Fn(&str, u64) -> (Vec<Value>, Option<Value>) + Send + Sync;
 
@@ -94,7 +94,7 @@ impl Bots {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = crate::ckpt::take("bots", &store, || World::load(&store)).unwrap_or_default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
         let mut w = w; w.steps.clear(); // what the start folded was answered when it happened
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default() });
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default(), far: Default::default() });
         { let g = b.world.lock().await; b.refresh_threads(&g); }
         { let me = b.clone(); crate::ckpt::register(move |store| me.world.blocking_lock().save(store)); }
         { let me = b.clone(); tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(20)).await; me.owner_outbox().await } }); } // OwnerJob: the outbox is walked again

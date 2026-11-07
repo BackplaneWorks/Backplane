@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 pub const TOOLS_JSON: &str = include_str!("tools.json");
 pub const NAMES: &[&str] = &["bot_whoami", "bot_list", "bot_send", "room_list", "room_create", "room_post", "room_read", "memory_save", "memory_recall", "memory_forget", "memory_list",
-    "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "bot_create", "voice_dictionary_add", "plane_read", "notify_person", "remind_person", "person_timezone", "project_create"];
+    "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "bot_create", "voice_dictionary_add", "plane_read", "room_join", "room_leave", "notify_person", "remind_person", "person_timezone", "project_create"];
 const HOP_MAX: u64 = 6;
 const MAX_PAGE: usize = 262_144;
 
@@ -113,15 +113,19 @@ impl Bots {
             }
             "bot_list" => {
                 let mut v: Vec<_> = w.bots.values().filter(|b| !b.deleted).collect(); v.sort_by_key(|x| (x.created, id_seq(&x.id), x.id.clone()));
-                (true, json!({"here":v.into_iter().map(|x| json!({"name":x.name,"id":x.id,"state":state(&w, &x.thread)})).collect::<Vec<_>>(),"elsewhere":[]}))
+                let here = v.into_iter().map(|x| json!({"name":x.name,"id":x.id,"state":state(&w, &x.thread)})).collect::<Vec<_>>();
+                (true, json!({"here":here,"elsewhere":self.far_bots().await}))
             }
             "bot_send" => self.t_send(w, &b, now, a, later).await,
             "room_list" => (true, Value::Array(rooms(&w).into_iter().map(room_json).collect())),
             "room_create" => {
-                let ms = members(&w, &b.id, gs(a, "members")); let rid = self.hub_id("r", now);
+                let ms = members(&w, &b.id, gs(a, "members"));
+                if let Err(e) = self.far_members_ok(&ms.lines().map(str::to_string).collect::<Vec<_>>()) { return fail(&e) }
+                let rid = self.hub_id("r", now);
                 let ev = json!({"$":"RoomSet","id":rid,"name":a.get("name").and_then(Value::as_str).unwrap_or("room"),"members":ms,"at":now});
                 self.t_commit(w, now, vec![ev]).await.map_or_else(|e| fail(&e), |_| said("room made"))
             }
+            "room_join" | "room_leave" => self.t_room_membership(w, &b, now, name == "room_join", a).await,
             "room_post" => {
                 let Some(room) = find_room(&w, gs(a, "room")).cloned() else { return fail("no such room (see room_list)") };
                 let rr = RoomRef { id: room.id, name: room.name, members: room.members };
@@ -169,12 +173,10 @@ impl Bots {
             "project_list" => (true, Value::Array(w.projects.iter().filter(|(_, p)| !p.2).map(|(id, p)| json!({"id":id,"name":p.0,"folder":p.1})).collect())),
             "bot_create" => self.t_spawn(w, &b, now, a).await,
             "plane_read" => {
-                let word = gs(a, "machine").trim(); // Fm.plan.pw: no machine is linked until the net lane's transport
-                if !word.is_empty() { return fail(&format!("no machine of yours called {word} is linked here (machine_list shows them)")) }
-                let rooms = self.room_news(w, now).await; let idle = gb(a, "idle", false);
-                let text = crate::statehost::policies().and_then(|p| p.with_state(|st| super::plane::read(st, w, &rooms, now, idle)));
-                let text = match text { Some(t) => t, None => { let st = self.state_folded(); super::plane::read(&st, w, &rooms, now, idle) } };
-                (true, json!({"text":text}))
+                let word = gs(a, "machine").trim(); // Fm.plan.pw: another machine's plane is asked of it (bots/far.rs)
+                let idle = gb(a, "idle", false);
+                if !word.is_empty() { return match self.far_plane(thread, word, idle).await { Ok(text) => (true, json!({"text":text})), Err(e) => fail(&e) } }
+                (true, json!({"text":self.plane_text(w, now, idle).await}))
             }
             "notify_person" => self.t_notify(w, &b, now, trim(gs(a, "reason")), trim(gs(a, "text")), trim(gs(a, "thread")), trim(gs(a, "ask"))).await,
             "remind_person" => {
@@ -206,6 +208,18 @@ impl Bots {
     /// Commit a tool's changes (with the uberbot's ops beside them); the lock is held by the caller
     async fn t_commit(&self, w: &World, now: u64, evs: Vec<Value>) -> Result<(), String> { self.hub.commit_many(&w.also(now, evs)).await.map(|_| ()).map_err(|e| format!("{e:#}")) }
 
+    /// room_join / room_leave: the bot's own membership; with `machine`, the room lives on that machine (it is replicated here once the bot is in it)
+    async fn t_room_membership(&self, w: &World, b: &Bot, now: u64, join: bool, a: &Value) -> Res {
+        let (room, machine) = (gs(a, "room").trim(), gs(a, "machine").trim());
+        if room.is_empty() { return fail("name the room (room_list)") }
+        if !machine.is_empty() { return match self.far_membership(w, &b.name, join, room, machine).await { Ok(()) => said(if join { "joined; the room is copied here in a moment" } else { "left" }), Err(e) => fail(&e) } }
+        let Some(r) = find_room(w, room).cloned() else { return fail("no such room (room_list; with `machine`, one on another machine)") };
+        let has = r.members.contains(&b.id);
+        if join == has { return said(if join { "you are in it already" } else { "you are not in it" }) }
+        let ms: Vec<String> = if join { let mut v = r.members.clone(); v.push(b.id.clone()); v } else { r.members.iter().filter(|m| **m != b.id).cloned().collect() };
+        self.t_commit(w, now, vec![json!({"$":"RoomSet","id":r.id,"name":r.name,"members":ms.join("\n"),"at":now})]).await.map_or_else(|e| fail(&e), |_| said(if join { "joined" } else { "left" }))
+    }
+
     /// A bot's post in a room: within the depth bound the post goes out at the next hop; past it, held (kept in the room for the person, heard by no bot)
     async fn t_post(&self, w: &World, b: &Bot, now: u64, room: &RoomRef, text: &str, before: Vec<Value>, later: &mut Option<(Pending, u64)>, said: impl Fn(&RoomRef) -> Res) -> Res {
         let hop = w.hops.get(&b.id).map_or(0, |h| h.now) + 1;
@@ -218,7 +232,19 @@ impl Bots {
 
     async fn t_send(&self, w: &World, b: &Bot, now: u64, a: &Value, later: &mut Option<(Pending, u64)>) -> Res {
         let (to, direct, topic) = (gs(a, "to"), gb(a, "direct", false), gs(a, "topic").trim());
-        if to.contains('@') { return fail(&format!("no linked machine called {} (see bot_list)", to.rsplit('@').next().unwrap_or(""))) } // machines are the net lane's: PARITY
+        if let Some((name, mach)) = to.rsplit_once('@') { // a bot on a linked machine: the room is shared with it (bots/far.rs)
+            let Some(link) = self.machine_link(mach) else { return fail(&format!("no linked machine called {mach} (see bot_list)")) };
+            if direct { return fail("a private message to a bot on another machine is not available: give a `topic`") }
+            let theirs = format!("{name}@{link}");
+            let rname = if topic.is_empty() { let (x, y) = (b.name.to_lowercase(), format!("{}@{}", name.to_lowercase(), mach.to_lowercase())); if x <= y { format!("{x} + {y}") } else { format!("{y} + {x}") } } else { topic.chars().take(60).collect() };
+            let found = rooms(w).into_iter().find(|r| r.name.to_lowercase() == rname.to_lowercase() && r.members.len() == 2 && r.members.contains(&b.id) && r.members.iter().any(|m| m.to_lowercase() == theirs.to_lowercase() || m.rsplit_once('@').map_or(false, |(n, mm)| n.eq_ignore_ascii_case(name) && self.machine_link(mm).as_deref() == Some(link.as_str())))).cloned();
+            let (rr, before) = match found {
+                Some(r) => (RoomRef { id: r.id, name: r.name, members: r.members }, vec![]),
+                None => { let id = self.hub_id("r", now); let ms = vec![b.id.clone(), theirs];
+                    let ev = json!({"$":"RoomSet","id":id,"name":rname,"members":ms.join("\n"),"at":now}); (RoomRef { id, name: rname, members: ms }, vec![ev]) }
+            };
+            return self.t_post(w, b, now, &rr, gs(a, "text"), before, later, |r| (true, json!({"ok":true,"room":r.id,"roomName":r.name,"note":format!("posted in #{}, shared with {to}; keep everything about this request there", r.name)}))).await
+        }
         let Some(t) = w.named(to).cloned().or_else(|| w.bot(to).filter(|x| !x.deleted).cloned()) else { return fail("no bot by that name here (see bot_list)") };
         if t.id == b.id { return fail("that is you") }
         let text = gs(a, "text");
@@ -295,6 +321,12 @@ impl Bots {
         st
     }
     /// Plane.rooms.go: each room's unread posts (those since the setting room.seen.<room>, or the last day, that the person did not write) and the last one's time
+    /// Plane.read of this machine
+    pub(super) async fn plane_text(&self, w: &World, now: u64, idle: bool) -> String {
+        let rooms = self.room_news(w, now).await;
+        let text = crate::statehost::policies().and_then(|p| p.with_state(|st| super::plane::read(st, w, &rooms, now, idle)));
+        match text { Some(t) => t, None => { let st = self.state_folded(); super::plane::read(&st, w, &rooms, now, idle) } }
+    }
     pub(super) async fn room_news(&self, w: &World, now: u64) -> Vec<super::plane::RoomNews> {
         let mut out = vec![];
         for r in rooms(w) {

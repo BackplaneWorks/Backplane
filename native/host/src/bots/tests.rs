@@ -1255,7 +1255,8 @@ fn stored(e: &Value) -> Value {
     let names = |k: &str| rec[k].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).filter(|x| tools::owns(x)).collect::<Vec<_>>();
     use crate::agents::mcp::ToolSet;
     let set = tools::BotToolSet(bots.clone()); let list = |t: &str| set.list(t).iter().map(|d| d["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
-    assert_eq!(list(rec["thread"].as_str().unwrap()), names("listBot"), "a bot's tools in the JS order");
+    let mut mine = list(rec["thread"].as_str().unwrap()); mine.retain(|n| n != "room_join" && n != "room_leave"); // (ours, beside the JS hub's)
+    assert_eq!(mine, names("listBot"), "a bot's tools in the JS order");
     assert_eq!(list("t1700000001-2"), names("listPlain"), "a plain thread's");
     let _ = std::fs::remove_dir_all(&work);
 }
@@ -1428,4 +1429,115 @@ async fn call_hook(hub: &Arc<Hub>, hid: &str, hs: Vec<(String, String)>, body: &
     assert_eq!(rpc(&hub, "board.set", json!({"item":{"title":"x","due":"soon"}})).await["error"], "a due date is YYYY-MM-DD");
     assert_eq!(rpc(&hub, "board.drop", json!({"id":bid})).await["ok"], true); assert_eq!(set(&hub, &format!("board.{bid}")).as_deref(), Some(""));
     assert_eq!(rpc(&hub, "board.drop", json!({"id":bid})).await["error"], format!("no item {bid}"));
+}
+
+// ---- bots across linked machines (bots/far.rs): two hubs, each with its Bots, wired to each other through an OwnerLink that calls the other's `far_received`
+// (the route's own gate, "only a link that is one of the owner's own", is net/rpc/tests.rs)
+struct Wire { to: std::sync::OnceLock<Arc<Bots>>, as_link: String, peer_name: String, up: std::sync::atomic::AtomicBool, seen: StdMutex<Vec<String>> }
+impl mail::owner::OwnerLink for Wire {
+    fn post<'a>(&'a self, link: &'a str, body: String) -> Fut<'a, Option<(u16, String)>> {
+        Box::pin(async move {
+            if link != "L1" || !self.up.load(std::sync::atomic::Ordering::SeqCst) { return None }
+            let o: Value = serde_json::from_str(&body).unwrap(); let (m, p) = (o["m"].as_str().unwrap().to_string(), o["p"].clone());
+            self.seen.lock().unwrap().push(m.clone());
+            let to = self.to.get().unwrap();
+            if m == "mcp.call" { // what net/rpc.rs makes of it
+                let (c, t) = to.far_received(&self.as_link, &format!("tool.{}", p["tool"].as_str().unwrap()), &p["args"]).await;
+                return Some(if c == 200 { (200, json!({"ok":true,"body":serde_json::from_str::<Value>(&t).unwrap()}).to_string()) } else { (c, t) });
+            }
+            Some(to.far_received(&self.as_link, &m, &p).await)
+        })
+    }
+    fn machines(&self) -> Vec<(String, String, String)> { vec![("L1".into(), self.peer_name.clone(), "http://x".into())] }
+}
+struct Two { ha: Arc<Hub>, ba: Arc<Bots>, ra: Arc<Rec>, hb: Arc<Hub>, bb: Arc<Bots>, rb: Arc<Rec>, ada: String, bob: String, wa: Arc<Wire> }
+async fn two(tag: &str) -> Two {
+    let (ha, ba, ra) = start(&format!("far{tag}A"), "").await; let (hb, bb, rb) = start(&format!("far{tag}B"), "").await;
+    let wa = Arc::new(Wire { to: Default::default(), as_link: "L1".into(), peer_name: "deskB".into(), up: true.into(), seen: Default::default() });
+    let wb = Arc::new(Wire { to: Default::default(), as_link: "L1".into(), peer_name: "deskA".into(), up: true.into(), seen: Default::default() });
+    wa.to.set(bb.clone()).ok(); wb.to.set(ba.clone()).ok();
+    ba.set_owner_link(wa.clone()); bb.set_owner_link(wb); ba.far_start(); bb.far_start();
+    let (ada, bob) = (bot(&ha, "ada").await, bot(&hb, "bob").await);
+    Two { ha, ba, ra, hb, bb, rb, ada, bob, wa }
+}
+fn thread_of(hub: &Arc<Hub>, bot: &str) -> String { log(hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == bot).unwrap()["thread"].as_str().unwrap().to_string() }
+fn posts(hub: &Arc<Hub>, room: &str) -> Vec<(String, String)> { log(hub).iter().filter(|e| e["$"] == "RoomPosted" && e["room"] == room).map(|e| (e["from"].as_str().unwrap().to_string(), e["text"].as_str().unwrap().to_string())).collect() }
+fn room_members(hub: &Arc<Hub>, room: &str) -> Option<String> { log(hub).iter().rev().find(|e| e["$"] == "RoomSet" && e["id"] == room).map(|e| e["members"].as_str().unwrap().to_string()) }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_room_with_a_bot_on_another_machine_is_kept_on_both_and_posts_travel_both_ways() {
+    let t = two("room").await;
+    let (th_a, th_b) = (thread_of(&t.ha, &t.ada), thread_of(&t.hb, &t.bob));
+    let (ok, r) = t.ba.tool_call(&th_a, "room_create", &json!({"name":"lab","members":"bob@deskB"})).await; assert!(ok, "{r}");
+    let rid = log(&t.ha).iter().find(|e| e["$"] == "RoomSet").unwrap()["id"].as_str().unwrap().to_string();
+    until(&t.hb, |l| l.iter().any(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str())).await;
+    assert_eq!(sorted(&room_members(&t.hb, &rid).unwrap()), sorted(&format!("{}\nada@L1", t.bob)), "B holds the room, ada as a bot of the other machine, bob as its own");
+    // ada posts: bob hears it on B, from ada@deskA
+    let (ok, _) = t.ba.tool_call(&th_a, "room_post", &json!({"room":"lab","text":"hi bob"})).await; assert!(ok);
+    until(&t.hb, |l| l.iter().any(|e| e["$"] == "RoomPosted" && e["text"] == "hi bob")).await;
+    assert_eq!(posts(&t.hb, &rid), vec![("ada@deskA".to_string(), "hi bob".to_string())]);
+    for _ in 0..100 { if t.rb.got.lock().unwrap().iter().any(|g| g.0 == th_b) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert!(t.rb.got.lock().unwrap().iter().any(|g| g.0 == th_b && g.2.contains("[message from ada@deskA in #lab]\nhi bob")), "bob's thread is told: {:?}", t.rb.got.lock().unwrap());
+    // bob answers: A logs it and wakes ada
+    let (ok, _) = t.bb.tool_call(&th_b, "room_post", &json!({"room":"lab","text":"hi ada"})).await; assert!(ok);
+    until(&t.ha, |l| l.iter().any(|e| e["$"] == "RoomPosted" && e["text"] == "hi ada")).await;
+    for _ in 0..100 { if t.ra.got.lock().unwrap().iter().any(|g| g.0 == th_a && g.2.contains("hi ada")) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert!(t.ra.got.lock().unwrap().iter().any(|g| g.0 == th_a && g.2.contains("[message from bob@deskB in #lab]")));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await; // an echo would show by now
+    assert_eq!((posts(&t.ha, &rid).len(), posts(&t.hb, &rid).len()), (2, 2), "each post once on each machine, none sent back: {:?} {:?}", posts(&t.ha, &rid), posts(&t.hb, &rid));
+    assert_eq!(log(&t.ha).iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count(), 1, "the room change was not sent back and forth");
+    assert_eq!(log(&t.hb).iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count(), 1);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn leaving_and_joining_a_shared_room_reaches_the_other_machine() {
+    let t = two("member").await;
+    let (th_a, th_b) = (thread_of(&t.ha, &t.ada), thread_of(&t.hb, &t.bob));
+    // bob makes a room on B; ada joins it from A by naming the machine: it is copied to A
+    assert!(t.bb.tool_call(&th_b, "room_create", &json!({"name":"b-room","members":""})).await.0);
+    let rid = log(&t.hb).iter().find(|e| e["$"] == "RoomSet").unwrap()["id"].as_str().unwrap().to_string();
+    let (ok, r) = t.ba.tool_call(&th_a, "room_join", &json!({"room":"b-room","machine":"deskB"})).await; assert!(ok, "{r}");
+    until(&t.ha, |l| l.iter().any(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str())).await;
+    assert_eq!(sorted(&room_members(&t.ha, &rid).unwrap()), sorted(&format!("{}\nbob@L1", t.ada)), "A holds it, bob as the other machine's");
+    until(&t.hb, |l| l.iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count() >= 2).await;
+    assert!(room_members(&t.hb, &rid).unwrap().contains("ada@L1"));
+    // bob leaves on B: A's copy loses him
+    assert!(t.bb.tool_call(&th_b, "room_leave", &json!({"room":"b-room"})).await.0);
+    until(&t.ha, |l| room_members_in(l, &rid).map_or(false, |m| !m.contains("bob"))).await;
+    // and a post from the person on A reaches nobody on B now
+    assert_eq!(room_members_in(&log(&t.ha), &rid).unwrap(), t.ada);
+}
+fn sorted(s: &str) -> Vec<String> { let mut v: Vec<String> = s.lines().map(str::to_string).collect(); v.sort(); v }
+fn room_members_in(l: &[Value], room: &str) -> Option<String> { l.iter().rev().find(|e| e["$"] == "RoomSet" && e["id"] == room).map(|e| e["members"].as_str().unwrap().to_string()) }
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn bot_send_to_name_at_machine_opens_a_shared_room_and_the_plane_of_the_other_machine_reads() {
+    let t = two("send").await;
+    let (th_a, th_b) = (thread_of(&t.ha, &t.ada), thread_of(&t.hb, &t.bob));
+    let (ok, r) = t.ba.tool_call(&th_a, "bot_list", &json!({})).await; assert!(ok);
+    assert_eq!(r["elsewhere"][0]["name"], "bob@deskB", "{r}");
+    let (ok, r) = t.ba.tool_call(&th_a, "bot_send", &json!({"to":"bob@deskB","text":"build the board","topic":"board"})).await; assert!(ok, "{r}");
+    until(&t.hb, |l| l.iter().any(|e| e["$"] == "RoomPosted" && e["text"] == "build the board")).await;
+    for _ in 0..100 { if t.rb.got.lock().unwrap().iter().any(|g| g.0 == th_b) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert!(t.rb.got.lock().unwrap().iter().any(|g| g.0 == th_b && g.2.contains("build the board")));
+    // the same topic again is the same room
+    let (ok, _) = t.ba.tool_call(&th_a, "bot_send", &json!({"to":"bob@deskB","text":"and test it","topic":"board"})).await; assert!(ok);
+    until(&t.hb, |l| l.iter().any(|e| e["$"] == "RoomPosted" && e["text"] == "and test it")).await;
+    assert_eq!(log(&t.ha).iter().filter(|e| e["$"] == "RoomSet").count(), 1);
+    // plane_read with `machine`: B's plane, its ids through the link
+    let (ok, r) = t.ba.tool_call(&th_a, "plane_read", &json!({"machine":"deskB"})).await; assert!(ok, "{r}");
+    let text = r["text"].as_str().unwrap(); assert!(text.contains("Status plane"), "{text}"); assert!(text.contains("L1~"), "bob's thread is named through the link: {text}");
+    let (ok, r) = t.ba.tool_call(&th_a, "plane_read", &json!({"machine":"nowhere"})).await; assert!(!ok); assert!(r["error"].as_str().unwrap().contains("no machine of yours called nowhere"));
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn nothing_crosses_a_link_that_is_not_there_and_a_room_is_not_taken_by_guessing_its_id() {
+    let t = two("down").await;
+    let th_a = thread_of(&t.ha, &t.ada);
+    t.wa.up.store(false, std::sync::atomic::Ordering::SeqCst); // away, or not the owner's own: the transport answers nothing
+    let (ok, r) = t.ba.tool_call(&th_a, "bot_send", &json!({"to":"bob@deskB","text":"x","topic":"t"})).await; assert!(ok, "the room is made here; {r}");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!log(&t.hb).iter().any(|e| e["$"] == "RoomSet" || e["$"] == "RoomPosted"), "B heard nothing");
+    let (ok, r) = t.ba.tool_call(&th_a, "plane_read", &json!({"machine":"deskB"})).await; assert!(!ok); assert!(r["error"].as_str().unwrap().contains("away"), "{r}");
+    let (ok, r) = t.ba.tool_call(&th_a, "room_create", &json!({"name":"q","members":"bob@elsewhere"})).await; assert!(!ok); assert!(r["error"].as_str().unwrap().contains("no linked machine called elsewhere"), "{r}");
+    // B has a room of its own; the other machine names its id and is told no
+    let th_b = thread_of(&t.hb, &t.bob);
+    assert!(t.bb.tool_call(&th_b, "room_create", &json!({"name":"mine","members":""})).await.0);
+    let mine = log(&t.hb).iter().find(|e| e["$"] == "RoomSet").unwrap()["id"].as_str().unwrap().to_string();
+    let (c, _) = t.bb.far_received("L1", "bots.room_sync", &json!({"room":mine,"name":"x","members":["ada@L1"],"deleted":false})).await; assert_eq!(c, 409);
+    let (c, _) = t.bb.far_received("L1", "bots.room_post", &json!({"room":mine,"msg":"m1","from":"ada","text":"hello"})).await; assert_eq!(c, 403);
+    let (c, _) = t.bb.far_received("L1", "bots.room_sync", &json!({"room":mine,"deleted":true})).await; assert_eq!(c, 409, "a room of its own is not deleted from elsewhere either");
 }

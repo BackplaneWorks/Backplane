@@ -62,6 +62,25 @@ impl FarRouter for Router {
             vec![]
         })
     }
+    fn mcp<'a>(&'a self, hub: &'a Arc<Hub>, link: &'a str, from: &'a str, tool: &'a str, args: &'a Value) -> Fut<'a, Result<(bool, Value), String>> {
+        Box::pin(async move {
+            if self.copy { return Err("a hub on a copied log does not reach other machines".into()) }
+            if !self.sync.own(link) { return Err(format!("no machine of yours is linked as {link} (machine_list shows them)")) }
+            let body = json!({"id": 0, "m": "mcp.call", "p": {"tool": tool, "from": from, "args": args}}).to_string();
+            let (code, text) = post(&self.sync, hub, link, &body).await;
+            match code {
+                0 => Err("that machine is away".into()),
+                200 => { let v: Value = serde_json::from_str(&text).map_err(|_| "invalid reply from that machine".to_string())?; Ok((v["ok"].as_bool().unwrap_or(false), v.get("body").cloned().unwrap_or(Value::Null))) }
+                _ => Err(format!("that machine did not take it: {}", text.chars().take(160).collect::<String>())),
+            }
+        })
+    }
+    fn machines(&self) -> Vec<(String, String, String)> { machines_of(&self.sync) }
+}
+/// The owner's own machines this hub is linked to: (link id, name, address)
+pub fn machines_of(sync: &FarSync) -> Vec<(String, String, String)> {
+    let j = sync.peering.routes.machines_value();
+    sync.peering.table.with(|p| p.live().into_iter().filter(|r| super::farsync::own_link(p, &j, &r.id)).map(|r| (r.id, r.name, r.url)).collect())
 }
 
 /// The bots lane's transport for `owner.mail` (a signed POST to a linked machine); only to one of the owner's own (the request carries mail text).
@@ -75,6 +94,7 @@ impl OwnerLink for Link {
             match post(&self.sync, &hub, link, &body).await { (0, _) => None, r => Some(r) }
         })
     }
+    fn machines(&self) -> Vec<(String, String, String)> { machines_of(&self.sync) }
 }
 
 pub struct RpcRoutes(pub Arc<FarSync>);
@@ -104,9 +124,25 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
         return HttpReply { status: status(code), ctype: "text/plain".into(), extra: String::new(), body: body.into_bytes() };
     }
     let p = o.get("p").cloned().unwrap_or(Value::Null);
+    if m.starts_with("bots.") && FAR_BOTS.contains(&m) {
+        let Some(bots) = crate::bots::api::of(hub) else { return HttpReply::text("503 Service Unavailable", "bots are not running") };
+        let (code, body) = bots.far_received(&link, m, &p).await;
+        return HttpReply { status: status(code), ctype: "text/plain".into(), extra: String::new(), body: body.into_bytes() };
+    }
     if m == "uber.sync" { return HttpReply::text("501 Not Implemented", "uber.sync is not ported on this hub yet") }
     if m == "mcp.call" {
-        return if MCP_REMOTE.contains(&p["tool"].as_str().unwrap_or("")) { HttpReply::text("501 Not Implemented", "mcp.call is not ported on this hub yet") } else { HttpReply::text("403 Forbidden", "not something this machine shares") };
+        let tool = p["tool"].as_str().unwrap_or("");
+        if !MCP_REMOTE.contains(&tool) { return HttpReply::text("403 Forbidden", "not something this machine shares") }
+        let from = p["from"].as_str().unwrap_or("");
+        if from.is_empty() || from.contains('~') { return HttpReply::text("400 Bad Request", "who is asking?") }
+        if tool == "plane_read" {
+            let Some(bots) = crate::bots::api::of(hub) else { return HttpReply::text("503 Service Unavailable", "bots are not running") };
+            let (code, body) = bots.far_received(&link, &format!("tool.{tool}"), &p["args"]).await;
+            return if code == 200 { json_reply(&json!({"ok": true, "body": serde_json::from_str::<Value>(&body).unwrap_or(Value::String(body))})) } else { HttpReply { status: status(code), ctype: "text/plain".into(), extra: String::new(), body: body.into_bytes() } };
+        }
+        let Some(srv) = hub.far_mcp() else { return HttpReply::text("503 Service Unavailable", "agents are not running") };
+        let (ok, body) = srv.serve(&link, &super::far::id(&link, from), tool, &p["args"]).await;
+        return json_reply(&json!({"ok": ok, "body": body}));
     }
     let Some(feed) = sync.feed.get() else { return HttpReply::text("503 Service Unavailable", "not ready") };
     if !feed.allowed(m, &p) { return HttpReply::text("403 Forbidden", "not something this machine shares") }
@@ -115,6 +151,8 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     let out = hub.request_here(&mut c, &json!({"id": 0, "m": m, "p": p})).await;
     match out.into_iter().find(|v| v["t"] == "reply") { Some(v) => json_reply(&v), None => HttpReply::text("500 Internal Server Error", "no answer") }
 }
+/// The bots lane's requests between machines: a room's members, a post in it
+const FAR_BOTS: &[&str] = &["bots.room_sync", "bots.room_post", "bots.list", "bots.room_join", "bots.room_leave"];
 /// `Fm.names` the owner's machines may call here (Fm.remote)
-const MCP_REMOTE: &[&str] = &["thread_send", "thread_wait_now", "thread_interrupt", "thread_update", "thread_list", "thread_launch", "machine_list", "thread_read", "thread_handoff", "plane_read", "launch_report"];
+const MCP_REMOTE: &[&str] = &["thread_send", "thread_wait_now", "thread_interrupt", "thread_update", "thread_list", "thread_launch", "machine_list", "thread_read", "thread_handoff", "plane_read", "launch_report", "thread_settle"];
 fn status(code: u16) -> &'static str { match code { 200 => "200 OK", 400 => "400 Bad Request", 403 => "403 Forbidden", 409 => "409 Conflict", 503 => "503 Service Unavailable", _ => "500 Internal Server Error" } }

@@ -1,0 +1,138 @@
+//! Threads on another of the owner's machines, for the tools: an agent's (or a bot's) `thread_*` call that names `<link>~<id>` or a `machine`
+//! is asked of that machine as a signed `mcp.call` over /far/rpc (`Agents::far_route`), and the owning machine runs it for the caller
+//! (`FarServe`, installed with `Hub::set_far_mcp`): the caller there is the thread `<link>~<its id>`, which is no thread of that machine's project
+//! and may reach any of them. Everything is gated on the link being one of the owner's own machines (net/rpc.rs).
+//! A thread launched from elsewhere reports back the same way a local one does: its turn ends and asks go to the launcher as `launch_report`.
+use super::{lines::hub_id, now_s, Agents};
+use crate::net::far;
+use serde_json::{json, Value};
+use std::sync::{Arc, Weak};
+
+fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
+fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
+
+/// The tools that take a thread, and so may name one elsewhere
+const ON_THREAD: &[&str] = &["thread_send", "thread_read", "thread_wait", "thread_interrupt", "thread_update", "thread_settle"];
+/// The tools that take a `machine`
+const ON_MACHINE: &[&str] = &["thread_list", "thread_launch"];
+
+/// The owning side of a tool call from another machine.
+pub struct FarServe(pub Weak<Agents>);
+impl crate::api::FarMcp for FarServe {
+    fn serve<'a>(&'a self, link: &'a str, from: &'a str, tool: &'a str, args: &'a Value) -> crate::api::Fut<'a, (bool, Value)> {
+        Box::pin(async move {
+            let Some(ag) = self.0.upgrade() else { return fail("agents are not running") };
+            ag.far_serve(link, from, tool, args).await
+        })
+    }
+}
+
+/// `args` with the thread ids made local to `link` (the request as the owning machine takes it)
+fn localized(link: &str, a: &Value) -> Value {
+    let mut a = a.clone();
+    if let Some(o) = a.as_object_mut() { for k in ["threadId", "parent"] { if let Some(s) = o.get(k).and_then(Value::as_str) { if far::is(s) && far::link(s) == link { o.insert(k.into(), Value::String(far::local(s))); } } } o.remove("machine"); }
+    a
+}
+/// The owning machine's answer with its thread ids made `<link>~<id>` here
+pub fn prefixed(link: &str, mut v: Value) -> Value {
+    fn pre(link: &str, o: &mut Value, k: &str) { if let Some(s) = o.get(k).and_then(Value::as_str) { if !s.is_empty() && !far::is(s) { o[k] = Value::String(far::id(link, s)) } } }
+    pre(link, &mut v, "threadId"); pre(link, &mut v, "parent");
+    if let Some(s) = v.get_mut("status") { pre(link, s, "id"); pre(link, s, "parent") }
+    if let Some(a) = v.get_mut("threads").and_then(Value::as_array_mut) { for t in a { pre(link, t, "id"); pre(link, t, "parent") } }
+    v
+}
+
+impl Agents {
+    /// The link a `machine` word names (a machine's name in any case, or its link id), among the owner's linked machines.
+    pub fn machine_link(&self, word: &str) -> Option<String> {
+        let w = word.trim().to_lowercase();
+        self.hub.far_machines().into_iter().find(|(id, name, _)| id.to_lowercase() == w || name.to_lowercase() == w).map(|(id, _, _)| id)
+    }
+
+    /// A call that is about another machine: Some(answer) when it was sent there (or could not be), None when it is about this one.
+    pub async fn far_route(self: &Arc<Self>, thread: &str, name: &str, a: &Value) -> Option<(bool, Value)> {
+        let (link, tool) = if ON_THREAD.contains(&name) && far::is(sv(a, "threadId")) { (far::link(sv(a, "threadId")), name) }
+            else if ON_MACHINE.contains(&name) && !sv(a, "machine").trim().is_empty() {
+                match self.machine_link(sv(a, "machine")) { Some(l) => (l, name), None => return Some(fail(&format!("no machine of yours called {} is linked here (machine_list shows them)", sv(a, "machine")))) }
+            } else { return None };
+        if far::is(thread) { return Some(fail("a thread on another machine cannot ask a third")) }
+        let args = localized(&link, a);
+        if name == "thread_wait" { return Some(self.far_wait(&link, thread, &args).await) }
+        Some(match self.hub.far_call(&link, thread, tool, &args).await {
+            Ok((ok, body)) => (ok, prefixed(&link, body)),
+            Err(e) => fail(&e),
+        })
+    }
+    /// thread_wait on a thread elsewhere: asked again every second until it is done or the time is up
+    async fn far_wait(&self, link: &str, thread: &str, a: &Value) -> (bool, Value) {
+        let end = tokio::time::Instant::now() + std::time::Duration::from_secs(super::tools::wait_clamp(a.get("timeoutMs").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(30000)));
+        loop {
+            match self.hub.far_call(link, thread, "thread_wait_now", a).await {
+                Ok((true, body)) => { if body["done"].as_bool().unwrap_or(false) || tokio::time::Instant::now() >= end { return (true, prefixed(link, body)) } }
+                Ok((false, body)) => return (false, body),
+                Err(e) => return fail(&e),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+    }
+
+    /// machine_list: this machine and the linked ones, each with its projects (ids for thread_launch)
+    pub async fn tool_machines(self: &Arc<Self>, _thread: &str) -> (bool, Value) {
+        let mut out = vec![json!({"name":"this machine","here":true,"projects":self.local_projects().await})];
+        for (id, name, url) in self.hub.far_machines() {
+            let r = self.hub.far_call(&id, "machine_list", "machine_list", &json!({})).await;
+            out.push(match r { Ok((true, b)) => json!({"link":id,"name":name,"url":url,"away":false,"projects":b["projects"]}), _ => json!({"link":id,"name":name,"url":url,"away":true,"projects":[]}) });
+        }
+        (true, json!({"machines":out}))
+    }
+    pub async fn local_projects(&self) -> Value {
+        let w = self.world().await;
+        let mut v: Vec<_> = w.projects.iter().filter(|(_, p)| !p.1).map(|(id, p)| json!({"id":id,"name":p.0,"folder":w.roots.get(id).cloned().unwrap_or_default()})).collect();
+        v.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+        Value::Array(v)
+    }
+    /// thread_list for a thread elsewhere: every project's threads, or the one `project` names
+    async fn list_for_far(&self, a: &Value) -> (bool, Value) {
+        let want = { let p = sv(a, "project").trim(); if p.is_empty() { None } else { let w = self.world().await; match w.project_find(p) { Some(id) => Some(id), None => return fail(&format!("no project {p} on this machine (machine_list shows them)")) } } };
+        let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(_, t)| !t.deleted && !t.project.is_empty() && want.as_ref().map_or(true, |p| &t.project == p)).map(|(k, _)| k.clone()).collect() };
+        ids.sort();
+        let mut out = vec![]; for id in ids { if let Some(j) = self.thread_json(&id).await { out.push(j) } }
+        (true, json!({"threads":out}))
+    }
+
+    /// The owning side: `tool` for the thread `from` (named `<link>~<id>`) of another machine.
+    pub async fn far_serve(self: &Arc<Self>, link: &str, from: &str, tool: &str, a: &Value) -> (bool, Value) {
+        match tool {
+            "thread_send" => self.tool_send(from, a).await,
+            "thread_read" => self.tool_read(from, a).await,
+            "thread_wait_now" => { let mut a = a.clone(); a["_now"] = json!(true); self.tool_wait(from, &a).await }
+            "thread_interrupt" => self.tool_interrupt(from, a).await,
+            "thread_update" => self.tool_update(from, a).await,
+            "thread_settle" => self.tool_settle(from, a).await,
+            "thread_launch" => self.tool_launch(from, a).await,
+            "thread_list" => self.list_for_far(a).await,
+            "machine_list" => (true, json!({"projects":self.local_projects().await})),
+            "launch_report" => self.far_report(link, from, a).await,
+            _ => fail("not something this machine shares"),
+        }
+    }
+    /// A report from a thread this thread launched on another machine: a message to it from `<link>~<thread>`
+    async fn far_report(self: &Arc<Self>, _link: &str, from: &str, a: &Value) -> (bool, Value) {
+        let to = sv(a, "to"); let text = sv(a, "text");
+        if text.is_empty() || !self.world().await.threads.contains_key(to) { return fail("that thread is not here") }
+        let msg = format!("t:{}:lr-{}", sv(a, "thread"), hub_id("r", now_s(), self.seq_n()));
+        let thread = sv(a, "thread").to_string(); let _ = from;
+        match self.inbound("user", to, &msg, text, (thread, "launch".into(), String::new()), vec![]).await { Ok(()) => (true, json!({"reported":true})), Err(e) => fail(&e) }
+    }
+    /// A report for a launcher on another machine (`to` is `<link>~<id>`): asked of that machine a few times, since the launcher may be away for a moment
+    pub fn send_far_report(self: &Arc<Self>, thread: &str, to: &str, text: &str) {
+        let (ag, thread, to, text) = (self.clone(), thread.to_string(), to.to_string(), text.to_string());
+        tokio::spawn(async move {
+            let link = far::link(&to); let args = json!({"to": far::local(&to), "text": text, "thread": far::id(&link, &thread)});
+            for n in 0..4u64 {
+                match ag.hub.far_call(&link, &thread, "launch_report", &args).await { Ok((true, _)) => return, Ok((false, b)) => { eprintln!("agents: report to {to} refused: {b}"); return } Err(_) => tokio::time::sleep(std::time::Duration::from_secs(2 << n)).await }
+            }
+            eprintln!("agents: report to {to} could not be sent");
+        });
+    }
+}

@@ -20,7 +20,7 @@ pub struct Hub {
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
     commits: tokio::sync::mpsc::UnboundedSender<Commit>,
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
-    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, far_router: std::sync::OnceLock<Arc<dyn crate::api::FarRouter>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, mirror_gate: tokio::sync::Mutex<()>, rebuild_run: tokio::sync::Mutex<()>, rebuild_again: std::sync::atomic::AtomicBool, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
+    views: std::sync::RwLock<Vec<(&'static str, Arc<dyn ViewMethod>)>>, observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, far_router: std::sync::OnceLock<Arc<dyn crate::api::FarRouter>>, far_mcp: std::sync::OnceLock<Arc<dyn crate::api::FarMcp>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, mirror_gate: tokio::sync::Mutex<()>, rebuild_run: tokio::sync::Mutex<()>, rebuild_again: std::sync::atomic::AtomicBool, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     me: std::sync::OnceLock<std::sync::Weak<Hub>>,
@@ -97,7 +97,7 @@ impl Hub {
         let model = Model::open(&store)?;
         crate::startup::mark("model built");
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; let _ = crate::plat::fs::random(&mut b); hex::encode(b) },
-            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), far_router: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), view_bump: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), outboxes: Default::default() });
+            rpc: Default::default(), http: Default::default(), views: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), far_router: Default::default(), far_mcp: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), view_bump: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), me: Default::default(), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         // housekeeping that cannot be written (a full disk) must not stop a hub that can still serve what it has
         if let Err(e) = hub.bootstrap() { crate::guard::degraded("log writes", &format!("{e:#}")); }
@@ -327,6 +327,15 @@ impl Hub {
     }
     /// Installs the mirrored threads' page source (net lane). Pages of a `<link>~<id>` thread come from it.
     pub fn set_far_router(&self, r: Arc<dyn crate::api::FarRouter>) { let _ = self.far_router.set(r); }
+    pub fn set_far_mcp(&self, m: Arc<dyn crate::api::FarMcp>) { let _ = self.far_mcp.set(m); }
+    pub fn far_mcp(&self) -> Option<Arc<dyn crate::api::FarMcp>> { self.far_mcp.get().cloned() }
+    /// A tool call for the thread `from` on the machine `link` (net lane): its answer, or why it could not be asked.
+    pub async fn far_call(&self, link: &str, from: &str, tool: &str, args: &Value) -> Result<(bool, Value), String> {
+        let Some(r) = self.far_router.get().cloned() else { return Err("no machine is linked".into()) };
+        r.mcp(&self.arc(), link, from, tool, args).await
+    }
+    /// The machines this hub may act on: (link id, name, address)
+    pub fn far_machines(&self) -> Vec<(String, String, String)> { self.far_router.get().map(|r| r.machines()).unwrap_or_default() }
     pub fn set_far(&self, f: Arc<dyn FarView>) { let _ = self.far.set(f); }
     pub fn far(&self) -> Option<Arc<dyn FarView>> { self.far.get().cloned() }
     /// Mirrored events (already renamed to `<link>~<id>` ids) to the presenter's state only: never the log, never `Model`, never a client's
