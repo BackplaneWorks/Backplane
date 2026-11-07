@@ -287,9 +287,10 @@ final class Journeys: XCTestCase {
         }
         if rows.count == 0 {
             let b = d.app.buttons["New thread in \(title)"]; for _ in 0..<40 where !b.isHittable { usleep(250_000) }; b.tap()
-            let t = d.el("data.thread.new.text"); _ = t.waitForExistence(timeout: 10); d.tap(t); t.typeText("picture thread"); d.tap(d.el("data.thread.new.start")); sleep(5)
+            let t = d.el("data.thread.new.text"); _ = t.waitForExistence(timeout: 10); d.tap(t); t.typeText("picture thread"); d.tap(d.el("data.thread.new.start"))
+            _ = rows.firstMatch.waitForExistence(timeout: 30) // a new thread takes a moment to reach the list
         }
-        guard d.step("open a thread", act: { for _ in 0..<20 where !(rows.firstMatch.exists && rows.firstMatch.isHittable) { usleep(250_000) }; rows.firstMatch.tap() }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
+        guard d.step("open a thread", act: { for _ in 0..<40 where !(rows.firstMatch.exists && rows.firstMatch.isHittable) { usleep(250_000) }; d.tap(rows.firstMatch) }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
         // a picture on the pasteboard, pasted with the system menu
         UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200)).image { c in UIColor.systemTeal.setFill(); c.fill(CGRect(x: 0, y: 0, width: 300, height: 200)) }
         let comp = d.el("thread.composer")
