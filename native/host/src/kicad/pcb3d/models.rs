@@ -698,7 +698,7 @@ mod tests {
         // a prewarm in the background and the 3D view asking for the same model: one conversion, both told
         let d = dir("once"); let c = Cache::new(d.join("parts"));
         use crate::plat::fs::PermissionsExt;
-        let t = d.join("count"); std::fs::write(&t, format!("#!/bin/sh\necho run >> {}\nsleep 0.6\nprintf glb > \"$2\"\n", d.join("runs").display())).unwrap();
+        let t = d.join("count"); std::fs::write(&t, format!("#!/bin/sh\necho run >> {}\nsleep 0.6\nprintf glb > \"$2\"\n", crate::plat::fs::script_path(&d.join("runs")))).unwrap();
         std::fs::set_permissions(&t, std::fs::Permissions::from_mode(0o755)).unwrap();
         let tools = [Mesher::Step2glb(t.to_string_lossy().into_owned())];
         let src = d.join("m.step"); std::fs::write(&src, "x").unwrap();

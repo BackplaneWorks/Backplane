@@ -1,6 +1,8 @@
 #!/bin/sh
 secs=${FAKE_SECS:-600}; per=${FAKE_PER:-3}; cycle=${FAKE_CYCLE:-30}
 sid="fake-$$"; n=0
+# Git for Windows' sh started by a Windows program sees PPID 1: its parent cannot be watched there (stdin ends when the hub goes)
+msys=; case "$(uname -s)" in MINGW*|MSYS*) msys=1 ;; esac
 echo "START $$ $(pwd)" >> "$FAKE_LOG"
 while IFS= read -r line; do
   case "$line" in
@@ -17,7 +19,7 @@ while IFS= read -r line; do
       fi
       t=0; k=0
       while [ $t -lt $ticks ]; do
-        kill -0 $PPID 2>/dev/null || exit 0
+        [ -n "$msys" ] || kill -0 $PPID 2>/dev/null || exit 0
         t=$((t + 1)); k=$((k + 1))
         if [ $k -eq 1 ]; then
           printf '%s\n' '{"type":"stream_event","event":{"type":"message_start","message":{"id":"m'"$$-$n-$t"'","role":"assistant","content":[],"usage":{"input_tokens":10}}},"session_id":"'"$sid"'"}'

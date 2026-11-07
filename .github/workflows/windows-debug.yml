@@ -1,0 +1,39 @@
+name: windows-debug
+# Run chosen hub or client tests on a Windows runner with their output (the Windows port, docs/e2e/MATRIX.md). By hand only.
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: host or gpui
+        default: host
+      filter:
+        description: nextest filter expression, e.g. test(/^agents::tests::lost::/)
+        required: true
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: never
+  CARGO_PROFILE_DEV_DEBUG: 0
+  RUST_BACKTRACE: short
+permissions:
+  contents: read
+jobs:
+  run:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/${{ inputs.crate }}
+          shared-key: windows-${{ inputs.crate }}
+          save-if: false
+      - uses: taiki-e/install-action@nextest
+      - name: tests
+        working-directory: native/${{ inputs.crate }}
+        shell: bash
+        env:
+          FILTER: ${{ inputs.filter }}
+        run: |
+          cargo build --locked --bins
+          cargo nextest run --locked --no-fail-fast --no-capture -E "$FILTER"

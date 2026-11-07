@@ -1229,7 +1229,7 @@ fn stored(e: &Value) -> Value {
         let home = name == "project_create" && c["args"]["path"].as_str().map_or(false, |p| !p.is_empty() && !p.starts_with('/'));
         if !tools::owns(name) || home { continue }
         if pre > done { hub.commit_many(&js[done..pre]).await.unwrap(); done = pre }
-        let mut text = c["args"].to_string(); for (a, b) in &ids { text = text.replace(a.as_str(), b) } text = text.replace("/tmp/bp-rec-work", &w);
+        let mut text = c["args"].to_string(); for (a, b) in &ids { text = text.replace(a.as_str(), b) } text = text.replace("/tmp/bp-rec-work", &w.replace('\\', "\\\\"));
         let args: Value = serde_json::from_str(&text).unwrap();
         *inbox.answer.lock().unwrap() = c["answer"].as_str().filter(|a| !a.is_empty()).unwrap_or("session").to_string();
         let th = c["thread"].as_str().unwrap(); let at = log(&hub).len();
