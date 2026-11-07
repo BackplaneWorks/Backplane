@@ -37,6 +37,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     let a = s.fake.wait(1).await; assert_eq!(a.len(), 1, "{a:?}");
     assert_eq!((a[0]["aps"]["alert"]["body"].as_str(), a[0]["thread"].as_str(), a[0]["aps"]["thread-id"].as_str()), (Some("Approve the deploy?"), Some(s.chat.as_str()), Some(s.chat.as_str())), "plain and short, linked to and grouped by the thread");
     assert_eq!(a[0]["aps"]["badge"], 1);
+    until(&s.hub, |l| l.iter().any(|e| e["$"] == "PushSent")).await; // recorded once the carrier answered
     let sent = log(&s.hub).into_iter().find(|e| e["$"] == "PushSent").expect("what a socket hears"); assert_eq!((sent["kind"].as_str(), sent["sent"].as_u64()), (Some("needs_you"), Some(1)));
 }
 
@@ -125,7 +126,9 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     // about a worker thread: the person writing in the uberbot's thread below deals with what is about that thread only
     let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":"Held while quiet","thread":"tw"}), now_s()).await; assert!(r.0, "{r:?}");
     settle().await; assert!(s.fake.alerts().is_empty(), "held");
-    let book: Book = serde_json::from_str(&s.hub.setting(push::BOOK).await.unwrap()).unwrap(); assert_eq!(book.held.len(), 1, "and it survives a restart in the book");
+    // the worker saves the book after it routes the order: wait for it rather than a fixed pause (a loaded machine is slower than settle)
+    let mut held = 0; for _ in 0..300 { held = s.hub.setting(push::BOOK).await.and_then(|v| serde_json::from_str::<Book>(&v).ok()).map_or(0, |b| b.held.len()); if held == 1 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
+    assert_eq!(held, 1, "and it survives a restart in the book");
     set(&s.hub, push::QUIET_URGENT, "on").await; settle().await;
     person(&s, 1).await;
     let r = notify(&s, "needs_you", "This one passes", now_s() + 5).await; assert!(r.0, "{r:?}");
@@ -135,7 +138,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
 }
 
 #[tokio::test] async fn a_burst_collapses_into_one() {
-    let s = setup("burst").await; set(&s.hub, push::BURST, "1").await; settle().await;
+    let s = setup("burst").await; set(&s.hub, push::BURST, "5").await; settle().await; // 5 s: wide enough that a loaded machine still sends the four inside it
     // about a worker thread, so the person's messages in the uberbot's thread (one per turn) deal with none of them
     s.hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
     for (i, t) in ["first thing", "second thing", "third thing", "fourth thing"].iter().enumerate() { person(&s, 10 * i as u64 + 5).await; let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":t,"thread":"tw"}), now_s() + 10 * (i as u64 + 1)).await; assert!(r.0, "{r:?}") }
@@ -165,7 +168,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     s.hub.commit(&json!({"$":"AskClosed","id":"a1","answer":"accept","at":3})).await.unwrap();
     for _ in 0..300 { if s.fake.clears().len() >= 2 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     let c = s.fake.clears(); assert_eq!(c.len(), 2, "both phones: {c:?}"); assert_eq!(c[0], json!({"aps":{"content-available":1,"badge":0},"clear":[key]}));
-    assert!(log(&s.hub).iter().any(|e| e["$"] == "PushCleared"), "a socket hears it too");
+    until(&s.hub, |l| l.iter().any(|e| e["$"] == "PushCleared")).await; // a socket hears it too
     // opening the thread on any device, and the person writing in it
     person(&s, 1).await; let r = notify(&s, "needs_you", "Second thing to look at", now_s() + 5).await; assert!(r.0, "{r:?}"); s.fake.wait(4).await;
     s.push.seen(&s.chat);

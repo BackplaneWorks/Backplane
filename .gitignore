@@ -9,5 +9,6 @@ node_modules/
 __pycache__/
 # Rust build output
 native/host/target/
+native/host/target-guard/
 native/gpui/target/
 native/voice/target/
