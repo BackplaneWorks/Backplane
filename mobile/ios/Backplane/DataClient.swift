@@ -62,8 +62,10 @@ final class DataClient {
     private(set) var quiet = ""
     private(set) var quietUrgent = false
 
-    // the hub being used (one in this build)
+    // the hub being used: the first of the paired ones (HubList)
     var link: String? { links.first }
+    /// the pairing screen is open over a paired hub, to add another (Settings → Add a hub)
+    var adding = false
     var hubName: String { link.flatMap { Pairing.key($0) } ?? "" }
 
     @ObservationIgnored private var task: URLSessionWebSocketTask?
@@ -114,6 +116,7 @@ final class DataClient {
             pairingBusy = true; pairingError = "Connecting…"
             Task {
                 defer { pairingBusy = false }
+                if HubList.local(invite.routes) { pairingError = HubList.localText; return }
                 do { let saved = try await Pairing.exchange(invite, name: UIDevice.current.name); pairingError = ""; adopt(saved) }
                 catch { pairingError = (error as NSError).domain == "BackplanePairing" ? error.localizedDescription : Pairing.message("hub_unreachable") }
             }
@@ -126,14 +129,32 @@ final class DataClient {
     private func adopt(_ link: String) {
         guard Pairing.key(link) != nil else { pairingError = "Enter the hub's address or pairing link."; return }
         let changed = Pairing.key(links.first ?? "") != Pairing.key(link)
-        links = [link]
+        links = HubList.adopt(links, link, key: Pairing.key)
         PairingStore.save(links)
-        needsRepair = false
+        needsRepair = false; adding = false
         if changed { reset() }
         connect()
     }
+    /// Switch to another paired hub: it goes first, this phone's copy of the last one's threads is dropped, and the socket moves.
+    func useHub(_ key: String) {
+        guard Pairing.key(link ?? "") != key else { return }
+        let next = HubList.use(links, key, key: Pairing.key)
+        guard next != links else { return }
+        close(); links = next; PairingStore.save(links); reset()
+        needsRepair = false; pairingError = ""; failure = ""
+        connect()
+    }
+    /// Forget one hub; when it was the one in use, the next paired hub is used (none left: the pairing screen).
+    func forgetHub(_ key: String) {
+        let current = Pairing.key(link ?? "") == key
+        links = HubList.forget(links, key, key: Pairing.key); PairingStore.save(links)
+        guard current else { return }
+        close(); reset(); needsRepair = false; pairingError = ""
+        if link != nil { connect() } else { conn = .offline }
+    }
+    /// Forget every hub.
     func unpair() {
-        links = []; PairingStore.save(links); reset(); close(); conn = .offline
+        links = []; adding = false; PairingStore.save(links); reset(); close(); conn = .offline
     }
     private func reset() {
         notice = HubNotice(); star = nil

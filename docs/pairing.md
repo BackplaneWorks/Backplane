@@ -54,6 +54,22 @@ there. `--tailscale-https` or `--tailnet-only` also puts it behind
 to a free port, because a hub never takes a port already mapped to something else.
 Every client reaches such a hub over TLS, checked against the system's roots.
 
+A phone keeps every hub it pairs with (Settings → Hubs: Use, Forget, Add a hub);
+the first is the one in use, and switching drops the phone's saved copy of the last
+one's threads. Pairing a hub again replaces only that hub's credential. A phone
+tries an invitation at each address it names, in order, and keeps the one that
+answered; a refusal is final (every guess counts against the hub's limit). A link
+whose every address is the hub's own computer (`localOnly`: the hub runs on
+127.0.0.1 without Tailscale) is refused on the phone with that reason, and
+Settings → Devices and Setup show a warning beside it; Setup does the same for a
+machine invite that names 127.0.0.1. `test/mobile/hubs_cases.json` holds both
+phones to the same list and address rules (`HubListTest`,
+`scripts/mobile/ios-hub-list-test.sh`, `test/mobile/hub_list_ref.py`).
+
+`test/e2e/pairing/link.py` links two running temp-home hubs the way Bots and Setup
+do (`bots.invite`, `bots.join`) and checks both logs hold the link, and that it
+survives a restart with `--restart-b`.
+
 ## Access and preservation
 
 Invitation secrets are in fragments and exchanged in POST authorization headers.

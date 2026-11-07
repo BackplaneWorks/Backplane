@@ -168,6 +168,21 @@ fn network(st: &State, info: &Value) -> Vec<Value> {
     ]
 }
 
+/// What a device invitation says when every address it names is this computer's own (`localOnly`): a phone that scans it opens 127.0.0.1 on itself.
+pub const LOCAL_DEVICE: &str = "This link names only this computer (127.0.0.1): a phone or another computer cannot reach it. Start the hub with Tailscale on, or on an address they can reach, then make a new link.";
+/// The same for a machine invite (`bp1:<url>:<peer>:<secret>`) whose address is this computer's own.
+pub const LOCAL_MACHINE: &str = "This invite names only this computer (127.0.0.1): another computer cannot reach it. Start the hub with Tailscale on, or set BACKPLANE_URL to an address the other machine can reach, then make a new invite.";
+/// An http(s) origin on this computer only: localhost, 127.x, [::1].
+pub fn loopback(url: &str) -> bool {
+    let r = url.trim().strip_prefix("http://").or_else(|| url.trim().strip_prefix("https://")).unwrap_or("");
+    r.starts_with("localhost") || r.starts_with("127.") || r.starts_with("[::1]")
+}
+/// A machine invite whose address is loopback: the url is what `bp1:` holds before its last two fields (peer, secret).
+pub fn loopback_invite(invite: &str) -> bool {
+    invite.strip_prefix("bp1:").and_then(|r| r.rsplitn(3, ':').nth(2)).map_or(false, loopback)
+}
+fn row_tone(label: &str, note: &str, tone: &str) -> Value { let mut r = row(label, note, vec![]); r["tone"] = json!(tone); r }
+
 /// Settings → Devices: the paired devices and the pairing links (net/pairing.rs `Registry::list`, put in `info.devices` by the presenter's caller), and Add a device (an invitation of this hub's own, made by `device-invite`).
 fn devices(session: &Value, info: &Value) -> Vec<Value> {
     let inv: Value = serde_json::from_str(draft(session, "@invite")).unwrap_or(Value::Null);
@@ -177,6 +192,7 @@ fn devices(session: &Value, info: &Value) -> Vec<Value> {
         row["qr"] = json!(inv["qr"].as_str().unwrap_or("").lines().map(str::to_string).collect::<Vec<_>>());
         row["qrnote"] = json!(format!("Code {} · works once, for ten minutes", inv["code"].as_str().unwrap_or("")));
         r.push(row);
+        if inv["localOnly"] == true { r.push(row_tone("Only this computer", LOCAL_DEVICE, "warn")) }
     } else if let Some(e) = inv["error"].as_str() { r.push(row("Add a device", &format!("Could not make an invitation: {e}."), vec![btn("Try again", "device-invite", "", false)])) }
     else { r.push(row("Add a device", "Makes a link, a QR code and a short code for one new device. Each works once, for ten minutes.", vec![btn("Add a device", "device-invite", "", false)])) }
     let list = &info["devices"];
@@ -538,6 +554,24 @@ mod tests {
         assert_eq!(by("Pairing link · open")["buttons"][0]["action"], "device-uninvite");
         assert!(by("Pairing link · used · Phone")["buttons"].as_array().unwrap().is_empty());
         assert_eq!(r.len(), 1 + 1 + 2 + 2, "a machine invite is Bots' and is not listed");
+    }
+    #[test] fn a_device_link_that_names_only_this_computer_says_so() {
+        let inv = |local: bool| json!({"link": "http://127.0.0.1:3797/pair#invite=x", "code": "ABCD2345", "qr": "", "localOnly": local}).to_string();
+        let r = pg_rows("devices", &[], json!({}), json!({}));
+        assert!(r.iter().all(|x| x["label"] != "Only this computer"), "no invitation, no note");
+        let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "devices", "@invite": inv(true)}}), &json!({}));
+        let w = v["rows"].as_array().unwrap().iter().find(|x| x["label"] == "Only this computer").cloned().expect("the loopback note");
+        assert_eq!((w["note"].as_str(), w["tone"].as_str()), (Some(LOCAL_DEVICE), Some("warn")));
+        let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "devices", "@invite": inv(false)}}), &json!({}));
+        assert!(v["rows"].as_array().unwrap().iter().all(|x| x["label"] != "Only this computer"), "a reachable link has no note");
+    }
+    #[test] fn loopback_addresses_and_invites() {
+        for u in ["http://127.0.0.1:3797", "https://localhost", "http://[::1]:1", "http://127.1.2.3:9"] { assert!(loopback(u), "{u}") }
+        for u in ["http://100.64.84.41:3787", "https://desktop.tail.ts.net:8451", "http://192.168.1.5:3787", ""] { assert!(!loopback(u), "{u}") }
+        let sec = "e4af8fb618176ac9cd1bf9fe7d62e765f20914b4d3d3aeae60ae3bf5ac91571a";
+        assert!(loopback_invite(&format!("bp1:http://127.0.0.1:3811:pd0302ba9e290b6e4:{sec}")));
+        assert!(!loopback_invite(&format!("bp1:http://desktop.tail.ts.net:3787:pd0302ba9e290b6e4:{sec}")));
+        assert!(!loopback_invite("nonsense") && !loopback_invite(""));
     }
     fn pg_rows(page: &str, kv: &[(&str, &str)], drafts: Value, info: Value) -> Vec<Value> {
         let v = view(&st(kv), &json!({"open": {"settings": true}, "drafts": {"@settings.page": page, "x": drafts}}), &info); v["rows"].as_array().unwrap().clone()

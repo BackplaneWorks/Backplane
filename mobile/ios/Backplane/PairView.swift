@@ -17,13 +17,14 @@ struct PairView: View {
     let done: (String) -> Void
     var status: String = ""
     var repair = false
+    var adding = false
     @State private var code = ""
     @State private var hubAddress = ""
     @State private var scanning = false
     @State private var invalid = false
 
-    init(tag: String, link: String, status: String = "", repair: Bool = false, done: @escaping (String) -> Void) {
-        self.tag = tag;self._link = State(initialValue: link);self.status = status;self.repair = repair;self.done = done
+    init(tag: String, link: String, status: String = "", repair: Bool = false, adding: Bool = false, done: @escaping (String) -> Void) {
+        self.tag = tag;self._link = State(initialValue: link);self.status = status;self.repair = repair;self.adding = adding;self.done = done
     }
 
     private func connect(_ text: String) {
@@ -41,7 +42,7 @@ struct PairView: View {
                     Text("BACKPLANE")
                         .font(.mono(.caption, weight: .bold))
                         .tracking(2).foregroundStyle(BackplaneDesign.accent)
-                    Text(repair ? "Re-pair this device" : "Connect to your Backplane hub").font(.largeTitle.weight(.bold))
+                    Text(repair ? "Re-pair this device" : adding ? "Add a hub" : "Connect to your Backplane hub").font(.largeTitle.weight(.bold))
                     Text("On your paired computer, open Settings → Devices → Add a device.").foregroundStyle(.secondary)
                     if !status.isEmpty { Text(status).foregroundStyle(PhaseColor.warn).accessibilityIdentifier("pair.status") }
                 }

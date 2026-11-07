@@ -1,0 +1,26 @@
+{
+  "_": "The phones' list of paired hubs and the addresses an invitation is tried at. Android's HubListTest and iOS's Tests/HubListTests.swift (scripts/mobile/ios-hub-list-test.sh) read this table. A hub's key is its host:port; the first link is the hub in use.",
+  "adopt": [
+    {"name": "the first hub", "links": [], "link": "http://a:1/#token=0123456789abcdef0123456789abcdef", "want": ["http://a:1/#token=0123456789abcdef0123456789abcdef"]},
+    {"name": "a second hub goes first and keeps the first", "links": ["http://a:1/#token=0123456789abcdef0123456789abcdef"], "link": "https://b.ts.net:8451/#token=0123456789abcdef0123456789abcdef", "want": ["https://b.ts.net:8451/#token=0123456789abcdef0123456789abcdef", "http://a:1/#token=0123456789abcdef0123456789abcdef"]},
+    {"name": "re-pairing a hub replaces its old credential", "links": ["http://a:1/#token=0123456789abcdef0123456789abcdef", "http://b:2/#token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], "link": "http://b:2/#token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "want": ["http://b:2/#token=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "http://a:1/#token=0123456789abcdef0123456789abcdef"]},
+    {"name": "another port is another hub", "links": ["http://a:1/#token=0123456789abcdef0123456789abcdef"], "link": "http://a:2/#token=0123456789abcdef0123456789abcdef", "want": ["http://a:2/#token=0123456789abcdef0123456789abcdef", "http://a:1/#token=0123456789abcdef0123456789abcdef"]}
+  ],
+  "use": [
+    {"name": "switching moves that hub first", "links": ["http://a:1/#token=0123456789abcdef0123456789abcdef", "http://b:2/#token=0123456789abcdef0123456789abcdef", "http://c:3/#token=0123456789abcdef0123456789abcdef"], "key": "c:3", "want": ["http://c:3/#token=0123456789abcdef0123456789abcdef", "http://a:1/#token=0123456789abcdef0123456789abcdef", "http://b:2/#token=0123456789abcdef0123456789abcdef"]},
+    {"name": "an unknown hub changes nothing", "links": ["http://a:1/#token=0123456789abcdef0123456789abcdef"], "key": "z:9", "want": ["http://a:1/#token=0123456789abcdef0123456789abcdef"]}
+  ],
+  "forget": [
+    {"name": "forgetting the hub in use falls back to the next", "links": ["http://a:1/#token=0123456789abcdef0123456789abcdef", "http://b:2/#token=0123456789abcdef0123456789abcdef"], "key": "a:1", "want": ["http://b:2/#token=0123456789abcdef0123456789abcdef"]},
+    {"name": "forgetting another keeps the one in use", "links": ["http://a:1/#token=0123456789abcdef0123456789abcdef", "http://b:2/#token=0123456789abcdef0123456789abcdef"], "key": "b:2", "want": ["http://a:1/#token=0123456789abcdef0123456789abcdef"]},
+    {"name": "forgetting the last leaves none", "links": ["http://a:1/#token=0123456789abcdef0123456789abcdef"], "key": "a:1", "want": []}
+  ],
+  "routes": [
+    {"name": "the link's own address first, then the others it names", "text": "https://m.tail.ts.net:8451/pair#invite=0123456789abcdef0123456789abcdef&routes=%5B%22https%3A%2F%2Fm.tail.ts.net%3A8451%22%2C%22http%3A%2F%2F100.64.84.41%3A3797%22%5D", "want": ["https://m.tail.ts.net:8451", "http://100.64.84.41:3797"], "local": false},
+    {"name": "no routes field: the link's address alone", "text": "http://100.1.2.3:3801/pair#code=ABCD2345", "want": ["http://100.1.2.3:3801"], "local": false},
+    {"name": "addresses that are not plain http(s) origins are dropped", "text": "http://100.1.2.3:3801/pair#invite=0123456789abcdef0123456789abcdef&routes=%5B%22javascript%3Aalert(1)%22%2C%22http%3A%2F%2Fu%3Ap%40evil%3A1%22%2C%22ftp%3A%2F%2Fx%22%2C%22http%3A%2F%2F192.168.1.5%3A3801%2Fpath%3Fq%22%5D", "want": ["http://100.1.2.3:3801", "http://192.168.1.5:3801"], "local": false},
+    {"name": "a link that names only the hub's own computer", "text": "http://127.0.0.1:3797/pair#invite=0123456789abcdef0123456789abcdef&routes=%5B%22http%3A%2F%2F127.0.0.1%3A3797%22%5D", "want": ["http://127.0.0.1:3797"], "local": true},
+    {"name": "localhost and ::1 are the hub's own computer too", "text": "http://localhost:3797/pair#invite=0123456789abcdef0123456789abcdef&routes=%5B%22http%3A%2F%2F%5B%3A%3A1%5D%3A3797%22%5D", "want": ["http://localhost:3797", "http://[::1]:3797"], "local": true},
+    {"name": "a routes field that is not JSON is ignored", "text": "http://100.1.2.3:3801/pair#invite=0123456789abcdef0123456789abcdef&routes=nope", "want": ["http://100.1.2.3:3801"], "local": false}
+  ]
+}

@@ -20,11 +20,25 @@ struct DataRoot: View {
                     PairView(tag: "en", link: "", status: client.pairingError, repair: client.needsRepair) { client.pair($0) }
                         .safeAreaInset(edge: .bottom) {
                             // refused or not, a paired phone can still look at the hub
-                            if !client.links.isEmpty { NavigationLink { DataHubView(client: client) } label: { Text("Hub") }.buttonStyle(DButton()).padding(12).accessibilityIdentifier("repair.hub") }
+                            if !client.links.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    NavigationLink { DataHubView(client: client) } label: { Text("Hub") }.buttonStyle(DButton()).accessibilityIdentifier("repair.hub")
+                                    // revoked here: the other paired hubs are one tap away
+                                    ForEach(client.links.dropFirst().compactMap { Pairing.key($0) }, id: \.self) { k in
+                                        Button("Use " + k) { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("repair.use.\(k)")
+                                    }
+                                }.padding(12)
+                            }
                         }
                 }
             } else {
                 NavigationStack(path: $path) { DataThreadsView(client: client, path: $path) }
+                    .sheet(isPresented: $client.adding) {
+                        NavigationStack {
+                            PairView(tag: "en", link: "", status: client.pairingError, adding: true) { client.pair($0) }
+                                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { client.adding = false; client.pairingError = "" }.accessibilityIdentifier("pair.cancel") } }
+                        }
+                    }
             }
         }
         .overlay { if let l = client.askLink { AskPairView(client: client, link: l) } }
@@ -48,6 +62,7 @@ struct DataRoot: View {
         .onChange(of: client.pushAccount, initial: true) { _, a in if !a.isEmpty { var p = NavigationPath(); p.append(DPage(name: "settings")); p.append(DPage(name: "accounts")); p.append(DAccountRoute(id: a, start: true)); path = p; client.pushAccount = "" } }
         // a newly paired (or forgotten) hub starts again on the list
         .onChange(of: client.links.isEmpty) { _, _ in path = NavigationPath() }
+        .onChange(of: client.link) { _, _ in path = NavigationPath() }
     }
 
     /// This app's links, its one handler: backplane://thread/<id> opens that thread, backplane://account/<id> that account's sign-in; any other (a pairing link) asks first (DataClient.opened).
@@ -881,7 +896,7 @@ struct DataImprovementsView: View {
 struct DataSettingsView: View {
     @Bindable var client: DataClient
     @Bindable private var settings = AppSettings.shared
-    @State private var confirmUnpair = false
+    @State private var forgetKey: String?
 
     private func onOff(_ title: String, _ on: Binding<Bool>, id: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -903,17 +918,24 @@ struct DataSettingsView: View {
                 Text("Off: only what you let through reaches this phone. Alerts come from your uberbot.").dmono(11).foregroundStyle(BackplaneDesign.dim)
                 if client.has("push") { DLine(); DataQuietSection(client: client) }
                 DLine()
-                DHeading(text: "Hub")
-                HStack(spacing: 8) {
-                    DDot(color: client.conn == .online ? BackplaneDesign.ok : client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8)
-                    Text(client.hubName.isEmpty ? "Not paired" : client.hubName).dmono(13).lineLimit(1)
-                    Spacer()
-                    Text(client.conn.rawValue).dmono(11).foregroundStyle(BackplaneDesign.dim)
+                DHeading(text: "Hubs")
+                let keys = client.links.compactMap { Pairing.key($0) }
+                ForEach(keys.indices, id: \.self) { i in
+                    let k = keys[i]
+                    HStack(spacing: 8) {
+                        if i == 0 { DDot(color: client.conn == .online ? BackplaneDesign.ok : client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8) }
+                        Text(k).dmono(13).lineLimit(1)
+                        Spacer()
+                        if i == 0 { Text(client.conn.rawValue).dmono(11).foregroundStyle(BackplaneDesign.dim) }
+                        else { Button("Use") { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.use.\(k)") }
+                        Button("Forget") { forgetKey = k }.buttonStyle(DButton(danger: true)).accessibilityIdentifier("settings.hub.forget.\(k)")
+                    }
                 }
+                if client.links.isEmpty { Text("Not paired").dmono(13) }
                 if !client.failure.isEmpty, client.conn != .online { Text(client.failure).dmono(11).foregroundStyle(BackplaneDesign.dim) }
                 HStack(spacing: 6) {
                     Button("Reconnect") { client.connect() }.buttonStyle(DButton())
-                    Button("Forget this hub") { confirmUnpair = true }.buttonStyle(DButton(danger: true))
+                    Button("Add a hub") { client.pairingError = ""; client.adding = true }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.add")
                 }
                 NavigationLink(value: DPage(name: "hub")) { Text("Hub") }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub")
                 if client.has("accounts") { NavigationLink(value: DPage(name: "accounts")) { Text("Accounts") }.buttonStyle(DButton()).accessibilityIdentifier("settings.accounts") }
@@ -929,8 +951,8 @@ struct DataSettingsView: View {
         }
         .background(BackplaneDesign.background)
         .dataBar("Settings")
-        .confirmationDialog("Forget this hub?", isPresented: $confirmUnpair, titleVisibility: .visible) {
-            Button("Forget", role: .destructive) { client.unpair() }
+        .confirmationDialog("Forget \(forgetKey ?? "this hub")?", isPresented: Binding(get: { forgetKey != nil }, set: { if !$0 { forgetKey = nil } }), titleVisibility: .visible) {
+            Button("Forget", role: .destructive) { if let k = forgetKey { client.forgetHub(k) }; forgetKey = nil }
         } message: { Text("This phone's saved copy of its threads is removed. Pair again to come back.") }
     }
 }

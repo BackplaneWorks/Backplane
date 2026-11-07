@@ -78,7 +78,7 @@ fun DataRoot() {
     LaunchedEffect(DataClient.openAccount) { DataClient.openAccount?.let { page = Page.Account(it, true); DataClient.openAccount = null } }
     LaunchedEffect(DataClient.openFromIntent) { DataClient.openFromIntent?.let { page = if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it); DataClient.openFromIntent = null } }
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
-        if (DataClient.link == null || DataClient.needsRepair) PairScreen()
+        if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else when (val p = page) {
             Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders }, { page = Page.New(it) }) { page = Page.Room(it) }
             is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it) { page = Page.Thread(p.id) } }
@@ -133,7 +133,7 @@ private fun PairScreen() {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)) {
         DMono("BACKPLANE", dcs.primary, 13, bold = true)
         Spacer(Modifier.height(8.dp))
-        Text(if (DataClient.needsRepair) "Re-pair this device" else "Pair with a hub", color = dcs.onSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        Text(if (DataClient.needsRepair) "Re-pair this device" else if (DataClient.adding) "Add a hub" else "Pair with a hub", color = dcs.onSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
         Text(if (DataClient.needsRepair) "This device was revoked. Make a new link in Settings → Devices on the hub." else "Paste the hub's pairing link or its address.", color = dcs.onSurfaceVariant, fontSize = 14.sp)
         Spacer(Modifier.height(20.dp))
@@ -143,6 +143,13 @@ private fun PairScreen() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DBtn("Pair", true, text.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.go")) { DataClient.pair(text) }
             DBtn("Scan code", false, true) { scanPairing(ctx, "data") { DataClient.pair(it) } }
+            if (DataClient.adding && DataClient.link != null) DBtn("Cancel", false, true, Modifier.testTag("pair.cancel")) { DataClient.adding = false; DataClient.pairingError = "" }
+        }
+        // revoked: the other paired hubs are one tap away
+        val others = DataClient.links.drop(1).mapNotNull { Pairing.key(it) }
+        if (DataClient.needsRepair && others.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp)); Text("Or use another paired hub", color = dcs.onSurfaceVariant, fontSize = 13.sp); Spacer(Modifier.height(8.dp))
+            others.forEach { k -> DBtn(k, false, modifier = Modifier.testTag("pair.use.$k")) { DataClient.useHub(k) } }
         }
         Spacer(Modifier.height(24.dp))
         Text("Or the hub's address and short code", color = dcs.onSurfaceVariant, fontSize = 13.sp)
@@ -585,10 +592,28 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
     Column(Modifier.fillMaxSize()) {
         DBar("Settings", back)
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            DMono("HUB", dfaint); Text(DataClient.hubName, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
+            DMono("HUBS", dfaint)
+            var forget by remember { mutableStateOf<String?>(null) }
+            DataClient.links.mapNotNull { Pairing.key(it) }.forEachIndexed { i, k ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (i == 0) DDot(if (DataClient.conn == DataClient.Conn.ONLINE) dcs.primary else if (DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8)
+                    Text(k, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (i > 0) DBtn("Use", false, modifier = Modifier.testTag("settings.hub.use.$k")) { DataClient.useHub(k); back() }
+                    DBtn("Forget", false, modifier = Modifier.testTag("settings.hub.forget.$k"), danger = true) { forget = k }
+                }
+            }
             DMono(if (DataClient.conn == DataClient.Conn.ONLINE) "online" else "offline ${DataClient.failure}", dcs.onSurfaceVariant, 12)
-            DBtn("Hub", false, modifier = Modifier.testTag("settings.hub"), onClick = hub)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DBtn("Hub", false, modifier = Modifier.testTag("settings.hub"), onClick = hub)
+                DBtn("Add a hub", false, modifier = Modifier.testTag("settings.hub.add")) { DataClient.pairingError = ""; DataClient.adding = true }
+            }
             if (DataClient.has("accounts")) DBtn("Accounts", false, modifier = Modifier.testTag("settings.accounts"), onClick = accounts)
+            forget?.let { k ->
+                AlertDialog(onDismissRequest = { forget = null }, title = { Text("Forget $k?") },
+                    text = { Text("This phone's saved copy of its threads is removed. Pair again to come back.") },
+                    confirmButton = { TextButton({ forget = null; DataClient.forgetHub(k); if (DataClient.link == null) back() }) { Text("Forget") } },
+                    dismissButton = { TextButton({ forget = null }) { Text("Cancel") } })
+            }
             DLine()
             UpdateSection()
             DLine()

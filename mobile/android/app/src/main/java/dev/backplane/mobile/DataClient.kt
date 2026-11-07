@@ -40,7 +40,11 @@ object DataClient {
     var btw by mutableStateOf<Map<String, Btw>>(emptyMap()); private set
     data class SecretAsk(val name: String, val purpose: String)
     var secretAsks by mutableStateOf<Map<String, List<SecretAsk>>>(emptyMap()); private set
-    var link by mutableStateOf<String?>(null); private set
+    /** every hub this phone is paired with (HubList); the first is the one in use */
+    var links by mutableStateOf<List<String>>(emptyList()); private set
+    val link: String? get() = links.firstOrNull()
+    /** the pairing screen is open over a paired hub, to add another (Settings → Add a hub) */
+    var adding by mutableStateOf(false)
     var pairingError by mutableStateOf(""); var pairingBusy by mutableStateOf(false)
     /** a pairing link that came from outside the app: nothing happens until the person says so */
     var askLink by mutableStateOf<String?>(null)
@@ -62,9 +66,9 @@ object DataClient {
         if (this::app.isInitialized) return
         app = ctx.applicationContext
         MeshDisk.dir = java.io.File(app.cacheDir, "models")
-        link = prefs().getString("link", null)
+        links = HubList.decode(prefs().getString("links", null), prefs().getString("link", null))
         settledOpen = prefs().getStringSet("settled.open", emptySet())!!.toSet()
-        System.getenv("BACKPLANE_LINK")?.let { link = it }
+        System.getenv("BACKPLANE_LINK")?.let { links = it.split(' ').filter(String::isNotBlank) }
         loadCache()
         if (link != null) connect()
     }
@@ -77,7 +81,11 @@ object DataClient {
             if (pairingBusy) return
             pairingBusy = true; pairingError = "Connecting…"
             scope.launch {
-                try { val l = Pairing.exchange(inv); pairingError = ""; adopt(l) }
+                try {
+                    val tries = inv.routes.ifEmpty { listOf(inv.origin) }
+                    if (HubList.local(tries)) { pairingError = HubList.LOCAL; pairingBusy = false; return@launch }
+                    val l = Pairing.exchange(inv, tries); pairingError = ""; adopt(l)
+                }
                 catch (e: Exception) { pairingError = e.message ?: "Hub unreachable" }
                 pairingBusy = false
             }
@@ -87,17 +95,32 @@ object DataClient {
         if (Pairing.malformedInvitation(text)) { pairingError = "Enter the complete invitation link or a valid eight-character code."; return }
         adopt(text.trim())
     }
+    private fun save(next: List<String>) { links = next; prefs().edit().putString("links", HubList.encode(next)).remove("link").apply() }
     private fun adopt(l: String) {
         if (Pairing.key(l) == null) { pairingError = "Enter the hub's address or pairing link."; return }
         val changed = Pairing.key(link ?: "") != Pairing.key(l)
-        link = l; prefs().edit().putString("link", l).apply(); needsRepair = false
+        save(HubList.adopt(links, l) { Pairing.key(it) }); needsRepair = false; adding = false
         if (changed) reset()
         connect()
+    }
+    /** Switch to another paired hub: it goes first, this phone's copy of the last one's threads is dropped, and the socket moves. */
+    fun useHub(key: String) {
+        if (Pairing.key(link ?: "") == key) return
+        val next = HubList.use(links, key) { Pairing.key(it) }; if (next == links) return
+        close(); save(next); reset(); needsRepair = false; pairingError = ""; failure = ""; connect()
+    }
+    /** Forget one hub; when it was the one in use, the next paired hub is used (none left: the pairing screen). */
+    fun forgetHub(key: String) {
+        val current = Pairing.key(link ?: "") == key
+        save(HubList.forget(links, key) { Pairing.key(it) })
+        if (!current) return
+        close(); reset(); needsRepair = false; pairingError = ""
+        if (link != null) connect() else { conn = Conn.OFFLINE; askLink = null; pairEpoch++ }
     }
     /** bumped by unpair(): the pairing screen starts again with empty fields */
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
-    fun unpair() { link = null; prefs().edit().remove("link").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
+    fun unpair() { links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
     private fun reset() { notice = HubNotice(); star = null; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
