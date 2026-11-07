@@ -22,16 +22,26 @@ fn reports(ev: &[Value], to: &str) -> Vec<String> { ev.iter().filter(|e| is(e, "
 
 #[tokio::test(flavor = "multi_thread")] async fn wake_on_a_subthread_wakes_its_watcher_once() {
     let (hub, ag, _sd) = codex_start("ce2").await; let from = len(&hub).await;
-    let (ok, r) = ag.tool_launch(T1, &json!({"prompt":"watched job","provider":"codex","report":false})).await; assert!(ok, "{r}"); let child = r["threadId"].as_str().unwrap().to_string();
+    // ordered by the log, never by time: the stand-in answers at once, so on a busy machine a turn begun before the wake is set can end before it
+    let done = |ev: &[Value], th: &str| ev.iter().filter(|e| is(e, "TurnChanged") && e["thread"] == th && e["state"] == "completed").count();
+    let wakes = |ev: &[Value]| ev.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["text"].as_str().map_or(false, |t| t.starts_with("Wake "))).count();
+    let (ok, r) = ag.tool_launch(T1, &json!({"prompt":"first job","provider":"codex","report":false})).await; assert!(ok, "{r}"); let child = r["threadId"].as_str().unwrap().to_string();
+    until(&hub, from, 30, |ev| done(ev, &child) >= 1).await;
     let ts = tool(&ag, "wake_on");
     let (ok, w) = ts.call(T1, "wake_on", &json!({"kind":"thread","target":child,"events":["done"],"note":"check it"})).await; assert!(ok, "{w}"); let id = w["id"].as_str().unwrap().to_string();
     let (ok, again) = ts.call(T1, "wake_on", &json!({"kind":"thread","target":child,"events":["done"]})).await; assert!(ok && again["existing"] == true && again["id"] == id.as_str(), "{again}");
     assert!(!ts.call(T1, "wake_on", &json!({"kind":"thread","target":T1})).await.0, "watching yourself is refused");
     assert!(!ts.call(T1, "wake_on", &json!({"kind":"thread","target":"nope"})).await.0);
+    assert_eq!(wakes(&log_from(&hub, from).await), 0, "a turn that ended before the wake was set does not fire it");
+    let (ok, r) = ag.tool_send(T1, &json!({"threadId":child,"text":"watched job"})).await; assert!(ok, "{r}");
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["text"].as_str().map_or(false, |t| t.starts_with("Wake ")))).await;
     let m = ev.iter().find(|e| is(e, "MessagePosted") && e["thread"] == T1 && e["text"].as_str().map_or(false, |t| t.starts_with("Wake "))).expect("the wake message");
     let t = m["text"].as_str().unwrap(); assert!(t.starts_with(&format!("Wake {id}: thread ")) && t.contains("ended its turn (completed). Its last reply: re: watched job") && t.contains("Events: done.") && t.contains("Note: check it."), "{t}");
     let (ok, l) = ts.call(T1, "wake_list", &json!({})).await; assert!(ok && l["wakes"].as_array().unwrap().is_empty(), "a once-wake drops after its message: {l}");
+    // once: the next turn the child ends wakes nobody (the drop was committed with the message, so the book has no wake left to fire)
+    let (ok, r) = ag.tool_send(T1, &json!({"threadId":child,"text":"third job"})).await; assert!(ok, "{r}");
+    until(&hub, from, 30, |ev| done(ev, &child) >= 3).await;
+    assert_eq!(wakes(&log_from(&hub, from).await), 1, "exactly one wake message");
     // a recurring wake stays and can be cancelled; another thread cannot cancel it
     let (_, w2) = ts.call(T1, "wake_on", &json!({"kind":"thread","target":child,"events":["end"],"once":false})).await; let id2 = w2["id"].as_str().unwrap().to_string();
     assert!(!ts.call("someone-else", "wake_cancel", &json!({"id":id2})).await.0);

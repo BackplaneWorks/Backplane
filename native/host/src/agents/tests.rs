@@ -123,13 +123,21 @@ fn shape(ev: &[Value]) -> Vec<String> { ev.iter().map(norm).collect() }
     assert!(log_from(&hub, 0).await.iter().all(|e| !turn_is(e, "interrupted")), "interrupt_idle_nothing");
     let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqlong"})).await;
-    until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant")).await; // a block ended; text streams after it
-    let d0 = ag.stats.deltas.load(Relaxed); let end = Instant::now() + Duration::from_secs(10); while ag.stats.deltas.load(Relaxed) == d0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await } // not a wall-clock guess: interrupt once new text has streamed
+    // every wait below is on an event or a counter, never on time: the bounds only say when to give up, and are long, because a gate runs this on a busy machine
+    let ev = until(&hub, from, 60, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant")).await; // a block ended; text streams after it
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant"), "no block ended");
+    let d0 = ag.stats.deltas.load(Relaxed); let end = Instant::now() + Duration::from_secs(60); while ag.stats.deltas.load(Relaxed) == d0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await } // interrupt once new text has streamed
+    assert!(ag.stats.deltas.load(Relaxed) > d0, "no text streamed after the first block");
     assert_eq!(rpc(&hub, "turn.interrupt", json!({"thread":T1})).await["ok"], true);
-    let ev = until(&hub, from, 5, |ev| ev.iter().any(|e| is(e, "SettingSet") && e["key"] == "provider.resume.t1700000001-2" && ev.iter().any(|x| turn_is(x, "interrupted")))).await;
-    let c = core(&ev, T1); let sh = shape(&c);
     let want = shape(&core(&lines_of(JS_INTERRUPT), T1));
-    let first = |v: &[String]| v.iter().position(|e| e.contains("interrupted")).unwrap();
+    let first = |v: &[String]| v.iter().position(|e| e.contains("interrupted"));
+    // the stop is whole when the interrupted turn and the four lines after it in the JS hub's order are all in (they need not come in one write)
+    let whole = |ev: &[Value]| { let sh = shape(&core(ev, T1)); first(&sh).map_or(false, |a| a >= 1 && sh[a..].iter().filter(|e| !e.contains("\"UsageSet\"")).count() >= 4) && ev.iter().any(|e| is(e, "SettingSet") && e["key"] == "provider.resume.t1700000001-2") };
+    let ev = until(&hub, from, 60, whole).await; assert!(whole(&ev), "the stop did not finish: {:?}", shape(&core(&ev, T1)));
+    // usage is metered from the stream as it comes, so on a busy machine a UsageSet can fall anywhere around the stop: the order below is of the turn's own lines
+    let metered = |v: Vec<String>| v.into_iter().filter(|e| !e.contains("\"UsageSet\"")).collect::<Vec<_>>();
+    let c = core(&ev, T1); let (sh, want) = (metered(shape(&c)), metered(want));
+    let first = |v: &[String]| first(v).unwrap();
     // the JS hub's order around a stop: the streamed text (if any), the interrupted turn, the stopped mark, the two cleared retry settings
     let (a, b) = (first(&sh), first(&want));
     assert!(sh[a - 1].contains("live:") && sh[a - 1].contains(":stopped"), "{}", sh[a - 1]); assert!(want[b - 1].contains("live:"));
