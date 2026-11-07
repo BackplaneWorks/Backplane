@@ -29,6 +29,8 @@ pub mod fs {
         if !name.contains(['<', '>', ':', '"', '|', '?', '*']) { return name.into() }
         name.chars().map(|c| if "<>:\"|?*".contains(c) { format!("%{:02X}", c as u32) } else { c.to_string() }).collect::<String>().into()
     }
+    /// Whether a path in text is absolute: C:\ or C:/, a share (\\host), or a slash (the current drive's root, and Git's shell's /c/...).
+    pub fn is_abs(p: &str) -> bool { let b = p.as_bytes(); p.starts_with('/') || p.starts_with('\\') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')) }
     /// The ways a folder's path may be written: as it is, with forward slashes (C:/x), and as Git's shell writes it (/c/x).
     pub fn path_forms(p: &str) -> Vec<String> {
         let f = p.replace('\\', "/"); let mut v = vec![p.to_string()]; if f != p { v.push(f.clone()) }

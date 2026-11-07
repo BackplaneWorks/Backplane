@@ -298,7 +298,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
             "viewer.watch" => {
                 let root = root_of(hub, th).await?; let kind = s(p, "kind"); let path = s(p, "path");
                 if path.split('/').any(|x| x == "..") || path.contains('\0') { return Err(err("that path is not in this project")) }
-                let path = if path.is_empty() || path.starts_with('/') { path.to_string() } else { format!("{root}/{path}") };
+                let path = if path.is_empty() || crate::plat::fs::is_abs(path) { path.to_string() } else { format!("{root}/{path}") };
                 let mut q = json!({"kind":kind,"root":root,"path":path});
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() } // the model the phone has cached (plot::mesh_id, hex): not sent again
@@ -320,7 +320,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 if file.split('/').any(|x| x == "..") || file.contains(['\0', '\n', '\t']) { return Err(err("that path is not in this project")) }
                 let r = result(rpc(hub, c, "history.refs", json!({"thread":th})).await?);
                 if !crate::present::viewer::ref_rows(s(&r, "refs")).iter().any(|x| x.2 == commit) { return Err(err("that version is not in this project")) }
-                let file = if file.is_empty() { s(&r, if kind == "board" { "pcb" } else { "sch" }).to_string() } else if file.starts_with('/') { file.to_string() } else { format!("{root}/{file}") };
+                let file = if file.is_empty() { s(&r, if kind == "board" { "pcb" } else { "sch" }).to_string() } else if crate::plat::fs::is_abs(file) { file.to_string() } else { format!("{root}/{file}") };
                 let bits = p["bits"].as_u64().unwrap_or(0) as u32;
                 let Some(path) = crate::present::viewer::compare_path(s(&r, "git"), s(&r, "top"), commit, &file, bits) else { return Err(err("that file is not in this repository")) };
                 rpc(hub, c, "kicad.watch", json!({"kind":kind,"root":root,"path":path})).await?; Ok(json!({"root":root}))
