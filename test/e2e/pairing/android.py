@@ -17,7 +17,10 @@ class Phone:
     def __init__(self, adb): self.adb = shlex.split(adb)
     def sh(self, cmd, timeout=30): return subprocess.run(self.adb + ["shell", cmd], capture_output=True, text=True, timeout=timeout).stdout
     def fresh(self): self.sh(f"pm clear {PKG}"); self.sh(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS"); self.launch()  # (the first-run permission dialog would cover the app)
-    def launch(self): self.sh("cmd statusbar collapse"); self.sh(f"am start -W -n {PKG}/{ACT}"); time.sleep(3)  # (a shade left down by another run would cover the app)
+    def launch(self):  # (a shade left down by another run, or a system crash dialog such as a fresh emulator's "Bluetooth keeps stopping", would cover the app)
+        self.sh("cmd statusbar collapse"); b = self.button("Close app")
+        if b is not None: self.tap(b); time.sleep(1)
+        self.sh(f"am start -W -n {PKG}/{ACT}"); time.sleep(3)
     def nodes(self):
         self.sh("uiautomator dump /sdcard/ui.xml >/dev/null 2>&1")
         try: return list(ET.fromstring(self.sh("cat /sdcard/ui.xml")).iter("node"))
@@ -49,7 +52,7 @@ class Phone:
         x1, y1, x2, y2 = map(int, re.findall(r"\d+", n.get("bounds")))
         self.sh(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
     def field(self):
-        self.top()
+        self.hide_keyboard(); self.top()  # (with the keyboard up in landscape the field can be out of the strip)
         for _ in range(2):  # (a dump taken while a scroll settles can miss it)
             f = next((n for n in self.nodes() if n.get("class") == "android.widget.EditText"), None)
             if f is not None: return f
