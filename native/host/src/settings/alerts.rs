@@ -39,8 +39,24 @@ pub fn body(kind: &str, text: &str) -> String {
 /// Desk.notify
 pub fn frame(thread: &str, title: &str, body: &str, kind: &str, key: &str) -> Value { json!({"t":"notify","thread":thread,"title":title,"body":body,"kind":kind,"key":key}) }
 
+/// The clear frame a desk gets when the need it was told about is answered: it closes that notification.
+pub fn clear_frame(thread: &str, key: &str) -> Value { json!({"t":"notify.clear","thread":thread,"key":key}) }
+
 #[derive(Default)]
-pub struct Desks { looks: Mutex<HashMap<u64, Look>> }
+pub struct Desks { looks: Mutex<HashMap<u64, Look>>, needs: Mutex<Needs> }
+/// What a desk was told about asks: the open asks' threads, and per thread the desk and key of its ask notification (bounded).
+#[derive(Default)]
+pub struct Needs { open: HashMap<String, String>, told: HashMap<String, (u64, String)> }
+impl Needs {
+    pub fn opened(&mut self, id: &str, thread: &str) { if self.open.len() > 4096 { self.open.clear() } self.open.insert(id.into(), thread.into()); }
+    pub fn told(&mut self, thread: &str, client: u64, key: &str) { if self.told.len() > 4096 { self.told.clear() } self.told.insert(thread.into(), (client, key.into())); }
+    /// An ask closed: the desk to clear and the key, once its thread has no other ask open.
+    pub fn closed(&mut self, id: &str) -> Option<(String, u64, String)> {
+        let thread = self.open.remove(id)?;
+        if self.open.values().any(|t| *t == thread) { return None }
+        self.told.remove(&thread).map(|(c, k)| (thread, c, k))
+    }
+}
 impl Desks {
     pub fn new() -> Arc<Desks> { Arc::new(Desks::default()) }
     /// The looks of desks still connected.
@@ -70,6 +86,9 @@ struct Alerts(Arc<Desks>);
 impl Observer for Alerts {
     fn committed(&self, hub: &Arc<Hub>, events: &[Value], _first: u32) {
         for e in events {
+            // a need answered: the desk that was told about it closes its notification
+            if e["$"] == "AskOpened" { if let (Some(id), Some(th)) = (e["id"].as_str(), e["thread"].as_str()) { self.0.needs.lock().unwrap().opened(id, th); } continue }
+            if e["$"] == "AskClosed" { if let Some((th, c, key)) = e["id"].as_str().and_then(|id| self.0.needs.lock().unwrap().closed(id)) { hub.push(c, clear_frame(&th, &key)); } continue }
             if e["$"] != "SettingSet" { continue }
             let Some(thread) = e["key"].as_str().and_then(|k| k.strip_prefix("alert.")) else { continue };
             let Some(v) = e["value"].as_str() else { continue };
@@ -84,7 +103,7 @@ impl Observer for Alerts {
                 let now = now_ms() / 1000;
                 let looks = desks.live(&hub);
                 let watched = holds(&kind) && seen(&looks, &thread, now);
-                if !watched { if let Some(c) = lead(&looks) { hub.push(c, frame(&thread, &title, &text_body, &kind, &key)); } }
+                if !watched { if let Some(c) = lead(&looks) { hub.push(c, frame(&thread, &title, &text_body, &kind, &key)); if kind == "ask" { desks.needs.lock().unwrap().told(&thread, c, &key); } } }
                 let state = match kind.as_str() { "fail" => "failed", "done" => "completed", _ => "" };
                 let _ = crate::settings::webhook::deliver(&hub, &thread, &kind, state, "", "", &text_body, &title).await;
             });
@@ -101,6 +120,15 @@ mod tests {
         assert!(!l("t1", true, 100).sees("t1", 280), "stale after the window");
         assert!(!l("t1", true, 100).sees("t2", 110));
         assert!(!l("t1", false, 100).sees("t1", 110), "no focus");
+    }
+    #[test] fn an_answered_need_clears_its_notification_once_the_thread_has_no_other_ask() {
+        let mut n = Needs::default();
+        n.opened("q1", "t1"); n.opened("q2", "t1"); n.opened("q3", "t2"); n.told("t1", 7, "ask-t1");
+        assert_eq!(n.closed("q1"), None, "t1 still has q2 open: the notification stays");
+        assert_eq!(n.closed("q2"), Some(("t1".into(), 7, "ask-t1".into())), "the last ask of t1 closed: desk 7 clears ask-t1");
+        assert_eq!(n.closed("q3"), None, "no desk was told about t2");
+        assert_eq!(n.closed("q2"), None, "cleared once");
+        assert_eq!(clear_frame("t1", "ask-t1"), json!({"t":"notify.clear","thread":"t1","key":"ask-t1"}));
     }
     #[test] fn the_desk_used_last_leads() {
         assert_eq!(lead(&[(1, l("a", true, 10)), (2, l("b", false, 30)), (3, l("c", true, 20))]), Some(2));
