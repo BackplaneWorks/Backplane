@@ -25,8 +25,8 @@ has access, has its own Revoke. Revoking an unused link stops it from pairing
 anything; revoking a used one also revokes the device it paired and closes that
 device's connections. A hub pairs only with a link it issued, recorded and has
 not revoked; one it cannot record is never issued. The newest hundred finished
-links stay listed. Hub-to-hub invites (`bp1:`, made in Bots to link a
-machine, and the machine codes below) are
+links stay listed. Hub-to-hub invites (`bp1:`, made by `bots.invite`; no page makes one now, and the
+Machines page's address field still takes one, and the machine codes below) are
 recorded and listed here too, as machine invites: they expire after ten
 minutes and work once like a device invitation, and revoking a used one
 unlinks the machine it linked. A short code needs the hub
@@ -68,7 +68,7 @@ phones to the same list and address rules (`HubListTest`,
 
 `test/e2e/pairing/link.py` links two running temp-home hubs: first by a machine code and an
 approval (a wrong code, a denied request, a request that waits and links nothing until approved, both sides recording
-`approved`), then the way Bots and Setup paste an invite (`bots.invite`, `bots.join`: unpaired), and checks both logs hold the
+`approved`), then the older invite paste (`bots.invite`, `bots.join`: unpaired; the Machines page takes a `bp1:` invite in its address field), and checks both logs hold the
 link and that it survives a restart with `--restart-b`.
 
 ## Pairing two machines

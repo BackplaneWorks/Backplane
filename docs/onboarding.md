@@ -21,18 +21,18 @@ macOS builds are not notarized yet. If macOS refuses to open the app, try to ope
 
 ## First launch
 
-The first window asks where the hub's home goes. The hub is the program that keeps your threads, settings and keys and runs your agents. Its home is the folder where it stores them.
+The first window asks where Backplane keeps your data. That is one folder on this computer, with your threads, settings and keys. A background program, the hub, runs your agents from it.
 
 | System | Default home |
 | --- | --- |
 | Linux | `~/.backplane/hub` |
 | macOS | `~/Library/Application Support/Backplane/hub` |
 
-Press Start the hub here to take the default, or Choose a folder for another. A folder that already has a hub's data opens as it is. The hub takes the first free port from 3800 to 3899 and keeps running when you close the window, so agents finish their work. Later launches go straight to the same home.
+Press Use this folder to take the default, or Choose a folder for another. A folder that already has a hub's data opens as it is. The hub takes the first free port from 3800 to 3899 and keeps running when you close the window, so agents finish their work. Later launches go straight to the same home.
 
-To change it, open Settings, Setup, go to The hub's home and press Choose another home. The old home stays as it is.
+To change it, open Settings, Setup, go to Where your data is kept and press Choose another folder. The old home stays as it is.
 
-Use a hub on another machine connects this window to a hub that is already running. On that machine, open Settings, Devices, Add a device. Paste the pairing link here, or type the address and the short code.
+Connect to a hub on another computer connects this window to a hub that is already running. On that machine, open Settings, Devices, Add a device. Paste the pairing link here, or type the address and the short code.
 
 ### Moving from 0.14
 
@@ -98,6 +98,8 @@ These agents sign in within a terminal, and Backplane cannot check that sign-in.
 
 ## KiCad and FreeCAD
 
+Stock KiCad 9 or later is enough to plot and export. Agents edit a board in a running KiCad only with Backplane KiCad, our build with an editing API; the KiCad step says whether the one it found is that build and links to the downloads. With stock KiCad, agents edit the files.
+
 Agents use KiCad for boards and schematics and FreeCAD for mechanical parts. The viewers need neither, but agents cannot change designs without them. Setup runs each tool and asks for its version, so a broken install shows as broken with its error.
 
 | System | KiCad | FreeCAD |
@@ -113,7 +115,9 @@ If a tool is somewhere else, give the full path to `kicad-cli` or `freecadcmd` u
 
 Each computer runs its own hub. Linked hubs show each other's projects and threads in one sidebar, and work stays on the machine that owns it.
 
-Hubs never link by themselves, even on one Tailscale account; pair them in Settings, Machines (a code, then your approval), or press Make an invite on one machine and paste the invite under Join another machine on the other. An invite works once, for ten minutes. Both machines need a network route to each other.
+Hubs never link by themselves, even on one Tailscale account. The step shows the Settings, Machines page. Press Make a code on one computer. On the other, enter the first computer's address and the code under Pair a machine. The first computer then shows a request with a check code, which must match, and you press Approve. Over ssh, `backplane pair --machine` does the same. A code works once, for ten minutes, and both computers need a network route to each other.
+
+To see another hub's threads in this window without linking, use the hub list at the top of the sidebar, or Settings, Hubs.
 
 ## Pair a phone
 

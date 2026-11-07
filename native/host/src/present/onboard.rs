@@ -89,14 +89,14 @@ pub const AGENTS: &[Agent] = &[
 fn install_cmd<'a>(a: &'a Agent, os: &str) -> &'a str { a.install.iter().find(|(p, _)| *p == os).map_or("", |(_, c)| *c) }
 
 /// What the checks found, and the state's own answers.
-struct Facts<'a> { st: &'a State, os: String, home: String, listen: String, exe: String, on_path: String, checks: Value, checked: bool, tailscale: String, peers: usize, devices: usize, version: String, invite: String, join_err: String, update: String }
+struct Facts<'a> { st: &'a State, info: &'a Value, os: String, home: String, listen: String, exe: String, on_path: String, checks: Value, checked: bool, tailscale: String, peers: usize, devices: usize, version: String, machines: Value, update: String }
 impl<'a> Facts<'a> {
-    fn of(st: &'a State, info: &Value) -> Facts<'a> {
+    fn of(st: &'a State, info: &'a Value) -> Facts<'a> {
         let checks: Value = st.settings.get("onboard.checks").and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
         let tailscale = { let t = s(&checks, "tailscale"); if t.is_empty() { s(info, "tailscale").to_string() } else { t.to_string() } };
         let peers = st.settings.keys().filter(|k| k.starts_with("peer.own.")).count();
-        Facts { st, os: { let o = s(info, "os"); if o.is_empty() { "linux".into() } else { o.to_string() } }, home: s(info, "home").into(), listen: s(info, "listen").into(), exe: s(&checks, "exe").into(), on_path: s(&checks, "onPath").into(),
-            checked: checks.is_object(), tailscale, peers, devices: checks["devices"].as_u64().unwrap_or(0) as usize, version: super::settings::version().to_string(), invite: s(info, "onboard.invite").into(), join_err: s(info, "onboard.join.err").into(), update: s(info, "update").into(), checks }
+        Facts { st, info, os: { let o = s(info, "os"); if o.is_empty() { "linux".into() } else { o.to_string() } }, home: s(info, "home").into(), listen: s(info, "listen").into(), exe: s(&checks, "exe").into(), on_path: s(&checks, "onPath").into(),
+            checked: checks.is_object(), tailscale, peers, devices: checks["devices"].as_u64().unwrap_or(0) as usize, version: super::settings::version().to_string(), machines: info["machines"].clone(), update: s(info, "update").into(), checks }
     }
     fn agent(&self, id: &str) -> &Value { &self.checks["agents"][id] }
     fn found(&self, id: &str) -> bool { !s(self.agent(id), "path").is_empty() }
@@ -112,10 +112,10 @@ fn looking(f: &Facts) -> &'static str { if f.checked { "" } else { "Checking thi
 // ---- the steps ----
 
 fn welcome(f: &Facts, c: &Client) -> Step {
-    let body = if c.phone { "Backplane runs coding agents on your boards, schematics and mechanical parts. This setup shows how to use it from this phone. Next moves on. Finish later closes it, and it comes back at the same step. Settings shows it again at any time.".to_string() }
-        else { "Backplane runs coding agents on your boards, schematics and mechanical parts, and draws the results in its own viewers. This setup checks what you have, helps you add what is missing and ends with a tour of each feature. Enter moves on and Esc is Finish later, which brings you back to this step at the next launch. Press a step in the list to go straight to it. Settings, Setup runs all of this again.".to_string() };
+    let body = if c.phone { "Backplane runs coding agents on your boards, schematics and mechanical parts. This setup shows how to use it from this phone. Next moves on. Finish later closes it, and it comes back at the same step. Settings, Setup shows it again.".to_string() }
+        else { "Backplane runs coding agents on your boards, schematics and mechanical parts, and draws the results in its own viewers. This setup checks what you have, helps you add what is missing and ends with a tour of each feature. Every step can be skipped. Enter moves on. Esc is Finish later, which brings you back to this step at the next launch. End setup stops it for good. Press a step in the list to go straight to it. Settings, Setup runs all of this again.".to_string() };
     let _ = f;
-    Step { id: "welcome", group: "Install", title: "Welcome to Backplane".into(), body, rows: vec![], choices: vec![choice("Skip all of setup", "ob-end", "")], panel: "", done: true, task: false }
+    Step { id: "welcome", group: "Install", title: "Welcome to Backplane".into(), body, rows: vec![], choices: vec![], panel: "", done: true, task: false }
 }
 
 fn install(f: &Facts) -> Step {
@@ -123,24 +123,24 @@ fn install(f: &Facts) -> Step {
     let (text, path_fix) = (pf.installed, pf.path_fix);
     let body = format!("You are running Backplane {} on {}. {text}", f.version, pf.name);
     let mut rows = vec![];
-    if !f.exe.is_empty() { rows.push(row("Hub program", &f.exe, vec![])); }
+    if !f.exe.is_empty() { rows.push(row("Program", &f.exe, vec![])); }
     rows.push(if !f.on_path.is_empty() { row("Terminal command", &format!("Found at {}.", f.on_path), vec![]) } else if f.checked { row("Terminal command", path_fix, vec![]) } else { row("Terminal command", looking(f), vec![]) });
     rows.push(row("Updates", "Settings, Network and updates picks the stable or the nightly channel.", vec![]));
     Step { id: "install", group: "Install", title: "Installed".into(), body, rows, choices: vec![], panel: "", done: true, task: false }
 }
 
 fn home(f: &Facts, c: &Client) -> Step {
-    let body = "The hub is the program that keeps your threads, settings and keys, and runs your agents. Its home is the folder where it stores all of that: the event log, attachments, bots, paired devices and secrets. One home runs one hub, and each machine usually has one.".to_string();
-    let mut rows = vec![row("This hub's home", &f.home, vec![]), row("Address", &format!("The hub listens on {}.", f.listen), vec![])];
-    if c.launcher { rows.push(row("Use another home", "Backplane opens the home chooser and starts a hub there. This home stays as it is, and its hub keeps running until this machine restarts.", vec![btn("Choose another home", "ob-home", "", false)])); }
-    Step { id: "home", group: "Install", title: "The hub's home".into(), body, rows, choices: vec![], panel: "", done: !f.home.is_empty(), task: false }
+    let body = "Backplane keeps your threads, settings, bots and keys in one folder on this computer. A background program, the hub, runs your agents from that folder. It keeps running when you close the window, so agents finish their work. Each computer usually has one.".to_string();
+    let mut rows = vec![row("Data folder", &f.home, vec![]), row("Address", &format!("The hub listens on {}.", f.listen), vec![])];
+    if c.launcher { rows.push(row("Use another folder", "Backplane restarts, asks for the folder and starts a hub there. This folder stays as it is, and its hub keeps running until this computer restarts.", vec![btn("Choose another folder", "ob-home", "", false)])); }
+    Step { id: "home", group: "Install", title: "Where your data is kept".into(), body, rows, choices: vec![], panel: "", done: !f.home.is_empty(), task: false }
 }
 
 fn usage(f: &Facts) -> Step {
     let (share, asked, ua) = (set(f.st, "telemetry.share"), set(f.st, "telemetry.asked"), set(f.st, "telemetry.usage.asked"));
     let answered = crate::settings::telemetry::answered(share, asked, ua) || !set(f.st, "onboard.usage").is_empty();
     let on = crate::settings::telemetry::on(share, ua) && set(f.st, "onboard.usage") != "off";
-    let body = "This build has no sender, so it sends nothing whatever you choose here. A later build may send anonymous counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. It would never send your conversations, projects, files, names or keys. Your choice here decides whether it may. Settings, Privacy changes it.".to_string();
+    let body = "This build sends nothing, whichever you choose. A later build may send anonymous counts if you say On. They are installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. It would never send your conversations, projects, files, names or keys. Settings, Privacy changes your choice.".to_string();
     let rows = vec![row("Share anonymous usage", if answered { "Your choice is saved." } else { "Choose one." }, vec![btn("On", "ob-usage", "on", answered && on), btn("Off", "ob-usage", "off", answered && !on)])];
     Step { id: "usage", group: "Install", title: "Anonymous usage".into(), body, rows, choices: vec![], panel: "", done: answered, task: true }
 }
@@ -165,7 +165,7 @@ fn claude(f: &Facts, c: &Client) -> Step {
     let names = f.accounts("claude");
     let done = f.signed("claude");
     if c.phone { return Step { id: "claude", group: "Agents", title: "Sign in to Claude".into(), body: "Sign in on the computer that runs the hub, in Setup or in Settings, Accounts. Agents run there, not on this phone.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
-    let body = "Backplane runs Claude Code, Anthropic's command-line agent, on this machine. Install it, then add an account below. Name each account, for example Work or Personal. Press Connect, open the link, sign in and paste the code Claude shows. Add as many accounts as you have. When one reaches its usage limit, Backplane moves the thread to another. Each thread keeps its own account, and the chip beside the model picker changes it. Use for new threads picks the account new threads start on. If a sign-in fails or the code expires, press Connect again. Backplane never copies your keys and never runs a paid request to check them.".to_string();
+    let body = "Backplane runs Claude Code, Anthropic's command-line agent, on this computer. Install it, then add an account below. Name it, for example Work or Personal, and press Connect. Open the link, sign in and paste the code Claude shows. Add as many accounts as you have. When one reaches its usage limit, Backplane moves the thread to another. Each thread keeps its own account, and the chip beside the model picker changes it. Use for new threads picks where new threads start. If a sign-in fails or the code expires, press Connect again. Backplane never copies your keys and never runs a paid request to check them.".to_string();
     let mut rows = agent_rows(f, a);
     if !names.is_empty() { rows.push(row("Accounts", &names.join(", "), vec![])); }
     rows.push(row("Check again", "Runs the checks now, after you install or sign in.", vec![btn("Check again", "ob-check", "", false)]));
@@ -177,7 +177,7 @@ fn codex(f: &Facts, c: &Client) -> Step {
     let names = f.accounts("codex");
     let done = f.signed("codex");
     if c.phone { return Step { id: "codex", group: "Agents", title: "Sign in to Codex".into(), body: "Sign in on the computer that runs the hub, in Setup or in Settings, Accounts.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
-    let body = "Codex is OpenAI's command-line agent. Install it, add an account below and press Connect. Backplane shows a link and a code to enter there, and the step turns done when Codex reports the sign-in. You need one agent to start, so skip this step if you only use Claude.".to_string();
+    let body = "Codex is OpenAI's command-line agent. Install it, add an account below and press Connect. Backplane shows a link and a code to enter there, and the step turns done when Codex reports the sign-in. You need only one agent, so skip this step if you use Claude.".to_string();
     let mut rows = agent_rows(f, a);
     if !names.is_empty() { rows.push(row("Accounts", &names.join(", "), vec![])); }
     rows.push(row("Check again", "Runs the checks now, after you install or sign in.", vec![btn("Check again", "ob-check", "", false)]));
@@ -187,7 +187,7 @@ fn codex(f: &Facts, c: &Client) -> Step {
 fn others(f: &Facts, c: &Client) -> Step {
     let done = AGENTS[2..].iter().any(|a| f.found(a.id));
     if c.phone { return Step { id: "others", group: "Agents", title: "Other agents".into(), body: "Backplane also runs Grok Build, Muse Code, OpenCode, Pi and Oh My Pi. Install them on the computer that runs the hub.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
-    let body = "Backplane also runs these agents. Each one signs in with its own command, in a terminal on this machine, and Backplane cannot check that sign-in. An agent that is not signed in says so in its first reply. You can skip all of them. Antigravity is listed in the model picker, but this build cannot install it yet.".to_string();
+    let body = "Backplane also runs these agents. Each one signs in with its own command, in a terminal on this computer, and Backplane cannot check that sign-in. An agent that is not signed in says so in its first reply. Skip this step if you use Claude or Codex. Antigravity is listed in the model picker, but this build cannot install it yet.".to_string();
     let mut rows: Vec<Value> = AGENTS[2..].iter().flat_map(|a| agent_rows(f, a)).collect();
     rows.push(row("Check again", "Runs the checks now, after you install one.", vec![btn("Check again", "ob-check", "", false)]));
     Step { id: "others", group: "Agents", title: "Other agents".into(), body, rows, choices: vec![], panel: "", done, task: true }
@@ -199,13 +199,25 @@ fn tool_note(f: &Facts, tool: &str, name: &str) -> String {
     else if !s(t, "path").is_empty() { format!("Found at {}, but it does not run: {}.", s(t, "path"), s(t, "why")) }
     else if f.checked { format!("{name} was not found.") } else { looking(f).to_string() }
 }
+/// What the KiCad found means for editing a board in a running KiCad (info `kicad.status`: ok, old, stock, broken, missing).
+fn live_note(ipc: &str, status: &str) -> String {
+    if ipc == "off" { return "Off in Settings, CAD. Agents edit the files.".into() }
+    match status {
+        "ok" => "Backplane KiCad is installed. Agents can edit a board in a running KiCad.",
+        "old" => "This Backplane KiCad is too old. Download the newest, then press Check again.",
+        "stock" => "This is stock KiCad, so agents edit the files. Download Backplane KiCad for live edits, then use Locate it below if it is not found.",
+        "missing" | "broken" => "Not available until a KiCad runs here.",
+        _ => "Checking this machine.",
+    }.into()
+}
 fn kicad(f: &Facts, st: &State, session: &Value, c: &Client) -> Step {
     let done = f.runs("kicad");
     if c.phone { return Step { id: "kicad", group: "CAD tools", title: "KiCad".into(), body: "KiCad runs on the computer that runs the hub. This phone shows boards and schematics the hub draws.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
-    let body = "Agents use KiCad to read, change and check boards and schematics. Backplane draws boards itself, but it needs kicad-cli to plot and export them. KiCad 9 or later works. To check it, Backplane runs kicad-cli version.".to_string();
+    let body = "Agents use KiCad to read, change and check boards and schematics. Backplane draws boards itself, but it needs kicad-cli to plot and export them, and KiCad 9 or later works for that. For live edits in a running KiCad, agents need Backplane KiCad, our build of KiCad with an editing API. Stock KiCad works too, and agents then edit the files.".to_string();
     let path = if session["drafts"]["@f.obkicad"].is_string() { draft(session, "@f.obkicad").to_string() } else { set(st, "kicad.path").to_string() };
     let mut rows = vec![row("KiCad", &tool_note(f, "kicad", "KiCad"), vec![link("Download", "https://www.kicad.org/download/")])];
     if !done && f.checked { for (name, cmd) in platform(&f.os).kicad { rows.push(row(name, cmd, vec![copy(cmd)])); } }
+    rows.push(row("Live editing", &live_note(set(f.st, "kicad.ipc"), s(f.info, "kicad.status")), vec![link("Get Backplane KiCad", "https://github.com/BackplaneWorks/Backplane_KiCad/releases")]));
     let mut located = row("Locate it", "If KiCad is somewhere else, give the full path to kicad-cli.", vec![btn("Use this path", "ob-kicad", "", false), btn("Check again", "ob-check", "", false)]);
     located["fields"] = json!([{"name": "obkicad", "hint": "Path to kicad-cli", "secret": false, "value": path}]);
     rows.push(located);
@@ -224,29 +236,29 @@ fn freecad(f: &Facts, st: &State, session: &Value, c: &Client) -> Step {
     Step { id: "freecad", group: "CAD tools", title: "FreeCAD".into(), body, rows, choices: vec![], panel: "", done, task: true }
 }
 
+/// The warning for a code that names only this computer (the Machines page's code row, `code.address`).
+pub const LOCAL_CODE: &str = "This code names only this computer (127.0.0.1): another computer cannot reach it. Start the hub with Tailscale on, or set BACKPLANE_URL to an address the other machine can reach, then make a new code.";
+
 fn machine(f: &Facts, session: &Value, c: &Client) -> Step {
-    let done = f.peers > 0;
-    if c.phone { return Step { id: "machine", group: "Devices", title: "Another machine".into(), body: "Hubs on your computers link to each other after you approve a pairing, and show each other's projects and threads. A linked machine appears in the list on this phone too.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
+    let paired = f.machines["linked"].as_array().into_iter().flatten().filter(|l| l["state"] == "paired").count();
+    let done = paired > 0 || f.peers > 0;
+    if c.phone { return Step { id: "machine", group: "Devices", title: "Another machine".into(), body: "Each computer runs its own hub. Hubs link only after you pair them with a code and approve the request, in Settings, Machines on a computer. Linked hubs show each other's projects and threads, and a linked machine appears in the list on this phone too. The phone's Settings, Hubs lists the hubs it is paired with.".into(), rows: vec![], choices: vec![], panel: "", done, task: false } }
     let on = matches!(f.tailscale.as_str(), "on" | "reachable");
-    let body = "Each computer runs its own hub. Linked hubs show each other's projects and threads in one sidebar, and work stays on the machine that owns it. Hubs never link by themselves, even on one Tailscale account: in Settings, Machines, make a code here, enter it with this address on the other machine, then approve its request here (or `backplane pair --machine` over ssh). An invite pasted into the other machine also links, but unpaired until you mark it Mine. Both machines need a network route to each other. Codes and invites work once, for ten minutes.".to_string();
+    let body = "Each computer you use runs its own hub. Linked hubs show each other's projects and threads in one sidebar, and work stays on the computer that owns it. Hubs never link by themselves, even on one Tailscale account. To link two: make a code here, enter it with this address on the other computer, then approve its request here. You can also run backplane pair --machine over ssh. Both computers need a network route to each other, usually Tailscale. A code works once, for ten minutes. To look at another hub without linking, use the hub list at the top of the sidebar or Settings, Hubs.".to_string();
     let ts_note = if on { "On. This hub listens on your tailnet." } else if f.tailscale == "off" { "Off. This hub started with --no-tailscale." } else { "Not connected. Sign in to Tailscale, then restart Backplane." };
-    let mut rows = vec![row("Tailscale", ts_note, vec![link("Get Tailscale", "https://tailscale.com/download")]), row("Linked machines", &if f.peers == 0 { "None yet.".to_string() } else { format!("{} linked.", f.peers) }, vec![])];
-    let invite = f.invite.as_str();
-    if invite.is_empty() { rows.push(row("Invite another machine", "Makes an invite to paste on the other machine.", vec![btn("Make an invite", "ob-machine-invite", "", false)])); }
-    else {
-        rows.push(row("Invite", invite, vec![copy(invite)]));
-        if super::settings::loopback_invite(invite) { let mut w = row("Only this computer", super::settings::LOCAL_MACHINE, vec![]); w["tone"] = json!("warn"); rows.push(w); }
-    }
-    let mut join = row("Join another machine", &if f.join_err.is_empty() { "Paste an invite made on the other machine.".to_string() } else { f.join_err.clone() }, vec![btn("Link", "ob-machine-join", "", false)]);
-    join["fields"] = json!([{"name": "objoin", "hint": "bp1:...", "secret": false, "value": draft(session, "@f.objoin")}]);
-    rows.push(join);
+    let mut rows = vec![row("Tailscale", ts_note, vec![link("Get Tailscale", "https://tailscale.com/download")])];
+    if f.machines.is_object() {
+        let draft_of = |k: &str| draft(session, &format!("@f.{k}")).to_string();
+        rows.extend(crate::net::machinespage::rows(&f.machines, &draft_of));
+        if f.machines["code"]["address"].as_str().map_or(false, super::settings::loopback) { let mut w = row("Only this computer", LOCAL_CODE, vec![]); w["tone"] = json!("warn"); rows.push(w); }
+    } else { rows.push(row("Linked machines", &if f.peers == 0 { "None yet.".to_string() } else { format!("{} linked.", f.peers) }, vec![])); }
     Step { id: "machine", group: "Devices", title: "Another machine".into(), body, rows, choices: vec![], panel: "", done, task: true }
 }
 
 fn phone(f: &Facts, session: &Value, c: &Client) -> Step {
     let done = f.devices > 0;
     if c.phone { return Step { id: "phone", group: "Devices", title: "This phone".into(), body: "This phone is paired. To add another device, open Settings, Devices, Add a device on the computer that runs the hub.".into(), rows: vec![], choices: vec![], panel: "", done: true, task: false } }
-    let body = "Install the Backplane app: iOS through TestFlight, Android from the signed file on the release page. Then scan the QR code with the app, or type the short code and the hub's address. Each invitation works once, for ten minutes. The phone needs a network route to this hub, usually Tailscale on the same tailnet. Treat the QR code and the link as passwords.".to_string();
+    let body = "Install the Backplane app: iOS through TestFlight, Android from the signed file on the release page. Then scan the QR code with the app, or type the short code and this hub's address. Each invitation works once, for ten minutes. The phone needs a network route to this hub, usually Tailscale on the same tailnet. Treat the QR code and the link as passwords.".to_string();
     let inv: Value = serde_json::from_str(draft(session, "@invite")).unwrap_or(Value::Null);
     let mut rows = vec![];
     if let Some(l) = inv["link"].as_str() {
@@ -317,7 +329,7 @@ fn tour(f: &Facts, c: &Client) -> Vec<Step> {
             tourstep("space", "A bot's space", "Each bot has a Space tab, a page the bot writes for you. It can hold a status, a table, buttons and fields to fill in. Ask a bot to make one.".into(), vec![]),
             tourstep("rooms", "Rooms", "A room is a shared chat for you and your bots. Make one under Bots, pick who joins and post in it. Each bot reads the room and answers there.".into(), vec![]),
             tourstep("routines", "Routines", "A routine runs a bot on a schedule. Open a bot, then Routines, and write what it should do and when, for example tomorrow 9am or monday 09:00.".into(), vec![]),
-            tourstep("settings", "Settings", "Settings holds this phone's choices, your notifications and the hubs it is paired with.".into(), vec![]),
+            tourstep("settings", "Settings", "Settings holds this phone's choices, your notifications and Hubs, the hubs it is paired with. The hub's own settings are on a computer.".into(), vec![]),
         ]
     }
     vec![
@@ -339,7 +351,7 @@ fn tour(f: &Facts, c: &Client) -> Vec<Step> {
         tourstep("palette", "Palette and shortcuts", format!("{m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, This device lists every shortcut and lets you change them."),
             vec![key("Palette", &format!("{m}+K")), key("New thread", &format!("{m}+N")), key("Sidebar", &format!("{m}+B")), key("Search threads", &format!("{m}+Shift+F")), key("Agent, model and effort", "Ctrl+M"), key("Previous and next thread", &format!("{m}+Shift+[ and {m}+Shift+]")), key("Uberbot chat", &format!("{m}+Shift+U")),
                 row("Try it", "Closes setup and opens the palette. Finish setup in the sidebar brings you back.", vec![btn("Open the palette", "ob-try", "palette", false)])]),
-        tourstep("settings", "Settings", "Settings holds the choices for the whole hub. This device holds the choices for this window only. The pages are Appearance, Threads, Agents, Writing, CAD, Ordering, Network and updates, Devices, API keys, Time zone, Privacy, Setup and About. Accounts is where you add more Claude and Codex accounts.".into(),
+        tourstep("settings", "Settings", format!("Settings holds the choices for the whole hub. This device holds the choices for this window only. The pages are {}. Accounts is where you add more Claude and Codex accounts, and Hubs switches this window to another hub.", super::settings::PAGES.iter().map(|(_, l)| *l).collect::<Vec<_>>().join(", ")),
             vec![row("Try it", "Closes setup and opens Settings. Finish setup in the sidebar brings you back.", vec![btn("Open Settings", "ob-try", "settings", false)])]),
     ]
 }
@@ -514,9 +526,6 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             send(hub, &mut rid, &mut cmds, "thread.create", p);
             json!({"drafts": {"@f.obfirst": ""}})
         }
-        // the hub makes it and says it in the info `onboard.invite`, never in the log
-        "ob-machine-invite" => { send(hub, &mut rid, &mut cmds, "onboard.machine", json!({"op": "invite"})); json!({}) }
-        "ob-machine-join" => { send(hub, &mut rid, &mut cmds, "onboard.machine", json!({"op": "join", "invite": draft(session, "@f.objoin").trim()})); json!({"drafts": {"@f.objoin": ""}}) }
         "ob-uber" => {
             if value.is_empty() { send(hub, &mut rid, &mut cmds, "onboard.uber", json!({})); } else { send(hub, &mut rid, &mut cmds, "bots.uber", json!({"bot": value})); }
             json!({})
@@ -550,18 +559,57 @@ mod tests {
     fn setting_of(o: &Out, key: &str) -> Option<String> { o.cmds.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).find(|v| v["m"] == "setting.set" && v["p"]["key"] == key).map(|v| s(&v["p"], "value").to_string()) }
     fn sent(o: &Out, m: &str) -> Vec<Value> { o.cmds.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).filter(|v| v["m"] == m).map(|v| v["p"].clone()).collect() }
 
-    /// A hub on 127.0.0.1 with Tailscale off makes invites and links that name only this computer: the step says so beside them.
-    #[test] fn invites_and_links_that_name_only_this_computer_carry_a_warning() {
-        let sec = "e4af8fb618176ac9cd1bf9fe7d62e765f20914b4d3d3aeae60ae3bf5ac91571a";
+    /// A hub on 127.0.0.1 with Tailscale off makes codes and links that name only this computer: the step says so beside them.
+    #[test] fn codes_and_links_that_name_only_this_computer_carry_a_warning() {
         let warned = |v: &Step| v.rows.iter().any(|r| r["label"] == "Only this computer" && r["tone"] == "warn");
+        let code = |addr: &str| json!({"linked": [], "found": [], "requests": [], "outgoing": [], "code": {"code": "123456", "address": addr, "left": 590, "peer": "p"}});
         let mut i = info("linux");
-        i["onboard.invite"] = json!(format!("bp1:http://127.0.0.1:3800:pd0302ba9e290b6e4:{sec}"));
-        assert!(warned(&machine(&Facts::of(&st(&[]), &i), &sess(json!({})), &desk())), "a loopback machine invite");
-        i["onboard.invite"] = json!(format!("bp1:http://desktop.tail.ts.net:3800:pd0302ba9e290b6e4:{sec}"));
+        i["machines"] = code("http://127.0.0.1:3800");
+        assert!(warned(&machine(&Facts::of(&st(&[]), &i), &sess(json!({})), &desk())), "a loopback machine code");
+        i["machines"] = code("http://desktop.tail.ts.net:3800");
         assert!(!warned(&machine(&Facts::of(&st(&[]), &i), &sess(json!({})), &desk())), "a tailnet one");
         let link = |local: bool| sess(json!({"@invite": json!({"link": "http://127.0.0.1:3800/pair#invite=x", "code": "ABCD2345", "qr": "", "localOnly": local}).to_string()}));
         assert!(warned(&phone(&Facts::of(&st(&[]), &info("linux")), &link(true), &desk())), "a loopback device link");
         assert!(!warned(&phone(&Facts::of(&st(&[]), &info("linux")), &link(false), &desk())), "a reachable one");
+    }
+    /// The machine step is the Machines page: pair by code and approval, never an invite that links by itself.
+    #[test] fn the_machine_step_pairs_with_codes_and_approval_like_settings_machines() {
+        let (s0, mut i) = (cst(blank(), &[]), info("linux"));
+        i["machines"] = json!({"linked": [{"id": "a", "name": "desk", "url": "http://d:3800", "state": "paired"}], "found": [], "requests": [{"id": "r", "name": "lab", "url": "http://l:3800", "check": "482913", "left": 100}], "outgoing": [], "code": null});
+        let p = at(&s0, "machine", &i, &desk());
+        assert_eq!(p["state"], "done", "a paired machine finishes the step");
+        let rows = p["rows"].as_array().unwrap();
+        let actions: Vec<&str> = rows.iter().flat_map(|r| r["buttons"].as_array().into_iter().flatten()).map(|b| s(b, "action")).collect();
+        for a in ["machine-approve", "machine-deny", "machine-pair", "machine-code"] { assert!(actions.contains(&a), "{a} in {actions:?}"); }
+        assert!(!actions.iter().any(|a| a.starts_with("ob-machine")), "no invite that links without approval");
+        let body = p["body"].as_str().unwrap();
+        assert!(body.contains("approve") && body.contains("never link by themselves") && body.contains("Settings, Hubs"), "{body}");
+        let shown = format!("{} {}", p["body"], p["rows"]);
+        for stale in ["Bots", "Mine", "invite", "bp1"] { assert!(!shown.contains(stale), "{stale} is stale in the machine step: {shown}"); }
+        let blank_i = info("linux");
+        assert_eq!(at(&s0, "machine", &blank_i, &desk())["state"], "todo", "no pairing data yet: not done, not a dead end");
+        assert!(at(&s0, "machine", &blank_i, &phone_c())["body"].as_str().unwrap().contains("Settings, Machines"));
+    }
+    /// What the step says about KiCad follows what the hub found.
+    #[test] fn the_kicad_step_says_what_live_editing_needs() {
+        let live = |status: &str, ipc: &str| { let mut i = info("linux"); i["kicad.status"] = json!(status); let p = at(&cst(blank(), &[("kicad.ipc", ipc)]), "kicad", &i, &desk()); p["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Live editing").unwrap()["note"].as_str().unwrap().to_string() };
+        assert!(live("ok", "on").contains("installed") && live("stock", "on").contains("stock KiCad") && live("old", "on").contains("too old") && live("missing", "on").contains("until a KiCad runs"));
+        assert!(live("ok", "off").contains("Settings, CAD"));
+        let p = at(&cst(blank(), &[]), "kicad", &info("linux"), &desk());
+        assert!(p["body"].as_str().unwrap().contains("Backplane KiCad"));
+        assert!(p["rows"].as_array().unwrap().iter().any(|r| r["buttons"].as_array().unwrap().iter().any(|b| s(b, "value").contains("Backplane_KiCad"))));
+    }
+    /// No internal word reaches a new person, and the Settings tour names every Settings page.
+    #[test] fn no_internal_words_and_the_settings_step_lists_every_page() {
+        let mut every = String::new();
+        for c in [desk(), phone_c()] { for os in ["linux", "darwin"] {
+            let (s0, i) = (cst(blank(), &[]), info(os));
+            for id in ids(&at(&s0, "welcome", &i, &c)) { every.push_str(&at(&s0, &id, &i, &c).to_string()); }
+        } }
+        for bad in ["Bend", "hub home", "hub's home", "guard", "mirror", "PeerTable", "far thread", "Bots page", "Skip all of setup"] { assert!(!every.contains(bad), "{bad:?} in the steps"); }
+        let p = at(&cst(blank(), &[]), "settings", &info("linux"), &desk());
+        for (_, label) in super::super::settings::PAGES { assert!(p["body"].as_str().unwrap().contains(label), "{label} missing from the Settings step"); }
+        assert_eq!(at(&cst(blank(), &[]), "welcome", &info("linux"), &desk())["choices"].as_array().unwrap().len(), 0, "End setup is the footer's, not a second button");
     }
     #[test] fn it_comes_up_on_a_blank_home_and_leaves_an_old_home_alone() {
         assert!(due(&st(&[]), &sess(json!({}))));
