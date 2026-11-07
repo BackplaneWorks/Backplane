@@ -47,10 +47,14 @@ fn refusal(kind: Kind, program: &str) -> Option<String> {
 }
 /// The hub's own variables from its guard and updater: which builds folder it was started from, its commit, its guard, safe mode, injected faults, the update feed.
 /// An agent, a shell an agent or the person runs, or a terminal never gets them: a test hub started from one would take the person's builds folder for its own,
-/// and could update itself against it (or a `backplane hub` there would act on the person's hub). BACKPLANE_NO_UPDATE stays: it only ever holds an update back.
+/// and could update itself against it (or a `backplane hub` there would act on the person's hub). Its listener and its address and name on the network go too
+/// (a test hub would bind the person's tailnet port, or claim the hub's URL), and the push key (it would notify the person's phones). Nothing an agent runs
+/// needs them to reach the hub: the MCP bridge gets the hub's URL as an argument, and `backplane hub` finds it by --home or its pointer file.
+/// BACKPLANE_NO_UPDATE stays: it only ever holds an update back.
 pub const HUB_ONLY: &[&str] = &["BACKPLANE_BUILDS", "BACKPLANE_BUILD", "BACKPLANE_COMMIT", "BACKPLANE_GUARD", "BACKPLANE_HOME", "BACKPLANE_SAFE", "BACKPLANE_SAFE_SKIP",
-    "BACKPLANE_CARRY_WAIT", "BACKPLANE_FAULT", "BACKPLANE_STEP_BUDGET", "BACKPLANE_UPDATE_FEED", "BACKPLANE_RELEASE_KEY", "BACKPLANE_TEST_BUILDS", "BACKPLANE_TEST_NO_UPDATE"];
-pub fn hub_only(name: &str) -> bool { HUB_ONLY.contains(&name) || name.starts_with("BACKPLANE_GUARD_") }
+    "BACKPLANE_CARRY_WAIT", "BACKPLANE_FAULT", "BACKPLANE_STEP_BUDGET", "BACKPLANE_UPDATE_FEED", "BACKPLANE_RELEASE_KEY", "BACKPLANE_TEST_BUILDS", "BACKPLANE_TEST_NO_UPDATE",
+    "BACKPLANE_HTTPS_PORT", "BACKPLANE_URL", "BACKPLANE_NAME", "BACKPLANE_HOOK_URL", "BACKPLANE_PEERS"];
+pub fn hub_only(name: &str) -> bool { HUB_ONLY.contains(&name) || name.starts_with("BACKPLANE_GUARD_") || name.starts_with("BACKPLANE_APNS_") }
 /// The kinds that run what an agent or a person supplies.
 fn scrubbed(kind: Kind) -> bool { matches!(kind, Kind::Agent | Kind::PersonTurn | Kind::Shell | Kind::Terminal) }
 fn hub_only_present() -> Vec<std::ffi::OsString> { std::env::vars_os().map(|(k, _)| k).filter(|k| k.to_str().map_or(false, hub_only)).collect() }
@@ -82,7 +86,7 @@ mod tests {
         assert!(refusal_with(false, Kind::PersonTurn, "claude", None).is_none(), "not a copy: no gate");
     }
     #[test] fn hub_only_names() {
-        for k in ["BACKPLANE_BUILDS", "BACKPLANE_COMMIT", "BACKPLANE_GUARD", "BACKPLANE_GUARD_STABLE", "BACKPLANE_SAFE", "BACKPLANE_UPDATE_FEED"] { assert!(hub_only(k), "{k}"); }
+        for k in ["BACKPLANE_BUILDS", "BACKPLANE_COMMIT", "BACKPLANE_GUARD", "BACKPLANE_GUARD_STABLE", "BACKPLANE_SAFE", "BACKPLANE_UPDATE_FEED", "BACKPLANE_HTTPS_PORT", "BACKPLANE_URL", "BACKPLANE_APNS_KEY_ID"] { assert!(hub_only(k), "{k}"); }
         for k in ["BACKPLANE_NO_UPDATE", "BACKPLANE_AGENT_OWNER", "BACKPLANE_AGENTS", "PATH", "BACKPLANE_GUARDIAN"] { assert!(!hub_only(k), "{k}"); }
     }
     #[tokio::test] async fn hub_env_probe_child() { // run by the test below with the hub's variables set, as a guarded dev hub has them
@@ -101,7 +105,9 @@ mod tests {
         let me = std::env::current_exe().unwrap();
         let mut c = std::process::Command::new(me); c.args(["proc::tests::hub_env_probe_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_HUB_ENV_PROBE", "1").env_remove("BACKPLANE_COPY");
         for (k, v) in [("BACKPLANE_BUILDS", "/home/x/.backplane-gpui-dev"), ("BACKPLANE_BUILD", "20261106-1"), ("BACKPLANE_COMMIT", "abc1234"), ("BACKPLANE_GUARD", "1"), ("BACKPLANE_GUARD_STABLE", "60"),
-            ("BACKPLANE_SAFE", "1"), ("BACKPLANE_SAFE_SKIP", "bots"), ("BACKPLANE_CARRY_WAIT", "60"), ("BACKPLANE_FAULT", "panic:bots"), ("BACKPLANE_UPDATE_FEED", "http://x"), ("BACKPLANE_NO_UPDATE", "1")] { c.env(k, v); }
+            ("BACKPLANE_SAFE", "1"), ("BACKPLANE_SAFE_SKIP", "bots"), ("BACKPLANE_CARRY_WAIT", "60"), ("BACKPLANE_FAULT", "panic:bots"), ("BACKPLANE_UPDATE_FEED", "http://x"), ("BACKPLANE_NO_UPDATE", "1"),
+            ("BACKPLANE_HTTPS_PORT", "8451"), ("BACKPLANE_URL", "https://desktop.example:8451"), ("BACKPLANE_NAME", "desktop"), ("BACKPLANE_HOOK_URL", "http://127.0.0.1:3797"), ("BACKPLANE_PEERS", "a,b"),
+            ("BACKPLANE_APNS_KEY_ID", "K"), ("BACKPLANE_APNS_PRIVATE_KEY_PATH", "/home/x/AuthKey.p8")] { c.env(k, v); }
         let o = c.output().unwrap();
         assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).contains("hub_env_probe_ok"), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     }
