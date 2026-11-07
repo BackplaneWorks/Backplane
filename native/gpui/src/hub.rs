@@ -215,7 +215,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         Refusal::Gone=>{v.restored=Restore::None;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                     }
                     if x["ok"]==true {if let Some(target)=v.saved.take(){v.drawn=true;v.session["sel"]=target["id"].clone();v.target=target;v.restored=Restore::AfterList;v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}}
-                    if x["ok"]!=true {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(format!("View request refused: {}",x["error"]["code"]))).await;continue;}
+                    if x["ok"]!=true {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(refused_view_text(&x["error"]["code"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
                         let c=v.controls.remove(&control).filter(|c|c.done);
@@ -329,6 +329,8 @@ pub fn view_refusal(x:&Value,method:&str,drawn:bool,restored:Restore)->Refusal {
     }
 }
 
+/// What a refused view request says. STALE_VIEW is a thing this hub does not have (a bot, room or thread of another hub, or one removed): said so.
+pub fn refused_view_text(code:&Value)->String { if code=="STALE_VIEW" {"That is not on this hub (it was removed, or belongs to another hub).".into()} else {format!("View request refused: {code}")} }
 /// The words for a failed product RPC's answer: the hub's error may be a plain string, an object with a message or a code, or something else.
 pub fn rpc_error(x:&Value)->String {
     let e=&x["error"];
@@ -340,6 +342,8 @@ pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start"
 /// A view command that is for this client, not the hub: `compose` sets a thread's composer, `say` is one line for the person (a refusal, unless its `tone` is "note").
 pub fn client_cmd(c:&Value)->Option<Event>{let text=c["text"].as_str().unwrap_or("").to_string();match c["type"].as_str()?{"compose"=>Some(Event::Compose(c["thread"].as_str()?.to_string(),text)),"say" if c["tone"]=="note"=>Some(Event::Note(text)),"say"=>Some(Event::Refused(text)),_=>None}}
 
+#[cfg(test)]
+mod refused_text_tests { #[test] fn a_stale_view_says_it_is_not_on_this_hub(){ assert!(super::refused_view_text(&serde_json::json!("STALE_VIEW")).contains("not on this hub")); assert_eq!(super::refused_view_text(&serde_json::json!("X")),"View request refused: \"X\""); } }
 #[cfg(test)]
 mod rpc_tests {
     use super::{is_post, rpc_error};
