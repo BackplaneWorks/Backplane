@@ -489,4 +489,23 @@ final class Journeys: XCTestCase {
         d.note("memory is sampled by run.sh (footprint every 30 s into long-session.mem.csv)")
         d.shot("end")
     }
+
+    // A live buy thread's Order card (test/order/live_ios.sh): opened on BUY_THREAD, Buy now opens Safari on the order server's page, whose test
+    // checkout pays the Stripe double; then the card in the app says Paid.
+    func test_order_card() {
+        d = Driver("order-card"); defer { d.finish() }
+        d.app.terminate()
+        d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_SELECT": d.env["BUY_THREAD"] ?? "", "BACKPLANE_PERFORMANCE": "1"]
+        d.app.launch(); d.skipTour()
+        guard d.step("the Order card on the buy thread", timeout: 40, act: {}, expect: { d.el("thread.order").exists }) else { d.shot("no-card"); return }
+        d.step("the customs line", act: {}, expect: { d.label("Includes import VAT").exists })
+        d.step("Buy now on the card", act: {}, expect: { d.el("thread.order.pay").exists })
+        d.shot("order-card")
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        d.step("Buy now opens Safari", timeout: 30, act: { d.tap(d.el("thread.order.pay")) }, expect: { safari.state == .runningForeground })
+        sleep(8); d.shot("browser")
+        d.app.activate()
+        d.step("the card says Paid", timeout: 60, act: {}, expect: { d.label("Paid: your order").exists })
+        d.shot("paid")
+    }
 }
