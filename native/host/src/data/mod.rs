@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -63,10 +63,16 @@ fn open_ask_counts(hub: &Hub) -> HashMap<String, u64> {
     for (id, th) in opened { if !closed.contains(&id) { *m.entry(th).or_insert(0) += 1 } }
     m
 }
-fn flags(hub: &Hub, id: &str) -> (bool, bool) {
+/// (pinned, on the Settled shelf, when it was settled in unix ms): the desktop's own shelf (shelf.rs: a manual settle or an unsettle wins over the clock, a snooze is not a settle).
+fn flags(hub: &Hub, id: &str) -> (bool, bool, u64) {
     let _ = hub;
-    crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(|t| (t.pinned, t.settled_at > t.unsettled_at)))).flatten().unwrap_or((false, false))
+    crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(shelf_flags))).flatten().unwrap_or((false, false, 0))
 }
+pub(crate) fn shelf_flags(t: &crate::state::Thread) -> (bool, bool, u64) {
+    let settled = crate::shelf::shelf_of(t) == crate::shelf::Shelf::Settled;
+    (t.pinned, settled, if settled { ms(t.settled_at) } else { 0 })
+}
+fn flags_of(id: &str) -> (bool, bool, u64) { crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(shelf_flags))).flatten().unwrap_or((false, false, 0)) }
 /// A setting of the policy state ("" when unset or the state is not up).
 fn setting_of(k: &str) -> String { crate::statehost::policies().and_then(|p| p.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default() }
 fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
@@ -75,21 +81,22 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let state = if waiting > 0 { "asking" } else { match t.turn.as_str() { "running" => "working", "failed" => "failed", _ => "idle" } };
     // what was last said, not the last tool call or a design step's record; a thread with only activity shows nothing
     let preview = m.page(&hub.store, id, 0, 8).ok().and_then(|p| p.rows.iter().find(|r| r.kind == "msg" && !r.text.trim().is_empty()).map(|r| clip(&shown_text(&r.text), PREVIEW))).unwrap_or_default();
-    let (pinned, settled) = flags(hub, id);
+    let (pinned, settled, settled_at) = flags(hub, id);
     // a model chosen within the provider is a ModesSet (the policy state), a switch of provider a ProviderSet (the model's fold)
     let (model, effort, runtime) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default()))).unwrap_or_default();
     let model = if model.is_empty() { t.model.clone() } else { model };
-    Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"archived":t.archived,
+    Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"settledAt":settled_at,"archived":t.archived,
         "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":ext::chip(&t.provider, &model, &effort),"preview":preview,"waiting":waiting,"parent":setting_of(&format!("thread.parent.{id}"))}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
+    let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && flags_of(i).1).count();
     let p = m.projects.get(id).filter(|p| !p.removed)?;
     let ts: Vec<_> = m.threads.iter().filter(|(_, t)| t.project == id && !t.deleted).collect();
     let count = ts.iter().filter(|(_, t)| !t.archived).count();
     let updated = ts.iter().map(|(_, t)| t.activity.max(t.created)).max().unwrap_or(0);
     let waiting: u64 = ts.iter().map(|(i, _)| asks.get(*i).copied().unwrap_or(0)).sum();
     let color = crate::present::badge::color_of(&setting_of(&format!("project.color.{id}")), id).to_string();
-    Some(json!({"id":id,"title":p.title,"root":p.root,"threadCount":count,"updatedAt":ms(updated),"waiting":waiting,
+    Some(json!({"id":id,"title":p.title,"root":p.root,"threadCount":count,"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
         "icon":crate::present::badge::icon_of(&setting_of(&format!("project.icon.{id}"))),"css":crate::present::badge::css_of(&color),"color":color}))
 }
 /// A cursor is "<updatedAt>:<id>" over a list sorted newest first, ties by id.
@@ -277,10 +284,14 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             let items = g.projects.keys().filter_map(|i| project_json(&g, i, &asks).map(|v| (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v))).collect();
             let (projects, next) = page_of(items, limit_of(p, 50, 200), s(p, "before")); Ok(json!({"projects":projects,"next":next})) }
         "threads.list" => { let g = hub.model().await; let asks = open_ask_counts(hub); let (proj, arch) = (s(p, "project"), p["archived"] == true);
-            let ids: Vec<String> = g.threads.iter().filter(|(_, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj)).map(|(i, _)| i.clone()).collect();
+            // `settled`: true is only the Settled shelf (newest settle first), false only the rest (newest activity first); left out, both, as before
+            let want = p.get("settled").and_then(Value::as_bool);
             let (mut items, lim) = (vec![], limit_of(p, 50, 200));
             // only the page's threads are built in full (the preview reads the log)
-            let mut keyed: Vec<(u64, String)> = ids.iter().map(|i| (ms(g.threads[i].activity.max(g.threads[i].created)), i.clone())).collect();
+            let mut keyed: Vec<(u64, String)> = g.threads.iter().filter(|(_, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj)).filter_map(|(i, t)| {
+                let (_, settled, at) = flags_of(i);
+                if want.map_or(false, |w| w != settled) { return None }
+                Some((if want == Some(true) { at } else { ms(t.activity.max(t.created)) }, i.clone())) }).collect();
             keyed.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             if let Some((a, i)) = s(p, "before").split_once(':') { if let Ok(a) = a.parse::<u64>() { keyed.retain(|x| x.0 < a || (x.0 == a && x.1.as_str() > i)) } }
             let more = keyed.len() > lim; keyed.truncate(lim);
@@ -332,7 +343,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
 #[derive(Clone, PartialEq)]
 enum Topic { Lists, Thread(String) }
 #[derive(Default)]
-struct Subs { next: u64, subs: Vec<(u64, Topic)>, live: HashSet<String> }
+struct Subs { next: u64, subs: Vec<(u64, Topic)>, live: HashSet<String>, counts: HashMap<String, (u64, u64)> }
 impl Subs {
     fn threads(&self, th: &str) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Thread(th.into())).map(|(i, _)| *i).collect() }
     fn lists(&self) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Lists).map(|(i, _)| *i).collect() }
@@ -347,7 +358,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
         let opened = if s(&e, "$") == "AskClosed" { ask_opened(hub, s(&e, "id")) } else { None };
-        let th = if matches!(s(&e, "$"), "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ProviderSet" | "ModesSet" | "ThreadDeleted") { s(&e, "id") } else if let Some(o) = &opened { s(o, "thread") } else { s(&e, "thread") }.to_string();
+        let th = if matches!(s(&e, "$"), "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadMerged" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ProviderSet" | "ModesSet" | "ThreadDeleted") { s(&e, "id") } else if let Some(o) = &opened { s(o, "thread") } else { s(&e, "thread") }.to_string();
         let mut entry: Option<Value> = None;
         match s(&e, "$") {
             "ThreadDeleted" => gone.push(th.clone()),
@@ -382,6 +393,11 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
     let g = hub.model().await; let asks = open_ask_counts(hub);
     for th in &upsert { if let Some(t) = thread_json(hub, &g, th, &asks) { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread", json!({"thread":t}))) } } }
+    // a project's counts (threads, settled) move with its threads
+    let moved: Vec<String> = { let mut v: Vec<String> = vec![]; for th in upsert.iter() { if let Some(t) = g.threads.get(th) { if !projects.iter().any(|(i, _)| *i == t.project) && !v.contains(&t.project) { v.push(t.project.clone()) } } } v };
+    // pushed only when a count moved (a message in a thread leaves them as they were)
+    for pid in &moved { if let Some(pj) = project_json(&g, pid, &asks) { let key = (pj["threadCount"].as_u64().unwrap_or(0), pj["settledCount"].as_u64().unwrap_or(0));
+        if subs.counts.insert(pid.clone(), key) != Some(key) { for sub in subs.lists() { out.push(d(sub, "project", json!({"project":pj}))) } } } }
     for th in &gone { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread.removed", json!({"id":th}))) } }
     for (id, alive) in &projects { for sub in subs.lists() { match alive.then(|| project_json(&g, id, &asks)).flatten() { Some(p) => out.push(d(sub, "project", json!({"project":p}))), None => out.push(d(sub, "project.removed", json!({"id":id}))) } } }
     out

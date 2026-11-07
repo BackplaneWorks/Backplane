@@ -95,19 +95,20 @@ struct DProject: Codable, Equatable, Identifiable {
     var title: String
     var root: String
     var threadCount: Int
+    var settledCount: Int?   // the hub's count of its settled threads (feature `settled`); nil from a hub before it
     var updatedAt: Int
     var waiting: Int
     var icon: String   // the badge the hub names: an icon and its colour as "#rrggbb"
     var css: String
-    enum CodingKeys: String, CodingKey { case id, title, root, threadCount, updatedAt, waiting, icon, css }
+    enum CodingKeys: String, CodingKey { case id, title, root, threadCount, settledCount, updatedAt, waiting, icon, css }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        id = c.str(.id); title = c.str(.title); root = c.str(.root); threadCount = c.int(.threadCount); updatedAt = c.int(.updatedAt); waiting = c.int(.waiting)
+        id = c.str(.id); title = c.str(.title); root = c.str(.root); threadCount = c.int(.threadCount); settledCount = try? c.decode(Int.self, forKey: .settledCount); updatedAt = c.int(.updatedAt); waiting = c.int(.waiting)
         icon = c.str(.icon); css = c.str(.css)
     }
 }
 
-struct DThread: Codable, Equatable, Identifiable {
+struct DThread: Codable, Equatable, Identifiable, ShelvedThread {
     var id: String
     var project: String
     var title: String
@@ -115,6 +116,7 @@ struct DThread: Codable, Equatable, Identifiable {
     var updatedAt: Int
     var pinned: Bool
     var settled: Bool
+    var settledAt: Int   // when it was settled, unix ms; 0 when it is not
     var archived: Bool
     var provider: String
     var model: String
@@ -124,11 +126,11 @@ struct DThread: Codable, Equatable, Identifiable {
     var preview: String
     var waiting: Int
     var parent: String   // the thread it is a subthread of; "" at the top level
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, archived, provider, model, effort, runtime, chip, preview, waiting, parent }
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
-        pinned = c.bool(.pinned); settled = c.bool(.settled); archived = c.bool(.archived)
+        pinned = c.bool(.pinned); settled = c.bool(.settled); settledAt = c.int(.settledAt); archived = c.bool(.archived)
         provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent)
     }
 }

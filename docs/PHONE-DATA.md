@@ -14,7 +14,7 @@ natively with typed Codable structs, cache-first. Fresh-home screens only: proje
 ## Types
 ```
 Project = {id, title, root, threadCount, updatedAt, waiting, icon, color, css}
-Thread  = {id, project, title, state, updatedAt, pinned, settled, archived, provider, model, preview, waiting, parent}
+Thread  = {id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, preview, waiting, parent}
           state ∈ "idle" | "working" | "asking" | "failed"; preview ≤ 140 chars; waiting = open asks
 Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?}
           kind ∈ "user" | "assistant" | "tool" | "ask" | "note" | "step"
@@ -24,7 +24,7 @@ Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?}
           ask  = {id, state ∈ "open" | "answered", question, options:[{id,label}], answered?:<option id or text>}
 ```
 ## Reads
-`projects.list {limit?=50, before?}` → `{projects, next}` (recent first) · `threads.list {project?, limit?=50, before?, archived?=false}` → `{threads, next}` ·
+`projects.list {limit?=50, before?}` → `{projects, next}` (recent first) · `threads.list {project?, limit?=50, before?, archived?=false, settled?}` → `{threads, next}` ·
 `thread.entries {thread, limit?=40, before?}` → `{thread, entries (oldest→newest within the page; newest page first), next}`; the streaming entry (live:true) is included.
 `dirs.list {path?}` → `{path, parent, dirs:[name]}` (browse the hub's folders to choose a project; default = home) — for `project.add`.
 ## Writes
@@ -104,3 +104,5 @@ Restarting the hub must work when its views are broken, the socket is down, or o
 - After a 202: `/healthz` every 2 s for up to 3 minutes until `ok`, `degraded` or `down`, stopping when the screen goes away and pausing while the app is in the background. The old hub (or rescue) goes on answering for a moment after its 202, so such an answer counts only once the restart has shown (no answer, `starting`, `hung`) or 10 s have passed. A request to `/healthz` gives up after 5 s, the others after 12 s; the credential is not sent on through a redirect.
 - `hello` carries `notice:{text, tone, actions}` (`text` empty when all is well, `tone` `warn` or `info`): a thin banner on the lists and the thread opens the Hub screen. `/hub/status` updates it too. The RPCs `hub.status` and `hub.control {action}` exist; the apps do not use them, since they need the socket.
 - `test/mobile/hub_cases.json` holds both apps to the same decisions (`HubRescueTest`, `scripts/mobile/hub-check.sh`); `test/mobile/hub_stub.py` plays these routes.
+
+- Feature `settled`: `settled` is the desktop's Settled shelf (a settle by the clock, by hand or by a merge; an unsettle or a new message takes a thread off it) and `settledAt` is when, in ms (0 off the shelf). `Project.settledCount` counts a project's settled threads that are not archived. `threads.list {settled: true}` lists only those, newest settle first (its cursor is `<settledAt>:<id>`); `{settled: false}` lists only the rest, newest activity first, so settled threads never push live ones off a page. Left out, both, as before. A `lists` subscription pushes `thread` on every settle, unsettle, wake and merge, and `project` when a project's thread or settled count moves. A phone shows the active threads under each project and the settled ones behind a "Settled (N)" row, loading them when it is opened.
