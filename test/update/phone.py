@@ -3,7 +3,7 @@
 
     phone.py SERIAL tap TEXT [exact] [nth]   tap the nth node showing TEXT (text or content-desc); -1 is the last
     phone.py SERIAL has TEXT [exact]         exit 0 when shown
-    phone.py SERIAL seek TEXT [exact]        scroll up until TEXT shows
+    phone.py SERIAL seek TEXT [exact]        scroll down, then up, until TEXT shows
     phone.py SERIAL text PREFIX              print the first text starting with PREFIX
     phone.py SERIAL shot FILE                screenshot
 Always `adb -s SERIAL`: another device may be attached.
@@ -25,10 +25,12 @@ if cmd == "shot":
 t = args[0]; exact = "exact" in args[1:]; nth = next((int(a) for a in args[1:] if a.lstrip("-").isdigit()), 0)  # -1: the last one (a dialog is drawn after the page under it)
 ns = [n for n in dump() if shown(n, t, exact)]
 if cmd == "seek":   # scroll the page up until TEXT shows (a long Settings page): Compose leaves what is off screen out of the tree
-    for _ in range(6):
+    for i in range(12):   # down the page first, then back up it
         if ns: sys.exit(0)
-        w, h = (int(x) for x in re.findall(r"\d+", adb("shell", "wm", "size", text=True).stdout)[-2:])
-        adb("shell", "input", "swipe", str(w // 2), str(h * 3 // 4), str(w // 2), str(h // 4), "300"); time.sleep(0.8)
+        # the screen as drawn now (the phone may be in landscape; `wm size` gives the portrait numbers)
+        w, h = (int(x) for x in re.findall(r"\d+", (dump() or [ET.Element("node", bounds="[0,0][1080,1080]")])[0].get("bounds"))[2:4])
+        a, b = (h * 3 // 4, h // 4) if i < 4 else (h // 4, h * 3 // 4)
+        adb("shell", "input", "swipe", str(w // 2), str(a), str(w // 2), str(b), "300"); time.sleep(0.8)
         ns = [n for n in dump() if shown(n, t, exact)]
     sys.exit(0 if ns else 1)
 if cmd == "has": sys.exit(0 if ns else 1)
