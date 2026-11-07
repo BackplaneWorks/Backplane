@@ -46,7 +46,7 @@ pub struct Thread {
 }
 impl Thread {
     /// Thread.blank: what an event for an unknown thread finds (hidden: archived and deleted).
-    fn blank() -> Thread {
+    pub(crate) fn blank() -> Thread {
         Thread { project: String::new(), title: String::new(), created: 0, activity: 0, turn: Turn::Idle, pending: 0, archived: true, override_: Override::None,
                  settled_at: 0, unsettled_at: 0, pinned: false, worktree_mode: false, branch: String::new(), worktree: String::new(),
                  provider: String::new(), model: String::new(), session: String::new(), deleted: true }

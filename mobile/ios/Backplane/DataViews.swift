@@ -70,10 +70,8 @@ struct DataThreadsView: View {
     @State private var badgeProject: DProject?
     @State private var projectTitle = ""
     @State private var shut = Set(UserDefaults.standard.stringArray(forKey: "data.projects.shut") ?? [])
-    @State private var settledOpen: Set<String> = []
 
     private var botThreads: Set<String> { Set(client.bots.map(\.thread)) }
-    private func threads(_ p: DProject) -> [DThread] { let b = botThreads; return client.threads.filter { $0.project == p.id && !$0.archived && !b.contains($0.id) } }
     private func toggle(_ p: DProject) {
         if shut.contains(p.id) { shut.remove(p.id) } else { shut.insert(p.id) }
         UserDefaults.standard.set(Array(shut), forKey: "data.projects.shut")
@@ -145,18 +143,23 @@ struct DataThreadsView: View {
             ForEach(client.projects) { p in
                 projectHeader(p)
                 if !shut.contains(p.id) {
-                    let all = threads(p)
-                    let active = all.filter { !$0.settled }.sorted { $0.pinned && !$1.pinned }
-                    let settled = all.filter(\.settled)
-                    ForEach(active) { threadRow($0) }
-                    if all.isEmpty { Text("No threads").dmono(12).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32).dataRow() }
-                    if !settled.isEmpty {
-                        let open = settledOpen.contains(p.id)
-                        Button { if open { settledOpen.remove(p.id) } else { settledOpen.insert(p.id) } } label: {
-                            HStack(spacing: 6) { Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10)); Text("Settled \(settled.count)").dmono(11); Spacer() }
+                    let g = ThreadGroups.split(client.threads, project: p.id, hidden: botThreads)
+                    let n = ThreadGroups.count(hub: p.settledCount, loaded: g.settled.count)
+                    ForEach(g.active) { threadRow($0) }
+                    if g.active.isEmpty && n == 0 { Text("No threads").dmono(12).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32).dataRow() }
+                    if n > 0 {
+                        let open = client.settledOpen.contains(p.id)
+                        Button { client.setSettled(open: !open, p.id) } label: {
+                            HStack(spacing: 6) { Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10)); Text(ThreadGroups.title(n)).dmono(11); Spacer() }
                                 .foregroundStyle(BackplaneDesign.faint).padding(.leading, 30).frame(height: 32).contentShape(Rectangle())
                         }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.settled." + p.id)
-                        if open { ForEach(settled) { threadRow($0) } }
+                        if open {
+                            ForEach(g.settled) { threadRow($0) }
+                            if client.settledMore[p.id] != nil {
+                                Button { Task { await client.loadSettled(p.id, more: true) } } label: { Text("More").dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
+                                    .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.settled.more." + p.id)
+                            }
+                        }
                     }
                 }
             }

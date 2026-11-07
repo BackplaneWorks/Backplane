@@ -21,11 +21,11 @@ data class DEntry(
     val agentOnly: Boolean = false, // a message only the agent reads (data/1 `agentOnly`): never shown
     val tone: String = "",  // a note: error, info…
 )
-data class DProject(val id: String, val title: String, val root: String, val threadCount: Int, val updatedAt: Long, val waiting: Int, val icon: String = "folder", val css: String = "")
+data class DProject(val id: String, val title: String, val root: String, val threadCount: Int, val updatedAt: Long, val waiting: Int, val icon: String = "folder", val css: String = "", val settledCount: Int? = null) // settledCount: the hub's count (feature `settled`), null from a hub before it
 data class DThread(
     val id: String, val project: String, val title: String, val state: String, val updatedAt: Long, val pinned: Boolean, val settled: Boolean,
     val archived: Boolean, val provider: String, val model: String, val preview: String, val waiting: Int,
-    val parent: String = "", val effort: String = "", val runtime: String = "", val chip: String = "", // chip: the composer's "claude / opus / high", in the hub's words
+    val parent: String = "", val effort: String = "", val runtime: String = "", val chip: String = "", val settledAt: Long = 0, // chip: the composer's "claude / opus / high", in the hub's words
 )
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
 data class DChoice(val label: String, val value: String, val on: Boolean, val ok: Boolean, val why: String)
@@ -48,10 +48,10 @@ fun parseEntry(o: JSONObject) = DEntry(
     o.optJSONArray("attachments").list { DAttachment(it.str("id"), it.str("name"), it.str("mime"), it.lng("bytes")) },
     label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
 )
-fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"))
+fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null)
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)

@@ -59,10 +59,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -351,4 +351,19 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 1, "update.status", json!({})).await; let u = &r["result"];
     assert!(u["current"].as_str().map_or(false, |c| !c.is_empty()), "{r}"); assert!(u["line"].as_str().map_or(false, |l| !l.is_empty()) && u["canCheck"].is_boolean(), "{r}");
     assert!(u.get("t").is_none() && u.get("result").is_none(), "not a reply inside a reply: {r}");
+}
+
+#[test] fn data_settled_is_the_desktops_shelf_with_the_time_it_was_settled() {
+    use crate::state::{Override, Thread};
+    let mk = |o: Override, set: u64, unset: u64, pinned: bool, archived: bool| { let mut t = Thread::blank(); t.deleted = false; t.archived = archived; t.override_ = o; t.settled_at = set; t.unsettled_at = unset; t.pinned = pinned; t };
+    // settled by the clock or the person: on the shelf, with its time in ms (event times are seconds or ms)
+    assert_eq!(shelf_flags(&mk(Override::None, 1_700_000_000, 0, false, false)), (false, true, 1_700_000_000_000));
+    assert_eq!(shelf_flags(&mk(Override::ForcedSettled, 1_700_000_000_000, 0, false, false)), (false, true, 1_700_000_000_000));
+    // woken by a message or unsettled by hand: off the shelf, no time
+    assert_eq!(shelf_flags(&mk(Override::None, 10, 20, false, false)), (false, false, 0));
+    assert_eq!(shelf_flags(&mk(Override::ForcedActive, 30, 20, false, false)), (false, false, 0), "an unsettle by hand outlasts the old settle time");
+    // pinned stays pinned (not settled) unless settled by hand; archived is on no shelf the phone lists
+    assert_eq!(shelf_flags(&mk(Override::None, 30, 20, true, false)).1, false);
+    assert_eq!(shelf_flags(&mk(Override::ForcedSettled, 30, 20, true, false)).1, true);
+    assert_eq!(shelf_flags(&mk(Override::ForcedSettled, 30, 20, false, true)).1, false);
 }

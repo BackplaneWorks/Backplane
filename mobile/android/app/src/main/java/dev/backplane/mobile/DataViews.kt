@@ -212,7 +212,6 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
-    var settledOpen by remember { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(DataClient.conn) { DataClient.refresh(); if (DataClient.conn == DataClient.Conn.ONLINE && DataClient.has("bots")) runCatching { DataClient.loadBots() } }
     Column(Modifier.fillMaxSize().background(dcs.surfaceVariant)) {
         DBar("Backplane", null) {
@@ -235,7 +234,6 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         } else LazyColumn(Modifier.fillMaxSize().testTag("home.list")) {
             items(DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, "uberbot") { open(b.thread) } }
             for (p in projects) {
-                val ts = threads.filter { it.project == p.id }
                 val closed = p.id in shut
                 item(key = "p:${p.id}") {
                     Row(Modifier.fillMaxWidth().height(40.dp).combinedClickable(onClick = {
@@ -251,17 +249,24 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                     }
                 }
                 if (!closed) {
-                    val active = ts.filter { !it.settled }.sortedByDescending { it.pinned }; val settled = ts.filter { it.settled }
-                    items(active, key = { "t:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
-                    if (ts.isEmpty()) item("none:${p.id}") { DMono("No threads", dfaint, 12, Modifier.padding(start = 34.dp, top = 6.dp, bottom = 8.dp)) }
-                    if (settled.isNotEmpty()) {
-                        val on = p.id in settledOpen
+                    val g = ThreadGroups.split(threads, p.id)
+                    val n = ThreadGroups.count(p.settledCount, g.settled.size)
+                    items(g.active, key = { "t:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+                    if (g.active.isEmpty() && n == 0) item("none:${p.id}") { DMono("No threads", dfaint, 12, Modifier.padding(start = 34.dp, top = 6.dp, bottom = 8.dp)) }
+                    if (n > 0) {
+                        val on = p.id in DataClient.settledOpen
                         item("settled:${p.id}") {
-                            Row(Modifier.fillMaxWidth().height(32.dp).clickable { settledOpen = if (on) settledOpen - p.id else settledOpen + p.id }.padding(start = 28.dp).testTag("home.settled.${p.id}"), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(if (on) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dfaint, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); DMono("Settled ${settled.size}", dfaint, 11)
+                            Row(Modifier.fillMaxWidth().height(32.dp).clickable { DataClient.setSettledOpen(p.id, !on) }.padding(start = 28.dp).testTag("home.settled.${p.id}"), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(if (on) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dfaint, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); DMono(ThreadGroups.title(n), dfaint, 11)
                             }
                         }
-                        if (on) items(settled, key = { "t:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+                        if (on) {
+                            items(g.settled, key = { "t:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+                            if (p.id in DataClient.settledMore) item("settled.more:${p.id}") {
+                                val more = rememberCoroutineScope()
+                                Row(Modifier.fillMaxWidth().height(32.dp).clickable { more.launch { DataClient.loadSettled(p.id, more = true) } }.padding(start = 34.dp).testTag("home.settled.more.${p.id}"), verticalAlignment = Alignment.CenterVertically) { DMono("More", dfaint, 11) }
+                            }
+                        }
                     }
                 }
             }

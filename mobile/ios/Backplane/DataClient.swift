@@ -23,6 +23,10 @@ final class DataClient {
     private(set) var older: [String: String] = [:]
     private(set) var loadedThreads: Set<String> = []
     private(set) var listsLoaded = false
+    // the projects whose "Settled (N)" row is open, kept on the device; their settled threads are read from the hub when it opens (feature `settled`)
+    private(set) var settledOpen = Set(UserDefaults.standard.stringArray(forKey: "data.settled.open") ?? [])
+    private(set) var settledMore: [String: String] = [:]   // a project's next page of settled threads
+    private(set) var settledBusy: Set<String> = []
     let plots = PlotStore()
     let voice = VoiceModel()
     private(set) var shot = 0
@@ -263,8 +267,29 @@ final class DataClient {
         projects = r.projects.sorted { $0.updatedAt > $1.updatedAt }; listsLoaded = true; scheduleSave()
     }
     private func loadThreads(_ g: Int) async throws {
-        let r: DThreadsPage = try await call("threads.list", ["limit": 200]); guard g == gen else { return }
-        threads = r.threads.sorted { $0.updatedAt > $1.updatedAt }; listNext = r.next; listsLoaded = true; scheduleSave()
+        // a hub with `settled` sends the live threads alone, so settled ones never push them off the page; the settled ones come per project when its row opens
+        let split = has("settled")
+        var q: [String: Any] = ["limit": 200]; if split { q["settled"] = false }
+        let r: DThreadsPage = try await call("threads.list", q); guard g == gen else { return }
+        threads = r.threads.sorted { $0.updatedAt > $1.updatedAt } + (split ? threads.filter { old in old.settled && !r.threads.contains(where: { $0.id == old.id }) } : [])
+        listNext = r.next; listsLoaded = true; scheduleSave()
+        if split { for p in settledOpen { await loadSettled(p, g: g) } }
+    }
+    func setSettled(open on: Bool, _ project: String) {
+        if on { settledOpen.insert(project) } else { settledOpen.remove(project) }
+        UserDefaults.standard.set(Array(settledOpen), forKey: "data.settled.open")
+        if on, has("settled"), conn == .online { let g = gen; Task { await loadSettled(project, g: g) } }
+    }
+    // the first page of a project's settled threads, or the next one
+    func loadSettled(_ project: String, more: Bool = false, g: Int? = nil) async {
+        let g = g ?? gen
+        guard has("settled"), !settledBusy.contains(project) else { return }
+        if more && settledMore[project] == nil { return }
+        settledBusy.insert(project); defer { settledBusy.remove(project) }
+        var q: [String: Any] = ["project": project, "settled": true, "limit": 50]; if more, let c = settledMore[project] { q["before"] = c }
+        guard let r: DThreadsPage = try? await call("threads.list", q), g == gen else { return }
+        for t in r.threads { if let i = threads.firstIndex(where: { $0.id == t.id }) { threads[i] = t } else { threads.append(t) } }
+        settledMore[project] = r.next; scheduleSave()
     }
 
     // opening a thread: what the cache has shows now; the hub's newest page replaces it
