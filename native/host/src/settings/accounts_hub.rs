@@ -53,8 +53,38 @@ async fn active(hub: &Arc<Hub>, profile: &str) -> bool {
     false
 }
 
+// ---- a dead sign-in: the one alert, and the threads it stopped going on once it is back ----
+
+/// What the last snapshot said of each profile: its state, and whether its sign-in is dead (expired, or a sign-in under way after it was).
+pub type Seen = std::collections::HashMap<String, (String, bool)>;
+/// SignIn.steps: of this snapshot, the profiles whose sign-in is newly dead and the ones that are back (connected after it was dead). `prev` becomes this snapshot.
+pub fn signin_steps(prev: &mut Seen, snapshot: &Value) -> (Vec<String>, Vec<String>) {
+    let (mut dead, mut back, mut next) = (vec![], vec![], Seen::new());
+    for p in snapshot["profiles"].as_array().into_iter().flatten() {
+        let (id, state) = (p["id"].as_str().unwrap_or("").to_string(), p["state"].as_str().unwrap_or("").to_string());
+        let was = prev.get(&id).map_or(false, |(_, d)| *d);
+        let now = state == "expired" || (state == "connecting" && was);
+        if now && !was { dead.push(id.clone()) }
+        if was && state == "connected" { back.push(id.clone()) }
+        next.insert(id, (state, now));
+    }
+    *prev = next; (dead, back)
+}
+/// The setting that says the person was alerted that a provider's sign-in expired (one alert a provider, until one of its accounts is back); the push module sends it.
+pub fn alert_key(provider: &str) -> String { format!("account.signin.alert.{provider}") }
+pub fn provider_title(provider: &str) -> &'static str { match provider { "codex" => "Codex", _ => "Claude" } }
+/// SignIn.alert: the alert to record for a dead account, when no account of its provider can run a turn (`eligible`: connected, not held, allowance left) and none is
+/// recorded yet. Its text is what the phone shows; `link` opens that account's sign-in.
+pub fn signin_alert(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, id: &str) -> Option<Value> {
+    let p = profiles.iter().find(|p| p["id"] == id)?;
+    let provider = p["provider"].as_str().unwrap_or("");
+    if !get(&alert_key(provider)).is_empty() || profiles.iter().any(|x| fb::eligible(get, now, provider, "", x)) { return None }
+    Some(json!({"profile":id,"epoch":p["epoch"],"provider":provider,"label":p["label"],"text":format!("{} sign-in expired: tap to sign in again", provider_title(provider)),"link":format!("account:{id}"),"at":now}))
+}
+
 /// One snapshot that changed: the log, the clients, and the turns that lost their account.
-pub async fn found(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Value) {
+pub async fn found(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Value) { found_seen(hub, agents, snapshot, &mut Seen::new()).await }
+pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Value, seen: &mut Seen) {
     let at = now_ms() / 1000;
     let mut settings = std::collections::HashMap::new();
     for k in ["accounts.inventory", "account.default.claude", "account.default.codex", "allowance.claude"] { settings.insert(k.to_string(), hub.setting(k).await.unwrap_or_default()); }
@@ -72,6 +102,28 @@ pub async fn found(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Valu
         let _ = hub.commit_many(&[json!({"$":"TurnChanged","thread":id,"state":"interrupted","at":at}),
             json!({"$":"ActivityLogged","thread":id,"act":format!("account-retired:{at}"),"tone":"error","kind":"account","summary":"This account's verified identity changed or disconnected. Check status and explicitly select an account to continue.","at":at})]).await;
         if let Some(a) = agents { let _ = a.stop(&id).await; }
+    }
+    if !snapshot["error"].as_str().unwrap_or("").is_empty() { return }
+    let (_, back) = signin_steps(seen, snapshot);
+    let profiles = snapshot["profiles"].as_array().cloned().unwrap_or_default();
+    // back: the alert is over, and every thread the expiry stopped goes on
+    for id in &back {
+        let provider = profiles.iter().find(|p| p["id"] == id.as_str()).and_then(|p| p["provider"].as_str()).unwrap_or("").to_string();
+        if !hub.setting(&alert_key(&provider)).await.unwrap_or_default().is_empty() { let _ = hub.commit_many(&[json!({"$":"SettingSet","key":alert_key(&provider),"value":"","at":at})]).await; }
+        if let Some(a) = agents { let n = super::driver::signed_in(a, id, at).await; if n > 0 { eprintln!("accounts: {n} thread(s) go on after a sign-in") } }
+    }
+    // still dead with nothing to take over: the one alert (the push module sends it in the uberbot's name)
+    let dead: Vec<&str> = seen.iter().filter(|(_, (_, d))| *d).map(|(id, _)| id.as_str()).collect();
+    if dead.is_empty() { return }
+    let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("account.limit.").map(|(k, _)| k.to_string()).chain(["claude", "codex"].iter().map(|p| alert_key(p))).collect() };
+    let mut held = std::collections::HashMap::new();
+    for k in keys { if let Some(v) = hub.setting(&k).await { held.insert(k, v); } }
+    for id in dead {
+        let get = |k: &str| held.get(k).cloned().unwrap_or_default();
+        if let Some(rec) = signin_alert(&profiles, &get, at, id) {
+            let key = alert_key(rec["provider"].as_str().unwrap_or(""));
+            let _ = hub.commit_many(&[json!({"$":"SettingSet","key":key,"value":rec.to_string(),"at":at})]).await; held.insert(key, rec.to_string());
+        }
     }
 }
 
@@ -104,7 +156,10 @@ impl RpcHandler for AccountsRpc {
         Box::pin(async move {
             if !self.allowed(who) { return vec![json!({"t":"reply","id":id,"ok":false,"error":accounts::GATE})] }
             let op = p.get("op").and_then(Value::as_str).unwrap_or("");
-            if matches!(op, "remove" | "login" | "disconnect") && active(hub, p.get("profile").and_then(Value::as_str).unwrap_or("")).await {
+            let pid = p.get("profile").and_then(Value::as_str).unwrap_or("");
+            // a dead login may be signed in again while turns of it are still winding down: they can do nothing with it
+            let dead = op == "login" && self.mgr.state_of(pid) == "expired";
+            if matches!(op, "remove" | "login" | "disconnect") && !dead && active(hub, pid).await {
                 return vec![json!({"t":"reply","id":id,"ok":false,"error":"Stop this account's active turns before changing its login."})]
             }
             let mut snap = self.mgr.request(p).await;
@@ -148,12 +203,12 @@ pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents
     hub.register_rpc(Arc::new(AccountsRpc::new(mgr.clone())));
     let (h, m) = (hub.clone(), mgr.clone());
     tokio::spawn(async move {
-        let mut last = String::new();
+        let (mut last, mut seen) = (String::new(), Seen::new());
         loop {
             // the background recheck of connected accounts: never on a copy of a log, never on a test hub (stand-in agents)
             if !crate::copy::on() && std::env::var_os("BACKPLANE_AGENTS").is_none() { let m2 = m.clone(); tokio::spawn(async move { m2.refresh().await }); }
             let snap = m.snapshot(); let text = snap.to_string();
-            if text != last { last = text; found(&h, &agents, &snap).await; }
+            if text != last { last = text; found_seen(&h, &agents, &snap, &mut seen).await; }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
@@ -193,6 +248,29 @@ mod tests {
         assert!(!retired(&accounts::binding_show("w", 2), &inv)); assert!(retired(&accounts::binding_show("w", 1), &inv), "another epoch");
         assert!(retired(&accounts::binding_show("d", 1), &inv), "disconnected"); assert!(retired(&accounts::binding_show("x", 1), &inv), "gone");
         assert!(!retired("", &inv) && !retired(&accounts::binding_show("", 0), &inv), "the CLI's own login is never retired");
+    }
+    #[test] fn a_dead_sign_in_is_seen_once_and_its_return_through_a_new_sign_in_is_seen() {
+        let snap = |st: &str| json!({"profiles":[{"id":"w","state":st},{"id":"p","state":"connected"}],"error":""});
+        let mut seen = Seen::new();
+        assert_eq!(signin_steps(&mut seen, &snap("connected")), (vec![], vec![]));
+        assert_eq!(signin_steps(&mut seen, &snap("expired")), (vec!["w".to_string()], vec![]));
+        assert_eq!(signin_steps(&mut seen, &snap("expired")), (vec![], vec![]), "once");
+        assert_eq!(signin_steps(&mut seen, &snap("connecting")), (vec![], vec![]), "a sign-in under way is still the dead one");
+        assert_eq!(signin_steps(&mut seen, &snap("connected")), (vec![], vec!["w".to_string()]));
+        assert_eq!(signin_steps(&mut seen, &snap("connecting")), (vec![], vec![]), "a sign-in of a working account is not a return");
+        assert_eq!(signin_steps(&mut seen, &snap("connected")), (vec![], vec![]));
+        let mut fresh = Seen::new(); assert_eq!(signin_steps(&mut fresh, &snap("expired")).0, ["w"], "a restart that finds it dead");
+    }
+    #[test] fn the_alert_goes_only_when_no_account_can_take_over_and_only_once() {
+        let ok = json!({"state":"ok","at":9_999_999_999u64,"windows":[{"scope":"five_hour","used_percent":10.0}]});
+        let ps = vec![json!({"id":"w","provider":"claude","label":"Work","epoch":2,"state":"expired"}), json!({"id":"p","provider":"claude","label":"Personal","epoch":1,"state":"connected","allowance":ok}), json!({"id":"c","provider":"codex","label":"C","epoch":1,"state":"connected"})];
+        assert!(signin_alert(&ps, &|_| String::new(), 100, "w").is_none(), "Personal takes over");
+        let held = fb::hold_key("claude", "p", 1); let rec = json!({"scope":"claude","reset":0,"at":90}).to_string();
+        let get = |k: &str| if k == held { rec.clone() } else { String::new() };
+        let a = signin_alert(&ps, &get, 100, "w").expect("Personal is out too");
+        assert_eq!((a["text"].as_str().unwrap(), a["link"].as_str().unwrap(), a["provider"].as_str().unwrap()), ("Claude sign-in expired: tap to sign in again", "account:w", "claude"));
+        let told = a.to_string(); let get2 = |k: &str| if k == held { rec.clone() } else if k == alert_key("claude") { told.clone() } else { String::new() };
+        assert!(signin_alert(&ps, &get2, 100, "w").is_none(), "one alert a provider until one of its accounts is back");
     }
     #[test] fn the_default_claude_allowance_is_kept_as_a_setting_once() {
         let s = json!({"default_allowance":{"provider":"claude","source":"claude-cli-usage","attempted_at":5,"windows":[]}});

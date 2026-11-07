@@ -645,7 +645,7 @@ impl Actor {
                 let Some(mgr) = self.ag.accounts.get().cloned() else { self.fail("could not start codex: Accounts are not available; select the default account".into(), "spawn", &format!("spawn-{now}")).await; return };
                 match mgr.launch_plan(&id, &b["epoch"].as_u64().unwrap_or(0).to_string(), &t.provider).await {
                     Ok(plan) => { prog = plan.program; acct_env = plan.env; acct_args = plan.args; busy = Some(crate::settings::accounts_hub::Busy::new(mgr, &id)); }
-                    Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+                    Err(e) => { if self.login_refused(&e).await { return } self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
                 }
             }
         }
@@ -734,7 +734,7 @@ impl Actor {
             if v["type"] == "bp.ask" { if let Some(e) = self.driver_ask(&v["request"], at).await { events.extend(e) } continue }
             let fx = self.cx.codex_line(&v, &self.prov.clone(), &self.model.clone(), at);
             let end = turn_end(&fx.events);
-            let verdict = crate::settings::driver::on_line(&self.ag.hub, &self.th, &v, end.as_deref(), &mut self.limit_seen).await;
+            let verdict = crate::settings::driver::on_line(&self.ag.hub, self.ag.accounts.get(), &self.th, &v, end.as_deref(), &mut self.limit_seen).await;
             let (drop_end, vevents) = (verdict.drop_turn_end, verdict.events); if verdict.act.is_some() { act = verdict.act } dropped |= drop_end;
             if let Some(id) = codex::step_for(&v) { self.jobs_step(&id) }
             for d in &fx.deltas {
@@ -773,7 +773,7 @@ impl Actor {
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
         if self.live_proc.as_ref().map_or(true, |p| p.person != self.person || (p.key != key && !self.cmds.open(""))) {
             self.stop().await; self.lines = None; self.exit = None;
-            if let Err(e) = self.spawn(t, &cwd, key).await { self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+            if let Err(e) = self.spawn(t, &cwd, key).await { if self.login_refused(&e).await { return } self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
             self.spawn_in = Some((msg.to_string(), text.to_string(), agent_text.to_string()));
         }
         let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
@@ -947,7 +947,7 @@ impl Actor {
                 }
             };
             let end = turn_end(&fx.events);
-            let verdict = crate::settings::driver::on_line(&self.ag.hub, &self.th, &v, end.as_deref(), &mut self.limit_seen).await; // a provider quota/limit line: hold, switch, start the same request again (Fallback.line)
+            let verdict = crate::settings::driver::on_line(&self.ag.hub, self.ag.accounts.get(), &self.th, &v, end.as_deref(), &mut self.limit_seen).await; // a provider quota/limit line: hold, switch, start the same request again (Fallback.line)
             let (drop_end, vevents) = (verdict.drop_turn_end, verdict.events); if verdict.act.is_some() { act = verdict.act } dropped |= drop_end;
             if v["type"] == "user" && v["parent_tool_use_id"].as_str().unwrap_or("").is_empty() { // Steps.claude: a step after the first tool result of a line
                 if let Some(id) = v["message"]["content"].as_array().and_then(|a| a.iter().find(|b| b["type"] == "tool_result")).and_then(|b| b["tool_use_id"].as_str()) { if !id.is_empty() { self.jobs_step(id) } } }
@@ -1002,6 +1002,16 @@ impl Actor {
         self.commit(ev).await;
     }
 
+    /// A turn that could not start because its account's sign-in is dead (accounts_io `EXPIRED`): read as the failed login it is, so it fails over, or waits for the sign-in,
+    /// as a turn that met it mid-way does. False: not that, and the start fails as any other.
+    async fn login_refused(&mut self, e: &str) -> bool {
+        if !e.contains(crate::settings::accounts_io::EXPIRED) { return false }
+        let v = crate::settings::driver::on_exit(&self.ag.hub, self.ag.accounts.get(), &self.th, e, &mut self.limit_seen).await;
+        if !v.drop_turn_end { return false }
+        self.cx.running = false; self.live_close().await; self.commit(v.events).await; self.jobs_end();
+        if let Some(a) = v.act { crate::settings::driver::spawn_act(self.ag.clone(), self.th.clone(), a) }
+        true
+    }
     /// The process is gone: what it still wrote is handled first, then Hub.agent_gone: a running turn fails.
     async fn gone(&mut self, e: Exit) {
         let n0 = self.spawn_n;
@@ -1010,7 +1020,7 @@ impl Actor {
         self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed);
         if self.cx.running && e.stderr.contains(SESSION_GONE) && self.can_retry_lost() && self.session_lost().await { return } // it said so on stderr only
         if self.cx.running { // it ended on a limit or a failed login: what the turn's end would have done
-            let v = crate::settings::driver::on_exit(&self.ag.hub, &self.th, &e.stderr, &mut self.limit_seen).await;
+            let v = crate::settings::driver::on_exit(&self.ag.hub, self.ag.accounts.get(), &self.th, &e.stderr, &mut self.limit_seen).await;
             if v.drop_turn_end {
                 let mut ev = v.events; if let Some(p) = self.partial(now_s()) { ev.push(p) }
                 self.cx.running = false; self.live_close().await; self.commit(ev).await;

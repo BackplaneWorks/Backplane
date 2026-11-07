@@ -52,7 +52,17 @@ pub fn admit(e: &Value, w: &World) -> bool {
     match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), _ => false }
 }
 /// What a client may not write (`setting.set`).
-pub fn reserved(key: &str) -> bool { key == BOOK }
+pub fn reserved(key: &str) -> bool { key == BOOK || key.starts_with(SIGNIN) }
+/// The hub's record that a provider's sign-in expired with no account to take over (settings/accounts_hub.rs `signin_alert`): written, the uberbot's one needs_you alert goes
+/// (the uberbot cannot say it itself: it runs on an account too, and on Nov 7 it was the one that had expired); emptied, the alert is dealt with.
+pub const SIGNIN: &str = "account.signin.alert.";
+/// The order a sign-in record makes, in the uberbot's name, to its own thread; `link` opens the account's sign-in on a phone.
+pub fn signin_order(w: &World, key: &str, rec: &Value, at: u64) -> Option<Value> {
+    let src = Source::notify(w, &w.uber_bot())?;
+    let provider = key.strip_prefix(SIGNIN).unwrap_or("");
+    let mut e = src.order(&format!("signin-{provider}-{at}"), "needs_you", &w.triage_thread(), "", rec["text"].as_str().unwrap_or("Sign-in expired: tap to sign in again"), at);
+    e["link"] = json!(rec["link"].as_str().unwrap_or("")); Some(e)
+}
 /// Whether needs_you or done text was already said (a reminder or digest repeats by design).
 pub fn repeat(reason: &str, told: &[crate::bots::ledger::Told], now: u64, text: &str) -> bool {
     matches!(reason, "needs_you" | "done") && !crate::bots::ledger::check(told, now, "", text, REPEAT_DAYS).is_empty()
@@ -82,7 +92,9 @@ pub fn route(now: u64, last: u64, burst: u64, quiet: Option<u64>, through: bool)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Item { pub id: String, pub reason: String, pub thread: String, pub ask: String, pub text: String, pub at: u64, #[serde(default)] pub due: u64, #[serde(default)] pub key: String }
+pub struct Item { pub id: String, pub reason: String, pub thread: String, pub ask: String, pub text: String, pub at: u64, #[serde(default)] pub due: u64, #[serde(default)] pub key: String,
+    /// What a tap opens instead of the thread ("account:<id>": that account's sign-in); empty for most.
+    #[serde(default)] pub link: String }
 /// What is waiting: `open` was shown, `held` waits for its time. `last` is when a push last went.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Book { pub open: Vec<Item>, pub held: Vec<Item>, pub last: u64 }
@@ -105,13 +117,14 @@ impl Book {
 }
 /// What one push says. Several items collapse into one, whose link is their thread when they share one, else the uberbot's.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Say { pub key: String, pub title: String, pub body: String, pub thread: String, pub ask: String, pub reason: String }
+pub struct Say { pub key: String, pub title: String, pub body: String, pub thread: String, pub ask: String, pub reason: String, pub link: String }
 pub fn collapse(items: &[Item], title: &str, home: &str, stamp: &str) -> Say {
-    if let [i] = items { return Say { key: format!("push-{}", i.id), title: if title.is_empty() { "Backplane".into() } else { title.into() }, body: short(&i.text, 180), thread: i.thread.clone(), ask: i.ask.clone(), reason: i.reason.clone() } }
+    if let [i] = items { return Say { key: format!("push-{}", i.id), title: if title.is_empty() { "Backplane".into() } else { title.into() }, body: short(&i.text, 180), thread: i.thread.clone(), ask: i.ask.clone(), reason: i.reason.clone(), link: i.link.clone() } }
     let same = items.iter().all(|i| i.thread == items[0].thread);
     let need = items.iter().filter(|i| i.reason == "needs_you").count();
     let body = if need > 0 { format!("{need} of {} need you", items.len()) } else { format!("{} updates", items.len()) };
-    Say { key: format!("push-{stamp}"), title: "Backplane".into(), body, thread: if same { items[0].thread.clone() } else { home.into() }, ask: String::new(), reason: if need > 0 { "needs_you".into() } else { "digest".into() } }
+    Say { key: format!("push-{stamp}"), title: "Backplane".into(), body, thread: if same { items[0].thread.clone() } else { home.into() }, ask: String::new(), reason: if need > 0 { "needs_you".into() } else { "digest".into() },
+        link: if items.iter().all(|i| i.link == items[0].link) { items[0].link.clone() } else { String::new() } }
 }
 /// Who hears it: a device that is not muted, and a muted one only for what the person let through.
 pub fn hears(d: &Device, through: bool) -> bool { d.kind == "alert" && d.platform == "ios" && (!d.mute || through) }
@@ -121,7 +134,7 @@ pub fn hears(d: &Device, through: bool) -> bool { d.kind == "alert" && d.platfor
 pub enum Sent { Ok, Dead, Later(String) }
 pub trait Carrier: Send + Sync { fn send(self: Arc<Self>, hub: Arc<Hub>, d: Device, frame: apns::Frame) -> futures_util::future::BoxFuture<'static, Sent>; }
 
-enum Msg { Order(Value), Asked(String), Spoke(String), Seen(String), Prefs }
+enum Msg { Order(Value), Asked(String), Spoke(String), Seen(String), Prefs, SignIn(String, String) }
 pub struct Push { tx: mpsc::UnboundedSender<Msg> }
 impl Push {
     /// `push.seen`: a device opened the thread.
@@ -135,6 +148,7 @@ impl crate::api::Observer for Watch {
             Some("AskClosed") => tx.send(Msg::Asked(e["id"].as_str().unwrap_or("").into())),
             Some("MessagePosted") if e["role"] == "user" && crate::state::fam::turnend::policy_direct(e["msg"].as_str().unwrap_or(""), e["text"].as_str().unwrap_or("")) => tx.send(Msg::Spoke(e["thread"].as_str().unwrap_or("").into())),
             Some("SettingSet") if matches!(e["key"].as_str(), Some(QUIET | QUIET_URGENT)) => tx.send(Msg::Prefs),
+            Some("SettingSet") if e["key"].as_str().map_or(false, |k| k.starts_with(SIGNIN)) => tx.send(Msg::SignIn(e["key"].as_str().unwrap_or("").into(), e["value"].as_str().unwrap_or("").into())),
             _ => Ok(()),
         }; }
     }
@@ -185,6 +199,14 @@ impl Worker {
             Msg::Asked(id) => self.deal(move |i| !id.is_empty() && i.ask == id).await,
             // an approval stays until it is answered: looking at it is not dealing with it
             Msg::Spoke(t) | Msg::Seen(t) => self.deal(move |i| i.thread == t && i.ask.is_empty()).await,
+            // the record of an expired sign-in: the alert, once; its clearing (the account is back) takes it off every phone
+            Msg::SignIn(key, v) => {
+                let provider = key.strip_prefix(SIGNIN).unwrap_or("").to_string();
+                if v.is_empty() { let pre = format!("signin-{provider}-"); return self.deal(move |i| i.id.starts_with(&pre)).await }
+                let rec: Value = serde_json::from_str(&v).unwrap_or(Value::Null);
+                let e = { let w = self.bots.world().await; signin_order(&w, &key, &rec, now_s()) };
+                match e { Some(e) => { let _ = self.hub.commit(&e).await; } None => eprintln!("push: a sign-in expired and there is no uberbot to say so") }
+            }
             Msg::Prefs => { let now = now_s(); let (q, _) = self.quiet(now).await; for i in &mut self.book.held { i.due = q.unwrap_or(now).max(now); } self.save().await }
         }
     }
@@ -202,7 +224,7 @@ impl Worker {
         if !ok { eprintln!("push: an order with no source was refused"); return }
         let s = |k: &str| e[k].as_str().unwrap_or("").to_string();
         let now = now_s();
-        let mut item = Item { id: s("id"), reason: s("reason"), thread: s("thread"), ask: s("ask"), text: s("text"), at: e["at"].as_u64().unwrap_or(now), due: 0, key: String::new() };
+        let mut item = Item { id: s("id"), reason: s("reason"), thread: s("thread"), ask: s("ask"), text: s("text"), at: e["at"].as_u64().unwrap_or(now), due: 0, key: String::new(), link: s("link") };
         let (quiet, allowed) = self.quiet(now).await;
         let burst = self.hub.setting(BURST).await.and_then(|v| v.parse().ok()).unwrap_or(BURST_S);
         match route(now, self.book.last, burst, quiet, allowed && item.reason == "needs_you") {
@@ -222,7 +244,7 @@ impl Worker {
         let badge = self.book.badge(self.asks());
         let frame = apns::Frame::alert(&say, badge);
         let sent = self.send(devices.iter().filter(|d| hears(d, through)), &frame).await;
-        let ev = json!({"$":"PushSent","key":say.key,"thread":say.thread,"ask":say.ask,"kind":say.reason,"title":say.title,"body":say.body,"badge":badge,"through":through,"sent":sent,"at":now});
+        let ev = json!({"$":"PushSent","key":say.key,"thread":say.thread,"ask":say.ask,"kind":say.reason,"title":say.title,"body":say.body,"badge":badge,"through":through,"sent":sent,"link":say.link,"at":now});
         let _ = self.hub.commit(&ev).await;
         self.save().await;
     }

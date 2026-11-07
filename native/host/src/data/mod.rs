@@ -4,6 +4,8 @@
 //! `turn.start`, `ask.answer`, `turn.interrupt`) run as this connection; subscriptions turn each new log line, and the streamed text of a running turn, into
 //! pushes (`thread`, `project`, `entry`, `text`, `turn`) for the lists and threads a connection asked for.
 mod ext;
+/// What a phone hears of a push on its socket (ext.rs `notify_of`).
+pub fn ext_notify(e: &Value) -> Value { ext::notify_of(e) }
 use crate::hub::{Conn, Hub, Out};
 use crate::wire;
 use anyhow::Result;
@@ -15,7 +17,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "accounts"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 

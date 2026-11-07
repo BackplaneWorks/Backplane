@@ -20,7 +20,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "accounts"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -68,6 +68,49 @@ fn known_thread(m: &crate::model::Model, id: &str) -> bool { m.threads.get(id).m
 
 fn contains(hay: &str, needle: &str) -> bool { hay.to_lowercase().contains(needle) }
 
+/// Accounts on a phone (feature "accounts"; settings/accounts_phone.rs draws them): the hub's own `accounts` request, as this connection. A data/1 socket is admitted only with the
+/// hub's token or a paired device's (every pairing is full access; a linked machine never holds one), so it is granted the accounts the way a desktop view is by naming
+/// `accountProfiles`, and the grant ends with the connection. `account.act {profile?, provider?, action: signin|add|code|cancel|check|remove, label?, code?}` answers the account
+/// as `account.view {profile}` does (`{account}`), or the page after a remove.
+async fn accounts(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
+    use crate::settings::accounts_phone as ph;
+    crate::settings::accounts_hub::grant_client(&c.gen, c.client);
+    let (zone, now) = (hub.setting("tz.machine").await.unwrap_or_default(), crate::hub::now_ms() / 1000);
+    let list = |r: Value| r["result"].clone();
+    let id = s(p, "profile").to_string();
+    let one = |snap: &Value, id: &str| ph::view(snap, id, &zone, now).map(|a| json!({"account":a})).ok_or_else(|| err("that account is gone"));
+    match m {
+        "accounts.page" => { let r = rpc(hub, c, "accounts", json!({"op":"list"})).await?; Ok(ph::page(&list(r), &zone, now)) }
+        "account.view" => { let r = rpc(hub, c, "accounts", json!({"op":"list"})).await?; one(&list(r), &id) }
+        _ => {
+            let action = s(p, "action");
+            let attempt = |snap: &Value| snap["attempts"].as_array().and_then(|a| a.iter().filter(|x| x["profile"] == id.as_str()).last()).and_then(|x| x["id"].as_str()).unwrap_or("").to_string();
+            let snap = match action {
+                "add" => {
+                    let provider = s(p, "provider"); if !ph::PROVIDERS.contains(&provider) { return Err(err("provider: claude or codex")) }
+                    let before = list(rpc(hub, c, "accounts", json!({"op":"list"})).await?);
+                    let label = ph::new_label(&before, provider, s(p, "label"));
+                    let r = list(rpc(hub, c, "accounts", json!({"op":"add","provider":provider,"label":label})).await?);
+                    let made = r["profiles"].as_array().and_then(|a| a.iter().filter(|x| x["provider"] == provider && x["label"] == label.as_str()).last()).and_then(|x| x["id"].as_str()).unwrap_or("").to_string();
+                    if made.is_empty() { return Err(err("the account could not be added")) }
+                    let r = list(rpc(hub, c, "accounts", json!({"op":"login","profile":made,"mode":"device"})).await?);
+                    return one(&r, &made);
+                }
+                "signin" => list(rpc(hub, c, "accounts", json!({"op":"login","profile":id,"mode":"device"})).await?),
+                "check" => list(rpc(hub, c, "accounts", json!({"op":"status","profile":id,"asked":true})).await?),
+                "code" | "cancel" => {
+                    let cur = list(rpc(hub, c, "accounts", json!({"op":"list"})).await?); let att = attempt(&cur);
+                    let q = if action == "code" { json!({"op":"respond","profile":id,"attempt":att,"code":s(p, "code")}) } else { json!({"op":"cancel","profile":id,"attempt":att}) };
+                    list(rpc(hub, c, "accounts", q).await?)
+                }
+                "remove" => { let r = list(rpc(hub, c, "accounts", json!({"op":"remove","profile":id})).await?); return Ok(ph::page(&r, &zone, now)) }
+                _ => return Err(err("action: signin, add, code, cancel, check or remove")),
+            };
+            one(&snap, &id)
+        }
+    }
+}
+
 pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Result<Value, Value>> {
     Some(match m {
         "thread.act" => thread_act(hub, c, p).await,
@@ -92,6 +135,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             }
         }
         "badge.list" => Ok(crate::present::badge::list()),
+        "accounts.page" | "account.view" | "account.act" => accounts(hub, c, m, p).await,
         "search" => search(hub, p).await,
         // setup on a phone (present/onboard.rs): the hub's own step list, `step` held by the app
         "onboard.view" | "onboard.act" => rpc(hub, c, m, p.clone()).await.map(|r| r["result"].clone()),
@@ -198,7 +242,7 @@ async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
 }
 
 /// Notifications for a `lists` subscription: an ask opened, a turn that ended (done or failed).
-pub fn notify_of(e: &Value) -> Value { json!({"kind":e["kind"],"thread":e["thread"],"ask":e["ask"],"key":e["key"],"title":e["title"],"body":e["body"],"badge":e["badge"],"through":e["through"]}) }
+pub fn notify_of(e: &Value) -> Value { json!({"kind":e["kind"],"thread":e["thread"],"ask":e["ask"],"key":e["key"],"title":e["title"],"body":e["body"],"badge":e["badge"],"through":e["through"],"link":e["link"].as_str().unwrap_or("")}) }
 
 
 // ---- viewers, files, browser (each the hub's own request, for the folder of the thread) ----

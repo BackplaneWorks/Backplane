@@ -56,7 +56,7 @@ pub fn chip_label(snap: &Value) -> String {
 }
 /// The words and the colour token of a state.
 pub fn badge(state: &str) -> (&'static str, &'static str) {
-    match state { "connected" => ("Connected", "ok"), "connecting" => ("Signing in", "accent"), "unchecked" => ("Not checked", "warn"), _ => ("Not connected", "faint") }
+    match state { "connected" => ("Connected", "ok"), "connecting" => ("Signing in", "accent"), "unchecked" => ("Not checked", "warn"), "expired" => ("Sign-in expired", "bad"), _ => ("Not connected", "faint") }
 }
 /// Whether the hub is waiting for the person or the provider (so the page asks again every couple of seconds).
 pub fn wants_poll(snap: &Value) -> bool {
@@ -269,12 +269,13 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     let pid = id.clone();
     if !live {
         if state == "connected" {
-            btn("Refresh", "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid})) }));
+            btn("Refresh", "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) }));
             if !default { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn("Use for new threads", "default", false, false, Box::new(move |this, _| { if this.tx.try_send(Command::Rpc("accounts.default".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch})), "acct-default")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
             { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn("Move all threads here", "moveall", false, false, Box::new(move |this, _| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
             btn("Sign out", "logout", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "disconnect", "profile": pid})) }));
         } else {
-            btn(if state == "unchecked" { "Check sign-in" } else { "Connect" }, "login", state != "unchecked", false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": if state_of(&this.screens.acct.snap, &pid) == "unchecked" { "status" } else { "login" }, "profile": pid})) }));
+            if state == "expired" { btn("Check now", "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) })); }
+            btn(if state == "unchecked" { "Check sign-in" } else if state == "expired" { "Sign in again" } else { "Connect" }, "login", state != "unchecked", false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": if state_of(&this.screens.acct.snap, &pid) == "unchecked" { "status" } else { "login" }, "profile": pid})) }));
         }
     }
     // Delete is always there: it is the way out of a sign-in that is stuck (the hub ends the attempt first)
@@ -492,7 +493,7 @@ mod tests {
         let ps = profiles(&snap()); assert_eq!(identity(&ps[0]), "Claude · a@b.com · max"); assert_eq!(identity(&ps[1]), "Claude");
         assert_eq!(allowance(&ps[0]), "62% of 5-hour used"); assert_eq!(allowance(&ps[1]), "");
         assert!(is_default(&snap(), &ps[0]) && !is_default(&snap(), &ps[1]));
-        assert_eq!(badge("connected"), ("Connected", "ok")); assert_eq!(badge("whatever").0, "Not connected");
+        assert_eq!(badge("connected"), ("Connected", "ok")); assert_eq!(badge("expired"), ("Sign-in expired", "bad")); assert_eq!(badge("whatever").0, "Not connected");
     }
     #[test] fn the_page_asks_again_only_while_something_waits() {
         assert!(wants_poll(&snap())); let mut s = snap(); s["attempts"] = json!([]); assert!(!wants_poll(&s)); s["profiles"][1]["state"] = json!("connecting"); assert!(wants_poll(&s));

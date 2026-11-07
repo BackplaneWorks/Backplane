@@ -69,11 +69,13 @@ internal fun dAgo(ms: Long): String {
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
-private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page }
+private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
 
 @Composable
 fun DataRoot() {
     var page by remember { mutableStateOf<Page>(DataClient.openFromIntent?.let { if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it) } ?: Page.Home) }
+    // an expired sign-in's alert: that account, its sign-in started
+    LaunchedEffect(DataClient.openAccount) { DataClient.openAccount?.let { page = Page.Account(it, true); DataClient.openAccount = null } }
     LaunchedEffect(DataClient.openFromIntent) { DataClient.openFromIntent?.let { page = if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it); DataClient.openFromIntent = null } }
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
         if (DataClient.link == null || DataClient.needsRepair) PairScreen()
@@ -83,7 +85,9 @@ fun DataRoot() {
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
             is Page.Thread -> { BackHandler { page = Page.Home }; ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }) { page = Page.Home } }
-            Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }, { page = Page.Hub(Page.Settings) }) { page = Page.Improve } }
+            Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }, { page = Page.Hub(Page.Settings) }, { page = Page.Accounts }) { page = Page.Improve } }
+            Page.Accounts -> { BackHandler { page = Page.Settings }; AccountsScreen({ page = Page.Settings }) { page = Page.Account(it, false) } }
+            is Page.Account -> { BackHandler { page = Page.Accounts }; key(p) { AccountScreen(p.id, p.start) { page = Page.Accounts } } } // each opening its own screen: an alert's tap reads the account afresh and starts the sign-in
             is Page.Hub -> { BackHandler { page = p.from }; HubScreen { page = p.from } }
             Page.Improve -> { BackHandler { page = Page.Settings }; ImproveScreen { page = Page.Settings } }
             Page.Folders -> { BackHandler { page = Page.Home }; FolderScreen({ page = Page.Home }) { page = Page.New(it) } }
@@ -576,13 +580,14 @@ private fun AskCard(tid: String, e: DEntry) {
 
 // ---- settings, folders, new thread
 @Composable
-private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, improve: () -> Unit) {
+private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Unit, improve: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         DBar("Settings", back)
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             DMono("HUB", dfaint); Text(DataClient.hubName, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
             DMono(if (DataClient.conn == DataClient.Conn.ONLINE) "online" else "offline ${DataClient.failure}", dcs.onSurfaceVariant, 12)
             DBtn("Hub", false, modifier = Modifier.testTag("settings.hub"), onClick = hub)
+            if (DataClient.has("accounts")) DBtn("Accounts", false, modifier = Modifier.testTag("settings.accounts"), onClick = accounts)
             DLine()
             UpdateSection()
             DLine()

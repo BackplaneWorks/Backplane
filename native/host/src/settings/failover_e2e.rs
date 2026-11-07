@@ -16,6 +16,7 @@ async fn rig(name: &str, provider: &str) -> Rig {
     for cli in ["claude", "codex"] { let p = bin.join(cli); std::fs::write(&p, STANDIN.replace("@DIR@", &dir.to_string_lossy())).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     let log = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":{root},\"at\":1700000000}}\n{{\"$\":\"ThreadCreated\",\"id\":\"{T}\",\"project\":\"p1\",\"title\":\"Fixture\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"{provider}\",\"model\":\"\",\"at\":1700000001}}\n", root = serde_json::to_string(&work.to_string_lossy()).unwrap());
     std::fs::write(home.join("events.jsonl"), log).unwrap();
+    std::fs::write(home.join("token"), "tok").unwrap(); // a phone's socket (data/1) presents it
     let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), Cli::standin(&bin)).await.unwrap();
     crate::commands::start_with(hub.clone(), Some(Arc::new(ag.clone())));
@@ -211,4 +212,72 @@ impl Rig {
     assert_eq!(r.pick(T, &p).await["ok"], true); r.mode("p@x.com", &format!("limit:{}", now() + 900)); r.say(T, "m10", "GO").await; r.rest(T, "completed", 4).await;
     assert_eq!(r.binding(T, "claude").await, w.0); let c: Value = serde_json::from_str(&r.hub.setting(&ac::chosen_key(T, "claude")).await.unwrap()).unwrap(); assert_eq!((c["by"].as_str().unwrap(), c["id"].as_str().unwrap()), ("person", p.0.as_str()));
     let (ok, _) = r.tool(t2, "thread_update", json!({"threadId":T,"account":"Work"})).await; assert!(!ok, "the bot still may not touch it, though Work is where it stands");
+}
+
+/// Nov 7: the only Claude account's OAuth session died. Every turn failed with "Failed to authenticate: OAuth session expired and could not be refreshed" while its status check
+/// said "connected", and the person, away with their phone, could not sign it in again. Here, with the stand-in: the thread stops cleanly and says why, the account says it is
+/// expired whatever `auth status` says, one alert is recorded, the phone signs it in through the data/1 socket (link, pasted code), and the thread goes on by itself.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn an_expired_sign_in_stops_the_thread_alerts_once_and_a_sign_in_from_the_phone_brings_it_back() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+    let r = rig("expiry", "claude").await;
+    let al = json!({"provider":"claude","state":"ok","phase":"complete","at":now(),"windows":[{"scope":"five_hour","used_percent":20.0}]});
+    let w = r.mgr.plant("claude", "Work", "w@x.com", al).await; r.settled(&[&w.0]).await; r.bind(T, "claude", &w).await;
+    r.say(T, "m1", "FIRST-REQUEST").await; r.rest(T, "completed", 1).await;
+    let old_home = r.turns()[0]["home"].as_str().unwrap().to_string();
+    std::fs::write(std::path::Path::new(&old_home).join("dead"), "").unwrap(); // its OAuth session died; the credentials file still names the account
+    r.say(T, "m2", "SECOND-REQUEST route the board").await; r.rest(T, "interrupted", 2).await;
+    assert_eq!(r.mgr.state_of(&w.0), "expired");
+    let said = r.lines(T); assert!(said.iter().any(|l| l == "Work's sign-in expired and no other claude account can take over. Continuing once you sign in again."), "{said:?}");
+    let rec: Value = serde_json::from_str(&r.hub.setting(&format!("provider.resume.{T}")).await.unwrap()).unwrap(); assert_eq!(rec["signin"], w.0.as_str());
+    // honest: the status check asks the provider, which refuses; the hold stays, and the inventory says expired
+    let _ = r.mgr.request(&json!({"op":"status","profile":w.0})).await; assert_eq!(r.mgr.state_of(&w.0), "expired", "auth status names the account, the provider refuses it");
+    r.tick(now()).await; assert!(!r.hub.setting(&fb::hold_key("claude", &w.0, w.1)).await.unwrap_or_default().is_empty(), "nothing newer has been learned");
+    let end = Instant::now() + Duration::from_secs(5); loop { if ac::profile(&r.hub.setting("accounts.inventory").await.unwrap_or_default(), &w.0)["state"] == "expired" { break } assert!(Instant::now() < end, "the inventory never said it"); tokio::time::sleep(Duration::from_millis(50)).await }
+    // a new message on it refuses at the start, in the same words, and waits as well (no turn runs on a dead login)
+    let waits = |r: &Rig| r.lines(T).iter().filter(|l| l.starts_with("Work's sign-in expired")).count();
+    r.say(T, "m3", "THIRD-REQUEST").await;
+    let end = Instant::now() + Duration::from_secs(20); while waits(&r) < 2 { assert!(Instant::now() < end, "{:?}", r.lines(T)); tokio::time::sleep(Duration::from_millis(50)).await }
+    r.rest(T, "interrupted", 2).await; assert_eq!(r.turns().len(), 2, "no process was started on it");
+    // one alert, linked to the account's sign-in
+    let alerts = |l: &[Value]| l.iter().filter(|e| e["$"] == "SettingSet" && e["key"] == accounts_hub::alert_key("claude") && e["value"] != "").cloned().collect::<Vec<_>>();
+    let end = Instant::now() + Duration::from_secs(5); while alerts(&r.log()).is_empty() { assert!(Instant::now() < end, "no alert"); tokio::time::sleep(Duration::from_millis(50)).await }
+    let a: Value = serde_json::from_str(alerts(&r.log())[0]["value"].as_str().unwrap()).unwrap();
+    assert_eq!((a["text"].as_str().unwrap(), a["link"].as_str().unwrap()), ("Claude sign-in expired: tap to sign in again", format!("account:{}", w.0).as_str()));
+
+    // the phone: a data/1 socket, as the app opens it
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
+    { let hub = r.hub.clone(); tokio::spawn(async move { loop { let Ok((st, _)) = l.accept().await else { return }; let h = hub.clone(); tokio::spawn(async move { let _ = crate::wire::serve_with(h, st, false).await; }); } }); }
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/ws?data=1&enc=json&token=tok")).await.unwrap();
+    let mut n = 0u64;
+    let mut call = |m: &'static str, p: Value| { n += 1; let id = n; let msg = json!({"id":id,"m":m,"p":p}).to_string(); (id, msg) };
+    async fn reply(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, id: u64, msg: String) -> Value {
+        ws.send(Message::Text(msg.into())).await.unwrap();
+        loop { let m = tokio::time::timeout(Duration::from_secs(60), ws.next()).await.expect("an answer").unwrap().unwrap(); if let Message::Text(t) = m { let v: Value = serde_json::from_str(t.as_str()).unwrap(); if v["t"] == "reply" && v["id"] == id { return v } } }
+    }
+    let hello = loop { let m = ws.next().await.unwrap().unwrap(); if let Message::Text(t) = m { break serde_json::from_str::<Value>(t.as_str()).unwrap() } };
+    assert!(hello["features"].as_array().unwrap().contains(&json!("accounts")));
+    let (id, m) = call("accounts.page", json!({})); let page = reply(&mut ws, id, m).await; assert_eq!(page["ok"], true, "{page}");
+    let row = &page["result"]["providers"][0]["accounts"][0]; assert_eq!((row["label"].as_str().unwrap(), row["line"].as_str().unwrap(), row["tone"].as_str().unwrap()), ("Work", "sign-in expired", "bad"));
+    let (id, m) = call("account.act", json!({"profile":w.0,"action":"signin"})); let v = reply(&mut ws, id, m).await; assert_eq!(v["ok"], true, "{v}");
+    let mut view = v["result"]["account"].clone();
+    let end = Instant::now() + Duration::from_secs(60);
+    while view["signin"]["paste"] != true { assert!(Instant::now() < end, "{view}"); tokio::time::sleep(Duration::from_millis(100)).await; let (id, m) = call("account.view", json!({"profile":w.0})); view = reply(&mut ws, id, m).await["result"]["account"].clone(); }
+    assert!(view["signin"]["url"].as_str().unwrap().starts_with("https://claude.com/cai/oauth/authorize?code=true"), "{view}");
+    assert_eq!(view["actions"], json!([{"label":"Cancel sign-in","action":"cancel","danger":false}]));
+    let (id, m) = call("account.act", json!({"profile":w.0,"action":"code","code":"WRONG#OTHER-ATTEMPT"})); let bad = reply(&mut ws, id, m).await; assert_eq!(bad["ok"], false, "a code of another attempt: {bad}");
+    let (id, m) = call("account.act", json!({"profile":w.0,"action":"code","code":"CODE#STATE9"})); assert_eq!(reply(&mut ws, id, m).await["ok"], true);
+    while view["state"] != "connected" { assert!(Instant::now() < end, "{view}"); tokio::time::sleep(Duration::from_millis(100)).await; let (id, m) = call("account.view", json!({"profile":w.0})); view = reply(&mut ws, id, m).await["result"]["account"].clone(); }
+    assert_eq!((view["signin"]["text"].as_str().unwrap(), view["line"].as_str().unwrap()), ("Signed in.", "connected"));
+
+    // the thread goes on by itself, on the account's new sign-in, and the alert is over
+    r.rest(T, "completed", 3).await;
+    let ts = r.turns(); assert_eq!(ts[2]["who"], "w@x.com"); assert_ne!(ts[2]["home"].as_str().unwrap(), old_home, "a new sign-in, a store of its own");
+    assert!(ts[2]["text"].as_str().unwrap().contains("signed in again"), "{}", ts[2]["text"]);
+    let inv = r.hub.setting("accounts.inventory").await.unwrap(); let e = ac::profile(&inv, &w.0)["epoch"].as_u64().unwrap(); assert!(e > w.1);
+    let b: Value = serde_json::from_str(&r.hub.setting(&ac::binding_key(T, "claude")).await.unwrap()).unwrap(); assert_eq!((b["id"].as_str().unwrap(), b["epoch"].as_u64().unwrap()), (w.0.as_str(), e));
+    assert!(r.lines(T).iter().any(|l| l == "Work is signed in again; continuing from the last step"), "{:?}", r.lines(T));
+    assert_eq!(r.hub.setting(&accounts_hub::alert_key("claude")).await.unwrap_or_default(), "", "the alert is dealt with");
+    assert_eq!(alerts(&r.log()).len(), 1, "one alert in all");
+    assert_eq!(r.hub.setting(&format!("provider.resume.{T}")).await.unwrap_or_default(), "");
 }

@@ -226,7 +226,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     assert_eq!(push::route(1000, 0, 120, Some(5000), false), Some(5000)); assert_eq!(push::route(1000, 0, 120, Some(5000), true), None, "through passes quiet");
     assert_eq!(push::route(1000, 950, 120, Some(5000), true), Some(1070), "but not the burst"); assert_eq!(push::route(1000, 950, 120, Some(1010), false), Some(1070));
 }
-fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.into(), reason: reason.into(), thread: th.into(), ask: ask.into(), text: format!("text {id}"), at: 1, due: 0, key: format!("k-{id}") } }
+fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.into(), reason: reason.into(), thread: th.into(), ask: ask.into(), text: format!("text {id}"), at: 1, due: 0, key: format!("k-{id}"), link: String::new() } }
 #[test] fn a_collapsed_push_links_its_shared_thread_else_home() {
     let one = push::collapse(&[item("a", "t1", "x", "done")], "Bub", "home", "s"); assert_eq!((one.key.as_str(), one.title.as_str(), one.body.as_str(), one.thread.as_str(), one.ask.as_str()), ("push-a", "Bub", "text a", "t1", "x"));
     assert_eq!(push::collapse(&[item("a", "t1", "", "done")], "", "home", "s").title, "Backplane");
@@ -284,4 +284,20 @@ fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.int
     std::fs::write(d.join("sig"), der).unwrap(); std::fs::write(d.join("msg"), format!("{}.{}", parts[0], parts[1])).unwrap();
     let o = sh(&["dgst", "-sha256", "-verify", p.to_str().unwrap(), "-signature", d.join("sig").to_str().unwrap(), d.join("msg").to_str().unwrap()]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stdout)); let _ = std::fs::remove_dir_all(d);
+}
+
+#[tokio::test] async fn an_expired_sign_in_is_one_alert_in_the_uberbots_name_that_opens_the_account_and_leaves_when_it_is_back() {
+    let s = setup("signin").await;
+    let rec = json!({"profile":"p1","epoch":2,"provider":"claude","label":"Work","text":"Claude sign-in expired: tap to sign in again","link":"account:p1","at":now_s()});
+    set(&s.hub, "account.signin.alert.claude", &rec.to_string()).await;
+    let a = s.fake.wait(1).await; assert_eq!(a.len(), 1, "{a:?}");
+    assert_eq!((a[0]["aps"]["alert"]["body"].as_str(), a[0]["link"].as_str(), a[0]["thread"].as_str(), a[0]["kind"].as_str()), (Some("Claude sign-in expired: tap to sign in again"), Some("account:p1"), Some(s.chat.as_str()), Some("needs_you")));
+    let ordered = log(&s.hub).into_iter().find(|e| e["$"] == "PushOrdered").unwrap(); assert_eq!((ordered["how"].as_str(), ordered["bot"].as_str()), (Some("notify"), Some(s.bub.as_str())), "in the uberbot's name");
+    until(&s.hub, |l| l.iter().any(|e| e["$"] == "PushSent")).await;
+    let sent = log(&s.hub).into_iter().find(|e| e["$"] == "PushSent").unwrap(); assert_eq!(sent["link"], "account:p1", "a socket hears the link too");
+    assert_eq!(crate::data::ext_notify(&sent)["link"], "account:p1");
+    set(&s.hub, "account.signin.alert.claude", "").await;
+    until(&s.hub, |l| l.iter().any(|e| e["$"] == "PushCleared")).await;
+    assert_eq!(s.fake.alerts().len(), 1, "no second alert");
+    assert!(push::reserved("account.signin.alert.claude"), "no client may write it");
 }

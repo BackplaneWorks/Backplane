@@ -54,6 +54,7 @@ final class DataClient {
 
     // a tapped notification: the thread to open and the approval to land on. The views follow these
     var pushThread = ""
+    var pushAccount = ""
     var pendingAsk = ""
     // the hub's quiet hours, as push.state says them
     private(set) var quiet = ""
@@ -663,7 +664,9 @@ final class DataClient {
     func setQuiet(_ spec: String) async { quiet = spec; _ = try? await call("push.prefs", ["notify.quiet": spec], as: DEmpty.self) }
     func setQuietUrgent(_ on: Bool) async { quietUrgent = on; _ = try? await call("push.prefs", ["notify.quiet.urgent": on ? "on" : "off"], as: DEmpty.self) }
     /// A tapped notification opens its thread, at its approval when it has one.
-    func openPush(thread: String, ask: String) {
+    func openPush(thread: String, ask: String, link: String = "") {
+        // a link the hub put on it opens that instead: "account:<id>" is that account's sign-in (an expired sign-in's alert)
+        if link.hasPrefix("account:") { pushAccount = String(link.dropFirst(8)); return }
         guard !thread.isEmpty else { return }
         pendingAsk = ask; pushThread = thread
     }

@@ -10,6 +10,9 @@
 #   auth              the login failed mid-turn
 #   exit-limit        the limit on stderr, and the process ends with no result
 # @DIR@/usage.<who> is that login's usage reading, the `rate_limits` of the CLI's get_usage answer.
+# A store with a file `dead` in it is a login whose OAuth session died (Nov 7, Claude Code 2.1.319): `auth status` still names the account, every turn fails with
+# "Failed to authenticate: OAuth session expired and could not be refreshed", and get_usage is refused with "OAuth refresh token is no longer valid; run /login".
+# `claude auth login --claudeai` (the hub's sign-in) prints its link and takes the code "CODE#STATE9" on stdin; it then signs in @DIR@/login.email (else w@x.com) in its own store.
 import json, os, sys, time, uuid
 D = "@DIR@"
 me = os.path.basename(sys.argv[0]); a = sys.argv[1:]
@@ -24,9 +27,10 @@ def record(session, text): open(os.path.join(D, "turns.jsonl"), "a").write(json.
 def sessions():
     d = os.path.join(home or os.path.join(D, "default-" + me), "sessions"); os.makedirs(d, exist_ok=True); return d
 
+def dead(): return bool(home) and os.path.exists(os.path.join(home, "dead"))
 def claude_turn(line, sid):
     u = line.get("uuid", "")
-    m = mode(); old = m == "limit-old"
+    m = "expired" if dead() else mode(); old = m == "limit-old"
     def lc(st):
         if not old: say({"type": "command_lifecycle", "command_uuid": u, "state": st, "uuid": str(uuid.uuid4()), "session_id": sid})
     c = line.get("message", {}).get("content", "")
@@ -34,6 +38,11 @@ def claude_turn(line, sid):
     lc("queued"); say({"type": "system", "subtype": "init", "session_id": sid, "cwd": os.getcwd(), "tools": ["Bash"], "model": "fake", "permissionMode": "bypassPermissions", "apiKeySource": "none", "claude_code_version": "2.0.0" if old else "2.1.286"}); lc("started")
     record(resume, text)
     if m == "exit-limit": print("Error: You've hit your usage limit. Try again later.", file=sys.stderr, flush=True); os._exit(1)
+    if m == "expired":
+        words = "Failed to authenticate: OAuth session expired and could not be refreshed"
+        say({"type": "assistant", "message": {"id": "a" + uuid.uuid4().hex, "role": "assistant", "content": [{"type": "text", "text": words}], "usage": {"input_tokens": 0, "output_tokens": 0}}, "error": "authentication_failed", "session_id": sid})
+        say({"type": "result", "subtype": "success", "is_error": True, "result": words, "session_id": sid})
+        lc("completed"); return
     if m.startswith("limit") or m == "auth":
         say({"type": "stream_event", "event": {"type": "message_start", "message": {"id": "p1", "role": "assistant", "content": [], "usage": {"input_tokens": 1}}}, "session_id": sid})
         say({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}, "session_id": sid})
@@ -58,6 +67,13 @@ if me == "claude":
             j = json.load(open(login)); j.update({"loggedIn": True, "authMethod": "claude.ai", "configDirectory": home}); print(json.dumps(j))
         else: print(json.dumps({"loggedIn": False}))
         sys.exit(0)
+    if a[:2] == ["auth", "login"]:
+        print("Opening your browser. If it does not open, visit https://claude.com/cai/oauth/authorize?code=true&client_id=standin&state=STATE9 and paste the code here:", flush=True)
+        code = sys.stdin.readline().strip()
+        if code != "CODE#STATE9": print("That code wasn't accepted.", flush=True); sys.exit(1)
+        try: email = open(os.path.join(D, "login.email")).read().strip()
+        except OSError: email = "w@x.com"
+        json.dump({"email": email, "subscriptionType": "max", "accountUuid": email, "orgUuid": "o1"}, open(login, "w")); print("Login successful.", flush=True); sys.exit(0)
     resume = a[a.index("--resume") + 1] if "--resume" in a else ""
     sid = resume
     if resume and not os.path.exists(os.path.join(sessions(), resume)):
@@ -73,6 +89,8 @@ if me == "claude":
         def usage():
             try: return {"rate_limits_available": True, "rate_limits": json.load(open(os.path.join(D, "usage." + who)))}
             except OSError: return {"rate_limits_available": False}
+        if dead() and r.get("request", {}).get("subtype") == "get_usage":
+            say({"type": "control_response", "response": {"request_id": rid, "subtype": "error", "error": "OAuth refresh token is no longer valid; run /login to re-authenticate"}}); continue
         resp = usage() if r.get("request", {}).get("subtype") == "get_usage" else {"models": [{"value": "opus", "displayName": "Opus", "supportedEffortLevels": ["low", "high"]}]} if rid == "models" else {}
         say({"type": "control_response", "response": {"request_id": rid, "subtype": "success", "response": resp}})
     sys.exit(0)

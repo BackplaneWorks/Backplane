@@ -62,7 +62,7 @@ fn quota_code(c: &str) -> bool { matches!(c, "rate_limit_error" | "rate_limit_ex
 /// Error.words (on the lower-cased reason)
 fn quota_words(s: &str) -> bool { ["hit your usage limit", "you've hit your limit", "you have hit your limit", "weekly limit", "usage limit reached", "usage limit has been reached", "insufficient quota", "rate limit exceeded", "budget exceeded"].iter().any(|w| s.contains(w)) }
 /// Error.no: sign-in and cancellation words are never a capacity signal.
-fn not_quota(s: &str) -> bool { ["authentication", "unauthorized", "log in", "login required", "cancelled", "canceled", "invalid api key", "keyring"].iter().any(|w| s.contains(w)) }
+fn not_quota(s: &str) -> bool { ["authentication", "authenticate", "unauthorized", "log in", "login required", "cancelled", "canceled", "invalid api key", "keyring"].iter().any(|w| s.contains(w)) }
 fn s_of<'a>(o: &'a Value, k: &str) -> &'a str { o.get(k).and_then(Value::as_str).unwrap_or("") }
 fn rejected(o: &Value) -> bool { s_of(o, "type") == "rate_limit_event" && s_of(&o["rate_limit_info"], "status") == "rejected" }
 fn assistant(o: &Value) -> bool { s_of(o, "type") == "assistant" && s_of(o, "error") == "rate_limit" }
@@ -93,7 +93,16 @@ pub fn classify(p: &str, m: &str, o: &Value) -> Option<Limit> {
 }
 /// Error.auth_code / Error.auth_words: what a provider's error envelope says when the login itself failed.
 fn auth_code(c: &str) -> bool { matches!(c, "authentication_error" | "invalid_api_key" | "permission_error" | "unauthorized" | "token_expired") }
-fn auth_words(s: &str) -> bool { ["please run /login", "invalid api key", "oauth token has expired", "authentication failed", "authentication_error", "not logged in", "login required", "unauthorized", "token has been revoked"].iter().any(|w| s.contains(w)) }
+/// Claude Code 2.1.319 says "Failed to authenticate: OAuth session expired and could not be refreshed" when its refresh token is dead (OAuthRefreshDeadError: "OAuth refresh token is
+/// no longer valid; run /login"), and "API Error: 401" for a token the API refused. Its refresh-lock timeout ("could not be refreshed: another Claude Code process is holding the
+/// refresh lock") is a moment's contention, never a failed login: the next request refreshes.
+fn auth_words(s: &str) -> bool {
+    if s.contains("refresh lock") { return false }
+    ["please run /login", "run /login", "invalid api key", "oauth token has expired", "authentication failed", "authentication_error", "not logged in", "login required", "unauthorized", "token has been revoked",
+     "failed to authenticate", "oauth session expired", "refresh token is no longer valid", "api error: 401", "status code 401", "401 unauthorized"].iter().any(|w| s.contains(w))
+}
+/// Words a provider CLI's refusal (a control request's error, a status line) says when the login itself is dead: what [`auth_failure`] reads, on any text.
+pub fn auth_text(s: &str) -> bool { let low = s.to_lowercase(); !low.contains("cancelled") && !low.contains("canceled") && auth_words(&low) }
 /// Error.auth: a failed login on a provider's error envelope, never arbitrary text: an assistant message saying the words is not one, and a cancelled turn is not one.
 /// The whole login is held (the provider's scope); nobody reports when it comes back, so the reset is unknown.
 pub fn auth_failure(p: &str, o: &Value) -> Option<Limit> {
@@ -266,6 +275,12 @@ mod outage_tests {
         assert_eq!(auth_failure("claude", &json!({"type":"result","is_error":false,"result":"please run /login"})), None, "nor a good result");
         assert_eq!(auth_failure("claude", &json!({"type":"error","message":"turn cancelled: not logged in"})), None);
         assert_eq!(auth_failure("claude", &json!({"type":"result","is_error":true,"result":"Overloaded"})), None, "a provider's bad day is neither");
+        // Nov 7: the words Claude Code 2.1.319 ended every turn with once its refresh token was dead; the lock timeout beside them is not one
+        for t in ["Failed to authenticate: OAuth session expired and could not be refreshed", "OAuth refresh token is no longer valid; run /login to re-authenticate", "API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}"] {
+            let o = json!({"type":"result","is_error":true,"result":t}); assert!(auth_failure("claude", &o).unwrap().auth, "{t}"); assert_eq!(classify("claude", "o", &o), None, "{t}"); assert!(auth_text(t), "{t}"); }
+        assert!(auth_failure("claude", &json!({"type":"assistant","error":"authentication_failed","message":{"content":[{"type":"text","text":"Failed to authenticate: OAuth session expired and could not be refreshed"}]}})).unwrap().auth);
+        let lock = json!({"type":"result","is_error":true,"result":"OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock"});
+        assert_eq!(auth_failure("claude", &lock), None, "contention for the refresh lock is not a dead login"); assert!(!auth_text("OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock"));
         assert!(!Value::from(serde_json::from_str::<Value>(&Limit { scope: "c".into(), reason: "r".into(), reset: 0, auth: false }.json(1)).unwrap()).as_object().unwrap().contains_key("auth"), "the record of a plain limit is as it always was");
     }
     #[test] fn what_a_process_left_on_stderr_is_read_like_an_envelope() {

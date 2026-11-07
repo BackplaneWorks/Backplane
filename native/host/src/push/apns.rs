@@ -16,7 +16,7 @@ impl Frame {
     /// An alert: `thread-id` groups by thread, the collapse id is the notification's identifier on the phone, and `key` is how a clear finds it.
     pub fn alert(s: &Say, badge: u64) -> Frame {
         Frame { push_type: "alert", priority: 10, collapse: s.key.clone(), payload: json!({"aps":{"alert":{"title":s.title,"body":s.body},"badge":badge,"sound":"default","thread-id":s.thread},
-            "thread":s.thread,"ask":s.ask,"key":s.key,"kind":s.reason}) }
+            "thread":s.thread,"ask":s.ask,"key":s.key,"kind":s.reason,"link":s.link}) }
     }
     /// A silent clear: the badge, and the notifications to take away. It shows nothing.
     pub fn clear(keys: &[String], badge: u64) -> Frame { Frame { push_type: "background", priority: 5, collapse: String::new(), payload: json!({"aps":{"content-available":1,"badge":badge},"clear":keys}) } }

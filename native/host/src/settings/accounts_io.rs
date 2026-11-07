@@ -21,6 +21,7 @@ const FAILURES: &[(&str, &str)] = &[
 const SIGNIN_DEFAULT: &str = "Sign-in could not be verified. Retry or check the provider CLI installation.";
 const DIRECTORY_ERR: &str = "Claude must report its isolated account directory (Claude Code 2.1.268 or later)";
 
+fn fb_auth(s: &str) -> bool { super::fallback::auth_text(s) }
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64) }
 /// A name shown to the person: no control characters, at most 64, trimmed.
@@ -84,20 +85,66 @@ fn unset_env(k: &str) -> bool {
     const EXACT: &[&str] = &["CODEX_HOME", "CODEX_SQLITE_HOME", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ACCESS_TOKEN", "OPENAI_IDENTITY_TOKEN_FILE", "OPENAI_FEDERATION_RULE_ID", "OPENAI_ORGANIZATION_ID", "CODEX_AUTH_TOKEN",
         "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS",
         "ANTHROPIC_PROFILE", "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_IDENTITY_TOKEN_FILE", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
-        "CLAUDE_CODE_USE_ANTHROPIC_AWS", "ANTHROPIC_AWS_API_KEY", "CLAUDE_CODE_API_KEY_HELPER", "CLAUDE_CODE_PROJECT_DIR_NAME"];
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS", "ANTHROPIC_AWS_API_KEY", "CLAUDE_CODE_API_KEY_HELPER", "CLAUDE_CODE_PROJECT_DIR_NAME",
+        // where Claude Code keeps its credentials and the lock its refreshes take; inherited, every profile would share one login and one lock
+        "CLAUDE_SECURESTORAGE_CONFIG_DIR"];
     EXACT.contains(&k) || k.starts_with("OPENAI_") || k.starts_with("ANTHROPIC_") || k.starts_with("CLAUDE_CODE_USE_")
         || (k.starts_with("CODEX_") && (k.contains("TOKEN") || k.contains("AUTH") || k.contains("WIF")))
         || ["CLAUDE_CODE_OAUTH", "CLAUDE_CODE_API_KEY", "CLAUDE_CODE_AUTH", "CLAUDE_CODE_PROFILE", "CLAUDE_CODE_SESSION"].iter().any(|p| k.starts_with(p))
 }
 
 #[derive(Clone, Debug)]
-pub struct Profile { pub id: String, pub provider: String, pub label: String, pub epoch: u64, pub fingerprint: String, pub store: String, pub state: String, pub identity: Value, pub catalog: Vec<Value>, pub allowance: Option<Value>, pub checked_at: u64, pub message: String }
+pub struct Profile { pub id: String, pub provider: String, pub label: String, pub epoch: u64, pub fingerprint: String, pub store: String, pub state: String, pub identity: Value, pub catalog: Vec<Value>, pub allowance: Option<Value>, pub checked_at: u64, pub message: String,
+    /// When its sign-in was found dead (0: it was not): kept in the registry, so a restart still knows it must be signed in again.
+    pub expired_at: u64,
+    /// When the provider last answered a request made with this login (its usage read): the proof a dead sign-in works again. Not kept.
+    pub proven_at: u64 }
 impl Profile {
     fn public(&self) -> Value {
         let allowance = self.allowance.as_ref().map(|a| { let mut a = a.clone(); if now_s().saturating_sub(a["at"].as_u64().unwrap_or(0)) > 300 { a["state"] = json!("stale") } a });
-        json!({"id":self.id,"provider":self.provider,"label":self.label,"epoch":self.epoch,"state":self.state,"identity":self.identity,"checkedAt":self.checked_at,"catalog":self.catalog,"allowance":allowance,"message":self.message})
+        json!({"id":self.id,"provider":self.provider,"label":self.label,"epoch":self.epoch,"state":self.state,"identity":self.identity,"checkedAt":self.checked_at,"catalog":self.catalog,"allowance":allowance,"message":self.message,"expiredAt":self.expired_at})
     }
 }
+// ---- the sign-in state: what a profile's state becomes on each fact ----
+
+/// What was learned of a profile's login.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fact {
+    /// A turn's provider said the login is dead (an expired or revoked OAuth session, a 401, "please run /login").
+    TurnRefused,
+    /// The status check: the CLI says who is signed in, and the provider answered a request made with the login (its usage read).
+    Proven,
+    /// The CLI says who is signed in, and the provider refused the request with words of a dead login.
+    Refused,
+    /// The CLI says who is signed in, and nothing proves the login works or is dead (no request was made, or it failed for another reason).
+    Unproven,
+    /// The CLI says nobody is signed in, or could not say.
+    NoLogin,
+    /// A sign-in attempt finished and was verified.
+    SignedIn,
+}
+/// The sign-in state machine. A login found dead stays "expired" until a sign-in or a request the provider answered says otherwise: `claude auth status` only reads the
+/// credentials file, which still names the account after its session died (on Nov 7 the inventory said "connected" for hours while every turn failed).
+pub fn after(state: &str, f: Fact) -> &'static str {
+    match (state, f) {
+        (_, Fact::SignedIn) => "connected",
+        ("connecting", _) => "connecting",
+        ("disconnected", Fact::TurnRefused) => "disconnected",
+        (_, Fact::TurnRefused) | (_, Fact::Refused) => "expired",
+        ("expired", Fact::Unproven) | ("expired", Fact::NoLogin) => "expired",
+        (_, Fact::NoLogin) => "disconnected",
+        (_, Fact::Proven) | (_, Fact::Unproven) => "connected",
+    }
+}
+/// What the person is told of an expired login, and what a turn that cannot start on it fails with (the failover reads "failed to authenticate" as a dead login).
+pub const EXPIRED_SHORT: &str = "Sign-in expired. Sign in again.";
+pub const EXPIRED: &str = "Failed to authenticate: this account's sign-in expired. Sign in again in Settings, Accounts.";
+/// A checked profile replaces the one in the registry, unless it was found dead while the check ran and the check proved nothing newer.
+fn merge_checked(slot: &Profile, mut np: Profile) -> Profile {
+    if slot.state == "expired" && np.state != "expired" && np.proven_at <= slot.expired_at { np.state = "expired".into(); np.expired_at = slot.expired_at; np.message = EXPIRED_SHORT.into(); }
+    np
+}
+
 #[derive(Clone)]
 struct Attempt { id: String, profile: String, state: String, url: String, user_code: String, expires_at: u64, message: String, previous_state: String, store: String }
 
@@ -187,7 +234,8 @@ impl Accounts {
                     match list {
                         Some(a) if a.iter().all(|p| valid_id(p["id"].as_str().unwrap_or("")) && matches!(p["provider"].as_str(), Some("claude" | "codex")) && p["epoch"].as_u64().map_or(false, |e| e >= 1)) => {
                             for p in a { inner.profiles.push(Profile { id: p["id"].as_str().unwrap().into(), provider: p["provider"].as_str().unwrap().into(), label: label(p["label"].as_str().unwrap_or("")), epoch: p["epoch"].as_u64().unwrap(),
-                                fingerprint: p["fingerprint"].as_str().unwrap_or("").into(), store: p["store"].as_str().filter(|s| valid_id(s)).unwrap_or("").into(), state: "unchecked".into(), identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message: String::new() }) }
+                                fingerprint: p["fingerprint"].as_str().unwrap_or("").into(), store: p["store"].as_str().filter(|s| valid_id(s)).unwrap_or("").into(), state: if p["expiredAt"].as_u64().unwrap_or(0) > 0 { "expired".into() } else { "unchecked".into() }, identity: json!({}), catalog: vec![], allowance: None, checked_at: 0,
+                                message: if p["expiredAt"].as_u64().unwrap_or(0) > 0 { EXPIRED_SHORT.into() } else { String::new() }, expired_at: p["expiredAt"].as_u64().unwrap_or(0), proven_at: 0 }) }
                         }
                         _ => inner.load_error = "The private account registry could not be verified.".into(),
                     }
@@ -198,7 +246,7 @@ impl Accounts {
     }
     /// Writes the registry (temp file, then rename). The revision moves only when the file is good; a failure is the op's failure.
     fn save(&self, g: &mut Inner) -> Result<(), ()> {
-        let body = json!({"version":1,"profiles":g.profiles.iter().map(|p| json!({"id":p.id,"provider":p.provider,"label":p.label,"epoch":p.epoch,"fingerprint":p.fingerprint,"store":p.store})).collect::<Vec<_>>()}).to_string();
+        let body = json!({"version":1,"profiles":g.profiles.iter().map(|p| { let mut o = json!({"id":p.id,"provider":p.provider,"label":p.label,"epoch":p.epoch,"fingerprint":p.fingerprint,"store":p.store}); if p.expired_at > 0 && p.state == "expired" { o["expiredAt"] = json!(p.expired_at) } o }).collect::<Vec<_>>()}).to_string();
         let tmp = self.root.join(format!("profiles.json.{}.tmp", new_id()));
         let w = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| { std::io::Write::write_all(&mut f, body.as_bytes())?; f.sync_all() }).and_then(|_| std::fs::rename(&tmp, self.root.join("profiles.json")));
         if w.is_err() { let _ = std::fs::remove_file(&tmp); return Err(()) }
@@ -338,9 +386,12 @@ impl Accounts {
     }
 
     /// Who is signed in to this profile, from the provider CLI: the profile updated (epoch moves when the identity does), or why not.
-    async fn verify(&self, p: &Profile, new_login: bool) -> Result<Profile, String> {
+    /// `asked`: the person asked for this check (status): the provider is asked too, however fresh the last reading.
+    async fn verify(&self, p: &Profile, new_login: bool) -> Result<Profile, String> { self.verify_k(p, new_login, false).await }
+    async fn verify_k(&self, p: &Profile, new_login: bool, asked: bool) -> Result<Profile, String> {
         let mut p = p.clone();
         let (identity, fp_identity, mut catalog, mut allowance);
+        let mut fact = Fact::Unproven;
         let last = |k: &str| self.inner.lock().unwrap().refresh_at.get(k).copied().unwrap_or(0).max(p.allowance.as_ref().and_then(|a| a["at"].as_u64()).unwrap_or(0));
         if p.provider == "claude" {
             let (code, data) = self.cli(Some(&p), "claude", &["auth", "status"]).await.map_err(|_| "Claude subscription sign-in could not be verified".to_string())?;
@@ -352,9 +403,13 @@ impl Accounts {
             catalog = if p.catalog.is_empty() { self.claude_models(&p).await } else { p.catalog.clone() };
             allowance = p.allowance.clone();
             let at = last(&format!("usage:{}", p.id));
-            if new_login || at == 0 || now_s().saturating_sub(at) >= 300 {
+            // a login found dead is read every check: the usage read is the one request that proves it works again (no inference request is made)
+            if new_login || asked || p.state == "expired" || at == 0 || now_s().saturating_sub(at) >= 300 {
                 self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s());
-                match self.claude_usage(Some(&p)).await {
+                let read = self.claude_read(Some(&p), "usage").await;
+                match &read { Ok(_) => fact = Fact::Proven, Err(reason) if fb_auth(reason) => fact = Fact::Refused, Err(_) => {} }
+                let windows = read.and_then(|r| if r["rate_limits_available"] != true { Err("Claude does not report limits for this account (it may not be a subscription plan).".to_string()) } else { let w = Self::claude_windows(&r); if w.is_empty() { Err("Claude reported no limit windows for this account.".into()) } else { Ok(w) } });
+                match windows {
                     Ok(windows) => { let n = now_s(); allowance = Some(json!({"provider":"claude","state":"ok","at":n,"attempted_at":n,"auth":"claude.ai","source":"claude-cli-usage","windows":windows})) }
                     Err(reason) => {
                         // a failed read is tried again in a minute, not five; the last good reading stays, else the reason is what the account shows
@@ -372,7 +427,7 @@ impl Accounts {
                 if a["account"]["type"] != "chatgpt" { return Err(()) }
                 let ident = json!({"email":label(a["account"]["email"].as_str().unwrap_or("")),"plan":label(a["account"]["planType"].as_str().unwrap_or("")),"auth":"chatgpt"});
                 let at = last(&format!("usage:{}", p.id));
-                let fresh = !new_login && at != 0 && now_s().saturating_sub(at) < 300;
+                let fresh = !new_login && !asked && p.state != "expired" && at != 0 && now_s().saturating_sub(at) < 300;
                 if !fresh { self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s()); }
                 let limits = if fresh { None } else { rpc.request("account/rateLimits/read", json!({}), 12).await.ok() };
                 let fp = json!([ident["email"], label(a["workspaceRouting"]["chatgptAccountId"].as_str().unwrap_or(""))]);
@@ -381,16 +436,19 @@ impl Accounts {
                         "efforts":x["supportedReasoningEfforts"].as_array().map(|a| a.iter().take(12).map(|y| json!(label(y["reasoningEffort"].as_str().or(y.as_str()).unwrap_or("")))).collect::<Vec<_>>()).unwrap_or_default()})).collect()).unwrap_or_default() };
                 let windows = limits.as_ref().map(Self::codex_windows).unwrap_or_default(); let n = now_s();
                 let al = if fresh || windows.is_empty() { p.allowance.clone() } else { Some(json!({"provider":"codex","state":"ok","at":n,"attempted_at":n,"auth":"chatgpt","source":"codex-app-server","windows":windows})) };
-                Ok::<_, ()>((ident, fp, cat, al))
+                Ok::<_, ()>((ident, fp, cat, al, limits.is_some()))
             }.await;
             rpc.close().await;
-            let (i, f, c, a) = r.map_err(|_| "Codex ChatGPT sign-in could not be verified".to_string())?;
-            identity = i; fp_identity = f; catalog = c; allowance = a;
+            let (i, f, c, a, answered) = r.map_err(|_| "Codex ChatGPT sign-in could not be verified".to_string())?;
+            identity = i; fp_identity = f; catalog = c; allowance = a; if answered { fact = Fact::Proven }
         }
         if !fp_identity.as_array().map_or(false, |a| a.iter().any(|x| x.as_str().map_or(false, |s| !s.is_empty()))) { return Err("Provider did not report a verifiable account identity".into()) }
         let digest = fingerprint(&p.id, &fp_identity);
         if new_login || (!p.fingerprint.is_empty() && p.fingerprint != digest) { p.epoch += 1; if !new_login { catalog = vec![]; allowance = None; } }
-        p.fingerprint = digest; p.identity = identity; p.catalog = catalog; p.allowance = allowance; p.checked_at = now_s(); p.state = "connected".into(); p.message.clear();
+        p.fingerprint = digest; p.identity = identity; p.catalog = catalog; p.allowance = allowance; p.checked_at = now_s();
+        if fact == Fact::Proven { p.proven_at = now_s() }
+        p.state = after(if new_login { "unchecked" } else { &p.state }, fact).into();
+        if p.state == "expired" { if p.expired_at == 0 { p.expired_at = now_s() } p.message = EXPIRED_SHORT.into() } else { p.expired_at = 0; p.message.clear() }
         Ok(p)
     }
 }
@@ -423,6 +481,21 @@ impl Accounts {
     fn busy(&self, id: &str) -> bool { self.inner.lock().unwrap().busy.get(id).copied().unwrap_or(0) > 0 }
     /// A provider child of this profile is running (a turn): the agents say so, and a disconnect or remove waits.
     pub fn child_started(&self, id: &str) { *self.inner.lock().unwrap().busy.entry(id.to_string()).or_insert(0) += 1 }
+    /// A turn's provider said this login is dead (fallback.rs `auth_failure`): the profile is to be signed in again, and says so until a sign-in or a request the provider
+    /// answers proves otherwise. Only at the epoch the turn ran on. True when this changed it.
+    pub fn expire(&self, id: &str, epoch: u64) -> bool {
+        let mut changed = false;
+        let apply = |g: &mut Inner, changed: &mut bool| {
+            let Some(p) = g.profiles.iter_mut().find(|p| p.id == id && p.epoch == epoch) else { return };
+            let next = after(&p.state, Fact::TurnRefused);
+            if p.state == "connecting" { for a in g.attempts.iter_mut().filter(|a| a.profile == id && a.previous_state != "disconnected") { a.previous_state = "expired".into() } return }
+            if next != p.state { p.state = next.into(); p.expired_at = now_s(); p.message = EXPIRED_SHORT.into(); *changed = true }
+        };
+        if self.mutate_save(|g| apply(g, &mut changed)).is_err() { let mut g = self.inner.lock().unwrap(); apply(&mut g, &mut changed); g.revision += 1; }
+        changed
+    }
+    /// The profile's state now ("" when there is none).
+    pub fn state_of(&self, id: &str) -> String { self.inner.lock().unwrap().profiles.iter().find(|p| p.id == id).map(|p| p.state.clone()).unwrap_or_default() }
     pub fn child_ended(&self, id: &str) { let mut g = self.inner.lock().unwrap(); if let Some(n) = g.busy.get_mut(id) { *n = n.saturating_sub(1); if *n == 0 { g.busy.remove(id); } } }
 
     /// A request on a profile: refused while another is in progress, or a launch is queued (accounts.js `jobs` / `launchQueues`). `check_busy`: also while a provider
@@ -447,7 +520,7 @@ impl Accounts {
         { if !self.inner.lock().unwrap().load_error.is_empty() { return Err(None) } }
         if op == "list" {
             // reverify saved profiles when the picker opens after a restart: initialization/status only
-            let todo: Vec<String> = { let g = self.inner.lock().unwrap(); g.profiles.iter().filter(|p| p.state == "unchecked" && !g.jobs.contains_key(&p.id)).map(|p| p.id.clone()).collect() };
+            let todo: Vec<String> = { let g = self.inner.lock().unwrap(); g.profiles.iter().filter(|p| (p.state == "unchecked" || p.state == "expired" && p.checked_at == 0) && !g.jobs.contains_key(&p.id)).map(|p| p.id.clone()).collect() };
             for id in todo { let _ = Box::pin(self.request_inner(&json!({"op":"status","profile":id}))).await; }
             return Ok(self.snapshot());
         }
@@ -455,7 +528,7 @@ impl Accounts {
             let (provider, lab) = (r["provider"].as_str().unwrap_or(""), label(r["label"].as_str().unwrap_or("")));
             let mut g = self.inner.lock().unwrap();
             if !matches!(provider, "claude" | "codex") || lab.is_empty() || g.profiles.len() >= 12 { return Err(None) }
-            let p = Profile { id: new_id(), provider: provider.into(), label: lab, epoch: 1, fingerprint: String::new(), store: String::new(), state: "disconnected".into(), identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message: String::new() };
+            let p = Profile { id: new_id(), provider: provider.into(), label: lab, epoch: 1, fingerprint: String::new(), store: String::new(), state: "disconnected".into(), identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message: String::new(), expired_at: 0, proven_at: 0 };
             self.directory(&p).map_err(|_| None)?;
             g.profiles.push(p); if self.save(&mut g).is_err() { g.profiles.pop(); return Err(None) } drop(g); return Ok(self.snapshot());
         }
@@ -495,9 +568,10 @@ impl Accounts {
         let res: Result<(), ()> = async {
             match op {
                 "status" => {
-                    match self.verify(&p, false).await {
-                        Ok(np) => { self.update(&pid, |slot| *slot = np)?; }
-                        Err(_) => { self.with_profile(&pid, |slot, g| { slot.state = "disconnected".into(); slot.identity = json!({}); slot.catalog = vec![]; slot.allowance = None; slot.message = "Account status could not be verified.".into(); g.revision += 1; }); }
+                    match self.verify_k(&p, false, r["asked"] == true).await {
+                        Ok(np) => { self.update(&pid, |slot| *slot = merge_checked(slot, np))?; }
+                        // a dead login stays one to sign in again: the CLI no longer naming anyone does not make it a disconnect
+                        Err(_) => { let _ = self.update(&pid, |slot| { if after(&slot.state, Fact::NoLogin) == "expired" { return } slot.state = "disconnected".into(); slot.identity = json!({}); slot.catalog = vec![]; slot.allowance = None; slot.message = "Account status could not be verified.".into(); slot.expired_at = 0; }); }
                     }
                     Ok(())
                 }
@@ -529,7 +603,9 @@ impl Accounts {
             let mut g = self.inner.lock().unwrap();
             let live: Vec<String> = g.jobs.iter().filter(|(_, v)| v.starts_with("attempt:")).map(|(k, _)| k.clone()).collect();
             g.attempts.retain(|a| live.contains(&a.profile));
-            if g.attempts.len() >= 8 || g.jobs.contains_key(&p.id) || g.busy.get(&p.id).copied().unwrap_or(0) > 0 || g.launching.get(&p.id).copied().unwrap_or(0) > 0 { return Err(()) }
+            // a dead login is signed in again even while a process of it lives: that process can do nothing with it, and the new sign-in has a store of its own
+            let dead = g.profiles.iter().any(|x| x.id == p.id && x.state == "expired");
+            if g.attempts.len() >= 8 || g.jobs.contains_key(&p.id) || (!dead && g.busy.get(&p.id).copied().unwrap_or(0) > 0) || g.launching.get(&p.id).copied().unwrap_or(0) > 0 { return Err(()) }
             let cand = Profile { store: aid.clone(), ..p.clone() };
             g.attempts.push(Attempt { id: aid.clone(), profile: p.id.clone(), state: "starting".into(), url: String::new(), user_code: String::new(), expires_at: now_ms() + 600_000, message: String::new(), previous_state: p.state.clone(), store: aid.clone() });
             g.jobs.insert(p.id.clone(), format!("attempt:{aid}"));
@@ -691,11 +767,13 @@ impl Accounts {
         let _turn = lock.lock().await;
         // the profile as it is now, after the launches ahead of this one: what they changed (identity, epoch, state) counts
         let p = self.profile(profile).map_err(|_| NO.to_string())?;
+        if p.state == "expired" && p.epoch.to_string() == epoch && cmd == p.provider { return Err(EXPIRED.into()) }
         if !matches!(p.state.as_str(), "connected" | "unchecked") || p.epoch.to_string() != epoch || cmd != p.provider { return Err(NO.into()) }
         let r = async {
             let np = self.verify(&p, false).await.map_err(|_| NO.to_string())?;
             // the verified identity is kept even when the turn is refused: the epoch it moved to is what the person must select again
-            self.update(profile, |slot| *slot = np.clone()).map_err(|_| "Account storage failed".to_string())?;
+            let np = { let mut kept = np.clone(); self.update(profile, |slot| { *slot = merge_checked(slot, np); kept = slot.clone(); }).map_err(|_| "Account storage failed".to_string())?; kept };
+            if np.state == "expired" { return Err(EXPIRED.into()) }
             if np.epoch.to_string() != epoch || np.state != "connected" { return Err("Account identity changed; select this account again".to_string()) }
             let program = (self.resolve)(cmd)?;
             let args: Vec<String> = if np.provider == "codex" { vec!["-c".into(), "cli_auth_credentials_store=\"file\"".into(), "-c".into(), "model_provider=\"openai\"".into()] }
@@ -727,7 +805,8 @@ impl Accounts {
     /// The 5-minute recheck of connected profiles (accounts.js `refresh`); a test hub and a copy never run it.
     pub async fn refresh(self: &Arc<Self>) {
         let now = now_s();
-        let ids: Vec<String> = { let g = self.inner.lock().unwrap(); g.profiles.iter().filter(|p| matches!(p.state.as_str(), "connected" | "unchecked") && !g.jobs.contains_key(&p.id) && g.busy.get(&p.id).copied().unwrap_or(0) == 0)
+        // an expired login is checked too, busy or not (a process of it can do nothing): a sign-in made elsewhere, or a provider that recovered, brings it back
+        let ids: Vec<String> = { let g = self.inner.lock().unwrap(); g.profiles.iter().filter(|p| (matches!(p.state.as_str(), "connected" | "unchecked") && g.busy.get(&p.id).copied().unwrap_or(0) == 0 || p.state == "expired") && !g.jobs.contains_key(&p.id))
             .filter(|p| { let at = g.refresh_at.get(&p.id).copied().unwrap_or(0).max(p.allowance.as_ref().and_then(|a| a["at"].as_u64()).unwrap_or(0)); at == 0 || now.saturating_sub(at) >= 300 }).map(|p| p.id.clone()).collect() };
         // a profile with a turn running is not verified again (its sign-in is in use), but its usage is a read-only request and is kept current
         let busy: Vec<String> = { let g = self.inner.lock().unwrap(); g.profiles.iter().filter(|p| p.provider == "claude" && p.state == "connected" && !g.jobs.contains_key(&p.id) && g.busy.get(&p.id).copied().unwrap_or(0) > 0)
@@ -736,6 +815,8 @@ impl Accounts {
             self.inner.lock().unwrap().refresh_at.insert(format!("usage:{id}"), now);
             let Ok(p) = self.profile(&id) else { continue };
             let r = self.claude_usage(Some(&p)).await; let n = now_s();
+            // the read was refused as a dead login: said now, before the next turn of it finds out
+            if matches!(&r, Err(reason) if fb_auth(reason)) { self.expire(&id, p.epoch); continue }
             let _ = self.with_profile(&id, |slot, g| { match r {
                 Ok(windows) => slot.allowance = Some(json!({"provider":"claude","state":"ok","at":n,"attempted_at":n,"auth":"claude.ai","source":"claude-cli-usage","windows":windows})),
                 Err(reason) => if slot.allowance.as_ref().map_or(true, |a| a["state"] != "ok") { slot.allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":n,"source":"claude-cli-usage","reason":reason,"windows":[]})) },
@@ -743,8 +824,9 @@ impl Accounts {
         }
         for id in ids {
             self.inner.lock().unwrap().refresh_at.insert(id.clone(), now);
-            if self.begin(&id, "refresh", true).is_err() { continue }
-            if let Ok(p) = self.profile(&id) { if let Ok(np) = self.verify(&p, false).await { let _ = self.update(&id, |slot| *slot = np); } }
+            let dead = self.profile(&id).map_or(false, |p| p.state == "expired");
+            if self.begin(&id, "refresh", !dead).is_err() { continue }
+            if let Ok(p) = self.profile(&id) { if let Ok(np) = self.verify(&p, false).await { let _ = self.update(&id, |slot| *slot = merge_checked(slot, np)); } }
             self.end(&id, "refresh");
         }
         let due = { let g = self.inner.lock().unwrap(); let at = g.refresh_at.get("default-claude").copied().unwrap_or(0); at == 0 || now.saturating_sub(at) >= 300 };
@@ -769,6 +851,43 @@ impl Accounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_sign_in_state_machine_keeps_a_dead_login_dead_until_something_proves_it_works() {
+        use Fact::*;
+        // a turn's provider says the login is dead: from any usable state it is expired; a sign-in under way and a disconnect stay what they are
+        for st in ["connected", "unchecked", "expired"] { assert_eq!(after(st, TurnRefused), "expired", "{st}") }
+        assert_eq!(after("connecting", TurnRefused), "connecting"); assert_eq!(after("disconnected", TurnRefused), "disconnected");
+        // Nov 7: `claude auth status` still named the account; that alone never makes a dead login connected again
+        assert_eq!(after("expired", Unproven), "expired"); assert_eq!(after("expired", NoLogin), "expired", "nobody signed in is still a sign-in to make, not a disconnect");
+        assert_eq!(after("expired", Refused), "expired"); assert_eq!(after("expired", Proven), "connected", "the provider answered a request made with it");
+        assert_eq!(after("expired", SignedIn), "connected");
+        // a usable login: a refused request finds it dead before any turn does; an unproven check keeps it as it was
+        assert_eq!(after("connected", Refused), "expired"); assert_eq!(after("connected", Unproven), "connected"); assert_eq!(after("unchecked", Unproven), "connected");
+        assert_eq!(after("connected", NoLogin), "disconnected"); assert_eq!(after("unchecked", NoLogin), "disconnected");
+        assert_eq!(after("connecting", Proven), "connecting", "a check never ends a sign-in");
+    }
+    #[test] fn a_check_that_started_before_the_login_died_does_not_bring_it_back() {
+        let base = Profile { id: "p".into(), provider: "claude".into(), label: "W".into(), epoch: 2, fingerprint: String::new(), store: String::new(), state: "connected".into(), identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message: String::new(), expired_at: 0, proven_at: 0 };
+        let dead = Profile { state: "expired".into(), expired_at: 100, message: EXPIRED_SHORT.into(), ..base.clone() };
+        let stale = Profile { checked_at: 120, proven_at: 50, ..base.clone() };
+        assert_eq!(merge_checked(&dead, stale.clone()).state, "expired", "its proof is older than the failure");
+        assert_eq!(merge_checked(&dead, Profile { proven_at: 130, ..stale.clone() }).state, "connected", "a request answered after it");
+        assert_eq!(merge_checked(&base, stale).state, "connected");
+    }
+    #[tokio::test] async fn an_expired_login_is_kept_across_a_restart_and_refuses_a_launch_in_words_the_failover_reads() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let home = std::env::temp_dir().join(format!("bp-acc-exp-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let a = Arc::new(Accounts::open(&home, Arc::new(|p: &str| Ok(PathBuf::from(p)))));
+        let (id, epoch) = a.plant("claude", "Work", "w@x.com", Value::Null).await;
+        assert!(!a.expire(&id, epoch + 1), "another epoch is another login"); assert!(a.expire(&id, epoch)); assert!(!a.expire(&id, epoch), "said once");
+        assert_eq!(a.state_of(&id), "expired");
+        let e = a.launch_plan(&id, &epoch.to_string(), "claude").await.unwrap_err(); assert_eq!(e, EXPIRED);
+        assert!(super::super::fallback::from_stderr("claude", "m", &e).map_or(false, |l| l.auth), "a start it refuses fails over as a failed login");
+        let again = Accounts::open(&home, Arc::new(|p: &str| Ok(PathBuf::from(p))));
+        let snap = again.snapshot(); let p = &snap["profiles"][0];
+        assert_eq!((p["state"].as_str().unwrap(), p["message"].as_str().unwrap()), ("expired", EXPIRED_SHORT), "a restart still knows");
+        assert!(p["expiredAt"].as_u64().unwrap() > 0);
+        let _ = std::fs::remove_dir_all(&home);
+    }
     static ENV: Mutex<()> = Mutex::new(());
     const CLAUDE: &str = r#"#!/usr/bin/env python3
 import sys, os, json, time

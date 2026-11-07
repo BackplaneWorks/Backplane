@@ -29,8 +29,9 @@ gradle.taskGraph.whenReady {
     }
 }
 
-val bpAppId = "dev.backplane.mobile.gpui"
-val bpScheme = "bpgpui"
+// -Pbp.appId=… -Pbp.scheme=…: a test build that installs beside the one a phone already uses (it keeps its pairing)
+val bpAppId = (findProperty("bp.appId") as String?) ?: "dev.backplane.mobile.gpui"
+val bpScheme = (findProperty("bp.scheme") as String?) ?: "bpgpui"
 
 android {
     namespace = "dev.backplane.mobile"

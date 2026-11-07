@@ -387,6 +387,8 @@ object DataClient {
     // ---- the hub's additions to data/1 (features actions, search, models, mentions, bots, notify)
     fun has(f: String) = f in features
     var openFromIntent by mutableStateOf<String?>(null)
+    /** An account whose sign-in an alert's tap (or backplane://account/<id>) opens. */
+    var openAccount by mutableStateOf<String?>(null)
     // a tapped notification's approval: the thread scrolls to it once it is loaded
     var pendingAsk by mutableStateOf("")
     /** Debug builds: the viewer tab the opened thread's viewer starts on (the intent's `vtab`). */
@@ -454,7 +456,7 @@ object DataClient {
         val tid = o.optString("thread"); val key = o.optString("key"); val ask = o.optString("ask")
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         nm.createNotificationChannel(android.app.NotificationChannel("data-alerts", "Alerts", android.app.NotificationManager.IMPORTANCE_DEFAULT))
-        val intent = android.content.Intent(app, DataActivity::class.java).putExtra("thread", tid).putExtra("ask", ask).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val intent = android.content.Intent(app, DataActivity::class.java).putExtra("thread", tid).putExtra("ask", ask).putExtra("link", o.optString("link")).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val open = android.app.PendingIntent.getActivity(app, key.hashCode(), intent, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
         val n = android.app.Notification.Builder(app, "data-alerts").setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle(o.optString("title").ifEmpty { "Backplane" })
             .setContentText(o.optString("body")).setGroup(tid).setNumber(o.optInt("badge")).setContentIntent(open).setAutoCancel(true).build()

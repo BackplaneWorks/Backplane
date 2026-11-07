@@ -44,14 +44,17 @@ struct DataRoot: View {
         .onChange(of: client.pendingThread) { _, id in if let id { path.append(id); client.pendingThread = nil } }
         .onOpenURL { route($0) }
         .onChange(of: client.pushThread, initial: true) { _, t in if !t.isEmpty { var p = NavigationPath(); p.append(t); path = p; client.pushThread = "" } }
+        // an alert that a sign-in expired: Settings, Accounts, that account, its sign-in started
+        .onChange(of: client.pushAccount, initial: true) { _, a in if !a.isEmpty { var p = NavigationPath(); p.append(DPage(name: "settings")); p.append(DPage(name: "accounts")); p.append(DAccountRoute(id: a, start: true)); path = p; client.pushAccount = "" } }
         // a newly paired (or forgotten) hub starts again on the list
         .onChange(of: client.links.isEmpty) { _, _ in path = NavigationPath() }
     }
 
-    /// This app's links, its one handler: backplane://thread/<id> opens that thread; any other (a pairing link) asks first (DataClient.opened).
+    /// This app's links, its one handler: backplane://thread/<id> opens that thread, backplane://account/<id> that account's sign-in; any other (a pairing link) asks first (DataClient.opened).
     private func route(_ url: URL) {
         guard url.scheme == "backplane" || url.scheme == AppIdentity.scheme else { return }
-        if url.host == "thread" { if let id = url.pathComponents.dropFirst().first { path.append(id) } } else { client.opened(url) }
+        if url.host == "thread" { if let id = url.pathComponents.dropFirst().first { path.append(id) } }
+        else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } } else { client.opened(url) }
     }
 }
 
@@ -113,7 +116,8 @@ struct DataThreadsView: View {
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t) }
             else { DLoading(text: client.conn == .online ? "Loading the thread…" : "Connecting to the hub…") } // never a blank page while the thread list comes
         }
-        .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else { DataImprovementsView(client: client) } }
+        .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else { DataImprovementsView(client: client) } }
+        .navigationDestination(for: DAccountRoute.self) { DataAccountView(client: client, route: $0) }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
         .alert("Rename project", isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
             TextField("Title", text: $projectTitle)
@@ -910,6 +914,7 @@ struct DataSettingsView: View {
                     Button("Forget this hub") { confirmUnpair = true }.buttonStyle(DButton(danger: true))
                 }
                 NavigationLink(value: DPage(name: "hub")) { Text("Hub") }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub")
+                if client.has("accounts") { NavigationLink(value: DPage(name: "accounts")) { Text("Accounts") }.buttonStyle(DButton()).accessibilityIdentifier("settings.accounts") }
                 DLine()
                 DataUpdateSection(client: client)
                 DLine()

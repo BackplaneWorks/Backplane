@@ -30,8 +30,8 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
     }
     nonisolated func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse, withCompletionHandler done: @escaping () -> Void) {
         let i = r.notification.request.content.userInfo
-        let (thread, ask) = (i["thread"] as? String ?? "", i["ask"] as? String ?? "")
-        DispatchQueue.main.async { MainActor.assumeIsolated { DataClient.shared.openPush(thread: thread, ask: ask); done() } }
+        let (thread, ask, link) = (i["thread"] as? String ?? "", i["ask"] as? String ?? "", i["link"] as? String ?? "")
+        DispatchQueue.main.async { MainActor.assumeIsolated { DataClient.shared.openPush(thread: thread, ask: ask, link: link); done() } }
     }
 }
 

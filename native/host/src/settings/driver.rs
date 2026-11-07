@@ -131,13 +131,18 @@ fn hold_of(w: &World, id: &str, epoch: u64) -> (u64, bool) {
 /// The thread waits: every account of the provider is out. Said plainly, and with the time when one is known.
 fn wait_all(w: &World, profiles: &[Value], from: &str, cur_id: &str, cur_epoch: u64) -> Next {
     let (th, at) = (w.thread.as_str(), w.now); let get = |k: &str| w.get(k);
+    // a named account whose sign-in is dead: the thread waits for the person to sign it in again, and goes on by itself once they have (`signed_in`)
+    let signin = !cur_id.is_empty() && hold_of(w, cur_id, cur_epoch).1;
     let until = fb::next_reset(profiles, &get, at, &w.provider, &w.model, cur_id, cur_epoch);
     let until = if until > at { until } else { 0 };
     let mut names: Vec<String> = profiles.iter().filter(|p| p["provider"] == w.provider.as_str() && p["state"] == "connected").filter_map(|p| p["label"].as_str().map(str::to_string)).collect();
     if cur_id.is_empty() { names.insert(0, "Default account".into()) }
     let list = if names.is_empty() { String::new() } else { format!(" ({})", names.join(", ")) };
-    let say = if until > 0 { format!("Every {} account is out{list}. Continuing at {}, when the first one resets.", w.provider, rules::when(&w.zone(), until, at)) } else { format!("Every {} account is out{list} and no reset time is known. Waiting for you.", w.provider) };
-    let mut events = vec![set(&format!("provider.resume.{th}"), &json!({"target":from,"reset":until,"reason":"account usage limit"}).to_string(), at)];
+    let say = if signin && until == 0 { format!("{}'s sign-in expired and no other {} account can take over. Continuing once you sign in again.", w.name(cur_id), w.provider) }
+        else if until > 0 { format!("Every {} account is out{list}. Continuing at {}, when the first one resets.", w.provider, rules::when(&w.zone(), until, at)) } else { format!("Every {} account is out{list} and no reset time is known. Waiting for you.", w.provider) };
+    let mut rec = json!({"target":from,"reset":until,"reason":if signin { "sign-in expired" } else { "account usage limit" }});
+    if signin { rec["signin"] = json!(cur_id) }
+    let mut events = vec![set(&format!("provider.resume.{th}"), &rec.to_string(), at)];
     if until == 0 { events.push(json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":at})) } // nothing will start it again: its task and launcher hear it stopped
     events.push(act_row(th, "warn", "provider-wait", &say, at));
     Next::Wait { events, reset: until }
@@ -206,7 +211,14 @@ fn merged(line: Option<fb::Limit>, seen: Option<fb::Limit>) -> Option<fb::Limit>
 }
 /// Called by the agents' actor for every line of a running turn, right after the line's own events are built. `end`: the state this line ended the turn in. `seen`: the limit the
 /// actor remembers for this turn (the settings written for an earlier line of the same read are not committed yet). Empty unless the line is a provider's for a running thread, and the thread's own (not a subagent's).
-pub async fn on_line(hub: &Arc<Hub>, thread: &str, v: &Value, end: Option<&str>, seen: &mut Option<fb::Limit>) -> Verdict {
+/// A dead login on a named account: the account says so (accounts_io `expire`), so no status check calls it connected while it cannot run a turn, and the person is asked to sign
+/// it in again. The CLI's own login is not an account here.
+fn expire_login(acc: Option<&Arc<crate::settings::accounts_io::Accounts>>, w: &World, lim: &fb::Limit) {
+    if !lim.auth { return }
+    let (id, epoch) = w.binding();
+    if let (false, Some(m)) = (id.is_empty(), acc) { m.expire(&id, epoch); }
+}
+pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_io::Accounts>>, thread: &str, v: &Value, end: Option<&str>, seen: &mut Option<fb::Limit>) -> Verdict {
     if !v["parent_tool_use_id"].as_str().unwrap_or("").is_empty() { return Verdict::default() }
     // a cheap look first: only an error envelope, a rejected-limit event or an assistant line can be a limit; any line that ends the turn decides one remembered
     let t = v["type"].as_str().unwrap_or("");
@@ -225,19 +237,22 @@ pub async fn on_line(hub: &Arc<Hub>, thread: &str, v: &Value, end: Option<&str>,
         let Some(lim) = lim else { return Verdict::default() };
         *seen = merged(Some(lim.clone()), seen.take());
         let w = world_of(hub, thread, provider, model).await;
+        expire_login(acc, &w, &lim);
         return on_limit(&w, seen.as_ref().unwrap_or(&lim), false, "");
     }
     let lim = merged(lim, seen.take());
     let w = world_of(hub, thread, provider, model).await;
     let Some(lim) = lim.or_else(|| pending_of(&w).filter(|p| due(p, w.now))) else { return Verdict::default() };
+    expire_login(acc, &w, &lim);
     let orig = original(hub, thread).await;
     on_limit(&w, &lim, true, &orig)
 }
 /// A running turn's process ended with no line ending the turn: a limit remembered, or one it left on stderr, is acted on as the line would have been.
-pub async fn on_exit(hub: &Arc<Hub>, thread: &str, stderr: &str, seen: &mut Option<fb::Limit>) -> Verdict {
+pub async fn on_exit(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_io::Accounts>>, thread: &str, stderr: &str, seen: &mut Option<fb::Limit>) -> Verdict {
     let (provider, model) = { let m = hub.model().await; match m.threads.get(thread) { Some(t) if t.turn == "running" => (t.provider.clone(), t.model.clone()), _ => return Verdict::default() } };
     let Some(lim) = merged(fb::from_stderr(&provider, &model, stderr), seen.take()) else { return Verdict::default() };
     let w = world_of(hub, thread, provider, model).await; let orig = original(hub, thread).await;
+    expire_login(acc, &w, &lim);
     on_limit(&w, &lim, true, &orig)
 }
 
@@ -299,6 +314,39 @@ pub(crate) async fn resume_on(ag: &Arc<Agents>, th: &str, msg: &str, ev: Vec<Val
         Ok(false) => {}
         Err(e) => eprintln!("driver: {th}: the resume could not switch: {e}"),
     }
+}
+pub const SIGNIN_TEXT: &str = "[Backplane] This account was signed in again after its sign-in expired, so the turn starts again. Continue the interrupted work from its current state. Check completed tool results and any work still running before repeating an action.";
+/// SignIn.restart: which waiting threads a sign-in ends. A record names the account whose expired sign-in stopped the thread (`wait_all`); the thread is still as it was left
+/// (alive, not held, dormant or ephemeral, its turn Interrupted with nothing queued, the record's target still its own).
+pub fn signin_ready(f: &ResumeFacts, rec: &Value, profile: &str) -> bool {
+    !profile.is_empty() && rec["signin"].as_str() == Some(profile) && f.exists && f.live && !(f.held || f.dormant || f.ephemeral) && f.interrupted && f.pending == 0 && rec["target"].as_str().unwrap_or("") == f.target
+}
+/// An account whose sign-in had expired is connected again (accounts_hub `found`): every thread its expiry stopped goes on, on that account at its new epoch, with the
+/// conversation handed over (a new sign-in is a new store: the old native session is not there). A person's pin on the account moves to the new epoch with it.
+pub(crate) async fn signed_in(ag: &Arc<Agents>, profile: &str, now_s: u64) -> usize {
+    let hub = ag.hub.clone();
+    let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("provider.resume.").map(|(k, _)| k.to_string()).collect() };
+    let inv = hub.setting("accounts.inventory").await.unwrap_or_default();
+    let p = accounts::profile(&inv, profile);
+    let (epoch, provider) = (p["epoch"].as_u64().unwrap_or(0), p["provider"].as_str().unwrap_or("").to_string());
+    if p["state"] != "connected" { return 0 }
+    let mut n = 0;
+    for k in keys {
+        let th = k.trim_start_matches("provider.resume.").to_string();
+        let rec: Value = serde_json::from_str(&hub.setting(&k).await.unwrap_or_default()).unwrap_or(Value::Null);
+        if !signin_ready(&resume_facts(&hub, &th).await, &rec, profile) { continue }
+        let chosen = hub.setting(&accounts::chosen_key(&th, &provider)).await.unwrap_or_default();
+        let c: Value = serde_json::from_str(&chosen).unwrap_or(Value::Null);
+        if c["by"] == "person" && c["id"] == profile { let _ = hub.commit_many(&[set(&accounts::chosen_key(&th, &provider), &accounts::chosen_show(profile, epoch, "person", c["who"].as_str().unwrap_or(""), now_s), now_s)]).await; }
+        let name = accounts::label(profile, &p);
+        if let Err(e) = ask(&hub, "accounts.choose", json!({"thread":th,"profile":profile,"epoch":epoch,"by":"failover","say":format!("Back on {name}: signed in again")})).await { eprintln!("driver: {th}: could not go back to its account after the sign-in: {e}"); continue }
+        let seq = hub.revision().await;
+        let ev = vec![set(&k, "", now_s), set(&tried_key(&th), "", now_s), json!({"$":"ActivityLogged","thread":th,"act":crate::agents::lines::hub_id("signin", now_s, seq),"tone":"info","kind":"provider-resume","summary":format!("{name} is signed in again; continuing from the last step"),"at":now_s})];
+        let orig = original(&hub, &th).await;
+        let text = if orig.trim().is_empty() || orig.starts_with("[Backplane]") { SIGNIN_TEXT.to_string() } else { format!("{SIGNIN_TEXT}\n\nOriginal request (context, not a new task):\n{orig}") };
+        if ag.deliver(&th, &crate::agents::lines::hub_id("signin", now_s, seq), &text, None, ev).await.is_ok() { n += 1 }
+    }
+    n
 }
 /// Holds with no reset that a newer fact has ended (fallback.rs `clearable`).
 pub(crate) async fn sweep_holds(hub: &Arc<Hub>, now_s: u64) {
@@ -465,6 +513,26 @@ mod tests {
         let v = on_limit(&world("claude", "opus", &[]), &l, true, "go"); assert!(v.events.is_empty() && !v.drop_turn_end && v.act.is_none());
         let (k, i) = two(); let w = world("claude", "opus", &[(k, i), ("account.thread.t1.claude", accounts::binding_show("w", 2))]);
         let v = on_limit(&w, &l, true, "go"); let rec: Value = serde_json::from_str(v.events[0]["value"].as_str().unwrap()).unwrap(); assert_eq!((rec["auth"].clone(), rec["reset"].clone()), (json!(true), json!(0)));
+    }
+    #[test] fn a_dead_sign_in_with_no_account_to_take_over_waits_for_the_sign_in_and_names_it() {
+        let (k, i) = two(); let l = fb::Limit { scope: "claude".into(), reason: "Failed to authenticate: OAuth session expired and could not be refreshed".into(), reset: 0, auth: true };
+        let mut w = world("claude", "opus", &[(k, i), ("account.thread.t1.claude", accounts::binding_show("w", 2))]); w.now = now_ms() / 1000;
+        let held = w.with(&on_limit(&w, &l, true, "go").events).with(&[set(&fb::hold_key("claude", "p", 1), &json!({"scope":"claude","reset":0,"auth":true}).to_string(), 1)]);
+        match next(&held) { Next::Wait { events, reset } => {
+            assert_eq!(reset, 0);
+            let rec: Value = serde_json::from_str(events[0]["value"].as_str().unwrap()).unwrap(); assert_eq!((rec["signin"].as_str(), rec["reason"].as_str()), (Some("w"), Some("sign-in expired")), "the sign-in it waits for");
+            assert_eq!(events.last().unwrap()["summary"], "Work's sign-in expired and no other claude account can take over. Continuing once you sign in again.");
+        } n => panic!("{n:?}") }
+        // a limit, not a sign-in: no account named
+        let lim_w = w.with(&on_limit(&w, &lim("claude", 0), true, "go").events).with(&[set(&fb::hold_key("claude", "p", 1), &json!({"scope":"claude","reset":0}).to_string(), 1)]);
+        match next(&lim_w) { Next::Wait { events, .. } => { let rec: Value = serde_json::from_str(events[0]["value"].as_str().unwrap()).unwrap(); assert!(rec["signin"].is_null()) } n => panic!("{n:?}") }
+    }
+    #[test] fn a_sign_in_goes_on_with_exactly_the_threads_it_stopped() {
+        let r = json!({"target":"claude/opus","reset":0,"signin":"w"});
+        assert!(signin_ready(&facts(), &r, "w")); assert!(!signin_ready(&facts(), &r, "p"), "another account's"); assert!(!signin_ready(&facts(), &rec(0), "w"), "a limit's wait");
+        assert!(!signin_ready(&ResumeFacts { pending: 1, ..facts() }, &r, "w"), "the person queued something: theirs goes first");
+        assert!(!signin_ready(&ResumeFacts { target: "claude/sonnet".into(), ..facts() }, &r, "w"), "the person changed it"); assert!(!signin_ready(&ResumeFacts { interrupted: false, ..facts() }, &r, "w"));
+        assert!(!signin_ready(&ResumeFacts { ephemeral: true, ..facts() }, &r, "w"));
     }
     #[test] fn a_limit_with_no_reset_of_its_own_takes_the_one_of_the_window_that_filled() {
         let at = 1000; let (k, i) = inv(json!([{"id":"w","provider":"claude","state":"connected","epoch":2,"label":"Work","allowance":{"windows":[{"scope":"five_hour","used_percent":100.0,"resets_at":5000}]}}]));
