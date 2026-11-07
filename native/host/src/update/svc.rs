@@ -9,7 +9,9 @@ use std::{fs, path::{Path, PathBuf}, sync::{atomic::{AtomicBool, Ordering::SeqCs
 
 const EVERY: u64 = 3600;
 
-pub fn builds() -> Option<PathBuf> { std::env::var_os("BACKPLANE_BUILDS").filter(|v| !v.is_empty()).map(PathBuf::from) }
+/// A test hub never reads BACKPLANE_BUILDS: an agent's shell inherits the person's (the dev hub sets it), and a test hub would then take their builds folder for its
+/// own (update.check said "off", not "package", and the hourly check would look at the real builds). A test that wants one sets BACKPLANE_TEST_BUILDS.
+pub fn builds() -> Option<PathBuf> { std::env::var_os(if cfg!(test) { "BACKPLANE_TEST_BUILDS" } else { "BACKPLANE_BUILDS" }).filter(|v| !v.is_empty()).map(PathBuf::from) }
 /// `BACKPLANE_NO_UPDATE=1`, or a copy of a real log, which acts on nothing outside its home.
 fn off() -> bool { crate::copy::on() || std::env::var("BACKPLANE_NO_UPDATE").map_or(false, |v| v == "1") }
 /// The feed. A flag or the environment may change it, never a setting: any paired client can write a setting, and this names what a hub runs next. The signature still has to match.
