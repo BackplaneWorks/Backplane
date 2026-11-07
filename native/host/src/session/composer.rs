@@ -68,11 +68,11 @@ fn say(text: &str) -> ActOut { ActOut { session_patch: json!({}), cmds: vec![jso
 /// What the composer holds now: `keep` for the kept copy, `compose` for the box itself.
 fn compose(hub: &str, sel: &str, text: &str) -> Vec<Value> { vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text}), json!({"type": "compose", "thread": sel, "text": text})] }
 /// The composer's own commands, none of them ever a message: `(word, the Send button's label, what it does)`. The clients match a draft against these (`command_is`).
-pub const WORDS: [(&str, &str, &str); 4] = [("/btw", "Ask", super::slash::OWN[0].1), ("/give", "Give", super::slash::OWN[1].1), ("/secret", "Send", super::slash::OWN[2].1), ("/intent", "Save", "Save this project's intent")];
+pub const WORDS: [(&str, &str, &str); 5] = [("/btw", "Ask", super::slash::OWN[0].1), ("/give", "Give", super::slash::OWN[1].1), ("/secret", "Send", super::slash::OWN[2].1), ("/intent", "Save", "Save this project's intent"), ("/settle", "Settle", super::slash::OWN[3].1)];
 /// The same table as data, for the phones (`hello.commands`) and the desktop (`thread.commands`).
 pub fn words() -> Value { Value::Array(WORDS.iter().map(|(w, l, d)| json!({"word": w, "label": l, "desc": d})).collect()) }
 /// A draft read as one of the composer's commands, and what follows the word.
-#[derive(Debug, PartialEq)] pub enum Word { Btw(String), Give, Secret(String), Intent(String) }
+#[derive(Debug, PartialEq)] pub enum Word { Btw(String), Give, Secret(String), Intent(String), Settle }
 pub fn word_of(draft: &str) -> Option<Word> {
     let rest = |w: &str| draft.trim().get(w.len()..).unwrap_or("").trim().to_string();
     // Sbox.is, Intent.is, Give.is, Btw.is, in the order Ui.send asks them
@@ -80,6 +80,7 @@ pub fn word_of(draft: &str) -> Option<Word> {
     if command_is(draft, "/intent") { return Some(Word::Intent(rest("/intent"))) }
     if command_is(draft, "/give") { return Some(Word::Give) }
     if command_is(draft, "/btw") { return Some(Word::Btw(rest("/btw"))) }
+    if command_is(draft, "/settle") { return Some(Word::Settle) }
     None
 }
 /// Bound.refuse: a draft this view holds only bounded is never sent; `marker` starts with its size in bytes. A message's bound is 128 KB.
@@ -115,6 +116,8 @@ fn run(cx: &SendCtx, session: &Value, sel: &str, w: Word) -> ActOut {
             let mut cmds = compose(cx.hub, sel, ""); cmds.push(req("thread.btw", json!({"thread": sel, "q": q})));
             ActOut { session_patch: json!({"rid": rid + 1, "drafts": drafts}), cmds }
         }
+        // settles the thread (its turn, work, tasks and locks stop with it); the composer is emptied at once
+        Word::Settle => { let mut drafts = Map::new(); drafts.insert(sel.to_string(), json!("")); let mut cmds = compose(cx.hub, sel, ""); cmds.push(req("thread.settle", json!({"thread": sel}))); ActOut { session_patch: json!({"rid": rid + 1, "drafts": drafts}), cmds } }
         Word::Give => ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![req("bots.give", json!({"thread": sel, "text": draft_of(session, sel).trim()}))] },
         Word::Secret(name) => ActOut { session_patch: json!({"drafts": {sel: "", "@sbox": if name.is_empty() { "+" } else { name.as_str() }, "@sbox.th": sel, "@sbox.err": "", "@f.sname": name}}), cmds: compose(cx.hub, sel, "") },
         // `/intent` alone has nothing to save, and saving nothing would empty the file: it opens the intent to edit
@@ -202,7 +205,7 @@ pub fn fields(draft: &str, running: bool, attaching: bool, claude: bool, own_ski
     if !matches!(lang, "" | "en") { return None }
     // Follow.stop: Stop while a turn runs and nothing is typed or attached
     let stop = running && blank(draft) && !attaching;
-    let label = if stop { "Stop" } else if command_is(draft, "/btw") { "Ask" } else if command_is(draft, "/give") { "Give" } else if command_is(draft, "/intent") { "Save" } else if running { "Steer" } else { "Send" };
+    let label = if stop { "Stop" } else if command_is(draft, "/btw") { "Ask" } else if command_is(draft, "/give") { "Give" } else if command_is(draft, "/intent") { "Save" } else if command_is(draft, "/settle") { "Settle" } else if running { "Steer" } else { "Send" };
     let skills = if super::slash::typing(draft) { slash_rows(claude, draft) } else { own_skills.clone() };
     Some(json!({"draft": draft, "skills": skills, "send": label, "sendAct": if stop { "interrupt" } else { "send" }}))
 }
@@ -325,6 +328,7 @@ mod tests {
     fn with(d: &str) -> Value { json!({"sel": T, "rid": 2, "drafts": {T: d}, "info": {}}) }
     #[test] fn the_composers_words_are_read_from_the_draft() {
         assert_eq!(word_of("/btw  why now \n"), Some(Word::Btw("why now".into()))); assert_eq!(word_of("/btw"), Some(Word::Btw("".into())));
+        assert_eq!(word_of("/settle"), Some(Word::Settle)); assert_eq!(word_of(" /settle \n"), Some(Word::Settle)); assert_eq!(word_of("/settled"), None);
         assert_eq!(word_of("/give >x note"), Some(Word::Give)); assert_eq!(word_of("/secret"), Some(Word::Secret("".into()))); assert_eq!(word_of("/secret github-token"), Some(Word::Secret("github-token".into())));
         assert_eq!(word_of("/intent\n# Goal\nlamp"), Some(Word::Intent("# Goal\nlamp".into()))); assert_eq!(word_of("/compact"), None); assert_eq!(word_of("hi /btw"), None); assert_eq!(word_of("/btwx"), None);
     }
@@ -353,6 +357,7 @@ mod tests {
         assert!(o.session_patch["drafts"].is_null() && o.cmds.len() == 1, "a refusal must find the text still there");
     }
     #[test] fn secret_opens_the_box_and_sends_nothing() {
+        let o = send(&cx(), &with("/settle")).unwrap(); let (m, p) = sent_method(&o).unwrap(); assert_eq!((m.as_str(), p["thread"].as_str()), ("thread.settle", Some("t1700000002-3")));
         let o = send(&cx(), &with("/secret gh")).unwrap(); assert!(sent_method(&o).is_none());
         let mut s = with(""); crate::session::patch::merge(&mut s, &o.session_patch);
         let b = secret_box(&s, T, "A thread", &[]);

@@ -96,11 +96,17 @@ impl Agents {
         let r = self.interrupt(target).await; if let Some(m) = self.mailroom() { m.stopping(target).await } /* Run.queue.hold */ match r { Ok(()) => (true, json!({"threadId":target,"state":"interrupted"})), Err(e) => { self.stopped_by.lock().unwrap().remove(target); fail(&e) } } // an interrupt that failed leaves no mark: the thread's next real end is reported
     }
     /// The Settle button for an agent: this thread (or another of the project) is settled, as `thread.settle` does.
-    pub async fn tool_settle(&self, thread: &str, a: &Value) -> (bool, Value) {
+    pub async fn tool_settle(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
         if crate::net::far::is(target) { return fail("name the thread (threadId)") }
         if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         self.commit_events(vec![json!({"$":"ThreadSettled","id":target,"manual":true,"at":now_s()})]).await;
+        // another thread is stopped as the person's Settle stops it (its turn, its agent process); the caller's own turn ends by itself
+        if target != thread {
+            if self.world().await.running(target) { self.stopped_by.lock().unwrap().insert(target.to_string(), thread.to_string()); let _ = self.interrupt(target).await; if let Some(m) = self.mailroom() { m.stopping(target).await } }
+            let _ = self.stop(target).await;
+        }
+        self.settle_work(target).await;
         (true, json!({"threadId":target,"settled":true}))
     }
     pub async fn tool_wait(&self, thread: &str, a: &Value) -> (bool, Value) {

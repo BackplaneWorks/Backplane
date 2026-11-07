@@ -344,6 +344,7 @@ async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, 
         }
         Some(Word::Give) => rpc(hub, c, "bots.give", json!({"thread":th,"text":text.trim()})).await.map(|_| json!({"kind":"give"})),
         Some(Word::Secret(name)) => Ok(json!({"kind":"secret","name":name})),
+        Some(Word::Settle) => rpc(hub, c, "thread.settle", json!({"thread":th})).await.map(|_| json!({"kind":"settle"})),
         Some(Word::Intent(b)) if b.is_empty() => { let card = crate::settings::fab::look(hub, th).await; Ok(json!({"kind":"edit","text":intent_edit(card["intent"].as_str().unwrap_or(""))})) }
         Some(Word::Intent(b)) => rpc(hub, c, "fab.intent", json!({"thread":th,"text":b})).await.map(|_| json!({"kind":"intent"})),
     }

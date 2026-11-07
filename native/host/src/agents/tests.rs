@@ -1598,3 +1598,57 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"board","path":""}})).await;
     let t = tool_text(&r); assert_eq!(t["settled"], false); assert_eq!(t["viewer"]["open"], "mech");
 }
+
+// ---- Settle: the thread's turn and everything it owns stop, and nothing starts it again ----
+async fn tool_of(ag: &Arc<Agents>, name: &str) -> Arc<dyn mcp::ToolSet> { ag.tool_sets().into_iter().find(|s| s.owns(name)).expect("tool set") }
+#[tokio::test(flavor = "multi_thread")] async fn settling_stops_the_turn_and_all_the_work_and_nothing_starts_it_again() {
+    let sd = dir("st-bin"); perf_standin(&sd, 30);
+    let (hub, ag, _h, _w) = start("st", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await; let other = "t1700001001-1";
+    crate::commands::start_with(hub.clone(), Some(Arc::new(ag.clone()) as Arc<dyn crate::commands::seam::Seam>));
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqlong"})).await;
+    until(&hub, 0, 60, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant")).await;
+    assert!(ag.world().await.running(T1), "a turn is running");
+    // what the thread owns: watched work, a lock, a wake, a launched thread with a turn of its own, a delegated-style task row
+    let (_, w) = ag.tool_work_run(T1, &json!({"command":"sleep 60","note":"slow"})).await; let wid = w["id"].as_str().unwrap().to_string();
+    assert!(ag.tool_lock_acquire(T1, &json!({"name":"bench"})).await.0);
+    let wakes = tool_of(&ag, "wake_on").await; assert!(wakes.call(T1, "wake_on", &json!({"kind":"thread","target":other})).await.0);
+    let (ok, l) = ag.tool_launch(T1, &json!({"prompt":"zqlong child"})).await; assert!(ok, "{l}"); let child = l["threadId"].as_str().or(l["childThreadId"].as_str()).unwrap().to_string();
+    tokio::time::sleep(Duration::from_secs(3)).await; // the child gets a moment to run
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "thread.settle", json!({"thread":T1})).await["ok"], true);
+    let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().map_or(false, |t| t.contains("\"slow\" ended: cancelled")))).await;
+    assert!(ev.iter().any(|e| is(e, "ThreadSettled") && e["id"] == T1 && e["manual"] == true));
+    assert!(ev.iter().any(|e| turn_is(e, "interrupted") && e["thread"] == T1), "the running turn was interrupted");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(ag.tool_work_list(T1).await.1["work"].as_array().unwrap().is_empty(), "no work row is left");
+    assert!(!ag.works.lock().unwrap().contains_key(&wid));
+    assert!(ag.tool_lock_list().await.1["locks"].as_array().unwrap().iter().all(|l| l["holder"].is_null() || l["holder"]["id"] != T1), "no lock is held: {:?}", ag.tool_lock_list().await.1);
+    assert_eq!(wakes.call(T1, "wake_list", &json!({})).await.1["wakes"].as_array().unwrap().len(), 0, "no wake is left");
+    assert!(!ag.world().await.running(&child), "the launched thread was stopped");
+    // the report of the cancelled work was filed, and the settled thread did not start a turn for it
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let after = log_from(&hub, from).await;
+    assert!(!after.iter().any(|e| turn_is(e, "running") && e["thread"] == T1), "a settled thread is not started again by its reports: {after:?}");
+    assert!(!ag.world().await.running(T1));
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_recovery_leaves_a_settled_thread_settled_and_stopped() {
+    let sd = dir("st2-bin"); perf_standin(&sd, 1);
+    // a turn cut by a restart is carried on, unless the thread was settled: the log says running, then settled
+    let (hub, ag, _h, _w) = start("st2", |w| running_log(w, &format!("{{\"$\":\"ThreadSettled\",\"id\":\"{T1}\",\"manual\":true,\"at\":1700000101}}\n")), |_| Cli::standin(&sd)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await; let ev = log_from(&hub, 0).await;
+    assert!(ev.iter().any(|e| turn_is(e, "interrupted")), "the cut turn is marked stopped");
+    assert!(!ev.iter().any(|e| turn_is(e, "running") && e["at"].as_u64().unwrap_or(0) > 1700000101), "no turn was carried on: {ev:?}");
+    assert!(!ag.world().await.running(T1)); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn the_agents_own_settle_tool_stops_the_work_of_another_thread() {
+    let sd = dir("st3-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("st3", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await; let other = "t1700001001-1";
+    let (_, r) = ag.tool_work_run(other, &json!({"command":"sleep 60","note":"theirs"})).await; assert!(r["id"].is_string());
+    let from = len(&hub).await;
+    assert!(ag.tool_settle(T1, &json!({"threadId":other})).await.0);
+    until(&hub, from, 30, |ev| ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("ended: cancelled")))).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(ag.tool_work_list(other).await.1["work"].as_array().unwrap().is_empty());
+    assert!(!log_from(&hub, from).await.iter().any(|e| turn_is(e, "running") && e["thread"] == other), "the report did not start the settled thread"); ag.shutdown();
+}

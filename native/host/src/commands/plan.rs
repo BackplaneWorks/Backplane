@@ -115,7 +115,13 @@ pub fn plan(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) ->
 fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) -> Option<Plan> {
     let th = s(p, "thread", "");
     match method {
-        "thread.settle" => done(vec![json!({"$":"ThreadSettled","id":th,"manual":true,"at":at})], id),
+        // Settle: a running turn is interrupted and the agent process stopped first (as archive does, see mod.rs), the background shells' rows go with it,
+        // and once it is logged everything else the thread owns stops (agents/settle.rs, mod.rs)
+        "thread.settle" => {
+            let mut ev = vec![json!({"$":"ThreadSettled","id":th,"manual":true,"at":at})];
+            if !f.setting(&format!("bg.{th}")).is_empty() { ev.push(json!({"$":"WorkSet","thread":th,"kind":"bg","rows":"","at":at})) }
+            Some(Plan { events: ev, reply: ok(id), stop: Some(th.clone()), wt: None, scratch: None, act: None })
+        }
         "thread.unsettle" => done(vec![json!({"$":"ThreadUnsettled","id":th,"at":at})], id),
         "thread.pin" => done(vec![json!({"$":"ThreadPinned","id":th,"pinned":true,"at":at})], id),
         "thread.unpin" => done(vec![json!({"$":"ThreadPinned","id":th,"pinned":false,"at":at})], id),
