@@ -99,11 +99,12 @@ fn snapshot_dir(home: &Path) -> Result<PathBuf, &'static str> {
 }
 /// mi_source: the source path to read: absolute or ~/, an image extension, no "." or ".." part, no NUL CR LF or backslash, and no symlink anywhere on it.
 pub fn source(src: &str) -> Result<PathBuf, &'static str> {
-    if src.len() > 1024 || src.contains(['\0', '\r', '\n', '\\']) || src.split('/').any(|x| x == "." || x == "..") { return Err("Invalid image path") }
+    // (Windows: a backslash is a separator there, not refused)
+    if src.len() > 1024 || src.contains(['\0', '\r', '\n']) || (cfg!(unix) && src.contains('\\')) || src.split(crate::plat::fs::SEPS).any(|x| x == "." || x == "..") { return Err("Invalid image path") }
     let file = match src.strip_prefix("~/") { Some(rest) => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(rest), None => PathBuf::from(src) };
     let l = file.to_string_lossy().to_lowercase();
     if !file.is_absolute() || !(l.ends_with(".png") || l.ends_with(".jpg") || l.ends_with(".jpeg") || l.ends_with(".gif") || l.ends_with(".webp") || l.ends_with(".bmp")) { return Err("Invalid image path") }
-    if crate::plat::fs::canonicalize(&file).map_err(|_| "Invalid image path")? != file { return Err("Image symlink") }
+    if !crate::plat::fs::no_link_on(&file).map_err(|_| "Invalid image path")? { return Err("Image symlink") }
     Ok(file)
 }
 fn valid_name(n: &str) -> bool { n.len() > 65 && n.as_bytes()[64] == b'.' && n[..64].bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')) && matches!(&n[65..], "png" | "jpg" | "gif" | "webp" | "bmp") }

@@ -24,7 +24,8 @@ pub fn preview(name: &str) -> &'static str {
 }
 
 /// Fm.safe: from the root, no ".." part, never absolute. (NUL is refused as well: no path holds one.)
-pub fn safe(rel: &str) -> bool { !crate::plat::fs::is_abs(rel) && !rel.contains('\0') && rel.split('/').all(|p| p != "..") }
+/// Windows: a backslash separates parts too (`..\x` climbs), and no `:` (a drive, `C:x`, or a file's stream).
+pub fn safe(rel: &str) -> bool { !crate::plat::fs::is_abs(rel) && !rel.contains('\0') && rel.split(crate::plat::fs::SEPS).all(|p| p != "..") && !(cfg!(windows) && rel.contains(':')) }
 /// Fm.drive: "C:" at the start.
 fn drive(rel: &str) -> bool { rel.chars().nth(1) == Some(':') }
 /// Fm.files.safe: Fm.safe, and nothing Windows would read as another place.
@@ -105,7 +106,9 @@ mod tests {
         for line in corpus.lines().filter(|l| !l.starts_with('#') && !l.is_empty()) {
             let (want, js) = line.split_once('\t').unwrap();
             let rel: String = serde_json::from_str(js).unwrap_or_else(|_| panic!("bad line {line}"));
-            assert_eq!(safe(&rel), want == "1", "{rel:?}"); n += 1;
+            // Windows: what climbs or names a drive through a backslash or a colon is refused there (the corpus is Unix's rule)
+            let win_refused = cfg!(windows) && (crate::plat::fs::is_abs(&rel) || rel.contains(':') || rel.split(crate::plat::fs::SEPS).any(|p| p == ".."));
+            assert_eq!(safe(&rel), want == "1" && !win_refused, "{rel:?}"); n += 1;
         }
         assert!(n >= 40, "corpus too small: {n}");
     }
