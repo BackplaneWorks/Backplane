@@ -125,7 +125,8 @@ jobs:
         shell: bash
         run: |
           args=(--locked --no-fail-fast --partition count:${{ matrix.partition }}/2)
-          if [ "$RUNNER_OS" = Windows ]; then args+=(-E "$(sh ../../scripts/ci-hub-windows-filter.sh)"); fi
+          # Windows: bp-sh goes beside the test binaries first (the hub runs every sh through it: src/bin/bp-sh.rs), then the filter of what does not hold there
+          if [ "$RUNNER_OS" = Windows ]; then cargo build --locked --bin bp-sh; args+=(-E "$(sh ../../scripts/ci-hub-windows-filter.sh)"); fi
           cargo nextest run "${args[@]}"
 
   window:
@@ -164,7 +165,6 @@ jobs:
   windows-smoke:
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    continue-on-error: true
     name: windows smoke
     runs-on: windows-latest
     steps:
