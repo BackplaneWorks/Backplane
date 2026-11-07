@@ -3,6 +3,7 @@
 //! an op beside the change, a machine that joins gets the first ops, and the conversation's lease says which machine holds it.
 //! The exchange between machines (`uber.sync` over /far/rpc, takeover, the holder's beat) belongs with the net lane's transport; the ops are made here.
 use super::rpc::{now_s, Bots};
+use std::sync::Arc;
 use super::world::{Routine, World};
 use serde_json::{json, Value};
 
@@ -108,7 +109,31 @@ impl World {
     }
 }
 
+/// What the uberbot is told when the hub comes back. It is short: the bot reads the plane itself.
+pub fn restarted_text(why: &str) -> String {
+    let why = why.trim(); let why = if why.is_empty() { String::new() } else { format!(" ({why})") };
+    format!("You were restarted{why}. Read the plane, restart any threads the restart halted, and carry on managing the backplane threads.")
+}
+
 impl Bots {
+    /// The hub came back: once this start has held for `hold_s`, the uberbot gets a turn of its own to pick up what the restart halted. A build that dies at once wakes nobody; nothing is woken on a copy or in safe mode.
+    pub fn restarted(self: &Arc<Self>, hold_s: u64, why: String) {
+        if crate::copy::on() || crate::guard::safe() { return }
+        let me = Arc::downgrade(self);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(hold_s)).await;
+            let Some(b) = me.upgrade() else { return };
+            let _ = b.wake_uber(&why).await;
+        });
+    }
+    /// The turn itself, when there is an uberbot and this machine holds its conversation.
+    pub async fn wake_uber(&self, why: &str) -> Result<bool, String> {
+        let now = now_s();
+        let th = { let w = self.world().await; let bot = w.uber_bot(); if bot.is_empty() || !w.holder_me() { return Ok(false) } w.bot(&bot).map(|b| b.thread.clone()).unwrap_or_default() };
+        if th.is_empty() { return Ok(false) }
+        self.inbox.deliver_system(&th, &self.id("m", now), &restarted_text(why), None).await?;
+        Ok(true)
+    }
     /// the uberbot has no conversation thread (an imported history ends with a BotSet that has none, and the sidebar then takes it for a bot on another machine): give it one
     pub async fn uber_heal(&self, now: u64) -> bool {
         if crate::copy::on() { return false }

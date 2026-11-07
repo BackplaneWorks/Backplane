@@ -166,7 +166,7 @@ impl World {
     pub fn sync_to(&mut self, store: &Store, total: usize) -> anyhow::Result<()> {
         while self.seen < total {
             let end = (self.seen + 4096).min(total);
-            for (i, l) in store.range(self.seen, end)?.iter().enumerate() { self.line = self.seen + i + 1; self.apply_line(l) }
+            for (i, l) in store.range(self.seen, end)?.iter().enumerate() { self.line = self.seen + i + 1; let at = self.seen + i; store.fold(at, l, |l| self.apply_line(l)) }
             self.seen = end;
         }
         Ok(())

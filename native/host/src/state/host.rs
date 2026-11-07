@@ -25,14 +25,14 @@ impl Transform for Host {
     fn commit_failed(&self, first_seq: u64) {
         if self.policy.commit_failed(first_seq) {
             eprintln!("state policies: a commit failed (log line {first_seq}); folding the log again");
-            if let Some(h) = self.hub.get() { tokio::spawn(boot_task(self.policy.clone(), h.clone())); }
+            if let Some(h) = self.hub.get() { tokio::spawn(boot_task(self.policy.clone(), h.clone(), crate::guard::Folding::begin())); }
         }
     }
 }
 impl Ticker for Host {
     fn tick<'a>(&'a self, hub: &'a Arc<Hub>, now_s: u64) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
-            if self.policy.take_poisoned() { eprintln!("state policies: the policy lock was poisoned by a panic; folding the log again"); tokio::spawn(boot_task(self.policy.clone(), hub.clone())); }
+            if self.policy.take_poisoned() { eprintln!("state policies: the policy lock was poisoned by a panic; folding the log again"); tokio::spawn(boot_task(self.policy.clone(), hub.clone(), crate::guard::Folding::begin())); }
             self.policy.tick(now_s)
         })
     }
@@ -56,7 +56,7 @@ fn fold_tail(store: &crate::store::Store, core: &mut Core, from: usize, len: usi
     let mut at = from;
     while at < len {
         let to = (at + 2000).min(len);
-        match store.range(at, to) { Ok(ls) => for l in ls { core.fold_line(&l); }, Err(e) => eprintln!("state policies: reading log lines {at}..{to} failed: {e}") }
+        match store.range(at, to) { Ok(ls) => for (i, l) in ls.iter().enumerate() { store.fold(at + i, l, |l| { core.fold_line(l); }); }, Err(e) => eprintln!("state policies: reading log lines {at}..{to} failed: {e}") }
         at = to;
     }
 }
@@ -121,7 +121,7 @@ async fn summarize(policy: Arc<Policy>, hub: Arc<Hub>, kind: &'static str, id: S
     }
 }
 
-async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>) {
+async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>, _folding: crate::guard::Folding) {
     let h = hub.clone();
     let (core, len) = match tokio::task::spawn_blocking(move || read_log(&h)).await { Ok(x) => x, Err(e) => { eprintln!("state policies: the log fold failed, the policies stay off: {e}"); return } };
     let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -160,7 +160,7 @@ pub fn start_with(hub: Arc<Hub>, passive: Option<bool>) -> Arc<Policies> {
     hub.register_transform(host.clone());   // first: the log length is read after this, so no batch is missed
     hub.register_rpc(Arc::new(StarRpc { policy: policy.clone() }));
     hub.register_ticker(host);
-    tokio::spawn(boot_task(policy.clone(), hub));
+    tokio::spawn(boot_task(policy.clone(), hub, crate::guard::Folding::begin()));
     let p = Arc::new(Policies { policy });
     let _ = POLICIES.set(p.clone());
     p

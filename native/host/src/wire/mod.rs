@@ -72,6 +72,13 @@ pub fn response(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> 
 }
 
 pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
+    // health first: it asks nothing of the views, the presenter, the log or the credentials
+    if req.route() == "/healthz" {
+        let (status, mut v) = crate::guard::health();
+        // which build answers: the guard checks it against the update it asked for. Only to a caller the hub knows (its token, a paired device), never to the open network
+        if hub.auth.allowed(&req) { v["version"] = hub.cfg.version.clone().into(); v["commit"] = hub.cfg.commit.clone().into(); }
+        s.write_all(&response(status, "application/json", "Cache-Control: no-store\r\n", v.to_string().as_bytes())).await.ok(); s.shutdown().await.ok(); return Ok(());
+    }
     // the body of a POST to a route that decides for itself (an own_auth handler, /auth/*): Content-Length only, capped; never buffered for the rest
     // a streaming upload: credential first (unless the handler decides itself), then the size, then the handler reads the body
     if let Some(h) = hub.http_for(req.route()).filter(|h| h.takes_body()) {

@@ -54,6 +54,7 @@ jobs:
           rm -f native/host/Cargo.toml.bak native/gpui/Cargo.toml.bak
       - name: build
         run: |
+          export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
           (cd native/host && cargo build --release --bin backplane-hub) & a=$!
           (cd native/gpui && cargo build --release) & b=$!
           wait $a; ra=$?; wait $b; rb=$?; exit $((ra | rb))

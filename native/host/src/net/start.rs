@@ -104,7 +104,8 @@ pub fn start_full(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool, https: b
             }
             routes
         }
-        Err(e) => { eprintln!("backplane: {e}"); std::process::exit(1) }
+        // the file stays as it is, and the hub comes up on what `Auth::load` read from it: the hub token and the paired devices it could parse still sign in, and nothing can be paired until it is fixed
+        Err(e) => { crate::guard::degraded("pairing", &e); Arc::new(AuthRoutes::new(Arc::new(super::pairing::Registry::empty(&hub.cfg.home)), host, port, super::qr::text)) }
     }
 }
 

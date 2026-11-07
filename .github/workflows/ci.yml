@@ -20,6 +20,7 @@ jobs:
     outputs:
       host: ${{ steps.f.outputs.host }}
       gpui: ${{ steps.f.outputs.gpui }}
+      guard: ${{ steps.f.outputs.guard }}
       android: ${{ steps.f.outputs.android }}
     steps:
       - uses: actions/checkout@v4
@@ -36,9 +37,32 @@ jobs:
               - 'native/gpui/**'
               - 'assets/**'
               - '.github/workflows/ci.yml'
+            guard:
+              - 'native/guard/**'
+              - '.github/workflows/ci.yml'
             android:
               - 'mobile/android/**'
               - '.github/workflows/ci.yml'
+
+  # `backplane`, the guard: it has to work where the hub is restarted from, so it runs on all three systems (docs/HUB-RESILIENCE.md).
+  guard:
+    needs: changes
+    if: needs.changes.outputs.guard == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    name: guard ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/guard
+      - name: guard tests
+        working-directory: native/guard
+        run: cargo test --locked
 
   # The hub's tests, split over runners with nextest. Tests that start the real `claude` CLI are left out (scripts/gate-skip.txt).
   hub:

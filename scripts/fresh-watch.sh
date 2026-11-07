@@ -2,7 +2,7 @@
 # Hot reload for fresh mode (scripts/fresh.sh, ~/.backplane-gpui-fresh): follow the builds dev-cut.sh publishes and relaunch the fresh hub and window on each.
 #   scripts/fresh-watch.sh            stay in the foreground (Ctrl-C stops following; the app keeps running)
 # Same hub binary: only the window is reopened, at once. A new hub waits until no turn is running (a restart cuts a turn); Enter in a terminal relaunches anyway.
-# The window comes back where it was (gpui-place.json, gpui-drafts.json in the home). A build whose hub does not answer is marked bad and the build before is put back.
+# The window comes back where it was (gpui-place.json, gpui-drafts.json in the home). A build whose hub does not answer is marked bad and the build before is put back; with a guard (docs/HUB-RESILIENCE.md) that happens inside the start.
 # Env: FRESH_DIR, FRESH_PORT (as fresh.sh), GPUI_DEV_DIR, GPUI_RELOAD_POLL (s, default 2), GPUI_RELOAD_BOOT (s the hub may take to answer, default 120).
 set -u
 # The hub reaps every process that carries its BACKPLANE_AGENT_OWNER mark and is not its child (agents/proc.rs reap_orphans). A watcher started from an agent turn inherits the mark,
@@ -20,6 +20,11 @@ tell() { say "$*"; notify-send -a Backplane 'Backplane GPUI (fresh)' "$*" 2>/dev
 alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 pid() { cat "$D/$1.pid" 2>/dev/null || true; }
 cur() { head -1 "$DEV/CURRENT" 2>/dev/null || true; }
+# BAD: every build the guard or this watcher has given up on (id, tab, why). .fresh-bad holds the newest alone.
+is_bad() { [ "$1" = "$(cat "$DEV/.fresh-bad" 2>/dev/null)" ] || cut -f1 "$DEV/BAD" 2>/dev/null | grep -qxF -- "$1"; }
+mark_bad() { printf '%s\n' "$1" > "$DEV/.fresh-bad"; cut -f1 "$DEV/BAD" 2>/dev/null | grep -qxF -- "$1" || printf '%s\t%s\n' "$1" "$2" >> "$DEV/BAD"; }
+# which build the guard ended up on: it may have gone back by itself
+guard_build() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("build",""))' "$H/guard/status.json" 2>/dev/null || true; }
 SHOWN=$DEV/.fresh-shown   # the build the app was last relaunched on (the hub can stay on an older one when only the window changed)
 shown() { cat "$SHOWN" 2>/dev/null || true; }
 running_dir() { local p; p=$(pid hub); alive "$p" && dirname "$(readlink "/proc/$p/exe" 2>/dev/null)" || true; }
@@ -34,7 +39,7 @@ go() {  # go BUILD_DIR WHAT(client|both): relaunch on that build
   export BIN=$b FRESH_TAILNET_PORT=$(cat "$D/tailnet.port" 2>/dev/null || true)
   [ -n "$FRESH_TAILNET_PORT" ] || unset FRESH_TAILNET_PORT
   if [ "$2" = client ]; then p=$(pid client); alive "$p" && kill "$p"; rm -f "$D/client.pid"; sleep 1
-  else p=$(pid hub); "$HERE/fresh.sh" stop >/dev/null; local i=0; while alive "$p" && [ $i -lt 100 ]; do sleep 0.2; i=$((i+1)); done; fi
+  else p=$(pid hub); FRESH_RESTART=1 "$HERE/fresh.sh" stop >/dev/null; local i=0; while alive "$p" && [ $i -lt 100 ]; do sleep 0.2; i=$((i+1)); done; fi
   "$HERE/fresh.sh" start || return 1
   local i=0; while [ $i -lt "$BOOT" ]; do hello && return 0; alive "$(pid hub)" || return 1; sleep 1; i=$((i+1)); done; return 1
 }
@@ -42,9 +47,12 @@ trap 'echo; say "stopped following; the app keeps running"; exit 0' INT TERM
 [ -d "$H" ] || { echo "fresh-watch: no fresh home in $H: run fresh.sh start first" >&2; exit 1; }
 say "following $DEV/CURRENT (shown: $(shown), hub: $(basename "$(running_dir)"))"
 rm -f "$REQ"; waiting=
+SELF=$(cksum < "$0")
 while :; do
-  c=$(cur); now=$(shown); [ -n "$now" ] || { now=$(basename "$(running_dir)"); printf '%s\n' "$now" > "$SHOWN"; }; bad=$(cat "$DEV/.fresh-bad" 2>/dev/null || true)
-  if [ -z "$c" ] || [ "$c" = "$now" ] || [ "$c" = "$bad" ] || [ ! -d "$DEV/builds/$c" ]; then waiting=; sleep "$POLL"; continue; fi
+  # a watcher outlives many merges: a new script takes over here, if it at least parses
+  if [ "$SELF" != "$(cksum < "$0")" ]; then if bash -n "$0" 2>/dev/null; then say "this script changed: running the new one"; exec "$0" "$@"; else SELF=$(cksum < "$0"); say "this script changed and does not parse: staying on the old one"; fi; fi
+  c=$(cur); now=$(shown); [ -n "$now" ] || { now=$(basename "$(running_dir)"); printf '%s\n' "$now" > "$SHOWN"; }
+  if [ -z "$c" ] || [ "$c" = "$now" ] || is_bad "$c" || [ ! -d "$DEV/builds/$c" ]; then waiting=; sleep "$POLL"; continue; fi
   what=both; cmp -s "$(running_dir)/backplane-hub" "$DEV/builds/$c/backplane-hub" 2>/dev/null && what=client
   if [ "$what" = both ] && alive "$(pid hub)"; then
     n=$(turns)
@@ -58,9 +66,10 @@ while :; do
     fi
   fi
   waiting=; prev=$(running_dir); say "relaunching on $c ($what)"; status relaunching "Relaunching on build ${c##*-}"
-  if go "$DEV/builds/$c" "$what"; then printf '%s\n' "$c" > "$SHOWN"; clear_status; tell "Now running $c"
+  if go "$DEV/builds/$c" "$what"; then printf '%s\n' "$c" > "$SHOWN"; clear_status; g=$(guard_build)
+    if [ "$what" = both ] && [ -n "$g" ] && [ "$g" != "$c" ]; then tell "Build $c did not hold; the guard is back on $g"; else tell "Now running $c"; fi
   else
-    clear_status; printf '%s\n' "$c" > "$DEV/.fresh-bad"; tell "Build $c did not come up; going back. See $D/hub.log"
+    clear_status; mark_bad "$c" "did not come up"; tell "Build $c did not come up; going back. See $D/hub.log"
     [ -n "$prev" ] && [ -x "$prev/backplane-hub" ] && go "$prev" both && { printf '%s\n' "$(basename "$prev")" > "$SHOWN"; say "back on $(basename "$prev")"; } || tell "Going back failed: the app is down. Logs are in $D"
   fi
 done

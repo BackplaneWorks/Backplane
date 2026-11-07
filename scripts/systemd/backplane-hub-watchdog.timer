@@ -1,0 +1,10 @@
+[Unit]
+Description=Backplane hub watchdog, every 30 seconds
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

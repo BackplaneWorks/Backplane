@@ -108,6 +108,7 @@ pub async fn start(hub: Arc<Hub>, ts: Arc<dyn Tailscale>, peering: Arc<Peering>,
     // a main listener that covers the address gets no owner trust: the authorities are set only once this listener is bound
     if tailnet::covered(host, &ip) { return State::Reachable { link: String::new() } }
     let Ok(l) = TcpListener::bind((ip.as_str(), port)).await else { return State::Unavailable };
+    crate::guard::listening(&format!("{ip}:{port}")); // rescue answers here too, while the hub is down
     peering.set_own_hosts(&ip, &tailnet::dns_name(&ts.status().await));
     let gate = Arc::new(tokio::sync::Semaphore::new(32));
     let waiting = Arc::new(tokio::sync::Semaphore::new(128));
