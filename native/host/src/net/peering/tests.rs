@@ -63,12 +63,13 @@ fn peerset(n: &Node, id: &str) -> Option<crate::net::peers::PeerRow> { n.p.table
 pub(crate) fn live_ids(n: &Node) -> Vec<String> { n.p.table.with(|p| p.live().into_iter().map(|x| x.id).collect()) }
 /// `b` pairs with `a` the real way (a code, a request, the person's approval on `a`); the link's id.
 pub(crate) async fn link_by_code(a: &Node, b: &Node) -> String {
+    let before = live_ids(a);
     let code = a.p.make_code().await.unwrap()["code"].as_str().unwrap().to_string();
     let (attempt, _) = b.p.pair_with(&b.hub, &url(a), &code).await.unwrap();
     for _ in 0..100 { if let Some(r) = a.p.page_data()["requests"].as_array().and_then(|r| r.first().cloned()) { a.p.approve(&a.hub, r["id"].as_str().unwrap()).await.unwrap(); break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     for _ in 0..100 { if b.p.attempt(&attempt)["state"] == "linked" { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     settle().await;
-    live_ids(a).into_iter().next().expect("linked")
+    live_ids(a).into_iter().find(|i| !before.contains(i)).expect("linked")
 }
 pub(crate) async fn settle() { for _ in 0..50 { tokio::time::sleep(std::time::Duration::from_millis(20)).await; } }
 
