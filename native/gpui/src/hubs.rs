@@ -15,10 +15,13 @@ pub struct Hub {
     /// The paired hub's address (http:// or https://); empty for this computer's own.
     #[serde(default)]
     pub origin: String,
+    /// This computer's own hub only: the token file of the hub the client was started on (`origin` is its address). Empty until the client is started with one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub token_file: String,
 }
 impl Hub {
-    pub fn local() -> Hub { Hub { key: LOCAL.into(), origin: String::new() } }
-    pub fn remote(origin: &str) -> Hub { Hub { key: crate::pairing::host_port(origin).0, origin: origin.trim_end_matches('/').to_string() } }
+    pub fn local() -> Hub { Hub { key: LOCAL.into(), origin: String::new(), token_file: String::new() } }
+    pub fn remote(origin: &str) -> Hub { Hub { key: crate::pairing::host_port(origin).0, origin: origin.trim_end_matches('/').to_string(), token_file: String::new() } }
     pub fn is_local(&self) -> bool { self.key == LOCAL }
     /// What the picker and the Hubs page call it.
     pub fn label(&self) -> String { if self.is_local() { "This computer".into() } else { self.key.clone() } }
@@ -61,6 +64,40 @@ pub fn adopted(list: &[Hub], origin: &str) -> Vec<Hub> { with_local(adopt(list, 
 pub fn used(list: &[Hub], key: &str) -> Vec<Hub> { with_local(use_hub(list, key, key_of)) }
 /// Forgetting a hub; this computer's own cannot be forgotten.
 pub fn forgotten(list: &[Hub], key: &str) -> Vec<Hub> { if key == LOCAL { list.to_vec() } else { with_local(forget(list, key, key_of)) } }
+
+/// Whether an address names a hub on this machine.
+pub fn is_loopback(url: &str) -> bool {
+    let (host, _) = crate::pairing::host_port(url);
+    let h = host.rsplit_once(':').map_or(host.as_str(), |(h, _)| h);
+    matches!(h, "127.0.0.1" | "localhost" | "[::1]")
+}
+/// A client started on a local hub (`--url`, `--token-file`) keeps that as "This computer": the new list, None when nothing changes or the address is not local.
+pub fn remembered(list: &[Hub], url: &str, token_file: &str) -> Option<Vec<Hub>> {
+    if token_file.is_empty() || !is_loopback(url) { return None }
+    let origin = crate::pairing::http_of(url).trim_end_matches('/').to_string();
+    let mut out = list.to_vec();
+    let l = out.iter_mut().find(|h| h.is_local())?;
+    if l.origin == origin && l.token_file == token_file { return None }
+    l.origin = origin; l.token_file = token_file.to_string();
+    Some(out)
+}
+/// What a relaunch adds to name the hub in use: when it is this computer's and a local target was kept, that target; else nothing (a paired hub connects by its saved credential).
+pub fn local_args(list: &[Hub]) -> Vec<String> {
+    match list.first() {
+        Some(h) if h.is_local() && !h.origin.is_empty() && !h.token_file.is_empty() => vec!["--url".into(), h.origin.clone(), "--token-file".into(), h.token_file.clone()],
+        _ => vec![],
+    }
+}
+/// The arguments to start again with, given the list in use.
+pub fn relaunch_with(args: &[String], list: &[Hub]) -> Vec<String> {
+    let mut out = crate::pairing::relaunch_args(args); out.extend(local_args(list)); out
+}
+/// The local hub this client was started on, when it is the one in use and its token file is still there.
+pub fn local_target(list: &[Hub]) -> Option<(String, PathBuf)> {
+    let h = list.first().filter(|h| h.is_local() && !h.origin.is_empty() && !h.token_file.is_empty())?;
+    let t = PathBuf::from(&h.token_file);
+    t.is_file().then(|| (h.origin.clone(), t))
+}
 
 /// What a start connects to.
 #[derive(Debug, PartialEq, Clone)]
@@ -165,6 +202,10 @@ pub fn adopt_saved(origin: &str, token: &str) -> io::Result<Vec<Hub>> { adopt_in
 pub fn use_saved(key: &str) -> io::Result<Option<Vec<Hub>>> { use_in(&dir().ok_or(io::ErrorKind::NotFound)?, key) }
 pub fn forget_saved(key: &str) -> io::Result<Option<(Vec<Hub>, bool)>> { forget_in(&dir().ok_or(io::ErrorKind::NotFound)?, key) }
 pub fn target_saved() -> Target { dir().map(|d| target_in(&d)).unwrap_or(Target::Local) }
+pub fn remember_saved(url: &str, token_file: &str) {
+    let Some(d) = dir() else { return };
+    if let Some(l) = remembered(&load_from(&d), url, token_file) { let _ = save_list(&d, &l); }
+}
 pub fn credential_saved(key: &str) -> Option<PathBuf> { dir().map(|d| credential_path(&d, key)) }
 
 #[cfg(test)]
@@ -201,7 +242,7 @@ mod tests {
         std::fs::write(d.join("pairing.json"), r#"{"hub":"wss://box.ts.net:8451"}"#).unwrap();
         std::fs::write(d.join("device-token"), SECRET).unwrap();
         let l = load_from(&d);
-        assert_eq!(l, vec![Hub { key: "box.ts.net:8451".into(), origin: "https://box.ts.net:8451".into() }, Hub::local()], "the paired hub stays in use");
+        assert_eq!(l, vec![Hub { key: "box.ts.net:8451".into(), origin: "https://box.ts.net:8451".into(), token_file: String::new() }, Hub::local()], "the paired hub stays in use");
         assert_eq!(std::fs::read_to_string(credential_path(&d, "box.ts.net:8451")).unwrap(), SECRET, "its credential moved to its own file");
         assert!(!d.join("pairing.json").exists() && !d.join("device-token").exists());
         assert_eq!(load_from(&d), l, "the list is what is read next time");
@@ -249,6 +290,29 @@ mod tests {
         assert_eq!(target_in(&d), Target::Local);
         let _ = std::fs::remove_dir_all(&d);
     }
+    fn args(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+    /// The bug: --url A --token-file F, switch to a remote, switch back, and the window started a new hub on the default home.
+    #[test] fn switching_to_a_remote_and_back_relaunches_on_the_local_hub_it_started_with() {
+        let d = tmp("roundtrip");
+        let start = args(&["--url", "http://127.0.0.1:3797", "--token-file", "/h/.backplane-gpui-fresh/home/token", "--theme", "dark"]);
+        remember_saved_in(&d, "http://127.0.0.1:3797", "/h/.backplane-gpui-fresh/home/token");
+        adopt_in(&d, "https://desktop.ts.net:8451", "dddddddddddddddddddddddddddddddd").unwrap();
+        // on the remote, the window runs with no --url: switching back relaunches from those args
+        let on_remote = relaunch_with(&start, &load_from(&d));
+        assert_eq!(on_remote, args(&["--theme", "dark"]), "a paired hub connects by its credential");
+        let list = use_in(&d, LOCAL).unwrap().unwrap();
+        assert_eq!(relaunch_with(&on_remote, &list), args(&["--theme", "dark", "--url", "http://127.0.0.1:3797", "--token-file", "/h/.backplane-gpui-fresh/home/token"]));
+        assert_eq!(load_from(&d)[0].origin, "http://127.0.0.1:3797", "kept across restarts");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn a_plain_install_relaunches_as_before() {
+        let l = vec![Hub::local()];
+        assert_eq!(relaunch_with(&args(&["--theme", "dark", "backplane://pair?url=x"]), &l), args(&["--theme", "dark"]));
+        assert_eq!(local_target(&l), None);
+        assert_eq!(remembered(&l, "http://100.64.0.1:3797", "/t"), None, "a hub on another machine is not this computer's");
+        assert_eq!(remembered(&l, "http://127.0.0.1:3797", ""), None);
+    }
+    fn remember_saved_in(dir: &Path, url: &str, tf: &str) { if let Some(l) = remembered(&load_from(dir), url, tf) { save_list(dir, &l).unwrap(); } }
     #[test] fn a_hub_without_its_credential_is_passed_over() {
         let l = vec![Hub::remote("http://a:1"), Hub::remote("http://b:2"), Hub::local()];
         assert_eq!(target(&l, |k| k == "b:2"), Target::Remote { key: "b:2".into(), ws: "ws://b:2".into() });

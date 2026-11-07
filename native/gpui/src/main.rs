@@ -232,7 +232,9 @@ fn main()->anyhow::Result<()> {
             if config.pending { // no --url: this device's own hub, or the chooser
                 let mut c=config.clone();c.launched=true;let saved=launch::load();
                 let env=std::env::var_os("BACKPLANE_HOME").filter(|h|!h.is_empty()).map(std::path::PathBuf::from);
-                if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).expect("open GPUI window");}
+                // this computer's hub is the one this client was started on, when it kept one; only a client never given one falls through to launch.json
+                if let (Some((url,tf)),true)=(hubs::local_target(&hubs::load()),env.is_none()) {c.hub=url.replacen("http://","ws://",1);c.token_file=tf;c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).expect("open GPUI window");}
+                else if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).expect("open GPUI window");}
                 else {let auto=env.or_else(||(!saved.home.is_empty()).then(||saved.home.clone().into()));cx.open_window(opts,move|window,cx|cx.new(|cx|screens::first::First::new(window,cx,c,started,auto))).expect("open GPUI window");}
             } else {
             cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).expect("open GPUI window");

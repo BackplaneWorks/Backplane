@@ -164,7 +164,7 @@ pub fn relaunch_args(args: &[String]) -> Vec<String> {
 pub fn relaunch() -> io::Error {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let exe = match std::env::current_exe() { Ok(e) => e, Err(e) => return e };
-    let mut c = std::process::Command::new(exe); c.args(relaunch_args(&args)).env_remove("BACKPLANE_GPUI_SCRIPT");
+    let mut c = std::process::Command::new(exe); c.args(crate::hubs::relaunch_with(&args, &crate::hubs::load())).env_remove("BACKPLANE_GPUI_SCRIPT");
     #[cfg(unix)] { use std::os::unix::process::CommandExt; c.exec() }
     #[cfg(not(unix))] { match c.spawn() { Ok(_) => std::process::exit(0), Err(e) => e } }
 }
