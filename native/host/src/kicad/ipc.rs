@@ -224,7 +224,8 @@ pub fn start(hub: &Arc<Hub>) {
     tokio::spawn(async move {
         let mut rx = h.subscribe(); let mut seen = String::from("\u{0}");
         loop {
-            let now = h.setting("kicad.path").await.unwrap_or_default();
+            let fcp = h.setting("freecad.path").await.unwrap_or_default(); super::stepglb::set_freecad_setting(&fcp);
+            let now = format!("{}\u{1}{fcp}", h.setting("kicad.path").await.unwrap_or_default());
             if now != seen { seen = now; publish_cad(&h).await }
             match rx.recv().await { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {} Err(_) => return }
         }
