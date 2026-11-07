@@ -29,9 +29,15 @@ jobs:
           - { target: linux-x64, os: ubuntu-22.04 }
           - { target: linux-arm64, os: ubuntu-22.04-arm }
           - { target: darwin-arm64, os: macos-latest }
+          - { target: windows-x64, os: windows-latest }
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
+      - run: git config --global core.autocrlf false
+        if: runner.os == 'Windows'
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: rui314/setup-mold@v1
@@ -56,16 +62,17 @@ jobs:
       - name: build
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
-          (cd native/host && cargo build --release --bin backplane-hub) & a=$!
+          (cd native/host && cargo build --release --bin backplane-hub --bin bp-sh) & a=$!
           (cd native/gpui && cargo build --release) & b=$!
           (cd native/guard && cargo build --release) & g=$!   # the guard: it starts the hub, updates it and brings it back (docs/deploy.md)
           wait $a; ra=$?; wait $b; rb=$?; wait $g; rg=$?; exit $((ra | rb | rg))
       - name: no test trust in a release
         run: |
           # feature e2e-trust (test/update's feed) trusts a key from the environment; its code carries this mark, so a release that has it is refused
-          if grep -aq backplane-e2e-trust-enabled native/host/target/release/backplane-hub; then echo "::error::backplane-hub was built with feature e2e-trust"; exit 1; fi
+          if grep -aq backplane-e2e-trust-enabled native/host/target/release/backplane-hub${{ runner.os == 'Windows' && '.exe' || '' }}; then echo "::error::backplane-hub was built with feature e2e-trust"; exit 1; fi
       - uses: oven-sh/setup-bun@v2
       - name: package
+        if: runner.os != 'Windows'
         run: |
           set -e
           d=pkg; mkdir -p $d
@@ -78,6 +85,20 @@ jobs:
           git rev-parse HEAD > $d/COMMIT
           name=backplane-$TAG-${{ matrix.target }}.tar.gz
           tar -C $d -czf $name .
+          echo "ARCHIVE=$name" >> $GITHUB_ENV
+      # Windows: a zip, as 0.14 shipped (backplane-<tag>-windows-x64.zip): the hub, the client, the guard and bp-sh (the hub's sh go-between, src/bin/bp-sh.rs) beside them.
+      # The client is a release build, so gpui's HLSL shaders were compiled here by the Windows SDK's fxc.exe; its manifest by rc.exe.
+      - name: package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          set -e
+          d=pkg; mkdir -p $d
+          for f in native/host/target/release/backplane-hub.exe native/host/target/release/bp-sh.exe native/gpui/target/release/backplane-gpui.exe native/guard/target/release/backplane.exe; do
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }; cp "$f" $d/; done
+          cp -r assets $d/assets
+          git rev-parse HEAD > $d/COMMIT
+          name=backplane-$TAG-${{ matrix.target }}.zip
+          (cd $d && 7z a -tzip -r "../$name" . > /dev/null)
           echo "ARCHIVE=$name" >> $GITHUB_ENV
       - uses: actions/upload-artifact@v4
         with:
@@ -106,8 +127,8 @@ jobs:
           import hashlib, json, glob, os, sys
           tag, v, ch, sha = sys.argv[1:5]
           assets = {}
-          for f in sorted(glob.glob(f"backplane-{tag}-*.tar.gz")):
-              t = f[len(f"backplane-{tag}-"):-len(".tar.gz")]
+          for f in sorted(glob.glob(f"backplane-{tag}-*.tar.gz") + glob.glob(f"backplane-{tag}-*.zip")):
+              t = f[len(f"backplane-{tag}-"):].removesuffix(".tar.gz").removesuffix(".zip")
               assets[t] = {"name": f, "sha256": hashlib.sha256(open(f, "rb").read()).hexdigest(), "size": os.path.getsize(f)}
           open("manifest.json", "w").write(json.dumps({"schema": 1, "tag": tag, "version": v, "channel": ch, "commit": sha, "assets": assets}, indent=1))
           PY
@@ -136,6 +157,7 @@ jobs:
           name: release-dry-run
           path: |
             backplane-*.tar.gz
+            backplane-*.zip
             install.sh
             manifest.json
             manifest.json.sig
@@ -148,7 +170,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           pre=; case "$TAG" in *-*) pre=--prerelease;; esac
-          gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz install.sh
+          gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz backplane-*.zip install.sh
           # all three signed files, or the updater counts the release as half published and never offers it (update/run.rs SIGNED)
           gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
           gh release edit "$TAG" --draft=false
