@@ -19,8 +19,32 @@ pub fn decode_jpeg(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)) }
 
 pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, banner: String, pub light: bool, open_error: Option<String>, opening_since: Instant, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
+/// One GET with a bearer token over the client's own stream (plain or TLS, as the hub's address says): (status, body), the body at most `max` bytes.
+pub fn get_bytes(url: &str, token: &str, timeout: Duration, max: u64) -> Result<(u16, Vec<u8>), String> {
+    let (addr, tls) = crate::pairing::host_port(url);
+    let path = url.split_once("://").map_or(url, |(_, r)| r).split_once('/').map_or("/".to_string(), |(_, p)| format!("/{p}"));
+    let mut s = crate::pairing::open(&addr, tls).map_err(|e| e.to_string())?; s.set_timeouts(timeout).map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut s, format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").as_bytes()).map_err(|e| e.to_string())?;
+    let mut raw = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut std::io::Read::take(&mut s, max + 8192), &mut raw); // (a TLS close without notice after the body is still a body)
+    parse_response(&raw)
+}
+/// (status, body) of a whole HTTP/1.1 response, de-chunked when it says so.
+pub fn parse_response(raw: &[u8]) -> Result<(u16, Vec<u8>), String> {
+    let at = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("no answer")?;
+    let head = String::from_utf8_lossy(&raw[..at]).to_string(); let body = &raw[at + 4..];
+    let code = head.split_whitespace().nth(1).and_then(|c| c.parse().ok()).ok_or("bad status line")?;
+    if !head.to_ascii_lowercase().contains("transfer-encoding: chunked") { return Ok((code, body.to_vec())) }
+    let (mut out, mut rest) = (Vec::new(), body);
+    while let Some(i) = rest.windows(2).position(|w| w == b"\r\n") {
+        let n = usize::from_str_radix(String::from_utf8_lossy(&rest[..i]).split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
+        let tail = &rest[i + 2..]; if n == 0 || tail.len() < n { break }
+        out.extend_from_slice(&tail[..n]); rest = tail[n..].strip_prefix(b"\r\n").unwrap_or(&tail[n..]);
+    }
+    Ok((code, out))
+}
 impl BrowserPage {
-    /// `base` like http://127.0.0.1:3821 (http only for now: this client has no TLS, so an https base never starts the poller), `owner` the page's owner as the hub names it (a bot's id, or the thread's id
+    /// `base` like http://127.0.0.1:3821 (plain or TLS, as the address says), `owner` the page's owner as the hub names it (a bot's id, or the thread's id
     /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
     /// `set_visible(true)`; mount the page with the tab and call `set_visible(false)` when another tab is shown.
     pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String, hub: tokio::sync::mpsc::Sender<crate::hub::Command>) -> Self {
@@ -41,28 +65,24 @@ impl BrowserPage {
         let stop = Arc::new(AtomicBool::new(false)); let visible = Arc::new(AtomicBool::new(false)); let vis = visible.clone(); // fetches only after set_visible(true)
         let (tx, rx) = async_channel::bounded::<Result<Option<Arc<RenderImage>>, String>>(2); // Ok(None): a good fetch of the frame already shown
         let flag = stop.clone(); let hub_open = hub_tx.clone();
-        if !https && use_poller { std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
+        let _ = https; if use_poller { std::thread::Builder::new().name("browser-frames".into()).spawn(move || {
             let url = format!("{}/bots/{}/screen.jpg", base.trim_end_matches('/'), owner);
             let (mut last, mut failing) = (0u64, false); let mut opened: Option<std::time::Instant> = None;
             while !flag.load(Ordering::Relaxed) {
                 if !vis.load(Ordering::Relaxed) { std::thread::sleep(Duration::from_millis(POLL_MS)); continue } // another tab is shown: no requests
-                let out = match ureq::get(&url).set("Authorization", &format!("Bearer {token}")).timeout(Duration::from_secs(3)).call() {
-                    Ok(resp) => {
-                        let mut body = Vec::new();
-                        match std::io::Read::read_to_end(&mut std::io::Read::take(resp.into_reader(), MAX_JPEG), &mut body) {
-                            Ok(_) if fnv(&body) == last => if failing { failing = false; Some(Ok(None)) } else { None }, // the same frame: nothing to draw (but a recovery clears the status)
-                            Ok(_) => { last = fnv(&body); failing = false; Some(decode_jpeg(&body).map(Some).ok_or_else(|| "frame is not a JPEG".to_string())) }
-                            Err(e) => Some(Err(format!("read: {e}"))),
-                        }
+                let out = match get_bytes(&url, &token, Duration::from_secs(3), MAX_JPEG) {
+                    Ok((200, body)) => {
+                        if fnv(&body) == last { if failing { failing = false; Some(Ok(None)) } else { None } } // the same frame: nothing to draw (but a recovery clears the status)
+                        else { last = fnv(&body); failing = false; Some(decode_jpeg(&body).map(Some).ok_or_else(|| "frame is not a JPEG".to_string())) }
                     }
-                    Err(ureq::Error::Status(404, _)) => {
+                    Ok((404, _)) => {
                         // no page exists for this owner yet: ask the hub to open one (at most every 5 s), its first frame follows
                         if opened.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) { opened = Some(std::time::Instant::now());
                             let _ = hub_open.try_send(crate::hub::Command::Rpc("bots.browser".into(), crate::screens::settings::Secret(serde_json::json!({"bot": owner, "op": "open"})), "browser")); }
                         Some(Err("Opening the browser…".into()))
                     }
-                    Err(ureq::Error::Status(c, _)) => Some(Err(format!("hub answered {c}"))),
-                    Err(ureq::Error::Transport(t)) => Some(Err(format!("hub unreachable: {}", t.kind()))),
+                    Ok((c, _)) => Some(Err(format!("hub answered {c}"))),
+                    Err(e) => Some(Err(format!("hub unreachable: {e}"))),
                 };
                 if matches!(out, Some(Err(_))) { failing = true; }
                 if let Some(msg) = out { if tx.try_send(msg).is_err() && tx.is_closed() { return } }
@@ -236,6 +256,14 @@ impl Bar {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_frame_answer_is_read_whole_or_de_chunked() {
+        let whole = b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n\xff\xd8\x00".to_vec();
+        assert_eq!(super::parse_response(&whole).unwrap(), (200, vec![0xff, 0xd8, 0]));
+        let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n\xff\xd8\r\n1\r\n\x00\r\n0\r\n\r\n".to_vec();
+        assert_eq!(super::parse_response(&chunked).unwrap(), (200, vec![0xff, 0xd8, 0]));
+        assert_eq!(super::parse_response(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap().0, 404);
+        assert!(super::parse_response(b"nonsense").is_err());
+    }
     #[test] fn an_empty_tab_names_what_is_missing_then_times_out_instead_of_waiting_forever() {
         use super::open_message; use std::time::Duration;
         assert!(open_message(&None, Duration::from_secs(2)).is_none(), "still starting: no complaint yet");
