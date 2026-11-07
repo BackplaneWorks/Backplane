@@ -18,6 +18,25 @@ pub fn offer(raw: &str) -> Value {
     if gstr(&o, "status", "") != "sent" || token.is_empty() || ids(&o).len() != 5 { return Value::Null }
     json!({"token": token, "text": BODY, "url": URL, "label": LABEL})
 }
+/// Star.replay (Settings, Developer): the offer made again now, whatever was decided, under a fresh token so it is decided again like the first.
+/// The ids are marked `dev-` (no person's prompt), so the ledger stays bounded and well formed.
+pub fn replay(now: u64) -> Vec<Value> {
+    let ids: Vec<String> = (1..=5).map(|i| format!("dev-{now}-{i}")).collect();
+    let v = json!({"status": "sent", "ids": ids, "token": ids[4], "eligibleAt": now, "sentAt": now, "dev": true});
+    vec![set(show(&v), now)]
+}
+/// Settings, Developer: where the suggestion stands, in a few words
+pub fn standing(raw: &str) -> String {
+    let o = parse_or_null(raw);
+    match gstr(&o, "status", "") {
+        "" if raw.is_empty() => "Not offered yet: 0 of 5 prompts".into(),
+        "counting" => format!("Not offered yet: {} of 5 prompts", ids(&o).len()),
+        "sent" => "Offered, not decided".into(),
+        "opened" => "Opened".into(),
+        "dismissed" => "Dismissed".into(),
+        _ => "Unreadable".into(),
+    }
+}
 /// The frame that carries `offer` to clients (targeted at the fifth prompt; to every client when it is decided)
 pub fn frame(offer: Value) -> Value { json!({"t": "star", "offer": offer}) }
 
@@ -77,6 +96,16 @@ mod tests {
         for a in ["open", "dismiss"] { let d = apply(&raw, decide(&raw, "m5", a, 9)); assert_eq!(offer(&d), Value::Null, "{a} is final"); }
         assert_eq!(offer("damaged"), Value::Null); assert_eq!(offer(r#"{"status":"sent","ids":["a"],"token":"a"}"#), Value::Null, "a short ledger is not an offer");
         assert_eq!(frame(Value::Null), json!({"t":"star","offer":null}));
+    }
+    #[test] fn star_replay_offers_again_under_a_fresh_token() {
+        let mut raw = String::new(); for i in 1..=5 { raw = apply(&raw, accept(&raw, &format!("m{i}"), i)); }
+        raw = apply(&raw, decide(&raw, "m5", "dismiss", 6)); assert_eq!(standing(&raw), "Dismissed");
+        let r = apply(&raw, replay(100)); let o = offer(&r);
+        assert_eq!(o["token"], "dev-100-5"); assert_eq!(o["text"], BODY); assert_eq!(standing(&r), "Offered, not decided");
+        assert!(decide(&r, "m5", "open", 101).is_empty(), "the old token decides nothing");
+        let d = apply(&r, decide(&r, "dev-100-5", "open", 101)); assert_eq!(offer(&d), Value::Null); assert_eq!(standing(&d), "Opened");
+        assert!(accept(&r, "m9", 102).is_empty(), "a replay counts nothing more");
+        assert_eq!(standing(""), "Not offered yet: 0 of 5 prompts"); assert_eq!(standing(&apply("", accept("", "m1", 1))), "Not offered yet: 1 of 5 prompts");
     }
     #[test] fn star_ledger_is_bounded_at_five_ids() {
         let mut raw = String::new(); for i in 1..=9 { raw = apply(&raw, accept(&raw, &format!("m{i}"), i)); }

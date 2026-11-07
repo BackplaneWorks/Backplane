@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("about", "About"), ("privacy", "Privacy")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -106,6 +106,11 @@ fn threads(st: &State, session: &Value) -> Vec<Value> {
     v
 }
 
+/// Settings > Developer: replay what a new person sees. Both act on the hub's settings, so every client sees the result.
+fn developer(st: &State) -> Vec<Value> {
+    vec![row("Replay first run", "Clears setup's progress and opens it at the first step, as on a new hub.", vec![btn("Replay setup", "ob-replay", "", true)]),
+         row("Star suggestion", &crate::state::fam::star::standing(set(st, crate::state::fam::star::KEY, "")), vec![btn("Show it now", "dev-star", "", false)])]
+}
 fn about(st: &State) -> Vec<Value> {
     let v = VERSION.get().map(String::as_str).unwrap_or("");
     let _ = st;
@@ -395,7 +400,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -420,6 +425,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
             json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
+        "dev-star" => { send(session, hub, "star.replay", json!({}), &mut cmds, &mut rid); json!({"open": {"settings": false}}) }
         "update-check" => { send(session, hub, "update.check", json!({}), &mut cmds, &mut rid); json!({}) }
         "update-now" => { send(session, hub, "update.now", json!({}), &mut cmds, &mut rid); json!({}) }
         "rule-add" | "board-add" => {
@@ -510,8 +516,16 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "About", "Privacy"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
+    }
+    #[test] fn developer_replays_setup_and_the_star_suggestion() {
+        let sess = json!({"open": {"settings": true}, "drafts": {"@settings.page": "developer"}, "rid": 5});
+        let v = view(&st(&[("star.nudge.v1", r#"{"status":"dismissed","ids":["a","b","c","d","e"],"token":"e"}"#)]), &sess, &json!({}));
+        assert_eq!(labels(&v), ["Developer", "Replay first run", "Star suggestion"]);
+        assert_eq!(v["rows"][1]["buttons"][0]["action"], "ob-replay"); assert_eq!(v["rows"][2]["note"], "Dismissed"); assert_eq!(v["rows"][2]["buttons"][0]["action"], "dev-star");
+        let o = act("h", &sess, "dev-star", "").unwrap();
+        assert_eq!(o.cmds.len(), 1); assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""m":"star.replay""#)); assert_eq!(o.patch["open"]["settings"], false, "closed, so the strip shows");
     }
     #[test] fn devices_lists_what_the_registry_says_and_offers_revoke_on_the_live_ones() {
         let info = json!({"devices": {"devices": [{"id": "d1", "name": "Phone", "revoked": false}, {"id": "d2", "name": "Old", "revoked": true}],
