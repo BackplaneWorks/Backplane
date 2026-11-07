@@ -138,7 +138,7 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
     let l = link(&a, &b, false).await;
     let lk = Link { sync: fb.clone(), hub: Arc::downgrade(&b.hub), copy: false };
     assert_eq!(lk.post(&l, json!({"m":"owner.mail","p":{}}).to_string()).await, None, "not the owner's machine: nothing is sent");
-    for n in [&a, &b] { n.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{l}"),"value":"pair","at":1})).await.unwrap(); }
+    for n in [&a, &b] { n.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{l}"),"value":"approved","at":1})).await.unwrap(); }
     // (A has no bots here: the request reached its owner.mail branch, which says so)
     let r = lk.post(&l, json!({"m":"owner.mail","p":{}}).to_string()).await.expect("sent");
     assert_eq!(r, (503, "bots are not running".to_string()), "signed, owner-only, and it reached the owner.mail branch");
