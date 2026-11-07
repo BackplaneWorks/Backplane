@@ -15,8 +15,8 @@ const WAIT_MS: u32 = 2000;
 #[repr(C)] #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params { eye: [f32; 4], right: [f32; 4], up: [f32; 4], fwd: [f32; 4], proj: [f32; 4], bg: [f32; 4] }
 #[repr(C)] #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vert { p: [f32; 3], nxy: u32, nz: u32, color: u32 }
-#[derive(blade_macros::ShaderData)] struct ModelData { params: Params, verts: gpu::BufferPiece }
+struct Vert { p: [f32; 3], nxy: u32, nz: u32, color: u32, group: u32 }
+#[derive(blade_macros::ShaderData)] struct ModelData { params: Params, verts: gpu::BufferPiece, fades: gpu::BufferPiece }
 #[derive(blade_macros::ShaderData)] struct BgData { params: Params }
 
 fn snorm(v: f32) -> u32 { ((v.clamp(-1.0, 1.0) * 32767.0).round() as i16 as u16) as u32 }
@@ -28,7 +28,7 @@ fn vertices(m: &Mesh) -> (Vec<Vert>, u32) {
             if (m.colors[i] >> 24 != 0) != clear { continue }
             for k in 0..3 {
                 let n = &m.normals[i][3 * k..3 * k + 3];
-                out.push(Vert { p: [t[3 * k], t[3 * k + 1], t[3 * k + 2]], nxy: snorm(n[0]) | snorm(n[1]) << 16, nz: snorm(n[2]), color: m.colors[i] });
+                out.push(Vert { p: [t[3 * k], t[3 * k + 1], t[3 * k + 2]], nxy: snorm(n[0]) | snorm(n[1]) << 16, nz: snorm(n[2]), color: m.colors[i], group: m.groups.get(i).copied().unwrap_or(0) });
             }
         }
     }
@@ -39,8 +39,9 @@ fn vertices(m: &Mesh) -> (Vec<Vert>, u32) {
 struct Target { size: (u32, u32), msaa: gpu::Texture, msaa_view: gpu::TextureView, depth: gpu::Texture, depth_view: gpu::TextureView, resolve: gpu::Texture, resolve_view: gpu::TextureView, read: gpu::Buffer }
 /// `mesh` names the model in the buffer: a Weak keeps its allocation, so no later mesh can take its address and be mistaken for it.
 struct Model { mesh: Weak<Mesh>, verts: gpu::Buffer, opaque: u32, total: u32 }
-struct Pipelines { bg: gpu::RenderPipeline, opaque: gpu::RenderPipeline, depth: gpu::RenderPipeline, blend: gpu::RenderPipeline }
-pub struct Gpu { ctx: gpu::Context, encoder: gpu::CommandEncoder, pipes: Pipelines, targets: Vec<Target>, model: Option<Model>, last: Option<gpu::SyncPoint>, pub device: String }
+struct Pipelines { bg: gpu::RenderPipeline, opaque: gpu::RenderPipeline, depth: gpu::RenderPipeline, blend: gpu::RenderPipeline, fade: gpu::RenderPipeline }
+/// `fades`: each group's fade (Mesh::groups), host memory rewritten for each picture, `cap` floats long
+pub struct Gpu { ctx: gpu::Context, encoder: gpu::CommandEncoder, pipes: Pipelines, targets: Vec<Target>, model: Option<Model>, fades: Option<(gpu::Buffer, usize)>, last: Option<gpu::SyncPoint>, pub device: String }
 
 /// Copies `n` bytes out of the read buffer. It is host memory the CPU does not cache (blade offers none that is: `Upload` is write-combined system memory, and
 /// `Shared` can be the card's own memory across the bus, 75 to 150 ms for one 1600 x 1000 picture on an RTX 5080), where ordinary loads crawl and streaming
@@ -85,6 +86,8 @@ fn pipelines(ctx: &gpu::Context) -> Pipelines {
         // transparency as the hub's renderer has it: only the nearest translucent layer shows, over what is opaque. Its depth first, then its colour where the depth is its own.
         depth: draw("solid-depth", depth(true, Greater), None, gpu::ColorWrites::empty()),
         blend: draw("solid-blend", depth(false, Equal), Some(gpu::BlendState::ALPHA_BLENDING), gpu::ColorWrites::COLOR),
+        // a part fading in: over everything drawn, the coat included, its opacity its fade; it writes no depth, so what is behind it still shows through
+        fade: draw("solid-fade", depth(false, Greater), Some(gpu::BlendState::ALPHA_BLENDING), gpu::ColorWrites::COLOR),
     }
 }
 
@@ -101,7 +104,7 @@ impl Gpu {
         if ctx.capabilities().sample_count_mask & SAMPLES == 0 || (info.is_software_emulated && want != "gpu") { return None }
         let encoder = ctx.create_command_encoder(gpu::CommandEncoderDesc { name: "solid", buffer_count: 2 });
         let pipes = pipelines(&ctx);
-        Some(Gpu { ctx, encoder, pipes, targets: Vec::new(), model: None, last: None, device: info.device_name })
+        Some(Gpu { ctx, encoder, pipes, targets: Vec::new(), model: None, fades: None, last: None, device: info.device_name })
     }
     fn wait(&mut self) -> bool { match self.last.take() { Some(s) => self.ctx.wait_for(&s, WAIT_MS), None => true } }
     /// The mesh into a buffer of its own, once: it stays until another model comes.
@@ -145,16 +148,36 @@ impl Gpu {
         self.ctx.destroy_buffer(t.read);
     }
     /// One picture as BGRA bytes, None when the GPU failed it.
-    pub fn render(&mut self, mesh: &Arc<Mesh>, cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> {
+    pub fn render(&mut self, mesh: &Arc<Mesh>, cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> { self.render_faded(mesh, &[], cam, w, h) }
+    /// The fades into their buffer (group 0, the board, is always 1); whether any group is between 0 and 1.
+    fn put_fades(&mut self, fades: &[f32]) -> bool {
+        let n = fades.len().max(1);
+        if self.fades.as_ref().map_or(true, |f| f.1 < n) {
+            if let Some((old, _)) = self.fades.take() { self.wait(); self.ctx.destroy_buffer(old); }
+            let cap = n.next_power_of_two().max(64);
+            self.fades = Some((self.ctx.create_buffer(gpu::BufferDesc { name: "solid-fades", size: cap as u64 * 4, memory: gpu::Memory::Upload }), cap));
+        }
+        let (buf, _) = self.fades.unwrap();
+        let mut any = false;
+        let vals: Vec<f32> = (0..n).map(|g| if g == 0 { 1.0 } else { let f = fades.get(g).copied().unwrap_or(1.0).clamp(0.0, 1.0); any |= f < 1.0; f }).collect();
+        unsafe { std::ptr::copy_nonoverlapping(vals.as_ptr() as *const u8, buf.data(), vals.len() * 4); }
+        self.ctx.sync_buffer(buf);
+        any
+    }
+    /// `render` with each group of triangles at its fade.
+    pub fn render_faded(&mut self, mesh: &Arc<Mesh>, fades: &[f32], cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> {
         if !self.upload(mesh) { return None }
         let size = (w as u32, h as u32);
         let at = self.target(size);
         if !self.wait() { return None }
         let (msaa, depth, resolve, read) = { let t = &self.targets[at]; (t.msaa_view, t.depth_view, t.resolve_view, t.read) };
+        if !self.wait() { return None }
+        let fading = self.put_fades(fades);
+        let fbuf = self.fades?.0;
         let (src, m) = (self.targets[at].resolve, self.model.as_ref()?);
         let (verts, opaque, total) = (m.verts, m.opaque, m.total);
         let f = 1.0 / (FOV / 2.0).tan(); let v = |a: [f32; 3]| [a[0], a[1], a[2], 0.0]; let e = cam.eye();
-        let params = Params { eye: v(e), right: v(cam.right), up: v(cam.up), fwd: v(cam.fwd), proj: [f * h as f32 / w as f32, f, (cam.dist * 0.02).max(1e-3), 0.0],
+        let params = Params { eye: v(e), right: v(cam.right), up: v(cam.up), fwd: v(cam.fwd), proj: [f * h as f32 / w as f32, f, (cam.dist * 0.02).max(1e-3), 0.0 /* the pass: 0 at rest, 1 fading parts only */],
             bg: [to_linear(BG[2]), to_linear(BG[1]), to_linear(BG[0]), 1.0] };
         self.encoder.start();
         {
@@ -162,12 +185,13 @@ impl Gpu {
                 colors: &[gpu::RenderTarget { view: msaa, init_op: gpu::InitOp::Clear(gpu::TextureColor::OpaqueBlack), finish_op: gpu::FinishOp::ResolveTo(resolve) }],
                 depth_stencil: Some(gpu::RenderTarget { view: depth, init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack), finish_op: gpu::FinishOp::Discard }) });
             { let mut p = pass.with(&self.pipes.bg); p.bind(0, &BgData { params }); p.draw(0, 3, 0, 1); }
-            let data = ModelData { params, verts: verts.into() };
+            let data = ModelData { params, verts: verts.into(), fades: fbuf.into() };
             if opaque > 0 { let mut p = pass.with(&self.pipes.opaque); p.bind(0, &data); p.draw(0, opaque, 0, 1); }
             if total > opaque {
                 { let mut p = pass.with(&self.pipes.depth); p.bind(0, &data); p.draw(opaque, total - opaque, 0, 1); }
                 { let mut p = pass.with(&self.pipes.blend); p.bind(0, &data); p.draw(opaque, total - opaque, 0, 1); }
             }
+            if fading { let mut q = params; q.proj[3] = 1.0; let mut p = pass.with(&self.pipes.fade); p.bind(0, &ModelData { params: q, verts: verts.into(), fades: fbuf.into() }); p.draw(0, total, 0, 1); }
         }
         self.encoder.transfer("solid-read").copy_texture_to_buffer(src.into(), read.into(), size.0 * 4, gpu::Extent { width: size.0, height: size.1, depth: 1 });
         let done = self.ctx.submit(&mut self.encoder);
@@ -183,7 +207,8 @@ impl Drop for Gpu {
         self.wait();
         for t in std::mem::take(&mut self.targets) { self.drop_target(t); }
         if let Some(m) = self.model.take() { self.ctx.destroy_buffer(m.verts); }
-        for p in [&mut self.pipes.bg, &mut self.pipes.opaque, &mut self.pipes.depth, &mut self.pipes.blend] { self.ctx.destroy_render_pipeline(p); }
+        if let Some((f, _)) = self.fades.take() { self.ctx.destroy_buffer(f); }
+        for p in [&mut self.pipes.bg, &mut self.pipes.opaque, &mut self.pipes.depth, &mut self.pipes.blend, &mut self.pipes.fade] { self.ctx.destroy_render_pipeline(p); }
         self.ctx.destroy_command_encoder(&mut self.encoder);
     }
 }

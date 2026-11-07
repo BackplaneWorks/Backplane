@@ -172,7 +172,7 @@ vertex MOut mesh_v(uint vid [[vertex_id]], const device MV *vs [[buffer(0)]], co
     o.vn = float3(v.n) * float3(1,-1,1); o.vp = float3(v.p) * float3(1,-1,1); o.vm = estimate(o.vc);
     return o;
 }
-fragment float4 mesh_f(MOut i [[stage_in]], constant U &u [[buffer(1)]]) {
+static float3 shade(MOut i, constant U &u) {
     float3 vc=i.vc, vn=i.vn, vp=i.vp, vm=i.vm;
     float3 eye=u.eye.xyz, right=u.right.xyz, up=u.up.xyz, forward=u.forward.xyz, thermal=u.thermal.xyz;
     float exposure=u.thermal.w, orthographic=0.0;
@@ -197,8 +197,14 @@ fragment float4 mesh_f(MOut i [[stage_in]], constant U &u [[buffer(1)]]) {
   rgb*=exp2(exposure);
   // Soft highlight shoulder; retain diffuse whites and dark material detail.
   rgb=rgb/(float3(1.0)+max(rgb-float3(0.8),float3(0.0))*0.28);
-  return float4(clamp(srgb(rgb),0.0,1.0),1.0);
-
+  return clamp(srgb(rgb),0.0,1.0);
+}
+fragment float4 mesh_f(MOut i [[stage_in]], constant U &u [[buffer(1)]]) {
+    return float4(shade(i, u), 1.0);
+}
+// a part fading in: premultiplied by u.fade, blended over the frame
+fragment float4 mesh_fa(MOut i [[stage_in]], constant U &u [[buffer(1)]]) {
+    return float4(shade(i, u) * u.fade, u.fade);
 }
 """#
 }

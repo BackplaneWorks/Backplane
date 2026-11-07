@@ -5,7 +5,7 @@
 //! 3D model at a time. `BACKPLANE_PLOT_NATIVE=0` sends them all to the child again (`backplane --plot KIND FILE INFOS`, `BACKPLANE_PLOT_BIN`,
 //! default `backplane-serve` beside the hub).
 //! Not ported yet: web stamps. A split view (`kicad.watch` kind "split") watches the schematic, board and 3D model at once (`watch_split`).
-use super::{plot::{self, Plot}, plotgen, plotread, project, solid, solidread, stepglb};
+use super::{pcb3d, plot::{self, Plot}, plotgen, plotread, project, solid, solidread, stepglb};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
@@ -31,9 +31,11 @@ pub fn kind_of(name: &str) -> Option<u32> { Some(match name { "board" => 0, "sch
 pub fn fnv(s: &str) -> u32 { s.chars().fold(2166136261u32, |h, c| (h ^ c as u32).wrapping_mul(16777619)) }
 
 #[derive(Default)]
-struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool }
+/// `parts`: a board model's part frames so far (the one that starts them first), `stop` its stream's (set when another replaces it)
+struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool, parts: Vec<Arc<Vec<u8>>>, stop: Option<Arc<std::sync::atomic::AtomicBool>> }
 /// `kept`: the id (`plot::mesh_id`) of the model the client already holds from an earlier visit; that model is not sent again
-struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64 }
+/// `parts_at`: how many of its source's part frames this watcher has been sent
+struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, parts_at: usize }
 #[derive(Default)]
 struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String> }
 
@@ -68,7 +70,7 @@ impl Plots {
           st.subs.remove(&client);
           for (i, (k, ky, f)) in views.into_iter().enumerate() {
               let carries = i == 0 && !solid_kind(k);
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh: vec![], fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if solid_kind(k) { kept } else { 0 } });
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh: vec![], fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if solid_kind(k) { kept } else { 0 }, parts_at: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: f.clone(), ..Default::default() });
               s.file = f;
               if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None } // Pv.fresh: a plot of an older file is not sent
@@ -91,7 +93,7 @@ impl Plots {
         { let mut st = self.st.lock().unwrap();
           st.subs.remove(&client);
           for (k, ky, file) in views {
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0 });
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: file.clone(), ..Default::default() });
               s.file = file;
               if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None }
@@ -113,7 +115,7 @@ impl Plots {
             let mut idle: Vec<String> = st.srcs.iter().filter(|(k, s)| !watched.contains(*k) && is_version(&s.file) == versions).map(|(k, _)| k.clone()).collect();
             idle.sort_by_key(|k| !st.idle.contains(k)); // already idle ones are the older
             let drop = idle.len().saturating_sub(limit);
-            for k in idle.iter().take(drop) { st.srcs.remove(k); }
+            for k in idle.iter().take(drop) { if let Some(f) = st.srcs.remove(k).and_then(|s| s.stop) { f.store(true, std::sync::atomic::Ordering::Relaxed) } }
             keep_idle.extend(idle.into_iter().skip(drop));
         }
         st.idle = keep_idle;
@@ -131,7 +133,7 @@ impl Plots {
     /// Bring watchers of `key` (or just `only`) up to its plot; a source with none yet is read.
     fn fan_one(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str, only: Option<u64>) {
         let (plot, need_read, kind) = { let st = self.st.lock().unwrap(); match st.srcs.get(ky) { Some(s) => (s.plot.clone(), s.plot.is_none() && !s.busy, s.kind), None => return } };
-        if let Some(p) = plot { self.send_to(hub, ky, &p, only); self.revision(hub, ky, only); if solid_kind(kind) { self.note(hub, ky, only) } }
+        if let Some(p) = plot { self.send_to(hub, ky, &p, only); self.sync_parts(hub, ky, only); self.revision(hub, ky, only); if solid_kind(kind) { self.note(hub, ky, only) } }
         if need_read { self.read(hub, ky) }
     }
     /// Pv.revision.ready: the exact revision of the file the plot is of, to the watchers (nothing for a version).
@@ -169,24 +171,101 @@ impl Plots {
         for c in gone { self.stop(c) }
     }
 
+    /// Each watcher of `key` (or just `only`) sent the part frames it has not had yet, in order.
+    fn sync_parts(&self, hub: &Arc<Hub>, ky: &str, only: Option<u64>) {
+        let mut gone = vec![];
+        { let mut st = self.st.lock().unwrap();
+          let frames = match st.srcs.get(ky) { Some(s) if !s.parts.is_empty() => s.parts.clone(), _ => return };
+          for (client, subs) in st.subs.iter_mut() {
+              if only.map_or(false, |o| o != *client) { continue }
+              for sub in subs.iter_mut().filter(|s| s.key == ky) {
+                  while sub.parts_at < frames.len() { if !hub.push_raw(*client, frames[sub.parts_at].to_vec()) { gone.push(*client); break } sub.parts_at += 1; }
+              }
+          } }
+        for c in gone { self.stop(c) }
+    }
+    /// A board model's parts, streamed: the plan's frames go onto the source as they are made and out to its watchers. A newer model's
+    /// stream stops this one (its flag), and so does the source leaving.
+    fn start_parts(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str, file: &str, rev: String, made: Arc<(pcb3d::stream::Plan, u64)>) {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        { let mut st = self.st.lock().unwrap();
+          let Some(s) = st.srcs.get_mut(ky) else { return };
+          if let Some(old) = s.stop.replace(stop.clone()) { old.store(true, std::sync::atomic::Ordering::Relaxed) }
+          s.parts.clear();
+          for subs in st.subs.values_mut() { for sub in subs.iter_mut().filter(|s| s.key == ky) { sub.parts_at = 0 } } }
+        let (me, hub, ky, file, home) = (self.clone(), hub.clone(), ky.to_string(), file.to_string(), self.home.clone());
+        let rt = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            let tools = stepglb::machine(&home);
+            let cache = pcb3d::models::Cache::standard();
+            let emit = |f: Vec<u8>| {
+                { let mut st = me.st.lock().unwrap();
+                  if stop.load(std::sync::atomic::Ordering::Relaxed) { return } // checked under the lock that replaces it: no frame of an old stream lands after a new one starts
+                  let Some(s) = st.srcs.get_mut(&ky) else { return };
+                  s.parts.push(Arc::new(f)); }
+                let (me, hub, ky) = (me.clone(), hub.clone(), ky.clone());
+                rt.spawn(async move { me.sync_parts(&hub, &ky, None) });
+            };
+            let t = pcb3d::stream::parts(&ky, &rev, &made.0, made.1, &cache, &tools, &stop, &emit);
+            eprintln!("pcb3d: {} parts: first {} ms, all {:.0} ms ({} part frames, {} instances boxed, {} models failed)", file, t.first.map_or("-".into(), |f| format!("{f:.0}")), t.all, t.models, t.boxes, t.failed);
+        });
+    }
+    /// Whether a board's 3D model is made here (pcb3d) rather than by kicad-cli: the setting `viewer.board3d` (`native`, the default, or `kicad-cli`).
+    async fn board3d_native(hub: &Arc<Hub>) -> bool { hub.setting("viewer.board3d").await.as_deref() != Some("kicad-cli") }
+    /// pcb3d: the bare board from its file (a saved version's too), and for a model with parts the plan of its parts, with the note of the
+    /// missing ones written. The GLB goes into the models cache behind it, by the file's revision.
+    async fn run_board3d(&self, hub: &Arc<Hub>, kind: u32, file: &str, ky: &str) -> Option<Result<(Plot, Option<Arc<(pcb3d::stream::Plan, u64)>>), String>> {
+        let (f, infos, cli) = (file.to_string(), self.infos(ky), super::ipc::runtime(hub).await.cli);
+        tokio::task::spawn_blocking(move || {
+            let r = std::panic::catch_unwind(|| {
+                let t = std::time::Instant::now();
+                let bytes = plotread::version(&f);
+                let abs = f.rsplit(['\t', '\n']).next().unwrap_or(&f).to_string();
+                let made = pcb3d::stream::board_model(&bytes)?;
+                let tris = made.plot.solid.as_ref().map_or(0, |s| s.n as u64);
+                eprintln!("pcb3d: {abs} board {:.0} ms (parse {:.0}, mesh {:.0}), {tris} triangles", t.elapsed().as_secs_f64() * 1000.0, made.ms.0, made.ms.1);
+                let plan = if kind == 3 { None } else {
+                    let env = pcb3d::models::Env::system((!cli.is_empty()).then(|| std::path::Path::new(&cli)));
+                    let dir = pcb3d::stream::board_dir(&abs);
+                    let p = pcb3d::stream::plan(&made.board, made.seat, &|raw: &str| pcb3d::models::resolve(raw, &dir, &env));
+                    plotgen::write_infos(&infos.to_string_lossy(), &pcb3d::stream::missing_note(&p));
+                    Some(Arc::new((p, tris)))
+                };
+                if !is_version(&f) { // the GLB, kept by revision: one per board
+                    let (layers, name, rev) = (made.layers, std::path::Path::new(&abs).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), stamp(&f).rev);
+                    std::thread::spawn(move || pcb3d::stream::keep_glb(&layers, &name, &abs, &rev));
+                }
+                Ok((made.plot, plan))
+            });
+            #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); }
+            r.unwrap_or_else(|_| Err(plotgen::UNREAD.to_string()))
+        }).await.ok()
+    }
+
     fn read(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str) {
         let (kind, file) = { let mut st = self.st.lock().unwrap(); let Some(s) = st.srcs.get_mut(ky) else { return }; if s.busy { s.again = true; return } s.busy = true; (s.kind, s.file.clone()) };
         let (me, hub, ky) = (self.clone(), hub.clone(), ky.to_string());
         tokio::spawn(async move {
             let _slot = me.readers.acquire().await.ok();
             // Pv.read.at: a model whose GLB is known too big is refused at once, not behind another model's read
-            let known = if solid_kind(kind) { solidread::known(kind, &file) } else { 0 };
-            let _one = if solid_kind(kind) && solid::fits(known) { Some(me.solid.lock().await) } else { None };
+            let native3d = solid_kind(kind) && file.ends_with(".kicad_pcb") && !file.starts_with("diff\n") && Self::board3d_native(&hub).await;
+            let known = if solid_kind(kind) && !native3d { solidread::known(kind, &file) } else { 0 };
+            let _one = if solid_kind(kind) && !native3d && solid::fits(known) { Some(me.solid.lock().await) } else { None };
             let before = if is_version(&file) { Stamp::default() } else { stamp(&file) };
-            let out = if !solid::fits(known) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
+            let mut parts = None;
+            let out = if native3d { me.run_board3d(&hub, kind, &file, &ky).await.map(|r| match r { Ok((p, plan)) => { parts = plan; (0, String::new(), Some(p)) } Err(e) => (3, e, None) }) }
+                else if !solid::fits(known) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
             let after = if is_version(&file) { Stamp::default() } else { stamp(&file) };
             let (code, text, made) = match out { Some((c, t, m)) => if before != after { (2, String::new(), None) } else { (c, t, m) }, None => (1, "cannot run the plot reader".into(), None) };
             let mut again = false;
             let plot = if code == 0 { Some(Arc::new(made.unwrap_or_else(|| plot::parse_child(&text)))) } else { None };
             { let mut st = me.st.lock().unwrap();
-              if let Some(s) = st.srcs.get_mut(&ky) { s.busy = false; s.stamp = Some(before); again = std::mem::take(&mut s.again); if let Some(p) = &plot { s.plot = Some(p.clone()) } } }
+              if let Some(s) = st.srcs.get_mut(&ky) { s.busy = false; s.stamp = Some(before.clone()); again = std::mem::take(&mut s.again); if let Some(p) = &plot { s.plot = Some(p.clone()) } } }
             match (&plot, code) {
-                (Some(p), _) => { me.send_to(&hub, &ky, p, None); me.revision(&hub, &ky, None) }
+                (Some(p), _) => {
+                    me.send_to(&hub, &ky, p, None); me.revision(&hub, &ky, None);
+                    if let Some(plan) = parts.take() { me.start_parts(&hub, &ky, &file, before.rev.clone(), plan) }
+                }
                 (None, 0 | 2) => {} // half written or read again: the next poll sees the file change
                 (None, _) => { // Pv.fail: every watcher told why, and holding nothing
                     let why: String = text.trim().chars().take(200).collect();

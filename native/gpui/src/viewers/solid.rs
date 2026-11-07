@@ -18,7 +18,8 @@ pub fn samples(w: usize, h: usize, draft: bool) -> usize { if draft { 1 } else i
 pub(super) const FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Mesh { pub tris: Vec<[f32; 9]>, pub normals: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32 }
+/// `groups`: each triangle's fade group, 0 the board (always shown), k the k-th part frame (it fades in); empty for a model with no parts.
+pub struct Mesh { pub tris: Vec<[f32; 9]>, pub normals: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32, pub groups: Vec<u32> }
 
 struct Varints<'a> { b: &'a [u8], at: usize, valid: bool }
 impl<'a> Varints<'a> {
@@ -60,8 +61,68 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
     let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
     let radius = (0..3).map(|a| (hi[a] - lo[a]) * (hi[a] - lo[a])).sum::<f32>().sqrt() / 2.0;
     let normals = raster::smooth_normals(&tris, &keys);
-    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3) })
+    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), groups: Vec::new() })
 }
+
+/// A part frame's model placed at each of its instances, in the page's axes (mm, the wire's y turned up, as `decode_mesh`). `at` is 12
+/// little-endian f32 an instance: the row-major 3 x 4 affine from the model's integer coordinates to the board model's. Errors when the
+/// bytes are not exactly `n` triangles or `at` is not whole instances.
+pub fn decode_part(n: usize, bytes: &[u8], at: &[u8]) -> Result<Mesh, String> {
+    if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized part".into()) }
+    if at.is_empty() || at.len() % 48 != 0 { return Err("Invalid part placement".into()) }
+    let k = at.len() / 48;
+    if n.saturating_mul(k) > MAX_TRIANGLES { return Err("Too many part triangles".into()) }
+    let mut v = Varints::new(bytes);
+    let (mut color, mut p) = (0u32, [0i32; 3]);
+    let (mut raw, mut cols) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    for _ in 0..n {
+        color ^= v.next();
+        let mut t = [0i32; 9];
+        for c in 0..3 { for a in 0..3 { p[a] = p[a].wrapping_add(v.signed()); t[3 * c + a] = p[a]; } }
+        if !v.valid { return Err("Incomplete part".into()) }
+        raw.push(t); cols.push(color);
+    }
+    if v.more() || !v.valid { return Err("Unexpected part bytes".into()) }
+    let (mut tris, mut colors, mut keys) = (Vec::with_capacity(n * k), Vec::with_capacity(n * k), Vec::with_capacity(n * k * 3));
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for m in at.chunks_exact(48) {
+        let a: [f32; 12] = std::array::from_fn(|i| f32::from_le_bytes([m[4 * i], m[4 * i + 1], m[4 * i + 2], m[4 * i + 3]]));
+        if a.iter().any(|x| !x.is_finite()) { return Err("Invalid part placement".into()) }
+        for (t, c) in raw.iter().zip(&cols) {
+            let mut o = [0f32; 9];
+            for c3 in 0..3 {
+                let (x, y, z) = (t[3 * c3] as f32, t[3 * c3 + 1] as f32, t[3 * c3 + 2] as f32);
+                let w = [a[0] * x + a[1] * y + a[2] * z + a[3], a[4] * x + a[5] * y + a[6] * z + a[7], a[8] * x + a[9] * y + a[10] * z + a[11]];
+                keys.push([w[0].round() as i32, w[1].round() as i32, w[2].round() as i32]);
+                // 10 micrometres -> millimetres, y turned up, as decode_mesh
+                o[3 * c3] = w[0] * 0.01; o[3 * c3 + 1] = -w[1] * 0.01; o[3 * c3 + 2] = w[2] * 0.01;
+                for q in 0..3 { lo[q] = lo[q].min(o[3 * c3 + q]); hi[q] = hi[q].max(o[3 * c3 + q]); }
+            }
+            tris.push(o); colors.push(*c);
+        }
+    }
+    let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
+    let radius = (0..3).map(|a| (hi[a] - lo[a]) * (hi[a] - lo[a])).sum::<f32>().sqrt() / 2.0;
+    let normals = raster::smooth_normals(&tris, &keys);
+    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), groups: Vec::new() })
+}
+
+/// The board and the parts that have come, as one model: the board's triangles (group 0) then each part frame's (group 1, 2...). Its
+/// centre and size are the board's, so arriving parts never move the camera.
+pub fn combine(board: Option<&Mesh>, parts: &[Arc<Mesh>]) -> Option<Mesh> {
+    let first = board.or(parts.first().map(|p| &**p))?;
+    let n = board.map_or(0, |b| b.tris.len()) + parts.iter().map(|p| p.tris.len()).sum::<usize>();
+    let mut m = Mesh { tris: Vec::with_capacity(n), normals: Vec::with_capacity(n), colors: Vec::with_capacity(n), center: first.center, radius: first.radius, groups: Vec::with_capacity(n) };
+    if let Some(b) = board { m.tris.extend_from_slice(&b.tris); m.normals.extend_from_slice(&b.normals); m.colors.extend_from_slice(&b.colors); m.groups.resize(b.tris.len(), 0); }
+    for (g, p) in parts.iter().enumerate() { m.tris.extend_from_slice(&p.tris); m.normals.extend_from_slice(&p.normals); m.colors.extend_from_slice(&p.colors); m.groups.resize(m.tris.len(), g as u32 + 1); }
+    Some(m)
+}
+/// How long a part takes to fade in.
+pub const FADE_MS: f32 = 300.0;
+/// A part group's opacity `ms` after it showed.
+pub fn fade_at(ms: f32) -> f32 { (ms / FADE_MS).clamp(0.0, 1.0) }
+/// The progress the page shows while parts stream ("" when there are none to wait for).
+pub fn progress(done: u32, of: u32) -> String { if of == 0 || done >= of { String::new() } else { format!("parts {done}/{of}") } }
 
 // ---- the frame: a minimal CBOR map reader (text keys, or the wire dictionary's integer keys; byte strings) ------
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +141,7 @@ fn item(b: &[u8], at: &mut usize, depth: usize) -> Option<Item> {
         2 => { let end = at.checked_add(n as usize)?; let v = b.get(*at..end)?.to_vec(); *at = end; Item::Bytes(v) }
         3 => { let end = at.checked_add(n as usize)?; let v = std::str::from_utf8(b.get(*at..end)?).ok()?.to_string(); *at = end; Item::Text(v) }
         4 => { if n > 1 << 20 { return None } let mut a = Vec::new(); for _ in 0..n { a.push(item(b, at, depth + 1)?); } Item::Array(a) }
+        5 => { for _ in 0..n.checked_mul(2)? { skip(b, at, depth + 1)?; } Item::Other } // a map's entries are stepped over, so what follows it reads right
         6 => return item(b, at, depth + 1), // a tag has one value: the tag number was the head's argument (as wire.rs reads it)
         _ => Item::Other,
     })
@@ -119,8 +181,28 @@ pub fn read_frame(b: &[u8]) -> Option<Vec<(String, Item)>> {
 }
 #[derive(Debug, PartialEq)]
 pub enum SolidFrame { Model(String, Mesh), /// why there is no model (the hub's `none`), the previous model stays
-    Note(String, String), Bad(String) }
+    Note(String, String), Bad(String),
+    /// the parts of the model start again: `of` instances will come
+    Parts(String, u32),
+    /// one part model at its instances (placed), and how many instances have now come
+    Part(String, Mesh, u32) }
 fn is_solid_key(k: &str) -> bool { k.starts_with("2|") || k.starts_with("3|") || k.starts_with("4|") }
+/// `parts:{of, rev}`: the map is not an `Item` (read_frame skips maps), so it is read here: the frame's `parts` value's `of`.
+fn read_parts(b: &[u8]) -> Option<u32> {
+    let mut at = 0; let (major, n) = head(b, &mut at)?; if major != 5 || n > 256 { return None }
+    for _ in 0..n {
+        let name = match item(b, &mut at, 1)? { Item::Text(t) => t, Item::Int(i) => crate::wire::KEYS.get(i as usize)?.to_string(), _ => return None };
+        if name != "parts" { skip(b, &mut at, 1)?; continue }
+        let (major, m) = head(b, &mut at)?; if major != 5 || m > 16 { return None }
+        let mut of = 0u32;
+        for _ in 0..m {
+            let k = match item(b, &mut at, 2)? { Item::Text(t) => t, _ => return None };
+            match item(b, &mut at, 2)? { Item::Int(v) if k == "of" && v >= 0 => of = v as u32, _ => {} }
+        }
+        return Some(of)
+    }
+    None
+}
 /// A solid frame as the page uses it; None when the bytes are not a solid frame at all.
 pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
     let f = read_frame(b)?;
@@ -128,6 +210,13 @@ pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
     let key = match get("key") { Some(Item::Text(k)) => k.clone(), _ => return None };
     if !is_solid_key(&key) { return None }
     if let Some(Item::Text(why)) = get("none") { return Some(SolidFrame::Note(key, why.clone())) }
+    if let Some(of) = read_parts(b) { return Some(SolidFrame::Parts(key, of)) }
+    if let Some(Item::Text(_id)) = get("part") {
+        let (Some(Item::Bytes(mesh)), Some(Item::Bytes(at))) = (get("mesh"), get("at")) else { return Some(SolidFrame::Bad("part without its model".into())) };
+        let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
+        let done = match get("done") { Some(Item::Int(d)) if *d >= 0 => *d as u32, _ => 0 };
+        return Some(match decode_part(n, mesh, at) { Ok(m) => SolidFrame::Part(key, m, done), Err(e) => SolidFrame::Bad(e) })
+    }
     let Some(Item::Bytes(mesh)) = get("mesh") else { return None }; // a note about the parts is not a model
     let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
     Some(match decode_mesh(n, mesh) { Ok(m) => SolidFrame::Model(key, m), Err(e) => SolidFrame::Bad(e) })
@@ -206,9 +295,28 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 }
 
 // ---- the worker: latest request wins -------------------------------------------------------------------------------
-enum Msg { Mesh(SolidFrame), Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str } }
+/// `Scene`: the model with the parts that have come (`mesh`), after one or more frames: `board` when the board itself is new (its
+/// pictures in flight are stale), `reset` when the parts started again, `groups` part frames held, `done` of `of` instances come.
+enum Msg { Mesh(SolidFrame), Scene { key: String, mesh: Option<Arc<Mesh>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str } }
 /// What to render: the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
-type Job = (Arc<Mesh>, Camera, usize, usize, usize, u64, bool);
+type Job = (Arc<Mesh>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool);
+/// What the worker holds of the model on show: the board, the part frames come so far, the progress.
+#[derive(Default)] struct Scene { key: String, board: Option<Arc<Mesh>>, parts: Vec<Arc<Mesh>>, done: u32, of: u32 }
+impl Scene {
+    /// One frame onto the scene: whether the model changed (and whether the board did, and the parts started again), or a message for the page.
+    fn take(&mut self, f: SolidFrame, board: &mut bool, reset: &mut bool) -> Result<bool, SolidFrame> {
+        match f {
+            SolidFrame::Model(key, m) => { self.key = key; self.board = Some(Arc::new(m)); self.parts.clear(); self.done = 0; self.of = 0; *board = true; *reset = true; Ok(true) }
+            SolidFrame::Parts(key, of) => {
+                if key != self.key && self.board.is_some() { return Ok(false) } // another model's parts: not under this board
+                self.key = key; self.parts.clear(); self.done = 0; self.of = of; *reset = true; Ok(true)
+            }
+            SolidFrame::Part(key, m, done) => { if key != self.key { return Ok(false) } self.parts.push(Arc::new(m)); self.done = done.min(self.of.max(done)); Ok(true) }
+            SolidFrame::Note(key, why) => { if key != self.key { *self = Scene { key: key.clone(), ..Default::default() } } Err(SolidFrame::Note(key, why)) }
+            other => Err(other),
+        }
+    }
+}
 /// Whether a render in progress goes on: a draft does, or a drag would show nothing at all; a picture at rest gives way to anything newer.
 pub fn wanted(draft: bool, my: u64, newest: u64) -> bool { draft || my == newest }
 /// Whether a finished picture goes on the screen: it is of this model (`floor`) and newer than the one there. Pictures of a drag finish behind the pointer: that is no reason to drop them.
@@ -216,41 +324,50 @@ pub fn shows(ticket: u64, shown: u64, floor: u64) -> bool { ticket >= floor && t
 /// What draws: the process's GPU (solid_gpu::shared), or the cores when there is none or it fails.
 #[derive(Default)] struct Drawer;
 impl Drawer {
-    fn draw(&mut self, mesh: &Arc<Mesh>, cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<(Vec<u8>, &'static str)> {
+    fn draw(&mut self, mesh: &Arc<Mesh>, fades: &[f32], cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<(Vec<u8>, &'static str)> {
         #[cfg(target_os = "linux")] {
             let mut gpu = super::solid_gpu::shared().lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(g) = gpu.as_mut() { match g.render(mesh, cam, w, h) { Some(px) => return Some((px, "gpu")), None => { log::warn!("3D page: the GPU failed a picture, drawing on the CPU from now on"); std::mem::forget(gpu.take()); } } }
+            if let Some(g) = gpu.as_mut() { match g.render_faded(mesh, fades, cam, w, h) { Some(px) => return Some((px, "gpu")), None => { log::warn!("3D page: the GPU failed a picture, drawing on the CPU from now on"); std::mem::forget(gpu.take()); } } }
         }
-        render(mesh, cam, w, h, ss, alive).map(|px| (px, "cpu"))
+        raster::render_faded(mesh, fades, cam, w, h, ss, alive).map(|px| (px, "cpu"))
     }
 }
-#[derive(Default)] struct Pending { frame: Option<Vec<u8>>, render: Option<Job>, shutdown: bool }
+/// Frames queue (every part frame counts; a burst is applied at once, then one model goes to the page); a render request is the latest only.
+#[derive(Default)] struct Pending { frames: Vec<Vec<u8>>, render: Option<Job>, shutdown: bool }
 struct Worker { slot: Arc<(Mutex<Pending>, Condvar)>, ticket: Arc<AtomicU64> }
 impl Worker {
     fn spawn(tx: async_channel::Sender<Msg>) -> Worker {
         let slot: Arc<(Mutex<Pending>, Condvar)> = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
         let ticket = Arc::new(AtomicU64::new(0));
         let (s2, g2) = (slot.clone(), ticket.clone());
-        std::thread::Builder::new().name("solid-render".into()).spawn(move || { let mut drawer = Drawer::default(); loop {
-            let job = { let (m, cv) = &*s2; let mut p = m.lock().unwrap();
-                while p.frame.is_none() && p.render.is_none() && !p.shutdown { p = cv.wait(p).unwrap(); }
-                if p.shutdown { return } (p.frame.take(), p.render.take()) };
-            if let (Some(bytes), _) = &job { if let Some(f) = parse_frame(bytes) { if tx.send_blocking(Msg::Mesh(f)).is_err() { return } } }
-            if let (_, Some((mesh, cam, w, h, ss, my, draft))) = job {
+        std::thread::Builder::new().name("solid-render".into()).spawn(move || { let (mut drawer, mut scene) = (Drawer::default(), Scene::default()); loop {
+            let (frames, render) = { let (m, cv) = &*s2; let mut p = m.lock().unwrap();
+                while p.frames.is_empty() && p.render.is_none() && !p.shutdown { p = cv.wait(p).unwrap(); }
+                if p.shutdown { return } (std::mem::take(&mut p.frames), p.render.take()) };
+            let (mut changed, mut board, mut reset) = (false, false, false);
+            for bytes in &frames {
+                let Some(f) = parse_frame(bytes) else { continue };
+                match scene.take(f, &mut board, &mut reset) { Ok(c) => changed |= c, Err(f) => if tx.send_blocking(Msg::Mesh(f)).is_err() { return } }
+            }
+            if changed {
+                let mesh = combine(scene.board.as_deref(), &scene.parts).map(Arc::new);
+                if tx.send_blocking(Msg::Scene { key: scene.key.clone(), mesh, board, reset, groups: scene.parts.len(), done: scene.done, of: scene.of }).is_err() { return }
+            }
+            if let Some((mesh, fades, cam, w, h, ss, my, draft)) = render {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
-                if let Some((px, by)) = drawer.draw(&mesh, &cam, w, h, ss, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
+                if let Some((px, by)) = drawer.draw(&mesh, &fades, &cam, w, h, ss, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
                     if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris.len(), w, h, by }).is_err() { return } }
                 }
             }
         } }).ok();
         Worker { slot, ticket }
     }
-    fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frame = Some(bytes); cv.notify_one(); }
+    fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frames.push(bytes); cv.notify_one(); }
     /// Ask for an image of `mesh`, replacing any request not yet begun.
-    fn submit_render(&self, mesh: Arc<Mesh>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool) -> u64 {
+    fn submit_render(&self, mesh: Arc<Mesh>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool) -> u64 {
         let ticket = self.ticket.fetch_add(1, Ordering::Relaxed) + 1;
-        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, cam, w, h, ss, ticket, draft)); cv.notify_one(); ticket
+        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, fades, cam, w, h, ss, ticket, draft)); cv.notify_one(); ticket
     }
 }
 impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
@@ -267,6 +384,8 @@ pub fn note_keeps_model(page_key: &str, note_key: &str) -> bool { page_key == no
 
 pub struct SolidPage {
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
+    /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
+    born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
 }
 impl SolidPage {
@@ -277,7 +396,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -289,17 +408,24 @@ impl SolidPage {
     }
     fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
         match msg {
-            Msg::Mesh(SolidFrame::Model(key, mesh)) => {
+            Msg::Scene { key, mesh, board, reset, groups, done, of } => {
                 let fresh = key != self.key || self.cam.is_none();
-                self.key = key; let mesh = Arc::new(mesh); self.floor = self.latest + 1;
+                self.key = key;
+                if reset { self.born.clear(); }
+                let now = std::time::Instant::now(); self.born.truncate(groups); while self.born.len() < groups { self.born.push(now); } // a part fades in from when it shows
+                self.parts = (done, of);
+                let Some(mesh) = mesh else { cx.notify(); return };
+                if board || fresh { self.floor = self.latest + 1; } // pictures of the old board are stale; ones without the newest part are not
                 if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fitted_for(&mesh, self.fit_aspect)); }
-                self.mesh = Some(mesh); self.note.clear(); self.ask_render(false); cx.notify();
+                self.mesh = Some(mesh); self.note.clear(); self.ask_render(self.drag.is_some()); cx.notify();
             }
+            Msg::Mesh(SolidFrame::Model(..) | SolidFrame::Parts(..) | SolidFrame::Part(..)) => {} // the worker makes these a Scene
             Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; the same source's previous model stays shown
                 if !note_keeps_model(&self.key, &key) {
                     // another source's model could not be made: the old source's model must not show under this key
                     self.mesh = None; self.cam = None; if let Some(i) = self.image.take() { self.retired.push(i); }
                     self.floor = self.latest + 1; // a render of the old model still in flight is stale
+                    self.born.clear(); self.parts = (0, 0);
                 }
                 self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
             }
@@ -309,11 +435,22 @@ impl SolidPage {
                 self.on_screen = ticket;
                 if let Some(old) = self.image.replace(image) { self.retired.push(old); }
                 self.stats = Stats { images: self.stats.images + 1, painted: self.stats.painted, last_ms: ms, last_tris: tris, last_size: (w, h), by }; cx.notify();
+                // a fade is drawn picture after picture while it runs (no timer: the next is asked when this one is in), then once more at rest
+                if ticket == self.latest && self.drag.is_none() && self.fading { let still = self.fades().1; self.ask_render(still); }
             }
         }
     }
+    /// Each part group's fade now (index 0 the board), and whether any is still fading.
+    fn fades(&self) -> (Vec<f32>, bool) {
+        let mut v = Vec::with_capacity(self.born.len() + 1); v.push(1.0); let mut any = false;
+        for b in &self.born { let f = fade_at(b.elapsed().as_secs_f32() * 1000.0); any |= f < 1.0; v.push(f); }
+        (v, any)
+    }
+    /// The parts' progress for the page ("" when none is awaited).
+    pub fn parts_progress(&self) -> String { progress(self.parts.0, self.parts.1) }
     /// Request an image at the panel's device-pixel size (half size for a draft), within MAX_PIXELS.
     fn ask_render(&mut self, draft: bool) {
+        let (fades, fading) = self.fades(); self.fading = fading;
         let (Some(mesh), Some(cam)) = (&self.mesh, self.cam) else { return };
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
         let (mut w, mut h) = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48));
@@ -321,7 +458,7 @@ impl SolidPage {
         // a draft while moving: one sample a pixel, and half size only on a very large panel; the rest at rest: smooth outlines
         if draft && w * h > DRAFT_PIXELS { let k = (DRAFT_PIXELS as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
         self.asked = (w, h);
-        self.latest = self.worker.submit_render(mesh.clone(), cam, w, h, samples(w, h, draft), draft);
+        self.latest = self.worker.submit_render(mesh.clone(), Arc::new(fades), cam, w, h, samples(w, h, draft), draft);
     }
     /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
     pub fn set_view(&mut self, name: &str) {
@@ -389,6 +526,7 @@ impl Render for SolidPage {
         });
         div().id("solid-page").size_full().overflow_hidden().relative().child(body).child(probe).children(tools)
             .when(self.image.is_some() && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())))
+            .when(self.image.is_some() && !self.parts_progress().is_empty(), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.parts_progress())))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((if e.modifiers.alt { Drag::Roll } else if e.modifiers.shift || e.modifiers.control { Drag::Pan } else { Drag::Orbit }, e.position)); }))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
             .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
@@ -590,6 +728,72 @@ mod tests {
         assert_eq!(super::samples(1600, 1000, false), 2); assert_eq!(super::samples(2880, 1800, false), 1);
     }
     /// The one device-backed test: skipped where there is no Vulkan at all.
+    fn cbor_text(f: &mut Vec<u8>, s: &str) { f.push(0x60 | s.len() as u8); f.extend(s.as_bytes()) }
+    fn cbor_bytes(f: &mut Vec<u8>, b: &[u8]) { f.push(0x5a); f.extend((b.len() as u32).to_be_bytes()); f.extend(b) }
+    fn part_frame(key: &str, tris: &[([i32; 9], u32)], at: &[[f32; 12]], done: u8) -> Vec<u8> {
+        let mut f = vec![0xa6]; cbor_text(&mut f, "key"); cbor_text(&mut f, key); cbor_text(&mut f, "part"); cbor_text(&mut f, "0123456789abcdef");
+        cbor_text(&mut f, "n"); f.push(tris.len() as u8); cbor_text(&mut f, "mesh"); cbor_bytes(&mut f, &encode(tris));
+        cbor_text(&mut f, "at"); cbor_bytes(&mut f, &at.iter().flatten().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
+        cbor_text(&mut f, "done"); f.push(done); f
+    }
+    fn parts_frame(key: &str, of: u8) -> Vec<u8> { let mut f = vec![0xa2]; cbor_text(&mut f, "key"); cbor_text(&mut f, key); cbor_text(&mut f, "parts"); f.push(0xa2); cbor_text(&mut f, "of"); f.push(of); cbor_text(&mut f, "rev"); cbor_text(&mut f, "1.2.3"); f }
+    const ID: [f32; 12] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    #[test] fn a_part_frame_places_its_model_at_every_instance_and_the_parts_frame_says_how_many() {
+        assert_eq!(parse_frame(&parts_frame("2|b|", 7)), Some(SolidFrame::Parts("2|b|".into(), 7)));
+        // the second instance: turned a quarter about z (x' = -y, y' = x) and moved 50 mm in x (5000 wire units)
+        let turn = [0.0, -1.0, 0.0, 5000.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let tri = [([1000, 0, 0, 0, 1000, 0, 0, 0, 500], 0x00ff00u32)];
+        match parse_frame(&part_frame("2|b|", &tri, &[ID, turn], 2)) {
+            Some(SolidFrame::Part(k, m, done)) => {
+                assert_eq!((k.as_str(), m.tris.len(), done), ("2|b|", 2, 2));
+                assert_eq!(m.tris[0], [10.0, -0.0, 0.0, 0.0, -10.0, 0.0, 0.0, -0.0, 5.0], "mm, y turned up as the board's");
+                assert_eq!(m.tris[1][0..3], [50.0, -10.0, 0.0]); assert_eq!(m.tris[1][3..6], [40.0, -0.0, 0.0]);
+                assert_eq!(m.colors, vec![0x00ff00, 0x00ff00]);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(super::decode_part(1, &encode(&tri), &[0u8; 47]).is_err(), "half an instance is refused");
+        assert!(super::decode_part(1, &encode(&tri), &f32::NAN.to_le_bytes().repeat(12)).is_err());
+    }
+    #[test] fn the_worker_scene_starts_parts_again_and_combines_them_after_the_board() {
+        let mut sc = super::Scene::default(); let (mut b, mut r) = (false, false);
+        assert_eq!(sc.take(SolidFrame::Model("2|b|".into(), mesh()), &mut b, &mut r), Ok(true)); assert!(b && r);
+        let part = |done| match parse_frame(&part_frame("2|b|", &cube()[..2], &[ID], done)) { Some(f) => f, None => panic!() };
+        assert_eq!(sc.take(SolidFrame::Parts("2|b|".into(), 2), &mut b, &mut r), Ok(true));
+        assert_eq!(sc.take(part(1), &mut b, &mut r), Ok(true)); assert_eq!(sc.take(part(2), &mut b, &mut r), Ok(true));
+        assert_eq!(sc.take(SolidFrame::Parts("2|other|".into(), 9), &mut b, &mut r), Ok(false), "another model's parts do not go under this board");
+        let all = super::combine(sc.board.as_deref(), &sc.parts).unwrap();
+        assert_eq!(all.tris.len(), 12 + 2 + 2); assert_eq!(&all.groups[10..], &[0, 0, 1, 1, 2, 2]);
+        assert_eq!((all.center, all.radius), (mesh().center, mesh().radius), "the camera stays on the board");
+        assert_eq!((sc.done, sc.of), (2, 2));
+        assert_eq!(sc.take(SolidFrame::Parts("2|b|".into(), 3), &mut b, &mut r), Ok(true)); assert!(sc.parts.is_empty() && sc.of == 3);
+        assert_eq!(super::progress(1, 3), "parts 1/3"); assert_eq!(super::progress(3, 3), ""); assert_eq!(super::progress(0, 0), "");
+        assert_eq!((super::fade_at(0.0), super::fade_at(150.0), super::fade_at(900.0)), (0.0, 0.5, 1.0));
+    }
+    #[test] fn a_part_fades_in_from_nothing_to_itself_over_the_board() {
+        let board = mesh();
+        // a part: a red square floating in front of the cube's top
+        let red = [([0, 0, 1500, 1000, 0, 1500, 1000, 1000, 1500], 0xff0000u32), ([0, 0, 1500, 1000, 1000, 1500, 0, 1000, 1500], 0xff0000)];
+        let Some(SolidFrame::Part(_, p, _)) = parse_frame(&part_frame("2|b|", &red, &[ID], 1)) else { panic!() };
+        let all = super::combine(Some(&board), &[std::sync::Arc::new(p)]).unwrap();
+        let c = Camera::fitted(&board).named("top"); let (w, h) = (48, 48);
+        let plain = render(&board, &c, w, h, 1, ALIVE).unwrap();
+        let at = |f: f32| super::super::raster::render_faded(&all, &[1.0, f], &c, w, h, 1, ALIVE).unwrap();
+        assert_eq!(at(0.0), plain, "not there yet: the board alone");
+        let (half, full) = (at(0.5), at(1.0));
+        let mid = (h / 2 * w + w / 2) * 4; let red_of = |p: &[u8]| p[mid + 2] as i32 - p[mid + 1] as i32; // BGRA
+        assert!(red_of(&plain) < red_of(&half) && red_of(&half) < red_of(&full), "{} {} {}", red_of(&plain), red_of(&half), red_of(&full));
+        assert_eq!(full, super::super::raster::render_faded(&all, &[], &c, w, h, 1, ALIVE).unwrap(), "faded in is the same as never faded");
+        #[cfg(target_os = "linux")] {
+            unsafe { std::env::set_var("BACKPLANE_SOLID_RENDERER", "gpu"); }
+            if let Some(mut g) = super::super::solid_gpu::Gpu::new() {
+                let a = std::sync::Arc::new(all);
+                let mut gp = |f: f32| g.render_faded(&a, &[1.0, f], &c, w, h).unwrap();
+                let (z, hf, fl) = (gp(0.0), gp(0.5), gp(1.0));
+                assert!(red_of(&z) < red_of(&hf) && red_of(&hf) < red_of(&fl), "gpu {} {} {}", red_of(&z), red_of(&hf), red_of(&fl));
+            }
+        }
+    }
     #[cfg(target_os = "linux")] #[test] fn gpu_and_cpu_agree() {
         // SAFETY of the env write: the only test that reads this variable
         unsafe { std::env::set_var("BACKPLANE_SOLID_RENDERER", "gpu"); }

@@ -350,6 +350,8 @@ final class PlotStore {
     @ObservationIgnored private let queue = DispatchQueue(label: "plot", qos: .userInitiated)
     private(set) var generation = 0
     @ObservationIgnored private let assets = PlotMeshAssets()
+    /// the parts of the board model streaming in after it (PlotParts.swift)
+    let parts = PartsStore()
     @ObservationIgnored private let meshQueue = DispatchQueue(label: "plot.mesh", qos: .userInitiated)
     /// The view the models now arriving are for (MeshDisk's slot), set by `cached`
     @ObservationIgnored private var slot = ""
@@ -409,6 +411,7 @@ final class PlotStore {
     func reset() {
         generation += 1
         assets.reset()
+        parts.reset()
         held = []
         splitFrames = [:]
         splitOrder = []
@@ -458,6 +461,12 @@ final class PlotStore {
                 }
                 return
             }
+            // the parts of a board's model: not a model of their own
+            if solid, o["parts"] != nil || o["part"] != nil {
+                let box = o
+                DispatchQueue.main.async { MainActor.assumeIsolated { if gen == self.generation { self.parts.receive(key, box) } } }
+                return
+            }
             // a note about the model (parts with no 3D model) is not a model
             if solid, o["mesh"] == nil { return }
             if solid {
@@ -466,6 +475,7 @@ final class PlotStore {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard gen == self.generation, assets.current(key, ticket) else { return }
+                        self.parts.boardChanged(key)
                         self.mesh = MeshFrame(key: key, mesh: previous, none: "Received model; decoding…" + (previous == nil ? "" : " — previous saved revision shown"), at: Date(), decoding: true)
                     }
                 }

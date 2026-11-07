@@ -74,7 +74,7 @@ pub fn smooth_normals(tris: &[[f32; 9]], keys: &[[i32; 3]]) -> Vec<[f32; 9]> {
 /// A screen triangle: vertices in 1/16 pixel, wound so every edge function is positive inside; 1/z at the vertices; camera-space unit normals
 /// (i16 fixed point); its colour; the pixel box it can touch.
 #[derive(Clone, Copy)]
-struct Setup { v: [[i32; 2]; 3], iz: [f32; 3], n: [[i16; 3]; 3], color: u32, bx0: i32, by0: i32, bx1: i32, by1: i32 }
+struct Setup { v: [[i32; 2]; 3], iz: [f32; 3], n: [[i16; 3]; 3], color: u32, fade: f32, bx0: i32, by0: i32, bx1: i32, by1: i32 }
 struct Geo { eye: V3, right: V3, up: V3, fwd: V3, near: f32, cx: f32, cy: f32, scale: f32, w: i32, h: i32 }
 const SUB: f32 = 16.0;
 fn floor_div(a: i64, b: i64) -> i64 { a.div_euclid(b) }
@@ -82,7 +82,7 @@ fn ceil_div(a: i64, b: i64) -> i64 { -((-a).div_euclid(b)) }
 
 fn quant(n: V3) -> [i16; 3] { let n = norm(n); [(n[0] * 32767.0).round() as i16, (n[1] * 32767.0).round() as i16, (n[2] * 32767.0).round() as i16] }
 
-fn emit(g: &Geo, p: [(V3, V3); 3], color: u32, out: &mut Vec<Setup>) {
+fn emit(g: &Geo, p: [(V3, V3); 3], color: u32, fade: f32, out: &mut Vec<Setup>) {
     let mut s = [[0f32; 2]; 3]; let mut iz = [0f32; 3];
     for k in 0..3 { let z = p[k].0[2]; iz[k] = 1.0 / z; s[k] = [g.cx + p[k].0[0] * iz[k] * g.scale, g.cy - p[k].0[1] * iz[k] * g.scale]; }
     let (minx, maxx) = (s[0][0].min(s[1][0]).min(s[2][0]), s[0][0].max(s[1][0]).max(s[2][0]));
@@ -102,19 +102,23 @@ fn emit(g: &Geo, p: [(V3, V3); 3], color: u32, out: &mut Vec<Setup>) {
     let (bx0, bx1) = (ceil_div(mnx - 8, 16).max(0), floor_div(mxx - 8, 16).min(g.w as i64 - 1));
     let (by0, by1) = (ceil_div(mny - 8, 16).max(0), floor_div(mxy - 8, 16).min(g.h as i64 - 1));
     if bx0 > bx1 || by0 > by1 { return }
-    out.push(Setup { v, iz: [iz[0], z1, z2], n: [n0, n1, n2], color, bx0: bx0 as i32, by0: by0 as i32, bx1: bx1 as i32, by1: by1 as i32 });
+    out.push(Setup { v, iz: [iz[0], z1, z2], n: [n0, n1, n2], color, fade, bx0: bx0 as i32, by0: by0 as i32, bx1: bx1 as i32, by1: by1 as i32 });
 }
 
-fn project(mesh: &Mesh, lo: usize, hi: usize, g: &Geo, out: &mut Vec<Setup>) {
+/// A triangle's fade (0..1): its group's in `fades`, 1 for the board (group 0) and for a mesh without groups.
+pub fn fade_of(mesh: &Mesh, fades: &[f32], i: usize) -> f32 { match mesh.groups.get(i) { Some(&g) if g > 0 => fades.get(g as usize).copied().unwrap_or(1.0).clamp(0.0, 1.0), _ => 1.0 } }
+fn project(mesh: &Mesh, fades: &[f32], lo: usize, hi: usize, g: &Geo, out: &mut Vec<Setup>) {
     for i in lo..hi {
         let (t, nm, color) = (&mesh.tris[i], &mesh.normals[i], mesh.colors[i]);
+        let fade = fade_of(mesh, fades, i);
+        if fade <= 0.0 { continue } // a part that has only just arrived: not there yet
         let mut pv = [([0f32; 3], [0f32; 3]); 3];
         for k in 0..3 {
             let d = sub([t[3 * k], t[3 * k + 1], t[3 * k + 2]], g.eye);
             let n = [nm[3 * k], nm[3 * k + 1], nm[3 * k + 2]];
             pv[k] = ([dot(d, g.right), dot(d, g.up), dot(d, g.fwd)], [dot(n, g.right), dot(n, g.up), dot(n, g.fwd)]);
         }
-        if pv.iter().all(|p| p.0[2] >= g.near) { emit(g, pv, color, out); continue }
+        if pv.iter().all(|p| p.0[2] >= g.near) { emit(g, pv, color, fade, out); continue }
         // clip against z >= near: 0, 1 or 2 triangles
         let mut poly = [([0f32; 3], [0f32; 3]); 4]; let mut m = 0;
         for k in 0..3 {
@@ -128,7 +132,7 @@ fn project(mesh: &Mesh, lo: usize, hi: usize, g: &Geo, out: &mut Vec<Setup>) {
                 poly[m] = (pos, l(p.1, q.1)); m += 1;
             }
         }
-        for k in 1..m.saturating_sub(1) { emit(g, [poly[0], poly[k], poly[k + 1]], color, out); }
+        for k in 1..m.saturating_sub(1) { emit(g, [poly[0], poly[k], poly[k + 1]], color, fade, out); }
     }
 }
 
@@ -206,8 +210,10 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
     let mut zb = [0f32; (TILE * TILE) as usize]; let mut idb = [u32::MAX; (TILE * TILE) as usize];
     // the nearest translucent layer of each sample, as the hub's renderer keeps it: only that one shows, over what is opaque
     let mut tz = [0f32; (TILE * TILE) as usize]; let mut tid = [u32::MAX; (TILE * TILE) as usize];
+    // the nearest fading part of each sample (a part model arriving): over everything else, its opacity its fade
+    let mut fz = [0f32; (TILE * TILE) as usize]; let mut fid = [u32::MAX; (TILE * TILE) as usize];
     for &id in ids {
-        let s = &set[id as usize]; let clear = s.color >> 24 != 0;
+        let s = &set[id as usize]; let clear = s.color >> 24 != 0; let fading = s.fade < 1.0;
         let (bx0, bx1, by0, by1) = (s.bx0.max(x0t), s.bx1.min(x0t + tw - 1), s.by0.max(y0t), s.by1.min(y0t + th - 1));
         if bx0 > bx1 || by0 > by1 { continue }
         let mut e = [0i64; 3]; let mut sx = [0i64; 3]; let mut sy = [0i64; 3];
@@ -233,7 +239,7 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
             for x in bx0..=bx1 {
                 if (e0 | e1 | e2) >= 0 {
                     let z = z00 + gx * (x - bx0) as f32 + gy * dyf; let i = row + (x - x0t) as usize;
-                    if clear { if z > tz[i] { tz[i] = z; tid[i] = id; } } else if z > zb[i] { zb[i] = z; idb[i] = id; }
+                    if fading { if z > fz[i] { fz[i] = z; fid[i] = id; } } else if clear { if z > tz[i] { tz[i] = z; tid[i] = id; } } else if z > zb[i] { zb[i] = z; idb[i] = id; }
                 }
                 e0 += sx[0]; e1 += sx[1]; e2 += sx[2];
             }
@@ -261,10 +267,16 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
             light(l, norm(n), ray, s.color)
         };
         let mut c = if idb[i] == u32::MAX { l.bg } else { surface(idb[i]) };
-        if tid[i] != u32::MAX && tz[i] > zb[i] {
+        let coat = |c: &mut [f32; 3]| if tid[i] != u32::MAX && tz[i] > zb[i] {
             let (t, a) = (surface(tid[i]), 1.0 - (set[tid[i] as usize].color >> 24) as f32 / 255.0);
             for k in 0..3 { c[k] += (t[k] - c[k]) * a; }
-        }
+        };
+        let fade = |c: &mut [f32; 3]| if fid[i] != u32::MAX && fz[i] > zb[i] {
+            let s = &set[fid[i] as usize]; let (t, a) = (surface(fid[i]), (1.0 - (s.color >> 24) as f32 / 255.0) * s.fade);
+            for k in 0..3 { c[k] += (t[k] - c[k]) * a; }
+        };
+        // the nearer of the coat and the fading part goes over the other
+        if fid[i] != u32::MAX && tid[i] != u32::MAX && tz[i] > fz[i] { fade(&mut c); coat(&mut c); } else { coat(&mut c); fade(&mut c); }
         for a in 0..3 { acc[o][a] += c[a]; }
     } }
     let inv = 1.0 / (ss * ss) as f32;
@@ -275,7 +287,9 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
 
 /// Render into BGRA (w x h x 4) with `ss` x `ss` samples a pixel (1 for a draft while the model is moving). `alive` is polled between pieces of
 /// work: a superseded render stops and returns None.
-pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> {
+pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> { render_faded(mesh, &[], cam, w, h, ss, alive) }
+/// `render` with each group of triangles (`Mesh::groups`) at its fade in `fades` (0 not drawn, under 1 drawn see-through over the rest, 1 as the board).
+pub fn render_faded(mesh: &Mesh, fades: &[f32], cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> {
     let ss = ss.clamp(1, 3) as i32;
     let (iw, ih) = (w as i32 * ss, h as i32 * ss);
     let f = 1.0 / (FOV / 2.0).tan();
@@ -290,7 +304,7 @@ pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize, ss: usize, alive: &
     std::thread::scope(|sc| { for _ in 0..threads.min(nchunks.max(1)) { sc.spawn(|| { loop {
         let c = next.fetch_add(1, Ordering::Relaxed); if c >= nchunks || !alive() { return }
         let mut out = Vec::with_capacity(CHUNK / 2);
-        project(mesh, c * CHUNK, ((c + 1) * CHUNK).min(mesh.tris.len()), &g, &mut out);
+        project(mesh, fades, c * CHUNK, ((c + 1) * CHUNK).min(mesh.tris.len()), &g, &mut out);
         done.lock().unwrap().push((c, out));
     } }); } });
     if !alive() { return None }

@@ -15,6 +15,7 @@ pub mod board;
 pub mod fl;
 pub mod glb;
 pub mod mesh;
+pub mod pcb3d;
 pub mod plot;
 pub mod plotgen;
 pub mod plotread;

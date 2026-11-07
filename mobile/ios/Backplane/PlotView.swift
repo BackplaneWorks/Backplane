@@ -129,6 +129,12 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
     private var capBuf, triBuf, meshBuf, colorBuf, hiCaps, hiTris, slabBuf, colorSlab: MTLBuffer?
     private var layers: [LayerDraw] = []
     private var meshCount = 0
+    // the parts: one buffer that grows by appending, a range per arrived group (never the board's buffer)
+    private var partBuf, partColors: MTLBuffer?
+    private var partCapacity = 0     // vertices
+    private var partCount = 0        // vertices held
+    private var partRanges: [(start: Int, count: Int, at: Double)] = []
+    private var partEpoch = -1
     private var hiCount = (0, 0)
     private var hiLayer = -1
     private var slabCount = 0
@@ -222,7 +228,7 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
         let c = p.colorAttachments[0]!
         c.pixelFormat = cov ? .r8Unorm : .bgra8Unorm
         c.writeMask = write ? .all : []
-        if write && f != "mesh_f" {
+        if write && f != "mesh_f" {  // mesh_fa blends
             c.isBlendingEnabled = true
             if cov {
                 c.rgbBlendOperation = .max
@@ -292,6 +298,36 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
         meshCount = m.colors.count
     }
 
+    /// The parts held: groups past the ones already in the buffer are appended; another epoch (the parts started again) starts over.
+    func load(parts p: PartsFrame?) {
+        guard let p else { partRanges = []; partCount = 0; partEpoch = -1; return }
+        if p.epoch != partEpoch || p.groups.count < partRanges.count { partRanges = []; partCount = 0; partEpoch = p.epoch }
+        for g in p.groups[partRanges.count...] where g.count > 0 {
+            let need = partCount + g.count
+            if need > partCapacity {
+                let cap = max(need, partCapacity * 2, 4096)
+                let nb = device.makeBuffer(length: cap * 24, options: .storageModeShared)
+                let nc = device.makeBuffer(length: cap * 4, options: .storageModeShared)
+                if let nb, let nc {
+                    if let partBuf, let partColors, partCount > 0 {
+                        memcpy(nb.contents(), partBuf.contents(), partCount * 24)
+                        memcpy(nc.contents(), partColors.contents(), partCount * 4)
+                    }
+                    partBuf = nb; partColors = nc; partCapacity = cap
+                } else { return }
+            }
+            g.verts.withUnsafeBytes { memcpy(partBuf!.contents() + partCount * 24, $0.baseAddress!, g.verts.count * 4) }
+            g.colors.withUnsafeBytes { memcpy(partColors!.contents() + partCount * 4, $0.baseAddress!, g.count * 4) }
+            partRanges.append((partCount, g.count, g.at))
+            partCount = need
+        }
+        // groups with no triangles still take their place in the order
+        while partRanges.count < p.groups.count { partRanges.append((partCount, 0, p.groups[partRanges.count].at)) }
+    }
+
+    /// Whether some part is still fading in at `now` (the display link runs while so)
+    func fading(_ now: Double) -> Bool { partRanges.contains { $0.count > 0 && now - $0.at < PartFade.ms / 1000 } }
+
     // the board as a plain slab (before its model arrives)
     func slab(_ box: [Float], color: UInt32) {
         guard box.count == 4 else { slabBuf = nil; slabCount = 0; return }
@@ -343,7 +379,7 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private func frame(_ cb: MTLCommandBuffer, _ t: MTLTexture, clear: Bool, depth d: Bool, _ f: (MTLRenderCommandEncoder) -> Void) {
+    private func frame(_ cb: MTLCommandBuffer, _ t: MTLTexture, clear: Bool, depth d: Bool, depthLoad: Bool = false, _ f: (MTLRenderCommandEncoder) -> Void) {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = t
         pass.colorAttachments[0].loadAction = clear ? .clear : .load
@@ -357,6 +393,14 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
             pass.stencilAttachment.texture = depth
             pass.stencilAttachment.loadAction = .clear
             pass.stencilAttachment.storeAction = .store
+        }
+        if depthLoad {
+            pass.depthAttachment.texture = depth
+            pass.depthAttachment.loadAction = .load
+            pass.depthAttachment.storeAction = .dontCare
+            pass.stencilAttachment.texture = depth
+            pass.stencilAttachment.loadAction = .load
+            pass.stencilAttachment.storeAction = .dontCare
         }
         guard let e = cb.makeRenderCommandEncoder(descriptor: pass) else { return }
         f(e)
@@ -442,6 +486,10 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
             // the model (or a slab) with depth, then the faces' layers over it
             let (mb, cbuf, mc) = meshCount > 0 ? (meshBuf, colorBuf, meshCount) : (slabBuf, colorSlab, slabCount)
             let dw = depthWrite
+            let now = CACurrentMediaTime()
+            var solidGroups = 0
+            while solidGroups < partRanges.count, now - partRanges[solidGroups].at >= PartFade.ms / 1000 { solidGroups += 1 }
+            let opaque = solidGroups < partRanges.count ? partRanges[solidGroups].start : partCount
             func model(_ e: MTLRenderCommandEncoder, _ p: MTLRenderPipelineState) {
                 e.setFrontFacing(.counterClockwise)
                 e.setCullMode(.none)
@@ -453,6 +501,12 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
                 e.setVertexBuffer(mb, offset: 0, index: 0)
                 e.setVertexBuffer(cbuf, offset: 0, index: 2)
                 e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: mc)
+                // the parts that have finished fading (arrival order, so they are a prefix), with the opaque model
+                if opaque > 0, let pb = partBuf, let pc = partColors {
+                    e.setVertexBuffer(pb, offset: 0, index: 0)
+                    e.setVertexBuffer(pc, offset: 0, index: 2)
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: opaque)
+                }
             }
             if samples > 1, let mcol = msColor, let mdep = msDepth {
                 // multisampled and resolved into the frame; the layers test
@@ -489,6 +543,24 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
                     }
                 }
                 if face.contains(hiLayer) { hi(cb, t, &u) }
+            }
+            // the parts still fading: blended over everything drawn, tested against the depth, not written to it
+            if solidGroups < partRanges.count, let pb = partBuf, let pc = partColors {
+                let fp = pipe("mesh_v", "mesh_fa", cov: false, three: true)
+                frame(cb, t, clear: false, depth: false, depthLoad: true) { e in
+                    e.setFrontFacing(.counterClockwise)
+                    e.setCullMode(.none)
+                    e.setDepthStencilState(depthRead)
+                    e.setRenderPipelineState(fp)
+                    e.setVertexBuffer(pb, offset: 0, index: 0)
+                    e.setVertexBuffer(pc, offset: 0, index: 2)
+                    for r in partRanges[solidGroups...] where r.count > 0 {
+                        u.fade = PartFade.alpha(now - r.at)
+                        e.setVertexBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
+                        e.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
+                        e.drawPrimitives(type: .triangle, vertexStart: r.start, vertexCount: r.count)
+                    }
+                }
             }
         } else {
             frame(cb, t, clear: true, depth: false) { _ in }
@@ -556,7 +628,7 @@ final class PlotCanvas: MTKView {
         guard key != stateKey else { return }
         savePose(); stateKey = key; pendingPose = Self.poses[key]
         fitted = false; box = []; edge = []; solid = []; chunks = []
-        renderer.load([], fresh: []); renderer.load(mesh: nil); renderer.slab([], color: 0)
+        renderer.load([], fresh: []); renderer.load(mesh: nil); renderer.load(parts: nil); renderer.slab([], color: 0)
         renderer.highlight(nil, nil); fling = .zero
     }
     private func restorePose() {
@@ -564,6 +636,12 @@ final class PlotCanvas: MTKView {
         renderer.scale = pose.scale
         renderer.off = pose.off + SIMD2(Float(bounds.width - pose.size.width), Float(bounds.height - pose.size.height)) / 2
         renderer.orbit = pose.orbit; fitted = true; pendingPose = nil
+    }
+    /// Parts arrived (or started again): appended to the parts buffer, and the display link runs for their fade
+    func showParts(_ p: PartsFrame?) {
+        renderer.load(parts: p)
+        if renderer.fading(CACurrentMediaTime()) { run() }
+        setNeedsDisplay()
     }
     func showMesh(_ frame: MeshFrame, standalone: Bool) {
         renderer.load(mesh: frame.mesh)
@@ -919,6 +997,7 @@ final class PlotCanvas: MTKView {
             renderer.fade = f
             if f >= 1 { fadeFrom = nil } else { busy = true }
         }
+        if renderer.fading(now) { busy = true }
         if simd_length(fling) > 8 {
             renderer.off += fling * dt
             fling *= pow(0.004, dt)
@@ -949,6 +1028,8 @@ struct PlotCanvasView: UIViewRepresentable {
     @Environment(\.backplaneLanguage) private var lang
     let frame: PlotFrame?
     let mesh: MeshFrame?
+    /// the parts of this model streaming in after the bare board (nil for a model that has them in it)
+    var parts: PartsFrame?
     var scope = ""
     var thermal = SIMD4<Float>(0, 25, 0, 0)
     let viewer: Viewer
@@ -974,7 +1055,7 @@ struct PlotCanvasView: UIViewRepresentable {
         }
         let source = scope + "\0" + (viewer.key.isEmpty ? viewer.layers : viewer.key) + "\0" + viewer.open
         if source != context.coordinator.source {
-            context.coordinator.source = source; context.coordinator.shown = nil; context.coordinator.mesh = nil; context.coordinator.picked = ""
+            context.coordinator.source = source; context.coordinator.shown = nil; context.coordinator.mesh = nil; context.coordinator.partsEpoch = -2; context.coordinator.partsCount = -1; context.coordinator.picked = ""
             c.bindSource(source)
         }
         if c.renderer.thermal != thermal { c.renderer.thermal = thermal; c.setNeedsDisplay() }
@@ -1029,6 +1110,11 @@ struct PlotCanvasView: UIViewRepresentable {
             context.coordinator.mesh = m.at
             c.showMesh(m, standalone: frame == nil)
         }
+        if three, parts?.epoch != context.coordinator.partsEpoch || (parts?.groups.count ?? 0) != context.coordinator.partsCount {
+            context.coordinator.partsEpoch = parts?.epoch ?? -1
+            context.coordinator.partsCount = parts?.groups.count ?? 0
+            c.showParts(parts)
+        }
         if viewer.picked != context.coordinator.picked {
             context.coordinator.picked = viewer.picked
             c.mark(viewer.picked)
@@ -1042,6 +1128,8 @@ struct PlotCanvasView: UIViewRepresentable {
         var shown: Date?
         var look: [UInt32] = []
         var mesh: Date?
+        var partsEpoch = -2
+        var partsCount = -1
         var picked = ""
         var tapped = false
         var held = false

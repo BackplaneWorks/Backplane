@@ -3,14 +3,17 @@
 // from the colour. raster.rs is the same model in Rust; the test `gpu_and_cpu_agree` holds them together.
 struct Params { eye: vec4<f32>, right: vec4<f32>, up: vec4<f32>, fwd: vec4<f32>, proj: vec4<f32>, bg: vec4<f32> }
 var<uniform> params: Params;
-struct Vert { px: f32, py: f32, pz: f32, nxy: u32, nz: u32, color: u32 }
+struct Vert { px: f32, py: f32, pz: f32, nxy: u32, nz: u32, color: u32, group: u32 }
 var<storage, read> verts: array<Vert>;
+// each group's fade (a part model arriving fades in, 0 to 1); group 0 is the board, always 1
+var<storage, read> fades: array<f32>;
 
 struct Out {
   @invariant @builtin(position) clip: vec4<f32>,
   @location(0) p: vec3<f32>,
   @location(1) n: vec3<f32>,
   @location(2) @interpolate(flat) color: u32,
+  @location(3) @interpolate(flat) fade: f32,
 }
 
 @vertex fn vs_model(@builtin(vertex_index) i: u32) -> Out {
@@ -24,6 +27,7 @@ struct Out {
   o.p = p;
   o.n = vec3<f32>(unpack2x16snorm(v.nxy), unpack2x16snorm(v.nz).x);
   o.color = v.color;
+  o.fade = fades[v.group];
   return o;
 }
 
@@ -63,6 +67,8 @@ fn studio(R: vec3<f32>, rough: f32, metal: f32) -> vec3<f32> {
 }
 
 @fragment fn fs_model(i: Out) -> @location(0) vec4<f32> {
+  // params.proj.w is the pass: 0 the model at rest (a fading part is not in it), 1 the fading parts only (over all the rest)
+  if ((params.proj.w > 0.5) != (i.fade < 1.0) || i.fade <= 0.0) { discard; }
   let right = params.right.xyz; let up = params.up.xyz; let fwd = params.fwd.xyz;
   let base = vec3<f32>(f32((i.color >> 16u) & 255u), f32((i.color >> 8u) & 255u), f32(i.color & 255u)) / 255.0;
   let clear = i.color >> 24u; // the wire's transparency: 0 opaque, 255 clear
@@ -83,5 +89,5 @@ fn studio(R: vec3<f32>, rough: f32, metal: f32) -> vec3<f32> {
   rgb += studio(R, rough, metal) * fresnel(f0, nv) * (1.0 - rough * 0.35);
   rgb += studio(R, 0.3, 0.0) * fresnel(vec3<f32>(0.04), nv) * coat;
   rgb = rgb / (vec3<f32>(1.0) + max(rgb - vec3<f32>(0.8), vec3<f32>(0.0)) * 0.28); // a soft shoulder for highlights
-  return vec4<f32>(rgb, 1.0 - f32(clear) / 255.0);
+  return vec4<f32>(rgb, (1.0 - f32(clear) / 255.0) * i.fade);
 }

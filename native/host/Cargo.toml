@@ -28,6 +28,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "signal", "net", "io-uti
 tokio-tungstenite = "0.24"
 prost = "0.14"
 prost-reflect = "0.16"
+rayon = "1"
+i_triangle = "0.51"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading", "Win32_System_Time", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }

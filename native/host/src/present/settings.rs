@@ -296,6 +296,7 @@ fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         row_f("KiCad", &kicad, vec![field("kpath", "Path to KiCad's command line, empty for the one on PATH", path)], vec![btn("Set", "kicad-path", "", true)]),
         row_f("FreeCAD", &free, vec![field("fpath", "Path to FreeCAD's command line (freecadcmd), empty to look for it", fpath)], vec![btn("Set", "freecad-path", "", true)]),
         row("KiCad over its API", "Lets agents edit a board in a running KiCad. Off uses the files only.", chips(&["on", "off"], set(st, "kicad.ipc", "on"), "kicad.ipc")),
+        row("Board 3D", "How a board's 3D model is made: natively, the board at once and its parts as they convert, or by kicad-cli, all at the end.", chips(&["native", "kicad-cli"], set(st, "viewer.board3d", "native"), "viewer.board3d")),
     ]
 }
 

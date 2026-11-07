@@ -110,6 +110,25 @@ pub fn solid_frame(key: &str, so: &Solid) -> Vec<u8> {
     o
 }
 
+/// The parts of a board's model start again: `{1: "plot", 31: key, parts: {of, rev}}` (docs/PHONE-DATA.md).
+pub fn parts_frame(key: &str, of: u32, rev: &str) -> Vec<u8> {
+    let mut o = Vec::with_capacity(64 + key.len() + rev.len());
+    head(&mut o, 5, 3); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
+    text(&mut o, "parts"); head(&mut o, 5, 2); text(&mut o, "of"); uint(&mut o, of); text(&mut o, "rev"); text(&mut o, rev);
+    o
+}
+/// One part model and its instances: `{1: "plot", 31: key, part, n, mesh, at, refs, done}`; `at` is 12 little-endian f32 an instance.
+pub fn part_frame(key: &str, id: &str, n: u32, mesh: &[u8], at: &[[f32; 12]], refs: &[String], done: u32) -> Vec<u8> {
+    let mut o = Vec::with_capacity(96 + mesh.len() + at.len() * 48 + refs.iter().map(|r| r.len() + 2).sum::<usize>());
+    head(&mut o, 5, 8); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
+    text(&mut o, "part"); text(&mut o, id); text(&mut o, "n"); uint(&mut o, n); text(&mut o, "mesh"); bytes(&mut o, mesh);
+    let ab: Vec<u8> = at.iter().flatten().flat_map(|x| x.to_le_bytes()).collect();
+    text(&mut o, "at"); bytes(&mut o, &ab);
+    text(&mut o, "refs"); head(&mut o, 4, refs.len() as u32); for r in refs { text(&mut o, r) }
+    text(&mut o, "done"); uint(&mut o, done);
+    o
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +171,9 @@ mod tests {
         let s = String::from_utf8_lossy(&f).into_owned(); assert!(s.contains("fam") && s.contains("base") && s.contains("thick"));
         assert!(f.windows(3).any(|w| w == [0x41, 0x01, 0x02] || w == [0x42, 0x01, 0x02])); // d as a byte string
         let m = solid_frame("2|/p|", &Solid { n: 1, b: [1, 2, 3, 4, 5, 6], d: vec![9] }); assert_eq!(m[0], 0xa5);
+        let p = parts_frame("2|p|", 3, "r"); assert_eq!(&p[..9], &[0xa3, 0x01, 0x64, b'p', b'l', b'o', b't', 0x18, 0x1f]);
+        let q = part_frame("2|p|", "0123456789abcdef", 1, &[9], &[[1.0; 12]], &["R1".into()], 1); assert_eq!(q[0], 0xa8);
+        assert!(q.windows(6).any(|w| w[0] == 0x58 && w[1] == 48 && w[2..6] == 1.0f32.to_le_bytes()), "at: 48 bytes an instance");
     }
     #[test] fn a_models_id_is_fnv1a_64_of_its_bytes() {
         // the phones (Plot.swift, Plot.kt) compute the same: these are their tests' values too

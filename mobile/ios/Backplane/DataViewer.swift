@@ -156,11 +156,12 @@ struct DataPlotTab: View {
         let head = three ? "0|" : kind == "schematic" ? "1|" : "0|"
         let frame = client.plots.frame.flatMap { $0.key.hasPrefix(head) ? $0 : nil }
         let mesh = three ? client.plots.mesh.flatMap { $0.key.hasPrefix("2|") ? $0 : nil } : nil
+        let parts = mesh.flatMap { client.plots.parts.parts($0.key) }
         let present = Set(frame?.chunks.map { $0.layer } ?? [])
         let bits = present.filter { $0 >= 0 && $0 < 32 }.reduce(UInt32(0)) { $0 | (1 << UInt32($1)) }
         ZStack(alignment: .topLeading) {
             if let v = plainViewer(open: three ? "3d" : kind, source: kind + "|" + path, picked: picked, off: layers?.off ?? 0, dim: layers?.dim ?? 0, lift: layers?.lift ?? 255) {
-                PlotCanvasView(frame: (frame?.none.isEmpty ?? true) ? frame : nil, mesh: mesh, scope: thread.id, viewer: v, pick: { p in
+                PlotCanvasView(frame: (frame?.none.isEmpty ?? true) ? frame : nil, mesh: mesh, parts: parts, scope: thread.id, viewer: v, pick: { p in
                     // the canvas says what lies under the finger as candidates; the smallest is what the tap means. Nothing there: deselect.
                     guard let (at, idx) = DPick.best(p), let f = frame else { info = ""; picked = ""; return }
                     picked = "\(at),\(idx)"
@@ -169,6 +170,11 @@ struct DataPlotTab: View {
                 .accessibilityIdentifier("data.viewer.surface")
             }
             let say = !has ? none : !error.isEmpty ? error : (frame?.none ?? "").isEmpty ? (mesh.map { $0.decoding ? "" : $0.none } ?? "") : frame!.none
+            if let progress = parts?.progress, !progress.isEmpty {
+                // the parts still streaming in after the board
+                Text(progress).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).padding(8).background(BackplaneDesign.panel.opacity(0.85)).padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).allowsHitTesting(false).accessibilityIdentifier("data.viewer.parts")
+            }
             if !say.isEmpty && three && mesh?.mesh != nil {
                 // a model on show stays; why it may be old is said above it
                 Text(say).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).padding(8).background(BackplaneDesign.panel.opacity(0.85)).padding(8).accessibilityIdentifier("data.viewer.note")
