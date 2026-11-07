@@ -82,10 +82,15 @@ pub struct Mock {
 
 impl Mock {
     pub fn start() -> Mock {
+        Mock::start_on(0)
+    }
+
+    /// On a given port (0: any).
+    pub fn start_on(port: u16) -> Mock {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
         let s = Arc::new(Shared::default());
         let shared = s.clone();
-        let l = rt.block_on(TcpListener::bind("127.0.0.1:0")).unwrap();
+        let l = rt.block_on(TcpListener::bind(("127.0.0.1", port))).unwrap();
         let base = format!("http://{}/v1", l.local_addr().unwrap());
         rt.spawn(async move {
             while let Ok((c, _)) = l.accept().await {
@@ -272,7 +277,8 @@ pub fn wav(pcm: &[u8], rate: u32) -> Vec<u8> {
 
 // ---- running the helper
 
-pub const EXE: &str = env!("CARGO_BIN_EXE_backplane-voice");
+// tests only (the mock_openai example has no binary to run)
+pub const EXE: &str = match option_env!("CARGO_BIN_EXE_backplane-voice") { Some(p) => p, None => "" };
 
 #[derive(Default)]
 struct Log {
