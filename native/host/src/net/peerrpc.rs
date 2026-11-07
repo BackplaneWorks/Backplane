@@ -12,15 +12,23 @@ fn err(id: &Value, why: &str) -> Vec<Value> { vec![json!({"t":"reply","id":id,"o
 fn now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 
 impl RpcHandler for PeerRpc {
-    fn methods(&self) -> &'static [&'static str] { &["bots.invite", "bots.join", "bots.unpeer", "bots.peer_own"] }
+    fn methods(&self) -> &'static [&'static str] { &["bots.invite", "bots.join", "bots.unpeer", "bots.peer_own", "machines.page", "machines.page.act", "machines.code", "machines.pair", "machines.attempt", "machines.requests", "machines.approve", "machines.deny"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
             match method {
                 "bots.invite" => match self.0.invite_for(&s("url")).await { Ok((inv, peer)) => ok(id, json!({"invite": inv, "peer": peer})), Err(e) => err(id, &e) },
+                "machines.page" => ok(id, json!({"rows": super::machinespage::rows(&self.0.page_data(), &|_| String::new())})),
+                "machines.page.act" => match super::machinespage::act(&self.0, hub, &s("action"), &s("value"), &p["fields"]).await { Ok(x) => ok(id, x), Err(e) => err(id, &e) },
+                "machines.code" => match self.0.make_code().await { Ok(x) => ok(id, x), Err(e) => err(id, &e) },
+                "machines.pair" => match self.0.pair_with(hub, &s("address"), &s("code")).await { Ok((a, c)) => ok(id, json!({"attempt": a, "check": c})), Err(e) => err(id, &e) },
+                "machines.attempt" => ok(id, self.0.attempt(&s("attempt"))),
+                "machines.requests" => { let d = self.0.page_data(); ok(id, json!({"requests": d["requests"], "outgoing": d["outgoing"]})) }
+                "machines.approve" => match self.0.approve(hub, &s("request")).await { Ok(()) => ok(id, json!({})), Err(e) => err(id, &e) },
+                "machines.deny" => match self.0.deny(hub, &s("request")).await { Ok(()) => ok(id, json!({})), Err(e) => err(id, &e) },
                 "bots.join" => match super::sign::invite_parse(&s("invite")) {
                     None => err(id, "not an invite"),
-                    Some(i) => match self.0.join(hub, &i, false).await { Ok((peer, name)) => ok(id, json!({"peer": peer, "name": name})), Err(e) => err(id, &e) },
+                    Some(i) => match self.0.join(hub, &i, "").await { Ok((peer, name)) => ok(id, json!({"peer": peer, "name": name})), Err(e) => err(id, &e) },
                 },
                 _ => {
                     let peer = s("peer");

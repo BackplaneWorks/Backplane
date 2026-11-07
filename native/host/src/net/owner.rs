@@ -62,27 +62,11 @@ pub fn owner_hosts(ip: &str, dns: &str, port: &str) -> Vec<String> {
     [ip, dns].iter().filter(|n| !n.is_empty()).flat_map(|n| [n.to_lowercase(), format!("{}:{port}", n.to_lowercase())]).collect()
 }
 fn owner_host(own: &[String], host: &str) -> bool { own.iter().any(|x| !x.is_empty() && x == host) }
-/// Auth.owner.pair: the whois-verified socket peer (`trusted`) may POST /bots/pair, to exactly one own
-/// authority, with no browser Origin and no proxy identity. Nothing else.
-pub fn owner_pair(trusted: bool, own: &[String], hs: Headers, method: &str, route: &str) -> bool {
-    trusted && header_count(hs, "host") == 1 && method == "POST" && route == "/bots/pair" && browser(hs)
-        && header(hs, "origin").is_empty() && header(hs, "tailscale-user-login").is_empty()
-        && owner_host(own, &header(hs, "host").to_lowercase())
-}
 /// Auth.owner.peer: the same identity on a linked machine's signed request; it vouches the link is the
 /// owner's own machine and grants nothing else (the signature is still checked).
 pub fn owner_peer(trusted: bool, own: &[String], hs: Headers) -> bool {
     trusted && header_count(hs, "host") == 1 && header(hs, "origin").is_empty() && header(hs, "tailscale-user-login").is_empty()
         && owner_host(own, &header(hs, "host").to_lowercase())
-}
-
-/// Auth.pair.proof: HMAC of the asked address and time, made from the asker's own token.
-pub fn pair_proof(token: &str, to: &str, at: u64) -> String { hmac_hex(token, &format!("bots-pair\n{to}\n{at}")) }
-pub const PAIR_WINDOW: u64 = 60;
-pub fn pair_fresh(now: u64, at: u64) -> bool { now.saturating_sub(at) + at.saturating_sub(now) <= PAIR_WINDOW }
-/// Auth.pair.checked: the asker made the proof, and it is still fresh.
-pub fn pair_checked(token: &str, to: &str, at: u64, now: u64, proof: &str) -> bool {
-    !token.is_empty() && !proof.is_empty() && pair_fresh(now, at) && same(proof, &pair_proof(token, to, at))
 }
 
 /// Auth.local.host: a Host naming this machine.
@@ -122,20 +106,6 @@ mod tests {
         // key longer than the block (case 6)
         assert_eq!(hex::encode(hmac_sha256(&[0xaa; 131], b"Test Using Larger Than Block-Size Key - Hash Key First")), "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
     }
-    #[test] fn owner_pair_needs_everything() {
-        let ok = hs(&[("Host", "100.1.2.3:3787")]);
-        assert!(owner_pair(true, &own(), &ok, "POST", "/bots/pair"));
-        assert!(!owner_pair(false, &own(), &ok, "POST", "/bots/pair"));
-        assert!(!owner_pair(true, &own(), &ok, "GET", "/bots/pair"));
-        assert!(!owner_pair(true, &own(), &ok, "POST", "/bots/deliver"));
-        assert!(!owner_pair(true, &own(), &hs(&[("Host", "evil.example")]), "POST", "/bots/pair"));
-        assert!(!owner_pair(true, &own(), &hs(&[("Host", "100.1.2.3:3787"), ("Origin", "http://100.1.2.3:3787")]), "POST", "/bots/pair"));
-        assert!(!owner_pair(true, &own(), &hs(&[("Host", "100.1.2.3:3787"), ("Tailscale-User-Login", "a@b")]), "POST", "/bots/pair"));
-        assert!(!owner_pair(true, &own(), &hs(&[("Host", "100.1.2.3:3787"), ("host", "evil.example")]), "POST", "/bots/pair"), "two Host fields are ambiguous");
-        assert!(!owner_pair(true, &[], &ok, "POST", "/bots/pair"), "no own authority: nobody");
-        assert!(!owner_pair(true, &[String::new()], &hs(&[("Host", "")]), "POST", "/bots/pair"), "an empty authority never matches");
-        assert!(!owner_pair(true, &own(), &hs(&[("Host", "100.1.2.3:3787"), ("Sec-Fetch-Site", "cross-site")]), "POST", "/bots/pair"));
-    }
     #[test] fn owner_peer_grants_only_the_vouch() {
         let ok = hs(&[("Host", "100.1.2.3")]);
         assert!(owner_peer(true, &own(), &ok));
@@ -147,17 +117,6 @@ mod tests {
     #[test] fn owner_hosts_come_from_the_listener() {
         assert_eq!(owner_hosts("100.1.2.3", "M.tail.ts.net", "3787"), vec!["100.1.2.3", "100.1.2.3:3787", "m.tail.ts.net", "m.tail.ts.net:3787"]);
         assert!(owner_hosts("", "", "3787").is_empty());
-    }
-    #[test] fn pair_proof_binds_asker_target_and_time() {
-        let p = pair_proof("tok", "http://b:1", 1000);
-        assert!(pair_checked("tok", "http://b:1", 1000, 1030, &p));
-        assert!(pair_checked("tok", "http://b:1", 1000, 970, &p), "the window is symmetric");
-        assert!(!pair_checked("tok", "http://b:1", 1000, 1061, &p), "stale");
-        assert!(!pair_checked("tok", "http://c:1", 1000, 1000, &p), "another target");
-        assert!(!pair_checked("tok", "http://b:1", 1001, 1001, &p), "another time");
-        assert!(!pair_checked("other", "http://b:1", 1000, 1000, &p), "another token");
-        assert!(!pair_checked("", "http://b:1", 1000, 1000, &p) && !pair_checked("tok", "http://b:1", 1000, 1000, ""));
-        assert_eq!(p.len(), 64);
     }
     #[test] fn pair_requires_the_bearer_and_ignores_loopback() {
         assert!(pair(&hs(&[("Authorization", "Bearer t"), ("Host", "127.0.0.1:1")]), "t"));

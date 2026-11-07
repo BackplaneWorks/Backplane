@@ -88,12 +88,16 @@ pub async fn signed(home: &Path, url: &str, peer: &str, secret: &str, now: u64, 
 pub async fn to_peer(home: &Path, url: &str, peer: &str, now: u64, path: &str, post: bool, body: &str) -> Resp {
     signed(home, url, peer, &peer_secret(home, peer), now, path, post, body).await
 }
-/// An unsigned POST with no body, to one of the owner's own machines (it trusts this one because Tailscale says
-/// whose it is: POST /bots/pair).
-pub async fn plain(url: &str) -> Resp {
+/// An unsigned POST of a JSON body (the pairing request and its poll: a machine code, not a signature, admits them); code 0
+/// when it could not be made.
+pub async fn post_json(home: &Path, url: &str, body: &str) -> Resp {
     if !url_ok(url) { return Resp { code: 0, body: "not an http address".into() } }
-    let a = ["-sS", "--proto", "=http,https", "-m", "15", "--max-filesize", "65536", "-X", "POST", "-H", "@-", "-w", "\n%{http_code}", "--url"].map(String::from).into_iter().chain([url.to_string()]).collect();
-    curl(a, "Content-Length: 0\n".into()).await
+    mkdir(&home.join("secrets")); mkdir(&home.join("secrets/tmp"));
+    let file = home.join("secrets/tmp").join(hex::encode(super::pairing::urandom(8)));
+    if !write_secret(&file, body) { return Resp { code: 0, body: "could not keep the body".into() } }
+    let mut a = args(Some(&file), url); a.insert(a.len() - 2, "-m".into()); a.insert(a.len() - 2, "10".into());
+    let r = curl(a, "Content-Type: application/json\n".into()).await;
+    let _ = std::fs::remove_file(&file); r
 }
 
 /// Where other machines reach this hub: BACKPLANE_URL when set, else its MagicDNS name on the tailnet (the hub

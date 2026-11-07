@@ -1,8 +1,7 @@
-//! The HTTP face of the peer handshake (`/bots/pair`, `/bots/pair/check`, `/bots/link`) and the two loops that keep it
-//! going: the machine finder (every two minutes) and the pairing ask (every minute, once per machine not yet linked).
-//! Each route decides its own admission (`own_auth`): a credential, `Auth.owner.pair`, or a pairing proof the asker
-//! confirms; the body is capped at 256 KB while it is read.
-use super::{machines, peering::{PReq, Peering}, peers::PeerTable, tailnet};
+//! The HTTP face of the peer handshake (`/bots/pair/*`, `/bots/link`) and the machine finder (every two minutes), which only
+//! suggests machines. Each route decides its own admission (`own_auth`): a machine code, a signature, or the hub's credential;
+//! the body is capped at 256 KB while it is read.
+use super::{peering::{PReq, Peering}, peers::PeerTable, tailnet};
 use crate::{api::{Fut, HttpHandler, HttpReply}, auth::Req, hub::Hub};
 use std::{sync::Arc, time::Duration};
 
@@ -33,25 +32,12 @@ async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status:
     hub.set_info("machines", &j.to_string()).await;
     peering.routes.machines(j, verified);
 }
-/// Pair.go: every machine of the owner's this hub should link to and is not linked to yet is asked for an invite.
-async fn pair_once(hub: &Arc<Hub>, peering: &Arc<Peering>, table: &PeerTable) {
-    let j = peering.routes.machines_value();
-    let (peers, off, no) = table.with(|p| (p.live().into_iter().map(|x| machines::Peer { id: x.id, name: x.name, url: x.url }).collect::<Vec<_>>(), p.sync_off_names(), p.live().into_iter().filter(|x| p.own_how(&x.id) == "no").map(|x| x.id).collect::<std::collections::HashSet<_>>()));
-    let due = machines::due(peering.tailnet, &j, &peers, &|n| off.contains(&n.to_lowercase()), &|id| no.contains(id));
-    let me = tailnet::announce(peering.tailnet, j["self"]["url"].as_str().unwrap_or(""));
-    for (_, url) in due {
-        let named = j["peers"].as_array().into_iter().flatten().any(|m| m["url"] == url.as_str() && m["named"] == true);
-        let (h, p, me) = (hub.clone(), peering.clone(), me.clone());
-        tokio::spawn(async move { p.ask(&h, &url, &me, !named).await });
-    }
-}
 pub fn spawn_loops(hub: Arc<Hub>, table: Arc<PeerTable>, peering: Arc<Peering>) {
     let (t2, p2) = (table.clone(), peering.clone());
     tokio::spawn(async move {
         table.start(&hub).await; // the peer table first: the rules read it
-        let (h2, t3, p3, h3) = (hub.clone(), t2.clone(), p2.clone(), hub.clone());
-        tokio::spawn(async move { loop { find_once(&h3, &p3, &t3).await; tokio::time::sleep(Duration::from_secs(120)).await } });
-        loop { tokio::time::sleep(Duration::from_secs(60)).await; pair_once(&h2, &p2, &t2).await }
+        // (only the finder: it suggests machines; nothing here links to one by itself)
+        loop { find_once(&hub, &p2, &t2).await; tokio::time::sleep(Duration::from_secs(120)).await }
     });
 }
 

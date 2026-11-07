@@ -242,13 +242,13 @@ pub fn ask(g: &Path, id: &str, body: &str) -> std::io::Result<()> {
 fn own_machine(req: &Req) -> bool {
     let (peer, ts, sig) = (req.header("x-backplane-peer"), req.header("x-backplane-timestamp"), req.header("x-backplane-signature"));
     let (Some(p), Ok(ts)) = (crate::net::start::peering(), ts.parse::<u64>()) else { return false };
-    if peer.is_empty() || !p.table.with(|t| t.peer(peer).map_or(false, |r| !r.revoked) && matches!(t.own_how(peer), "pair" | "owner")) { return false }
+    if peer.is_empty() || !p.table.with(|t| t.peer(peer).map_or(false, |r| !r.revoked) && t.verified(peer)) { return false }
     crate::net::sign::check(&crate::net::botnet::peer_secret(&p.home, peer), now_s(), ts, &String::from_utf8_lossy(&req.body), sig)
 }
 /// Restart another of the owner's machines from this one. If its hub is down its guard answers on the same address, with the same signature.
 async fn forward(hub: &Arc<Hub>, machine: &str, body: &[u8]) -> HttpReply {
     let Some(p) = crate::net::start::peering() else { return reply("409 Conflict", json!({"ok": false, "text": "no linked machines here"})) };
-    let found = p.table.with(|t| t.live().into_iter().find(|x| (x.id == machine || x.name == machine) && matches!(t.own_how(&x.id), "pair" | "owner")).map(|x| (x.id, x.url)));
+    let found = p.table.with(|t| t.live().into_iter().find(|x| (x.id == machine || x.name == machine) && t.verified(&x.id)).map(|x| (x.id, x.url)));
     let Some((link, url)) = found else { return reply("409 Conflict", json!({"ok": false, "text": "not one of your linked machines"})) };
     let mut b: Value = serde_json::from_slice(body).unwrap_or(Value::Null); if let Some(o) = b.as_object_mut() { o.remove("machine"); }
     let r = crate::net::botnet::to_peer(&hub.cfg.home, &url, &link, now_s(), "/hub/control", true, &b.to_string()).await;
@@ -266,7 +266,7 @@ pub fn start(hub: &Arc<Hub>) {
         let s = status(&h.cfg.home); let n = notice(&s);
         h.set_info("hub.notice", &if n["text"] == "" { String::new() } else { n.to_string() }).await;
         if let Some(p) = crate::net::start::peering() {
-            let ids: Vec<String> = p.table.with(|t| t.live().into_iter().filter(|x| matches!(t.own_how(&x.id), "pair" | "owner")).map(|x| x.id).collect());
+            let ids: Vec<String> = p.table.with(|t| t.live().into_iter().filter(|x| t.verified(&x.id)).map(|x| x.id).collect());
             put("peers.json", &json!({"peers": ids}).to_string());
         }
         tokio::time::sleep(Duration::from_secs(30)).await;
