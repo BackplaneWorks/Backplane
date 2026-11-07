@@ -61,8 +61,8 @@ internal fun dAgo(ms: Long): String {
     val s = (System.currentTimeMillis() - ms) / 1000
     return when { ms <= 0 -> ""; s < 60 -> "now"; s < 3600 -> "${s / 60}m"; s < 86400 -> "${s / 3600}h"; else -> "${s / 86400}d" }
 }
-@Composable internal fun DMono(t: String, c: Color = dcs.onSurfaceVariant, size: Int = 11, modifier: Modifier = Modifier, bold: Boolean = false) =
-    Text(t, modifier, color = c, fontFamily = BpMono, fontSize = size.sp, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+@Composable internal fun DMono(t: String, c: Color = dcs.onSurfaceVariant, size: Int = 11, modifier: Modifier = Modifier, bold: Boolean = false, lines: Int = 1) =
+    Text(t, modifier, color = c, fontFamily = BpMono, fontSize = size.sp, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, maxLines = lines, overflow = TextOverflow.Ellipsis)
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
@@ -651,9 +651,9 @@ private fun OrderCard(o: DataClient.Order) {
                 when (s.mark) { "done" -> DMono("✓ ${s.label}", dcs.onSurfaceVariant, 11); "on" -> DMono(s.label, dcs.primary, 11, bold = true); else -> DMono(s.label, dcs.outlineVariant, 11) }
             }
         }
-        DMono(o.line, if (o.waiting) dcs.onSurfaceVariant else dcs.onSurface, 12)
+        DMono(o.line, if (o.waiting) dcs.onSurfaceVariant else dcs.onSurface, 12, lines = 4) // the card's words wrap, as on iOS and in the window
         if (o.total.isNotEmpty()) DMono(o.total, dcs.onSurface, 14, bold = true)
-        if (o.customs.isNotEmpty()) DMono(o.customs, dcs.onSurfaceVariant, 11)
+        if (o.customs.isNotEmpty()) DMono(o.customs, dcs.onSurfaceVariant, 11, Modifier.testTag("thread.order.customs"), lines = 4)
         if (o.pay.startsWith("https://") || o.pay.startsWith("http://")) DBtn(o.label.ifEmpty { "Buy now" }, true, modifier = Modifier.testTag("thread.order.pay")) {
             runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(o.pay))) }
         }
