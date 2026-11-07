@@ -2,7 +2,9 @@ package dev.backplane.mobile
 
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.*
 import okhttp3.*
@@ -137,6 +139,7 @@ object DataClient {
                 else { val e = o.opt("error"); d.completeExceptionally(Exception(if (e is JSONObject) e.optString("message", e.optString("code")) else e?.toString() ?: "The hub refused")) }
             }
             "d" -> push(o)
+            "voice" -> DataVoice.frame(o)
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
         }
     }
@@ -248,7 +251,7 @@ object DataClient {
         val cid = UUID.randomUUID().toString()
         val local = DEntry("local:$cid", "user", t, System.currentTimeMillis(), clientId = cid, sending = true, localImages = images)
         entries = entries + (tid to (entries[tid] ?: emptyList()) + local)
-        setDraft(tid, "")
+        setDraft(tid, ""); fields[tid] = TextFieldValue("")
         scope.launch { deliver(tid, t, cid, images) }
     }
     fun retry(tid: String, e: DEntry) {
@@ -292,6 +295,13 @@ object DataClient {
         return Triple(r.optString("path"), if (r.isNull("parent")) null else r.optString("parent"), r.optJSONArray("dirs")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
     }
     fun draft(tid: String) = prefs().getString("draft.$tid", "") ?: ""
+    // the composer's text with its caret, kept per thread: dictation edits it from the hub's frames whether or not the thread is on screen
+    private val fields = mutableStateMapOf<String, TextFieldValue>()
+    fun field(tid: String): TextFieldValue = fields[tid] ?: TextFieldValue(draft(tid))
+    fun setField(tid: String, v: TextFieldValue, typed: Boolean = true) {
+        val old = field(tid).text; fields[tid] = v; setDraft(tid, v.text)
+        if (typed && old != v.text) DataVoice.typed(tid, old, v.text)
+    }
     fun setDraft(tid: String, t: String) { prefs().edit().apply { if (t.isEmpty()) remove("draft.$tid") else putString("draft.$tid", t) }.apply() }
 
     // ---- the Hub screen: plain HTTP from the pairing alone, whatever the socket is doing

@@ -31,7 +31,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -168,6 +170,14 @@ private fun AskPair(link: String) {
 internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant) {
     Box(modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, line)).padding(horizontal = 10.dp, vertical = 10.dp)) {
         if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant) {
+    Box(modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, line)).padding(horizontal = 10.dp, vertical = 10.dp)) {
+        if (v.text.isEmpty()) Text(hint, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
     }
 }
@@ -320,10 +330,15 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
     var stick by remember(id) { mutableStateOf(true) }
     LaunchedEffect(state) { snapshotFlow { state.isScrollInProgress to state.canScrollForward }.collect { (moving, more) -> if (moving) stick = !more } }
     LaunchedEffect(rows.size, list.lastOrNull()?.text?.length, thread?.state) { if (stick && state.layoutInfo.totalItemsCount > 0) state.scrollToItem(state.layoutInfo.totalItemsCount - 1, Int.MAX_VALUE) }
-    var draft by remember(id) { mutableStateOf(DataClient.draft(id)) }
+    val field = DataClient.field(id); val draft = field.text
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val pending = remember(id) { mutableStateListOf<ByteArray>() }
     var notice by remember(id) { mutableStateOf("") }
+    val micAsk = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) { notice = ""; DataVoice.press(id) } else notice = "Microphone access is off for Backplane. Turn it on in Settings, then press the mic again."
+    }
+    val dictate = DataVoice.available
+    LaunchedEffect(id, DataClient.conn, dictate) { if (dictate && DataClient.conn == DataClient.Conn.ONLINE) DataVoice.refresh(id) }
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, uri) }; if (b != null) pending.add(b) else notice = "That picture could not be read." }
     }
@@ -354,20 +369,25 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
         }
         DLine()
         order?.let { OrderCard(it) }
-        MentionPopup(draft) { draft = it; DataClient.setDraft(id, it) }
+        MentionPopup(draft) { DataClient.setField(id, TextFieldValue(it, TextRange(it.length))) }
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (notice.isNotEmpty()) DMono(notice, dwarn, 12)
             if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) { Pic(b, 64) }; }
             }
-            DField(draft, { draft = it; DataClient.setDraft(id, it) }, "Ask anything: @bot, >thread, %project, #room, &model, \$skill, /btw", Modifier.testTag("thread.composer"), 6, dcs.primary)
+            if (dictate) VoiceStrip(id)
+            DField(field, { DataClient.setField(id, it) }, "Ask anything: @bot, >thread, %project, #room, &model, \$skill, /btw", Modifier.testTag("thread.composer"), 6, dcs.primary)
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { "default" }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
                 Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) pick.launch("image/*") else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.attach"), contentAlignment = Alignment.Center) { Icon(Icons.Default.AttachFile, "Attach", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
                 Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) drawing = true else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, "Draw", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                if (dictate) MicChip(DataVoice.on(id)) {
+                    if (DataVoice.on(id) || androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id)
+                    else micAsk.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
                 val blank = draft.isBlank() && pending.isEmpty()
                 if (running && blank) DBtn("Stop", false, modifier = Modifier.testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
-                else DBtn("Send", true, !blank, Modifier.testTag("thread.send")) { DataClient.send(id, draft, pending.toList()); pending.clear(); draft = ""; notice = ""; stick = true }
+                else DBtn("Send", true, !blank, Modifier.testTag("thread.send")) { if (dictate) DataVoice.sent(id); DataClient.send(id, draft, pending.toList()); pending.clear(); notice = ""; stick = true }
             }
         }
     }
@@ -465,6 +485,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, improve: () -> Uni
             DLine()
             DBtn("Improvements", false, modifier = Modifier.testTag("settings.improve"), onClick = improve)
             DLine()
+            if (DataVoice.available) VoiceSettings()
             DMono("ALERTS", dfaint)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(true to "on", false to "off").forEach { (v, l) -> DBtn(l, alerts == v, modifier = Modifier.testTag("settings.alerts.$l")) { alerts = v; AppSettings.putAlerts(v) } } }
