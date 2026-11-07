@@ -26,6 +26,13 @@ pub fn view_kind(kind: &str) -> Command { Command::Action("view".into(), kind.to
 pub fn close() -> Command { view_kind("") }
 /// Open in KiCad: the hub starts KiCad on the thread's design (kicad/open.rs), offered while the viewer has a board or schematic.
 pub fn kicad_open() -> Command { Command::Action("kicad-open".into(), String::new()) }
+/// The button's words. KiCad opens where the design is, on the hub's own machine: with a hub on another machine the button says whose screen.
+pub fn kicad_open_label(hub_addr: Option<&str>) -> String {
+    match hub_addr.map(|a| a.rsplit_once(':').map_or(a, |(h, _)| h)) {
+        Some(h) if !h.is_empty() && !matches!(h, "127.0.0.1" | "localhost" | "[::1]") => format!("Open in KiCad on {}", h.split('.').next().unwrap_or(h)),
+        _ => "Open in KiCad".into(),
+    }
+}
 pub fn has_design(viewer: &Value) -> bool { tabs(viewer).iter().any(|t| matches!(t.value.as_str(), "board" | "schematic")) }
 
 fn arr<'a>(v: &'a Value, k: &str) -> impl Iterator<Item = &'a Value> { v[k].as_array().into_iter().flatten() }
@@ -257,7 +264,7 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let diff_on = thread["diff"].is_object();
     let mut bar = div().h(px(34.)).flex_shrink_0().flex().items_center().gap_1().px_2().border_b_1().border_color(c("line"));
     for (i, t) in tabs(viewer).into_iter().enumerate() { bar = bar.child(btn(cx, light, format!("vtab-{i}"), t.label, t.on && !diff_on, view_kind(&t.value))); }
-    if has_design(viewer) { bar = bar.child(div().flex_1()).child(btn(cx, light, "kicad-open".into(), "Open in KiCad".into(), false, kicad_open())); } else { bar = bar.child(div().flex_1()); }
+    if has_design(viewer) { bar = bar.child(div().flex_1()).child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str())), false, kicad_open())); } else { bar = bar.child(div().flex_1()); }
     bar = bar.child(div().id("viewer-close").px_2().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("Close")
         .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close()); cx.notify(); })));
     let body: AnyElement = if diff_on { diff_page(cx, light, &thread["diff"]) }
@@ -342,6 +349,10 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn open_in_kicad_names_the_machine_when_the_hub_is_another() {
+        assert_eq!(kicad_open_label(Some("127.0.0.1:3797")), "Open in KiCad"); assert_eq!(kicad_open_label(None), "Open in KiCad");
+        assert_eq!(kicad_open_label(Some("desktop.tail9e0cf2.ts.net:8451")), "Open in KiCad on desktop");
+    }
     #[test] fn open_in_kicad_is_offered_with_a_board_or_a_schematic() {
         assert!(has_design(&serde_json::json!({"choices":[{"label":"Board","value":"board"},{"label":"Files","value":"files"}]})));
         assert!(has_design(&serde_json::json!({"choices":[{"label":"Schematic","value":"schematic"}]})));
