@@ -88,7 +88,7 @@ pub fn on_limit(w: &World, lim: &fb::Limit, terminal: bool, original: &str) -> V
         ev.push(set(&format!("account.failover.pending.{th}"), "", at)); ev.push(set(&tried_key(th), &json!(tried).to_string(), at));
     } else if w.chain_on() {
         // Fallback.limited: the outage is the provider's (or the model's) until its reset
-        let held = |s: &str| fb::limit_active(&serde_json::from_str(&w.get(&fb::Limit::key(s))).unwrap_or(Value::Null), at);
+        let held = |s: &str| fb::hold_active(&serde_json::from_str(&w.get(&fb::Limit::key(s))).unwrap_or(Value::Null), at);
         if !held(&lim.scope) { ev.push(set(&fb::Limit::key(&lim.scope), &lim.json(at), at)) }
         ev.push(set(&format!("fallback.pending.{th}"), "", at));
     } else {
@@ -231,6 +231,8 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
         // `seen` too: a record written for a line of this same read is not committed yet, so the store does not show it, and left behind it would fail a later turn over
         let had = seen.take().is_some(); let mut ev = vec![];
         for k in [format!("account.failover.pending.{thread}"), format!("fallback.pending.{thread}")] { if had || !hub.setting(&k).await.unwrap_or_default().is_empty() { ev.push(set(&k, "", now_ms() / 1000)) } }
+        // a turn that completed on its login is the proof the login is not out: its holds are over (they had outlived the limit by a day on Nov 7)
+        if end == Some("completed") && !had { ev.extend(proven_events(hub, thread, &provider, &model).await) }
         return Verdict { events: ev, ..Default::default() };
     }
     if end.is_none() {
@@ -246,6 +248,18 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
     expire_login(acc, &w, &lim);
     let orig = original(hub, thread).await;
     on_limit(&w, &lim, true, &orig)
+}
+/// The events that end the limit holds on a thread's login (and model) after a turn completed on it (fallback.rs `proven`).
+async fn proven_events(hub: &Arc<Hub>, thread: &str, provider: &str, model: &str) -> Vec<Value> {
+    let b: Value = serde_json::from_str(&hub.setting(&accounts::binding_key(thread, provider)).await.unwrap_or_default()).unwrap_or(Value::Null);
+    let (id, epoch) = (b["id"].as_str().unwrap_or("").to_string(), b["epoch"].as_u64().unwrap_or(0));
+    let keys: Vec<String> = [fb::hold_key(provider, &id, epoch), fb::hold_model_key(provider, &id, epoch, model)].into_iter().collect();
+    let mut held = HashMap::new();
+    for k in &keys { if let Some(v) = hub.setting(k).await { if !v.is_empty() { held.insert(k.clone(), v); } } }
+    if held.is_empty() { return vec![] }
+    let names: Vec<String> = held.keys().cloned().collect(); let get = |k: &str| held.get(k).cloned().unwrap_or_default();
+    let now = now_ms() / 1000;
+    fb::proven(&names, &get, provider, &id, epoch, model).into_iter().map(|k| set(&k, "", now)).collect()
 }
 /// A running turn's process ended with no line ending the turn: a limit remembered, or one it left on stderr, is acted on as the line would have been.
 pub async fn on_exit(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_io::Accounts>>, thread: &str, stderr: &str, seen: &mut Option<fb::Limit>) -> Verdict {
@@ -357,7 +371,9 @@ pub(crate) async fn sweep_holds(hub: &Arc<Hub>, now_s: u64) {
     if held.is_empty() { return }
     let inv: Value = serde_json::from_str(&hub.setting("accounts.inventory").await.unwrap_or_default()).unwrap_or(Value::Null);
     let get = |k: &str| held.get(k).cloned().unwrap_or_default(); let names: Vec<String> = held.keys().cloned().collect();
-    let ev: Vec<Value> = inv["profiles"].as_array().into_iter().flatten().flat_map(|p| fb::clearable(p, &names, &get, now_s)).map(|k| set(&k, "", now_s)).collect();
+    // the CLI's own login too: its reading is the default allowance (on Nov 7 its weekly-limit hold, with no reset, outlived the limit by a day)
+    let default = fb::default_profile("claude", &hub.setting("allowance.claude").await.unwrap_or_default());
+    let ev: Vec<Value> = inv["profiles"].as_array().into_iter().flatten().chain(std::iter::once(&default)).flat_map(|p| fb::clearable(p, &names, &get, now_s)).map(|k| set(&k, "", now_s)).collect();
     if !ev.is_empty() { let _ = hub.commit_many(&ev).await; }
 }
 /// The account a thread left has reset: the thread goes back to it, between turns.
@@ -477,7 +493,7 @@ mod tests {
     }
     #[test] fn a_chain_target_whose_accounts_are_all_held_is_passed_over() {
         let at = now_ms() / 1000; let (k, i) = inv(json!([{"id":"c","provider":"codex","state":"connected","epoch":1}]));
-        let chain = [("fallback.on", "on".to_string()), ("fallback.chain", "claude/opus,codex/gpt-6,grok/g".to_string()), ("fallback.outage.claude", json!({"scope":"claude","reset":0}).to_string()), (k, i)];
+        let chain = [("fallback.on", "on".to_string()), ("fallback.chain", "claude/opus,codex/gpt-6,grok/g".to_string()), ("fallback.outage.claude", json!({"scope":"claude","reset":0,"at":at}).to_string()), (k, i)];
         let mut w = world("claude", "opus", &chain); w.now = at;
         match next(&w) { Next::Chain { to, account, .. } => assert_eq!((to.provider.as_str(), account), ("codex", Some(("c".to_string(), 1))), "it runs on the account it has there"), n => panic!("{n:?}") }
         let held = w.with(&[set(&fb::hold_key("codex", "c", 1), &json!({"scope":"codex","reset":at + 100}).to_string(), 1)]);
@@ -524,7 +540,7 @@ mod tests {
             assert_eq!(events.last().unwrap()["summary"], "Work's sign-in expired and no other claude account can take over. Continuing once you sign in again.");
         } n => panic!("{n:?}") }
         // a limit, not a sign-in: no account named
-        let lim_w = w.with(&on_limit(&w, &lim("claude", 0), true, "go").events).with(&[set(&fb::hold_key("claude", "p", 1), &json!({"scope":"claude","reset":0}).to_string(), 1)]);
+        let lim_w = w.with(&on_limit(&w, &lim("claude", 0), true, "go").events).with(&[set(&fb::hold_key("claude", "p", 1), &json!({"scope":"claude","reset":0,"at":w.now}).to_string(), 1)]);
         match next(&lim_w) { Next::Wait { events, .. } => { let rec: Value = serde_json::from_str(events[0]["value"].as_str().unwrap()).unwrap(); assert!(rec["signin"].is_null()) } n => panic!("{n:?}") }
     }
     #[test] fn a_sign_in_goes_on_with_exactly_the_threads_it_stopped() {
