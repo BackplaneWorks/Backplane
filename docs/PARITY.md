@@ -30,14 +30,14 @@ Each lane updates its own rows in the commit that lands the work.
 | Feature | Status | Owner | Audit |
 |---|---|---|---|
 | **Voice** | | |
-| Dictation from the mic, desktop: the GPUI `Dictate` chip starts a hub session (`bots.voice` start/stop/view/act), draws the strip, level and fix chips, applies the hub's edits (`screens/voice.rs`, `voice_mic.rs`); until the Rust `backplane-voice` helper lands, a session says the helper did not start | partial | voice |
-| Dictation from the phones: the hub serves `/voice/in` and pipes the phone's audio to the helper; until the Rust `backplane-voice` helper lands, a session says the helper did not start; not yet driven on an emulator or simulator | partial | voice |
-| Whole recordings and Pebble ring notes: the ring's webhook form with `audio` is answered 202 and transcribed with the dictionary (`voice/ring.rs`, `bots/hooks.rs`), the ring's own words go when there is no key or no words; until the Rust `backplane-voice` helper lands, a session says the helper did not start | partial | voice |
+| Dictation from the mic, desktop: the GPUI `Dictate` chip starts a hub session (`bots.voice` start/stop/view/act), draws the strip, level and fix chips, applies the hub's edits (`screens/voice.rs`, `voice_mic.rs`); the Rust `backplane-voice` helper is built and shipped beside the hub; a whole session through the hub is not yet driven end to end | partial | voice |
+| Dictation from the phones: the hub serves `/voice/in` and pipes the phone's audio to the helper; the Rust `backplane-voice` helper is built and shipped beside the hub; a whole session through the hub is not yet driven end to end; not yet driven on an emulator or simulator | partial | voice |
+| Whole recordings and Pebble ring notes: the ring's webhook form with `audio` is answered 202 and transcribed with the dictionary (`voice/ring.rs`, `bots/hooks.rs`), the ring's own words go when there is no key or no words; the Rust `backplane-voice` helper is built and shipped beside the hub; a whole session through the hub is not yet driven end to end | partial | voice |
 | Voice ops of `bots.voice`: status, key, unkey, add, start, stop, view, act, page, page-act, install, remove, api-add, api-del (`voice/session.rs`) | done | voice |
 | Settings: Voice page (engine, model, mic, key, dictionary, learned fixes; `voice/page.rs`, in `PAGES`) | done | voice |
 | Personal dictionary, learned words, `voice_dictionary_add`: `voice.e.`/`voice.l.` settings, the correction pass and settle as pure Rust with 0.14's test vectors (`voice/vdict.rs`, `words.rs`), the bot tool writes a `voice.e.` entry | done | voice |
-| Local engine (Parakeet, sherpa-onnx through a Node addon today) | missing | voice |
-| `tools/voice` helper still Bun, README still says "stays in" Bend | partial | voice |
+| Local engine: Parakeet TDT through sherpa-onnx's C API, in `backplane-voice` (its own process, opened at run time), runtime and models downloaded by `local-install` with pinned checksums; real audio decodes on Linux (`native/voice/tests/local_e2e.rs`), macOS and Windows not yet run | partial | voice |
+| Voice helper in Rust (`native/voice`, `scripts/build-voice.sh`, built and tested by dev-build); `tools/voice` (Bun) removed | done | voice |
 | **Commerce** | | |
 | Card and Ready to order data (`fab.look`, `fab.intent`) | partial | commerce |
 | Buy it: `order.buy` is not ported (`settings/fab.rs`), so no buy thread starts | missing | commerce |
@@ -60,7 +60,7 @@ Each lane updates its own rows in the commit that lands the work.
 | **Helpers** (goal: only `tools/browser` stays Bun) | | |
 | `tools/kipc`: removed, with `BACKPLANE_KIPC_BIN` and `scripts/build-kipc.sh`; the hub does the IPC in process | done | cleanup |
 | `tools/step2glb`: FreeCAD comes first, Bun and OpenCascade WASM are the fallback for machines without FreeCAD | partial | helpers |
-| `tools/voice` | partial | voice |
+| `tools/voice` (removed; `native/voice` replaces it) | done | voice |
 | `tools/platform/windows-path.ts` | unchecked | helpers |
 | **Requests and tools with no handler on `main`** | | |
 | Rules and task board from a client (`rules.set/drop`, `board.set/drop`; the agents' side is there) | missing | hub-rest | Audit: the four are unknown methods. 0.14 had no screen for them either (callers: `ledger.bend` and `docs/bots.md` only), so this is request parity, not a screen a person lost. |
@@ -224,7 +224,7 @@ Filled in by the lanes as they meet them. A row needs what was rough and what it
 
 | Rough edge | Status | Owner |
 |---|---|---|
-| Dictation depended on a Bun helper and a Node addon fetched at runtime | missing | voice |
-| A dead control looks live (the `Dictate` chip) | missing | voice |
+| Dictation depended on a Bun helper and a Node addon fetched at runtime: now one Rust helper that opens sherpa-onnx's C library at run time | done | voice |
+| A dead control looks live (the `Dictate` chip): it starts a session now | done | voice |
 | A failed routine save said nothing | done | threads-small |
 | Provider marks were initials | missing | threads-small |
