@@ -99,6 +99,9 @@ pub fn identity_mismatch(expect: &serde_json::Value, said: &serde_json::Value) -
 pub fn low_space(free: u64, total: u64, floor: u64) -> bool { free < floor || (free.saturating_mul(20) < total && free < 10 << 30) }
 pub fn gb(n: u64) -> String { format!("{:.1} GB", n as f64 / 1e9) }
 
+/// The parts an update came up without that the build before it had running (both from /healthz `degraded`). A part that was already down is the home's, not the update's.
+pub fn lost_parts(before: &[String], now: &[String]) -> Vec<String> { now.iter().filter(|p| !before.contains(p)).cloned().collect() }
+
 /// What a person or a client may ask for.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Action { Restart, Safe, Rollback, Use(String), Update(String), Stop }
@@ -212,6 +215,12 @@ mod tests {
         assert!(low_space(g / 2, 2000 * g, g), "under 1 GiB, whatever the size");
         assert!(low_space(g * 14 / 10, 30 * g, g), "a 30 GB tmpfs with 1.4 GB left: under 5 %");
         assert!(!low_space(10 * g, 30 * g, g)); assert!(!low_space(90 * g, 1800 * g, g), "90 GB free of 1.8 TB is under 5 % and not low");
+    }
+    #[test] fn an_update_that_loses_a_part_fails_and_one_the_home_had_down_does_not() {
+        assert_eq!(lost_parts(&[], &s(&["bots"])), s(&["bots"]), "bots panicked at start: the update goes back");
+        assert!(lost_parts(&s(&["pairing"]), &s(&["pairing"])).is_empty(), "pairing was down before as well: the home's, not the update's");
+        assert_eq!(lost_parts(&s(&["pairing"]), &s(&["pairing", "agents"])), s(&["agents"]));
+        assert!(lost_parts(&s(&["bots"]), &[]).is_empty(), "coming up with more is fine");
     }
     #[test] fn actions_parse() {
         assert_eq!(Action::parse("restart", ""), Some(Action::Restart)); assert_eq!(Action::parse("normal", ""), Some(Action::Restart));
