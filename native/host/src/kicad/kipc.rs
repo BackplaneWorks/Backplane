@@ -286,7 +286,8 @@ mod tests {
     #[tokio::test] async fn a_fresh_socket_stands_in_for_the_ready_line() {
         let d = tmp("fresh"); let sock = format!("{d}/api.sock"); let alt = format!("{d}/api-999.sock");
         let old = std::os::unix::net::UnixListener::bind(&sock).unwrap();
-        let f = script(&d, "sleep 1");
+        let go = format!("{d}/go"); // the server lives until the test has seen its socket, not for a fixed time (60 s at most, should the test die)
+        let f = script(&d, &format!("i=0; while [ ! -e '{go}' ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i+1)); done"));
         let (mut n, mut r) = native("");
         n.handle(json!({"id":1,"op":"spawn","key":"p","argv":[f,"--socket",sock]}));
         assert_eq!(next(&mut r).await["ok"], json!(true));
@@ -294,6 +295,7 @@ mod tests {
         assert!(r.try_recv().is_err(), "a socket from before the launch is not ready");
         let new = std::os::unix::net::UnixListener::bind(&alt).unwrap();
         assert_eq!(next(&mut r).await, json!({"event":"line","key":"p","text":format!("{READY}{alt}")}));
+        std::fs::write(&go, "").unwrap();
         assert_eq!(next(&mut r).await["event"], json!("exit")); drop((old, new));
     }
     #[test] fn sockets_at_sees_only_the_servers_names() {
