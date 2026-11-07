@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+# A stand-in `claude` for the F rows: stream-json on stdin/stdout like perf_standin.ts, plus triggers in the user's text.
+#   zqask      asks the person a question through the hub's MCP permission_prompt (AskUserQuestion) and logs the answer
+#   zqapprove  asks to run a Bash command (an approval) and logs allow or deny
+#   zqplan     calls ExitPlanMode (the plan card)
+#   zqtool X   calls the hub MCP tool X (thread_list) and logs what it said
+#   zqecho     answers with the text it was given, so attachments and agentText can be checked
+#   zqquote D  calls order_quote for folder D
+#   zqshort    a short turn; anything else a turn of FAKE_SECS seconds
+import sys, os, json, time, urllib.request
+log = os.environ.get("FAKE_LOG", "/dev/null")
+def L(s):
+    open(log, "a").write(s + "\n")
+a = sys.argv[1:]
+url = ""
+if "--mcp-config" in a:
+    try: url = json.loads(a[a.index("--mcp-config") + 1])["mcpServers"]["backplane"]["url"]
+    except Exception: pass
+L("START %d args=%s" % (os.getpid(), json.dumps(a)[:600]))
+def mcp(method, params):
+    req = urllib.request.Request(url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(), headers={"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(req, timeout=300).read() or b"{}")
+def out(o):
+    print(json.dumps(o), flush=True)
+if "-p" in a and "--input-format" not in a:  # one-shot text generation (titles, summaries)
+    sys.stdin.read(); L("ONESHOT")
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "Stand-in title for the thread"}), flush=True); sys.exit(0)
+sid = "fake-%d" % os.getpid()
+n = 0
+for line in sys.stdin:
+    try: r = json.loads(line)
+    except Exception: continue
+    if r.get("type") != "user":
+        if r.get("type") == "control_request":
+            out({"type": "control_response", "response": {"request_id": r.get("request_id"), "subtype": "success", "response": {}}})
+        continue
+    n += 1
+    c = r.get("message", {}).get("content", "")
+    text = c if isinstance(c, str) else " ".join(x.get("text", "") for x in c if isinstance(x, dict))
+    L("TURN %d %s" % (os.getpid(), text[:300].replace("\n", " ")))
+    out({"type": "system", "subtype": "init", "session_id": sid, "cwd": os.getcwd(), "tools": ["Bash"], "model": "fake", "permissionMode": "default"})
+    say = "done"
+    def perm(tool, inp):
+        d = mcp("tools/call", {"name": "permission_prompt", "arguments": {"tool_name": tool, "input": inp}})
+        t = d.get("result", {}).get("content", [{}])[0].get("text", "")
+        L("PERM %s -> %s" % (tool, t[:300].replace("\n", " ")))
+        return t
+    try:
+        if "zqask" in text:
+            say = "answer: " + perm("AskUserQuestion", {"questions": [{"question": "Which port?", "header": "Port", "options": [{"label": "USB-C", "description": ""}, {"label": "Barrel", "description": ""}], "multiSelect": False}]})[:200]
+        elif "zqapprove" in text:
+            say = "approval: " + perm("Bash", {"command": "echo approved-by-person", "description": "say it"})[:200]
+        elif "zqplan" in text:
+            say = "plan: " + perm("ExitPlanMode", {"plan": "1. Draw the board\n2. Route it"})[:200]
+        elif "zqtool" in text:
+            name = text.split("zqtool", 1)[1].split()[0]
+            d = mcp("tools/call", {"name": name, "arguments": {}})
+            t = d.get("result", {}).get("content", [{}])[0].get("text", "")
+            L("TOOL %s -> %s" % (name, t[:400].replace("\n", " ")))
+            say = "tool %s said: %s" % (name, t[:200])
+        elif "zqquote" in text:
+            d = mcp("tools/call", {"name": "order_quote", "arguments": {"dir": text.split("zqquote", 1)[1].split()[0]}})
+            t = d.get("result", {}).get("content", [{}])[0].get("text", "")
+            L("TOOL order_quote -> %s" % t[:400].replace("\n", " "))
+            say = "quote: " + t[:200]
+        elif "zqecho" in text:
+            say = "echo: " + text
+    except Exception as e:
+        L("ERR %r" % (e,)); say = "error %r" % (e,)
+    if "zqshort" not in text and not any(k in text for k in ["zqask", "zqapprove", "zqplan", "zqtool", "zqquote", "zqecho"]):
+        for i in range(int(float(os.environ.get("FAKE_SECS", "600")) * 10)):
+            if i % 10 == 0: out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "working "}}, "session_id": sid})
+            time.sleep(0.1)
+    out({"type": "assistant", "message": {"id": "m%d-%d" % (os.getpid(), n), "role": "assistant", "content": [{"type": "text", "text": say}]}, "session_id": sid})
+    out({"type": "result", "subtype": "success", "is_error": False, "result": say, "session_id": sid, "modelUsage": {"fake": {"contextWindow": 200000}}, "usage": {"input_tokens": 1200, "output_tokens": 80}})
