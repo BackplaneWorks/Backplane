@@ -37,6 +37,7 @@ async fn start_slow(name: &str, log: &str, slow: bool) -> (Arc<Hub>, Arc<Bots>, 
     (hub, bots, rec)
 }
 async fn start(name: &str, log: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Rec>) { start_slow(name, log, false).await }
+const DESK_ONLY: &str = "shown on the person's desktop; only the uberbot reaches their phone";
 fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
 async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m).expect("handler"); h.call(hub, &caller(), &json!(7), m, &p).await.remove(0) }
 fn log(hub: &Arc<Hub>) -> Vec<Value> { hub.store.range(0, usize::MAX).unwrap().iter().filter_map(|l| serde_json::from_str(l).ok()).collect() }
@@ -1229,6 +1230,8 @@ fn stored(e: &Value) -> Value {
         let want: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!(raw));
         assert_eq!(c["result"]["isError"].as_bool().unwrap(), !ok, "{name} {args}: {body}");
         let got: Value = serde_json::from_str(&body.to_string().replace(&w, "/tmp/bp-rec-work")).unwrap();
+        // Push.gate: the JS hub let any bot reach the phone; here only the uberbot does, and this recording has none
+        let mut want = want; if name == "notify_person" && want["note"] == "sent to the person" { want["note"] = json!(DESK_ONLY) }
         assert_eq!(scrubbed(&got), scrubbed(&want), "{name} {args}");
         if let (Some(a), Some(b)) = (want["id"].as_str(), body["id"].as_str()) { ids.push((a.to_string(), b.to_string())) }
         // what the call left in the log; a mark an alert gets is the state lane's (no Transform on this hub)
@@ -1297,7 +1300,7 @@ fn stored(e: &Value) -> Value {
     let digest = |bots: Arc<Bots>, th: String| async move { bots.tool_call_at(&th, "notify_person", &json!({"text":"d","reason":"digest"}), 200).await };
     assert!(!digest(bots.clone(), th.clone()).await.0, "the turn's message is the newest");
     *rec.queue.lock().unwrap() = vec!["m2".into()];
-    assert_eq!(digest(bots.clone(), th.clone()).await, (true, json!({"ok":true,"note":"sent to the person"})));
+    assert_eq!(digest(bots.clone(), th.clone()).await, (true, json!({"ok":true,"note":DESK_ONLY})), "no uberbot here, so the desk only");
 }
 #[tokio::test] async fn a_filed_mail_to_the_uberbot_gives_its_agent_a_turn_once_however_often_it_is_routed() {
     // a routine's firing is filed for the uberbot; its run is bound to that input, claims the owner ticket, and the agent is handed the brief with the exact body.
@@ -1329,6 +1332,7 @@ fn stored(e: &Value) -> Value {
 }
 
 mod triage;
+mod push;
 mod standin;
 
 async fn call_hook(hub: &Arc<Hub>, hid: &str, hs: Vec<(String, String)>, body: &str) -> (String, String) {

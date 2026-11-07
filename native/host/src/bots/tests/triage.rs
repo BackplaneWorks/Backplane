@@ -4,7 +4,7 @@ use crate::agents::mailroom::{Funnel, Mailroom};
 use crate::bots::mail::{funnel::Room, tools::{lists, MailTools}, escalate::disposition_key};
 use crate::agents::mcp::ToolSet;
 
-async fn uber(name: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Rec>, String, String) {
+pub(super) async fn uber(name: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Rec>, String, String) {
     let (hub, bots, rec) = start(&format!("parity-{name}"), "").await;
     let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; let bub = r["bot"].as_str().unwrap().to_string();
     until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet") && l.iter().any(|e| e["$"] == "WorktreeSet")).await;
@@ -14,10 +14,10 @@ async fn uber(name: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Rec>, String, String) {
     (hub, bots, rec, bub, th)
 }
 fn runs(hub: &Arc<Hub>) -> Vec<Value> { log(hub).into_iter().filter(|e| e["$"] == "RunSet").collect() }
-async fn settle() { tokio::time::sleep(std::time::Duration::from_millis(300)).await }
+pub(super) async fn settle() { tokio::time::sleep(std::time::Duration::from_millis(300)).await }
 /// what an agent's turn leaves in the log; the mailroom answers from the log, as it does for a real one
 async fn turn(hub: &Arc<Hub>, th: &str, end: &str) { turn_said(hub, th, end, "worked on it").await }
-async fn turn_said(hub: &Arc<Hub>, th: &str, end: &str, text: &str) {
+pub(super) async fn turn_said(hub: &Arc<Hub>, th: &str, end: &str, text: &str) {
     hub.commit_many(&[json!({"$":"TurnChanged","thread":th,"state":"running","at":now_s()})]).await.unwrap();
     hub.commit_many(&[json!({"$":"MessagePosted","thread":th,"msg":format!("a{}", hub.store.len()),"role":"assistant","text":text,"at":now_s()}), json!({"$":"TurnChanged","thread":th,"state":end,"at":now_s()})]).await.unwrap();
 }

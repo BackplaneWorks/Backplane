@@ -19,11 +19,12 @@ class DataActivity : ComponentActivity() {
         val preview = if (BuildConfig.DEBUG) intent?.getStringExtra("mdpreview") else null
         val stream = intent?.getBooleanExtra("stream", false) == true
         if (preview != null) { setContent { Theme(AppSettings.appearance) { MdPreview(java.io.File(preview).readText(), stream) } }; return }
+        DataClient.pendingAsk = intent?.getStringExtra("ask") ?: ""
         setContent { Theme(AppSettings.appearance) { DataRoot() } }
     }
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra("thread")?.let { DataClient.openFromIntent = it }
+        intent.getStringExtra("thread")?.let { DataClient.openFromIntent = it; DataClient.pendingAsk = intent.getStringExtra("ask") ?: "" }
         intent.data?.let { route(it) }
     }
     // backplane://thread/<id> opens that thread; any other link of this app's scheme asks before it pairs

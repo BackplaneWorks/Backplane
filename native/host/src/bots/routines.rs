@@ -94,6 +94,7 @@ impl Bots {
             let stamp = format!("{now}.{}", self.hub.store.len());
             let line = if on { format!("reminder\tremind-{}\t{memory}\t{stamp}\t{}", r.id, alert_text(&r.prompt, 500)) } else { format!("\t\t{memory}\t{stamp}\t") };
             ev.push(json!({"$":"SettingSet","key":format!("alert.{thread}"),"value":line,"at":now}));
+            if let (true, Some(s)) = (on, crate::push::Source::reminder(w, r)) { ev.push(s.order(&format!("remind-{}-{now}", r.id), "reminder", thread, "", &r.prompt, now)) }
             return Some((ev, None, None));
         }
         let mut ev: Vec<Value> = fired.collect();

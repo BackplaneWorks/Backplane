@@ -6,7 +6,7 @@ import XCTest
 // Honest limits, written into every result: XCUIElement.tap() returns after the app is idle, so `tap_ms` includes that quiescence;
 // `result_ms` is tap -> the expected element existing (polled every 20 ms). First-changed-frame latency and fps come from the video.
 final class Driver {
-    let app = XCUIApplication(bundleIdentifier: "dev.backplane.gpui")
+    let app = XCUIApplication(bundleIdentifier: ProcessInfo.processInfo.environment["APP_ID"] ?? "dev.backplane.gpui")
     let journey: String
     let out: String
     var steps: [[String: Any]] = []

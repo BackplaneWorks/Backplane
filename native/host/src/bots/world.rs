@@ -12,7 +12,12 @@ pub struct Room { pub id: String, pub name: String, pub members: Vec<String>, pu
 pub struct Mem { pub bot: String, pub key: String, pub kind: String, pub text: String, pub tags: String, pub created: u64, pub updated: u64 }
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Routine { pub id: String, pub bot: String, pub name: String, pub cron: String, pub prompt: String, pub on: bool, pub last: u64, pub created: u64, pub deleted: bool,
-    pub once: u64, pub tz: String, pub kind: String, pub done: bool, pub slot: u64 }
+    pub once: u64, pub tz: String, pub kind: String, pub done: bool, pub slot: u64,
+    /// the bot whose tool planned it; empty when the person did (see push::Source)
+    #[serde(default)] pub by: String }
+/// A phone's push token (DeviceRegistered, DevicePrefs). A phone registers on every connect, so a checkpoint from before this field fills in by itself.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Device { pub token: String, pub platform: String, pub kind: String, pub env: String, pub bundle: String, pub mute: bool }
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Hook { pub id: String, pub bot: String, pub name: String, pub created: u64, pub revoked: bool, pub last: u64, pub count: u64 }
 /// BT.Hops
@@ -26,6 +31,7 @@ pub struct World {
     pub bots: HashMap<String, Bot>, pub rooms: HashMap<String, Room>, post_ids: HashSet<String>,
     pub mems: HashMap<String, Mem>, pub spaces: HashMap<String, String>, pub pages: HashMap<String, (String, u64)>,
     pub routines: HashMap<String, Routine>, pub hooks: HashMap<String, Hook>, pub peers: HashMap<String, Peer>,
+    #[serde(default)] pub devices: HashMap<String, Device>,
     /// only the settings a bots request reads (SETTINGS): a log of a million lines holds hundreds of thousands of keys
     pub settings: HashMap<String, String>,
     /// message id filed in a bot's thread -> its 1-based log line (Hub.has_msg; Rto.resolve reads the text from the log)
@@ -173,14 +179,16 @@ impl World {
     }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 41] = ["ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+        const READ: [&str; 44] = ["DeviceRegistered", "DeviceDropped", "DevicePrefs", "ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
             "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke", "ProjectCreated", "ProjectRemoved"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
         if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|k| line.contains(k)) { return }
         if t == "TurnChanged" || t == "QueueTaken" {
             let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
-            if !self.bot_threads.contains(th) && self.mail.run_of(th).is_none() { return }
+            // Triage.thread.end: any thread's end is the uberbot's news once there is one (rare lines); every other turn line only matters for bots and runs
+            let end = t == "TurnChanged" && (line.contains("\"state\":\"completed\"") || line.contains("\"state\":\"failed\"")) && !self.uber_bot().is_empty();
+            if !end && !self.bot_threads.contains(th) && self.mail.run_of(th).is_none() { return }
         }
         if t == "ActivityLogged" && !line.contains("fallback-blocked") { return }
         if t == "ModesSet" {
@@ -195,7 +203,7 @@ impl World {
     }
     fn routine_mut(&mut self, id: &str) -> &mut Routine {
         self.routines.entry(id.to_string()).or_insert_with(|| Routine { id: id.into(), bot: String::new(), name: String::new(), cron: String::new(), prompt: String::new(), on: false, last: 0, created: 0, deleted: true,
-            once: 0, tz: String::new(), kind: String::new(), done: false, slot: 0 })
+            once: 0, tz: String::new(), kind: String::new(), done: false, slot: 0, by: String::new() })
     }
     pub fn apply(&mut self, t: &str, e: &Value) {
         let id = s(e, "id").to_string(); let at = n(e, "at");
@@ -248,16 +256,19 @@ impl World {
             "HookHit" => { if let Some(h) = self.hooks.get_mut(&id) { h.last = at; h.count += 1 } }
             "RoutineSet" => {
                 let old = self.routines.get(&id).cloned();
-                let (was_on, deleted, last, created, bot, once, tz, kind, done, slot) = old.map_or((false, true, 0, 0, String::new(), 0, String::new(), String::new(), false, 0),
-                    |o| (o.on, o.deleted, o.last, o.created, o.bot, o.once, o.tz, o.kind, o.done, o.slot));
+                let (was_on, deleted, last, created, bot, once, tz, kind, done, slot, by) = old.map_or((false, true, 0, 0, String::new(), 0, String::new(), String::new(), false, 0, String::new()),
+                    |o| (o.on, o.deleted, o.last, o.created, o.bot, o.once, o.tz, o.kind, o.done, o.slot, o.by));
                 let was = was_on && !deleted; let on = b(e, "on");
                 let nb = if s(e, "bot").is_empty() { bot } else { s(e, "bot").into() };
                 self.routines.insert(id.clone(), Routine { id, bot: nb, name: s(e, "name").into(), cron: s(e, "cron").into(), prompt: s(e, "prompt").into(), on,
-                    last: if !was && on { at } else { last }, created: if deleted { at } else { created }, deleted: false, once, tz, kind, done, slot: if !was && on { 0 } else { slot } });
+                    last: if !was && on { at } else { last }, created: if deleted { at } else { created }, deleted: false, once, tz, kind, done, slot: if !was && on { 0 } else { slot }, by });
             }
             "RoutineDeleted" => { self.routine_mut(&id).deleted = true }
             "RoutineFired" => { self.routine_mut(&id).last = at }
-            "RoutinePlan" => { let r = self.routine_mut(&id); r.once = n(e, "once"); r.tz = s(e, "tz").into(); r.kind = s(e, "kind").into(); r.done = false; r.slot = 0 }
+            "RoutinePlan" => { let r = self.routine_mut(&id); r.once = n(e, "once"); r.tz = s(e, "tz").into(); r.kind = s(e, "kind").into(); r.by = s(e, "by").into(); r.done = false; r.slot = 0 }
+            "DeviceRegistered" => { let t = s(e, "token").to_string(); let mute = self.devices.get(&t).map_or(false, |d| d.mute); self.devices.insert(t.clone(), Device { token: t, platform: s(e, "platform").into(), kind: s(e, "kind").into(), env: s(e, "env").into(), bundle: s(e, "bundle").into(), mute }); }
+            "DeviceDropped" => { self.devices.remove(s(e, "token")); }
+            "DevicePrefs" => { if let Some(d) = self.devices.get_mut(s(e, "token")) { d.mute = e["mute"] == true } }
             "RoutineSlot" => { self.routine_mut(&id).slot = n(e, "slot") }
             "RoutineDone" => { self.routine_mut(&id).done = true }
             "MemorySaved" => {

@@ -27,13 +27,17 @@ pub fn registered(p: &Value, now: u64) -> Option<Value> {
 /// device.drop's event.
 pub fn dropped(p: &Value, now: u64) -> Value { json!({"$":"DeviceDropped","token":get(p,"token",""),"at":now}) }
 
+/// device.prefs' event: this phone's mute, by its token.
+pub fn prefs(p: &Value, now: u64) -> Option<Value> { safe(get(p, "token", "")).then(|| json!({"$":"DevicePrefs","token":get(p,"token",""),"mute":p["mute"] == true,"at":now})) }
+
 pub struct Devices;
 impl RpcHandler for Devices {
-    fn methods(&self) -> &'static [&'static str] { &["device.register", "device.drop"] }
+    fn methods(&self) -> &'static [&'static str] { &["device.register", "device.drop", "device.prefs"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let now = crate::hub::now_ms() / 1000;
-            let ev = if method == "device.register" { match registered(p, now) { Some(e) => e, None => return vec![json!({"t":"reply","id":id,"ok":false,"error":"bad device"})] } } else { dropped(p, now) };
+            let made = match method { "device.register" => registered(p, now), "device.prefs" => prefs(p, now), _ => Some(dropped(p, now)) };
+            let Some(ev) = made else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"bad device"})] };
             match hub.commit(&ev).await { Ok(_) => vec![json!({"t":"reply","id":id,"ok":true})], Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})] }
         })
     }
@@ -58,6 +62,11 @@ mod tests {
         let mut p = good(); p.as_object_mut().unwrap().remove("env"); p.as_object_mut().unwrap().remove("thread");
         let e = registered(&p, 8).unwrap(); assert_eq!((e["env"].as_str(), e["thread"].as_str()), (Some("production"), Some("")));
         assert!(registered(&json!({}), 1).is_none());
+    }
+    #[test] fn device_prefs_need_a_safe_token() {
+        assert_eq!(prefs(&json!({"token":"t1","mute":true}), 4).unwrap(), json!({"$":"DevicePrefs","token":"t1","mute":true,"at":4}));
+        assert_eq!(prefs(&json!({"token":"t1"}), 4).unwrap()["mute"], false);
+        assert!(prefs(&json!({"token":"a b","mute":true}), 4).is_none() && prefs(&json!({}), 4).is_none());
     }
     #[test] fn device_drop_event() { assert_eq!(dropped(&json!({"token":"t"}), 3), json!({"$":"DeviceDropped","token":"t","at":3})); assert_eq!(dropped(&json!({}), 3)["token"], ""); }
     #[tokio::test] async fn device_rpc_commits_and_answers() {

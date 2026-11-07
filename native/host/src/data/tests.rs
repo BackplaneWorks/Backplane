@@ -59,10 +59,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -203,6 +203,21 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     assert!(o.windows(6).any(|w| w == b"result"));
 }
 
+// a phone's push calls: a token reaches the log, and push.state's answer is its own fields, not the rpc's reply around them
+struct PushState;
+impl crate::api::RpcHandler for PushState {
+    fn methods(&self) -> &'static [&'static str] { &["push.state"] }
+    fn call<'a>(&'a self, _h: &'a Arc<Hub>, _w: &'a crate::api::Caller, id: &'a Value, _m: &'a str, _p: &'a Value) -> crate::api::Fut<'a, Vec<Value>> { Box::pin(async move { vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":["k"],"badge":2,"quiet":"off","urgent":false}})] }) }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_phone_registers_its_token_and_reads_push_state_over_data() {
+    let (h, port) = up("push").await; h.register_rpc(Arc::new(crate::net::devices::Devices)); h.register_rpc(Arc::new(PushState));
+    let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let r = ask(&mut ws, 1, "device.register", json!({"token":"abc123","platform":"ios","kind":"alert","env":"sandbox","bundle":"dev.backplane.mobile"})).await; assert_eq!((r["ok"].as_bool(), &r["result"]), (Some(true), &json!({})), "{r}");
+    assert!(h.store.range(0, usize::MAX).unwrap().iter().any(|l| l.contains("DeviceRegistered") && l.contains("abc123")));
+    let r = ask(&mut ws, 2, "device.register", json!({"token":"a b"})).await; assert_eq!(r["ok"], false, "{r}");
+    let r = ask(&mut ws, 3, "push.state", json!({})).await; assert_eq!(r["result"], json!({"keys":["k"],"badge":2,"quiet":"off","urgent":false}));
+}
+
 // the phone additions (data/ext.rs)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_additions_search_models_mentions_directory_and_actions() {
     let (_h, port) = up("ext").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
@@ -228,12 +243,9 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     assert!(p["css"].as_str().unwrap().starts_with('#') && !p["color"].as_str().unwrap().is_empty() && p["icon"] == "folder", "a project carries its badge: {p}");
     assert_eq!(r["result"]["threads"][0]["parent"], "", "a thread says what it is under");
 }
-#[test] fn notify_for_marks_asks_and_turn_ends_only() {
-    let t = |k: &str| ext::notify_for(&json!({"$":"TurnChanged","state":k}), "t1", "T", "");
-    assert_eq!(t("completed").unwrap()["kind"], "done"); assert_eq!(t("failed").unwrap()["kind"], "fail");
-    assert!(t("running").is_none() && t("interrupted").is_none() && t("cancelled").is_none());
-    assert_eq!(ext::notify_for(&json!({"$":"AskOpened"}), "t1", "T", "rm -rf x").unwrap()["body"], "rm -rf x");
-    assert!(ext::notify_for(&json!({"$":"MessagePosted"}), "t1", "T", "").is_none());
+#[test] fn notify_says_what_the_gate_sent() {
+    let n = ext::notify_of(&json!({"$":"PushSent","kind":"needs_you","thread":"t1","ask":"a1","key":"push-1","title":"Bub","body":"Approve?","badge":2,"through":false,"sent":1,"at":9}));
+    assert_eq!(n, json!({"kind":"needs_you","thread":"t1","ask":"a1","key":"push-1","title":"Bub","body":"Approve?","badge":2,"through":false}));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_activity_arrives_ready_to_fold_in_the_desktops_words() {

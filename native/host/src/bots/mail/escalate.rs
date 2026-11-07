@@ -199,7 +199,13 @@ impl<'a> Ctx<'a> {
     }
     /// Triage.ask: an ask in managed work: a run's own is a private escalation; any other stays open at its source and enters triage as actionable mail
     pub fn triage_ask(&mut self, id: &str, th: &str, tool: &str, detail: &str) -> Step {
-        if !self.w.managed(th) { return Step::none() }
+        let tt = self.w.triage_thread();
+        if tt.is_empty() { return Step::none() }
+        // Push.gate: the uberbot's own ask is the one ask that may reach a phone by itself (it cannot call notify_person while it waits). Any other thread's ask only reaches the uberbot, below
+        if th == tt {
+            let Some(src) = crate::push::Source::notify(self.w, &self.w.uber_bot()).filter(|_| self.policy_on("needs")) else { return Step::none() };
+            return Step { cs: vec![src.order(&format!("ask-{id}"), "needs_you", th, id, &crate::state::fam::turnend::ask_say(tool, detail), self.now)], outs: vec![] }
+        }
         if let Some(r) = self.run_of(th).filter(|r| self.runs_on(&r.bot) && !self.w.private_is(&r.thread)) {
             let text = format!("Private triage is waiting on its own tool permission or question; evidence gathering is incomplete. This is not a source worker approval or evidence that the person must act. Review privately and resolve coordination within existing authority; keep internal tool arguments out of user updates.\nRun: {}\nPending run ask: {id}. It remains pending; no authorization was granted.", ref_uri("thread", th));
             return self.run_escalate(&r.bot, &r.conv, "bot", &text)
@@ -218,6 +224,13 @@ impl<'a> Ctx<'a> {
         let text = self.f.last.get(th).map(|l| l.0.clone()).unwrap_or_default();
         if state == "completed" && text.trim().is_empty() { return Step::none() }
         self.operational(Origin::new(&self.w.mail_addr(th), "bot", ""), &self.w.triage_thread(), &format!("Bot report from {}:\n{text}", ref_uri("thread", th)), &format!("triage-bot:{th}:{}", self.now), "fyi", vec![])
+    }
+    /// Triage.thread.end: a thread nobody manages finished: the uberbot hears it as mail it reads when it next looks (fyi: it starts no turn), and decides; its own thread is not news to it
+    pub fn triage_thread_end(&mut self, th: &str, state: &str) -> Step {
+        let tt = self.w.triage_thread();
+        if tt.is_empty() || th == tt || self.w.managed(th) || self.run_is(th) { return Step::none() }
+        // its words are not folded here (a big log's messages are not read): the mail names the thread, and the uberbot reads it when it matters
+        self.operational(Origin::new(&self.w.mail_addr(th), "thread", ""), &tt, &format!("Thread {state}: {}", ref_uri("thread", th)), &format!("triage-end:{th}:{}", self.now), "fyi", vec![])
     }
     pub fn run_is(&self, th: &str) -> bool { self.w.private_is(th) || self.run_of(th).filter(|r| self.runs_on(&r.bot)).is_some() }
     fn run_of_any(&self, th: &str) -> Option<Run> { self.run_of(th).filter(|r| !self.w.private_is(&r.thread)) }
@@ -241,7 +254,7 @@ impl<'a> Ctx<'a> {
         if self.policy_on("needs") || self.policy_on("settled") { cs.push(self.alert_set(&target, "note", &format!("tell-{msg}"), &Self::alert_text(text, 500))) }
         cs.extend(self.told_mark(&msg, key, text, "chat", &bot));
         self.replay(&cs);
-        let note = format!("[Backplane] Your private mailroom just told the person this in your conversation (key {key}). It is already on screen and the person was notified: do not repeat it, take it into account. If you have nothing to add, end with an empty reply.\n\n{text}");
+        let note = format!("[Backplane] Your private mailroom just told the person this in your conversation (key {key}). It is on screen in your conversation, and no phone alert went out: only your notify_person reaches their phone, so call it if they must know now. Do not repeat it otherwise, take it into account. If you have nothing to add, end with an empty reply.\n\n{text}");
         Step { cs, outs: vec![RouteOut::Note { thread: target, id: format!("told:{msg}"), text: note }] }
     }
     /// Mail.failure: the journal refused a report for the owner: an explicit delivery failure reaches its back office; nothing claims it was filed

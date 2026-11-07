@@ -114,7 +114,7 @@ object DataClient {
         calls.values.forEach { it.completeExceptionally(Exception("Offline")) }; calls.clear()
         listSub = 0; threadSub = 0
     }
-    fun foreground() { if (link != null && (conn != Conn.ONLINE || System.currentTimeMillis() - heard > 20_000)) connect() }
+    fun foreground() { if (link != null && (conn != Conn.ONLINE || System.currentTimeMillis() - heard > 20_000)) connect() else if (link != null) scope.launch { syncPush() } }
     private fun lost(g: Int, why: String) {
         if (g != gen) return
         failure = why; close(); conn = Conn.OFFLINE
@@ -159,6 +159,7 @@ object DataClient {
             listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
             if (g != gen) return
             coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) } }
+            syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
     }
@@ -175,6 +176,7 @@ object DataClient {
         open = id
         if (conn != Conn.ONLINE) return
         val g = gen
+        if (has("push")) scope.launch { runCatching { call("push.seen", JSONObject().put("thread", id)) }; syncPush() }
         scope.launch { launch { runCatching { subscribeThread(id, g) } }; refreshThread(id) }
     }
     fun closeThread(id: String) {
@@ -224,6 +226,7 @@ object DataClient {
                 entries = entries + (tid to l.map { if (it.id == eid) it.copy(text = it.text + add, live = true) else it })
             }
             "notify" -> notify(o)
+            "clear" -> cleared(o.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
             "turn" -> { val tid = o.optString("thread"); val s = o.optString("state"); threads = threads.map { if (it.id == tid) it.copy(state = s) else it } }
         }
     }
@@ -311,6 +314,8 @@ object DataClient {
     // ---- the hub's additions to data/1 (features actions, search, models, mentions, bots, notify)
     fun has(f: String) = f in features
     var openFromIntent by mutableStateOf<String?>(null)
+    // a tapped notification's approval: the thread scrolls to it once it is loaded
+    var pendingAsk by mutableStateOf("")
     val plots = PlotStore()
     var shot by mutableStateOf(0L); private set   // the browser page's newest frame announced by the hub (any thread: the tab compares the bot it shows)
     var shotBot by mutableStateOf(""); private set
@@ -366,17 +371,35 @@ object DataClient {
     suspend fun roomPost(room: String, text: String) { call("room.post", JSONObject().put("room", room).put("text", text).put("clientId", UUID.randomUUID().toString())) }
     suspend fun botSay(bot: String, text: String) { call("bot.say", JSONObject().put("bot", bot).put("text", text).put("clientId", UUID.randomUUID().toString())) }
 
-    // alerts: a turn that ended or asks, while the app is not on screen (the hub's `notify` push on the lists subscription)
+    // alerts: only what the hub's gate lets through reaches here (native/host/src/push): this phone has no push service, so it hears them on its socket while the app lives
+    private val alertTag = "push"
     private fun notify(o: JSONObject) {
-        if (foreground || !AppSettings.alertsOn()) return
-        val kind = o.optString("kind"); val tid = o.optString("thread")
+        if (foreground) return
+        if (!AppSettings.alertsOn() && !o.optBoolean("through")) return
+        val tid = o.optString("thread"); val key = o.optString("key"); val ask = o.optString("ask")
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        nm.createNotificationChannel(android.app.NotificationChannel("data-alerts", "Threads", android.app.NotificationManager.IMPORTANCE_DEFAULT))
-        val open = android.app.PendingIntent.getActivity(app, tid.hashCode(), android.content.Intent(app, DataActivity::class.java).putExtra("thread", tid).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP), android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+        nm.createNotificationChannel(android.app.NotificationChannel("data-alerts", "Alerts", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+        val intent = android.content.Intent(app, DataActivity::class.java).putExtra("thread", tid).putExtra("ask", ask).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val open = android.app.PendingIntent.getActivity(app, key.hashCode(), intent, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
         val n = android.app.Notification.Builder(app, "data-alerts").setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle(o.optString("title").ifEmpty { "Backplane" })
-            .setContentText(when (kind) { "ask" -> "Waiting for your answer: " + o.optString("body"); "fail" -> "The turn failed"; else -> "Finished" }).setContentIntent(open).setAutoCancel(true).build()
-        nm.notify(tid.hashCode(), n)
+            .setContentText(o.optString("body")).setGroup(tid).setNumber(o.optInt("badge")).setContentIntent(open).setAutoCancel(true).build()
+        nm.notify(alertTag, key.hashCode(), n)
     }
+    // what was dealt with leaves this phone, by its key
+    private fun cleared(keys: List<String>) { val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager; keys.forEach { nm.cancel(alertTag, it.hashCode()) } }
+    var quiet by mutableStateOf(""); private set
+    var quietUrgent by mutableStateOf(false); private set
+    // what is waiting, on connect and on coming to the front: whatever was dealt with while this phone slept leaves it
+    private suspend fun syncPush() {
+        if (!has("push")) return
+        val r = runCatching { call("push.state") }.getOrNull() ?: return
+        quiet = r.optString("quiet"); quietUrgent = r.optBoolean("urgent")
+        val keys = r.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it).hashCode() }.toSet() } ?: emptySet()
+        val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        nm.activeNotifications.filter { it.tag == alertTag && it.id !in keys }.forEach { nm.cancel(alertTag, it.id) }
+    }
+    fun putQuiet(spec: String) { quiet = spec; scope.launch { runCatching { call("push.prefs", JSONObject().put("notify.quiet", spec)) } } }
+    fun putQuietUrgent(on: Boolean) { quietUrgent = on; scope.launch { runCatching { call("push.prefs", JSONObject().put("notify.quiet.urgent", if (on) "on" else "off")) } } }
 
     // ---- viewers, files, browser (features viewers, files, browser; native/host/src/data/ext.rs)
     data class ProjectFiles(val root: String, val pcb: String, val sch: String)

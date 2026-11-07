@@ -47,7 +47,7 @@ impl Outbox {
 /// SignalRevision.affects: only activity lines and assistant/system messages leave the signal inputs alone; every other event,
 /// including one this hub does not know, counts.
 /// Setting.wire_blank: what clients get blank on the wire.
-pub fn wire_blank(key: &str) -> bool { key.starts_with("launch.input.") || key.starts_with("fallback.input.") || key.starts_with("ride.") }
+pub fn wire_blank(key: &str) -> bool { key == crate::push::BOOK || key.starts_with("launch.input.") || key.starts_with("fallback.input.") || key.starts_with("ride.") }
 
 pub fn signal_affects(e: &Value) -> bool {
     match e["$"].as_str() { Some("ActivityLogged") => false, Some("MessagePosted") => !matches!(e["role"].as_str(), Some("assistant") | Some("system")), _ => true }
@@ -434,7 +434,7 @@ impl Hub {
         let v: Value = serde_json::from_str(line).ok()?;
         let at = v["at"].as_u64().unwrap_or(0);
         match v["$"].as_str() {
-            Some(t @ ("DeviceRegistered" | "DeviceDropped")) => Some(json!({"$": t, "at": at})),
+            Some(t @ ("DeviceRegistered" | "DeviceDropped" | "DevicePrefs")) => Some(json!({"$": t, "at": at})),
             Some("SettingSet") if v["key"].as_str().map_or(false, wire_blank) => Some(json!({"$":"SettingSet","key":v["key"],"value":"","at":at})),
             _ => Some(v),
         }
@@ -602,6 +602,11 @@ mod tests {
     }
 
     const TOKEN: &str = "apns-token-SECRET-0123456789abcdef";
+    #[test] fn device_prefs_never_send_the_token_and_the_push_book_travels_blank() {
+        let w = Hub::wire_item(&format!("{{\"$\":\"DevicePrefs\",\"token\":\"{TOKEN}\",\"mute\":true,\"at\":42}}")).unwrap();
+        assert_eq!(w, json!({"$":"DevicePrefs","at":42}));
+        assert_eq!(Hub::wire_item(r#"{"$":"SettingSet","key":"push.book","value":"{\"open\":[]}","at":1}"#).unwrap()["value"], "");
+    }
     // laws device_token_never_sent, device_drop_never_sent, input_wire_blank, ride_wire_blank
     #[test] fn device_token_never_sent() {
         let line = format!("{{\"$\":\"DeviceRegistered\",\"id\":\"d1\",\"token\":\"{TOKEN}\",\"platform\":\"ios\",\"bundle\":\"dev.backplane.mobile\",\"name\":\"Phone\",\"at\":42}}");

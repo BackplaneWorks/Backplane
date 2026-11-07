@@ -43,6 +43,7 @@ struct DataRoot: View {
         .onChange(of: phase) { _, p in if p == .active { client.foreground() } }
         .onChange(of: client.pendingThread) { _, id in if let id { path.append(id); client.pendingThread = nil } }
         .onOpenURL { route($0) }
+        .onChange(of: client.pushThread, initial: true) { _, t in if !t.isEmpty { var p = NavigationPath(); p.append(t); path = p; client.pushThread = "" } }
         // a newly paired (or forgotten) hub starts again on the list
         .onChange(of: client.links.isEmpty) { _, _ in path = NavigationPath() }
     }
@@ -409,7 +410,8 @@ struct DataThreadView: View {
                 .modifier(DStick(atEnd: $atEnd))
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: list.last?.id) { _, _ in if atEnd { proxy.scrollTo("end", anchor: .bottom) } }
-                .onChange(of: list.count) { _, _ in if atEnd { proxy.scrollTo("end", anchor: .bottom) } }
+                .onChange(of: list.count) { _, _ in if client.pendingAsk.isEmpty, atEnd { proxy.scrollTo("end", anchor: .bottom) }; toAsk(proxy) }
+                .onAppear { toAsk(proxy) }
                 .onChange(of: list.last?.text.count) { _, _ in if atEnd { proxy.scrollTo("end", anchor: .bottom) } }
             }
             if let order { DataOrderCard(order: order) }
@@ -549,6 +551,13 @@ struct DataThreadView: View {
     private func micPress() {
         let at = ComposerHandle.view.map { VoiceEdit.chars(text, utf16: $0.selectedRange.location) } ?? VoiceEdit.count(text)
         client.voice.press(id, draft: text, caret: at)
+    }
+    // a tapped notification lands on its approval, once it is loaded
+    private func toAsk(_ proxy: ScrollViewProxy) {
+        let e = "ask:" + client.pendingAsk
+        guard !client.pendingAsk.isEmpty, list.contains(where: { $0.id == e }) else { return }
+        client.pendingAsk = ""
+        DispatchQueue.main.async { proxy.scrollTo(e, anchor: .center) }
     }
     private func send() {
         let t = text
@@ -750,10 +759,11 @@ struct DataSettingsView: View {
                 DHeading(text: "Text size")
                 DChoices(options: [(label: "system", value: "system")] + AppSettings.textSteps.map { (label: $0.tag, value: $0.tag) }, value: $settings.textSize).accessibilityIdentifier("settings.textsize")
                 onOff("Alerts on this phone", $settings.alerts, id: "settings.alerts")
-                    .onChange(of: settings.alerts) { _, on in if on { Task { await client.askNotificationPermission() } } }
+                    .onChange(of: settings.alerts) { _, on in Task { if on { await client.enablePush() }; await client.pushMute() } }
                 if settings.alerts { onOff("Alert sound", $settings.alertSound, id: "settings.sound") }
                 onOff("Haptics", $settings.haptics, id: "settings.haptics")
-                Text("Stored on this phone only; never sent to a hub. Alerts tell you when a turn ends or asks while the app is still running; they are not push notifications.").dmono(11).foregroundStyle(BackplaneDesign.dim)
+                Text("Off: only what you let through reaches this phone. Alerts come from your uberbot.").dmono(11).foregroundStyle(BackplaneDesign.dim)
+                if client.has("push") { DLine(); DataQuietSection(client: client) }
                 DLine()
                 DHeading(text: "Hub")
                 HStack(spacing: 8) {

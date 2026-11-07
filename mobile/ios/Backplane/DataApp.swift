@@ -4,6 +4,7 @@ import SwiftUI
 #if DATA_APP
 @main
 struct DataApp: App {
+    @UIApplicationDelegateAdaptor private var push: PushDelegate
     @State private var client = DataClient.shared
     private let monoFonts: Void = Mono.register()
     var body: some Scene {

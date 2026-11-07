@@ -91,6 +91,7 @@ impl Bots {
                     if on && (state == "completed" || state == "failed") {
                         if let Some(r) = &run { let e = c.run_ended(r, &state); st = st.cat(e) }
                         let b = c.triage_bot_end(&thread, &state); st = st.cat(b);
+                        let t = c.triage_thread_end(&thread, &state); st = st.cat(t);
                     }
                     let l = c.private_lost(&thread, &state); st = st.cat(l);
                 }

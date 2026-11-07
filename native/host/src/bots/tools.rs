@@ -176,7 +176,7 @@ impl Bots {
                 let text = match text { Some(t) => t, None => { let st = self.state_folded(); super::plane::read(&st, w, &rooms, now, idle) } };
                 (true, json!({"text":text}))
             }
-            "notify_person" => self.t_notify(w, &b, now, trim(gs(a, "reason")), trim(gs(a, "text"))).await,
+            "notify_person" => self.t_notify(w, &b, now, trim(gs(a, "reason")), trim(gs(a, "text")), trim(gs(a, "thread")), trim(gs(a, "ask"))).await,
             "remind_person" => {
                 let text = gs(a, "text").trim().to_string();
                 if text.is_empty() { return fail("say what to remind them of (text)") }
@@ -187,7 +187,7 @@ impl Bots {
                         let rid = self.hub_id("o", now); let rule = person_rule(&z, now);
                         let note = format!("I'll remind them {} ({}): {text}", rule.show(once), rel(now, once));
                         let evs = vec![json!({"$":"RoutineSet","id":rid,"bot":b.id,"name":text.chars().take(48).collect::<String>(),"cron":"","prompt":text,"on":true,"at":now}),
-                            json!({"$":"RoutinePlan","id":rid,"once":once,"tz":tz,"kind":"remind","at":now})];
+                            json!({"$":"RoutinePlan","id":rid,"once":once,"tz":tz,"kind":"remind","by":b.id,"at":now})];
                         self.t_commit(w, now, evs).await.map_or_else(|e| fail(&e), |_| said(&note))
                     }
                 }
@@ -251,12 +251,12 @@ impl Bots {
                 let (name, prompt, on) = (a.get("name").and_then(Value::as_str).unwrap_or("routine"), gs(a, "prompt"), gb(a, "on", true));
                 let kind = w.routines.get(rid_in).map_or("", |r| r.kind.as_str());
                 let evs = vec![json!({"$":"RoutineSet","id":rid,"bot":b.id,"name":name,"cron":cron,"prompt":prompt,"on":on,"at":now}),
-                    json!({"$":"RoutinePlan","id":rid,"once":once,"tz":tz,"kind":kind,"at":now})];
+                    json!({"$":"RoutinePlan","id":rid,"once":once,"tz":tz,"kind":kind,"by":b.id,"at":now})];
                 // the routine as it will stand (World.routine_set / routine_plan)
                 let old = w.routines.get(&rid).cloned();
                 let (was_on, deleted, last, created, slot) = old.map_or((false, true, 0, 0, 0), |o| (o.on, o.deleted, o.last, o.created, o.slot));
                 let was = was_on && !deleted;
-                let after = Routine { id: rid.clone(), bot: b.id.clone(), name: name.into(), cron, prompt: prompt.into(), on, last: if !was && on { now } else { last }, created: if deleted { now } else { created }, deleted: false,
+                let after = Routine { by: b.id.clone(), id: rid.clone(), bot: b.id.clone(), name: name.into(), cron, prompt: prompt.into(), on, last: if !was && on { now } else { last }, created: if deleted { now } else { created }, deleted: false,
                     once, tz, kind: kind.into(), done: false, slot: 0 };
                 let _ = slot;
                 let note = format!("routine saved: {}", saved(&z, &after, now));
@@ -331,8 +331,13 @@ impl Bots {
 
     /// Bots.notify: the person is alerted for needs_you, a done they asked for, and a routine's reminder or digest, nothing else. An allowed call writes the thread's alert
     /// record (kind note), which the told mark and the alert follow; with the setting off it writes the record with no kind.
-    async fn t_notify(&self, w: &World, b: &Bot, now: u64, reason: &str, text: &str) -> Res {
+    async fn t_notify(&self, w: &World, b: &Bot, now: u64, reason: &str, text: &str, link: &str, ask: &str) -> Res {
         if text.is_empty() { return fail("Say what the person should know.") }
+        // Push.gate: the only source a bot can hold, and it is the uberbot's; a repeat is refused against the told records before anything is recorded
+        let source = crate::push::Source::notify(w, &b.id);
+        if crate::push::repeat(reason, &self.told_all().await, now, text) { return fail("Not sent: the person was already told this in the last day. told_check shows when.") }
+        if !link.is_empty() && !self.hub.model().await.threads.contains_key(link) { return fail("Not sent: no such thread to link to.") }
+        if !ask.is_empty() && crate::data::ask_thread(&self.hub, ask).filter(|t| link.is_empty() || t == link).is_none() { return fail("Not sent: no such open approval on that thread.") }
         let th = &b.thread; let ((trigger, start), pid) = self.turn_of(th).await;
         let rec = self.hub.setting(&format!("alert.{th}")).await.unwrap_or_default();
         let f: Vec<&str> = rec.splitn(5, '\t').collect(); let field = |i: usize| f.get(i).copied().unwrap_or("");
@@ -351,8 +356,11 @@ impl Bots {
         };
         let stamp = format!("{now}.{}", self.hub.store.len());
         let value = if on { format!("note\tnote-{}\t{settled}\t{stamp}\t{}", self.hub_id("n", now), one_line(text, 500)) } else { format!("\t\t{settled}\t{stamp}\t") };
-        let ev = json!({"$":"SettingSet","key":format!("alert.{th}"),"value":value,"at":now});
-        self.t_commit(w, now, vec![ev]).await.map_or_else(|e| fail(&e), |_| said(if on { "sent to the person" } else { "recorded; the person turned these alerts off" }))
+        let mut evs = vec![json!({"$":"SettingSet","key":format!("alert.{th}"),"value":value,"at":now})];
+        let target = if !ask.is_empty() && link.is_empty() { crate::data::ask_thread(&self.hub, ask).unwrap_or_default() } else if link.is_empty() { th.to_string() } else { link.to_string() };
+        if let (true, Some(s)) = (on, &source) { evs.push(s.order(&self.hub_id("push", now), reason, &target, ask, text, now)) }
+        let answer = if !on { "recorded; the person turned these alerts off" } else if source.is_some() { "sent to the person" } else { "shown on the person's desktop; only the uberbot reaches their phone" };
+        self.t_commit(w, now, evs).await.map_or_else(|e| fail(&e), |_| said(answer))
     }
 
     /// project_create (Hub.newproj): the person is asked first, unless they allowed it for this session; once they accept, the folder is made when missing and resolved, and

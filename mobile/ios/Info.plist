@@ -3,6 +3,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- a silent push clears a notification dealt with on another device -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<!-- the hub is reached over the tailnet (WireGuard), as plain ws:// -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

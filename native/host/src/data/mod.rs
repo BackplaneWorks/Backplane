@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -45,6 +45,15 @@ fn pack(v: &Value, json_mode: bool) -> Message { if json_mode { Message::Text(v.
 
 // ---- reading ----
 /// Open asks per thread: one pass over the log's tail (an ask is open from its AskOpened until its AskClosed).
+/// Every ask still open, for the badge (push).
+pub fn open_ask_total(hub: &Hub) -> u64 { open_ask_counts(hub).values().sum() }
+/// The thread of an ask still open.
+pub fn ask_thread(hub: &Hub, ask: &str) -> Option<String> {
+    let n = hub.store.len(); let lines = hub.store.range(n.saturating_sub(ASK_SCAN), n).ok()?; let mut found = None;
+    for l in lines { if !l.contains("\"Ask") || !l.contains(ask) { continue } let Ok(e) = serde_json::from_str::<Value>(&l) else { continue };
+        if s(&e, "id") != ask { continue } match s(&e, "$") { "AskOpened" => found = Some(s(&e, "thread").to_string()), "AskClosed" => found = None, _ => {} } }
+    found
+}
 fn open_ask_counts(hub: &Hub) -> HashMap<String, u64> {
     let n = hub.store.len(); let mut m = HashMap::new();
     let Ok(lines) = hub.store.range(n.saturating_sub(ASK_SCAN), n) else { return m };
@@ -331,7 +340,6 @@ fn turn_word(state: &str) -> &'static str { match state { "running" => "working"
 /// The pushes for new log lines, for the lists and threads this connection subscribed to.
 async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     if subs.subs.is_empty() { return vec![] }
-    let mut notes: Vec<(Value, String)> = vec![];
     let mut out = vec![]; let (mut upsert, mut gone, mut projects): (Vec<String>, Vec<String>, Vec<(String, bool)>) = (vec![], vec![], vec![]);
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
@@ -354,10 +362,13 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
             }
             "MessageAttached" => { let id = s(&e, "msg"); let mut en = json!({"id":id,"kind":"user","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"attachments":e["attachments"]}); if let Some(x) = recalled(id) { en["text"] = x["text"].clone(); if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } entry = Some(en) }
             "ActivityLogged" => entry = act_entry(s(&e, "act"), s(&e, "tone"), s(&e, "kind"), s(&e, "summary"), ms(e["at"].as_u64().unwrap_or(0))),
-            "AskOpened" => { entry = Some(ask_entry(&e, None)); notes.push((e.clone(), th.clone())) }
+            "AskOpened" => entry = Some(ask_entry(&e, None)),
+            // the only alert a phone hears on its socket: what the uberbot's gate let through (push), and its clear
+            "PushSent" => { for sub in subs.lists() { out.push(d(sub, "notify", ext::notify_of(&e))) } }
+            "PushCleared" => { for sub in subs.lists() { out.push(d(sub, "clear", json!({"keys":e["keys"],"badge":e["badge"]}))) } }
             // the whole ask again, answered (an AskClosed names only the ask: its thread and question come from its AskOpened)
             "AskClosed" => { let id = s(&e, "id"); entry = Some(match &opened { Some(o) => ask_entry(o, Some(s(&e, "answer"))), None => json!({"id":format!("ask:{id}"),"kind":"ask","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"ask":{"id":id,"state":"answered","question":"","options":[],"answered":s(&e,"answer")}}) }); }
-            "TurnChanged" => { for sub in subs.threads(&th) { out.push(d(sub, "turn", json!({"thread":th,"state":turn_word(s(&e, "state"))}))) } notes.push((e.clone(), th.clone())) },
+            "TurnChanged" => { for sub in subs.threads(&th) { out.push(d(sub, "turn", json!({"thread":th,"state":turn_word(s(&e, "state"))}))) } },
             _ => {}
         }
         if !th.is_empty() && !matches!(s(&e, "$"), "ThreadDeleted") && !th.starts_with("remind") { if !upsert.contains(&th) { upsert.push(th.clone()) } }
@@ -365,8 +376,6 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     }
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
     let g = hub.model().await; let asks = open_ask_counts(hub);
-    for (e, th) in &notes { let title = g.threads.get(th).map_or("", |t| t.title.as_str()); let q = if s(e, "$") == "AskOpened" { ask_entry(e, None)["text"].as_str().unwrap_or("").to_string() } else { String::new() };
-        if let Some(n) = ext::notify_for(e, th, title, &q) { for sub in subs.lists() { out.push(d(sub, "notify", n.clone())) } } }
     for th in &upsert { if let Some(t) = thread_json(hub, &g, th, &asks) { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread", json!({"thread":t}))) } } }
     for th in &gone { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread.removed", json!({"id":th}))) } }
     for (id, alive) in &projects { for sub in subs.lists() { match alive.then(|| project_json(&g, id, &asks)).flatten() { Some(p) => out.push(d(sub, "project", json!({"project":p}))), None => out.push(d(sub, "project.removed", json!({"id":id}))) } } }
