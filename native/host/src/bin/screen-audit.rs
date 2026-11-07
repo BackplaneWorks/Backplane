@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
     for at in (0..store.len()).step_by(2000) { for line in store.range(at,at+2000)? { st.apply_line(&line); } }
     let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
     let open=HashSet::new();
-    let opts=sidebar::Opts{hub:"audit",now,selected:"",open:&open,older_open:false};
+    let opts=sidebar::Opts{hub:"audit",now,selected:"",open:&open,older_open:false,query:""};
     let plan=sidebar::plan(&st,&opts); let visible:HashSet<&str>=plan.ids().into_iter().collect();
     let mut reasons:BTreeMap<&str,usize>=BTreeMap::new(); let mut selected_matches=0; let mut selected_reason="thread.not-found"; let mut requested_775_utc_gate_count=0;
     for (id,t) in &st.threads {

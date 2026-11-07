@@ -161,6 +161,23 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
     // nothing missed: no handoff and no suffix
     let (e, _) = ask(&h, "thread.provider", json!({"thread":"t1","provider":"grok"})).await; assert!(e.iter().any(|v| v["$"] == "TurnQueued"), "grok missed the switch notes");
 }
+// Give.step: the conversation queued ahead of the target's next message, the rest of the text as the note; a thread never gives to itself; naming nothing is refused in words
+#[tokio::test] async fn give_hands_the_conversation_over_and_refuses_what_names_nothing() {
+    let h = hub("give").await;
+    say(&h, "t1", "user", "hello", 1).await;
+    let (e, r) = ask(&h, "bots.give", json!({"thread":"t1","text":"/give >two see this"})).await; assert_eq!(r, ok());
+    assert_eq!((e[0]["$"].as_str(), e[0]["thread"].as_str()), (Some("TurnQueued"), Some("t2"))); assert!(e[0]["msg"].as_str().unwrap().starts_with("handoff:give:t1:"));
+    let hand = e[0]["text"].as_str().unwrap(); assert!(hand.contains("hands you the conversation of the thread \"One\" (t1). The user's note with it: >two see this") && hand.contains("User: hello"), "{hand}");
+    assert_eq!((e[1]["thread"].as_str(), e[1]["summary"].as_str()), (Some("t2"), Some("\"One\" was handed over; it goes with the next message")));
+    assert_eq!((e[2]["thread"].as_str(), e[2]["summary"].as_str()), (Some("t1"), Some("Given to \"Two\"")));
+    { let mut fo = super::fold::Fold::default(); fo.sync(&h.store).unwrap(); assert!(!fo.waiting("t2"), "it waits for the next message; it starts no turn"); }
+    // before the %proj give below, which makes a second thread titled "One"
+    for text in ["/give", "/give nobody here", "/give >one"] { let (e, r) = ask(&h, "bots.give", json!({"thread":"t1","text":text})).await; assert_eq!((r["ok"].as_bool(), r["error"].as_str()), (Some(false), Some(super::give::NOTHING_NAMED)), "{text}"); assert!(e.is_empty(), "{text}"); }
+    let (e, r) = ask(&h, "bots.give", json!({"thread":"t1","text":"/give %proj"})).await; assert_eq!(r, ok());
+    let made = e.iter().find(|v| v["$"] == "ThreadCreated").unwrap(); assert_eq!((made["project"].as_str(), made["title"].as_str()), (Some("p1"), Some("One")));
+    assert_eq!(e.iter().find(|v| v["$"] == "TurnQueued").unwrap()["thread"], made["id"]); assert_eq!(e.last().unwrap()["summary"], "Given to a new thread in proj");
+    let (_, r) = ask(&h, "bots.give", json!({"thread":"ghost","text":"/give >two"})).await; assert_eq!(r["error"], "no such thread");
+}
 // Hub.fork / Hub.back: a fork records its source and carries the conversation as handed-over context
 #[tokio::test] async fn a_fork_carries_the_conversation_and_comes_back_into_its_source() {
     let h = hub("fork").await;

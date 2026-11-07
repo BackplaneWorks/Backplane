@@ -164,6 +164,11 @@ impl ViewActor {
         self.record_reply(kind, reply);
         if let Some(last) = self.reads.last_mut() { last.0 = Some((view.to_string(), target.clone())); }
     }
+    /// An answer that comes long after the question (a side question's): whatever this connection shows by then, its next request carries it; the session knows which thread it is for.
+    pub fn record_answer(&mut self, kind: &str, reply: &Value) {
+        self.record_reply(kind, reply);
+        if let Some(last) = self.reads.last_mut() { last.1["any"] = json!(true); }
+    }
     pub fn record_read(&mut self, kind: &str, id: u64, ok: bool, result: Value) {
         self.reads.push((None, json!({"kind": kind, "id": id, "ok": ok, "result": result})));
         let n = self.reads.len();
@@ -179,6 +184,7 @@ impl ViewActor {
             match bound {
                 Some((v, t)) if v == view && same(&t) => out.push(r),
                 Some(_) => {}
+                None if r["any"] == true => out.push(r),
                 None => keep.push((Some((view.to_string(), target.clone())), r)),
             }
         }
@@ -351,6 +357,7 @@ pub fn record_reply_bound_m(client: u64, kind: &str, method: &str, reply: &Value
     a.record_reply_bound(kind, reply, view, target);
     if let Some(last) = a.reads.last_mut() { last.1["method"] = json!(method); }
 }
+pub fn record_answer(client: u64, kind: &str, reply: &Value) { ACTORS.lock().unwrap().entry(client).or_default().record_answer(kind, reply); }
 pub fn record_reply(client: u64, kind: &str, reply: &Value) { ACTORS.lock().unwrap().entry(client).or_default().record_reply(kind, reply); }
 /// The reads recorded since the last V request, for `reads` in the next one.
 pub fn take_reads(client: u64, view_id: &str, target: &Value) -> Vec<Value> {
@@ -630,6 +637,12 @@ mod tests {
         assert_eq!(out["session"]["drafts"], json!({})); assert_eq!(out["session"]["info"], json!({})); assert_eq!(out["session"]["outbox"], json!({}));
         assert!(out["session"].get("error").is_none() && out["session"].get("note").is_none());
         forget(900_777);
+    }
+    #[test] fn a_late_answer_reaches_the_next_request_wherever_the_view_went() {
+        let mut a = ViewActor::default();
+        a.record_answer("thread.btw", &json!({"id": 4, "ok": true, "result": {"thread": "t1", "btw": "yes"}}));
+        let got = a.take_reads("v2", &json!({"kind": "thread", "id": "t2"})); assert_eq!(got.len(), 1, "not held back a request, and not dropped by a move"); assert_eq!(got[0]["kind"], "thread.btw");
+        assert!(a.take_reads("v2", &json!({"kind": "thread", "id": "t2"})).is_empty(), "once");
     }
     #[test] fn forget_and_the_bound_keep_the_map_flat() {
         let mut m: HashMap<u64, ViewActor> = HashMap::new();

@@ -71,6 +71,9 @@ pub fn title_clean(answer: &str) -> String {
     if l.chars().count() > 60 { format!("{}...", l.chars().take(57).collect::<String>()) } else { l }
 }
 
+/// Btw.system
+const BTW_SYSTEM: &str = "You answer a quick side question about a coding agent's thread. The thread so far and the question follow. Answer from what the thread shows, in a few sentences, in plain text. Do not do the work, do not use tools and do not repeat the question. If the thread does not tell, say so.";
+
 /// How a one-shot is run: the program and arguments to put ahead, and the environment (a named account's profile).
 #[derive(Default, Clone)]
 pub struct Launch { pub program: Option<std::path::PathBuf>, pub args: Vec<String>, pub env: Vec<(String, String)> }
@@ -94,6 +97,24 @@ impl Agents {
         let out = match tokio::time::timeout(TIMEOUT, read).await { Ok(o) => o, Err(_) => { proc::terminate(pid, Duration::from_secs(1)); return None } };
         let _ = tokio::time::timeout(Duration::from_secs(5), exit).await; proc::terminate(pid, Duration::from_millis(100));
         let a = answer(provider, &out); if a.is_empty() { None } else { Some(a) }
+    }
+    /// A side question (/btw): the writing model reads the thread so far and the question; the thread, its turn and the log never see either. The answer, or "" (the client says where the model is chosen).
+    /// Under the thread's own account when it has one for that provider, else the default login (TextScope).
+    pub async fn side_answer(&self, thread: &str, q: &str) -> String {
+        let (title, tp, tm) = { let w = self.world().await; (w.threads.get(thread).map(|t| t.title.clone()).unwrap_or_default(), w.setting("text.provider").to_string(), w.setting("text.model").to_string()) };
+        let cx = crate::commands::recent(&self.hub, thread).await;
+        let why = format!("The user asks a side question about the thread \"{title}\" ({thread}) while its agent works. Its conversation so far, oldest first:");
+        let input = format!("{}\n\n{q}", crate::commands::hand_text(&why, &cx.entries, thread));
+        let (provider, model) = pick(&tp, &tm);
+        let raw = self.hub.setting(&crate::settings::accounts::binding_key(thread, provider)).await.unwrap_or_default();
+        let b: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+        let id = b["id"].as_str().unwrap_or("").to_string();
+        if !id.is_empty() { if let Some(mgr) = self.accounts.get().cloned() {
+            if let Ok(pl) = mgr.launch_plan(&id, &b["epoch"].as_u64().unwrap_or(0).to_string(), provider).await {
+                if let Some(a) = self.shot(provider, &model, BTW_SYSTEM, &input, &Launch { program: Some(pl.program), args: pl.args, env: pl.env }).await { return a }
+            }
+        } }
+        self.shot(provider, &model, BTW_SYSTEM, &input, &Launch::default()).await.unwrap_or_default()
     }
     /// A thread's title from `text`: Haiku under the thread's own account (else the default login), then Haiku on the default login, then Codex's light model.
     /// The cleaned title, or None (each failed attempt is logged).

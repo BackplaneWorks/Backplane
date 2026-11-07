@@ -28,7 +28,7 @@ fn main() {
     }
     if let Some((hub, now, sel)) = proj {
         let open = std::collections::HashSet::new();
-        println!("{}", serde_json::to_string(&sidebar::projects(&st, &sidebar::Opts { hub: &hub, now, selected: &sel, open: &open, older_open: false })).unwrap());
+        println!("{}", serde_json::to_string(&sidebar::projects(&st, &sidebar::Opts { hub: &hub, now, selected: &sel, open: &open, older_open: false, query: "" })).unwrap());
         return
     }
     let ix = signal::index(&st);

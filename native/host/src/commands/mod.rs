@@ -3,6 +3,7 @@
 //! sends; the handler commits them with `Hub::commit_many` and acknowledges after that returns. Field order is the codec's
 //!, so a log either hub wrote reads in the other.
 pub mod fold;
+pub mod give;
 pub mod key;
 pub mod plan;
 pub mod actions;
@@ -70,11 +71,15 @@ impl Commands {
 }
 
 impl RpcHandler for Commands {
-    fn methods(&self) -> &'static [&'static str] { &["thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
+    fn methods(&self) -> &'static [&'static str] { &["bots.give", "thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
         "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "accounts.select", "accounts.move_all", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
         "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "order.buy", "fs.list", "fs.mkdir", "fs.find"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
+            if method == "bots.give" { // made of the requests below, so it holds no lock of its own past reading the modes
+                let modes = { let mut f = self.fold.lock().await; let _ = f.sync(&hub.store); f.threads.get(p["thread"].as_str().unwrap_or("")).map_or_else(Default::default, |t| (t.runtime.clone(), t.interaction.clone())) };
+                return give::give(hub, who, id, p, modes).await
+            }
             // one request at a time: the plan reads the fold the commit then moves on
             // the picker's folder requests (FsJob): the answer carries `result`, ok when it holds no `error`
             let answer = |r: Value| vec![json!({"t":"reply","id":id,"ok":r.get("error").is_none(),"result":r})];
@@ -158,6 +163,8 @@ impl RpcHandler for Commands {
 /// The conversation of a thread, newest first, for a handoff to another account (settings/driver.rs).
 pub async fn entries(hub: &Arc<Hub>, th: &str) -> Option<Ctx> { Some(entries_of(hub, th).await) }
 pub use plan::hand_text;
+/// The newest of a thread's conversation, for a one-off answer about it: as much as a hand-over can carry and no more (a long thread is not read whole for a side question).
+pub async fn recent(hub: &Arc<Hub>, th: &str) -> Ctx { entries_upto(hub, th, 256).await }
 /// A thread's own entries, newest first: the rows filed under it that it wrote, not the messages it sent elsewhere.
 pub(crate) async fn entries_of(hub: &Arc<Hub>, th: &str) -> Ctx { entries_upto(hub, th, usize::MAX).await }
 /// The newest `max` or so entries (whole pages of 32), newest first.

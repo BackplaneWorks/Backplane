@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -251,6 +251,8 @@ fn store_attachments(hub: &Hub, thread: &str, list: &Value) -> Result<(Vec<Value
 async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, client_id: &str, attachments: &Value) -> Result<Value, Value> {
     let has = attachments.as_array().map_or(false, |a| !a.is_empty());
     if text.trim().is_empty() && !has { return Err(err("empty message")) }
+    // a command of the composer is never a message: an app that does not know `composer.run` would post a side question to the thread, or a secret to the log
+    if crate::session::composer::word_of(text).is_some() { return Err(err("This app is too old for /btw, /give, /secret and /intent. Update it. Nothing was sent.")) }
     if !client_id.is_empty() { if !safe_id(client_id) { return Err(err("clientId: letters, digits and - _ . : only, 64 at most")) } if let Some(e) = recalled(client_id) { return Ok(e) } }
     if !hub.model().await.threads.get(thread).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
     let (meta, paths) = store_attachments(hub, thread, attachments)?;
@@ -332,7 +334,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         "attachment.get" => attachment_get(hub, p),
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
         // the same answer every client gets (its `result`, not the reply around it); the phones draw it
-        "update.status" | "update.check" | "app.update" => Ok(rpc(hub, c, m, json!({})).await?["result"].clone()),
+        "update.status" | "update.check" | "app.update" | "update.now" => Ok(rpc(hub, c, m, json!({})).await?["result"].clone()),
         "update.channel" => { let ch = s(p, "channel"); if ch != "stable" && ch != "beta" { return Err(err("no such channel")) } rpc(hub, c, "setting.set", json!({"key":"update.channel","value":ch})).await?; Ok(rpc(hub, c, "update.status", json!({})).await?["result"].clone()) }
         "turn.interrupt" => { rpc(hub, c, "turn.interrupt", json!({"thread":s(p, "thread")})).await?; Ok(json!({})) }
         _ => match ext::call(hub, c, m, p).await { Some(r) => r, None => Err(err("unknown method")) },
@@ -384,6 +386,12 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
             "PushCleared" => { for sub in subs.lists() { out.push(d(sub, "clear", json!({"keys":e["keys"],"badge":e["badge"]}))) } }
             // the whole ask again, answered (an AskClosed names only the ask: its thread and question come from its AskOpened)
             "AskClosed" => { let id = s(&e, "id"); entry = Some(match &opened { Some(o) => ask_entry(o, Some(s(&e, "answer"))), None => json!({"id":format!("ask:{id}"),"kind":"ask","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"ask":{"id":id,"state":"answered","question":"","options":[],"answered":s(&e,"answer")}}) }); }
+            // an agent asked for a secret, or the ask ended: the phone reads the list again (`secret.asks`). Only a name and a thread: no value ever passes here
+            "SettingSet" if s(&e, "key").starts_with("secret.ask.") => {
+                let t: Value = serde_json::from_str(s(&e, "value")).unwrap_or(Value::Null); let at = s(&t, "thread").to_string();
+                let open: Vec<(u64, String)> = subs.subs.iter().filter_map(|(i, t)| match t { Topic::Thread(x) if at.is_empty() || *x == at => Some((*i, x.clone())), _ => None }).collect(); // (an ended ask names no thread: each open thread looks again)
+                for (sub, x) in open { out.push(d(sub, "secret", json!({"thread":x}))) }
+            }
             "TurnChanged" => { for sub in subs.threads(&th) { out.push(d(sub, "turn", json!({"thread":th,"state":turn_word(s(&e, "state"))}))) } },
             _ => {}
         }
@@ -439,7 +447,7 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
     if !hub.admit_blocking(conn.client, token).await { return Ok(()) }
-    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home))}), json_mode)).await?;
+    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home))}), json_mode)).await?;
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;

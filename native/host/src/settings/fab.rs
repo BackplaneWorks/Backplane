@@ -212,7 +212,8 @@ pub async fn reply(hub: &Arc<Hub>, id: &Value, method: &str, p: &Value) -> Value
     if method == "fab.intent" {
         // the person's own words for .backplane/intent.md, then the card; a copy writes nothing into the project
         if crate::copy::on() { return json!({"t":"reply","id":id,"ok":false,"error":crate::copy::HOME_ONLY}) }
-        if let Some(cwd) = crate::files::root_of(hub, thread).await {
+        let Some(cwd) = crate::files::root_of(hub, thread).await else { return json!({"t":"reply","id":id,"ok":false,"error":"This thread has no project folder to keep an intent in."}) };
+        {
             let text = p.get("text").and_then(Value::as_str).unwrap_or("").trim().to_string();
             let c2 = cwd.clone();
             let w = tokio::task::spawn_blocking(move || -> std::io::Result<()> { let d = c2.join(".backplane"); std::fs::create_dir_all(&d)?; let f = d.join("intent.md"); std::fs::write(&f, format!("{text}\n"))?; std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)) }).await;

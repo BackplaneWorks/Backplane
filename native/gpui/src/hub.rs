@@ -7,10 +7,10 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64), /** read this history page of the thread, then stand on the newest again */ History(String) }
-#[derive(Debug)] pub enum Event { /** the hub refused this device's credential: it was revoked */ Unpaired, /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line */ Sheets(String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
+#[derive(Debug)] pub enum Event { /** the hub put this text in a thread's composer */ Compose(String,String), /** a line that is no error (Intent saved) */ Note(String), /** the hub refused this device's credential: it was revoked */ Unpaired, /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line */ Sheets(String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
 impl Event {
     /// What the performance overlay calls it.
-    pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::BrowserTabs(..)=>"browser tabs",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(_)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired"}}
+    pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::BrowserTabs(..)=>"browser tabs",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(_)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired",Event::Compose(..)=>"compose",Event::Note(_)=>"note"}}
 }
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
@@ -193,7 +193,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 "reply"=>{
                     let id=x["id"].as_u64().unwrap_or(0);
                     if let Some(tag)=v.asks.remove(&id) {let _=events.send(Event::Answer(tag,x)).await;continue;}
-                    if let Some(tag)=v.rpcs.remove(&id) {if tag=="acct" || (tag=="acct-moveall" && x["ok"]==true) {let _=events.send(Event::Data(tag.clone(),x["result"].clone())).await;}if tag=="steps" {let _=events.send(Event::Steps(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag.starts_with("probe") {let slot:usize=tag[5..].parse().unwrap_or(0);let m=x["result"]["matches"].as_array().map(|a|a.iter().filter_map(|p|Some((p[0].as_u64()? as usize,p[1].as_u64()? as usize))).collect()).unwrap_or_default();let _=events.send(Event::Probe(slot,m)).await;continue;}if tag=="refs" {let _=events.send(Event::Refs(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag=="pick" {let _=events.send(Event::Pick(if x["ok"]==true {x["result"]["info"].as_str().unwrap_or("").to_string()} else {String::new()})).await;continue;}let ok=x["ok"]==true;let why=if ok&&(tag.starts_with("files")||tag.starts_with("hook")){x["result"].to_string()}else{crate::screens::settings::reply_error(&x)};let _=events.send(Event::Rpc(tag,ok,why)).await;continue;}
+                    if let Some(tag)=v.rpcs.remove(&id) {if tag=="acct" || (tag=="acct-moveall" && x["ok"]==true) {let _=events.send(Event::Data(tag.clone(),x["result"].clone())).await;}if tag=="steps" {let _=events.send(Event::Steps(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag.starts_with("probe") {let slot:usize=tag[5..].parse().unwrap_or(0);let m=x["result"]["matches"].as_array().map(|a|a.iter().filter_map(|p|Some((p[0].as_u64()? as usize,p[1].as_u64()? as usize))).collect()).unwrap_or_default();let _=events.send(Event::Probe(slot,m)).await;continue;}if tag=="refs" {let _=events.send(Event::Refs(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag=="pick" {let _=events.send(Event::Pick(if x["ok"]==true {x["result"]["info"].as_str().unwrap_or("").to_string()} else {String::new()})).await;continue;}let ok=x["ok"]==true;let why=if ok&&tag.starts_with("hook"){crate::screens::bots::hook_answer(&x).to_string()}else if ok&&tag.starts_with("files"){x["result"].to_string()}else{crate::screens::settings::reply_error(&x)};let _=events.send(Event::Rpc(tag,ok,why)).await;continue;}
                     if let Some(is_post)=v.outgoing.remove(&id) {let name=v.rpc_names.remove(&id).unwrap_or_default();if !is_post {v.dirty=true;} /* a job's answer (mech.list, boards.list, fab.look...) is folded by the hub into this view: ask for it */
                         // every product RPC's answer is logged, so a refused send is never silent (the reply's error may be a plain string, a code or a message)
                         let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};
@@ -241,6 +241,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         // The reply is stale for drawing (the hub moved on while it was in flight) but its commands are what the person's press asked for: they still go out, once.
                         if method=="view.action" && r["version"]==1 && r["hub"]==v.hub && r["generation"]==v.greeting["generation"] && r["epoch"]==v.greeting["epoch"] {
                             for command in r["cmds"].as_array().into_iter().flatten() {
+                                if let Some(e)=client_cmd(command) {let _=events.send(e).await;continue;}
                                 if command["type"]!="send" || !(command["hub"].is_null()||command["hub"]==v.hub) {continue;}
                                 let Some(request)=command["text"].as_str().and_then(|t|serde_json::from_str::<Value>(t).ok()) else {continue};
                                 let (Some(rpc_id),m)=(request["id"].as_u64(),request["m"].as_str().unwrap_or("")) else {continue};
@@ -261,6 +262,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     v.view_id=r["viewId"].as_str().context("missing view id")?.to_string();
                     ensure!(r["session"].is_object(),"missing session");v.session=r["session"].clone();v.restored=Restore::None;v.drawn=true;crate::screens::place::note_view(&v.target,&v.session);
                     for command in r["cmds"].as_array().into_iter().flatten(){
+                        if let Some(e)=client_cmd(command) {let _=events.send(e).await;continue;}
                         if command["type"]=="send" {
                             ensure!(command["hub"].is_null()||command["hub"]==v.hub,"cross-hub command refused");
                             let request:Value=serde_json::from_str(command["text"].as_str().context("missing command text")?)?;
@@ -328,7 +330,9 @@ pub fn rpc_error(x:&Value)->String {
 }
 /// The product RPCs that post a message: their acceptance is the client's "sent" (chat.send comes through `view.action` by name too).
 /// The product RPCs whose ok answer is a message the hub took (the window then empties its box). A bot's chat sends `bots.say`, not `turn.start`.
-pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start","bots.say"].contains(&m) }
+pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start","bots.say","bots.give"].contains(&m) }
+/// A view command that is for this client, not the hub: `compose` sets a thread's composer, `say` is one line for the person (a refusal, unless its `tone` is "note").
+pub fn client_cmd(c:&Value)->Option<Event>{let text=c["text"].as_str().unwrap_or("").to_string();match c["type"].as_str()?{"compose"=>Some(Event::Compose(c["thread"].as_str()?.to_string(),text)),"say" if c["tone"]=="note"=>Some(Event::Note(text)),"say"=>Some(Event::Refused(text)),_=>None}}
 
 #[cfg(test)]
 mod rpc_tests {
@@ -352,6 +356,13 @@ mod rpc_tests {
         assert_eq!(f(&hard, "view.open", false, Restore::First), Gone);
         assert_eq!(f(&hard, "view.open", false, Restore::None), Show);
         assert_eq!(f(&json!({"ok":true}), "view.open", false, Restore::First), Show);
+    }
+    #[test] fn the_clients_own_commands_become_events() {
+        use super::{client_cmd,Event};use serde_json::json;
+        assert!(matches!(client_cmd(&json!({"type":"compose","thread":"t1","text":"hi"})),Some(Event::Compose(t,x)) if t=="t1"&&x=="hi"));
+        assert!(matches!(client_cmd(&json!({"type":"say","text":"no"})),Some(Event::Refused(x)) if x=="no"));
+        assert!(matches!(client_cmd(&json!({"type":"say","tone":"note","text":"saved"})),Some(Event::Note(x)) if x=="saved"));
+        assert!(client_cmd(&json!({"type":"send","text":"{}"})).is_none()&&client_cmd(&json!({"type":"keep"})).is_none());
     }
     #[test] fn turn_start_is_a_post() { for m in ["turn.start","message.send","thread.send","send","bots.say"] { assert!(is_post(m), "{m}"); } assert!(!is_post("fab.look") && !is_post("mech.list")); }
 }

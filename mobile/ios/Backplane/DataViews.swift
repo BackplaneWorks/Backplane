@@ -367,6 +367,53 @@ private struct DStick: ViewModifier {
     }
 }
 
+/// A side question and its answer, until closed.
+private struct DataBtwCard: View {
+    let btw: DataClient.Btw
+    let close: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("btw · \(btw.q)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Spacer()
+                Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("Close").accessibilityIdentifier("thread.btw.close")
+            }
+            ScrollView { Text(btw.a).font(.footnote).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 220)
+        }
+        .padding(.horizontal).padding(.vertical, 8).background(BackplaneDesign.panel).accessibilityIdentifier("thread.btw")
+    }
+}
+
+/// The masked box of a chat: `/secret`, or an agent's request. The value is held here and leaves once, as `secret.set`; it is never a draft.
+private struct DataSecretBox: View {
+    @Bindable var client: DataClient
+    let thread: String
+    let name0: String
+    let asked: DataClient.SecretAsk?
+    let shut: () -> Void
+    @State private var name = ""
+    @State private var value = ""
+    @State private var err = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(name0.isEmpty ? "A secret for this chat. Agents use it by name and never see the value." : "Secret: \(name0). Agents use it by name and never see the value.").font(.footnote)
+            if let p = asked?.purpose, !p.isEmpty { Text(p).font(.caption).foregroundStyle(.secondary) }
+            if name0.isEmpty { TextField("Name", text: $name).textFieldStyle(.roundedBorder).autocorrectionDisabled().textInputAutocapitalization(.never).accessibilityIdentifier("thread.secret.name") }
+            SecureField("Paste the value", text: $value).textFieldStyle(.roundedBorder).accessibilityIdentifier("thread.secret.value")
+            if !err.isEmpty { Text(err).font(.caption).foregroundStyle(.red) }
+            HStack {
+                Button("Save") {
+                    Task { do { try await client.saveSecret(thread, name: (name0.isEmpty ? name : name0).trimmingCharacters(in: .whitespaces), value: value, purpose: asked?.purpose ?? ""); value = ""; shut() }
+                        catch { err = (error as? DError)?.message ?? "The hub refused the secret" } }
+                }.disabled((name0.isEmpty && name.isEmpty) || value.isEmpty).accessibilityIdentifier("thread.secret.save")
+                Button("Cancel") { value = ""; shut() }.accessibilityIdentifier("thread.secret.cancel")
+                if let a = asked { Button("Not needed") { Task { await client.dismissSecret(thread, name: a.name); value = ""; shut() } } }
+            }
+        }
+        .padding(12).background(BackplaneDesign.panel).accessibilityIdentifier("thread.secret")
+    }
+}
+
 struct DataThreadView: View {
     @Bindable var client: DataClient
     let id: String
@@ -375,6 +422,8 @@ struct DataThreadView: View {
     @State private var picked: [PhotosPickerItem] = []
     @State private var drawing = false
     @State private var notice = ""
+    // the masked box: a name ("" for a new one) while open; the value stays in the box until Save
+    @State private var box: String?
     @State private var renaming: DThread?
     @State private var deleting: DThread?
     @State private var modelSheet = false
@@ -430,6 +479,11 @@ struct DataThreadView: View {
             if let order { DataOrderCard(order: order) }
             DataMentionBar(client: client, text: text) { text = $0; client.setDraft(id, $0) }
             DVoiceStrip(client: client, thread: id, draft: text)
+            if let b = client.btw[id] { DataBtwCard(btw: b) { client.closeBtw(id) } }
+            let asked = client.secretAsks[id]?.first
+            if box != nil || asked != nil {
+                DataSecretBox(client: client, thread: id, name0: box ?? asked?.name ?? "", asked: (box == nil || asked?.name == box) ? asked : nil) { box = nil }.id((box ?? "") + (asked?.name ?? ""))
+            }
             composer
         }
         .onChange(of: client.voice.caret.rev) { _, rev in
@@ -481,6 +535,7 @@ struct DataThreadView: View {
             #endif
         }
         .onDisappear { client.closeThread(id) }
+        .task(id: id) { await client.refreshSecretAsks(id) }
     }
 
     // the desktop's strip under the bar: STATE, then the tools a thread always has
@@ -553,7 +608,7 @@ struct DataThreadView: View {
                     if working && blank {
                         Button("Stop") { Task { await client.interrupt(id) } }.buttonStyle(DButton(danger: true)).accessibilityLabel("Stop").accessibilityIdentifier("thread.send")
                     } else {
-                        Button("Send") { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
+                        Button(client.commandOf(text)?.label ?? "Send") { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
                     }
                 }
             }
@@ -572,9 +627,25 @@ struct DataThreadView: View {
         client.pendingAsk = ""
         DispatchQueue.main.async { proxy.scrollTo(e, anchor: .center) }
     }
+    // a command of the composer: the hub runs it; a refusal leaves the draft and says why
+    private func run(_ t: String) {
+        notice = ""
+        Task {
+            do {
+                let r = try await client.runCommand(id, t.trimmingCharacters(in: .whitespacesAndNewlines))
+                switch r.kind {
+                case "edit": text = r.text ?? ""; client.setDraft(id, text)
+                case "secret": box = r.name ?? ""; text = ""; client.setDraft(id, "")
+                case "intent": notice = "Intent saved"; text = ""; client.setDraft(id, "")
+                default: text = ""; client.setDraft(id, "")
+                }
+            } catch { notice = (error as? DError)?.message ?? "That could not be done." }
+        }
+    }
     private func send() {
         let t = text
         guard !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pending.isEmpty else { return }
+        if client.commandOf(t) != nil { run(t); return }
         let images = pending
         text = ""; pending = []; atEnd = true
         client.send(id, t, images: images)

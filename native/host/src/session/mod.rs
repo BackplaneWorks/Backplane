@@ -23,7 +23,7 @@ mod actor;
 #[allow(dead_code)] pub mod slash;
 pub mod thread_actions;
 pub mod pages;
-pub use actor::{forget, is_job, record_read, record_read_bound, record_reply, record_reply_bound, record_reply_bound_m, replied, replied_late, take_reads};
+pub use actor::{forget, is_job, record_answer, record_read, record_read_bound, record_reply, record_reply_bound, record_reply_bound_m, replied, replied_late, take_reads};
 pub fn start(_hub: &Arc<Hub>) {}
 
 pub const REPLY_BYTES: usize = 262144;

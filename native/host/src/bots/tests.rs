@@ -1395,3 +1395,29 @@ async fn call_hook(hub: &Arc<Hub>, hid: &str, hs: Vec<(String, String)>, body: &
     for _ in 0..100 { if rec.got.lock().unwrap().iter().any(|x| x.2.starts_with("[task: login] Run the task skill login with") && x.2.contains("ada")) { return } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
     panic!("the bot never heard the task: {:?}", rec.got.lock().unwrap());
 }
+
+// rules.set/drop, board.set/drop: the person's own edits of the standing rules and the task board, as settings the agents' side reads
+#[tokio::test] async fn the_person_sets_and_drops_rules_and_board_items() {
+    let (hub, _bots, _r) = start("person-edits", "").await;
+    let set = |hub: &Arc<Hub>, k: &str| log(hub).iter().rev().find(|e| e["$"] == "SettingSet" && e["key"] == k).map(|e| e["value"].as_str().unwrap().to_string());
+    let r = rpc(&hub, "rules.set", json!({"rule":{"text":"Never push to main","tool":"Bash, git_*","enforce":true,"word":"push"}})).await; assert_eq!(r["ok"], true, "{r}");
+    let id = r["result"]["id"].as_str().unwrap().to_string();
+    let stored: Value = serde_json::from_str(&set(&hub, &format!("rule.{id}")).unwrap()).unwrap();
+    assert_eq!((stored["text"].as_str(), stored["tool"].as_str(), stored["enforce"].as_bool(), stored["on"].as_bool(), stored["by"].as_str()), (Some("Never push to main"), Some("Bash, git_*"), Some(true), Some(true), Some("person")));
+    let st: std::collections::HashMap<String, String> = [(format!("rule.{id}"), stored.to_string())].into();
+    assert!(crate::agents::rules::rules_block(&st, "", "").contains("Never push to main"), "the agents' block reads it");
+    let r = rpc(&hub, "rules.set", json!({"rule":{"id":id,"on":false}})).await; assert_eq!(r["ok"], true, "{r}");
+    let stored: Value = serde_json::from_str(&set(&hub, &format!("rule.{id}")).unwrap()).unwrap(); assert_eq!((stored["on"].as_bool(), stored["text"].as_str()), (Some(false), Some("Never push to main")), "only what was given changes");
+    for (rule, why) in [(json!({"text":""}), "a rule needs its words"), (json!({"text":"x","enforce":true}), "an enforced rule names the tools it refuses"), (json!({"text":"x","bot":"nobody"}), "no bot \"nobody\" here"), (json!({"id":"zz","text":"x"}), "no rule zz")] {
+        assert_eq!(rpc(&hub, "rules.set", json!({"rule":rule})).await["error"], why);
+    }
+    assert_eq!(rpc(&hub, "rules.drop", json!({"id":id})).await["ok"], true); assert_eq!(set(&hub, &format!("rule.{id}")).as_deref(), Some(""));
+    assert_eq!(rpc(&hub, "rules.drop", json!({"id":id})).await["error"], format!("no rule {id}"));
+    let r = rpc(&hub, "board.set", json!({"item":{"title":"Order the boards","due":"2026-12-01"}})).await; assert_eq!(r["ok"], true, "{r}");
+    let bid = r["result"]["id"].as_str().unwrap().to_string(); assert_eq!(r["result"]["item"]["status"], "todo");
+    assert_eq!(rpc(&hub, "board.set", json!({"item":{"id":bid,"status":"doing"}})).await["result"]["item"]["title"], "Order the boards");
+    let item: Value = serde_json::from_str(&set(&hub, &format!("board.{bid}")).unwrap()).unwrap(); assert_eq!((item["status"].as_str(), item["by"].as_str()), (Some("doing"), Some("person")));
+    assert_eq!(rpc(&hub, "board.set", json!({"item":{"title":"x","due":"soon"}})).await["error"], "a due date is YYYY-MM-DD");
+    assert_eq!(rpc(&hub, "board.drop", json!({"id":bid})).await["ok"], true); assert_eq!(set(&hub, &format!("board.{bid}")).as_deref(), Some(""));
+    assert_eq!(rpc(&hub, "board.drop", json!({"id":bid})).await["error"], format!("no item {bid}"));
+}

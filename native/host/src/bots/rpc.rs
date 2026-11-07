@@ -316,7 +316,7 @@ fn human(who: &Caller, p: &Value) -> Option<u64> { if who.client > 0 && matches!
 
 struct Rpc(Arc<Bots>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run", "bots.hook", "bots.hook_token", "bots.hook_revoke", "bots.pin", "bots.uber_home", "bots.uber_join"] }
+    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run", "bots.hook", "bots.hook_token", "bots.hook_revoke", "bots.pin", "bots.uber_home", "bots.uber_join", "rules.set", "rules.drop", "board.set", "board.drop"] }
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let b = &self.0;
@@ -342,6 +342,10 @@ impl RpcHandler for Rpc {
                 "bots.pin" => b.pin(id, p).await,
                 "bots.uber_home" => b.uber_home(id).await,
                 "bots.uber_join" => b.uber_join(id, gs(p, "uid")).await,
+                "rules.set" | "rules.drop" | "board.set" | "board.drop" => {
+                    let w = b.world().await; let (ok, r) = b.person_call(&w, method, p, now_s()).await; drop(w);
+                    vec![if ok { json!({"t":"reply","id":id,"ok":true,"result":r}) } else { err(id, gs(&r, "error")) }]
+                }
                 _ => vec![err(id, "unknown bots request")],
             }
         })

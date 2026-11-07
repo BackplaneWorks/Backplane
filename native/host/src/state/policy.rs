@@ -37,6 +37,8 @@ pub fn lean_keeps(k: &str) -> bool {
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && (k.starts_with("tok.t.") || k.contains(".t."))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control
     if ["settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model"].contains(&k) || ["push.webhook.", "notify."].iter().any(|p| k.starts_with(p)) { return true }
+    // Settings, Rules and task board: the person's standing rules and the task board's items (a few, each at most a few KB; a removed one is gone, `blank_gone`)
+    if k.starts_with("rule.") || k.starts_with("board.") { return true }
     // setup (present/onboard.rs): the step reached, the skipped and seen lists, done, and the last checks of this machine (a few KB, replaced each time)
     if k.starts_with("onboard.") || k == "freecad.path" { return true }
     k.starts_with("launch.input.") || k.starts_with("fallback.input.") || (!k.starts_with("ride.") && KEEP.iter().any(|p| k.starts_with(p)))
@@ -219,6 +221,7 @@ mod tests {
     #[test] fn lean_keeps_what_policies_read_and_drops_what_grows() {
         for k in ["todos.t1", "todos.visible.t1", "text.provider", "text.model", "kicad.path", "kicad.ipc", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model", "autosettle.quiet.t1", "liveness.t1", "wake.w1", "lock.merge", "launch.t2", "alert.t1", "told.k1-1", "settle.done", "launch.input.t1", "fallback.input.t1", "order.enabled", "order.estimates", "account.thread.t1.claude", "files.max.mb", "person.tz", "tz.machine", "think", "permissions.default", "effort:t1", "wait.t1", "stop.t1", "fail.t1"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["allowance.claude", "allowance.codex", "accounts.inventory"] { assert!(lean_keeps(k), "{k}: the composer's limits chip reads it"); }
+        for k in ["rule.r1", "board.b1"] { assert!(lean_keeps(k), "{k}: Settings, Rules and task board lists it"); }
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }
         for k in ["ride.t1", "tok.basis.t1", "uber.op.u.m.1", "todos.base.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }

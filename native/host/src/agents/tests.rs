@@ -247,6 +247,20 @@ fn renames(ev: &[Value]) -> Vec<String> { ev.iter().filter(|e| is(e, "ThreadRena
     let r = ag.retitle(T1, Some("New thread"), false).await; println!("REAL TITLE: {r:?}");
     assert!(r.is_ok(), "{r:?}"); assert!(renames(&log_from(&hub, from).await).len() == 1); ag.shutdown();
 }
+/// /btw: answered by the writing model off to the side; nothing reaches the log or a turn. A socket's caller gets the reply late, and is not held up meanwhile.
+#[tokio::test(flavor = "multi_thread")] async fn a_side_question_is_answered_and_leaves_no_trace() {
+    let sd = dir("btw-bin"); title_standin(&sd, "Because of the rail");
+    let (hub, ag, _h, _w) = start("btw", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
+    let r = rpc(&hub, "thread.btw", json!({"thread":T1,"q":"why?"})).await;
+    assert_eq!((r["result"]["btw"].as_str(), r["result"]["q"].as_str(), r["result"]["thread"].as_str()), (Some("Because of the rail"), Some("why?"), Some(T1)), "{r}");
+    assert_eq!(rpc(&hub, "thread.btw", json!({"thread":T1,"q":"  "})).await["error"], crate::session::composer::BTW_EMPTY);
+    let (mut c, _) = hub.connect(true); let mut out = hub.attach(c.client);
+    assert!(hub.request(&mut c, &json!({"id":9,"m":"thread.btw","p":{"thread":T1,"q":"why?"}})).await.is_empty(), "the socket goes on; the answer comes later");
+    let late = tokio::time::timeout(Duration::from_secs(20), async { loop { if let Some(crate::hub::Out::Value(v)) = out.recv().await { if v["t"] == "reply" { return v } } } }).await.expect("the answer comes");
+    assert_eq!((late["id"].as_u64(), late["result"]["btw"].as_str()), (Some(9), Some("Because of the rail")));
+    assert!(log_from(&hub, from).await.is_empty(), "the log never sees it");
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn a_failed_title_model_leaves_the_first_line() {
     let sd = dir("tf-bin"); perf_standin(&sd, 1); // its one-shot answers nothing usable (the stand-in's reply is no result line)
     let (hub, ag, _h, _w) = start("tf", |w| base_log(w, 1, "").replace("Fixture 0", "New thread"), |_| Cli::standin(&sd)).await; let from = len(&hub).await;

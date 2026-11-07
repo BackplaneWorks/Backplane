@@ -105,15 +105,35 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
     c.into_iter().map(|x| json!({"word": x.word, "label": x.word, "desc": x.about})).collect()
 }
 
+/// The words of a text that start with a sigil, its punctuation off, each once, in order.
+fn sigil_words(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for w in text.split(|c: char| c.is_whitespace()) {
+        let w = w.trim_start_matches(|c| matches!(c, '(' | '[' | '"' | '\'' | '`')).trim_end_matches(|c| matches!(c, '.' | ',' | ':' | ';' | '!' | '?' | ')' | ']' | '"' | '\'' | '`'));
+        if w.len() > 1 && matches!(w.chars().next(), Some('@' | '>' | '%' | '#' | '&')) && !out.iter().any(|x| x == w) { out.push(w.to_string()) }
+    }
+    out
+}
+
+/// What a `/give` names: `(sigil, id, name)` for each `>thread`, `%project` and `@bot` the text points at, each once, in order. Lists are `(id, title)`; a slug two threads share takes the id's tail, as the popup writes it.
+pub fn give_hits(text: &str, threads: &[(String, String)], projects: &[(String, String)], bots: &[(String, String)]) -> Vec<(char, String, String)> {
+    let mut out: Vec<(char, String, String)> = vec![];
+    for w in sigil_words(text) {
+        let (sig, rest) = (w.chars().next().unwrap(), w[1..].to_ascii_lowercase());
+        let named = |l: &[(String, String)]| l.iter().find(|(_, n)| slug(n) == rest).cloned();
+        let hit = match sig {
+            '>' => threads.iter().find(|(id, t)| { let s = slug(t); let n = threads.iter().filter(|(_, o)| slug(o) == s).count();
+                !s.is_empty() && (rest == s || (n > 1 && rest == format!("{s}-{}", id.rsplit('-').next().unwrap_or("")))) }).cloned(),
+            '%' => named(projects), '@' => named(bots), _ => None };
+        if let Some((id, name)) = hit { if !out.iter().any(|h| h.0 == sig && h.1 == id) { out.push((sig, id, name)) } }
+    }
+    out
+}
+
 /// What a sent message's reference words point at, for the cards drawn under it: `{word, kind, id, label}` with `kind` bot, thread, project, room or model and `id` the hub-qualified id
 /// (`<hub>|<id>`; a model has none). A word that names nothing here is left out (it stays plain text); each word once, in order.
 pub fn refs_in(st: &State, hub: &str, text: &str) -> Vec<Value> {
-    let words: Vec<String> = { let mut out: Vec<String> = vec![];
-        for w in text.split(|c: char| c.is_whitespace()) {
-            let w = w.trim_start_matches(|c| matches!(c, '(' | '[' | '"' | '\'' | '`')).trim_end_matches(|c| matches!(c, '.' | ',' | ':' | ';' | '!' | '?' | ')' | ']' | '"' | '\'' | '`'));
-            if w.len() > 1 && matches!(w.chars().next(), Some('@' | '>' | '%' | '#' | '&')) && !out.iter().any(|x| x == w) { out.push(w.to_string()) }
-        }
-        out };
+    let words = sigil_words(text);
     if words.is_empty() { return vec![] }
     let all: Value = MODELS.get().map(|f| f()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
     let mut slugs: std::collections::HashMap<String, usize> = Default::default();
@@ -144,6 +164,13 @@ pub fn complete(draft: &str, word: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_give_finds_what_it_names() {
+        let l = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+        let (t, p, b) = (l(&[("t1", "Fix the lamp"), ("t2-7", "Same"), ("t3-9", "Same")]), l(&[("p1", "Boards")]), l(&[("b1", "Bub")]));
+        assert_eq!(give_hits("/give >fix-the-lamp, %boards and @Bub! see this", &t, &p, &b), vec![('>', "t1".into(), "Fix the lamp".into()), ('%', "p1".into(), "Boards".into()), ('@', "b1".into(), "Bub".into())]);
+        assert_eq!(give_hits("/give >same-9 >same-9", &t, &p, &b), vec![('>', "t3-9".into(), "Same".into())], "a shared slug takes the tail; once");
+        assert!(give_hits("/give >nothing here", &t, &p, &b).is_empty());
+    }
     #[test] fn a_title_is_a_slug() { assert_eq!(slug("Fix the perf lag!"), "fix-the-perf-lag"); assert_eq!(slug("--A  b--"), "a-b"); assert_eq!(slug(&"x".repeat(50)).len(), 40); }
     #[test] fn only_a_sigil_word_is_offered() { assert!(typing("hello").is_none() && typing("@").is_some() && typing(">fo").is_some() && typing("@a.b").is_none()); }
     #[test] fn the_chosen_row_replaces_the_word_being_typed() {

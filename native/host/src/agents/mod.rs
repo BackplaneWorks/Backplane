@@ -308,12 +308,23 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle"] }
-    fn call<'a>(&'a self, _hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw"] }
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             if method == "ask.answer" { return match self.0.answer(p.get("id").and_then(Value::as_str).unwrap_or(""), p.get("answer").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] } }
             let th = p.get("thread").and_then(Value::as_str).unwrap_or("");
             if th.is_empty() || !self.0.world().await.threads.contains_key(th) { eprintln!("agents: {method} refused: unknown thread {th:?}"); return vec![err(id, "unknown thread")] } // refused, and said so on the hub's log
+            if method == "thread.btw" {
+                let q = p.get("q").and_then(Value::as_str).unwrap_or("").trim().to_string();
+                if q.is_empty() { return vec![err(id, crate::session::composer::BTW_EMPTY)] }
+                let (ag, th, id2) = (self.0.clone(), th.to_string(), id.clone());
+                let answer = async move { let a = ag.side_answer(&th, &q).await; json!({"t":"reply","id":id2,"ok":true,"result":{"thread":th,"q":q,"btw":a}}) };
+                // nothing is logged and no turn sees it. The model may take a minute: a connection answers everything else meanwhile, and its reply comes when it comes. A caller with no socket of its own (a linked machine's) waits.
+                if !hub.is_attached(who.client) { return vec![answer.await] }
+                let (hub, client) = (hub.clone(), who.client);
+                tokio::spawn(async move { let r = answer.await; crate::session::record_answer(client, "thread.btw", &r); hub.push(client, r); });
+                return vec![]
+            }
             if method == "thread.retitle" { // the thread menu's Regenerate title: the person asked, so it replaces even a title they typed
                 let ag = self.0.clone(); let th = th.to_string(); let r = ag.retitle(&th, None, true).await;
                 return vec![match r { Ok(t) => json!({"t":"reply","id":id,"ok":true,"result":{"title":t}}), Err(e) => err(id, &e) }]

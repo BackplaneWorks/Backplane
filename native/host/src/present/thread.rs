@@ -321,6 +321,12 @@ fn person_zone(st: &State) -> Option<Rule> {
     Some(Rule::parse(get(&key)).unwrap_or_else(Rule::utc))
 }
 
+/// Sbox.asks: the secrets the agents asked for and the person has not answered: `(name, purpose, thread)`, oldest key first.
+pub fn secret_asks(st: &State) -> Vec<(String, String, String)> {
+    st.settings.iter().filter_map(|(k, v)| { let n = k.strip_prefix("secret.ask.")?; if v.is_empty() { return None } let b: Value = serde_json::from_str(v).ok()?;
+        Some((n.to_string(), b["purpose"].as_str().unwrap_or("").to_string(), b["thread"].as_str().unwrap_or("").to_string())) }).collect()
+}
+
 /// shown.thread for a plain idle thread, from the page rows. `hub` is the request's hub key (the id is `<hub>|<thread>`), `draft` the composer's text.
 /// None unless every key is derived.
 pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft: &str) -> Option<Value> {
@@ -439,6 +445,10 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let rid = params["session"]["drafts"][format!("@reply:{thread}")].as_str().unwrap_or("");
     o.insert("replying".into(), if rid.is_empty() { Value::Null } else { json!({"id": rid, "text": params["session"]["drafts"][format!("@reply.q:{thread}")].as_str().unwrap_or("")}) });
     o.insert("uploading".into(), json!(params["session"]["drafts"][format!("@att.up:{thread}")].as_str().unwrap_or("")));
+    // the side question over the composer, the masked box, and the words a client must not draw as a message (Draft.preview)
+    o.insert("btw".into(), crate::session::composer::btw_json(&params["session"], thread));
+    o.insert("secretBox".into(), crate::session::composer::secret_box(&params["session"], thread, &t.title, &secret_asks(st)));
+    o.insert("commands".into(), crate::session::composer::words());
     // the reference popup (`@bot >thread %project #room`), from this hub's own state
     let refs = Value::Array(crate::session::composer::mention::rows(st, thread, draft));
     let c = crate::session::composer::fields(draft, running, !atts.is_empty(), t.provider == "claude", &refs, lang).ok_or("composer.language")?;
@@ -481,7 +491,7 @@ mod tests {
         let want = &p["out"]["shown"]["thread"];
         for (k, w) in want.as_object().unwrap() { assert_eq!(got.get(k), Some(w), "key {k}"); }
         // the Allowance chip's text (keys.rs `allowance`) and the picker's other agents (`pickerAgents`) are Backplane's own: the recorded helper reply has no such keys
-        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "pickerAgents")).count(), want.as_object().unwrap().len());
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "pickerAgents" | "secretBox" | "commands")).count(), want.as_object().unwrap().len());
     }
     // a thread that sent messages into other threads still opens: those rows are left out of its page
     #[test] fn rows_this_thread_sent_elsewhere_are_left_out_not_refused() {

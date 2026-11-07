@@ -1,7 +1,7 @@
 //! The composer's actions in Rust, as pure functions over the request's session (serde Values, no
-//! Session type), returning the patch to merge into the session and the commands for the client, or None for a case not ported (the caller falls back to the helper).
-//! Ported: a plain-text `draft` and a plain-text `send` to a thread (not a bot's). Not ported (None): a draft with a popup in play (a sigil word, `$`, an open
-//! popup: Refs.want/Skills.want), `/btw` `/give` `/secret` `/intent`, attachments, replies, a bot's thread (Bots.say), a bounded draft, accounts params.
+//! Session type), returning the patch to merge into the session and the commands for the client. `send` always answers: what cannot go says why (`say`) and the draft stays.
+//! Ported: `draft`, `send` to a thread or a bot's, attachments, replies, `/btw` `/give` `/secret` `/intent`, the card's Edit (`fab-edit`), a bounded draft's refusal.
+//! Commands beyond the hub's own (`send`): `compose` puts text in the composer, `say` shows one line (`tone` "note": not an error).
 use serde_json::{json, Map, Value};
 
 #[path = "mention.rs"] pub mod mention;
@@ -63,11 +63,95 @@ pub fn bind(p: Value, binding: Option<&str>) -> Value {
 /// Ui.msg_id: "c" ++ cid ++ now ++ "-" ++ rid.
 pub fn msg_id(cid: &str, now_s: u64, rid: u64) -> String { format!("c{cid}{now_s}-{rid}") }
 
+/// One line for the person; nothing else changes, so the draft stays as it is. Every refusal goes this way: a request the hub cannot run is never the person's only answer.
+fn say(text: &str) -> ActOut { ActOut { session_patch: json!({}), cmds: vec![json!({"type": "say", "text": text})] } }
+/// What the composer holds now: `keep` for the kept copy, `compose` for the box itself.
+fn compose(hub: &str, sel: &str, text: &str) -> Vec<Value> { vec![json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": text}), json!({"type": "compose", "thread": sel, "text": text})] }
+/// The composer's own commands, none of them ever a message: `(word, the Send button's label, what it does)`. The clients match a draft against these (`command_is`).
+pub const WORDS: [(&str, &str, &str); 4] = [("/btw", "Ask", super::slash::OWN[0].1), ("/give", "Give", super::slash::OWN[1].1), ("/secret", "Send", super::slash::OWN[2].1), ("/intent", "Save", "Save this project's intent")];
+/// The same table as data, for the phones (`hello.commands`) and the desktop (`thread.commands`).
+pub fn words() -> Value { Value::Array(WORDS.iter().map(|(w, l, d)| json!({"word": w, "label": l, "desc": d})).collect()) }
+/// A draft read as one of the composer's commands, and what follows the word.
+#[derive(Debug, PartialEq)] pub enum Word { Btw(String), Give, Secret(String), Intent(String) }
+pub fn word_of(draft: &str) -> Option<Word> {
+    let rest = |w: &str| draft.trim().get(w.len()..).unwrap_or("").trim().to_string();
+    // Sbox.is, Intent.is, Give.is, Btw.is, in the order Ui.send asks them
+    if command_is(draft, "/secret") { return Some(Word::Secret(super::slash::token(&rest("/secret")).to_string())) }
+    if command_is(draft, "/intent") { return Some(Word::Intent(rest("/intent"))) }
+    if command_is(draft, "/give") { return Some(Word::Give) }
+    if command_is(draft, "/btw") { return Some(Word::Btw(rest("/btw"))) }
+    None
+}
+/// Bound.refuse: a draft this view holds only bounded is never sent; `marker` starts with its size in bytes. A message's bound is 128 KB.
+fn bound_says(marker: &str) -> String {
+    let n: u64 = marker.chars().take_while(char::is_ascii_digit).collect::<String>().parse().unwrap_or(0);
+    format!("This draft is {} KB. A message can be at most 128 KB.", n.div_ceil(1024))
+}
+pub const BTW_EMPTY: &str = "Type your question after /btw.";
+/// Intent.edit: what Edit puts in the composer: `/intent` and the text to change, the template for a project with none.
+pub fn intent_edit(intent: &str) -> String { format!("/intent\n{}", if intent.trim().is_empty() { "# Goal\n\n# Parts\n\n# Notes\n" } else { intent }) }
+
+/// Intent.borrow, Intent.borrowed: Edit borrows the composer. The conversation's draft is kept once, also when Edit is pressed again before Save.
+fn intent_borrow(hub: &str, session: &Value, sel: &str) -> ActOut {
+    let d = &session["drafts"]; let current = draft_of(session, sel);
+    let text = intent_edit(s(&session["info"], &format!("fab.intent:{sel}")));
+    let mut drafts = Map::new(); drafts.insert(sel.to_string(), json!(text));
+    if !(s(d, &format!("@intent.edit:{sel}")) == "1" && command_is(current, "/intent")) {
+        // a bare `/intent` typed to get here is the command, not a draft to come back to
+        drafts.insert(format!("@intent.draft:{sel}"), json!(if word_of(current).is_some() { "" } else { current })); drafts.insert(format!("@intent.edit:{sel}"), json!("1"));
+    }
+    let mut cmds = compose(hub, sel, &text); cmds.push(json!({"type": "focus", "id": "composer"}));
+    ActOut { session_patch: json!({"drafts": drafts}), cmds }
+}
+
+/// A command of the composer run: the side question and the secret box leave the composer at once; a hand-off or a save keeps its text until the hub said yes (the reply empties it), so a refusal loses nothing.
+fn run(cx: &SendCtx, session: &Value, sel: &str, w: Word) -> ActOut {
+    let rid = session["rid"].as_u64().unwrap_or(0);
+    let req = |m: &str, p: Value| json!({"type": "send", "hub": cx.hub, "text": json!({"id": rid, "m": m, "p": p}).to_string()});
+    match w {
+        Word::Btw(q) if q.is_empty() => say(BTW_EMPTY),
+        Word::Btw(q) => {
+            let mut drafts = Map::new(); drafts.insert(sel.to_string(), json!("")); drafts.insert(format!("@btw:{sel}"), json!(q)); drafts.insert(format!("@btw.a:{sel}"), json!(""));
+            let mut cmds = compose(cx.hub, sel, ""); cmds.push(req("thread.btw", json!({"thread": sel, "q": q})));
+            ActOut { session_patch: json!({"rid": rid + 1, "drafts": drafts}), cmds }
+        }
+        Word::Give => ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![req("bots.give", json!({"thread": sel, "text": draft_of(session, sel).trim()}))] },
+        Word::Secret(name) => ActOut { session_patch: json!({"drafts": {sel: "", "@sbox": if name.is_empty() { "+" } else { name.as_str() }, "@sbox.th": sel, "@sbox.err": "", "@f.sname": name}}), cmds: compose(cx.hub, sel, "") },
+        // `/intent` alone has nothing to save, and saving nothing would empty the file: it opens the intent to edit
+        Word::Intent(body) if body.is_empty() => intent_borrow(cx.hub, session, sel),
+        Word::Intent(body) => ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![req("fab.intent", json!({"thread": sel, "text": body}))] },
+    }
+}
+
+/// `thread.btw`: the side question of this thread and its answer, until closed (Btw.text).
+pub fn btw_json(session: &Value, thread: &str) -> Value {
+    let q = s(&session["drafts"], &format!("@btw:{thread}")); if q.is_empty() { return Value::Null }
+    let a = s(&session["drafts"], &format!("@btw.a:{thread}"));
+    json!({"q": q, "a": if a.is_empty() { "Thinking…" } else { a }})
+}
+/// Btw.answer: an answer that came back empty says where the model is chosen.
+pub fn btw_answer(a: &str) -> String { let a = a.trim(); if a.is_empty() { "No answer came back (Settings, Writing: the model it asks).".into() } else { a.to_string() } }
+/// `thread.secretBox`: the masked box of this thread: one opened here (`/secret`), else the first of the agents' requests in it (`asks`: `(name, purpose, thread)`).
+/// No value is ever here: the field is the app's own, and Save goes straight to the hub (`secret.set`).
+pub fn secret_box(session: &Value, thread: &str, title: &str, asks: &[(String, String, String)]) -> Value {
+    let d = &session["drafts"];
+    let (open, err) = (s(d, "@sbox"), s(d, "@sbox.err"));
+    let pack = |name: &str, purpose: &str, fresh: bool, ask: bool| json!({"name": name, "purpose": purpose, "who": title, "thread": thread, "fresh": fresh, "ask": ask, "err": err,
+        "save": format!("{name}\u{1f}{purpose}\u{1f}{thread}")});
+    if !open.is_empty() && s(d, "@sbox.th") == thread {
+        let asked = asks.iter().find(|(n, ..)| n == open);
+        return pack(if open == "+" { "" } else { open }, asked.map_or(s(d, "@f.spurpose"), |a| a.1.as_str()), open == "+", asked.is_some());
+    }
+    match asks.iter().find(|a| a.2 == thread) { Some((n, p, _)) => pack(n, p, false, true), None => Value::Null }
+}
+
 /// Ui.act "send": the plain draft of the selected thread sent as `turn.start` (mode "steer": Follow.mode), the draft and its companions emptied, the request kept in the outbox.
+/// A draft that is a command of the composer runs as that command. Never None: this is the person pressing Send, and there is no one else to answer them.
 pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let sel = s(session, "sel");
     let body = draft_of(session, sel).trim();
     let d = &session["drafts"];
+    if !s(d, "@draft.bound").is_empty() { return Some(say(&bound_says(s(d, "@draft.bound")))) }
     // Att.join: what was written, then one `[attachment: path]` line per attachment
     let atts: Vec<String> = att_paths(s(d, &format!("@att:{sel}")));
     let lines = atts.iter().map(|p| format!("[attachment: {p}]")).collect::<Vec<_>>().join("\n");
@@ -76,9 +160,10 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let (reply_id, reply_full) = (s(d, &format!("@reply:{sel}")), s(d, &format!("@reply.full:{sel}")));
     let text = if !text.is_empty() && !reply_id.is_empty() && !reply_full.is_empty() { format!("{}\n\n{text}", reply_block(reply_id, reply_full)) } else { text };
     let text = text.as_str();
-    if sel.is_empty() || !safe(sel) || text.is_empty() { return None }
-    if ["/btw", "/give", "/secret", "/intent"].iter().any(|w| command_is(body, w)) || (cx.bot_thread && cx.bot.is_none()) { return None }
-    if !s(d, &format!("@intent.edit:{sel}")).is_empty() || !s(d, "@draft.bound").is_empty() { return None }
+    if text.is_empty() { return Some(ActOut { session_patch: json!({}), cmds: vec![] }) } // Ui.send.k: nothing typed sends nothing
+    if sel.is_empty() || !safe(sel) { return Some(say("Open a thread first: this has nowhere to go yet.")) }
+    if let Some(w) = word_of(body) { return Some(run(cx, session, sel, w)) }
+    if cx.bot_thread && cx.bot.is_none() { return Some(say("This bot's thread is not ready, so nothing was sent. Your text is still here.")) }
     let rid = session["rid"].as_u64().unwrap_or(0);
     // Rpc.text: {"id":rid,"m":"turn.start","p":{thread,text,msg,mode}} in this key order
     // a bot's thread is talked to as the bot (Bots.say: its wake, its memory, the star count); the thread's account is the bot's own
@@ -86,6 +171,8 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let request = format!("{{\"id\":{rid},\"m\":\"{m}\",\"p\":{}}}", serde_json::to_string(&p).ok()?);
     let mut drafts = Map::new();
     for k in [sel.to_string(), format!("@att:{sel}"), format!("@reply:{sel}"), format!("@reply.q:{sel}"), format!("@reply.full:{sel}")] { drafts.insert(k, json!("")); }
+    // Draft.intent.clear: ordinary text sent over an intent edit ends it
+    if s(d, &format!("@intent.edit:{sel}")) == "1" { for k in [format!("@intent.edit:{sel}"), format!("@intent.draft:{sel}")] { drafts.insert(k, json!("")); } }
     let mut outbox = Map::new(); outbox.insert(rid.to_string(), json!(request));
     Some(ActOut {
         session_patch: json!({"rid": rid + 1, "drafts": drafts, "outbox": outbox}),
@@ -168,6 +255,26 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
             let sel = s(session, "sel"); if !safe(sel) { return None }
             Some(ActOut { session_patch: json!({"drafts": {"@sk.off": draft_of(session, sel)}}), cmds: vec![] })
         }
+        // the card above the composer put away (Btw.close)
+        "btw-close" => {
+            let sel = s(session, "sel"); if !safe(sel) { return None }
+            Some(ActOut { session_patch: json!({"drafts": {format!("@btw:{sel}"): "", format!("@btw.a:{sel}"): ""}}), cmds: vec![] })
+        }
+        // the project card's Edit: the intent in the composer (Fab.act 1)
+        "fab-edit" => { let sel = s(session, "sel"); if !safe(sel) { return None } Some(intent_borrow(hub, session, sel)) }
+        // the secret box (Sbox.act). No action carries a value: Save is the app's own request, and these only open, shut and say why
+        "secret-open-here" => {
+            let sel = s(session, "sel"); if !safe(sel) { return None }
+            let name = s(params, "value");
+            Some(ActOut { session_patch: json!({"drafts": {"@sbox": if name.is_empty() { "+" } else { name }, "@sbox.th": sel, "@sbox.err": "", "@f.sname": name}}), cmds: vec![] })
+        }
+        "secret-shut" | "secret-sent" => Some(ActOut { session_patch: json!({"drafts": {"@sbox": "", "@sbox.th": "", "@sbox.err": "", "@f.sname": "", "@f.spurpose": ""}}), cmds: vec![] }),
+        "secret-err" => Some(ActOut { session_patch: json!({"drafts": {"@sbox.err": s(params, "value")}}), cmds: vec![] }),
+        "secret-dismiss" => {
+            let rid = session["rid"].as_u64().unwrap_or(0);
+            Some(ActOut { session_patch: json!({"rid": rid + 1, "drafts": {"@sbox": "", "@sbox.th": "", "@sbox.err": "", "@f.sname": ""}}),
+                cmds: vec![json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "secret.dismiss", "p": {"name": s(params, "value")}}).to_string()})] })
+        }
         "send" | "send-alt" => {
             let sel = s(session, "sel");
             send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), bot: facts.bot_of(sel), binding: facts.account_binding(sel) }, session)
@@ -209,12 +316,70 @@ mod tests {
     #[test] fn a_sigil_word_is_kept_like_any_text() {
         for v in ["/gi", "hi $sk", "see @bo", "to >th", "in %pr", "post #ro", "a ^b"] { assert!(draft("h", &session(), v).is_some(), "{v}") }
     }
-    #[test] fn only_the_helpers_own_commands_do_not_send() {
-        let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None };
-        let with = |d: &str| json!({"sel": "t1700000002-3", "rid": 2, "drafts": {"t1700000002-3": d}, "info": {}});
-        assert!(send(&cx, &with("/btw why")).is_none() && send(&cx, &with("/give >x")).is_none());
-        assert!(send(&cx, &with("/compact")).is_some() && send(&cx, &with("see @bot %proj")).is_some());
+    fn sent_method(o: &ActOut) -> Option<(String, Value)> {
+        o.cmds.iter().find(|c| c["type"] == "send").map(|c| { let r: Value = serde_json::from_str(c["text"].as_str().unwrap()).unwrap(); (r["m"].as_str().unwrap().to_string(), r["p"].clone()) })
     }
+    fn says(o: &ActOut) -> &str { o.cmds.iter().find(|c| c["type"] == "say").and_then(|c| c["text"].as_str()).unwrap_or("") }
+    const T: &str = "t1700000002-3";
+    fn cx() -> SendCtx<'static> { SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None } }
+    fn with(d: &str) -> Value { json!({"sel": T, "rid": 2, "drafts": {T: d}, "info": {}}) }
+    #[test] fn the_composers_words_are_read_from_the_draft() {
+        assert_eq!(word_of("/btw  why now \n"), Some(Word::Btw("why now".into()))); assert_eq!(word_of("/btw"), Some(Word::Btw("".into())));
+        assert_eq!(word_of("/give >x note"), Some(Word::Give)); assert_eq!(word_of("/secret"), Some(Word::Secret("".into()))); assert_eq!(word_of("/secret github-token"), Some(Word::Secret("github-token".into())));
+        assert_eq!(word_of("/intent\n# Goal\nlamp"), Some(Word::Intent("# Goal\nlamp".into()))); assert_eq!(word_of("/compact"), None); assert_eq!(word_of("hi /btw"), None); assert_eq!(word_of("/btwx"), None);
+    }
+    #[test] fn a_side_question_goes_to_the_hub_and_never_to_the_thread() {
+        let o = send(&cx(), &with("/btw why")).unwrap();
+        let (m, p) = sent_method(&o).unwrap(); assert_eq!((m.as_str(), p["q"].as_str(), p["thread"].as_str()), ("thread.btw", Some("why"), Some(T)));
+        assert_eq!(o.session_patch["drafts"][format!("@btw:{T}")], "why"); assert_eq!(o.session_patch["drafts"][T], "", "the draft goes with it");
+        assert!(o.cmds.iter().any(|c| c["type"] == "compose" && c["text"] == ""), "the box is emptied now, not when the answer comes");
+        assert_eq!(btw_json(&json!({"drafts": {format!("@btw:{T}"): "why", format!("@btw.a:{T}"): ""}}), T), json!({"q": "why", "a": "Thinking…"}));
+        assert_eq!(btw_json(&json!({"drafts": {format!("@btw:{T}"): "why", format!("@btw.a:{T}"): "because"}}), T)["a"], "because"); assert_eq!(btw_json(&json!({"drafts": {}}), T), Value::Null);
+        assert!(btw_answer("  ").contains("Settings, Writing")); assert_eq!(btw_answer(" a "), "a");
+    }
+    #[test] fn a_refused_command_says_why_and_keeps_the_draft() {
+        for (draft, says_) in [("/btw", BTW_EMPTY)] {
+            let o = send(&cx(), &with(draft)).unwrap();
+            assert_eq!(says(&o), says_); assert_eq!(o.session_patch, json!({}), "nothing changes, so the draft stays"); assert!(sent_method(&o).is_none());
+        }
+        let mut b = with("long"); b["drafts"]["@draft.bound"] = json!("200000 abc");
+        let o = send(&cx(), &b).unwrap(); assert_eq!(says(&o), "This draft is 196 KB. A message can be at most 128 KB."); assert_eq!(o.session_patch, json!({}));
+        let o = send(&SendCtx { bot_thread: true, ..cx() }, &session()).unwrap(); assert!(says(&o).contains("nothing was sent")); assert_eq!(o.session_patch, json!({}));
+        let o = send(&cx(), &json!({"sel": "", "rid": 2, "drafts": {"": "hi"}})).unwrap(); assert!(!says(&o).is_empty());
+    }
+    #[test] fn give_keeps_its_text_until_the_hub_took_it() {
+        let o = send(&cx(), &with("/give >x see this")).unwrap();
+        let (m, p) = sent_method(&o).unwrap(); assert_eq!((m.as_str(), p["text"].as_str()), ("bots.give", Some("/give >x see this")));
+        assert!(o.session_patch["drafts"].is_null() && o.cmds.len() == 1, "a refusal must find the text still there");
+    }
+    #[test] fn secret_opens_the_box_and_sends_nothing() {
+        let o = send(&cx(), &with("/secret gh")).unwrap(); assert!(sent_method(&o).is_none());
+        let mut s = with(""); crate::session::patch::merge(&mut s, &o.session_patch);
+        let b = secret_box(&s, T, "A thread", &[]);
+        assert_eq!((b["name"].as_str(), b["fresh"].as_bool(), b["who"].as_str(), b["save"].as_str()), (Some("gh"), Some(false), Some("A thread"), Some(format!("gh\u{1f}\u{1f}{T}").as_str())));
+        assert_eq!(secret_box(&s, "other", "x", &[]), Value::Null, "only in the thread it was opened in");
+        let s = with(""); let o = send(&cx(), &with("/secret")).unwrap(); let mut s2 = s.clone(); crate::session::patch::merge(&mut s2, &o.session_patch); assert_eq!(secret_box(&s2, T, "t", &[])["fresh"], true);
+        let asks = [("db".to_string(), "the database".to_string(), T.to_string())];
+        let a = secret_box(&s, T, "t", &asks); assert_eq!((a["name"].as_str(), a["purpose"].as_str(), a["ask"].as_bool()), (Some("db"), Some("the database"), Some(true)), "an agent's request shows by itself");
+    }
+    #[test] fn an_intent_is_saved_through_its_request_and_edit_borrows_the_composer() {
+        let o = send(&cx(), &with("/intent # Goal\nlamp")).unwrap();
+        let (m, p) = sent_method(&o).unwrap(); assert_eq!((m.as_str(), p["text"].as_str()), ("fab.intent", Some("# Goal\nlamp")));
+        assert!(o.session_patch["drafts"].is_null(), "the text stays until the hub wrote it");
+        let mut s = with("half a thought"); s["info"] = json!({format!("fab.intent:{T}"): "# Goal\nlamp"});
+        let e = act(&json!({"session": s, "action": "fab-edit", "value": "", "hub": "h"}), &Plain).unwrap();
+        assert_eq!(e.session_patch["drafts"][T], "/intent\n# Goal\nlamp"); assert_eq!(e.session_patch["drafts"][format!("@intent.draft:{T}")], "half a thought"); assert_eq!(e.session_patch["drafts"][format!("@intent.edit:{T}")], "1");
+        assert!(e.cmds.iter().any(|c| c["type"] == "compose" && c["text"] == "/intent\n# Goal\nlamp"));
+        // Edit again before Save keeps the conversation's draft it kept the first time
+        let mut s2 = s.clone(); crate::session::patch::merge(&mut s2, &e.session_patch);
+        let again = act(&json!({"session": s2, "action": "fab-edit", "value": "", "hub": "h"}), &Plain).unwrap(); assert!(again.session_patch["drafts"].get(format!("@intent.draft:{T}")).is_none());
+        // `/intent` alone saves nothing: emptying a project's intent takes more than a word
+        let bare = send(&cx(), &with("/intent")).unwrap(); assert!(sent_method(&bare).is_none()); assert_eq!(bare.session_patch["drafts"][T], intent_edit("")); assert_eq!(bare.session_patch["drafts"][format!("@intent.draft:{T}")], "");
+        // ordinary text sent over an abandoned edit ends it
+        let mut o = with("just chat"); o["drafts"][format!("@intent.edit:{T}")] = json!("1"); o["drafts"][format!("@intent.draft:{T}")] = json!("old");
+        let p = send(&cx(), &o).unwrap(); assert_eq!(sent_method(&p).unwrap().0, "turn.start"); assert_eq!(p.session_patch["drafts"][format!("@intent.edit:{T}")], ""); assert_eq!(p.session_patch["drafts"][format!("@intent.draft:{T}")], "");
+    }
+    #[test] fn other_slash_words_are_messages() { assert_eq!(sent_method(&send(&cx(), &with("/compact")).unwrap()).unwrap().0, "turn.start"); assert_eq!(sent_method(&send(&cx(), &with("see @bot %proj")).unwrap()).unwrap().0, "turn.start"); }
     #[test] fn send_is_what_the_js_hub_answered() {
         let cx = SendCtx { hub: "http://127.0.0.1:3820", cid: "parity-gpui", now_s: 1793864523, bot_thread: false, bot: None, binding: None };
         let o = send(&cx, &session()).unwrap();
@@ -268,17 +433,14 @@ mod tests {
         let send_o = act(&p("send", ""), &Plain).unwrap();
         assert_eq!(send_o.cmds[1]["text"].as_str().unwrap().contains("\"msg\":\"cparity-gpui1793864523-2\""), true, "now is milliseconds in the params, seconds in the msg id");
         assert_eq!(act(&p("send-alt", ""), &Plain).unwrap().cmds, send_o.cmds, "Follow.mode answers steer for both");
-        assert!(act(&p("send", ""), &Bot).is_none(), "a bot's thread is Bots.say");
+        assert!(says(&act(&p("send", ""), &Bot).unwrap()).contains("nothing was sent"), "a bot's thread with no bot says so");
         for a in ["select", "row-pin", "interrupt", ""] { assert!(act(&p(a, "x"), &Plain).is_none(), "{a}") }
     }
-    #[test] fn what_is_not_ported_is_none() {
+    #[test] fn send_always_answers() {
         let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None };
         let with = |k: &str, v: &str| { let mut s = session(); s["drafts"][k] = json!(v); s };
-        assert!(send(&cx, &with("t1700000002-3", "   ")).is_none(), "blank");
-        assert!(send(&cx, &with("t1700000002-3", "/btw why")).is_none(), "slash commands");
+        let blank = send(&cx, &with("t1700000002-3", "   ")).unwrap(); assert!(blank.cmds.is_empty(), "blank sends nothing and says nothing");
         assert!(send(&cx, &with("@att:t1700000002-3", "a")).is_some(), "attachments");
         assert!(send(&cx, &with("@reply:t1700000002-3", "m1")).is_some(), "a reply with no quote kept sends as plain text");
-        assert!(send(&cx, &with("@draft.bound", "5 abc")).is_none(), "a bounded draft");
-        assert!(send(&SendCtx { bot_thread: true, ..SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None } }, &session()).is_none(), "a bot's thread");
     }
 }

@@ -83,12 +83,12 @@ impl Echo {
 #[derive(Default)]
 pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool }
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
-const GROUPS: [&[&str]; 4] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["usage", "setup", "about", "privacy"]];
+const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
     match page { "appearance" => "sun", "threads" => "message-square", "agents" => "cpu", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
-        "devices" => "link", "network" => "globe", "voice" => "mic", "keys" => "code", "timezone" => "clock", "usage" => "gauge", "about" => "book", "privacy" => "file-text", _ => "settings" }
+        "devices" => "link", "network" => "globe", "voice" => "mic", "keys" => "code", "timezone" => "clock", "rules" => "circle-check", "usage" => "gauge", "about" => "book", "privacy" => "file-text", _ => "settings" }
 }
 /// The hub shows its page menu (rows that are each one `settings-page` button naming a page) or one page (its first row is the way back).
 #[derive(Debug, PartialEq)]
@@ -114,7 +114,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let rows = parse(&this.data["settings"]);
     sync_nav(this, &rows, cx);
     let mut want: Vec<Field> = rows.into_iter().flat_map(|r| r.fields).collect();
-    want.extend(super::bots::form_fields(&this.data)); want.extend(super::panels::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data)); want.extend(super::onboard::form_fields(&this.data));
+    want.extend(super::bots::form_fields(&this.data)); want.extend(super::panels::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data)); want.extend(super::onboard::form_fields(&this.data)); want.extend(super::sidebox::form_fields(&this.data));
     this.screens.fields.retain(|n, _| want.iter().any(|f| f.name == *n));
     for f in want {
         if let Some(slot) = this.screens.fields.get_mut(&f.name) {
@@ -180,6 +180,8 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
 }
 
 /// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
+/// A hub page of the nav, chosen (a click, or the e2e `click` on `set-nav:<page>`): what is typed goes first, then the hub is asked for the page.
+pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.page = p.to_string(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string())); }
 pub fn flush_fields(this: &mut Backplane) {
     let names: Vec<String> = this.screens.fields.iter().filter(|(_, s)| !s.vault && s.pending.is_some()).map(|(n, _)| n.clone()).collect();
     for n in names {
@@ -351,7 +353,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let item = if on { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(item.child(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" }))).child(title.clone())
-            .on_click(cx.listener(move |this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.page = p2.clone(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p2.clone())); cx.notify(); })));
+            .on_click(cx.listener(move |this, _, _, cx| { go_page(this, &p2); cx.notify(); })));
     }
     let title = if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
     let dialog = div().id("settings-dialog").flex().flex_col().w(px(1040.)).max_w_full().h(px(760.)).max_h_full().border_1().border_color(c("line")).bg(c("bg")).overflow_hidden().on_mouse_down_out(cx.listener(|this, _, _, cx| close(this, cx)))
@@ -467,7 +469,7 @@ mod tests {
         assert_eq!(shown(&[]), Shown::Other);
     }
     #[test] fn every_page_has_an_icon_in_the_set_and_the_search_filters_titles_by_substring() {
-        let icons: Vec<String> = ["sun", "message-square", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "gauge", "book", "file-text", "settings", "search", "x"].iter().map(|s| s.to_string()).collect();
+        let icons: Vec<String> = ["sun", "message-square", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "circle-check", "gauge", "book", "file-text", "settings", "search", "x"].iter().map(|s| s.to_string()).collect();
         for g in GROUPS { for p in g { assert!(icons.contains(&nav_icon(p).to_string()), "{p}"); } }
         assert!(nav_matches("Appearance", "") && nav_matches("Appearance", " ear") && nav_matches("Appearance", "APP") && !nav_matches("Appearance", "zzz"));
         assert_eq!(group_of("zzz"), GROUPS.len());

@@ -58,7 +58,8 @@ fn prune(home: &Path, b: &Path) {
 }
 
 #[derive(Default)]
-pub struct Updates { st: Mutex<Status>, working: AtomicBool, wanted: AtomicBool, last: Mutex<u64> }
+/// `forced`: the person pressed Update now, so running turns do not hold it (they continue after the restart, as any restart's do).
+pub struct Updates { st: Mutex<Status>, working: AtomicBool, wanted: AtomicBool, forced: AtomicBool, last: Mutex<u64> }
 impl Updates {
     fn pending_path(hub: &Hub) -> PathBuf { hub.cfg.home.join("update").join("pending") }
     async fn tell(&self, hub: &Arc<Hub>, f: impl FnOnce(&mut Status)) {
@@ -109,7 +110,7 @@ impl Updates {
         };
         let tag = found.tag.clone();
         // automatic like 0.14: nothing has to be pressed, but a running turn always wins
-        if Self::turns_run(hub).await { let t = tag.clone(); self.tell(hub, |s| { s.state = "waiting".into(); s.available = t; s.note = "Waiting for running turns to finish.".into(); s.checked = at; }).await; self.wanted.store(true, SeqCst); self.working.store(false, SeqCst); return }
+        if !self.forced.swap(false, SeqCst) && Self::turns_run(hub).await { let t = tag.clone(); self.tell(hub, |s| { s.state = "waiting".into(); s.available = t; s.note = "Waiting for running turns to finish.".into(); s.checked = at; }).await; self.wanted.store(true, SeqCst); self.working.store(false, SeqCst); return }
         let t = tag.clone(); self.tell(hub, |s| { s.state = "downloading".into(); s.available = t; s.checked = at; }).await;
         let (f2, b3) = (found.clone(), b.clone());
         let staged = tokio::task::spawn_blocking(move || run::stage(&f2, &b3, &curl, &tar)).await.unwrap_or_else(|e| Err(e.to_string()));
@@ -132,17 +133,18 @@ pub fn install(hub: &Arc<Hub>) {
 
 pub struct Rpc(pub Arc<Updates>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["update.check", "update.status", "app.update"] }
+    fn methods(&self) -> &'static [&'static str] { &["update.check", "update.status", "app.update", "update.now"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, _p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let channel = Updates::channel(hub).await; // as stored now: a change in Settings counts at once
             let status = |u: &Updates| { let s = u.st.lock().unwrap().clone(); let (line, check) = crate::present::settings::update_line(&serde_json::to_string(&s).unwrap_or_default());
                 json!({"version":s.available,"channel":channel,"current":s.current,"state":s.state,"note":s.note,"checked":s.checked,"line":line,"canCheck":check}) };
             if method != "update.status" && builds().is_some() && !off() {
-                if method == "app.update" { self.0.wanted.store(true, SeqCst); }
+                if method == "app.update" || method == "update.now" { self.0.wanted.store(true, SeqCst); }
+                if method == "update.now" { self.0.forced.store(true, SeqCst); }
                 let (u, h, now) = (self.0.clone(), hub.clone(), Updates::now_s()); tokio::spawn(async move { u.pass(&h, now).await; });
             }
-            if method == "app.update" && builds().is_none() { hub.push_all(&json!({"t":"update","error":"this install updates through its package"})); }
+            if (method == "app.update" || method == "update.now") && builds().is_none() { hub.push_all(&json!({"t":"update","error":"this install updates through its package"})); }
             vec![json!({"t":"reply","id":id,"ok":true,"result":status(&self.0)})]
         })
     }
@@ -175,6 +177,7 @@ mod tests {
         assert_eq!((v["result"]["line"].as_str(), v["result"]["canCheck"].as_bool()), (Some("Updated by its package."), Some(false)), "the sentence every client shows");
         hub.commit(&json!({"$":"SettingSet","key":"update.channel","value":"nightly","at":1})).await.unwrap(); assert_eq!(call("update.check").await["result"]["channel"], "beta", "0.14's stored nightly");
         hub.commit(&json!({"$":"SettingSet","key":"update.channel","value":"beta","at":2})).await.unwrap(); assert_eq!(call("update.status").await["result"]["channel"], "beta");
+        assert_eq!(call("update.now").await["ok"], true, "Update now answers like app.update");
         assert_eq!(call("app.update").await["ok"], true); assert!(!home.join("update").exists(), "a package install keeps no update files");
         let _ = fs::remove_dir_all(&home);
     }

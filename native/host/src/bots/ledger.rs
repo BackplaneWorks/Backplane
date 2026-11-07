@@ -168,6 +168,23 @@ pub fn make(w: &World, now: u64, by: &str, o: &Value, old: &Item) -> Result<Item
     Ok(Item { id: old.id.clone(), title, status: status_norm(gsd(o, "status", &old.status)), owner: ow.0, project: pr.0, due, group: take(trim(gsd(o, "group", &old.group)), 80), links: links_of(o.get("links"), &old.links), notes, at: old.at, updated: now, by: by.into() })
 }
 
+/// Rules.make: the rule that results from the request on `old` (the fields given replace the old ones). `{id, text, bot, project, tool, enforce, word, on, at, by}`;
+/// an enforced rule needs a tool (it is what the gate refuses), and its word unlocks it.
+pub fn rule_make(w: &World, now: u64, o: &Value, old: &Value) -> Result<Value, String> {
+    let pick = |k: &str| if o.get(k).is_some() { trim(gs(o, k)).to_string() } else { gs(old, k).to_string() };
+    let flag = |k: &str, d: bool| o.get(k).and_then(Value::as_bool).or_else(|| old.get(k).and_then(Value::as_bool)).unwrap_or(d);
+    let (text, tool, word) = (pick("text"), pats(&pick("tool")).join(", "), pick("word"));
+    let bot = if o.get("bot").is_some() { bot_res(w, trim(gs(o, "bot"))) } else { (gs(old, "bot").to_string(), String::new()) };
+    let pr = if o.get("project").is_some() { proj_res(w, trim(gs(o, "project"))) } else { (gs(old, "project").to_string(), String::new()) };
+    let enforce = flag("enforce", false);
+    let text_err = if text.is_empty() { "a rule needs its words" } else if len(&text) > 1000 { "a rule is at most 1000 characters" } else { "" };
+    let enf_err = if enforce && tool.is_empty() { "an enforced rule names the tools it refuses" } else { "" };
+    let word_err = if word.contains(char::is_whitespace) { "the word that unlocks a rule is one word" } else { "" };
+    let err = first(&[text_err, enf_err, word_err, &bot.1, &pr.1]);
+    if !err.is_empty() { return Err(err) }
+    Ok(json!({"id":gs(old, "id"),"text":text,"bot":bot.0,"project":pr.0,"tool":tool,"enforce":enforce,"word":take(&word, 40),"on":flag("on", true),"at":old.get("at").and_then(Value::as_u64).unwrap_or(now),"by":"person","updated":now}))
+}
+
 // ---- a markdown list ----
 
 /// Imp: one item read from a list
@@ -299,6 +316,32 @@ impl Bots {
             }
             "task_board_import" => self.tb_import(w, now, &by, &bot, a).await,
             _ => fail("unknown tool"),
+        }
+    }
+    /// The person's own edits of the board and the standing rules (`board.set {item}`, `board.drop {id}`, `rules.set {rule}`, `rules.drop {id}`): with an `id` a set changes
+    /// that record (only the fields given), without one it makes a new one. `bot`, `owner` and `project` may be names. A refusal is the validation's words.
+    pub(super) async fn person_call(&self, w: &World, method: &str, p: &Value, now: u64) -> Res {
+        let body = |k: &str| if p.get(k).map_or(false, Value::is_object) { p[k].clone() } else { p.clone() };
+        match method {
+            "board.set" => {
+                let o = body("item"); let id = trim(gs(&o, "id")).to_string();
+                let old = if id.is_empty() { Item { id: self.hub_id("b", now), status: "todo".into(), at: now, updated: now, ..Default::default() } }
+                    else { match self.board_all().await.into_iter().find(|t| t.id == id) { Some(t) => t, None => return fail(&format!("no item {id}")) } };
+                match make(w, now, "person", &me(&o, ""), &old) { Ok(t) => { let id = t.id.clone(); self.ledger_save(w, now, vec![t.set()], json!({"id":id,"item":Self::tb_json(w, &t)})).await } Err(e) => fail(&e) }
+            }
+            "board.drop" => self.ledger_call(w, "", "task_board_remove", p, now).await,
+            "rules.set" => {
+                let o = body("rule"); let id = trim(gs(&o, "id")).to_string();
+                let old: Value = if id.is_empty() { json!({"id":self.hub_id("r", now),"on":true,"enforce":false,"at":now}) } else {
+                    match self.family("rule.").await.into_iter().find(|(k, _)| k[5..] == id) { Some((_, v)) => serde_json::from_str(&v).unwrap_or(json!({"id":id,"at":now})), None => return fail(&format!("no rule {id}")) } };
+                match rule_make(w, now, &o, &old) { Ok(r) => { let id = gs(&r, "id").to_string(); self.ledger_save(w, now, vec![json!({"$":"SettingSet","key":format!("rule.{id}"),"value":r.to_string(),"at":now})], json!({"id":id,"rule":r})).await } Err(e) => fail(&e) }
+            }
+            "rules.drop" => {
+                let id = trim(gs(p, "id")); if id.is_empty() { return fail("an id is needed") }
+                if !self.family("rule.").await.iter().any(|(k, _)| k[5..] == *id) { return fail(&format!("no rule {id}")) }
+                self.ledger_save(w, now, vec![json!({"$":"SettingSet","key":format!("rule.{id}"),"value":"","at":now})], json!({"id":id})).await
+            }
+            _ => fail("unknown request"),
         }
     }
     async fn ledger_save(&self, w: &World, now: u64, evs: Vec<Value>, body: Value) -> Res { match self.hub.commit_many(&w.also(now, evs)).await { Ok(_) => (true, body), Err(e) => fail(&format!("{e:#}")) } }

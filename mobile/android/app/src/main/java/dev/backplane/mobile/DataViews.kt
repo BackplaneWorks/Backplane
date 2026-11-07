@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -35,6 +36,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -353,6 +356,11 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
     }
     val dictate = DataVoice.available
     LaunchedEffect(id, DataClient.conn, dictate) { if (dictate && DataClient.conn == DataClient.Conn.ONLINE) DataVoice.refresh(id) }
+    // the masked box: a name ("" for a new one) while open; the value stays in this box until Save
+    var box by remember(id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(id) { DataClient.refreshSecretAsks(id) }
+    val word = DataClient.commandOf(draft)
+    fun put(t: String) = DataClient.setField(id, TextFieldValue(t, TextRange(t.length)), typed = false)
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, uri) }; if (b != null) pending.add(b) else notice = "That picture could not be read." }
     }
@@ -383,7 +391,10 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
         }
         DLine()
         order?.let { OrderCard(it) }
-        MentionPopup(draft) { DataClient.setField(id, TextFieldValue(it, TextRange(it.length))) }
+        MentionPopup(draft) { put(it) }
+        DataClient.btw[id]?.let { b -> BtwCard(b) { DataClient.closeBtw(id) } }
+        val asked = DataClient.secretAsks[id]?.firstOrNull()
+        if (box != null || asked != null) SecretBox(id, box ?: asked?.name ?: "", asked?.takeIf { box == null || it.name == box }, { box = null })
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (notice.isNotEmpty()) DMono(notice, dwarn, 12)
             if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -401,7 +412,20 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
                 }
                 val blank = draft.isBlank() && pending.isEmpty()
                 if (running && blank) DBtn("Stop", false, modifier = Modifier.testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
-                else DBtn("Send", true, !blank, Modifier.testTag("thread.send")) { if (dictate) DataVoice.sent(id); DataClient.send(id, draft, pending.toList()); pending.clear(); notice = ""; stick = true }
+                else DBtn(word?.label ?: "Send", true, !blank, Modifier.testTag("thread.send")) {
+                    notice = ""
+                    if (word == null) { if (dictate) DataVoice.sent(id); DataClient.send(id, draft, pending.toList()); pending.clear(); stick = true }
+                    // a command of the composer: the hub runs it; a refusal leaves the draft and says why
+                    else { val text = draft.trim(); scope.launch { try {
+                        val r = DataClient.runCommand(id, text)
+                        when (r.optString("kind")) {
+                            "edit" -> put(r.optString("text"))
+                            "secret" -> { box = r.optString("name"); put("") }
+                            "intent" -> { notice = "Intent saved"; put("") }
+                            else -> put("")
+                        }
+                    } catch (e: Exception) { notice = e.message ?: "That could not be done." } } }
+                }
             }
         }
     }
@@ -439,6 +463,40 @@ private fun WorkingRow() {
     Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp).testTag("thread.working"), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(12.dp), contentAlignment = Alignment.Center) { Box(Modifier.size((5 + 7 * a).dp).alpha(.45f + .55f * a).background(dok)) }
         Spacer(Modifier.width(8.dp)); DMono("Working…", dcs.onSurfaceVariant, 13)
+    }
+}
+
+@Composable
+private fun BtwCard(b: DataClient.Btw, close: () -> Unit) {
+    Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 12.dp, vertical = 8.dp).testTag("thread.btw")) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DMono("btw · ${b.q}", modifier = Modifier.weight(1f))
+            IconButton(onClick = close, modifier = Modifier.testTag("thread.btw.close")) { Icon(Icons.Default.Close, "Close", tint = dcs.onSurfaceVariant) }
+        }
+        Text(b.a, color = dcs.onSurface, fontSize = 13.sp, modifier = Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState()))
+    }
+}
+
+/** The masked box of a chat: `/secret`, or an agent's request. The value is held here and leaves once, as `secret.set`; it is never a draft. */
+@Composable
+private fun SecretBox(tid: String, name0: String, asked: DataClient.SecretAsk?, shut: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var name by remember(tid, name0) { mutableStateOf(name0) }; var value by remember(tid, name0) { mutableStateOf("") }; var err by remember(tid, name0) { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.primary)).padding(12.dp).testTag("thread.secret"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(if (name0.isEmpty()) "A secret for this chat. Agents use it by name and never see the value." else "Secret: $name0. Agents use it by name and never see the value.", color = dcs.onSurface, fontSize = 13.sp)
+        asked?.purpose?.takeIf { it.isNotEmpty() }?.let { DMono(it) }
+        if (name0.isEmpty()) DField(name, { name = it }, "Name", Modifier.testTag("thread.secret.name"))
+        Box(Modifier.fillMaxWidth().background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp)) {
+            if (value.isEmpty()) Text("Paste the value", color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
+            BasicTextField(value, { value = it }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = 1,
+                visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth().testTag("thread.secret.value"))
+        }
+        if (err.isNotEmpty()) DMono(err, dcs.error, 12)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DBtn("Save", true, name.isNotBlank() && value.isNotBlank(), Modifier.testTag("thread.secret.save")) { scope.launch { try { DataClient.saveSecret(tid, name.trim(), value, asked?.purpose ?: ""); value = ""; shut() } catch (e: Exception) { err = e.message ?: "The hub refused the secret" } } }
+            DBtn("Cancel", false, true, Modifier.testTag("thread.secret.cancel")) { value = ""; shut() }
+            if (asked != null) DBtn("Not needed", false, true) { scope.launch { runCatching { DataClient.dismissSecret(tid, asked.name) }; value = ""; shut() } }
+        }
     }
 }
 

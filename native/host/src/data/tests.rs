@@ -59,10 +59,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -216,6 +216,23 @@ impl crate::api::RpcHandler for PushState {
     assert!(h.store.range(0, usize::MAX).unwrap().iter().any(|l| l.contains("DeviceRegistered") && l.contains("abc123")));
     let r = ask(&mut ws, 2, "device.register", json!({"token":"a b"})).await; assert_eq!(r["ok"], false, "{r}");
     let r = ask(&mut ws, 3, "push.state", json!({})).await; assert_eq!(r["result"], json!({"keys":["k"],"badge":2,"quiet":"off","urgent":false}));
+}
+
+// the composer's own commands (feature commands): never a message, whatever the app
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn the_composers_commands_run_and_are_never_posted() {
+    let (h, port) = up("cmds").await; let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await; assert_eq!(hello["commands"][0]["word"], "/btw"); assert_eq!(hello["commands"][0]["label"], "Ask");
+    let n = h.store.len();
+    for text in ["/btw why", "/give >x", "/secret sk-abc123", "/intent # Goal"] { let r = ask(&mut ws, 1, "message.send", json!({"thread":"t1","text":text})).await; assert_eq!(r["ok"], false, "{text}"); assert!(r["error"].to_string().contains("Update it"), "{r}"); }
+    assert_eq!(h.store.len(), n, "an old app's command reaches neither the log nor the thread");
+    assert_eq!(ask(&mut ws, 2, "composer.run", json!({"thread":"t1","text":"/btw"})).await["error"], crate::session::composer::BTW_EMPTY);
+    assert_eq!(ask(&mut ws, 3, "composer.run", json!({"thread":"t1","text":"hello"})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 4, "composer.run", json!({"thread":"zz","text":"/btw x"})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 5, "composer.run", json!({"thread":"t1","text":"/secret gh"})).await["result"], json!({"kind":"secret","name":"gh"}));
+    assert_eq!(ask(&mut ws, 6, "composer.run", json!({"thread":"t1","text":"/btw why"})).await["result"], json!({"kind":"btw","q":"why"}));
+    let a = loop { let v = next(&mut ws).await; if v["k"] == "btw" { break v } };
+    assert_eq!((a["t"].as_str(), a["thread"].as_str(), a["q"].as_str()), (Some("d"), Some("t1"), Some("why"))); assert!(a["a"].as_str().unwrap().contains("Settings, Writing"), "no model here: it says where the model is chosen");
+    assert_eq!(h.store.len(), n);
 }
 
 // the phone additions (data/ext.rs)

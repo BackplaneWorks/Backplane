@@ -464,6 +464,8 @@ impl Hub {
         let out = self.request_one(c, msg).await;
         // the Files tab and its kin are reads of the hub for a hub-drawn view: the policy applies the reply (Fm.reply, Pdf.got, Mech.after ...) on the view's next request
         let method = msg.get("m").and_then(Value::as_str).unwrap_or("");
+        // the intent written: the reply brings the composer back (pages::apply_reads), on the very next view request
+        if method == "fab.intent" && !c.view_id.is_empty() { if let Some(r) = out.first().filter(|r| r["t"] == "reply") { crate::session::record_reply_bound(c.client, method, r, &c.view_id, &c.target); } }
         if matches!(method, "files.dir" | "pdf.page" | "mech.list" | "mech.render" | "boards.list" | "history.refs") && !c.view_id.is_empty() {
             if let Some(r) = out.first().filter(|r| r["t"] == "reply") { crate::session::record_reply(c.client, method, r); }
         }

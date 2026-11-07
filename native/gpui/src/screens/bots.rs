@@ -347,6 +347,13 @@ pub fn save_persona(this: &mut Backplane, bot: &str, cx: &mut Context<Backplane>
 
 /// What the last webhook request answered, shown on the Hooks tab until the next one: a new hook's secret (once), or a token and where to post.
 static REVEAL: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
+/// What a webhook request answered. The hub's replies for these are flat, like the secret ones: `{t, id, ok, tokenHook, token, tokenUrl}`, no `result`. What it reveals goes to the screen only: never a log line.
+pub fn hook_answer(reply: &Value) -> Value {
+    if reply["result"].is_object() { return reply["result"].clone() }
+    let mut o = reply.as_object().cloned().unwrap_or_default();
+    for k in ["t", "id", "ok"] { o.remove(k); }
+    Value::Object(o)
+}
 /// The answer of `bots.hook` / `bots.hook_token` (the hub hands the whole reply on for these tags).
 pub fn hook_done(this: &mut Backplane, _tag: &str, ok: bool, why: &str, cx: &mut Context<Backplane>) {
     *REVEAL.lock().unwrap() = if ok { serde_json::from_str(why).unwrap_or(Value::Null) } else { json!({"error": if why.is_empty() { "The hub refused it.".to_string() } else { why.to_string() }}) };
@@ -439,6 +446,18 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             Some(frame(inner, bar_h(bot), None))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod hook_tests {
+    use super::hook_answer; use core::prelude::v1::test;
+    use serde_json::json;
+    #[test] fn a_token_reply_is_read_flat_as_the_hub_sends_it() {
+        let a = hook_answer(&json!({"t":"reply","id":7,"ok":true,"tokenHook":"h1","token":"tok","tokenUrl":"http://hub/hook/h1"}));
+        assert_eq!(a, json!({"tokenHook":"h1","token":"tok","tokenUrl":"http://hub/hook/h1"}));
+        assert_eq!(hook_answer(&json!({"t":"reply","id":7,"ok":true,"secret":"s1","secretFor":"h1"}))["secret"], "s1");
+        assert_eq!(hook_answer(&json!({"t":"reply","id":7,"ok":true,"result":{"token":"x"}}))["token"], "x");
     }
 }
 

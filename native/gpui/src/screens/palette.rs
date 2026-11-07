@@ -66,6 +66,9 @@ pub fn items(data: &Value) -> Vec<Item> {
             v.push(Item { label: string(t, "title"), place: ptitle.clone(), kind: "thread", what: Do::Thread(string(t, "id")) });
         }
     }
+    for t in data["conversationHistory"]["jump"].as_array().into_iter().flatten().chain(data["legacy"].as_array().into_iter().flatten()) {
+        v.push(Item { label: string(t, "title"), place: "Conversation history".into(), kind: "thread", what: Do::Thread(string(t, "id")) });
+    }
     for t in data["active"].as_array().into_iter().flatten().chain(data["activeSettled"]["rows"].as_array().into_iter().flatten()) {
         v.push(Item { label: string(t, "title"), place: string(t, "project"), kind: "thread", what: Do::Thread(string(t, "id")) });
     }
@@ -152,6 +155,12 @@ mod tests {
     fn data() -> Value { json!({"thread": {"tools": [{"label": "Pin", "action": "pin"}, {"label": "Delete", "action": "delete"}], "menu": []},
         "projects": [{"id": "h|p1", "title": "Demo", "threads": [{"id": "h|t1", "title": "Board layout review"}, {"id": "h|t2", "title": "Power budget"}], "settled": [{"id": "h|t3", "title": "Old notes"}]}]}) }
     #[test] fn a_prefix_beats_a_word_beats_letters_in_order() { assert_eq!((rank("Board layout", "boa"), rank("Board layout", "lay"), rank("Board layout", "blt"), rank("Board layout", "zz"), rank("x", "")), (3, 2, 1, 0, 1)); }
+    #[test] fn an_old_scratch_chat_is_found_by_its_title() {
+        let d = serde_json::json!({"conversationHistory": {"jump": [{"id": "h|s1", "title": "zebra scratch chat"}]}, "legacy": [{"id": "h|s2", "title": "live chat"}]});
+        let found: Vec<_> = items(&d).into_iter().filter(|i| i.kind == "thread").collect();
+        assert_eq!(found.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["zebra scratch chat", "live chat"]);
+        assert_eq!(found[0].what, Do::Thread("h|s1".into())); assert_eq!(found[0].place, "Conversation history");
+    }
     #[test] fn threads_and_actions_are_found_by_what_is_typed_and_a_delete_is_never_offered() {
         let all = items(&data());
         assert!(all.iter().any(|i| i.what == Do::Thread("h|t3".into())) && all.iter().any(|i| i.what == Do::Action("pin".into(), String::new())) && all.iter().any(|i| i.what == Do::Settings));

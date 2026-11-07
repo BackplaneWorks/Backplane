@@ -92,7 +92,7 @@ Frames, to the client that started the session (`{"t":"voice","thread","ev",…}
 
 The hub decides what to say; a phone shows it. Restart and rollback are not here: they are the guard's, on the Hub screen below.
 - `update.status` → `{current, version, channel, state, note, checked, line, canCheck}`: `line` is the sentence to show, the same one the desktop's Settings shows; `version` is what is available, "" for none; `channel` is `stable` or `beta` (a stored `nightly` reads as `beta`); `canCheck` says whether to offer Check now.
-- `update.check` looks now and answers the same; on a hub that updates itself this also installs what it finds once no turn runs. `app.update` asks for an install and answers the same.
+- `update.check` looks now and answers the same; on a hub that updates itself this also installs what it finds once no turn runs. `app.update` asks for an install and answers the same. `update.now` is the same, and goes ahead while turns run (they continue after the restart): Settings offers it as Update now while an update waits for running turns.
 - `update.channel {channel}` sets it to `stable` or `beta` and answers the same.
 
 ## The Hub screen (`HubRescue.kt`/`.swift`, `HubScreen.kt`, `HubView.swift`)

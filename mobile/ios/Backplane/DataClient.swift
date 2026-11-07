@@ -38,6 +38,13 @@ final class DataClient {
     // hello `notice`, newer from /hub/status: the banner
     private(set) var notice = HubNotice()
     var canSendImages: Bool { features.contains("images") }
+    // the composer's own commands (hello.commands): the hub's table; none of them is ever a message
+    struct Word: Equatable { let word, label, desc: String }
+    private(set) var commands: [Word] = []
+    struct Btw: Equatable { let q: String; var a: String }
+    private(set) var btw: [String: Btw] = [:]
+    struct SecretAsk: Decodable, Equatable { let name: String; let purpose: String }
+    private(set) var secretAsks: [String: [SecretAsk]] = [:]
     var pairingError = "" { didSet { logPair("status", pairingError) } }
     var pairingBusy = false
     private(set) var links: [String] = PairingStore.load()
@@ -216,6 +223,7 @@ final class DataClient {
             guard (o["proto"] as? String)?.hasPrefix("data/") == true else { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
             features = Set((o["features"] as? [String]) ?? [])
             notice = HubRescue.notice(o["notice"] as? [String: Any])
+            commands = ((o["commands"] as? [[String: Any]]) ?? []).map { Word(word: $0["word"] as? String ?? "", label: $0["label"] as? String ?? "", desc: $0["desc"] as? String ?? "") }
             conn = .online; failure = ""; backoff = 0.25; plots.reset()
             Task { await self.synchronise(g) }
         case "reply":
@@ -371,6 +379,8 @@ final class DataClient {
     // MARK: pushes
     private func push(_ o: [String: Any]) {
         guard let k = o["k"] as? String else { return }
+        if k == "btw", let th = o["thread"] as? String, let q = o["q"] as? String, btw[th]?.q == q { btw[th] = Btw(q: q, a: o["a"] as? String ?? ""); return }
+        if k == "secret" { let th = o["thread"] as? String ?? ""; Task { await refreshSecretAsks(th) }; return }
         func decode<T: Decodable>(_ key: String, _ type: T.Type) -> T? {
             guard let v = o[key], let d = try? JSONSerialization.data(withJSONObject: v) else { return nil }
             return try? JSONDecoder().decode(T.self, from: d)
@@ -510,6 +520,35 @@ final class DataClient {
     func putDraft(_ tid: String, _ text: String) {
         drafts[tid] = text.isEmpty ? nil : text
         UserDefaults.standard.set(drafts, forKey: "data.drafts")
+    }
+
+    // MARK: the composer's own commands (feature commands): the hub runs them, the draft stays until it said yes
+    struct CommandResult: Decodable { let kind: String; var q: String?; var name: String?; var text: String? }
+    private struct SecretAsks: Decodable { let asks: [SecretAsk] }
+    /// The command this draft is, by the hub's own rule (session/composer.rs command_is): the word alone, or followed by a space or a new line.
+    func commandOf(_ draft: String) -> Word? {
+        let lead = String(draft.drop(while: { $0.isWhitespace }))
+        return commands.first { w in
+            guard lead.hasPrefix(w.word) else { return false }
+            let r = lead.dropFirst(w.word.count)
+            return r.allSatisfy(\.isWhitespace) || r.first == " " || r.first == "\n"
+        }
+    }
+    /// Runs it; throws the hub's plain words when it cannot. `kind` says what became of it.
+    func runCommand(_ tid: String, _ text: String) async throws -> CommandResult {
+        let r: CommandResult = try await call("composer.run", ["thread": tid, "text": text])
+        if r.kind == "btw" { btw[tid] = Btw(q: r.q ?? "", a: "Thinking…") }
+        return r
+    }
+    func closeBtw(_ tid: String) { btw[tid] = nil }
+    func saveSecret(_ tid: String, name: String, value: String, purpose: String) async throws {
+        let _: DEmpty = try await call("secret.set", ["name": name, "value": value, "purpose": purpose, "thread": tid])
+        await refreshSecretAsks(tid)
+    }
+    func dismissSecret(_ tid: String, name: String) async { let _: DEmpty? = try? await call("secret.dismiss", ["name": name]); await refreshSecretAsks(tid) }
+    func refreshSecretAsks(_ tid: String) async {
+        guard has("commands"), !tid.isEmpty, let r: SecretAsks = try? await call("secret.asks", ["thread": tid]) else { return }
+        secretAsks[tid] = r.asks
     }
 
     // MARK: data/1 additions (features actions, search, models, mentions, bots, notify; the hub's native/host/src/data/ext.rs)

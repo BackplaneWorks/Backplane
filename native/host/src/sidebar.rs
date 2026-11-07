@@ -8,9 +8,21 @@
 //! machines (far), bot and mail-run threads, Scratch, sync-off machines, other locales, search.
 use crate::shelf::{shelf_at, Shelf};
 use crate::signal;
-use crate::state::{Override, State, Thread};
+use crate::state::{Override, State, Thread, Turn};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+
+/// Fuzzy.score > 0: every character of the query is in the title, in order, whatever the case (an empty query matches all). For project names: there are few and they are short.
+pub fn fuzzy_hit(title: &str, q: &str) -> bool {
+    let mut t = title.chars().flat_map(char::to_lowercase);
+    q.chars().flat_map(char::to_lowercase).all(|c| t.any(|x| x == c))
+}
+/// Palette.hit: every word of the query is somewhere in the text, whatever the case. For thread titles: they are many and long, and letters in order would match most of them.
+pub fn word_hit(text: &str, q: &str) -> bool { let t = text.to_lowercase(); q.to_lowercase().split_whitespace().all(|w| t.contains(w)) }
+/// The Scratch project's id: conversations that belong to no project. Nothing starts there any more; its chats stay (Conversation history).
+pub const SCRATCH: &str = "scratch";
+/// How many Scratch chats the palette is told of, newest first.
+const JUMP_MAX: usize = 200;
 
 pub struct Opts<'a> {
     /// the hub's key: ids are qualified `<hub>|<id>`
@@ -23,6 +35,8 @@ pub struct Opts<'a> {
     pub open: &'a HashSet<String>,
     /// the "old-projects" flag: show the folded Older group
     pub older_open: bool,
+    /// the sidebar's search: "" for none (`word_hit` on threads, `fuzzy_hit` on projects)
+    pub query: &'a str,
 }
 
 const QUIET_DAYS: u64 = 259_200;
@@ -266,6 +280,37 @@ pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
 }
 
 impl Plan<'_> {
+    /// The sidebar's search on a thread: its title, or any below it in the tree (the row that shows it).
+    fn tree_hit(&self, id: &str) -> bool {
+        let (mut stack, mut fuel) = (vec![id], 1 + self.st.threads.len());
+        while let Some(x) = stack.pop() {
+            if fuel == 0 { break } fuel -= 1;
+            if self.st.threads.get(x).map_or(false, |t| word_hit(&t.title, self.o.query)) { return true }
+            if let Some(k) = self.kids_by.get(x) { stack.extend(k.iter().copied()); }
+        }
+        false
+    }
+    /// Whether the search finds a thread of this project on any shelf, folded ones too.
+    pub fn has_hit(&self, id: &str) -> bool {
+        self.find(id).map_or(false, |(p, _)| [&p.sh.pinned, &p.sh.active, &p.sh.snoozed, &p.sh.settled, &p.sh.hidden].iter().any(|v| v.iter().any(|t| self.tree_hit(t))))
+    }
+    /// Scratch chats (Legacy.live, Legacy.history): `(rows, history)`. A chat that wants attention always has its row; the rest show when the group is open or a search finds them.
+    /// `history` is the rest as `{id, title}`, newest first: what the group counts and the palette jumps to. No row starts a thread: only what exists is listed.
+    pub fn legacy(&self, open: bool) -> (Vec<Value>, Vec<Value>) {
+        let (st, o) = (self.st, self.o);
+        let mut all: Vec<(&str, &Thread)> = st.threads.iter().filter(|(i, t)| t.project == SCRATCH && !t.deleted && !t.archived && display_parent(st, i).is_empty() && !st.run_hidden(i)).map(|(i, t)| (i.as_str(), t)).collect();
+        all.sort_by(|a, b| b.1.activity.cmp(&a.1.activity).then(a.0.cmp(b.0)));
+        let wants = |id: &str, t: &Thread| { let until = st.snooze_until.get(id).copied().unwrap_or(0); id == o.selected || t.pending > 0 || t.turn == Turn::Running || matches!(shelf_at(t, until, o.now), Shelf::Pinned | Shelf::Active) };
+        let (mut rows, mut history) = (vec![], vec![]);
+        for (id, t) in all {
+            let live = wants(id, t);
+            if !live { if history.len() < JUMP_MAX { history.push(json!({"id": q(o, id), "title": t.title})); } }
+            if !word_hit(&t.title, o.query) || !(live || open) { continue }
+            let r = Row { id, t, depth: 0, expanded: false, children: self.kids_by.get(id).map_or(0, |k| k.len()) };
+            let mut j = thread_json(st, o, &self.ix, &r, 0, 0); j["project"] = json!("Conversation history"); rows.push(j);
+        }
+        (rows, history)
+    }
     /// How many projects are in the Older group (no live thread, quiet for more than QUIET_DAYS): drawn only once it is opened
     pub fn older_count(&self) -> usize { self.older_n }
     pub fn ids(&self) -> Vec<&str> { self.order.iter().map(|(i,_)|self.projects[*i].id).collect() }
@@ -284,6 +329,8 @@ impl Plan<'_> {
     pub fn project(&self,id: &str,choose: &mut dyn FnMut(&str,&[&str])->(Vec<usize>,Value)) -> Option<Value> {
         let (p,quiet)=self.find(id)?; let st=self.st; let o=self.o; let sh=&p.sh;
         let meta=&st.projects[id];
+        // a search that only the project's threads answer shows those threads, wherever they stand; one its name answers shows the project as it is
+        let narrow=!o.query.is_empty() && !fuzzy_hit(&meta.title,o.query);
         let mut live=sh.pinned.clone(); live.extend(sh.active.iter().copied());
         let mut arch: Vec<&str>=sh.hidden.iter().copied().filter(|id|st.threads[*id].archived && !st.threads[*id].deleted).collect();
         arch.sort_by(|a,b|rank(&st.threads[*b]).cmp(&rank(&st.threads[*a])));
@@ -292,7 +339,9 @@ impl Plan<'_> {
             "archOpen":o.open.contains(&format!("arch:{id}")),"archivedCount":arch.len()});
         for (kind,page,roots,enabled) in [("threads","threadsPage",&live,true),("snoozed","snoozedPage",&sh.snoozed,true),
             ("settled","settledPage",&sh.settled,o.open.contains(id)),("archived","archivedPage",&arch,o.open.contains(&format!("arch:{id}")))] {
-            let rows=if enabled { tree_rows(st,roots,o.selected,&self.kids_by) }else{vec![]};
+            let mut rows=if enabled || narrow { tree_rows(st,roots,o.selected,&self.kids_by) }else{vec![]};
+            if narrow { rows.retain(|r|r.id==o.selected || self.tree_hit(r.id)); }
+            if narrow && !rows.is_empty() { match kind { "settled"=>project["open"]=json!(true), "archived"=>project["archOpen"]=json!(true), _=>{} } }
             let ids: Vec<&str>=rows.iter().map(|r|r.id).collect();
             let (indices,pager)=choose(kind,&ids);
             let values: Vec<Value>=indices.into_iter().filter_map(|i|rows.get(i)).map(|r| {
@@ -345,7 +394,7 @@ impl Plan<'_> {
 pub fn order_of(st: &State, now: u64, kind: &str, id: &str) -> Option<(String, Vec<String>)> {
     if kind == "project" {
         let open: HashSet<String> = HashSet::new();
-        let o = Opts { hub: "", now, selected: "", open: &open, older_open: true };
+        let o = Opts { hub: "", now, selected: "", open: &open, older_open: true, query: "" };
         let p = plan(st, &o);
         return Some((String::new(), p.ids().into_iter().map(String::from).collect()));
     }
@@ -371,7 +420,7 @@ mod tests {
     fn fold(lines: &[&str]) -> State { let mut s = State::new(); for l in lines { s.apply_line(l); } s }
     const PC: &str = r#"{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":10}"#;
     fn tc(id: &str, at: u64) -> String { format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":{at}}}"#) }
-    fn opts<'a>(open: &'a HashSet<String>, now: u64) -> Opts<'a> { Opts { hub: "h", now, selected: "", open, older_open: false } }
+    fn opts<'a>(open: &'a HashSet<String>, now: u64) -> Opts<'a> { Opts { hub: "h", now, selected: "", open, older_open: false, query: "" } }
 
     // law kids_bot_child_shown: a bot's delegated child is never hidden under the bot
     #[test] fn kids_bot_child_shown() {
@@ -427,7 +476,7 @@ mod bounded_tests {
         assert_eq!(st.threads.len(),12_000);
         for older_open in [false,true] {
             let mut open=HashSet::new(); for i in 0..30 { open.insert(format!("p{i:02}")); open.insert(format!("arch:p{i:02}")); }
-            let opts=Opts{hub:"h",now,selected:"",open:&open,older_open};
+            let opts=Opts{hub:"h",now,selected:"",open:&open,older_open,query:""};
             let full=projects(&st,&opts); let plan=plan(&st,&opts); let ids=plan.ids();
             assert_eq!(ids.len(),if older_open{30}else{20});
             assert_eq!(ids,full.iter().map(|p|p["id"].as_str().unwrap().strip_prefix("h|").unwrap()).collect::<Vec<_>>());

@@ -37,6 +37,7 @@ pub mod plot;
 pub mod projects;
 pub mod plotview;
 pub mod select;
+pub mod sidebox;
 pub mod strip;
 pub mod term;
 pub mod settings;

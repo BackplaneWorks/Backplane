@@ -27,7 +27,7 @@ use script::{Pending,Step};
 use hub::{Command,Event};
 actions!(backplane,[Send,ClosePopup,CopySelection,ToggleSidebarKey,FocusSearchKey,OpenPaletteKey]);
 pub struct Backplane { pub pair:Option<screens::pair::Ui>, pub paired:bool,
-    pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String,
+    pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String, note:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, started:Instant, usable:bool,
     first_frame:bool, script_done:bool, pub timeline:ListState, pub cats:art::Cats, pub links_sent:bool, pub links_last:String, pub sidebar_open:bool, pub models_pending:bool, pub local:local::Local, pub project_page:Option<String>, pub arm_new:Option<(Instant,std::collections::HashSet<String>)>, pub echo_seq:u64, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize, screens:screens::Screens,
@@ -73,7 +73,7 @@ impl Backplane {
         }).detach();
         cx.subscribe(&input,|this,_,event:&screens::composer::ComposerEvent,cx|this.attach_event(event,cx)).detach();
         cx.on_app_quit(|this,_|{this.screens.drafts.flush();async{}}).detach();
-        Self{pair,paired,input,data:Value::Null,status:"Connecting…".into(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
+        Self{pair,paired,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),last_layout:String::new(),wake_at:None,reconnected:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),steps,pending:None,seq:0,want_focus:false,script_total,screens:screens::Screens::new(cx,target,drafts_path,saved)}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         let timed=perf::on().then(||(event.name(),Instant::now()));
@@ -113,6 +113,9 @@ impl Backplane {
             Event::Error(e)=>{self.error=e;},
             Event::Unpaired=>screens::pair::revoked(self,cx),
             Event::Refused(e)=>{self.error=e;},
+            Event::Note(n)=>{self.note=n;},
+            // the hub moved the composer on: a command left it, or the conversation's draft came back after an intent was saved. Another thread's is kept for when it opens
+            Event::Compose(th,text)=>{if th==self.selected {self.input.update(cx,|input,cx|input.set(text.clone(),cx));}if text.is_empty(){self.drafts.remove(&th);}else{self.drafts.insert(th.clone(),text.clone());}self.screens.drafts.set(&th,&text);},
         }
         if let Some((name,t0))=timed {if name=="picture" {if let Some(t)=&self.timing {perf::picture(t,self.apply_ms);}}perf::event(name,t0);}
         cx.notify();
@@ -170,7 +173,7 @@ impl Backplane {
         let text=self.input.read(cx).content.to_string();
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());
-        if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {if !text.trim().is_empty(){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();}cx.notify();
+        if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {if !text.trim().is_empty()&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();self.note.clear();}cx.notify();
     }
     /// The message is drawn at the end of the open thread the moment it is sent; the hub's picture, which has the real entry, replaces it (history::merge
     /// keeps the rows up to the first one the hub also has, so an echo past it is dropped, not doubled).

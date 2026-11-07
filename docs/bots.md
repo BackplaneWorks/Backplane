@@ -406,7 +406,9 @@ project (`""` all), tool patterns (names, or a prefix ending in `*`,
 separated by commas or spaces), whether it is enforced, the word that
 unlocks it, and whether it is on. The person edits them with `rules.set
 {rule}` (with an `id` it changes that rule) and `rules.drop {id}`; the
-reply carries a validation error (`bot` and `project` may be names).
+reply carries a validation error (`bot` and `project` may be names). The
+desktop's Settings, Rules and task board, lists them with Turn off/on and
+Remove, and adds one from its words.
 
 Every turn of every thread starts with the `<rules>` block of the rules
 that apply to it (`Rules.agent`, outermost in `Bots.turn`, before the
@@ -445,7 +447,8 @@ in every thread have:
   `skipped`; importing the same list again adds nothing.
 
 The person edits the board with `board.set {item}` (with an `id` it
-updates) and `board.drop {id}`. The items are settings, local to this
+updates) and `board.drop {id}`. The same Settings page lists the open items with
+Done and Remove, and adds one from its title. The items are settings, local to this
 machine (not synced to others).
 ## Mentions in threads
 

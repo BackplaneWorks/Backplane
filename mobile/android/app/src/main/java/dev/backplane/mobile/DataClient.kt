@@ -32,6 +32,13 @@ object DataClient {
     var listsLoaded by mutableStateOf(false); private set
     var features by mutableStateOf<Set<String>>(emptySet()); private set
     var notice by mutableStateOf(HubNotice()); private set   // hello `notice`, newer from /hub/status: the banner
+    // the composer's own commands (hello.commands): the hub's table; none of them is ever a message
+    data class Word(val word: String, val label: String, val desc: String)
+    var commands by mutableStateOf<List<Word>>(emptyList()); private set
+    data class Btw(val q: String, val a: String)
+    var btw by mutableStateOf<Map<String, Btw>>(emptyMap()); private set
+    data class SecretAsk(val name: String, val purpose: String)
+    var secretAsks by mutableStateOf<Map<String, List<SecretAsk>>>(emptyMap()); private set
     var link by mutableStateOf<String?>(null); private set
     var pairingError by mutableStateOf(""); var pairingBusy by mutableStateOf(false)
     /** a pairing link that came from outside the app: nothing happens until the person says so */
@@ -135,6 +142,7 @@ object DataClient {
                 if (!o.optString("proto").startsWith("data/")) { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
                 features = o.optJSONArray("features")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
                 notice = HubRescue.notice(o.optJSONObject("notice"))
+                commands = o.optJSONArray("commands")?.let { a -> (0 until a.length()).map { val w = a.getJSONObject(it); Word(w.optString("word"), w.optString("label"), w.optString("desc")) } } ?: emptyList()
                 conn = Conn.ONLINE; failure = ""; backoff = 250; plots.reset()
                 scope.launch { synchronise(g) }
             }
@@ -248,6 +256,8 @@ object DataClient {
     private fun push(o: JSONObject) {
         when (o.optString("k")) {
             "thread" -> o.optJSONObject("thread")?.let { upsert(parseThread(it)) }
+            "btw" -> { val tid = o.optString("thread"); if (btw[tid]?.q == o.optString("q")) btw = btw + (tid to Btw(o.optString("q"), o.optString("a"))) }
+            "secret" -> scope.launch { refreshSecretAsks(o.optString("thread")) }
             "thread.removed" -> { val id = o.optString("id"); threads = threads.filter { it.id != id }; entries = entries - id; save() }
             "project.removed" -> { val id = o.optString("id"); projects = projects.filter { it.id != id }; save() }
             "project" -> o.optJSONObject("project")?.let { val p = parseProject(it); projects = (projects.filter { x -> x.id != p.id } + p).sortedByDescending { x -> x.updatedAt }; save() }
@@ -342,6 +352,26 @@ object DataClient {
     // ---- the Hub screen: plain HTTP from the pairing alone, whatever the socket is doing
     fun hubHttp(): HubHttp? { val l = link ?: return null; return HubHttp(Pairing.http(l, "", token = false) ?: return null, Pairing.token(l)) }
     fun heardNotice(n: HubNotice) { notice = n }
+    // ---- the composer's own commands (feature commands): the hub runs them, the draft stays until it said yes
+    /** The command this draft is, by the hub's own rule (session/composer.rs command_is): the word alone, or followed by a space or a new line. */
+    fun commandOf(draft: String): Word? {
+        val lead = draft.trimStart()
+        return commands.firstOrNull { w -> lead.startsWith(w.word) && lead.substring(w.word.length).let { r -> r.isBlank() || r[0] == ' ' || r[0] == '\n' } }
+    }
+    /** Runs it; throws the hub's plain words when it cannot. The answer's `kind` is what became of it. */
+    suspend fun runCommand(tid: String, text: String): JSONObject {
+        val r = call("composer.run", JSONObject().put("thread", tid).put("text", text))
+        if (r.optString("kind") == "btw") btw = btw + (tid to Btw(r.optString("q"), "Thinking…"))
+        return r
+    }
+    fun closeBtw(tid: String) { btw = btw - tid }
+    suspend fun saveSecret(tid: String, name: String, value: String, purpose: String) { call("secret.set", JSONObject().put("name", name).put("value", value).put("purpose", purpose).put("thread", tid)); refreshSecretAsks(tid) }
+    suspend fun dismissSecret(tid: String, name: String) { call("secret.dismiss", JSONObject().put("name", name)); refreshSecretAsks(tid) }
+    suspend fun refreshSecretAsks(tid: String) {
+        if (!has("commands") || tid.isEmpty()) return
+        val a = runCatching { call("secret.asks", JSONObject().put("thread", tid)).optJSONArray("asks") }.getOrNull() ?: return
+        secretAsks = secretAsks + (tid to (0 until a.length()).map { val x = a.getJSONObject(it); SecretAsk(x.optString("name"), x.optString("purpose")) })
+    }
 
     // ---- the hub's additions to data/1 (features actions, search, models, mentions, bots, notify)
     fun has(f: String) = f in features

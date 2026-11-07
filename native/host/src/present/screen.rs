@@ -35,11 +35,7 @@ fn mine(p: &Value) -> bool {
     p["nativeSidebar"]==json!(1) && match text(&p["target"],"kind") { "recent"=>id.is_empty(), "thread"=>!id.is_empty() && !id.contains('~'), "bot"=>p["botPage"].is_object(), "room"=>p["roomPage"].is_object(), _=>false }
 }
 fn setting<'a>(st: &'a State,k: &str) -> &'a str { st.settings.get(k).map(String::as_str).unwrap_or("") }
-/// Fuzzy.score > 0: every character of the query is in the title, in order, whatever the case (an empty query matches all)
-pub fn fuzzy_hit(title: &str,q: &str) -> bool {
-    let mut t=title.chars().flat_map(char::to_lowercase);
-    q.chars().flat_map(char::to_lowercase).all(|c| t.any(|x| x==c))
-}
+pub use crate::sidebar::fuzzy_hit;
 fn flag(s: &Value,k: &str) -> bool { s["open"][k].as_bool().unwrap_or(false) }
 fn refused<T>(reason: &'static str) -> Option<T> { super::refusal::report(reason); None }
 
@@ -73,10 +69,13 @@ fn rooms(st: &State, hub: &str) -> Vec<Value> {
 fn find_go(st: &State,p: &Value) -> Option<Value> {
     let q=text(&p["session"]["drafts"],"@f.pq").trim().to_string();
     let open: HashSet<String>=HashSet::new();
-    let opts=sidebar::Opts { hub:text(p,"hub"),now:p["now"].as_u64().unwrap_or(0)/1000,selected:"",open:&open,older_open:true };
+    let opts=sidebar::Opts { hub:text(p,"hub"),now:p["now"].as_u64().unwrap_or(0)/1000,selected:"",open:&open,older_open:true,query:&q };
     let plan=sidebar::plan(st,&opts);
-    let first=plan.ids().into_iter().find(|id| q.is_empty() || st.projects.get(*id).map_or(false,|pr|fuzzy_hit(&pr.title,&q)))?.to_string();
-    let top=st.threads.iter().filter(|(_,t)|t.project==first && !t.archived && !t.deleted).max_by_key(|(id,t)|(t.pinned,t.activity,id.as_str().to_string()))?.0.clone();
+    let named=|id:&str| q.is_empty() || st.projects.get(id).map_or(false,|pr|fuzzy_hit(&pr.title,&q));
+    // the first project the search shows: its top thread, its top match when only its threads answered; failing those, a chat of the Conversation history
+    let first=plan.ids().into_iter().find(|id| named(id) || plan.has_hit(id)).map(str::to_string);
+    let top=first.and_then(|f| st.threads.iter().filter(|(_,t)|t.project==f && !t.archived && !t.deleted && (named(&f) || sidebar::word_hit(&t.title,&q))).max_by_key(|(id,t)|(t.pinned,t.activity,id.as_str().to_string())).map(|x|x.0.clone()))
+        .or_else(|| plan.legacy(true).0.first().and_then(|r|r["id"].as_str()).map(|i|i.rsplit('|').next().unwrap_or("").to_string()))?;
     let mut c=p.clone(); c["action"]=json!("select"); c["value"]=json!(format!("{}|{top}",text(p,"hub")));
     c["session"]["drafts"]["@f.pq"]=json!("");
     Some(c)
@@ -126,7 +125,7 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         "flag" | "side-older" | "side-settled" => {
             let raw=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
             let key=match action { "side-older"=>"old-projects", "side-settled"=>"active-settled", _=>raw };
-            let known=key=="old-projects" || key=="active-settled" || st.projects.contains_key(key.strip_prefix("arch:").unwrap_or(key));
+            let known=key=="old-projects" || key=="active-settled" || key=="conversation-history" || st.projects.contains_key(key.strip_prefix("arch:").unwrap_or(key));
             if !known { return refused("action.sidebar-flag") }
             if !session["open"].is_object() { session["open"]=json!({}); }
             let was=flag(&session,key); session["open"][key]=json!(!was);
@@ -275,16 +274,16 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
     if action=="native-sidebar-page" { session["drafts"]["@menu"]=json!(""); session["drafts"]["@del"]=json!(""); }
     let open: HashSet<String>=session["open"].as_object().into_iter().flatten().filter(|(_,v)|v.as_bool()==Some(true)).map(|(k,_)|k.clone()).collect();
     // a search unfolds the older projects too (Side.unfolded)
-    let opts=sidebar::Opts { hub,now:p["now"].as_u64().unwrap_or(0)/1000,selected:thread,open:&open,older_open:flag(&session,"old-projects") || !query.is_empty() };
+    let opts=sidebar::Opts { hub,now:p["now"].as_u64().unwrap_or(0)/1000,selected:thread,open:&open,older_open:flag(&session,"old-projects") || !query.is_empty(),query:&query };
     let plan=sidebar::plan(st,&opts);
     let selected_project=st.threads.get(thread).map(|t|t.project.as_str()).unwrap_or("");
-    // Find.rows: only the projects whose name fuzzy-matches; the one holding the open thread stays (Side.cur.held)
-    let ids: Vec<&str>=plan.ids().into_iter().filter(|id| query.is_empty() || *id==selected_project || st.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query))).collect();
+    // Find.rows: the projects whose name fuzzy-matches, and those holding a thread the search finds; the one holding the open thread stays (Side.cur.held)
+    let ids: Vec<&str>=plan.ids().into_iter().filter(|id| query.is_empty() || *id==selected_project || st.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || plan.has_hit(id)).collect();
     let project_limit=ns.project_limit();
     // For now an explicitly opened thread in a folded Older project is unported. The recent list
     // already offers only visible projects; forcing an excluded project needs the filter exception port.
     // (a removed project's thread still draws, with no row for it)
-    if mode!="active" && !selected_project.is_empty() && !ids.contains(&selected_project) && st.projects.get(selected_project).map_or(false,|p|!p.removed) { return refused("sidebar.selected-project-hidden") }
+    if mode!="active" && !selected_project.is_empty() && selected_project!=sidebar::SCRATCH && !ids.contains(&selected_project) && st.projects.get(selected_project).map_or(false,|p|!p.removed) { return refused("sidebar.selected-project-hidden") }
     let ids: Vec<&str>=if mode=="active" { vec![] } else { ids };
     let (mut indices,projects_page)=ns.slice_ids(&ids,"projects","",project_limit,selected_project);
     indices.sort_unstable(); // Mob.native.keep_projects keeps source order, including the selected exception.
@@ -318,10 +317,16 @@ pub fn recent(st: &State,p: &Value) -> Option<Value> {
         shown["active"]=json!(live);
         shown["activeSettled"]=json!({"count":faded.len(),"open":open,"rows":if open { faded } else { vec![] }});
     }
+    // Conversation history: the Scratch chats. 0.14 stopped new ones and kept these; a search opens the group by itself, and the palette jumps to any of them
+    { let open=flag(&session,"conversation-history") || !query.is_empty(); let (rows,history)=plan.legacy(open);
+      shown["legacy"]=json!(rows);
+      // the group's row stays while any chat is in it, the open one too (it has its row under the group, never under a project)
+      let live=rows.iter().filter(|r| !history.iter().any(|h| h["id"]==r["id"])).count();
+      if !history.is_empty() || live>0 { shown["conversationHistory"]=json!({"count":history.len()+live,"open":open,"toggle":query.is_empty(),"jump":history}); } }
     // the Older group: a row that opens or shuts it (a search opens it by itself)
     if mode!="active" && query.is_empty() && plan.older_count()>0 { shown["olderProjects"]=json!({"count":plan.older_count(),"open":flag(&session,"old-projects")}); }
     // the query in force, said back once the box has been used (the client takes it when it is not what it sent: Enter clears it)
-    if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search projects"}); }
+    if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search projects and threads"}); }
     { let f=picker::folders(&session["drafts"],&std::env::var("HOME").unwrap_or_default(),&st.projects.values().filter(|p|!p.removed).map(|p|p.root.as_str()).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
     if !thread.is_empty() { shown["stats"]=super::keys::stats(st,thread); } // the Context panel's rows (beside the thread: its object is the helper's, key for key)
     if bot_page.is_object() {
@@ -456,6 +461,8 @@ mod state_tests {
         event(&mut st,json!({"$":"BotDeleted","id":"b","at":6})); event(&mut st,json!({"$":"RoomDeleted","id":"r","at":6}));
         let v=recent(&st,&params()).unwrap(); assert_eq!(v["shown"]["bots"],json!([])); assert_eq!(v["shown"]["rooms"],json!([]));
     }
+    /// A lean state from log lines (JSON text).
+    fn state(lines: &[&str]) -> State { let mut st=State::new(); st.lean=true; for l in lines { event(&mut st,serde_json::from_str(l).unwrap()); } st }
     fn two_projects() -> State {
         let mut st=State::new(); st.lean=true;
         for e in [json!({"$":"ProjectCreated","id":"pa","title":"Alpha board","root":"/a","at":1}), json!({"$":"ProjectCreated","id":"pb","title":"Beta","root":"/b","at":2}),
@@ -470,6 +477,35 @@ mod state_tests {
         p["session"]["drafts"]=json!({"@f.pq":"zzz"}); assert!(names(&recent(&st,&p).unwrap()).is_empty());
         p["session"]["drafts"]=json!({"@f.pq":""}); assert_eq!(names(&recent(&st,&p).unwrap()).len(),2);
         assert!(fuzzy_hit("Alpha board","ALB") && !fuzzy_hit("Beta","ab"));
+    }
+    #[test] fn the_search_finds_threads_by_title_and_narrows_a_project_to_them() {
+        let st=state(&[r#"{"$":"ProjectCreated","id":"pa","title":"Alpha","root":"/a","at":1}"#,r#"{"$":"ProjectCreated","id":"pb","title":"Beta","root":"/b","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"ta","project":"pa","title":"Route the rail","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}"#,
+            r#"{"$":"ThreadCreated","id":"tb","project":"pa","title":"Other work","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":3}"#,
+            r#"{"$":"ThreadCreated","id":"tc","project":"pb","title":"Quiet one","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":4}"#]);
+        let titles=|v:&Value| v["shown"]["projects"].as_array().unwrap().iter().flat_map(|p|p["threads"].as_array().unwrap().iter().map(|t|t["title"].as_str().unwrap().to_string()).collect::<Vec<_>>()).collect::<Vec<_>>();
+        let mut p=params(); p["session"]["drafts"]=json!({"@f.pq":"route"});
+        let v=recent(&st,&p).unwrap(); assert_eq!(names(&v),["Alpha"],"a thread's title finds its project with no thread open"); assert_eq!(titles(&v),["Route the rail"],"and only that thread shows");
+        p["session"]["drafts"]=json!({"@f.pq":"alpha"}); assert_eq!(titles(&recent(&st,&p).unwrap()).len(),2,"a project found by its name shows as it is");
+        p["session"]["drafts"]=json!({"@f.pq":"nothing like it"}); assert!(names(&recent(&st,&p).unwrap()).is_empty());
+        let mut o=params(); o["session"]["drafts"]=json!({"@f.pq":"route"}); o["action"]=json!("proj-go"); assert_eq!(recent(&st,&o).unwrap()["nextTarget"]["id"],"ta","Enter opens the thread found");
+    }
+    #[test] fn scratch_chats_are_conversation_history_found_by_search_and_never_a_place_to_start() {
+        let chat=|id:&str,title:&str,at:u32| format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"scratch","title":"{title}","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":{at}}}"#);
+        let settled=r#"{"$":"ThreadSettled","id":"s1","manual":true,"at":9}"#;
+        let (a,b)=(chat("s1","zebra scratch chat",2),chat("s2","live chat",3));
+        let st=state(&[r#"{"$":"ProjectCreated","id":"scratch","title":"Scratch","root":"/s","at":1}"#,&a,&b,settled]);
+        let v=recent(&st,&params()).unwrap();
+        assert!(names(&v).is_empty(),"no Scratch project among the projects: nothing to start a thread in");
+        let rows=|v:&Value| v["shown"]["legacy"].as_array().unwrap().iter().map(|t|t["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(rows(&v),["live chat"],"a chat still going keeps its row"); assert_eq!(v["shown"]["conversationHistory"]["count"],2,"both chats: the live one too"); assert_eq!(v["shown"]["conversationHistory"]["jump"][0]["title"],"zebra scratch chat");
+        let mut p=params(); p["session"]["drafts"]=json!({"@f.pq":"zebra"}); assert_eq!(rows(&recent(&st,&p).unwrap()),["zebra scratch chat"],"a search opens the group by itself and filters it");
+        let mut p=params(); p["session"]["open"]=json!({"conversation-history":true}); assert_eq!(rows(&recent(&st,&p).unwrap()).len(),2,"the toggle shows the rest");
+        let mut p=params(); p["action"]=json!("flag"); p["value"]=json!("conversation-history"); assert_eq!(recent(&st,&p).unwrap()["session"]["open"]["conversation-history"],true);
+        let mut o=params(); o["session"]["drafts"]=json!({"@f.pq":"zebra"}); o["action"]=json!("proj-go"); assert_eq!(recent(&st,&o).unwrap()["nextTarget"]["id"],"s1","Enter opens the chat found");
+        let only=state(&[r#"{"$":"ProjectCreated","id":"scratch","title":"Scratch","root":"/s","at":1}"#,&a,settled]);
+        let mut p=params(); p["target"]=json!({"kind":"thread","id":"s1"}); p["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderN":0});
+        if let Some(v)=recent(&only,&p) { assert_eq!(v["shown"]["conversationHistory"]["count"],1,"the open chat keeps the group's row: {}",v["shown"]); assert_eq!(rows(&v),["zebra scratch chat"]); }
     }
     #[test] fn typing_in_the_search_sets_the_query_and_enter_opens_the_first_projects_top_thread() {
         let st=two_projects();
@@ -567,8 +603,8 @@ mod thread_binding_tests {
         for lean in [false,true] {
             let (st,p,expected)=fixture(lean);
             let out=recent(&st,&p).expect("plain thread root is supported");
-            // the Allowance chip's text (keys.rs `allowance`) and the picker's other agents (`pickerAgents`) are Backplane's own: the recorded helper reply has no such keys
-            let bare=|mut t:Value|{ for k in ["allowance","pickerAgents"] { t.as_object_mut().unwrap().remove(k); } t };
+            // the Allowance chip's text (keys.rs `allowance`), the picker's other agents (`pickerAgents`) and the masked box and the composer's commands (`secretBox`, `commands`; `btw` is the helper's own key) are Backplane's own: the recorded helper reply has no such keys
+            let bare=|mut t:Value|{ for k in ["allowance","pickerAgents","secretBox","commands"] { t.as_object_mut().unwrap().remove(k); } t };
             assert_eq!(bare(out["shown"]["thread"].clone()),expected); assert_eq!(bare(out["overlay"]["j"]["thread"].clone()),expected);
             assert_eq!(out["session"]["sel"],p["target"]["id"]); assert_eq!(out["window"],p["window"]);
             assert_eq!(out["shown"]["nativeSidebar"],1);

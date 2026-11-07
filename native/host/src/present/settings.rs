@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("usage", "Usage"), ("setup", "Setup"), ("about", "About"), ("privacy", "Privacy")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("about", "About"), ("privacy", "Privacy")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -53,7 +53,11 @@ pub fn update_line(status: &str) -> (String, bool) {
 }
 fn update_row(version: &str, status: &str) -> Value {
     let (line, check) = update_line(status);
-    row(&format!("Backplane {version}"), &line, if check { vec![btn("Check now", "update-check", "", false)] } else { vec![] })
+    // waiting on running turns: Update now goes ahead anyway (update.now; the turns continue after the restart)
+    let waiting = serde_json::from_str::<Value>(status).map_or(false, |v| v["state"] == "waiting");
+    let mut b = if check { vec![btn("Check now", "update-check", "", false)] } else { vec![] };
+    if waiting { b.push(btn("Update now", "update-now", "", false)); }
+    row(&format!("Backplane {version}"), &line, b)
 }
 
 fn appearance(st: &State) -> Vec<Value> {
@@ -194,6 +198,38 @@ fn zone_of(st: &State) -> (String, &'static str) {
 fn zone_ok(z: &str) -> bool {
     !z.is_empty() && z.len() <= 64 && z.chars().all(|c| c.is_ascii_alphanumeric() || "/_-+".contains(c)) && (z.contains('/') || matches!(z, "UTC" | "GMT" | "Etc"))
 }
+/// The records of a settings family (`rule.<id>`, `board.<id>`), oldest first: the agents' side reads the same ones (agents/rules.rs, bots/ledger.rs).
+fn family(st: &State, pre: &str) -> Vec<Value> {
+    let mut v: Vec<Value> = st.settings.iter().filter(|(k, x)| k.starts_with(pre) && !x.is_empty()).filter_map(|(k, x)| {
+        let mut o: Value = serde_json::from_str(x).ok()?; if !o.is_object() { return None }
+        if s(&o, "id").is_empty() { o["id"] = json!(&k[pre.len()..]); } Some(o) }).collect();
+    v.sort_by(|a, b| (a["at"].as_u64().unwrap_or(0), s(a, "id")).cmp(&(b["at"].as_u64().unwrap_or(0), s(b, "id")))); v
+}
+/// Rules and task board: what the person wants always or never done (`rules.set`, `rules.drop`), and the shared list of what is to be done (`board.set`, `board.drop`).
+fn rules(st: &State, session: &Value) -> Vec<Value> {
+    let mut v = vec![row("Standing rules", "Every agent's turn starts with the rules that apply to it. An enforced rule with tools is also checked: those tools are refused unless your latest message says its word.", vec![])];
+    for r in family(st, "rule.") {
+        let on = r["on"].as_bool().unwrap_or(true); let (tool, word) = (s(&r, "tool"), s(&r, "word"));
+        let mut note = vec![if on { "On" } else { "Off" }.to_string()];
+        if !tool.is_empty() { note.push(if r["enforce"] == true { if word.is_empty() { format!("refuses {tool}") } else { format!("refuses {tool} unless you say \"{word}\"") } } else { format!("when using {tool}") }); }
+        v.push(row(s(&r, "text"), &note.join(" · "), vec![btn(if on { "Turn off" } else { "Turn on" }, "rule-on", &format!("{}={}", s(&r, "id"), !on), false), btn("Remove", "rule-drop", s(&r, "id"), false)]));
+    }
+    v.push(row_f("New rule", "Its words, as you would say them to an agent.", vec![field("rtext", "e.g. Never push to main", draft(session, "@f.rtext"))], vec![btn("Add rule", "rule-add", "", true)]));
+    v.push(row("Task board", "One shared list: agents in every thread read and update it.", vec![]));
+    let mut items = family(st, "board.");
+    let rank = |x: &str| match x { "doing" => 0, "blocked" => 1, "todo" => 2, "done" => 3, _ => 4 };
+    items.sort_by_key(|i| rank(s(i, "status")));
+    for i in items.iter().filter(|i| rank(s(i, "status")) < 4) {
+        let st_ = s(i, "status"); let due = s(i, "due");
+        let note = if due.is_empty() { st_.to_string() } else { format!("{st_} · due {due}") };
+        let mut b = vec![]; if st_ != "done" { b.push(btn("Done", "board-done", s(i, "id"), false)); }
+        b.push(btn("Remove", "board-drop", s(i, "id"), false));
+        v.push(row(s(i, "title"), &note, b));
+    }
+    v.push(row_f("New item", "What is to be done.", vec![field("btitle", "e.g. Order the boards", draft(session, "@f.btitle"))], vec![btn("Add item", "board-add", "", true)]));
+    v
+}
+
 fn timezone(st: &State, session: &Value) -> Vec<Value> {
     let (zone, src) = zone_of(st);
     let source = match src { "set" => "set", "phone" => "from your phone", "machine" => "this machine", _ => "nothing reported yet" };
@@ -355,7 +391,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -381,6 +417,17 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
         "update-check" => { send(session, hub, "update.check", json!({}), &mut cmds, &mut rid); json!({}) }
+        "update-now" => { send(session, hub, "update.now", json!({}), &mut cmds, &mut rid); json!({}) }
+        "rule-add" | "board-add" => {
+            let (f, m, body) = if action == "rule-add" { ("@f.rtext", "rules.set", "rule") } else { ("@f.btitle", "board.set", "item") };
+            let text = draft(session, f).trim().to_string(); if text.is_empty() { return Some(Out { patch: json!({}), cmds }) }
+            let key = if body == "rule" { "text" } else { "title" };
+            send(session, hub, m, json!({body: {key: text}}), &mut cmds, &mut rid); json!({"drafts": {f: ""}})
+        }
+        "rule-on" => { let (id, on) = value.split_once('=')?; send(session, hub, "rules.set", json!({"rule": {"id": id, "on": on == "true"}}), &mut cmds, &mut rid); json!({}) }
+        "rule-drop" => { send(session, hub, "rules.drop", json!({"id": value}), &mut cmds, &mut rid); json!({}) }
+        "board-done" => { send(session, hub, "board.set", json!({"item": {"id": value, "status": "done"}}), &mut cmds, &mut rid); json!({}) }
+        "board-drop" => { send(session, hub, "board.drop", json!({"id": value}), &mut cmds, &mut rid); json!({}) }
         // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
         "device-invite" | "device-revoke" | "device-uninvite" => {
             let Some(routes) = crate::net::start::routes() else { return Some(Out { patch: json!({"drafts": {"@invite": json!({"error": "no_registry"}).to_string()}}), cmds }) };
@@ -415,7 +462,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }
@@ -459,7 +506,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "Usage", "Setup", "About", "Privacy"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "About", "Privacy"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn devices_lists_what_the_registry_says_and_offers_revoke_on_the_live_ones() {
@@ -617,12 +664,29 @@ mod tests {
         let r = |s: &str| update_row("0.15.0", s);
         assert_eq!(r("")["note"], "Updated by its package."); assert_eq!(r(r#"{"state":"package"}"#)["buttons"], json!([]), "nothing to press");
         assert_eq!(r(r#"{"state":"idle"}"#)["note"], "Up to date, checked hourly."); assert_eq!(r(r#"{"state":"idle"}"#)["buttons"][0]["action"], "update-check");
+        assert_eq!(r(r#"{"state":"waiting","available":"v9"}"#)["buttons"][0]["action"], "update-now", "waiting on turns: Update now goes ahead"); assert!(r(r#"{"state":"idle"}"#)["buttons"].as_array().unwrap().iter().all(|b| b["action"] != "update-now"));
         assert_eq!(r(r#"{"state":"idle","note":"Updated to v0.16.0."}"#)["note"], "Updated to v0.16.0.");
         assert_eq!(r(r#"{"state":"waiting","available":"v0.16.0"}"#)["note"], "v0.16.0 installs when running turns finish.");
         assert_eq!(r(r#"{"state":"failed","note":"v0.16.0 failed its health check, so this build stayed."}"#)["buttons"][0]["label"], "Check now");
         assert_eq!(r(r#"{"state":"installing","available":"v0.16.0"}"#)["buttons"], json!([]), "nothing to press while it goes"); assert_eq!(r("not json")["note"], "Updated by its package.");
     }
     #[test] fn a_stored_nightly_lights_beta() { assert_eq!((update_channel("nightly"), update_channel("beta"), update_channel("stable"), update_channel("x")), ("beta", "beta", "stable", "stable")); }
+    #[test] fn rules_and_the_board_are_listed_and_edited_from_settings() {
+        let mut st = State::new();
+        for e in [json!({"$":"SettingSet","key":"rule.r1","value":r#"{"id":"r1","text":"Never push to main","tool":"Bash","enforce":true,"word":"push","on":true,"at":2}"#,"at":2}),
+            json!({"$":"SettingSet","key":"board.b1","value":r#"{"id":"b1","title":"Order the boards","status":"todo","due":"2026-12-01","at":3}"#,"at":3}),
+            json!({"$":"SettingSet","key":"board.b2","value":r#"{"id":"b2","title":"Old","status":"dropped","at":1}"#,"at":3})] { assert!(st.apply(&e)); }
+        let v = view(&st, &json!({"drafts": {"@settings.page": "rules"}}), &json!({}));
+        let rows = v["rows"].as_array().unwrap(); let labels: Vec<&str> = rows.iter().map(|r| r["label"].as_str().unwrap()).collect();
+        assert_eq!(labels, ["Rules and task board", "Standing rules", "Never push to main", "New rule", "Task board", "Order the boards", "New item"], "a dropped item is not listed");
+        assert_eq!(rows[2]["note"], "On · refuses Bash unless you say \"push\""); assert_eq!(rows[5]["note"], "todo · due 2026-12-01");
+        let sent = |o: Out| o.cmds[0]["text"].as_str().unwrap().to_string();
+        assert_eq!(sent(act("h", &json!({"rid": 3, "drafts": {"@f.rtext": " Ask first "}}), "rule-add", "").unwrap()), r#"{"id":3,"m":"rules.set","p":{"rule":{"text":"Ask first"}}}"#);
+        assert!(act("h", &json!({"rid": 3, "drafts": {"@f.rtext": "  "}}), "rule-add", "").unwrap().cmds.is_empty(), "nothing typed, nothing sent");
+        assert_eq!(sent(act("h", &json!({"rid": 4}), "rule-on", "r1=false").unwrap()), r#"{"id":4,"m":"rules.set","p":{"rule":{"id":"r1","on":false}}}"#);
+        assert_eq!(sent(act("h", &json!({"rid": 5}), "board-done", "b1").unwrap()), r#"{"id":5,"m":"board.set","p":{"item":{"id":"b1","status":"done"}}}"#);
+        assert_eq!(sent(act("h", &json!({"rid": 6}), "board-drop", "b1").unwrap()), r#"{"id":6,"m":"board.drop","p":{"id":"b1"}}"#);
+    }
     #[test] fn check_now_asks_the_hub() { assert_eq!(act("h", &json!({"rid": 3}), "update-check", "").unwrap().cmds[0]["text"], json!(r#"{"id":3,"m":"update.check","p":{}}"#)); }
     #[test] fn agents_offers_the_hubs_models_with_default_first_and_the_current_lit() {
         let info = json!({"models": json!({"claude": ["fable", "opus"], "about": {"claude": {"cli": "", "labels": {"default": "Claude Code's own default", "opus": "Opus 5.5"}}}}).to_string()});

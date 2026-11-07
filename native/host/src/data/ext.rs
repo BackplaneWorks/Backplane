@@ -20,7 +20,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -91,6 +91,12 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         "search" => search(hub, p).await,
         // setup on a phone (present/onboard.rs): the hub's own step list, `step` held by the app
         "onboard.view" | "onboard.act" => rpc(hub, c, m, p.clone()).await.map(|r| r["result"].clone()),
+        "composer.run" => composer_run(hub, c, p).await,
+        // the value goes from this frame to the vault and nowhere else: no log, no message, no argv
+        "secret.set" => rpc(hub, c, "secret.set", json!({"name":s(p, "name"),"value":s(p, "value"),"purpose":s(p, "purpose"),"thread":s(p, "thread")})).await.map(|_| json!({})),
+        "secret.dismiss" => rpc(hub, c, "secret.dismiss", json!({"name":s(p, "name")})).await.map(|_| json!({})),
+        "secret.asks" => { let th = s(p, "thread"); let asks = crate::statehost::policies().and_then(|x| x.with_state(crate::present::thread::secret_asks)).unwrap_or_default();
+            Ok(json!({"asks": asks.iter().filter(|a| th.is_empty() || a.2 == th).map(|a| json!({"name":a.0,"purpose":a.1,"thread":a.2})).collect::<Vec<_>>()})) }
         "models.list" => Ok(json!({"models": serde_json::from_str::<Value>(&crate::settings::models::all()).unwrap_or(json!({}))})),
         "thread.model" => {
             let th = s(p, "thread"); if !known_thread(&*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
@@ -251,8 +257,33 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
 }
 /// Frames the hub pushes to this connection that a phone's viewer reads: a plot (binary CBOR, or JSON for "none") and a browser frame's announcement.
 pub fn wants_raw(b: &[u8]) -> bool { b.len() > 7 && (0xA0..=0xB7).contains(&b[0]) && b[1] == 1 && b[2..7] == [0x64, b'p', b'l', b'o', b't'] }
-pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice") }
+pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice") || (s(v, "t") == "d" && s(v, "k") == "btw") }
 
+/// `composer.run {thread, text}`: the draft is one of `hello.commands`, run the way the desktop runs it (session/composer.rs). The answer's `kind` says what became of it: `btw` (a side
+/// question, its answer comes as a push `{t:"d",k:"btw",thread,q,a}` to this socket only), `give`, `secret` (the app opens its masked box for `name`; `secret.set` saves), `intent`, or
+/// `edit` (the composer takes `text`). A refusal is `error`, in plain words: the app keeps the draft and shows them.
+async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Value> {
+    use crate::session::composer::{btw_answer, intent_edit, word_of, Word, BTW_EMPTY};
+    let (th, text) = (s(p, "thread"), s(p, "text"));
+    if !known_thread(&*hub.model().await, th) { return Err(err("unknown thread")) }
+    match word_of(text) {
+        None => Err(err("not a command of the composer")),
+        Some(Word::Btw(q)) if q.is_empty() => Err(err(BTW_EMPTY)),
+        Some(Word::Btw(q)) => {
+            let (h, client, thread, asked) = (hub.clone(), c.client, th.to_string(), q.clone());
+            tokio::spawn(async move { // the model may take a minute: this socket keeps answering meanwhile
+                let who = crate::api::Caller { gen: String::new(), client: 0 };
+                let r = match h.rpc_for("thread.btw") { Some(x) => x.call(&h, &who, &json!(0), "thread.btw", &json!({"thread":thread,"q":asked})).await.into_iter().next().unwrap_or(Value::Null), None => Value::Null };
+                h.push(client, json!({"t":"d","k":"btw","thread":thread,"q":asked,"a":btw_answer(r["result"]["btw"].as_str().unwrap_or(""))}));
+            });
+            Ok(json!({"kind":"btw","q":q}))
+        }
+        Some(Word::Give) => rpc(hub, c, "bots.give", json!({"thread":th,"text":text.trim()})).await.map(|_| json!({"kind":"give"})),
+        Some(Word::Secret(name)) => Ok(json!({"kind":"secret","name":name})),
+        Some(Word::Intent(b)) if b.is_empty() => { let card = crate::settings::fab::look(hub, th).await; Ok(json!({"kind":"edit","text":intent_edit(card["intent"].as_str().unwrap_or(""))})) }
+        Some(Word::Intent(b)) => rpc(hub, c, "fab.intent", json!({"thread":th,"text":b})).await.map(|_| json!({"kind":"intent"})),
+    }
+}
 // ---- dictation: the hub's `bots.voice`, the same ops the desktop sends (voice/session.rs); its `{"t":"voice"}` frames reach this socket as they are ----
 async fn voice(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
     let mut q = p.clone();

@@ -371,6 +371,16 @@ impl Render for Backplane {
         for page in self.data["sidebarPages"].as_array().into_iter().flatten() {
             for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
         }
+        // Conversation history: the old Scratch chats. Nothing starts here; a chat that wants attention always has its row, the rest open from this row or from a search
+        let history = &self.data["conversationHistory"];
+        if history["toggle"] == true {
+            let (n, open) = (history["count"].as_u64().unwrap_or(0), history["open"] == true);
+            ctl.push(CtlEntry { id: "side-history".into(), label: "Conversation history".into(), ctl: Ctl::Node("flag".into(), "conversation-history".into()) });
+            rows.push(with_rect(div().id("side-history"), || "side-history".to_string()).flex().items_center().gap_2().px_3().py_1().text_size(px(11.)).text_color(c("accent")).cursor_pointer().hover(|s| s.bg(c("raise")))
+                .child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(format!("Conversation history ({n})"))
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), "conversation-history".into())); cx.notify(); })).into_any_element());
+        }
+        for t in self.data["legacy"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, "", "", false, &mut ctl)); }
         // the Older group of projects (no live thread, quiet for a while): a row that opens and shuts it
         if let Some(n) = self.data["olderProjects"]["count"].as_u64() {
             let open = self.data["olderProjects"]["open"].as_bool().unwrap_or(false);
@@ -495,6 +505,7 @@ impl Render for Backplane {
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
         for (id, label, c) in crate::screens::tools::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
         ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
+        if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
         if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
         ctl.push(CtlEntry { id: "rail:Terminal".into(), label: "Terminal".into(), ctl: Ctl::None });
@@ -564,6 +575,7 @@ impl Render for Backplane {
                             cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
                         } }, |_, _, _, _| {}).absolute().size_0())))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
+                    .when(!self.note.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("dim")).child(self.note.clone())))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
                         .children(crate::screens::picker::view(cx, light, &thread, self.screens.picker_open, &self.screens.pick, &self.local.favs))
@@ -577,6 +589,8 @@ impl Render for Backplane {
                         .children(crate::screens::order::view(cx, light, &thread["order"]))
                         .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
                         .children(self.screens.voice.views.get(&self.selected).cloned().and_then(|v| crate::screens::voice::view(cx, light, &v, self.screens.voice.level, self.screens.voice.fix.clone().as_ref())))
+                        .children(crate::screens::sidebox::btw(cx, light, &thread["btw"]))
+                        .children(crate::screens::sidebox::secret(cx, light, &self.screens.fields, &thread["secretBox"]))
                         .children(reply_chip(cx, light, &thread["replying"]))
                         .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
                         .child(div().id("composer-box").border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
@@ -588,7 +602,7 @@ impl Render for Backplane {
                             .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::limits_chip(cx, light, &self.screens.acct, allowance), || "ui:Allowance".to_string())))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("dictate"), || "ui:Dictate".to_string())).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.voice_press(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
-                            .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child("Send").on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
+                            .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child(crate::screens::sidebox::send_label(thread)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                     .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b)))
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))

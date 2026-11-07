@@ -3,7 +3,7 @@
 //! `Ui.diff`/`Dv.*` (Diff), `Rp.*` (Review), `Ui.revert*`; the diff text is read as src/core/diff reads it. Pure functions over the request's session; the session keeps the same
 //! keys `Ui` keeps (`diff:<t>`, `diff.none:<t>`, `diff.at:<t>`, `diff.auto:<t>`, `view.kind:<t>`, `view.path:<t>`, `rp.md:<t>:<page>` ..., the scratch `@rp.busy:<t>`, `@rp.req:<id>`,
 //! `@revert`), so the helper, where there is one, reads the same state.
-use super::{patch, select};
+use super::{composer, patch, select};
 use crate::md;
 use serde_json::{json, Map, Value};
 
@@ -262,6 +262,8 @@ pub fn act(hub: &str, session: &Value, sel: &str, action: &str, value: &str) -> 
 /// Ui.reverting: armed for this thread, with Diff on show
 pub fn reverting(session: &Value, sel: &str) -> bool { !sel.is_empty() && draft(session, "@revert") == sel && diff_on(session, sel) }
 
+/// Why a request failed: the reply's own words.
+fn why_of(r: &Value) -> String { r["error"].as_str().or_else(|| r["result"]["error"].as_str()).or_else(|| r["error"]["message"].as_str()).unwrap_or("The request failed.").to_string() }
 /// The reads a view request carries, applied to the session (Ui.reply.diff, Rp.reply, Rp.failed, Rp.ticked); the commands a read makes (a Diff on show asked again after a
 /// commit or a revert). `reads` are `{kind, method?, id, ok, result, error?}`; a method not named is told by the shape of its result.
 pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads: &[Value]) -> Vec<Value> {
@@ -272,6 +274,25 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
         let method = match r["method"].as_str() { Some(m) => m, None if res.get("report").is_some() => "review.bom", None if res.get("ticked").is_some() => "review.tick", None if res.get("diff").is_some() => "git.diff", None => "" };
         let mut p = json!({});
         if ok && res.get("board_list").is_some() { if let Some(k) = crate::present::ready::keep_boards(res) { patch::merge(session, &k); } continue }
+        // a side question's answer (Btw.got): for the question still on show, in whatever thread; a failure says why in its place
+        if r["kind"] == "thread.btw" {
+            let th = s(res, "thread"); let q = s(res, "q");
+            if !th.is_empty() && draft(session, &format!("@btw:{th}")) == q {
+                let a = if ok { composer::btw_answer(s(res, "btw")) } else { why_of(r) };
+                patch::merge(session, &json!({"drafts": {format!("@btw.a:{th}"): a}}));
+            }
+            continue
+        }
+        // the intent written (Intent.saved.got, Intent.return): the card is the answer's, the conversation gets its composer back; a refusal is the client's to show, and the text stays
+        if r["kind"] == "fab.intent" {
+            if !ok { continue }
+            if let Some(k) = crate::present::ready::keep(res) { patch::merge(session, &k); }
+            let th = s(res, "thread").to_string(); let back = draft(session, &format!("@intent.draft:{th}")).to_string();
+            patch::merge(session, &json!({"drafts": {th.clone(): back, format!("@intent.draft:{th}"): "", format!("@intent.edit:{th}"): ""}}));
+            cmds.push(json!({"type": "keep", "thread": format!("{hub}|{th}"), "text": back})); cmds.push(json!({"type": "compose", "thread": th, "text": back}));
+            cmds.push(json!({"type": "say", "tone": "note", "text": "Intent saved"}));
+            continue
+        }
         if r["kind"] == "fab.look" && ok { if let Some(k) = crate::present::ready::keep(res) { patch::merge(session, &k); } continue }
         match method {
             "git.diff" if res.get("diff").is_some() => {
