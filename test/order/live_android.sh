@@ -46,6 +46,13 @@ if want "Buy: lamp" 15; then tapx "Buy: lamp" || tap "Buy: lamp"; ok "the buy th
 if want "ORDER · lamp" 30; then ok "the Order card is on the buy thread"; else bad "the Order card is on the buy thread"; fi
 want "Includes import VAT" 5 && ok "the card says what the total covers about customs" || bad "the customs line"
 want "Buy now" 5 && ok "Buy now is on the card" || bad "Buy now is on the card"
+# the hub's note to the agent is not shown; the customs line wraps (its node is taller than the card's one-line title)
+$UI has "[Backplane] The quote is posted" >/dev/null 2>&1 && bad "the hub's note to the agent is shown" || ok "the hub's note to the agent is not shown"
+# the card's own customs line is the last match (the quote's message above it says the same words)
+nc=$($UI count "Includes import VAT" 2>/dev/null); cb=$($UI bounds "Includes import VAT" $(( ${nc:-1} - 1 )) 2>/dev/null); tb=$($UI bounds "ORDER · lamp" 2>/dev/null)
+[ -n "$cb" ] && [ -n "$tb" ] && [ "$(echo $cb | awk '{print $2}')" -gt "$(echo $tb | awk '{print $2}')" ] || bad "the customs node measured is not the card's ($cb, title $tb)"
+ch=$(echo $cb | awk '{print $4-$2}'); th=$(echo $tb | awk '{print $4-$2}'); echo "customs node $cb (h $ch), title $tb (h $th)"
+[ -n "$ch" ] && [ -n "$th" ] && [ "$ch" -gt $(( th * 3 / 2 )) ] && ok "the customs line wraps instead of being cut off" || bad "the customs line is cut off (h $ch vs one line $th)"
 shot 1-order-card
 before=$(fabpaid); tap "Buy now · " || tap "Buy now" || bad "Buy now can be tapped"
 sleep 6; want "Use without an account" 3 && { tapx "Use without an account"; sleep 4; }

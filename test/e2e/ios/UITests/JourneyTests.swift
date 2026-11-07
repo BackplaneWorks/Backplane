@@ -500,6 +500,7 @@ final class Journeys: XCTestCase {
         guard d.step("the Order card on the buy thread", timeout: 40, act: {}, expect: { d.el("thread.order").exists }) else { d.shot("no-card"); return }
         d.step("the customs line", act: {}, expect: { d.label("Includes import VAT").exists })
         d.step("Buy now on the card", act: {}, expect: { d.el("thread.order.pay").exists })
+        d.step("the hub's note to the agent is not shown", act: {}, expect: { !d.label("[Backplane] The quote is posted").exists })
         d.shot("order-card")
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
         d.step("Buy now opens Safari", timeout: 30, act: { d.tap(d.el("thread.order.pay")) }, expect: { safari.state == .runningForeground })

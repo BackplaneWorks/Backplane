@@ -88,7 +88,7 @@ try:
     calls = [{'name': 'order_quote', 'arguments': {'dir': 'mfg/1'}}]
     hub = spawn([HUB, '--home', OUT + '/home', '--port', str(port), '--host', '127.0.0.1', '--no-tailscale', '--foreground'], 'hub.log', cwd=proj,
                 env={**env, 'BACKPLANE_AGENTS': OUT + '/bin', 'BACKPLANE_NO_UPDATE': '1', 'BACKPLANE_KISTACK_SYNC': '0', 'BACKPLANE_ORDER_SERVER': f'http://127.0.0.1:{fport}',
-                     'FAKE_LOG': OUT + '/standin.log', 'BP_STANDIN_MODE': 'mcpcalls', 'BP_MCP_CALLS': json.dumps(calls)})
+                     'FAKE_LOG': OUT + '/standin.log', 'BP_STANDIN_MODE': 'mcpcalls', 'BP_MCP_CALLS': json.dumps(calls), 'BP_MCP_DELAY_MS': '6000'})
     t = time.time()
     while not os.path.exists(OUT + '/home/token'):
         if time.time() - t > 30: raise SystemExit('FAIL the hub did not start')
@@ -97,7 +97,7 @@ try:
     if (b'BACKPLANE_AGENTS=' + (OUT + '/bin').encode()) not in environ: raise SystemExit('FAIL the hub has no stand-in folder')
     json.dump([{'select': 0}, {'wait': 900000}], open(OUT + '/script.json', 'w'))
     spawn([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', OUT + '/home/token', '--script', OUT + '/script.json', '--exit-after', '1500'], 'client.log',
-          env={**env, 'PATH': OUT + '/bin:' + env['PATH'], 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=' + OUT + '/no-bus', 'BACKPLANE_GPUI_RECTS': '1', 'BACKPLANE_GPUI_ASSETS': ASSETS, 'VK_ICD_FILENAMES': '/usr/share/vulkan/icd.d/lvp_icd.json',
+          env={**env, 'PATH': OUT + '/bin:' + env['PATH'], 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=' + OUT + '/no-bus', 'BACKPLANE_GPUI_NOTIFY_CMD': OUT + '/bin/notify', 'BACKPLANE_GPUI_RECTS': '1', 'BACKPLANE_GPUI_ASSETS': ASSETS, 'VK_ICD_FILENAMES': '/usr/share/vulkan/icd.d/lvp_icd.json',
                'LP_NUM_THREADS': '2', 'LIBGL_ALWAYS_SOFTWARE': '1', 'GALLIUM_DRIVER': 'llvmpipe', 'LD_LIBRARY_PATH': ''})
     wait('the thread', lambda: metrics('usable') and 'ui:Draw' in controls(), 60); time.sleep(2)
 
@@ -109,6 +109,12 @@ try:
     buy = wait('a buy thread', lambda: next((e['id'] for e in events() if e.get('$') == 'ThreadCreated' and e['id'] != 't1'), None), 20)
     title = next(e.get('title', '') for e in events() if e.get('$') == 'ThreadCreated' and e['id'] == buy)
     check(title.startswith('Buy: lamp'), 'the buy thread is named "Buy: <project>"', title)
+    # look away: back on the first thread while the buy thread's agent works, so its need is raised on a thread the window is not watching
+    wait('the window on the buy thread', lambda: rect_of(f'thread:{buy}'), 20); time.sleep(1); press_rect(wait('the first thread', lambda: rect_of('thread:t1'), 10))
+    def notes(): return open(OUT + '/notify.log').read().splitlines() if os.path.exists(OUT + '/notify.log') else []
+    wait('the need notified on the desktop', lambda: any('Needs you' in l for l in notes()), 40)
+    check(True, 'a need on a thread the window is not watching raises a desktop notification')
+    press_rect(wait('the buy thread row', lambda: rect_of(f'thread:{buy}'), 10))
     def send_button():
         for k, c in controls().items():
             if k.startswith('ask:') and 'Send' in (c.get('label') or '') and c.get('rect', {}).get('w', 0) > 0: return c['rect']
@@ -117,6 +123,9 @@ try:
     check(any(e.get('$') == 'AskOpened' and e.get('tool') == 'order_quote' for e in events()), 'order_quote asks before anything is sent')
     check(not os.listdir(OUT + '/fab') or not any(f.startswith('q_') for f in os.listdir(OUT + '/fab')), 'nothing reached the order server before Send', os.listdir(OUT + '/fab'))
     press_rect(r)
+    # the need is answered: the desktop notification it raised is closed (the hub's notify.clear, by the alert's key)
+    wait("the need's notification closed", lambda: any(l.startswith('--close ask-') for l in notes()), 15)
+    check(True, 'Send answers the need and its desktop notification is closed')
     # 3. the quote comes back: the Order card with its total, customs line and Buy now
     r = wait('Buy now on the Order card', lambda: rect_of('ui:Buy now'), 120); time.sleep(2); shot('3-order-card')
     q = next((e for e in events() if e.get('$') == 'MessagePosted' and str(e.get('msg', '')).startswith('q:')), None)
