@@ -113,7 +113,7 @@ If a tool is somewhere else, give the full path to `kicad-cli` or `freecadcmd` u
 
 Each computer runs its own hub. Linked hubs show each other's projects and threads in one sidebar, and work stays on the machine that owns it.
 
-With Tailscale signed in on both machines, hubs find each other every two minutes and link by themselves. Without Tailscale, press Make an invite on one machine and paste the invite under Join another machine on the other. An invite works once, for ten minutes. Both machines need a network route to each other.
+Hubs never link by themselves, even on one Tailscale account; pair them in Settings, Machines (a code, then your approval), or press Make an invite on one machine and paste the invite under Join another machine on the other. An invite works once, for ten minutes. Both machines need a network route to each other.
 
 ## Pair a phone
 
