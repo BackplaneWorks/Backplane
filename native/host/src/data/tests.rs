@@ -343,3 +343,12 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!(shown_text("[attachment: /a/x.png]"), "", "a picture alone has no words");
     assert_eq!(shown_text("see [attachment: x] inline"), "see [attachment: x] inline", "only whole lines are attachment lines");
 }
+
+/// Settings > Updates on a phone: the status itself, the words included, not the reply wrapped around it (the Pixel showed "Backplane" and nothing else).
+#[tokio::test] async fn update_status_is_the_status_itself() {
+    let (h, port) = up("update").await; crate::update::svc::install(&h); tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let r = ask(&mut ws, 1, "update.status", json!({})).await; let u = &r["result"];
+    assert!(u["current"].as_str().map_or(false, |c| !c.is_empty()), "{r}"); assert!(u["line"].as_str().map_or(false, |l| !l.is_empty()) && u["canCheck"].is_boolean(), "{r}");
+    assert!(u.get("t").is_none() && u.get("result").is_none(), "not a reply inside a reply: {r}");
+}

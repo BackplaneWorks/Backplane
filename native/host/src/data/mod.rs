@@ -320,8 +320,9 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId"), p.get("attachments").unwrap_or(&Value::Null)).await?})),
         "attachment.get" => attachment_get(hub, p),
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
-        "update.status" | "update.check" | "app.update" => rpc(hub, c, m, json!({})).await, // the same answer every client gets; the phones draw it
-        "update.channel" => { let ch = s(p, "channel"); if ch != "stable" && ch != "beta" { return Err(err("no such channel")) } rpc(hub, c, "setting.set", json!({"key":"update.channel","value":ch})).await?; rpc(hub, c, "update.status", json!({})).await }
+        // the same answer every client gets (its `result`, not the reply around it); the phones draw it
+        "update.status" | "update.check" | "app.update" => Ok(rpc(hub, c, m, json!({})).await?["result"].clone()),
+        "update.channel" => { let ch = s(p, "channel"); if ch != "stable" && ch != "beta" { return Err(err("no such channel")) } rpc(hub, c, "setting.set", json!({"key":"update.channel","value":ch})).await?; Ok(rpc(hub, c, "update.status", json!({})).await?["result"].clone()) }
         "turn.interrupt" => { rpc(hub, c, "turn.interrupt", json!({"thread":s(p, "thread")})).await?; Ok(json!({})) }
         _ => match ext::call(hub, c, m, p).await { Some(r) => r, None => Err(err("unknown method")) },
     }
