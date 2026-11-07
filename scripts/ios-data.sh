@@ -1,6 +1,6 @@
 #!/bin/sh
 # The data/1 app's journeys on the simulator: against the stub hub (test/phone/stub-hub.ts, default) or a Rust hub binary (HUB=path to it).
-#   scripts/ios-data.sh [JOURNEY...]   default: data-flow     env: HUB (a Rust hub binary)
+#   scripts/ios-data.sh [JOURNEY...]   default: data-flow     env: HUB (a Rust hub binary), APP (the Backplane.app on the Mac to install; default run.sh's)
 # Start with work_run {lock: "mac-heavy"}. The hub runs on h@backplane (tailnet address, 3700M cap) in a throwaway folder that is deleted at the end.
 cd "$(dirname "$0")/.." || exit 1
 B=$PWD/build/gpui; M=$B/mac-ssh; SB='ssh -o BatchMode:yes h@backplane'; SB='ssh -o BatchMode=yes h@backplane'; U=${SIM_UDID:-E3BC1B9E-AE4D-498C-97AF-B22FE897B41F}
@@ -36,7 +36,7 @@ fi
 $SB "cat $TOKFILE" > /tmp/data-token
 RSYNC_RSH=$M rsync -a /tmp/data-token hs-mac-mini:bp-gpui-ios/data-token
 RSYNC_RSH=$M rsync -a --delete test/e2e/ios/ hs-mac-mini:bp-gpui-ios/e2e/
-$M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_HOST=$HOSTDNS HUB_PORT=$PORT HUB_TOKEN_FILE=\$HOME/bp-gpui-ios/data-token HUB_PROJECT_PATH=$V/projects/e2e1 sh ./run.sh $J; xcrun simctl shutdown $U"
+$M hs-mac-mini "cd ~/bp-gpui-ios/e2e && rm -rf ~/bp-gpui-ios/e2e-out && SIM_UDID=$U OUT=\$HOME/bp-gpui-ios/e2e-out HUB_HOST=$HOSTDNS HUB_PORT=$PORT HUB_TOKEN_FILE=\$HOME/bp-gpui-ios/data-token HUB_PROJECT_PATH=$V/projects/e2e1 APP=\"${APP:-}\" sh ./run.sh $J; xcrun simctl shutdown $U"
 RSYNC_RSH=$M rsync -a hs-mac-mini:bp-gpui-ios/e2e-out/ $OUT/
 $SB "tail -5 $V/stub.log $V/hub.log 2>/dev/null | cut -c1-300" > $OUT/hub-log-tail.txt 2>&1
 $SB "for p in \$(ss -ltnp | grep ':$PORT ' | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do kill \$p; done; sleep 2; ss -ltn | grep -c ':$PORT ' ; rm -rf $V; ls -d $V 2>&1 | tail -1"
