@@ -22,8 +22,8 @@ pid() { cat "$D/$1.pid" 2>/dev/null || true; }
 case "$PORT" in 3787|3788) die "port $PORT is Backplane's";; esac
 case "$(realpath -m "$D")" in "$HOME/.backplane-bend"*|"$HOME/.backplane-gpui"|"$HOME/.backplane-gpui/"*|"$HOME/.backplane-gpui-copy"*|"$HOME/.backplane-gpui-side"*|"$HOME/.local/share/backplane"*) die "$D is another install's folder";; esac
 cmd=${1:-start}
-# one stop or start at a time: the watcher and the outside watchdog (hub-watchdog.sh) both come through here
-if [ -z "${FRESH_LOCKED:-}" ] && command -v flock >/dev/null; then case "$cmd" in start|stop) mkdir -p "$D"; export FRESH_LOCKED=1; exec flock -w 60 "$D/.lifecycle.lock" "$0" "$@";; esac; fi
+# one stop or start at a time: the watcher and the outside watchdog (hub-watchdog.sh) both come through here. -o: the hub and window it starts must not inherit the lock, or every later stop and start waits 60 s and fails
+if [ -z "${FRESH_LOCKED:-}" ] && command -v flock >/dev/null; then case "$cmd" in start|stop) mkdir -p "$D"; export FRESH_LOCKED=1; exec flock -o -w 60 "$D/.lifecycle.lock" "$0" "$@";; esac; fi
 case "$cmd" in
   status) for w in hub client; do p=$(pid $w); if alive "$p"; then echo "$w: running, pid $p"; else echo "$w: not running"; fi; done
           [ -f "$H/token" ] && { printf 'Authorization: Bearer %s\n' "$(cat "$H/token")" | curl -s -m2 -H @- "http://127.0.0.1:$PORT/hello" | head -c 200; echo; }
