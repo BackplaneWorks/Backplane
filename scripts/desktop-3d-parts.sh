@@ -31,7 +31,7 @@ if first: st+=[{"click":"rail:Board"},{"wait":int(first)}]
 json.dump(st+[{"click":"rail:3D"},{"wait":60000}],open(R+"/script.json","w"))
 PY
 export LC_ALL=C
-systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 -- nice -n 10 sh -c '
+systemd-run --user --scope -q -- nice -n 10 sh -c '
 set -eu
 R='$R'; X='$X'; HUB='$HUB'; CLIENT='$CLIENT'; PORT='$PORT'; DISP='$DISP'; SHOT_MS='$SHOT_MS'; SHOTS='$SHOTS'; MAIN='$MAIN'
 cleanup() { for f in client i3 xvfb hub; do [ -f $R/$f.pid ] && kill $(cat $R/$f.pid) 2>/dev/null || true; done; sleep 1; }

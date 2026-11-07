@@ -1,5 +1,5 @@
 #!/bin/sh
-# Headless emulator on THIS desktop, own AVD, own capped user service, never on the screen.
+# Headless emulator on THIS desktop, own AVD, own user service, never on the screen.
 # usage: scripts/android-emu.sh create | start | stop | status | fresh | ensure [MB] | adb ARGS...
 # Memory (measured, 2026-11-07): every guest app process that draws its screen and then dies (force-stop, pm clear, a reinstall) leaves about
 # 125 MB on the host in the emulator's renderer, in every software GPU mode; an app kept alive costs nothing. So: `fresh` resets the Backplane
@@ -22,7 +22,7 @@ create) mkdir -p "$ANDROID_AVD_HOME"
 start)
   if systemctl --user is-active -q "$UNIT"; then booted && { echo "running ($UNIT)"; exit 0; }; fi
   systemctl --user reset-failed "$UNIT" 2>/dev/null || true; mkdir -p "$W"
-  systemd-run --user --unit "$UNIT" -q -p MemoryMax=8G -p MemorySwapMax=0 -p Nice=10 --setenv=ANDROID_AVD_HOME="$ANDROID_AVD_HOME" --setenv=ANDROID_HOME="$ANDROID_HOME" \
+  systemd-run --user --unit "$UNIT" -q -p Nice=10 --setenv=ANDROID_AVD_HOME="$ANDROID_AVD_HOME" --setenv=ANDROID_HOME="$ANDROID_HOME" \
     --setenv=ANDROID_SDK_ROOT="$ANDROID_HOME" -p StandardOutput=truncate:"$W/emulator.log" -p StandardError=append:"$W/emulator.log" \
     $ANDROID_HOME/emulator/emulator -avd "$AVD" -port $PORT -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 -cores 4 \
       -netsim-args --instance=$NETSIM

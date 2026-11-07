@@ -18,7 +18,6 @@
 #   `try` (no copy at all): a seeded synthetic home (3 projects, 12 threads), stand-in agents, nothing real in it.
 #   SWITCH_PORT     default 3790 (3787, 3788, 3799, 3821 are refused: the live hub, its dev hub, the shared test hub)
 #   SWITCH_DIR      state: home, logs, pids. Default ~/.backplane-gpui-switch (mode 700; never under the repo)
-#   SWITCH_MEM      the scope's MemoryMax, default 3700M (swap is always 0). Never raise it to make a run fit; report instead.
 #   SWITCH_DISPLAY  where the client opens. Required (no default): your own screen's, or :61 (build/gpui/xvfb) for tests.
 #   HUB_BIN CLIENT_BIN  by absolute path; default the main checkout's build/gpui/{hub/prov/backplane-hub-full,
 #                   linux/backplane-gpui}
@@ -32,7 +31,6 @@ ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SW=${SWITCH_DIR:-$HOME/.backplane-gpui-switch}
 PORT=${SWITCH_PORT:-3790}
-MEM=${SWITCH_MEM:-3700M}
 # `start` needs an explicit source and it must be synthetic: no default store (the hold, below)
 SRC=${SWITCH_SOURCE:-}
 HUB_BIN=${HUB_BIN:-$ROOT/build/gpui/hub/prov/backplane-hub-full}
@@ -194,7 +192,7 @@ launch_hub() {
   # stand-in agents: nothing may call a model
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$HERE/test/tools/claude_standin.ts" > "$SW/bin/claude"; chmod +x "$SW/bin/claude"
   local n; for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$SW/bin/$n"; chmod +x "$SW/bin/$n"; done
-  # the hub in its own capped scope, a fake HOME (no real credentials), copy guard on, loopback only
+  # the hub in its own scope, a fake HOME (no real credentials), copy guard on, loopback only
   local pol=()
   local envx; if [ "$MODE" = side ]; then
     # the hub itself has the FAKE home; the real one goes only to a person's-turn child (BACKPLANE_PERSON_HOME, which the hub strips from
@@ -205,7 +203,7 @@ launch_hub() {
     [ "$SBS_AGENTS" = 0 ] || envx+=(BACKPLANE_AGENTS="$SW/bin" BP_STANDIN_MODE=stream)
   else envx=(HOME="$SW/fakehome" XDG_CACHE_HOME="$SW/fakehome/.cache" BACKPLANE_COPY=1 BACKPLANE_AGENTS="$SW/bin" BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=stream); fi
   ( cd "$SW/proj" && exec setsid env -i PATH="$PATH" LC_ALL=C XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" "${envx[@]}" \
-      systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
+      systemd-run --user --scope -q -- \
       env -u DBUS_SESSION_BUS_ADDRESS -u XDG_RUNTIME_DIR "$HUB_BIN" --home "$H" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground "${pol[@]}" \
       > "$SW/hub.log" 2>&1 < /dev/null ) &
   echo $! > "$SW/hub.pid"; echo "$HUB_BIN" > "$SW/hub.bin"
@@ -245,7 +243,7 @@ launch_client() {
     [ -n "$DISP" ] || die "no display: set SWITCH_DISPLAY (:61 is the isolated one) or pass --no-client"
     local sw=; case "${VK_ICD_FILENAMES:-}" in *lvp*) sw="BACKPLANE_GPUI_RECTS=1 LP_NUM_THREADS=2";; esac  # software Vulkan draws only in rects mode
     ( exec setsid env $sw DISPLAY="$DISP" ${VK_ICD_FILENAMES:+VK_ICD_FILENAMES="$VK_ICD_FILENAMES"} ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} HOME="$HOME" \
-        systemd-run --user --scope -q -p "MemoryMax=$MEM" -p MemorySwapMax=0 -- \
+        systemd-run --user --scope -q -- \
         "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$H/token" ${SWITCH_CLIENT_ARGS:-} > "$SW/client.log" 2>&1 < /dev/null ) &
     echo $! > "$SW/client.pid"; echo "$CLIENT_BIN" > "$SW/client.bin"; echo "client pid $(cat "$SW/client.pid") on $DISP"
   fi

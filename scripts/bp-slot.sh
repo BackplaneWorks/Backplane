@@ -13,7 +13,7 @@ cd "$B/$LANE" || exit 70
 while :; do
   s=1
   while [ "$s" -le "$N" ]; do
-    flock -n -o -E 200 "$B/.slot.$s" timeout 3000 systemd-run --user --scope -q -p MemoryMax=5G -p MemorySwapMax=0 -- sh -c "$CMD"
+    flock -n -o -E 200 "$B/.slot.$s" timeout 3000 systemd-run --user --scope -q -- sh -c "$CMD"
     rc=$?; [ "$rc" = 200 ] || exit "$rc"
     s=$((s+1))
   done

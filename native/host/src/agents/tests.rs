@@ -539,7 +539,11 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     let got: Vec<String> = { let raw = std::fs::read_to_string(&argfile).unwrap(); let mut v: Vec<String> = raw.split('\0').map(str::to_string).collect(); v.pop(); v };
     let want: Vec<String> = serde_json::from_str(include_str!("../../../../test/agents/fixtures/argv-default.json")).unwrap();
     assert_eq!(got.len(), want.len());
-    let norm = |v: &[String]| v.iter().map(|x| { let x = x.replace(&home.join("attachments").to_string_lossy().to_string(), "<home>/attachments").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/home/attachments", "<home>/attachments");
+    // the FreeCAD the hub tells about is the one it finds on this machine (PATH first): told as the fixture's, wherever it is installed here
+    let told = crate::files::kicad::stepglb::told_freecad(&home, "/home/h/.local/bin/freecadcmd");
+    let fc_dir = told.rsplit_once('/').map(|d| d.0.to_string()).unwrap_or_default();
+    let norm = |v: &[String]| v.iter().map(|x| { let x = if fc_dir.is_empty() || fc_dir == "/home/h/.local/bin" { x.clone() } else { x.replace(&format!("{fc_dir}/freecad"), "/home/h/.local/bin/freecad") };
+        let x = x.replace(&home.join("attachments").to_string_lossy().to_string(), "<home>/attachments").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/home/attachments", "<home>/attachments");
         let x = x.replace(&work.to_string_lossy().to_string(), "<root>").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/fixroot", "<root>");
         if x.contains("/mcp/") { let (a, b) = x.split_once("/mcp/").unwrap(); let _ = a; format!("mcp:{}", b.split('?').next().unwrap().split('.').next().unwrap()) } else { x } }).collect::<Vec<_>>();
     // arguments, prompt and the MCP config (its port, generation and key differ by run)

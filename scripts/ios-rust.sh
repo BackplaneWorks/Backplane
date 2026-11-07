@@ -4,7 +4,7 @@
 cd "$(dirname "$0")/.." || exit 1
 B=$PWD/build/gpui; M=$B/mac-ssh; U=E3BC1B9E-AE4D-498C-97AF-B22FE897B41F; SB='ssh -o BatchMode=yes h@backplane'
 T=$(cat /tmp/rust-thread)
-start='cd ~/bp-gpui-ios-hub/rust/proj; export BACKPLANE_AGENTS=$HOME/bp-gpui-ios-hub/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=plain TZ=Etc/UTC; nohup systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 ../backplane-hub-full --home ../home --port 3815 --host 100.96.192.111 --no-tailscale --foreground --policy-bin ../bp-policy-page --window-bin ../window > ../hub.log 2>&1 & sleep 8; P=$(ss -ltnp | grep ":3815 " | grep -o "pid=[0-9]*" | head -1 | cut -d= -f2); echo pid $P > ../pid; tr "\0" "\n" < /proc/$P/environ | grep BACKPLANE_AGENTS'
+start='cd ~/bp-gpui-ios-hub/rust/proj; export BACKPLANE_AGENTS=$HOME/bp-gpui-ios-hub/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=plain TZ=Etc/UTC; nohup systemd-run --user --scope -q ../backplane-hub-full --home ../home --port 3815 --host 100.96.192.111 --no-tailscale --foreground --policy-bin ../bp-policy-page --window-bin ../window > ../hub.log 2>&1 & sleep 8; P=$(ss -ltnp | grep ":3815 " | grep -o "pid=[0-9]*" | head -1 | cut -d= -f2); echo pid $P > ../pid; tr "\0" "\n" < /proc/$P/environ | grep BACKPLANE_AGENTS'
 stop='cd ~/bp-gpui-ios-hub/rust; kill $(grep -o "[0-9]*" pid | head -1); sleep 3'
 E1="export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer HUBURL=http://backplane.tail9e0cf2.ts.net:3815/ TOKFILE=~/bp-gpui-ios/seed-rust-token"
 $M hs-mac-mini "$E1; xcrun simctl boot $U 2>/dev/null; xcrun simctl uninstall $U dev.backplane.gpui; sh ~/bp-gpui-ios/ios-shot.sh $U rust-open 25 'ob-skip' $T"

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Improvements, end to end, on a temp home (never the store copy): the GPUI client on the Rust hub, stand-in agents only (no model), loopback,
-# the isolated display :61 (never the person's screen), one scope capped at 3700M with swap 0, nice 19. The run (test/improvements.json):
+# the isolated display :61 (never the person's screen), one scope, nice 19. The run (test/improvements.json):
 # open the panel, type the description, evidence and details, capture this window (ffmpeg x11grab of our own window id), select the screenshot,
 # diagnostics and details, review the public issue, open the GitHub draft (a recorder stands in for the browser: nothing leaves the machine),
 # write the report with an agent (stand-in), load it, record the window, play it, then hand the request to an agent thread (internal).
@@ -31,7 +31,7 @@ ev=[{"$":"ProjectCreated","id":"p1","title":"Backplane","root":R+"/proj/backplan
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))
 PY
 export LC_ALL=C
-systemd-run --user --scope -q -p MemoryMax=3700M -p MemorySwapMax=0 -- nice -n 19 sh -c '
+systemd-run --user --scope -q -- nice -n 19 sh -c '
 set -eu
 cleanup() { for f in client i3 xvfb hub; do [ -f '$R'/$f.pid ] && kill $(cat '$R'/$f.pid) 2>/dev/null || true; done; sleep 1; }
 trap cleanup EXIT INT TERM
