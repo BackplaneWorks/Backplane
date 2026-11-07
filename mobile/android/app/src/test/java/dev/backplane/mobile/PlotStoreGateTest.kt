@@ -46,6 +46,21 @@ class PlotStoreGateTest {
         assertEquals(listOf("parts"), g.shown(PlotStore.keys("3d", a, "")))
     }
 
+    @Test fun aPartWithItsOwnMeshIsNotTheModel() {
+        // the hub's frames as they are: a `part` carries a mesh too (it was taken for the board's model, which then went blank)
+        val model = mapOf<String, Any?>("key" to "2|$a|", "n" to 12L, "mesh" to ByteArray(120))
+        val part = mapOf<String, Any?>("key" to "2|$a|", "part" to "0123456789abcdef", "n" to 2L, "mesh" to ByteArray(20), "at" to ByteArray(48))
+        val start = mapOf<String, Any?>("key" to "2|$a|", "parts" to mapOf("of" to 3L, "rev" to "r"))
+        assertEquals(true, PlotStore.isModel(model)); assertEquals(false, PlotStore.isModel(part)); assertEquals(false, PlotStore.isModel(start))
+        assertEquals(true, PlotStore.isPart(part)); assertEquals(true, PlotStore.isPart(start))
+        val g = ViewGate<Map<String, Any?>> { x, y -> PlotStore.sameKind(x, y) }
+        g.begin(); g.park("2|$a|", model); g.park("2|$a|", start); g.park("2|$a|", part)
+        assertEquals("the part did not replace the parked model", listOf(model, start, part), g.shown(PlotStore.keys("3d", a, "")))
+        val newer = model + ("n" to 13L)
+        g.begin(); g.park("2|$a|", model); g.park("2|$a|", newer)
+        assertEquals("a newer model still replaces the older", listOf(newer), g.shown(PlotStore.keys("3d", a, "")))
+    }
+
     @Test fun theKeysAreTheHubs() {
         assertEquals(listOf("0|/r|"), PlotStore.keys("board", "/r", ""))
         assertEquals(listOf("3|/r|/r/mech/a.step", "0|/r|/r/mech/a.step"), PlotStore.keys("3d-bare", "/r", "mech/a.step"))

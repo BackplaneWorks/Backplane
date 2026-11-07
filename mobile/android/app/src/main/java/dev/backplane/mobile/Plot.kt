@@ -405,7 +405,7 @@ class PlotStore {
     // A plot for another key came late for a view that was left and is dropped; one that comes before the answer waits for it. Main thread.
     private class Parked(val o: Map<String, Any?>?, val f: PlotFrame?)
     // a newer plot or model replaces the parked one of its key; a model's parts all wait, in order
-    private val gate = ViewGate<Parked> { a, b -> (a.f != null && b.f != null) || (a.o?.get("mesh") != null && b.o?.get("mesh") != null) }
+    private val gate = ViewGate<Parked> { a, b -> (a.f != null && b.f != null) || sameKind(a.o, b.o) }
     /** This view's cached model (MeshDisk), drawn once the hub names its key among the view's */
     private var disk: Map<String, Any?>? = null
     private fun wanted(key: String): Boolean? = gate.wanted(key)
@@ -515,7 +515,7 @@ class PlotStore {
         when (wanted(key)) { null -> { park(key, o, null); return }; false -> return; true -> {} }
         val fam = (o["fam"] as? String)?.takeIf { it.isNotEmpty() } ?: key
         val solid = key.startsWith("2|") || key.startsWith("3|") || key.startsWith("4|")
-        if (solid && o["none"] == null && o["mesh"] == null) { more?.invoke(key, o); return } // parts after (or without) the model: for the view on show only
+        if (solid && o["none"] == null && !isModel(o)) { more?.invoke(key, o); return } // parts after (or without) the model: for the view on show only (a `part` has a mesh of its own, and is not the model)
         val gen = generation; val slot = slot
         val ticket = if (solid) assets.issue(key, assets.epoch()) ?: return else 0L
         val previous = if (solid) assets.frame(key)?.mesh else null
@@ -545,6 +545,12 @@ class PlotStore {
     }
 
     companion object {
+        /** A model's part frames (`parts`, `part`): a `part` carries a `mesh` of its own, so a mesh alone does not make a frame the model. */
+        fun isPart(o: Map<String, Any?>?): Boolean = o != null && (o["part"] != null || o["parts"] != null)
+        /** The board's own model: a mesh, and not a part's. */
+        fun isModel(o: Map<String, Any?>?): Boolean = o != null && o["mesh"] != null && !isPart(o)
+        /** Two parked frames of one key the later replaces: two models (parts all wait, in order). */
+        fun sameKind(a: Map<String, Any?>?, b: Map<String, Any?>?): Boolean = isModel(a) && isModel(b)
         /** The keys a view shows by the hub's rule (kicad/watch.rs `key`), for a hub that does not answer them. */
         fun keys(kind: String, root: String, path: String): List<String> {
             val p = if (path.isEmpty() || path.startsWith("/")) path else "$root/$path"
