@@ -2,7 +2,7 @@
 """The Android app's pairing on an emulator through its real UI: uiautomator finds the controls, `input` types and taps, and the hub says whether it worked.
 A simulator result: it counts for the app and the protocol, not for a real phone.
 
-  android.py --base http://HOST:PORT --token-file T --adb 'CMD' --sockets 'CMD' [--restart 'CMD'] [--expire 'CMD']
+  android.py --base http://HOST:PORT --token-file T --adb 'CMD' --sockets 'CMD' [--restart 'CMD'] [--expire 'CMD'] [--device 'a real Pixel 9 (USB)']
 
 --adb is the prefix that reaches your own emulator. --sockets prints how many sockets are established to the hub from outside, run where the hub is.
 """
@@ -22,31 +22,69 @@ class Phone:
         self.sh("uiautomator dump /sdcard/ui.xml >/dev/null 2>&1")
         try: return list(ET.fromstring(self.sh("cat /sdcard/ui.xml")).iter("node"))
         except ET.ParseError: return []
-    def texts(self): return re.sub(r"(invite|code)=[^ &|]+", r"\1=<secret>", " | ".join(t for n in self.nodes() for t in (n.get("text"), n.get("content-desc")) if t))
+    # The pairing screen scrolls where it does not fit (a phone in landscape, the keyboard up): what is below the fold is not in a dump, so the
+    # driver scrolls to it, with swipes sized from the window, as a person would.
+    def scrolls(self, ns=None): return any(n.get("scrollable") == "true" for n in (ns if ns is not None else self.nodes()))
+    def swipe(self, up, ns=None):  # inside the scrolling view: above the keyboard (imePadding), clear of the status bar's shade
+        sc = [n for n in (ns if ns is not None else self.nodes()) if n.get("scrollable") == "true"]
+        if not sc: return
+        x1, y1, x2, y2 = map(int, re.findall(r"\d+", sc[0].get("bounds"))); x, h = (x1 + x2) // 2, y2 - y1
+        a, b = y1 + int(h * 0.8), y1 + int(h * 0.2)
+        self.sh(f"input swipe {x} {a if up else b} {x} {b if up else a} 300"); time.sleep(0.6)
+    def top(self):
+        ns = self.nodes()
+        if self.scrolls(ns):
+            for _ in range(3): self.swipe(False, ns)
+    def bottom(self):
+        ns = self.nodes()
+        if self.scrolls(ns):
+            for _ in range(3): self.swipe(True, ns)
+    def texts(self):
+        ns = self.nodes(); out = [t for n in ns for t in (n.get("text"), n.get("content-desc")) if t]
+        if self.scrolls(ns):  # the rest of the screen too, then back to the top
+            self.bottom(); out += [t for n in self.nodes() for t in (n.get("text"), n.get("content-desc")) if t and t not in out]; self.top()
+        return re.sub(r"(invite|code)=[^ &|]+", r"\1=<secret>", " | ".join(out))
     def tap(self, n):
         x1, y1, x2, y2 = map(int, re.findall(r"\d+", n.get("bounds")))
         self.sh(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
-    def field(self): return next((n for n in self.nodes() if n.get("class") == "android.widget.EditText"), None)
+    def field(self):
+        self.top()
+        for _ in range(2):  # (a dump taken while a scroll settles can miss it)
+            f = next((n for n in self.nodes() if n.get("class") == "android.widget.EditText"), None)
+            if f is not None: return f
+            time.sleep(1)
+        return None
     def button(self, label, last=False):
         m = [n for n in self.nodes() if n.get("text") == label or n.get("content-desc") == label]
         return (m[-1] if last else m[0]) if m else None
+    def seek(self, label):  # a control that may be below the fold
+        for i in range(4):
+            b = self.button(label)
+            if b is not None: return b
+            self.swipe(True)
+        return None
+    def code_fields(self):  # the address and code fields: the two after "Or the hub's address and short code", with the screen at its bottom
+        self.bottom(); ns = self.nodes()
+        i = next((k for k, n in enumerate(ns) if (n.get("text") or "").startswith("Or the hub's address")), None)
+        return [n for n in ns[i:] if n.get("class") == "android.widget.EditText"] if i is not None else []
     def type_and_pair(self, text):
         f = self.field()
         if f is None: return False
         self.tap(f); time.sleep(0.5)
         self.sh("input text " + shlex.quote(text))
         time.sleep(1)
-        b = self.button("Pair")  # with the keyboard up, as a person taps it: dismissing it moves the layout under the tap
+        b = self.seek("Pair")  # with the keyboard up, as a person taps it: dismissing it moves the layout under the tap
         if b is None: return False
         self.tap(b); time.sleep(4); return True
     def code_and_pair(self, address, code):
-        fs = [n for n in self.nodes() if n.get("class") == "android.widget.EditText"]
+        fs = self.code_fields()
         if len(fs) < 2: return False
-        self.tap(fs[1]); time.sleep(0.6); self.sh("input text " + shlex.quote(address)); time.sleep(0.6)
-        fs = [n for n in self.nodes() if n.get("class") == "android.widget.EditText"]
-        self.tap(fs[2]); time.sleep(0.6); self.sh("input text " + shlex.quote(code)); time.sleep(0.8)
-        b = self.button("Pair with code")
-        if b is None: self.sh("input keyevent 4"); time.sleep(1.2); b = self.button("Pair with code")
+        self.tap(fs[0]); time.sleep(0.6); self.sh("input text " + shlex.quote(address)); time.sleep(0.6)
+        fs = self.code_fields()
+        if len(fs) < 2: return False
+        self.tap(fs[1]); time.sleep(0.6); self.sh("input text " + shlex.quote(code)); time.sleep(0.8)
+        b = self.seek("Pair with code")
+        if b is None: self.sh("input keyevent 4"); time.sleep(1.2); b = self.seek("Pair with code")
         if b is None: return False
         self.tap(b); time.sleep(4); return True
     def open_link(self, url): self.sh("am start -W -a android.intent.action.VIEW -d " + shlex.quote(url) + f" {PKG}")  # (adb shell parses once: quoted twice, the data began with a quote and no app took it); time.sleep(5)
@@ -55,33 +93,34 @@ class Phone:
 def live(hub): return sum(1 for d in hub.devices()[1]["devices"] if not d.get("revoked"))
 def sockets(cmd): return int((subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip() or "0").split()[-1])
 def on_pair_screen(p): return p.field() is not None and "Pair" in p.texts()
+def left_pairing(p): t = p.texts(); return bool(t) and "Pair with a hub" not in t and "Re-pair this device" not in t  # (said of what is on screen, not of a field it did not find)
 
 
 def main():
     a = argparse.ArgumentParser()
     for n in ("--base", "--token-file", "--adb", "--sockets"): a.add_argument(n, required=True)
-    a.add_argument("--restart", default=""); a.add_argument("--expire", default="")
+    a.add_argument("--device", default="Android emulator (a simulator result)"); a.add_argument("--restart", default=""); a.add_argument("--expire", default="")
     o = a.parse_args()
     hub, p = Hub(o.base, open(o.token_file).read().strip()), Phone(o.adb)
-    print(f"route {hub.base}, Android emulator (a simulator result)", flush=True)
+    print(f"route {hub.base}, {o.device}", flush=True)
 
     p.fresh()
     check("a fresh app starts at pairing", on_pair_screen(p), p.texts()[:90])
     print("   screen offers:", p.texts()[:160], flush=True)
-    check("the screen offers a hub address and short code", sum(1 for n in p.nodes() if n.get("class") == "android.widget.EditText") == 3)
+    check("the screen offers a hub address and short code", len(p.code_fields()) == 2); p.top()
 
     # link, typed into the field
     n0 = live(hub); st, inv = hub.invite()
     check("link typed and Pair tapped", p.type_and_pair(inv["link"]))
     check("link: the hub lists one more live device", live(hub) == n0 + 1, p.texts()[:90])
     check("link: the app holds a socket to the hub", sockets(o.sockets) >= 1)
-    check("link: the app has left pairing", not on_pair_screen(p), p.texts()[:90])
+    check("link: the app has left pairing", left_pairing(p), p.texts()[:90])
 
     # a short code
     p.fresh(); n0 = live(hub); st, inv = hub.invite()
     check("address and short code typed", p.code_and_pair(hub.base, inv["code"].lower()[:4] + "-" + inv["code"].lower()[4:]))
     check("short code pairs (lower case, with a dash)", live(hub) == n0 + 1, p.texts()[:90])
-    check("short code: the app has left pairing", not on_pair_screen(p), p.texts()[:90])
+    check("short code: the app has left pairing", left_pairing(p), p.texts()[:90])
     p.fresh(); st, inv = hub.invite(); n0 = live(hub)
     p.type_and_pair(inv["code"])
     check("a bare code is not taken for a hub address", on_pair_screen(p) and "address with the short code" in p.texts(), p.texts()[:120])
