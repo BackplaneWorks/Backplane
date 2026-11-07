@@ -14,6 +14,8 @@ pub mod fs {
     /// A file's mode bits as a test compares them: the real ones.
     pub fn mode_bits(actual: u32, _want: u32) -> u32 { actual }
     pub use std::fs::canonicalize;
+    /// Whether no part of an absolute path is a link (it is its own real path).
+    pub fn no_link_on(p: &std::path::Path) -> std::io::Result<bool> { Ok(canonicalize(p)? == p) }
     /// Whether a path in text is absolute: it starts at /.
     pub fn is_abs(p: &str) -> bool { p.starts_with('/') }
     /// The ways a folder's path may be written: as it is.

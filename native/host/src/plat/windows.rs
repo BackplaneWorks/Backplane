@@ -29,6 +29,11 @@ pub mod fs {
         if !name.contains(['<', '>', ':', '"', '|', '?', '*']) { return name.into() }
         name.chars().map(|c| if "<>:\"|?*".contains(c) { format!("%{:02X}", c as u32) } else { c.to_string() }).collect::<String>().into()
     }
+    /// Whether no part of an absolute path is a link or junction (Windows' real path can differ by a short 8.3 name or case, so each part is asked).
+    pub fn no_link_on(p: &Path) -> io::Result<bool> {
+        fs::metadata(p)?;
+        Ok(p.ancestors().filter(|a| a.parent().is_some()).all(|a| fs::symlink_metadata(a).map_or(false, |m| !m.file_type().is_symlink() && !std::os::windows::fs::FileTypeExt::is_symlink_dir(&m.file_type()))))
+    }
     /// Whether a path in text is absolute: C:\ or C:/, a share (\\host), or a slash (the current drive's root, and Git's shell's /c/...).
     pub fn is_abs(p: &str) -> bool { let b = p.as_bytes(); p.starts_with('/') || p.starts_with('\\') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')) }
     /// The ways a folder's path may be written: as it is, with forward slashes (C:/x), and as Git's shell writes it (/c/x).
