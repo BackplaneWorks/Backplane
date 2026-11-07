@@ -49,7 +49,7 @@ impl CefPage {
         // test hook (no portal on a bare Xvfb): answer with this file instead of asking the person
         if let Some(f) = std::env::var_os("BACKPLANE_CEF_TEST_FILE").filter(|f| !f.is_empty()) { let mut l = cef::CefStringList::new(); l.append(&f.to_string_lossy()); d.cb.cont(Some(&mut l)); return }
         let rx: std::pin::Pin<Box<dyn std::future::Future<Output = Option<Vec<std::path::PathBuf>>>>> = if d.save {
-            let r = cx.prompt_for_new_path(&std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(), None);
+            let r = cx.prompt_for_new_path(&crate::plat::user_home().unwrap_or_default(), None);
             Box::pin(async move { r.await.ok().and_then(|r| r.ok()).flatten().map(|p| vec![p]) })
         } else {
             let r = cx.prompt_for_paths(PathPromptOptions { files: !d.folder, directories: d.folder, multiple: d.multiple, prompt: None });

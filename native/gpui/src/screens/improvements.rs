@@ -538,7 +538,7 @@ fn open_target(what: &str) -> Result<(), String> {
 }
 /// Where a saved file goes: `BACKPLANE_GPUI_SAVE_DIR`, else ~/Downloads (else the home folder). Never over an existing file.
 fn save_file(name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
-    let dir = std::env::var_os("BACKPLANE_GPUI_SAVE_DIR").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| { let d = PathBuf::from(h).join("Downloads"); if d.is_dir() { d } else { PathBuf::from(std::env::var_os("HOME").unwrap_or_default()) } })).ok_or("No folder to save in.")?;
+    let dir = std::env::var_os("BACKPLANE_GPUI_SAVE_DIR").map(PathBuf::from).or_else(|| crate::plat::user_home().map(|h| { let d = h.join("Downloads"); if d.is_dir() { d } else { h } })).ok_or("No folder to save in.")?;
     let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
     for i in 0..1000 {
         let p = dir.join(if i == 0 { name.to_string() } else { format!("{stem}-{i}.{ext}") });

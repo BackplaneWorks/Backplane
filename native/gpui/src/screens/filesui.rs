@@ -96,7 +96,7 @@ pub fn unique(name: &str, taken: &dyn Fn(&str) -> bool) -> String {
 }
 /// A name the saver may write: no path parts.
 pub fn save_name(n: &str) -> String { let n = n.rsplit(['/', '\\']).next().unwrap_or(""); let n = n.trim_start_matches('.'); if n.is_empty() { "download".into() } else { n.replace(['\0', '\n', '\r'], "_") } }
-pub fn downloads_dir() -> PathBuf { std::env::var_os("BACKPLANE_GPUI_DOWNLOADS").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Downloads")) }
+pub fn downloads_dir() -> PathBuf { std::env::var_os("BACKPLANE_GPUI_DOWNLOADS").map(PathBuf::from).unwrap_or_else(|| crate::plat::user_home().unwrap_or_default().join("Downloads")) }
 
 impl FileRow { pub fn down(&self) -> String { self.down.clone() } }
 

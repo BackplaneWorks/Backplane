@@ -167,7 +167,7 @@ mod tests {
         let im = Images::default(); let t = Target { addr: "127.0.0.1:1".into(), token: "t".into(), tls: false };   // connection refused: every fetch fails fast
         im.frame();
         for i in 0..200 { let _ = im.get(Some(&t), &format!("/img?path={i}")); }
-        for _ in 0..200 { if !im.loading() { break; } std::thread::sleep(Duration::from_millis(25)); }
+        for _ in 0..2400 { if !im.loading() { break; } std::thread::sleep(Duration::from_millis(25)); } // Windows takes about 2 s to refuse a connection
         assert!(!im.loading(), "loading must end, or the window repaints forever");
         assert!(im.s.0.lock().unwrap().workers <= WORKERS);
         assert_eq!(im.s.0.lock().unwrap().items.len(), 200, "everything drawn this frame is kept");

@@ -21,7 +21,7 @@ pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Som
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String>, /** a pairing credential is what connects: a 401 means this device was revoked */ pub paired:bool, /** no hub to connect to: the client starts at pairing */ pub unpaired:bool, /** a link from outside, to ask about */ pub pair_link:Option<String>, /** no --url, no pairing: the launcher (launch.rs) finds or starts this machine's hub, or the chooser asks */ pub pending:bool, /** this client started or found its own hub */ pub launched:bool }
 impl Config {
     pub fn parse() -> Result<Self> {
-        let home=std::env::var("HOME")?;
+        let home=crate::plat::user_home().context("no home folder ($HOME)")?;
         let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token"),exit_after:None,swatches:false,gallery:false,fonts:false,solid_demo:None,theme:None,paired:false,unpaired:false,pair_link:None,pending:false,launched:false,script:std::env::var_os("BACKPLANE_GPUI_SCRIPT").map(PathBuf::from)};
         let (mut args,mut named,mut keyed)=(std::env::args().skip(1),false,false);
         while let Some(arg)=args.next() { match arg.as_str() {

@@ -46,3 +46,22 @@ pub fn private_file(p: &std::path::Path) -> std::io::Result<std::fs::File> {
     #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; o.mode(0o600); }
     o.open(p)
 }
+
+/// The user's own folder: $HOME (Windows: %USERPROFILE% when HOME is not set, as outside Git's shell).
+pub fn user_home() -> Option<std::path::PathBuf> {
+    let h = std::env::var_os("HOME").filter(|h| !h.is_empty());
+    #[cfg(windows)] let h = h.or_else(|| std::env::var_os("USERPROFILE").filter(|h| !h.is_empty()));
+    h.map(std::path::PathBuf::from)
+}
+/// Where this device's settings live: $XDG_CONFIG_HOME, else ~/.config (Windows: %APPDATA%).
+pub fn config_base() -> Option<std::path::PathBuf> {
+    let x = std::env::var_os("XDG_CONFIG_HOME").filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
+    #[cfg(windows)] let x = x.or_else(|| std::env::var_os("APPDATA").filter(|p| !p.is_empty()).map(std::path::PathBuf::from));
+    x.or_else(|| user_home().map(|h| h.join(".config")))
+}
+/// Where caches live: $XDG_CACHE_HOME, else ~/.cache (Windows: %LOCALAPPDATA%).
+pub fn cache_base() -> Option<std::path::PathBuf> {
+    let x = std::env::var_os("XDG_CACHE_HOME").map(std::path::PathBuf::from);
+    #[cfg(windows)] let x = x.or_else(|| std::env::var_os("LOCALAPPDATA").filter(|p| !p.is_empty()).map(std::path::PathBuf::from));
+    x.or_else(|| user_home().map(|h| h.join(".cache")))
+}

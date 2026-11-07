@@ -29,7 +29,7 @@ impl Default for Local {
 
 pub fn path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("BACKPLANE_GPUI_LOCAL").filter(|p| !p.is_empty()) { return Some(p.into()) }
-    let base = std::env::var_os("XDG_CONFIG_HOME").filter(|p| !p.is_empty()).map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    let base = crate::plat::config_base()?;
     Some(base.join("backplane-gpui/local-settings.json"))
 }
 

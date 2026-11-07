@@ -156,6 +156,33 @@ jobs:
         shell: bash
         run: cargo nextest run --locked --no-fail-fast
 
+  # A hub on a temp home and the GPUI client connected to it, on the runner's desktop (WARP, no GPU): test/windows/smoke.sh.
+  windows-smoke:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    continue-on-error: true
+    name: windows smoke
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/host
+            native/gpui
+          shared-key: windows-smoke
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: build
+        shell: bash
+        run: |
+          (cd native/host && cargo build --locked --bin backplane-hub)
+          (cd native/gpui && cargo build --locked)
+      - name: smoke
+        shell: bash
+        run: HUB=native/host/target/debug/backplane-hub.exe GPUI=native/gpui/target/debug/backplane-gpui.exe test/windows/smoke.sh
+
   android:
     needs: changes
     if: needs.changes.outputs.android == 'true'

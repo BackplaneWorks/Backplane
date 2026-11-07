@@ -20,11 +20,10 @@ pub struct Saved {
 
 fn config_dir() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("BACKPLANE_GPUI_CONFIG").filter(|p| !p.is_empty()) { return Some(p.into()) }
-    let base = std::env::var_os("XDG_CONFIG_HOME").filter(|p| !p.is_empty()).map(PathBuf::from)
-        .or_else(|| user_home().map(|h| h.join(".config")))?;
+    let base = crate::plat::config_base()?;
     Some(base.join("backplane-gpui"))
 }
-pub fn user_home() -> Option<PathBuf> { std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from) }
+pub fn user_home() -> Option<PathBuf> { crate::plat::user_home() }
 pub fn saved_path() -> Option<PathBuf> { config_dir().map(|d| d.join("launch.json")) }
 pub fn load() -> Saved { saved_path().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default() }
 pub fn save(s: &Saved) -> Result<()> {
@@ -38,7 +37,7 @@ pub fn forget() { if let Some(p) = saved_path() { let _ = std::fs::remove_file(p
 
 /// Where a home goes when the person takes the default, per system. Each system with a build has a line here.
 pub fn default_home(os: &str, user: &Path) -> PathBuf {
-    match os { "macos" => user.join("Library/Application Support/Backplane/hub"), _ => user.join(".backplane/hub") }
+    match os { "macos" => user.join("Library/Application Support/Backplane/hub"), "windows" => user.join("AppData").join("Roaming").join("Backplane").join("hub"), _ => user.join(".backplane/hub") }
 }
 pub fn default_here() -> Option<PathBuf> { user_home().map(|u| default_home(std::env::consts::OS, &u)) }
 
@@ -171,13 +170,16 @@ mod tests {
     #[test] fn each_system_has_its_own_default_home() {
         assert_eq!(default_home("linux", Path::new("/home/a")), Path::new("/home/a/.backplane/hub"));
         assert_eq!(default_home("macos", Path::new("/Users/a")), Path::new("/Users/a/Library/Application Support/Backplane/hub"));
+        assert_eq!(default_home("windows", Path::new(r"C:\Users\a")), Path::new(r"C:\Users\a").join("AppData").join("Roaming").join("Backplane").join("hub"));
     }
     #[test] fn a_home_must_be_a_full_path_and_never_the_old_one() {
         let old = Path::new("/h/.backplane-bend");
-        assert_eq!(home_problem("/h/.backplane/hub", Some(old)), "");
+        let full = if cfg!(windows) { r"C:\h\.backplane\hub" } else { "/h/.backplane/hub" };
+        assert_eq!(home_problem(full, Some(old)), "");
         assert!(home_problem("", None).starts_with("Choose"));
         assert!(home_problem("hub", None).contains("full path"));
-        assert!(home_problem("/h/.backplane-bend/x", Some(old)).contains("0.14"));
+        if cfg!(unix) { assert!(home_problem("/h/.backplane-bend/x", Some(old)).contains("0.14")); }
+        else { assert!(home_problem(r"C:\h\.backplane-bend\x", Some(Path::new(r"C:\h\.backplane-bend"))).contains("0.14")); }
     }
     #[test] fn the_lock_says_the_port() {
         assert_eq!(lock_port("1234 3801 flock\n"), Some(3801));

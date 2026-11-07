@@ -19,7 +19,7 @@ pub struct Bar { pub phase: String, pub text: String, pub frac: Option<f32>, ///
 /// The watcher's status (STATUS: a build waits to relaunch the app, can be asked to) and the builder's (BUILD: a build is being made, failed): the watcher's is shown first.
 fn paths() -> Vec<PathBuf> {
     if let Some(p) = std::env::var_os("BACKPLANE_DEV_STATUS") { return vec![PathBuf::from(p)] }
-    let d = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".backplane-gpui-dev");
+    let d = crate::plat::user_home().unwrap_or_default().join(".backplane-gpui-dev");
     vec![d.join("STATUS"), d.join("BUILD")]
 }
 fn path() -> PathBuf { paths().remove(0) }

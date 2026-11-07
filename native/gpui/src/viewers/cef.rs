@@ -128,7 +128,7 @@ wrap_download_handler! {
         fn can_download(&self, _b: Option<&mut Browser>, _url: Option<&CefString>, _method: Option<&CefString>) -> ::std::os::raw::c_int { eprintln!("GPUI_LOG {{\"cef_can_download\":{}}}", serde_json::Value::String(s(_url))); true as _ }
         fn on_before_download(&self, _b: Option<&mut Browser>, _item: Option<&mut DownloadItem>, name: Option<&CefString>, cb: Option<&mut BeforeDownloadCallback>) -> ::std::os::raw::c_int {
             // no dialog: the file goes to the person's Downloads folder (never over a file), the page says so when it is done
-            let dir = std::env::var_os("XDG_DOWNLOAD_DIR").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads"))).unwrap_or_else(std::env::temp_dir);
+            let dir = std::env::var_os("XDG_DOWNLOAD_DIR").map(PathBuf::from).or_else(|| crate::plat::user_home().map(|h| h.join("Downloads"))).unwrap_or_else(std::env::temp_dir);
             let _ = std::fs::create_dir_all(&dir);
             let path = unique_path(&dir, &safe_name(&s(name)));
             eprintln!("GPUI_LOG {{\"cef_download\":{}}}", serde_json::Value::String(path.to_string_lossy().into_owned()));
@@ -203,7 +203,7 @@ pub fn subprocess() -> Option<i32> {
 pub fn runtime_dir() -> Option<PathBuf> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Some(p) = std::env::var_os("BACKPLANE_CEF").filter(|p| !p.is_empty()) { let p = PathBuf::from(p); cands.push(if p.is_dir() { p } else { p.parent().map(Path::to_path_buf).unwrap_or(p) }); }
-    let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")));
+    let cache = crate::plat::cache_base();
     if let Some(c) = cache { cands.push(c.join("backplane").join("cef-runtime").join(VERSION)); }
     if let Ok(me) = std::env::current_exe() { if let Some(d) = me.parent() { cands.push(d.to_path_buf()); } }
     cands.into_iter().find(|d| d.join("icudtl.dat").exists() && d.join("resources.pak").exists() && d.join("libcef.so").exists())
@@ -222,7 +222,7 @@ impl Engine {
         let dir = runtime_dir().ok_or_else(|| "no CEF runtime (set BACKPLANE_CEF to the runtime directory, or put it in ~/.cache/backplane/cef-runtime/".to_string() + VERSION + ")")?;
         let port = std::env::var("BACKPLANE_CEF_CDP_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or_else(free_port);
         let profile = std::env::var_os("BACKPLANE_CEF_PROFILE").map(PathBuf::from).unwrap_or_else(|| {
-            let h = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(); h.join(".cache/backplane/cef-gpui-profile")
+            crate::plat::user_home().unwrap_or_default().join(".cache/backplane/cef-gpui-profile")
         });
         let _ = std::fs::create_dir_all(&profile);
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
