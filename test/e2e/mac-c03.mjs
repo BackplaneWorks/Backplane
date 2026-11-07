@@ -1,13 +1,15 @@
 // C03 on a machine with FreeCAD and no window: Settings > CAD's FreeCAD path (field fpath, button freecad-path, setting freecad.path) is the one the hub launches.
 // usage: node test/e2e/mac-c03.mjs HUB_BIN OUT_DIR [PORT] [REAL_FREECADCMD]   -> one line per check, OUT_DIR/c03.json
 // A wrapper stands in for freecadcmd: it logs each call, then runs the real one, so the log shows which program the hub started to mesh a STEP (BACKPLANE_STEP2GLB=off: FreeCAD is the only mesher).
-import {mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,chmodSync,copyFileSync,readdirSync} from 'node:fs';
+import {symlinkSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,chmodSync,copyFileSync,readdirSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,sleep} from '../perf/lib.mjs';
 import {viewClient} from '../perf/view.mjs';
 import {encode,decode} from '../wire.mjs';
 const [bin,out,port0,realArg]=process.argv.slice(2);const port=Number(port0||3840);process.env.NO_SCOPE='1';
 const real=realArg||process.env.HOME+'/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd';
 rmSync(out,{recursive:true,force:true});mkdirSync(out+'/bin',{recursive:true});mkdirSync(out+'/fc',{recursive:true});mkdirSync(out+'/proj',{recursive:true});makeStandins(out+'/bin');
+// off the Mac the hub's own search is PATH: a link named freecadcmd to the real one stands for "found by the search" (no wrapper, so no calls are logged)
+const found=process.platform==='darwin'?'/FreeCAD.app/':out+'/bin/freecadcmd';if(process.platform!=='darwin')symlinkSync(real,out+'/bin/freecadcmd');
 const calls=out+'/fc/calls.log';const wrap=out+'/fc/freecadcmd';
 writeFileSync(wrap,`#!/bin/sh\necho "$@" >> ${calls}\nexec ${real} "$@"\n`);chmodSync(wrap,0o755);
 copyFileSync(new URL('../files/fixtures/mesh/bracket.step',import.meta.url).pathname,out+'/proj/bracket.step');
@@ -38,7 +40,7 @@ rec('C03 path set',stored===wrap&&json(row).includes(wrap)&&r1.ok&&r1.calls>0,`s
 // 2. a path that does not run: the page says so and the hub falls back to its search
 await act('bfield','fpath\u001f/nonexistent/freecadcmd');await act('freecad-path');await sleep(1200);
 row=await cadRow();const r2=await render();
-rec('C03 bad path',(row?.note||'').includes('/FreeCAD.app/')&&!json(row?.note).includes('nonexistent')&&r2.ok&&r2.calls===0,`the setting does not run, so the note shows the program the search found instead ("not found at that path" is for when nothing is found): "${row?.note}"; mech.render still wrote ${r2.files} files via the normal search, wrapper calls ${r2.calls}`);
+rec('C03 bad path',(row?.note||'').includes(found)&&!json(row?.note).includes('nonexistent')&&r2.ok&&r2.calls===0,`the setting does not run, so the note shows the program the search found instead ("not found at that path" is for when nothing is found): "${row?.note}"; mech.render still wrote ${r2.files} files via the normal search, wrapper calls ${r2.calls}`);
 // 3. persisted across a restart
 await act('bfield','fpath\u001f'+wrap);await act('freecad-path');await sleep(1000);
 try{v.close()}catch{};ws.close();stopHub(hub);await sleep(1500);

@@ -33,28 +33,28 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | F20 | File browser and downloads | not run | not run | deferred, no VM |
 | F21 | Reconnect, resume from sequence, outbox, long session | not run | not run | deferred, no VM |
 | F22 | Ordering flow up to the quote; no order placed | not run | not run | deferred, no VM |
-| F23 | A killed hub leaves no agent behind | not run | fail | deferred, no VM |
+| F23 | A killed hub leaves no agent behind | pass, hub only | pass | deferred, no VM |
 | | **Install and CAD** | | | |
 | C01 | Package installs and starts on a clean user | not run | not run | deferred, no VM |
 | C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | pass | pass, part: ERC and DRC, no export | deferred, no VM |
-| C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | fail | pass, part: install not run | deferred, no VM |
+| C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | pass, part: install not run | pass, part: install not run | deferred, no VM |
 | | **Remote operation** | | | |
 | R01 | Restart the hub from another machine | pass | pass | deferred, no VM |
 | R02 | Update: channel, Check now, download, checksum, swap, restart | pass | pass | deferred, no VM |
 | R03 | Rollback after a bad update | pass | pass | deferred, no VM |
 | | **Settings: each control persists across restart and takes effect** | | | |
 | S01 | Appearance | persists, effect not proven | not run | deferred, no VM |
-| S02 | Threads | persists, effect not proven | not run | deferred, no VM |
-| S03 | Agents | persists, effect not proven | not run | deferred, no VM |
+| S02 | Threads | pass | not run | deferred, no VM |
+| S03 | Agents | pass, part: provider and model | not run | deferred, no VM |
 | S04 | Writing | persists, effect not proven | not run | deferred, no VM |
 | S05 | CAD | pass, part: KiCad only | not run | deferred, no VM |
-| S06 | Ordering | persists, effect not proven | not run | deferred, no VM |
+| S06 | Ordering | pass, part: Ordering on/off | not run | deferred, no VM |
 | S07 | Devices | pass | not run | deferred, no VM |
-| S08 | Network | persists, effect not proven | not run | deferred, no VM |
-| S09 | Voice | fail | not run | deferred, no VM |
+| S08 | Network | pass, part: update channel | not run | deferred, no VM |
+| S09 | Voice | persists, effect not proven | not run | deferred, no VM |
 | S10 | Keys | not run | not run | deferred, no VM |
-| S11 | Timezone | persists, effect not proven | not run | deferred, no VM |
-| S12 | Usage | fail | not run | deferred, no VM |
+| S11 | Timezone | pass | not run | deferred, no VM |
+| S12 | Usage | pass, part: page in the menu, totals by unit test | not run | deferred, no VM |
 | S13 | About | pass | not run | deferred, no VM |
 | S14 | Privacy | pass | not run | deferred, no VM |
 
@@ -267,3 +267,19 @@ Rig: Boat sandbox (4 vCPU, 8 GB, Ubuntu 24.04), source `26ba50a0ba49496a9baf89cb
 | R01 macOS | pass | 7a2df741f2 | hs-mac-mini macOS arm64 (guard + hub, no window); clients: GPUI on backplane, Pixel 9 52220DLAQ001FC, both over the LAN | `test/update/clients.sh mac gpui@backplane phone` (real guard + hub built with `--features e2e-trust` from the commit, private home and port, feed on loopback signed by a keypair made for the run (deleted at its end), every release below 0.1.0; a client's Check now is judged only after the hub's own first check has run, so an install can come from nothing else before the hour): the guard runs on macOS as on Linux; GPUI on backplane and the Pixel each paired with the Mac hub (10.0.0.166), restarted it and rolled it back; the GPUI client's Restart hub and Roll back hub from the Commands box (ctrl-k, typed, pressed twice to confirm); its Check now is the Settings button's action through the script hook (`{"action":["update-check",""]}`), as the client cannot open Settings from a script |
 | R02 macOS | pass | 7a2df741f2 | hs-mac-mini macOS arm64 (guard + hub, no window); clients: GPUI on backplane, Pixel 9 52220DLAQ001FC, both over the LAN | `feed.sh` on the Mac (8/8: good, older, wrongkey, ceiling, healthz as on Linux; /hello says `0.0.2 7a2df741f2`); Check now from GPUI on backplane and from the Pixel installed v0.0.2 |
 | R03 macOS | pass | 7a2df741f2 | hs-mac-mini macOS arm64 (guard + hub, no window); clients: GPUI on backplane, Pixel 9 52220DLAQ001FC, both over the LAN | `feed.sh` on the Mac: panic, die, mismatch each marked bad and back on v0.0.1; by hand from GPUI on backplane and from the Pixel: "rolled back by remote", back on v0.0.1 |
+
+
+### Test-honesty lane (branch honest-tests)
+
+| ID | Result | Commit | Environment | Evidence |
+|---|---|---|---|---|
+| S12 | pass, part: page in the menu, totals by unit test | b0e0aa023c | Linux desktop, debug hub | `test/e2e/settings-walk.mjs`: the hub menu lists 15 pages, `usage` and `voice` among them; `present::settings::tests::usage_adds_the_thread_totals_per_provider` |
+| S09 | persists, effect not proven | b0e0aa023c | Linux desktop, debug hub | the stale "voice not in the menu" is gone (846d94c44f); the walk applied and persisted 12 voice controls |
+| S03 | pass, part: provider and model | see log | Linux desktop, debug hub | `test/e2e/mac-effects.mjs`: a new thread starts on `agent.provider`/`agent.model` (claude -> codex/gpt-5.6-sol -> claude/opus); thinking and fallback not probed |
+| S06 | pass, part: Ordering on/off | see log | Linux desktop, debug hub | `mac-effects.mjs`: with `order.enabled` off the next turn's prompt says "Ordering from Backplane is off", with it on it does not; Buy it not driven |
+| S08 | pass, part: update channel | see log | Linux desktop, debug hub | `mac-effects.mjs`: `update.status` reports beta, then stable, after the chips; no update run (R02) |
+| S02, S11, S14 | pass | see log | Linux desktop, debug hub | the same `mac-effects.mjs` run: upload limit 413/200, zone offsets, telemetry states |
+| C03 | pass, part: install not run | see log | Linux desktop, FreeCAD at /usr/local/bin/FreeCAD | `test/e2e/mac-c03.mjs` (now Linux-aware): default search finds freecadcmd on PATH, the typed path is stored and run by the hub (wrapper logged), a bad path falls back, survives a restart. FreeCAD was already installed; the hub has no installer, and the Boat AppImage install was not rerun |
+| F23 | pass | see log | Linux and macOS | `agents::tests::a_killed_hub_leaves_no_agent_behind` passes on both (CI macOS included once its skip was removed); Mac rows run `b3ecb1d730` |
+
+Still not proven: S01 (theme is drawn by the clients), S04 (title provider/model) and the S03 thinking/fallback chips.
