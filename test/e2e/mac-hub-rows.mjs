@@ -78,15 +78,7 @@ if(qev){const st=await c.rpc('queue.steer',{thread:L,msg:qev.msg});await sleep(8
 const it=await c.rpc('turn.interrupt',{thread:L}); const ints=await until(()=>has(e=>e.$==='TurnChanged'&&e.thread===L&&e.state!=='running'),8000);
 log('F07',it.ok&&ints,`turn.interrupt ok=${it.ok} turn left running=${ints} (${events().filter(e=>e.$==='TurnChanged'&&e.thread===L).map(e=>e.state).join('>')})`);
 await c.rpc('turn.start',{thread:L,text:'long turn 2'}); await until(()=>events().filter(e=>e.$==='TurnChanged'&&e.thread===L&&e.state==='running').length>=2,5000);
-// F07 held queue: a model choice holds waiting work (Config.hold); queue.resume starts it
-{const H=await mk('held');await c.rpc('turn.start',{thread:H,text:'zqshort first'});await until(()=>has(e=>e.$==='TurnChanged'&&e.thread===H&&e.state==='running'),5000);
- await c.rpc('thread.modes',{thread:H,model:'opus'});await c.rpc('turn.start',{thread:H,text:'zqshort held message'});await sleep(800);
- const tq=events().find(e=>e.$==='TurnQueued'&&e.thread===H);
- await until(()=>has(e=>e.$==='TurnChanged'&&e.thread===H&&e.state!=='running'),30000);await sleep(1500);
- const held=!events().some(e=>e.$==='TurnChanged'&&e.thread===H&&e.state==='running'&&e.at>(tq?.at??1e12)&&false);
- const before=events().filter(e=>e.$==='TurnChanged'&&e.thread===H&&e.state==='running').length;
- const rs=await c.rpc('queue.resume',{thread:H});const after=await until(()=>events().filter(e=>e.$==='TurnChanged'&&e.thread===H&&e.state==='running').length>before,8000);
- log('F07-held',!!tq&&rs.ok&&after,`held queue: TurnQueued=${!!tq}, queue.resume ok=${rs.ok} started the held message=${after}`)}
+// F07 held queue: not here (a model choice holds only work that waits, so a fresh message is never held): linux-f-rows.mjs drives it with an interrupted turn
 await c.rpc('setting.set',{key:'restart.continue',value:'off'});
 // F21 part: since-resume before the restart
 const nBefore=events().length;

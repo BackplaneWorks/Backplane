@@ -4,6 +4,24 @@ def pause(s=1.2): time.sleep(s)
 def sel(i): click_ctl('thread:t%d' % i); pause(1.0)
 def chord(c): xin('chord', *c.split())
 
+# ---- F09 the context meter: the Context panel says "no reading yet" until a turn is counted, then shows what the thread holds and what is left
+if want('F09'):
+    sel(1); click_ctl('ui:Context'); pause(1.5); shot('m-empty'); PANEL = (367, 515, 1265, 780)
+    xin('click', 815, 810); xin('type', 'zqshort meter'); xin('key', 'Return')
+    until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 30); pause(3); shot('m-after')
+    changed = differs(px('m-empty'), px('m-after'), PANEL)
+    keys = sorted({e['key'].split('.')[0] + '.' + e['key'].split('.')[1] for e in events() if e['$'] == 'SettingSet' and e.get('key', '').startswith(('tok.', 'turn.last'))})
+    counted = any(e['$'] == 'TurnUsage' for e in events())
+    log('F09-meter', changed and counted, 'Context panel before the turn (m-empty.png) and after it (m-after.png): the panel changed=%s once the turn was counted; the hub logged TurnUsage=%s, readings %s. The figures are read from the screenshot, not by the driver' % (changed, counted, keys))
+    # drafts survive a crash: type, kill the client, restart it, the text is back
+    xin('click', 815, 810); xin('type', 'unsent draft zq9'); pause(2.5)
+    client.kill(); client.wait(); time.sleep(1.5)
+    client = spawn([CLIENT, '--url', 'http://127.0.0.1:%d' % PORT, '--token-file', P('home/token'), '--script', P('script.json'), '--exit-after', '3000'], 'client.log', cenv); time.sleep(8)
+    shot('m-draft'); from PIL import Image
+    crop = px('m-draft').crop((367, 788, 1265, 848)); open_composer_has_text = crop.convert('L').getextrema()[1] > 150 and sum(1 for v in crop.convert('L').getdata() if v > 150) > 80
+    log('F09-draft', open_composer_has_text, 'typed an unsent draft, killed the client process, started it again: the composer shows text again=%s (m-draft.png)' % open_composer_has_text)
+
+
 # ---- F15 image paste: a PNG on the real clipboard, Ctrl+V in the composer, Send posts it with the image and the agent is told its path
 if want('F15'):
     img = os.path.join(OUT, 'paste.png')
@@ -23,6 +41,28 @@ if want('F15'):
     told = os.path.exists(P('fake.log')) and any('look at this' in l and 'attachments/' in l for l in open(P('fake.log')).read().splitlines() if l.startswith('TURN'))
     same = bool(files) and open(files[0], 'rb').read()[:8] == b'\x89PNG\r\n\x1a\n'
     log('F15-paste', chip and sent and same and told, 'a PNG on the X clipboard pasted with Ctrl+V: composer changed=%s; message posted=%s; stored as a PNG=%s (%s); the agent was told the path=%s' % (chip, sent, same, [os.path.relpath(f, OUT) for f in files][:1], told))
+
+# ---- F06 cards in the client: the approval, question and plan cards of a thread, answered with the mouse; the agent hears each answer
+if want('F06'):
+    fake = lambda: open(P('fake.log')).read() if os.path.exists(P('fake.log')) else ''
+    asks = lambda th, kind: [e for e in events() if e['$'] == 'AskOpened' and e.get('thread') == th and e.get('kind') == kind]
+    closed = lambda a: any(e['$'] == 'AskClosed' and e.get('id') == a['id'] for e in events())
+    sel(1); say_ = lambda t: (xin('click', 815, 810), xin('type', t), xin('key', 'Return'))
+    say_('zqapprove now'); until(lambda: asks('t1', 'approval'), 20); pause(2); shot('f6-approval')
+    a1 = asks('t1', 'approval')[-1]; click_ctl('ask:0:0'); ok1 = until(lambda: closed(a1), 20); until(lambda: 'PERM Bash -> ' in fake(), 15)
+    allowed = bool(re.search(r'PERM Bash -> .*allow', fake(), re.I))
+    until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
+    n = len(asks('t1', 'approval')); say_('zqapprove again'); until(lambda: len(asks('t1', 'approval')) > n, 20); pause(2)
+    a2 = asks('t1', 'approval')[-1]; click_ctl('ask:0:2'); ok2 = until(lambda: closed(a2), 20); until(lambda: re.search(r'PERM Bash -> .*deny', fake(), re.I), 15)
+    denied = bool(re.search(r'PERM Bash -> .*deny', fake(), re.I))
+    log('F06-approval', ok1 and allowed and ok2 and denied, 'approval card (f6-approval.png) with Allow, Allow for session and Deny: Allow closed the ask and the agent got allow=%s; Deny closed the next and the agent got deny=%s' % (allowed, denied))
+    until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
+    say_('zqask'); until(lambda: asks('t1', 'input'), 20); pause(2); shot('f6-question'); q = asks('t1', 'input')[-1]
+    ids = sorted(k for k in ctrls() if k.startswith('ask:')); click_ctl(ids[0]) if ids else None; okq = until(lambda: closed(q), 20); until(lambda: 'PERM AskUserQuestion -> ' in fake(), 15)
+    heard = bool(re.search(r'PERM AskUserQuestion -> .*(USB-C|Barrel)', fake()))
+    log('F06-question', bool(ids) and okq and heard, 'question card "%s" (f6-question.png), option buttons %s: the first closed it and the agent got the answer=%s' % ((q.get('detail') or '')[:30].replace('\n', ' '), ids, heard))
+    sel(2); say_('zqplan'); until(lambda: asks('t2', 'plan'), 20); pause(2); shot('f6-plan'); pl = asks('t2', 'plan')
+    log('F06-plan', bool(pl) and 'Draw the board' in (pl[-1].get('detail') or ''), 'a thread in plan mode (ModesSet interaction=plan) asked to exit with the plan card (f6-plan.png), AskOpened kind=plan with the plan text=%s' % bool(pl))
 
 # ---- F16 keybindings: each chord of the shortcuts table through the window's bindings, judged by what the client or the hub then shows
 if want('F16'):
@@ -71,45 +111,6 @@ if want('F17'):
         xin('drag', cx - 80, cy, cx + 80, cy + 40); pause(1.5); shot('v-%s-pan' % kind); panned = differs(px('v-%s-zoom' % kind), px('v-%s-pan' % kind), VIEW)
         res.append((kind, drawn, zoomed, panned)); print('   ', kind, 'drawn', drawn, 'wheel changed it', zoomed, 'drag changed it', panned, flush=True)
     log('F17', all(r[1] and r[2] and r[3] for r in res), '; '.join('%s: drawn=%s wheel=%s %s=%s' % (k, d, z, 'orbit' if k == '3D' else 'pan', p_) for k, d, z, p_ in res) + ' (frames are not judged: llvmpipe)')
-
-# ---- F09 the context meter: the Context panel says "no reading yet" until a turn is counted, then shows what the thread holds and what is left
-if want('F09'):
-    sel(1); click_ctl('ui:Context'); pause(1.5); shot('m-empty'); PANEL = (367, 515, 1265, 780)
-    xin('click', 815, 810); xin('type', 'zqshort meter'); xin('key', 'Return')
-    until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 30); pause(3); shot('m-after')
-    changed = differs(px('m-empty'), px('m-after'), PANEL)
-    keys = sorted({e['key'].split('.')[0] + '.' + e['key'].split('.')[1] for e in events() if e['$'] == 'SettingSet' and e.get('key', '').startswith(('tok.', 'turn.last'))})
-    counted = any(e['$'] == 'TurnUsage' for e in events())
-    log('F09-meter', changed and counted, 'Context panel before the turn (m-empty.png) and after it (m-after.png): the panel changed=%s once the turn was counted; the hub logged TurnUsage=%s, readings %s. The figures are read from the screenshot, not by the driver' % (changed, counted, keys))
-    # drafts survive a crash: type, kill the client, restart it, the text is back
-    xin('click', 815, 810); xin('type', 'unsent draft zq9'); pause(2.5)
-    client.kill(); client.wait(); time.sleep(1.5)
-    client = spawn([CLIENT, '--url', 'http://127.0.0.1:%d' % PORT, '--token-file', P('home/token'), '--script', P('script.json'), '--exit-after', '3000'], 'client.log', cenv); time.sleep(8)
-    shot('m-draft'); from PIL import Image
-    crop = px('m-draft').crop((367, 788, 1265, 848)); open_composer_has_text = crop.convert('L').getextrema()[1] > 150 and sum(1 for v in crop.convert('L').getdata() if v > 150) > 80
-    log('F09-draft', open_composer_has_text, 'typed an unsent draft, killed the client process, started it again: the composer shows text again=%s (m-draft.png)' % open_composer_has_text)
-
-# ---- F06 cards in the client: the approval, question and plan cards of a thread, answered with the mouse; the agent hears each answer
-if want('F06'):
-    fake = lambda: open(P('fake.log')).read() if os.path.exists(P('fake.log')) else ''
-    asks = lambda th, kind: [e for e in events() if e['$'] == 'AskOpened' and e.get('thread') == th and e.get('kind') == kind]
-    closed = lambda a: any(e['$'] == 'AskClosed' and e.get('id') == a['id'] for e in events())
-    sel(1); say_ = lambda t: (xin('click', 815, 810), xin('type', t), xin('key', 'Return'))
-    say_('zqapprove now'); until(lambda: asks('t1', 'approval'), 20); pause(2); shot('f6-approval')
-    a1 = asks('t1', 'approval')[-1]; click_ctl('ask:0:0'); ok1 = until(lambda: closed(a1), 20); until(lambda: 'PERM Bash -> ' in fake(), 15)
-    allowed = bool(re.search(r'PERM Bash -> .*allow', fake(), re.I))
-    until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
-    n = len(asks('t1', 'approval')); say_('zqapprove again'); until(lambda: len(asks('t1', 'approval')) > n, 20); pause(2)
-    a2 = asks('t1', 'approval')[-1]; click_ctl('ask:0:2'); ok2 = until(lambda: closed(a2), 20); until(lambda: re.search(r'PERM Bash -> .*deny', fake(), re.I), 15)
-    denied = bool(re.search(r'PERM Bash -> .*deny', fake(), re.I))
-    log('F06-approval', ok1 and allowed and ok2 and denied, 'approval card (f6-approval.png) with Allow, Allow for session and Deny: Allow closed the ask and the agent got allow=%s; Deny closed the next and the agent got deny=%s' % (allowed, denied))
-    until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
-    say_('zqask'); until(lambda: asks('t1', 'input'), 20); pause(2); shot('f6-question'); q = asks('t1', 'input')[-1]
-    ids = sorted(k for k in ctrls() if k.startswith('ask:')); click_ctl(ids[0]) if ids else None; okq = until(lambda: closed(q), 20); until(lambda: 'PERM AskUserQuestion -> ' in fake(), 15)
-    heard = bool(re.search(r'PERM AskUserQuestion -> .*(USB-C|Barrel)', fake()))
-    log('F06-question', bool(ids) and okq and heard, 'question card "%s" (f6-question.png), option buttons %s: the first closed it and the agent got the answer=%s' % ((q.get('detail') or '')[:30].replace('\n', ' '), ids, heard))
-    sel(2); say_('zqplan'); until(lambda: asks('t2', 'plan'), 20); pause(2); shot('f6-plan'); pl = asks('t2', 'plan')
-    log('F06-plan', bool(pl) and 'Draw the board' in (pl[-1].get('detail') or ''), 'a thread in plan mode (ModesSet interaction=plan) asked to exit with the plan card (f6-plan.png), AskOpened kind=plan with the plan text=%s' % bool(pl))
 
 # ---- F07 stop, F08 fork, F14 terminal, F21 reconnect: through the buttons and keys of the window
 if want('F07'):
