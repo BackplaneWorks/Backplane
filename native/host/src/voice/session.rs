@@ -30,7 +30,7 @@ fn s<'a>(p: &'a Value, k: &str) -> &'a str { p.get(k).and_then(Value::as_str).un
 /// Where the helper is: `BACKPLANE_VOICE_BIN`, else beside this program.
 pub fn exe() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("BACKPLANE_VOICE_BIN").filter(|p| !p.is_empty()) { return Some(p.into()) }
-    let b = std::env::current_exe().ok()?.parent()?.join("backplane-voice"); b.exists().then_some(b)
+    let b = std::env::current_exe().ok()?.parent()?.join(format!("backplane-voice{}", std::env::consts::EXE_SUFFIX)); b.exists().then_some(b)
 }
 /// The model is downloaded whole (the helper writes ready-<model> last).
 fn ready(home: &Path, model: &str) -> bool { text_of(&local_dir(home).join(format!("ready-{}", vdict::model_id(model)))).trim() == "ok" }

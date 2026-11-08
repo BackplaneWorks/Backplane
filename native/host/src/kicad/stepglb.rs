@@ -68,7 +68,9 @@ pub fn attempts(env: Option<&str>, gui: &str, cmd: &str, beside: &str) -> Vec<Me
 fn runnable(p: &Path) -> bool { use crate::plat::fs::PermissionsExt; std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false) }
 fn on_path(c: &str) -> Option<String> {
     if c.contains('/') { return runnable(Path::new(c)).then(|| c.to_string()) }
-    std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(c)).find(|f| runnable(f))).map(|f| f.to_string_lossy().into_owned())
+    // Windows: a program on PATH is `<name>.exe`
+    let names = [c.to_string(), format!("{c}{}", std::env::consts::EXE_SUFFIX)];
+    std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).flat_map(|d| names.iter().map(move |n| d.join(n)).collect::<Vec<_>>()).find(|f| runnable(f))).map(|f| f.to_string_lossy().into_owned())
 }
 /// macOS app bundles: `rel` under /Applications and ~/Applications (a user-level install, no admin rights), in that order.
 pub fn mac_apps(rel: &str) -> Vec<String> {
@@ -103,7 +105,8 @@ pub fn freecad_gui(cmd: &str) -> String {
 /// Helper.find: backplane-step2glb beside the hub, then at the install's top, then on PATH
 fn step2glb_beside() -> String {
     let exe = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
-    let near = exe.iter().flat_map(|d| [d.join("backplane-step2glb"), d.join("../backplane-step2glb")]).find(|p| runnable(p));
+    let name = format!("backplane-step2glb{}", std::env::consts::EXE_SUFFIX);   // Windows: the .exe
+    let near = exe.iter().flat_map(|d| [d.join(&name), d.join("..").join(&name)]).find(|p| runnable(p));
     near.map(|p| p.to_string_lossy().into_owned()).or_else(|| on_path("backplane-step2glb")).unwrap_or_default()
 }
 /// The tools on this machine, in order: what the two entry points use.
