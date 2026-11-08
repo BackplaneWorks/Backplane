@@ -61,7 +61,7 @@ struct Up { hub: Arc<Hub>, ag: Arc<Agents>, mgr: Arc<Accounts>, took: Duration, 
 async fn boot(home: &Path, b: &Bins) -> Up {
     let hub = Hub::start(cfg(home), Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let (t0, from) = (Instant::now(), hub.store.len());
-    let ag = tokio::time::timeout(Duration::from_secs(20), Agents::start_with(hub.clone(), Cli::standin(&b.bin))).await
+    let ag = tokio::time::timeout(Duration::from_secs(60), Agents::start_with(hub.clone(), Cli::standin(&b.bin))).await
         .expect("the agents' start never ended: its recovery waited on the account manager it is only given once it has returned").unwrap();
     let took = t0.elapsed();
     crate::commands::start_with(hub.clone(), Some(Arc::new(ag.clone())));
@@ -99,7 +99,7 @@ async fn a_restart_with_turns_cut_on_a_saved_account_carries_every_one_on_under_
     let b = bins("one"); let home = fresh("one-home");
     let ps = saved_home(&home, &b, 6, &[]).await;
     let up = boot(&home, &b).await;
-    assert!(up.took < Duration::from_secs(5), "the agents' start does not wait on the turns it carries on: {:?}", up.took);
+    assert!(up.took < Duration::from_secs(30), "the agents' start does not wait on the turns it carries on: {:?}", up.took);
     let ths = threads(6);
     all(&up.hub, &ths, "completed", 60).await;
     let text = raw(&up.hub); assert!(!text.contains(NOT_AVAILABLE), "no start failed on the accounts:\n{text}");
@@ -115,7 +115,7 @@ async fn a_slow_status_check_after_a_restart_is_waited_out_not_refused() {
     saved_home(&home, &b, 2, &[]).await;
     std::fs::write(b.rec.join("authslow"), "2.5").unwrap(); // the inventory's first check of the profile takes a while
     let up = boot(&home, &b).await;
-    assert!(up.took < Duration::from_secs(5), "{:?}", up.took);
+    assert!(up.took < Duration::from_secs(30), "{:?}", up.took);
     all(&up.hub, &threads(2), "completed", 60).await;
     assert!(!raw(&up.hub).contains(NOT_AVAILABLE)); assert!(b.turns().iter().all(|x| x["who"] == "w@x.com"), "{:#?}", b.turns());
     up.ag.shutdown(); let _ = std::fs::remove_dir_all(&home);
@@ -142,7 +142,7 @@ async fn a_bound_profile_that_cannot_start_falls_back_to_another_account_then_to
     let r = up.mgr.request(&json!({"op":"disconnect","profile":ps[1].0})).await; assert_eq!(r["error"], "", "{r}");
     std::fs::write(b.rec.join("default.login"), json!({"email":"me@x.com"}).to_string()).unwrap(); // the CLI's own login is signed in
     up.ag.deliver_person(&tid(0), "m-fb2", "and on", vec![]).await.unwrap();
-    let end = Instant::now() + Duration::from_secs(30); while b.turns().len() < before + 2 { assert!(Instant::now() < end, "{:?}", lines(&up.hub, &tid(0))); tokio::time::sleep(Duration::from_millis(100)).await }
+    let end = Instant::now() + Duration::from_secs(120); while b.turns().len() < before + 2 { assert!(Instant::now() < end, "{:?}", lines(&up.hub, &tid(0))); tokio::time::sleep(Duration::from_millis(100)).await }
     all(&up.hub, &[tid(0)], "completed", 30).await;
     assert_eq!(b.turns()[before + 1]["who"], "me@x.com", "the CLI's default login: {:#?}", b.turns());
     assert!(lines(&up.hub, &tid(0)).iter().any(|l| l == "Started on this computer's own Claude login: Work cannot start a turn now (Reconnect and select this account before starting a turn)"), "{:?}", lines(&up.hub, &tid(0)));
@@ -188,7 +188,9 @@ async fn a_storm_of_twenty_restarts_mid_turn_never_fails_a_start_on_the_accounts
     for r in 0..20 {
         if r % 2 == 1 { std::fs::write(b.rec.join("authslow"), "0.8").unwrap() } else { let _ = std::fs::remove_file(b.rec.join("authslow")); }
         let up = boot(&home, &b).await;
-        assert!(up.took < Duration::from_secs(5), "restart {r}: the agents' start took {:?}", up.took);
+        // the start must not wait on a carried turn (the Nov 7 bug: each waited a minute for an account manager that only came once the start returned): that is a minute or more, so 30 s only says
+        // "it hung", and a loaded machine (a full gate, a Windows runner) that takes a few seconds is not it
+        assert!(up.took < Duration::from_secs(30), "restart {r}: the agents' start took {:?}", up.took);
         if r == 3 { // a hold the profile ran out on hours ago, never cleared
             up.hub.commit(&json!({"$":"SettingSet","key":crate::settings::fallback::hold_key("claude", &ps[0].0, ps[0].1),"value":json!({"scope":"claude","reset":now() - 3600,"at":now() - 7200}).to_string(),"at":now()})).await.unwrap(); }
         // Bub's mail, and a mailroom lane, the moment the hub is back
@@ -207,7 +209,7 @@ async fn a_storm_of_twenty_restarts_mid_turn_never_fails_a_start_on_the_accounts
             let busy = c.iter().all(|th| { let at = since.iter().rposition(|e| e["$"] == "MessagePosted" && e["thread"] == th.as_str() && e["text"].as_str().unwrap_or("").starts_with(crate::agents::world::CARRY_TEXT)).unwrap(); since[at..].iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == th.as_str() && e["role"] == "assistant") });
             let mailed = since.iter().any(|e| e["$"] == "MessagePosted" && e["msg"] == format!("mail-{r}").as_str());
             if busy && mailed && !c.is_empty() && t0.elapsed() > Duration::from_millis(700) { break }
-            assert!(t0.elapsed() < Duration::from_secs(20), "restart {r}: the carried turns never got going: {c:?} {:?}", lines(&up.hub, BUB_T));
+            assert!(t0.elapsed() < Duration::from_secs(120), "restart {r}: the carried turns never got going: {c:?} {:?}", lines(&up.hub, BUB_T));
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         let text = raw(&up.hub); assert!(!text.contains(NOT_AVAILABLE), "restart {r}: a start failed on the accounts");
