@@ -28,6 +28,16 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
         if s(l, "state") == "unpaired" { x["tone"] = json!("warn") }
         r.push(x);
     }
+    // machines the linked ones are linked to: one press asks for a code through them, the person approves on that machine
+    for v in d["via"].as_array().into_iter().flatten() {
+        r.push(row(if s(v, "name").is_empty() { s(v, "url") } else { s(v, "name") }, &format!("{} · linked to {}, not to this machine yet. Pairing asks you to approve on that machine.", s(v, "url"), s(v, "via_name")),
+            vec![btn("Pair", "machine-introduce", &format!("{}\u{1f}{}", s(v, "via"), s(v, "url")), true)]));
+    }
+    if !linked.is_empty() {
+        let mut x = row("Rename a machine", "How this machine calls another: one word or a few, never the same as another's. Agents and the composer (~name) use it.", vec![btn("Rename", "machine-rename", "", true)]);
+        x["fields"] = json!([field("rfrom", "Machine now called", &draft("rfrom")), field("rname", "New name", &draft("rname"))]);
+        r.push(x);
+    }
     for q in d["requests"].as_array().into_iter().flatten() {
         r.push(row(&format!("{} wants to pair", s(q, "name")), &format!("{} · check code {} (it must match the one on that machine) · {}s left", s(q, "url"), s(q, "check"), q["left"].as_u64().unwrap_or(0)),
             vec![btn("Approve", "machine-approve", s(q, "id"), true), btn("Deny", "machine-deny", s(q, "id"), false)]));
@@ -67,6 +77,20 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
             let ev = if action == "machine-remove" { json!({"$":"PeerSet","id":value,"name":"","url":"","revoked":true,"at":now}) } else { json!({"$":"SettingSet","key":format!("peer.own.{value}"),"value":"owner","at":now}) };
             hub.commit(&ev).await.map_err(|e| format!("{e:#}"))?;
             if action == "machine-remove" { p.unpeered(value) }
+            Ok(json!({}))
+        }
+        "machine-introduce" => {
+            let (via, url) = value.split_once('\u{1f}').ok_or("which machine?")?;
+            p.introduce(hub, via, url).await.map(|(id, check)| json!({"attempt": id, "check": check}))
+        }
+        "machine-rename" => {
+            let (from, to) = (f("rfrom"), f("rname"));
+            let rows: Vec<(String, String)> = p.table.with(|t| t.live().into_iter().map(|x| (x.id, x.name)).collect());
+            let Some(id) = rows.iter().find(|(i, n)| *i == from || crate::bots::mesh::word(n) == crate::bots::mesh::word(&from)).map(|r| r.0.clone()) else { return Err(format!("no linked machine is called {from}")) };
+            let to = crate::net::botnet::clean(&to);
+            crate::bots::mesh::name_free(&rows, &id, &to, &crate::net::botnet::name().await)?;
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            hub.commit(&json!({"$":"PeerSet","id":id,"name":to,"url":"","revoked":false,"at":now})).await.map_err(|e| format!("{e:#}"))?;
             Ok(json!({}))
         }
         "machine-pair" => {

@@ -1,23 +1,24 @@
 //! Bots across the owner's linked machines (the transport is `OwnerLink`, a signed POST over /far/rpc to a link that is one of the owner's own: net/rpc.rs).
 //!
-//! A room may have members on one other machine, written `name@machine` (the machine's name or its link id; stored as typed, read by `remote_link`).
+//! A room may have members on any number of the owner's machines, written `name@machine` (the machine's name or its link id; stored as typed, read by `remote_link`).
 //! Each machine keeps its own copy of the room under the same id, so Bots shows it on both. What travels, all through `Bots::far_received` on the other side:
 //!   `bots.room_sync` {room, name, members: [wire], deleted?}: the room's members and name (a made, changed or left room; `deleted` when it is gone or that machine has no member left)
 //!   `bots.room_post` {room, msg, from, text, hop, at}: a post of a bot or the person here
-//! "wire" members name bots as the other machine reads them: a bot of the sender is `name@<link>`, a bot of the receiver is its bare name. The link id is the same on both
-//! machines. A post is logged on the receiving machine as from `name@<machine>` and heard by that machine's members; it is never sent back (a post from `x@y` is not forwarded).
-//! A room has members on one other machine at most. Nothing here is accepted from a link that is not the owner's own (the route refuses it first).
+//! "wire" members name bots as the other machine reads them: a bot of the sender is `name@<link>`, a bot of the receiver is its bare name, a bot of a third machine is
+//! `name@<mid>` (the machine id, `mesh.rs`: a link id is made per pair, so a third machine cannot be named by one). Every machine with members in a room is sent its changes and
+//! posts directly by the machine they happen on (a full mesh, no relay); a state a machine already holds is not applied again, so nothing loops. A post is logged on the receiving machine as from `name@<machine>` and heard by that machine's members; it is never sent back (a post from `x@y` is not forwarded).
+//! Nothing here is accepted from a link that is not the owner's own (the route refuses it first).
 use super::{post::RoomRef, rpc::{now_s, Bots}, world::World};
 use crate::api::Observer;
 use crate::hub::Hub;
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::{Arc, Mutex, Weak}};
 
-fn gs<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
+pub(super) fn gs<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 
 /// The state of the room traffic this machine keeps: what each room last sent a machine, and the changes it applied from one (so they are not sent back).
 #[derive(Default)]
-pub struct FarState { sent: Mutex<HashMap<(String, String), String>>, applied: Mutex<HashMap<(String, String), String>> }
+pub struct FarState { sent: Mutex<HashMap<(String, String), String>>, applied: Mutex<HashMap<(String, String), String>>, pub(super) mesh: super::mesh::MeshState }
 
 /// Registered on the hub once the bots and the transport exist: a committed room change or post goes to the machine that has members in it.
 pub struct FarOut(pub Weak<Bots>);
@@ -37,8 +38,9 @@ impl Bots {
     pub fn machines(&self) -> Vec<(String, String, String)> { self.owner_link.get().map(|l| l.machines()).unwrap_or_default() }
     /// The link a machine word names (name in any case, or the link id)
     pub fn machine_link(&self, word: &str) -> Option<String> {
-        let w = word.trim().to_lowercase();
-        self.machines().into_iter().find(|(id, name, _)| id.to_lowercase() == w || name.to_lowercase() == w).map(|(id, _, _)| id)
+        let w = word.trim().trim_start_matches('~').to_lowercase();
+        let ww = super::mesh::word(&w);
+        self.machines().into_iter().find(|(id, name, _)| id.to_lowercase() == w || name.to_lowercase() == w || (!ww.is_empty() && super::mesh::word(name) == ww)).map(|(id, _, _)| id)
     }
     fn machine_name(&self, link: &str) -> String { self.machines().into_iter().find(|m| m.0 == link).map(|m| m.1).filter(|n| !n.is_empty()).unwrap_or_else(|| link.to_string()) }
     /// The one link a room's `name@machine` members are on ("" for none); a second machine is not served
@@ -47,27 +49,29 @@ impl Bots {
         for m in members { if let Some((_, mach)) = m.rsplit_once('@') { if let Some(l) = self.machine_link(mach) { if !v.contains(&l) { v.push(l) } } } }
         v
     }
-    /// The members as machine `link` reads them
-    fn to_wire(&self, w: &World, link: &str, members: &[String]) -> Vec<String> {
+    /// The members as machine `link` reads them (see `mesh::member_out`). A member on a third machine whose id is not known is left out.
+    async fn to_wire(&self, link: &str, members: &[String]) -> Vec<String> {
+        if members.iter().any(|m| m.contains('@')) { self.mesh_learn().await }
+        let w = self.world().await;
         let mut out: Vec<String> = vec![];
         for m in members {
-            let x = if let Some((n, mach)) = m.rsplit_once('@') { if self.machine_link(mach).as_deref() == Some(link) { n.to_string() } else { continue } }
-                else { match w.bot(m).filter(|b| !b.deleted) { Some(b) => format!("{}@{link}", b.name), None => continue } };
-            if !out.contains(&x) { out.push(x) }
+            let x = super::mesh::member_out(m, link, |id| w.bot(id).filter(|b| !b.deleted).map(|b| b.name.clone()), |mach| self.machine_link(mach), |l| self.mid_known(l));
+            if let Some(x) = x { if !out.contains(&x) { out.push(x) } }
         }
         out.sort(); out
     }
-    /// Wire members from machine `link` as this one stores them: its bots stay `name@<link>`, ours become bot ids; names that are no bot here are dropped
-    fn from_wire(&self, w: &World, link: &str, wire: &[String]) -> Vec<String> {
+    /// Wire members from machine `link` as this one stores them: its bots stay `name@<link>`, ours become bot ids, a third machine's become `name@<our link to it>`; others are dropped
+    async fn from_wire(&self, link: &str, wire: &[String]) -> Vec<String> {
+        if wire.iter().any(|x| x.rsplit_once('@').map_or(false, |(_, m)| m != link)) { self.mesh_learn().await }
+        let w = self.world().await;
         let mut out: Vec<String> = vec![];
         for x in wire {
-            let id = if let Some((n, mach)) = x.rsplit_once('@') { if mach == link { format!("{n}@{link}") } else { continue } }
-                else { match w.named(x).map(|b| b.id.clone()).or_else(|| w.bot(x).filter(|b| !b.deleted).map(|b| b.id.clone())) { Some(i) => i, None => continue } };
-            if !out.contains(&id) { out.push(id) }
+            let id = super::mesh::member_in(x, link, |n| w.named(n).map(|b| b.id.clone()).or_else(|| w.bot(n).filter(|b| !b.deleted).map(|b| b.id.clone())), |mid| self.link_of_mid(mid));
+            if let Some(id) = id { if !out.contains(&id) { out.push(id) } }
         }
         out
     }
-    async fn far_send(&self, link: &str, m: &str, p: Value) -> Option<(u16, String)> {
+    pub(super) async fn far_send(&self, link: &str, m: &str, p: Value) -> Option<(u16, String)> {
         let l = self.owner_link.get()?;
         l.post(link, json!({"id": 0, "m": m, "p": p}).to_string()).await
     }
@@ -86,13 +90,13 @@ impl Bots {
                     for l in now_links { self.far_send(&l, "bots.room_post", json!({"room":room,"msg":gs(&e, "id"),"from":gs(&e, "from"),"text":gs(&e, "text"),"hop":e["hop"],"at":e["at"]})).await; }
                 }
                 _ => {
-                    let live = if kind == "RoomDeleted" { None } else { now_links.first().cloned() };
+                    let live: Vec<String> = if kind == "RoomDeleted" { vec![] } else { now_links.clone() };
                     // a machine that was sent the room and has no member in it now (left, or the room is gone) is told it is gone
                     let mut cands: Vec<String> = vec![]; for l in had.iter().chain(now_links.iter()).chain(self.remote_link(&members).iter()) { if !cands.contains(l) { cands.push(l.clone()) } }
                     for l in cands {
-                        let gone = Some(&l) != live.as_ref();
+                        let gone = !live.contains(&l);
                         let key = (room.clone(), l.clone());
-                        let wire = if gone { vec![] } else { let w = self.world().await; self.to_wire(&w, &l, &members) };
+                        let wire = if gone { vec![] } else { self.to_wire(&l, &members).await };
                         let sig = if gone { "\u{0}deleted".to_string() } else { format!("{name}\n{}", wire.join("\n")) };
                         let came = { let mut ap = self.far.applied.lock().unwrap(); let hit = ap.get(&key).map_or(false, |m| *m == if gone { sig.clone() } else { members.join("\n") }); if hit { ap.remove(&key); } hit };
                         if came { // it came from that machine: not sent back
@@ -115,6 +119,7 @@ impl Bots {
         match m {
             "bots.room_sync" => self.far_room_sync(link, p).await,
             "bots.room_post" => self.far_room_post(link, p).await,
+            "bots.hello" => (200, self.mesh_hello(p["flat"].as_bool().unwrap_or(false)).await.to_string()),
             "bots.list" => { let w = self.world().await; let mut v: Vec<_> = w.bots.values().filter(|b| !b.deleted).map(|b| b.name.clone()).collect(); v.sort(); (200, json!({"bots": v}).to_string()) }
             "bots.room_join" | "bots.room_leave" => self.far_member(link, m == "bots.room_join", p).await,
             "tool.plane_read" => { let w = self.world().await; let text = self.plane_text(&w, now_s(), p["idle"].as_bool().unwrap_or(false)).await; (200, json!({"text": text}).to_string()) }
@@ -124,8 +129,7 @@ impl Bots {
     async fn far_room_sync(&self, link: &str, p: &Value) -> (u16, String) {
         let (room, now) = (gs(p, "room").to_string(), now_s());
         if room.is_empty() || room.starts_with("dm:") || room.contains('~') { return (400, "no room".into()) }
-        let w = self.world().await;
-        let existing = w.rooms.get(&room).cloned();
+        let existing = { let w = self.world().await; w.rooms.get(&room).cloned() };
         // a room this machine made by itself is not another machine's to change by guessing its id
         if let Some(r) = &existing { if !r.deleted && !self.remote_link(&r.members).contains(&link.to_string()) { return (409, "that room is not shared with you".into()) } }
         if p["deleted"].as_bool().unwrap_or(false) {
@@ -134,15 +138,17 @@ impl Bots {
             return match self.hub.commit(&json!({"$":"RoomDeleted","id":room,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
         }
         let wire: Vec<String> = p["members"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
-        let members = self.from_wire(&w, link, &wire);
+        let members = self.from_wire(link, &wire).await;
         if !members.iter().any(|m| !m.contains('@')) { // nobody of ours is in it (any more): the copy goes
             if existing.map_or(true, |r| r.deleted) { return (200, "no member here".into()) }
             self.far.applied.lock().unwrap().insert((room.clone(), link.to_string()), "\u{0}deleted".into());
             return match self.hub.commit(&json!({"$":"RoomDeleted","id":room,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
         }
+        let name = if gs(p, "name").is_empty() { "room" } else { gs(p, "name") };
+        // the state this machine already holds is not stored again: with several machines the same change arrives from each of them, and nothing loops
+        if let Some(r) = existing.as_ref().filter(|r| !r.deleted) { let (mut a, mut b) = (r.members.clone(), members.clone()); a.sort(); b.sort(); if a == b && r.name == name { return (200, "ok".into()) } }
         let text = members.join("\n");
         self.far.applied.lock().unwrap().insert((room.clone(), link.to_string()), text.clone());
-        let name = if gs(p, "name").is_empty() { "room" } else { gs(p, "name") };
         match self.hub.commit(&json!({"$":"RoomSet","id":room,"name":name,"members":text,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
     }
     async fn far_room_post(self: &Arc<Self>, link: &str, p: &Value) -> (u16, String) {
@@ -185,14 +191,11 @@ impl Bots {
         }
         Value::Array(out)
     }
-    /// The `name@machine` members of a room being made must all be on one linked machine
+    /// The `name@machine` members of a room being made must each be on a linked machine (any number of machines)
     pub fn far_members_ok(&self, ms: &[String]) -> Result<(), String> {
-        let mut links: Vec<String> = vec![];
         for m in ms { if let Some((_, mach)) = m.rsplit_once('@') {
-            let Some(l) = self.machine_link(mach) else { return Err(format!("no linked machine called {mach} (see bot_list)")) };
-            if !links.contains(&l) { links.push(l) }
+            if self.machine_link(mach).is_none() { return Err(format!("no linked machine called {mach} (see bot_list)")) }
         } }
-        if links.len() > 1 { return Err("a room can have members on one other machine".into()) }
         Ok(())
     }
     /// room_join / room_leave: this bot, or (with `machine`) asked of the machine the room lives on

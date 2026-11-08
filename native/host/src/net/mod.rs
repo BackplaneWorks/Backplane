@@ -23,6 +23,7 @@ pub mod listener;
 pub mod machinespage;
 pub mod machines;
 pub mod lan;
+pub mod mesh;
 pub mod origin;
 pub mod outbox;
 pub mod owner;
@@ -71,10 +72,10 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         hub.set_far_router(std::sync::Arc::new(rpc::Router::new(sync.clone())));
         crate::mirror::watch_origins(hub.clone()); // (each linked machine's projects' origins, for one sidebar project per repository)
         { // (the bots start on their own; the transport is handed over once they exist, looked for for ten minutes)
-            let (hub, sync) = (hub.clone(), sync.clone());
+            let (hub, sync, peering_w) = (hub.clone(), sync.clone(), peering.clone());
             tokio::spawn(async move {
                 for _ in 0..300 {
-                    if let Some(b) = crate::bots::api::of(&hub) { b.set_owner_link(std::sync::Arc::new(rpc::Link { sync, hub: std::sync::Arc::downgrade(&hub), copy: crate::copy::on() })); b.far_start(); return }
+                    if let Some(b) = crate::bots::api::of(&hub) { b.set_owner_link(std::sync::Arc::new(rpc::Link { sync, hub: std::sync::Arc::downgrade(&hub), copy: crate::copy::on() })); b.far_start(); b.mesh_watch(peering_w); return }
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             });

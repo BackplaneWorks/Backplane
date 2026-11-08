@@ -45,8 +45,8 @@ pub fn prefixed(link: &str, mut v: Value) -> Value {
 impl Agents {
     /// The link a `machine` word names (a machine's name in any case, or its link id), among the owner's linked machines.
     pub fn machine_link(&self, word: &str) -> Option<String> {
-        let w = word.trim().to_lowercase();
-        self.hub.far_machines().into_iter().find(|(id, name, _)| id.to_lowercase() == w || name.to_lowercase() == w).map(|(id, _, _)| id)
+        let w = word.trim().trim_start_matches('~').to_lowercase(); let ww = crate::bots::mesh::word(&w);
+        self.hub.far_machines().into_iter().find(|(id, name, _)| id.to_lowercase() == w || name.to_lowercase() == w || (!ww.is_empty() && crate::bots::mesh::word(name) == ww)).map(|(id, _, _)| id)
     }
 
     /// A call that is about another machine: Some(answer) when it was sent there (or could not be), None when it is about this one.

@@ -1,5 +1,5 @@
 //! The composer's reference popup, natively: a word typed with a sigil names something, `@bot` a bot, `>thread` a thread,
-//! `%project` a project, `#room` a group chat. The rows are computed from the hub's own state (no helper), ranked by how well the query matches, then the
+//! `%project` a project, `#room` a group chat, `~machine` one of the owner's paired machines (after one, `%project` and `>thread` pick from that machine). The rows are computed from the hub's own state (no helper), ranked by how well the query matches, then the
 //! same project, then recent work; at most 6. Choosing a row (action `skill`) replaces the word being typed with the row's word and a space.
 use crate::state::State;
 use serde_json::{json, Value};
@@ -21,13 +21,32 @@ pub fn slug(s: &str) -> String {
 static MODELS: std::sync::OnceLock<fn() -> String> = std::sync::OnceLock::new();
 pub fn set_models(f: fn() -> String) { let _ = MODELS.set(f); }
 
+/// A paired machine as the composer offers it: its name, whether it answered last, and what its mirror holds (ids are `<link>~<id>`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MachineRow { pub name: String, pub link: String, pub away: bool, pub projects: Vec<(String, String)>, pub threads: Vec<(String, String)> }
+static MACHINES: std::sync::RwLock<Vec<MachineRow>> = std::sync::RwLock::new(Vec::new());
+/// The paired machines, kept by the net lane (`bots::mesh::Bots::mesh_watch`): the popup and the chips read it, nothing else does.
+pub fn set_machines(v: Vec<MachineRow>) { *MACHINES.write().unwrap() = v; }
+pub fn machines() -> Vec<MachineRow> { MACHINES.read().unwrap().clone() }
+/// The machine a sigil word `~name` names (a machine's name as a word)
+fn machine_of<'a>(ms: &'a [MachineRow], w: &str) -> Option<&'a MachineRow> {
+    let rest = w.strip_prefix('~')?; let r = slug(rest);
+    if r.is_empty() { return None }
+    ms.iter().find(|m| slug(&m.name) == r)
+}
+/// The machine named by a `~machine` word earlier in the draft (before the word being typed), the nearest one: what `%` and `>` then pick from.
+fn machine_before<'a>(ms: &'a [MachineRow], draft: &str) -> Option<&'a MachineRow> {
+    let t = token(draft); let head = &draft[..draft.len() - t.len()];
+    head.split(|c: char| c.is_whitespace()).rev().find_map(|w| machine_of(ms, w.trim_end_matches(|c| matches!(c, ',' | '.' | ':' | ';' | '!' | '?'))))
+}
+
 /// The word being typed (the draft's last: after its last space, line feed, tab or carriage return).
 pub fn token(draft: &str) -> &str { super::super::slash::token(draft) }
 
 /// Refs.typing: a sigil and then only slug characters.
 fn typing(w: &str) -> Option<(char, String)> {
     let mut cs = w.chars(); let sig = cs.next()?;
-    if !matches!(sig, '@' | '>' | '%' | '#' | '&') { return None }
+    if !matches!(sig, '@' | '>' | '%' | '#' | '&' | '~') { return None }
     let q: String = cs.collect();
     // a model id (`provider/model`) holds more than a slug does (settings/mentions.rs)
     let ok = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_' || (sig == '&' && matches!(c, '/' | '.' | ':' | '+'));
@@ -61,12 +80,26 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
         return crate::agents::skills::rows(&crate::agents::skills::popup_index(&cwd), token(draft), &provider, isolated);
     }
     let Some((sig, q)) = typing(token(draft)) else { return vec![] };
+    let ms = machines();
+    let on = if matches!(sig, '%' | '>') { machine_before(&ms, draft) } else { None };
     let here_project = st.threads.get(here).map(|t| t.project.clone()).unwrap_or_default();
     let mut c: Vec<Cand> = vec![];
     match sig {
         '@' => for b in st.bots_nav.values() {
             let s = slug(&b.name); let sc = score(&s, &b.name, &q);
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("@{s}"), about: "bot".into(), score: sc, same: false, at: b.talked.max(b.created) }) }
+        },
+        '~' => for m in &ms {
+            let s = slug(&m.name); let sc = score(&s, &m.name, &q);
+            if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("~{s}"), about: format!("machine · {}", if m.away { "away" } else { "here" }), score: sc + if m.away { 0 } else { 5 }, same: false, at: 0 }) }
+        },
+        '>' if on.is_some() => for (id, t) in &on.unwrap().threads {
+            let s = slug(t); let sc = score(&s, t, &q);
+            if sc > 0 && !s.is_empty() { c.push(Cand { word: format!(">{s}"), about: format!("thread · {}", on.unwrap().name), score: sc, same: false, at: id.len() as u64 }) }
+        },
+        '%' if on.is_some() => for (_, t) in &on.unwrap().projects {
+            let s = slug(t); let sc = score(&s, t, &q);
+            if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("%{s}"), about: format!("project · {}", on.unwrap().name), score: sc, same: false, at: 0 }) }
         },
         '>' => {
             let live: Vec<(&String, &crate::state::Thread)> = st.threads.iter().filter(|(i, t)| !t.deleted && i.as_str() != here && !t.title.trim().is_empty()).collect();
@@ -110,7 +143,7 @@ fn sigil_words(text: &str) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     for w in text.split(|c: char| c.is_whitespace()) {
         let w = w.trim_start_matches(|c| matches!(c, '(' | '[' | '"' | '\'' | '`')).trim_end_matches(|c| matches!(c, '.' | ',' | ':' | ';' | '!' | '?' | ')' | ']' | '"' | '\'' | '`'));
-        if w.len() > 1 && matches!(w.chars().next(), Some('@' | '>' | '%' | '#' | '&')) && !out.iter().any(|x| x == w) { out.push(w.to_string()) }
+        if w.len() > 1 && matches!(w.chars().next(), Some('@' | '>' | '%' | '#' | '&' | '~')) && !out.iter().any(|x| x == w) { out.push(w.to_string()) }
     }
     out
 }
@@ -139,17 +172,25 @@ pub fn refs_in(st: &State, hub: &str, text: &str) -> Vec<Value> {
     let mut slugs: std::collections::HashMap<String, usize> = Default::default();
     for t in st.threads.values().filter(|t| !t.deleted) { *slugs.entry(slug(&t.title)).or_default() += 1 }
     let q = |id: &str| format!("{hub}|{id}");
+    let ms = machines();
     let mut out = vec![];
+    let mut on: Option<&MachineRow> = None; // the machine a `~name` before this word names: %project and >thread then mean that machine's
     for w in words {
         let (sig, rest) = (w.chars().next().unwrap(), &w[1..]);
-        let hit: Option<(&str, String, String)> = match sig {
+        if sig == '~' { on = machine_of(&ms, &w).or(on) }
+        let there = if matches!(sig, '%' | '>') { on } else { None };
+        let hit: Option<(&str, String, String)> = if let Some(m) = there {
+            let l = if sig == '%' { &m.projects } else { &m.threads };
+            l.iter().find(|(_, t)| slug(t) == rest.to_ascii_lowercase()).map(|(id, t)| (if sig == '%' { "project" } else { "thread" }, q(id), t.clone()))
+        } else { match sig {
+            '~' => machine_of(&ms, &w).map(|m| ("machine", String::new(), m.name.clone())),
             '@' => st.bots_nav.iter().find(|(_, b)| slug(&b.name) == rest.to_ascii_lowercase()).map(|(id, b)| ("bot", q(id), b.name.clone())),
             '>' => st.threads.iter().filter(|(_, t)| !t.deleted).find(|(id, t)| { let s = slug(&t.title); let n = slugs.get(&s).copied().unwrap_or(0);
                     !s.is_empty() && (rest == s || (n > 1 && rest == format!("{s}-{}", id.rsplit('-').next().unwrap_or("")))) }).map(|(id, t)| ("thread", q(id), t.title.clone())),
             '%' => st.projects.iter().filter(|(_, p)| !p.removed).find(|(_, p)| slug(&p.title) == rest.to_ascii_lowercase()).map(|(id, p)| ("project", q(id), p.title.clone())),
             '#' => st.rooms_nav.iter().find(|(_, r)| slug(&r.name) == rest.to_ascii_lowercase()).map(|(id, r)| ("room", q(id), r.name.clone())),
             _ => rest.split_once('/').and_then(|(pr, m)| all[pr].as_array().and_then(|rows| rows.iter().find(|r| r["value"].as_str() == Some(m))).map(|r| ("model", String::new(), r["label"].as_str().unwrap_or(m).to_string()))),
-        };
+        } };
         if let Some((kind, id, label)) = hit { out.push(json!({"word": w, "kind": kind, "id": id, "label": label})) }
     }
     out

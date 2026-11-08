@@ -636,15 +636,15 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "voice-term" => { for (k, v) in crate::voice::page::term_settings(draft(session, "@f.vterm")) { send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); } json!({"drafts": {"@f.vterm": ""}}) }
         // Machines: every press goes to the hub as machines.page.act, with the fields as typed
         a if a.starts_with("machine-") => {
-            let fields = json!({"maddr": draft(session, "@f.maddr"), "mcode": draft(session, "@f.mcode"), "fcode": draft(session, "@f.fcode")});
+            let fields = json!({"maddr": draft(session, "@f.maddr"), "mcode": draft(session, "@f.mcode"), "fcode": draft(session, "@f.fcode"), "rfrom": draft(session, "@f.rfrom"), "rname": draft(session, "@f.rname")});
             send(session, hub, "machines.page.act", json!({"action": a, "value": value, "fields": fields}), &mut cmds, &mut rid);
-            if a == "machine-pair" { json!({"drafts": {"@f.maddr": "", "@f.mcode": "", "@f.fcode": ""}}) } else { json!({}) }
+            if a == "machine-pair" { json!({"drafts": {"@f.maddr": "", "@f.mcode": "", "@f.fcode": ""}}) } else if a == "machine-rename" { json!({"drafts": {"@f.rfrom": "", "@f.rname": ""}}) } else { json!({}) }
         }
         "key-sent" => json!({"drafts": {"@f.kname": "", "@key.err": "", "@keys.rm": ""}}),
         "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }

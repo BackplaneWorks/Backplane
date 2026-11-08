@@ -12,7 +12,7 @@ fn err(id: &Value, why: &str) -> Vec<Value> { vec![json!({"t":"reply","id":id,"o
 fn now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 
 impl RpcHandler for PeerRpc {
-    fn methods(&self) -> &'static [&'static str] { &["bots.invite", "bots.join", "bots.unpeer", "bots.peer_own", "machines.page", "machines.page.act", "machines.code", "machines.pair", "machines.attempt", "machines.requests", "machines.approve", "machines.deny"] }
+    fn methods(&self) -> &'static [&'static str] { &["bots.invite", "bots.join", "bots.unpeer", "bots.peer_own", "machines.page", "machines.page.act", "machines.code", "machines.pair", "machines.attempt", "machines.requests", "machines.approve", "machines.deny", "mesh.machines"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -26,6 +26,13 @@ impl RpcHandler for PeerRpc {
                 "machines.requests" => { let d = self.0.page_data(); ok(id, json!({"requests": d["requests"], "outgoing": d["outgoing"]})) }
                 "machines.approve" => match self.0.approve(hub, &s("request")).await { Ok(()) => ok(id, json!({})), Err(e) => err(id, &e) },
                 "machines.deny" => match self.0.deny(hub, &s("request")).await { Ok(()) => ok(id, json!({})), Err(e) => err(id, &e) },
+                // the paired machines by name (and machine id), and what a text's `~machine` words mean to an agent: for clients, tests and `backplane pair`
+                "mesh.machines" => match crate::bots::api::of(hub) {
+                    None => err(id, "bots are not running"),
+                    Some(b) => { let rows = b.mesh_rows();
+                        let ms: Vec<Value> = rows.iter().map(|m| json!({"name": m.name, "word": crate::bots::mesh::word(&m.name), "link": m.link, "mid": b.mid_known(&m.link).unwrap_or_default(), "away": m.away, "projects": m.projects.iter().map(|p| json!({"id": p.0, "title": p.1})).collect::<Vec<_>>()})).collect();
+                        ok(id, json!({"mid": b.my_mid(), "machines": ms, "lines": crate::agents::refs::machine_lines(&rows, &s("text")), "prompt": b.machines_prompt()})) }
+                },
                 "bots.join" => match super::sign::invite_parse(&s("invite")) {
                     None => err(id, "not an invite"),
                     Some(i) => match self.0.join(hub, &i, "").await { Ok((peer, name)) => ok(id, json!({"peer": peer, "name": name})), Err(e) => err(id, &e) },
