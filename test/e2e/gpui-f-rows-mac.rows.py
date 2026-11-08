@@ -280,7 +280,11 @@ if want('F18'):
         res.append(('download (known missing: a download the person starts is not kept in frame mode yet, Windows lane)' if not found else 'download', got and (bool(found) or True), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
     pause(3); shot('f18-top2'); pos2['pop'] = find('f18-top2', (255, 136, 0)) or pos2['pop']; print('   F18: popup button at %s, server saw %s' % (pos2['pop'], names()), flush=True)   # the "Saved" banner after a download moves the page down
     if pos2['pop']:
-        xin('click', *pos2['pop']); ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
+        for _t in range(3):   # a click can arrive while the pane is still resizing after the download banner: find the button again and press until the page reports the click
+            xin('click', *pos2['pop'])
+            if until(lambda: 'popup-click' in names(), 6): break
+            pause(2); shot('f18-top3'); pos2['pop'] = find('f18-top3', (255, 136, 0)) or pos2['pop']; print('   F18: no popup click reported yet (attempt %d); the button is at %s' % (_t + 1, pos2['pop']), flush=True)
+        ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
         tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
         res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
     shot('f18-end')
