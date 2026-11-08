@@ -16,7 +16,7 @@ class DataActivity : ComponentActivity() {
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         // a check without hands (debug builds): --es thread <id> --es vtab 3D opens that thread's viewer on that tab
         if (BuildConfig.DEBUG) DataClient.openViewerTab = intent?.getStringExtra("vtab")
-        DataClient.openFromIntent = intent?.getStringExtra("thread")
+        DataClient.openFromIntent = intent?.getStringExtra("thread")?.ifEmpty { null }
         linked(intent)
         // a check without a hub (debug builds): --es mdpreview /data/local/tmp/x.md [--ez stream true] draws that file as a message
         val preview = if (BuildConfig.DEBUG) intent?.getStringExtra("mdpreview") else null
@@ -28,7 +28,7 @@ class DataActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         if (BuildConfig.DEBUG) DataClient.openViewerTab = intent.getStringExtra("vtab")
-        intent.getStringExtra("thread")?.let { DataClient.openFromIntent = it; DataClient.pendingAsk = intent.getStringExtra("ask") ?: "" }
+        intent.getStringExtra("thread")?.takeIf(String::isNotEmpty)?.let { DataClient.openFromIntent = it; DataClient.pendingAsk = intent.getStringExtra("ask") ?: "" }
         linked(intent)
         intent.data?.let { route(it) }
     }
