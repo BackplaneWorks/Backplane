@@ -98,6 +98,8 @@ jobs:
         run: |
           # feature e2e-trust (test/update's feed) trusts a key from the environment; its code carries this mark, so a release that has it is refused
           if grep -aq backplane-e2e-trust-enabled native/host/target/release/backplane-hub${{ runner.os == 'Windows' && '.exe' || '' }}; then echo "::error::backplane-hub was built with feature e2e-trust"; exit 1; fi
+      # The Bun version here is deploy/bun-version's: change them together, and update deploy/licenses/bun (NOTICE.md and Bun's LICENSE.md at that tag)
+      # whenever it changes. scripts/licenses.sh refuses a package built with a Bun the notices do not name.
       # bun for the browser helper and step2glb. Its download server has answered 504 more than once: a pinned version, kept in the Actions cache, and
       # up to three tries with a pause between, so a tag push never fails halfway on it
       - uses: actions/cache@v4
@@ -122,6 +124,12 @@ jobs:
         run: |
           for i in 1 2 3; do npm install -g bun@1.4.4 && break; sleep 30; done
           bun --version
+      # licenses/rust: the notices of the Rust crates in each program, for this target (scripts/rust-licenses.sh). A crate under a licence outside
+      # deploy/licenses/rust/about.toml's allow-list fails the release here. cargo-about is kept in ~/.cargo/bin by the rust cache.
+      - name: rust notices
+        run: |
+          command -v cargo-about >/dev/null && [ "$(cargo-about --version)" = "cargo-about 0.9.3" ] || cargo install --locked --features cli cargo-about@0.9.3
+          scripts/rust-licenses.sh ${{ matrix.target }} build/licenses/rust
       - name: package
         if: runner.os != 'Windows'
         run: |
@@ -148,9 +156,11 @@ jobs:
           # the client's generated assets (assets/GENERATED.md): without them it draws no icons and no cats
           [ -s $d/assets/icons.json ] && [ "$(ls $d/assets/cat-rigs | wc -l)" -ge 576 ] || { echo "::error::assets/icons.json or assets/cat-rigs missing from the archive"; exit 1; }
           git rev-parse HEAD > $d/COMMIT
+          scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
           # everything a dev cut has (scripts/dev-build.sh), or the job fails: a release must not lose a feature a dev cut showed working
           need="backplane-hub backplane-gpui backplane backplane-voice backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs"
-          case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak";; esac
+          need="$need licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt"
+          case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
           for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
           ls -la $d
           name=backplane-$TAG-${{ matrix.target }}-native.tar.gz   # -native: 0.14's updater takes any asset ending in <platform>.tar.gz (rel::archive_name)
@@ -170,7 +180,9 @@ jobs:
           cp -r assets $d/assets
           [ -s $d/assets/icons.json ] && [ "$(ls $d/assets/cat-rigs | wc -l)" -ge 576 ] || { echo "::error::assets/icons.json or assets/cat-rigs missing from the archive"; exit 1; }
           git rev-parse HEAD > $d/COMMIT
-          for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs; do
+          scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
+          for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs \
+                   licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt; do
             [ -e "$d/$f" ] || { echo "::error::$f missing from the windows-x64 archive"; exit 1; }; done
           ls -la $d
           name=backplane-$TAG-${{ matrix.target }}-native.zip
