@@ -8,6 +8,10 @@ if want('CAL'):
     log('CAL', ok and sel_changed, 'clicked thread:t2 with a real mouse click: clicked=%s, the window redrew=%s' % (ok, sel_changed))
 
 MAIN = lambda: rects()['main']
+def say_(t):   # click the composer, type, press Return; if the message did not reach the hub, press Return again (a key can land before the field has focus)
+    n = len([e for e in events() if e['$'] == 'MessagePosted' and t in e.get('text', '')])
+    xin('click', *CC()); xin('type', t); xin('key', 'Return')
+    if not until(lambda: len([e for e in events() if e['$'] == 'MessagePosted' and t in e.get('text', '')]) > n, 6): xin('click', *CC()); xin('key', 'Return')
 def CC():
     r = rects()['composer']; return int(r['x'] + r['w'] / 2), int(r['y'] + 30)
 def box(r, pad=0): return (int(r['x']) + pad, int(r['y']) + pad, int(r['x'] + r['w']) - pad, int(r['y'] + r['h']) - pad)
@@ -64,7 +68,7 @@ if want('F06'):
     fake = lambda: open(P('fake.log')).read() if os.path.exists(P('fake.log')) else ''
     asks = lambda th, kind: [e for e in events() if e['$'] == 'AskOpened' and e.get('thread') == th and e.get('kind') == kind]
     closed = lambda a: any(e['$'] == 'AskClosed' and e.get('id') == a['id'] for e in events())
-    sel(1); say_ = lambda t: (xin('click', *CC()), xin('type', t), xin('key', 'Return'))
+    sel(1); pass
     say_('zqapprove now'); until(lambda: asks('t1', 'approval'), 20); pause(2); shot('f6-approval')
     a1 = asks('t1', 'approval')[-1]; click_ctl('ask:0:0'); ok1 = until(lambda: closed(a1), 20); until(lambda: 'PERM Bash -> ' in fake(), 15)
     allowed = bool(re.search(r'PERM Bash -> .*allow', fake(), re.I))
@@ -131,7 +135,7 @@ if want('F17'):
 
 # ---- F07 stop, F08 fork, F14 terminal, F21 reconnect: through the buttons and keys of the window
 if want('F07'):
-    sel(1); say_ = lambda t: (xin('click', *CC()), xin('type', t), xin('key', 'Return'))
+    sel(1); pass
     n0 = len([e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'running'])
     say_('a long turn'); until(lambda: len([e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'running']) > n0, 20); pause(1.5); shot('f7-running')
     stopped = click_ctl('tool:interrupt'); ok = until(lambda: events()[-1]['$'] and any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'interrupted' for e in events()), 20)

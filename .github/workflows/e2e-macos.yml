@@ -105,6 +105,7 @@ jobs:
         run: |
           chmod +x dist/*; mkdir -p out
           echo "client+hub commit $(cat dist/COMMIT)"
+          set -o pipefail
           .venv/bin/python test/e2e/gpui-f-rows-mac.py "$PWD/dist/backplane-gpui" "$PWD/dist/backplane-hub" "$PWD/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
         env:
           ROWS: ${{ inputs.rows }}

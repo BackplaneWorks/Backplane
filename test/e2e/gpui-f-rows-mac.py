@@ -150,4 +150,4 @@ def want(i):
     return not ONLY or i in ONLY
 exec(open(os.path.join(HERE, 'gpui-f-rows-mac.rows.py')).read())
 cleanup()
-sys.exit(0)
+sys.exit(0 if all(r['ok'] for r in rows) else 1)
