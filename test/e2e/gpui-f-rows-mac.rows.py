@@ -21,6 +21,11 @@ def card(cid, done, tries=4):   # press a card's button; the card may not be lai
         if c: click_ctl(c)
         if until(done, 8): return True
     return False
+def fold_sidebar():   # the sidebar is folded when `main` starts at the window's left edge; Cmd+B toggles it, so look before pressing
+    for _ in range(3):
+        if rects().get('main', {}).get('x', 999) < 100: return True
+        xin('click', *CC()); chord('ctrl b'); pause(1.5)
+    return False
 def say_(t):   # click the composer, type, press Return; if the message did not reach the hub, press Return again (a key can land before the field has focus)
     n = len([e for e in events() if e['$'] == 'MessagePosted' and t in e.get('text', '')])
     xin('click', *CC()); xin('type', t); xin('key', 'Return')
@@ -147,7 +152,7 @@ if want('F16'):
 # ---- F17 viewers: the rail's Board, Schematic, 3D and Mech pages on a seeded KiCad board and a STEP part; zoom with the wheel, pan and orbit with the left button
 if want('F17'):
     from PIL import ImageStat
-    sel(1); res = []; chord('ctrl b'); pause(1.5)   # a 1024 px window has no room for sidebar, timeline and viewer at once
+    sel(1); res = []; fold_sidebar()   # a 1024 px window has no room for sidebar, timeline and viewer at once
     VIEW = (560, 70, win()[2] - 80, win()[3] - 20)   # right of the timeline, left of the rail
     def busy(name):  # drawn: thousands of pixels that are not the page's background (a "Loading" line or a toolbar is a few hundred)
         im = px(name).crop(VIEW).convert('L'); bg = im.getpixel((5, 5)); return sum(1 for v in im.getdata() if abs(v - bg) > 25) > 6000
@@ -234,7 +239,7 @@ if want('F18'):
                 r, g, b = d[x, y]
                 if abs(r - rgb[0]) < tol and abs(g - rgb[1]) < tol and abs(b - rgb[2]) < tol: xs += x; ys += y; n += 1
         return (xs // n, ys // n) if n * 4 >= minpx else None
-    sel(1); chord('ctrl b'); pause(1.0); click_ctl('rail:Browser'); pause(4); allow_dialogs(); VW = (560, 90, win()[2] - 80, win()[3] - 30); shot('f18-open')
+    sel(1); fold_sidebar(); click_ctl('rail:Browser'); pause(4); allow_dialogs(); VW = (560, 90, win()[2] - 80, win()[3] - 30); shot('f18-open')
     def go():   # focus the page, then the address field, replace its text with the URL, Return
         allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(1.0); chord('ctrl a'); pause(0.3); xin('type', URL); xin('key1', 'Return'); allow_dialogs()
         if not until(lambda: 'load' in names(), 6): xin('key1', 'Return')   # the first Return after typed text is often taken to commit it; press again only when the page has not loaded (the address bar navigates on every Return)
@@ -273,7 +278,7 @@ if want('F18'):
         xin('click', *pos2['dl']); got = until(lambda: 'download-get' in names(), 30); pause(3)
         home = os.path.expanduser('~'); found = glob.glob(home + '/Downloads/f18-file*') + glob.glob(P('home') + '/**/f18-file*', recursive=True) + glob.glob(P('home') + '/**/*f18*download*', recursive=True)
         res.append(('download (known missing: a download the person starts is not kept in frame mode yet, Windows lane)' if not found else 'download', got and (bool(found) or True), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
-    shot('f18-top2'); pos2['pop'] = find('f18-top2', (255, 136, 0)) or pos2['pop']   # the "Saved" banner after a download moves the page down
+    pause(3); shot('f18-top2'); pos2['pop'] = find('f18-top2', (255, 136, 0)) or pos2['pop']; print('   F18: popup button at %s, server saw %s' % (pos2['pop'], names()), flush=True)   # the "Saved" banner after a download moves the page down
     if pos2['pop']:
         xin('click', *pos2['pop']); ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
         tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
