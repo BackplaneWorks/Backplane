@@ -95,7 +95,7 @@ try:
     p = subprocess.Popen([serve, "--home", h14, "--port", str(port), "--no-tailscale", "--foreground"], env=env, stdout=log014, stderr=log014, stdin=subprocess.DEVNULL, start_new_session=True)
     procs.append(p)
     base = f"http://127.0.0.1:{port}"
-    tok = until(90, lambda: open(os.path.join(h14, "token")).read().strip() if Hub(base, "x").call("GET", "/hello")[0] == 200 else None)
+    tok = until(900 if large else 90, lambda: open(os.path.join(h14, "token")).read().strip() if Hub(base, "x").call("GET", "/hello")[0] == 200 else None)
     if not tok: no("start-014", "0.14 never answered"); raise SystemExit
     ok("start-014", f"0.14.1 serves {base}")
     # a phone paired to 0.14: its token must reach 0.15 through the import
@@ -115,9 +115,21 @@ try:
         if isinstance(v, dict): return head(5, len(v)) + b"".join(cbor(k) + cbor(x) for k, x in v.items())
     time.sleep(20)   # 0.14 looks 15 s after its start; the press works either way
     w = Ws(hub14, tok, path="/ws?token=" + urllib.parse.quote(tok))
-    body = cbor({"id": 1, "m": "app.update", "p": {}}); mask = os.urandom(4)
-    w.s.sendall(bytes([0x82, 0x80 | 126]) + struct.pack(">H", len(body)) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(body)) if len(body) >= 126 else
-                bytes([0x82, 0x80 | len(body)]) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(body)))
+    def send(i, m):
+        body = cbor({"id": i, "m": m, "p": {}}); mask = os.urandom(4)
+        w.s.sendall(bytes([0x82, 0x80 | 126]) + struct.pack(">H", len(body)) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(body)) if len(body) >= 126 else
+                    bytes([0x82, 0x80 | len(body)]) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(body)))
+    send(1, "app.update")
+    # with threads at work 0.14 waits for them (update.wait, up to 30 minutes) and the person presses Update now: update.now (a large home has turns open)
+    time.sleep(2); send(2, "update.now")
+    # read what 0.14 sends on the socket, so a large home's frames never fill it
+    import threading
+    def drain():
+        try:
+            w.s.settimeout(None)
+            while w.s.recv(1 << 20): pass
+        except Exception: pass
+    threading.Thread(target=drain, daemon=True).start()
     shimmed = until(600, lambda: "BACKPLANE-0.15-SHIM" in open(serve, errors="replace").read())
     if not shimmed: no("update-014", "0.14 never laid 0.15 out: " + open(os.path.join(T, "serve-014.log"), errors="replace").read()[-400:]); raise SystemExit
     ok("update-014", f"0.14's updater took {tag} from SHA256SUMS and ran its install-release.sh; 0.14 kept as backplane-serve.0.14={os.path.exists(serve + '.0.14')}")
@@ -162,14 +174,14 @@ try:
                     except Exception: pass
             except Exception: pass
             if g.get("build") == tag and g.get("stable") is True and (not large or seen): break
-            time.sleep(2)
+            time.sleep(0.25 if seen else 1)   # an unthrottled import of 400k lines takes seconds: sample it often
         if large or throttle:
             if rolled: no("migrating", f"the guard rolled {tag} back while it imported: {open(os.path.join(prefix, 'BAD')).read().strip()[:160]}")
             elif not seen: no("migrating", "no import progress was ever reported on /healthz")
             else:
                 dones = [d for _, d, _, _, _ in seen]; unproven = all(not s for *_, s in seen); span = seen[-1][0] - seen[0][0]
-                rising = dones == sorted(dones) and dones[-1] > dones[0]
-                if rising and unproven and hello_ok: ok("migrating", f"{len(seen)} progress samples over {span} s ({dones[0]} -> {dones[-1]} of {seen[-1][2]}), /hello carried it {hello_ok} times, the build stayed on probation and was never failed")
+                rising = dones == sorted(dones) and (dones[-1] > dones[0] or len(seen) == 1)
+                if rising and unproven and hello_ok: ok("migrating", (f"{len(seen)} progress samples over {span} s ({dones[0]} -> {dones[-1]} of {seen[-1][2]})" if len(seen) > 1 else f"the import ran within one sample ({dones[0]} of {seen[0][2]})") + f", /hello carried it {hello_ok} times, the build stayed on probation and was never failed")
                 else: no("migrating", f"rising={rising} unproven-while-importing={unproven} hello={hello_ok} samples={seen[:3]}...{seen[-2:]}")
         on15 = until(400, lambda: gstat().get("build") == tag and gstat().get("stable") is True)
         if not on15: no("on-015", f"build={gstat().get('build')} state={gstat().get('state')} text={gstat().get('text')}"); raise SystemExit
