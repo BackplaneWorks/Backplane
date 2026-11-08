@@ -5,7 +5,7 @@
 // directory (see README.md). Only protocol lines are written to stdout;
 // logs go to stderr.
 
-import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -130,6 +130,8 @@ type Owner = {
   // the in-page recorder is on for this owner (record op)
   recording: boolean;
   lastNav: string;
+  // an agent's `download` op is waiting for this owner's download: the person's handler leaves it to that op
+  fetching?: boolean;
 };
 
 const owners = new Map<string, Owner>();
@@ -522,6 +524,9 @@ async function adopt(o: Owner, p: Page): Promise<void> {
     titleChanged(o, p);
     if (p === o.active) send({ event: "load", page: o.name, url: p.url() });
   });
+  // a download the person started on the page (a link, a button): saved, then handed to the hub, which gives it to the
+  // window that shows this page; Chrome's own copy would be dropped with its temporary profile (`personDownload`)
+  if (engine !== "cef") p.on("download", (d) => { if (!o.fetching) void personDownload(o, d).catch((e) => log(`download: ${e}`)); });
   // a popup (window.open, target=_blank) joins its opener's tabs and is
   // what the owner drives next
   p.on("popup", (q) => {
@@ -920,6 +925,18 @@ function needPath(a: Json, op: string): string {
   return resolve(a.path);
 }
 
+// the person's downloads: one folder of the helper's, its files the hub takes (`download` event: page, name, path, bytes)
+let personDir = "";
+export async function personDownload(o: { name: string }, d: { suggestedFilename(): string; saveAs(p: string): Promise<void>; failure(): Promise<string | null>; url(): string }): Promise<void> {
+  if (!personDir) personDir = mkdtempSync(join(tmpdir(), "bp-browser-downloads-"));
+  const name = d.suggestedFilename();
+  const path = freeName(personDir, name);
+  await d.saveAs(path);
+  const failure = await d.failure();
+  if (failure) { send({ event: "download", page: o.name, name, error: failure }); return; }
+  send({ event: "download", page: o.name, name: basename(path), path, url: d.url(), bytes: statSync(path).size });
+}
+
 // a file name in dir that is not taken yet: name, name (1), name (2)...
 function freeName(dir: string, name: string): string {
   const safe = basename(name).replace(/[\/\\\0]/g, "_") || "download";
@@ -1313,11 +1330,16 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
       copyFileSync(d.file, path); rmSync(d.file, { force: true });
       return { path, url: d.url, suggestedFilename: d.suggestedFilename, bytes: statSync(path).size };
     }
-    const waiting = p.waitForEvent("download", { timeout });
-    if (t) await t.click({ timeout });
-    // navigating to a file fails with "Download is starting"; the event is what counts
-    else p.goto(normalizeUrl(a.url), { timeout }).catch(() => {});
-    const d = await waiting;
+    const o = owners.get(name);
+    if (o) o.fetching = true;
+    let d;
+    try {
+      const waiting = p.waitForEvent("download", { timeout });
+      if (t) await t.click({ timeout });
+      // navigating to a file fails with "Download is starting"; the event is what counts
+      else p.goto(normalizeUrl(a.url), { timeout }).catch(() => {});
+      d = await waiting;
+    } finally { if (o) o.fetching = false; }
     const path = freeName(dir, d.suggestedFilename());
     await d.saveAs(path);
     const failure = await d.failure();
