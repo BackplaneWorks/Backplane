@@ -144,7 +144,10 @@ def main():
         ("a click on the page's link navigated (bp-page2)", any_("click_link", lambda e: e.get("title") == "bp-page2"), json.dumps(last("click_link"))[:300]),
         ("back returned to the first page", any_("back", lambda e: str(e.get("url", "")).endswith("/index.html")), json.dumps(last("back"))[:300]),
         ("forward went to the second page again", any_("forward", lambda e: str(e.get("url", "")).endswith("/page2.html")), json.dumps(last("forward"))[:300]),
-        ("a file:// page loaded", any_("goto_file", lambda e: e.get("title") == "bp-page2" and str(e.get("url", "")).startswith("file:")), json.dumps(last("goto_file"))[:300]),
+        # embedded Chromium is the person's own browser: file:// opens. The hub's page is on the hub's machine, and its toolbar opens http(s) only
+        # (native/host/src/term/driver.rs cef_url): a file:// address there is refused and the page stays where it was
+        (("a file:// page loaded", any_("goto_file", lambda e: e.get("title") == "bp-page2" and str(e.get("url", "")).startswith("file:")), json.dumps(last("goto_file"))[:300]) if a.mode == "cef" else
+         ("a file:// address is refused by the hub's page (it stays on page two)", all(not str(e.get("url", "")).startswith("file:") for e in at("goto_file")) and any_("goto_file", lambda e: e.get("title") == "bp-page2"), json.dumps(last("goto_file"))[:300])),
         (f"an https page loaded ({a.https})", any_("goto_https", lambda e: str(e.get("url", "")).startswith("https://") and e.get("title") not in ("", None, "bp-page2") and not e.get("load_error")), json.dumps(last("goto_https"))[:300]),
         ("a second tab opened", any_("new_tab", lambda e: e.get("tabs", 0) >= 2), json.dumps(last("new_tab"))[:200]),
         ("closing it left one tab", any_("close_tab", lambda e: e.get("tabs", 0) == 1), json.dumps(last("close_tab"))[:200]),
