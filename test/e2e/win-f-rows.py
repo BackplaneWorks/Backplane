@@ -47,7 +47,7 @@ open(P('home/events.jsonl'), 'w', newline='\n').write(''.join(json.dumps(e) + '\
 env = dict(os.environ)
 env.update(BACKPLANE_AGENTS=P('bin'), BACKPLANE_NO_UPDATE='1', FAKE_LOG=P('fake.log'), FAKE_SECS='600', HOME=P('fakehome'), USERPROFILE=P('fakehome'),
            APPDATA=P('fakehome/AppData/Roaming'), LOCALAPPDATA=P('fakehome/AppData/Local'), XDG_CONFIG_HOME=P('fakehome/.config'), XDG_CACHE_HOME=P('fakehome/.cache'),
-           PATH=P('bin') + os.pathsep + os.environ['PATH'], BACKPLANE_ORDER_SERVER='http://127.0.0.1:%d' % order_srv.server_address[1])
+           PATH=os.pathsep.join([P('bin'), os.path.dirname(sys.executable), os.environ['PATH']]),   # the stand-ins' #! names python3: this one BACKPLANE_ORDER_SERVER='http://127.0.0.1:%d' % order_srv.server_address[1])
 env.pop('SHELL', None)
 def spawn(args, log_name, e=None, cwd=None):
     p = subprocess.Popen(args, env=e or env, cwd=cwd, stdout=open(P(log_name), 'ab'), stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW); procs.append(p); return p
