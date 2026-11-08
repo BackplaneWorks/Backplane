@@ -25,7 +25,7 @@ const HEAD: f32 = 28.;
 
 /// A screen this client holds: the panel's shells and the chat terminals' cards share them (a popped-out card is the same screen).
 /// `state` is the hub's word for it (running, done N, exited N, stopped; "" before the hub said), `focus` a card's keyboard.
-struct Screen { vt: Vt, pid: i32, used: u64, state: String, focus: Option<FocusHandle>, open: bool, home: (u16, u16) }
+struct Screen { vt: Vt, pid: i32, used: u64, state: String, focus: Option<FocusHandle>, open: bool, home: (u16, u16), title: String }
 /// A selection by the mouse: (absolute row, column) at each end; rows count from the top of the scrollback.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Sel { pub a: (usize, usize), pub b: (usize, usize) }
@@ -158,15 +158,15 @@ impl Term {
             let Some(old) = self.screens.iter().filter(|(k, _)| *k != &self.key).min_by_key(|(_, s)| s.used).map(|(k, _)| k.clone()) else { break };
             self.screens.remove(&old);
         }
-        self.screens.insert(key.into(), Screen { vt: Vt::new(self.size.0 as usize, self.size.1 as usize), pid: 0, used: tick, state: String::new(), focus: None, open: false, home: (0, 0) });
+        self.screens.insert(key.into(), Screen { vt: Vt::new(self.size.0 as usize, self.size.1 as usize), pid: 0, used: tick, state: String::new(), focus: None, open: false, home: (0, 0), title: String::new() });
         true
     }
     /// A card's screen: made at the entry's size when this client holds none (True: ask the hub for a snapshot). Its keyboard is made once.
-    pub fn ensure_card(&mut self, key: &str, cols: u16, rows: u16, focus: impl FnOnce() -> FocusHandle) -> bool {
+    pub fn ensure_card(&mut self, key: &str, title: &str, cols: u16, rows: u16, focus: impl FnOnce() -> FocusHandle) -> bool {
         let fresh = self.ensure(key);
         let s = self.screens.get_mut(key).unwrap();
         if fresh { s.vt = Vt::new(cols as usize, rows as usize) }
-        s.home = (cols, rows);
+        s.home = (cols, rows); if s.title != title { s.title = title.to_string() }
         if s.focus.is_none() { s.focus = Some(focus()) }
         fresh
     }
@@ -384,7 +384,7 @@ impl Backplane {
         let (id, key, title) = (s("id"), s("key"), s("title"));
         let (cols, rows) = (e["cols"].as_u64().unwrap_or(80) as u16, e["rows"].as_u64().unwrap_or(24) as u16);
         if key.is_empty() { return div().into_any_element() }
-        let fresh = self.screens.term.ensure_card(&key, cols, rows, || cx.focus_handle());
+        let fresh = self.screens.term.ensure_card(&key, &title, cols, rows, || cx.focus_handle());
         if fresh { self.term_rpc("term.snap", json!({"key": key})); }
         for (op, label) in [("focus", "Terminal"), ("expand", "Expand"), ("pop", "Pop out"), ("stop", "Stop")] {
             self.controls.push(crate::script::CtlEntry { id: format!("term-{op}:{id}"), label: format!("{label} · {title}"), ctl: crate::script::Ctl::Term(op.into(), key.clone()) });
@@ -476,7 +476,9 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
         body = body.child(if focused { cur.bg(rgba(0xd9dce4aa)) } else { cur.border_1().border_color(rgb(vt::DEFAULT_FG)) });
     }
     let hint = format!("{} hides · Shift+Esc back to the message · {} copy · {} paste", crate::keys::hint(l, "term"), crate::keys::show("secondary-shift-c", crate::keys::mac()), crate::keys::show("secondary-shift-v", crate::keys::mac()));
-    let label = if !name.is_empty() { name } else if title.is_empty() { "Terminal".to_string() } else { format!("Terminal · {title}") };
+    // a card popped out says its own title, not its thread's
+    let card = t.screens.get(&t.key).map(|s| s.title.clone()).filter(|x| !x.is_empty());
+    let label = if !name.is_empty() { name } else if let Some(ct) = card { format!("Terminal · {ct}") } else if title.is_empty() { "Terminal".to_string() } else { format!("Terminal · {title}") };
     let label = if scroll > 0 { format!("{label} · {scroll} lines back") } else { label };
     Some(div().id("floating-terminal").absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).flex().flex_col()
         .bg(rgb(vt::DEFAULT_BG)).border_1().border_color(if focused { c("accent") } else { c("line") }).shadow_lg()
