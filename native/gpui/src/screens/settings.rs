@@ -296,11 +296,13 @@ pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str, cx: &mut C
     let _ = this.tx.try_send(Command::Action(a.into(), v));
 }
 
-fn qr(light: bool, lines: &[String]) -> AnyElement {
+/// A QR code as scanners read it in either theme: dark modules on white with the four-module quiet zone the standard asks for (a light
+/// code on the dark theme's background, as it was drawn, is one many phone scanners do not read at all).
+fn qr(_light: bool, lines: &[String]) -> AnyElement {
     let n = lines.len(); let cell = 4.0_f32;
-    let dark = theme::color(light, "text"); let bg = theme::color(light, "view");
+    let (dark, bg) = (gpui::rgb(0x000000), gpui::rgb(0xffffff));
     let rows: Vec<Vec<bool>> = lines.iter().map(|l| l.chars().map(|c| c == '1').collect()).collect();
-    div().p_2().bg(bg).child(canvas(|_, _, _| (), move |bounds, _, window, _| {
+    div().p(px(4.0 * cell)).bg(bg).child(canvas(|_, _, _| (), move |bounds, _, window, _| {
         for (y, row) in rows.iter().enumerate() { for (x, on) in row.iter().enumerate() {
             if *on { window.paint_quad(fill(Bounds::new(point(bounds.left() + px(x as f32 * cell), bounds.top() + px(y as f32 * cell)), size(px(cell), px(cell))), dark)); }
         } }

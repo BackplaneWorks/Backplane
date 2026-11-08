@@ -441,7 +441,7 @@ fn phone(f: &Facts, session: &Value, c: &Client) -> Step {
     let mut rows = vec![];
     if let Some(l) = inv["link"].as_str() {
         let mut r = row("Pairing link", l, vec![copy(l), btn("Make another", "device-invite", "", false)]);
-        r["qr"] = json!(s(&inv, "qr").lines().map(str::to_string).collect::<Vec<_>>());
+        r["qr"] = json!(crate::net::qr::text(l).lines().map(str::to_string).collect::<Vec<_>>());
         r["qrnote"] = json!(format!("Short code {}, for ten minutes", s(&inv, "code")));
         rows.push(r);
         if inv["localOnly"] == true { let mut w = row("Only this computer", super::settings::LOCAL_DEVICE, vec![]); w["tone"] = json!("warn"); rows.push(w); }

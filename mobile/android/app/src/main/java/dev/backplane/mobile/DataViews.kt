@@ -156,6 +156,13 @@ private fun PairScreen() {
     var address by remember(DataClient.pairEpoch) { mutableStateOf("") }
     var code by remember(DataClient.pairEpoch) { mutableStateOf("") }
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val tag = LocalBackplaneLanguage.current
+    // the in-app scanner (Scanner.kt): over this screen while open; a camera refused or missing leaves a note here, beside the photo and the paste
+    val scan = pairScanner(tag)
+    val photo = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) pairingFromImage(ctx, uri)?.let { DataClient.pair(it) } ?: run { DataClient.pairingError = NativeMessages.native_pair_scanner_invalid(tag) }
+    }
+    if (scan.open) { ScannerView(tag, scan.close, scan.failed) { scan.close(); DataClient.pair(it) }; return }
     // centred when it fits; scrolls when it does not (a phone in landscape, a large font, the keyboard up): the short code and its button stay reachable
     Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.Center) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)) {
@@ -170,9 +177,12 @@ private fun PairScreen() {
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DBtn("Pair", true, text.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.go")) { DataClient.pair(text) }
-            DBtn("Scan code", false, true) { scanPairing(ctx, "data") { DataClient.pair(it) } }
+            DBtn("Scan code", false, !DataClient.pairingBusy, Modifier.testTag("pair.scan"), onClick = scan.start)
             if (DataClient.adding && DataClient.link != null) DBtn("Cancel", false, true, Modifier.testTag("pair.cancel")) { DataClient.adding = false; DataClient.pairingError = "" }
         }
+        Spacer(Modifier.height(8.dp))
+        DBtn("Choose a photo of the code", false, !DataClient.pairingBusy, Modifier.testTag("pair.photo")) { photo.launch("image/*") }
+        if (scan.note.isNotEmpty()) { Spacer(Modifier.height(8.dp)); ScanNote(tag, scan) }
         // revoked: the other paired hubs are one tap away
         val others = DataClient.links.drop(1).mapNotNull { Pairing.key(it) }
         if (DataClient.needsRepair && others.isNotEmpty()) {
@@ -685,6 +695,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             DBtn("Improvements", false, modifier = Modifier.testTag("settings.improve"), onClick = improve)
             DLine()
             if (DataVoice.available) VoiceSettings()
+            if (DataDevices.available) { DevicesSettings(); DLine() }
             if (DataMachines.available) { MachinesSettings(); DLine() }
             DMono("ALERTS", dfaint)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }
