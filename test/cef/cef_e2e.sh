@@ -146,7 +146,8 @@ PY
 read FPS LAT RSZ < "$OUT/bench.txt"
 echo "measured: ${FPS} fps painted into the gpui image (animated page, software rendering), click to changed pixel ${LAT} ms, resize to painted frame ${RSZ} ms"
 check "the page animates at a usable frame rate (${FPS} fps, software GL)" "$(python3 -c "print(1 if float('${FPS:-0}')>=15 else 0)")" "$FPS"
-check "input to visible change is fast (click to changed pixel ${LAT} ms)" "$(python3 -c "print(1 if 0<=float('${LAT:--1}')<400 else 0)")" "$LAT"
+LATMAX=400; [ -z "${E2E_SLOW:-}" ] || LATMAX=1500   # E2E_SLOW: a small CI runner (software rendering on 4 cores)
+check "input to visible change is fast (click to changed pixel ${LAT} ms)" "$(python3 -c "print(1 if 0<=float('${LAT:--1}')<${LATMAX} else 0)")" "$LAT"
 check "a resize reaches a painted frame quickly (${RSZ} ms)" "$(python3 -c "print(1 if 0<=float('${RSZ:--1}')<600 else 0)")" "$RSZ"
 A2=$(grep 'MCPCALL' "$OUT/standin.log" | uniq | sed -n 2p | cut -c1-300 || true)
 A3=$(grep 'MCPCALL' "$OUT/standin.log" | uniq | sed -n 3p | cut -c1-300 || true)
