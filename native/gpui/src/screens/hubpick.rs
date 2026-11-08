@@ -2,7 +2,7 @@
 //! choice does) is `crate::hubs`'s; this draws it and carries it out. Switching keeps the choice, closes this window's socket by starting the client
 //! again on the chosen hub (the way a new pairing already does), so nothing shown from the old hub is left.
 use crate::{hubs::{self, Entry}, screens::settings::{Btn, Row}, theme, Backplane};
-use gpui::*;
+use gpui::{prelude::*, *};
 
 /// `hub:menu`, `hub:add`, `hub:use:<key>`, `hub:forget:<key>`: the actions the picker, the page and a script name.
 #[derive(Debug, PartialEq, Clone)]
@@ -59,11 +59,14 @@ pub fn picker(this: &Backplane, cx: &mut Context<Backplane>, light: bool, ctl: &
     use crate::script::{Ctl, CtlEntry};
     let c = |n: &str| theme::color(light, n);
     let es = hubs::entries(&this.hubs);
-    let cur = es.first().map(|e| e.label.clone()).unwrap_or_default();
+    // the hub the window is on, by its address when that is another computer's (a `--url` start too, whatever the list says)
+    let away = this.screens.elsewhere.clone();
+    let cur = away.as_ref().map(|e| e.1.clone()).or_else(|| es.first().map(|e| e.label.clone())).unwrap_or_default();
     ctl.push(CtlEntry { id: "hub:menu".into(), label: "Hub".into(), ctl: Ctl::Hub(Act::Menu) });
     let mut col = div().flex().flex_col().border_b_1().border_color(c("line")).child(
         div().id("hub-picker").flex().items_center().gap_2().px_3().py_1().cursor_pointer().text_size(px(12.)).hover(|s| s.bg(c("panel")))
-            .child(div().flex_1().min_w_0().overflow_hidden().child(cur)).child(crate::art::icon(if this.hub_menu { "chevron-down" } else { "chevron-right" }, 14., c("dim")))
+            .children(away.as_ref().map(|_| crate::art::icon("link", 12., c("accent"))))
+            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().when(away.is_some(), |d| d.text_color(c("accent"))).child(cur)).child(crate::art::icon(if this.hub_menu { "chevron-down" } else { "chevron-right" }, 14., c("dim")))
             .on_click(cx.listener(|this, _, _, cx| act(this, Act::Menu, cx))));
     if this.hub_menu {
         for e in es.iter().skip(1) {

@@ -71,6 +71,16 @@ pub fn is_loopback(url: &str) -> bool {
     let h = host.rsplit_once(':').map_or(host.as_str(), |(h, _)| h);
     matches!(h, "127.0.0.1" | "localhost" | "[::1]")
 }
+/// The window's hub when it is not this computer's (any address off loopback: a hub chosen in the picker, or `--url`): its short name for
+/// the persistent mark ("desktop", the first label of its host) and its address for the hover. None: this computer's, drawn as always.
+pub fn elsewhere(url: &str) -> Option<(String, String)> {
+    if url.is_empty() || is_loopback(url) { return None }
+    let (addr, tls) = crate::pairing::host_port(url);
+    let host = addr.rsplit_once(':').map_or(addr.as_str(), |(h, _)| h).trim_matches(['[', ']']).to_string();
+    let short = if host.parse::<std::net::IpAddr>().is_ok() { host.clone() } else { host.split('.').next().unwrap_or(&host).to_string() };
+    let full = if (tls && addr.ends_with(":443")) || (!tls && addr.ends_with(":80")) { host } else { addr };
+    Some((short, full))
+}
 /// A client started on a local hub (`--url`, `--token-file`) keeps that as "This computer": the new list, None when nothing changes or the address is not local.
 pub fn remembered(list: &[Hub], url: &str, token_file: &str) -> Option<Vec<Hub>> {
     if token_file.is_empty() || !is_loopback(url) { return None }
@@ -215,6 +225,12 @@ mod tests {
     const SECRET: &str = "0123456789abcdef0123456789abcdef";
     fn cases() -> Value { serde_json::from_str(include_str!("../../../test/mobile/hubs_cases.json")).unwrap() }
     fn strs(v: &Value) -> Vec<String> { v.as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect() }
+    #[test] fn a_window_on_another_hub_knows_it_and_this_computers_does_not() {
+        assert_eq!(elsewhere("wss://desktop.tail9e0cf2.ts.net"), Some(("desktop".into(), "desktop.tail9e0cf2.ts.net".into())));
+        assert_eq!(elsewhere("ws://framework-1.tail.ts.net:8451"), Some(("framework-1".into(), "framework-1.tail.ts.net:8451".into())));
+        assert_eq!(elsewhere("ws://100.64.0.2:3800").map(|e| e.0), Some("100.64.0.2".into()));
+        assert_eq!((elsewhere("ws://127.0.0.1:3800"), elsewhere("http://localhost:8450"), elsewhere("")), (None, None, None));
+    }
     #[test] fn the_phones_adopt_table() {
         for c in cases()["adopt"].as_array().unwrap() {
             assert_eq!(adopt(&strs(&c["links"]), c["link"].as_str().unwrap().to_string(), |l| link_key(l)), strs(&c["want"]), "{}", c["name"]);

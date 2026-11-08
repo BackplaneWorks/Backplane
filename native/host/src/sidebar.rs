@@ -436,6 +436,12 @@ pub fn label_rows(project: &mut Value, mark: &Value) {
     if mark.is_null() { return }
     for k in ["threads", "snoozed", "settled", "archived"] { if let Some(a) = project[k].as_array_mut() { for r in a { r["machine"] = mark["name"].clone(); r["mark"] = mark.clone(); } } }
 }
+/// What a project of this machine that is also on linked machines (one repository, `crate::mirror::unify`) says after its name, from
+/// those machines' markers: "also on desktop", "also on desktop, framework". Empty for none.
+pub fn also_label(marks: &[Value]) -> String {
+    let names: Vec<&str> = marks.iter().filter_map(|m| m["short"].as_str().filter(|s| !s.is_empty())).collect();
+    if names.is_empty() { String::new() } else { format!("also on {}", names.join(", ")) }
+}
 /// Two machines' rows of one shelf as one list: each machine's own order is kept (manual keys too) and a thread tree moves as one
 /// block (its root and the rows under it); at each step the block whose root `key` is higher goes first, `a`'s on a tie.
 pub fn merge_rows(a: Vec<Value>, b: Vec<Value>, key: &dyn Fn(&str) -> i128) -> Vec<Value> {
@@ -489,7 +495,9 @@ mod tests {
         assert_eq!(ids, ["a1", "a1k", "b1", "b1k", "a0", "a2", "b2"]);
         let mut local = json!({"threads": [r("a1", 0)], "settled": [], "snoozed": [], "archived": [], "settledCount": 2, "archivedCount": 0, "threadsPage": null, "settledPage": null, "snoozedPage": null, "archivedPage": null, "shelf": "Settled 2"});
         let mut far = json!({"threads": [r("b1", 0)], "settled": [r("b2", 0)], "snoozed": [], "archived": [], "settledCount": 3, "archivedCount": 1, "threadsPage": {"total": 1}, "settledPage": null, "snoozedPage": null, "archivedPage": null});
-        label_rows(&mut far, &json!({"name":"framework","short":"framework","away":false})); label_rows(&mut local, &Value::Null);
+        label_rows(&mut far, &json!({"name":"framework","short":"framework","away":false,"label":"on framework","runs":"runs on framework"})); label_rows(&mut local, &Value::Null);
+        assert_eq!(also_label(&[json!({"name":"desktop.tail.ts.net","short":"desktop"}), json!({"name":"framework-1","short":"framework-1","away":true})]), "also on desktop, framework-1");
+        assert_eq!(also_label(&[]), "", "a project only here says nothing");
         join_project(&mut local, far, &|_, id| key(id));
         assert_eq!(local["threads"].as_array().unwrap().iter().map(|v| (v["id"].as_str().unwrap(), v["mark"]["short"].as_str())).collect::<Vec<_>>(), [("a1", None), ("b1", Some("framework"))], "this machine's rows look as before");
         assert_eq!((local["settledCount"].as_u64(), local["archivedCount"].as_u64(), local["shelf"].as_str()), (Some(5), Some(1), Some("Settled 5")));

@@ -4,9 +4,11 @@ project folder that is a git repository with the same origin in another form (A 
 thread; linked and marked the owner's own. Then on A:
   - machine_list (a bot's mcpcall) gives B's project with `origin` github.com/o/r;
   - the native sidebar (view.open) shows ONE project for the repository, holding A's thread (no marker) and B's thread (`mark` naming B);
-  - a project of another repository on B keeps its own row, labelled by machine.
+  - a project of another repository on B keeps its own row, labelled by machine;
+  - the place words: the merged project says `also` "also on <B>", B's own project `mark.label` "on <B>", B's thread `mark.runs` "runs on <B>".
 
-  unified.py --hub PATH/backplane-hub [--port-a 3831] [--port-b 3832]
+  unified.py --hub PATH/backplane-hub [--port-a 3831] [--port-b 3832] [--hold DIR]
+  --hold DIR: after the checks, write DIR/rig.json ({url, token_file} of A) and keep both hubs up until DIR/stop exists (a window to look at).
 """
 import argparse, json, os, shutil, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,7 +24,9 @@ def seed(root, name, origin, other):
     os.makedirs(home, exist_ok=True); os.makedirs(proj, exist_ok=True)
     subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
     subprocess.run(["git", "remote", "add", "origin", origin], cwd=proj, check=True)
-    ev = [{"$": "ProjectCreated", "id": "p1", "title": "repo-" + name, "root": proj, "at": int(time.time()) - 60},
+    # (set up and not resuming: a window opened on the held rig shows the sidebar, not the first-run tour)
+    ev = [{"$": "SettingSet", "key": k, "value": v, "at": int(time.time()) - 90} for k, v in (("onboard.done", "1"), ("onboard.uber", "1"), ("restart.continue", "off"))]
+    ev += [{"$": "ProjectCreated", "id": "p1", "title": "repo-" + name, "root": proj, "at": int(time.time()) - 60},
           {"$": "ThreadCreated", "id": "t-" + name, "project": "p1", "title": "thread on " + name, "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": int(time.time()) - 30}]
     if other:
         o = os.path.join(root, name, "other"); os.makedirs(o, exist_ok=True)
@@ -49,6 +53,7 @@ def main():
     a.add_argument("--hub", required=True)
     a.add_argument("--port-a", type=int, default=3831)
     a.add_argument("--port-b", type=int, default=3832)
+    a.add_argument("--hold", default="")
     o = a.parse_args()
     bun = shutil.which("bun")
     if not bun:
@@ -109,6 +114,16 @@ def main():
         check("B's thread names its machine", isinstance(far.get("mark"), dict) and far["mark"].get("name") and far["mark"].get("away") is False, json.dumps(far)[:300])
         other = next((p for p in ps if p.get("title") == "other-b"), None)
         check("a linked project of another repository keeps its own row, labelled", bool(other) and other.get("machine") == far["mark"]["name"], str(titles))
+        short = far["mark"].get("short", "")
+        check("the merged project says where else it is", repo.get("also") == f"also on {short}" and "mark" not in repo, json.dumps({k: repo.get(k) for k in ("also", "marks", "mark")})[:300])
+        check("the other machine's project says where it is", bool(other) and (other.get("mark") or {}).get("label") == f"on {short}", json.dumps((other or {}).get("mark"))[:200])
+        check("the other machine's thread says where it runs", far["mark"].get("runs") == f"runs on {short}", json.dumps(far["mark"])[:200])
+        if o.hold:
+            os.makedirs(o.hold, exist_ok=True)
+            with open(os.path.join(o.hold, "rig.json"), "w") as f: json.dump({"url": f"ws://127.0.0.1:{o.port_a}", "token_file": os.path.join(ha, "token"), "far_thread": far["id"]}, f)
+            print("holding: touch", os.path.join(o.hold, "stop"), flush=True)
+            end = time.time() + 3 * 3600
+            while time.time() < end and not os.path.exists(os.path.join(o.hold, "stop")): time.sleep(1)
     finally:
         for p in (pa, pb): p.terminate()
         for p in (pa, pb):
