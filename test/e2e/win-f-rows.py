@@ -4,7 +4,7 @@
 interpreter its #! names), real input through SendInput, screenshots of the client's area, the real clipboard. A check passes from what the hub
 logged, what the client reported (GPUI_METRIC lines) or pixels; never from the driver's own say-so. The client's area is made 1440x900 at the
 screen's top left, so the rows' coordinates mean what they mean on Linux.
-usage: win-f-rows.py CLIENT_EXE HUB_EXE ASSETS_DIR OUT [PORT] [rows...]   -> OUT/rows.json, OUT/shots/*.png, one line per check"""
+usage: [ROWS=win-f18.rows.py] win-f-rows.py CLIENT_EXE HUB_EXE ASSETS_DIR OUT [PORT] [rows...]   -> OUT/rows.json, OUT/shots/*.png, one line per check"""
 import os, sys, json, time, shutil, subprocess, glob, re, ctypes, threading, http.server
 from ctypes import wintypes as W
 CLIENT, HUB, ASSETS, OUT = [os.path.abspath(a) for a in sys.argv[1:5]]
@@ -208,7 +208,7 @@ def want(i):
     return not ONLY or i in ONLY
 denv = env
 try:
-    exec(open(os.path.join(HERE, 'gpui-f-rows.rows.py')).read())
+    exec(open(os.path.join(HERE, os.environ.get('ROWS', 'gpui-f-rows.rows.py'))).read())   # ROWS: another rows file (win-f18.rows.py)
 finally:
     cleanup()
 sys.exit(0)
