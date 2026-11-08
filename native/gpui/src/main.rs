@@ -1,4 +1,7 @@
 #![recursion_limit = "256"]
+// Windows: a window program, not a console one, so starting it (Explorer, the Start menu, the guard) opens no console window beside it.
+// What it prints still reaches a file or pipe it is given (the tests, `--exit-after` runs).
+#![cfg_attr(windows, windows_subsystem = "windows")]
 mod art;
 mod delta;
 mod hub;

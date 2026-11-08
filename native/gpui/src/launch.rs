@@ -89,6 +89,9 @@ pub fn guarded_install(me: &Path) -> Option<(PathBuf, PathBuf)> {
 
 fn detached(cmd: &mut std::process::Command) {
     #[cfg(unix)] { use std::os::unix::process::CommandExt; cmd.process_group(0); }
+    // a console of its own that is never shown (CREATE_NO_WINDOW), shared by what the hub starts (git, sh), in its own group (CREATE_NEW_PROCESS_GROUP):
+    // started from this window program with nothing, Windows would open a console window for the hub
+    #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000 | 0x0000_0200); }
 }
 /// The end of the hub's log, for the words when it did not start.
 fn log_tail(log: &Path) -> String { let t = std::fs::read_to_string(log).unwrap_or_default(); t.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(200).collect() }

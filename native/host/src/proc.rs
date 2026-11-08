@@ -65,6 +65,8 @@ fn dead(program: &str, why: &str) -> String { eprintln!("{why}"); format!("/none
 pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
     let mut c = match refusal(kind, &p) { None => { let (prog, pre) = crate::plat::hub::launch(program.as_ref()); let mut c = tokio::process::Command::new(prog); c.args(pre); c } Some(why) => tokio::process::Command::new(dead(&p, &why)) };
+    // Windows: no console window for what the hub starts, whether or not the hub has a console to share (a guard's, a task's); own_group keeps it
+    #[cfg(windows)] c.creation_flags(crate::plat::hub::NO_WINDOW);
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     c
 }
@@ -72,6 +74,7 @@ pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Com
 pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
     let mut c = match refusal(kind, &p) { None => { let (prog, pre) = crate::plat::hub::launch(program.as_ref()); let mut c = std::process::Command::new(prog); c.args(pre); c } Some(why) => std::process::Command::new(dead(&p, &why)) };
+    #[cfg(windows)] { use std::os::windows::process::CommandExt; c.creation_flags(crate::plat::hub::NO_WINDOW); }
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     c
 }
