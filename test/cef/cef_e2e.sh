@@ -14,7 +14,9 @@ rm -rf "$OUT"; mkdir -p "$OUT/home" "$OUT/proj" "$OUT/bin" "$OUT/fakehome/.cache
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > "$OUT/bin/claude"; chmod +x "$OUT/bin/claude"
 for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$OUT/bin/$n"; chmod +x "$OUT/bin/$n"; done
 # the hub's browser helper from source, on the attach path only (no Chrome of its own)
-printf '#!/bin/sh\ncd %s/tools/browser && exec %s src/main.ts --engine chrome "$@" 2>> %s/helper.err\n' "$ROOT" "$(command -v bun)" "$OUT" > "$OUT/bin/backplane-browser"; chmod +x "$OUT/bin/backplane-browser"
+if [ -n "${E2E_BROWSER:-}" ]; then printf '#!/bin/sh\nexec %s "$@" 2>> %s/helper.err\n' "$E2E_BROWSER" "$OUT" > "$OUT/bin/backplane-browser"   # a release archive's own helper
+else printf '#!/bin/sh\ncd %s/tools/browser && exec %s src/main.ts --engine chrome "$@" 2>> %s/helper.err\n' "$ROOT" "$(command -v bun)" "$OUT" > "$OUT/bin/backplane-browser"; chmod +x "$OUT/bin/backplane-browser"; fi
+chmod +x "$OUT/bin/backplane-browser"
 python3 - "$OUT" <<'PY'
 import json,sys,time
 R=sys.argv[1]; NOW=int(time.time())
@@ -43,7 +45,7 @@ cat > "$OUT/script.json" <<JSON
  {"cef":{"tab":0}},{"cef":{"goto":"http://127.0.0.1:$PPORT/bench.html"}},{"wait":4000},{"cef":{"report":true}},{"wait":3000},{"cef":{"report":true}},{"cef":{"latency":true}},{"wait":1500},{"cef":{"report":true}},{"wait":500}]
 JSON
 DISPLAY=$DISP LD_LIBRARY_PATH=$RT BACKPLANE_CEF=$RT BACKPLANE_CEF_CDP_PORT=$CDP BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF_TEST_FILE=$HERE/page/test-upload.txt BACKPLANE_CEF_PROFILE=$OUT/profile VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 \
-  BACKPLANE_GPUI_ASSETS=$MAIN/build/gpui/linux/assets HOME=$OUT/fakehome \
+  BACKPLANE_GPUI_ASSETS=${E2E_ASSETS:-$MAIN/build/gpui/linux/assets} HOME=$OUT/fakehome \
   "$CLIENT" --url http://127.0.0.1:$HPORT --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 260 > "$OUT/client.log" 2>&1 & CP=$!; PIDS="$PIDS $CP"
 export DISPLAY=$DISP
 ok=0; fail=0; check() { if [ "$2" = "1" ]; then echo "PASS $1"; ok=$((ok+1)); else echo "FAIL $1 ($3)"; fail=$((fail+1)); fi; }
