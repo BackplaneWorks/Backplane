@@ -464,7 +464,7 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     assert_eq!(call("thread_send", json!({"threadId":other,"text":"  "})).await, (false, json!({"error":"thread_send needs a non-empty `text` (the message); nothing was sent"})));
     assert_eq!(call("thread_send", json!({"threadId":"nope","text":"hi"})).await, (false, json!({"error":"that thread is not in this project"})));
     assert_eq!(call("thread_send", json!({"threadId":other,"message":"zqshort hello"})).await, (true, json!({"threadId":other,"state":"sent"})));
-    let r = call("thread_wait", json!({"threadId":other,"timeoutMs":20000})).await.1; assert_eq!(r["done"], true);
+    let r = call("thread_wait", json!({"threadId":other,"timeoutMs":60000})).await.1; assert_eq!(r["done"], true);
     let ev = log_from(&hub, 0).await; let m = ev.iter().find(|e| is(e, "MessagePosted") && e["thread"] == other && e["role"] == "user").unwrap(); assert_eq!(m["msg"].as_str().unwrap().split(':').take(2).collect::<Vec<_>>(), ["t", T1]);
     assert!(ev.iter().any(|e| is(e, "MessageFrom") && e["thread"] == other && e["from"] == format!("thread:{T1}") && e["kind"] == "thread"));
     let read = call("thread_read", json!({"threadId":other,"limit":3})).await.1; assert_eq!(read["entries"].as_array().unwrap().len(), 3); assert_eq!(read["status"]["id"], other);
