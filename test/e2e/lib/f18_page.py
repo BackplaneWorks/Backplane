@@ -4,11 +4,11 @@ this server as a request (/ev/<name>), so a check passes from what the page did,
 import http.server, threading, time, urllib.parse
 PAGE = b"""<!doctype html><meta charset=utf-8><title>f18-start</title>
 <style>body{margin:0;background:#fff;font:20px sans-serif;height:3600px}
-#btn{position:absolute;left:80px;top:20px;width:300px;height:90px;background:#00cc66;border:0;font-size:24px}
-#inp{position:absolute;left:80px;top:130px;width:500px;height:70px;background:#ffff66;border:2px solid #333;font-size:30px}
-#pop{position:absolute;left:80px;top:230px;width:300px;height:90px;background:#ff8800;border:0;font-size:24px}
-#dl{position:absolute;left:80px;top:340px;width:300px;height:90px;background:#cc00cc;color:#fff;font-size:24px;line-height:90px;text-align:center;text-decoration:none}
-#out{position:absolute;left:80px;top:450px}
+#btn{position:absolute;left:60px;top:10px;width:260px;height:60px;background:#00cc66;border:0;font-size:22px}
+#inp{position:absolute;left:60px;top:85px;width:420px;height:50px;background:#ffff66;border:2px solid #333;font-size:26px}
+#pop{position:absolute;left:60px;top:150px;width:260px;height:60px;background:#ff8800;border:0;font-size:22px}
+#dl{position:absolute;left:60px;top:225px;width:260px;height:60px;background:#cc00cc;color:#fff;font-size:22px;line-height:60px;text-align:center;text-decoration:none}
+#out{position:absolute;left:60px;top:310px}
 #end{position:absolute;left:0;top:3400px;width:100%;height:100px;background:#0033cc}</style>
 <button id=btn>Click me</button><input id=inp placeholder=type><button id=pop>popup</button><a id=dl href=/file.txt>download</a><div id=out>idle</div><div id=end></div>
 <script>
