@@ -1,5 +1,6 @@
 #!/bin/sh
 secs=${FAKE_SECS:-600}; per=${FAKE_PER:-3}; cycle=${FAKE_CYCLE:-30}
+# FAKE_CYCLE_NEXT: the length of every block after the first (default FAKE_CYCLE), so a test can see one block end and then interrupt mid-block for certain
 sid="fake-$$"; n=0
 # Git for Windows' sh started by a Windows program sees PPID 1: its parent cannot be watched there (stdin ends when the hub goes)
 msys=; case "$(uname -s)" in MINGW*|MSYS*) msys=1 ;; esac
@@ -38,7 +39,7 @@ while IFS= read -r line; do
           printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"@'"$now"'@ some words of an answer about the board, "}},"session_id":"'"$sid"'"}'
         done
         if [ $k -ge $cycle ]; then
-          k=0
+          k=0; cycle=${FAKE_CYCLE_NEXT:-$cycle}
           printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"'"$sid"'"}'
           printf '%s\n' '{"type":"assistant","message":{"id":"m'"$$-$n-$t"'","role":"assistant","content":[{"type":"text","text":"Some words of an answer about the board, the whole paragraph the deltas built, as Claude sends it once the block ends. It names U3 and the 3V3 rail, and says what changed in the layout and why."}],"usage":{"input_tokens":1000,"cache_read_input_tokens":'"$((20000 + t))"',"output_tokens":'"$t"'}},"session_id":"'"$sid"'"}'
           printf '%s\n' '{"type":"assistant","message":{"id":"m'"$$-$n-$t"'b","role":"assistant","content":[{"type":"tool_use","id":"tu'"$$-$n-$t"'","name":"Bash","input":{"command":"ls -la src/core | head -'"$t"'","description":"List files"}}],"usage":{"input_tokens":1000,"cache_read_input_tokens":'"$((20000 + t))"',"output_tokens":'"$((t + 1))"'}},"session_id":"'"$sid"'"}'

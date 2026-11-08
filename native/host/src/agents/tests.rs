@@ -117,7 +117,9 @@ fn shape(ev: &[Value]) -> Vec<String> { ev.iter().map(norm).collect() }
 }
 
 #[tokio::test(flavor = "multi_thread")] async fn an_interrupt_posts_the_streamed_text_and_stops_a_running_turn_only() {
-    let sd = dir("i-bin"); perf_standin(&sd, 30);
+    // one short block (0.5 s), then one that lasts the rest of the turn: the stop always lands mid-block, with streamed text to post, however slow the machine.
+    // (With every block 0.5 s long, a loaded gate's interrupt often arrived just after a block closed, and there was no text to post.)
+    let sd = dir("i-bin"); script(&sd, "claude", &STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_CYCLE_NEXT=100000 FAKE_SECS=120 FAKE_LOG=/dev/null\n", 1));
     let (hub, ag, _h, _w) = start("i", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
     assert_eq!(rpc(&hub, "turn.interrupt", json!({"thread":T1})).await["ok"], true); // idle: nothing
     assert!(log_from(&hub, 0).await.iter().all(|e| !turn_is(e, "interrupted")), "interrupt_idle_nothing");
