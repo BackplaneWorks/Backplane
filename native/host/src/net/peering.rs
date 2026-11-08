@@ -19,7 +19,7 @@ impl PReq {
 
 pub struct Peering {
     pub home: PathBuf, pub reg: Arc<Registry>, pub table: Arc<PeerTable>, pub routes: Arc<AuthRoutes>,
-    pub tailnet: bool, pub host: String, pub port: u16,
+    pub tailnet: bool, pub host: String, pub port: u16, pub via: Mutex<Vec<Value>>,
     own_hosts: Mutex<Vec<String>>, seen: Mutex<sign::Seen>, pub flow: PairFlow,
     pub(crate) now: Box<dyn Fn() -> u64 + Send + Sync>,
 }
@@ -41,7 +41,7 @@ fn hexv(c: u8) -> Option<u8> { (c as char).to_digit(16).map(|d| d as u8) }
 
 impl Peering {
     pub fn new(home: PathBuf, reg: Arc<Registry>, table: Arc<PeerTable>, routes: Arc<AuthRoutes>, tailnet: bool, host: &str, port: u16) -> Peering {
-        Peering { home, reg, table, routes, tailnet, host: host.into(), port, own_hosts: Mutex::new(vec![]), seen: Mutex::new(sign::Seen::default()), flow: PairFlow::default(),
+        Peering { home, reg, table, routes, tailnet, host: host.into(), port, via: Mutex::new(vec![]), own_hosts: Mutex::new(vec![]), seen: Mutex::new(sign::Seen::default()), flow: PairFlow::default(),
             now: Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())) }
     }
     pub fn with_clock(mut self, now: Box<dyn Fn() -> u64 + Send + Sync>) -> Peering { self.now = now; self }

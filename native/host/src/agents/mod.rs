@@ -155,11 +155,12 @@ impl Agents {
             (w.setting("kicad.ipc") != "off", w.setting("order.enabled") != "off", w.setting("agent.lang").to_string(), !w.setting(&format!("buy.{th}")).is_empty(), ()) };
         let _ = names;
         let (root, home, host) = (cwd.to_string(), self.host.home.clone(), self.host.clone());
+        let machines = crate::bots::api::of(&self.hub).map(|b| b.machines_prompt()).unwrap_or_default(); // the paired machines, by name
         tokio::task::spawn_blocking(move || {
             let f = inputs::read(&root); let keys_path = home.join("secrets/api.env");
             let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
             prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders,
-                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines: String::new(), buy, lang })
+                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines, buy, lang })
         }).await.unwrap_or_default()
     }
     /// PendingChanged: the number of open asks on a thread, written after an ask opens or closes (`extra` asks counted on top).
@@ -620,7 +621,7 @@ impl Actor {
         self.jobs_start(&cwd, &msg); if !self.settle_ends().await { return Ok(()) } // a Stop while it waited for the checkpoint: no agent is started, the Stop ends the turn
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
-        let text_ref = { let w = self.ag.world().await; let model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
+        let text_ref = { let w = self.ag.world().await; let mut model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); if role == "user" && origin.is_none() { model_lines.extend(refs::machine_lines(&crate::session::composer::mention::machines(), &text)) } format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
         let text_rv = if rv_block.is_empty() { text_ref } else { format!("{text_ref}\n\n{rv_block}") };
         let agent_text = if role == "user" && origin.is_none() { let n = crate::term::tools::on_person_message(&self.ag.hub, &th).await; if n.is_empty() { text_rv.clone() } else { format!("{text_rv}\n\n{n}") } } else { text_rv.clone() };
         let agent_text = if takes_ride && !codex { format!("{}\n\n{}", codex::ride_input(&ride), agent_text) } else { agent_text }; // what waited for the person goes with their next message

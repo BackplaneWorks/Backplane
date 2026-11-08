@@ -140,7 +140,11 @@ pub const OLDER: &str = "that machine runs an older Backplane: update it there";
 /// The owner's own machines this hub is linked to: (link id, name, address)
 pub fn machines_of(sync: &FarSync) -> Vec<(String, String, String)> {
     let j = sync.peering.routes.machines_value();
-    sync.peering.table.with(|p| p.live().into_iter().filter(|r| super::farsync::own_link(p, &j, &r.id)).map(|r| (r.id, r.name, r.url)).collect())
+    let rows: Vec<(String, String, String)> = sync.peering.table.with(|p| p.live().into_iter().filter(|r| super::farsync::own_link(p, &j, &r.id)).map(|r| (r.id, r.name, r.url)).collect());
+    // names are unique: two machines called the same are told apart (`bots::mesh::unique_labels`), so `~name` and `name@machine` mean one machine
+    let names: Vec<(String, String)> = rows.iter().map(|r| (r.0.clone(), r.1.clone())).collect();
+    let uniq = crate::bots::mesh::unique_labels(&names, crate::bots::mesh::RESERVED);
+    rows.into_iter().zip(uniq).map(|(r, (_, label))| (r.0, label, r.2)).collect()
 }
 
 /// The bots lane's transport for `owner.mail` (a signed POST to a linked machine); only to one of the owner's own (the request carries mail text).
@@ -202,6 +206,7 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
         }
         _ => {}
     }
+    if m == "bots.mesh_code" { return super::mesh::serve_code(sync, hub, &o.get("p").cloned().unwrap_or(Value::Null)).await }
     if m == "uber.sync" { return HttpReply::text("501 Not Implemented", "uber.sync is not ported on this hub yet") }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");
@@ -225,7 +230,7 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     match out.into_iter().find(|v| v["t"] == "reply") { Some(v) => json_reply(&v), None => HttpReply::text("500 Internal Server Error", "no answer") }
 }
 /// The bots lane's requests between machines: a room's members, a post in it
-const FAR_BOTS: &[&str] = &["bots.room_sync", "bots.room_post", "bots.list", "bots.room_join", "bots.room_leave"];
+const FAR_BOTS: &[&str] = &["bots.room_sync", "bots.room_post", "bots.list", "bots.room_join", "bots.room_leave", "bots.hello"];
 /// `Fm.names` the owner's machines may call here (Fm.remote)
 const MCP_REMOTE: &[&str] = &["thread_send", "thread_wait_now", "thread_interrupt", "thread_update", "thread_list", "thread_launch", "machine_list", "thread_read", "thread_handoff", "plane_read", "launch_report", "thread_settle"];
 fn status(code: u16) -> &'static str { match code { 200 => "200 OK", 400 => "400 Bad Request", 403 => "403 Forbidden", 409 => "409 Conflict", 503 => "503 Service Unavailable", _ => "500 Internal Server Error" } }

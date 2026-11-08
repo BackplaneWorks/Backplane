@@ -7,6 +7,7 @@ pub mod mail;
 pub mod clock;
 pub mod hooks;
 pub mod far;
+pub mod mesh;
 pub mod ledger;
 pub mod plane;
 pub mod post;

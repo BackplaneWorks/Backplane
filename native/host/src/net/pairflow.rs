@@ -236,6 +236,7 @@ impl Peering {
             "linked": linked, "found": found,
             "requests": reqs.iter().filter(|r| r.state == In::Pending).map(|r| json!({"id": r.id, "name": r.name, "url": r.url, "check": r.check, "left": (r.at + WAIT_S).saturating_sub(now)})).collect::<Vec<_>>(),
             "outgoing": outs.iter().map(|o| { let mut v = json!({"id": o.id, "address": o.address, "check": o.check}); v["status"] = self_state(&o.state); v }).collect::<Vec<_>>(),
+            "via": self.via.lock().unwrap().clone(),
             "code": made.map(|m| json!({"code": m.code, "address": m.address, "left": (m.expires_ms / 1000).saturating_sub(now), "peer": m.peer})),
         })
     }

@@ -1541,3 +1541,126 @@ fn room_members_in(l: &[Value], room: &str) -> Option<String> { l.iter().rev().f
     let (c, _) = t.bb.far_received("L1", "bots.room_post", &json!({"room":mine,"msg":"m1","from":"ada","text":"hello"})).await; assert_eq!(c, 403);
     let (c, _) = t.bb.far_received("L1", "bots.room_sync", &json!({"room":mine,"deleted":true})).await; assert_eq!(c, 409, "a room of its own is not deleted from elsewhere either");
 }
+
+// ---- the full mesh: three hubs, each linked directly to the other two. A link id is made per pair (`L<low><high>`: both ends of a pair use the same one, a third machine uses another), so a bot of a third machine travels as `name@<machine id>`.
+struct Mesh3 { me: usize, nodes: Arc<std::sync::OnceLock<Vec<Arc<Bots>>>>, down: Arc<StdMutex<Vec<(usize, usize)>>>, sent: Arc<StdMutex<Vec<(usize, usize, String)>>> }
+impl mail::owner::OwnerLink for Mesh3 {
+    fn post<'a>(&'a self, link: &'a str, body: String) -> Fut<'a, Option<(u16, String)>> {
+        Box::pin(async move {
+            let (a, b): (usize, usize) = (link[1..2].parse().ok()?, link[2..3].parse().ok()?); let to = if a == self.me { b } else { a };
+            if self.down.lock().unwrap().contains(&(self.me, to)) || self.down.lock().unwrap().contains(&(to, self.me)) { return None }
+            let o: Value = serde_json::from_str(&body).unwrap(); let (m, p) = (o["m"].as_str().unwrap().to_string(), o["p"].clone());
+            self.sent.lock().unwrap().push((self.me, to, m.clone()));
+            let b = &self.nodes.get().unwrap()[to]; let from = link.to_string();
+            Some(b.far_received(&from, &m, &p).await)
+        })
+    }
+    fn machines(&self) -> Vec<(String, String, String)> { (0..3).filter(|j| *j != self.me).map(|j| (format!("L{}{}", j.min(self.me), j.max(self.me)), format!("m{j}"), format!("http://m{j}:3797"))).collect() }
+}
+struct Three { h: Vec<Arc<Hub>>, b: Vec<Arc<Bots>>, bots: Vec<String>, th: Vec<String>, down: Arc<StdMutex<Vec<(usize, usize)>>>, sent: Arc<StdMutex<Vec<(usize, usize, String)>>> }
+async fn three(tag: &str) -> Three {
+    let (mut h, mut b) = (vec![], vec![]);
+    for (i, n) in ["ada", "bob", "cy"].iter().enumerate() { let (hub, bots, _r) = start(&format!("mesh{tag}{i}"), "").await; let _ = n; h.push(hub); b.push(bots); }
+    let nodes = Arc::new(std::sync::OnceLock::new()); let down: Arc<StdMutex<Vec<(usize, usize)>>> = Default::default(); let sent: Arc<StdMutex<Vec<(usize, usize, String)>>> = Default::default();
+    nodes.set(b.clone()).ok();
+    for i in 0..3 { b[i].set_owner_link(Arc::new(Mesh3 { me: i, nodes: nodes.clone(), down: down.clone(), sent: sent.clone() })); b[i].far_start(); }
+    let mut bots = vec![]; let mut th = vec![];
+    for (i, n) in ["ada", "bob", "cy"].iter().enumerate() { let id = bot(&h[i], n).await; th.push(thread_of(&h[i], &id)); bots.push(id); }
+    Three { h, b, bots, th, down, sent }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_room_with_bots_on_three_machines_is_the_same_on_all_and_each_post_arrives_once() {
+    let t = three("room").await;
+    // machine ids are told on asking, are told apart, and persist in the home
+    let mids: Vec<String> = (0..3).map(|i| t.b[i].my_mid()).collect();
+    assert!(mids[0] != mids[1] && mids[1] != mids[2] && mids.iter().all(|m| m.len() == 16));
+    assert_eq!(t.b[0].my_mid(), mids[0]); assert_eq!(std::fs::read_to_string(t.h[0].cfg.home.join("machine-id")).unwrap().trim(), mids[0]);
+    let (ok, r) = t.b[0].tool_call(&t.th[0], "room_create", &json!({"name":"lab","members":"bob@m1\ncy@m2"})).await; assert!(ok, "{r}");
+    let rid = log(&t.h[0]).iter().find(|e| e["$"] == "RoomSet").unwrap()["id"].as_str().unwrap().to_string();
+    for i in [1, 2] { until(&t.h[i], |l| l.iter().any(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str())).await; }
+    // every machine holds the room with the other two machines' bots as bots of the machine they are on, its own as bare ids
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(sorted(&room_members(&t.h[0], &rid).unwrap()), sorted(&format!("{}\nbob@m1\ncy@m2", t.bots[0])), "A keeps them as typed");
+    assert_eq!(sorted(&room_members(&t.h[1], &rid).unwrap()), sorted(&format!("{}\nada@L01\ncy@L12", t.bots[1])), "B reaches C by its own link to it");
+    assert_eq!(sorted(&room_members(&t.h[2], &rid).unwrap()), sorted(&format!("{}\nada@L02\nbob@L12", t.bots[2])));
+    // posts: each reaches each other machine once, from the sender's name and machine
+    for (who, text) in [(0usize, "from ada"), (1, "from bob"), (2, "from cy")] {
+        let (ok, r) = t.b[who].tool_call(&t.th[who], "room_post", &json!({"room":"lab","text":text})).await; assert!(ok, "{r}");
+    }
+    for i in 0..3 { until(&t.h[i], |l| l.iter().filter(|e| e["$"] == "RoomPosted" && e["room"] == rid.as_str()).count() >= 3).await; }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await; // an echo or a second copy would show by now
+    for i in 0..3 {
+        let got = posts(&t.h[i], &rid);
+        assert_eq!(got.len(), 3, "machine {i}: {got:?}");
+        assert_eq!(got.iter().map(|g| g.1.clone()).collect::<std::collections::BTreeSet<_>>().len(), 3, "each post once on machine {i}: {got:?}");
+        assert!(got.iter().any(|g| g.0 == "ada@m0") == (i != 0) && got.iter().any(|g| g.0 == "bob@m1") == (i != 1) && got.iter().any(|g| g.0 == "cy@m2") == (i != 2), "senders on machine {i}: {got:?}");
+    }
+    // the room changes did not go round: each machine stored its room's members once or twice (the creation and the one that completed it), never more
+    for i in 0..3 { let n = log(&t.h[i]).iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count(); assert!(n <= 2, "machine {i} stored the room {n} times"); }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_bot_joining_from_a_third_machine_reaches_both_others_and_a_downed_link_is_routed_around_nowhere() {
+    let t = three("join").await;
+    // bob makes a room on B with ada; cy joins it from C by naming B; A learns of cy from B without a link of its own having carried cy's name
+    assert!(t.b[1].tool_call(&t.th[1], "room_create", &json!({"name":"b-room","members":"ada@m0"})).await.0);
+    let rid = log(&t.h[1]).iter().find(|e| e["$"] == "RoomSet").unwrap()["id"].as_str().unwrap().to_string();
+    until(&t.h[0], |l| l.iter().any(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str())).await;
+    let (ok, r) = t.b[2].tool_call(&t.th[2], "room_join", &json!({"room":"b-room","machine":"m1"})).await; assert!(ok, "{r}");
+    until(&t.h[2], |l| l.iter().any(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str())).await;
+    until(&t.h[0], |l| room_members_in(l, &rid).map_or(false, |m| m.contains("cy@"))).await;
+    assert!(room_members_in(&log(&t.h[0]), &rid).unwrap().contains("cy@L02"), "A names C by A's own link to it");
+    assert_eq!(sorted(&room_members(&t.h[2], &rid).unwrap()), sorted(&format!("{}\nbob@L12\nada@L02", t.bots[2])));
+    // C's post reaches A directly, not through B
+    t.sent.lock().unwrap().clear();
+    assert!(t.b[2].tool_call(&t.th[2], "room_post", &json!({"room":"b-room","text":"direct"})).await.0);
+    until(&t.h[0], |l| l.iter().any(|e| e["$"] == "RoomPosted" && e["text"] == "direct")).await;
+    until(&t.h[1], |l| l.iter().any(|e| e["$"] == "RoomPosted" && e["text"] == "direct")).await;
+    assert!(t.sent.lock().unwrap().iter().any(|s| s.0 == 2 && s.1 == 0 && s.2 == "bots.room_post"), "C sent it to A itself: {:?}", t.sent.lock().unwrap());
+    // the direct route is down: nothing is relayed behind its back (no relay fallback), and the other route is untouched
+    t.down.lock().unwrap().push((2, 0));
+    assert!(t.b[2].tool_call(&t.th[2], "room_post", &json!({"room":"b-room","text":"second"})).await.0);
+    until(&t.h[1], |l| l.iter().any(|e| e["$"] == "RoomPosted" && e["text"] == "second")).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!posts(&t.h[0], &rid).iter().any(|p| p.1 == "second"), "A did not get it by way of B");
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn the_mesh_lists_machines_a_linked_machine_knows_that_this_one_does_not() {
+    // A is linked to B only; B is linked to A and C: A sees C through B
+    let (h, b): (Vec<_>, Vec<_>) = { let mut h = vec![]; let mut b = vec![]; for i in 0..3 { let (hub, bots, _) = start(&format!("meshcand{i}"), "").await; h.push(hub); b.push(bots); } (h, b) };
+    let nodes = Arc::new(std::sync::OnceLock::new()); nodes.set(b.clone()).ok();
+    struct Partial(Mesh3, Vec<usize>);
+    impl mail::owner::OwnerLink for Partial {
+        fn post<'a>(&'a self, link: &'a str, body: String) -> Fut<'a, Option<(u16, String)>> { self.0.post(link, body) }
+        fn machines(&self) -> Vec<(String, String, String)> { self.0.machines().into_iter().filter(|m| self.1.contains(&m.1[1..].parse::<usize>().unwrap())).collect() }
+    }
+    let mk = |i: usize, only: Vec<usize>| Arc::new(Partial(Mesh3 { me: i, nodes: nodes.clone(), down: Default::default(), sent: Default::default() }, only));
+    b[0].set_owner_link(mk(0, vec![1])); b[1].set_owner_link(mk(1, vec![0, 2])); b[2].set_owner_link(mk(2, vec![1]));
+    let c = b[0].mesh_candidates().await;
+    assert_eq!(c.len(), 1, "{c:?}"); assert_eq!((c[0]["name"].as_str(), c[0]["via_name"].as_str(), c[0]["url"].as_str()), (Some("m2"), Some("m1"), Some("http://m2:3797")));
+    assert_eq!(c[0]["mid"], b[2].my_mid().as_str());
+    let _ = h;
+}
+#[test] fn names_are_made_unique_and_a_rename_may_not_clash() {
+    use super::mesh::{name_free, unique_labels, word};
+    let rows = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+    let r = rows(&[("p2", "Desktop"), ("p1", "desktop"), ("p3", "laptop"), ("p4", "this machine")]);
+    let u = unique_labels(&r, super::mesh::RESERVED);
+    assert_eq!(u, rows(&[("p2", "Desktop-2"), ("p1", "desktop"), ("p3", "laptop"), ("p4", "this machine-2")]), "the first by link keeps the name; a reserved one and a repeat take -2");
+    assert_eq!(word("Desk Top!"), "desk-top");
+    assert!(name_free(&r, "p3", "lap", "framework").is_ok() && name_free(&r, "p3", "laptop", "framework").is_ok(), "its own name is free to it");
+    assert!(name_free(&r, "p3", "Desktop", "framework").is_err() && name_free(&r, "p3", "framework", "framework").is_err() && name_free(&r, "p3", "here", "x").is_err() && name_free(&r, "p3", "!!", "x").is_err());
+}
+#[test] fn a_member_is_told_to_the_machine_that_can_read_it() {
+    use super::mesh::{member_in, member_out};
+    let own = |id: &str| (id == "b1").then(|| "ada".to_string());
+    let link_of = |m: &str| match m { "m1" => Some("L01".to_string()), "m2" => Some("L02".to_string()), _ => None };
+    let mid_of = |l: &str| match l { "L01" => Some("mid1".to_string()), "L02" => Some("mid2".to_string()), _ => None };
+    assert_eq!(member_out("b1", "L01", own, link_of, mid_of).as_deref(), Some("ada@L01"), "my own bot is name@<the link the receiver has to me>");
+    assert_eq!(member_out("bob@m1", "L01", own, link_of, mid_of).as_deref(), Some("bob"), "the receiver's own bot is bare");
+    assert_eq!(member_out("cy@m2", "L01", own, link_of, mid_of).as_deref(), Some("cy@mid2"), "a third machine's bot by its machine id");
+    assert_eq!(member_out("cy@m9", "L01", own, link_of, mid_of), None);
+    assert_eq!(member_out("gone", "L01", own, link_of, mid_of), None);
+    let bot_id = |n: &str| (n == "bob").then(|| "b9".to_string());
+    let lom = |m: &str| (m == "mid2").then(|| "L12".to_string());
+    assert_eq!(member_in("bob", "L10", bot_id, lom).as_deref(), Some("b9"));
+    assert_eq!(member_in("ada@L10", "L10", bot_id, lom).as_deref(), Some("ada@L10"));
+    assert_eq!(member_in("cy@mid2", "L10", bot_id, lom).as_deref(), Some("cy@L12"));
+    assert_eq!(member_in("dee@mid7", "L10", bot_id, lom), None, "a machine this one has no link to is dropped");
+}

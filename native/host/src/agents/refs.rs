@@ -66,3 +66,35 @@ pub fn block(w: &World, sel: &str, text: &str, model_lines: &[String]) -> String
     let mut ls: Vec<String> = found(w, sel, text).iter().map(|(h, word)| line(w, h, word)).collect(); ls.extend(model_lines.iter().cloned());
     if ls.is_empty() { String::new() } else { format!("\n\n<references>\n{}\n</references>", ls.join("\n")) }
 }
+
+/// The lines for `~machine` references in a message, and for the `%project` and `>thread` words after one (they mean that machine's): what the agent is
+/// told about each. A word that names nothing is left out.
+pub fn machine_lines(ms: &[crate::session::composer::mention::MachineRow], text: &str) -> Vec<String> {
+    use crate::session::composer::mention::slug;
+    let local = |id: &str| id.split_once('~').map_or(id.to_string(), |x| x.1.to_string());
+    let (mut out, mut on): (Vec<String>, Option<&crate::session::composer::mention::MachineRow>) = (vec![], None);
+    for w in text.split(char::is_whitespace).filter(|x| !x.is_empty()) {
+        let w = w.trim_end_matches(|c| matches!(c, ',' | '.' | ':' | ';' | '!' | '?' | ')'));
+        let (Some(sig), true) = (w.chars().next(), w.len() > 1) else { continue };
+        let rest = slug(&w[sig.len_utf8()..]);
+        match sig {
+            '~' => if let Some(m) = ms.iter().find(|m| slug(&m.name) == rest) {
+                on = Some(m);
+                let ps: Vec<String> = m.projects.iter().take(12).map(|(i, t)| format!("\"{t}\" (id {})", local(i))).collect();
+                let line = format!("{w} is the machine \"{}\" (link {}), one of the person's paired machines, {}. {}Work asked \"on {w}\" is a thread launched there: thread_launch with machine \"{}\"{}; its threads are <link>~<id>.",
+                    m.name, m.link, if m.away { "away now (it may not answer)" } else { "here" },
+                    if ps.is_empty() { String::new() } else { format!("Its projects: {}. ", ps.join(", ")) }, m.name, if m.projects.is_empty() { "" } else { " and the project id" });
+                if !out.contains(&line) { out.push(line) }
+            },
+            '%' | '>' => if let Some(m) = on {
+                let l = if sig == '%' { &m.projects } else { &m.threads };
+                if let Some((id, t)) = l.iter().find(|(_, t)| slug(t) == rest) {
+                    out.push(if sig == '%' { format!("{w} is the project \"{t}\" on ~{} (id {}): to work in it, thread_launch with machine \"{}\" and project \"{}\".", slug(&m.name), local(id), m.name, local(id)) }
+                        else { format!("{w} is the thread \"{t}\" on ~{} (id {id}). Read it with thread_read, message it with thread_send.", slug(&m.name)) })
+                }
+            },
+            _ => {}
+        }
+    }
+    out
+}
