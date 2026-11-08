@@ -9,6 +9,8 @@ fp() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print
 CLIENT=$1; HUB=$2; OUT=${OUT:-/tmp/cef-e2e}; DISP=${DISP:-:77}; HPORT=${HPORT:-$(fp)}; PPORT=${PPORT:-$(fp)}; CDP=${CDP:-$(fp)}
 RT=${BACKPLANE_CEF:-$HOME/.cache/backplane/cef-runtime/154.0.34}
 XV=${XVFB_ROOT:-}; for d in $XV $MAIN/build/gpui/xvfb $HOME/.cache/xvfb-root $HOME/.local/xvfb-root; do [ -x "$d/usr/bin/Xvfb" ] && { XV=$d; break; }; done   # an unpacked Xvfb (no Xvfb package on the desktop)
+XVB=$XV/usr/bin/Xvfb; XLD=$XV/usr/lib/x86_64-linux-gnu; if ! [ -x "$XVB" ] && command -v Xvfb >/dev/null 2>&1; then XVB=$(command -v Xvfb); XLD=; fi   # else the system's (a CI runner's)
+ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)   # lavapipe: lvp_icd.json on x86_64, lvp_icd.aarch64.json on arm64
 rm -rf "$OUT"; mkdir -p "$OUT/home" "$OUT/proj" "$OUT/bin" "$OUT/fakehome/.cache"
 [ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP in use"; exit 2; }
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > "$OUT/bin/claude"; chmod +x "$OUT/bin/claude"
@@ -26,7 +28,7 @@ PY
 PIDS=""; cleanup() { for p in $PIDS; do kill $p 2>/dev/null || true; done; sleep 1; }; trap cleanup EXIT INT TERM
 export LC_ALL=C
 (cd "$HERE/page" && exec python3 -m http.server $PPORT --bind 127.0.0.1 > "$OUT/page.log" 2>&1) & PIDS="$PIDS $!"
-LD_LIBRARY_PATH=$XV/usr/lib/x86_64-linux-gnu $XV/usr/bin/Xvfb $DISP -screen 0 1440x900x24 -nolisten tcp -xkbdir /usr/share/X11/xkb > "$OUT/xvfb.log" 2>&1 & PIDS="$PIDS $!"
+LD_LIBRARY_PATH=$XLD $XVB $DISP -screen 0 1440x900x24 -nolisten tcp -xkbdir /usr/share/X11/xkb > "$OUT/xvfb.log" 2>&1 & PIDS="$PIDS $!"
 sleep 2
 printf 'font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\nhide_edge_borders both\nipc-socket %s/i3.sock\n' "$OUT" > "$OUT/i3.conf"
 mkdir -p -m 700 "$OUT/run"; XDG_RUNTIME_DIR=$OUT/run DISPLAY=$DISP i3 -c "$OUT/i3.conf" > "$OUT/i3.log" 2>&1 & PIDS="$PIDS $!"
@@ -44,7 +46,7 @@ cat > "$OUT/script.json" <<JSON
  {"mark":"remote"},{"wait":50000},{"cef":{"report":true}},
  {"cef":{"tab":0}},{"cef":{"goto":"http://127.0.0.1:$PPORT/bench.html"}},{"wait":4000},{"cef":{"report":true}},{"wait":3000},{"cef":{"report":true}},{"cef":{"latency":true}},{"wait":1500},{"cef":{"report":true}},{"wait":500}]
 JSON
-DISPLAY=$DISP LD_LIBRARY_PATH=$RT BACKPLANE_CEF=$RT BACKPLANE_CEF_CDP_PORT=$CDP BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF_TEST_FILE=$HERE/page/test-upload.txt BACKPLANE_CEF_PROFILE=$OUT/profile VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 \
+DISPLAY=$DISP LD_LIBRARY_PATH=$RT BACKPLANE_CEF=$RT BACKPLANE_CEF_CDP_PORT=$CDP BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF_TEST_FILE=$HERE/page/test-upload.txt BACKPLANE_CEF_PROFILE=$OUT/profile VK_ICD_FILENAMES=$ICD LP_NUM_THREADS=2 \
   BACKPLANE_GPUI_ASSETS=${E2E_ASSETS:-$MAIN/build/gpui/linux/assets} HOME=$OUT/fakehome \
   "$CLIENT" --url http://127.0.0.1:$HPORT --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 260 > "$OUT/client.log" 2>&1 & CP=$!; PIDS="$PIDS $CP"
 export DISPLAY=$DISP
