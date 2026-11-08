@@ -1,0 +1,9 @@
+<!doctype html><meta charset=utf-8><title>scroll:0</title>
+<style>body{margin:0;background:#fff;font:16px sans-serif}#inp{position:fixed;left:100px;top:60px;width:320px;height:32px;font-size:18px}
+.band{height:400px}.band:nth-child(odd){background:#ddeeff}</style>
+<input id=inp placeholder=type><div style="height:120px"></div><div id=bands></div>
+<script>
+for(let i=0;i<20;i++){const d=document.createElement('div');d.className='band';d.textContent='band '+i;bands.appendChild(d)}
+let typed='';const show=()=>{document.title='scroll:'+Math.round(scrollY)+(typed?' typed:'+typed:'')};
+addEventListener('scroll',show);inp.oninput=()=>{typed=inp.value;show()};
+</script>

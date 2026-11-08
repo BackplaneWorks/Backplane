@@ -232,6 +232,7 @@ fn main()->anyhow::Result<()> {
     if let Some(code)=viewers::cef::subprocess(){std::process::exit(code);} // a CEF helper process (renderer, gpu...) is this executable run again
     // `--install [DIR]`: the headless install of an unpacked Windows release (install.rs); nothing else runs
     #[cfg(windows)] if let Some(dir)=install::install_arg(&std::env::args().collect::<Vec<_>>()) {std::process::exit(install::headless(dir));}
+    if let Some(why)=plat::display_problem(std::env::var("DISPLAY").ok().as_deref(),std::env::var("WAYLAND_DISPLAY").ok().as_deref()) {eprintln!("backplane-gpui: {why}");eprintln!("GPUI_LOG {}",serde_json::json!({"no_display":why}));std::process::exit(3);}
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let started=Instant::now();let config=hub::Config::parse()?;let exit_after=config.exit_after;
     if config.swatches||config.gallery||config.fonts||std::env::var_os("BACKPLANE_GPUI_RECTS").is_some(){art::enable_rects();}
