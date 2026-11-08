@@ -47,10 +47,15 @@ open(P('home/events.jsonl'), 'w', newline='\n').write(''.join(json.dumps(e) + '\
 env = dict(os.environ)
 env.update(BACKPLANE_AGENTS=P('bin'), BACKPLANE_NO_UPDATE='1', FAKE_LOG=P('fake.log'), FAKE_SECS='600', HOME=P('fakehome'), USERPROFILE=P('fakehome'),
            APPDATA=P('fakehome/AppData/Roaming'), LOCALAPPDATA=P('fakehome/AppData/Local'), XDG_CONFIG_HOME=P('fakehome/.config'), XDG_CACHE_HOME=P('fakehome/.cache'),
-           PATH=os.pathsep.join([P('bin'), os.path.dirname(sys.executable), os.environ['PATH']]),   # the stand-ins' #! names python3: this one BACKPLANE_ORDER_SERVER='http://127.0.0.1:%d' % order_srv.server_address[1])
+           # the stand-ins' #! names python3: this one, first after the stand-ins
+           PATH=os.pathsep.join([P('bin'), os.path.dirname(sys.executable), os.environ['PATH']]),
+           BACKPLANE_ORDER_SERVER='http://127.0.0.1:%d' % order_srv.server_address[1])
 env.pop('SHELL', None)
 def spawn(args, log_name, e=None, cwd=None):
-    p = subprocess.Popen(args, env=e or env, cwd=cwd, stdout=open(P(log_name), 'ab'), stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW); procs.append(p); return p
+    p = subprocess.Popen(args, env=e or env, cwd=cwd, stdout=open(P(log_name), 'ab'), stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW); procs.append(p)
+    if args[0] == CLIENT and 'place' in globals():   # a client the rows start again (F09's crash) is placed like the first
+        threading.Thread(target=place_when_up, args=(p.pid,), daemon=True).start()
+    return p
 def cleanup(*_):
     for p in procs:
         try: subprocess.run(['taskkill', '/T', '/F', '/PID', str(p.pid)], capture_output=True)   # its tree: only the pids this driver started
@@ -73,12 +78,14 @@ def window_of(pid):
     found = []
     def cb(h, _):
         p = W.DWORD(); u32.GetWindowThreadProcessId(h, ctypes.byref(p))
-        if p.value == pid and u32.IsWindowVisible(h) and u32.GetWindowTextLengthW(h) > 0: found.append(h)
+        if p.value == pid and u32.IsWindowVisible(h) and u32.GetWindowTextLengthW(h) > 0:
+            r = W.RECT(); u32.GetWindowRect(h, ctypes.byref(r)); found.append(((r.right - r.left) * (r.bottom - r.top), h))
         return True
-    u32.EnumWindows(WNDENUMPROC(cb), 0); return found[0] if found else None
+    # the client has more than one visible, titled window (a small helper beside the main one): the main one is the largest
+    u32.EnumWindows(WNDENUMPROC(cb), 0); return max(found)[1] if found else None
 HWND = [None]
-def place():
-    h = window_of(client.pid)
+def place(pid=None):
+    h = window_of(pid or client.pid)
     if not h: return False
     HWND[0] = h
     u32.ShowWindow(h, 9)  # SW_RESTORE: a maximised window ignores a size
@@ -86,6 +93,11 @@ def place():
     u32.AdjustWindowRectEx(ctypes.byref(r), style, False, ex)
     u32.SetWindowPos(h, 0, r.left, r.top, r.right - r.left, r.bottom - r.top, 0x0040)  # SWP_SHOWWINDOW
     u32.SetForegroundWindow(h); return True
+def place_when_up(pid):
+    for _ in range(40):
+        if place(pid): break
+        time.sleep(0.5)
+    time.sleep(3); place(pid)   # once more after the first frames: a window may size itself as it opens
 def origin():
     pt = W.POINT(0, 0); u32.ClientToScreen(HWND[0], ctypes.byref(pt)); return pt.x, pt.y
 for _ in range(60):
@@ -143,7 +155,13 @@ def shot(name):
 def clip_image(img):
     """the real clipboard holds the PNG, as a person's copy would put it there"""
     subprocess.run(['powershell', '-NoProfile', '-STA', '-Command', "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; [Windows.Forms.Clipboard]::SetImage([Drawing.Image]::FromFile('%s'))" % img], capture_output=True)
-def metrics(): return [json.loads(l.split('GPUI_METRIC ', 1)[1]) for l in open(P('client.log'), errors='replace') if 'GPUI_METRIC ' in l]
+def metrics():
+    out = []   # a line the client is still writing (or two clients' lines run together after F09's restart) is not one yet
+    for l in open(P('client.log'), errors='replace'):
+        if 'GPUI_METRIC ' in l:
+            try: out.append(json.loads(l.split('GPUI_METRIC ', 1)[1]))
+            except ValueError: pass
+    return out
 def rects():
     r = {}
     for m in metrics():
