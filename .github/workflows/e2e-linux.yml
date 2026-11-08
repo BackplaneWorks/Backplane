@@ -66,6 +66,9 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/e2e"
           docker run --rm --privileged -v "$PWD:/w" -v "$RUNNER_TEMP:$RUNNER_TEMP" -w /w ${{ inputs.image }} bash test/e2e/ci-container.sh ${{ inputs.probe_only && 'probe' || 'full' }} arch "$RUNNER_TEMP/e2e" 2>&1 | tee e2e.txt
+      - name: own the files
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/e2e" . 2>/dev/null; sudo chmod -R u+rX "$RUNNER_TEMP/e2e" 2>/dev/null; true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
