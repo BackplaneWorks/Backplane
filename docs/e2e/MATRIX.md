@@ -12,26 +12,26 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 |---|---|---|---|---|
 | | **Core** | | | |
 | F01 | Hub boots on a temp home, `/hello` answers | pass | pass | pass (`windows smoke`, run 42429479397, 10837b209d) |
-| F02 | Client connects; sidebar and projects load | pass | pass (runner run 42474003421) | pass, part: an empty home, WARP (`windows smoke`, run 42429479397) |
+| F02 | Client connects; sidebar and projects load | pass | pass (rc.1 archive, run 42489602486) | pass, part: an empty home, WARP (`windows smoke`, run 42429479397) |
 | F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
 | F04 | Stand-in turn streams; restart ends running turns as interrupted | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
 | F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | pass, hub only, part: the stand-in provider tests that run there (scripts/ci-hub-windows-filter.sh skips the rest) |
-| F06 | Runtime modes, approvals, questions, plans | not run | pass, source build (run 42471112134); release archive: approval only (run 42474003421) | pass (Windows Server 2022 VM, see its section) |
-| F07 | Queue, steer, stop, held queue resume | not run | pass, source build (run 42471112134); archive: fail in run 42474003421, pass in 42454941978 | pass (Windows Server 2022 VM, see its section) |
+| F06 | Runtime modes, approvals, questions, plans | not run | pass: approval, question, plan (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
+| F07 | Queue, steer, stop, held queue resume | not run | pass (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
 | F08 | Fork, bring back, provider switch | not run | not run | pass (Windows Server 2022 VM, see its section) |
-| F09 | Todos, context meter, drafts survive a crash | not run | pass (run 42474003421, archive) | pass (Windows Server 2022 VM, see its section) |
+| F09 | Todos, context meter, drafts survive a crash | not run | pass (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
 | F10 | Inboxes, orchestration tools, subthreads panel | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F11 | Model picker, effort, project picker, project badges | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F13 | Titles and the text generation model | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F14 | Terminal | not run | pass, hub only | pass, hub only: ConPTY (term::tests on windows-latest; the flood test is skipped) |
-| F15 | Attachments and image paste | not run | pass, source build (run 42471112134); archive: pass in 42454941978, fail in 42474003421 | pass (Windows Server 2022 VM, see its section) |
-| F16 | Keybindings | not run | pass, 12 of 12 keys (runs 42458427024, 42474003421); one key flakes per other run | pass (Windows Server 2022 VM, see its section) |
-| F17 | Viewers: board, schematic, 3D, STEP | not run | pass, 4 of 4 viewers (runs 42469212549, 42474003421); Mech pan flaked in 42471112134 | pass (Windows Server 2022 VM, see its section) |
-| F18 | Browser tab (CEF) | not run | pass, part: frame-stream helper; a download the person starts known missing (run 42471112134). Release archive v0.14.93: fail, the frame poller bug (run 42474003421) | pass, part: frame-stream helper, no embedded Chromium (Windows Server 2022 VM, see its section) |
+| F15 | Attachments and image paste | not run | pass (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
+| F16 | Keybindings | not run | pass, 12 of 12 keys (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
+| F17 | Viewers: board, schematic, 3D, STEP | not run | pass, 4 of 4 viewers (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
+| F18 | Browser tab (CEF) | not run | pass, part: frame-stream helper (no CEF on macOS); page, click, type, scroll, popup, download, input after it (rc.1 archive, run 42489602486) | pass, part: frame-stream helper, no embedded Chromium (Windows Server 2022 VM, see its section) |
 | F19 | Bots and rooms | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F20 | File browser and downloads | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
-| F21 | Reconnect, resume from sequence, outbox, long session | not run | pass, source build (run 42471112134); archive: fail in 42474003421 | pass (Windows Server 2022 VM, see its section) |
+| F21 | Reconnect, resume from sequence, outbox, long session | not run | pass (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
 | F22 | Ordering flow up to the quote; no order placed | not run | not run | pass (Windows Server 2022 VM, see its section) |
 | F23 | A killed hub leaves no agent behind | pass, hub only | pass | pass (Windows Server 2022 VM, see its section) |
 | | **Install and CAD** | | | |
@@ -244,6 +244,28 @@ Workflow `e2e-macos.yml` (dispatch only): the hub rows from a build of the check
 | F21 | pass on a source build | 42471112134 | same | the hub restarted on the same home: the status line changed while down, and a message typed after reconnecting reached the new hub. Archive: fail in 42474003421 (status check) |
 | F22 | pass on a source build | 42471112134 | same | files card, Send, quote card; nothing paid. Archive: fail in 42474003421 |
 
+
+### macOS, release candidate v0.15.0-rc.1 (commit 8976e8deb7), macos-latest runner
+
+The darwin-arm64 archive of release dry run 42482640273, installed with that run's own `install.sh` (`test/e2e/mac-install-archive.sh`), on a runner with a logged-in GUI session (a 1024x768 virtual display). The hub rows, effects, C03, the CAD rows and the Settings walk run against the installed hub; the client rows drive the installed client with real input (`cliclick`, Quartz wheel events, a real clipboard) and `screencapture` (`test/e2e/gpui-f-rows-mac.py`). Workflow `e2e-macos.yml`, dispatch only. Passes: 42485912897, 42488217505, 42489602486 (the last is the one cited below).
+
+| ID | Result | Run | Evidence |
+|---|---|---|---|
+| F01, F03, F07-F10, F12, F14, F19-F21, F23 (hub) | pass, hub only | 42489602486 | `mac-hub-rows.mjs`: 15 of 15 |
+| F04 (hub) | **fail on rc.1** | 42484353067, 42485912897 (fail), 42488217505, 42489602486 (pass only through a retry) | the hub stops answering for 20-40 s after the second turn starts: `setting.set restart.continue=off` got no reply (3 tries of 15 s), was never logged, and the restart then continued the turn. The log shows `ActivityLogged checkpoint "Saving the last turn's checkpoint…"` and the next event 22-37 s later; the change that adds that line is f8980e8295 (a turn that waits for the earlier checkpoint says so). Release blocker, with the Linux lane for rc.2. The row now makes one write and records a stall as a fail |
+| S01-S14 effects (hub) | pass | 42489602486 | `mac-effects.mjs` 7 of 7 (files.max.mb, person.tz, telemetry, agent provider/model, update.channel, order.enabled); `settings-walk.mjs` 89 controls, 0 not applied, 0 persist failures |
+| C02 | pass | 42489602486 | the hub ran ERC + DRC and the exports (gerbers, bom, cpl, step, pdfs) with the app's `kicad-cli`; the CAD page names the CLI that was set (5 of 5 checks). The earlier "page shows /opt/homebrew/bin/kicad-cli" was my check reading the page before the hub republished it after the setting: `/opt/homebrew/bin/kicad-cli` is only a symlink to the app's binary, and the setting wins over PATH |
+| C03 | pass, part: install not run | 42489602486 | `mac-c03.mjs` 4 of 4, `mac-c03-agent.mjs` 3 of 3 (FreeCAD 1.1.4 by brew cask): the path control is used by the hub and told to agents |
+| F02, F09, F15 | pass | 42489602486 | sidebar and threads, Context panel and drafts, a pasted PNG named to the agent |
+| F06 | pass | 42489602486 | approval Allow and Deny, the question card, the plan card, each reaching the agent |
+| F07, F08 | pass | 42489602486 | Stop ends the running turn; Fork creates a thread |
+| F14 | pass in 42488217505; fail in 42489602486 | | the floating terminal: typed command ran in a real shell; once the Return was lost twice (the command stayed on the line, f14-typed.png); the row now presses Return until it runs |
+| F16 | pass, 12 of 12 | 42489602486 | palette, models, sidebar, files, diff, terminal, thread 2, performance, uberbot, new, stop, settle |
+| F17 | pass, 4 of 4 | 42489602486 | Board, Schematic, 3D, Mech drawn; wheel and drag change each |
+| F18 | pass, part: frame-stream helper | 42489602486 | no CEF on macOS: the page loads and paints from the helper's frames; real click, typing, wheel, popup (loaded, has its opener), a download that lands in `~/Downloads` and the hub's downloads folder, and a click after the download. A lost click on the link was taken at -24 px from the centre of its visible colour (the link sits at the bottom edge of the frame) |
+| F21, F22 | pass | 42489602486 | hub restart and reconnect; the files card, Send and the quote card (nothing paid) |
+
+Not one run was clean on every row: each of 42485912897, 42488217505 and 42489602486 had one failing row (F18 download; F16, a bug in my retry; F14). F04 is the one that is the hub's, not the driver's.
 
 ### Windows
 
