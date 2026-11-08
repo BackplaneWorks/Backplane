@@ -32,6 +32,8 @@ gradle.taskGraph.whenReady {
 // -Pbp.appId=… -Pbp.scheme=…: a test build that installs beside the one a phone already uses (it keeps its pairing)
 val bpAppId = (findProperty("bp.appId") as String?) ?: "dev.backplane.mobile.gpui"
 val bpScheme = (findProperty("bp.scheme") as String?) ?: "bpgpui"
+// -Pbp.appName=…: the launcher name (the release is "Backplane", as 0.14.1 was)
+val bpAppName = (findProperty("bp.appName") as String?) ?: "Backplane GPUI"
 
 android {
     namespace = "dev.backplane.mobile"
@@ -40,7 +42,7 @@ android {
     defaultConfig {
         applicationId = bpAppId
         manifestPlaceholders["urlScheme"] = bpScheme
-        resValue("string", "app_name", "Backplane GPUI")
+        resValue("string", "app_name", bpAppName)
         resValue("string", "app_id", bpAppId)
         buildConfigField("String", "URL_SCHEME", "\"$bpScheme\"")
         minSdk = 26

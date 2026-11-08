@@ -106,8 +106,76 @@ jobs:
           path: ${{ env.ARCHIVE }}
           retention-days: 7
 
+  # The Android data app (dev.backplane.mobile), signed with the release key 0.14.1 shipped with (repo secrets BACKPLANE_ANDROID_*). A job of its own, so an Android failure
+  # is plain to see, and publish needs it: no release goes out without the APK. Its artifact is named archive-android, so publish's archive-* download picks the APK and
+  # AAB up. A dry run also builds the same app under a side id (dev.backplane.mobile.rel, artifact android-sideid, never published), which installs beside a phone's own app.
+  android:
+    name: build android
+    runs-on: ubuntu-latest
+    env:
+      CERT_SHA256: ef21acdb7d2de02106c29caf35eb73e704a152960e8113c8149eca1c305e906e   # CN=Backplane, O=Backplane: what 0.14.1's APK was signed with
+      KEYSTORE_B64: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.BACKPLANE_ANDROID_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEY_PASSWORD }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: release inputs
+        run: |
+          set -e
+          [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ] || { echo "::error::the BACKPLANE_ANDROID_* signing secrets are not all set"; exit 1; }
+          umask 077; printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          # a counter above every earlier release (0.14.1 was 2026110401), as the date and hour
+          code=$(date -u +%Y%m%d%H); [ "$code" -gt 2026110401 ] || { echo "::error::version code $code is not above 0.14.1's"; exit 1; }
+          { echo "BACKPLANE_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore"; echo "BACKPLANE_ANDROID_VERSION_NAME=${TAG#v}"; echo "BACKPLANE_ANDROID_VERSION_CODE=$code"; } >> "$GITHUB_ENV"
+          echo "version ${TAG#v} ($code)"
+      - name: build (APK and AAB)
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon -q -Pbp.appId=dev.backplane.mobile -Pbp.scheme=backplane -Pbp.appName=Backplane :app:assembleRelease :app:bundleRelease
+      - name: signed with the release key, or the job fails
+        run: |
+          set -e
+          apk=mobile/android/app/build/outputs/apk/release/app-release.apk; aab=mobile/android/app/build/outputs/bundle/release/app-release.aab
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          a=$("$bt/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          b=$(keytool -printcert -jarfile "$aab" | sed -n 's/^[[:space:]]*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')
+          echo "apk $a"; echo "aab $b"
+          [ "$a" = "$CERT_SHA256" ] && [ "$b" = "$CERT_SHA256" ] || { echo "::error::not signed with the release key ($CERT_SHA256)"; exit 1; }
+          "$bt/aapt2" dump badging "$apk" | head -1
+          cp "$apk" "backplane-$TAG-android.apk"; cp "$aab" "backplane-$TAG-android.aab"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-android
+          path: |
+            backplane-${{ env.TAG }}-android.apk
+            backplane-${{ env.TAG }}-android.aab
+          retention-days: 7
+      - name: the same build under a side id (dry run only)
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: mobile/android
+        run: |
+          set -e
+          ./gradlew --no-daemon -q -Pbp.appId=dev.backplane.mobile.rel -Pbp.scheme=bprel -Pbp.appName="Backplane rel" :app:assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/backplane-$TAG-android-sideid.apk"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: android-sideid
+          path: backplane-${{ env.TAG }}-android-sideid.apk
+          retention-days: 7
+      - name: forget the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.keystore"
+
   publish:
-    needs: build
+    needs: [build, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
