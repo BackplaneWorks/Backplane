@@ -43,16 +43,16 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | R02 | Update: channel, Check now, download, checksum, swap, restart | pass | pass | deferred, no VM |
 | R03 | Rollback after a bad update | pass | pass | deferred, no VM |
 | | **Settings: each control persists across restart and takes effect** | | | |
-| S01 | Appearance | persists, effect not proven | not run | deferred, no VM |
+| S01 | Appearance | pass, part: hub side (theme and sidebar view the hub sends) | not run | deferred, no VM |
 | S02 | Threads | pass | not run | deferred, no VM |
-| S03 | Agents | pass, part: provider and model | not run | deferred, no VM |
+| S03 | Agents | pass | not run | deferred, no VM |
 | S04 | Writing | persists, effect not proven | not run | deferred, no VM |
-| S05 | CAD | pass, part: KiCad only | not run | deferred, no VM |
+| S05 | CAD | pass | not run | deferred, no VM |
 | S06 | Ordering | pass, part: Ordering on/off | not run | deferred, no VM |
 | S07 | Devices | pass | not run | deferred, no VM |
 | S08 | Network | pass, part: update channel | not run | deferred, no VM |
 | S09 | Voice | persists, effect not proven | not run | deferred, no VM |
-| S10 | Keys | not run | not run | deferred, no VM |
+| S10 | Keys | pass, part: hub side (add, list, prompt, forget) | not run | deferred, no VM |
 | S11 | Timezone | pass | not run | deferred, no VM |
 | S12 | Usage | pass, part: page in the menu, totals by unit test | not run | deferred, no VM |
 | S13 | About | pass | not run | deferred, no VM |
@@ -282,4 +282,6 @@ Rig: Boat sandbox (4 vCPU, 8 GB, Ubuntu 24.04), source `26ba50a0ba49496a9baf89cb
 | C03 | pass, part: install not run | 4c8a1c578a | Linux desktop, FreeCAD at /usr/local/bin/FreeCAD | `test/e2e/mac-c03.mjs` (now Linux-aware): default search finds freecadcmd on PATH, the typed path is stored and run by the hub (wrapper logged), a bad path falls back, survives a restart. FreeCAD was already installed; the hub has no installer, and the Boat AppImage install was not rerun |
 | F23 | pass | 4c8a1c578a | Linux and macOS | `agents::tests::a_killed_hub_leaves_no_agent_behind` passes on both (CI macOS included once its skip was removed); Mac rows run `b3ecb1d730` |
 
-Still not proven: S01 (theme is drawn by the clients), S04 (title provider/model) and the S03 thinking/fallback chips.
+Still not proven: S04 (title provider/model), the S03 fallback hierarchy chips, and what the clients draw for S01 (only the hub's side is probed).
+
+| S01, S03, S05, S10, S13 | pass (S01, S10: hub side) | see commit | Linux desktop, debug hub of main | `test/e2e/s-effects.mjs` (the Linux lane's probes, S08 and S14 expectations corrected, freecad.path left to mac-c03.mjs): `shown.theme` follows `ui.theme`; the sidebar view changes with `sidebar.view`; `agent.model` and `agent.provider` start a new thread on them and `--model` reaches the agent; `agent.thinking` adds `--thinking-display`; `kicad.ipc` changes the agent prompt; an added API key is listed, named in the prompt without its value and forgotten in two presses; About shows the hello version. 12 of 12 probes ok |
