@@ -39,7 +39,7 @@ impl HttpHandler for MessageImage {
             if !root_credential(hub, req) { return HttpReply::text("401 Unauthorized", "this Backplane needs its pairing token") }
             let (entry, path) = (pct(&req.param("entry")), pct(&req.param("path")));
             let unavailable = || HttpReply::text("404 Not Found", "Image unavailable");
-            if !mimg::is_image(&path) || path.contains("/../") || path.contains("/./") || path.contains('\\') { return unavailable() }
+            if !mimg::is_image(&path) || !mimg::no_climb(&path) { return unavailable() }
             let home = hub.cfg.home.clone();
             // snapshots before it announces the message; here the loop runs just after the commit. Wait (up to CATCH_UP) while the loop is
             // behind the log as it stood when this request arrived, then look once: an image the message named is there by then.

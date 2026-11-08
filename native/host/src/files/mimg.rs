@@ -32,8 +32,10 @@ pub fn paths(text: &str) -> Vec<String> {
     out
 }
 /// Img.message_allowed: both the saved message and the exact spelling authorize the path.
+/// A path that does not climb: no `.` or `..` part under this system's separators (Windows: `\\` and `/`), and on Unix no `\\` at all.
+pub fn no_climb(p: &str) -> bool { !(cfg!(unix) && p.contains('\\')) && !p.split(crate::plat::fs::SEPS).any(|x| x == "." || x == "..") }
 pub fn message_allowed(text: &str, path: &str) -> bool {
-    is_image(path) && !(path.contains("/../") || path.contains("/./") || path.contains('\\')) && paths(text).iter().any(|p| p == path)
+    is_image(path) && no_climb(path) && paths(text).iter().any(|p| p == path)
 }
 
 // ---- effects/message_image.js
@@ -167,7 +169,15 @@ mod tests {
         assert_eq!(paths("see /a/b.png, and (~/c/d.JPG). Also file:///e/f.gif! and /a/b.png again <x> `/g.webp`: /h.bmp?"), ["/a/b.png", "~/c/d.JPG", "/e/f.gif", "/g.webp", "/h.bmp"]);
         assert!(paths("rel/x.png /x.txt http://x/y.png").is_empty());
         assert!(paths(&format!("/{}.png", "a".repeat(1100))).is_empty()); assert!(may("a .PNG b") && may("x.jpeg") && !may("x.txt png") && !may(""));
-        assert!(message_allowed("see /a/b.png", "/a/b.png")); for (t, p) in [("see /a/b.png", "/a/c.png"), ("/a/../b.png", "/a/../b.png"), ("/a/./b.png", "/a/./b.png"), ("/a/b\\.png", "/a/b\\.png"), ("x", "/a/b.png"), ("/a/b.txt", "/a/b.txt")] { assert!(!message_allowed(t, p), "{p}") }
+        assert!(message_allowed("see /a/b.png", "/a/b.png")); for (t, p) in [("see /a/b.png", "/a/c.png"), ("/a/../b.png", "/a/../b.png"), ("/a/./b.png", "/a/./b.png"), ("x", "/a/b.png"), ("/a/b.txt", "/a/b.txt")] { assert!(!message_allowed(t, p), "{p}") }
+    }
+    #[cfg(unix)] #[test] fn a_backslash_is_refused_on_unix() { assert!(!message_allowed("/a/b\\.png", "/a/b\\.png")) }
+    /// Windows: an image an agent names as C:\\x\\y.png (the hub's own attachments are written so) is allowed, a climb under either separator is not.
+    #[cfg(windows)] #[test] fn a_windows_path_is_allowed_and_a_climb_is_not() {
+        let p = r"C:\x\home\attachments\t1\a-pasted-1.png";
+        assert_eq!(paths(&format!("echo: look [attachment: {p}]")), [p]);
+        assert!(message_allowed(&format!("[attachment: {p}]"), p));
+        for q in [r"C:\x\..\y.png", r"C:\x\.\y.png", r"C:/x/../y.png"] { assert!(!message_allowed(&format!("see {q}"), q), "{q}") }
     }
     #[test] fn image_types_and_bounds() {
         assert_eq!(image_type(&png(10, 10)), Ok("png")); assert!(image_type(&png(10_000, 10_000)).is_err()); assert!(image_type(&png(0, 5)).is_err());
