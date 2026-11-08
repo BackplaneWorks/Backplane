@@ -131,6 +131,11 @@ pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: 
         let raw = hub.setting(&accounts::binding_key(&id, &provider)).await.unwrap_or_default();
         if !retired(&raw, &inventory) { continue }
         if !hub.setting(&fallback_key(&id)).await.unwrap_or_default().is_empty() { continue } // it runs on another login already: its own account's change is not its business now
+        // only a turn whose process runs on the retired account is cut. A turn that is still choosing its login (it shows running from the moment the message is taken, before
+        // its spawn has tried the account) goes through account_route, which takes another account or says why it cannot start: cutting it here interrupted a turn that
+        // was about to start on Personal right after Work was signed out (restart_e2e, under load).
+        let on = serde_json::from_str::<Value>(&raw).ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
+        if let Some(m) = agents.as_ref().and_then(|a| a.accounts.get()) { if m.runs_on(&id).as_deref() != Some(on.as_str()) { continue } }
         let _ = hub.commit_many(&[json!({"$":"TurnChanged","thread":id,"state":"interrupted","at":at}),
             json!({"$":"ActivityLogged","thread":id,"act":format!("account-retired:{at}"),"tone":"error","kind":"account","summary":"This account's verified identity changed or disconnected. Check status and explicitly select an account to continue.","at":at})]).await;
         if let Some(a) = agents { let _ = a.stop(&id).await; }
@@ -171,9 +176,13 @@ pub fn offered(p: &Value) -> bool { p.get("accountProfiles") == Some(&json!(1)) 
 pub fn note_request(gen: &str, client: u64, in_view: bool, msg: &Value) { if in_view && offered(msg.get("p").unwrap_or(&Value::Null)) { grant_client(gen, client) } }
 
 /// Marks a profile as in use by a running child until dropped (login, disconnect and removal refuse while one is).
-pub struct Busy(Arc<Accounts>, String);
-impl Busy { pub fn new(m: Arc<Accounts>, id: &str) -> Busy { m.child_started(id); Busy(m, id.to_string()) } }
-impl Drop for Busy { fn drop(&mut self) { self.0.child_ended(&self.1) } }
+pub struct Busy(Arc<Accounts>, String, Option<(String, u64)>);
+impl Busy {
+    pub fn new(m: Arc<Accounts>, id: &str) -> Busy { m.child_started(id); Busy(m, id.to_string(), None) }
+    /// Also records that thread `th`'s process runs on it (`Accounts::runs_on`), which the retire watch below asks before it interrupts a turn.
+    pub fn for_thread(m: Arc<Accounts>, id: &str, th: &str) -> Busy { m.child_started(id); let t = m.run_on(th, id); Busy(m, id.to_string(), Some((th.to_string(), t))) }
+}
+impl Drop for Busy { fn drop(&mut self) { self.0.child_ended(&self.1); if let Some((th, t)) = &self.2 { self.0.run_off(th, *t) } } }
 
 pub struct AccountsRpc { pub mgr: Arc<Accounts> }
 impl AccountsRpc {
