@@ -25,6 +25,10 @@ To remove Backplane: quit it and stop the hub (`%LOCALAPPDATA%\Backplane\backpla
 
 On Linux and macOS, press Update in 0.14 as usual: 0.15 installs beside it, starts on the same port and offers to import 0.14's projects, threads, bots and paired phones (docs/deploy.md, "From 0.14"). Link your other machines again in Settings, Devices. If 0.15 fails to start, 0.14 comes back by itself. On Windows, 0.14 cannot update itself: quit it, download `backplane-<tag>-windows-x64-native.zip` from the release, extract it and run `backplane-gpui.exe` (Install, as above); its setup offers the same import.
 
+## What each platform's archive carries
+
+Every archive holds the hub, the desktop client, the guard, `backplane-voice` (dictation), `backplane-browser` (the Browser tab's helper), `backplane-step2glb` (STEP to GLB without FreeCAD) and `assets/` with the generated icons and cat rigs; `release.yml` fails a build that misses any. On Linux the client also has the embedded Chromium (feature `cef`) with its runtime beside it (`libcef.so`, the `.pak` files, `icudtl.dat`, `v8_context_snapshot.bin`, `locales/`). On macOS and Windows the client is built without it: the Browser tab shows the page as the hub's helper draws it (a frame stream), not an embedded browser.
+
 ## Phones
 
 - **iOS:** install through TestFlight with an invitation.

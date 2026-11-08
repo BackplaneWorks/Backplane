@@ -53,6 +53,7 @@ jobs:
             native/host
             native/gpui
             native/guard
+            native/voice
           shared-key: release-${{ matrix.target }}
       - name: stamp the version
         run: |
@@ -63,9 +64,13 @@ jobs:
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
           (cd native/host && cargo build --release --bin backplane-hub --bin bp-sh) & a=$!
-          (cd native/gpui && cargo build --release) & b=$!
+          # the client with the embedded Chromium (feature cef) where the client can run it: Linux. macOS and Windows ship without it; their Browser tab is
+          # the hub's frame stream from backplane-browser (docs/install.md); the client's CEF code finds a Linux runtime only (viewers/cef.rs runtime_dir)
+          cef=; case "${{ matrix.target }}" in linux-*) cef="--features cef";; esac
+          (cd native/gpui && cargo build --release $cef) & b=$!
           (cd native/guard && cargo build --release) & g=$!   # the guard: it starts the hub, updates it and brings it back (docs/deploy.md)
-          wait $a; ra=$?; wait $b; rb=$?; wait $g; rg=$?; exit $((ra | rb | rg))
+          (cd native/voice && cargo build --release --bin backplane-voice) & v=$!   # dictation's helper: the hub runs it from beside itself (voice/session.rs)
+          wait $a; ra=$?; wait $b; rb=$?; wait $g; rg=$?; wait $v; rv=$?; exit $((ra | rb | rg | rv))
       - name: no test trust in a release
         run: |
           # feature e2e-trust (test/update's feed) trusts a key from the environment; its code carries this mark, so a release that has it is refused
@@ -76,15 +81,29 @@ jobs:
         run: |
           set -e
           d=pkg; mkdir -p $d
-          cp native/host/target/release/backplane-hub native/gpui/target/release/backplane-gpui $d/
+          cp native/host/target/release/backplane-hub native/gpui/target/release/backplane-gpui native/voice/target/release/backplane-voice $d/
           # the guard goes in every archive: an install without it can neither update nor recover (deploy/install.sh.in refuses one)
           [ -x native/guard/target/release/backplane ] || { echo "::error::no guard (native/guard) for ${{ matrix.target }}"; exit 1; }
           cp native/guard/target/release/backplane $d/
-          (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser") || echo "no browser helper built"
+          # the Browser tab's helper and STEP's mesher (no FreeCAD needed), both bun programs: either missing fails the job
+          (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser")
+          (cd tools/step2glb && bun install --frozen-lockfile && bun build --compile step2glb.ts --outfile "$PWD/../../$d/backplane-step2glb")
+          # Linux: CEF's runtime beside the client, where viewers/cef.rs runtime_dir looks in an install (libcef stripped: ~1.4 GB with symbols, ~270 MB without)
+          case "${{ matrix.target }}" in linux-*)
+            R=native/gpui/target/release
+            for f in libcef.so resources.pak chrome_100_percent.pak chrome_200_percent.pak icudtl.dat v8_context_snapshot.bin; do [ -f $R/$f ] || { echo "::error::CEF runtime file $f missing from the build"; exit 1; }; cp $R/$f $d/; done
+            for f in libvk_swiftshader.so libvulkan.so.1 vk_swiftshader_icd.json; do [ ! -f $R/$f ] || cp $R/$f $d/; done
+            cp -r $R/locales $d/locales; strip --strip-unneeded $d/libcef.so ;;
+          esac
           cp -r assets $d/assets
           # the client's generated assets (assets/GENERATED.md): without them it draws no icons and no cats
           [ -s $d/assets/icons.json ] && [ "$(ls $d/assets/cat-rigs | wc -l)" -ge 576 ] || { echo "::error::assets/icons.json or assets/cat-rigs missing from the archive"; exit 1; }
           git rev-parse HEAD > $d/COMMIT
+          # everything a dev cut has (scripts/dev-build.sh), or the job fails: a release must not lose a feature a dev cut showed working
+          need="backplane-hub backplane-gpui backplane backplane-voice backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs"
+          case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak";; esac
+          for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
+          ls -la $d
           name=backplane-$TAG-${{ matrix.target }}-native.tar.gz   # -native: 0.14's updater takes any asset ending in <platform>.tar.gz (rel::archive_name)
           tar -C $d -czf $name .
           echo "ARCHIVE=$name" >> $GITHUB_ENV
@@ -95,11 +114,16 @@ jobs:
         run: |
           set -e
           d=pkg; mkdir -p $d
-          for f in native/host/target/release/backplane-hub.exe native/host/target/release/bp-sh.exe native/gpui/target/release/backplane-gpui.exe native/guard/target/release/backplane.exe; do
+          for f in native/host/target/release/backplane-hub.exe native/host/target/release/bp-sh.exe native/gpui/target/release/backplane-gpui.exe native/guard/target/release/backplane.exe native/voice/target/release/backplane-voice.exe; do
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }; cp "$f" $d/; done
+          (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser.exe")
+          (cd tools/step2glb && bun install --frozen-lockfile && bun build --compile step2glb.ts --outfile "$PWD/../../$d/backplane-step2glb.exe")
           cp -r assets $d/assets
           [ -s $d/assets/icons.json ] && [ "$(ls $d/assets/cat-rigs | wc -l)" -ge 576 ] || { echo "::error::assets/icons.json or assets/cat-rigs missing from the archive"; exit 1; }
           git rev-parse HEAD > $d/COMMIT
+          for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs; do
+            [ -e "$d/$f" ] || { echo "::error::$f missing from the windows-x64 archive"; exit 1; }; done
+          ls -la $d
           name=backplane-$TAG-${{ matrix.target }}-native.zip
           (cd $d && 7z a -tzip -r "../$name" . > /dev/null)
           echo "ARCHIVE=$name" >> $GITHUB_ENV
