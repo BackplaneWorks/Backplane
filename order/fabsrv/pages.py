@@ -57,6 +57,10 @@ def done(status):
                            "You can close this tab: Backplane shows the progress in your buy thread, and the receipt is in your email.</p>")
 
 
+def paused():
+    return page("Ordering paused", f"<h1>Ordering is paused</h1><p class=sub>{e(config.PAUSED_NOTE)}</p>")
+
+
 def cancelled():
     return page("Payment", "<h1>Not paid</h1><p class=sub>Nothing was charged. You can close this tab; Buy now in Backplane opens it again.</p>")
 

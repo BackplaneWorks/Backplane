@@ -192,6 +192,13 @@ def test_quote_from_files_with_assembly():
         assert c.get(f"/q/{up['id']}?t=nope").status_code == 404
         # Buy now goes straight to Stripe; payments are not set up in tests: a clear refusal, nothing else
         assert c.get(f"/q/{up['id']}?t={up['token']}", follow_redirects=False).status_code == 503
+        # paying paused: Buy now says so instead of opening a payment page
+        appmod.config.PAUSED = True
+        try:
+            r = c.get(f"/q/{up['id']}?t={up['token']}", follow_redirects=False)
+            assert r.status_code == 200 and "paused" in r.text and "export the manufacturing files" in r.text
+        finally:
+            appmod.config.PAUSED = False
 
 
 def test_a_part_only_standard_assembly_places_prices_it():

@@ -42,6 +42,11 @@ PILOT = env("FAB_PILOT", "1" if STRIPE_KEY.startswith("sk_test_") else "0") == "
 PILOT_NOTE = ("Pilot: ordering through Backplane is still being tested. This checkout is a test and your card will not be "
               "charged. To try it, use the card 4242 4242 4242 4242 with any future date and CVC. To get your parts made now, "
               "order them from any fabricator with the files Backplane exported to the mfg folder of your project.")
+# Paying paused (FAB_PAUSED=1): Buy now shows PAUSED_NOTE instead of opening
+# Stripe, and checkouts still open are expired; quotes and paid orders carry on
+PAUSED = env("FAB_PAUSED", "0") == "1"
+PAUSED_NOTE = ("Thanks for your interest. As of November 8 we have temporarily paused paying through here; we'll be back soon. "
+               "You can ask Backplane to export the manufacturing files and order them directly from a PCB manufacturer.")
 MOUSER_KEY = env("MOUSER_API_KEY")
 TI_KEY = env("TI_API_KEY")
 TI_SECRET = env("TI_API_SECRET")
