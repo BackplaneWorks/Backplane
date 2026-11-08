@@ -10,6 +10,12 @@ on:
       tag:
         description: Tag to stamp on the dry run
         default: v0.0.0-dryrun.1
+      first_run:
+        description: "smoke: an older dry run's run id (its release-dry-run artifact): installed first, then updated to this one"
+        default: ""
+      broken_run:
+        description: "smoke: a dry run with a newer tag than this one whose hub dies at its start: rolled back from"
+        default: ""
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -333,3 +339,63 @@ jobs:
           # all three signed files, or the updater counts the release as half published and never offers it (update/run.rs SIGNED)
           gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
           gh release edit "$TAG" --draft=false
+
+  # The release-candidate smoke, dry runs only, on each target's own runner (test/update/rc-smoke.sh): the archive installed as a person would, the guard
+  # starting the hub and /hello naming the manifest's version and commit, the helpers answering, the installed client drawing with every asset and its
+  # Browser tab showing a local page; with next_run and broken_run, an update from a loopback feed and a rollback from a build that dies. On linux-x64 and
+  # darwin-arm64 also the way from 0.14 (test/update/from-014.py): 0.14.1, installed from its release, updates itself to this dry run.
+  smoke:
+    needs: publish
+    if: github.event_name == 'workflow_dispatch' && always() && needs.publish.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-22.04 }
+          - { target: linux-arm64, os: ubuntu-22.04-arm }
+          - { target: darwin-arm64, os: macos-latest }
+          - { target: windows-x64, os: windows-latest }
+    name: smoke ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: release-dry-run, path: rel }
+      - uses: actions/download-artifact@v4
+        if: github.event.inputs.first_run != ''
+        with: { name: release-dry-run, path: first, run-id: "${{ github.event.inputs.first_run }}", github-token: "${{ github.token }}" }
+      - uses: actions/download-artifact@v4
+        if: github.event.inputs.broken_run != ''
+        with: { name: release-dry-run, path: broken, run-id: "${{ github.event.inputs.broken_run }}", github-token: "${{ github.token }}" }
+      - name: display (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends xvfb i3 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2 > /dev/null
+      - name: rc-smoke
+        run: |
+          set -o pipefail
+          RC_DIR=$RUNNER_TEMP bash test/update/rc-smoke.sh rel | tee smoke.txt
+          # update and rollback: the older dry run installed, this one taken from a loopback feed, the broken one rolled back from
+          if [ -d first ] && [ -d broken ] && [ "${{ runner.os }}" != Windows ]; then RC_DIR=$RUNNER_TEMP UPD_DIR=$RUNNER_TEMP bash test/update/install-e2e.sh first rel broken | tee -a smoke.txt; fi
+      - name: the way from 0.14
+        if: matrix.target == 'linux-x64' || matrix.target == 'darwin-arm64'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -o pipefail
+          plat=${{ matrix.target }}; mkdir -p v0141
+          gh release download v0.14.1 --repo ${{ github.repository }} -p install.sh -p "backplane-v0.14.1-$plat.tar.gz" -D v0141
+          UPD_DIR=$RUNNER_TEMP python3 -I test/update/from-014.py v0141 rel | tee from014.txt
+          if [ -d broken ]; then UPD_DIR=$RUNNER_TEMP python3 -I test/update/from-014.py v0141 broken --panics | tee -a from014.txt; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.target }}
+          path: |
+            smoke.txt
+            from014.txt
+          retention-days: 7
