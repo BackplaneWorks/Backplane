@@ -13,7 +13,7 @@ inv() { hub invite "$W/inv.json" >/dev/null; python3 -c "import json,sys;print(j
 fresh() { rm -rf "$W/rig/$1"; }
 run() { n=$1; s=$2; shift 2; "${LAUNCH_SH:-sh}" "$LAUNCH" "$n" "$s" "$@" >/dev/null 2>&1; }
 says() { grep -q "$2" "$L/gpui-$1.out"; echo $?; }
-saved() { ls "$W/rig/$1/config/backplane-gpui/hubs/"*.token >/dev/null 2>&1; echo $?; }
+saved() { if ls "$W/rig/$1/config/backplane-gpui/hubs/"*.token >/dev/null 2>&1; then echo 0; else echo 1; fi; }  # (0 saved, 1 not: ls itself says 2 when nothing matches)
 live() { hub devices | grep -c " live "; }
 addr=${BASE#*://}
 
