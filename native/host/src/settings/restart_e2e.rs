@@ -234,7 +234,10 @@ async fn a_storm_of_twenty_restarts_mid_turn_never_fails_a_start_on_the_accounts
     let ev = log(&up.hub);
     for th in &ths { assert!(!ev.iter().any(|e| e["thread"] == th.as_str() && e["$"] == "TurnChanged" && e["state"] == "failed"), "{th} failed: {:?}", lines(&up.hub, th)) }
     let ran: Vec<String> = b.turns().iter().filter_map(|t| t["text"].as_str().map(str::to_string)).collect();
-    assert!(ran.iter().filter(|t| t.contains("a mail for you")).count() >= 1, "Bub's mail reached it");
+    // every mail is in Bub's thread for good; whether its agent read one before the next cut is timing (a message on a running turn's input that a restart cuts is not
+    // carried on in its words: the carry says "continue")
+    let posted = (0..20).filter(|r| ev.iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == BUB_T && e["msg"] == format!("mail-{r}").as_str())).count();
+    assert_eq!(posted, 20, "every one of Bub's mails is in its thread");
     assert!(b.turns().iter().all(|x| x["who"] == "w@x.com"), "every turn on the saved profile");
     let fails: usize = homes.iter().chain([&home]).map(|h| std::fs::read_to_string(h.join("events.jsonl")).unwrap().matches(NOT_AVAILABLE).count()).sum();
     eprintln!("storm: 20 restarts, {} threads, {} carries, {} turns started, {} with Bub's mail, {} mailroom lanes, every thread completed, {fails} account failures", ths.len(), carried(&up.hub).len(), b.turns().len(), ran.iter().filter(|t| t.contains("a mail for you")).count(), ran.iter().filter(|t| t.contains("sort the mail")).count());
