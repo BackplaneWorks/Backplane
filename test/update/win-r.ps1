@@ -29,7 +29,8 @@ switch ($Step) {
   'install' {
     $tag = $Tags[0]
     if (Test-Path "$P\backplane.exe") { & "$P\backplane.exe" hub stop --home $H 2>&1 | Select -Last 1 }
-    Get-Process backplane-gpui -EA SilentlyContinue | % { "stop client $($_.Id)"; Stop-Process -Id $_.Id -Force }
+    # only the clients this install started (their program is under $P), never one by its name alone
+    Get-CimInstance Win32_Process -Filter "Name='backplane-gpui.exe'" | ? { $_.ExecutablePath -and $_.ExecutablePath.StartsWith("$P\", 'OrdinalIgnoreCase') } | % { "stop client $($_.ProcessId) ($($_.ExecutablePath))"; Stop-Process -Id $_.ProcessId -Force }
     Start-Sleep 3
     # the install only: Backplane KiCad (kicad\) shares the prefix and stays
     Remove-Item -Recurse -Force "$P\builds", "$P\CURRENT", "$P\BAD", "$P\backplane.exe", "$P\backplane.exe.old", "$env:APPDATA\Backplane", "$env:APPDATA\backplane-gpui", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Backplane.lnk" -EA SilentlyContinue

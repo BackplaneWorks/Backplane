@@ -82,9 +82,7 @@ export async function installChrome(log: (s: string) => void): Promise<string> {
   if (!zip.ok) throw new Error(`Chrome download: HTTP ${zip.status}`);
   const file = join(tmp, "chrome.zip");
   await Bun.write(file, zip);
-  const unzip = platform() === "win32"
-    ? Bun.spawnSync(["tar", "-xf", file, "-C", tmp])
-    : Bun.spawnSync(["unzip", "-q", file, "-d", tmp]);
+  const unzip = Bun.spawnSync(unzipCommand(file, tmp));
   if (unzip.exitCode !== 0) throw new Error(`could not unpack Chrome: ${unzip.stderr.toString().trim()}`);
   rmSync(file, { force: true });
   rmSync(dir, { recursive: true, force: true });
@@ -92,6 +90,13 @@ export async function installChrome(log: (s: string) => void): Promise<string> {
   const exe = join(dir, cftBinary(plat));
   if (!existsSync(exe)) throw new Error("Chrome unpacked without its executable");
   return exe;
+}
+
+/** How a zip is unpacked here. Windows: its own tar.exe by its full path (bsdtar reads zips and C:\ paths); a `tar` found on PATH may be
+ *  Git's GNU tar, which takes "C:" for a remote host ("Cannot connect to C: resolve failed"), and Git's usr\bin is on PATH for agents. */
+export function unzipCommand(file: string, into: string, os: string = platform(), root: string = process.env.SystemRoot || "C:\\Windows"): string[] {
+  if (os === "win32") return [`${root}\\System32\\tar.exe`, "-xf", file, "-C", into];
+  return ["unzip", "-q", file, "-d", into];
 }
 
 export function findChromium(): string | null {
