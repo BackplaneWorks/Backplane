@@ -98,8 +98,22 @@ def confirm(o):
         print("stripe confirm:", repr(e), flush=True)
 
 
+def expire(o):
+    """Close an open Checkout so it can no longer be paid (paying is paused); one
+    paid meanwhile is kept as paid."""
+    try:
+        with _client() as c:
+            s = _session(c, o["session"])
+            if s.get("status") == "open":
+                r = c.post(f"/checkout/sessions/{o['session']}/expire")
+                s = r.json() if r.status_code < 400 else _session(c, o["session"])
+            _apply(o, s)
+    except (Unavailable, httpx.HTTPError) as e:
+        print("stripe expire:", repr(e), flush=True)
+
+
 def reconcile():
     if not config.STRIPE_KEY:
         return
     for o in store.open_checkouts():
-        confirm(o)
+        expire(o) if config.PAUSED else confirm(o)
