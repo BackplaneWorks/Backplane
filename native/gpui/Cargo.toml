@@ -48,6 +48,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 [patch.crates-io]
 xattr = { path = "vendor/xattr" }
+# gpui 0.2.2 with one change in build.rs: a Windows client cross-built on Linux embeds the shader bytes fxc made on Windows (vendor/gpui/PATCH.md)
+gpui = { path = "vendor/gpui" }
 
 [profile.release]
 opt-level = "s"
