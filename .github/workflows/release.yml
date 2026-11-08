@@ -399,6 +399,8 @@ jobs:
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           set -o pipefail
+          # 0.14's stable channel takes only plain vX.Y.Z tags: a -beta.N dry run is never offered to it
+          case "$TAG" in *-*) echo "the way from 0.14 needs a plain tag (this dry run is $TAG): skipped"; exit 0;; esac
           plat=${{ matrix.target }}; mkdir -p v0141
           gh release download v0.14.1 --repo ${{ github.repository }} -p install.sh -p "backplane-v0.14.1-$plat.tar.gz" -D v0141
           UPD_DIR=$RUNNER_TEMP python3 -I test/update/from-014.py v0141 rel | tee from014.txt
