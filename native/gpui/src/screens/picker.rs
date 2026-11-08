@@ -203,13 +203,6 @@ pub fn shown(thread: &Value, pick: &Pick, favs: &[String]) -> Option<Shown> {
     Some(Shown { own, cur, all, rows, hidden })
 }
 
-/// The chip under the composer: the hub's words for the thread's agent, model and effort ("codex / gpt-6.1-sol / high"), and the agent for its mark.
-pub fn chip_text(picker: &Value) -> (String, String) {
-    let provider = { let p = string(picker, "provider"); if p.is_empty() { bare(&provider_of(&parse(picker))).to_string() } else { p } };
-    let chip = string(picker, "chip");
-    (if chip.is_empty() { format!("{provider} / default") } else { chip }, provider)
-}
-
 /// A provider's colour and fallback initial: a square of its colour with its initial. (The hub sends no artwork; these stand in.)
 pub fn mark(provider: &str) -> (u32, &'static str) {
     match provider { "claude" => (0xd97757, "A"), "codex" => (0x10a37f, "O"), "grok" => (0x6b7280, "X"), "muse" => (0x8b5cf6, "M"), "opencode" => (0x2563eb, "C"),
@@ -297,7 +290,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     }
     let effort_col = div().w(px(250.)).flex_shrink_0().flex().flex_col().border_l_1().border_color(c("line")).child(head(2, "Effort")).child(meter)
         .child(div().px_3().pt_2().text_size(px(11.)).text_color(c("faint")).child(meter_note(&ss, &cur.provider, &own)));
-    Some(div().id("picker").flex().items_start().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).child(agents).child(model_col).child(effort_col).into_any_element())
+    Some(div().id("picker").flex().items_start().text_size(px(12.)).child(agents).child(model_col).child(effort_col).into_any_element())
 }
 
 impl Backplane {
@@ -499,10 +492,6 @@ mod tests {
         let s = shown(&t, &pick, &[]).unwrap(); assert_eq!(s.cur, s.own);
         let pick = Pick { cur: Some(("h|t2".into(), far.clone())), ..Default::default() };
         let s = shown(&t, &pick, &[]).unwrap(); assert_eq!(s.cur, far); assert_eq!(s.rows[1].choices.len(), 2, "its agent's rows");
-    }
-    #[test] fn the_chip_reads_the_hubs_words_and_its_agent() {
-        let (p, _) = fixture(); assert_eq!(chip_text(&p), ("claude / opus / high".to_string(), "claude".to_string()));
-        let old = serde_json::json!({"providers": [{"label": "codex", "value": "@codex", "on": true}]}); assert_eq!(chip_text(&old), ("codex / default".to_string(), "codex".to_string()), "a hub that sends no chip");
     }
     #[test] fn a_provider_value_names_its_mark() { assert_eq!(mark(bare("@claude")), mark("claude")); assert_eq!(bare("codex"), "codex"); }
     #[test] fn the_thumb_follows_the_scroll_and_hides_without_overflow() {
