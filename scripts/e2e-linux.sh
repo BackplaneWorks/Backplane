@@ -10,6 +10,7 @@
 #   settings walk  test/e2e/settings-walk.mjs     every control on every Settings page, applied and persisted over a restart
 #   client rows    test/e2e/gpui-f-rows.py        the GPUI window on a private Xvfb + i3 with real X input
 #   CEF            test/cef/cef_e2e.sh            the embedded Chromium in the window
+#   CEF lifecycle  test/cef/lifecycle_e2e.sh      https and file:// pages, back, typing, scrolling, the tab closed/reopened and quit with no CEF helper left
 #   phone rows     test/e2e/pixel-f-rows.sh       the Pixel 9; the script takes ~/.cache/pixel-52220DLAQ001FC.lock itself and holds it for its whole run (skipped with --no-phone, or when no device is attached)
 # OUT_DIR/summary.md is the paste: the commit, what ran, counts per driver, every failure with its evidence. Exit 0 only when nothing failed.
 # Frame budgets are not judged: llvmpipe is software rendering. A row that was not run says why (skip), never pass.
@@ -84,6 +85,14 @@ f=open(sys.argv[2],'a')
 for l in open(sys.argv[1],errors='replace'):
     m=re.match(r'^(PASS|FAIL) (.*)$',l.rstrip())
     if m: f.write("cef-link\t%s\tcef-link\t%s\n"%('ok' if m.group(1)=='PASS' else 'FAIL',m.group(2)[:200]))
+PY
+run cef-life env OUT="$OUT/cef-life" DISP=:79 E2E_ASSETS="${E2E_ASSETS:-$ASSETS}" BACKPLANE_CEF="${BACKPLANE_CEF:-$HOME/.cache/backplane/cef-runtime/154.0.34}" sh test/cef/lifecycle_e2e.sh "$GUI" "$HUB"
+python3 - "$OUT/cef-life.log" "$OUT/results.tsv" <<'PY'
+import sys,re
+f=open(sys.argv[2],'a')
+for l in open(sys.argv[1],errors='replace'):
+    m=re.match(r'^(PASS|FAIL) (.*)$',l.rstrip())
+    if m: f.write("cef-life\t%s\tcef-life\t%s\n"%('ok' if m.group(1)=='PASS' else 'FAIL',m.group(2)[:200]))
 PY
 if [ $PHONE = 1 ] && adb devices 2>/dev/null | grep -q "^52220DLAQ001FC.device"; then
   echo "== phone rows (waiting for the lock)"; test/e2e/pixel-f-rows.sh "$HUB" "$OUT/phone" > "$OUT/phone-rows.log" 2>&1; parse phone-rows "$OUT/phone-rows.log"
