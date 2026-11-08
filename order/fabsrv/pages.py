@@ -6,7 +6,7 @@ import datetime
 import html
 import json
 
-from . import config
+from . import config, duties
 
 
 CSS = """
@@ -74,6 +74,23 @@ def _opts(p):
     return ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in o.items() if v not in (None, False, ""))
 
 
+def tax_flag(q, ship):
+    """A paid US order whose sales tax was quoted for another state than Stripe's address (or for
+    none): what the fab will charge instead, so the operator can refund or ask for the difference."""
+    t = q.get("sales_tax") or {}
+    state = ship.get("state") or ""
+    if not t or not state or state == (t.get("region") or ""):
+        return ""
+    rate = duties.US_SALES_TAX.get(state)
+    quoted = f"{t.get('region')} ({t.get('rate'):g}%)" if t.get("region") else f"no state ({t.get('rate'):g}%)"
+    if rate is None:
+        return f"<p class='small bad'><b>Sales tax</b> quoted for {e(quoted)}, ships to {e(state)}: no rate for it, check it.</p>"
+    diff = round(t.get("base", 0) * rate / 100 - t.get("amount", 0), 2)
+    what = f"about {money(diff)} more to ask for" if diff > 0 else f"about {money(-diff)} to refund"
+    return (f"<p class='small bad'><b>Sales tax</b> quoted for {e(quoted)}, {money(t.get('amount', 0))}; "
+            f"ships to {e(state)} ({rate:g}%): {e(what)}.</p>")
+
+
 def admin(rows):
     """The paid orders, each with what to order where: its parts, options and costs, the
     customer's address, and the files to download."""
@@ -95,7 +112,8 @@ def admin(rows):
             rows_html.append(f"<tr><td><b>{e(p['name'])}</b> × {e(p['qty'])}" + (f" ({e(p['assembled'])} assembled)" if p.get("assembled") else "")
                              + f"<br><span class='muted small'>{e(p.get('summary'))}<br>{e(_opts(mp))}</span></td></tr>")
         costs = "".join(f"<tr><td class=small>{e(ln['label'])}</td><td class='n small'>{money(ln['amount'])}</td></tr>" for ln in q.get("part_lines", []))
-        costs += "".join(f"<tr><td class=small>{e(ln['label'])}</td><td class='n small'>{money(ln['amount'])}</td></tr>" for ln in q.get("lines", [])[1:3])
+        costs += "".join(f"<tr><td class=small>{e(ln['label'])}</td><td class='n small'>{money(ln['amount'])}</td></tr>" for ln in q.get("lines", [])[1:])
+        tax = tax_flag(q, ship)
         opts = "".join(f"<option{' selected' if s == o['status'] else ''}>{s}</option>"
                        for s in ("paid", "placed", "shipped", "delivered", "refunded", "cancelled"))
         out.append(
@@ -104,7 +122,7 @@ def admin(rows):
             f"<td class=n><a href='/admin/files/{e(o['quote_id'])}'>Files (.zip)</a></td></tr></table>"
             f"<table style='margin-top:10px'><tr><td style='width:55%'><table>{''.join(rows_html)}</table></td>"
             f"<td><table>{costs}</table><p class=small><b>Ship to</b> {e(ship.get('name'))}, {e(a)}<br>{e(o['email'])} · {e(ship.get('phone'))}"
-            f"<br>{e((q.get('shipping') or {}).get('method'))}</p></td></tr></table>"
+            f"<br>{e((q.get('shipping') or {}).get('method'))}</p>{tax}</td></tr></table>"
             f"<form method=post action='/admin/order/{e(o['id'])}' style='display:flex;gap:8px;margin-top:8px'>"
             f"<select name=status>{opts}</select><input name=tracking placeholder='tracking number' value='{e(o['tracking'])}'>"
             f"<input name=note placeholder=note value='{e(o['note'])}' style='flex:1'><button style='width:auto;padding:6px 16px'>Save</button></form></div>")

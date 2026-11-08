@@ -45,7 +45,7 @@ fn status_tool() -> Value { def("order_status", "Where this thread's last quote 
 fn ask_tool() -> Value {
     def("order_ask", "Ask the person one question, shown in its own card above the message box on every device: choices they can tap, or with typed a box to type the answer in (where it ships); they may always type their own answer. Answers at once: end your turn, and their answer comes as their next message, however long they take.",
         json!({"question":prop("The question, short and plain."),"options":{"type":"array","items":{"type":"string"},"description":"Two to four short choices, the likely one first; none with typed."},
-            "typed":{"type":"boolean","description":"true when the answer is typed (the country it ships to): the person gets a box with Continue."},"last":prop("With typed: the earlier order's answer (its country's name), offered as a quick choice.")}), json!(["question"]))
+            "typed":{"type":"boolean","description":"true when the answer is typed (the country it ships to, and for the US its state): the person gets a box with Continue."},"last":prop("With typed: the earlier order's answer (its country's name, or its US state), offered as a quick choice.")}), json!(["question"]))
 }
 /// Bots.order.tools: what a thread's agent is shown: none with Ordering off, a buy thread's own only in a buy thread.
 pub fn defs(on: bool, buy: bool) -> Vec<Value> {
@@ -230,7 +230,8 @@ pub fn ask_detail(dir: &str, m: &Value, ps: &[String]) -> String {
         let name = p["name"].as_str().unwrap_or("?"); let asm = match &p["assemble"] { Value::Null => String::new(), Value::String(s) => s.clone(), v => v.to_string() };
         if asm.is_empty() || asm == "0" { format!("{name} ×{qty}") } else { format!("{name} ×{qty} ({asm} assembled)") } }).collect();
     let n = ps.len(); let mut list: String = ps.iter().take(40).map(|p| format!("\n{p}")).collect(); if n > 40 { list.push_str("\n…") }
-    format!("Send {n} {} from {dir} to Backplane's quote service? They are kept only to make what you order.\nShips to {} · {}\n{list}", if n == 1 { "file" } else { "files" }, m["ship_to"].as_str().unwrap_or("?"), parts.join(", "))
+    let to = match (m["ship_to"].as_str().unwrap_or("?"), m["ship_region"].as_str().map(str::trim).filter(|r| !r.is_empty())) { (c, Some(r)) => format!("{c} ({r})"), (c, None) => c.to_string() };
+    format!("Send {n} {} from {dir} to Backplane's quote service? They are kept only to make what you order.\nShips to {to} · {}\n{list}", if n == 1 { "file" } else { "files" }, parts.join(", "))
 }
 /// The manifest's files (`"files": {path: sha256}`), when the folder may be sent.
 fn sendable(cwd: &Path, dir: &str) -> Option<(Value, Vec<String>, String)> {
@@ -464,6 +465,7 @@ mod tests {
         let r = tmp("send"); let f = "mfg/1/a.zip"; put(r.join(f), "z"); let m = json!({"ship_to":"Germany","parts":[{"name":"Main","qty":5,"assemble":2}],"files":{"a.zip":"h"}}); put(r.join("mfg/1/manifest.json"), &m.to_string());
         let (_, ps, h) = sendable(&r, "mfg/1").unwrap(); assert_eq!(ps, ["a.zip"]); assert_eq!(h.len(), 64);
         assert_eq!(ask_detail("mfg/1", &m, &ps), "Send 1 file from mfg/1 to Backplane's quote service? They are kept only to make what you order.\nShips to Germany · Main ×5 (2 assembled)\n\na.zip");
+        let us = json!({"ship_to":"US","ship_region":"GA","parts":[{"name":"Main","qty":5}],"files":{"a.zip":"h"}}); assert!(ask_detail("mfg/1", &us, &ps).contains("\nShips to US (GA) · Main ×5\n"), "the state it ships to is shown with the country");
         assert!(sendable(&r, "mfg/../mfg/1").is_none()); assert!(sendable(&r, "mfg/2").is_none(), "no manifest");
         crate::plat::fs::symlink("/etc/passwd", r.join("mfg/1/b.zip")).unwrap(); assert!(sendable(&r, "mfg/1").is_none(), "a folder holding a link is refused, listed or not"); std::fs::remove_file(r.join("mfg/1/b.zip")).unwrap();
         let o = tmp("elsewhere"); put(o.join("3/manifest.json"), &m.to_string()); put(o.join("3/a.zip"), "z"); crate::plat::fs::symlink(&o, r.join("linked")).unwrap(); assert!(sendable(&r, "linked/3").is_none(), "nor a link on the way there");

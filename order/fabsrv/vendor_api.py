@@ -17,7 +17,8 @@ words of catalog.py; it alone knows the fab's option labels.
         Assembly service fees for one board design, without the components.
         spec: boards, sides (1|2), smt_joints, tht_joints (per board),
         unique_parts, extended_parts, standard_only (the MPNs of stocked parts
-        the fab places only with its standard service), and the board's
+        the fab places only with its standard service), xray_parts (how many
+        of those a board places: the fab X-rays each), and the board's
         options and features (eligibility for the cheaper service depends on
         them all).
 
@@ -34,10 +35,12 @@ words of catalog.py; it alone knows the fab's option labels.
         [{mpn, qty, unit_usd, category}]), on top of the parts themselves.
 
     shipping(country, parcels) -> Ship
-        parcels: [{kind, weight_kg, value_usd}]; Ship: {price, method, days,
-        ddp} for them all to a country (ddp: every parcel goes duty paid, so
-        the quote carries the duties; else the courier collects them), or
-        {problem} when it cannot be priced now.
+        parcels: [{kind, weight_kg, value_usd, assembled}] (assembled: how
+        many boards of it come assembled, 0 for none); Ship: {price, method,
+        days, ddp, parcels} for them all to a country, as the fab's checkout
+        charges it (ddp: every parcel goes duty paid, so the quote carries
+        the duties; else the courier collects them; parcels: how many it
+        ships as), or {problem} when it cannot be priced now.
 
 Price: {total, lines: [{label, amount}], lead_days, warnings, model_date}
 """
