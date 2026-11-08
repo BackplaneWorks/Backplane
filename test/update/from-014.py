@@ -109,7 +109,17 @@ try:
     shimmed = until(600, lambda: "BACKPLANE-0.15-SHIM" in open(serve, errors="replace").read())
     if not shimmed: no("update-014", "0.14 never laid 0.15 out: " + open(os.path.join(T, "serve-014.log"), errors="replace").read()[-400:]); raise SystemExit
     ok("update-014", f"0.14's updater took {tag} from SHA256SUMS and ran its install-release.sh; 0.14 kept as backplane-serve.0.14={os.path.exists(serve + '.0.14')}")
-    h14_before = {f: hashlib.sha256(open(os.path.join(h14, f), "rb").read()).hexdigest() for f in ("events.jsonl", "token", "devices-v1.json") if os.path.exists(os.path.join(h14, f))}
+    # 0.14's home: every file's sha256. 0.14 itself writes there while it runs (and again as v0.14-legacy before the move); 0.15 never may
+    def tree(d):
+        out = {}
+        for r, _, fs in os.walk(d):
+            for f in fs:
+                p = os.path.join(r, f)
+                try: out[os.path.relpath(p, d)] = hashlib.sha256(open(p, "rb").read()).hexdigest()
+                except OSError: pass
+        return out
+    def marks():   # what only a 0.15 hub or its guard would leave in a home
+        return [m for m in ("guard", "update", "ckpt", "hub.owner", "quarantine", "update-from-0.14.log") if os.path.exists(os.path.join(h14, m))]
 
     def gstat():
         try: return json.load(open(os.path.join(h15, "guard", "status.json")))
@@ -124,6 +134,7 @@ try:
     else:
         on15 = until(400, lambda: gstat().get("build") == tag and gstat().get("stable") is True)
         if not on15: no("on-015", f"build={gstat().get('build')} state={gstat().get('state')} text={gstat().get('text')}"); raise SystemExit
+        h14_at_proof = tree(h14)
         said = hello(); ver = manifest["version"]
         if ver.encode() in said and manifest["commit"][:7].encode() in said: ok("on-015", f"the guard runs {tag} on 0.14's port {port}, proven; /hello names {ver} and {manifest['commit'][:9]}")
         else: no("on-015", f"/hello: {said[:120]!r}")
@@ -135,8 +146,12 @@ try:
         if device:
             w2 = Ws(hub15, device); hi = w2.hello() if w2.status == 101 else None
             ok("device", "the phone paired to 0.14 is accepted by 0.15 without pairing again") if hi else no("device", f"0.15 refused the 0.14 device token (ws {w2.status})")
-    after = {f: hashlib.sha256(open(os.path.join(h14, f), "rb").read()).hexdigest() for f in h14_before}
-    ok("old-home", "0.14's home unchanged by 0.15") if after == h14_before or panics else no("old-home", "0.14's home changed")
+    m = marks()
+    if m: no("old-home", f"0.15 wrote into 0.14's home: {m}")
+    elif not panics and tree(h14) != h14_at_proof:
+        changed = sorted(k for k in set(tree(h14)) | set(h14_at_proof) if tree(h14).get(k) != h14_at_proof.get(k))
+        no("old-home", f"0.14's home changed while 0.15 ran (import, device): {changed[:5]}")
+    else: ok("old-home", "0.14's home has nothing of 0.15's" + ("" if panics else f", and is byte-identical ({len(h14_at_proof)} files) from 0.15's start through the import"))
 finally:
     stop()
     print(f"from-014{' --panics' if panics else ''}: {len(PASS)} passed, {len(FAIL)} failed{': ' + ' '.join(FAIL) if FAIL else ''}  (kept: {T})")
