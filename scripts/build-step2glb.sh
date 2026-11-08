@@ -6,6 +6,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 BUN=${BUN:-$(command -v bun || echo "$HOME/.bun/bin/bun")}
+. scripts/bun-pin.sh; bun_pin_check "$BUN"
 (cd tools/step2glb && "$BUN" install --frozen-lockfile)
 mkdir -p dist
 "$BUN" build tools/step2glb/step2glb.ts --compile --minify \

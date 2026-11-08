@@ -108,7 +108,8 @@ impl View {
         if ["view.open","view.page","view.update","view.action"].contains(&method) {
             p["nativeSidebar"]=json!(1);
             p["accountProfiles"]=json!(1); // the account page: the hub offers its `accounts` grant only to a view that declares this version
-            p["client"]=json!({"kind":"desktop","os":match std::env::consts::OS{"macos"=>"darwin",o=>o},"launcher":self.launcher,"browser":if cfg!(feature="cef"){"cef"}else{"frames"}}); // browser: what Settings > About says this window's Browser tab is // setup's words for keys, and whether another home can be chosen
+            p["client"]=json!({"kind":"desktop","os":match std::env::consts::OS{"macos"=>"darwin",o=>o},"launcher":self.launcher,"browser":if cfg!(feature="cef"){"cef"}else{"frames"}});
+            if let Some(d)=licenses_dir(){p["client"]["licenses"]=json!(d.to_string_lossy());} // Settings > About: where this install's notices are // browser: what Settings > About says this window's Browser tab is // setup's words for keys, and whether another home can be chosen
             // Offer keyed deltas against the newest body held; the hub answers whole or with ops from it.
             p["viewDelta"]=json!({"version":1,"token":self.bases.newest});
             self.offered.insert(self.next,self.bases.newest.clone());
@@ -130,6 +131,12 @@ impl View {
     }
 }
 /// The id of a direct request (not a view's): from 2^30, apart from the views' own.
+/// The notices of the third-party software in this install (`licenses/` beside the program, as every release archive has it): Settings > About names
+/// the folder, and its Open folder button opens this one only, whatever the hub sends. None when this build has none beside it (a dev build).
+pub fn licenses_dir()->Option<PathBuf> {
+    static DIR:std::sync::OnceLock<Option<PathBuf>>=std::sync::OnceLock::new();
+    DIR.get_or_init(||{let me=std::env::current_exe().ok()?;let me=std::fs::canonicalize(&me).unwrap_or(me);let d=me.parent()?.join("licenses");d.join("README.md").is_file().then_some(d)}).clone()
+}
 fn rpc_id()->u64 {static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed)}
 pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) {
     crate::screens::place::open(&config);

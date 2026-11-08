@@ -1,0 +1,30 @@
+# cargo-about's config for the Rust notices in every release archive (licenses/rust/*.txt). scripts/rust-licenses.sh runs it for each
+# binary's workspace and target; release.yml runs that script, and a crate under a licence not listed here fails the release.
+# Adding a licence here is a decision: say why in deploy/licenses/README.md.
+accepted = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "NCSA",
+    "CDLA-Permissive-2.0",
+    "bzip2-1.0.6",
+    "OpenSSL",
+    # weak copyleft, per file: used unmodified (dwrote on Windows, option-ext); the notice says where their source is
+    "MPL-2.0",
+]
+# what is compiled in, not what only runs at build time
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# Backplane's own crates (publish = false) are MIT under the repository's LICENSE
+private = { ignore = true }
