@@ -15,13 +15,31 @@ The design and why: `docs/voice-dictation-design.md`.
 
 ## The local engine
 
-`backplane-voice live --engine local --local-dir <home>/voice/local`. The
-runtime (sherpa-onnx's C library and ONNX Runtime, from npm, sha512 pinned)
-and the models (from sherpa-onnx's releases, sha256 pinned) are fetched by
-`local-install` into `<home>/voice/local`, each checked and moved into place,
-then `ready-<model>` is written (what the hub reads). Nothing is bundled in
-the package; nothing loads in the hub: the helper is its own process and opens
-the C library at run time, so a crash there ends one session. The hub
+`backplane-voice live --engine local --local-dir <home>/voice/local`.
+`local-install` puts three things in `<home>/voice/local`, each checked
+against its pin before it is moved into place, then writes `ready-<model>`
+(what the hub reads):
+
+- the runtime: sherpa-onnx's C library and ONNX Runtime, from npm, sha512
+  pinned;
+- the model: from sherpa-onnx's releases, each file it holds pinned by size
+  and sha256, with Hugging Face as the second source when the archive fails or
+  does not match;
+- the voice activity model, `silero_vad.onnx` (644 KB): the one piece the
+  package carries, beside `backplane-voice` (release archives and dev cuts
+  alike), because GitHub, its only source, fails for hours at a time. The copy
+  is taken only when it matches its pin; an older package, or a copy that does
+  not match, downloads it as before. `local-status` says `vadBundled` when a
+  matching copy is there. Its notice is the archive's `licenses/silero-vad`;
+  where it comes from is `native/voice/vad/README.md`.
+
+Downloads that fail with a 5xx or a dropped connection are retried; a 4xx or
+a checksum mismatch is final, and nothing half-checked is ever moved into
+place. The details (pins, sources, retries) are `native/voice/README.md`,
+"The local engine". The runtime and the models are not in the package (about
+500 MB, and only for those who choose the local engine). Nothing loads in the
+hub: the helper is its own process and opens the C library at run time, so a
+crash there ends one session. The hub
 publishes the download as info (`voice.job`, `voice.local`), so Settings
 follows it wherever it is open, and a failure stays on the page until the next
 try. The helper loads the model
