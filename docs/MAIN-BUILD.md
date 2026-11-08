@@ -19,6 +19,12 @@ From your own worktree, once your tests pass: `git rebase main`, then fast-forwa
 - Waits (bar red) when under 20 GB is free (`MAIN_MIN_FREE_GB`), after trying `scripts/worktree-gc.sh --apply`. Takes one build slot like every `dev-build.sh` and `scripts/cargo-q` (`scripts/lib-buildslot.sh`), `-j` from free memory, at low priority; compiled dependencies come from `sccache`.
 - Runs without `BACKPLANE_AGENT_OWNER` (the hub reaps marked processes).
 
+## Where the time goes, and what is skipped
+
+Every phase logs `time: PHASE Ns` in `~/.backplane-gpui-dev/main-build.log`. A full gate is about: compile tests 10 s, run tests 75 s (the hub's suite; one test, the restart storm, runs 48 s alone and is the tail, and fails when it shares the machine with the other suites, so it stays where it is), builds 15 s (guard, hub, voice and window side by side), smoke start 17-30 s (fixed waits).
+
+A suite is not run again when its inputs are byte-identical to the last run that passed: the key is git's index of its files (the hub's: everything but `native/gpui`, `native/voice`, `mobile/`, `order/` and the top-level `docs/*.md`; the window's: everything but the other crates and the same three; the voice's: `native/voice`), the compiler and `dev-build.sh`. The log says `skip: hub tests: inputs identical (KEY) to the run that passed at COMMIT`. The smoke start is skipped the same way when the hub's and the guard's inputs are those of the last passing smoke start. Keys are kept in `$GPUI_DEV_DIR/.gate-ok/` and written only after a pass. `GATE_FULL=1` runs everything. The hub is always rebuilt (it names its commit).
+
 ## The bar
 
 While a build runs, `scripts/build-haiku.sh` has Haiku write a haiku on the commits since the tip built before (`MAIN_PREV`). It ships beside the build as `HAIKU` and the green bar shows it after the text. No `claude`, no commits or a slow answer: no haiku, the build is not held up.
