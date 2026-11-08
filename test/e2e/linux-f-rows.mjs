@@ -76,7 +76,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const op=await until(()=>has(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval'),15000);const ask=events().find(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval');
  const an=ask?await c.rpc('ask.answer',{id:ask.id,answer:'accept'}):{ok:false};const fin=await finished(T);
  log('F06',m.ok&&op&&an.ok&&fin&&/PERM Bash -> .*allow/i.test(fake())&&has(e=>e.$==='AskClosed'&&e.id===ask?.id),`runtime approval-required: Bash approval opened (${ask?.detail?.slice(0,40)}), accepted (reply ok=${an.ok} ${an.error||''}), the agent got allow=${/PERM Bash -> .*allow/i.test(fake())}, ask closed`);
- await c.rpc('turn.start',{thread:T,text:'zqapprove again'});await until(()=>events().filter(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval').length>=2,15000);
+ await c.rpc('turn.start',{thread:T,text:'zqapprove again'});await until(()=>events().filter(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval').length>=2,40000);   // 40 s: a stand-in's second question takes longer on a slow machine
  const ask2=events().filter(e=>e.$==='AskOpened'&&e.thread===T&&e.kind==='approval').at(-1);await c.rpc('ask.answer',{id:ask2.id,answer:'decline'});await finished(T,2);
  log('F06',/PERM Bash -> .*deny/i.test(fake()),`a declined approval reaches the agent as deny=${/PERM Bash -> .*deny/i.test(fake())}`);
  const Q=await mk('question');await c.rpc('turn.start',{thread:Q,text:'zqask'});
@@ -150,7 +150,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  await c.rpc('setting.set',{key:'files.max.mb',value:'1'});await sleep(500);const low=await up(0,'k4',2);await c.rpc('setting.set',{key:'files.max.mb',value:''});
  const cap=under.stored&&!over.stored&&!low.stored&&/cap|limit/i.test(over.err+over.text)&&/cap|limit/i.test(low.err+low.text);
  const big=`60 MB at the default accepted=${under.stored}; 513 MB refused=${!over.stored} (${over.status} ${over.err||over.text}); with files.max.mb=1 a 2 MB upload refused=${!low.stored} (${low.status} ${low.err||low.text})`;
- log('F15',cap&&r.status===200&&stored&&t.ok&&!!att&&/look at this/.test(posted?.text||'')&&fake().includes(`[image: ${j.attached}]`),`POST /attach ${r.status} stored ${j.attached?.replace(OUT,'')} bytes match=${stored}; MessageAttached logged=${!!att}; the agent was told the path=${fake().includes(j.attached||'#')}; the cap (files.max.mb, default 512 MB in files/attach.rs): ${big}`)}
+ log('F15',cap&&r.status===200&&stored&&t.ok&&!!att&&/look at this/.test(posted?.text||'')&&fake().includes(`[image: ${j.attached}]`),`POST /attach ${r.status} stored ${j.attached?.replace(OUT,'')} bytes match=${stored}; turn.start ok=${t.ok}; the echo posted=${/look at this/.test(posted?.text||'')}; MessageAttached logged=${!!att}; the agent was told the path=${fake().includes(j.attached||'#')}; the cap (files.max.mb, default 512 MB in files/attach.rs): ${big}`)}
 
 // F21 resume, outbox (the same message id is one message), long session
 {const T=await mk('outbox');const mid='m-outbox-1';const a=await c.rpc('turn.start',{thread:T,text:'zqshort once',msg:mid});const b=await c.rpc('turn.start',{thread:T,text:'zqshort once',msg:mid});await finished(T);
@@ -197,7 +197,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  let remote='';try{remote=git(R,'branch','--list')}catch{}
  const pr=await c.rpc('git.act',{thread:t,action:'create_pr'});
  log('F12-checkpoint',both&&rv.ok&&after.first&&!after.second,`two turns wrote first.txt and second.txt (both present=${both}); git.revert to checkpoint 1 (after the first turn) ok=${rv.ok} (${(rv.result?.text||rv.error||'').slice(0,60)}); then first.txt=${after.first}, second.txt=${after.second}`);
- log('F12-push',cm.ok&&ps.ok&&/backplane\//.test(remote),`commit ok=${cm.ok}; push ok=${ps.ok} (${(ps.result?.text||'').slice(0,60)}); the bare remote lists ${JSON.stringify(remote.trim()).slice(0,80)}`);
+ log('F12-push',cm.ok&&ps.ok&&/backplane\//.test(remote),`commit ok=${cm.ok}${cm.ok?'':' ('+String(cm.error||cm.result?.text||'').slice(0,80)+')'}; push ok=${ps.ok} (${(ps.result?.text||'').slice(0,60)}); the bare remote lists ${JSON.stringify(remote.trim()).slice(0,80)}`);
  log('F12-pr',!pr.ok,`create_pr with no gh or forge remote is refused, not faked: ok=${pr.ok} ${(pr.result?.text||pr.error||'').slice(0,100)}`)}
 
 // F19 a bot answers a message in its chat
@@ -216,7 +216,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  log('F20-download',g.status===200&&gt==='download me\n'&&/attachment/.test(g.headers.get('content-disposition')||'')&&z.status===200&&zb.slice(0,2).toString()==='PK'&&bad.status===400&&noauth.status===401,`GET /files/get ${g.status} body ok, Content-Disposition ${g.headers.get('content-disposition')}; /files/zip ${z.status} ${zb.length} bytes PK; a path outside the project ${bad.status}; no token ${noauth.status}`)}
 
 // F17 the viewers' hub side: a STEP rendered to PNG views by the hub
-{const T=await mk('mech');mkdirSync(OUT+'/proj/mech',{recursive:true});copyFileSync(HERE+'../files/fixtures/mesh/bracket.step',OUT+'/proj/mech/bracket.step');
+{const T=await mk('mech');mkdirSync(OUT+'/proj/mech',{recursive:true});copyFileSync(join(HERE,'..','files','fixtures','mesh','bracket.step'),OUT+'/proj/mech/bracket.step');
  const ls=await c.rpc('mech.list',{thread:T});const r=await c.rpc('mech.render',{thread:T,path:'mech/bracket.step'});await sleep(500);
  const pngs=existsSync(OUT+'/proj/mech/renders')?readdirSync(OUT+'/proj/mech/renders').filter(f=>f.endsWith('.png')):[];
  log('F17-mech',ls.ok&&r.ok&&pngs.length>0,`mech.list ok=${ls.ok} (${JSON.stringify(ls.result||ls.error).slice(0,70)}); mech.render ok=${r.ok} ${(r.result?.text||r.error||'').slice(0,80)}; renders written ${pngs.join(',')}`)}

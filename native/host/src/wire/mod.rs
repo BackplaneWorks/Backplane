@@ -91,7 +91,10 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         let expect = req.header("expect").eq_ignore_ascii_case("100-continue");
         let r = h.call_body(&hub.arc(), &req, crate::api::Body::new(&mut s, len.unwrap(), expect)).await;
         let out = response_for(r.status, &r.ctype, &r.extra, &r.body);
-        s.write_all(&out).await?; s.shutdown().await.ok(); return Ok(());
+        s.write_all(&out).await?;
+        // a refusal (the attach cap) answers before the body is read: on Windows a close with unread input resets and the client loses the answer
+        if r.status.starts_with('2') { s.shutdown().await.ok(); } else { crate::plat::net::refused_close(&mut s).await; }
+        return Ok(());
     }
     if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {
         // no Content-Length and no Transfer-Encoding is an empty body; chunked is refused
