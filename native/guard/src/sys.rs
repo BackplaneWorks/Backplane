@@ -25,16 +25,20 @@ use std::{path::Path, process::{Child, Command, ExitStatus}};
 #[cfg(windows)] mod os {
     pub fn watch_stop() {}
     pub fn stop_asked() -> bool { false }
-    pub fn term(pid: u32) { let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string()]).output(); }
-    pub fn abort(pid: u32) { let _ = std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output(); }
-    pub fn alive(pid: u32) -> bool { std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().map_or(false, |o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string())) }
+    pub fn term(pid: u32) { let _ = quiet("taskkill").args(["/PID", &pid.to_string()]).output(); }
+    pub fn abort(pid: u32) { let _ = quiet("taskkill").args(["/F", "/PID", &pid.to_string()]).output(); }
+    pub fn alive(pid: u32) -> bool { quiet("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().map_or(false, |o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string())) }
     #[link(name = "kernel32")] extern "system" { fn GetDiskFreeSpaceExW(dir: *const u16, free: *mut u64, total: *mut u64, all: *mut u64) -> i32; }
     pub fn space(p: &std::path::Path) -> Option<(u64, u64)> {
         use std::os::windows::ffi::OsStrExt;
         let w: Vec<u16> = p.as_os_str().encode_wide().chain(Some(0)).collect(); let (mut a, mut b, mut c) = (0u64, 0u64, 0u64);
         (unsafe { GetDiskFreeSpaceExW(w.as_ptr(), &mut a, &mut b, &mut c) } != 0).then_some((a, b))
     }
-    pub fn detach(c: &mut std::process::Command) { use std::os::windows::process::CommandExt; c.creation_flags(0x0000_0008 | 0x0000_0200); } // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    /// CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP: the hub gets a console that is never shown, which what it starts (git, sh) shares.
+    /// DETACHED_PROCESS left it none, so every console program the hub ran opened a console window of its own.
+    pub fn detach(c: &mut std::process::Command) { use std::os::windows::process::CommandExt; c.creation_flags(NO_WINDOW | 0x0000_0200); }
+    const NO_WINDOW: u32 = 0x0800_0000;
+    fn quiet(name: &str) -> std::process::Command { use std::os::windows::process::CommandExt; let mut c = std::process::Command::new(name); c.creation_flags(NO_WINDOW); c }
     pub fn signal_of(_: &std::process::ExitStatus) -> Option<i32> { None }
 }
 pub use os::{abort, alive, detach, signal_of, space, stop_asked, term, watch_stop};

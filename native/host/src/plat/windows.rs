@@ -133,6 +133,8 @@ pub mod proc {
     use windows_sys::Win32::System::{JobObjects::*, Threading::*};
     pub const HUP: i32 = 1; pub const KILL: i32 = 9; pub const TERM: i32 = 15;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200; const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    /// For every program the hub starts (proc.rs): a console program run with no console window.
+    pub const NO_WINDOW: u32 = CREATE_NO_WINDOW;
     fn job_name(pid: u32) -> Vec<u16> { wide(&format!("Local\\backplane-group-{pid}")) }
     /// Handles of groups that die with the hub (kill-on-close): the hub holds them until the group is killed, or it exits.
     static KEPT: std::sync::Mutex<Vec<(u32, usize)>> = std::sync::Mutex::new(Vec::new());
