@@ -13,6 +13,51 @@ pub struct Projects {
     sent_q: Vec<String>, sent_f: Vec<String>, echo_q: Option<String>, echo_f: Option<String>,
     /// Set when a box wants the keys on the next frame: "search" or "folder".
     pub focus: Option<&'static str>, folder_open: bool,
+    /// The project page's own reads: `project.home` (the folder's goal and notes, board and files) and `fab.look {project}` (the parts its fab files name).
+    pub home: Home,
+}
+
+/// What the hub said of the project on show (asked when its page opens; an answer for another project is dropped).
+#[derive(Default)]
+pub struct Home { pub pid: String, pub snap: Value, pub card: Value, seq: u64, asks: Vec<(u64, &'static str, String)> }
+/// Ask tags of the project page (far above the Improvements page's own).
+const TAG: u64 = 1 << 48;
+/// The page opened (or opened again): its two reads go out; what the last answers said stays until the new ones come.
+pub fn ask_home(this: &mut Backplane, pid: &str) {
+    let h = &mut this.screens.projects.home;
+    if h.pid != pid { h.snap = Value::Null; h.card = Value::Null; h.pid = pid.to_string(); }
+    for (m, p) in [("project.home", serde_json::json!({"project": pid})), ("fab.look", serde_json::json!({"project": pid}))] {
+        let h = &mut this.screens.projects.home; h.seq += 1; let tag = TAG + h.seq;
+        h.asks.push((tag, m, pid.to_string())); if h.asks.len() > 16 { h.asks.remove(0); }
+        let _ = this.tx.try_send(Command::Ask(m.to_string(), p, tag));
+    }
+}
+/// An answer to one of the page's reads (false: not the page's).
+pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
+    if tag < TAG { return false }
+    let h = &mut this.screens.projects.home;
+    let Some(i) = h.asks.iter().position(|a| a.0 == tag) else { return true };
+    let (_, m, pid) = h.asks.remove(i);
+    if pid != h.pid || reply["ok"] != true { return true }
+    let r = reply["result"].clone();
+    if m == "project.home" { if r.get("artifacts").is_some() { h.snap = r; } } else { h.card = r; }
+    cx.notify(); true
+}
+/// The goal and notes as the person wrote them (`.backplane/intent.md`), a line each: (kind, text): "h" a heading, "li" a list item, "p" text.
+pub fn intent_lines(text: &str) -> Vec<(&'static str, String)> {
+    text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).take(60).map(|l| {
+        let t = l.trim_start();
+        if let Some(h) = t.strip_prefix('#') { ("h", h.trim_start_matches('#').trim().to_string()) }
+        else if let Some(i) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) { ("li", i.trim().to_string()) }
+        else { ("p", t.to_string()) }
+    }).collect()
+}
+/// The boards the project has: the board and schematic the hub found (`project.home`'s artifacts), else the card's board files.
+pub fn boards(snap: &Value, card: &Value, root: &str) -> Vec<String> {
+    let rel = |p: &str| p.strip_prefix(root).map(|r| r.trim_start_matches('/').to_string()).unwrap_or_else(|| p.to_string());
+    let mut out: Vec<String> = snap["artifacts"].as_array().into_iter().flatten().filter(|a| a["kind"] == "board").map(|a| rel(a["path"].as_str().unwrap_or(""))).filter(|p| !p.is_empty()).collect();
+    for b in card["board_files"].as_array().into_iter().flatten().filter_map(Value::as_str) { if !out.iter().any(|o| o == b) { out.push(b.to_string()); } }
+    out.truncate(12); out
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -113,7 +158,7 @@ pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
     data["projects"].as_array()?.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))
 }
 /// A project's page, from the sidebar's own rows (no round trip): its name and folder, New thread, and each thread that is in it.
-pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>) -> Vec<AnyElement> {
+pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>) -> Vec<AnyElement> {
     use crate::script::CtlEntry;
     let Some(p) = find(data, pid) else { return vec![] };
     let c = |n: &str| theme::color(light, n);
@@ -122,6 +167,32 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &str, c
         div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(string(p, "title")).into_any_element(),
         div().text_size(px(12.)).text_color(c("dim")).child(string(p, "root")).into_any_element(),
     ];
+    // what the folder holds (the hub's reads): the goal and notes, the parts to order and the boards (no Ready to order bar and no Buy it here: Buy it is a thread's tool)
+    let (hp, snap, card) = (home.pid.clone(), home.snap.clone(), home.card.clone());
+    if hp == pid {
+        let root = string(&snap, "root"); let root = if root.is_empty() { string(p, "root") } else { root };
+        let intent = { let i = string(&card, "intent"); if i.is_empty() && snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == "intent")) { string(&snap, "intent") } else { i } };
+        out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child("GOAL & NOTES").into_any_element());
+        if intent.trim().is_empty() { out.push(div().text_color(c("dim")).child("No goal yet. Ask an agent to write what this project is for, or edit .backplane/intent.md.").into_any_element()); }
+        let mut col = div().id("home-intent").flex().flex_col().gap_1().text_size(px(13.));
+        for (k, t) in intent_lines(&intent) {
+            col = col.child(match k { "h" => div().pt_1().font_weight(FontWeight::BOLD).child(t), "li" => div().flex().gap_2().child(div().text_color(c("dim")).child("•")).child(div().flex_1().child(t)), _ => div().child(t) });
+        }
+        out.push(col.into_any_element());
+        let parts: Vec<&Value> = card["parts"].as_array().into_iter().flatten().collect();
+        if !parts.is_empty() {
+            out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(format!("TO ORDER ({})", parts.len())).into_any_element());
+            for (i, x) in parts.iter().enumerate() {
+                out.push(div().id(SharedString::from(format!("home-part-{i}"))).flex().gap_2().px_2().h(px(26.)).items_center().border_b_1().border_color(c("line")).text_size(px(12.))
+                    .child(div().flex_1().child(string(x, "name"))).child(div().text_color(c("dim")).child(string(x, "kind"))).child(div().text_color(c("faint")).child(string(x, "path"))).into_any_element());
+            }
+        }
+        let bs = boards(&snap, &card, &root);
+        if !bs.is_empty() {
+            out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(format!("BOARDS ({})", bs.len())).into_any_element());
+            for (i, b) in bs.iter().enumerate() { out.push(div().id(SharedString::from(format!("home-board-{i}"))).px_2().h(px(26.)).flex().items_center().border_b_1().border_color(c("line")).text_size(px(12.)).child(b.clone()).into_any_element()); }
+        }
+    }
     let pid2 = pid.to_string();
     ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
     out.push(div().id("page-new-thread").px_3().py_1().w(px(140.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child("New thread")
@@ -171,5 +242,18 @@ mod tests {
         assert!(matches!(search_cmd("ecc"), Command::Action(a, v) if a == "proj-find-q" && v == "ecc")); assert!(matches!(go_cmd(), Command::Action(a, _) if a == "proj-go"));
         assert!(matches!(open_cmd(), Command::Action(a, _) if a == "picker-open")); assert!(matches!(type_cmd("~/"), Command::Action(a, v) if a == "picker-type" && v == "~/"));
         assert_eq!(hint(&Value::Null), "Search projects"); assert_eq!(query(&j(r#"{"search":{"query":"x"}}"#)), "x");
+    }
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*; use serde_json::json; use core::prelude::v1::test;
+    #[test] fn the_goal_and_notes_are_drawn_a_line_each() {
+        assert_eq!(intent_lines("# Goal\n\nA lamp.\n\n# Parts\n\n- LED board\n* Shade\n## Notes"), vec![("h", "Goal".into()), ("p", "A lamp.".into()), ("h", "Parts".into()), ("li", "LED board".into()), ("li", "Shade".into()), ("h", "Notes".into())]);
+    }
+    #[test] fn the_boards_are_the_folders_board_then_the_cards_board_files() {
+        let snap = json!({"artifacts": [{"kind": "board", "path": "/p/board.kicad_pcb"}, {"kind": "intent", "path": "/p/.backplane/intent.md"}]});
+        assert_eq!(boards(&snap, &json!({"board_files": ["board.kicad_pcb", "boards/b/b.kicad_pcb"]}), "/p"), vec!["board.kicad_pcb".to_string(), "boards/b/b.kicad_pcb".into()]);
+        assert!(boards(&Value::Null, &Value::Null, "/p").is_empty());
     }
 }

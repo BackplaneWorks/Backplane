@@ -424,7 +424,7 @@ impl Render for Backplane {
         let home = &self.data["projectHome"];
         let page = self.project_page.clone().filter(|p| crate::screens::projects::find(&self.data, p).is_some());
         let has_home = home.is_object() || page.is_some();
-        let home_els: Vec<AnyElement> = if let (false, Some(p)) = (home.is_object(), page.as_ref()) { crate::screens::projects::page(cx, light, &self.data, p, &mut ctl) } else if has_home {
+        let home_els: Vec<AnyElement> = if let (false, Some(p)) = (home.is_object(), page.as_ref()) { crate::screens::projects::page(cx, light, &self.data, &self.screens.projects.home, p, &mut ctl) } else if has_home {
             home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"), &mut ctl)).collect()
         } else { Vec::new() };
         // popup
