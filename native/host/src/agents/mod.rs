@@ -248,6 +248,7 @@ impl Agents {
         tx.try_send(Cmd::WakeRide { id: id.into(), text: text.into(), start, reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
     }
     pub async fn interrupt(self: &Arc<Self>, thread: &str) -> Result<(), String> {
+        self.ends_of(thread).stop_waiting(); // a start waiting for the earlier turn's checkpoint gives up now: the Stop would otherwise queue behind it
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
         tx.try_send(Cmd::Interrupt { reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?;
         rx.await.map_err(|_| "the thread's agent stopped".to_string())
@@ -445,17 +446,25 @@ pub(crate) async fn hist_worker<F, Fut>(mut rx: mpsc::Receiver<(Option<JobGuard>
 }
 /// The turn-end captures (step and checkpoint) not yet finished: the next turn's agent is not started while one is, so the files it writes are never inside the earlier turn's checkpoint.
 #[derive(Default)]
-pub(crate) struct HistEnds { n: std::sync::atomic::AtomicUsize, done: tokio::sync::Notify }
+pub(crate) struct HistEnds { n: std::sync::atomic::AtomicUsize, done: tokio::sync::Notify, /** counts the Stops sent to the thread: a start that waits gives up when it changes */ stops: std::sync::atomic::AtomicU64, stopped: tokio::sync::Notify }
+impl HistEnds {
+    /// The person pressed Stop: a start waiting for the capture is cancelled (nothing is spawned; the Stop itself ends the turn).
+    pub(crate) fn stop_waiting(&self) { self.stops.fetch_add(1, Relaxed); self.stopped.notify_waiters() }
+    async fn stopped_since(&self, gen: u64) { loop { let w = self.stopped.notified(); tokio::pin!(w); w.as_mut().enable(); if self.stops.load(Relaxed) != gen { return } w.await } }
+}
 /// How long a turn waits for the earlier one's checkpoint before saying so.
 const CKPT_SAY: Duration = Duration::from_secs(2);
 /// Waits (at most HIST_JOB) for the earlier turn's end captures: called before a turn's input reaches the agent. Past `say` (CKPT_SAY) it logs an activity, so a queued turn
 /// waiting on a huge work tree does not look stuck.
-async fn ends_settled(e: Arc<HistEnds>, ag: Arc<Agents>, th: String, say: Duration) {
+/// Returns false when a Stop came while it waited: the start is cancelled.
+async fn ends_settled(e: Arc<HistEnds>, ag: Arc<Agents>, th: String, say: Duration) -> bool {
+    let gen = e.stops.load(Relaxed);
     let wait = |e: Arc<HistEnds>| async move { loop { let w = e.done.notified(); tokio::pin!(w); w.as_mut().enable(); if e.n.load(Relaxed) == 0 { return } w.await } };
-    if tokio::time::timeout(say, wait(e.clone())).await.is_ok() { return }
+    let ended = tokio::select! { r = tokio::time::timeout(say, wait(e.clone())) => r.is_ok().then_some(true), _ = e.stopped_since(gen) => Some(false) };
+    if let Some(go) = ended { return go }
     let now = now_s();
     ag.commit_events(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", now, ag.seq()),"tone":"info","kind":"checkpoint","summary":"Saving the last turn's checkpoint\u{2026}","at":now})]).await;
-    let _ = tokio::time::timeout(HIST_JOB.saturating_sub(say), wait(e)).await;
+    tokio::select! { _ = tokio::time::timeout(HIST_JOB.saturating_sub(say), wait(e.clone())) => true, _ = e.stopped_since(gen) => false }
 }
 struct EndDone(Arc<HistEnds>);
 impl Drop for EndDone { fn drop(&mut self) { self.0.n.fetch_sub(1, Relaxed); self.0.done.notify_waiters() } }
@@ -608,7 +617,7 @@ impl Actor {
         if let Some(ph) = first_title { let (ag, th2) = (self.ag.clone(), th.clone()); tokio::spawn(async move { if let Err(e) = ag.retitle(&th2, Some(&ph), false).await { eprintln!("titles: {th2}: kept the first line: {e}") } }); }
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
-        self.jobs_start(&cwd, &msg); self.settle_ends().await;
+        self.jobs_start(&cwd, &msg); if !self.settle_ends().await { return Ok(()) } // a Stop while it waited for the checkpoint: no agent is started, the Stop ends the turn
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
         let text_ref = { let w = self.ag.world().await; let model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
@@ -653,7 +662,7 @@ impl Actor {
         let handed = if taken { String::new() } else { self.handed(&mut ev, now).await }; // what was queued is `text` when it is all taken; otherwise the hand-overs go with this turn and the rest stays
         let text = if handed.is_empty() { text } else { format!("{handed}\n\n{text}") };
         self.commit(ev).await;
-        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); self.settle_ends().await;
+        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); if !self.settle_ends().await { return Ok(()) }
         if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
         Ok(())
     }
@@ -758,7 +767,7 @@ impl Actor {
         // Ride.start: an idle thread starts a turn with the waiting rides
         self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone();
         let mut ev = codex::ride_done(&th, &v, "with a new turn", now); ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); self.settle_ends().await;
+        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); if !self.settle_ends().await { return Ok(()) }
         let input = codex::ride_input(&v);
         if self.codex { self.codex_run(&t, &cwd, &input).await } else { let msg = hub_id("w", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &input, &input, now).await }
         Ok(())
@@ -772,7 +781,7 @@ impl Actor {
         let Some(t) = t else { return }; if ride.is_empty() || t.archived || t.deleted || providers::driver(&t.provider).is_none() { return }
         let now = now_s(); let mut ev = codex::ride_done(&th, &ride, "with a new turn", now);
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); self.settle_ends().await;
+        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); if !self.settle_ends().await { return }
         self.codex_run(&t, &cwd, &codex::ride_input(&ride)).await;
     }
 
@@ -854,7 +863,7 @@ impl Actor {
     /// Hub.post.go: a new turn's design baseline (checkpoint 0 and a step), taken in the background.
     /// Before a turn's input reaches the agent: wait for the earlier turn's end captures. Only this thread's start waits (the actor is this thread's own task): when it has to, the caller
     /// is answered first, the events being durable, so a client that sent the message is not held (and with it everything else it asks on its connection) for the capture.
-    async fn settle_ends(&mut self) {
+    async fn settle_ends(&mut self) -> bool {
         if self.hist_ends.n.load(Relaxed) > 0 { if let Some(re) = self.early.take() { let _ = re.send(Ok(())); } }
         ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone(), CKPT_SAY).await
     }

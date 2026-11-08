@@ -86,3 +86,50 @@ async fn a_turn_waiting_for_the_checkpoint_holds_back_nothing_else_and_starts_af
     assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "please write held.txt").count(), 1, "the message is posted once");
     ag.shutdown();
 }
+
+/// A start that has to wait and then fails is shown like any failed start: the turn ends `failed` with the reason in an activity line, and the message stays. (The caller was answered at the wait,
+/// so nothing comes back to it: a failed start never came back through the reply anyway, it is committed as events.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_start_after_the_wait_is_shown_as_a_failed_turn_with_its_reason() {
+    let none = dir("ckpt-fail-bin");                                                                  // no claude here: the start fails
+    let (hub, ag, _home, _work) = start("ckpt-fail", |w| base_log(w, 1, ""), |_| Cli::standin(&none)).await;
+    let held = ag.ends_of(T1); held.n.fetch_add(1, Relaxed);
+    let from = len(&hub).await;
+    let r = tokio::time::timeout(Duration::from_secs(5), rpc(&hub, "turn.start", json!({"thread":T1,"text":"please write nothing.txt"}))).await.expect("answered while it waits");
+    assert_eq!(r["ok"], true);
+    until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "checkpoint")).await;
+    assert!(!until(&hub, from, 1, |ev| ev.iter().any(|e| turn_is(e, "failed"))).await.iter().any(|e| turn_is(e, "failed")), "nothing fails while the start waits");
+    held.n.fetch_sub(1, Relaxed); held.done.notify_waiters();
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "failed"))).await;
+    assert!(ev.iter().any(|e| turn_is(e, "failed")), "the turn ends failed: {ev:?}");
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().map_or(false, |s| s.contains("could not start claude"))), "with the reason in the thread: {ev:?}");
+    assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "please write nothing.txt").count(), 1, "and the message stays");
+    ag.shutdown();
+}
+
+/// Stop while the turn waits for the checkpoint: it is answered at once, the start is cancelled (no agent is spawned, even once the capture ends), the turn ends `interrupted`, the message
+/// stays, and the thread takes the next message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stop_while_a_turn_waits_for_the_checkpoint_cancels_the_start() {
+    let bin = dir("ckpt-stop-bin"); script(&bin, "claude", WRITER);
+    let (hub, ag, _home, work) = start("ckpt-stop", |w| base_log(w, 1, ""), |_| Cli::standin(&bin)).await;
+    let held = ag.ends_of(T1); held.n.fetch_add(1, Relaxed);
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":"please write stopped.txt"})).await["ok"], true);
+    until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "checkpoint")).await;      // "Saving the last turn's checkpoint…" is on screen
+    let t = Instant::now(); let r = tokio::time::timeout(Duration::from_secs(5), rpc(&hub, "turn.interrupt", json!({"thread":T1}))).await.expect("Stop is answered while the start waits");
+    assert_eq!(r["ok"], true); assert!(t.elapsed() < Duration::from_secs(1), "Stop took {:?}", t.elapsed());
+    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| turn_is(e, "interrupted"))).await;
+    assert!(ev.iter().any(|e| turn_is(e, "interrupted")), "the turn ends interrupted: {ev:?}");
+    held.n.fetch_sub(1, Relaxed); held.done.notify_waiters();                                           // the capture ends: nothing starts
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(!work.join("stopped.txt").exists(), "no agent was spawned for the stopped turn");
+    let ev = log_from(&hub, from).await;
+    assert!(!ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed")), "the stopped turn neither completes nor fails: {ev:?}");
+    assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "please write stopped.txt").count(), 1, "the message stays");
+    // the thread is not wedged: the next message runs
+    assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":"please write next.txt"})).await["ok"], true);
+    for _ in 0..100 { if work.join("next.txt").exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    assert!(work.join("next.txt").exists(), "the next turn starts");
+    ag.shutdown();
+}
