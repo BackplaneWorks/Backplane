@@ -32,3 +32,56 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: probe, path: out }
+
+  build:
+    if: inputs.jobs != 'probe'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/host
+            native/gpui
+          shared-key: e2e-macos
+      - name: build the darwin-arm64 hub and client
+        run: |
+          export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
+          (cd native/host && cargo build --release --bin backplane-hub --bin bp-sh) & a=$!
+          (cd native/gpui && cargo build --release) & b=$!
+          wait $a; ra=$?; wait $b; rb=$?; [ $ra = 0 ] && [ $rb = 0 ]
+          mkdir -p dist; cp native/host/target/release/backplane-hub native/host/target/release/bp-sh native/gpui/target/release/backplane-gpui dist/
+          echo "$BACKPLANE_COMMIT" > dist/COMMIT; ls -l dist
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist }
+
+  hub:
+    needs: build
+    if: inputs.jobs == 'hub' || inputs.jobs == 'all'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: FreeCAD and KiCad
+        run: brew install --cask freecad kicad
+      - name: macOS hub rows
+        run: |
+          set -o pipefail
+          chmod +x dist/*; mkdir -p out; export HOME_BEFORE=$HOME
+          echo "hub commit $(cat dist/COMMIT)"
+          ok=0
+          node test/e2e/mac-hub-rows.mjs "$PWD/dist/backplane-hub" "$PWD/out/hub-rows" 3801 2>&1 | tee out/hub-rows.txt || ok=1
+          FC=/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd
+          node test/e2e/mac-effects.mjs "$PWD/dist/backplane-hub" "$PWD/out/effects" 3860 2>&1 | tee out/effects.txt || ok=1
+          node test/e2e/mac-c03.mjs "$PWD/dist/backplane-hub" "$PWD/out/c03" 3840 "$FC" 2>&1 | tee out/c03.txt || ok=1
+          node test/e2e/mac-c03-agent.mjs "$PWD/dist/backplane-hub" "$PWD/out/c03-agent" 3850 "$FC" 2>&1 | tee out/c03-agent.txt || ok=1
+          KICAD_CLI=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli node test/e2e/cad-rows.mjs "$PWD/dist/backplane-hub" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
+          node test/e2e/settings-walk.mjs "$PWD/dist/backplane-hub" "$PWD/out/walk" 3830 2>&1 | tee out/walk.txt || ok=1
+          exit $ok
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: hub-rows, path: out, include-hidden-files: true }
