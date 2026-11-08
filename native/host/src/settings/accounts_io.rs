@@ -524,8 +524,12 @@ impl Accounts {
     /// that was replaced cannot clear its successor's record.
     pub fn run_on(&self, th: &str, id: &str) -> u64 { let mut g = self.inner.lock().unwrap(); g.runs_seq += 1; let t = g.runs_seq; g.runs_on.insert(th.to_string(), (id.to_string(), t)); t }
     pub fn run_off(&self, th: &str, token: u64) { let mut g = self.inner.lock().unwrap(); if g.runs_on.get(th).map_or(false, |(_, t)| *t == token) { g.runs_on.remove(th); } }
-    /// Tests: a routine check (the 5-minute refresh) holds profile `id` until `release_check`, so a start on it waits in launch_plan, running and on no login.
-    #[cfg(test)] pub fn hold_check(&self, id: &str) -> bool { self.begin(id, "refresh", false).is_ok() }
+    /// Tests: a routine check (the 5-minute refresh) holds profile `id` until `release_check`, so a start on it waits in launch_plan, running and on no login. Taken once the
+    /// profile is free: the hub's own refresh checks a planted profile on its first tick, and under load that check can still be running here (it failed a full gate).
+    #[cfg(test)] pub async fn hold_check(&self, id: &str) -> bool {
+        let end = std::time::Instant::now() + Duration::from_secs(120);
+        loop { if self.begin(id, "refresh", false).is_ok() { return true } if std::time::Instant::now() >= end { return false } tokio::time::sleep(Duration::from_millis(20)).await }
+    }
     #[cfg(test)] pub fn release_check(&self, id: &str) { self.end(id, "refresh") }
     /// The profile thread `th`'s live provider process runs on; None while none runs on a saved profile (a turn still choosing its login, or one on the CLI's own).
     pub fn runs_on(&self, th: &str) -> Option<String> { self.inner.lock().unwrap().runs_on.get(th).map(|(id, _)| id.clone()) }
