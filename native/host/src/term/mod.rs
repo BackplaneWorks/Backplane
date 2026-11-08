@@ -13,6 +13,7 @@ pub mod emb;
 #[cfg(windows)] #[path = "pty_windows.rs"] pub mod pty;
 pub mod task;
 pub mod teach;
+pub mod stream;
 pub mod tools;
 pub mod vt;
 
@@ -32,7 +33,15 @@ const MAX_SKIPPED: usize = 4096;
 pub const ALL: u64 = u64::MAX;
 
 struct Shell { pid: i32, pty: Arc<pty::Pty> }
-struct Screen { title: String, vt: Vt, seen: bool, state: String, pid: i32 }
+/// One terminal's screen and its stream: `gen` names this run of it (a new process or a screen read back from disk is a new one), `off` is how many
+/// bytes it printed in this run, `ring` the newest of them (at most RING), so a client that held up to an offset takes only what came after (stream.rs).
+struct Screen { title: String, vt: Vt, seen: bool, state: String, pid: i32, gen: u64, off: u64, ring: std::collections::VecDeque<u8>, dirty: bool, cwd: String, at: u64 }
+impl Screen {
+    fn new(title: &str, vt: Vt, seen: bool, state: &str, pid: i32, cwd: &str) -> Screen {
+        Screen { title: title.into(), vt, seen, state: state.into(), pid, gen: stream::gen(), off: 0, ring: Default::default(), dirty: false, cwd: cwd.into(), at: now_s() }
+    }
+    fn took(&mut self, bs: &[u8]) { self.off += bs.len() as u64; stream::keep(&mut self.ring, bs); self.dirty = true; }
+}
 #[derive(Default)]
 struct Inner { shells: HashMap<String, Shell>, screens: HashMap<String, Screen>, finished: std::collections::VecDeque<String>,
     /// (client, key) whose output frames were skipped: the client's copy of that screen is stale until a snapshot goes out. Bounded by clients x terminals.
@@ -52,7 +61,8 @@ pub fn start(hub: Arc<Hub>) {
     let t = Arc::new(Terms { hub: hub.clone(), inner: Mutex::new(Inner::default()), home, shell });
     TERMS.get_or_init(Default::default).lock().unwrap().insert(hub.cfg.home.clone(), t.clone());
     // a skipped client gets its snapshot even when the terminal prints nothing more
-    { let t = t.clone(); tokio::spawn(async move { let mut iv = tokio::time::interval(std::time::Duration::from_millis(500)); loop { iv.tick().await; t.catch_up().await } }); }
+    { let t = t.clone(); tokio::spawn(async move { let mut iv = tokio::time::interval(std::time::Duration::from_millis(500)); let mut n = 0u64;
+    loop { iv.tick().await; t.catch_up().await; n += 1; if n % 4 == 0 { t.save_dirty().await } } }); }
     hub.register_rpc(Arc::new(TermRpc(t)));
     browser::start(&hub);
 }
@@ -68,6 +78,12 @@ fn frame(key: &str, pid: Option<i32>, b: &[u8], reset: Option<(usize, usize)>) -
     if let Some((c, r)) = reset { o.insert("reset".into(), json!([c, r])); }
     Value::Object(o)
 }
+/// A frame of the screen's stream: `g` its run, `o` the offset its bytes start at (a snapshot's `o` is the offset it shows the screen at).
+fn sframe(key: &str, sc: &Screen, pid: Option<i32>, b: &[u8], reset: Option<(usize, usize)>, o: u64) -> Value {
+    let mut f = frame(key, pid, b, reset); f["g"] = json!(sc.gen); f["o"] = json!(o); f
+}
+/// A terminal's state changed (running, done N, exited N, stopped): every client hears it, as a frame with no bytes.
+fn state_frame(key: &str, sc: &Screen) -> Value { let mut f = frame(key, None, &[], None); f["state"] = json!(sc.state); f["g"] = json!(sc.gen); f["o"] = json!(sc.off); f }
 
 impl Terms {
     fn send_to(&self, client: u64, f: Value) { if client == ALL { self.hub.push_all(&f) } else { self.hub.push(client, f); } }
@@ -85,7 +101,7 @@ impl Terms {
         let pid = sp.pty.pid; let (mut out, exit) = (sp.output, sp.exit);
         { let mut g = self.inner.lock().await;
           g.shells.insert(key.into(), Shell { pid, pty: Arc::new(sp.pty) });
-          g.screens.insert(key.into(), Screen { title: title.into(), vt: Vt::new(cols as usize, rows as usize), seen, state: "running".into(), pid }); }
+          g.screens.insert(key.into(), Screen::new(title, Vt::new(cols as usize, rows as usize), seen, "running", pid, cwd)); }
         let (me, k) = (self.clone(), key.to_string());
         tokio::spawn(async move {
             while let Some(chunk) = out.recv().await { me.fed(&k, pid, &chunk).await }
@@ -102,19 +118,22 @@ impl Terms {
         let live = g.shells.get(key).map_or(pid == 0, |s| s.pid == pid);
         if !live { return }
         let emb = emb::is_key(key);
-        let replies = match g.screens.get_mut(key) {
+        let (replies, f, moved) = match g.screens.get_mut(key) {
             Some(sc) if sc.pid == pid => {
-                sc.vt.feed(bs);
+                let o = sc.off; sc.vt.feed(bs); sc.took(bs);
                 let r = sc.vt.replies().to_vec(); sc.vt.drain();
-                if emb { sc.seen = emb::stays(sc.seen, &sc.state); sc.state = emb::after(&sc.state, bs); r } else { vec![] }
+                let was = sc.state.clone();
+                let r = if emb { sc.seen = emb::stays(sc.seen, &sc.state); sc.state = emb::after(&sc.state, bs); r } else { vec![] };
+                (r, sframe(key, sc, Some(pid), bs, None, o), (sc.state != was).then(|| state_frame(key, sc)))
             }
-            _ => vec![],
+            _ => (vec![], frame(key, Some(pid), bs, None), None),
         };
         if !replies.is_empty() { if let Some(sh) = g.shells.get(key) { sh.pty.write(replies); } }
         // droppable: a client over half its outbox is skipped and marked, not dropped
-        let f = frame(key, Some(pid), bs, None); let bytes = bs.len() * 4 + 96;
+        let bytes = bs.len() * 4 + 96;
         for c in self.hub.clients() { if !self.hub.push_budgeted(c, f.clone(), bytes) && g.skipped.len() < MAX_SKIPPED { g.skipped.insert((c, key.to_string())); } }
         drop(g);
+        if let Some(sf) = moved { self.hub.push_all(&sf) }
         self.catch_up().await;
     }
     /// Each skipped client gets one snapshot of the screen it missed as soon as its outbox takes one (a budgeted push: over half full it is
@@ -125,7 +144,7 @@ impl Terms {
         let marks: Vec<(u64, String)> = g.skipped.iter().cloned().collect();
         for (c, key) in marks {
             let Some(sc) = g.screens.get(&key) else { g.skipped.remove(&(c, key)); continue };
-            let snap = emb::snap(&sc.vt); let f = frame(&key, None, &snap, Some((sc.vt.cols(), sc.vt.rows())));
+            let snap = emb::snap(&sc.vt); let f = sframe(&key, sc, None, &snap, Some((sc.vt.cols(), sc.vt.rows())), sc.off);
             if self.hub.push_budgeted(c, f, snap.len() * 4 + 96) { g.skipped.remove(&(c, key)); }
         }
     }
@@ -134,10 +153,16 @@ impl Terms {
     async fn gone(&self, key: &str, pid: i32, code: i32) {
         let mut g = self.inner.lock().await;
         if g.shells.get(key).map_or(false, |s| s.pid == pid) { g.shells.remove(key); }
-        if emb::is_key(key) {
-            if let Some(sc) = g.screens.get_mut(key) { if sc.pid == pid { sc.seen = emb::stays(sc.seen, &sc.state); sc.state = format!("exited {code}"); self.save(key, sc) } }
-        }
+        let mut sf = None;
+        if let Some(sc) = g.screens.get_mut(key) { if sc.pid == pid {
+            sc.seen = emb::stays(sc.seen, &sc.state);
+            // a stopped one stays stopped: its end is the hang-up's
+            if sc.state != "stopped" { sc.state = format!("exited {code}") }
+            if emb::is_key(key) { self.save(key, sc); sc.dirty = false }
+            sf = Some(state_frame(key, sc));
+        } }
         Self::finish(&mut g, key);
+        drop(g); if let Some(f) = sf { self.hub.push_all(&f) }
     }
     /// A finished terminal's screen stays in memory only among the newest KEEP_FINISHED (chat terminals are on disk; a shell's is not kept).
     fn finish(g: &mut Inner, key: &str) {
@@ -151,6 +176,13 @@ impl Terms {
         let name = crate::plat::fs::file_name(key); let (path, tmp) = (self.home.join("terms").join(&*name), self.home.join("terms").join(format!("{name}.tmp")));
         if std::fs::write(&tmp, b).is_ok() { let _ = crate::plat::fs::rename(&tmp, &path); }
     }
+    /// Running chat terminals' screens go to disk now and then (every 2 s at most, only when they printed), so a hub that stops while one runs
+    /// still has its last screen; read back, it is a stopped one.
+    pub async fn save_dirty(&self) {
+        let mut g = self.inner.lock().await;
+        let keys: Vec<String> = g.screens.iter().filter(|(k, sc)| sc.dirty && emb::is_key(k)).map(|(k, _)| k.clone()).collect();
+        for k in keys { if let Some(sc) = g.screens.get_mut(&k) { self.save(&k, sc); sc.dirty = false } }
+    }
     /// Et.load: the screen from its file when the actor does not hold it (the hub started again since it ran).
     fn load(&self, g: &mut Inner, key: &str) {
         if g.screens.contains_key(key) || !emb::key_ok(key) { return }
@@ -160,7 +192,10 @@ impl Terms {
         let mut it = head.split('\t'); let mut xy = it.next().unwrap_or("").split('x');
         let (c, r) = (emb::cols(emb::num(xy.next().unwrap_or(""))) as usize, emb::rows(emb::num(xy.next().unwrap_or(""))) as usize);
         let mut vt = Vt::new(c, r); vt.feed(body);
-        g.screens.insert(key.into(), Screen { title: String::new(), vt, seen: true, state: it.next().unwrap_or("").to_string(), pid: 0 });
+        // a terminal that ran when the hub stopped did not end by itself: it was stopped
+        let state = stream::read_back(it.next().unwrap_or(""));
+        let mut sc = Screen::new("", vt, true, &state, 0, ""); sc.took(body); sc.dirty = false;
+        g.screens.insert(key.into(), sc);
         Self::finish(g, key); // a screen read back is a finished one: it counts against the cap too
     }
 
@@ -181,7 +216,11 @@ impl Terms {
         let (cols, rows) = (cols.clamp(1, vt::MAX_COLS as u16), rows.clamp(1, vt::MAX_ROWS as u16));
         let mut g = self.inner.lock().await;
         if let Some(sh) = g.shells.get(key) { sh.pty.resize(cols, rows) }
-        if let Some(sc) = g.screens.get_mut(key) { sc.vt.resize(cols as usize, rows as usize) }
+        // a new size is news for every client that shows it: the screen as it now is, at that size (the program redraws after)
+        let mut f = None;
+        if let Some(sc) = g.screens.get_mut(key) { if (sc.vt.cols(), sc.vt.rows()) != (cols as usize, rows as usize) {
+            sc.vt.resize(cols as usize, rows as usize); f = Some(sframe(key, sc, None, &emb::snap(&sc.vt), Some((sc.vt.cols(), sc.vt.rows())), sc.off)) } }
+        drop(g); if let Some(f) = f { self.hub.push_all(&f) }
     }
     /// A chat terminal's command on a pty of its own (TRun); `again` hangs up the one running first.
     pub async fn run(self: &Arc<Self>, key: &str, title: &str, cwd: &str, cmd: &str, cols: u32, rows: u32, again: bool) { self.run_with(crate::copy::on(), key, title, cwd, cmd, cols, rows, again).await }
@@ -201,14 +240,15 @@ impl Terms {
         let args = vec!["-lc".to_string(), emb::script(cmd, &self.shell)];
         match self.launch(key, &self.shell, &args, cwd, c as u16, r as u16, title, false).await {
             Ok(_) => {}
-            Err(e) => { self.inner.lock().await.screens.insert(key.into(), Screen { title: title.into(), vt: Vt::new(c as usize, r as usize), seen: false, state: "failed to start".into(), pid: 0 });
+            Err(e) => { self.inner.lock().await.screens.insert(key.into(), Screen::new(title, Vt::new(c as usize, r as usize), false, "failed to start", 0, cwd));
                 self.hub.push_all(&frame(key, Some(0), format!("[could not start a shell: {e}]\r\n").as_bytes(), None)); }
         }
     }
     /// TSnap: bytes that draw the screen on a blank terminal, to one client (ALL: every client).
     pub async fn snap(&self, client: u64, key: &str) {
         let mut g = self.inner.lock().await; self.load(&mut g, key);
-        let f = match g.screens.get(key) { Some(sc) => frame(key, None, &emb::snap(&sc.vt), Some((sc.vt.cols(), sc.vt.rows()))), None => frame(key, None, &[], Some((emb::cols(0) as usize, emb::rows(0) as usize))) };
+        let f = match g.screens.get(key) { Some(sc) => { let mut f = sframe(key, sc, None, &emb::snap(&sc.vt), Some((sc.vt.cols(), sc.vt.rows())), sc.off); f["state"] = json!(sc.state); f }
+            None => frame(key, None, &[], Some((emb::cols(0) as usize, emb::rows(0) as usize))) };
         drop(g); self.send_to(client, f);
     }
     /// TRead: ("state", report) and the agent has now seen it; None: no such terminal.
@@ -230,12 +270,51 @@ impl Terms {
     pub async fn kill(&self, key: &str) {
         let mut g = self.inner.lock().await;
         if let Some(sh) = g.shells.get(key) { sh.pty.hangup(); let p = sh.pty.clone(); tokio::spawn(async move { tokio::time::sleep(std::time::Duration::from_secs(3)).await; p.force() }); }
-        if let Some(sc) = g.screens.get_mut(key) { if sc.state == "running" { sc.state = "stopped".into() } }
+        let mut sf = None;
+        let live = g.shells.contains_key(key);
+        if let Some(sc) = g.screens.get_mut(key) { if live || sc.state == "running" { if sc.state != "stopped" { sc.state = "stopped".into(); sf = Some(state_frame(key, sc)) } } }
+        drop(g); if let Some(f) = sf { self.hub.push_all(&f) }
     }
+    /// Stream.read: what a client that holds run `g` up to `from` needs to hold the screen as it is now: the bytes since, or a snapshot.
+    /// None: no such terminal.
+    pub async fn stream_read(&self, key: &str, g: u64, from: Option<u64>) -> Option<Value> {
+        let mut gd = self.inner.lock().await; self.load(&mut gd, key);
+        let sc = gd.screens.get(key)?; let running = gd.shells.contains_key(key);
+        let mut o = json!({"key":key,"g":sc.gen,"o":sc.off,"state":sc.state,"cols":sc.vt.cols(),"rows":sc.vt.rows(),"title":view_title(sc),"running":running});
+        match stream::since(sc.gen, sc.off, &sc.ring, g, from) {
+            Some(b) => { o["from"] = json!(from.unwrap_or(0)); o["b"] = json!(b64(&b)); }
+            None => { o["reset"] = json!([sc.vt.cols(), sc.vt.rows()]); o["b"] = json!(b64(&emb::snap(&sc.vt))); }
+        }
+        Some(o)
+    }
+    /// Every terminal the hub holds now (running ones and the finished screens it keeps), newest first; `pre` keeps the keys that start with it.
+    pub async fn list(&self, pre: &str) -> Vec<Value> {
+        let g = self.inner.lock().await;
+        let mut v: Vec<(u64, Value)> = g.screens.iter().filter(|(k, _)| k.starts_with(pre)).map(|(k, sc)| (sc.at, json!({"key":k,"kind":kind_of(k),"thread":thread_of(k),"title":view_title(sc),
+            "state":sc.state,"running":g.shells.contains_key(k),"cols":sc.vt.cols(),"rows":sc.vt.rows(),"g":sc.gen,"o":sc.off,"cwd":sc.cwd,"at":sc.at * 1000}))).collect();
+        v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1["key"].as_str().cmp(&b.1["key"].as_str()))); v.into_iter().map(|x| x.1).collect()
+    }
+    /// A new shell of its own for a client (a phone's Terminals list): key `s:<project>:<n>` (`s::<n>` for the hub's home folder), in `cwd`.
+    pub async fn new_shell(self: &Arc<Self>, project: &str, cwd: &str, cols: u16, rows: u16) -> Result<String, String> {
+        let (cols, rows) = (cols.clamp(1, vt::MAX_COLS as u16), rows.clamp(1, vt::MAX_ROWS as u16));
+        if self.inner.lock().await.shells.len() >= MAX_SHELLS { return Err("too many terminals are open".into()) }
+        let key = format!("s:{project}:{}", stream::gen());
+        let title = std::path::Path::new(cwd).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "shell".into());
+        self.launch(&key, &self.shell, &["-l".to_string()], cwd, cols, rows, &title, true).await.map_err(|e| format!("could not start {} in {}: {}", self.shell, cwd, e))?;
+        Ok(key)
+    }
+    pub async fn known(&self, key: &str) -> bool { self.read_known(key).await }
     /// The chat terminals of a thread that are running now.
     pub async fn running_of(&self, thread: &str) -> Vec<String> { let pre = format!("x:{thread}:"); self.inner.lock().await.shells.keys().filter(|k| k.starts_with(&pre)).cloned().collect() }
     pub async fn shell_count(&self) -> usize { self.inner.lock().await.shells.len() }
 }
+
+fn b64(b: &[u8]) -> String { use base64::Engine; base64::engine::general_purpose::STANDARD.encode(b) }
+/// chat (`x:<thread>:<id>`), shell (a client's own, `s:<project>:<n>`) or panel (a thread's floating terminal, keyed by the thread).
+pub fn kind_of(k: &str) -> &'static str { if emb::is_key(k) { "chat" } else if k.starts_with("s:") { "shell" } else { "panel" } }
+/// The thread a terminal belongs to ("" for a client's own shell).
+pub fn thread_of(k: &str) -> &str { if emb::is_key(k) { k[2..].rsplitn(2, ':').nth(1).unwrap_or("") } else if k.starts_with("s:") { "" } else { k } }
+fn view_title(sc: &Screen) -> String { if !sc.vt.title().is_empty() { sc.vt.title().to_string() } else { sc.title.clone() } }
 
 // ---- reading the log for what the model does not index yet ----
 

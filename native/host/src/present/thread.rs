@@ -245,8 +245,21 @@ fn stops(es: &[Ent], running: bool, end: u8, marks: &dyn Fn(&str) -> u8) -> Hash
     m
 }
 
+/// A chat terminal's key and its entry's summary "title\nCOLSxROWS\ncommand", as term/emb.rs has them (this file is also built without the
+/// term lane, by screen-audit; term/tests.rs holds the two to the same answers).
+pub fn term_key(thread: &str, id: &str) -> String { format!("x:{thread}:{id}") }
+pub fn term_summary(s: &str) -> (String, u32, u32, String) {
+    let num = |s: &str| s.bytes().filter(u8::is_ascii_digit).fold(0u32, |a, b| (a * 10 + (b - b'0') as u32).min(100000));
+    let clamp = |n: u32, lo: u32, hi: u32, d: u32| if n == 0 { d } else { n.clamp(lo, hi) };
+    let mut it = s.split('\n'); let title = it.next().unwrap_or("").to_string(); let mut xy = it.next().unwrap_or("").split('x');
+    let (c, r) = (clamp(num(xy.next().unwrap_or("")), 20, 200, 80), clamp(num(xy.next().unwrap_or("")), 3, 60, 24));
+    (title, c, r, it.collect::<Vec<_>>().join("\n"))
+}
 /// Mob.act.k for an activity that does not fold: its tone, its name and what it says
 pub(crate) fn plain_act(e: &Ent) -> Value {
+    // a chat terminal (term/emb.rs): a card in the timeline, its screen streamed by `term` frames under `key` (set by thread_object_checked)
+    if e.role == "term" && e.akind == "terminal" { let (title, cols, rows, cmd) = term_summary(&e.text);
+        return json!({"id": e.id, "kind": "term", "text": title, "title": title, "cols": cols, "rows": rows, "cmd": cmd}) }
     let text = if e.akind == "result" && e.text.trim().is_empty() { "The turn ended with an error; the agent gave no reason.".to_string() } else if e.text == e.akind { String::new() } else { e.text.clone() };
     let tone = if e.akind == "restart" { "info restart".to_string() } else { e.role.clone() };
     json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text})
@@ -424,6 +437,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     // a sent message's references (@bot >thread %project #room &model) as cards the client draws under it
     let mut entries = entries;
     for e in entries.iter_mut() {
+        if e["kind"] == "term" { let id = e["id"].as_str().unwrap_or("").to_string(); e["key"] = json!(term_key(thread, &id)); }
         if e["kind"] == "user" { let text = e["text"].as_str().unwrap_or("").to_string(); let mut refs = crate::session::composer::mention::refs_in(st, hub, &text);
             if text.contains('$') { let (cwd, prov, iso) = crate::session::composer::mention::thread_skill_facts(st, thread); refs.extend(crate::agents::skills::chips(&crate::agents::skills::popup_index(&cwd), &text, &prov, iso)); }
             if !refs.is_empty() { e["refs"] = Value::Array(refs); } }

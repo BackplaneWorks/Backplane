@@ -170,7 +170,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     let (hub, home, _work) = hub_in("disk").await; let key = "x:t1:xdisk-1";
     let mut vt = Vt::new(30, 4); vt.feed(b"saved screen\r\nline2"); let mut b = b"30x4\tdone 0\n".to_vec(); b.extend(emb::snap(&vt)); std::fs::write(home.join("terms").join(&*crate::plat::fs::file_name((key).as_ref())), b).unwrap();
     let t = get(&hub).unwrap(); let (state, report) = t.read(key).await.unwrap();
-    assert_eq!(state, "done 0"); assert!(report.contains("saved screen\nline2"), "{report}");
+    assert_eq!(state, "exited 0", "its command had ended; its shell went with the hub"); assert!(report.contains("saved screen\nline2"), "{report}");
     assert!(t.read("../../etc/passwd").await.is_none(), "keys never leave the terms folder");
 }
 
@@ -184,7 +184,7 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
 }
 #[tokio::test] async fn only_the_newest_finished_screens_stay_in_memory() {
     let mut g = Inner::default();
-    for i in 0..(KEEP_FINISHED + 10) { let k = format!("x:t:{i}"); g.screens.insert(k.clone(), Screen { title: String::new(), vt: Vt::new(80, 24), seen: true, state: "exited 0".into(), pid: 0 }); Terms::finish(&mut g, &k) }
+    for i in 0..(KEEP_FINISHED + 10) { let k = format!("x:t:{i}"); g.screens.insert(k.clone(), Screen::new("", Vt::new(80, 24), true, "exited 0", 0, "")); Terms::finish(&mut g, &k) }
     assert_eq!(g.screens.len(), KEEP_FINISHED); assert!(g.screens.contains_key(&format!("x:t:{}", KEEP_FINISHED + 9))); assert!(!g.screens.contains_key("x:t:0"));
 }
 #[tokio::test] async fn an_entry_is_found_through_the_threads_own_rows_with_its_whole_command() {
@@ -253,4 +253,111 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     assert_eq!(rpc(&hub, "bots.task", json!({"bot":"b1","op":"delete","slug":"login"})).await["ok"], true);
     assert!(d.tasks_view("b1").await["items"].as_array().unwrap().is_empty());
     assert_eq!(d.tasks_view("b2").await["items"].as_array().unwrap().len(), 1);
+}
+
+#[test] fn the_presenter_reads_a_terminal_entry_as_emb_does() {
+    for s in ["Pick\n100x30\necho a\necho b", "t\nbad\nc", "x\n5x1\n", "", "only"] {
+        let p = emb::parse_summary(s); assert_eq!(crate::present::thread::term_summary(s), (p.title, p.cols, p.rows, p.cmd), "{s:?}");
+    }
+    assert_eq!(crate::present::thread::term_key("t1", "x9"), emb::key("t1", "x9"));
+}
+
+/// The bytes a client holds of `key`, by the offset rule phones use (stream::merge): frames of another run, or past a gap, are not taken.
+fn take_frames(rx: &Tap, key: &str, g: &mut u64, held: &mut u64, acc: &mut Vec<u8>, gaps: &mut u32, states: &mut Vec<String>) {
+    for v in rx.take() { if v["t"] != "term" || v["thread"] != key { continue }
+        if let Some(st) = v["state"].as_str() { if v["b"].as_array().map_or(true, |b| b.is_empty()) { states.push(st.into()); continue } }
+        let b: Vec<u8> = v["b"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as u8).collect();
+        let (Some(fg), Some(o)) = (v["g"].as_u64(), v["o"].as_u64()) else { continue };
+        if v.get("reset").is_some() { continue } // a snapshot: a phone would draw it; here only the raw stream is compared
+        if fg != *g { *gaps += 1; continue }
+        match stream::merge(*held, o, b.len()) { stream::Merge::Take(i) => { acc.extend(&b[i..]); *held = o + b.len() as u64 } stream::Merge::Skip => {} stream::Merge::Gap => *gaps += 1 }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test] async fn a_terminal_streams_with_offsets_and_a_client_resumes_from_where_it_was() {
+    let (hub, _home, _work) = hub_in("stream").await; let rx = Tap::new(&hub, 1);
+    let (ok, o) = tools::call(&hub, "t1", "terminal_open", &json!({"command":"for i in 1 2 3 4 5; do echo line-$i; done","title":"S","cols":60,"rows":10})).await.unwrap(); assert!(ok);
+    let key = emb::key("t1", o["id"].as_str().unwrap());
+    let mut watch = std::collections::HashSet::new();
+    // a phone watches from nothing: a snapshot of the run, and where it stands
+    let r = crate::data::term::call(&hub, &mut watch, "term.watch", &json!({"key":key})).await.unwrap().unwrap();
+    assert!(watch.contains(&key)); assert!(r["reset"].is_array() && r["g"].as_u64().unwrap() > 0, "{r}");
+    let g0 = r["g"].as_u64().unwrap();
+    // the live frames say where their bytes start: taken in order they are the whole stream, with no gap
+    let (mut g, mut held, mut acc, mut gaps, mut states) = (g0, 0u64, vec![], 0u32, vec![]);
+    let t = get(&hub).unwrap();
+    assert!(wait(10, || { take_frames(&rx, &key, &mut g, &mut held, &mut acc, &mut gaps, &mut states); String::from_utf8_lossy(&acc).contains("line-5") }).await, "{}", String::from_utf8_lossy(&acc));
+    assert_eq!(gaps, 0); assert!(wait(5, || states.iter().any(|s| s == "done 0") || { take_frames(&rx, &key, &mut g, &mut held, &mut acc, &mut gaps, &mut states); false }).await, "the command's end is a state frame: {states:?}");
+    // a phone that held up to line-2 resumes: only what came after, from its offset
+    let all = String::from_utf8_lossy(&acc).into_owned(); let cut = all.find("line-3").unwrap() as u64;
+    let r = crate::data::term::call(&hub, &mut watch, "term.read", &json!({"key":key,"g":g0,"from":cut})).await.unwrap().unwrap();
+    assert!(r.get("reset").is_none(), "{r}"); assert_eq!(r["from"].as_u64(), Some(cut));
+    use base64::Engine; let tail = base64::engine::general_purpose::STANDARD.decode(r["b"].as_str().unwrap()).unwrap();
+    assert!(String::from_utf8_lossy(&tail).starts_with("line-3") && !String::from_utf8_lossy(&tail).contains("line-2"));
+    assert_eq!(cut + tail.len() as u64, r["o"].as_u64().unwrap(), "from + what it got = where the stream stands");
+    // another run (or an offset never reached) gets a snapshot instead
+    let r = crate::data::term::call(&hub, &mut watch, "term.read", &json!({"key":key,"g":g0 - 1,"from":cut})).await.unwrap().unwrap(); assert!(r["reset"].is_array());
+    let r = crate::data::term::call(&hub, &mut watch, "term.read", &json!({"key":key,"g":g0,"from":1u64 << 40})).await.unwrap().unwrap(); assert!(r["reset"].is_array());
+    // typed through the data API, echoed in the stream
+    let r = crate::data::term::call(&hub, &mut watch, "term.write", &json!({"key":key,"text":"echo typed-$((40+2))\r"})).await.unwrap().unwrap(); assert_eq!(r["sent"], 21);
+    assert!(wait(10, || { take_frames(&rx, &key, &mut g, &mut held, &mut acc, &mut gaps, &mut states); String::from_utf8_lossy(&acc).contains("typed-42") }).await);
+    // the push a watching socket gets, and none for a key it does not watch
+    let f = frame(&key, Some(1), b"ab", None); assert_eq!(crate::data::term::push_of(&watch, &f).unwrap()["b"], "YWI=");
+    assert!(crate::data::term::push_of(&Default::default(), &f).is_none());
+    // a list names it, by thread
+    let l = crate::data::term::call(&hub, &mut watch, "term.list", &json!({"thread":"t1"})).await.unwrap().unwrap();
+    assert!(l["terms"].as_array().unwrap().iter().any(|x| x["key"] == key.as_str() && x["kind"] == "chat" && x["running"] == true), "{l}");
+    // stop: a state frame says stopped, and it stays stopped once the shell is gone
+    crate::data::term::call(&hub, &mut watch, "term.stop", &json!({"key":key})).await.unwrap().unwrap();
+    assert!(wait(10, || { take_frames(&rx, &key, &mut g, &mut held, &mut acc, &mut gaps, &mut states); states.iter().any(|s| s == "stopped") }).await, "{states:?}");
+    assert!(wait(10, || t.inner.try_lock().map_or(false, |g| !g.shells.contains_key(&key))).await);
+    assert_eq!(t.stream_read(&key, 0, None).await.unwrap()["state"], "stopped");
+    crate::data::term::call(&hub, &mut watch, "term.unwatch", &json!({"key":key})).await.unwrap().unwrap(); assert!(watch.is_empty());
+    let e = crate::data::term::call(&hub, &mut watch, "term.write", &json!({"key":"../x"})).await.unwrap().unwrap_err(); assert_eq!(e, "no such terminal");
+}
+
+#[cfg(unix)]
+#[tokio::test] async fn a_resize_reaches_the_program_and_every_client_gets_the_screen_at_the_new_size() {
+    let (hub, _home, _work) = hub_in("resize").await; let rx = Tap::new(&hub, 1);
+    let mut watch = std::collections::HashSet::new();
+    // a phone's own shell in the project's folder
+    let r = crate::data::term::call(&hub, &mut watch, "term.new", &json!({"project":"p1","cols":70,"rows":12})).await.unwrap().unwrap();
+    let key = r["key"].as_str().unwrap().to_string(); assert!(key.starts_with("s:p1:"), "{r}"); assert_eq!((r["cols"].as_u64(), r["rows"].as_u64()), (Some(70), Some(12)));
+    let l = crate::data::term::call(&hub, &mut watch, "term.list", &json!({"project":"p1"})).await.unwrap().unwrap();
+    assert!(l["terms"].as_array().unwrap().iter().any(|x| x["key"] == key.as_str() && x["kind"] == "shell"), "{l}");
+    assert!(crate::data::term::call(&hub, &mut watch, "term.list", &json!({"project":"nope"})).await.unwrap().unwrap()["terms"].as_array().unwrap().is_empty());
+    rx.take();
+    crate::data::term::call(&hub, &mut watch, "term.resize", &json!({"key":key,"cols":44,"rows":9})).await.unwrap().unwrap();
+    let (mut all, mut rs) = (vec![], vec![]);
+    assert!(wait(5, || { drain(&rx, &key, &mut all, &mut rs); !rs.is_empty() }).await); assert_eq!(rs[0], json!([44, 9]), "a snapshot at the new size goes to every client");
+    crate::data::term::call(&hub, &mut watch, "term.write", &json!({"key":key,"b":"c3R0eSBzaXplCg=="})).await.unwrap().unwrap(); // "stty size\n"
+    assert!(wait(10, || { drain(&rx, &key, &mut all, &mut rs); String::from_utf8_lossy(&all).contains("9 44") }).await, "{}", String::from_utf8_lossy(&all));
+    // the same size again is no news
+    rx.take(); crate::data::term::call(&hub, &mut watch, "term.resize", &json!({"key":key,"cols":44,"rows":9})).await.unwrap().unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await; rs.clear(); drain(&rx, &key, &mut all, &mut rs); assert!(rs.is_empty());
+    crate::data::term::call(&hub, &mut watch, "term.write", &json!({"key":key,"text":"exit 4\n"})).await.unwrap().unwrap();
+    assert!(wait(10, || { let t = get(&hub).unwrap(); t.inner.try_lock().map_or(false, |g| g.screens.get(&key).map_or(false, |s| s.state == "exited 4")) }).await);
+    assert!(crate::data::term::call(&hub, &mut watch, "term.new", &json!({"project":"nope"})).await.unwrap().is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test] async fn a_running_chat_terminal_is_on_disk_and_reads_back_stopped_after_the_hub_stops() {
+    let (hub, home, _work) = hub_in("survive").await;
+    let (_, o) = tools::call(&hub, "t1", "terminal_open", &json!({"command":"echo kept-$((6*7)); sleep 60","title":"K","cols":50,"rows":8})).await.unwrap();
+    let key = emb::key("t1", o["id"].as_str().unwrap()); let t = get(&hub).unwrap();
+    assert!(wait(10, || t.inner.try_lock().map_or(false, |g| g.screens.get(&key).map_or(false, |s| emb::text(&s.vt).contains("kept-42")))).await);
+    t.save_dirty().await;
+    let f = std::fs::read_to_string(home.join("terms").join(&*crate::plat::fs::file_name(key.as_ref()))).unwrap(); assert!(f.starts_with("50x8\trunning\n"), "{}", f.lines().next().unwrap());
+    // a hub that starts again holds no screen: it reads the file, and a terminal that was running is stopped, its screen kept
+    t.inner.lock().await.screens.remove(&key);
+    let r = t.stream_read(&key, 0, None).await.unwrap(); assert_eq!(r["state"], "stopped"); assert_eq!((r["cols"].as_u64(), r["rows"].as_u64()), (Some(50), Some(8)));
+    use base64::Engine; assert!(String::from_utf8_lossy(&base64::engine::general_purpose::STANDARD.decode(r["b"].as_str().unwrap()).unwrap()).contains("kept-42"));
+    t.kill(&key).await;
+}
+
+#[test] fn the_desktop_and_phones_see_a_terminal_entry_as_a_card_with_its_key() {
+    let e = crate::present::thread::Ent { id: "x9".into(), msg: false, role: "term".into(), akind: "terminal".into(), text: "Build\n100x20\nmake".into(), at: 1 };
+    let v = crate::present::thread::plain_act(&e); assert_eq!((v["kind"].as_str(), v["title"].as_str(), v["cols"].as_u64(), v["rows"].as_u64(), v["cmd"].as_str()), (Some("term"), Some("Build"), Some(100), Some(20), Some("make")));
+    let p = crate::data::term::entry("t1", "x9", "Build\n100x20\nmake", 5); assert_eq!(p["kind"], "term"); assert_eq!(p["term"]["key"], "x:t1:x9"); assert_eq!(p["term"]["cmd"], "make");
 }
