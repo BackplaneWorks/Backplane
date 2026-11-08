@@ -692,7 +692,7 @@ final class Journeys: XCTestCase {
         let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = sb.buttons["Allow"]
         if allow.waitForExistence(timeout: 8) { allow.tap() }
-        guard d.step("the chat terminal's card", timeout: 40, act: {}, expect: { d.el("data.entry.term").exists && d.label("card line 3").exists }) else { return }
+        guard d.step("the chat terminal's card", timeout: 40, act: {}, expect: { d.el("data.entry.term").exists && ((d.el("term.card.screen").value as? String) ?? "").contains("card line 3") }) else { return }
         d.step("the card says its command is done", act: {}, expect: { d.label("done 0").exists })
         d.shot("1-card")
         guard d.step("a tap opens it full screen", act: { d.tap(d.el("data.entry.term")) }, expect: { screen().exists }) else { return }
