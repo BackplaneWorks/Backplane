@@ -30,10 +30,14 @@ if [ "${1:-}" = --xwin ]; then
   tgt=${CARGO_TARGET_DIR:-${BP_TMP:-$HOME/.cache/bp-tmp}/target-winmsvc}; export CARGO_TARGET_DIR=$tgt
   (cd "$HERE/native/host" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof" --bin backplane-hub --bin bp-sh)
   (cd "$HERE/native/guard" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile release)   # the guard has no fast profile
-  (cd "$HERE/native/gpui" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof")
+  # the client with the embedded Chromium (feature cef, as dev-build.sh and release.yml build it; GPUI_FEATURES= for none). The cef crate fetches CEF's
+  # Windows distribution once into CEF_PATH and builds its wrapper with clang-cl; the runtime it copies beside the .exe goes into DIR below
+  feat=${GPUI_FEATURES-cef}; export CEF_PATH=${CEF_PATH:-$HOME/.cache/backplane/cef-rs}
+  (cd "$HERE/native/gpui" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof" ${feat:+--features "$feat"})
   (cd "$HERE/native/voice" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof" --bin backplane-voice)   # dictation's helper, beside the hub
   d=$prof; [ "$d" = dev ] && d=debug
   for f in backplane-hub.exe bp-sh.exe backplane-gpui.exe backplane-voice.exe; do cp "$tgt/x86_64-pc-windows-msvc/$d/$f" "$out/"; done
+  [ -z "$feat" ] || "$HERE/scripts/cef-runtime-files.sh" "$tgt/x86_64-pc-windows-msvc/$d" "$out" windows
   cp "$HERE/native/voice/vad/silero_vad.onnx" "$HERE/native/voice/vad/silero_vad.LICENSE" "$out/"   # as release.yml ships it
   cp "$tgt/x86_64-pc-windows-msvc/release/backplane.exe" "$out/"
   git -C "$HERE" rev-parse HEAD > "$out/COMMIT"

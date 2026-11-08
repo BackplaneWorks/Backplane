@@ -15,8 +15,8 @@ command -v cargo-about >/dev/null || { echo "rust-licenses: cargo-about not inst
 # paths relative to the root: cargo-about is a native program, and on Windows it cannot read Git Bash's /d/... paths
 cd "$root"; mkdir -p "$out"
 cfg=deploy/licenses/rust/about.toml; hbs=deploy/licenses/rust/about.hbs
-# file  workspace  features (as release.yml builds them: the client has CEF on Linux only)
-cef=-; case "$t" in linux-*) cef=cef ;; esac
+# file  workspace  features (as release.yml builds them: the client has CEF on every platform)
+cef=cef
 while read -r file ws feat what; do
   [ "$feat" != - ] || feat=
   echo "rust-licenses: $file ($what, $triple)"

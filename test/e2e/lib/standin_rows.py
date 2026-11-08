@@ -6,6 +6,8 @@
 #   zqtool X   calls the hub MCP tool X (thread_list) and logs what it said
 #   zqecho     answers with the text it was given, so attachments and agentText can be checked
 #   zqquote D  calls order_quote for folder D
+#   zqcalls    calls each tool of the JSON list in $BP_MCP_CALLS_FILE ([{name, arguments}]) in turn, logs "CALL name ok|error text"; image blocks are
+#              written to $BP_STANDIN_IMAGES/<n>-<name>.png
 #   zqshort    a short turn; anything else a turn of FAKE_SECS seconds
 import sys, os, json, time, urllib.request
 log = os.environ.get("FAKE_LOG", "/dev/null")
@@ -78,6 +80,17 @@ while True:
             t = d.get("result", {}).get("content", [{}])[0].get("text", "")
             L("TOOL %s -> %s" % (name, t[:400].replace("\n", " ")))
             say = "tool %s said: %s" % (name, t[:200])
+        elif "zqcalls" in text:
+            import base64
+            for i, t in enumerate(json.load(open(os.environ["BP_MCP_CALLS_FILE"]))):
+                d = mcp("tools/call", {"name": t["name"], "arguments": t.get("arguments", {})})
+                res = d.get("result", {}); blocks = res.get("content", [])
+                txt = " ".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+                for b in blocks:
+                    if b.get("type") == "image" and os.environ.get("BP_STANDIN_IMAGES"):
+                        f = os.path.join(os.environ["BP_STANDIN_IMAGES"], "%d-%s.png" % (i, t["name"])); open(f, "wb").write(base64.b64decode(b["data"])); L("IMAGE %s" % f)
+                L("CALL %s %s %s" % (t["name"], "error" if res.get("isError") or "error" in d else "ok", (txt or json.dumps(d.get("error", "")))[:400].replace("\n", " ")))
+            say = "calls done"
         elif "zqquote" in text:
             d = mcp("tools/call", {"name": "order_quote", "arguments": {"dir": text.split("zqquote", 1)[1].split()[0]}})
             t = d.get("result", {}).get("content", [{}])[0].get("text", "")
@@ -90,7 +103,7 @@ while True:
             say = "echo: " + text
     except Exception as e:
         L("ERR %r" % (e,)); say = "error %r" % (e,)
-    if "zqshort" not in text and not any(k in text for k in ["zqask", "zqapprove", "zqplan", "zqtool", "zqquote", "zqecho", "zqwrite"]):
+    if "zqshort" not in text and not any(k in text for k in ["zqask", "zqapprove", "zqplan", "zqtool", "zqquote", "zqecho", "zqwrite", "zqcalls"]):
         for i in range(int(float(os.environ.get("FAKE_SECS", "600")) * 10)):
             if i % 10 == 0: out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "working "}}, "session_id": sid})
             l2 = readline(0.1)

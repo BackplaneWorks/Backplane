@@ -41,6 +41,10 @@ pub struct Tab {
     resize_at: Mutex<Option<(std::time::Instant, u32)>>, resize_done: Mutex<f64>,
 }
 
+/// The platform's cursor handle as the `cef` crate's DisplayHandler takes it (unused: the page draws gpui's own cursor from the type).
+#[cfg(target_os = "macos")] type CursorHandle = *mut u8;
+#[cfg(not(target_os = "macos"))] type CursorHandle = sys::cef_cursor_handle_t;
+
 fn s(x: Option<&CefString>) -> String { x.map(|c| c.to_string()).unwrap_or_default() }
 
 wrap_render_handler! {
@@ -70,7 +74,7 @@ wrap_display_handler! {
             if frame.map_or(false, |f| f.is_main() == 1) { eprintln!("GPUI_LOG {{\"cef_address\":{}}}", serde_json::Value::String(s(url))); self.tab.st.lock().unwrap().url = s(url); let _ = self.tab.wake.try_send(()); }
         }
         fn on_title_change(&self, _b: Option<&mut Browser>, title: Option<&CefString>) { self.tab.st.lock().unwrap().title = s(title); let _ = self.tab.wake.try_send(()); }
-        fn on_cursor_change(&self, _b: Option<&mut Browser>, _c: ::std::os::raw::c_ulong, ty: CursorType, _i: Option<&CursorInfo>) -> ::std::os::raw::c_int {
+        fn on_cursor_change(&self, _b: Option<&mut Browser>, _c: CursorHandle, ty: CursorType, _i: Option<&CursorInfo>) -> ::std::os::raw::c_int {
             *self.tab.cursor.lock().unwrap() = cur_of(ty); let _ = self.tab.wake.try_send(()); true as _
         }
     }
@@ -172,9 +176,27 @@ fn cur_of(t: CursorType) -> Cur {
     else if t == CursorType::NOTALLOWED || t == CursorType::NODROP { Cur::NotAllowed } else if t == CursorType::NONE { Cur::None } else { Cur::Default }
 }
 
+/// macOS runs CEF on the main thread with an external message pump (it has no multi-threaded loop there): CEF says when it wants work through
+/// `on_schedule_message_pump_work` (any thread), the delay goes on this channel, and `pump` (cef_page.rs, on gpui's main thread) calls
+/// `do_message_loop_work` when it is due. Nothing runs while CEF asks for nothing. On Linux and Windows CEF has its own UI thread and never asks.
+static PUMP: OnceLock<(async_channel::Sender<i64>, async_channel::Receiver<i64>)> = OnceLock::new();
+fn pump_chan() -> &'static (async_channel::Sender<i64>, async_channel::Receiver<i64>) { PUMP.get_or_init(async_channel::unbounded) }
+/// The delays CEF asked for (ms; 0 or less: now).
+pub fn pump_requests() -> async_channel::Receiver<i64> { pump_chan().1.clone() }
+/// One round of CEF's work on this (the main) thread.
+pub fn pump_work() { do_message_loop_work(); }
+/// Whether this platform pumps CEF from gpui's main thread.
+pub const EXTERNAL_PUMP: bool = cfg!(target_os = "macos");
+wrap_browser_process_handler! {
+    struct PumpH;
+    impl BrowserProcessHandler {
+        fn on_schedule_message_pump_work(&self, delay_ms: i64) { let _ = pump_chan().0.try_send(delay_ms); }
+    }
+}
 wrap_app! {
     struct AppH { args: Arc<Vec<(String, String)>> }
     impl App {
+        fn browser_process_handler(&self) -> Option<BrowserProcessHandler> { Some(PumpH::new()) }
         fn on_before_command_line_processing(&self, _ty: Option<&CefString>, cl: Option<&mut CommandLine>) {
             let Some(cl) = cl else { return };
             for (k, v) in self.args.iter() { if v.is_empty() { cl.append_switch(Some(&k.as_str().into())); } else { cl.append_switch_with_value(Some(&k.as_str().into()), Some(&v.as_str().into())); } }
@@ -184,12 +206,23 @@ wrap_app! {
 fn app() -> App { AppH::new(Arc::new(switches())) }
 fn switches() -> Vec<(String, String)> {
     let mut v = vec![("use-mock-keychain".into(), String::new()), ("password-store".into(), "basic".into()), ("noerrdialogs".into(), String::new()), ("disable-features".into(), "Translate".into())];
+    // Linux: the window is X11 (gpui's x11 backend; on a Wayland desktop it runs through XWayland), and so is Chromium: pinned, so a Wayland session's
+    // WAYLAND_DISPLAY never makes it pick its own Wayland platform, which off-screen rendering does not need and which would not share our X display
+    #[cfg(target_os = "linux")]
+    v.push(("ozone-platform".into(), "x11".into()));
     if std::env::var_os("BACKPLANE_CEF_NO_GPU").is_some() { v.push(("disable-gpu".into(), String::new())); v.push(("disable-gpu-compositing".into(), String::new())); }
     v
 }
 
 /// First call of `main`. In a CEF helper process (renderer, gpu, ...) this runs it to its end and returns its exit code; in the browser process it does nothing.
 pub fn subprocess() -> Option<i32> {
+    // macOS: the engine is a framework loaded at run time; a helper (`--type=...`) loads it before any CEF call, the browser process only when a Browser tab starts it
+    #[cfg(target_os = "macos")]
+    {
+        if !std::env::args().any(|a| a.starts_with("--type=")) { return None }
+        let fw = mac::helper_framework()?;
+        if !mac::load(&fw) { eprintln!("backplane-gpui: could not load {}", fw.display()); return Some(1) }
+    }
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
     let args = cef::args::Args::new();
     let cmd = args.as_cmd_line()?;
@@ -204,8 +237,20 @@ pub fn runtime_dir() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("BACKPLANE_CEF").filter(|p| !p.is_empty()) { let p = PathBuf::from(p); cands.push(if p.is_dir() { p } else { p.parent().map(Path::to_path_buf).unwrap_or(p) }); }
     let cache = crate::plat::cache_base();
     if let Some(c) = cache { cands.push(c.join("backplane").join("cef-runtime").join(VERSION)); }
-    if let Ok(me) = std::env::current_exe() { if let Some(d) = me.parent() { cands.push(d.to_path_buf()); } }
-    cands.into_iter().find(|d| d.join("icudtl.dat").exists() && d.join("resources.pak").exists() && d.join("libcef.so").exists())
+    if let Ok(me) = std::env::current_exe() { if let Some(d) = me.parent() { cands.push(d.to_path_buf()); if cfg!(target_os = "macos") { cands.push(d.join("../Frameworks")); } } }
+    #[cfg(target_os = "macos")]
+    return cands.into_iter().find(|d| d.join(mac::FRAMEWORK).join("Resources").join("icudtl.dat").exists() && d.join(mac::FRAMEWORK).join(mac::LIB).exists());
+    #[cfg(not(target_os = "macos"))]
+    cands.into_iter().find(|d| d.join("icudtl.dat").exists() && d.join("resources.pak").exists() && d.join(LIB).exists())
+}
+/// The engine's library in a runtime directory.
+#[cfg(target_os = "windows")] pub const LIB: &str = "libcef.dll";
+#[cfg(not(target_os = "windows"))] pub const LIB: &str = "libcef.so";
+/// The engine's profile (cookies, storage): `~/.cache/backplane/cef-gpui-profile` (Windows: `%LOCALAPPDATA%\backplane\cef-gpui-profile`).
+fn profile_dir() -> PathBuf {
+    if let Some(p) = std::env::var_os("BACKPLANE_CEF_PROFILE").filter(|p| !p.is_empty()) { return PathBuf::from(p) }
+    #[cfg(target_os = "windows")] { if let Some(c) = crate::plat::cache_base() { return c.join("backplane").join("cef-gpui-profile") } }
+    crate::plat::user_home().unwrap_or_default().join(".cache").join("backplane").join("cef-gpui-profile")
 }
 
 /// CEF reads icudtl.dat, the paks and the snapshot from the directory libcef.so was loaded from (RUNPATH `$ORIGIN`: the executable's directory, whatever a link there points at),
@@ -239,16 +284,25 @@ impl Engine {
         #[cfg(target_os = "linux")]
         if let Some(ed) = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(Path::to_path_buf)) { ensure_beside(&dir, &ed)?; }
         let port = std::env::var("BACKPLANE_CEF_CDP_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or_else(free_port);
-        let profile = std::env::var_os("BACKPLANE_CEF_PROFILE").map(PathBuf::from).unwrap_or_else(|| {
-            crate::plat::user_home().unwrap_or_default().join(".cache/backplane/cef-gpui-profile")
-        });
+        let profile = profile_dir();
         let _ = std::fs::create_dir_all(&profile);
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        // the helper processes: this executable again (Linux, Windows); on macOS the helper app beside it (`mac::helper`), whose program is backplane-cef-helper
+        #[cfg(target_os = "macos")]
+        let (sub, res, loc) = { let fw = dir.join(mac::FRAMEWORK); if !mac::load(&fw) { return Err(format!("could not load {}", fw.display())) }
+            mac::adopt_app_protocol();
+            // the helpers find the same framework (set on the main thread before CEF starts any thread of its own)
+            unsafe { std::env::set_var("BACKPLANE_CEF_FRAMEWORK", &fw); }
+            (mac::helper(&exe).ok_or_else(|| format!("no {}.app beside {} (scripts/cef-mac-helpers.sh)", mac::HELPER, exe.display()))?, fw.join("Resources"), fw.join("Resources")) };
+        #[cfg(not(target_os = "macos"))]
+        let (sub, res, loc) = (exe.clone(), dir.clone(), dir.join("locales"));
         let settings = Settings {
-            no_sandbox: true as _, multi_threaded_message_loop: true as _, windowless_rendering_enabled: true as _,
-            browser_subprocess_path: CefString::from(exe.to_string_lossy().as_ref()),
-            resources_dir_path: CefString::from(dir.to_string_lossy().as_ref()),
-            locales_dir_path: CefString::from(dir.join("locales").to_string_lossy().as_ref()),
+            no_sandbox: true as _, multi_threaded_message_loop: (!EXTERNAL_PUMP) as _, external_message_pump: EXTERNAL_PUMP as _, windowless_rendering_enabled: true as _,
+            browser_subprocess_path: CefString::from(sub.to_string_lossy().as_ref()),
+            #[cfg(target_os = "macos")] framework_dir_path: CefString::from(dir.join(mac::FRAMEWORK).to_string_lossy().as_ref()),
+            #[cfg(target_os = "macos")] main_bundle_path: CefString::from(mac::main_bundle(&exe).to_string_lossy().as_ref()),
+            resources_dir_path: CefString::from(res.to_string_lossy().as_ref()),
+            locales_dir_path: CefString::from(loc.to_string_lossy().as_ref()),
             root_cache_path: CefString::from(profile.to_string_lossy().as_ref()), cache_path: CefString::from(profile.to_string_lossy().as_ref()),
             remote_debugging_port: port as _, persist_session_cookies: true as _,
             log_severity: LogSeverity::WARNING, ..Default::default()
@@ -313,6 +367,8 @@ impl Tab {
     pub fn wheel(&self, x: i32, y: i32, mods: u32, dx: i32, dy: i32) { self.host(|h| h.send_mouse_wheel_event(Some(&MouseEvent { x, y, modifiers: mods }), dx, dy)); }
     pub fn key(&self, kind: u8, mods: u32, vk: i32, native: i32, ch: u16) {
         let ty = match kind { 0 => KeyEventType::RAWKEYDOWN, 1 => KeyEventType::KEYUP, _ => KeyEventType::CHAR };
+        // macOS's OSR builds an NSEvent from the native code: it must be the Mac's virtual key code, not the Windows one
+        #[cfg(target_os = "macos")] let native = mac::key_code(vk).unwrap_or(native);
         let e = KeyEvent { size: std::mem::size_of::<KeyEvent>(), type_: ty, modifiers: mods, windows_key_code: vk, native_key_code: native, is_system_key: 0, character: ch, unmodified_character: ch, focus_on_editable_field: 0 };
         self.host(|h| h.send_key_event(Some(&e)));
     }
@@ -334,10 +390,16 @@ pub fn vk(key: &str) -> Option<i32> {
     Some(match key { "enter" => 13, "backspace" => 8, "tab" => 9, "escape" => 27, "space" => 32, "left" => 37, "up" => 38, "right" => 39, "down" => 40, "delete" => 46, "home" => 36, "end" => 35, "pageup" => 33, "pagedown" => 34, "insert" => 45,
         k if k.starts_with('f') && k[1..].parse::<i32>().map_or(false, |n| (1..=12).contains(&n)) => 111 + k[1..].parse::<i32>().unwrap(), _ => return None })
 }
+/// EVENTFLAG_COMMAND_DOWN: gpui's platform key (Command on macOS).
+pub const COMMAND: u32 = 1 << 7;
 /// CEF event flags from gpui modifiers (shift, control, alt) and mouse buttons held.
 pub fn flags(shift: bool, ctrl: bool, alt: bool, left: bool, middle: bool, right: bool) -> u32 {
     (shift as u32) << 1 | (ctrl as u32) << 2 | (alt as u32) << 3 | (left as u32) << 4 | (middle as u32) << 5 | (right as u32) << 6
 }
+
+#[cfg(target_os = "macos")]
+#[path = "cef_mac.rs"]
+pub mod mac;
 
 #[cfg(test)]
 mod tests {

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       jobs:
-        description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), pairing (test/e2e/pairing/gpui.sh, hub and client on this runner), all"
+        description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), pairing (test/e2e/pairing/gpui.sh, hub and client on this runner), browser (the embedded Browser and the agent's browser tools, test/cef/agent_proof.py), all"
         default: all
       archive_run:
         description: "release dry run whose darwin-arm64 archive the client rows run from, installed with its install.sh"
@@ -127,6 +127,25 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: client-rows, path: out }
+
+  browser:
+    # the embedded Chromium in the installed archive's client: the Browser tab shows the page inside the window and the agent's preview_* tools drive it
+    if: inputs.jobs == 'browser' || inputs.jobs == 'all'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install the release archive with its own installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test/e2e/mac-install-archive.sh ${{ inputs.archive_run }} ${{ inputs.archive_tag }}
+      - name: the Browser tab and the agent's browser tools
+        run: |
+          set -o pipefail; mkdir -p out
+          echo "installed build $(cat "$BUILD/COMMIT") (${{ inputs.archive_tag }})"; ls "$BUILD"
+          python3 test/cef/agent_proof.py "$BUILD/backplane-gpui" "$BUILD/backplane-hub" "$BUILD/backplane-browser" "$BUILD/assets" "$PWD/out/browser" 2>&1 | tee out/browser.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: browser, path: out }
 
   client-src:
     # the same client rows, from a build of this checkout (hub, client and the browser helper from source), for a tree newer than the last release archive

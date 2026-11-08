@@ -69,12 +69,33 @@ const MAC_PLATFORM_IVAR: &str = "platform";
 static mut APP_CLASS: *const Class = ptr::null();
 static mut APP_DELEGATE_CLASS: *const Class = ptr::null();
 
+const HANDLING_SEND_EVENT_IVAR: &str = "handlingSendEvent";
+extern "C" fn is_handling_send_event(this: &Object, _: Sel) -> BOOL {
+    if unsafe { *this.get_ivar::<bool>(HANDLING_SEND_EVENT_IVAR) } { YES } else { NO }
+}
+extern "C" fn set_handling_send_event(this: &mut Object, _: Sel, on: BOOL) {
+    unsafe { this.set_ivar::<bool>(HANDLING_SEND_EVENT_IVAR, on == YES) }
+}
+extern "C" fn app_send_event(this: &mut Object, _: Sel, event: id) {
+    unsafe {
+        let was = *this.get_ivar::<bool>(HANDLING_SEND_EVENT_IVAR);
+        this.set_ivar::<bool>(HANDLING_SEND_EVENT_IVAR, true);
+        let _: () = msg_send![super(this, class!(NSApplication)), sendEvent: event];
+        this.set_ivar::<bool>(HANDLING_SEND_EVENT_IVAR, was);
+    }
+}
+
 #[ctor]
 unsafe fn build_classes() {
     unsafe {
         APP_CLASS = {
             let mut decl = ClassDecl::new("GPUIApplication", class!(NSApplication)).unwrap();
             decl.add_ivar::<*mut c_void>(MAC_PLATFORM_IVAR);
+            // Chromium (an embedded CEF) asks the application whether it is inside -sendEvent: (CrAppProtocol / CrAppControlProtocol)
+            decl.add_ivar::<bool>(HANDLING_SEND_EVENT_IVAR);
+            decl.add_method(sel!(isHandlingSendEvent), is_handling_send_event as extern "C" fn(&Object, Sel) -> BOOL);
+            decl.add_method(sel!(setHandlingSendEvent:), set_handling_send_event as extern "C" fn(&mut Object, Sel, BOOL));
+            decl.add_method(sel!(sendEvent:), app_send_event as extern "C" fn(&mut Object, Sel, id));
             decl.register()
         }
     };

@@ -3,6 +3,17 @@ name = "backplane-gpui"
 version = "0.15.0"
 edition = "2024"
 publish = false
+default-run = "backplane-gpui"
+
+[[bin]]
+name = "backplane-gpui"
+path = "src/main.rs"
+
+# the embedded Chromium's helper processes on macOS (src/bin/backplane-cef-helper.rs, scripts/cef-mac-helpers.sh)
+[[bin]]
+name = "backplane-cef-helper"
+path = "src/bin/backplane-cef-helper.rs"
+required-features = ["cef"]
 
 [features]
 default = []
