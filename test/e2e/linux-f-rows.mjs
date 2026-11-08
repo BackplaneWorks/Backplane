@@ -5,15 +5,18 @@
 import {spawn} from 'node:child_process';
 import {mkdirSync,rmSync,writeFileSync,readFileSync,chmodSync,copyFileSync,readdirSync,existsSync,openSync,symlinkSync} from 'node:fs';
 import http from 'node:http';
+import {fileURLToPath} from 'node:url';
+import {join} from 'node:path';
 import {encode,decode} from '../wire.mjs';
+// runs on Windows too (bun, Git for Windows' sh on PATH, python3 for the stand-in)
 const [BIN,OUT,PORT_ARG]=process.argv.slice(2); const PORT=Number(PORT_ARG||3881);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 rmSync(OUT,{recursive:true,force:true}); mkdirSync(OUT+'/bin',{recursive:true}); mkdirSync(OUT+'/proj/sub',{recursive:true});
-const HOME=OUT+'/home', AG=OUT+'/bin', HERE=new URL('.',import.meta.url).pathname;
+const HOME=OUT+'/home', AG=OUT+'/bin', HERE=fileURLToPath(new URL('.',import.meta.url));   // a path on Windows too (pathname is /C:/...)
 copyFileSync(HERE+'lib/standin_rows.py',AG+'/claude'); writeFileSync(`${AG}/agy`,'#!/bin/sh\nexit 1\n');writeFileSync(`${AG}/codex`,'#!/bin/sh\n# a stand-in for the one-shot `codex exec` only (the writing model): logs its argv, answers one agent_message; any other use exits 1\ncase "$1" in exec) echo "CODEX-ONESHOT $*" >> "$FAKE_LOG"; m=default; p=; for a in "$@"; do [ "$p" = -m ] && m=$a; p=$a; done; printf \'{"type":"item.completed","item":{"type":"agent_message","text":"Codex title from %s"}}\\n\' "$m";; *) exit 1;; esac\n');
 // the other providers' stand-ins are the scripts the hub's in-process provider tests use (test/agents/): ACP for Grok and OpenCode, MSP for Muse, Pi's and Oh My Pi's RPC; Antigravity's agent is a managed install, so its stand-in sits at the installed path
-const PR=HERE+'../agents/';for(const [n,f] of [['grok','standin-acp.sh'],['opencode','standin-acp.sh'],['muse','prov/standin-muse.py'],['pi','prov-pi/standin-pi.sh'],['omp','prov-pi/standin-omp.sh']])copyFileSync(PR+f,`${AG}/${n}`);
-mkdirSync(`${OUT}/home/antigravity/1.3.0`,{recursive:true});copyFileSync(PR+'prov/standin-agy.py',`${OUT}/home/antigravity/1.3.0/agy_acp_server.par`);copyFileSync(PR+'prov/agy-turn.jsonl',`${OUT}/home/antigravity/1.3.0/agy-turn.jsonl`);
+const PR=join(HERE,'..','agents');   // joined: Bun on Windows does not resolve .. in a path with both separatorsfor(const [n,f] of [['grok','standin-acp.sh'],['opencode','standin-acp.sh'],['muse','prov/standin-muse.py'],['pi','prov-pi/standin-pi.sh'],['omp','prov-pi/standin-omp.sh']])copyFileSync(join(PR,f),`${AG}/${n}`);
+mkdirSync(`${OUT}/home/antigravity/1.3.0`,{recursive:true});copyFileSync(join(PR,'prov','standin-agy.py'),`${OUT}/home/antigravity/1.3.0/agy_acp_server.par`);copyFileSync(join(PR,'prov','agy-turn.jsonl'),`${OUT}/home/antigravity/1.3.0/agy-turn.jsonl`);
 for(const f of readdirSync(AG)) chmodSync(`${AG}/${f}`,0o755);
 writeFileSync(`${AG}/sh`,'#!/bin/sh\nexec /bin/sh "$@"\n');chmodSync(`${AG}/sh`,0o755);   // with BACKPLANE_AGENTS the hub resolves every program it starts from that folder, and Antigravity's runner script is started through sh
 writeFileSync(OUT+'/proj/readme.txt','e2e fixture\n');
@@ -26,7 +29,7 @@ const orderSeen=[]; const srv=http.createServer((q,s)=>{const b=[];q.on('data',d
   if(q.method==='GET'&&q.url.startsWith('/v1/quotes/q_e2e1'))return s.end(JSON.stringify({status:'quoted',currency:'USD',total:12.5,lines:[{name:'Board',qty:5,total:12.5}]}));
   s.statusCode=404;s.end('{"error":"no"}')})});
 await new Promise(r=>srv.listen(0,'127.0.0.1',r)); const ORDER=`http://127.0.0.1:${srv.address().port}`;
-let hub=null; const env0={...process.env,BACKPLANE_AGENTS:AG,PATH:`${AG}:${process.env.PATH}`,BACKPLANE_NO_UPDATE:'1',SHELL:'/bin/sh',BACKPLANE_ORDER_SERVER:ORDER,FAKE_LOG:FAKE,FAKE_SECS:'600'};
+let hub=null; const env0={...process.env,BACKPLANE_AGENTS:AG,PATH:`${AG}${process.platform==='win32'?';':':'}${process.env.PATH}`,BACKPLANE_NO_UPDATE:'1',...(process.platform==='win32'?{}:{SHELL:'/bin/sh'}),BACKPLANE_ORDER_SERVER:ORDER,FAKE_LOG:FAKE,FAKE_SECS:'600'};
 async function start(){
   const out=openSync(OUT+'/hub.log','a');
   hub=spawn(BIN,['--home',HOME,'--port',String(PORT),'--no-tailscale','--foreground'],{env:env0,stdio:['ignore',out,out]});

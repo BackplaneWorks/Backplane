@@ -219,8 +219,16 @@ pub mod creds {
 
 /// The hub process itself.
 pub mod hub {
-    /// One hub per home: an exclusive lock on the file, not waited for. False if another process holds it.
-    pub fn lock(f: &std::fs::File) -> bool { f.try_lock().is_ok() }
+    /// One hub per home: an exclusive lock, not waited for. False if another process holds it. Windows locks are mandatory, so a lock on
+    /// the whole file (std's try_lock) kept every other process from reading it (the client reads `<pid> <port>` from hub.lock to find a
+    /// running hub); the lock is on one byte far past the end instead, which excludes the same way and leaves the text readable.
+    pub fn lock(f: &std::fs::File) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY};
+        let mut o: windows_sys::Win32::System::IO::OVERLAPPED = unsafe { std::mem::zeroed() };
+        o.Anonymous.Anonymous.OffsetHigh = 1 << 30; // byte 2^62
+        unsafe { LockFileEx(f.as_raw_handle() as _, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &mut o) != 0 }
+    }
     /// No descriptor limit to raise.
     pub fn raise_nofile() {}
     /// Ctrl+C or Ctrl+Break, the console closing, logoff or shutdown end the hub, said in hub.log, exit 130 (as SIGINT).
@@ -363,5 +371,20 @@ pub mod ipc {
         s.connect().await?;
         *l.next.lock().unwrap() = Some(ServerOptions::new().create(&l.name)?);
         Ok(s)
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    /// hub.lock: one holder; another cannot take it, but anyone can read the `<pid> <port>` it says.
+    #[test] fn a_held_lock_excludes_and_its_text_stays_readable() {
+        let p = std::env::temp_dir().join(format!("bp-lock-{}", std::process::id()));
+        std::fs::write(&p, "123 3800 flock\n").unwrap();
+        let open = || std::fs::OpenOptions::new().read(true).write(true).open(&p).unwrap();
+        let (a, b) = (open(), open());
+        assert!(super::hub::lock(&a)); assert!(!super::hub::lock(&b), "a second holder");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "123 3800 flock\n", "readable while held");
+        drop(a); assert!(super::hub::lock(&b), "free once the holder closes it");
+        drop(b); let _ = std::fs::remove_file(&p);
     }
 }
