@@ -142,6 +142,21 @@ Each lane's rows: `| ID | result | commit | rig | evidence |`.
 | S13 | pass | 37c30e1cf8 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | about: one read-only row with the version; no controls |
 | S14 | pass | 37c30e1cf8 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | privacy: Off applied; On did NOT re-enable (the chip sent `setting.set`, which the hub refuses for `telemetry.share=on`; no client sent `telemetry.choice`). Fixed in efa3eb26df and the presenter whitelist; Reset id applied + persisted |
 
+### Linux, release archive v0.15.0-rc.1
+
+The release candidate: commit `8976e8deb7` (branch `rc/0.15.0`), dry run 42482640273, `archive-linux-x64` (sha256 `69989ca64c40…`; the archive's COMMIT file says `8976e8deb7`). Installed by `install.sh` into a private prefix, home and port with the guard running its hub; the rows use the installed hub, client, assets, CEF runtime and browser helper. One command: `scripts/e2e-linux.sh --archive <tar.gz>` with the phone; driver scripts from `b0672a0150` (identical to the RC's for `scripts/e2e-linux.sh`, `test/e2e` and `test/cef`). Run 2026-11-08 13:28 UTC on the desktop, llvmpipe (frame budgets are not judged). The archive was never published or uploaded; the copies are deleted.
+
+| driver | ok | fail | not run |
+|---|---|---|---|
+| install | 1 | 0 | 0 |
+| hub rows (`linux-f-rows.mjs`: F01-F22 hub halves, F05 on all 8 providers, S04) | 32 | 0 | 0 |
+| settings walk | 89 controls on 11 pages, 0 not applied; the 34 re-read after a hub restart all kept their value | 0 | 0 |
+| client rows (`gpui-f-rows.py`, installed client, real X input) | 13 | 0 | 0 |
+| CEF (`cef_e2e.sh`, the archive's own runtime and browser helper) | 23 | 0 | 0 |
+| phone rows (`pixel-f-rows.sh`, Pixel 9, one lock for the whole run) | 6 | 0 | 0 |
+
+Every row passes on the release candidate's archive: the three Voice chips of v0.14.93 apply now, S04 Writing has its effect, and the phone rows (F06 allow, decline and question, F07 stop, F17 viewers, F21 reconnect) pass. linux-arm64 is the remote-op lane's release smoke (GitHub's ubuntu-22.04-arm runner), not this suite.
+
 ### Linux, release archive v0.14.93
 
 The same Linux rows against the release archive, not a dev build: dry run 42451126435 (`archive-linux-x64`, sha256 `efabbd8a883b…`, COMMIT file `2958b9046a`), installed by `install.sh` (filled in from `deploy/install.sh.in` with the archive's sha256) into a private prefix, home and port, the guard running its hub. The rows then use the installed hub, client, assets, CEF runtime and browser helper. One command: `scripts/e2e-linux.sh --archive <tar.gz> --no-phone`; driver scripts from `67fc7928ee`'s tree. The archive was never published or uploaded; the copies are deleted.
