@@ -89,7 +89,28 @@ jobs:
         run: |
           # feature e2e-trust (test/update's feed) trusts a key from the environment; its code carries this mark, so a release that has it is refused
           if grep -aq backplane-e2e-trust-enabled native/host/target/release/backplane-hub${{ runner.os == 'Windows' && '.exe' || '' }}; then echo "::error::backplane-hub was built with feature e2e-trust"; exit 1; fi
-      - uses: oven-sh/setup-bun@v2
+      # bun for the browser helper and step2glb. Its download server has answered 504 more than once: a pinned version, kept in the Actions cache, and
+      # up to three tries with a pause between, so a tag push never fails halfway on it
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun
+          key: bun-1.3.10-${{ runner.os }}-${{ runner.arch }}
+      - id: bun1
+        uses: oven-sh/setup-bun@v2
+        continue-on-error: true
+        with: { bun-version: 1.3.10 }
+      - if: steps.bun1.outcome == 'failure'
+        run: sleep 30
+      - id: bun2
+        if: steps.bun1.outcome == 'failure'
+        uses: oven-sh/setup-bun@v2
+        continue-on-error: true
+        with: { bun-version: 1.3.10 }
+      - if: steps.bun1.outcome == 'failure' && steps.bun2.outcome == 'failure'
+        run: sleep 90
+      - if: steps.bun1.outcome == 'failure' && steps.bun2.outcome == 'failure'
+        uses: oven-sh/setup-bun@v2
+        with: { bun-version: 1.3.10 }
       - name: package
         if: runner.os != 'Windows'
         run: |
