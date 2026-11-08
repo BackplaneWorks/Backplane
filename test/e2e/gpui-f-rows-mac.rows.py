@@ -245,15 +245,15 @@ if want('F18'):
     pause(1.0); shot('f18-scrolled')
     xin('wheel', cx, cy, -12); pause(1.5); shot('f18-top')
     pos2 = {k: find('f18-top', c) for k, c in [('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
-    if pos2['pop']:
-        xin('click', *pos2['pop']); ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
-        tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
-        res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
     if pos2['dl']:
         click_ctl('rail:Browser'); pause(0.5)
         xin('click', *pos2['dl']); got = until(lambda: 'download-get' in names(), 30); pause(3)
         home = os.path.expanduser('~'); found = glob.glob(home + '/Downloads/f18-file*') + glob.glob(P('home') + '/**/f18-file*', recursive=True) + glob.glob(P('home') + '/**/*f18*download*', recursive=True)
         res.append(('download (known missing: a download the person starts is not kept in frame mode yet, Windows lane)' if not found else 'download', got and (bool(found) or True), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
+    if pos2['pop']:
+        xin('click', *pos2['pop']); ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
+        tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
+        res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
     shot('f18-end')
     for n, ok, why in res: print('   F18', n, ok, why, flush=True)
     log('F18', all(r[1] for r in res) and len(res) >= 6, '; '.join('%s: %s' % (n, 'ok' if ok else 'FAIL (' + why + ')') for n, ok, why in res))
