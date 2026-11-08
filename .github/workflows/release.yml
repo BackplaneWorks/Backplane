@@ -154,6 +154,42 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # Gradle itself, without depending on GitHub: services.gradle.org redirects to github.com/gradle/gradle-distributions, which answered 504 for hours
+      # (2026-11-08, dry run 42469337937). The zip is cached between runs, fetched with retries from Gradle and then from mirrors, and used only if its
+      # sha256 is the one pinned in gradle-wrapper.properties (distributionSha256Sum), so a mirror cannot hand over anything else. The build runs it directly.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/bp-gradle-dist
+          key: gradle-dist-${{ hashFiles('mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/caches/jars-9
+          key: gradle-deps-${{ hashFiles('mobile/android/**/*.gradle.kts', 'mobile/android/gradle/libs.versions.toml', 'mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-deps-
+      - name: gradle distribution (cached, retried, mirrored, sha256-checked)
+        run: |
+          set -e
+          props=mobile/android/gradle/wrapper/gradle-wrapper.properties
+          want=$(sed -n 's/^distributionSha256Sum=//p' $props); url=$(sed -n 's/^distributionUrl=//p' $props | sed 's/\\:/:/g')
+          name=$(basename "$url"); ver=${name#gradle-}; ver=${ver%-bin.zip}
+          [ -n "$want" ] && [ -n "$ver" ] || { echo "::error::gradle-wrapper.properties needs distributionUrl and distributionSha256Sum"; exit 1; }
+          d=$HOME/.cache/bp-gradle-dist; mkdir -p "$d"; z=$d/$name
+          ok() { [ -f "$z" ] && [ "$(sha256sum "$z" | cut -d' ' -f1)" = "$want" ]; }
+          if ok; then echo "gradle $ver from the cache"; else
+            for u in "$url" "https://github.com/gradle/gradle-distributions/releases/download/v$ver/$name" \
+                     "https://mirrors.cloud.tencent.com/gradle/$name" "https://mirrors.aliyun.com/gradle/distributions/v$ver/$name" "https://mirrors.huaweicloud.com/gradle/$name"; do
+              for wait in 5 15 45; do
+                rm -f "$z.part"
+                if curl -fsSL --connect-timeout 20 --max-time 600 -o "$z.part" "$u" && [ "$(sha256sum "$z.part" | cut -d' ' -f1)" = "$want" ]; then mv "$z.part" "$z"; echo "gradle $ver from $u"; break 2; fi
+                echo "::warning::gradle $ver: $u failed or did not match the pinned sha256; again in ${wait}s"; sleep $wait
+              done
+            done
+            rm -f "$z.part"; ok || { echo "::error::no source served gradle $ver with sha256 $want"; exit 1; }
+          fi
+          unzip -q -o "$z" -d "$RUNNER_TEMP/gradle"
+          echo "GRADLE=$RUNNER_TEMP/gradle/gradle-$ver/bin/gradle" >> "$GITHUB_ENV"
       - name: release inputs
         run: |
           set -e
@@ -165,7 +201,7 @@ jobs:
           echo "version ${TAG#v} ($code)"
       - name: build (APK and AAB)
         working-directory: mobile/android
-        run: ./gradlew --no-daemon -q -Pbp.appId=dev.backplane.mobile -Pbp.scheme=backplane -Pbp.appName=Backplane :app:assembleRelease :app:bundleRelease
+        run: '"$GRADLE" --no-daemon -q -Pbp.appId=dev.backplane.mobile -Pbp.scheme=backplane -Pbp.appName=Backplane :app:assembleRelease :app:bundleRelease'
       - name: signed with the release key, or the job fails
         run: |
           set -e
@@ -193,7 +229,7 @@ jobs:
         working-directory: mobile/android
         run: |
           set -e
-          ./gradlew --no-daemon -q -Pbp.appId=dev.backplane.mobile.rel -Pbp.scheme=bprel -Pbp.appName="Backplane rel" :app:assembleRelease
+          "$GRADLE" --no-daemon -q -Pbp.appId=dev.backplane.mobile.rel -Pbp.scheme=bprel -Pbp.appName="Backplane rel" :app:assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/backplane-$TAG-android-sideid.apk"
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch'
