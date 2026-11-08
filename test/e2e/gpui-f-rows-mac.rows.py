@@ -293,9 +293,15 @@ if want('F18'):
     tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
     res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
     pause(6)   # the popup closes itself after 4 s: the first tab is the view again
-    pd = fresh((204, 0, 204), 'f18-t-dl')
+    pd = None
+    for _t in range(3):   # the view is the first tab again only after the popup closed: look, press, and press again until the page reports the click
+        pd = fresh((204, 0, 204), 'f18-t-dl')
+        if not pd: pause(3); continue
+        xin('click', *pd)
+        if until(lambda: 'download-click' in names(), 6): break
+        print('   F18: no download click reported yet (attempt %d)' % (_t + 1), flush=True)
     if pd:
-        xin('click', *pd); got = until(lambda: 'download-get' in names(), 30); pause(3)
+        got = until(lambda: 'download-get' in names(), 30); pause(3)
         home = os.path.expanduser('~'); found = glob.glob(home + '/Downloads/f18-file*') + glob.glob(P('home') + '/**/f18-file*', recursive=True)
         res.append(('download', got and bool(found), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
         n_click = names().count('click'); pb2 = fresh((0, 204, 102), 'f18-t-btn2')
