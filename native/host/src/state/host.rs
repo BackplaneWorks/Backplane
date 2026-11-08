@@ -160,6 +160,12 @@ impl RpcHandler for StarRpc {
 }
 
 static POLICIES: OnceLock<Arc<Policies>> = OnceLock::new();
+/// The 0.14 import (`Hub::import_lines`) writes history no transform sees. `refold_begin` before its first line holds the policies' batches;
+/// `refold_end` after its last folds the whole log again, as a start does. True from begin when this call owns the fold.
+static FOLDS: std::sync::Mutex<Vec<(std::path::PathBuf, std::sync::Weak<Policy>)>> = std::sync::Mutex::new(Vec::new());
+fn policy_of(hub: &Hub) -> Option<Arc<Policy>> { FOLDS.lock().unwrap().iter().find(|(h, _)| h == &hub.cfg.home).and_then(|(_, w)| w.upgrade()) }
+pub fn refold_begin(hub: &Hub) -> bool { policy_of(hub).map_or(false, |p| p.begin_refold()) }
+pub fn refold_end(hub: &Arc<Hub>, owned: bool) { if !owned { return } if let Some(p) = policy_of(hub) { tokio::spawn(boot_task(p, hub.clone(), crate::guard::Folding::begin())); } }
 /// The policies, once `start` has run: for actors that cannot be handed them (agents: `Policies::line` per provider line, `read` on a view open)
 pub fn policies() -> Option<Arc<Policies>> { POLICIES.get().cloned() }
 
@@ -170,6 +176,7 @@ pub fn start_with(hub: Arc<Hub>, passive: Option<bool>) -> Arc<Policies> {
     if let Some(on) = passive { policy.set_passive(on) }
     policy.set_no_outward(crate::copy::on());
     let host = Arc::new(Host { policy: policy.clone(), hub: OnceLock::new() });
+    { let mut f = FOLDS.lock().unwrap(); f.retain(|(h, w)| w.strong_count() > 0 && h != &hub.cfg.home); f.push((hub.cfg.home.clone(), Arc::downgrade(&policy))); }
     let _ = host.hub.set(hub.clone());
     hub.register_transform(host.clone());   // first: the log length is read after this, so no batch is missed
     hub.register_rpc(Arc::new(StarRpc { policy: policy.clone() }));

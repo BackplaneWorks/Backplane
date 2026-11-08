@@ -1,0 +1,1 @@
+A small Backplane 0.14 home for the 0.14 import tests (native/host/src/import014), written by test/fixtures/make-v014-home.py. Each line has the shape v0.14.1 wrote; names, ids, text and keys are made up. The last line of events.jsonl is torn on purpose. Tests copy this folder to a temp dir and import the copy.

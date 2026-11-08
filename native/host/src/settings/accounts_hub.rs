@@ -226,6 +226,9 @@ pub async fn holds(hub: &Arc<Hub>, profiles: &Value, model: &str) -> Value {
     Value::Object(out)
 }
 
+static LIVE: std::sync::Mutex<Vec<(std::path::PathBuf, std::sync::Weak<Accounts>)>> = std::sync::Mutex::new(Vec::new());
+/// The account manager running for `home` (the 0.14 import adds the profiles it copied to it).
+pub fn live(home: &std::path::Path) -> Option<Arc<Accounts>> { LIVE.lock().unwrap().iter().find(|(h, _)| h == home).and_then(|(_, w)| w.upgrade()) }
 /// The manager for this hub's home (provider CLIs resolved like the agents'), its RPC, and the 1-second watch that tells everyone of a change.
 pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> { start_cli(hub, agents, crate::agents::proc::Cli::from_env()) }
 /// The hub's one account manager, opened on first use (a cheap read of the private registry). The agents take it before their recovery carries any turn on, settings::start
@@ -235,6 +238,7 @@ pub fn manager(hub: &Arc<Hub>, cli: crate::agents::proc::Cli) -> Arc<Accounts> {
 /// `start` with the provider CLIs found by `cli` (a test gives it a folder of stand-ins).
 pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents::proc::Cli) -> Arc<Accounts> {
     let mgr = manager(hub, cli);
+    LIVE.lock().unwrap().retain(|(h, w)| w.strong_count() > 0 && h != &hub.cfg.home); LIVE.lock().unwrap().push((hub.cfg.home.clone(), Arc::downgrade(&mgr)));
     if let Some(a) = &agents { let _ = a.accounts.set(mgr.clone()); } // the agents' start overran its budget: they take the same manager from the hub when they get to it
     hub.register_rpc(Arc::new(AccountsRpc::new(mgr.clone())));
     let (h, m) = (hub.clone(), mgr.clone());

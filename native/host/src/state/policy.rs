@@ -175,6 +175,9 @@ impl Policy {
         g.booting = Some(vec![]);
         true
     }
+    /// The 0.14 import is about to write lines no transform sees: hold every batch from now on, as a start does, until `finish_boot` folds the
+    /// log again (`host::refold_end`). False when a fold is already pending (its own `finish_boot` covers the import too).
+    pub fn begin_refold(&self) -> bool { let mut g = self.lock(); if g.booting.is_some() { return false } g.booting = Some(vec![]); true }
     /// The log through line `len` was folded into `core` (read AFTER the transform was registered): install it, replay the batches seen
     /// since past `len`, and return the events they derive (to be committed by the caller).
     pub fn finish_boot(&self, core: Core, len: u64, now_s: u64) -> Vec<Value> {

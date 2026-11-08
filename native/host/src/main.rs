@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mirror; mod model; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
+mod agents; mod api; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mirror; mod model; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
 mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
 use anyhow::{Context, Result};
@@ -189,6 +189,7 @@ async fn run(a: Args) -> Result<()> {
     guard::step_now("settings-start", || settings::start(hub.clone(), agents));
     startup::mark("settings start started");
     guard::step_now("commands", || commands::start(hub.clone()));
+    let _import = import014::start(&hub); // finds a 0.14 home and offers it in setup; reads nothing more until asked
     startup::mark("commands started");
     if let Some(w) = &a.window { let _ = hub.window_bin.set(w.clone()); }
     // the policies (autosettle, alerts, told, summaries, liveness, star nudge...): keep the Arc, the view lane reads it. Safe mode runs them passive

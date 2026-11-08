@@ -156,6 +156,82 @@ fn home(f: &Facts, c: &Client) -> Step {
     Step { id: "home", group: "Install", title: "Where your data is kept".into(), body, rows, choices: vec![], panel: "", done: !f.home.is_empty(), task: false }
 }
 
+// ---- the 0.14 import (import014/mod.rs does it; these are its words) ----
+
+/// The import as the hub info `import.v014` tells it. None: no 0.14 home on this computer and nothing imported.
+pub fn import_info(info: &Value) -> Option<Value> { info["import.v014"].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).filter(|v| v["state"].is_string() && v["state"] != "none") }
+fn num(v: &Value, k: &str) -> u64 { v[k].as_u64().unwrap_or(0) }
+fn many(n: u64, one: &str, more: &str) -> String { format!("{n} {}", if n == 1 { one } else { more }) }
+/// "12 projects, 1045 threads with 170677 messages, 6 bots with 1293 memories, ..." for what is not zero.
+pub fn import_counted(c: &Value) -> String {
+    let mut parts = vec![];
+    if num(c, "projects") > 0 { parts.push(many(num(c, "projects"), "project", "projects")) }
+    if num(c, "threads") > 0 || num(c, "messages") > 0 { parts.push(format!("{} with {}", many(num(c, "threads"), "thread", "threads"), many(num(c, "messages"), "message", "messages"))) }
+    if num(c, "bots") > 0 || num(c, "memories") > 0 { parts.push(format!("{} with {}", many(num(c, "bots"), "bot", "bots"), many(num(c, "memories"), "memory", "memories"))) }
+    if num(c, "rooms") > 0 || num(c, "posts") > 0 { parts.push(format!("{} with {}", many(num(c, "rooms"), "room", "rooms"), many(num(c, "posts"), "post", "posts"))) }
+    if num(c, "routines") > 0 { parts.push(many(num(c, "routines"), "routine", "routines")) }
+    if num(c, "settings") > 0 { parts.push(many(num(c, "settings"), "setting", "settings")) }
+    if num(c, "devices") > 0 { parts.push(many(num(c, "devices"), "paired device", "paired devices")) }
+    match parts.len() { 0 => "Nothing new.".into(), 1 => format!("{}.", parts[0]), n => format!("{} and {}.", parts[..n - 1].join(", "), parts[n - 1]) }
+}
+/// The words for one note on what stays behind.
+pub fn import_note(n: &Value) -> String {
+    let (k, c) = (s(n, "k"), num(n, "n"));
+    match k {
+        "runs" => format!("{} stay in 0.14. They were the mailroom's own working threads, and its mail stays with them.", many(c, "mail run", "mail runs")),
+        "routines-off" => format!("{} arrive switched off, so none runs twice while 0.14 still runs. Turn each on in its bot's Routines tab.", many(c, "routine", "routines")),
+        "machines" => "Links to your other machines stay in 0.14. Link them again in Settings, Devices.".into(),
+        "keys-stay" => "Keys, webhook secrets and sign-ins stay in 0.14 unless you import with keys.".into(),
+        "google" => "The Google connection is not part of this version and stays in 0.14.".into(),
+        "clashes" => format!("{} stay in 0.14 because this hub already uses their names for something else.", many(c, "item", "items")),
+        "fresh" => "Turn state, queues, wakes, locks and usage meters start fresh here.".into(),
+        "running" => "0.14 is still running. Import again later to bring what it adds after now.".into(),
+        "bot-folder" => format!("The folder of {} holds {} GB and stays at {}. Its threads and memory came across.", s(n, "name"), num(n, "gb"), s(n, "path")),
+        "copy-failed" => format!("{} could not be copied: {}.", s(n, "path"), s(n, "why").trim_end_matches('.')),
+        "sign-in" => format!("Sign in again to {}. Their history came across.", n["names"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default()),
+        "accounts-later" => "The account profiles were copied but not added yet. Import again once the hub has finished starting.".into(),
+        "vault-failed" => format!("The 0.14 keys did not come: {}. Add them again in Settings, API keys.", s(n, "why").trim_end_matches('.')),
+        _ => String::new(),
+    }
+}
+/// The rows for the import, in setup and in Settings, Import.
+pub fn import_rows(info: &Value) -> Vec<Value> {
+    let Some(v) = import_info(info) else { return vec![row("Nothing to import", "No Backplane 0.14 data was found on this computer. If it is in another folder, start the hub with BACKPLANE_IMPORT_FROM set to that folder.", vec![])] };
+    let notes = |v: &Value| v["notes"].as_array().into_iter().flatten().map(import_note).filter(|t| !t.is_empty()).map(|t| row("Stays behind", &t, vec![])).collect::<Vec<_>>();
+    let mut rows = vec![];
+    match s(&v, "state") {
+        "found" => rows.push(row("What is there", "Not counted yet. Counting reads the 0.14 log and changes nothing.", vec![btn("Count", "ob-import", "scan", true)])),
+        "scanning" => rows.push(row("Counting", "Reading the 0.14 log.", vec![])),
+        "ready" => {
+            let c = &v["counts"];
+            if num(c, "lines") == 0 { rows.push(row("Nothing new", "Everything in the 0.14 log is here already.", vec![btn("Count again", "ob-import", "scan", false)])) }
+            else {
+                rows.push(row("What comes across", &import_counted(c), vec![]));
+                rows.push(row("Import", "Copies them into this hub now. Keys and sign-ins stay in 0.14.", vec![btn("Import", "ob-import", "run", true)]));
+                rows.push(row("Import with keys", "Also copies the vault, the voice key, webhook secrets and your Claude and Codex sign-ins. If 0.14 keeps running, one of them may ask you to sign in again.", vec![btn("Import with keys", "ob-import", "run-secrets", false)]));
+            }
+            rows.extend(notes(&v));
+        }
+        "running" => rows.push(row("Importing", &if num(&v, "of") == 0 { "Reading the 0.14 log.".to_string() } else { format!("{} of {} events written.", num(&v, "done"), num(&v, "of")) }, vec![])),
+        "done" => {
+            let c = &v["counts"];
+            let what = if num(c, "lines") == 0 { "Nothing new came across: everything was here already.".to_string() } else { import_counted(c) };
+            rows.push(row("Imported", &what, vec![btn("Count again", "ob-import", "scan", false)]));
+            rows.extend(notes(&v));
+        }
+        _ => { let mut r = row("The import stopped", s(&v, "why"), vec![btn("Try again", "ob-import", "scan", true)]); r["tone"] = json!("warn"); rows.push(r) }
+    }
+    rows
+}
+/// Setup's import step: only on a desktop, and only when this computer has 0.14 data or an import was made.
+fn import(f: &Facts, c: &Client) -> Option<Step> {
+    if c.phone { return None }
+    let v = import_info(f.info)?;
+    let from = s(&v, "from");
+    let body = if from.is_empty() { "Your Backplane 0.14 data was copied into this hub.".to_string() } else { format!("Backplane 0.14 kept its data in {from}. This hub can copy your projects, threads, bots, rooms and settings from it. The 0.14 folder is only read: nothing in it changes or moves, and 0.14 keeps working.") };
+    Some(Step { id: "import", group: "Install", title: "Bring your 0.14 projects across?".into(), body, rows: import_rows(f.info), choices: vec![], panel: "", done: v["state"] == "done", task: true })
+}
+
 fn usage(f: &Facts) -> Step {
     let (share, asked, ua) = (set(f.st, "telemetry.share"), set(f.st, "telemetry.asked"), set(f.st, "telemetry.usage.asked"));
     let answered = crate::settings::telemetry::answered(share, asked, ua) || !set(f.st, "onboard.usage").is_empty();
@@ -438,6 +514,7 @@ fn finish(marks: &[(String, String, Mark)]) -> Step {
 fn all(f: &Facts, st: &State, session: &Value, c: &Client, user_home: &str) -> Vec<Step> {
     let mut v = vec![welcome(f, c)];
     if !c.phone { v.push(install(f)); v.push(home(f, c)); }
+    v.extend(import(f, c));
     v.push(usage(f));
     v.extend([claude(f, c), codex(f, c), others(f, c), kicad(f, st, session, c), freecad(f, st, session, c), machine(f, session, c), phone(f, session, c), remote(f, c), project(f, session, c, user_home), thread(f, session, c)]);
     v.extend(tour(f, c));
@@ -564,6 +641,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         "ob-install" => { if value.is_empty() { return None } send(hub, &mut rid, &mut cmds, "onboard.install", json!({"tool": value})); json!({}) }
         "ob-kicad-install" => { send(hub, &mut rid, &mut cmds, "kicad.install", json!({"consent": true})); json!({}) }
         "ob-check" => { send(hub, &mut rid, &mut cmds, "onboard.check", json!({})); json!({}) }
+        "ob-import" => { let (op, secrets) = match value { "scan" => ("scan", false), "run" => ("run", false), "run-secrets" => ("run", true), _ => return None }; send(hub, &mut rid, &mut cmds, "import.v014", json!({"op": op, "secrets": secrets})); json!({}) }
         "ob-usage" => {
             if value != "on" && value != "off" { return None }
             put(hub, &mut rid, &mut cmds, "onboard.usage", value);
@@ -692,6 +770,30 @@ mod tests {
             i["kicad.status"] = json!("stock"); walk(&at(&s0, "kicad", &i, &c), &mut out);
         } } }
         out.sort(); out.dedup(); out
+    }
+    /// Every state the import shows, with every note it can carry.
+    fn import_samples() -> Vec<Value> {
+        let notes = json!([{"k":"runs","n":12644},{"k":"routines-off","n":3},{"k":"machines"},{"k":"keys-stay"},{"k":"google"},{"k":"clashes","n":1},{"k":"fresh"},{"k":"running"},
+            {"k":"bot-folder","name":"Bub","gb":46,"path":"/home/a/.backplane-bend/bots/b1"},{"k":"copy-failed","path":"/x","why":"no space left"},{"k":"sign-in","names":["Work"]},{"k":"accounts-later"},{"k":"vault-failed","why":"its key file is missing"}]);
+        let c = json!({"projects":12,"threads":1045,"messages":170677,"bots":6,"memories":1293,"rooms":3,"posts":170,"routines":40,"settings":20,"devices":2,"lines":400000});
+        [json!({"state":"found","from":"/home/a/.backplane-bend"}), json!({"state":"scanning","from":"/f"}), json!({"state":"ready","from":"/f","counts":c,"notes":notes}), json!({"state":"ready","from":"/f","counts":{"lines":0},"notes":[]}),
+         json!({"state":"running","from":"/f","done":4000,"of":9000}), json!({"state":"running","from":"/f","done":0,"of":0}), json!({"state":"done","from":"/f","counts":c,"notes":notes}), json!({"state":"done","counts":{"lines":0}}),
+         json!({"state":"failed","from":"/f","why":"The 0.14 log could not be read: denied."})].into_iter().map(|v| json!({"import.v014": v.to_string()})).collect()
+    }
+    #[test] fn the_import_step_shows_only_with_0_14_data_and_each_press_asks_the_hub() {
+        let st = cst(blank(), &[]);
+        assert!(ids(&at(&st, "welcome", &info("linux"), &desk())).iter().all(|i| i != "import"), "no 0.14 home: no step");
+        let mut i = info("linux"); i["import.v014"] = json!(json!({"state":"found","from":"/h/.backplane-bend"}).to_string());
+        assert!(ids(&at(&st, "welcome", &i, &desk())).iter().any(|x| x == "import"));
+        assert!(ids(&at(&st, "welcome", &i, &phone_c())).iter().all(|x| x != "import"), "a phone does not import");
+        for (v, op, secrets) in [("scan", "scan", false), ("run", "run", false), ("run-secrets", "run", true)] {
+            let o = act(&st, "h", &sess(json!({})), &i, &desk(), "/h", "ob-import", v).unwrap();
+            let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!((sent["m"].as_str(), sent["p"]["op"].as_str(), sent["p"]["secrets"].as_bool()), (Some("import.v014"), Some(op), Some(secrets)));
+        }
+        assert!(act(&st, "h", &sess(json!({})), &i, &desk(), "/h", "ob-import", "rm").is_none());
+        let done = json!({"import.v014": json!({"state":"done","counts":{"projects":2,"threads":3,"messages":9,"lines":20},"notes":[{"k":"runs","n":4}]}).to_string()});
+        let r = import_rows(&done); assert_eq!(r[0]["note"], "2 projects and 3 threads with 9 messages."); assert!(r[1]["note"].as_str().unwrap().starts_with("4 mail runs stay in 0.14"));
     }
     /// Everything that lives outside Backplane has a button or a page, on each system, and the phones' links are choices they decode.
     #[test] fn every_step_that_needs_something_outside_backplane_links_or_installs_it() {
@@ -859,6 +961,8 @@ mod tests {
             for id in ids(&at(&s0, "welcome", &i, &c)) { walk(&at(&s0, &id, &i, &c), &mut out); }
             for r in settings_rows(&s0, &sess(json!({})), &i, &c, "/h") { walk(&r, &mut out); }
         } } }
+        for st in import_samples() { walk(&Value::Array(import_rows(&st)), &mut out); if let Some(x) = import(&Facts::of(&cst(blank(), &[]), &st), &desk()) { out.push(x.title); out.push(x.body) } }
+        walk(&Value::Array(import_rows(&json!({}))), &mut out);
         out.sort(); out.dedup(); out
     }
     #[test] fn the_update_words_follow_how_the_hub_was_installed() {

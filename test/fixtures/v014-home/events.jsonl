@@ -1,0 +1,59 @@
+{"$":"SettingSet","key":"machine.id","value":"m0123456789abcdef","at":1790175000}
+{"$":"SettingSet","key":"agent.provider","value":"codex","at":1790175657}
+{"$":"SettingSet","key":"agent.provider","value":"claude","at":1790175658}
+{"$":"SettingSet","key":"ui.theme","value":"dark","at":1790175659}
+{"$":"SettingSet","key":"allowance.codex","value":"{}","at":1790175660}
+{"$":"ProjectCreated","id":"p1790175753-8","title":"Nordic","root":"~/Documents/Nordic","at":1790175753}
+{"$":"ProjectCreated","id":"p1790175760-9","title":"Old idea","root":"~/Documents/old-idea","at":1790175760}
+{"$":"ThreadCreated","id":"t1790175755-10","project":"p1790175753-8","title":"New thread","env":"local","branch":"","worktree":"","provider":"claude","model":"opus","at":1790175755}
+{"$":"ModesSet","id":"t1790175755-10","runtime":"full-access","interaction":"default","model":"opus","at":1790175766}
+{"$":"ThreadRenamed","id":"t1790175755-10","title":"Pick a regulator","at":1790175780}
+{"$":"MessagePosted","thread":"t1790175755-10","msg":"m1790175780-13","role":"user","text":"Which LDO fits 3.3 V at 300 mA?","at":1790175780}
+{"$":"TurnChanged","thread":"t1790175755-10","state":"running","at":1790175780}
+{"$":"ActivityLogged","thread":"t1790175755-10","act":"e1790175781-16","tone":"tool","kind":"claude","summary":"jlc_search LDO 3.3V","at":1790175781}
+{"$":"UsageSet","thread":"t1790175755-10","used":12000,"at":1790175782}
+{"$":"MessagePosted","thread":"t1790175755-10","msg":"m1790175790-18","role":"assistant","text":"An AP2112K-3.3 fits \ud83d: 600 mA, SOT-23-5.","at":1790175790}
+{"$":"TurnUsage","thread":"t1790175755-10","cost":1,"at":1790175790}
+{"$":"TurnChanged","thread":"t1790175755-10","state":"completed","at":1790175791}
+{"$":"SessionSet","id":"t1790175755-10","session":"47119e0e-5017-4813-8353-70a01f309d22","at":1790175791}
+{"$":"ThreadSettled","id":"t1790175755-10","manual":true,"at":1790175800}
+{"$":"SettingSet","key":"summary.at.t1790175755-10","value":"1790175800","at":1790175800}
+{"$":"ThreadCreated","id":"t1790175900-20","project":"p1790175753-8","title":"Layout","env":"worktree","branch":"backplane/a1","worktree":"","provider":"claude","model":"opus","at":1790175900}
+{"$":"TaskDelegated","task":"k1790175901-21","parent":"t1790175755-10","child":"t1790175900-20","depth":1,"provider":"claude","model":"opus","at":1790175901}
+{"$":"TaskStateSet","task":"k1790175901-21","state":"running","summary":"placing parts","at":1790175901}
+{"$":"TurnChanged","thread":"t1790175900-20","state":"running","at":1790175902}
+{"$":"AskOpened","id":"a1790175903-22","thread":"t1790175900-20","at":1790175903}
+{"$":"TurnQueued","thread":"t1790175900-20","text":"and the silkscreen","at":1790175904}
+{"$":"WakeSet","id":"w1790175905-23","thread":"t1790175755-10","at":1790175905}
+{"$":"LockChanged","name":"build","lock":"held","at":1790175906}
+{"$":"ThreadCreated","id":"t1790175910-24","project":"p1790175760-9","title":"Gone with its project","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1790175910}
+{"$":"MessagePosted","thread":"t1790175910-24","msg":"m1790175911-25","role":"user","text":"hello","at":1790175911}
+{"$":"ProjectRemoved","id":"p1790175760-9","at":1790175920}
+{"$":"ThreadCreated","id":"t1790175930-26","project":"p1790175753-8","title":"Deleted","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1790175930}
+{"$":"ThreadDeleted","id":"t1790175930-26","at":1790175931}
+{"$":"BotSet","id":"b1790292962-8017","name":"Ada","thread":"t1790292962-8017","look":306440,"persona":"Answers the person's mail.","at":1790292962}
+{"$":"ThreadCreated","id":"t1790292962-8017","project":"","title":"Ada","env":"local","branch":"","worktree":"","provider":"claude","model":"opus","at":1790292962}
+{"$":"MessagePosted","thread":"t1790292962-8017","msg":"m1790292970-8018","role":"user","text":"Remember that I like 0402 parts.","at":1790292970}
+{"$":"MemorySaved","bot":"b1790292962-8017","key":"","kind":"fact","text":"The person likes 0402 parts.","tags":"","at":1790292971}
+{"$":"SpaceSet","bot":"b1790292962-8017","spec":"{\"title\":\"Ada\",\"blocks\":[]}","at":1790292972}
+{"$":"RoutineSet","id":"o1790305944-9249","bot":"b1790292962-8017","name":"Morning check","cron":"0 8 * * *","prompt":"Read the overnight mail.","on":true,"at":1790305944}
+{"$":"HookSet","id":"h1790305792-9226","bot":"b1790292962-8017","name":"CI","revoked":false,"at":1790305792}
+{"$":"BotWoke","bot":"b1790292962-8017","hop":1,"at":1790305950}
+{"$":"RoutineFired","id":"o1790305944-9249","at":1790306000}
+{"$":"RunSet","thread":"run1792383741-196955","bot":"b1790292962-8017","conv":"wake:w1","mail":"t:t1:lr-r1","at":1792383741}
+{"$":"ThreadCreated","id":"run1792383741-196955","project":"p1790175753-8","title":"Mail run","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1792383741}
+{"$":"MessagePosted","thread":"run1792383741-196955","msg":"m1792383742-1","role":"user","text":"mail in","at":1792383742}
+{"$":"MailPosted","id":"mail1792383698-196877","conv":"pair:x","from":"thread:a","to":"thread:b","kind":"thread","ref":"","want":"fyi","head":"hi","size":2,"at":1792383698}
+{"$":"SettingSet","key":"liveness.run1792383741-196955","value":"1","at":1792383743}
+{"$":"SettingSet","key":"summary.at.run1792383741-196955","value":"1","at":1792383743}
+{"$":"RoomSet","id":"r1790349564-10743","name":"Everybody","members":"b1790292962-8017","at":1790349564}
+{"$":"RoomPosted","id":"p1790373060-12782","room":"r1790349564-10743","from":"Ada","text":"Good morning.","hop":1,"at":1790373060}
+{"$":"UberSet","bot":"b1790292962-8017","uid":"u1791867695-0011223344556677","at":1791867695}
+{"$":"DeviceRegistered","token":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","platform":"ios","kind":"alert","thread":"","env":"production","bundle":"dev.backplane.works","at":1790213430}
+{"$":"DeviceRegistered","token":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","platform":"android","kind":"alert","thread":"","env":"production","bundle":"dev.backplane.works","at":1790213431}
+{"$":"DeviceDropped","token":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","at":1790213432}
+{"$":"PeerSet","id":"p97a9070fbff5a66b","name":"laptop","url":"http://laptop.example.ts.net:3787","revoked":false,"at":1790349575}
+{"$":"DeployBuilt","id":"d1","at":1790349576}
+{"$":"CtxNoted","thread":"t1790175755-10","at":1790349577}
+{"$":"SettingSet","key":"told.k1792001002-105187-1","value":"1","at":1792001002}
+{"$":"MessagePosted","thread":"t1790175755-10","msg":"torn

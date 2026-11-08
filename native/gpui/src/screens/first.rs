@@ -22,7 +22,7 @@ const OTHER_NOTE: &str = "A hub is the Backplane program on another computer. On
 const CONNECT: &str = "Connect";
 const BACK: &str = "Back";
 const HAS_DATA: &str = "This folder already has a hub's data. Backplane opens it as it is.";
-const OLD_NOTE: &str = "Backplane 0.14 data is in that folder. This version leaves it alone. To copy your threads here, see the install guide.";
+const OLD_NOTE: &str = "Backplane 0.14 data is in that folder. This version only reads it. Once the hub starts, setup offers to copy your projects, threads and bots into the folder you choose here.";
 const GUIDE: &str = "https://github.com/BackplaneWorks/Backplane/blob/main/docs/onboarding.md";
 
 impl First {
