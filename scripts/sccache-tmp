@@ -6,7 +6,7 @@
 # hyphen); through a sh wrapper native/voice's tests compiled with no path to their binary and all 41 failed with NotFound.
 CC=${BQ_CC_TMP:-${BP_TMP:-$HOME/.cache/bp-tmp}/sccache}; mkdir -p "$CC"
 for p in $(pgrep -x -u "$(id -u)" sccache 2>/dev/null); do
-  t=$(tr '\0' '\n' < /proc/$p/environ 2>/dev/null | sed -n 's/^TMPDIR=//p')
+  t=$({ tr '\0' '\n' < /proc/$p/environ; } 2>/dev/null | sed -n 's/^TMPDIR=//p')
   [ -n "$t" ] && [ ! -d "$t" ] && TMPDIR=$CC sccache --stop-server > /dev/null 2>&1
 done
 TMPDIR=$CC exec sccache "$@"

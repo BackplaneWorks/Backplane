@@ -1,9 +1,13 @@
 #!/bin/bash
 # cargo-q ARGS...: `cargo ARGS...` queued behind the machine-wide build slots (scripts/lib-buildslot.sh), through the shared compiler cache, with -j sized from free memory.
 #   scripts/cargo-q test --offline          from native/host or native/gpui, in your own worktree, instead of bare cargo
-# Every lane runs its tests and builds this way, so a few heavy builds run at once and the rest wait; the wait is said on stderr. An explicit -j/--jobs is kept.
+# Every lane runs its tests and builds this way, so a few heavy builds run at once; when every slot is taken a test/build/check/clippy/doc runs on a Boat box instead of waiting (scripts/lib-boat.sh, BP_NO_BOAT=1 forces local), else the wait is said on stderr. An explicit -j/--jobs is kept.
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-buildslot.sh"
-if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: waiting for a build slot" >&2; }; bq_run waiting "$0" "$@"; exit $?; fi
+if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: waiting for a build slot" >&2; }
+  # every slot taken: a build or test that gives the same result anywhere runs on a Boat box instead of waiting (scripts/lib-boat.sh; BP_NO_BOAT=1 forces local)
+  bo_cargo_ok "$@" && bo_ready && export BQ_OFFLOAD=1; bq_run waiting "$0" "$@"; exit $?; fi
+# started by bq_run under a Boat lease: run there, with the same exit code and the same artifacts in the same places
+if [ -n "${BP_BOAT_IDX:-}" ]; then bo_cargo "$@"; rc=$?; [ "$rc" = 98 ] && exit 98; exit "$rc"; fi
 bq_cc
 bp_notmp_target "${CARGO_TARGET_DIR:-}" || exit 1
 j=(); case " $* " in *" -j"*|*" --jobs"*) ;; *) j=(-j "$(bq_jobs)");; esac
