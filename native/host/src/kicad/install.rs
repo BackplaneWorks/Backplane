@@ -182,7 +182,15 @@ pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path,
     let mut c = match standin { Some(s) => crate::proc::tokio_cmd(crate::proc::Kind::Net, s), None => { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, "sh"); c.arg("-c").arg(SCRIPT).arg("sh"); c } };
     c.args(args(parent, p)).current_dir(parent).stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err));
     crate::plat::proc::own_group_tokio(&mut c);
-    let mut child = c.spawn().map_err(|e| format!("could not start the installer: {e}"))?;
+    // "Text file busy": an installer written a moment ago is still open for writing in a child another thread just forked; it passes in a few milliseconds
+    let mut tries = 0;
+    let mut child = loop {
+        match c.spawn() {
+            Ok(c) => break c,
+            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => { tries += 1; tokio::time::sleep(std::time::Duration::from_millis(25)).await }
+            Err(e) => return Err(format!("could not start the installer: {e}")),
+        }
+    };
     if let Some(id) = child.id() { crate::plat::proc::adopt(id, false) }
     let mut said = String::new();
     let status = loop {
@@ -334,9 +342,11 @@ mod tests {
 
     #[cfg(unix)] #[test] fn a_standin_installer_that_succeeds_is_reported_with_its_steps() {
         let r = tmp("sok"); let s = r.join("standin");
-        exe(&s, "#!/bin/sh\necho \"Downloading $5\"\nsleep 0.4\necho Unpacking\nmkdir -p \"$1/$3/bin\" && touch \"$1/$3/$8\"\necho \"Installed in $1/$3\"\n");
+        // the installer goes on once the first step has been heard (a go file the step callback makes), never after a pause: a loaded machine can let it finish between two looks at its log
+        let go = r.join("go");
+        exe(&s, &format!("#!/bin/sh\necho \"Downloading $5\"\ni=0; while [ ! -e '{}' ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done\necho Unpacking\nmkdir -p \"$1/$3/bin\" && touch \"$1/$3/$8\"\necho \"Installed in $1/$3\"\n", go.display()));
         let parent = r.join("kicad"); let mut steps = vec![];
-        let got = rt().block_on(run(Some(&s), &parent, &LINUX, &r.join("log"), |l| steps.push(l)));
+        let got = rt().block_on(run(Some(&s), &parent, &LINUX, &r.join("log"), |l| { if steps.is_empty() { let _ = std::fs::write(&go, ""); } steps.push(l) }));
         assert_eq!(got, Ok(parent.join("10.99.0-bp.4").to_string_lossy().to_string()));
         assert!(steps.first().unwrap().starts_with("Downloading backplane-kicad-linux") && steps.last().unwrap().starts_with("Installed in"), "{steps:?}");
     }

@@ -210,7 +210,8 @@ async fn a_storm_of_twenty_restarts_mid_turn_never_fails_a_start_on_the_accounts
         let t0 = Instant::now();
         loop {
             let ev = log(&up.hub); let since = &ev[up.from..];
-            let c = carried_since(&up.hub, up.from);
+            // the carried threads from the same snapshot as `since` (a second look at the log may see a carry the first did not, and the search below would find none)
+            let c: Vec<String> = since.iter().filter(|e| e["$"] == "MessagePosted" && e["role"] == "user" && e["text"].as_str().unwrap_or("").starts_with(crate::agents::world::CARRY_TEXT)).filter_map(|e| e["thread"].as_str().map(str::to_string)).collect();
             let busy = c.iter().all(|th| { let at = since.iter().rposition(|e| e["$"] == "MessagePosted" && e["thread"] == th.as_str() && e["text"].as_str().unwrap_or("").starts_with(crate::agents::world::CARRY_TEXT)).unwrap(); since[at..].iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == th.as_str() && e["role"] == "assistant") });
             let mailed = since.iter().any(|e| e["$"] == "MessagePosted" && e["msg"] == format!("mail-{r}").as_str());
             if busy && mailed && !c.is_empty() && t0.elapsed() > Duration::from_millis(700) { break }
