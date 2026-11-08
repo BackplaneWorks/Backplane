@@ -1,0 +1,34 @@
+# The macOS column of docs/e2e/MATRIX.md, on a runner with a logged-in GUI session (the Mac mini is builds only).
+# Run by hand only: gh workflow run e2e-macos.yml --ref <branch> [-f jobs=probe|build|rows|all]
+name: e2e-macos
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), all"
+        default: all
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: inputs.jobs == 'probe' || inputs.jobs == 'all'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: what the runner allows
+        run: |
+          set +e
+          sw_vers; uname -m; id -un; echo "console: $(stat -f%Su /dev/console)"
+          system_profiler SPDisplaysDataType | head -30
+          mkdir -p out; screencapture -x out/probe.png; ls -l out/probe.png; sips -g pixelWidth -g pixelHeight out/probe.png
+          osascript -e 'tell application "System Events" to get name of every process whose background only is false' 
+          osascript -e 'tell application "System Events" to keystroke "a"' ; echo "keystroke rc=$?"
+          brew list --versions cliclick || brew install cliclick; cliclick p; echo "cliclick rc=$?"
+          cliclick m:200,200 w:200 p; echo "cliclick move rc=$?"
+          osascript -e 'tell application "Finder" to get bounds of window of desktop'
+          python3 -c "import Quartz; print('quartz ok')" 2>&1 | tail -1
+          ls /Library/Application\ Support/com.apple.TCC/ 2>&1; sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "select service,client,auth_value from access" 2>&1 | head -20
+          node --version; python3 --version; bun --version 2>&1 | head -1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: probe, path: out }
