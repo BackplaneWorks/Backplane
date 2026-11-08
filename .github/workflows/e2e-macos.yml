@@ -100,6 +100,7 @@ jobs:
       - name: input and screenshot tools
         run: |
           brew install cliclick
+          brew install --cask freecad   # the Mech viewer asks the hub for FreeCAD
           python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz
       - name: client rows
         run: |

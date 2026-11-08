@@ -8,6 +8,11 @@ if want('CAL'):
     log('CAL', ok and sel_changed, 'clicked thread:t2 with a real mouse click: clicked=%s, the window redrew=%s' % (ok, sel_changed))
 
 MAIN = lambda: rects()['main']
+def ensure_sidebar():   # the sidebar is open when `main` starts at the sidebar's width; Cmd+B toggles it, so look before pressing
+    for _ in range(3):
+        if rects().get('main', {}).get('x', 0) > 100 and 'thread:t1' in ctrls(): return True
+        xin('click', *CC()); chord('ctrl b'); pause(1.5)
+    return False
 def say_(t):   # click the composer, type, press Return; if the message did not reach the hub, press Return again (a key can land before the field has focus)
     n = len([e for e in events() if e['$'] == 'MessagePosted' and t in e.get('text', '')])
     xin('click', *CC()); xin('type', t); xin('key', 'Return')
@@ -135,7 +140,7 @@ if want('F17'):
         pause(1.5); shot('v-%s-zoom' % kind); zoomed = differs(px('v-%s' % kind), px('v-%s-zoom' % kind), VIEW)
         xin('drag', cx - 80, cy, cx + 80, cy + 40); pause(1.5); shot('v-%s-pan' % kind); panned = differs(px('v-%s-zoom' % kind), px('v-%s-pan' % kind), VIEW)
         res.append((kind, drawn, zoomed, panned)); print('   ', kind, 'drawn', drawn, 'wheel changed it', zoomed, 'drag changed it', panned, flush=True)
-    chord('ctrl b'); pause(1.0)   # the sidebar back for the rows after this one
+    ensure_sidebar()   # the sidebar back for the rows after this one
     log('F17', all(r[1] and r[2] and r[3] for r in res), '; '.join('%s: drawn=%s wheel=%s %s=%s' % (k, d, z, 'orbit' if k == '3D' else 'pan', p_) for k, d, z, p_ in res) + ' (frames are not judged: llvmpipe)')
 
 # ---- F07 stop, F08 fork, F14 terminal, F21 reconnect: through the buttons and keys of the window
