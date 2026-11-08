@@ -222,6 +222,11 @@ impl Backplane {
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
 pub fn bind_all(cx:&mut App,l:&local::Local){keys::bind_all(cx,l);}
 static OPENED:std::sync::LazyLock<(async_channel::Sender<String>,async_channel::Receiver<String>)>=std::sync::LazyLock::new(||async_channel::bounded(8));
+/// The window could not be made (no display, a surface the compositor refuses): say so and leave with an error code, instead of a panic that aborts into a core dump.
+fn window_failed<T>(e: anyhow::Error) -> T { eprintln!("Backplane: cannot open its window: {e:#}"); std::process::exit(1) }
+/// Quit from the next executor turn: the platform may still be inside its own handler for the close (X11 holds its client borrowed there, and `quit` borrows it again: "already borrowed").
+fn quit_later(cx: &mut App) { cx.spawn(async move |cx| { let _ = cx.update(|cx| cx.quit()); }).detach(); }
+
 fn main()->anyhow::Result<()> {
     #[cfg(feature="cef")]
     if let Some(code)=viewers::cef::subprocess(){std::process::exit(code);} // a CEF helper process (renderer, gpu...) is this executable run again
@@ -238,23 +243,23 @@ fn main()->anyhow::Result<()> {
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});
     app.run(move|cx:&mut App|{
         art::load_fonts(cx);bind_all(cx,&local::Local::load());
-        cx.on_window_closed(|cx|if cx.windows().is_empty(){cx.quit();}).detach();
+        cx.on_window_closed(|cx|if cx.windows().is_empty(){quit_later(cx);}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
         let opts=WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()};
         if let Some(spec)=config.solid_demo.clone() { // --solid-demo TRIS|FILE[,STEPS]: the 3D page alone on a synthetic model or a frame file (measurement, check mode)
             let mut it=spec.split(',');let source=it.next().unwrap_or("100000").to_string();let steps=it.next().and_then(|t|t.parse().ok()).unwrap_or(200);
-            cx.open_window(opts,move|_,cx|cx.new(|cx|viewers::demo::Demo::new(cx,&source,steps,started))).expect("open GPUI window");
+            cx.open_window(opts,move|_,cx|cx.new(|cx|viewers::demo::Demo::new(cx,&source,steps,started))).unwrap_or_else(window_failed);
         } else {
             let measure=config.script.is_some();
             if config.pending { // no --url: this device's own hub, or the chooser
                 let mut c=config.clone();c.launched=true;let saved=launch::load();
                 let env=std::env::var_os("BACKPLANE_HOME").filter(|h|!h.is_empty()).map(std::path::PathBuf::from);
                 // this computer's hub is the one this client was started on, when it kept one; only a client never given one falls through to launch.json
-                if let (Some((url,tf)),true)=(hubs::local_target(&hubs::load()),env.is_none()) {c.hub=url.replacen("http://","ws://",1);c.token_file=tf;c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).expect("open GPUI window");}
-                else if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).expect("open GPUI window");}
-                else {let auto=env.or_else(||(!saved.home.is_empty()).then(||saved.home.clone().into()));cx.open_window(opts,move|window,cx|cx.new(|cx|screens::first::First::new(window,cx,c,started,auto))).expect("open GPUI window");}
+                if let (Some((url,tf)),true)=(hubs::local_target(&hubs::load()),env.is_none()) {c.hub=url.replacen("http://","ws://",1);c.token_file=tf;c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
+                else if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
+                else {let auto=env.or_else(||(!saved.home.is_empty()).then(||saved.home.clone().into()));cx.open_window(opts,move|window,cx|cx.new(|cx|screens::first::First::new(window,cx,c,started,auto))).unwrap_or_else(window_failed);}
             } else {
-            cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).expect("open GPUI window");
+            cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).unwrap_or_else(window_failed);
             }
         }
         cx.activate(true);
