@@ -4,6 +4,7 @@
 //! `turn.start`, `ask.answer`, `turn.interrupt`) run as this connection; subscriptions turn each new log line, and the streamed text of a running turn, into
 //! pushes (`thread`, `project`, `entry`, `text`, `turn`) for the lists and threads a connection asked for.
 mod ext;
+pub mod term;
 /// What a phone hears of a push on its socket (ext.rs `notify_of`).
 pub fn ext_notify(e: &Value) -> Value { ext::notify_of(e) }
 use crate::hub::{Conn, Hub, Out};
@@ -17,7 +18,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -153,15 +154,17 @@ fn row_entry(r: &crate::model::Row) -> Option<Value> {
         if crate::present::thread::agent_only(&r.role, &r.text) { en["agentOnly"] = json!(true) }
         return Some(en);
     }
-    act_entry(&r.id, &r.role, &r.akind, &r.text, at)
+    act_entry(&r.thread, &r.id, &r.role, &r.akind, &r.text, at)
 }
 /// An activity as the phones see it, in the desktop's words (present/thread.rs): a tool call by its shown name, a design step by what changed, anything else a note
 /// with its name and tone. A phone folds a run of `tool` and `step` entries (docs/PHONE-DATA.md); the design as it was before an edit is no entry at all.
-fn act_entry(id: &str, role: &str, akind: &str, text: &str, at: u64) -> Option<Value> {
+fn act_entry(thread: &str, id: &str, role: &str, akind: &str, text: &str, at: u64) -> Option<Value> {
     use crate::present::thread as pt;
     let e = pt::Ent { id: id.into(), msg: false, role: role.into(), akind: akind.into(), text: text.into(), at };
     Some(match role {
         "tool" => json!({"id":id,"kind":"tool","text":text,"at":at,"tool":{"name":pt::shown_name(akind),"summary":if text == akind { String::new() } else { clip(text, 200) },"state":"done"}}),
+        // a chat terminal: a card the phone draws and streams (data/term.rs)
+        r if r == crate::term::emb::TONE && akind == crate::term::emb::KIND => term::entry(thread, id, text, at),
         "step" if pt::step_base(&e) => return None,
         "step" => json!({"id":id,"kind":"step","text":text,"label":pt::step_row(&e),"at":at}),
         _ => { let a = pt::plain_act(&e); json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}) }
@@ -353,7 +356,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
 #[derive(Clone, PartialEq)]
 enum Topic { Lists, Thread(String) }
 #[derive(Default)]
-struct Subs { next: u64, subs: Vec<(u64, Topic)>, live: HashSet<String>, counts: HashMap<String, (u64, u64)> }
+struct Subs { next: u64, subs: Vec<(u64, Topic)>, live: HashSet<String>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
 impl Subs {
     fn threads(&self, th: &str) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Thread(th.into())).map(|(i, _)| *i).collect() }
     fn lists(&self) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Lists).map(|(i, _)| *i).collect() }
@@ -390,7 +393,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 if replaced || kind != "assistant" || !s(&e, "text").trim().is_empty() { entry = Some(en) }
             }
             "MessageAttached" => { let id = s(&e, "msg"); let mut en = json!({"id":id,"kind":"user","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"attachments":e["attachments"]}); if let Some(x) = recalled(id) { en["text"] = x["text"].clone(); if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } entry = Some(en) }
-            "ActivityLogged" => entry = act_entry(s(&e, "act"), s(&e, "tone"), s(&e, "kind"), s(&e, "summary"), ms(e["at"].as_u64().unwrap_or(0))),
+            "ActivityLogged" => entry = act_entry(&th, s(&e, "act"), s(&e, "tone"), s(&e, "kind"), s(&e, "summary"), ms(e["at"].as_u64().unwrap_or(0))),
             "AskOpened" => entry = Some(ask_entry(&e, None)),
             // the only alert a phone hears on its socket: what the uberbot's gate let through (push), and its clear
             "PushSent" => { for sub in subs.lists() { out.push(d(sub, "notify", ext::notify_of(&e))) } }
@@ -449,7 +452,7 @@ async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Val
             _ => Err(err("topic: lists or thread")),
         },
         "unsubscribe" => { let n = p["sub"].as_u64().unwrap_or(0); subs.subs.retain(|(i, _)| *i != n); Ok(json!({})) }
-        _ => call(hub, c, m, &p).await,
+        _ => match term::call(hub, &mut subs.terms, m, &p).await { Some(r) => r, None => call(hub, c, m, &p).await },
     };
     match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }
 }
@@ -485,6 +488,8 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
                 match o { Out::Close => return Ok(()),
                     // a viewer's plot frames (binary CBOR) and its small announcements; anything else the hub pushes is for the other clients
                     Out::Raw(b) => if ext::wants_raw(&b) { tx.send(Message::Binary(b.into())).await?; },
+                    // a terminal this socket watches: its bytes and where they start (data/term.rs)
+                    Out::Value(v) if v["t"] == "term" => if let Some(f) = term::push_of(&subs.terms, &v) { tx.send(pack(&f, json_mode)).await?; },
                     Out::Value(v) => if ext::wants_value(&v) {
                         // a plot's "none" is binary like the plots (one decoder in the app); a browser frame's announcement is JSON
                         if v["t"] == "plot" { let mut b = Vec::new(); cbor_plain(&v, &mut b); tx.send(Message::Binary(b.into())).await?; } else { tx.send(pack(&v, json_mode)).await?; } } } }
