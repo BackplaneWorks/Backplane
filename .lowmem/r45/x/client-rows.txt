@@ -1,0 +1,58 @@
+screen (1024, 768) window content (0, 59, 1024, 648)
+rects {"composer": [264, 410, 688, 234], "main": [264, 36, 688, 608], "rail": [953, 44, 71, 608], "sidebar": [0, 36, 263, 608], "topbar": [12, 0, 1024, 35]}
+controls 39 ['hub:menu', 'project:p1', 'rail:3D', 'rail:Board', 'rail:Browser', 'rail:Commands', 'rail:Diff', 'rail:Files', 'rail:Mech', 'rail:Review', 'rail:Schematic', 'rail:Split', 'rail:Terminal', 'send', 'thread:t1', 'thread:t2', 'thread:t3', 'tool-0', 'tool-1', 'tool-2', 'tool-3', 'tool:archive', 'tool:fork', 'tool:pin', 'tool:settle', 'ui:Account', 'ui:Add project', 'ui:Attach', 'ui:Context', 'ui:Dictate', 'ui:Draw', 'ui:Fold sidebar', 'ui:Improvements', 'ui:Jump or run a command', 'ui:New bot', 'ui:New room', 'ui:New thread', 'ui:Search', 'ui:Settings']
+ok   CAL clicked thread:t2 with a real mouse click: clicked=True, the window redrew=True
+ok   F02 the client drew its first frame and reached usable=True; the sidebar lists project p1 and threads ['thread:t1', 'thread:t2', 'thread:t3'] (controls reported by the client); gpu [{'device': None, 'event': 'gpu', 't_ms': 1406.91, 'epoch_ms': 1794151830771}] (f02.png shows the sidebar, the threads and "Connected")
+ok   F09-meter Context panel before the turn (m-empty.png) and after it (m-after.png): the panel changed=True once the turn was counted; the hub logged TurnUsage=True, readings ['tok.basis', 'tok.epoch', 'tok.recount']. The figures are read from the screenshot, not by the driver
+<string>:14: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+ok   F09-draft typed an unsent draft, killed the client process, started it again: the composer shows text again=True (m-draft.png)
+ok   F15-paste a PNG on the X clipboard pasted with Ctrl+V: composer changed=True; message posted=True; stored as a PNG=True (['home/attachments/t1/3d2679e8-pasted-1794151885.png']); the agent was told the path=True
+ok   F06-approval approval card (f6-approval.png) with Allow, Allow for session and Deny: Allow closed the ask and the agent got allow=True; Deny closed the next and the agent got deny=True
+ok   F06-question question card "Which port?" (f6-question.png), option buttons ['ask:0:0', 'ask:0:1', 'ask:0:2']: the first closed it and the agent got the answer=True
+ok   F06-plan a thread in plan mode (ModesSet interaction=plan) asked to exit with the plan card (f6-plan.png), AskOpened kind=plan with the plan text=True
+    palette ctrl k True the command palette drew over the window
+    models ctrl m True the model menu opened (client `pick` metric)
+    sidebar ctrl b True the main pane grew left as the sidebar folded (main.x 264.0 -> 1.0)
+    files ctrl p True the Files page drew (the window changed)
+    diff ctrl d True the Diff page drew (the window changed)
+    terminal ctrl j True the floating terminal drew
+    thread2 ctrl 2 True the header moved to the second thread
+    perf ctrl shift h True the performance overlay drew
+    uber ctrl shift u True the uberbot's chat opened
+    new ctrl n True ThreadCreated in the hub log
+    stop ctrl period True TurnChanged interrupted in the hub log
+    settle ctrl shift s True ThreadSettled in the hub log
+ok   F16 palette ctrl k: ok; models ctrl m: ok; sidebar ctrl b: ok; files ctrl p: ok; diff ctrl d: ok; terminal ctrl j: ok; thread2 ctrl 2: ok; perf ctrl shift h: ok; uber ctrl shift u: ok; new ctrl n: ok; stop ctrl period: ok; settle ctrl shift s: ok
+<string>:6: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+<string>:6: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+    Board drawn True wheel changed it True drag changed it True
+<string>:6: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+<string>:6: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+    Schematic drawn True wheel changed it True drag changed it True
+<string>:6: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+<string>:6: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+    3D drawn True wheel changed it True drag changed it True
+<string>:6: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+<string>:6: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+    Mech drawn True wheel changed it True drag changed it True
+ok   F17 Board: drawn=True wheel=True pan=True; Schematic: drawn=True wheel=True pan=True; 3D: drawn=True wheel=True orbit=True; Mech: drawn=True wheel=True pan=True (frames are not judged: llvmpipe)
+ok   F07-stop a running turn (f7-running.png) and the Stop button in the thread header: TurnChanged interrupted in the hub log=True
+ok   F08-fork the Fork thread button: a new thread was created in the hub log=True (f8-fork.png)
+ok   F14-terminal the floating terminal (Ctrl+J): a command typed with the keyboard ran in a real shell (the marker file exists=True) and the panel redrew=True (f14-typed.png)
+ok   F21-reconnect the hub was stopped and started again on the same home: the status line changed while it was down=True, and after reconnecting a message typed in the window reached the new hub process=True (f21-*.png)
+ok   F22-card the files card (f22-files-card.png, buttons ['ask:0:0', 'ask:0:1']) opened with nothing uploaded before Send (no POST to the order server)=True; Send pressed with the mouse: the hub uploaded to the stand-in order server and the quote card was set=True (f22-quote.png); requests seen ['GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'POST /v1/quotes', 'GET /v1/quotes/q_rig1'], none to pay or buy=True
+   F18: hub frame after the wait: (9341, '043db6ce') (poked=False)
+   F18 hub frame (what the poller fetches): (9341, '043db6ce') then (9341, '043db6ce')
+   F18: the popup button took the click at +0 px from the centre found on the frame (attempt 1)
+   F18: no download click reported yet (attempt 1)
+   F18: no download click reported yet (attempt 2)
+   F18: the download link took the click at -24 px from the centre found on the frame (attempt 3)
+   F18: server saw ['load', 'click', 'input:z', 'input:zq', 'input:zqf', 'input:zqf1', 'input:zqf18', 'scroll:120', 'scroll:240', 'scroll:360', 'scroll:480', 'scroll:600', 'scroll:720', 'scroll:600', 'scroll:480', 'scroll:360', 'scroll:240', 'scroll:120', 'scroll:0', 'popup-click', 'popup-loaded', 'message:hi-from-popup', 'popup-has-opener', 'download-click', 'download-get', 'click']
+   F18 page loads and paints True the helper streamed the test page (the page asked its server: True); targets found on the frame: {'btn': (752, 208), 'inp': (789, 279), 'pop': (752, 347), 'dl': (751, 421)}
+   F18 click True a real click on the green button reached the page (it reported "click")
+   F18 type True typing in the page field reached the page (reported ['input:zqf18'])
+   F18 scroll True the wheel scrolled the page (reported ['scroll:720'])
+   F18 popup True the popup button opened a page that loaded (True) and had its opener (True); the tab list the client got last: {"event":"tabs","page":"t1","url":"http://127.0.0.1:49302/popup.html","tabs":[{"id":"tab-27759-1","index":0,"url":"http://127.0.0.1:49302/","title":"typed:zqf18","active":false},{"id":"tab-27759-2","i
+   F18 download True the link was followed and the server sent an attachment (True); files named f18-file* after it: ['/Users/runner/Downloads/f18-file.txt', '/Users/runner/work/Backplane/Backplane/out/client/home/browser-downloads/d1794152298920-0/f18-file.txt']
+   F18 input after a download True a click on the green button after the download reached the page (clicks reported 1 -> 2)
+ok   F18 page loads and paints: ok; click: ok; type: ok; scroll: ok; popup: ok; download: ok; input after a download: ok

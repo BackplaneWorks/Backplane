@@ -1,0 +1,84 @@
+{
+ "rows": [
+  {
+   "id": "CAL",
+   "ok": true,
+   "ev": "clicked thread:t2 with a real mouse click: clicked=True, the window redrew=True"
+  },
+  {
+   "id": "F02",
+   "ok": true,
+   "ev": "the client drew its first frame and reached usable=True; the sidebar lists project p1 and threads ['thread:t1', 'thread:t2', 'thread:t3'] (controls reported by the client); gpu [{'device': None, 'event': 'gpu', 't_ms': 1406.91, 'epoch_ms': 1794151830771}] (f02.png shows the sidebar, the threads and \"Connected\")"
+  },
+  {
+   "id": "F09-meter",
+   "ok": true,
+   "ev": "Context panel before the turn (m-empty.png) and after it (m-after.png): the panel changed=True once the turn was counted; the hub logged TurnUsage=True, readings ['tok.basis', 'tok.epoch', 'tok.recount']. The figures are read from the screenshot, not by the driver"
+  },
+  {
+   "id": "F09-draft",
+   "ok": true,
+   "ev": "typed an unsent draft, killed the client process, started it again: the composer shows text again=True (m-draft.png)"
+  },
+  {
+   "id": "F15-paste",
+   "ok": true,
+   "ev": "a PNG on the X clipboard pasted with Ctrl+V: composer changed=True; message posted=True; stored as a PNG=True (['home/attachments/t1/3d2679e8-pasted-1794151885.png']); the agent was told the path=True"
+  },
+  {
+   "id": "F06-approval",
+   "ok": true,
+   "ev": "approval card (f6-approval.png) with Allow, Allow for session and Deny: Allow closed the ask and the agent got allow=True; Deny closed the next and the agent got deny=True"
+  },
+  {
+   "id": "F06-question",
+   "ok": true,
+   "ev": "question card \"Which port?\" (f6-question.png), option buttons ['ask:0:0', 'ask:0:1', 'ask:0:2']: the first closed it and the agent got the answer=True"
+  },
+  {
+   "id": "F06-plan",
+   "ok": true,
+   "ev": "a thread in plan mode (ModesSet interaction=plan) asked to exit with the plan card (f6-plan.png), AskOpened kind=plan with the plan text=True"
+  },
+  {
+   "id": "F16",
+   "ok": true,
+   "ev": "palette ctrl k: ok; models ctrl m: ok; sidebar ctrl b: ok; files ctrl p: ok; diff ctrl d: ok; terminal ctrl j: ok; thread2 ctrl 2: ok; perf ctrl shift h: ok; uber ctrl shift u: ok; new ctrl n: ok; stop ctrl period: ok; settle ctrl shift s: ok"
+  },
+  {
+   "id": "F17",
+   "ok": true,
+   "ev": "Board: drawn=True wheel=True pan=True; Schematic: drawn=True wheel=True pan=True; 3D: drawn=True wheel=True orbit=True; Mech: drawn=True wheel=True pan=True (frames are not judged: llvmpipe)"
+  },
+  {
+   "id": "F07-stop",
+   "ok": true,
+   "ev": "a running turn (f7-running.png) and the Stop button in the thread header: TurnChanged interrupted in the hub log=True"
+  },
+  {
+   "id": "F08-fork",
+   "ok": true,
+   "ev": "the Fork thread button: a new thread was created in the hub log=True (f8-fork.png)"
+  },
+  {
+   "id": "F14-terminal",
+   "ok": true,
+   "ev": "the floating terminal (Ctrl+J): a command typed with the keyboard ran in a real shell (the marker file exists=True) and the panel redrew=True (f14-typed.png)"
+  },
+  {
+   "id": "F21-reconnect",
+   "ok": true,
+   "ev": "the hub was stopped and started again on the same home: the status line changed while it was down=True, and after reconnecting a message typed in the window reached the new hub process=True (f21-*.png)"
+  },
+  {
+   "id": "F22-card",
+   "ok": true,
+   "ev": "the files card (f22-files-card.png, buttons ['ask:0:0', 'ask:0:1']) opened with nothing uploaded before Send (no POST to the order server)=True; Send pressed with the mouse: the hub uploaded to the stand-in order server and the quote card was set=True (f22-quote.png); requests seen ['GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'GET /v1/health', 'POST /v1/quotes', 'GET /v1/quotes/q_rig1'], none to pay or buy=True"
+  },
+  {
+   "id": "F18",
+   "ok": true,
+   "ev": "page loads and paints: ok; click: ok; type: ok; scroll: ok; popup: ok; download: ok; input after a download: ok"
+  }
+ ]
+}
