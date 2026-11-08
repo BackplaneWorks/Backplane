@@ -144,10 +144,13 @@ jobs:
           set -e
           apk=mobile/android/app/build/outputs/apk/release/app-release.apk; aab=mobile/android/app/build/outputs/bundle/release/app-release.aab
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          a=$("$bt/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
-          b=$(keytool -printcert -jarfile "$aab" | sed -n 's/^[[:space:]]*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')
-          echo "apk $a"; echo "aab $b"
-          [ "$a" = "$CERT_SHA256" ] && [ "$b" = "$CERT_SHA256" ] || { echo "::error::not signed with the release key ($CERT_SHA256)"; exit 1; }
+          # apksigner names a signer "Signer #1" or, for a signer limited to SDK levels, "Signer (minSdkVersion=…)": every signer's digest, the release key among them
+          "$bt/apksigner" verify --verbose --print-certs "$apk" > apk-certs.txt
+          a=$(sed -n 's/^Signer.* certificate SHA-256 digest: //p' apk-certs.txt | sort -u | tr '\n' ' ')
+          b=$(keytool -printcert -jarfile "$aab" | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f' | sort -u | tr '\n' ' ')
+          echo "apk signers: $a"; echo "aab signers: $b"; grep -E '^Verified using|^Number of signers' apk-certs.txt || true
+          case " $a" in *" $CERT_SHA256 "*) ;; *) echo "::error::the APK is not signed with the release key ($CERT_SHA256)"; cat apk-certs.txt; exit 1;; esac
+          case " $b" in *" $CERT_SHA256 "*) ;; *) echo "::error::the AAB is not signed with the release key ($CERT_SHA256)"; exit 1;; esac
           "$bt/aapt2" dump badging "$apk" | head -1
           cp "$apk" "backplane-$TAG-android.apk"; cp "$aab" "backplane-$TAG-android.aab"
       - uses: actions/upload-artifact@v4
