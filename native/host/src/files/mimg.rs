@@ -132,7 +132,7 @@ pub fn set_thread(home: &Path, entry: &str, src: &str, thread: &str) -> bool {
     if j.get("thread").is_some() { return true }
     j["thread"] = serde_json::json!(thread);
     let tmp = rf.with_extension("json.thread");
-    let ok = (|| { use std::io::Write; let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?; f.write_all(j.to_string().as_bytes())?; std::fs::rename(&tmp, &rf) })();
+    let ok = (|| { use std::io::Write; let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?; f.write_all(j.to_string().as_bytes())?; crate::plat::fs::rename(&tmp, &rf) })();
     let _ = std::fs::remove_file(&tmp); ok.is_ok()
 }
 /// mi_snapshot: the snapshot file for (entry, source), made if it is not there yet; Err when it cannot be had.
@@ -150,7 +150,7 @@ pub fn snapshot(home: &Path, entry: &str, src: &str, thread: &str) -> Result<Sna
     }
     let tmp = rf.with_extension(format!("json.{}", &sha_hex(&b)[..16]));
     let body = serde_json::json!({"image": name, "thread": thread}).to_string();
-    let r = (|| { use std::io::Write; let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?; f.write_all(body.as_bytes())?; std::fs::rename(&tmp, &rf) })();
+    let r = (|| { use std::io::Write; let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?; f.write_all(body.as_bytes())?; crate::plat::fs::rename(&tmp, &rf) })();
     let _ = std::fs::remove_file(&tmp);
     r.map_err(|_| "")?;
     Ok(Snap { path: out, thread: Some(thread.to_string()) })

@@ -208,7 +208,7 @@ pub fn keep_glb(layers: &[super::Layer], name: &str, path: &str, rev: &str) {
     let bytes = super::glbw::glb(layers, name);
     if bytes.is_empty() { return }
     let stage = out.with_extension(format!("glb.{}.part", std::process::id()));
-    if std::fs::write(&stage, &bytes).is_err() || std::fs::rename(&stage, &out).is_err() { let _ = std::fs::remove_file(&stage); return }
+    if std::fs::write(&stage, &bytes).is_err() || crate::plat::fs::rename(&stage, &out).is_err() { let _ = std::fs::remove_file(&stage); return }
     let prefix = format!("board-native-v1-{:08x}.", super::super::stepglb::fnv(path));
     let own = out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     if let Ok(rd) = std::fs::read_dir(dir) { for e in rd.flatten() { let n = e.file_name().to_string_lossy().into_owned(); if n.starts_with(&prefix) && n.ends_with(".glb") && n != own { let _ = std::fs::remove_file(e.path()); } } }

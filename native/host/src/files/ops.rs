@@ -36,7 +36,7 @@ pub fn rename(root: &Path, rel: &str, to: &str) -> Result<String, String> {
     if lm.file_type().is_symlink() { return Err("a link is not renamed here".into()) }
     let dest = d.join(to);
     if std::fs::symlink_metadata(&dest).is_ok() { return Err(format!("\"{to}\" already exists")) }
-    std::fs::rename(&from, &dest).map_err(|e| e.to_string())?;
+    crate::plat::fs::rename(&from, &dest).map_err(|e| e.to_string())?;
     Ok(fm::join(&fm::parent(rel), to))
 }
 pub fn delete(root: &Path, rel: &str) -> Result<String, String> {

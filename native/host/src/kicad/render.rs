@@ -45,7 +45,7 @@ fn model_glb(src: &str, cache: &str, tools: &[Mesher]) -> Option<String> {
 /// Render.write and Render.publish: the file appears whole or not at all
 fn write(path: &str, bs: &[u8]) -> bool {
     let part = format!("{path}.part");
-    let ok = std::fs::write(&part, bs).is_ok() && std::fs::rename(&part, path).is_ok();
+    let ok = std::fs::write(&part, bs).is_ok() && crate::plat::fs::rename(&part, path).is_ok();
     if !ok { let _ = std::fs::remove_file(&part); }
     ok
 }

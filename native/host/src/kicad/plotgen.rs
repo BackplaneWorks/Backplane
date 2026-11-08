@@ -252,7 +252,7 @@ pub fn write_infos(path: &str, text: &str) {
     if path.is_empty() { return }
     if let Some((d, _)) = path.rsplit_once('/') { let _ = std::fs::create_dir_all(d); }
     let new = format!("{path}.new");
-    if std::fs::write(&new, text).is_ok() { let _ = std::fs::rename(&new, path); }
+    if std::fs::write(&new, text).is_ok() { let _ = crate::plat::fs::rename(&new, path); }
 }
 /// Line.plot: the lines child prints (a byte goes as the char of that number), for comparing with it
 pub fn lines(p: &Plot) -> Vec<u8> {

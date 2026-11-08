@@ -58,7 +58,7 @@ pub fn write_atomic(dir: &std::path::Path, name: &str, text: &str) -> std::io::R
     static N: AtomicU64 = AtomicU64::new(0);
     std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!(".{name}.{}.{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-    std::fs::write(&tmp, text)?; std::fs::rename(&tmp, dir.join(name))
+    std::fs::write(&tmp, text)?; crate::plat::fs::rename(&tmp, dir.join(name))
 }
 
 // ---- Failures ----

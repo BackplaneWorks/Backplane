@@ -97,7 +97,7 @@ fn write(home: &Path, text: &str) -> Result<(), String> {
     let w = (|| -> std::io::Result<()> {
         let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
         f.write_all(text.as_bytes())?; f.sync_all()?;
-        std::fs::rename(&tmp, path(home))
+        crate::plat::fs::rename(&tmp, path(home))
     })();
     if w.is_err() { let _ = std::fs::remove_file(&tmp); return Err("error: the keys file could not be written".into()) }
     super::mask::reload_api(); // masked from this instant, not from the cache's next read

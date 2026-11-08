@@ -44,7 +44,7 @@ pub fn stage(out: &str, tag: &str) -> std::io::Result<PathBuf> {
 pub fn publish(r: Ran, from: &Path, out: &str) -> Ran {
     if r.code != 0 { return r }
     if !have(&from.to_string_lossy()) { return Ran { code: 1, out: "Could not cache 3D model: converter produced no model".into() } }
-    match std::fs::rename(from, out) { Ok(()) => r, Err(e) => Ran { code: 1, out: format!("Could not cache 3D model: {e}") } }
+    match crate::plat::fs::rename(from, out) { Ok(()) => r, Err(e) => Ran { code: 1, out: format!("Could not cache 3D model: {e}") } }
 }
 
 /// How a STEP is meshed.

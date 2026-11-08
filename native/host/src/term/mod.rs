@@ -149,7 +149,7 @@ impl Terms {
         if !emb::key_ok(key) { return }
         let mut b = format!("{}x{}\t{}\n", sc.vt.cols(), sc.vt.rows(), sc.state).into_bytes(); b.extend(emb::snap(&sc.vt));
         let name = crate::plat::fs::file_name(key); let (path, tmp) = (self.home.join("terms").join(&*name), self.home.join("terms").join(format!("{name}.tmp")));
-        if std::fs::write(&tmp, b).is_ok() { let _ = std::fs::rename(&tmp, &path); }
+        if std::fs::write(&tmp, b).is_ok() { let _ = crate::plat::fs::rename(&tmp, &path); }
     }
     /// Et.load: the screen from its file when the actor does not hold it (the hub started again since it ran).
     fn load(&self, g: &mut Inner, key: &str) {
