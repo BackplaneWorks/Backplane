@@ -92,7 +92,7 @@ def abs_(x, y): ox, oy, _, _ = win(); return int(ox + x), int(oy + y)
 def xin(cmd, *a):
     if cmd == 'click': x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y), 'w:60', 'c:%d,%d' % (x, y))
     elif cmd == 'type': cli('w:80', 't:' + str(a[0]))
-    elif cmd == 'key': cli('kp:' + KEYS.get(a[0], a[0].lower()))
+    elif cmd == 'key': cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))
     elif cmd == 'wheel':
         x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y)); time.sleep(0.2)
         for _ in range(abs(int(a[2]))): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, 3 if int(a[2]) > 0 else -3)); time.sleep(0.15)
@@ -101,8 +101,9 @@ def xin(cmd, *a):
     elif cmd == 'chord': chord_(a)
     time.sleep(0.1)
 MODS = {'ctrl': 'cmd', 'cmd': 'cmd', 'shift': 'shift', 'alt': 'alt'}   # the rows say ctrl for the secondary key, which is Cmd on a Mac (keys.rs)
+LITERAL_CTRL = [['ctrl', 'm'], ['ctrl', 'period'], ['ctrl', 'shift', 'h']]   # keys.rs binds these with the Control key itself (`ctrl-m`, `ctrl-.`, `ctrl-shift-h`); the rest are `secondary-` (Cmd)
 def chord_(names):
-    *mods, k = names; ms = ','.join(MODS[m] for m in mods); k = {'period': '.', 'comma': ',', 'bracketleft': '[', 'bracketright': ']'}.get(k, k)
+    *mods, k = names; ms = ','.join(('ctrl' if list(names) in LITERAL_CTRL and m == 'ctrl' else MODS[m]) for m in mods); k = {'period': '.', 'comma': ',', 'bracketleft': '[', 'bracketright': ']'}.get(k, k)
     cli('kd:' + ms, 't:' + k, 'ku:' + ms) if len(k) == 1 else cli('kd:' + ms, 'kp:' + KEYS.get(k, k), 'ku:' + ms)
 def chord(c): xin('chord', *c.split())
 def shot(name):
