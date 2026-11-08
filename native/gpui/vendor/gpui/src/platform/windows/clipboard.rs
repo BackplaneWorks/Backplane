@@ -85,8 +85,39 @@ pub(crate) fn read_from_clipboard() -> Option<ClipboardItem> {
             ClipboardFormatType::Image => read_image_from_clipboard(item_format),
             ClipboardFormatType::Files => read_files_from_clipboard(),
         })
+        .or_else(read_bitmap_as_png)
     })
     .flatten()
+}
+
+/// Backplane: a clipboard that holds only a bitmap (PrintScreen, the Snipping Tool's older copy, many programs' Copy) pastes as a PNG.
+/// gpui reads only the registered image formats (PNG, GIF, JPEG, SVG), so such a paste gave nothing. Tried only when none of those is there.
+fn read_bitmap_as_png() -> Option<ClipboardItem> {
+    const CF_DIB: u32 = 8;
+    unsafe { IsClipboardFormatAvailable(CF_DIB).ok()? };
+    let dib = with_clipboard_data(CF_DIB, |p, size| unsafe { std::slice::from_raw_parts(p as *const u8, size).to_vec() })?;
+    let png = dib_to_png(&dib)?;
+    Some(ClipboardItem { entries: vec![ClipboardEntry::Image(Image::from_bytes(ImageFormat::Png, png))] })
+}
+
+/// A packed DIB (BITMAPINFOHEADER or later, its colour masks and table, then the pixels) as a PNG: a BMP file is the same bytes after
+/// a 14-byte header that says where the pixels start.
+fn dib_to_png(dib: &[u8]) -> Option<Vec<u8>> {
+    let u32_at = |i: usize| dib.get(i..i + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let header = u32_at(0)? as usize;
+    if header < 40 || dib.len() < header { return None }
+    let bits = u16::from_le_bytes([dib[14], dib[15]]) as usize;
+    let (compression, used) = (u32_at(16)?, u32_at(32)? as usize);
+    let masks = if header == 40 && (compression == 3 || compression == 6) { if compression == 6 { 16 } else { 12 } } else { 0 }; // BI_BITFIELDS, BI_ALPHABITFIELDS
+    let colours = if used > 0 { used } else if bits <= 8 { 1 << bits } else { 0 };
+    let start = 14 + header + masks + colours * 4;
+    let mut bmp = Vec::with_capacity(14 + dib.len());
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&((14 + dib.len()) as u32).to_le_bytes());
+    bmp.extend_from_slice(&[0; 4]);
+    bmp.extend_from_slice(&(start as u32).to_le_bytes());
+    bmp.extend_from_slice(dib);
+    convert_image_to_png_format(&bmp, ImageFormat::Bmp).ok()
 }
 
 pub(crate) fn with_file_names<F>(hdrop: HDROP, mut f: F)
@@ -384,5 +415,24 @@ impl From<ImageFormat> for image::ImageFormat {
             ImageFormat::Tiff => image::ImageFormat::Tiff,
             _ => unreachable!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod backplane_tests {
+    /// A 2x1 24-bit DIB, bottom-up, the way a bitmap-only clipboard holds it, comes out as a PNG of the same pixels.
+    #[test]
+    fn a_bitmap_on_the_clipboard_becomes_a_png() {
+        let mut dib = vec![];
+        for v in [40u32, 2, 1] { dib.extend_from_slice(&v.to_le_bytes()); }
+        dib.extend_from_slice(&1u16.to_le_bytes()); dib.extend_from_slice(&24u16.to_le_bytes());
+        for v in [0u32, 8, 0, 0, 0, 0] { dib.extend_from_slice(&v.to_le_bytes()); }
+        dib.extend_from_slice(&[0, 0, 255, 255, 0, 0, 0, 0]); // BGR red, BGR blue, row padding
+        let png = super::dib_to_png(&dib).expect("a PNG");
+        let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap().to_rgb8();
+        assert_eq!((img.width(), img.height()), (2, 1));
+        assert_eq!(img.get_pixel(0, 0).0, [255, 0, 0]);
+        assert_eq!(img.get_pixel(1, 0).0, [0, 0, 255]);
+        assert!(super::dib_to_png(&[0; 12]).is_none(), "a header too short is not a bitmap");
     }
 }
