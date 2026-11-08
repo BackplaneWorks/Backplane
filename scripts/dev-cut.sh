@@ -35,7 +35,7 @@ mkdir "$tmp"; cp "$src/backplane-hub" "$src/backplane-gpui" "$tmp/"
 [ ! -x "$src/backplane-voice" ] || cp "$src/backplane-voice" "$tmp/"
 [ ! -f "$src/silero_vad.onnx" ] || cp "$src/silero_vad.onnx" "$tmp/"
 [ ! -x "$src/backplane" ] || cp "$src/backplane" "$tmp/"
-[ ! -e "$src/libcef.so" ] || cp -P "$src/libcef.so" "$tmp/"   # a link to the shared stripped libcef (dev-build.sh)
+for f in libcef.so resources.pak chrome_100_percent.pak chrome_200_percent.pak icudtl.dat v8_context_snapshot.bin locales; do [ ! -e "$src/$f" ] || cp -P "$src/$f" "$tmp/"; done   # links to the shared stripped libcef and its runtime (dev-build.sh)
 [ ! -f "$src/COMMIT" ] || cp "$src/COMMIT" "$tmp/"
 [ ! -f "$src/HAIKU" ] || cp "$src/HAIKU" "$tmp/"
 [ ! -d "$src/assets" ] || cp -r "$src/assets" "$tmp/"
