@@ -58,6 +58,7 @@ if want('F09'):
     shot('m-draft'); from PIL import Image
     crop = px('m-draft').crop(box(rects()['composer'])); open_composer_has_text = crop.convert('L').getextrema()[1] > 150 and sum(1 for v in crop.convert('L').getdata() if v > 150) > 80
     log('F09-draft', open_composer_has_text, 'typed an unsent draft, killed the client process, started it again: the composer shows text again=%s (m-draft.png)' % open_composer_has_text)
+    xin('click', *CC()); chord('ctrl a'); xin('key', 'BackSpace'); pause(0.5)   # the restored draft must not ride along on every later message
 
 
 # ---- F15 image paste: a PNG on the real clipboard, Ctrl+V in the composer, Send posts it with the image and the agent is told its path
@@ -76,7 +77,7 @@ if want('F15'):
     sent = until(lambda: any(e['$'] == 'MessagePosted' and e.get('role') == 'user' and 'look at this' in e.get('text', '') for e in events()), 20)
     pause(2); shot('f15-sent')
     files = glob.glob(P('home/attachments/*/*pasted*.png')) or glob.glob(P('home/attachments/*/*.png'))
-    told = os.path.exists(P('fake.log')) and any('look at this' in l and 'attachments/' in l for l in open(P('fake.log')).read().splitlines() if l.startswith('TURN'))
+    told = until(lambda: os.path.exists(P('fake.log')) and any('look at this' in l and 'attachments/' in l for l in open(P('fake.log')).read().splitlines() if l.startswith('TURN')), 30)
     same = bool(files) and open(files[0], 'rb').read()[:8] == b'\x89PNG\r\n\x1a\n'
     log('F15-paste', chip and sent and same and told, 'a PNG on the X clipboard pasted with Ctrl+V: composer changed=%s; message posted=%s; stored as a PNG=%s (%s); the agent was told the path=%s' % (chip, sent, same, [os.path.relpath(f, OUT) for f in files][:1], told))
 
