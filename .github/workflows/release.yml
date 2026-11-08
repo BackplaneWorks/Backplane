@@ -117,9 +117,11 @@ jobs:
         with: { bun-version: 1.4.4 }
       - if: steps.bun1.outcome == 'failure' && steps.bun2.outcome == 'failure'
         run: sleep 90
+      # GitHub's release downloads can be down for hours (504): the last try takes bun from npm's registry instead
       - if: steps.bun1.outcome == 'failure' && steps.bun2.outcome == 'failure'
-        uses: oven-sh/setup-bun@v2
-        with: { bun-version: 1.4.4 }
+        run: |
+          for i in 1 2 3; do npm install -g bun@1.4.4 && break; sleep 30; done
+          bun --version
       - name: package
         if: runner.os != 'Windows'
         run: |
