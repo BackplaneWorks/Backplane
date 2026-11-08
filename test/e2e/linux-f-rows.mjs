@@ -167,11 +167,17 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const n=events().filter(e=>e.$==='MessagePosted'&&e.thread===T&&e.msg===mid).length;
  log('F21-outbox',a.ok&&b.ok&&n===1,`the same client message id sent twice (a retry after a lost reply) posted ${n} message(s); replies ok=${a.ok},${b.ok}`);
  const L=await mk('long');let sent=0;for(let i=0;i<150;i++){const r=await c.rpc('turn.start',{thread:L,text:`zqshort long ${i}`});if(r.ok)sent++;if(i%10===9)await finished(L,i/10+1)}
- await finished(L,15);const total=events().filter(e=>e.$==='MessagePosted'&&e.thread===L&&e.role==='user').length;
+ await finished(L,15);
+ // the restart below is a hard kill on Windows (process.kill is TerminateProcess there): wait until the thread runs no turn, or the hub rightly carries the
+ // running one on after the restart with a message of its own ("Backplane restarted while you were working", MessageFrom carry), which is not one of the 150
+ const idle=await until(()=>{const s=turnStates(L);return s.length>0&&s[s.length-1]!=='running'},120000);
+ const mine=()=>events().filter(e=>e.$==='MessagePosted'&&e.thread===L&&e.role==='user'&&/^zqshort long \d+$/.test(e.text||''));
+ const total=mine().length;
  c.ws.close();process.kill(pid0,'SIGTERM');await sleep(2500);const pid1=await start();c=await connect();await sleep(1500);
- const after=events().filter(e=>e.$==='MessagePosted'&&e.thread===L&&e.role==='user').length;
+ const after=mine().length;const ids=mine().map(e=>e.msg);const dup=ids.length-new Set(ids).size;
+ const carried=events().filter(e=>e.$==='MessagePosted'&&e.thread===L&&e.role==='user'&&/^Backplane restarted while you were working/.test(e.text||'')).length;
  const cs=await connect('since=0&origin=0&');await sleep(2500);const seen=JSON.stringify(cs.frames).split('MessagePosted').length-1;cs.ws.close();
- log('F21-long',sent===150&&total>=150&&after===total&&seen>=150,`150 messages sent, ${total} user messages logged, ${after} after a hub restart; a fresh connection from since=0 replayed ${seen} MessagePosted items; events.jsonl ${(readFileSync(HOME+'/events.jsonl').length/1024).toFixed(0)} KiB`);
+ log('F21-long',sent===150&&total===150&&after===150&&dup===0&&seen>=150,`150 messages sent, ${total} of them logged, ${after} after a hub restart, ${dup} message ids twice; the thread idle before the restart=${idle}, restart carry messages ${carried}; a fresh connection from since=0 replayed ${seen} MessagePosted items; events.jsonl ${(readFileSync(HOME+'/events.jsonl').length/1024).toFixed(0)} KiB`);
  const c2=await connect(`since=${Math.max(0,events().length-20)}&origin=0&`);await sleep(1200);log('F21-resume',c2.frames.some(f=>f.t==='log'||f.t==='changes'),`a connection with since= got ${[...new Set(c2.frames.map(f=>f.t))].join(',')}`);c2.ws.close()}
 
 // F22 the order flow up to the quote: the agent offers the folder, the person approves the files, the hub uploads them and posts the quote; no order is placed
