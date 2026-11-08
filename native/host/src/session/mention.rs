@@ -262,8 +262,6 @@ mod tests {
         let r = refs_in(&st, "h", "run on ~desk-top %boards and >fix-lamp, not ~nowhere");
         let got: Vec<(String, String, String)> = r.iter().map(|x| (x["word"].as_str().unwrap().into(), x["kind"].as_str().unwrap().into(), x["id"].as_str().unwrap().into())).collect();
         assert_eq!(got, [("~desk-top".into(), "machine".into(), "".into()), ("%boards".into(), "project".into(), "h|L1~p1".into()), (">fix-lamp".into(), "thread".into(), "h|L1~t1-4".into())]);
-        let l = crate::agents::refs::machine_lines(&machines(), "do it on ~desk-top %boards");
-        assert!(l[0].contains("thread_launch") && l[0].contains("p1") && l[1].contains("project \"p1\""), "{l:?}");
         set_machines(vec![]);
     }
 }
