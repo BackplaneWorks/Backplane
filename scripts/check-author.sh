@@ -4,9 +4,13 @@
 # Fails, naming the commits, when a commit in the given rev-list arguments has another author or committer.
 # usage: scripts/check-author.sh <rev-list args>   e.g. origin/main..HEAD   |   $new --not $old   (used by land.sh, the hooks and CI)
 set -eu
-[ $# -gt 0 ] || { echo "usage: check-author.sh <rev-list args>" >&2; exit 2; }
+# usage: scripts/check-author.sh --ident   checks the commit about to be made (git var, so env and config count): the pre-commit hook
+[ $# -gt 0 ] || { echo "usage: check-author.sh <rev-list args> | --ident" >&2; exit 2; }
+log() { if [ "$1" = --ident ]; then
+    a=$(git var GIT_AUTHOR_IDENT | sed -n 's/.*<\(.*\)>.*/\1/p'); c=$(git var GIT_COMMITTER_IDENT | sed -n 's/.*<\(.*\)>.*/\1/p'); echo "this-commit $a $c"
+  else git log --format='%h %ae %ce' "$@"; fi; }
 want=build@amemb.com
-bad=$(git log --format='%h %ae %ce' "$@" | awk '
+bad=$(log "$@" | awk '
   function ok_author(e) { return e == "build@amemb.com" || e == "206324213+jlcjak@users.noreply.github.com" }
   function ok_committer(e) { return ok_author(e) || e == "noreply@github.com" }
   !ok_author($2) || !ok_committer($3) { print "  " $1 " author=" $2 " committer=" $3 }')
