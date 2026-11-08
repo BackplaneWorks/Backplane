@@ -2,6 +2,7 @@
 //   bun test/e2e/s-effects.mjs HUB_BIN OUTDIR [port]   (NO_SCOPE=1 PERF_REPO=<repo root>)
 // A line per probe: {id, control, ok, evidence}. `ok:false` is a control that saves but does nothing observable here: fix it or report it.
 import {mkdirSync,rmSync,writeFileSync,chmodSync,readFileSync,existsSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
 import {argvStandins,argvs,argOf,sock,idof,setting,waitFor,sleep,startHub,stopHub,client} from './lib/hubrows.mjs';
 const [bin,out,port0]=process.argv.slice(2);const port=Number(port0||3870);process.env.NO_SCOPE='1';
 rmSync(out,{recursive:true,force:true});mkdirSync(out+'/bin',{recursive:true});mkdirSync(out+'/argv',{recursive:true});mkdirSync(out+'/proj',{recursive:true});
@@ -71,5 +72,29 @@ const shown=async()=>viewOf(async v=>v.last?.result?.shown);
 // ---- S13 about: the page's version is the hub's
 {const rows=await viewOf(async v=>{await v.req('view.action',{action:'flag',value:'settings'});const g=await v.req('view.action',{action:'settings-page',value:'about'});return g?.x?.result?.shown?.settings?.rows||[]});
  const ver=c.hello?.version;rec('S13','About version row',!!ver&&JSON.stringify(rows).includes(ver),`data/1 hello version ${ver}; the page says ${JSON.stringify(rows[1]?.label)}`)}
-// S14 telemetry: proven by test/e2e/mac-effects.mjs (setting.set refuses On by design; the page's token turns it on)
+// ---- S07 devices: Add a device makes a link that pairs one device once; the page lists it; Revoke on the page ends its credential
+{const call=(m,path,h)=>fetch(hub.url+path,{method:m,headers:h}).then(async r=>({s:r.status,j:await r.json().catch(()=>({}))}));
+ const {viewClient}=await import('../perf/view.mjs');const v=await viewClient(hub,{mobile:true,delta:false,native:true});await v.open();await v.req('view.action',{action:'flag',value:'settings'});
+ const pg=async()=>(await v.req('view.action',{action:'settings-page',value:'devices'}))?.x?.result?.shown?.settings?.rows||[];
+ await pg();await v.req('view.action',{action:'device-invite',value:''});const rows=await pg();
+ const link=rows.find(r=>r.label==='Pairing link')?.note||'';const secret=new URLSearchParams(link.split('#')[1]||'').get('invite')||'';
+ const enroll=n=>call('POST','/auth/enroll',{Authorization:`Bearer ${secret}`,'X-Backplane-Client':'native','X-Backplane-Name':n});
+ const en=await enroll('e2e phone'),twice=await enroll('e2e twice');const tok=en.j?.token,id=en.j?.id;
+ const before=(await call('GET','/auth/devices',{Authorization:`Bearer ${tok}`})).s;await sleep(500);const listed=(await pg()).find(r=>r.label==='e2e phone');
+ await v.req('view.action',{action:'device-revoke',value:id});await sleep(500);
+ const after=(await call('GET','/auth/devices',{Authorization:`Bearer ${tok}`})).s;const shown=(await pg()).find(r=>r.label==='e2e phone');v.close();
+ rec('S07','Add a device, Revoke',!!secret&&en.s===200&&!!tok&&twice.s!==200&&before===200&&listed?.note==='Paired'&&after===401&&shown?.note==='Revoked',`Add a device: a Pairing link row ${!!link} with an invite secret ${!!secret}; enroll with it -> ${en.s}, the same link again -> ${twice.s}; the device's token on /auth/devices -> ${before}; the page lists "e2e phone" as ${listed?.note}; after Revoke on the page: the token -> ${after}, the page says ${shown?.note}`)}
+// ---- S14 privacy: in Off and in On the hub opens no connection off this machine; On only through the page's own choice (setting.set refuses it on purpose, settings/telemetry.rs `reserved`)
+{const ev=()=>readFileSync(hub.home+'/events.jsonl','utf8').split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(Boolean);
+ const g=key=>{let x='';for(const e of ev())if(e.$==='SettingSet'&&e.key===key)x=e.value;return x};
+ const tm=()=>JSON.stringify(['telemetry.share','telemetry.asked','telemetry.usage.asked','telemetry.usage.generation','telemetry.choice.revision'].map(g));
+ const mine=()=>{try{if(process.platform==='win32')return execFileSync('netstat',['-ano'],{stdio:['ignore','pipe','ignore']}).toString().split('\n').map(l=>l.trim().split(/\s+/)).filter(x=>x[0]==='TCP'&&x[4]===String(hub.pid));
+   return execFileSync('lsof',['-nP','-a','-p',String(hub.pid),'-i'],{stdio:['ignore','pipe','ignore']}).toString().split('\n').slice(1).filter(Boolean).map(l=>{const f=l.trim().split(/\s+/);const [, r]=(f[8]||'').split('->');return ['TCP',f[8],r||'',f[9]||'']})}catch{return []}};
+ const off_box=x=>x[2]&&!/^(127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\[::\]|localhost|\*)(:|$)/.test(x[2]);
+ const seen={};let sockets=0;const watch=async n=>{const f=new Set();for(let i=0;i<20;i++){const m=mine();sockets=Math.max(sockets,m.length);m.filter(off_box).forEach(x=>f.add(x[2]));await sleep(500)}seen[n]=[...f]};
+ const k=await client(hub);await set('telemetry.share','off');const off=g('telemetry.share');await watch('off');
+ await k.rpc('setting.set',{key:'telemetry.share',value:'on'},10000);await sleep(300);const still=g('telemetry.share');
+ const on=await k.rpc('telemetry.choice',{value:'on',expected:tm(),decision:'',popup:false},10000);await sleep(400);const onv=g('telemetry.share');await watch('on');
+ await set('telemetry.share','off');k.ws.close();
+ rec('S14','telemetry.share',off==='off'&&still==='off'&&onv==='on'&&sockets>0&&seen.off.length===0&&seen.on.length===0,`Off via setting.set: stored ${off}; On via setting.set: refused, still ${still}; On via telemetry.choice with the page's token: ok=${on?.o?.ok}, stored ${onv}; the hub's own TCP sockets seen (${process.platform==='win32'?'netstat -ano':'lsof'}): ${sockets}, any to another machine over 10 s: Off ${seen.off.join(' ')||'none'}, On ${seen.on.join(' ')||'none'}`)}
 writeFileSync(out+'/s-effects.json',JSON.stringify(res,null,1));c.ws.close();stopHub(hub);process.exit(0);
