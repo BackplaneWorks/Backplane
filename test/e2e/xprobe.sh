@@ -13,7 +13,16 @@ try() { name=$1; PENV=$2; shift 2; N=88; rm -f /tmp/.X11-unix/X$N
 from PIL import Image, ImageStat
 s=ImageStat.Stat(Image.open('/tmp/xprobe-$name.png').convert('L')); print('$name', 'mean', round(s.mean[0],2), 'stddev', round(s.stddev[0],2))"
   grep -iE 'gpu|first_frame|vulkan|error|panic' /tmp/xprobe-client.log | head -5 | cut -c1-240
+  DISPLAY=:$N xwd -root -silent 2>/dev/null | wc -c | sed 's/^/xwd bytes: /'; DISPLAY=:$N xwininfo -root -tree 2>/dev/null | grep -c "x" | sed 's/^/xwininfo lines: /'
   kill $C $X 2>/dev/null; wait $C $X 2>/dev/null; }
+# control: does the screenshot tool see anything at all? (a red root window)
+Xvfb :89 -screen 0 400x300x24 -nolisten tcp > /dev/null 2>&1 & XC=$!; sleep 2
+DISPLAY=:89 xsetroot -solid red; DISPLAY=:89 import -window root /tmp/xprobe-ctl.png 2>&1 | head -2
+DISPLAY=:89 xwd -root -silent > /tmp/xprobe-ctl.xwd 2>&1; ls -la /tmp/xprobe-ctl.xwd | cut -c1-80
+python3 -I -c "
+from PIL import Image, ImageStat
+print('control red mean', ImageStat.Stat(Image.open('/tmp/xprobe-ctl.png').convert('L')).mean[0])"
+kill $XC 2>/dev/null; wait $XC 2>/dev/null
 try default ""
 try wsisw MESA_VK_WSI_DEBUG=sw
 try noshm MESA_VK_WSI_DEBUG=noshm
