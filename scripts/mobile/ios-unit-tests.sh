@@ -19,3 +19,4 @@ run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroup
 run term-stream TermStreamTests.swift "" TermStream.swift
 run vt VtTests.swift "" Vt.swift
 run term-card TermCardTests.swift "" Vt.swift TermCard.swift
+run migration MigrationTests.swift "" Migration.swift

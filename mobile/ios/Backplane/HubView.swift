@@ -122,3 +122,73 @@ struct DataStarBanner: View {
         }
     }
 }
+
+/// A 0.14 home coming across (DataClient.migration): the hub's title, its bar and the first two of its lines, as the notice banner; a tap opens the card.
+/// It has no close: it goes when one of the card's buttons is answered.
+struct DataMigrationBanner: View {
+    let client: DataClient
+    var body: some View {
+        if let c = client.migration.card {
+            Button { client.migrationOpen = true } label: {
+                VStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            DDot(color: dMigColor(c), size: 8)
+                            Text(c.title).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        if let f = c.fill { DMigBar(fill: f) }
+                        ForEach(Array(c.short.enumerated()), id: \.offset) { _, l in Text(l).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }
+                    }.padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.raised)
+                    DLine()
+                }
+            }.buttonStyle(.plain).accessibilityIdentifier("migration.banner")
+        }
+    }
+}
+
+/// The whole card: title, body, bar, every line and the hub's buttons (onboard.act). While it runs it has no button; it closes back to the banner.
+struct DataMigrationCard: View {
+    let client: DataClient
+    var body: some View {
+        ScrollView {
+            if let c = client.migration.card {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(c.title).dmono(15, bold: true).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("migration.title")
+                    if !c.body.isEmpty { Text(c.body).dmono(13).foregroundStyle(BackplaneDesign.text).fixedSize(horizontal: false, vertical: true) }
+                    if let f = c.fill { DMigBar(fill: f, height: 6) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(c.lines.enumerated()), id: \.offset) { _, l in Text(l).dmono(12).foregroundStyle(BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    if !c.buttons.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(Array(c.buttons.enumerated()), id: \.offset) { _, b in
+                                Button(b.label) { client.migrationAct(b) }.buttonStyle(DButton(primary: b.on)).disabled(client.migrationBusy)
+                                    .accessibilityIdentifier("migration.button.\(b.value)")
+                            }
+                        }
+                    }
+                    if !client.migrationError.isEmpty { Text(client.migrationError).dmono(12).foregroundStyle(BackplaneDesign.warn) }
+                }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .dataSheet()
+        .accessibilityIdentifier("migration.card")
+    }
+}
+
+/// The import's bar: the line colour, filled in accent to the hub's pct. Square; it moves only when a frame comes.
+struct DMigBar: View {
+    let fill: Double
+    var height: CGFloat = 3
+    var body: some View {
+        GeometryReader { g in
+            ZStack(alignment: .leading) {
+                Rectangle().fill(BackplaneDesign.line)
+                Rectangle().fill(BackplaneDesign.accent).frame(width: g.size.width * fill)
+            }
+        }.frame(height: height).accessibilityHidden(true)
+    }
+}
+func dMigColor(_ c: DMigCard) -> Color { switch c.state { case "failed": BackplaneDesign.bad; case "done": BackplaneDesign.ok; default: BackplaneDesign.accent } }
