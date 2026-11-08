@@ -159,7 +159,8 @@ jobs:
         run: |
           set -o pipefail; mkdir -p out; B="$PWD/dist"
           echo "built commit $(cat "$B/COMMIT")"
-          BACKPLANE_BROWSER="$B/backplane-browser" .venv/bin/python test/e2e/gpui-f-rows-mac.py "$B/backplane-gpui" "$B/backplane-hub" "$B/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
+          printf '#!/bin/sh\nexec "%s" "$@" 2>> "%s/helper.err"\n' "$B/backplane-browser" "$PWD/out" > "$B/bb.sh"; chmod +x "$B/bb.sh"   # the hub drops the helper's stderr; keep it
+          BACKPLANE_BROWSER="$B/bb.sh" .venv/bin/python test/e2e/gpui-f-rows-mac.py "$B/backplane-gpui" "$B/backplane-hub" "$B/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
         env:
           ROWS: ${{ inputs.rows }}
       - uses: actions/upload-artifact@v4
