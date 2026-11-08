@@ -60,7 +60,6 @@ fn simple(st: &State, session: &Value, sel: &str) -> bool {
     // (Diff and Review, which pages.rs draws, may be on show: a drawing or a close puts them away)
     let own = !pages::kind_of(session, sel).is_empty();
     !sel.is_empty() && !sel.starts_with("project-home-") && !sel.starts_with('@') && st.threads.contains_key(sel)
-        && (own || !session["panel"].as_bool().unwrap_or(false))
         && s(d, "@view.bare").is_empty()
         && (own || (s(info, &format!("view.path:{sel}")).is_empty() && s(info, &format!("view.kind:{sel}")).is_empty()))
 }
@@ -461,7 +460,8 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         }
         _ => {}
     }
-    if session["panel"].as_bool().unwrap_or(false) || !s(info, &format!("view.kind:{sel}")).is_empty() || !s(info, &format!("view.path:{sel}")).is_empty() { return None }
+    // (the session's `panel` alone is no page: it stays on from another thread's Diff when a new thread is made or another one picked, and this thread has nothing open)
+    if !s(info, &format!("view.kind:{sel}")).is_empty() || !s(info, &format!("view.path:{sel}")).is_empty() { return None }
     if kind.is_empty() { return Some(template.clone()) }
     if !shows(kind) || !simple(st, session, sel) { return None }
     let root = root_of(st, sel);
@@ -562,6 +562,11 @@ mod tests {
         assert!(viewer_json(&st, &template, &diff).is_some(), "Diff on show is pages.rs's: the thread carries its diff beside the viewer");
         let mut kind = idle.clone(); kind["info"] = json!({format!("view.kind:{th}"): "mech"});
         assert!(viewer_json(&st, &template, &kind).is_none(), "a view.kind in the info alone is the helper's too");
+        // Diff open on another thread leaves the session's panel on: this thread, with nothing of its own open, is still drawn (a new thread made from the + after Diff was refused)
+        let mut other = idle.clone(); other["panel"] = json!(true); other["info"] = json!({"view.kind:t-other": "diff", "panel:t-other": "1"});
+        assert_eq!(viewer_json(&st, &template, &other), Some(template.clone()), "the panel left on by another thread: the idle viewer");
+        let mut board = other.clone(); board["drafts"] = json!({format!("@view:{th}"): "board", "@view.at": "0|/tmp/soak2|"});
+        assert!(viewer_json(&st, &template, &board).is_some(), "and its own drawing is drawn");
     }
     #[test] fn the_view_action_and_the_viewer_of_board_schematic_and_3d_are_the_helpers() {
         let (st, th) = state(); let f = fx();

@@ -43,6 +43,7 @@
 //                "ask:" asks a question (AskUserQuestion), "approve:" a
 //                Bash approval, both through permission_prompt, waiting;
 //                "edit:" moves the board's first footprint 2.54 mm;
+//                "write:" adds a line to README.md and writes NOTES-<tag>.md;
 //                "delegate:" calls delegate_task (a plain child);
 //                "mcpcall:{json}" makes one Backplane MCP call, {"name":..,"arguments":..}, and says its answer;
 //                "fail:" starts, then fails the turn (an API error result)
@@ -422,6 +423,17 @@ async function run(c: Cmd, firstOne: boolean) {
       }
       await sleep(ms);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: f ? `edited ${f}` : "no board" }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "write:": a Write call that adds a line to README.md (a tracked file) and writes NOTES-<tag>.md (a new one), in the turn's folder
+    if (c.text.includes("write:")) {
+      const fs = await import("node:fs");
+      const id = `toolu_${rnd()}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "Write", input: { file_path: `${process.cwd()}/NOTES-${tag}.md`, content: `notes ${tag}\n` } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      fs.appendFileSync("README.md", `a line from ${tag}\n`);
+      fs.writeFileSync(`NOTES-${tag}.md`, `notes ${tag}\n`);
+      await sleep(ms);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `wrote README.md and NOTES-${tag}.md` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     }
     // "delegate:": hands a child task to another thread (delegate_task)
     if (c.text.includes("delegate:") && mcpUrl) {
