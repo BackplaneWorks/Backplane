@@ -567,6 +567,27 @@ mod tests {
     fn st(kv: &[(&str, &str)]) -> State { let mut s = State::new(); for (k, v) in kv { s.settings.insert(k.to_string(), v.to_string()); } s }
     fn labels(v: &Value) -> Vec<String> { v["rows"].as_array().unwrap().iter().map(|r| r["label"].as_str().unwrap().to_string()).collect() }
 
+    /// Matrix S09: a Voice chip chosen in Settings is lit when the page is drawn again. The page is drawn from the lean copy of the state,
+    /// which once dropped every `voice.` setting, so the engine, the model, a dictionary entry and a learned fix all looked unchosen.
+    #[test] fn voice_choices_are_lit_from_the_lean_state() {
+        let mut s = State::new(); s.lean = true;
+        for (k, v) in [("voice.engine", "local"), ("voice.model", "parakeet-v3"), ("voice.device", "mic2"), ("voice.e.kicad", "KiCad = key cad"), ("voice.l.jason", "JSON\t2\t0")] {
+            assert!(s.apply(&json!({"$": "SettingSet", "key": k, "value": v, "at": 1})), "{k}");
+        }
+        let info = json!({"voice.devices": json!({"default": "mic1", "devices": [{"name": "mic1", "label": "Desk"}, {"name": "mic2", "label": "Headset"}]}).to_string()});
+        let rows = voice(&s, &json!({"drafts": {}}), &info);
+        let lit = |label: &str| -> Vec<String> { rows.iter().filter(|r| r["label"] == label).flat_map(|r| r["buttons"].as_array().unwrap().iter().filter(|b| b["on"] == true).map(|b| b["value"].as_str().unwrap().to_string())).collect() };
+        assert_eq!(lit("Speech to text"), ["voice.engine=local"]);
+        assert_eq!(lit("Local model"), ["voice.model=parakeet-v3"]);
+        assert_eq!(lit("Microphone"), ["voice.device=mic2"]);
+        let r = rows.iter().find(|r| r["label"] == "Dictionary").unwrap(); assert!(r["buttons"].to_string().contains("KiCad = key cad"), "{r}");
+        assert_eq!(lit("Learned fixes").len(), 1, "a fix made twice and never undone applies by itself, so its chip is lit");
+        // and choosing another drops the old one, as the walk does: cloud after local
+        s.apply(&json!({"$": "SettingSet", "key": "voice.engine", "value": "cloud", "at": 2}));
+        let rows = voice(&s, &json!({"drafts": {}}), &info);
+        assert_eq!(rows[0]["buttons"].as_array().unwrap().iter().filter(|b| b["on"] == true).map(|b| b["value"].clone()).collect::<Vec<_>>(), [json!("voice.engine=cloud")]);
+    }
+
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
         assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);

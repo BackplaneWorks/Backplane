@@ -37,6 +37,9 @@ pub fn lean_keeps(k: &str) -> bool {
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && (k.starts_with("tok.t.") || k.contains(".t."))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control
     if ["settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "thread.env", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "viewer.board3d", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model"].contains(&k) || ["push.webhook.", "notify.", "tz.rule."].iter().any(|p| k.starts_with(p)) { return true }
+    // Settings, Voice (voice/page.rs, drawn by present/settings.rs from this copy): the engine, the model and the microphone, and the dictionary's
+    // entries and learned fixes (a short line each, a removed one is gone, `blank_gone`). Without them every choice there looked unchosen (matrix S09).
+    if ["voice.engine", "voice.model", "voice.device"].contains(&k) || k.starts_with("voice.e.") || k.starts_with("voice.l.") { return true }
     // Settings, Rules and task board: the person's standing rules and the task board's items (a few, each at most a few KB; a removed one is gone, `blank_gone`)
     if k.starts_with("rule.") || k.starts_with("board.") { return true }
     // setup (present/onboard.rs): the step reached, the skipped and seen lists, done, and the last checks of this machine (a few KB, replaced each time)
@@ -233,6 +236,7 @@ mod tests {
         for k in ["tz.rule.Europe/Helsinki", "tz.rule.Pacific/Auckland"] { assert!(lean_keeps(k), "{k}: the thread view reads the person's zone rule, without it every time stamp is dropped"); }
         for k in ["allowance.claude", "allowance.codex", "accounts.inventory"] { assert!(lean_keeps(k), "{k}: the composer's limits chip reads it"); }
         for k in ["rule.r1", "board.b1"] { assert!(lean_keeps(k), "{k}: Settings, Rules and task board lists it"); }
+        for k in ["voice.engine", "voice.model", "voice.device", "voice.e.kicad", "voice.l.jason"] { assert!(lean_keeps(k), "{k}: Settings, Voice shows it"); }
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }
         for k in ["ride.t1", "tok.basis.t1", "uber.op.u.m.1", "todos.base.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
