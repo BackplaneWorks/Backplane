@@ -111,10 +111,17 @@ fn developer(st: &State) -> Vec<Value> {
     vec![row("Replay first run", "Clears setup's progress and opens it at the first step, as on a new hub.", vec![btn("Replay setup", "ob-replay", "", true)]),
          row("Star suggestion", &crate::state::fam::star::standing(set(st, crate::state::fam::star::KEY, "")), vec![btn("Show it now", "dev-star", "", false)])]
 }
-fn about(st: &State) -> Vec<Value> {
+fn about(st: &State, info: &Value) -> Vec<Value> {
     let v = VERSION.get().map(String::as_str).unwrap_or("");
     let _ = st;
-    vec![row(&format!("Backplane {v}"), "Updates are under Network.", vec![])]
+    let mut r = vec![row(&format!("Backplane {v}"), "Updates are under Network.", vec![])];
+    // what this window's Browser tab is (a desktop client says; a phone says nothing)
+    match info["client"]["browser"].as_str() {
+        Some("frames") => r.push(row("Browser", "Frame mode: the hub's browser draws each page and this window shows it.", vec![])),
+        Some("cef") => r.push(row("Browser", "Embedded Chromium in this window.", vec![])),
+        _ => {}
+    }
+    r
 }
 
 const PROVIDERS: &[&str] = &["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"];
@@ -440,7 +447,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "machines" => crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string()), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "machines" => crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string()), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -592,6 +599,14 @@ mod tests {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
         assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
+    }
+    #[test] fn about_says_what_this_windows_browser_tab_is() {
+        let about = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); labels(&v) };
+        let notes = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); v["rows"].as_array().unwrap().iter().map(|r| r["note"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
+        assert!(about(json!({"kind": "desktop", "browser": "frames"})).contains(&"Browser".to_string()));
+        assert!(notes(json!({"kind": "desktop", "browser": "frames"})).iter().any(|n| n.starts_with("Frame mode")));
+        assert!(notes(json!({"kind": "desktop", "browser": "cef"})).iter().any(|n| n.contains("Embedded Chromium")));
+        assert!(!about(json!({"kind": "phone"})).contains(&"Browser".to_string()), "a phone says nothing of a browser");
     }
     #[test] fn developer_replays_setup_and_the_star_suggestion() {
         let sess = json!({"open": {"settings": true}, "drafts": {"@settings.page": "developer"}, "rid": 5});
