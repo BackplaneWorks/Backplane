@@ -347,8 +347,14 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
         let at = |s: &str| mine.iter().rposition(|e| turn_is(e, s)).unwrap_or_else(|| panic!("{th} has no {s} turn"));
         assert!(at("interrupted") < at("running") && at("running") < at("completed"), "{th} took a turn after the cut");
     }
-    assert!(c[BURST - 1].1 - c[0].1 <= 1, "the first BURST at once");
-    assert!(c[9].1 - c[BURST - 1].1 >= (9 - BURST as u64 + 1 - 1) * CARRY_GAP_S - 1, "the rest apart: {c:?}");
+    // read from the hub's own log, never against the wall clock (a loaded machine stretches the burst but never the gaps' lower bound):
+    // the burst is carried before the first of the line is let go (a thread of the line is the only one whose wait mark is cleared, and that comes after a gap's sleep)...
+    let pos = |f: &dyn Fn(&Value) -> bool| ev.iter().position(|e| f(e));
+    let cleared = pos(&|e| is(e, "SettingSet") && e["key"].as_str().unwrap_or("").starts_with("carry.wait.") && e["value"] == "").expect("the line is let go");
+    let burst_end = ev.iter().enumerate().filter(|(_, e)| is(e, "MessagePosted") && e["role"] == "user" && e["text"].as_str().unwrap_or("").starts_with(world::CARRY_TEXT)).nth(BURST - 1).unwrap().0;
+    assert!(burst_end < cleared, "the first BURST go before anyone in line is let go");
+    // ...and each of the line follows the one before it by a gap (logged whole seconds: one short)
+    for k in BURST..10 { assert!(c[k].1 + 1 >= c[k - 1].1 + CARRY_GAP_S, "a gap before {}: {c:?}", c[k].0); }
     assert_eq!(waiting(&ev), Vec::<String>::new(), "nothing left in line"); assert_eq!(ag.stats.procs_spawned.load(Relaxed), 10); ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn restart_continue_turned_off_stops_those_still_in_line() {
@@ -380,10 +386,13 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_carries_on_at_most_a_burst_at_once() {
     let sd = dir("cb-bin"); script(&sd, "claude", DEAF);
     let (hub, ag, _h, _w) = start("cb", |w| { let mut l = base_log(w, 6, ""); for i in 0..6 { let id = if i == 0 { T1.to_string() } else { format!("t17000010{i:02}-{i}") }; l += &format!("{{\"$\":\"MessagePosted\",\"thread\":\"{id}\",\"msg\":\"u{i}\",\"role\":\"user\",\"text\":\"x\",\"at\":1700000100}}\n{{\"$\":\"TurnChanged\",\"thread\":\"{id}\",\"state\":\"running\",\"at\":1700000100}}\n") } l }, |_| Cli::standin(&sd)).await;
-    tokio::time::sleep(Duration::from_millis(800)).await; let ev = log_from(&hub, 0).await;
+    // waited for in the log, never a pause: the burst is there once BURST carry messages are, and whatever else comes comes a gap later
+    let ev = until(&hub, 0, 60, |ev| carried(ev).len() >= BURST && ev.iter().filter(|e| turn_is(e, "interrupted")).count() >= 6).await;
     assert_eq!(ev.iter().filter(|e| turn_is(e, "interrupted")).count(), 6, "every cut turn is marked");
-    assert_eq!(ev.iter().filter(|e| e["text"].as_str().unwrap_or("").starts_with(world::CARRY_TEXT)).count(), BURST);
-    assert_eq!(ag.stats.procs_spawned.load(Relaxed), BURST as u64); ag.shutdown();
+    let c = carried(&ev); assert!(c.len() >= BURST, "{c:?}");
+    assert_eq!(waiting(&ev).len(), 6 - c.len(), "the others are written down in line, not started");
+    if c.len() > BURST { assert!(c[BURST].1 + 1 >= c[BURST - 1].1 + CARRY_GAP_S, "one past the burst came a gap later: {c:?}") } // a very late look may find the first of the line
+    assert!(ag.stats.procs_spawned.load(Relaxed) <= c.len() as u64); ag.shutdown();
 }
 
 // ---- load: twenty agents ----
