@@ -68,7 +68,8 @@ pub fn refusal(code: u16) -> String {
     }
 }
 
-fn reset(w: &Value) -> Option<u64> { w["resets_at"].as_str().and_then(super::accounts_io::parse_iso).or_else(|| w["resets_at"].as_f64().map(|x| x as u64)).filter(|r| *r > 0) }
+/// A window's reset, to the nearest minute: the service says "07:59:59.98" one moment and "08:00:00.24" the next for the same reset.
+fn reset(w: &Value) -> Option<u64> { w["resets_at"].as_str().and_then(super::accounts_io::parse_iso).or_else(|| w["resets_at"].as_f64().map(|x| x as u64)).filter(|r| *r > 0).map(|r| (r + 30) / 60 * 60) }
 fn percent(v: &Value) -> Option<f64> { v.as_f64().filter(|u| u.is_finite() && *u >= 0.0).map(|u| u.min(100.0)) }
 /// The fixed windows the endpoint names: (key, minutes, label, shared).
 const FIXED: &[(&str, u64, &str, bool)] = &[("five_hour", 300, "5-hour", true), ("seven_day", 10080, "Weekly", true), ("seven_day_opus", 10080, "Opus weekly", false), ("seven_day_sonnet", 10080, "Sonnet weekly", false)];
@@ -157,6 +158,7 @@ pub(crate) mod tests {
         assert_eq!(w[2]["used_percent"], 100.0); assert!(w[3].get("resets_at").is_none());
         assert_eq!(extra(&b).unwrap(), json!({"enabled":true,"used":"12.34 EUR","limit":"100.00 EUR","percent":12.34,"reason":""}));
         assert!(windows(&Value::Null).is_empty() && extra(&json!({})).is_none());
+        let jitter = windows(&json!({"seven_day":{"utilization":1,"resets_at":"2026-11-11T16:59:59.981000+00:00"}})); assert_eq!(jitter[0]["resets_at"], 1_794_416_400u64, "a reset a hair early is the minute it means");
         // Claude Code's own `get_usage` passes the same body on as `rate_limits`, with its projection added
         let cli = json!({"rate_limits_available":true,"rate_limits":b.clone()});
         assert_eq!(super::super::accounts_io::Accounts::claude_windows(&cli), w);

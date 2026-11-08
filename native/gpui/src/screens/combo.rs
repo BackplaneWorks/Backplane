@@ -77,7 +77,7 @@ pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Bac
         let mut u = div().flex().flex_col().px_3().pb_2().gap(px(2.)).text_size(px(12.));
         for r in rows {
             u = u.child(div().flex().items_center().gap_2().when(!r.applies, |d| d.opacity(0.6))
-                .child(div().w(px(110.)).flex_shrink_0().text_color(c("dim")).child(r.label)).child(div().w(px(70.)).flex_shrink_0().text_color(c(r.tone)).child(r.left))
+                .child(div().w(px(96.)).flex_shrink_0().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(r.label)).child(div().w(px(66.)).flex_shrink_0().text_color(c(r.tone)).child(r.left))
                 .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c("faint")).child(r.resets)));
         }
         for n in notes { u = u.child(div().text_size(px(11.)).text_color(c("dim")).child(n)) }
@@ -85,7 +85,7 @@ pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Bac
     }
     let model_col = div().flex_1().min_w_0().flex().flex_col().child(head("Model", if st.menu { this.key_hint("models") } else { "↑↓ ←→ Tab".into() }, !st.menu)).children(model);
     let body = if narrow { div().flex().flex_col().child(model_col).when(accounts_on, |d| d.child(div().h(px(1.)).bg(c("line"))).child(side)) }
-        else { div().flex().child(model_col).when(accounts_on, |d| d.child(div().w(px(1.)).bg(c("line"))).child(side.w(px(330.)).flex_shrink_0())) };
+        else { div().flex().child(model_col).when(accounts_on, |d| d.child(div().w(px(1.)).bg(c("line"))).child(side.w(px(360.)).flex_shrink_0())) };
     Some(div().id("combo-menu").border_1().border_color(c("line")).bg(c("panel")).child(body).into_any_element())
 }
 
