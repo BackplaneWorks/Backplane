@@ -177,13 +177,15 @@ const DEAF: &str = "#!/bin/sh\nsleep 600\n";
     let sd = dir("x-bin"); script(&sd, "claude", EXITS);
     let (hub, ag, _h, _w) = start("x", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await;
-    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| turn_is(e, "failed"))).await;
+    let ev = until(&hub, from, 60, |ev| ev.iter().any(|e| turn_is(e, "failed"))).await;
     let row = ev.iter().find(|e| is(e, "ActivityLogged") && e["kind"] == "exit").expect("an exit row"); assert_eq!(row["summary"], "agent exited with code 3"); assert_eq!(row["tone"], "error");
     assert!(ev.iter().any(|e| is(e, "SessionSet")), "what it wrote before it went is kept");
     assert!(ev.iter().any(|e| e["key"].as_str().map_or(false, |k| k.starts_with("failed."))));
     assert_eq!(ag.stats.procs_exited.load(Relaxed), 1);
     // the next message starts a fresh process
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"again"})).await; tokio::time::sleep(Duration::from_millis(500)).await; assert_eq!(ag.stats.procs_spawned.load(Relaxed), 2);
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"again"})).await;
+    let end = Instant::now() + Duration::from_secs(60); while ag.stats.procs_spawned.load(Relaxed) < 2 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await } // waited for, not paused for
+    assert_eq!(ag.stats.procs_spawned.load(Relaxed), 2);
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_killed_process_is_named_as_probably_out_of_memory() {

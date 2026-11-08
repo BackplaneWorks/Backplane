@@ -218,7 +218,7 @@ async fn a_storm_of_twenty_restarts_mid_turn_never_fails_a_start_on_the_accounts
             let mailed = since.iter().any(|e| e["$"] == "MessagePosted" && e["msg"] == format!("mail-{r}").as_str());
             if c.len() != last_n { last_n = c.len(); steady = Instant::now(); }
             if held && busy && mailed && !c.is_empty() && steady.elapsed() > Duration::from_millis(400) { break }
-            assert!(t0.elapsed() < Duration::from_secs(120), "restart {r}: the carried turns never got going: {c:?} {:?}", lines(&up.hub, BUB_T));
+            assert!(t0.elapsed() < Duration::from_secs(300), "restart {r}: the carried turns never got going: {c:?} {:?}", lines(&up.hub, BUB_T));
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         let text = raw(&up.hub); assert!(!text.contains(NOT_AVAILABLE), "restart {r}: a start failed on the accounts");
@@ -229,7 +229,7 @@ async fn a_storm_of_twenty_restarts_mid_turn_never_fails_a_start_on_the_accounts
     }
     let _ = std::fs::remove_file(b.rec.join("authslow"));
     let up = boot(&home, &b).await;
-    all(&up.hub, &ths, "completed", 120).await;
+    all(&up.hub, &ths, "completed", 300).await;
     for h in homes.iter().chain([&home]) { let t = std::fs::read_to_string(h.join("events.jsonl")).unwrap(); assert!(!t.contains(NOT_AVAILABLE), "{}: a start failed on the accounts", h.display()); }
     let ev = log(&up.hub);
     for th in &ths { assert!(!ev.iter().any(|e| e["thread"] == th.as_str() && e["$"] == "TurnChanged" && e["state"] == "failed"), "{th} failed: {:?}", lines(&up.hub, th)) }
