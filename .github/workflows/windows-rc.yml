@@ -1,0 +1,127 @@
+# A release candidate's Windows zip on a windows-latest runner, beside the VM's interactive rows: the hub-side rows on its own backplane-hub.exe
+# (test/e2e/linux-f-rows.mjs, s-effects.mjs, settings-walk.mjs), and the install from the zip (backplane-gpui.exe --install, its guard, a restart).
+# Runs on a push to a lane/win-rc* branch (its file needs no landing first) or by dispatch. Every step runs; the last says which failed.
+name: windows-rc
+on:
+  push:
+    branches: ['lane/win-rc*']
+  workflow_dispatch:
+    inputs:
+      archive_run: { description: "release dry run whose archive-windows-x64 zip is tested", default: "42509812215" }
+      archive_tag: { default: "v0.15.0-rc.2" }
+permissions:
+  contents: read
+  actions: read
+env:
+  ARCHIVE_RUN: ${{ inputs.archive_run || '42509812215' }}
+  ARCHIVE_TAG: ${{ inputs.archive_tag || 'v0.15.0-rc.2' }}
+  NO_SCOPE: '1'
+jobs:
+  rc:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - run: git config --global core.autocrlf false
+      - name: a git identity (the hub's checkpoint commits use the person's, as on any machine where git was set up)
+        run: git config --global user.name 'Backplane E2E'; git config --global user.email 'e2e@example.com'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - name: python3 beside python (the stand-ins' #! names python3)
+        shell: bash
+        run: d=$(dirname "$(command -v python)"); [ -e "$d/python3.exe" ] || cp "$d/python.exe" "$d/python3.exe"; python3 --version
+      - id: bun1
+        uses: oven-sh/setup-bun@v2
+        continue-on-error: true
+        with: { bun-version: 1.4.4 }
+      - if: steps.bun1.outcome == 'failure'
+        name: bun from npm's registry (GitHub's download answered 504)
+        shell: bash
+        run: npm install -g bun@1.4.4 && bun --version
+      - name: the release candidate's zip (its dry run's artifact)
+        uses: actions/download-artifact@v4
+        with:
+          name: archive-windows-x64
+          run-id: ${{ env.ARCHIVE_RUN }}
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}\zip
+      - name: unpack
+        shell: pwsh
+        run: |
+          $z = Get-ChildItem "$env:RUNNER_TEMP\zip" -Filter "backplane-$env:ARCHIVE_TAG-windows-x64-native.zip" | Select -First 1
+          if (-not $z) { throw "no zip for $env:ARCHIVE_TAG" }
+          "zip: $($z.Name) $($z.Length) bytes, sha256 $((Get-FileHash $z.FullName).Hash.ToLower())"
+          Expand-Archive $z.FullName -DestinationPath "$env:RUNNER_TEMP\rc"
+          "programs: $(Get-Content $env:RUNNER_TEMP\rc\COMMIT); $((Get-ChildItem $env:RUNNER_TEMP\rc | % Name) -join ' ')"
+      - name: hub rows (linux-f-rows.mjs, S04 and S12 with them)
+        id: hub
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail; R=$(cygpath -m "$RUNNER_TEMP")
+          bun test/e2e/linux-f-rows.mjs "$R/rc/backplane-hub.exe" "$R/lfr" 3871 2>&1 | tee "$R/lfr.log"
+          ! grep -q '^FAIL' "$R/lfr.log"
+      - name: Settings effects (s-effects.mjs)
+        id: seff
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail; R=$(cygpath -m "$RUNNER_TEMP")
+          bun test/e2e/s-effects.mjs "$R/rc/backplane-hub.exe" "$R/seff" 3870 2>&1 | tee "$R/seff.log"
+          ! grep -q '"ok":false' "$R/seff.log"
+      - name: Settings walk (settings-walk.mjs)
+        id: walk
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail; R=$(cygpath -m "$RUNNER_TEMP")
+          bun test/e2e/settings-walk.mjs "$R/rc/backplane-hub.exe" "$R/walk" 3873 2>&1 | tee "$R/walk.log" | grep -v 'not a chip'
+          grep -q 'not applied: 0, persist failures: 0' "$R/walk.log"
+      - name: install from the zip (backplane-gpui.exe --install), the guard, a restart, the bundled VAD
+        id: install
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $rc = "$env:RUNNER_TEMP\rc"; $P = "$env:LOCALAPPDATA\Backplane"; $H = "$env:APPDATA\Backplane\hub"; $bad = 0
+          function check($what, $ok) { if ($ok) { "ok   $what" } else { "FAIL $what"; $script:bad++ } }
+          $out = & "$rc\backplane-gpui.exe" --install 2>&1 | Out-String; "install: $($out.Trim()) (exit $LASTEXITCODE)"
+          check "the install answered 0" ($LASTEXITCODE -eq 0)
+          $tag = Get-Content "$P\CURRENT" -EA SilentlyContinue
+          check "CURRENT is $env:ARCHIVE_TAG" ($tag -eq $env:ARCHIVE_TAG)
+          check "the guard beside builds\ and the whole zip under builds\$tag" ((Test-Path "$P\backplane.exe") -and (Test-Path "$P\builds\$tag\backplane-hub.exe") -and (Test-Path "$P\builds\$tag\silero_vad.onnx"))
+          check "a Start-menu entry" (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Backplane.lnk")
+          $g = Start-Process "$P\backplane.exe" -ArgumentList 'hub','run','--home',$H,'--port','3800','--builds',$P,'--','--no-tailscale','--foreground' -PassThru -WindowStyle Hidden -RedirectStandardOutput "$env:RUNNER_TEMP\guard.out" -RedirectStandardError "$env:RUNNER_TEMP\guard.err"
+          $up = $false; for ($i = 0; $i -lt 90; $i++) { try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3800/hello -TimeoutSec 2 | Out-Null; $up = $true; break } catch { Start-Sleep 1 } }
+          check "the guard's hub answers /hello" $up
+          $s = Get-Content "$H\guard\status.json" -Raw | ConvertFrom-Json
+          check "the guard runs $tag ($($s.build), $($s.commit), state $($s.state))" ($s.build -eq $tag -and $s.commit -eq (Get-Content "$rc\COMMIT"))
+          $u = & bun test/update/win-r.mjs 3800 "$H\token" update.status 2>&1 | Out-String
+          check "update.status says current $($env:ARCHIVE_TAG.TrimStart('v'))" ($u -match ('"current":"' + [regex]::Escape($env:ARCHIVE_TAG.TrimStart('v')) + '"'))
+          $a = $s.hubPid; & "$P\backplane.exe" hub restart --now --home $H 2>&1 | Select -Last 1
+          $b = $a; for ($i = 0; $i -lt 60; $i++) { Start-Sleep 2; $b = (Get-Content "$H\guard\status.json" -Raw | ConvertFrom-Json).hubPid; if ($b -and $b -ne $a) { break } }
+          $up2 = try { (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3800/hello -TimeoutSec 5).StatusCode -eq 200 } catch { $false }
+          check "backplane hub restart replaced the hub ($a -> $b) and it answers again" ($b -ne $a -and $up2)
+          $v = & "$P\builds\$tag\backplane-voice.exe" local-status --local-dir "$env:RUNNER_TEMP\vempty" 2>&1 | Select -First 1
+          check "the voice helper sees the VAD beside it (vadBundled)" ($v -match '"vadBundled":true')
+          & "$P\backplane.exe" hub stop --home $H 2>&1 | Select -Last 1
+          "an update to a second build: not run (no second signed build of this line; an -rc tag is not an update target, update/rel.rs tag_ok)"
+          exit $bad
+      - name: keep the hub rows' home and logs (F21's events, to read a failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-rc-hub-rows
+          path: |
+            ${{ runner.temp }}/lfr/home/events.jsonl
+            ${{ runner.temp }}/lfr/hub.log
+            ${{ runner.temp }}/lfr/rows.json
+            ${{ runner.temp }}/lfr.log
+          retention-days: 3
+          if-no-files-found: warn
+      - name: which failed
+        if: always()
+        shell: bash
+        run: |
+          echo "hub rows: ${{ steps.hub.outcome }}; s-effects: ${{ steps.seff.outcome }}; settings walk: ${{ steps.walk.outcome }}; install: ${{ steps.install.outcome }}"
+          [ "${{ steps.hub.outcome }}${{ steps.seff.outcome }}${{ steps.walk.outcome }}${{ steps.install.outcome }}" = successsuccesssuccesssuccess ]
