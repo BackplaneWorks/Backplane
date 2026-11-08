@@ -30,7 +30,8 @@ jobs:
       - name: install tool and path unit tests
         working-directory: native/host
         shell: bash
-        run: cargo test --locked -- kicad::install:: settings::tools_install:: kicad::ipc::tests::a_managed_runtime
+        run: |
+          cargo test --locked -- kicad::install:: settings::tools_install:: kicad::ipc::tests::a_managed_runtime
       - name: Backplane KiCad, the real install (status ok)
         working-directory: native/host
         shell: bash
