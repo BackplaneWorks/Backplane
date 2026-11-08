@@ -18,7 +18,7 @@ BUILD=1; PHONE=1; OUT=; ARCHIVE=
 while [ $# -gt 0 ]; do case "$1" in --no-build) BUILD=0;; --no-phone) PHONE=0;; --archive) shift; ARCHIVE=$(realpath "$1"); BUILD=0;; *) OUT=$1;; esac; shift; done
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 SHA=$(git rev-parse HEAD); SHORT=$(git rev-parse --short HEAD); DIRTY=$(git status --porcelain --untracked-files=no | wc -l)
-LABEL="$SHORT"; [ -n "$ARCHIVE" ] && { TAG=$(basename "$ARCHIVE" | sed -E 's/^backplane-(v[0-9][^-]*)-.*/\1/'); LABEL="release-$TAG"; }
+LABEL="$SHORT"; [ -n "$ARCHIVE" ] && { TAG=$(basename "$ARCHIVE" | sed -E 's/^backplane-(v.*)-linux-.*/\1/'); LABEL="release-$TAG"; }
 OUT=${OUT:-$HOME/.cache/e2e-linux-$LABEL}; mkdir -p "$OUT/tmp"; OUT=$(cd "$OUT" && pwd)
 : > "$OUT/results.tsv"   # driver<TAB>status<TAB>id<TAB>evidence
 add() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$OUT/results.tsv"; }
