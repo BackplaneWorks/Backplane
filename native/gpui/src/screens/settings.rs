@@ -87,15 +87,46 @@ const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "agents", "writing"], &
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
 /// How the dialog fits a window of `w` x `h` px: the margin around it, the page list's width, and whether a row's controls go under its words
 /// (a narrow page has no room beside them). The page list and the rows each scroll on their own, so nothing is out of reach on a short window.
+/// `rows` is the width the rows are laid out in (the page less its side margins, `gutter` each); each row decides from it whether its controls
+/// fit beside its words (`row_fit`).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Fit { pub pad: f32, pub nav: f32, pub stack: bool }
+pub struct Fit { pub pad: f32, pub nav: f32, pub gutter: f32, pub rows: f32 }
 pub fn fit(w: f32, h: f32) -> Fit {
     let pad = if w < 900. || h < 640. { 8. } else { 24. };
     let dialog = (w - 2. * pad).min(1040.);
     let nav = if dialog < 640. { 150. } else if dialog < 860. { 180. } else { 220. };
-    // the rows' own width (less their 24 px margins) below what a label and the widest controls (up to 430 px) need side by side
-    Fit { pad, nav, stack: dialog - nav - 48. < 620. }
+    let gutter = if dialog < 640. { 12. } else { 24. };
+    Fit { pad, nav, gutter, rows: (dialog - 2. - nav - 2. * gutter).max(120.) }
 }
+/// The least width a row's words keep beside its controls; narrower, the controls go under them.
+pub const LABEL_MIN: f32 = 220.0;
+/// The widest the controls beside the words get.
+pub const CONTROLS_MAX: f32 = 430.0;
+const GAP: f32 = 16.0;
+/// A chip's width at the settings' 12 px (its 12 px padding each side): wide (CJK) characters count as a full em. An estimate on the generous side,
+/// so a line of chips is never wider than the room it was packed for.
+pub fn chip_w(label: &str) -> f32 { 24. + label.chars().map(|c| if (c as u32) >= 0x1100 && !c.is_whitespace() { 12.5 } else { 7.6 }).sum::<f32>() }
+/// How a row lays out in `avail` px: whether its controls go under its words (`stack`), and its chips as lines (how many on each), each line
+/// no wider than the room it has (a single chip wider than that has a line of its own). `field`/`qr`: the widths of a text field, a QR code.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RowFit { pub stack: bool, pub lines: Vec<usize> }
+pub fn row_fit(avail: f32, chips: &[f32], field: f32, qr: f32) -> RowFit {
+    let side = (avail - LABEL_MIN - GAP).min(CONTROLS_MAX);
+    let widest = chips.iter().copied().fold(0.0f32, f32::max).max(field).max(qr);
+    // beside the words when the widest single control fits there; the chips then wrap within that room
+    let stack = widest > side;
+    let room = if stack { avail } else { side };
+    let mut lines = Vec::new(); let (mut n, mut w) = (0usize, 0.0f32);
+    for &c in chips {
+        let next = if n == 0 { c } else { w + 4. + c };
+        if n > 0 && (next > room || n == CHIPS_PER_LINE) { lines.push(n); n = 1; w = c; } else { n += 1; w = next; }
+    }
+    if n > 0 { lines.push(n); }
+    RowFit { stack, lines }
+}
+/// A page list entry's icon keeps its size, and its title ends in "…" when the list is narrow (it never runs under the icon).
+fn nav_icon_el(icon: AnyElement) -> Div { div().flex_shrink_0().child(icon) }
+fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(t.to_string()) }
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
     match page { "appearance" => "sun", "threads" => "message-square", "agents" => "cpu", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
@@ -286,25 +317,35 @@ pub fn structure(settings: &Value) -> String {
 const CHIPS_PER_LINE: usize = 6;
 /// A hub row as a dialog row: label and muted note on the left, the controls on the right, a hairline under it. A row that is only a label is a
 /// section heading; a label and a note with nothing to press or type is a paragraph.
-pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize, stack: bool) -> AnyElement {
+/// `avail`: the width the row is laid out in (`Fit::rows`); `row_fit` decides from it whether the controls go beside the words or under them.
+pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize, avail: f32) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let controls = !r.buttons.is_empty() || r.fields.iter().any(|f| fields.contains_key(&f.name)) || !r.qr.is_empty();
+    let has_field = r.fields.iter().any(|f| fields.contains_key(&f.name));
+    let controls = !r.buttons.is_empty() || has_field || !r.qr.is_empty();
     if !controls && r.note.is_empty() {
         return div().pt_4().pb_1().text_size(px(14.)).font_weight(FontWeight::BOLD).child(r.label.clone()).into_any_element();
     }
-    let mut left = div().flex().flex_col().gap_1().flex_1().min_w_0();
+    let field_w = 260f32.min(avail);
+    let widths: Vec<f32> = r.buttons.iter().map(|b| chip_w(&b.label)).collect();
+    let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { 0. }, if r.qr.is_empty() { 0. } else { r.qr.len() as f32 * 4. + 16. });
+    // the words keep their least width beside the controls (never squeezed to a letter a line), or the whole row's under a stack
+    let mut left = div().flex().flex_col().gap_1().min_w_0();
+    left = if stack { left.w_full() } else { left.flex_1().min_w(px(LABEL_MIN)) };
     if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(r.label.clone())); }
     if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(r.note.clone())); }
-    let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(430.)) };
+    let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(CONTROLS_MAX)) };
     for f in &r.fields {
-        if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(260.)).px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
+        if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
     }
     if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().text_size(px(11.)).text_color(c("dim")).child(r.qrnote.clone())); } }
     if !r.buttons.is_empty() {
-        // chips in lines of at most CHIPS_PER_LINE (a wrapping flex row does not grow its parent's height in gpui, and the next row would be drawn over it)
-        for (line, chunk) in r.buttons.chunks(CHIPS_PER_LINE).enumerate() {
+        // (not a wrapping flex row: it does not grow its parent's height in gpui, and the next row would be drawn over it)
+        // chips in lines packed to the room they have (row_fit), at most CHIPS_PER_LINE each
+        let mut start = 0;
+        for n in lines {
+            let (first, chunk) = (start, &r.buttons[start..start + n]); start += n;
             right = right.child(div().flex().when(!stack, |d| d.justify_end()).gap_1().children(chunk.iter().enumerate().map(|(k, b)| {
-                let j = line * CHIPS_PER_LINE + k; let b2 = b.clone();
+                let j = first + k; let b2 = b.clone();
                 let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer();
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named by what it does: `btn:<action>:<value>`
@@ -313,7 +354,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
             }).collect::<Vec<_>>()));
         }
     }
-    let line = if stack { div().flex().flex_col().gap_2() } else { div().flex().items_center().gap_4() };
+    let line = if stack { div().flex().flex_col().gap_2() } else { div().flex().items_center().gap(px(GAP)) };
     line.py_3().border_b_1().border_color(c("line")).child(left).child(right).into_any_element()
 }
 
@@ -342,7 +383,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let skip = if on_page { 1 } else { 0 };
     let dev_rows = device_rows(local);
     let hub_rows = super::hubpick::rows(hub_list);
-    let mut els: Vec<AnyElement> = if on_hubs { hub_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() } else if on_acct { super::accounts::page(cx, light, acct) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.stack)).collect() };
+    let mut els: Vec<AnyElement> = if on_hubs { hub_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() };
     if !on_device && !on_acct && !on_hubs && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS - skip)).into_any_element()); }
     // the left nav
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
@@ -351,14 +392,14 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let item = if on_device { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("THIS DEVICE"))
-            .child(item.child(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" }))).child("This device").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = false; cx.notify(); })));
+            .child(item.child(nav_icon_el(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" })))).child(nav_title("This device")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = false; cx.notify(); })));
         let hubs_item = div().id("set-nav-hubs").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let hubs_item = if on_hubs { hubs_item.bg(c("raise")) } else { hubs_item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(hubs_item.child(crate::art::icon("globe", 16., c(if on_hubs { "text" } else { "dim" }))).child("Hubs").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = true; cx.notify(); })));
+        nav = nav.child(hubs_item.child(nav_icon_el(crate::art::icon("globe", 16., c(if on_hubs { "text" } else { "dim" })))).child(nav_title("Hubs")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = true; cx.notify(); })));
         let acct_item = div().id("set-nav-accounts").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let acct_item = if on_acct { acct_item.bg(c("raise")) } else { acct_item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("ALL DEVICES (HUB)"))
-            .child(acct_item.child(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" }))).child("Accounts").on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
+            .child(acct_item.child(nav_icon_el(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" })))).child(nav_title("Accounts")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
         if !hub_on { nav = nav.child(div().px_3().pt_2().text_size(px(11.)).text_color(c("dim")).child("The hub's other settings open here when it serves them.")); }
     }
     let mut last = usize::MAX;
@@ -371,7 +412,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let (p2, on) = (page.clone(), !on_device && !on_acct && !on_hubs && if on_page { title_now == *t_nav } else { *page == ui.page });
         let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let item = if on { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(item.child(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" }))).child(title.clone())
+        nav = nav.child(item.child(nav_icon_el(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" })))).child(nav_title(title))
             .on_click(cx.listener(move |this, _, _, cx| { go_page(this, &p2); cx.notify(); })));
     }
     let title = if on_hubs { "Hubs".to_string() } else if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
@@ -381,7 +422,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             .child(div().id("settings-close").p_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise"))).child(crate::art::icon("x", 16., c("dim")))
                 .on_click(cx.listener(|this, _, _, cx| close(this, cx)))))
         .child(div().flex().flex_1().min_h_0().child(nav)
-            .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().px_6().py_3().flex().flex_col()
+            .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().px(px(fit.gutter)).py_3().flex().flex_col()
                 .child(div().pb_1().text_size(px(15.)).font_weight(FontWeight::BOLD).child(title))
                 .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device || on_hubs { "accent" } else { "dim" })).child(if on_hubs { "Kept on this computer only. Each hub has its own credential here." } else if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." })).children(els)));
     Some(div().id("settings").absolute().inset_0().occlude().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p(px(fit.pad)).child(dialog).into_any_element())
@@ -419,10 +460,29 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
 mod tests {
     use super::*;
     #[test] fn the_dialog_fits_a_small_window() {
-        assert_eq!(fit(1400., 900.), Fit { pad: 24., nav: 220., stack: false }, "a desktop window: side by side");
-        let f = fit(1024., 600.); assert_eq!(f.pad, 8., "a short window keeps its height for the rows"); assert!(!f.stack);
-        let f = fit(800., 600.); assert_eq!((f.nav, f.stack), (180., true), "a narrow one stacks the controls under the words");
-        let f = fit(600., 500.); assert_eq!(f.nav, 150.); assert!(f.stack); assert!(600. - 2. * f.pad - f.nav - 48. > 300., "the rows keep room to read");
+        assert_eq!(fit(1400., 900.), Fit { pad: 24., nav: 220., gutter: 24., rows: 1040. - 2. - 220. - 48. }, "a desktop window");
+        let f = fit(1024., 600.); assert_eq!(f.pad, 8., "a short window keeps its height for the rows");
+        let f = fit(800., 600.); assert_eq!(f.nav, 180.);
+        let f = fit(600., 500.); assert_eq!((f.nav, f.gutter), (150., 12.)); assert!(f.rows > 300., "the rows keep room to read");
+        let f = fit(420., 600.); assert!(f.rows >= 200., "{f:?}");
+    }
+    #[test] fn a_row_keeps_its_words_readable_and_its_chips_inside_the_room_they_have() {
+        let fonts: Vec<f32> = ["Noto Sans Mono", "JetBrains Mono", "Fira Code", "IBM Plex Mono", "Source Code Pro"].iter().map(|l| chip_w(l)).collect();
+        // wide: beside the words, the chips in lines no wider than the controls' room
+        let wide = row_fit(fit(1400., 900.).rows, &fonts, 0., 0.); assert!(!wide.stack);
+        let fits = |avail: f32, f: &RowFit| { let room = if f.stack { avail } else { (avail - LABEL_MIN - GAP).min(CONTROLS_MAX) }; let mut i = 0; for &n in &f.lines { let w: f32 = fonts[i..i + n].iter().sum::<f32>() + 4. * (n as f32 - 1.); assert!(n == 1 || w <= room, "{w} > {room}"); i += n; } assert_eq!(i, fonts.len()); };
+        fits(fit(1400., 900.).rows, &wide);
+        // every window from phone-thin to wide: the words keep LABEL_MIN beside the controls, or have the whole row with the controls under them
+        for w in [420., 500., 600., 700., 800., 900., 1000., 1200.] {
+            let avail = fit(w, 700.).rows; let f = row_fit(avail, &fonts, 0., 0.); fits(avail, &f);
+            if !f.stack { assert!(avail - LABEL_MIN - GAP >= fonts.iter().copied().fold(0., f32::max), "{w}"); }
+        }
+        assert!(row_fit(fit(420., 700.).rows, &fonts, 0., 0.).stack, "a thin window stacks");
+        assert!(row_fit(fit(420., 700.).rows, &[], 260., 0.).stack, "and a text field goes under its words");
+        assert!(!row_fit(fit(1400., 900.).rows, &[], 260., 0.).stack);
+        assert_eq!(row_fit(100., &[300.], 0., 0.).lines, vec![1], "a chip wider than the room still has a line");
+        assert_eq!(row_fit(2000., &[50.; 9], 0., 0.).lines, vec![6, 3], "at most CHIPS_PER_LINE a line");
+        assert!(chip_w("日本語") > chip_w("abc"));
     }
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }

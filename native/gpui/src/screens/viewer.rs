@@ -20,10 +20,15 @@ pub struct DiffFile { pub name: String, pub status: String, pub lines: Vec<DiffL
 
 pub const MAX_ROWS: usize = 1000;
 
-/// Open a viewer kind, or close the viewer with "": the phones' idempotent `view` action. The client never toggles the panel and never
-/// guesses its state: pressing twice before the reply asks for the same thing twice.
+/// Open a viewer kind, or close the viewer with "": the phones' idempotent `view` action.
 pub fn view_kind(kind: &str) -> Command { Command::Action("view".into(), kind.to_string()) }
 pub fn close() -> Command { view_kind("") }
+/// A rail press (or its key) on a viewer kind: the kind the rail shows lit (the hub's page, or the one just pressed) shuts the viewer, as a press
+/// on the web's shown tab did; any other kind opens. Still the idempotent `view` action either way, decided from what is on the screen.
+pub fn rail_command(viewer: &Value, diff_on: bool, pending: Option<&str>, kind: &str) -> Command {
+    let lit = !diff_on && (pending.is_some() || viewer["open"].as_str().map_or(false, |o| !o.is_empty())) && active_kind(viewer, pending) == kind;
+    if lit && !kind.is_empty() { close() } else { view_kind(kind) }
+}
 /// Open in KiCad: the hub starts KiCad on the thread's design (kicad/open.rs), offered while the viewer has a board or schematic.
 pub fn kicad_open() -> Command { Command::Action("kicad-open".into(), String::new()) }
 /// The button's words. KiCad opens where the design is, on the hub's own machine: with a hub on another machine the button says whose screen.
@@ -48,9 +53,11 @@ pub fn diff_files(diff: &Value) -> Vec<DiffFile> {
 /// The sign and the kind of colour a diff line takes: 1 added, 2 removed, 4 a hunk header, the rest context.
 pub fn diff_sign(k: u32) -> &'static str { match k { 1 => "+", 2 => "-", _ => " " } }
 
-/// The kind the viewer shows: the hub's marked tab, or the one just pressed until the hub answers.
+/// The kind the viewer shows: the hub's marked tab, or the one just pressed until the hub answers. A page with no tab of its own (Split,
+/// Browser) is its open kind; a file opened from Files is Files'.
 pub fn active_kind(viewer: &Value, pending: Option<&str>) -> String {
-    pending.map(str::to_string).unwrap_or_else(|| tabs(viewer).into_iter().find(|t| t.on).map(|t| t.value).unwrap_or_default())
+    pending.map(str::to_string).or_else(|| tabs(viewer).into_iter().find(|t| t.on).map(|t| t.value))
+        .unwrap_or_else(|| match viewer["open"].as_str().unwrap_or("") { "image" | "pdf" | "text" => "files".into(), o => o.to_string() })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -83,7 +90,7 @@ fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: 
 }
 
 /// Mech: a chip per part (and Renders) over the part's 3D; with no part chosen the page says what there is (or why not) and lists them.
-fn mech_chrome(cx: &mut Context<Backplane>, light: bool, viewer: &Value, key_empty: bool) -> AnyElement {
+fn mech_chrome(cx: &mut Context<Backplane>, light: bool, viewer: &Value, key_empty: bool, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mech = &viewer["mech"];
     let mut col = div().flex().flex_col().gap_1().px_3().py_2().border_b_1().border_color(c("line"));
@@ -92,11 +99,12 @@ fn mech_chrome(cx: &mut Context<Backplane>, light: bool, viewer: &Value, key_emp
         let say = [string(mech, "say"), string(mech, "empty"), string(mech, "note")].into_iter().find(|s| !s.is_empty());
         if let Some(s) = say { col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(s)); }
     }
-    let mut row = div().flex().flex_wrap().gap_2();
+    let mut row = div().flex().flex_wrap().items_center().gap_2();
     for (i, p) in parts.iter().enumerate() { row = row.child(btn(cx, light, format!("mech-part-{i}"), p.label.clone(), p.on, Command::Action("mech-part".into(), p.value.clone()))); }
     // (no Renders button: the renders page is not drawn here yet, and an offered button must lead somewhere)
     row = row.child(btn(cx, light, "mech-refresh".into(), "Refresh".into(), false, Command::Action("mech-refresh".into(), String::new())));
-    col.child(row).into_any_element()
+    // the pane's controls end the first line: the parts wrap under them
+    col.child(div().flex().items_start().gap_2().child(div().flex_1().min_w_0().child(row)).child(actions)).into_any_element()
 }
 
 /// A row's icon by what it opens as.
@@ -117,12 +125,39 @@ pub fn diff_controls(diff: &Value) -> Vec<(&'static str, &'static str, &'static 
     v
 }
 
-fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyElement {
+/// The room (px) the pane's controls take in a page's top right corner, left free by the 3D page's own floating tools.
+pub const CORNER_ROOM: f32 = 150.0;
+/// The pane's own controls, at the end of the page's toolbar row: where the page comes from (another machine's thread: "desktop: boards/x.kicad_pcb"),
+/// Open in KiCad (while there is a board or schematic) and Close. They were the tab bar's; the rail picks the page now.
+fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target: Option<&super::attach::Target>, diff_on: bool) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let viewer = &thread["viewer"];
+    let mut row = div().flex().flex_shrink_0().items_center().gap_1().max_w_full();
+    if let Some((_, o, hover)) = super::badge::place_text(&thread["mark"], "") {
+        let t = super::badge::from_machine(&thread["mark"], &source(viewer, diff_on)); let col = c("dim");
+        row = row.child(div().id("viewer-from").min_w_0().max_w(px(200.)).flex().items_center().gap(px(3.)).overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(col).opacity(o)
+            .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
+    }
+    if has_design(viewer) { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open())); }
+    row.child(div().id("viewer-close").px_1().py_1().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip("Close the viewer", "", light))
+        .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
+        .into_any_element()
+}
+/// A page drawn to its edges with the pane's controls over its top right corner.
+fn in_corner(page: AnyElement, actions: AnyElement) -> AnyElement {
+    div().relative().size_full().child(page).child(div().absolute().top_1().right_2().flex().justify_end().max_w(px(CORNER_ROOM + 200.)).child(actions)).into_any_element()
+}
+/// A page that has nothing to show yet: what it says, and the pane's controls on the same row.
+fn status_row(light: bool, say: &str, actions: Option<AnyElement>) -> AnyElement {
+    div().flex().items_center().gap_2().px_3().py_2().child(div().flex_1().min_w_0().text_color(theme::color(light, "dim")).child(say.to_string())).children(actions).into_any_element()
+}
+
+fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().text_size(px(12.));
     col = col.child(div().flex().gap_2().px_3().py_2().items_center().child(div().flex_1().text_color(c("dim")).child(string(diff, "summary")))
         .children([("Commit", "commit_push"), ("PR", "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l.to_string(), false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>())
-        .child(btn(cx, light, "revert-ask".into(), "Revert".into(), diff["reverting"] == true, Command::Action("revert".into(), "ask".into()))));
+        .child(btn(cx, light, "revert-ask".into(), "Revert".into(), diff["reverting"] == true, Command::Action("revert".into(), "ask".into()))).child(actions));
     // Revert asks first (Ui.revert): the diff stays on show while the person decides what to discard
     if diff["reverting"] == true {
         col = col.child(div().flex().flex_col().gap_2().px_3().py_2().bg(c("raise")).border_y_1().border_color(c("bad"))
@@ -169,20 +204,24 @@ pub fn source(viewer: &Value, diff_on: bool) -> String {
 pub fn boards(viewer: &Value) -> Vec<(String, String, bool)> {
     viewer["boards"].as_array().into_iter().flatten().map(|b| (string(b, "label"), string(b, "value"), b["on"].as_bool().unwrap_or(false))).collect()
 }
-fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet]) -> AnyElement {
+fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet], actions: Option<AnyElement>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let loading = || div().p_3().text_color(c("dim")).child(if open == "board" { "Loading the board…" } else { "Loading the schematic…" }).into_any_element();
-    let Some(frame) = frame else { return loading() };
+    let loading = |actions| status_row(light, if open == "board" { "Loading the board…" } else { "Loading the schematic…" }, actions);
+    let Some(frame) = frame else { return loading(actions) };
     // the frame must be the source this viewer asks for: another project's board stays off the screen until its own plot arrives
     let mut want = string(viewer, "key");
     // a comparison on show is its own source: `diff\n<old>\n<live>` after the key; another page puts it away
     if let Some(cmp) = pv.compare.clone() { if cmp.base == want { want = format!("{want}{}", super::histbar::shown(&cmp)); } else { pv.compare = None; } }
-    if !want.is_empty() && !frame.key.is_empty() && frame.key != want { return loading() }
-    if !frame.none.is_empty() { return div().p_3().text_color(c("dim")).child(frame.none.clone()).into_any_element(); }
+    if !want.is_empty() && !frame.key.is_empty() && frame.key != want { return loading(actions) }
+    if !frame.none.is_empty() { return status_row(light, &frame.none, actions); }
     if pv.focus.is_none() { pv.focus = Some(cx.focus_handle()); }
     let (w, h) = pv.bounds.map_or((480., 600.), |b| (f32::from(b.size.width), f32::from(b.size.height)));
     let view = super::plotview::ensure_view(pv, frame, w, h);
     let mut col = div().size_full().flex().flex_col();
+    // the page's toolbar first: History and Compare, then the pane's controls at its end (screens::histbar)
+    let mut actions = actions;
+    if layers && matches!(open, "board" | "schematic") { col = col.child(super::histbar::bar_el(cx, light, pv, actions.take())); }
+    else if let Some(a) = actions.take() { col = col.child(div().flex().justify_end().px_3().py_1().child(a)); }
     let note = string(viewer, "note");
     if !note.is_empty() { col = col.child(div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(note)); }
     // Boards: a project with several lists them as chips, the one on show marked; a press shows that board (and its schematic)
@@ -216,8 +255,6 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
             col = col.child(list);
         }
     }
-    // History and Compare (screens::histbar): steps, versions, Old/Diff/New
-    if layers && matches!(open, "board" | "schematic") { col = col.child(super::histbar::bar_el(cx, light, pv)); }
     if layers {
         let fit = div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().py_1().mt_1().ml_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child("Fit")
             .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.touched = false; pv.fit_wh = (0., 0.); cx.notify(); }));
@@ -237,8 +274,8 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
 }
 
 /// Board or schematic: the plot the hub sent for this file.
-fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView) -> AnyElement {
-    plot_pane(cx, light, 0, open, viewer, plot.frame.as_ref(), pv, true, &plot.sheets)
+fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, actions: AnyElement) -> AnyElement {
+    plot_pane(cx, light, 0, open, viewer, plot.frame.as_ref(), pv, true, &plot.sheets, Some(actions))
 }
 
 /// Split: the schematic across the top, the board and its 3D model beneath it, each its own page of `viewer.panes` (key, camera), all watched at once.
@@ -248,18 +285,19 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
     if panes.len() < 3 { return div().p_3().text_color(c("dim")).child("Opening…").into_any_element(); }
     let [sch_pv, brd_pv] = pvs;
     let tag = |label: &str| div().absolute().top_1().left_2().px_1().text_size(px(10.)).text_color(c("dim")).child(label.to_string());
-    let sch = div().relative().w_full().h(relative(0.5)).border_b_1().border_color(c("line")).child(plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &[])).child(tag("Schematic"));
-    let brd = div().relative().flex_1().min_w_0().h_full().border_r_1().border_color(c("line")).child(plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[])).child(tag("Board"));
+    let sch = div().relative().w_full().h(relative(0.5)).border_b_1().border_color(c("line")).child(plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &[], None)).child(tag("Schematic"));
+    let brd = div().relative().flex_1().min_w_0().h_full().border_r_1().border_color(c("line")).child(plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], None)).child(tag("Board"));
     let want3 = string(panes[2], "key");
     let model: AnyElement = match solid { Some(s) if solid_ready(&want3, have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => div().p_3().text_color(c("dim")).child("Loading the model…").into_any_element() };
     let d3 = div().relative().flex_1().min_w_0().h_full().child(model).child(tag("3D"));
     div().size_full().flex().flex_col().child(sch).child(div().flex().flex_1().min_h_0().child(brd).child(d3)).into_any_element()
 }
 
-fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Value) -> AnyElement {
+fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Value, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().gap_2().p_3();
-    col = col.child(div().flex().flex_wrap().gap_2().children(arr(review, "tabs").enumerate().map(|(i, t)| btn(cx, light, format!("rv-{i}"), string(t, "label"), t["on"].as_bool().unwrap_or(false), Command::Action("rv-page".into(), string(t, "page")))).collect::<Vec<_>>()));
+    let pages = div().flex_1().min_w_0().flex().flex_wrap().gap_2().children(arr(review, "tabs").enumerate().map(|(i, t)| btn(cx, light, format!("rv-{i}"), string(t, "label"), t["on"].as_bool().unwrap_or(false), Command::Action("rv-page".into(), string(t, "page")))).collect::<Vec<_>>());
+    col = col.child(div().flex().items_start().gap_2().child(pages).child(actions));
     let title = string(review, "title");
     let page = arr(review, "tabs").find(|t| t["on"] == true).map(|t| string(t, "page")).unwrap_or_default();
     if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(15.)).child(title))
@@ -289,39 +327,36 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let viewer = &thread["viewer"];
     let open = viewer["open"].as_str().unwrap_or("");
     let diff_on = thread["diff"].is_object();
-    let mut bar = div().h(px(34.)).flex_shrink_0().flex().items_center().gap_1().px_2().border_b_1().border_color(c("line"));
-    for (i, t) in tabs(viewer).into_iter().enumerate() { bar = bar.child(btn(cx, light, format!("vtab-{i}"), t.label, t.on && !diff_on, view_kind(&t.value))); }
-    // another machine's thread: which machine the page comes from, and what it shows ("desktop: boards/x.kicad_pcb")
-    if let Some((_, o, hover)) = super::badge::place_text(&thread["mark"], "") {
-        let t = super::badge::from_machine(&thread["mark"], &source(viewer, diff_on)); let col = c("dim");
-        bar = bar.child(div().id("viewer-from").ml_2().min_w_0().flex().items_center().gap(px(3.)).overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(col).opacity(o)
-            .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
-    }
-    if has_design(viewer) { bar = bar.child(div().flex_1()).child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open())); } else { bar = bar.child(div().flex_1()); }
-    bar = bar.child(div().id("viewer-close").px_2().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("Close")
-        .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close()); cx.notify(); })));
-    let body: AnyElement = if diff_on { diff_page(cx, light, &thread["diff"]) }
-        else if open == "files" && viewer["files"].is_object() { super::filesui::files_page(cx, light, &viewer["files"], files_ui) }
-        else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target) }
-        else if open == "review" && viewer["review"].is_object() { review_page(cx, reg, light, &viewer["review"]) }
-        else if matches!(open, "board" | "schematic") { plot_page(cx, light, open, viewer, plot, pv) }
-        else if open == "split" { let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default(); split_page(cx, light, viewer, plot, split_pv, solid, &have) }
+    // no tab bar: the rail picks the page. The pane's own controls (where it comes from, Open in KiCad, Close) end the page's toolbar row,
+    // or float in the top right corner of a page drawn to its edges (3D, Split, Browser)
+    let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on);
+    let body: AnyElement = if diff_on { let a = acts(cx); diff_page(cx, light, &thread["diff"], a) }
+        else if open == "files" && viewer["files"].is_object() { let a = acts(cx); super::filesui::files_page(cx, light, &viewer["files"], files_ui, a) }
+        else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { let a = acts(cx); super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target, a) }
+        else if open == "review" && viewer["review"].is_object() { let a = acts(cx); review_page(cx, reg, light, &viewer["review"], a) }
+        else if matches!(open, "board" | "schematic") { let a = acts(cx); plot_page(cx, light, open, viewer, plot, pv, a) }
+        else if open == "split" { let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default(); let page = split_page(cx, light, viewer, plot, split_pv, solid, &have); let a = acts(cx); in_corner(page, a) }
         else if matches!(open, "3d" | "mech") {
             let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
             // what the page HOLDS, not what was queued for it: a big model's decode, a frame that fails or is replaced in the worker's slot
             let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default();
-            let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if solid_ready(&want, &have) => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => div().p_3().text_color(c("dim")).child("Loading the model…").into_any_element() } };
-            if open == "mech" { div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, key_empty)).child(model).into_any_element() } else { div().size_full().flex().flex_col().child(model).into_any_element() }
+            let ready = matches!(solid, Some(s) if solid_ready(&want, &have));
+            // the 3D page's own tools float top left over the model: they wrap short of the corner the pane's controls take
+            if let Some(s) = solid { let room = if open == "3d" && ready { CORNER_ROOM } else { 0. }; if s.read(cx).reserve != room { s.update(cx, |p, cx| { p.reserve = room; cx.notify(); }); } }
+            let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => status_row(light, "Loading the model…", None) } };
+            if open == "mech" { let a = acts(cx); div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, key_empty, a)).child(model).into_any_element() }
+            else if ready { let a = acts(cx); in_corner(div().size_full().flex().flex_col().child(model).into_any_element(), a) }
+            else { let a = acts(cx); status_row(light, "Loading the model…", Some(a)) }
         }
-        else if open == "browser" { match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => div().p_3().text_color(c("dim")).child("The browser page needs a connected hub.").into_any_element() } }
-        else { div().p_3().text_color(c("dim")).child("Opening…").into_any_element() };
+        else if open == "browser" { let a = acts(cx); match browser { Some(b) => in_corner(div().size_full().child(b.clone()).into_any_element(), a), None => status_row(light, "The browser page needs a connected hub.", Some(a)) } }
+        else { let a = acts(cx); status_row(light, "Opening…", Some(a)) };
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
     Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(crate::local::VIEWER_PX.0 as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("line")).flex().flex_col()
         .child(resize_handle(cx))
-        .child(bar).child(if matches!(open, "files" | "image" | "pdf" | "text") && !diff_on { div().id("viewer-body").flex_1().min_h_0().child(body) } else { div().id("viewer-body").flex_1().min_h_0().overflow_y_scroll().child(body) }).into_any_element())
+        .child(if matches!(open, "files" | "image" | "pdf" | "text") && !diff_on { div().id("viewer-body").flex_1().min_h_0().child(body) } else { div().id("viewer-body").flex_1().min_h_0().overflow_y_scroll().child(body) }).into_any_element())
 }
 
 /// The pane's width: this device's choice (the left edge's drag), else the default; read once from the local file, then kept here.
@@ -415,7 +450,25 @@ mod tests {
         assert_eq!((file_icon("board"), file_icon("schematic"), file_icon("folder"), file_icon("pdf"), file_icon("text"), file_icon("")), ("circuit-board", "cpu", "folder", "file-text", "file", "file"));
         assert!(file_listed_only("") && file_listed_only("other") && !file_listed_only("text") && !file_listed_only("board") && !file_listed_only("folder"));
     }
-    #[test] fn opening_and_closing_are_the_idempotent_view_action_never_a_toggle() {
+    #[test] fn a_rail_press_on_the_lit_kind_shuts_the_viewer_and_any_other_opens_it() {
+        let shut = |c: Command| matches!(c, Command::Action(a, v) if a == "view" && v.is_empty());
+        let opens = |c: Command, k: &str| matches!(c, Command::Action(a, v) if a == "view" && v == k);
+        let board = j(r#"{"open":"board","choices":[{"label":"Board","value":"board","on":true},{"label":"Files","value":"files","on":false}]}"#);
+        assert!(shut(rail_command(&board, false, None, "board")), "Board on show, Board pressed: the viewer shuts");
+        assert!(opens(rail_command(&board, false, None, "schematic"), "schematic"), "another kind opens");
+        assert!(opens(rail_command(&board, true, None, "board"), "board"), "Diff covers the board: Board shows it again");
+        let closed = j(r#"{"open":"","choices":[{"label":"Board","value":"board","on":false}]}"#);
+        assert!(opens(rail_command(&closed, false, None, "board"), "board") && opens(rail_command(&Value::Null, false, None, "board"), "board"), "nothing open: it opens");
+        // pressed and not answered yet: the rail already shows it lit, so a second press shuts it; a press after Close opens again
+        assert!(shut(rail_command(&closed, false, Some("board"), "board")));
+        assert!(opens(rail_command(&board, false, Some(""), "board"), "board"), "Close pressed, the hub not caught up: Board opens");
+        // pages with no tab (Split, Browser) and a file opened from Files are lit and shut as well
+        assert!(shut(rail_command(&j(r#"{"open":"split","choices":[{"label":"Board","value":"board","on":false}]}"#), false, None, "split")));
+        assert!(shut(rail_command(&j(r#"{"open":"browser"}"#), false, None, "browser")));
+        assert!(shut(rail_command(&j(r#"{"open":"image","choices":[{"label":"Files","value":"files","on":true}]}"#), false, None, "files")));
+        assert_eq!(active_kind(&j(r#"{"open":"pdf"}"#), None), "files");
+    }
+    #[test] fn opening_and_closing_are_the_idempotent_view_action() {
         for c in [view_kind("board"), view_kind("board"), view_kind("schematic")] { match c { Command::Action(a, v) => { assert_eq!(a, "view"); assert!(v == "board" || v == "schematic"); } c => panic!("{c:?}") } }
         match close() { Command::Action(a, v) => assert_eq!((a.as_str(), v.as_str()), ("view", "")), c => panic!("{c:?}") }
     }
