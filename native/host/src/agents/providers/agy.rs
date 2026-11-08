@@ -81,6 +81,8 @@ exit $r\n".into()
 pub fn write_runner(root: &str) -> std::io::Result<()> {
     use crate::plat::fs::PermissionsExt;
     std::fs::create_dir_all(root)?;
+    // Windows refuses to open a file in the instant a rename replaces it: a runner already whole is left as it is, so a turn starting meanwhile can always read it
+    if cfg!(windows) && std::fs::read_to_string(format!("{root}/agy.sh")).map_or(false, |t| t == run_sh()) { return Ok(()) }
     // a name of its own per call: two turns starting together never write the same file (pid + a counter, as pi.rs's write_atomic)
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let tmp = format!("{root}/agy.sh.{}.{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)); std::fs::write(&tmp, run_sh())?;

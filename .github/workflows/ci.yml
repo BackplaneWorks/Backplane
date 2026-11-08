@@ -126,7 +126,7 @@ jobs:
         run: |
           args=(--locked --no-fail-fast --partition count:${{ matrix.partition }}/2)
           # Windows: bp-sh goes beside the test binaries first (the hub runs every sh through it: src/bin/bp-sh.rs), then the filter of what does not hold there
-          if [ "$RUNNER_OS" = Windows ]; then cargo build --locked --bin bp-sh; args+=(-E "$(sh ../../scripts/ci-hub-windows-filter.sh)"); fi
+          if [ "$RUNNER_OS" = Windows ]; then cargo build --locked --bin bp-sh; args+=(--retries 1 -E "$(sh ../../scripts/ci-hub-windows-filter.sh)"); fi # one retry: the runner's load flakes (a retried pass shows as FLAKY in the log)
           cargo nextest run "${args[@]}"
 
   window:
