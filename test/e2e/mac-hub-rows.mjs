@@ -79,8 +79,11 @@ const it=await c.rpc('turn.interrupt',{thread:L}); const ints=await until(()=>ha
 log('F07',it.ok&&ints,`turn.interrupt ok=${it.ok} turn left running=${ints} (${events().filter(e=>e.$==='TurnChanged'&&e.thread===L).map(e=>e.state).join('>')})`);
 await c.rpc('turn.start',{thread:L,text:'long turn 2'}); await until(()=>events().filter(e=>e.$==='TurnChanged'&&e.thread===L&&e.state==='running').length>=2,5000);
 // F07 held queue: not here (a model choice holds only work that waits, so a fresh message is never held): linux-f-rows.mjs drives it with an interrupted turn
-// the setting must be in the hub's log before it is killed: a restart that finds restart.continue unset carries the turn on (default), so a lost write would read as a hub bug
-for(let t=0;t<3&&!events().some(e=>e.$==='SettingSet'&&e.key==='restart.continue'&&e.value==='off');t++){const r=await c.rpc('setting.set',{key:'restart.continue',value:'off'});await until(()=>events().some(e=>e.$==='SettingSet'&&e.key==='restart.continue'&&e.value==='off'),5000);if(!events().some(e=>e.$==='SettingSet'&&e.key==='restart.continue'&&e.value==='off'))console.log(`   F04: setting.set restart.continue=off attempt ${t+1}: reply ${JSON.stringify(r).slice(0,160)}, nothing logged`)}
+// restart.continue=off: one write, then look in the hub's log. A write that is not answered or not logged is a result, not something to retry: it is what the checkpoint wait did in rc.1 (the hub's replies stopped for 20-40 s after the second turn started), and a restart that finds the setting unset carries the turn on
+const rc0=Date.now(); const rcr=await c.rpc('setting.set',{key:'restart.continue',value:'off'});
+const landed=await until(()=>events().some(e=>e.$==='SettingSet'&&e.key==='restart.continue'&&e.value==='off'),5000);
+const ckpt=events().filter(e=>e.$==='ActivityLogged'&&e.kind==='checkpoint').pop();
+log('F04',landed&&rcr?.ok!==false,`setting.set restart.continue=off: reply ${JSON.stringify(rcr).slice(0,120)} after ${((Date.now()-rc0)/1000).toFixed(1)} s, written to the hub's log=${landed}${landed?'':'; the hub stalled: a checkpoint line was logged at '+(ckpt?.at||'none')+' and the last event before the write is at '+(events().filter(e=>e.at).pop()?.at)}`);
 // F21 part: since-resume before the restart
 const nBefore=events().length;
 c.ws.close(); try{process.kill(pid0,'SIGTERM')}catch{} await sleep(2500);
