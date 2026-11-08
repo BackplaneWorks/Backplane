@@ -39,6 +39,7 @@ struct DataRoot: View {
                                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { client.adding = false; client.pairingError = "" }.accessibilityIdentifier("pair.cancel") } }
                         }
                     }
+                    .sheet(isPresented: Binding(get: { client.migrationOpen && client.migration.card != nil }, set: { client.migrationOpen = $0 })) { DataMigrationCard(client: client) }
             }
         }
         .overlay { if let l = client.askLink { AskPairView(client: client, link: l) } }
@@ -119,6 +120,7 @@ struct DataThreadsView: View {
     var body: some View {
         VStack(spacing: 0) {
             DataHubBanner(client: client)
+            DataMigrationBanner(client: client)
             DataStarBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
@@ -544,6 +546,7 @@ struct DataThreadView: View {
     var body: some View {
         VStack(spacing: 0) {
             DataHubBanner(client: client)
+            DataMigrationBanner(client: client)
             DataStarBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip

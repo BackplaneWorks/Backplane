@@ -50,6 +50,12 @@ final class DataClient {
     private(set) var features: Set<String> = []
     // hello `notice`, newer from /hub/status: the banner
     private(set) var notice = HubNotice()
+    // a 0.14 home coming across (hello `migrating`, then `migrating` frames): the hub's card, until one of its buttons answers it (Migration.swift)
+    private(set) var migration = DMigration()
+    /// the card is open over the screen (a tap on its banner)
+    var migrationOpen = false
+    private(set) var migrationBusy = false
+    private(set) var migrationError = ""
     // the GitHub star suggestion (feature "star"): shown while the hub says so, gone once decided on any device
     private(set) var star: DStarOffer?
     var canSendImages: Bool { features.contains("images") }
@@ -170,7 +176,8 @@ final class DataClient {
         links = []; adding = false; PairingStore.save(links); reset(); close(); conn = .offline
     }
     private func reset() {
-        notice = HubNotice(); star = nil
+        notice = HubNotice(); star = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
+        dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil
         try? FileManager.default.removeItem(at: cacheURL)
     }
@@ -263,6 +270,7 @@ final class DataClient {
             guard (o["proto"] as? String)?.hasPrefix("data/") == true else { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
             features = Set((o["features"] as? [String]) ?? [])
             notice = HubRescue.notice(o["notice"] as? [String: Any])
+            heardMigration(o["migrating"])
             commands = ((o["commands"] as? [[String: Any]]) ?? []).map { Word(word: $0["word"] as? String ?? "", label: $0["label"] as? String ?? "", desc: $0["desc"] as? String ?? "") }
             conn = .online; failure = ""; backoff = 0.25; plots.reset()
             Task { await self.synchronise(g) }
@@ -277,6 +285,7 @@ final class DataClient {
         case "voice": voice.frame(o)
         case "plot": plots.receiveJSON(o) // why a view has nothing to show (the plots themselves come as binary frames)
         case "star": star = DStarOffer.of(o["offer"])
+        case "migrating": heardMigration(o)
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
         default: break
         }
@@ -336,12 +345,39 @@ final class DataClient {
         guard let s = star else { return }; star = nil
         Task { let _: DEmpty? = try? await call("star.nudge", ["token": s.token, "action": action]) }
     }
+    private func heardMigration(_ v: Any?) {
+        migration.heard(v)
+        if migration.card == nil { migrationOpen = false }
+        #if DEBUG
+        // a simulator has no taps: BACKPLANE_MIGRATION_OPEN=1 opens the card as it comes, BACKPLANE_MIGRATION_PRESS=<label> presses that button once it is shown
+        let env = ProcessInfo.processInfo.environment
+        if env["BACKPLANE_MIGRATION_OPEN"] == "1", migration.card != nil { migrationOpen = true }
+        if let l = env["BACKPLANE_MIGRATION_PRESS"], let b = migration.card?.buttons.first(where: { $0.label == l }), !migrationBusy {
+            Task { try? await Task.sleep(for: .seconds(4)); self.migrationAct(b) }
+        }
+        NSLog("BPMIG %@ %@", migration.card?.state ?? "none", String(migration.card?.pct ?? -1))
+        #endif
+    }
+    /// one of the card's buttons, as setup's: onboard.act {action, value}. The hub's ok answers the card; a run it starts shows itself with its next frame
+    func migrationAct(_ b: DMigButton) {
+        guard !migrationBusy else { return }
+        migrationBusy = true; migrationError = ""
+        Task {
+            defer { migrationBusy = false }
+            do {
+                let _: DEmpty = try await call("onboard.act", ["action": b.action, "value": b.value])
+                migration.answered()
+                if migration.card == nil { migrationOpen = false }
+            } catch { migrationError = (error as? DError)?.message ?? error.localizedDescription }
+        }
+    }
     func loadLocks() async { guard has("work"), let r: DLocks = try? await call("locks.list") else { return }; locks = r.locks }
     private func loadWork(_ id: String) async { guard has("work"), let r: DWorkReply = try? await call("thread.work", ["thread": id]) else { return }; work[id] = r.subs }
     // a row's button; what it changes comes back as a push
     func workAct(_ id: String, _ row: DWorkRow) { Task { _ = try? await call("work.act", ["thread": id, "act": row.act ?? "", "value": row.value ?? ""], as: DEmpty.self) } }
     private func loadProjects(_ g: Int) async throws {
         let r: DProjectsPage = try await call("projects.list", ["limit": 100]); guard g == gen else { return }
+        flushLists()   // the deltas that came before the page are older than it
         projects = r.projects.sorted { $0.updatedAt > $1.updatedAt }; listsLoaded = true; scheduleSave()
     }
     private func loadThreads(_ g: Int) async throws {
@@ -349,6 +385,7 @@ final class DataClient {
         let split = has("settled")
         var q: [String: Any] = ["limit": 200]; if split { q["settled"] = false }
         let r: DThreadsPage = try await call("threads.list", q); guard g == gen else { return }
+        flushLists()
         threads = r.threads.sorted { $0.updatedAt > $1.updatedAt } + (split ? threads.filter { old in old.settled && !r.threads.contains(where: { $0.id == old.id }) } : [])
         listNext = r.next; listsLoaded = true; scheduleSave()
         if split { for p in settledOpen { await loadSettled(p, g: g) } }
@@ -366,6 +403,7 @@ final class DataClient {
         settledBusy.insert(project); defer { settledBusy.remove(project) }
         var q: [String: Any] = ["project": project, "settled": true, "limit": 50]; if more, let c = settledMore[project] { q["before"] = c }
         guard let r: DThreadsPage = try? await call("threads.list", q), g == gen else { return }
+        flushLists()
         for t in r.threads { if let i = threads.firstIndex(where: { $0.id == t.id }) { threads[i] = t } else { threads.append(t) } }
         settledMore[project] = r.next; scheduleSave()
     }
@@ -455,17 +493,16 @@ final class DataClient {
         if k == "secret" { let th = o["thread"] as? String ?? ""; Task { await refreshSecretAsks(th) }; return }
         // a null (`"subs":null` when a thread's work ends) or any non-JSON value decodes to nil instead of raising
         func decode<T: Decodable>(_ key: String, _ type: T.Type) -> T? { WireJSON.decode(o[key], as: type) }
+        // a row that changed is held for one batch (flushLists): a burst (a 0.14 import writes thousands) is one sort and one redraw, not one per row,
+        // so the socket's frames never queue up behind the list. Anything else first applies what is held, so the order stays the hub's
+        if k == "thread", let t = decode("thread", DThread.self) { dueThreads.append(t); dueLists(); return }
+        if k == "project", let p = decode("project", DProject.self) { dueProjects.append(p); dueLists(); return }
+        flushLists()
         switch k {
-        case "thread": if let t = decode("thread", DThread.self) { upsert(t); if t.history { historyMoved() } }
         case "thread.removed":
             if let id = o["id"] as? String { threads.removeAll { $0.id == id }; entries[id] = nil; scheduleSave() }
         case "project.removed":
             if let id = o["id"] as? String { projects.removeAll { $0.id == id }; scheduleSave() }
-        case "project":
-            if let p = decode("project", DProject.self) {
-                if let i = projects.firstIndex(where: { $0.id == p.id }) { projects[i] = p } else { projects.append(p) }
-                projects.sort { $0.updatedAt > $1.updatedAt }; scheduleSave()
-            }
         case "entry":
             if let tid = o["thread"] as? String, let e = decode("entry", DEntry.self) { put(e, in: tid) }
         case "work":
@@ -488,7 +525,34 @@ final class DataClient {
         default: break
         }
     }
+    @ObservationIgnored private var dueThreads: [DThread] = []
+    @ObservationIgnored private var dueProjects: [DProject] = []
+    @ObservationIgnored private var dueTask: Task<Void, Never>?
+    private func dueLists() {
+        guard dueTask == nil else { return }
+        dueTask = Task { [weak self] in try? await Task.sleep(for: .milliseconds(200)); self?.flushLists() }
+    }
+    /// the held rows, in the order they came: one sort and one change of each list
+    func flushLists() {
+        dueTask?.cancel(); dueTask = nil
+        if !dueThreads.isEmpty {
+            let due = dueThreads; dueThreads = []
+            var ts = threads; var at = Dictionary(ts.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+            for t in due { if let i = at[t.id] { ts[i] = t } else { at[t.id] = ts.count; ts.append(t) } }
+            threads = ts.sorted { $0.updatedAt > $1.updatedAt }
+            if due.contains(where: \.history) { historyMoved() }
+            scheduleSave()
+        }
+        if !dueProjects.isEmpty {
+            let due = dueProjects; dueProjects = []
+            var ps = projects; var at = Dictionary(ps.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+            for p in due { if let i = at[p.id] { ps[i] = p } else { at[p.id] = ps.count; ps.append(p) } }
+            projects = ps.sorted { $0.updatedAt > $1.updatedAt }
+            scheduleSave()
+        }
+    }
     private func upsert(_ t: DThread) {
+        flushLists()
         if let i = threads.firstIndex(where: { $0.id == t.id }) {
             threads[i] = t
         } else { threads.append(t) }
@@ -574,6 +638,7 @@ final class DataClient {
     func addProject(path: String, title: String = "") async throws -> DProject {
         var p: [String: Any] = ["path": path]; if !title.isEmpty { p["title"] = title }
         let r: DProjectReply = try await call("project.add", p)
+        flushLists()
         if let i = projects.firstIndex(where: { $0.id == r.project.id }) { projects[i] = r.project } else { projects.insert(r.project, at: 0) }
         return r.project
     }
@@ -631,6 +696,7 @@ final class DataClient {
         var p: [String: Any] = ["thread": id, "action": action]; if !title.isEmpty { p["title"] = title }
         do {
             let r: DThreadOpt = try await call("thread.act", p)
+            flushLists()
             if action == "delete" { threads.removeAll { $0.id == id }; entries[id] = nil; scheduleSave() }
             else if let t = r.thread { upsert(t) }
         } catch { failure = error.localizedDescription }
@@ -640,6 +706,7 @@ final class DataClient {
         var p: [String: Any] = ["project": id, "action": action]; if !title.isEmpty { p["title"] = title }; if !value.isEmpty { p["value"] = value }
         do {
             _ = try await call("project.act", p, as: DEmpty.self)
+            flushLists()
             if action == "remove" { projects.removeAll { $0.id == id }; threads.removeAll { $0.project == id }; scheduleSave() } else { await refresh() }
         } catch { failure = error.localizedDescription }
     }
