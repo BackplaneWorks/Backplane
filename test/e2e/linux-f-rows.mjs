@@ -13,9 +13,10 @@ const [BIN,OUT,PORT_ARG]=process.argv.slice(2); const PORT=Number(PORT_ARG||3881
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 rmSync(OUT,{recursive:true,force:true}); mkdirSync(OUT+'/bin',{recursive:true}); mkdirSync(OUT+'/proj/sub',{recursive:true});
 const HOME=OUT+'/home', AG=OUT+'/bin', HERE=fileURLToPath(new URL('.',import.meta.url));   // a path on Windows too (pathname is /C:/...)
-copyFileSync(HERE+'lib/standin_rows.py',AG+'/claude'); writeFileSync(`${AG}/agy`,'#!/bin/sh\nexit 1\n');writeFileSync(`${AG}/codex`,'#!/bin/sh\n# a stand-in for the one-shot `codex exec` only (the writing model): logs its argv, answers one agent_message; any other use exits 1\ncase "$1" in exec) echo "CODEX-ONESHOT $*" >> "$FAKE_LOG"; m=default; p=; for a in "$@"; do [ "$p" = -m ] && m=$a; p=$a; done; printf \'{"type":"item.completed","item":{"type":"agent_message","text":"Codex title from %s"}}\\n\' "$m";; *) exit 1;; esac\n');
+copyFileSync(HERE+'lib/standin_rows.py',AG+'/claude'); writeFileSync(`${AG}/agy`,'#!/bin/sh\nexit 1\n');
 // the other providers' stand-ins are the scripts the hub's in-process provider tests use (test/agents/): ACP for Grok and OpenCode, MSP for Muse, Pi's and Oh My Pi's RPC; Antigravity's agent is a managed install, so its stand-in sits at the installed path
-const PR=join(HERE,'..','agents');   // joined: Bun on Windows does not resolve .. in a path with both separatorsfor(const [n,f] of [['grok','standin-acp.sh'],['opencode','standin-acp.sh'],['muse','prov/standin-muse.py'],['pi','prov-pi/standin-pi.sh'],['omp','prov-pi/standin-omp.sh']])copyFileSync(join(PR,f),`${AG}/${n}`);
+const PR=join(HERE,'..','agents');   // joined: Bun on Windows does not resolve .. in a path with both separators
+for(const [n,f] of [['codex','standin-codex.sh'],['grok','standin-acp.sh'],['opencode','standin-acp.sh'],['muse','prov/standin-muse.py'],['pi','prov-pi/standin-pi.sh'],['omp','prov-pi/standin-omp.sh']])copyFileSync(join(PR,f),`${AG}/${n}`);
 mkdirSync(`${OUT}/home/antigravity/1.3.0`,{recursive:true});copyFileSync(join(PR,'prov','standin-agy.py'),`${OUT}/home/antigravity/1.3.0/agy_acp_server.par`);copyFileSync(join(PR,'prov','agy-turn.jsonl'),`${OUT}/home/antigravity/1.3.0/agy-turn.jsonl`);
 for(const f of readdirSync(AG)) chmodSync(`${AG}/${f}`,0o755);
 writeFileSync(`${AG}/sh`,'#!/bin/sh\nexec /bin/sh "$@"\n');chmodSync(`${AG}/sh`,0o755);   // with BACKPLANE_AGENTS the hub resolves every program it starts from that folder, and Antigravity's runner script is started through sh
@@ -68,7 +69,15 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
   const asked=await until(()=>has(e=>e.$==='AskOpened'&&e.thread===T2),30000);const a=events().find(e=>e.$==='AskOpened'&&e.thread===T2);
   const an=a?await c.rpc('ask.answer',{id:a.id,answer:'accept'}):{ok:false};const fin=await until(()=>turnStates(T2).some(s=>s==='completed'||s==='failed'),60000);
   log('F05-'+p,done&&st==='completed'&&said&&asked&&an.ok&&fin&&turnStates(T2).at(-1)==='completed',`${p}: a plain turn ${st} with an assistant message=${said}; a permission turn opened an ask=${asked} (${(a?.detail||'').slice(0,30).replace(/\n/g,' ')}), accepted ok=${an.ok}, then ${turnStates(T2).at(-1)}`)}
- skip('F05-codex','not run: no process-level stand-in exists for Codex; its driver is covered by the hub\'s in-process tests with recorded fixtures')}
+ {const T1=await mk('prov-codex',{provider:'codex'});await c.rpc('thread.modes',{thread:T1,runtime:'approval-required'});await sleep(300);
+  await c.rpc('turn.start',{thread:T1,text:'hello codex'});const d1=await until(()=>turnStates(T1).some(s=>s==='completed'||s==='failed'),60000);
+  const said=events().some(e=>e.$==='MessagePosted'&&e.thread===T1&&e.role==='assistant'&&/^re: hello codex/.test(e.text||''));
+  const sess=events().some(e=>e.$==='SessionSet'&&e.id===T1&&e.session==='cs-1');const shell=events().some(e=>e.$==='ActivityLogged'&&e.thread===T1&&e.kind==='shell'&&e.summary==='echo ok');const usage=events().some(e=>e.$==='TurnUsage'&&e.thread===T1);
+  await c.rpc('turn.start',{thread:T1,text:'second turn'});await until(()=>turnStates(T1).filter(s=>s==='completed').length>=2,60000);
+  const argv=fake().split('\n').filter(l=>/^CODEX exec/.test(l)&&!/--ephemeral/.test(l));
+  const resumed=argv.some(l=>/^CODEX exec resume cs-1 /.test(l));const sandbox=argv.some(l=>/ -s read-only /.test(l));
+  log('F05-codex',d1&&said&&sess&&shell&&usage&&resumed&&sandbox,`codex: a turn completed, the reply "re: hello codex" posted=${said}, session cs-1 recorded=${sess}, its command shown=${shell}, usage counted=${usage}; the next turn resumed the session (\`exec resume cs-1\`)=${resumed}; approval-required ran it with \`-s read-only\`=${sandbox}. Codex has no ask protocol over exec: approvals are the sandbox, so there is no permission card to answer`)}
+}
 
 // F06 runtime modes, approvals, questions, plans
 {const T=await mk('modes');const m=await c.rpc('thread.modes',{thread:T,runtime:'approval-required'});await until(()=>has(e=>e.$==='ModesSet'&&e.id===T&&e.runtime==='approval-required'),5000);
@@ -106,14 +115,14 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
 
 // S04 Writing: the writing provider and model decide the one-shot that names threads (argv of the stand-in, and the title it answers)
 {const T=await mk('New thread');await c.rpc('turn.start',{thread:T,text:'zqshort name this thread'});await finished(T);
- const titles=()=>events().filter(e=>e.$==='ThreadRenamed'&&e.id===T).map(e=>e.title);const oneshots=()=>fake().split('\n').filter(l=>/^START .*"-p", "--model"/.test(l)||/^CODEX-ONESHOT/.test(l));
+ const titles=()=>events().filter(e=>e.$==='ThreadRenamed'&&e.id===T).map(e=>e.title);const oneshots=()=>fake().split('\n').filter(l=>/^START .*"-p", "--model"/.test(l)||/^CODEX .*--ephemeral/.test(l));
  await c.rpc('setting.set',{key:'text.provider',value:'claude'});await c.rpc('setting.set',{key:'text.model',value:'sonnet'});await sleep(500);
  const r1=await c.rpc('thread.retitle',{thread:T});const t1=r1.result?.title;const a1=oneshots().at(-1)||'';
  await c.rpc('setting.set',{key:'text.provider',value:'codex'});await c.rpc('setting.set',{key:'text.model',value:''});await sleep(500);
  const r2=await c.rpc('thread.retitle',{thread:T});const t2=r2.result?.title;const a2=oneshots().at(-1)||'';
  await c.rpc('setting.set',{key:'text.provider',value:''});await c.rpc('setting.set',{key:'text.model',value:''});await sleep(500);
  const r3=await c.rpc('thread.retitle',{thread:T});const t3=r3.result?.title;const a3=oneshots().at(-1)||'';
- log('S04',r1.ok&&/--model", "sonnet"/.test(a1)&&t1==='Title from sonnet'&&r2.ok&&/^CODEX-ONESHOT exec/.test(a2)&&/^Codex title/.test(t2||'')&&r3.ok&&/--model", "claude-haiku/.test(a3),`Writing > model: with the writing model sonnet the title call ran \`claude -p --model sonnet\` and the title came back "${t1}"; Writing > provider codex: the call went to \`codex exec\` ("${t2}"); both cleared: the light default (Haiku) again. The chips persist (settings walk); this is the effect`)}
+ log('S04',r1.ok&&/--model", "sonnet"/.test(a1)&&t1==='Title from sonnet'&&r2.ok&&/^CODEX exec .*--ephemeral/.test(a2)&&/^Codex title/.test(t2||'')&&r3.ok&&/--model", "claude-haiku/.test(a3),`Writing > model: with the writing model sonnet the title call ran \`claude -p --model sonnet\` and the title came back "${t1}"; Writing > provider codex: the call went to \`codex exec\` ("${t2}"); both cleared: the light default (Haiku) again. The chips persist (settings walk); this is the effect`)}
 
 // F08 bring back, after a fork
 {const A=await mk('forkme');await c.rpc('turn.start',{thread:A,text:'zqshort fork source'});await finished(A);

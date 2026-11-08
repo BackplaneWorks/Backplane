@@ -695,17 +695,7 @@ async fn recovered(extra: &str, state: &str) -> Vec<Value> {
 
 // ---- Codex: one process per turn, Codex-shaped lines (codex.rs) ----
 /// A `codex` stand-in: reads the turn's text from its last argument; "slow" turns wait; every turn says thread.started, a delta, a command and a reply that echoes the text.
-const CODEX_STANDIN: &str = r#"#!/bin/sh
-case "$1" in --version) echo "codex-cli 0.0.0"; exit 0;; esac
-for a in "$@"; do last="$a"; done
-D=$(dirname "$0"); echo "$@" >> "$D/argv.log"; echo $$ > "$D/pid"
-echo '{"type":"thread.started","thread_id":"cs-1"}'
-echo '{"type":"item.delta","text":"par"}'
-case "$last" in *slow*) sleep 2;; *die*) exit 3;; *hang*) sleep 60;; esac
-echo '{"type":"item.completed","item":{"id":"it1","type":"command_execution","command":"echo ok"}}'
-printf '{"type":"item.completed","item":{"id":"it2","type":"agent_message","text":"re: %s"}}\n' "$(echo "$last" | tr '\n' ' ' | tr -d '"')"
-echo '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":10}}'
-"#;
+const CODEX_STANDIN: &str = include_str!("../../../../test/agents/standin-codex.sh");
 fn codex_log(work: &Path) -> String { base_log(work, 1, "").replace("\"provider\":\"claude\"", "\"provider\":\"codex\"") }
 async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
     let sd = dir(&format!("{name}-bin")); script(&sd, "codex", CODEX_STANDIN);
