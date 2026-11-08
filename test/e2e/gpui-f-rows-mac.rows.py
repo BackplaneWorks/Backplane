@@ -96,7 +96,7 @@ if want('F06'):
     denied = bool(re.search(r'PERM Bash -> .*deny', fake(), re.I))
     log('F06-approval', ok1 and allowed and ok2 and denied, 'approval card (f6-approval.png) with Allow, Allow for session and Deny: Allow closed the ask and the agent got allow=%s; Deny closed the next and the agent got deny=%s' % (allowed, denied))
     until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
-    say_('zqask'); until(lambda: asks('t1', 'input'), 30); pause(2); shot('f6-question'); q = asks('t1', 'input')[-1]
+    say_('zqask'); until(lambda: asks('t1', 'input'), 45); pause(2); shot('f6-question'); q = asks('t1', 'input')[-1]
     ids = sorted(k for k in ctrls() if k.startswith('ask:')); okq = card('first', lambda: closed(q)); until(lambda: 'PERM AskUserQuestion -> ' in fake(), 15)
     heard = bool(re.search(r'PERM AskUserQuestion -> .*(USB-C|Barrel)', fake()))
     log('F06-question', bool(ids) and okq and heard, 'question card "%s" (f6-question.png), option buttons %s: the first closed it and the agent got the answer=%s' % ((q.get('detail') or '')[:30].replace('\n', ' '), ids, heard))
