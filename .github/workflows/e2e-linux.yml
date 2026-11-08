@@ -78,6 +78,8 @@ jobs:
             ${{ runner.temp }}/e2e/results.tsv
             ${{ runner.temp }}/e2e/*.log
             ${{ runner.temp }}/e2e/hub-rows/rows.json
+            ${{ runner.temp }}/e2e/hub-rows/**/*.log
+            ${{ runner.temp }}/e2e/hub-rows/**/fake*
             ${{ runner.temp }}/e2e/client/rows.json
             ${{ runner.temp }}/e2e/client/shots/*.png
             ${{ runner.temp }}/e2e/cef/*.log
