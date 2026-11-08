@@ -244,9 +244,13 @@ impl Files {
                     let Some(h) = peek_head(&c).await else { return };
                     let _ = read_body(&mut c, &h).await;
                     count.fetch_add(1, Ordering::SeqCst);
-                    let answer = if let Some(rest) = h.path.strip_prefix("/redirect") {
+                    // /504/<n>/<path>: a gateway timeout for the first n asks overall, then <path> (GitHub's release files, some days)
+                    let (path, busy) = match h.path.strip_prefix("/504/").and_then(|r| r.split_once('/')) { Some((n, rest)) => (format!("/{rest}"), count.load(Ordering::SeqCst) <= n.parse().unwrap_or(0)), None => (h.path.clone(), false) };
+                    let answer = if busy {
+                        http("504 Gateway Time-out", "text/html", b"<html><body><h1>504 Gateway Time-out</h1></body></html>")
+                    } else if let Some(rest) = h.path.strip_prefix("/redirect") {
                         format!("HTTP/1.1 302 Found\r\nLocation: {rest}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_bytes()
-                    } else if let Some(b) = files.get(&h.path) {
+                    } else if let Some(b) = files.get(&path) {
                         http("200 OK", "application/octet-stream", b)
                     } else {
                         http("404 Not Found", "text/plain", b"not found")

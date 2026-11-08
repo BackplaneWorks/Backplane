@@ -28,7 +28,15 @@ pub struct Model {
     pub id: String,
     pub label: String,
     pub dir: String,
+    /// About what a download is, for the page.
+    pub size: u64,
+    /// The archive. Upstream repacks it now and then (the same files, a new archive: 2026-11-07), so its own size and
+    /// checksum are not what is trusted: `files` are, checked after unpacking and before anything uses them.
     pub pin: Pin,
+    /// A second source of the same files, one by one (`<mirror><name>`), when the archive fails or its files do not match.
+    pub mirror: Option<String>,
+    /// What must be in `dir` whatever the source: name, size, sha256.
+    pub files: Vec<(String, u64, String)>,
 }
 
 /// Everything fetched; tests swap in their own.
@@ -37,6 +45,8 @@ pub struct Pins {
     pub runtimes: Vec<(String, Pin)>,
     pub models: Vec<Model>,
     pub vad: Pin,
+    /// The VAD a release ships beside the helper (native/voice/vad): taken when it matches `vad`, so only a build without it downloads one.
+    pub vad_bundled: Option<PathBuf>,
 }
 
 const GH: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/";
@@ -50,6 +60,20 @@ fn github(file: &str, size: u64, sha256: &str) -> Pin {
     Pin { url: format!("{GH}{file}"), size: Some(size), sha256: Some(sha256.to_string()), sha512: None }
 }
 
+/// A model: its archive on GitHub (unpinned: its files are), the same files on Hugging Face, and their pins.
+fn parakeet(v: &str, label: &str, size: u64, files: [(&str, u64, &str); 4]) -> Model {
+    let dir = format!("sherpa-onnx-nemo-parakeet-tdt-0.6b-{v}-int8");
+    Model {
+        id: format!("parakeet-{v}"),
+        label: label.into(),
+        size,
+        pin: Pin { url: format!("{GH}{dir}.tar.bz2"), size: None, sha256: None, sha512: None },
+        mirror: Some(format!("https://huggingface.co/csukuangfj/{dir}/resolve/main/")),
+        files: files.iter().map(|(n, s, h)| (n.to_string(), *s, h.to_string())).collect(),
+        dir,
+    }
+}
+
 impl Pins {
     pub fn pinned() -> Pins {
         Pins {
@@ -61,20 +85,21 @@ impl Pins {
                 npm("win-x64", "7vwdAw9PGEb0JLSpK7UFxAdp1vabBHK9Nhw2jFRBWSFgtslUPHIB0T6syJfRgiUGyCeNW9fJvcFAk2F2u7hBEw=="),
             ],
             models: vec![
-                Model {
-                    id: "parakeet-v2".into(),
-                    label: "Parakeet TDT 0.6B v2 (English)".into(),
-                    dir: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8".into(),
-                    pin: github("sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2", 482468385, "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad"),
-                },
-                Model {
-                    id: "parakeet-v3".into(),
-                    label: "Parakeet TDT 0.6B v3 (25 languages)".into(),
-                    dir: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8".into(),
-                    pin: github("sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2", 487170055, "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf"),
-                },
+                parakeet("v2", "Parakeet TDT 0.6B v2 (English)", 482440461, [
+                    ("encoder.int8.onnx", 652282309, "92a10bd9c23936ea0566c29f963bc57c2a5df4261b6a8921c39abea66557ca8b"),
+                    ("decoder.int8.onnx", 7257753, "4d097bae3bac5c96018d5293ba39f1b657296102b142affda40378f38b020f41"),
+                    ("joiner.int8.onnx", 1739080, "77a29f3e5ac7d37074e0af465391b80f314015d5b97f0f90c6c7767f1d56f428"),
+                    ("tokens.txt", 9384, "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"),
+                ]),
+                parakeet("v3", "Parakeet TDT 0.6B v3 (25 languages)", 487211443, [
+                    ("encoder.int8.onnx", 652282294, "1afbe69c1ffdabee94755f42e4daf1d93549131a3da11356bda84fcef0f2c479"),
+                    ("decoder.int8.onnx", 11845274, "0222a86147299d4dee90edf95b6d13827edb42ad8b7c9cf0b2582f030937c0b5"),
+                    ("joiner.int8.onnx", 6355277, "cbd02f3696e9944970111fb439d9c3fd365a80374565f13f2b9c7007d253fc98"),
+                    ("tokens.txt", 93939, "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"),
+                ]),
             ],
             vad: github("silero_vad.onnx", 643854, "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"),
+            vad_bundled: std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("silero_vad.onnx"))),
         }
     }
 
@@ -144,16 +169,18 @@ fn installed(dir: &Path, m: &Model) -> bool {
 
 /// What is installed under DIR.
 pub fn status(dir: &Path) -> Value {
-    status_of(dir, &Pins::pinned())
+    status_with(dir, &Pins::pinned())
 }
 
-fn status_of(dir: &Path, pins: &Pins) -> Value {
-    let models: Vec<Value> = pins.models.iter().map(|m| json!({"id": m.id, "label": m.label, "size": m.pin.size.unwrap_or(0), "installed": installed(dir, m)})).collect();
+/// `status` against PINS (tests).
+pub fn status_with(dir: &Path, pins: &Pins) -> Value {
+    let models: Vec<Value> = pins.models.iter().map(|m| json!({"id": m.id, "label": m.label, "size": m.size, "installed": installed(dir, m)})).collect();
     json!({
         "platform": plat(),
         "supported": pins.runtime().is_some(),
         "runtime": runtime_dir(dir).join(c_library()).exists(),
         "vad": vad_path(dir).exists(),
+        "vadBundled": bundled_ok(pins), // a release's copy beside the helper, which an install takes instead of a download
         "models": models,
     })
 }
@@ -176,48 +203,71 @@ pub fn ready(dir: &Path, id: &str) -> Option<String> {
 /// what, done, total, phase
 pub type Progress<'a> = &'a mut dyn FnMut(&str, u64, u64, &str);
 
+/// A download, tried again after a server's 5xx or a dropped connection (GitHub's release files answer 504 now and then);
+/// a 4xx or a checksum that does not match is final.
 fn fetch_to(pin: &Pin, path: &Path, what: &str, progress: Progress) -> Result<(), String> {
-    progress(what, 0, pin.size.unwrap_or(0), "download");
-    let res = net::agent(None).get(&pin.url).call().map_err(|e| net::error_msg(&e))?;
-    if !res.status().is_success() {
-        return Err(format!("{what}: HTTP {}", res.status().as_u16()));
+    let mut wait = std::env::var("BACKPLANE_VOICE_RETRY_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(RETRY_WAIT_MS); // tests wait less
+    for _ in 1..FETCH_TRIES {
+        match fetch_once(pin, path, what, progress) {
+            Err((e, true)) => { eprintln!("{e}: trying again in {wait} ms"); std::thread::sleep(std::time::Duration::from_millis(wait)); wait *= 3 }
+            r => return r.map_err(|e| e.0),
+        }
     }
+    fetch_once(pin, path, what, progress).map_err(|e| e.0)
+}
+
+const FETCH_TRIES: u32 = 4;
+const RETRY_WAIT_MS: u64 = 2000;
+
+fn fetch_once(pin: &Pin, path: &Path, what: &str, progress: Progress) -> Result<(), (String, bool)> {
+    progress(what, 0, pin.size.unwrap_or(0), "download");
+    let res = match net::agent(None).get(&pin.url).call() {
+        Ok(r) => r,
+        Err(ureq::Error::StatusCode(c)) => return Err((format!("{what}: HTTP {c}"), c >= 500)),
+        Err(e) => return Err((net::error_msg(&e), true)),
+    };
+    if !res.status().is_success() {
+        let c = res.status().as_u16();
+        return Err((format!("{what}: HTTP {c}"), c >= 500));
+    }
+    let fin = |e: String| (e, false);
+    let drop = |e: std::io::Error| (format!("{what}: {e}"), true);
     let length = res.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
     let total = pin.size.or(length).unwrap_or(0);
     // a model is far over ureq's default limit on a body
     let mut body = res.into_body().into_with_config().limit(u64::MAX).reader();
     let mut h256 = Sha256::new();
     let mut h512 = Sha512::new();
-    let mut out = BufWriter::new(fs::File::create(path).map_err(|e| e.to_string())?);
+    let mut out = BufWriter::new(fs::File::create(path).map_err(|e| fin(e.to_string()))?);
     let mut buf = vec![0u8; 256 * 1024];
     let mut done = 0u64;
     let mut last: Option<Instant> = None;
     loop {
-        let n = body.read(&mut buf).map_err(|e| e.to_string())?;
+        let n = body.read(&mut buf).map_err(drop)?;
         if n == 0 {
             break;
         }
         h256.update(&buf[..n]);
         h512.update(&buf[..n]);
-        out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        out.write_all(&buf[..n]).map_err(|e| fin(e.to_string()))?;
         done += n as u64;
         if last.is_none_or(|t| t.elapsed().as_millis() > 250) {
             last = Some(Instant::now());
             progress(what, done, total, "download");
         }
     }
-    out.flush().map_err(|e| e.to_string())?;
+    out.flush().map_err(|e| fin(e.to_string()))?;
     progress(what, done, total, "download");
     if pin.size.is_some_and(|s| s != done) {
-        return Err(format!("{what}: {done} bytes, expected {}", pin.size.unwrap()));
+        return Err(fin(format!("{what}: {done} bytes, expected {}", pin.size.unwrap())));
     }
     let hex: String = h256.finalize().iter().map(|b| format!("{b:02x}")).collect();
     if pin.sha256.as_ref().is_some_and(|h| *h != hex) {
-        return Err(format!("{what}: checksum mismatch"));
+        return Err(fin(format!("{what}: checksum mismatch")));
     }
     let b64 = base64::engine::general_purpose::STANDARD.encode(h512.finalize());
     if pin.sha512.as_ref().is_some_and(|h| *h != b64) {
-        return Err(format!("{what}: checksum mismatch"));
+        return Err(fin(format!("{what}: checksum mismatch")));
     }
     Ok(())
 }
@@ -243,7 +293,9 @@ fn pieces(dir: &Path, stage: &Path, pins: &Pins, m: &Model, progress: Progress) 
     let io = |e: std::io::Error| e.to_string();
     if !vad_path(dir).exists() {
         let p = stage.join("silero_vad.onnx");
-        fetch_to(&pins.vad, &p, "voice activity model", progress)?;
+        if !bundled_vad(pins, &p) {
+            fetch_to(&pins.vad, &p, "voice activity model", progress)?;
+        }
         fs::rename(&p, vad_path(dir)).map_err(io)?;
     }
     if !runtime_dir(dir).join(c_library()).exists() {
@@ -256,15 +308,90 @@ fn pieces(dir: &Path, stage: &Path, pins: &Pins, m: &Model, progress: Progress) 
         fs::rename(stage.join("rt").join("package"), runtime_dir(dir)).map_err(io)?;
     }
     if !installed(dir, m) {
-        let tb = stage.join("model.tar.bz2");
-        fetch_to(&m.pin, &tb, &m.label, progress)?;
-        progress(&m.label, 0, 0, "unpack");
-        untar(&tb, &stage.join("m"), true)?;
-        rm(&stage.join("m").join(&m.dir).join("test_wavs"));
+        let got = match from_archive(stage, m, progress) {
+            Ok(d) => d,
+            Err(e) => match &m.mirror {
+                Some(base) => from_mirror(base, stage, m, progress).map_err(|e2| format!("{e}; second source: {e2}"))?,
+                None => return Err(e),
+            },
+        };
         rm(&dir.join(&m.dir));
-        fs::rename(stage.join("m").join(&m.dir), dir.join(&m.dir)).map_err(io)?;
+        fs::rename(&got, dir.join(&m.dir)).map_err(io)?;
     }
     Ok(())
+}
+
+/// The VAD shipped beside the helper, copied to P, when it is there and matches the pin (else it is downloaded).
+fn bundled_vad(pins: &Pins, p: &Path) -> bool {
+    let Some(b) = pins.vad_bundled.as_deref().filter(|b| b.exists()) else { return false };
+    if !bundled_ok(pins) {
+        eprintln!("{} does not match its pin: downloading the voice activity model", b.display());
+        return false;
+    }
+    fs::copy(b, p).is_ok()
+}
+
+/// Whether the VAD beside the helper is there and is the pinned file.
+fn bundled_ok(pins: &Pins) -> bool {
+    let Some(b) = pins.vad_bundled.as_deref() else { return false };
+    let Ok(md) = fs::metadata(b) else { return false };
+    pins.vad.size.is_none_or(|s| s == md.len()) && pins.vad.sha256.as_ref().is_none_or(|h| sha256_of(b).ok().as_ref() == Some(h))
+}
+
+/// The model's archive, unpacked in the staging folder, its files checked: the folder they are in.
+fn from_archive(stage: &Path, m: &Model, progress: Progress) -> Result<PathBuf, String> {
+    let tb = stage.join("model.tar.bz2");
+    fetch_to(&m.pin, &tb, &m.label, progress)?;
+    progress(&m.label, 0, 0, "unpack");
+    let un = untar(&tb, &stage.join("m"), true);
+    rm(&tb);
+    un?;
+    let d = stage.join("m").join(&m.dir);
+    rm(&d.join("test_wavs"));
+    check_files(&d, m)?;
+    Ok(d)
+}
+
+/// The model's files one by one from its second source, each checked as it comes.
+fn from_mirror(base: &str, stage: &Path, m: &Model, progress: Progress) -> Result<PathBuf, String> {
+    let d = stage.join("m2").join(&m.dir);
+    rm(&d);
+    fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    let total: u64 = m.files.iter().map(|f| f.1).sum();
+    let mut off = 0u64;
+    for (name, size, sha) in &m.files {
+        let pin = Pin { url: format!("{base}{name}"), size: Some(*size), sha256: Some(sha.clone()), sha512: None };
+        let mut each = |what: &str, done: u64, _: u64, phase: &str| progress(what, off + done, total, phase);
+        fetch_to(&pin, &d.join(name), &m.label, &mut each).map_err(|e| format!("{e} ({name})"))?;
+        off += size;
+    }
+    Ok(d)
+}
+
+/// Every pinned file of M in D, with its size and sha256.
+fn check_files(d: &Path, m: &Model) -> Result<(), String> {
+    for (name, size, sha) in &m.files {
+        let p = d.join(name);
+        let Ok(md) = fs::metadata(&p) else { return Err(format!("{}: {name} is not in the archive", m.label)) };
+        if md.len() != *size || sha256_of(&p).map_err(|e| e.to_string())? != *sha {
+            return Err(format!("{}: {name} does not match its pin", m.label));
+        }
+    }
+    Ok(())
+}
+
+fn sha256_of(p: &Path) -> std::io::Result<String> {
+    let mut f = fs::File::open(p)?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Fetch whatever is missing for model ID into DIR; each piece lands in a
@@ -410,10 +537,21 @@ mod tests {
     fn the_pins_are_0_14s() {
         let p = Pins::pinned();
         assert_eq!(p.runtimes.len(), 5);
-        assert_eq!(p.model("parakeet-v2").unwrap().pin.size, Some(482468385));
+        assert_eq!(p.model("parakeet-v2").unwrap().size, 482440461);
+        assert!(p.models.iter().all(|m| m.files.len() == 4 && m.mirror.as_deref().is_some_and(|u| u.contains(&m.dir)) && m.pin.sha256.is_none()), "every model pins its files and has a second source");
         assert_eq!(p.model("parakeet-v3").unwrap().dir, "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8");
         assert_eq!(p.vad.sha256.as_deref(), Some("9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"));
         assert_eq!(p.vad.url, "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx");
+        assert!(p.vad_bundled.as_deref().is_some_and(|b| b.ends_with("silero_vad.onnx")), "beside the helper");
+    }
+
+    #[test]
+    fn the_vad_a_release_ships_matches_the_pin() {
+        let f = Path::new(env!("CARGO_MANIFEST_DIR")).join("vad/silero_vad.onnx");
+        let p = Pins::pinned();
+        assert_eq!(fs::metadata(&f).unwrap().len(), p.vad.size.unwrap());
+        assert_eq!(sha256_of(&f).unwrap(), p.vad.sha256.unwrap());
+        assert!(Path::new(env!("CARGO_MANIFEST_DIR")).join("vad/silero_vad.LICENSE").exists(), "its licence goes with it");
         assert!(p.runtimes[0].1.url.ends_with("sherpa-onnx-linux-x64/-/sherpa-onnx-linux-x64-2.0.1.tgz"));
     }
 
@@ -440,7 +578,7 @@ mod tests {
         assert_eq!(ready(t.path(), "parakeet-v2"), None);
         let s = status(t.path());
         assert_eq!((&s["runtime"], &s["vad"], &s["models"][0]["installed"], &s["models"][1]["installed"]), (&json!(true), &json!(true), &json!(true), &json!(false)));
-        assert_eq!(s["models"][0]["size"], json!(482468385));
+        assert_eq!(s["models"][0]["size"], json!(482440461));
         assert_eq!(s["models"][0]["label"], json!("Parakeet TDT 0.6B v2 (English)"));
         // the runtime check is the C library, not sherpa-onnx.node
         fs::remove_file(runtime_dir(t.path()).join(c_library())).unwrap();

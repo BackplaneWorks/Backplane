@@ -574,9 +574,10 @@ fn local_status_and_remove_report_the_folder() {
     assert_eq!(r.done(), 0);
     let e = &r.events()[0];
     let keys: Vec<&String> = e.as_object().unwrap().keys().collect();
-    assert_eq!(keys, vec!["event", "platform", "supported", "runtime", "vad", "models", "bytes"]);
+    assert_eq!(keys, vec!["event", "platform", "supported", "runtime", "vad", "vadBundled", "models", "bytes"]);
+    assert_eq!(e["vadBundled"], json!(false), "no release copy beside a test build");
     assert_eq!((&e["event"], &e["vad"], &e["runtime"], &e["bytes"]), (&json!("local"), &json!(true), &json!(false), &json!(5)));
-    assert_eq!(e["models"][0], json!({"id": "parakeet-v2", "label": "Parakeet TDT 0.6B v2 (English)", "size": 482468385, "installed": false}));
+    assert_eq!(e["models"][0], json!({"id": "parakeet-v2", "label": "Parakeet TDT 0.6B v2 (English)", "size": 482440461, "installed": false}));
     assert_eq!(r.names(), vec!["local", "end"]);
     let mut r = Run::new(&["local-remove", "--local-dir", dir], "http://127.0.0.1:9/v1", &[]);
     assert_eq!(r.done(), 0);

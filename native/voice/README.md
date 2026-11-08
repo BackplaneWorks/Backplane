@@ -137,8 +137,8 @@ NDJSON on stdout, one object a line, written at once; diagnostics on stderr.
                                             0 for a segment cut by the stop
 {"event":"stopping"}                        live: a stop began
 {"event":"error","error":"<one line>"}      no key, 401, no recorder, network, server errors
-{"event":"local","platform":"linux-x64","supported":true,"runtime":true,"vad":true,
- "models":[{"id":"parakeet-v2","label":"...","size":482468385,"installed":true}],"bytes":0}
+{"event":"local","platform":"linux-x64","supported":true,"runtime":true,"vad":true,"vadBundled":true,
+ "models":[{"id":"parakeet-v2","label":"...","size":482440461,"installed":true}],"bytes":0}
                                             local-status, local-remove, local-install's last word
 {"event":"progress","what":"<piece>","done":0,"total":0,"phase":"download|unpack"}
 {"event":"end"}                             always last; exit 0, or 1 after any error
@@ -158,10 +158,20 @@ sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/   the model folder
 ready-<id>              written last; what the hub reads
 ```
 
-The same pins and folders as 0.14, so an install from then keeps working with
+The same folders as 0.14, so an install from then keeps working with
 nothing fetched again: the npm package always held the C library beside the
 Node addon. Each piece streams into `.stage-<pid>`, its size and hash are
 checked, it is unpacked in-process and renamed into place.
+
+- The VAD ships in every release archive beside the helper (`vad/`, its
+  licence and provenance in `vad/README.md`). An install copies that copy in
+  when it matches the pin, and downloads it only when it is missing (dev builds).
+- A model's archive is not pinned: upstream repacks it (2026-11-07, the same
+  files in new archives). Its four files are, by size and sha256, checked after
+  unpacking. When the archive fails or its files do not match, the same files
+  come one by one from Hugging Face (`mirror`), each checked against the same pins.
+- A 5xx or a dropped connection is tried again: four tries, 2, 6 and 18 s apart
+  (`BACKPLANE_VOICE_RETRY_MS` for tests). A 4xx or a checksum is final.
 
 `src/sherpa.rs` loads the C library with `libloading` and holds hand-written
 `#[repr(C)]` structs for `sherpa/c-api.h`, the v2.0.1 header kept here. They
