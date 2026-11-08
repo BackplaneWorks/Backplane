@@ -108,7 +108,7 @@ impl View {
         if ["view.open","view.page","view.update","view.action"].contains(&method) {
             p["nativeSidebar"]=json!(1);
             p["accountProfiles"]=json!(1); // the account page: the hub offers its `accounts` grant only to a view that declares this version
-            p["client"]=json!({"kind":"desktop","os":match std::env::consts::OS{"macos"=>"darwin",o=>o},"launcher":self.launcher}); // setup's words for keys, and whether another home can be chosen
+            p["client"]=json!({"kind":"desktop","os":match std::env::consts::OS{"macos"=>"darwin",o=>o},"launcher":self.launcher,"browser":if cfg!(feature="cef"){"cef"}else{"frames"}}); // browser: what Settings > About says this window's Browser tab is // setup's words for keys, and whether another home can be chosen
             // Offer keyed deltas against the newest body held; the hub answers whole or with ops from it.
             p["viewDelta"]=json!({"version":1,"token":self.bases.newest});
             self.offered.insert(self.next,self.bases.newest.clone());
