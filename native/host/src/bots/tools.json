@@ -78,7 +78,7 @@
  },
  {
   "name": "room_post",
-  "description": "Post a message in a room: every other member hears it. Answer a post once, only when you have something to add; past the depth limit a post is held (the person sees it, no bot hears it).",
+  "description": "Post a message in a room: every other member hears it. Answer a post once, only when you have something to add; past the depth limit a post is held (the person sees it, no bot hears it). A room on another machine: room_join it with `machine` first; once it is copied here, post to it.",
   "inputSchema": {
    "type": "object",
    "properties": {
