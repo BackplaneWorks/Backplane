@@ -127,8 +127,8 @@ if want('F16'):
     sel(1)
     trial('new', 'ctrl n', lambda a, b, e, m: (any(x['$'] == 'ThreadCreated' for x in e), 'ThreadCreated in the hub log'))
     # stop and settle need a running turn: send a long one by keys
-    sel(2); say_('a long turn')
-    t2 = lambda: [e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't2']
+    sel(1); say_('a long turn')   # a thread that is not waiting on a plan
+    t2 = lambda: [e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') in ('running', 'interrupted')]
     until(lambda: any(e['state'] == 'running' for e in t2()), 40)
     until(lambda: 'tool:interrupt' in ctrls(), 40)   # the Stop button is there while the turn runs
     trial('stop', 'ctrl period', lambda a, b, e, m: (any(x['$'] == 'TurnChanged' and x.get('state') == 'interrupted' for x in e), 'TurnChanged interrupted in the hub log'))
