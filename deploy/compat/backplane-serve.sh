@@ -31,7 +31,8 @@ if [ -f "$home/guard/lock" ] && ! "$G" hub status --home "$home" 2>/dev/null | g
 fi
 # 0.14 as a build the guard can run and go back to: its own server, home and arguments, whatever the guard passes
 leg="$prefix/builds/v0.14-legacy"
-if [ -x "$prefix/backplane-serve.0.14" ]; then
+# (never a 0.14 that is this shim: run as legacy it would start this again, and the guard would start it again and again)
+if [ -x "$prefix/backplane-serve.0.14" ] && ! grep -q BACKPLANE-0.15-SHIM "$prefix/backplane-serve.0.14" 2>/dev/null; then
   mkdir -p "$leg"
   q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
   printf '#!/bin/sh\n# Backplane 0.14 under the guard (deploy/compat/backplane-serve.sh)\nexec %s --home %s --port %s --foreground\n' \

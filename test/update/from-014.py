@@ -189,7 +189,8 @@ try:
         w.s.sendall(bytes([0x82, 0x80 | 126]) + struct.pack(">H", len(body)) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(body)) if len(body) >= 126 else
                     bytes([0x82, 0x80 | len(body)]) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(body)))
     send(1, "app.update")
-    # with threads at work 0.14 waits for them (update.wait, up to 30 minutes) and the person presses Update now: update.now (a large home has turns open)
+    # with threads at work 0.14 waits for them (update.wait, up to 30 minutes) and the person presses Update now: update.now (a large home has turns open).
+    # On an idle 0.14 both presses install, two install-release.sh runs at once: kept on purpose, it is how the way back once lost 0.14 (install-release.sh's lock)
     time.sleep(2); send(2, "update.now")
     # read what 0.14 sends on the socket, so a large home's frames never fill it
     import threading
