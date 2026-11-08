@@ -63,7 +63,7 @@ if until_ 120 said; then ok install "installed into builds/$TAG; the guard start
 else no install "/hello said '$(hello)', wanted $VER $COMMIT; $(tail -3 "$T/install.log" 2>/dev/null)"; fi
 
 # 2. the helpers a dev cut has, each answering
-[ -x "$B/backplane-voice$X" ] && "$B/backplane-voice$X" local-status --local-dir "$T/voice-models" > "$T/voice.out" 2>&1 && grep -q '"event":"local"' "$T/voice.out" && ok voice "backplane-voice local-status: $(head -c 120 "$T/voice.out" | tr '\n' ' ')" || no voice "backplane-voice local-status failed: $(head -c 200 "$T/voice.out" 2>/dev/null)"
+[ -x "$B/backplane-voice$X" ] && "$B/backplane-voice$X" local-status --local-dir "$T/voice-models" > "$T/voice.out" 2>&1 && grep -q '"event":"local"' "$T/voice.out" && grep -q '"vadBundled":true' "$T/voice.out" && ok voice "backplane-voice local-status: $(head -c 120 "$T/voice.out" | tr '\n' ' ')" || no voice "backplane-voice local-status failed, or the bundled VAD (silero_vad.onnx) is missing or not the pinned one: $(head -c 200 "$T/voice.out" 2>/dev/null)"
 if "$B/backplane-step2glb$X" "$ROOT/test/files/fixtures/mesh/bracket.step" "$T/bracket.glb" > "$T/step.out" 2>&1 && [ -s "$T/bracket.glb" ] && [ "$(head -c 4 "$T/bracket.glb")" = glTF ]; then ok step2glb "bracket.step -> $(wc -c < "$T/bracket.glb") bytes of GLB"
 else no step2glb "$(tail -2 "$T/step.out")"; fi
 [ -x "$B/backplane-browser$X" ] && ok browser "backplane-browser beside the hub" || no browser "no backplane-browser$X in builds/$TAG"
