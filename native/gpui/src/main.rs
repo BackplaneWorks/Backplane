@@ -216,6 +216,8 @@ static OPENED:std::sync::LazyLock<(async_channel::Sender<String>,async_channel::
 fn main()->anyhow::Result<()> {
     #[cfg(feature="cef")]
     if let Some(code)=viewers::cef::subprocess(){std::process::exit(code);} // a CEF helper process (renderer, gpu...) is this executable run again
+    // `--install [DIR]`: the headless install of an unpacked Windows release (install.rs); nothing else runs
+    #[cfg(windows)] if let Some(dir)=install::install_arg(&std::env::args().collect::<Vec<_>>()) {std::process::exit(install::headless(dir));}
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let started=Instant::now();let config=hub::Config::parse()?;let exit_after=config.exit_after;
     if config.swatches||config.gallery||config.fonts||std::env::var_os("BACKPLANE_GPUI_RECTS").is_some(){art::enable_rects();}
