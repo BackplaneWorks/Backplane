@@ -15,7 +15,7 @@ run hub-list HubListTests.swift "$ROOT/test/mobile/hubs_cases.json" HubList.swif
 run thread-groups ThreadGroupsTests.swift "" ThreadGroups.swift
 run voice-edit VoiceEditTests.swift "$ROOT/test/fixtures/voice-edits.json" VoiceEdit.swift
 run plot-parts PlotPartsTests.swift "" Plot.swift PlotParts.swift
-run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift
+run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift
 run term-stream TermStreamTests.swift "" TermStream.swift
 run vt VtTests.swift "" Vt.swift
 run term-card TermCardTests.swift "" Vt.swift TermCard.swift
