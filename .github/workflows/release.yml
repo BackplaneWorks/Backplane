@@ -147,9 +147,10 @@ jobs:
           set -e
           apk=mobile/android/app/build/outputs/apk/release/app-release.apk; aab=mobile/android/app/build/outputs/bundle/release/app-release.aab
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          # apksigner names a signer "Signer #1" or, for a signer limited to SDK levels, "Signer (minSdkVersion=…)": every signer's digest, the release key among them
+          # every signer's certificate digest, the release key among them. apksigner's wording differs by build-tools version: "Signer #1 certificate SHA-256
+          # digest: X" (35) and "V2 Signer: certificate SHA-256 digest: X" (the runner's), so take the 64 hex digits after "certificate SHA-256 digest:"
           "$bt/apksigner" verify --verbose --print-certs "$apk" > apk-certs.txt
-          a=$(sed -n 's/^Signer.* certificate SHA-256 digest: //p' apk-certs.txt | sort -u | tr '\n' ' ')
+          a=$(sed -n 's/.*[Ss]igner.*certificate SHA-256 digest: \([0-9a-f]\{64\}\).*/\1/p' apk-certs.txt | sort -u | tr '\n' ' ')
           b=$(keytool -printcert -jarfile "$aab" | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f' | sort -u | tr '\n' ' ')
           echo "apk signers: $a"; echo "aab signers: $b"; grep -E '^Verified using|^Number of signers' apk-certs.txt || true
           case " $a" in *" $CERT_SHA256 "*) ;; *) echo "::error::the APK is not signed with the release key ($CERT_SHA256)"; cat apk-certs.txt; exit 1;; esac
