@@ -6,7 +6,8 @@ fn main() {
     if env::var_os("CARGO_FEATURE_CEF").is_some() {
         match env::var("CARGO_CFG_TARGET_OS").as_deref() {
             Ok("linux") => println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN"),
-            Ok("windows") => println!("cargo:rustc-link-arg-bin=backplane-gpui=/DELAYLOAD:libcef.dll"),
+            // (MSVC's linker only: a gnullvm cross build, scripts/windows-check.sh, takes no /DELAYLOAD and builds without cef)
+            Ok("windows") if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") => println!("cargo:rustc-link-arg-bin=backplane-gpui=/DELAYLOAD:libcef.dll"),
             _ => {}
         }
     }

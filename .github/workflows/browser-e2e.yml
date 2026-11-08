@@ -58,11 +58,18 @@ jobs:
           shared-key: browser-e2e-${{ matrix.mode }}
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.4.4 }
+      - uses: rui314/setup-mold@v1
+        if: runner.os == 'Linux'
+      # the cef crate builds CEF's C++ wrapper with CMake and Ninja (and on Windows MSVC's cl.exe on PATH)
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+        if: matrix.mode == 'cef'
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.mode == 'cef' && runner.os == 'Windows'
       - name: desktop (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends xvfb i3 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2t64 libxkbcommon0 libxtst6 x11-utils > /dev/null
+          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev ninja-build xvfb i3 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2t64 libxkbcommon0 libxtst6 x11-utils > /dev/null
       - name: build
         shell: bash
         run: |

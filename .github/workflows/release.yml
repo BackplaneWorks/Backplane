@@ -87,9 +87,9 @@ jobs:
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
           (cd native/host && cargo build --release --bin backplane-hub --bin bp-sh) & a=$!
-          # the client with the embedded Chromium (feature cef) where the client can run it: Linux. macOS and Windows ship without it; their Browser tab is
-          # the hub's frame stream from backplane-browser (docs/install.md); the client's CEF code finds a Linux runtime only (viewers/cef.rs runtime_dir)
-          cef=; case "${{ matrix.target }}" in linux-*) cef="--features cef";; esac
+          # the client with the embedded Chromium (feature cef) on every desktop target (docs/browser-cef-port.md). Without a usable runtime beside it the
+          # Browser tab says why and shows the hub's frames from backplane-browser (viewers/cef.rs runtime_dir)
+          cef="--features cef"
           (cd native/gpui && cargo build --release $cef) & b=$!
           (cd native/guard && cargo build --release) & g=$!   # the guard: it starts the hub, updates it and brings it back (docs/deploy.md)
           (cd native/voice && cargo build --release --bin backplane-voice) & v=$!   # dictation's helper: the hub runs it from beside itself (voice/session.rs)
@@ -154,6 +154,8 @@ jobs:
             for f in libcef.so resources.pak chrome_100_percent.pak chrome_200_percent.pak icudtl.dat v8_context_snapshot.bin; do [ -f $R/$f ] || { echo "::error::CEF runtime file $f missing from the build"; exit 1; }; cp $R/$f $d/; done
             for f in libvk_swiftshader.so libvulkan.so.1 vk_swiftshader_icd.json; do [ ! -f $R/$f ] || cp $R/$f $d/; done
             cp -r $R/locales $d/locales; strip --strip-unneeded $d/libcef.so ;;
+          # macOS: cef/ beside the client: the framework, the five helper bundles (backplane-cef-helper) and the stub main bundle, ad-hoc signed
+          darwin-*) scripts/cef-runtime-pack.sh macos native/gpui/target/release $d ;;
           esac
           cp -r assets $d/assets
           # the client's generated assets (assets/GENERATED.md): without them it draws no icons and no cats
@@ -163,8 +165,9 @@ jobs:
           # everything a dev cut has (scripts/dev-build.sh), or the job fails: a release must not lose a feature a dev cut showed working
           need="backplane-hub backplane-gpui backplane backplane-voice silero_vad.onnx backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs"
           need="$need licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt"
-          case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
-          for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
+          case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";;
+            darwin-*) need="$need cef/Chromium_Embedded_Framework.framework cef/Backplane_Helper.app cef/Backplane_Helper_(GPU).app cef/Backplane_Helper_(Renderer).app cef/Backplane_Helper_(Plugin).app cef/Backplane_Helper_(Alerts).app cef/Backplane.app licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
+          for f in $need; do f=${f//_/ }; [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
           ls -la $d
           name=backplane-$TAG-${{ matrix.target }}-native.tar.gz   # -native: 0.14's updater takes any asset ending in <platform>.tar.gz (rel::archive_name)
           tar -C $d -czf $name .
@@ -179,6 +182,8 @@ jobs:
           for f in native/host/target/release/backplane-hub.exe native/host/target/release/bp-sh.exe native/gpui/target/release/backplane-gpui.exe native/guard/target/release/backplane.exe native/voice/target/release/backplane-voice.exe; do
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }; cp "$f" $d/; done
           cp native/voice/vad/silero_vad.onnx $d/   # beside the voice helper, as on the other platforms (its notice: licenses/silero-vad)
+          # CEF's runtime beside the client (libcef.dll is delay-loaded: without these the Browser tab shows the hub's frames and says why)
+          scripts/cef-runtime-pack.sh windows native/gpui/target/release $d
           echo "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6  $d/silero_vad.onnx" | sha256sum -c - || { echo "::error::silero_vad.onnx is not the pinned file (native/voice/src/local.rs)"; exit 1; }
           (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser.exe")
           (cd tools/step2glb && bun install --frozen-lockfile && bun build --compile step2glb.ts --outfile "$PWD/../../$d/backplane-step2glb.exe")
@@ -187,6 +192,7 @@ jobs:
           git rev-parse HEAD > $d/COMMIT
           scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
           for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe silero_vad.onnx backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs \
+                   libcef.dll chrome_elf.dll icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt \
                    licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt; do
             [ -e "$d/$f" ] || { echo "::error::$f missing from the windows-x64 archive"; exit 1; }; done
           ls -la $d
