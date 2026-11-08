@@ -513,6 +513,7 @@ impl Render for Backplane {
         for (id, label, c) in crate::screens::tools::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
         // the bot form, a bot's tabs and its Webhooks page are controls too (screens::bots::controls)
         for (id, label, c) in crate::screens::bots::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
+        if has_thread { ctl.push(CtlEntry { id: "ui:Thread menu".into(), label: "Thread actions".into(), ctl: Ctl::ThreadMenu }); }
         ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
         // Settings > CAD's Install KiCad buttons (Install KiCad, Install, Cancel, Try again): `set:<action>`
@@ -557,7 +558,13 @@ impl Render for Backplane {
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
                     // another machine's thread: "Project · on desktop" (this machine's looks as always)
                     .when(has_thread, |d| d.children(crate::screens::badge::place(light, &thread["mark"], "", "crumb").map(|p| div().flex().items_center().gap_2().child(div().text_color(c("faint")).child("·")).child(p))))
-                    .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let id = string(&this.data["thread"], "id"); let id = crate::screens::attach::raw_id(&id).to_string(); let _ = this.tx.try_send(Command::Action("row-rename".into(), id)); cx.notify(); })).font_weight(FontWeight::BOLD).child(string(thread, "title"))).child(ic(light, "chevron-down", 14., "dim"))))
+                    .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").font_weight(FontWeight::BOLD).child(string(thread, "title"))
+                        // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu
+                        .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
+                        .child(with_rect(div().id("thread-menu"), || "ui:Thread menu".to_string()).px_1().h_full().flex().items_center().cursor_pointer().hover(|s| s.bg(c("raise")))
+                            // the menu drops from under the ▾
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(point(e.position.x - px(8.), e.position.y + px(14.)), items, cx); } }))
+                            .child(ic(light, "chevron-down", 14., "dim")))))
                 .child(div().flex().items_center().gap_3()
                     .child(with_rect(div().id("palette-bar").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Jump or run a command", &crate::keys::hint(&self.local, "palette"), light)), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command"))
                     .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
@@ -629,7 +636,6 @@ impl Render for Backplane {
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
-                    .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs))
                     .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette, &self.local, &self.selected))
                     .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref()))
                 )
@@ -638,6 +644,8 @@ impl Render for Backplane {
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .children(crate::perf::mark("over"))
+            // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
+            .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
             .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
             .children({ let title = crate::screens::badge::from_machine(&self.data["thread"]["mark"], &string(&self.data["thread"], "title")); crate::screens::term::view(cx, window, light, &self.local, &title, &self.screens.term) })

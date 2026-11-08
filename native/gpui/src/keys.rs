@@ -222,10 +222,19 @@ pub fn tip(text: &str, key: &str, light: bool) -> impl Fn(&mut Window, &mut App)
 }
 
 impl Backplane {
-    /// A rail button pressed, or its key: the viewer's kind (or Diff) is asked for.
+    /// A rail button pressed, or its key: the viewer's kind (or Diff) is asked for; the kind already lit shuts the viewer.
     pub(crate) fn rail_press(&mut self, a: &str, v: &str, cx: &mut Context<Self>) {
-        let cmd = if a == "view-kind" { self.screens.rail_pending = Some(v.to_string()); self.screens.rail_at = Some(std::time::Instant::now()); self.screens.plot_click = matches!(v, "board" | "schematic").then(std::time::Instant::now); crate::screens::viewer::view_kind(v) } else { Command::Action(a.into(), v.into()) };
+        let cmd = if a == "view-kind" { self.rail_view(v) } else { Command::Action(a.into(), v.into()) };
         let _ = self.tx.try_send(cmd); cx.notify();
+    }
+    /// The command a rail press on viewer kind `v` sends (screens::viewer::rail_command), with the rail lit at once for what it asks: the kind, or none.
+    pub(crate) fn rail_view(&mut self, v: &str) -> Command {
+        let thread = &self.data["thread"];
+        let cmd = crate::screens::viewer::rail_command(&thread["viewer"], thread["diff"].is_object(), self.screens.rail_pending.as_deref(), v);
+        let opens = matches!(&cmd, Command::Action(_, k) if !k.is_empty());
+        self.screens.rail_pending = Some(if opens { v.to_string() } else { String::new() }); self.screens.rail_at = Some(std::time::Instant::now());
+        self.screens.plot_click = (opens && matches!(v, "board" | "schematic")).then(std::time::Instant::now);
+        cmd
     }
     /// A bare key does nothing while something covers the page.
     fn covered(&self) -> bool { self.screens.palette.open || self.screens.lightbox.is_some() || self.screens.picker_open || self.screens.acct.menu || crate::screens::settings::is_open(self) || self.data["tour"].is_object() || crate::screens::migrate::is_up(&self.data) }

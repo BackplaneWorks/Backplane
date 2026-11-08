@@ -75,6 +75,8 @@ impl Imp {
         crate::plat::private_dir(&self.dir)
     }
     /// Write the draft through a temp file (0600). An error is said, not swallowed: a handoff never goes ahead on an unsaved receipt.
+    /// The screen recording in progress, if any, taken (its drop stops the recorder).
+    pub fn take_recording(&mut self) -> Option<capture::Recording> { self.rec.take() }
     fn write_draft(&self) -> Result<(), String> {
         use std::io::Write;
         if !self.ensure_dir() { return Err("Could not keep this draft on this device. Retry.".into()); }

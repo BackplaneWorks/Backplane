@@ -248,7 +248,8 @@ fn attempt_panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, a: &Va
     col.child(div().flex().child(button(cx, light, format!("acct-cancel-{aid}"), "Cancel sign-in", false, false, move |this, _| ask(this, json!({"op": "cancel", "profile": pid2, "attempt": aid2}))))).into_any_element()
 }
 
-fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: usize) -> AnyElement {
+/// `narrow`: the state goes under the name instead of beside it (a page under ADD_ROW_MIN wide).
+fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: usize, narrow: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let (id, state) = (string(p, "id"), string(p, "state"));
     let (word, tok) = badge(&state);
@@ -256,8 +257,8 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     let default = is_default(&st.snap, p);
     let mut sub = vec![identity(p)];
     let al = allowance(p); if !al.is_empty() { sub.push(al) }
-    let head = div().flex().items_center().gap_3()
-        .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w_0()
+    let head = if narrow { div().flex().flex_col().items_start() } else { div().flex().items_center() }.gap_3()
+        .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(140.)).max_w_full()
             .child(div().flex().items_center().gap_2().child(super::picker::logo(if p["provider"] == "codex" { "codex" } else { "claude" })).child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(string(p, "label")))
                 .when(default, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(px(11.)).text_color(c("dim")).child("New threads"))))
             .child(div().text_size(px(12.)).text_color(c("dim")).child(sub.join("  ·  "))))
@@ -293,7 +294,10 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
 fn state_of(snap: &Value, id: &str) -> String { profiles(snap).iter().find(|p| p["id"] == id).map(|p| string(p, "state")).unwrap_or_default() }
 
 /// The page: the profiles as cards, then the add box.
-pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> Vec<AnyElement> {
+/// The width under which the label box and Add go one under the other (settings::Fit::rows).
+pub const ADD_ROW_MIN: f32 = 380.0;
+/// `avail`: the width the page's rows are laid out in.
+pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
     out.push(div().pb_3().text_size(px(12.)).text_color(c("dim")).child("Each account is a separate Claude subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.").into_any_element());
@@ -301,14 +305,17 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> Vec<AnyE
     if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
     // the CLI's own login is always there
     let def_default = !profiles(&st.snap).iter().any(|p| is_default(&st.snap, p));
-    out.push(div().flex().items_center().gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
-        .child(div().flex().flex_col().gap(px(2.)).flex_1().child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child("Default account")).child(div().text_size(px(12.)).text_color(c("dim")).child("The Claude CLI's own sign-in on this machine, as before.")))
-        .child(div().flex().items_center().gap_2().child(div().size(px(8.)).bg(c("ok"))).child(div().text_size(px(12.)).text_color(c("ok")).child(if def_default { "Used for new threads" } else { "Available" }))).into_any_element());
+    // narrow, the state goes under the words instead of squeezing them
+    let card_row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start() } else { div().flex().items_center() };
+    out.push(card_row.gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
+        .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(160.)).max_w_full().child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child("Default account")).child(div().text_size(px(12.)).text_color(c("dim")).child("The Claude CLI's own sign-in on this machine, as before.")))
+        .child(div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c("ok"))).child(div().text_size(px(12.)).text_color(c("ok")).child(if def_default { "Used for new threads" } else { "Available" }))).into_any_element());
     let ps = profiles(&st.snap);
-    for (i, p) in ps.iter().enumerate() { out.push(card(cx, light, st, p, i)); }
+    for (i, p) in ps.iter().enumerate() { out.push(card(cx, light, st, p, i, avail < ADD_ROW_MIN)); }
     if let Some(input) = &st.label {
-        out.push(div().flex().items_center().gap_2().mt_2()
-            .child(div().flex_1().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone()))
+        let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mt_2().child(div().w_full().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
+            else { div().flex().items_center().gap_2().mt_2().child(div().flex_1().min_w_0().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
+        out.push(row
             .child(button(cx, light, "acct-add".into(), "Add Claude account", true, false, |this, cx| add(this, cx))).into_any_element());
     }
     out
@@ -319,7 +326,7 @@ pub fn panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provider: 
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
     if !st.notice.is_empty() { out.push(div().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("bad")).child(st.notice.clone()).into_any_element()); }
-    for (i, p) in profiles(&st.snap).iter().enumerate().filter(|(_, p)| p["provider"] == provider) { out.push(card(cx, light, st, p, i)); }
+    for (i, p) in profiles(&st.snap).iter().enumerate().filter(|(_, p)| p["provider"] == provider) { out.push(card(cx, light, st, p, i, false)); }
     if let Some(input) = &st.label {
         let word = if provider == "codex" { "Add Codex account" } else { "Add Claude account" };
         out.push(div().flex().items_center().gap_2().child(div().flex_1().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone()))

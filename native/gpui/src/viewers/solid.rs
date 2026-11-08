@@ -261,18 +261,19 @@ impl Camera {
     }
     pub fn eye(&self) -> [f32; 3] { sub(self.target, mul(self.fwd, self.dist)) }
     fn reortho(&mut self) { self.fwd = norm(self.fwd); self.right = norm(cross(self.fwd, self.up)); self.up = cross(self.right, self.fwd); }
-    /// A drag of (dx, dy) pixels: the model follows the pointer, about the target, in any direction (no pole, no clamp).
+    /// A drag of (dx, dy) pixels (y down): the model follows the pointer, about the target, in any direction (no pole, no clamp). The web's
+    /// `Orbit.spin` exactly: the view turns by -|d|·k about the screen axis u·dx + r·dy, so a drag to the right brings the model's front to the
+    /// right (the camera goes round to the left) and a drag down brings its top toward the viewer.
     pub fn orbit(&mut self, dx: f32, dy: f32) {
         let k = 0.008; // radians per pixel
-        let (ar, au) = (self.right, self.up);
-        // the scene turns about the view's vertical axis with a horizontal drag, about the horizontal axis with a vertical one
-        for v in [&mut self.right, &mut self.fwd, &mut self.up] { *v = rotate(*v, au, dx * k); }
-        let ar2 = rotate(ar, au, dx * k);
-        for v in [&mut self.up, &mut self.fwd, &mut self.right] { *v = rotate(*v, ar2, dy * k); }
+        let l = (dx * dx + dy * dy).sqrt();
+        if l < 1e-6 { return }
+        let axis = norm(add(mul(self.up, dx / l), mul(self.right, dy / l)));
+        for v in [&mut self.right, &mut self.fwd, &mut self.up] { *v = rotate(*v, axis, -l * k); }
         self.reortho();
     }
-    /// alt drag: roll about the view axis.
-    pub fn roll(&mut self, dx: f32) { let (f, a) = (self.fwd, dx * 0.008); self.right = rotate(self.right, f, a); self.up = rotate(self.up, f, a); self.reortho(); }
+    /// alt drag: roll about the view axis; a drag to the right turns the model clockwise on screen (the web's `Orbit.roll`).
+    pub fn roll(&mut self, dx: f32) { let (f, a) = (self.fwd, -dx * 0.008); self.right = rotate(self.right, f, a); self.up = rotate(self.up, f, a); self.reortho(); }
     /// Move the view: a right/middle or shift drag of (dx, dy) pixels in a panel `h` pixels high.
     pub fn pan(&mut self, dx: f32, dy: f32, h: f32) {
         let per_px = 2.0 * (FOV / 2.0).tan() * self.dist / h.max(1.0);
@@ -386,7 +387,7 @@ pub struct SolidPage {
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
-    pub note: String, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
+    pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
 }
 impl SolidPage {
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -396,7 +397,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, note: "No 3D model yet".into(), worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -509,7 +510,7 @@ impl Render for SolidPage {
             None => div().size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(self.note.clone()).into_any_element(),
         };
         let tools = (self.mesh.is_some()).then(|| {
-            let mut bar = div().absolute().top_2().left_2().flex().flex_wrap().gap_1();
+            let mut bar = div().absolute().top_2().left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
             for (label, view) in [("Fit", "fit"), ("Iso", "iso"), ("Top", "top"), ("Bottom", "bottom"), ("Front", "front"), ("Right", "right"), ("Back", "back"), ("Left", "left"), ("Snap view", "snap")] {
                 bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().py_1().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
                     .hover(|d| d.bg(rgba(0x2a3548ee))).child(label)
@@ -561,7 +562,7 @@ mod tests {
         assert!(!super::note_keeps_model("", "2|/b|"));
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
-    use super::{decode_mesh, parse_frame, render, Camera, Mesh, SolidFrame, BG};
+    use super::{decode_mesh, parse_frame, render, Camera, Mesh, SolidFrame, BG, add, mul, sub};
     use super::super::raster::smooth_normals;
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
     fn zig(v: i32) -> u32 { ((v << 1) ^ (v >> 31)) as u32 }
@@ -628,6 +629,31 @@ mod tests {
         assert_ne!(a, render(&m, &c, 64, 64, 2, ALIVE).unwrap());
         let mut z = Camera::fitted(&m); for _ in 0..500 { z.zoom_at(5.0, 0.0, 0.0, 1.5); } assert!((z.dist - z.fit / 60.0).abs() < 1e-3, "in-bound 1/60");
         for _ in 0..500 { z.zoom_at(-5.0, 0.0, 0.0, 1.5); } assert!((z.dist - z.fit * 20.0).abs() < 1e-1, "out-bound 20x");
+    }
+    /// Where a model point shows on the screen, relative to the centre: (right, up), and how near the eye it is.
+    fn screen(c: &Camera, p: [f32; 3]) -> (f32, f32, f32) { let d = super::sub(p, c.target); (super::dot(d, c.right), super::dot(d, c.up), -super::dot(d, c.fwd)) }
+    #[test] fn a_drag_turns_the_model_the_way_the_pointer_goes_as_the_web_did() {
+        let m = mesh(); let c0 = Camera::fitted(&m); let r = 10.0;
+        // the point of the model facing the viewer, and its top
+        let front = super::sub(c0.target, mul(c0.fwd, r)); let top = add(c0.target, mul(c0.up, r));
+        let mut c = c0; c.orbit(40.0, 0.0);
+        let (x, y, _) = screen(&c, front); assert!(x > 0.5 && y.abs() < 1e-3, "a drag to the right takes the front to the right: {x} {y}");
+        assert!(super::dot(sub(c.eye(), c0.eye()), c0.right) < 0.0, "the camera goes round the other way, to the left");
+        let mut c = c0; c.orbit(-40.0, 0.0); assert!(screen(&c, front).0 < -0.5, "left goes left");
+        let mut c = c0; c.orbit(0.0, 40.0);
+        let (x, y, _) = screen(&c, front); assert!(y < -0.5 && x.abs() < 1e-3, "a drag down takes the front down: {x} {y}");
+        assert!(screen(&c, top).2 > screen(&c0, top).2 + 0.5, "and tips the top toward the viewer");
+        let mut c = c0; c.orbit(0.0, -40.0); assert!(screen(&c, front).1 > 0.5, "up goes up");
+        // the web's Orbit.spin, step for step: turn(normalize(u·mx + r·my), -|m|·k)
+        let mut c = c0; c.orbit(30.0, -20.0);
+        let (mx, my) = (30.0f32, -20.0f32); let l = (mx * mx + my * my).sqrt(); let k = super::norm(add(mul(c0.up, mx / l), mul(c0.right, my / l)));
+        let want = super::rotate(c0.fwd, k, -l * 0.008);
+        for a in 0..3 { assert!((c.fwd[a] - want[a]).abs() < 1e-4, "{:?} vs {:?}", c.fwd, want); }
+        let mut c = c0; c.orbit(0.0, 0.0); assert_eq!(c, c0, "no movement, no turn");
+    }
+    #[test] fn an_alt_drag_to_the_right_turns_the_model_clockwise_on_screen() {
+        let m = mesh(); let c0 = Camera::fitted(&m); let top = add(c0.target, mul(c0.up, 10.0));
+        let mut c = c0; c.roll(40.0); assert!(screen(&c, top).0 > 0.5, "the top goes right: clockwise");
     }
     #[test] fn roll_turns_about_the_view_axis_and_peek_reads_the_key_without_the_mesh() {
         let m = mesh(); let mut c = Camera::fitted(&m); let fwd = c.fwd; let up = c.up; c.roll(60.0);
