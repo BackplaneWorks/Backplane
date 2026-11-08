@@ -74,15 +74,15 @@ Owned end to end by the push lane (branch `respectful-push`, thread t1793985890-
 
 | ID | Feature | Owner | Result |
 |---|---|---|---|
-| P01 | APNs sender | `respectful-push` | not run |
-| P02 | Uberbot-only gate | `respectful-push` | not run |
-| P03 | Dedupe | `respectful-push` | not run |
-| P04 | Quiet hours | `respectful-push` | not run |
-| P05 | Deep link | `respectful-push` | not run |
-| P06 | Badge | `respectful-push` | not run |
-| P07 | Clear on any device | `respectful-push` | not run |
-| P08 | Simulator evidence | `respectful-push` | not run |
-| P09 | TestFlight | `respectful-push` | not run |
+| P01 | APNs sender | `respectful-push` | pass, part: real APNs sandbox delivered every alert to the simulator; a background clear was accepted by APNs but not delivered (best effort) |
+| P02 | Uberbot-only gate | `respectful-push` | pass |
+| P03 | Dedupe | `respectful-push` | pass |
+| P04 | Quiet hours | `respectful-push` | pass |
+| P05 | Deep link | `respectful-push` | pass (iOS) |
+| P06 | Badge | `respectful-push` | pass |
+| P07 | Clear on any device | `respectful-push` | pass |
+| P08 | Simulator evidence | `respectful-push` | pass |
+| P09 | TestFlight | `respectful-push` | pass (202611072342, 202611080012: VALID, internal group only) |
 
 ## Builders
 
@@ -228,6 +228,26 @@ Rig: Boat sandbox (4 vCPU, 8 GB, Ubuntu 24.04), source `26ba50a0ba49496a9baf89cb
 | S12 | fail | cc53fca16a | hs-mac-mini macOS 26.5 arm64, hub release build, no window (console session logged in, no window allowed) | `test/e2e/settings-walk.mjs` (node) on the hub's settings view: usage: not in the hub menu |
 | S13 | pass | cc53fca16a | hs-mac-mini macOS 26.5 arm64, hub release build, no window (console session logged in, no window allowed) | `test/e2e/settings-walk.mjs` (node) on the hub's settings view: about: read-only version row |
 | S14 | pass, part: nothing is sent in any state | 6e44184379 | hs-mac-mini macOS 26.5 arm64, hub release build, no window | privacy: `test/e2e/mac-effects.mjs` walked Off (`setting.set`, stored off), On via `setting.set` (refused on purpose, `reserved` in settings/telemetry.rs: a stale click must not re-enable; stays off), On via `telemetry.choice` with the page's token (what the On button sends; stored on). The hub opened no non-loopback connection over 10 s in Off or On. This build has no sender or endpoint (`may_send` is always false), so the choice shows only in what is stored |
+
+### iOS and push (lane respectful-push, t1793985890-103)
+
+Hub at 6faf730503 (built on this desktop; no sandbox), simulator on hs-mac-mini (iOS 26.5, iPhone 17 Pro, headless: simctl only, no Simulator.app window), app `dev.backplane.works` (Debug, the TestFlight bundle id). Stand-in agents throughout; a check passes from the hub's events.jsonl, the stand-in's log or the phone's own notification list, never from the driver's say-so.
+
+| ID | Result | Commit | Rig | Evidence |
+|---|---|---|---|---|
+| P01 | pass, part | 6faf730503 | Linux hub (desktop, temp home) → APNs sandbox → simulator | `cargo-q test push` 34/34 (JWT signed and checked by openssl, frames, curl config, answers). `test/e2e/push/run.sh apns`: the hub sends through api.sandbox.push.apple.com with the team's key, 18/19 steps: every alert reached the simulator through Apple. The silent clear (priority 5) was accepted by APNs (no error, the device kept) and not delivered to the simulator; Apple does not promise background pushes |
+| P02 | pass | 6faf730503 | same; Pixel 9 52220DLAQ001FC (real phone, dev.backplane.mobile.gpui) | unit tests (`every_other_path_is_refused`, `only_the_gate_can_build_an_order`); simulator 19/19 and Pixel 11/11: another bot's notify_person, a worker thread, a finished turn and an approval alone push nothing (hub PushSent unchanged); the alert's record names the uberbot's thread, title Bub |
+| P03 | pass | 6faf730503 | simulator; Pixel 9 | `a_repeat_is_refused_against_the_told_records`; the same text a second time: no banner, PushSent unchanged (both phones) |
+| P04 | pass | 6faf730503 | simulator | `quiet_hours_hold_until_they_end_and_a_needs_you_passes_only_if_allowed`; on the simulator an order in quiet hours shows nothing, then arrives when quiet hours end |
+| P05 | pass | 6faf730503 | simulator | a tap on the banner opens its thread; a tap on the approval's alert lands on the approval (`data.entry.ask`). Android's tap is not driven |
+| P06 | pass | 6faf730503 | simulator (sink) | `the_book_counts_and_clears`; the app's silent-clear handler set the icon badge from the hub's count ("56 new items" → "53") |
+| P07 | pass | 6faf730503 | simulator; Pixel 9 | `dealing_with_it_clears_every_device_and_the_badge` (two phones); answering the approval clears it on the simulator (PushCleared) and removes the notification from the Pixel |
+| P08 | pass | 6faf730503 | simulator | `test/e2e/push/run.sh sink`: 19/19 (the hub's exact payloads through `simctl push`); `test/e2e/push/android.sh` on the Pixel: 11/11 |
+| P09 | pass | c793914ba8, 6cf22b8fe8 | hs-mac-mini, App Store Connect | TestFlight 202611072342 (null-push crash fix) and 202611080012 (phone terminals): uploaded, VALID, internal group "Me" only (`asc-build.py`); new crashes are read by `scripts/mobile/testflight-crashes.sh` |
+| F06 (iOS) | pass | 6faf730503 | simulator, private hub `test/e2e/pixel-hub.mjs` | `test/e2e/ios/f-rows.sh` (FRows/test_f_rows): the approval card drawn, Allow reaches the agent as allow, Decline as deny; after Stop, the question "Which port?" is drawn and the tapped Barrel reaches the agent |
+| F07 (iOS) | pass | 6faf730503 | same | Stop (the send button while a turn runs) on a long turn: TurnChanged interrupted in the hub log |
+| F17 (iOS) | fail | 6faf730503 | same | Board, Schematic, 3D draw and move under a swipe. Mech passed in the last run (429220 lit pixels) but showed a black page in an earlier one: the iOS 3D lane found a race (a late 3D answer taken as Mech's, any model accepted); fix pending in t1794013338-118 |
+| F21 (iOS) | pass | 6faf730503 | same | the hub killed: the app says offline; started again on the same home: the app reconnects and a message sent afterwards reaches the new hub |
 
 ### Pairing and remote operation
 
