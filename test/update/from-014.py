@@ -29,6 +29,10 @@ large, throttle = opt("--large"), opt("--throttle")
 # go back to 0.14, whose home 0.15 never touched; then GOOD_DIR's release (another dry run's artifact) is laid out and moved to, and finishes the import:
 # every 0.14 thread and message it keeps is in 0.15's log exactly once
 crash = opt("--crash-import")
+# --prove-set (with --crash-import): 0.14's home as 0.15 found it (unchanged up to the crash) is imported again, cleanly, by GOOD_DIR's hub into a second
+# home; the resumed import's thread and message ids must hold every id of that clean one, and any id more must come from what 0.14 wrote after (its log
+# is append-only: the lines past the snapshot's length). Each id missing or more is listed with its line.
+prove = "--prove-set" in sys.argv
 # --expect-from FILE: a clean import of the same home (a plain run's kept import-result.json): the resumed import must reach its threads and messages
 expect_once = json.load(open(opt("--expect-from"))).get("once") if opt("--expect-from") else None
 PASS, FAIL = [], []
@@ -97,6 +101,51 @@ def stop():
         try: os.killpg(p.pid, signal.SIGTERM)
         except Exception: pass
     fsrv.terminate()
+
+def ids_lines(path, kind, key):   # id -> its first line, for one kind of line in a log
+    n = {}
+    for l in open(path, errors="replace"):
+        if f'"{kind}"' not in l: continue
+        try: v = json.loads(l)
+        except Exception: continue
+        if v.get("$") == kind and v.get(key) not in n: n[v.get(key)] = l.strip()
+    return n
+def prove_set(gtag):
+    snap = os.path.join(T, "snap-014"); h2 = os.path.join(T, "home-015-clean")
+    if not os.path.isdir(snap): no("same-set", "no snapshot of 0.14's home was taken at 0.15's start"); return
+    # the snapshot is 0.14's home up to the crash: its log is byte for byte the start of 0.14's log now
+    sl = os.path.getsize(os.path.join(snap, "events.jsonl")); fl = os.path.join(h14, "events.jsonl")
+    with open(fl, "rb") as f: head = f.read(sl)
+    if head != open(os.path.join(snap, "events.jsonl"), "rb").read(): no("same-set", "0.14's log now does not start with the snapshot's"); return
+    # a clean import of the snapshot by the same build, into a second home
+    os.makedirs(h2, exist_ok=True); p2 = free_port()
+    e2 = dict(env); e2.update(BACKPLANE_IMPORT_FROM=snap, BACKPLANE_IMPORT_AUTO="1"); e2.pop("BACKPLANE_NEW_HOME", None)
+    hub_bin = os.path.join(prefix, "builds", gtag, "backplane-hub")
+    lg = open(os.path.join(T, "clean-hub.log"), "ab")
+    q = subprocess.Popen([hub_bin, "--home", h2, "--port", str(p2), "--host", "127.0.0.1", "--foreground", "--no-tailscale"], env=e2, stdout=lg, stderr=lg, stdin=subprocess.DEVNULL, start_new_session=True)
+    try:
+        def done():
+            t2 = open(os.path.join(h2, "token")).read().strip(); hb = Hub(f"http://127.0.0.1:{p2}", t2); st, r = hb.call("GET", "/import/0.14", hb.bearer())
+            return r if st == 200 and r.get("state") == "done" else None
+        r2 = until(1800, done)
+    finally:
+        try: os.killpg(q.pid, signal.SIGTERM); q.wait(30)
+        except Exception: pass
+    if not r2: no("same-set", "the clean import of the snapshot never finished: " + open(os.path.join(T, "clean-hub.log"), errors="replace").read()[-300:]); return
+    # what 0.14 wrote after the snapshot: the ids its log's later lines carry
+    with open(fl, "rb") as f: f.seek(sl); tail = f.read().decode(errors="replace")
+    report, bad = [], False
+    for kind, key in (("ThreadCreated", "id"), ("MessagePosted", "msg")):
+        snap_ids = ids_lines(os.path.join(snap, "events.jsonl"), kind, key); fin_ids = ids_lines(fl, kind, key)
+        clean = set(ids_lines(os.path.join(h2, "events.jsonl"), kind, key)) & set(snap_ids)
+        resumed = set(ids_lines(os.path.join(h15, "events.jsonl"), kind, key)) & set(fin_ids)
+        later = {k for k in fin_ids if k not in snap_ids}
+        missing = sorted(clean - resumed); extra = sorted(resumed - clean); unexplained = [k for k in extra if k not in later]
+        report.append(f"{kind}: clean {len(clean)}, resumed {len(resumed)}, missing {len(missing)}, more {len(extra)} ({len(extra) - len(unexplained)} from 0.14's log after the snapshot)")
+        for k in missing: bad = True; print(f"  MISSING {kind} {k}: {snap_ids.get(k, '')[:300]}", flush=True)
+        for k in extra: print(f"  {'MORE (0.14 after the snapshot)' if k in later else 'MORE, UNEXPLAINED'} {kind} {k}: {fin_ids.get(k, '')[:300]}", flush=True)
+        bad = bad or bool(unexplained)
+    (no if bad else ok)("same-set", "; ".join(report))
 
 try:
     # 1. 0.14.1, installed by its own published installer
@@ -183,7 +232,9 @@ try:
         seen, before, at_bad, t0 = [], None, None, time.time()
         while time.time() < t0 + 1800 and not bad():
             g = gstat()
-            if g.get("build") == tag and before is None: before = tree(h14)   # 0.14 stopped, 0.15 started: 0.14's home as 0.15 found it
+            if g.get("build") == tag and before is None:
+                before = tree(h14)   # 0.14 stopped, 0.15 started: 0.14's home as 0.15 found it
+                if prove: shutil.copytree(h14, os.path.join(T, "snap-014"), symlinks=True, ignore_dangling_symlinks=True)
             try:
                 st, h = health(); m = h.get("migrating")
                 if isinstance(m, dict) and m.get("state") == "running": seen.append((round(time.time() - t0), m.get("done", 0), m.get("total", 0), g.get("stable")))
@@ -235,6 +286,7 @@ try:
             if device:
                 w2 = Ws(hub15, device); hi = w2.hello() if w2.status == 101 else None
                 ok("device", "the phone paired to 0.14 is accepted by 0.15 without pairing again") if hi else no("device", f"0.15 refused the 0.14 device token (ws {w2.status})")
+            if prove: prove_set(gtag)
     else:
         # the move to 0.15 imports 0.14's home by itself (the shim sets BACKPLANE_IMPORT_AUTO): watch it from outside, as the new app and phones would.
         # While it runs the hub answers /hello and /healthz with the progress, the guard keeps it on probation without failing it, and only then proves it.
