@@ -72,7 +72,7 @@ pub const PLATFORMS: &[Platform] = &[
         kicad: &[("Homebrew", "brew install --cask kicad")], freecad: &[("Homebrew", "brew install --cask freecad")],
         kicad_names: &["kicad-cli"], kicad_places: &["/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"], freecad_names: &["freecadcmd", "FreeCADCmd"] },
     Platform { id: "windows", name: "Windows",
-        installed: "Backplane runs from the folder where you unpacked it. Closing the window leaves the hub running, so agents finish their work. Windows may ask for permission once when a tool's own installer starts.",
+        installed: "Backplane is installed in your user folder, under AppData, Local, Backplane. Its guard keeps it updated and brings the hub back if it stops. The Start menu opens it. Closing the window leaves the hub running, so agents finish their work. Windows may ask for permission once when a tool's own installer starts.",
         path_fix: "Backplane is not on your PATH. Open it from its folder or the Start menu.", launcher: "backplane.exe",
         kicad: &[("winget", "winget install --id KiCad.KiCad -e")], freecad: &[("winget", "winget install --id FreeCAD.FreeCAD -e")],
         kicad_names: &["kicad-cli.exe"], kicad_places: &["C:\\Program Files\\KiCad\\10.0\\bin\\kicad-cli.exe", "C:\\Program Files\\KiCad\\9.0\\bin\\kicad-cli.exe"], freecad_names: &["FreeCADCmd.exe", "freecadcmd.exe"] },
