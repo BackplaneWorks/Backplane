@@ -673,4 +673,53 @@ final class Journeys: XCTestCase {
         d.step("the card says Paid", timeout: 60, act: {}, expect: { d.label("Paid: your order").exists })
         d.shot("paid")
     }
+
+    // Terminals (feature `terms`; scripts/mobile/ios-term-rig.sh, rig-seed.ts): the chat terminal's card in a thread, open full screen, type with the soft keyboard,
+    // rotate (the pty's size follows), lose the connection while the shell prints and get it back, stop it; then the project's Terminals screen and a new shell.
+    // env: TERM_THREAD, TERM_PROJECT (rig-seed.ts), HUB_CTL (the relay's control port).
+    func test_terminal() {
+        d = Driver("terminal"); defer { d.finish() }
+        let screen = { d.el("term.screen") }
+        let text = { (screen().value as? String) ?? "" }
+        func sizes(_ t: String) -> (Int, Int)? {
+            for l in t.split(separator: "\n").reversed() { let p = l.split(separator: " "); if p.count == 2, let r = Int(p[0]), let c = Int(p[1]) { return (c, r) } }
+            return nil
+        }
+        d.app.terminate()
+        d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_SELECT": d.env["TERM_THREAD"] ?? "", "BACKPLANE_PERFORMANCE": "1"]
+        d.app.launch(); d.skipTour()
+        guard d.step("the chat terminal's card", timeout: 40, act: {}, expect: { d.el("data.entry.term").exists && d.label("card line 3").exists }) else { return }
+        d.step("the card says its command is done", act: {}, expect: { d.label("done 0").exists })
+        d.shot("1-card")
+        guard d.step("a tap opens it full screen", act: { d.tap(d.el("data.entry.term")) }, expect: { screen().exists }) else { return }
+        d.step("the soft keyboard is up with the accessory row", timeout: 10, act: {}, expect: { d.app.keyboards.firstMatch.exists && d.el("term.key.esc").exists })
+        d.shot("2-full-screen")
+        d.step("ls shows the folder", timeout: 20, act: { d.app.typeText("ls\n") }, expect: { text().contains("alpha.txt") && text().contains("gamma.txt") })
+        d.shot("3-ls")
+        d.step("Ctrl is sticky: Ctrl then c ends a running sleep", timeout: 20, act: { d.app.typeText("sleep 30\n"); sleep(1); d.tap(d.el("term.key.ctrl")); d.app.typeText("c") }, expect: { text().contains("^C") || !text().hasSuffix("sleep 30\n") })
+        d.step("stty size in portrait", timeout: 20, act: { d.app.typeText("clear; stty size\n") }, expect: { sizes(text()) != nil })
+        let portrait = sizes(text())
+        d.shot("4-portrait")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        d.step("landscape: the pty has the new size", timeout: 20, act: { sleep(2); d.app.typeText("clear; stty size\n") }, expect: { if let a = sizes(text()), let p = portrait { return a.0 > p.0 && a.1 < p.1 }; return false })
+        d.shot("5-landscape")
+        XCUIDevice.shared.orientation = .portrait; sleep(2)
+        d.step("the connection drops while the shell prints", timeout: 30, act: { d.app.typeText("clear; sleep 10; echo AWAY-OUTPUT\n"); sleep(1); _ = d.ctl("/cut") }, expect: { true })
+        sleep(3); d.shot("6-offline")
+        sleep(11); _ = d.ctl("/heal")
+        d.step("back online: the output printed while away appears, nothing lost", timeout: 60, act: {}, expect: { text().contains("AWAY-OUTPUT") })
+        d.shot("7-reconnected")
+        d.step("Stop hangs it up", timeout: 20, act: { d.tap(d.el("term.stop")) }, expect: { d.el("term.state").label.contains("stopped") })
+        d.shot("8-stopped")
+        d.tap(d.el("term.close"))
+        d.step("the card says stopped", timeout: 20, act: {}, expect: { d.el("term.card.state").exists && d.el("term.card.state").label.contains("stopped") })
+        d.shot("9-card-stopped")
+        back()
+        let tbtn = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.terms.'")).firstMatch
+        d.step("the project's Terminals screen", timeout: 20, act: { d.tap(tbtn) }, expect: { d.el("terms.new").exists && d.el("terms.row").exists })
+        d.shot("10-terminals")
+        d.step("New shell opens a shell full screen", timeout: 30, act: { d.tap(d.el("terms.new")) }, expect: { screen().exists })
+        d.step("the new shell runs a command", timeout: 20, act: { d.app.typeText("echo NEW-SHELL-$((6*7))\n") }, expect: { text().contains("NEW-SHELL-42") })
+        d.shot("11-new-shell")
+    }
 }
