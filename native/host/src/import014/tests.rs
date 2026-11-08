@@ -148,17 +148,23 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
 
 #[test] fn the_0_14_home_is_found_in_each_systems_user_folder() {
     let d = tmp("find"); let user = d.join("Users").join("A Person"); let old = user.join(".backplane-bend"); std::fs::create_dir_all(&old).unwrap();
-    let elsewhere = d.join("not-temp-home"); // a home under the temp folder looks only at BACKPLANE_IMPORT_FROM
-    assert_eq!(source_in(&elsewhere, None, Some(user.clone())), None, "no events.jsonl: not a 0.14 home");
+    let elsewhere = d.join("not-temp-home"); let one = |c: PathBuf| vec![c];
+    assert_eq!(source_in(&elsewhere, None, one(old.clone())), None, "no events.jsonl: not a 0.14 home");
     std::fs::write(old.join("events.jsonl"), "").unwrap();
-    assert_eq!(source_in(&elsewhere, Some(old.clone()), None), Some(old.clone()), "BACKPLANE_IMPORT_FROM");
-    assert_eq!(source_in(&old, Some(old.clone()), None), None, "the home itself is not its own source");
-    assert_eq!(source_in(&old.join("hub"), Some(old.clone()), None), None, "nor a folder inside it");
-    assert_eq!(source_in(&d.join("h"), None, Some(user.clone())), None, "a temp home does not look in the user folder");
-    // the default, as 0.14 put it on Linux (~), macOS (/Users/x) and Windows (C:\Users\x): <user folder>/.backplane-bend
-    let p = |u: &str| PathBuf::from(u).join(".backplane-bend");
-    assert_eq!(p("/home/a"), PathBuf::from("/home/a/.backplane-bend")); assert_eq!(p("/Users/a"), PathBuf::from("/Users/a/.backplane-bend"));
-    if cfg!(windows) { assert_eq!(p(r"C:\Users\a"), PathBuf::from(r"C:\Users\a\.backplane-bend")) }
+    assert_eq!(source_in(&elsewhere, Some(old.clone()), vec![]), Some(old.clone()), "BACKPLANE_IMPORT_FROM");
+    assert_eq!(source_in(&old, Some(old.clone()), vec![]), None, "the home itself is not its own source");
+    assert_eq!(source_in(&old.join("hub"), Some(old.clone()), vec![]), None, "nor a folder inside it");
+    assert_eq!(source_in(&d.join("h"), None, one(old.clone())), None, "a temp home looks only at BACKPLANE_IMPORT_FROM");
+    // where 0.14 put it: <user folder>/.backplane-bend everywhere (Linux ~, macOS /Users/x, Windows %USERPROFILE%), and on Windows the Cygwin user folders
+    assert_eq!(candidates(false, Some("/home/a".into()), None, Some("a".into()), None), vec![PathBuf::from("/home/a/.backplane-bend")], "Linux and macOS: the user folder only");
+    let w = candidates(true, Some(PathBuf::from(r"C:\Users\a")), Some(PathBuf::from(r"C:\Users\a\AppData\Local")), Some("a".into()), Some(PathBuf::from(r"D:\cyg")));
+    let s: Vec<String> = w.iter().map(|p| p.to_string_lossy().replace('/', "\\")).collect();
+    assert_eq!(s, [r"C:\Users\a\.backplane-bend", r"D:\cyg\home\a\.backplane-bend", r"C:\Users\a\AppData\Local\Backplane\cygwin64\home\a\.backplane-bend", r"C:\cygwin64\home\a\.backplane-bend"]);
+    // of two 0.14 homes, the one written last
+    let cyg = d.join("cyg/home/a/.backplane-bend"); std::fs::create_dir_all(&cyg).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20)); std::fs::write(cyg.join("events.jsonl"), "{}\n").unwrap();
+    let not_temp = PathBuf::from("/nonexistent-bp-home/hub");
+    if !not_temp.starts_with(std::env::temp_dir()) { assert_eq!(source_in(&not_temp, None, vec![old.clone(), cyg.clone()]), Some(cyg.clone())); }
 }
 
 #[test] fn the_plan_counts_without_holding_lines() {

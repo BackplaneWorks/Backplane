@@ -28,12 +28,30 @@ fn same(a: &Path, b: &Path) -> bool { crate::plat::fs::canonicalize(a).unwrap_or
 /// A folder that holds a 0.14 home and is not this home nor inside it (or it inside the old one).
 pub fn is_old_home(old: &Path, home: &Path) -> bool { old.join("events.jsonl").is_file() && !same(old, home) && !home.starts_with(old) && !old.starts_with(home) }
 
-/// Where this hub looks: `from` (BACKPLANE_IMPORT_FROM), else `<user>/.backplane-bend`. A home under the temp folder (tests) looks only at `from`.
-pub fn source_in(home: &Path, from: Option<PathBuf>, user: Option<PathBuf>) -> Option<PathBuf> {
-    let c = from.or_else(|| if home.starts_with(std::env::temp_dir()) { None } else { user.map(|u| u.join(".backplane-bend")) })?;
-    is_old_home(&c, home).then_some(c)
+/// The folders 0.14 may have used as its home on this system, from its own launchers: everywhere `<user folder>/.backplane-bend` (the desktop app's
+/// `os.homedir()`); on Windows also the Cygwin user folder 0.14's hub-only launcher (Run-Backplane.ps1: `bash --login`, HOME unset) gave it,
+/// `<cygwin root>\home\<user>\.backplane-bend`, the root being BACKPLANE_CYGWIN_ROOT, `%LOCALAPPDATA%\Backplane\cygwin64` or `C:\cygwin64`.
+pub fn candidates(windows: bool, user: Option<PathBuf>, local_app_data: Option<PathBuf>, user_name: Option<String>, cygwin_root: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = user.into_iter().map(|u| u.join(".backplane-bend")).collect();
+    if windows {
+        let roots: Vec<PathBuf> = cygwin_root.into_iter().chain(local_app_data.map(|l| l.join("Backplane").join("cygwin64"))).chain([PathBuf::from(r"C:\cygwin64")]).collect();
+        if let Some(n) = user_name.filter(|n| !n.is_empty()) { for r in roots { v.push(r.join("home").join(&n).join(".backplane-bend")) } }
+    }
+    v
 }
-pub fn source(home: &Path) -> Option<PathBuf> { source_in(home, std::env::var_os("BACKPLANE_IMPORT_FROM").filter(|v| !v.is_empty()).map(PathBuf::from), user_folder()) }
+/// Where this hub imports from: `from` (BACKPLANE_IMPORT_FROM) when given, else the candidate that is a 0.14 home and was written last (a machine that ran
+/// 0.14 both ways keeps its newest data). A home under the temp folder (tests) looks only at `from`.
+pub fn source_in(home: &Path, from: Option<PathBuf>, candidates: Vec<PathBuf>) -> Option<PathBuf> {
+    if let Some(f) = from { return is_old_home(&f, home).then_some(f) }
+    if home.starts_with(std::env::temp_dir()) { return None }
+    let when = |p: &PathBuf| std::fs::metadata(p.join("events.jsonl")).and_then(|m| m.modified()).ok();
+    candidates.into_iter().filter(|c| is_old_home(c, home)).max_by_key(when)
+}
+pub fn source(home: &Path) -> Option<PathBuf> {
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty());
+    source_in(home, env("BACKPLANE_IMPORT_FROM").map(PathBuf::from),
+        candidates(cfg!(windows), user_folder(), env("LOCALAPPDATA").map(PathBuf::from), env("USERNAME").and_then(|n| n.into_string().ok()), env("BACKPLANE_CYGWIN_ROOT").map(PathBuf::from)))
+}
 
 /// Whether 0.14's hub holds its home now (its flock on hub.lock); then what it writes after the read comes in a later import.
 fn running(old: &Path) -> bool {
