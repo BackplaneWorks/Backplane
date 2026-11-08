@@ -187,7 +187,16 @@ fn start_server(key: String, argv0: Vec<String>, memory: Option<String>, env: Ve
     c.args(&argv[1..]).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).current_dir("/").kill_on_drop(false);
     let run = Arc::new(Run { key, said: AtomicBool::new(false), done: AtomicBool::new(false), tail: Mutex::new(VecDeque::new()), sink });
     tokio::spawn(async move {
-        let mut child = match c.spawn() { Ok(c) => c, Err(e) => return run.end(127, Some(e.to_string())) };
+        // "Text file busy": a program written a moment ago is still open for writing in a child another thread just forked (the child holds the descriptor until its own exec);
+        // it passes in a few milliseconds, as for the accounts' CLI (accounts_io)
+        let mut tries = 0;
+        let mut child = loop {
+            match c.spawn() {
+                Ok(c) => break c,
+                Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => { tries += 1; tokio::time::sleep(Duration::from_millis(25)).await }
+                Err(e) => return run.end(127, Some(e.to_string())),
+            }
+        };
         let (out, err) = (child.stdout.take(), child.stderr.take());
         if !at.is_empty() { // KiCad buffers stdout on a pipe: report its freshly bound socket; the hub still requires Ping and a matching GetVersion
             let run = run.clone();
