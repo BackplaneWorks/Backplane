@@ -94,7 +94,7 @@ def xin(cmd, *a):
     elif cmd == 'type': cli('w:80', 't:' + str(a[0]))
     elif cmd == 'key':
         cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))
-        if a[0] == 'Return': cli('w:500', 'kp:return')   # the first Return after typed text is often taken by the text input to commit it; a second on an empty field does nothing
+        # one press: a second Return a moment later sends a message twice when the composer has not yet cleared (say_ presses again only when the hub has not seen the message)
     elif cmd == 'key1': cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))   # one press, for a field where Return acts each time it is pressed (the address bar)
     elif cmd == 'wheel':
         x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y)); time.sleep(0.2)
