@@ -14,6 +14,6 @@ skip="$skip | test(=agents::providers::pi::tests::the_command_line_is_the_hubs) 
 skip="$skip | test(=agents::tests::side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards) | test(=files::export10::tests::an_empty_report_exports_at_once_and_a_bad_one_is_an_error) | test(=files::export10::tests::an_unmarked_folder_is_never_adopted_and_a_link_never_followed) | test(=files::export10::tests::consent_follows_the_report_and_agents_may_force) | test(=files::git::tests::stacked_actions_against_a_local_bare_remote) | test(=files::rv::tests::a_failed_gate_stops_a_release_unless_forced_and_an_execution_failure_always) | test(=files::rv::tests::a_release_tags_exports_and_publishes_only_when_asked) | test(=net::copy_outs::no_alert_driven_out_leaves_on_a_copy_and_the_same_probe_posts_without_the_flag) | test(=term::tests::a_flood_skips_a_client_that_does_not_read_keeps_it_and_snaps_it_when_it_catches_up)"
 # Windows by design: the agy runner test reads the file while 15 other threads rename onto it, and Windows refuses an open in the instant of a replace (the hub leaves a whole runner alone)
 skip="$skip | test(=agents::providers::agy::tests::the_runner_is_written_whole_by_turns_starting_together)"
-# Unix by design: a killed hub's child and grandchild are Git sh's pids, which no Windows call reaches
+# Unix by design: a killed hub's child and grandchild are Git sh's pids, which no Windows call reaches (Windows has its own: plat::windows::f23_tests)
 skip="$skip | test(=agents::tests::a_killed_hub_leaves_no_agent_behind)"
 echo "not ($skip)"
