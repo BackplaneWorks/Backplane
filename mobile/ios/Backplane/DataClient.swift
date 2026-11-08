@@ -30,6 +30,7 @@ final class DataClient {
     let plots = PlotStore()
     let voice = VoiceModel()
     let machines = MachinesModel()
+    let terms = TermStore()
     private(set) var shot = 0
     private(set) var shotBot = ""
     private(set) var bots: [DBot] = []
@@ -91,6 +92,7 @@ final class DataClient {
         loadCache()
         voice.client = self
         machines.client = self
+        terms.client = self
         #if DEBUG
         // a simulator has no taps: what the form's Pair and the question's buttons call, from the environment
         let env = ProcessInfo.processInfo.environment
@@ -201,6 +203,7 @@ final class DataClient {
         for (_, k) in calls { k.resume(throwing: DError(code: "OFFLINE", message: "Offline")) }
         calls = [:]
         listSub = 0; threadSub = 0
+        terms.disconnected()
     }
     // the app came back to the front: a socket that died while suspended is replaced at once
     func foreground() {
@@ -298,6 +301,7 @@ final class DataClient {
             await enablePush(); await registerPush(); await syncPush()
             await loadLocks()
             await loadStar()
+            terms.resync()
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
@@ -438,6 +442,7 @@ final class DataClient {
     private func push(_ o: [String: Any]) {
         guard let k = o["k"] as? String else { return }
         if k == "btw", let th = o["thread"] as? String, let q = o["q"] as? String, btw[th]?.q == q { btw[th] = Btw(q: q, a: o["a"] as? String ?? ""); return }
+        if k == "term" { terms.push(o); return }
         if k == "secret" { let th = o["thread"] as? String ?? ""; Task { await refreshSecretAsks(th) }; return }
         // a null (`"subs":null` when a thread's work ends) or any non-JSON value decodes to nil instead of raising
         func decode<T: Decodable>(_ key: String, _ type: T.Type) -> T? { WireJSON.decode(o[key], as: type) }

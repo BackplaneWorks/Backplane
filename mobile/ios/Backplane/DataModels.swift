@@ -68,12 +68,13 @@ struct DEntry: Codable, Equatable, Identifiable {
     var agentOnly = false   // a message only the agent reads (data/1 `agentOnly`): never shown
     var tool: DTool?
     var ask: DAsk?
+    var term: DTermInfo?   // a chat terminal (feature `terms`, kind "term")
     var attachments: [DAttachment] = []
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, attachments }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, attachments }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -86,6 +87,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         agentOnly = c.bool(.agentOnly)
         tool = try? c.decode(DTool.self, forKey: .tool)
         ask = try? c.decode(DAsk.self, forKey: .ask)
+        term = try? c.decode(DTermInfo.self, forKey: .term)
         attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []
     }
 }
