@@ -112,7 +112,7 @@ jobs:
         run: |
           brew install cliclick
           brew install --cask freecad || echo "FreeCAD did not install (a download error): the Mech viewer row will say so"   # the Mech viewer asks the hub for FreeCAD
-          python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz
+          python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz cbor2
       - name: client rows, from the installed archive
         run: |
           set -o pipefail; mkdir -p out
@@ -120,6 +120,7 @@ jobs:
           BACKPLANE_BROWSER="$BUILD/backplane-browser" .venv/bin/python test/e2e/gpui-f-rows-mac.py "$BUILD/backplane-gpui" "$BUILD/backplane-hub" "$BUILD/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
         env:
           ROWS: ${{ inputs.rows }}
+          RELAY: ${{ contains(inputs.rows, 'F14X') && '1' || '' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: client-rows, path: out }
@@ -153,7 +154,7 @@ jobs:
         run: |
           brew install cliclick
           brew install --cask freecad || echo "FreeCAD did not install (a download error): the Mech viewer row will say so"
-          python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz
+          python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz cbor2
       - name: client rows, from this checkout's build
         run: |
           set -o pipefail; mkdir -p out; B="$PWD/dist"
@@ -162,6 +163,7 @@ jobs:
           BACKPLANE_BROWSER="$B/bb.sh" .venv/bin/python test/e2e/gpui-f-rows-mac.py "$B/backplane-gpui" "$B/backplane-hub" "$B/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
         env:
           ROWS: ${{ inputs.rows }}
+          RELAY: ${{ contains(inputs.rows, 'F14X') && '1' || '' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: client-rows, path: out }

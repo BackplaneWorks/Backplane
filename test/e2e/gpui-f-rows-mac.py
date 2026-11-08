@@ -60,8 +60,60 @@ assert ('BACKPLANE_AGENTS=' + P('bin')) in subprocess.run(['ps', 'eww', '-p', st
 denv = dict(env)
 cenv = dict(denv, BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1')
 open(P('script.json'), 'w').write('[{"select":0},{"wait":3000000}]')
+# ---- a recording relay between the client and the hub (F14X only): what the client sent, frame by frame, to tell a key the client dropped from one the hub dropped
+CLIENT_PORT = PORT; SENT = []   # SENT: (time, method, params) of every request the client made
+if os.environ.get('RELAY'):
+    import socket, struct
+    CLIENT_PORT = PORT + 1000
+    def _frames(buf, out):   # client->hub WebSocket frames (masked) after the upgrade request
+        while True:
+            if len(buf) < 2: return
+            ln = buf[1] & 0x7f; i = 2
+            if ln == 126:
+                if len(buf) < 4: return
+                ln = struct.unpack('>H', buf[2:4])[0]; i = 4
+            elif ln == 127:
+                if len(buf) < 10: return
+                ln = struct.unpack('>Q', buf[2:10])[0]; i = 10
+            mask = buf[1] & 0x80
+            if mask: i += 4
+            if len(buf) < i + ln: return
+            pl = bytearray(buf[i:i + ln])
+            if mask:
+                k = buf[i - 4:i]
+                for j in range(len(pl)): pl[j] ^= k[j % 4]
+            op = buf[0] & 0x0f; del buf[:i + ln]
+            if op == 2: out.append(bytes(pl))
+    def _relay(c):
+        h = socket.create_connection(('127.0.0.1', PORT)); st = {'up': True, 'buf': bytearray(), 'hs': False}
+        def down():
+            try:
+                while True:
+                    d = h.recv(65536)
+                    if not d: break
+                    c.sendall(d)
+            except Exception: pass
+        threading.Thread(target=down, daemon=True).start()
+        try:
+            while True:
+                d = c.recv(65536)
+                if not d: break
+                h.sendall(d)
+                if not st['hs']:
+                    st['buf'] += d; k = st['buf'].find(b'\r\n\r\n')
+                    if k < 0: continue
+                    st['hs'] = True; del st['buf'][:k + 4]
+                else: st['buf'] += d
+                got = []; _frames(st['buf'], got)
+                for pl in got:
+                    try:
+                        import cbor2; m = cbor2.loads(pl); SENT.append((time.time(), m.get('m'), m.get('p')))
+                    except Exception as e: SENT.append((time.time(), 'undecoded', repr(e)[:80]))
+        except Exception: pass
+    _ls = socket.socket(); _ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); _ls.bind(('127.0.0.1', CLIENT_PORT)); _ls.listen(8)
+    threading.Thread(target=lambda: [threading.Thread(target=_relay, args=(_ls.accept()[0],), daemon=True).start() for _ in iter(int, 1)], daemon=True).start()
 def start_client():
-    c = spawn([CLIENT, '--url', 'http://127.0.0.1:%d' % PORT, '--token-file', P('home/token'), '--script', P('script.json'), '--exit-after', '3000'], 'client.log', cenv)
+    c = spawn([CLIENT, '--url', 'http://127.0.0.1:%d' % CLIENT_PORT, '--token-file', P('home/token'), '--script', P('script.json'), '--exit-after', '3000'], 'client.log', cenv)
     time.sleep(8); fit_window(); return c
 # ---- the window: found and fitted to the screen through System Events; its content origin is the window's origin plus the title bar
 TB = int(os.environ.get('TITLEBAR', '28'))
