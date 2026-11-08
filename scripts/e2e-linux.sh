@@ -21,6 +21,7 @@ SHA=$(git rev-parse HEAD); SHORT=$(git rev-parse --short HEAD); DIRTY=$(git stat
 LABEL="$SHORT"; [ -n "$ARCHIVE" ] && { TAG=$(basename "$ARCHIVE" | sed -E 's/^backplane-(v[0-9][^-]*)-.*/\1/'); LABEL="release-$TAG"; }
 OUT=${OUT:-$HOME/.cache/e2e-linux-$LABEL}; mkdir -p "$OUT/tmp"; OUT=$(cd "$OUT" && pwd)
 : > "$OUT/results.tsv"   # driver<TAB>status<TAB>id<TAB>evidence
+add() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$OUT/results.tsv"; }
 export TMPDIR=$OUT/tmp NO_SCOPE=1 PERF_REPO=$ROOT BACKPLANE_NO_UPDATE=1; unset CLAUDE_CONFIG_DIR
 HUB=$ROOT/native/host/target/fast/backplane-hub; GUI=$ROOT/native/gpui/target/fast/backplane-gpui; ASSETS=$ROOT/assets
 if [ $BUILD = 1 ]; then
@@ -48,7 +49,6 @@ fi
 [ -x "$HUB" ] && [ -x "$GUI" ] || { echo "no binaries at $HUB / $GUI (build first)"; exit 2; }
 export LD_LIBRARY_PATH=$(dirname "$GUI")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 SUM=$OUT/summary.md
-add() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$OUT/results.tsv"; }
 parse() { # driver logfile: lines "ok   ID evidence" / "FAIL ID evidence" / "skip ID evidence" (hub, client and phone rows)
   local st id ev l; while IFS= read -r l; do
     case "$l" in ok\ *|FAIL\ *|skip\ *) read -r st id ev <<< "$l"; add "$1" "$st" "$id" "${ev//$'\t'/ }";; esac
