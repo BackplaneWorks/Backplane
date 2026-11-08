@@ -175,6 +175,7 @@ fn cur_of(t: CursorType) -> Cur {
 wrap_app! {
     struct AppH { args: Arc<Vec<(String, String)>> }
     impl App {
+        fn browser_process_handler(&self) -> Option<BrowserProcessHandler> { if cfg!(target_os = "macos") { Some(ProcH::new()) } else { None } }
         fn on_before_command_line_processing(&self, _ty: Option<&CefString>, cl: Option<&mut CommandLine>) {
             let Some(cl) = cl else { return };
             for (k, v) in self.args.iter() { if v.is_empty() { cl.append_switch(Some(&k.as_str().into())); } else { cl.append_switch_with_value(Some(&k.as_str().into()), Some(&v.as_str().into())); } }
@@ -188,24 +189,59 @@ fn switches() -> Vec<(String, String)> {
     v
 }
 
+/// Whether this process was started by CEF as one of its helpers (renderer, gpu, utility...): `--type=...` on the command line. Read from argv
+/// alone, before any CEF call: on Windows libcef.dll is delay-loaded and on macOS the framework is loaded by hand, so a CEF call in a process
+/// that has no runtime would end it.
+pub fn is_helper_argv<I: IntoIterator<Item = String>>(args: I) -> bool { args.into_iter().skip(1).any(|a| a.starts_with("--type=")) }
+
 /// First call of `main`. In a CEF helper process (renderer, gpu, ...) this runs it to its end and returns its exit code; in the browser process it does nothing.
+/// (macOS helpers are their own small executables in helper bundles, src/bin/backplane-cef-helper.rs; this executable is never one there.)
 pub fn subprocess() -> Option<i32> {
+    if !is_helper_argv(std::env::args_os().map(|a| a.to_string_lossy().into_owned())) { return None }
+    #[cfg(windows)] win::use_dll_dir(std::env::var_os("BACKPLANE_CEF_DLL_DIR").map(PathBuf::from).as_deref());
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
     let args = cef::args::Args::new();
-    let cmd = args.as_cmd_line()?;
-    if cmd.has_switch(Some(&CefString::from("type"))) != 1 { return None }
     let mut a = app();
     Some(execute_process(Some(args.as_main_args()), Some(&mut a), std::ptr::null_mut()).max(0))
 }
 
-/// The runtime directory: `$BACKPLANE_CEF` (the directory, or the `backplane-cef` file in it), else `<cache>/backplane/cef-runtime/<VERSION>`.
-pub fn runtime_dir() -> Option<PathBuf> {
+/// What a runtime directory must hold on this OS before CEF is started from it (relative paths). A missing file is a failed CHECK inside
+/// `cef_initialize` (the whole process ends) or, on Windows, a delay-load exception: so nothing is called until all of these are there.
+#[cfg(any(target_os = "linux", test))]
+pub const NEED_LINUX: &[&str] = &["libcef.so", "icudtl.dat", "resources.pak"];
+#[cfg(any(windows, test))]
+pub const NEED_WINDOWS: &[&str] = &["libcef.dll", "chrome_elf.dll", "icudtl.dat", "resources.pak", "chrome_100_percent.pak", "v8_context_snapshot.bin", "locales/en-US.pak"];
+/// macOS: the framework and the five helper bundles CEF starts by name (`<name> Helper (GPU).app`...), all in one directory (`cef/` beside the client, or
+/// an app bundle's Contents/Frameworks).
+#[cfg(any(target_os = "macos", test))]
+pub const NEED_MACOS: &[&str] = &["Chromium Embedded Framework.framework/Chromium Embedded Framework", "Chromium Embedded Framework.framework/Resources/icudtl.dat",
+    "Backplane Helper.app/Contents/MacOS/Backplane Helper", "Backplane Helper (GPU).app/Contents/MacOS/Backplane Helper (GPU)", "Backplane Helper (Renderer).app/Contents/MacOS/Backplane Helper (Renderer)",
+    "Backplane Helper (Plugin).app/Contents/MacOS/Backplane Helper (Plugin)", "Backplane Helper (Alerts).app/Contents/MacOS/Backplane Helper (Alerts)"];
+#[cfg(target_os = "linux")] const NEED: &[&str] = NEED_LINUX;
+#[cfg(windows)] const NEED: &[&str] = NEED_WINDOWS;
+#[cfg(target_os = "macos")] const NEED: &[&str] = NEED_MACOS;
+/// The files of `need` missing from `dir`.
+pub fn missing<'a>(dir: &Path, need: &[&'a str]) -> Vec<&'a str> { need.iter().copied().filter(|f| !dir.join(f).exists()).collect() }
+
+/// Where this OS looks for a runtime, in order: `$BACKPLANE_CEF` (the directory, or a file in it), `<cache>/backplane/cef-runtime/<VERSION>` (Linux, Windows),
+/// then beside the executable (Linux, Windows: the release layout; macOS: `cef/` beside it, or `../Frameworks` inside an app bundle).
+fn candidates() -> Vec<PathBuf> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Some(p) = std::env::var_os("BACKPLANE_CEF").filter(|p| !p.is_empty()) { let p = PathBuf::from(p); cands.push(if p.is_dir() { p } else { p.parent().map(Path::to_path_buf).unwrap_or(p) }); }
-    let cache = crate::plat::cache_base();
-    if let Some(c) = cache { cands.push(c.join("backplane").join("cef-runtime").join(VERSION)); }
-    if let Ok(me) = std::env::current_exe() { if let Some(d) = me.parent() { cands.push(d.to_path_buf()); } }
-    cands.into_iter().find(|d| d.join("icudtl.dat").exists() && d.join("resources.pak").exists() && d.join("libcef.so").exists())
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok().or(Some(e))).and_then(|e| e.parent().map(Path::to_path_buf));
+    #[cfg(not(target_os = "macos"))]
+    { if let Some(c) = crate::plat::cache_base() { cands.push(c.join("backplane").join("cef-runtime").join(VERSION)); }
+      if let Some(d) = exe_dir { cands.push(d); } }
+    #[cfg(target_os = "macos")]
+    if let Some(d) = exe_dir { cands.push(d.join("cef")); cands.push(d.join("..").join("Frameworks")); }
+    cands
+}
+/// The runtime directory, or why there is none (the Browser tab says it, and shows the hub's frames).
+pub fn runtime_dir() -> Result<PathBuf, String> {
+    let cands = candidates();
+    if let Some(d) = cands.iter().find(|d| missing(d, NEED).is_empty()) { return Ok(d.clone()) }
+    let first = cands.first().cloned().unwrap_or_default();
+    Err(format!("no CEF runtime: {} has not {} (set BACKPLANE_CEF to the runtime directory)", first.display(), missing(&first, NEED).join(", ")))
 }
 
 /// CEF reads icudtl.dat, the paks and the snapshot from the directory libcef.so was loaded from (RUNPATH `$ORIGIN`: the executable's directory, whatever a link there points at),
@@ -225,6 +261,73 @@ fn ensure_beside(dir: &Path, exe_dir: &Path) -> Result<(), String> {
     if missing.is_empty() { Ok(()) } else { Err(format!("CEF's files are missing beside {} ({}) and could not be linked from {}", exe_dir.display(), missing.join(", "), dir.display())) }
 }
 
+/// Windows: libcef.dll is delay-loaded (build.rs), so the client starts without it; before the first CEF call the DLL's directory is put on the
+/// search path when it is not the executable's own.
+#[cfg(windows)]
+mod win {
+    #[link(name = "kernel32")] unsafe extern "system" { fn SetDllDirectoryW(path: *const u16) -> i32; }
+    pub fn use_dll_dir(dir: Option<&std::path::Path>) {
+        let Some(d) = dir else { return };
+        use std::os::windows::ffi::OsStrExt;
+        let w: Vec<u16> = d.as_os_str().encode_wide().chain(Some(0)).collect();
+        unsafe { SetDllDirectoryW(w.as_ptr()); }
+    }
+}
+
+/// macOS: CEF's browser process wants NSApp to answer CefAppProtocol (`isHandlingSendEvent`, `setHandlingSendEvent:`); gpui's application class
+/// does not, so the two methods and the protocols are added to it at run time (the framework, once loaded, defines the protocols).
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::{ffi::{c_char, c_void}, sync::atomic::{AtomicBool, Ordering}};
+    #[link(name = "objc")] unsafe extern "C" {
+        fn objc_getClass(name: *const c_char) -> *mut c_void; fn sel_registerName(name: *const c_char) -> *mut c_void; fn objc_msgSend();
+        fn object_getClass(o: *mut c_void) -> *mut c_void; fn class_addMethod(c: *mut c_void, s: *mut c_void, imp: *const c_void, types: *const c_char) -> i8;
+        fn objc_getProtocol(name: *const c_char) -> *mut c_void; fn class_addProtocol(c: *mut c_void, p: *mut c_void) -> i8;
+    }
+    static HANDLING: AtomicBool = AtomicBool::new(false);
+    extern "C" fn is_handling(_: *mut c_void, _: *mut c_void) -> bool { HANDLING.load(Ordering::Relaxed) }
+    extern "C" fn set_handling(_: *mut c_void, _: *mut c_void, v: bool) { HANDLING.store(v, Ordering::Relaxed) }
+    pub fn conform_app() {
+        unsafe {
+            let send: extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void = std::mem::transmute(objc_msgSend as *const c_void);
+            let app = send(objc_getClass(c"NSApplication".as_ptr()), sel_registerName(c"sharedApplication".as_ptr()));
+            if app.is_null() { return }
+            let cls = object_getClass(app);
+            #[cfg(target_arch = "aarch64")] let (get, set) = (c"B@:", c"v@:B");
+            #[cfg(not(target_arch = "aarch64"))] let (get, set) = (c"c@:", c"v@:c");
+            class_addMethod(cls, sel_registerName(c"isHandlingSendEvent".as_ptr()), is_handling as *const c_void, get.as_ptr());
+            class_addMethod(cls, sel_registerName(c"setHandlingSendEvent:".as_ptr()), set_handling as *const c_void, set.as_ptr());
+            for p in [c"CrAppProtocol", c"CrAppControlProtocol", c"CefAppProtocol"] { let pr = objc_getProtocol(p.as_ptr()); if !pr.is_null() { class_addProtocol(cls, pr); } }
+        }
+    }
+}
+
+/// macOS has no multi-threaded message loop: CEF runs on the main thread through `do_message_loop_work`, called by a task of the window's
+/// (`pump`) when CEF asks for it (`on_schedule_message_pump_work`) and at the latest every 33 ms while the engine is up, as CEF's own
+/// external-pump client does.
+static PUMP: OnceLock<(async_channel::Sender<i64>, async_channel::Receiver<i64>)> = OnceLock::new();
+fn pump_chan() -> &'static (async_channel::Sender<i64>, async_channel::Receiver<i64>) { PUMP.get_or_init(|| async_channel::bounded(1)) }
+wrap_browser_process_handler! {
+    struct ProcH {}
+    impl BrowserProcessHandler {
+        fn on_schedule_message_pump_work(&self, delay_ms: i64) { let _ = pump_chan().0.try_send(delay_ms); }
+    }
+}
+static PUMPING: AtomicBool = AtomicBool::new(false);
+/// Starts the main-thread pump once (macOS; a no-op where CEF runs its own UI thread).
+pub fn pump<T: 'static>(cx: &mut gpui::Context<T>) {
+    if !cfg!(target_os = "macos") || !matches!(ENGINE.get(), Some(Ok(_))) || PUMPING.swap(true, Ordering::SeqCst) { return }
+    cx.spawn(async move |_, cx| {
+        let rx = pump_chan().1.clone();
+        loop {
+            let tick = cx.background_executor().timer(std::time::Duration::from_millis(33));
+            let asked = futures_util::future::select(Box::pin(rx.recv()), tick).await;
+            if let futures_util::future::Either::Left((Ok(d), _)) = asked { if d > 0 { cx.background_executor().timer(std::time::Duration::from_millis(d.min(33) as u64)).await; } }
+            do_message_loop_work();
+        }
+    }).detach();
+}
+
 pub struct Engine { pub cdp_port: u16, pub dir: PathBuf }
 static ENGINE: OnceLock<Result<Engine, String>> = OnceLock::new();
 
@@ -235,28 +338,45 @@ impl Engine {
     pub fn get() -> &'static Result<Engine, String> { ENGINE.get_or_init(Engine::start) }
     fn start() -> Result<Engine, String> {
         if std::env::var_os("BACKPLANE_CEF_OFF").is_some() { return Err("BACKPLANE_CEF_OFF is set".into()) }
-        let dir = runtime_dir().ok_or_else(|| "no CEF runtime (set BACKPLANE_CEF to the runtime directory, or put it in ~/.cache/backplane/cef-runtime/".to_string() + VERSION + ")")?;
+        let dir = runtime_dir()?;
         #[cfg(target_os = "linux")]
         if let Some(ed) = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(Path::to_path_buf)) { ensure_beside(&dir, &ed)?; }
+        #[cfg(windows)]
+        { let beside = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).map_or(false, |d| d == dir);
+          if !beside { win::use_dll_dir(Some(&dir)); unsafe { std::env::set_var("BACKPLANE_CEF_DLL_DIR", &dir); } } } // the helpers (this executable again) look there too
+        #[cfg(target_os = "macos")]
+        { let fw = dir.join("Chromium Embedded Framework.framework/Chromium Embedded Framework");
+          let c = std::ffi::CString::new(fw.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+          if load_library(Some(unsafe { &*c.as_ptr() })) != 1 { return Err(format!("CEF's framework did not load ({})", fw.display())) }
+          mac::conform_app(); }
+        let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
         let port = std::env::var("BACKPLANE_CEF_CDP_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or_else(free_port);
         let profile = std::env::var_os("BACKPLANE_CEF_PROFILE").map(PathBuf::from).unwrap_or_else(|| {
-            crate::plat::user_home().unwrap_or_default().join(".cache/backplane/cef-gpui-profile")
+            #[cfg(target_os = "linux")] { crate::plat::user_home().unwrap_or_default().join(".cache/backplane/cef-gpui-profile") }
+            #[cfg(not(target_os = "linux"))] { crate::plat::cache_base().unwrap_or_else(std::env::temp_dir).join("backplane").join("cef-gpui-profile") }
         });
         let _ = std::fs::create_dir_all(&profile);
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let settings = Settings {
-            no_sandbox: true as _, multi_threaded_message_loop: true as _, windowless_rendering_enabled: true as _,
-            browser_subprocess_path: CefString::from(exe.to_string_lossy().as_ref()),
-            resources_dir_path: CefString::from(dir.to_string_lossy().as_ref()),
-            locales_dir_path: CefString::from(dir.join("locales").to_string_lossy().as_ref()),
-            root_cache_path: CefString::from(profile.to_string_lossy().as_ref()), cache_path: CefString::from(profile.to_string_lossy().as_ref()),
+        let cs = |p: &Path| CefString::from(p.to_string_lossy().as_ref());
+        let mut settings = Settings {
+            no_sandbox: true as _, windowless_rendering_enabled: true as _,
+            root_cache_path: cs(&profile), cache_path: cs(&profile),
             remote_debugging_port: port as _, persist_session_cookies: true as _,
             log_severity: LogSeverity::WARNING, ..Default::default()
         };
+        // Linux, Windows: CEF's UI thread is its own, the helpers are this executable; macOS: the main thread's pump (`pump`), the helper bundles beside the framework
+        #[cfg(not(target_os = "macos"))]
+        { settings.multi_threaded_message_loop = true as _; settings.browser_subprocess_path = cs(&exe);
+          settings.resources_dir_path = cs(&dir); settings.locales_dir_path = cs(&dir.join("locales")); }
+        #[cfg(target_os = "macos")]
+        { let _ = &exe; settings.external_message_pump = true as _; settings.framework_dir_path = cs(&dir.join("Chromium Embedded Framework.framework"));
+          settings.browser_subprocess_path = cs(&dir.join("Backplane Helper.app/Contents/MacOS/Backplane Helper"));
+          let main = dir.join("Backplane.app"); if main.exists() { settings.main_bundle_path = cs(&main); } } // the client itself is not in a bundle: a stub one names it
         let args = cef::args::Args::new();
         let mut a = app();
         let ok = initialize(Some(args.as_main_args()), Some(&settings), Some(&mut a), std::ptr::null_mut());
         if ok != 1 { return Err(format!("CEF did not start (initialize answered {ok})")) }
+        eprintln!("GPUI_LOG {{\"cef_started\":{}}}", serde_json::Value::String(dir.display().to_string()));
         Ok(Engine { cdp_port: port, dir })
     }
     pub fn shutdown() { if ENGINE.get().map_or(false, |e| e.is_ok()) { cef::shutdown(); } }
@@ -354,6 +474,19 @@ mod tests {
         for f in RUNTIME_FILES { if f != "locales" { std::fs::write(rt.join(f), b"x").unwrap(); } }
         assert!(ensure_beside(&rt, &ex).is_ok()); for f in RUNTIME_FILES { assert!(ex.join(f).exists(), "{f}"); }
         assert!(ensure_beside(&rt, &rt).is_ok()); let _ = std::fs::remove_dir_all(&b);
+    }
+    #[test] fn only_a_type_switch_makes_a_helper() {
+        let a = |v: &[&str]| is_helper_argv(v.iter().map(|s| s.to_string()));
+        assert!(a(&["gpui", "--type=renderer", "--lang=en"])); assert!(!a(&["gpui", "--url", "ws://x"])); assert!(!a(&["--type=gpu"]), "argv[0] is the program");
+        assert!(!a(&["gpui", "--typed"]));
+    }
+    #[test] fn a_runtime_is_refused_until_every_file_this_os_needs_is_there() {
+        let d = std::env::temp_dir().join(format!("bp-cefneed-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        for need in [NEED_LINUX, NEED_WINDOWS, NEED_MACOS] {
+            std::fs::create_dir_all(&d).unwrap(); assert_eq!(missing(&d, need).len(), need.len());
+            for (i, f) in need.iter().enumerate() { let p = d.join(f); std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(&p, b"x").unwrap(); assert_eq!(missing(&d, need).len(), need.len() - i - 1, "{f}"); }
+            let _ = std::fs::remove_dir_all(&d);
+        }
     }
     #[test] fn key_codes() { assert_eq!(vk("a"), Some(65)); assert_eq!(vk("7"), Some(55)); assert_eq!(vk("enter"), Some(13)); assert_eq!(vk("f5"), Some(116)); assert_eq!(vk("é"), None); }
     #[test] fn event_flags() { assert_eq!(flags(true, false, false, true, false, false), 2 | 16); assert_eq!(flags(false, true, true, false, false, true), 4 | 8 | 64); }

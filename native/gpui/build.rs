@@ -1,7 +1,15 @@
 use std::{env, fs, path::PathBuf};
 fn main() {
     // the cef feature links libcef.so dynamically; the cef crate copies it beside the binary, so find it there (docs/browser-cef.md)
-    if env::var_os("CARGO_FEATURE_CEF").is_some() { println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN"); }
+    // Windows: libcef.dll is delay-loaded, so the client starts (and its Browser tab shows the hub's frames, saying why) when the DLL is not beside it;
+    // viewers/cef.rs checks every runtime file before its first CEF call. macOS: the framework is loaded by hand (cef::load_library), nothing to link.
+    if env::var_os("CARGO_FEATURE_CEF").is_some() {
+        match env::var("CARGO_CFG_TARGET_OS").as_deref() {
+            Ok("linux") => println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN"),
+            Ok("windows") => println!("cargo:rustc-link-arg-bin=backplane-gpui=/DELAYLOAD:libcef.dll"),
+            _ => {}
+        }
+    }
     let css_path=PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../assets/web/style.css");
     println!("cargo:rerun-if-changed={}",css_path.display());
     let css=fs::read_to_string(css_path).unwrap();
