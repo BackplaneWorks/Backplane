@@ -97,7 +97,7 @@ def xin(cmd, *a):
         if a[0] == 'Return': cli('w:500', 'kp:return')   # the first Return after typed text is often taken by the text input to commit it; a second on an empty field does nothing
     elif cmd == 'wheel':
         x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y)); time.sleep(0.2)
-        for _ in range(abs(int(a[2]))): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, 3 if int(a[2]) > 0 else -3)); time.sleep(0.15)
+        for _ in range(abs(int(a[2]))): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, -3 if int(a[2]) > 0 else 3)); time.sleep(0.15)   # the rows say positive = scroll down; a Quartz wheel event's positive value is the other way
     elif cmd == 'drag':
         x1, y1 = abs_(a[0], a[1]); x2, y2 = abs_(a[2], a[3]); cli('dd:%d,%d' % (x1, y1), 'dm:%d,%d' % ((x1 + x2) // 2, (y1 + y2) // 2), 'dm:%d,%d' % (x2, y2), 'du:%d,%d' % (x2, y2))
     elif cmd == 'chord': chord_(a)
