@@ -44,14 +44,15 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
 
 #[tokio::test] async fn a_0_14_home_comes_across_once_and_is_left_as_it_was() {
     let r = rig("full").await; let before = snapshot(&r.old);
+    let n0 = r.hub.store.len();
     let scan = r.imp.scan(&r.hub, false).await;
     assert_eq!(scan["state"], "ready", "{scan}");
-    let n0 = r.hub.store.len();
-    assert_eq!(n0, log(&r.hub).len());
     let c = &scan["counts"];
     assert_eq!((c["projects"].as_u64(), c["threads"].as_u64(), c["bots"].as_u64(), c["rooms"].as_u64(), c["routines"].as_u64(), c["devices"].as_u64(), c["pushes"].as_u64()), (Some(1), Some(3), Some(1), Some(1), Some(1), Some(1), Some(1)), "{c}");
     assert_eq!((c["runs"].as_u64(), c["deleted"].as_u64(), c["removed"].as_u64()), (Some(1), Some(2), Some(1)), "{c}");
-    assert_eq!(r.hub.store.len(), n0, "counting writes nothing");
+    // counting writes nothing: what the hub's own start may write meanwhile is a setting of its own, never a line of the 0.14 log (CI run 42452044244)
+    let meanwhile: Vec<String> = r.hub.store.range(n0, r.hub.store.len()).unwrap();
+    assert!(meanwhile.iter().all(|l| l.starts_with("{\"$\":\"SettingSet\"") && !l.contains("ui.theme") && !l.contains(DONE)), "counting wrote {meanwhile:?}");
 
     let res = r.imp.run(&r.hub, false).await;
     assert_eq!(res["state"], "done", "{res}");
