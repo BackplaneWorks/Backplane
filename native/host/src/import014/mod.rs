@@ -64,10 +64,13 @@ pub fn start_from(hub: &Arc<Hub>, from: Option<PathBuf>) -> Arc<Importer> {
             (None, false) => { let mut d: Value = serde_json::from_str(&done).unwrap_or(json!({})); d["state"] = json!("done"); d }
             (None, true) => return,
         };
-        h.set_info(INFO, &v.to_string()).await;
+        publish(&h, &v).await;
     });
     me
 }
+
+/// The import's state for every client: the info key, and a redraw of every open view (setup and Settings read it).
+async fn publish(hub: &Arc<Hub>, v: &Value) { hub.set_info(INFO, &v.to_string()).await; hub.bump_views(); }
 
 /// The notes on what stays behind, as codes the words are chosen for (present/onboard.rs `import_note`).
 fn notes(p: &plan::Plan, old: &Path, secrets: bool, extra: Vec<Value>) -> Vec<Value> {
@@ -88,7 +91,7 @@ impl Importer {
     /// What would come across now: counts and notes, nothing written.
     pub async fn scan(&self, hub: &Arc<Hub>, secrets: bool) -> Value {
         let Some(old) = self.from.clone() else { return json!({"state":"none"}) };
-        hub.set_info(INFO, &json!({"state":"scanning","from":old.to_string_lossy()}).to_string()).await;
+        publish(hub, &json!({"state":"scanning","from":old.to_string_lossy()})).await;
         let (store, o) = (hub.store.clone(), old.clone());
         let r = tokio::task::spawn_blocking(move || { let have = have_of(&store); plan::plan(&o.join("events.jsonl"), &have, plan::Opts { secrets, keep: false }) }).await;
         let v = match r {
@@ -96,7 +99,7 @@ impl Importer {
             Ok(Err(e)) => json!({"state":"failed","from":old.to_string_lossy(),"why":format!("The 0.14 log could not be read: {e}.")}),
             Err(e) => json!({"state":"failed","from":old.to_string_lossy(),"why":format!("{e}")}),
         };
-        hub.set_info(INFO, &v.to_string()).await;
+        publish(hub, &v).await;
         v
     }
     /// Import: the lines, then the files. One at a time; answers the result (also the info and the setting `import.v014.done`).
@@ -104,7 +107,7 @@ impl Importer {
         let Some(old) = self.from.clone() else { return json!({"state":"none"}) };
         let Ok(_one) = self.busy.try_lock() else { return json!({"state":"running","from":old.to_string_lossy(),"why":"An import is running already."}) };
         let from = old.to_string_lossy().into_owned();
-        hub.set_info(INFO, &json!({"state":"running","from":from,"done":0,"of":0}).to_string()).await;
+        publish(hub, &json!({"state":"running","from":from,"done":0,"of":0})).await;
         let (store, o) = (hub.store.clone(), old.clone());
         let p = match tokio::task::spawn_blocking(move || { let have = have_of(&store); plan::plan(&o.join("events.jsonl"), &have, plan::Opts { secrets, keep: true }) }).await {
             Ok(Ok(p)) => p,
@@ -128,7 +131,7 @@ impl Importer {
         for ch in p.lines.chunks(CHUNK) {
             if let Err(e) = hub.import_lines(ch.to_vec()).await { err = format!("{e:#}"); break }
             done += ch.len();
-            hub.set_info(INFO, &json!({"state":"running","from":from,"done":done,"of":total}).to_string()).await;
+            publish(hub, &json!({"state":"running","from":from,"done":done,"of":total})).await;
         }
         crate::statehost::refold_end(hub, owned);
         if !err.is_empty() { return self.failed(hub, &from, &format!("Writing to this home failed after {done} of {total} events: {err}. Import again to finish: what is here already is not written twice.")).await }
@@ -136,11 +139,11 @@ impl Importer {
         let r = json!({"state":"done","from":from,"counts":c,"bots":p.bots.iter().map(|(_, n)| n).collect::<Vec<_>>(),"devices":devices,"accounts":accounts.added,"signin":accounts.signin,"keys":keys.added,
             "files":fr.copied,"secrets":secrets,"at":crate::hub::now_ms() / 1000,"notes":notes(&p, &old, secrets, extra)});
         let _ = hub.commit(&json!({"$":"SettingSet","key":DONE,"value":r.to_string(),"at":crate::hub::now_ms() / 1000})).await;
-        hub.set_info(INFO, &r.to_string()).await;
+        publish(hub, &r).await;
         r
     }
     async fn failed(&self, hub: &Arc<Hub>, from: &str, why: &str) -> Value {
-        let v = json!({"state":"failed","from":from,"why":why}); hub.set_info(INFO, &v.to_string()).await; v
+        let v = json!({"state":"failed","from":from,"why":why}); publish(hub, &v).await; v
     }
 }
 

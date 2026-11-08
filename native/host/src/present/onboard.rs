@@ -174,30 +174,31 @@ pub fn import_counted(c: &Value) -> String {
     if num(c, "devices") > 0 { parts.push(many(num(c, "devices"), "paired device", "paired devices")) }
     match parts.len() { 0 => "Nothing new.".into(), 1 => format!("{}.", parts[0]), n => format!("{} and {}.", parts[..n - 1].join(", "), parts[n - 1]) }
 }
-/// The words for one note on what stays behind.
-pub fn import_note(n: &Value) -> String {
+/// The label and words for one note on what stays behind or needs doing.
+pub fn import_note(n: &Value) -> (String, String) {
     let (k, c) = (s(n, "k"), num(n, "n"));
-    match k {
-        "runs" => format!("{} stay in 0.14. They were the mailroom's own working threads, and its mail stays with them.", many(c, "mail run", "mail runs")),
-        "routines-off" => format!("{} arrive switched off, so none runs twice while 0.14 still runs. Turn each on in its bot's Routines tab.", many(c, "routine", "routines")),
-        "machines" => "Links to your other machines stay in 0.14. Link them again in Settings, Devices.".into(),
-        "keys-stay" => "Keys, webhook secrets and sign-ins stay in 0.14 unless you import with keys.".into(),
-        "google" => "The Google connection is not part of this version and stays in 0.14.".into(),
-        "clashes" => format!("{} stay in 0.14 because this hub already uses their names for something else.", many(c, "item", "items")),
-        "fresh" => "Turn state, queues, wakes, locks and usage meters start fresh here.".into(),
-        "running" => "0.14 is still running. Import again later to bring what it adds after now.".into(),
-        "bot-folder" => format!("The folder of {} holds {} GB and stays at {}. Its threads and memory came across.", s(n, "name"), num(n, "gb"), s(n, "path")),
-        "copy-failed" => format!("{} could not be copied: {}.", s(n, "path"), s(n, "why").trim_end_matches('.')),
-        "sign-in" => format!("Sign in again to {}. Their history came across.", n["names"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default()),
-        "accounts-later" => "The account profiles were copied but not added yet. Import again once the hub has finished starting.".into(),
-        "vault-failed" => format!("The 0.14 keys did not come: {}. Add them again in Settings, API keys.", s(n, "why").trim_end_matches('.')),
-        _ => String::new(),
-    }
+    let (l, t) = match k {
+        "runs" => ("Mail runs", format!("{} in 0.14. They were the mailroom's own working threads, and its mail stays with them.", if c == 1 { "1 mail run stays".to_string() } else { format!("{c} mail runs stay") })),
+        "routines-off" => ("Routines", format!("{} switched off, so none runs twice while 0.14 still runs. Turn each on in its bot's Routines tab.", if c == 1 { "1 routine arrives".to_string() } else { format!("{c} routines arrive") })),
+        "machines" => ("Other machines", "Links to your other machines stay in 0.14. Link them again in Settings, Devices.".into()),
+        "keys-stay" => ("Keys", "Keys, webhook secrets and sign-ins stay in 0.14 unless you import with keys.".into()),
+        "google" => ("Google", "The Google connection is not part of this version and stays in 0.14.".into()),
+        "clashes" => ("Name clashes", format!("{} in 0.14 because this hub already uses {} for something else.", if c == 1 { "1 item stays".to_string() } else { format!("{c} items stay") }, if c == 1 { "its name" } else { "their names" })),
+        "fresh" => ("Starts fresh", "Turn state, queues, wakes, locks and usage meters start fresh here.".into()),
+        "running" => ("0.14 is running", "0.14 is still running. Import again later to bring what it adds after now.".into()),
+        "bot-folder" => ("Bot folder", format!("The folder of {} holds {} GB and stays at {}. Its threads and memory came across.", s(n, "name"), num(n, "gb"), s(n, "path"))),
+        "copy-failed" => ("Not copied", format!("{} could not be copied: {}.", s(n, "path"), s(n, "why").trim_end_matches('.'))),
+        "sign-in" => ("Sign in again", format!("Sign in again to {}. Their history came across.", n["names"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default())),
+        "accounts-later" => ("Accounts", "The account profiles were copied but not added yet. Import again once the hub has finished starting.".into()),
+        "vault-failed" => ("Keys", format!("The 0.14 keys did not come: {}. Add them again in Settings, API keys.", s(n, "why").trim_end_matches('.'))),
+        _ => ("", String::new()),
+    };
+    (l.to_string(), t)
 }
 /// The rows for the import, in setup and in Settings, Import.
 pub fn import_rows(info: &Value) -> Vec<Value> {
     let Some(v) = import_info(info) else { return vec![row("Nothing to import", "No Backplane 0.14 data was found on this computer. If it is in another folder, start the hub with BACKPLANE_IMPORT_FROM set to that folder.", vec![])] };
-    let notes = |v: &Value| v["notes"].as_array().into_iter().flatten().map(import_note).filter(|t| !t.is_empty()).map(|t| row("Stays behind", &t, vec![])).collect::<Vec<_>>();
+    let notes = |v: &Value| v["notes"].as_array().into_iter().flatten().map(import_note).filter(|(_, t)| !t.is_empty()).map(|(l, t)| row(&l, &t, vec![])).collect::<Vec<_>>();
     let mut rows = vec![];
     match s(&v, "state") {
         "found" => rows.push(row("What is there", "Not counted yet. Counting reads the 0.14 log and changes nothing.", vec![btn("Count", "ob-import", "scan", true)])),
@@ -216,7 +217,8 @@ pub fn import_rows(info: &Value) -> Vec<Value> {
         "done" => {
             let c = &v["counts"];
             let what = if num(c, "lines") == 0 { "Nothing new came across: everything was here already.".to_string() } else { import_counted(c) };
-            rows.push(row("Imported", &what, vec![btn("Count again", "ob-import", "scan", false)]));
+            rows.push(row("Imported", &what, vec![]));
+            rows.push(row("Import again", "Counts what 0.14 added since. Nothing already here comes twice.", vec![btn("Count again", "ob-import", "scan", false)]));
             rows.extend(notes(&v));
         }
         _ => { let mut r = row("The import stopped", s(&v, "why"), vec![btn("Try again", "ob-import", "scan", true)]); r["tone"] = json!("warn"); rows.push(r) }
@@ -793,7 +795,8 @@ mod tests {
         }
         assert!(act(&st, "h", &sess(json!({})), &i, &desk(), "/h", "ob-import", "rm").is_none());
         let done = json!({"import.v014": json!({"state":"done","counts":{"projects":2,"threads":3,"messages":9,"lines":20},"notes":[{"k":"runs","n":4}]}).to_string()});
-        let r = import_rows(&done); assert_eq!(r[0]["note"], "2 projects and 3 threads with 9 messages."); assert!(r[1]["note"].as_str().unwrap().starts_with("4 mail runs stay in 0.14"));
+        let r = import_rows(&done); assert_eq!(r[0]["note"], "2 projects and 3 threads with 9 messages."); assert_eq!(r[1]["label"], "Import again"); assert!(r[2]["note"].as_str().unwrap().starts_with("4 mail runs stay in 0.14"));
+        assert!(import_note(&json!({"k":"runs","n":1})).1.starts_with("1 mail run stays")); assert!(import_note(&json!({"k":"routines-off","n":1})).1.starts_with("1 routine arrives"));
     }
     /// Everything that lives outside Backplane has a button or a page, on each system, and the phones' links are choices they decode.
     #[test] fn every_step_that_needs_something_outside_backplane_links_or_installs_it() {

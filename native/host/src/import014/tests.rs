@@ -87,7 +87,9 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     let n1 = h.store.len();
     let again = r.imp.run(&r.hub, false).await;
     assert_eq!(again["counts"]["lines"], 0, "{again}"); assert!(again["counts"]["already"].as_u64().unwrap() > 0);
-    assert_eq!(h.store.len(), n1 + 1, "only the result setting");
+    // only the result (a policy refolding may add a setting of its own at any time: never an imported line)
+    let new: Vec<String> = h.store.range(n1, h.store.len()).unwrap();
+    assert!(new.iter().all(|l| l.starts_with("{\"$\":\"SettingSet\"") && !l.contains("ui.theme")), "{new:?}"); assert_eq!(new.iter().filter(|l| l.contains(DONE)).count(), 1, "{new:?}");
     assert_eq!(reg.device_keys().len(), 1); assert_eq!(acc.ids().len(), 1);
     assert_eq!(snapshot(&r.old), before, "the 0.14 home is unchanged");
 }
@@ -100,9 +102,22 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     assert_eq!(std::fs::read_to_string(r.home.join("secrets/openai.key")).unwrap(), "sk-fixture-not-real\n");
     assert!(r.home.join("secrets/hooks/h1790305792-9226").is_file() && r.home.join("secrets/hooks/h1790305792-9226.token").is_file());
     assert_eq!(has(&r.hub, "\"HookSet\""), 1, "the webhook comes with its secret");
-    { use crate::plat::fs::PermissionsExt; assert_eq!(std::fs::metadata(r.home.join("secrets/openai.key")).unwrap().permissions().mode() & 0o777, 0o600); }
+    #[cfg(unix)] { use crate::plat::fs::PermissionsExt; assert_eq!(std::fs::metadata(r.home.join("secrets/openai.key")).unwrap().permissions().mode() & 0o777, 0o600); }
     assert!(res["notes"].as_array().unwrap().iter().all(|n| n["k"] != "keys-stay" && n["k"] != "sign-in"));
     assert_eq!(snapshot(&r.old), before);
+}
+
+#[tokio::test] async fn keys_chosen_later_bring_the_login_to_a_profile_imported_without_it() {
+    let r = rig("later").await;
+    r.imp.run(&r.hub, false).await;
+    let store = r.home.join("providers/accounts-v1/5e70d94b-6252-4f29-8eed-d3bd8c4b961a/02b33ae0-d452-432d-8838-bc364d86404d");
+    assert!(!store.join(".credentials.json").exists());
+    let acc = crate::settings::accounts_hub::live(&r.home).unwrap();
+    assert_eq!(acc.snapshot()["profiles"][0]["state"], "expired");
+    let res = r.imp.run(&r.hub, true).await;
+    assert!(store.join(".credentials.json").is_file(), "the login comes now");
+    assert_eq!(res["accounts"], 1, "{res}"); assert_ne!(acc.snapshot()["profiles"][0]["state"], "expired");
+    assert_eq!(acc.ids().len(), 1);
 }
 
 #[tokio::test] async fn an_import_after_0_14_kept_working_adds_only_what_is_new() {
@@ -113,7 +128,9 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     let mut f = std::fs::OpenOptions::new().append(true).open(r.old.join("events.jsonl")).unwrap();
     std::io::Write::write_all(&mut f, b"\",\"role\":\"user\",\"text\":\"one more\",\"at\":1790175999}\n{\"$\":\"MessagePosted\",\"thread\":\"t1790175755-10\",\"msg\":\"m1790176000-90\",\"role\":\"assistant\",\"text\":\"later\",\"at\":1790176000}\n").unwrap();
     let res = r.imp.run(&r.hub, false).await;
-    assert_eq!(res["counts"]["messages"], 2, "{res}"); assert_eq!(r.hub.store.len(), n + 3);
+    assert_eq!(res["counts"]["messages"], 2, "{res}");
+    let new: Vec<String> = r.hub.store.range(n, r.hub.store.len()).unwrap();
+    assert_eq!(new.iter().filter(|l| !l.starts_with("{\"$\":\"SettingSet\"")).count(), 2, "the two messages and nothing else: {new:?}");
     assert_eq!(has(&r.hub, "m1790176000-90"), 1);
 }
 

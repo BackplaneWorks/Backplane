@@ -59,7 +59,8 @@ pub fn copy(old: &Path, home: &Path, bots: &[(String, String)], hooks: &[String]
     let dest = home.join("providers/accounts-v1");
     for p in list {
         let id = p["id"].as_str().unwrap_or("").to_string();
-        if !crate::settings::accounts_io::valid_id(&id) || have_profiles.contains(&id) { continue }
+        // a profile here already (an earlier import without keys) still gets its missing files when keys come now: its login
+        if !crate::settings::accounts_io::valid_id(&id) || (have_profiles.contains(&id) && !secrets) { continue }
         let (s, d) = (reg.join(&id), dest.join(&id));
         if s.is_dir() { cp(s, d.clone(), if secrets { &[] } else { LOGINS }, &mut r); private(&d); }
         // a bot's agent history is filed under the folder it worked in, which moved
