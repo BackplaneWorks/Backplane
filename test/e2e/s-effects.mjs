@@ -16,7 +16,7 @@ const mk=async(title,x={})=>idof((await c.rpc('thread.create',{project:p,title,.
 /** start a fresh thread, send one short turn, return {thread, argv of the process it started} */
 async function turn(title,x={}){const n0=argvs(out+'/argv').length;const t=await mk(title,x);await c.rpc('message.send',{thread:t,text:'zqshort '+title});
   const a=await waitFor(()=>{const l=argvs(out+'/argv');return l.length>n0&&l[l.length-1]},20000);return {t,a}}
-const prompt=a=>argOf(a||[],'--append-system-prompt')||'';
+const prompt=a=>{const f=argOf(a||[],'--append-system-prompt-file');if(f)try{return readFileSync(f,'utf8')}catch{return ''} return argOf(a||[],'--append-system-prompt')||''}; // Windows: the hub passes it in a file
 // ---- S03 agents: the defaults for new threads, thinking
 await set('agent.model','haiku');{const t=await mk('model default');const th=(await c.rpc('threads.list',{limit:50})).result?.threads?.find(x=>x.id===t);const r=await turn('model arg');
   rec('S03','agent.model chip',th?.model==='haiku'&&argOf(r.a,'--model')==='haiku',`new thread model=${th?.model}; stand-in argv --model ${argOf(r.a,'--model')}`)}

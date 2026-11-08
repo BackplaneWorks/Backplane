@@ -996,6 +996,7 @@ impl Actor {
         let (effort, think) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think) };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url });
+        #[cfg(windows)] { let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect(); rules::prompt_to_file(&mut args, &self.ag.host.home.join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?; }
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load
         self.ag.set_gen(&th, &gen);

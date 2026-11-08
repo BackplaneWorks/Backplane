@@ -55,6 +55,17 @@ pub fn claude_args(a: &ArgsIn) -> Vec<String> {
     v.push(s("--mcp-config")); v.push(mcp_config(a.mcp_url));
     v
 }
+/// Windows: the system prompt goes to Claude in a file (`--append-system-prompt-file`). A command line there holds 32767 characters,
+/// npm's `claude.cmd` (cmd.exe) 8191 and Git's sh keeps 8186 of a quoted argument, while the prompt is 13 to 20 thousand; and a batch
+/// file's arguments may not hold the prompt's newlines at all.
+pub fn prompt_to_file(args: &mut [String], file: &std::path::Path) -> std::io::Result<()> {
+    let Some(i) = args.iter().position(|a| a == "--append-system-prompt") else { return Ok(()) };
+    if i + 1 >= args.len() { return Ok(()) }
+    if let Some(d) = file.parent() { std::fs::create_dir_all(d)?; }
+    let tmp = file.with_extension("tmp"); std::fs::write(&tmp, &args[i + 1])?; std::fs::rename(&tmp, file)?;
+    args[i] = "--append-system-prompt-file".into(); args[i + 1] = file.to_string_lossy().into_owned();
+    Ok(())
+}
 /// AG.Effort.of("claude", e): the levels Claude takes.
 pub fn effort_ok(e: &str) -> bool { ["low", "medium", "high", "xhigh", "max"].contains(&e) }
 /// The MCP servers Claude is given: Backplane's own, and pcbparts (a free parts-search MCP).
@@ -230,5 +241,16 @@ mod tests {
         assert_eq!(refusal(&rs, "mcp__backplane__deploy_main", "do it"), "Refused by a standing rule (r3): \"No deploys\". mcp__backplane__deploy_main needs the person's word \"ship it\" in their latest message.");
         assert_eq!(refusal(&rs, "deploy_main", "please SHIP IT"), ""); assert!(!refusal(&rs, "deploy_main", "[from a bot] ship it").is_empty(), "a delivered message cannot unlock");
         assert_eq!(refusal(&rs, "Write", "ship it"), "Refused by a standing rule (r4): \"Never edit\". Write is not allowed here."); assert_eq!(refusal(&rs, "Bash", ""), "", "a rule without enforce is words only"); assert_eq!(refusal(&rs, "", "x"), "");
+    }
+    #[test] fn a_prompt_too_long_for_a_windows_command_line_goes_in_a_file() {
+        let d = std::env::temp_dir().join(format!("bp-pf-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let long = "line one\n".repeat(3000);
+        let mut a: Vec<String> = ["-p", "--append-system-prompt", long.as_str(), "--model", "m"].iter().map(|x| x.to_string()).collect();
+        let f = d.join("prompts/t1.md");
+        prompt_to_file(&mut a, &f).unwrap();
+        assert_eq!(a, vec!["-p".to_string(), "--append-system-prompt-file".into(), f.to_string_lossy().into_owned(), "--model".into(), "m".into()]);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), long, "the whole prompt, newlines and all");
+        let mut b: Vec<String> = vec!["-p".into()]; prompt_to_file(&mut b, &f).unwrap(); assert_eq!(b, vec!["-p".to_string()], "no prompt, nothing changes");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
