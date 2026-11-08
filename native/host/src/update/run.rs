@@ -74,9 +74,10 @@ pub fn members_ok(names: &str, long: &str) -> Result<(), String> {
 }
 
 /// A build ready to run: the hub is there and runs, and nothing in it is a link of either kind (it could point outside its folder). Checked again after unpacking, whatever the listing said.
-fn check_tree(d: &Path) -> Result<(), String> {
-    let hub = fs::metadata(d.join("backplane-hub")).map_err(|_| "the archive has no backplane-hub".to_string())?;
-    #[cfg(unix)] { use crate::plat::fs::PermissionsExt; if hub.permissions().mode() & 0o111 == 0 { return Err("the archive's backplane-hub cannot run".into()) } }
+/// `zip`: a Windows build, whose hub is `backplane-hub.exe` and has no mode bits to check.
+fn check_tree(d: &Path, zip: bool) -> Result<(), String> {
+    let hub = fs::metadata(d.join(if zip { "backplane-hub.exe" } else { "backplane-hub" })).map_err(|_| "the archive has no backplane-hub".to_string())?;
+    #[cfg(unix)] { use crate::plat::fs::PermissionsExt; if !zip && hub.permissions().mode() & 0o111 == 0 { return Err("the archive's backplane-hub cannot run".into()) } }
     if !hub.is_file() { return Err("the archive has no backplane-hub".into()) }
     let mut todo = vec![d.to_path_buf()];
     while let Some(x) = todo.pop() {
@@ -97,11 +98,13 @@ pub fn stage(f: &Found, builds: &Path, get: Get, unpack: Unpack) -> Result<PathB
     let work = builds.join("builds").join(format!(".stage-{}-{}", f.tag, std::process::id()));
     let _ = fs::remove_dir_all(&work); fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let r = (|| {
-        let a = work.join("archive.tar.gz"); get(&f.url, &a, f.asset.size)?;
+        // the unpacker tells the kinds apart by this name, which comes from the verified manifest (rel::archive_name)
+        let zip = f.asset.name.ends_with(".zip");
+        let a = work.join(if zip { "archive.zip" } else { "archive.tar.gz" }); get(&f.url, &a, f.asset.size)?;
         if fs::metadata(&a).map_err(|e| e.to_string())?.len() != f.asset.size { return Err("the download is the wrong size".to_string()) }
         if sha256(&a)? != f.asset.sha256 { return Err("the download's checksum does not match".to_string()) }
         let x = work.join("build"); fs::create_dir(&x).map_err(|e| e.to_string())?;
-        unpack(&a, &x)?; check_tree(&x)?;
+        unpack(&a, &x)?; check_tree(&x, zip)?;
         // written after the tree check, by us, from the verified manifest: an archive cannot choose what its build is held to
         fs::write(x.join("EXPECT"), json!({"version":f.version,"commit":f.commit}).to_string()).map_err(|e| e.to_string())?;
         fs::rename(&x, &dest).map_err(|e| e.to_string())
@@ -159,9 +162,10 @@ mod tests {
             self.asked.borrow_mut().push(url.into());
             let b = self.files.get(url).ok_or("404")?; if b.len() as u64 > max { return Err("too big".into()) } fs::write(out, b).map_err(|e| e.to_string())
         }
-        fn release(&mut self, tag: &str, archive: &[u8]) -> Listed {
-            let name = format!("backplane-{tag}-{T}-native.tar.gz");
-            let m = json!({"schema":1,"tag":tag,"version":&tag[1..],"channel":rel::tag_channel(tag),"commit":"c","assets":{T:{"name":name,"sha256":sha(archive),"size":archive.len()}}}).to_string().into_bytes();
+        fn release(&mut self, tag: &str, archive: &[u8]) -> Listed { self.release_for(tag, T, archive) }
+        fn release_for(&mut self, tag: &str, target: &str, archive: &[u8]) -> Listed {
+            let name = rel::archive_name(tag, target);
+            let m = json!({"schema":1,"tag":tag,"version":&tag[1..],"channel":rel::tag_channel(tag),"commit":"c","assets":{target:{"name":name,"sha256":sha(archive),"size":archive.len()}}}).to_string().into_bytes();
             let s = pair().sk.sign(&m, None).as_ref().to_vec();
             let mut urls = BTreeMap::new();
             for (n, b) in [("manifest.json", m), ("manifest.json.sig", s), ("manifest.json.keyid", b"k\n".to_vec()), (name.as_str(), archive.to_vec())] { let u = format!("mem://{tag}/{n}"); self.files.insert(u.clone(), b); urls.insert(n.to_string(), u); }
@@ -222,6 +226,19 @@ mod tests {
         assert!(d.join("backplane-hub").is_file()); assert_eq!(left(&r), vec!["v0.16.0"], "no scratch left");
         let e: Value = serde_json::from_str(&fs::read_to_string(d.join("EXPECT")).unwrap()).unwrap();
         assert_eq!((e["version"].as_str(), e["commit"].as_str()), (Some("0.16.0"), Some("c")), "the guard's probation check, from the signed manifest");
+    }
+    #[test] fn a_windows_build_comes_as_a_zip_with_its_hub_exe() {
+        let r = Rig::new("zip"); let mut f = Feed::new(); let l = f.release_for("v0.16.0", "windows-x64", b"zipped"); let k = keys();
+        let a = Ask { current: "0.15.0", channel: "stable", target: "windows-x64", keys: &k, bad: &[] };
+        let x = find(&a, &[l], &r.d.join("scratch"), &|u, o, m| f.get(u, o, m)).unwrap().unwrap();
+        assert_eq!(x.asset.name, "backplane-v0.16.0-windows-x64.zip");
+        let seen = RefCell::new(String::new());
+        let unzip = |a: &Path, d: &Path| -> Result<(), String> { *seen.borrow_mut() = a.file_name().unwrap().to_string_lossy().into(); fs::write(d.join("backplane-hub.exe"), b"MZ").map_err(|e| e.to_string()) };
+        let d = stage(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &unzip).unwrap();
+        assert_eq!(*seen.borrow(), "archive.zip", "the unpacker is told it is a zip"); assert!(d.join("backplane-hub.exe").is_file()); assert!(d.join("EXPECT").is_file());
+        let r2 = Rig::new("zip-nohub"); let mut f2 = Feed::new(); let l2 = f2.release_for("v0.16.0", "windows-x64", b"zipped");
+        let x2 = find(&a, &[l2], &r2.d.join("scratch"), &|u, o, m| f2.get(u, o, m)).unwrap().unwrap();
+        assert!(stage(&x2, &r2.d.join("b"), &|u, o, m| f2.get(u, o, m), &good_tree).unwrap_err().contains("no backplane-hub"), "a Unix hub is not a Windows build"); assert!(left(&r2).is_empty());
     }
     #[test] fn a_corrupt_archive_is_never_unpacked_and_leaves_nothing() {
         let r = Rig::new("corrupt"); let mut f = Feed::new(); let x = found(&mut f, &r, b"archive"); f.files.insert(x.url.clone(), b"ARCHIVE".to_vec());
