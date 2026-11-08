@@ -18,10 +18,10 @@ fn git(d: &Path, a: &[&str]) { let o = std::process::Command::new("git").args(["
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_turn_started_the_moment_the_last_one_ends_is_not_inside_the_earlier_checkpoint() {
-    super::super::CKPT_SAY_MS.store(1, std::sync::atomic::Ordering::Relaxed); // say so as soon as a turn has to wait
     let bin = dir("ckpt-bin"); script(&bin, "claude", WRITER);
     let (hub, ag, _home, work) = start("ckpt", |w| { std::fs::write(w.join("a.txt"), "one\n").unwrap();
-        // a work tree big enough that a capture takes longer than the test's polling: the earlier turn's end capture is still running when the next message is sent
+        // a work tree big enough that a capture takes a while: the earlier turn's end capture is likely still running when the next message is sent. (The hub never runs a repo's own clean
+        // filters, so a slow filter cannot make it slow; the wait is proved without git below.) Whether the capture was still running is machine speed: the revert assertions hold either way.
         std::fs::create_dir_all(w.join("bulk")).unwrap(); for i in 0..6000 { std::fs::write(w.join(format!("bulk/f{i}.txt")), format!("{i}\n")).unwrap() } git(w, &["init", "-q", "-b", "main"]); git(w, &["add", "."]); git(w, &["commit", "-qm", "init"]); base_log(w, 1, "") }, |_| Cli::standin(&bin)).await;
     let wp = work.to_string_lossy().into_owned();
     for (n, file) in ["first.txt", "second.txt"].iter().enumerate() {
@@ -36,7 +36,24 @@ async fn a_turn_started_the_moment_the_last_one_ends_is_not_inside_the_earlier_c
     assert_eq!(crate::files::git::checkpoint_revert(&wp, T1, 1).await, "");
     assert!(work.join("first.txt").exists(), "checkpoint 1 has what turn 1 wrote");
     assert!(!work.join("second.txt").exists(), "checkpoint 1 does not have what turn 2 wrote");
-    let said = hub.store.range(0, usize::MAX).unwrap().iter().any(|l| l.contains("\"ActivityLogged\"") && l.contains("Saving the last turn's checkpoint"));
-    assert!(said, "a turn that waits for the earlier checkpoint says so in the thread");
+    ag.shutdown();
+}
+
+/// The wait itself, without git: an end capture still counted as running holds the next turn, which says so in the thread once it has waited `say`, and goes on the moment the capture ends.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_waiting_for_the_earlier_checkpoint_says_so_and_goes_on_when_it_ends() {
+    let bin = dir("ckpt-wait-bin"); script(&bin, "claude", WRITER);
+    let (hub, ag, _home, _work) = start("ckpt-wait", |w| base_log(w, 1, ""), |_| Cli::standin(&bin)).await;
+    let ends = Arc::new(super::super::HistEnds::default()); ends.n.fetch_add(1, Relaxed);                    // one end capture "running"
+    let from = len(&hub).await;
+    let waiter = tokio::spawn(super::super::ends_settled(ends.clone(), ag.clone(), T1.to_string(), Duration::from_millis(50)));
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().map_or(false, |s| s.contains("Saving the last turn's checkpoint")))).await;
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["thread"] == T1 && e["kind"] == "checkpoint"), "the waiting turn says so in its thread: {ev:?}");
+    assert!(!waiter.is_finished(), "it still waits while the capture runs");
+    ends.n.fetch_sub(1, Relaxed); ends.done.notify_waiters();                                                // the capture ends
+    tokio::time::timeout(Duration::from_secs(10), waiter).await.expect("it goes on once the capture ends").unwrap();
+    // a turn that finds nothing running does not say anything
+    let from = len(&hub).await; super::super::ends_settled(Arc::new(super::super::HistEnds::default()), ag.clone(), T1.to_string(), Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await; assert!(!log_from(&hub, from).await.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "checkpoint"), "nothing was waited for: nothing said");
     ag.shutdown();
 }
