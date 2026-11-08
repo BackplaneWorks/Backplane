@@ -41,7 +41,7 @@ ticker & TK=$!
 # a haiku on what this build adds (commits since MAIN_PREV, the tip built before), made by Haiku while the build runs; a miss costs nothing
 HK=$(mktemp "$DEV/.haiku.XXXX"); HKP=
 if [ -n "${MAIN_PREV:-}" ]; then "$HERE/build-haiku.sh" "$ROOT" "$MAIN_PREV" "$(git -C "$ROOT" rev-parse HEAD)" > "$HK" 2>/dev/null & HKP=$!; fi
-cleanup() { kill $TK $HKP 2>/dev/null; rm -f "$ST" "$ST.$$" "$PH" "$HK"; [ -n "${D:-}" ] && rm -rf "$D"; [ -n "${BOXID:-}" ] && bo_finish "$BX" "$BOXID" "$BJOB"; rm -f "$LOG"
+cleanup() { kill $TK $HKP $(jobs -p) 2>/dev/null; [ -z "${BL:-}" ] || rm -rf "$BL"; rm -f "$ST" "$ST.$$" "$PH" "$HK"; [ -n "${D:-}" ] && rm -rf "$D"; [ -n "${BOXID:-}" ] && bo_finish "$BX" "$BOXID" "$BJOB"; rm -f "$LOG"
   for t in "${tds[@]}"; do [ -e "$t/.bpt-failed" ] || bpt_rm "$t"; done; }  # test temp dirs (below): a passing, interrupted or killed run leaves none; a failed one's stays
 tds=()
 trap cleanup EXIT
@@ -71,6 +71,15 @@ winstep() {
 }
 # `backplane`, the guard (native/guard): a small crate of its own, built first
 guardstep() { mark "guard"; CG "$ROOT/native/guard" "$UT" build --profile "$PROFILE" $OFFLINE -j "$J" > "$LOG" 2>&1 || fail guard; }
+# the four builds, side by side: four crates, four target dirs, so no cargo lock is shared; the window (the longest when it changed) runs here, the other three beside it with a log each
+buildall() {
+  mark "builds"; local i; BL=$(mktemp -d "$DEV/.bl.XXXX"); local -a bp=() bn=()
+  ( CG "$ROOT/native/guard" "$UT" build --profile "$PROFILE" $OFFLINE -j "$J" > "$BL/guard" 2>&1 ) & bp+=($!); bn+=(guard)
+  ( CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-hub > "$BL/hub" 2>&1 ) & bp+=($!); bn+=(hub)
+  ( CG "$ROOT/native/voice" "$VT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-voice > "$BL/voice" 2>&1 ) & bp+=($!); bn+=(voice)
+  winstep
+  for i in "${!bp[@]}"; do wait "${bp[$i]}" || { cp "$BL/${bn[$i]}" "$LOG"; rm -rf "$BL"; fail "${bn[$i]}"; }; done
+  rm -rf "$BL"; }
 # On a Boat box (every local slot taken, lib-boat.sh): this same script runs there with BP_REMOTE_CORE=1 (the tests and the four builds, no stage, no publish), its output
 # comes back into $LOG, and the programs are copied back to $HT/$GT/$VT/$UT/$PROFILE, hashed on the box and again here. The stage, the smoke start and the publish below stay local.
 boat_core() {
@@ -96,38 +105,51 @@ boat_core() {
 if [ -n "$BX" ]; then boat_core
 elif [ "$GATE" = 1 ]; then
   mark "guard tests"; CG "$ROOT/native/guard" "$UT" test $OFFLINE -j "$J" > "$LOG" 2>&1 || fail "guard tests"
-  mark "compiling tests"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX"); LV=$(mktemp "$DEV/.t.XXXX")
-  CG "$ROOT/native/host" "$HT" test $OFFLINE -j "$J" --no-run > "$LH" 2>&1 & ph=$!
-  CG "$ROOT/native/gpui" "$GT" test $OFFLINE -j "$J" --no-run > "$LW" 2>&1 & pw=$!
+  # A suite whose inputs are byte-identical (git's index of its files, the compiler, this script) to the last time it passed is not run again: the log says "skip: ..." and names that run.
+  # Inputs are everything but what the suite cannot see (the other crates, mobile/, order/, the top-level docs); anything unknown counts as an input. GATE_FULL=1 runs everything.
+  GOK=$DEV/.gate-ok; mkdir -p "$GOK"; RV=$(rustc -V 2>/dev/null); ex=(':(exclude)mobile' ':(exclude)order' ':(exclude,glob)docs/*.md')
+  gkey() { local s=$1; shift; { printf '%s\n' "$s $RV $PROFILE"; git -C "$ROOT" ls-files -s -- "$@" scripts/dev-build.sh scripts/gate-skip.txt scripts/lib-buildslot.sh 2>/dev/null; } | sha1sum | cut -c1-16; }
+  git -C "$ROOT" rev-parse HEAD > /dev/null 2>&1 && ok=1 || ok=0
+  declare -A KEY SKIP
+  if [ "$ok" = 1 ]; then
+    KEY[hub]=$(gkey hub . "${ex[@]}" ':(exclude)native/gpui' ':(exclude)native/voice'); KEY[window]=$(gkey window . "${ex[@]}" ':(exclude)native/host' ':(exclude)native/voice' ':(exclude)native/guard')
+    KEY[voice]=$(gkey voice native/voice)
+  fi
+  for k in hub window voice; do SKIP[$k]=0
+    if [ -n "${KEY[$k]:-}" ] && [ -z "${GATE_FULL:-}" ] && [ "$(head -1 "$GOK/$k" 2>/dev/null)" = "${KEY[$k]}" ]; then SKIP[$k]=1
+      echo "skip: $k tests: inputs identical (${KEY[$k]}) to the run that passed at $(sed -n 2p "$GOK/$k"); $(sed -n 3p "$GOK/$k")"; fi; done
+  mark "compiling tests"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX"); LV=$(mktemp "$DEV/.t.XXXX"); ph=; pw=; pv=
+  [ "${SKIP[hub]}" = 1 ] || { CG "$ROOT/native/host" "$HT" test $OFFLINE -j "$J" --no-run > "$LH" 2>&1 & ph=$!; }
+  [ "${SKIP[window]}" = 1 ] || { CG "$ROOT/native/gpui" "$GT" test $OFFLINE -j "$J" --no-run > "$LW" 2>&1 & pw=$!; }
   # the voice tests take env!("CARGO_BIN_EXE_backplane-voice"), which came out undefined through sccache ("not defined at compile time") and is fine without it; its deps are already built in $VT
-  RUSTC_WRAPPER= CG "$ROOT/native/voice" "$VT" test $OFFLINE -j "$J" --no-run > "$LV" 2>&1 & pv=$!
-  wait $ph || { cp "$LH" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "hub tests"; }
-  wait $pw || { cp "$LW" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "window tests"; }
-  wait $pv || { cp "$LV" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "voice tests"; }
+  [ "${SKIP[voice]}" = 1 ] || { RUSTC_WRAPPER= CG "$ROOT/native/voice" "$VT" test $OFFLINE -j "$J" --no-run > "$LV" 2>&1 & pv=$!; }
+  [ -z "$ph" ] || wait $ph || { cp "$LH" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "hub tests"; }
+  [ -z "$pw" ] || wait $pw || { cp "$LW" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "window tests"; }
+  [ -z "$pv" ] || wait $pv || { cp "$LV" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "voice tests"; }
   mark "testing"; names=(); pids=(); logs=(); st=()
   # each test program gets its own TMPDIR (tests make dirs under temp_dir() and never remove them; lib-buildslot.sh bpt_new), removed after a pass, kept (bounded) after a failure
   run() { n=$1; dir=$2; shift 2; l=$(mktemp "$DEV/.t.XXXX"); t=$(bpt_new); tds+=("$t"); ( cd "$dir" && TMPDIR=$t CARGO_MANIFEST_DIR="$dir" "$@" ) > "$l" 2>&1 9>&- & pids+=($!); names+=("$n"); logs+=("$l")
     # a machine with fewer than 16 cores (a Boat box) runs the test programs one after another: side by side they starve each other's timing-sensitive tests (a recorder "that fails at once" is judged within 500 ms)
     if [ "$ncpu" -lt 16 ]; then wait "${pids[-1]}"; st[${#pids[@]}-1]=$?; fi; }
-  for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LH"); do run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}"; done
-  for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LW"); do run "window tests" "$ROOT/native/gpui" "$x"; done
-  for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LV"); do run "voice tests" "$ROOT/native/voice" "$x"; done
+  # scripts/gate-slow.txt: tests that run for most of a minute alone. Libtest starts tests in name order, so such a test starting late is the whole run's tail; each gets its own process from the start
+  # (--exact, full path) and the main process skips it. Every test still runs once.
+  slow=(); slowskip=(); while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) slow+=("$l"); slowskip+=(--skip "$l");; esac; done < "$HERE/gate-slow.txt"
+  if [ "${SKIP[hub]}" != 1 ]; then for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LH"); do
+    for t in "${slow[@]}"; do run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}" --exact "$t"; done
+    run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}" "${slowskip[@]}"; done; fi
+  if [ "${SKIP[window]}" != 1 ]; then for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LW"); do run "window tests" "$ROOT/native/gpui" "$x"; done; fi
+  if [ "${SKIP[voice]}" != 1 ]; then for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LV"); do run "voice tests" "$ROOT/native/voice" "$x"; done; fi
   rm -f "$LH" "$LW" "$LV"
   bad=; for i in "${!pids[@]}"; do { if [ -n "${st[$i]+x}" ]; then [ "${st[$i]}" = 0 ]; else wait "${pids[$i]}"; fi; } && bpt_end "${tds[$i]}" 0 || { [ -n "$bad" ] || bad=$i; bpt_end "${tds[$i]}" 1; }; done
   if [ -n "$bad" ]; then cp "${logs[$bad]}" "$LOG"; rm -f "${logs[@]}"; fail "${names[$bad]}"; fi
   # what ran, per suite (so two runs, here and on a Boat box, can be compared): "gate: hub tests 1234 passed, 0 failed, 3 ignored"
-  for n in "hub tests" "window tests" "voice tests"; do for i in "${!names[@]}"; do [ "${names[$i]}" = "$n" ] && cat "${logs[$i]}"; done | awk -v n="$n" '/^test result:/ {p+=$4; f+=$6; g+=$8} END {printf "gate: %s %d passed, %d failed, %d ignored\n", n, p, f, g}'; done
+  GL=$(for n in "hub tests" "window tests" "voice tests"; do [ "${SKIP[${n% tests}]}" = 1 ] && continue; for i in "${!names[@]}"; do [ "${names[$i]}" = "$n" ] && cat "${logs[$i]}"; done | awk -v n="$n" '/^test result:/ {p+=$4; f+=$6; g+=$8} END {printf "gate: %s %d passed, %d failed, %d ignored\n", n, p, f, g}'; done); [ -z "$GL" ] || echo "$GL"
   rm -f "${logs[@]}"
+  if [ "$ok" = 1 ]; then for k in hub window voice; do [ "${SKIP[$k]}" = 1 ] || printf '%s\n%s\n%s\n' "${KEY[$k]}" "$(git -C "$ROOT" rev-parse --short HEAD)" "$(printf %s "$GL" | grep "^gate: $k tests")" > "$GOK/$k"; done; fi
   # the builds come after the tests, not beside them: a build at -j28 starves the timing-sensitive hub tests (reconnect_loses_nothing_under_streaming_load and others fail under that load)
-  guardstep
-  mark "hub"; CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
-  voicestep
-  winstep
+  buildall
 else
-  guardstep
-  mark "hub";    CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
-  voicestep
-  winstep
+  buildall
 fi
 if [ -n "${BP_REMOTE_CORE:-}" ]; then   # on a Boat box: the programs and their hashes, for the caller to copy back (lib-boat.sh bo_pull); no stage here
   kill $TK 2>/dev/null; echo "bp-features: $FEATURES" >&2; T=$HOME/target; cd "$T" || exit 1
@@ -162,8 +184,14 @@ git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
 [ -z "$HKP" ] || wait "$HKP" 2>/dev/null; [ -s "$HK" ] && cp "$HK" "$D/HAIKU"
 # the last gate: this hub, under this guard, starts and restarts on a real-shaped home, and the build now current can still read what it wrote. Nothing is published otherwise.
 if [ -z "${SKIP_SMOKE:-}" ] || [ -n "$BX" ]; then   # (a build made on a Boat box is always smoke-started here, whatever SKIP_SMOKE says)
+  # the smoke start is fixed waits of 30 s or more: skipped when the hub's inputs and the guard's are those of the last smoke start that passed (the binaries differ only in the commit they name); logged
+  SK=; [ -n "${KEY[hub]:-}" ] && SK=$(gkey smoke native/guard)-${KEY[hub]}
+  if [ -n "$SK" ] && [ -z "${GATE_FULL:-}" ] && [ -z "$BX" ] && [ "$(head -1 "$DEV/.gate-ok/smoke" 2>/dev/null)" = "$SK" ]; then echo "skip: smoke start: hub and guard inputs identical ($SK) to the smoke start that passed at $(sed -n 2p "$DEV/.gate-ok/smoke")"
+  else
   mark "smoke start"; status building "Smoke start of $(cat "$D/COMMIT")" "$est" "$est"
   SMOKE_DIR="$DEV" "$HERE/smoke-start.sh" "$D" "$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)" > "$LOG" 2>&1 || fail "smoke start"
+  [ -z "$SK" ] || printf '%s\n%s\n' "$SK" "$(git -C "$ROOT" rev-parse --short HEAD)" > "$DEV/.gate-ok/smoke"
+  fi
 fi
 [ "$CUT" = 0 ] && { mark ""; echo "time: total $(( $(date +%s) - start ))s"; echo "built in $D"; D=; exit 0; }
 status ready "Build $(cat "$D/COMMIT") ready: publishing" "$est" "$est"; mark "publish"
