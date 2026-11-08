@@ -9,3 +9,13 @@ _data = tempfile.mkdtemp(prefix="fab-test-")
 os.environ.update({"FAB_DATA": _data, "FAB_VENDOR": str(HERE / "fakevendor"), "FAB_ENV_FILE": "/nonexistent",
                    "FAB_ADMIN_TOKEN": "admin-token-for-tests-0123456789", "FAB_PUBLIC_URL": "http://testserver"})
 os.environ.pop("STRIPE_KEY", None)
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def fresh_limits():
+    """Each test starts with no requests counted (the hourly quote budget is smaller than the suite)."""
+    from fabsrv import limits
+    limits._hits.clear()
+    yield

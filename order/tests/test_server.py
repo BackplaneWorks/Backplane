@@ -180,7 +180,7 @@ def test_quote_from_files_with_assembly():
         part = quote["parts"][0]
         assert "20×15 mm" in part["summary"] and part["assembled"] == 2
         # the fee is inside Manufacturing, never a line of its own
-        assert [ln["label"] for ln in quote["lines"]] == ["Manufacturing", "Shipping", "Duties & taxes"]
+        assert [ln["label"] for ln in quote["lines"]] == ["Manufacturing", "Shipping", "Duties & taxes", "Sales tax (estimated)"]
         cost = sum(pl["amount"] for pl in quote.get("part_lines", []))
         assert quote["lines"][0]["amount"] > cost, "Manufacturing carries the fee on top of the fab's cost"
         assert abs(sum(ln["amount"] for ln in quote["lines"]) - quote["total"]) < 0.01
@@ -309,3 +309,131 @@ def test_ship_to_must_be_a_country():
     m = manifest(sent)
     m["ship_to"] = "GR"
     assert package.check_manifest(m)["ship_to"] == "GR"
+
+
+# ---------------------------------------------------------------- taxes and fees the fab charges on top
+
+def test_us_sales_tax_follows_the_state():
+    files = {"main/gerbers.zip": board_zip()}
+    with client() as c:
+        quotes = {}
+        for region in ("GA", "OR", None):
+            man = manifest(files)
+            if region:
+                man["ship_region"] = region
+            quotes[region] = quote_of(c, man, files)["quote"]
+    ga, orgn, none = quotes["GA"], quotes["OR"], quotes[None]
+    tax = {k: q["lines"][3] for k, q in quotes.items()}
+    # on the goods (the stand-in board, 3.50) and the shipping (20.00), at Georgia's average combined rate
+    assert tax["GA"]["label"] == "Sales tax (estimated)" and "Georgia, 7.56%" in tax["GA"]["detail"]
+    assert ga["sales_tax"]["rate"] == 7.56 and ga["region"] == "GA" and ga["sales_tax"]["base"] == 23.50
+    assert tax["GA"]["amount"] == round(ga["sales_tax"]["base"] * 0.0756, 2)
+    assert "Ships to the United States (Georgia)" in ga["markdown"]
+    # Oregon has none; without a state, a high rate, and the quote says so
+    assert tax["OR"]["amount"] == 0 and "Oregon has no sales tax" in tax["OR"]["detail"]
+    assert none["sales_tax"]["rate"] == 10.25 and none["region"] == "" and "without the state" in tax[None]["detail"]
+    assert any("doesn't say which US state" in w for w in none["warnings"]), none["warnings"]
+    assert none["total"] > ga["total"] > orgn["total"]
+    for q in quotes.values():
+        assert abs(sum(ln["amount"] for ln in q["lines"]) - q["total"]) < 0.01
+
+
+def test_ship_region_is_a_us_state_and_only_read_for_the_us():
+    sent = {"main/gerbers.zip": b"x"}
+    for bad in ("XX", "Georgia", 7):
+        m = manifest(sent)
+        m["ship_region"] = bad
+        try:
+            package.check_manifest(m)
+            raise AssertionError(f"{bad!r} passed as a state")
+        except package.Bad as e:
+            assert "two-letter code" in str(e), str(e)
+    m = manifest(sent)
+    m["ship_region"] = " wa"
+    assert package.check_manifest(m)["ship_region"] == "WA"
+    m = manifest(sent)
+    m["ship_to"], m["ship_region"] = "GR", "Attica"
+    assert package.check_manifest(m)["ship_region"] == ""
+
+
+def test_duty_paid_parcels_carry_the_couriers_fee():
+    from fabsrv import duties
+    assert duties.disbursement("US", 1, True) == 4.44
+    assert duties.disbursement("GR", 1, True) == round(7.40 * duties.EUR_FEES, 2) >= 8.5
+    assert duties.disbursement("US", 2, True) == 8.88
+    assert duties.disbursement("US", 1, False) == 0 and duties.disbursement("US", 0, True) == 0
+    files = {"main/gerbers.zip": board_zip()}
+    with client() as c:
+        us = quote_of(c, manifest(files), files)["quote"]
+        man = manifest(files)
+        man["ship_to"] = "GR"
+        gr = quote_of(c, man, files)["quote"]
+    # the stand-in board costs 2 + 20*15/1000*5 = 3.50; its duty-paid shipping 20.00
+    assert us["lines"][2]["amount"] == round(3.50 * 0.35 + 4.44, 2), us["lines"]
+    assert "courier's fee" in us["lines"][2]["detail"]
+    assert gr["lines"][2]["amount"] == round((3.50 + 20) * 0.24 + duties.EUR_LINE + 8.88, 2), gr["lines"]
+    # no sales tax outside the US
+    assert [ln["label"] for ln in gr["lines"]] == ["Manufacturing", "Shipping", "Duties & taxes"] and gr["sales_tax"] is None
+
+
+class _Pinned:
+    """A pack pinned to what the real one priced two paid orders at (2026-11-08), by numbers only."""
+
+    def __init__(self, board, assembly, ship):
+        self.board, self.asm, self.ship = board, assembly, ship
+
+    def min_qty(self, kind, options):
+        return 5
+
+    def estimate(self, kind, options, features, qty):
+        return {"total": self.board, "lines": [], "lead_days": 3, "warnings": []}
+
+    def assembly(self, spec):
+        return {"total": self.asm, "lines": [], "lead_days": 4, "warnings": []}
+
+    def shipping(self, country, parcels):
+        return {"price": self.ship, "method": "Express (duties paid)", "days": "2-4 days", "ddp": True, "parcels": 1}
+
+
+def _price_pinned(monkeypatch, pack, components, qty, assemble, region, size):
+    from fabsrv import pricing, sourcing, vendor_api
+    monkeypatch.setattr(vendor_api, "pack", lambda: pack)
+    monkeypatch.setattr(sourcing, "components", lambda v, lines, boards: {
+        "total": components, "unique": 14, "extended": 5, "lines": [], "problems": [], "warnings": [],
+        "extra_days": 0, "standard_only": ["LGA"] if assemble else [], "xray_parts": 1 if assemble else 0})
+    opts = {"layers": 2, "thickness_mm": 1.6, "color": "green", "finish": "hasl", "copper_oz": 1,
+            "castellated": False, "gold_fingers": False}
+    man = {"ship_to": "US", "ship_region": region, "title": "t", "parts": [
+        {"name": "b", "kind": "pcb", "qty": qty, "options": opts, "features": {}, "files": {}, "assemble": assemble, "given": []}]}
+    feats = {"parts": {"b": {"width_mm": size[0], "height_mm": size[1], "layers": 2, "min_drill_mm": 0.3, "paste_top": 88,
+                             "tht_holes": 0, "bom": []}}, "problems": [], "warnings": []}
+    return pricing.price(man, feats)
+
+
+def test_the_two_orders_that_came_in_under_now_cover_the_fab(monkeypatch):
+    # 2026-11-08: two paid US orders the fab charged more for than their quotes
+    # (no sales tax, no duty-paid parcel fee, shipping under). With what the
+    # pack prices them at now, the quote covers the fab's checkout by about the fee.
+    # 5 assembled 2-layer boards to Georgia: quoted $258.79, the fab charged $265.07
+    q = _price_pinned(monkeypatch, _Pinned(20.70, 72.65, 34.86), 71.66, 5, 5, "GA", (25.4, 20.32))
+    assert 265.07 * 1.05 < q["total"] < 265.07 * 1.20, q["lines"]
+    # 10 bare 2-layer boards to Washington: quoted $36.97, the fab charged $43.43
+    q = _price_pinned(monkeypatch, _Pinned(5.00, 0, 29.26), 0, 10, 0, "WA", (99.06, 90.68))
+    assert 43.43 * 1.05 < q["total"] < 43.43 * 1.15, q["lines"]
+    assert [ln["label"] for ln in q["lines"]] == ["Manufacturing", "Shipping", "Duties & taxes", "Sales tax (estimated)"]
+    assert abs(sum(ln["amount"] for ln in q["lines"]) - q["total"]) < 0.01
+
+
+def test_the_order_list_flags_a_state_the_tax_was_not_quoted_for():
+    from fabsrv import pages, pay
+    q = {"sales_tax": {"region": "GA", "rate": 7.56, "base": 200.0, "amount": 15.12, "known": True}}
+    assert pages.tax_flag(q, {"state": "GA"}) == ""
+    flag = pages.tax_flag(q, {"state": "WA"})
+    assert "quoted for GA (7.56%)" in flag and "ships to WA (9.57%)" in flag and "$4.02 more to ask for" in flag, flag
+    assert "to refund" in pages.tax_flag(q, {"state": "OR"})
+    none = {"sales_tax": {"region": "", "rate": 10.25, "base": 200.0, "amount": 20.5, "known": False}}
+    assert "quoted for no state" in pages.tax_flag(none, {"state": "GA"})
+    assert pages.tax_flag({}, {"state": "GA"}) == ""  # quoted before sales tax was
+    row = {"result": json.dumps(q)}
+    assert pay.shipped_state(row, {"country": "US", "state": "wa"}) == {"state": "WA", "quoted": "GA"}
+    assert pay.shipped_state(row, {"country": "GR", "state": "Attica"}) == {}

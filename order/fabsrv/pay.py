@@ -5,8 +5,10 @@ collects the card, email, phone and the shipping address (only in the
 quote's country, since shipping and duties were priced for it). Payment is
 confirmed by asking Stripe for the session, never by trusting the return URL
 alone, so no webhook endpoint is needed: the return page and a ten-minute
-sweep both ask.
+sweep both ask. A US order keeps the state Stripe collected beside the one
+its sales tax was quoted for, for the order list to compare.
 """
+import json
 import time
 
 import httpx
@@ -79,13 +81,28 @@ def checkout(row, quote):
         return s["url"]
 
 
+def shipped_state(row, address):
+    """{state, quoted}: the US state Stripe collected and the one the quote's sales tax was worked
+    out for ("" when it had none), so the order list can flag a difference; {} outside the US.
+    The charge itself is never changed here: the operator refunds or asks for the difference."""
+    if (address or {}).get("country") != "US" or row is None:
+        return {}
+    try:
+        quoted = (json.loads(row["result"] or "{}").get("sales_tax") or {}).get("region") or ""
+    except ValueError:
+        quoted = ""
+    return {"state": str(address.get("state") or "").strip().upper(), "quoted": quoted}
+
+
 def _apply(o, s):
     if s.get("payment_status") == "paid" and o["status"] == "checkout":
         det = s.get("customer_details") or {}
         ship = (s.get("collected_information") or {}).get("shipping_details") or s.get("shipping_details") or {}
+        addr = ship.get("address") or {}
         store.set_order(o["id"], status="paid", amount=s.get("amount_total") or o["amount"],
                         email=det.get("email") or "", shipping={"name": ship.get("name"), "address": ship.get("address"),
-                                                               "phone": det.get("phone")})
+                                                               "phone": det.get("phone"),
+                                                               **shipped_state(store.quote(o["quote_id"]), addr)})
     elif s.get("status") == "expired" and o["status"] == "checkout":
         store.set_order(o["id"], status="cancelled")
 

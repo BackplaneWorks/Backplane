@@ -6,8 +6,9 @@ said is only used where the files cannot tell (finish, colour, material,
 bends) and a difference is reported as a warning.
 
 The person sees three lines and a total: manufacturing, shipping, and duties
-and taxes. Our fee (FEE of everything, FEE_CNC of CNC parts) is part of the
-manufacturing line, not a line of its own; shipping and taxes show at cost.
+and taxes, and a US quote a fourth, its sales tax. Our fee (FEE of everything,
+FEE_CNC of CNC parts) is part of the manufacturing line, not a line of its own;
+shipping and taxes show what the fab is expected to charge for them.
 """
 import re
 import datetime
@@ -183,6 +184,7 @@ def price(manifest, measured):
                 asm = v.assembly({"boards": n, "sides": sides, "smt_joints": (f.get("paste_top", 0) + f.get("paste_bottom", 0)),
                                   "tht_joints": f.get("tht_holes", 0), "unique_parts": comp["unique"],
                                   "extended_parts": comp["extended"], "standard_only": comp["standard_only"],
+                                  "xray_parts": comp["xray_parts"],
                                   "options": opts, "features": feats})
                 warnings += [f"{p['name']}: {w}" for w in asm.get("warnings", [])]
                 cost += float(asm["total"]) + comp["total"]
@@ -193,7 +195,8 @@ def price(manifest, measured):
             part_lines.append({"label": f"{p['name']}: {qty} boards", "amount": round(float(pr["total"]), 2)})
             grams = (feats["width_mm"] * feats["height_mm"] / 100 * opts["thickness_mm"] / 10
                      * BOARD_DENSITIES.get(kind, BOARD_DENSITY) * qty)
-            parcels.append({"kind": kind, "weight_kg": grams / 1000 * (1.3 if p.get("assemble") else 1.0), "value_usd": cost})
+            parcels.append({"kind": kind, "weight_kg": grams / 1000 * (1.3 if p.get("assemble") else 1.0), "value_usd": cost,
+                            "assembled": p.get("assemble") or 0})
             mfg += cost
             parts_out.append(out)
             continue
@@ -218,7 +221,8 @@ def price(manifest, measured):
         else:
             mfg += cost
         vol = feats.get("volume_cm3") or (feats.get("flat_x_mm", 0) * feats.get("flat_y_mm", 0) / 100 * opts.get("thickness_mm", 1) / 10)
-        parcels.append({"kind": kind, "weight_kg": vol * density(opts.get("material")) * qty / 1000, "value_usd": cost})
+        parcels.append({"kind": kind, "weight_kg": vol * density(opts.get("material")) * qty / 1000, "value_usd": cost,
+                        "assembled": 0})
         part_lines.append({"label": f"{p['name']}: {qty} pieces", "amount": round(cost, 2)})
         parts_out.append({"name": p["name"], "kind": kind, "qty": qty, "summary": summary(kind, opts, feats)})
 
@@ -227,17 +231,28 @@ def price(manifest, measured):
     if ship.get("problem"):
         problems.append(ship["problem"])
     ddp = bool(ship.get("ddp"))
-    tax = duties.estimate(country, goods, ship.get("price", 0.0), len(parts_out), ddp)
+    # duties, and the courier's fee for paying them on each duty-paid parcel
+    tax = (duties.estimate(country, goods, ship.get("price", 0.0), len(parts_out), ddp)
+           + duties.disbursement(country, ship.get("parcels", 1) if parcels else 0, ddp))
+    # US sales tax, on the goods and the shipping, at the state's rate (a high one without a state)
+    region = manifest.get("ship_region") or ""
+    stax = duties.sales_tax(country, region, goods, ship.get("price", 0.0)) if parts_out else None
+    if stax and not stax["known"]:
+        warnings.append(f"Sales tax is estimated at {stax['rate']:g}%: the quote doesn't say which US state it ships to")
     # the fee is folded into the manufacturing line (the same amount as when
-    # it was a line of its own, so the total does not change)
-    fee = config.FEE * (mfg + ship["price"] + tax) + config.FEE_CNC * cnc
+    # it was a line of its own, so the total does not change); it is a share of
+    # every line, taxes included, so a line the fab charges a little over is covered
+    fee = config.FEE * (mfg + ship["price"] + tax + (stax["amount"] if stax else 0.0)) + config.FEE_CNC * cnc
     lines = [
         {"label": "Manufacturing", "amount": round(goods + fee, 2), "detail": made_of(parts_out)},
         {"label": "Shipping", "amount": round(ship["price"], 2), "detail": neutral(", ".join(x for x in (ship.get("method"), ship.get("days")) if x))},
         {"label": "Duties & taxes", "amount": round(tax, 2), "detail": duties.note(country, ddp)},
     ]
+    if stax:
+        lines.append({"label": "Sales tax (estimated)", "amount": stax["amount"], "detail": duties.sales_tax_note(stax)})
     total = round(sum(ln["amount"] for ln in lines), 2)
     q = {"title": manifest.get("title") or "", "country": country, "country_name": duties.name(country),
+         "region": region if stax and stax["known"] else "", "sales_tax": stax,
          "currency": config.CURRENCY, "parts": parts_out, "lines": lines, "total": total,
          "part_lines": part_lines, "lead_days": lead, "problems": [neutral(x) for x in problems], "warnings": [neutral(x) for x in warnings],
          "shipping": {"method": neutral(ship.get("method", "")), "days": ship.get("days", ""), "ddp": ddp},
@@ -256,7 +271,8 @@ def markdown(q):
     out = [f"**Your quote: {money(q['total'])}**", ""]
     ship = q["shipping"]
     how = f" by {ship['method']}" if ship.get("method") else ""
-    out.append(f"Ships to {q['country_name']}{how}" + (f", {ship['days']}" if ship.get("days") else "")
+    where = q["country_name"] + (f" ({duties.STATES[q['region']]})" if q.get("region") in duties.STATES else "")
+    out.append(f"Ships to {where}{how}" + (f", {ship['days']}" if ship.get("days") else "")
                + (f". Made in about {q['lead_days']} days." if q["lead_days"] else "."))
     out += ["", "| Item | Cost |", "|---|---:|"]
     for ln in q["lines"]:
