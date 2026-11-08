@@ -67,10 +67,22 @@ pub fn attempts(env: Option<&str>, gui: &str, cmd: &str, beside: &str) -> Vec<Me
 
 fn runnable(p: &Path) -> bool { use crate::plat::fs::PermissionsExt; std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false) }
 fn on_path(c: &str) -> Option<String> {
-    if c.contains('/') { return runnable(Path::new(c)).then(|| c.to_string()) }
+    // a path, not a name: with a separator (Windows: either) or a drive
+    if c.contains(crate::plat::fs::SEPS) || crate::plat::fs::is_abs(c) { return runnable(Path::new(c)).then(|| c.to_string()) }
     // Windows: a program on PATH is `<name>.exe`
     let names = [c.to_string(), format!("{c}{}", std::env::consts::EXE_SUFFIX)];
     std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).flat_map(|d| names.iter().map(move |n| d.join(n)).collect::<Vec<_>>()).find(|f| runnable(f))).map(|f| f.to_string_lossy().into_owned())
+}
+/// Windows: FreeCAD's installer puts it in `<Program Files>\FreeCAD <version>\bin` (or the user's `%LOCALAPPDATA%\Programs`), not on PATH:
+/// `exe` in each such folder, the newest version first.
+pub fn windows_freecad(exe: &str) -> Vec<String> {
+    if !cfg!(windows) { return vec![] }
+    let mut roots: Vec<std::path::PathBuf> = ["ProgramFiles", "ProgramW6432"].iter().filter_map(|v| std::env::var_os(v)).map(Into::into).collect();
+    if let Some(l) = std::env::var_os("LOCALAPPDATA") { roots.push(Path::new(&l).join("Programs")) }
+    let mut found: Vec<std::path::PathBuf> = roots.iter().filter_map(|r| std::fs::read_dir(r).ok()).flatten().flatten()
+        .filter(|e| e.file_name().to_string_lossy().to_lowercase().starts_with("freecad")).map(|e| e.path().join("bin").join(exe)).filter(|p| p.is_file()).collect();
+    found.sort(); found.dedup(); found.reverse();
+    found.into_iter().map(|p| p.to_string_lossy().into_owned()).collect()
 }
 /// macOS app bundles: `rel` under /Applications and ~/Applications (a user-level install, no admin rights), in that order.
 pub fn mac_apps(rel: &str) -> Vec<String> {
@@ -91,14 +103,16 @@ pub fn freecad_cmd(home: &Path) -> String {
     let env = std::env::var("BACKPLANE_FREECAD").unwrap_or_default();
     let mut cands: Vec<String> = vec![freecad_setting(), env, managed, "freecadcmd".into(), "FreeCADCmd".into(), "freecad.cmd".into()];
     cands.extend(mac_apps("FreeCAD.app/Contents/Resources/bin/freecadcmd"));
+    cands.extend(windows_freecad("freecadcmd.exe"));
     cands.iter().filter(|c| !c.is_empty()).find_map(|c| on_path(c)).unwrap_or_default()
 }
 /// The FreeCAD an agent is told about: the one the hub would launch (a setting that does not run is skipped), else what the host found at start.
 pub fn told_freecad(home: &Path, host_fc: &str) -> String { let c = freecad_cmd(home); if c.is_empty() { host_fc.to_string() } else { c } }
 /// freecadGui: the GUI program beside its console one, else on PATH
 pub fn freecad_gui(cmd: &str) -> String {
-    let dir = cmd.rsplit_once('/').map(|d| d.0.to_string()).unwrap_or_default();
+    let dir = cmd.rsplit_once(crate::plat::fs::SEPS).map(|d| d.0.to_string()).unwrap_or_default();
     let mut near: Vec<String> = if dir.is_empty() { vec![] } else { vec![format!("{dir}/freecad"), format!("{dir}/FreeCAD"), format!("{}/MacOS/FreeCAD", dir.trim_end_matches("/Resources/bin"))] };
+    if cfg!(windows) && !dir.is_empty() { near.insert(0, format!("{dir}\\freecad.exe")) }
     near.extend(["freecad".to_string(), "FreeCAD".to_string()]);
     near.iter().find_map(|c| on_path(c)).unwrap_or_default()
 }
