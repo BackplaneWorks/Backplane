@@ -31,8 +31,10 @@ pub fn chip(provider: &str, model: &str, effort: &str) -> String { format!("{pro
 /// The picker the desktop opens from that chip (present/keys.rs), as sections a phone draws in order and answers with `thread.pick`. Models carry the hub's labels and
 /// say when one cannot be used; a provider with no list offers its default. Pure: `models` is `settings::models::all`.
 pub fn picker_sections(models: &Value, provider: &str, model: &str, effort: &str, runtime: &str) -> Value {
-    let k = crate::present::keys::picker(provider, model, effort, "");
-    let plain = |list: &Value, strip: bool| -> Vec<Value> { list.as_array().into_iter().flatten().map(|c| { let v = c["value"].as_str().unwrap_or(""); json!({"label":c["label"],"value":if strip { v.trim_start_matches('@') } else { v },"on":c["on"],"ok":true,"why":""}) }).collect() };
+    let info: Value = serde_json::from_str(&crate::settings::models::info()).unwrap_or(Value::Null);
+    let k = crate::present::keys::picker_with(provider, model, effort, "", info.is_object().then_some(&info));
+    let plain = |list: &Value, strip: bool| -> Vec<Value> { list.as_array().into_iter().flatten().map(|c| { let v = c["value"].as_str().unwrap_or(""); let ok = c["ok"].as_bool().unwrap_or(true);
+        json!({"label":c["label"],"value":if strip { v.trim_start_matches('@') } else { v },"on":c["on"],"ok":ok,"why":if ok { "" } else { c["note"].as_str().unwrap_or("") }}) }).collect() };
     let mut rows = vec![json!({"label":"default","value":"","on":model.is_empty(),"ok":true,"why":""})];
     for r in models[provider].as_array().into_iter().flatten() { let v = r["value"].as_str().unwrap_or(""); if !v.is_empty() { rows.push(json!({"label":r["label"],"value":v,"on":v == model,"ok":r["ok"],"why":r["why"]})) } }
     if !model.is_empty() && !rows.iter().any(|c| c["value"] == model) { rows.push(json!({"label":model,"value":model,"on":true,"ok":true,"why":""})) }

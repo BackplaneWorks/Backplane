@@ -146,6 +146,10 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
     h.commit(&json!({"$":"TurnChanged","thread":"t2","state":"running","at":9})).await.unwrap();
     let (e, r) = ask(&h, "thread.provider", json!({"thread":"t2","provider":"codex"})).await; assert!(e.is_empty()); assert_eq!(r["error"], "a provider changes between turns: stop this one first");
     let (e, r) = ask(&h, "thread.provider", json!({"thread":"t1","provider":"claude"})).await; assert_eq!(r, ok()); assert_eq!(e.len(), 1, "the same provider only holds the old work: {e:?}"); // t1 waits (two queued messages): the hold
+    // the same provider naming a model and an effort (the picker pressed an agent, then a model, before the first came back): they are set, with the hold
+    let (e, r) = ask(&h, "thread.provider", json!({"thread":"t1","provider":"claude","model":"haiku","effort":"low"})).await; assert_eq!(r, ok());
+    assert_eq!(e.iter().map(|v| v["$"].as_str().unwrap()).collect::<Vec<_>>()[..2], ["ModesSet", "SettingSet"], "{e:?}"); assert_eq!(e[0]["model"], "haiku"); assert_eq!(e[1]["value"], "low");
+    let (e, _) = ask(&h, "thread.provider", json!({"thread":"t1","provider":"claude","model":"opus"})).await; assert_eq!(e.iter().filter(|v| v["$"] == "ModesSet").count(), 1);
     say(&h, "t1", "user", "make a board", 1).await; say(&h, "t1", "assistant", "done", 2).await;
     let (e, r) = ask(&h, "thread.provider", json!({"thread":"t1","provider":"grok","model":"grok-4.5","effort":"high"})).await; assert_eq!(r, ok());
     assert_eq!(e[0]["$"], "ProviderSet"); assert_eq!(e[0]["provider"], "grok"); assert_eq!(e[0]["model"], "grok-4.5");

@@ -423,7 +423,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
     let why: String = es.iter().rev().take_while(|e| !(e.msg && e.role == "user")).find(|e| !e.msg && e.role == "error").map(|e| e.text.trim().chars().take(400).collect()).unwrap_or_default();
-    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why, params["hubInfo"]["models"].as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()).as_ref()).ok_or_else(||state_keys_refusal(st,thread))?;
+    let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why, params["hubInfo"]["models"].as_str()).ok_or_else(||state_keys_refusal(st,thread))?;
     let t = st.threads.get(thread).ok_or("thread.missing")?;
     let mut o: serde_json::Map<String, Value> = serde_json::from_str(STATIC).map_err(|_|"thread.template")?;
     // the viewer panel the thread has open (Board, Schematic, 3D; other pages are not ported)
@@ -506,7 +506,7 @@ mod tests {
         for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
         let got = thread_object(&st, "h", th, &p["params"], "").expect("a plain idle thread is drawn here");
         let want = &p["out"]["shown"]["thread"];
-        for (k, w) in want.as_object().unwrap() { assert_eq!(got.get(k), Some(w), "key {k}"); }
+        for (k, w) in want.as_object().unwrap() { if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w); continue } assert_eq!(got.get(k), Some(w), "key {k}"); }
         // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`) and the picker's other agents (`pickerAgents`) are Backplane's own: the recorded helper reply has no such keys
         assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands")).count(), want.as_object().unwrap().len());
     }
@@ -572,7 +572,7 @@ mod tests {
             let got = thread_object(&st, "h", th, &params, "").unwrap_or_else(|| panic!("{name} should be drawn"));
             let (diff, tail) = (x["diff"].as_object().unwrap(), x["tail"].as_array().unwrap());
             // a browser task's ask has a card of its own: here it draws as an ordinary card (a stated degrade); a buy thread's is 0.14's, key for key
-            for (k, w) in diff { if name == "askbrowser" && matches!(k.as_str(), "asks" | "order") { continue } assert_eq!(got.get(k), Some(w), "{name}: {k}"); }
+            for (k, w) in diff { if name == "askbrowser" && matches!(k.as_str(), "asks" | "order") { continue } if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w, "{name}: picker"); continue } assert_eq!(got.get(k), Some(w), "{name}: {k}"); }
             let es = got["entries"].as_array().unwrap();
             assert_eq!(es.len() as u64, x["entries"].as_u64().unwrap(), "{name}: entries");
             assert_eq!(&es[es.len() - 2..], tail.as_slice(), "{name}: tail");

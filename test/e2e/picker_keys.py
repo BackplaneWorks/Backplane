@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real keys (XTest) against the model menu and the composer's popup; run by scripts/desktop-picker-keys.sh with DISPLAY set to a private Xvfb.
+"""Real keys (XTest) against the model picker (0.14's three columns: agent, model, effort meter) and the composer's popup; run by scripts/desktop-picker-keys.sh with DISPLAY set to a private Xvfb.
 Judged from outside the drawing: the client's GPUI_METRIC lines (`pick`, `popup`) and what reached the hub's event log. Screenshots land in $R/shots."""
 import json, os, subprocess, sys, time
 R, XIN = sys.argv[1], sys.argv[2]
@@ -52,9 +52,10 @@ e0 = metrics('pick')[-1]['effort']
 l = press('Right'); check(l['col'] == 'model', f'Right keeps the column: {l}'); shot('02-effort')
 vals = [press('Left')['effort'] for _ in range(7)]
 check(vals[-1] == vals[-2] == '', f'Left stops at auto: {vals}')
-# ---- the row scrolls into view: the last effort row sits below the 320 px list
-press('Tab'); ys = [press('Down') for _ in range(5)]; y = press('Down'); shot('03-scrolled')
-check(y['y'] > 0, f'the list scrolled to keep the row in view: y={y["y"]} child={y["child"]}')
+# ---- in the effort column (0.14's meter) Up is more effort and Down less, stopping at the ends
+press('Tab'); d = press('Down'); u = press('Up'); shot('03-meter')
+check(d['col'] == 'effort' and u['effort'] != d['effort'], f'Up and Down step the meter: {d} {u}')
+press('shift', 'Tab')
 # ---- Esc shuts and applies nothing; the keyboard goes back to the composer
 n = len(changes()); x('key', 'Escape'); time.sleep(0.5); shot('04-esc')
 check(len(changes()) == n, 'Esc applies nothing')

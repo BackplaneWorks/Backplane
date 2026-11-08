@@ -8,7 +8,6 @@ State at gpui 9e0c089fad. Everything below is checked against the helper where a
 | Key | Shows now | Missing | Source in |
 |---|---|---|---|
 | `skills`, composer popup rows for a draft whose last word starts with `$ @ > % #` or `&` | `[]` (no popup) | the Refs rows: ranked threads, projects, rooms, bots, skills, model mentions | `U.Refs.offer`, `Skills.of`, `Refs.refresh` |
-| `picker.models` | the thread's own model only | the hub's models list and labels (`models` info) | `U.Models.phone` |
 | `boat` | `""` | the worktree chip | `UZ.Chip.of` |
 | `parent`, `subs` | `null` | "launched by" row; delegated tasks and Claude's background shells | `Mob.parent.loc`, `SB.Subs.rows` |
 | `queue`, `queued` | `[]`, `""` | context handed over above the composer; the order card of a buy thread | `Mob.queue`, `U.Fab.*` |

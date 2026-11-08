@@ -6,6 +6,7 @@ use crate::shelf::{shelf_of, Shelf};
 use crate::signal;
 use crate::state::{Override, State, Turn};
 use serde_json::{json, Map, Value};
+use std::sync::{Arc, Mutex};
 
 /// Mob.state
 pub fn state_word(t: Turn) -> &'static str { match t { Turn::Running => "run", Turn::Failed => "fail", Turn::Interrupted => "stop", _ => "idle" } }
@@ -227,32 +228,79 @@ pub fn account_sections(st: &State, id: &str, now_s: u64) -> Vec<Value> {
     if !usage.is_empty() { out.push(json!({"title":"Usage","action":"usage","choices":usage})) }
     out
 }
-/// Mob.picker.ctx.loc with no models info: the model chip, the model menu (the thread's own model only: the hub's model list is not here), the efforts the
-/// provider takes and the providers. This is what the helper draws before it has heard the hub's models.
-pub fn picker(provider: &str, model: &str, effort: &str, reading: &str) -> Value {
+/// The agents the picker offers, in its order, with what each is (dim beside its name: 0.14's ModelPick.product).
+pub const AGENTS: &[(&str, &str)] = &[("claude", "Claude Code"), ("codex", "Codex CLI"), ("grok", "Grok CLI"), ("muse", "Muse Code"), ("antigravity", "Google"), ("opencode", "OpenCode"), ("pi", "Pi"), ("omp", "Oh My Pi")];
+/// Effort.chips.about: the levels `model` of `provider` takes, its default ("") first: those its CLI says that model takes (Claude, Codex, Pi and Oh My Pi
+/// report them per model), kept to the levels Backplane passes on for the provider; none when it takes none.
+pub fn model_efforts(models: Option<&Value>, provider: &str, model: &str) -> Vec<&'static str> {
+    let lv = levels(provider);
+    let known = models.and_then(|m| m["about"][provider]["efforts"].get(if model.is_empty() { "default" } else { model })).and_then(Value::as_array);
+    let take: Vec<&'static str> = match known { Some(xs) => lv.iter().copied().filter(|l| xs.iter().any(|x| x == l)).collect(), None => lv.to_vec() };
+    if take.is_empty() { vec![] } else { std::iter::once("").chain(take).collect() }
+}
+/// Whether an agent can be used here, and why not: its CLI found (Claude's aliases are built in), the reason it lists nothing.
+pub fn agent_ok(models: Option<&Value>, provider: &str) -> (bool, String) {
+    let Some(m) = models.filter(|m| m["probed"] == true) else { return (true, String::new()) }; // not asked yet (the built-in list): nothing is known to be missing
+    let about = &m["about"][provider];
+    let cli = about["cli"].as_str().unwrap_or("");
+    if cli.is_empty() && provider != "claude" { return (false, if provider == "antigravity" { "not installed: Settings > Agents installs it".into() } else { "not installed on this machine".into() }) }
+    (true, about["error"].as_str().unwrap_or("").to_string())
+}
+/// The chip under the composer: "claude / opus / high", the effort left out for an agent whose model takes none (0.14's View.mp.text).
+pub fn chip(provider: &str, model: &str, effort: &str, efforts: bool) -> String {
+    format!("{provider} / {}{}", if model.is_empty() { "default" } else { model }, if efforts { format!(" / {}", effort_label(effort)) } else { String::new() })
+}
+/// Mob.picker.ctx.loc: the model chip and its label, the model menu (the thread's provider's models, each with what its CLI calls it), the efforts its model
+/// takes and the agents (with what each is and whether it can be used). Without the hub's models info: the provider's default only.
+pub fn picker_with(provider: &str, model: &str, effort: &str, reading: &str, models: Option<&Value>) -> Value {
     let label = format!("{} · {}{}{}", provider, if model.is_empty() { "default" } else { model }, if effort.is_empty() { String::new() } else { format!(" · {}", effort_label(effort)) }, usage_tail(provider, reading));
     let choice = |l: String, v: &str, on: bool| json!({"label": l, "value": v, "on": on});
-    let lv = levels(provider);
-    let efforts: Vec<Value> = if lv.is_empty() { vec![] } else { std::iter::once("").chain(lv.iter().copied()).map(|e| choice(effort_label(e), e, e == effort || e == format!("@{provider}"))).collect() };
-    let providers: Vec<Value> = ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"].iter().map(|p| { let v = format!("@{p}"); choice((*p).into(), &v, v == effort || *p == provider) }).collect();
-    json!({"label": label, "models": [choice("default".into(), "", model.is_empty())], "efforts": efforts, "providers": providers})
+    let es = model_efforts(models, provider, model);
+    let efforts: Vec<Value> = es.iter().map(|e| choice(effort_label(e), e, *e == effort || *e == format!("@{provider}"))).collect();
+    let providers: Vec<Value> = AGENTS.iter().map(|(p, what)| { let v = format!("@{p}"); let (ok, why) = agent_ok(models, p);
+        json!({"label": p, "value": v, "on": v == effort || *p == provider, "note": if ok { *what } else if why.starts_with("not installed") { "not installed" } else { why.as_str() }, "ok": ok}) }).collect();
+    let menu = match models { Some(ms) => model_choices(ms, provider, model), None => json!([{"label": "default", "value": "", "on": model.is_empty()}]) };
+    json!({"label": label, "chip": chip(provider, model, effort, !es.is_empty()), "provider": provider, "models": menu, "efforts": efforts, "providers": providers})
 }
+pub fn picker(provider: &str, model: &str, effort: &str, reading: &str) -> Value { picker_with(provider, model, effort, reading, None) }
 
-/// The model menu once the hub's `models` info is known (Models.menu): the provider's default first, its models, and the thread's own when the list lacks it.
+/// The model menu once the hub's `models` info is known (Models.menu): the provider's default first, its models (each with its CLI's label as `note`, and the efforts it
+/// takes when they differ from the default's), and the thread's own when the list lacks it.
 pub fn model_choices(models: &Value, provider: &str, model: &str) -> Value {
-    let choice = |l: &str, v: &str| json!({"label": if l.is_empty() { "default" } else { l }, "value": v, "on": v == model});
-    let mut v = vec![choice("", "")];
-    for id in models[provider].as_array().into_iter().flatten().filter_map(Value::as_str) { v.push(choice(id, id)); }
-    if !model.is_empty() && !v.iter().any(|c| c["value"] == model) { v.push(choice(model, model)); }
+    let labels = &models["about"][provider]["labels"];
+    let base = model_efforts(Some(models), provider, "");
+    let choice = |v: &str| { let mut c = json!({"label": if v.is_empty() { "default" } else { v }, "value": v, "on": v == model, "note": labels[if v.is_empty() { "default" } else { v }].as_str().unwrap_or("")});
+        let es = model_efforts(Some(models), provider, v); if es != base { c["efforts"] = json!(es) } c };
+    let mut v = vec![choice("")];
+    for id in models[provider].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|m| !m.is_empty() && *m != "default") { v.push(choice(id)); }
+    if !model.is_empty() && !v.iter().any(|c| c["value"] == model) { v.push(choice(model)); }
     Value::Array(v)
 }
 
 /// Every agent's models and efforts, by name: the desktop picker's cursor walks another agent's lists on the client, a key at a time, with no request (the thread's own lists stay in `picker`).
 pub fn picker_agents(models: Option<&Value>) -> Value {
-    Value::Object(["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"].iter().map(|p| {
-        let k = picker(p, "", "", "");
-        (p.to_string(), json!({"models": models.map_or(k["models"].clone(), |ms| model_choices(ms, p, "")), "efforts": k["efforts"]}))
+    Value::Object(AGENTS.iter().map(|(p, _)| {
+        let k = picker_with(p, "", "", "", models);
+        let (ok, why) = agent_ok(models, p);
+        (p.to_string(), json!({"models": if ok { k["models"].clone() } else { json!([]) }, "efforts": k["efforts"], "ok": ok, "why": why}))
     }).collect())
+}
+/// The picker as the helper recorded it (the test fixtures): the chip, the agent and each row's note, state and efforts are Backplane's own.
+#[cfg(test)]
+pub fn as_helper(p: &Value) -> Value {
+    let rows = |v: &Value| Value::Array(v.as_array().into_iter().flatten().map(|c| json!({"label":c["label"],"value":c["value"],"on":c["on"]})).collect());
+    json!({"label":p["label"],"models":rows(&p["models"]),"efforts":rows(&p["efforts"]),"providers":rows(&p["providers"])})
+}
+/// `picker_agents` for the models info text in force, made once per text: every thread's picture carries it, and the lists run to hundreds of models.
+pub fn picker_agents_of(text: Option<&str>) -> (Option<Arc<Value>>, Value) {
+    static LAST: Mutex<Option<(String, Arc<Value>, Value)>> = Mutex::new(None);
+    let Some(t) = text else { return (None, picker_agents(None)) };
+    let mut g = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, m, a)) = g.as_ref() { if k == t { return (Some(m.clone()), a.clone()) } }
+    let Ok(m) = serde_json::from_str::<Value>(t) else { return (None, picker_agents(None)) };
+    let a = picker_agents(Some(&m)); let m = Arc::new(m);
+    *g = Some((t.to_string(), m.clone(), a.clone()));
+    (Some(m), a)
 }
 
 /// The Context panel's sections for a thread (present/tokstats.rs), read from its settings.
@@ -264,7 +312,7 @@ pub fn stats(st: &State, id: &str) -> Value {
 }
 
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
-pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models: Option<&Value>) -> Option<Map<String, Value>> {
+pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&str>) -> Option<Map<String, Value>> {
     let t = st.threads.get(id)?;
     // a lean State may have dropped the fork record: then "forked" cannot be told
     let fork_key = format!("fork.{id}");
@@ -289,10 +337,9 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models: Option<&Value>)
     m.insert("working".into(), json!(working)); m.insert("phase".into(), json!(phase));
     m.insert("permissions".into(), permissions(st.runtime.get(id).map(String::as_str).unwrap_or("")));
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
-    let mut pk = picker(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")));
-    if let Some(ms) = models { pk["models"] = model_choices(ms, &t.provider, &t.model); }
-    m.insert("picker".into(), pk);
-    m.insert("pickerAgents".into(), picker_agents(models));
+    let (models, agents) = picker_agents_of(models_text);
+    m.insert("picker".into(), picker_with(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")), models.as_deref()));
+    m.insert("pickerAgents".into(), agents);
     m.insert("claude".into(), json!(t.provider == "claude"));
     m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
     m.insert("combo".into(), combo_of(st, id, now_s));
@@ -360,6 +407,8 @@ mod tests {
         assert_eq!((a[1]["title"].clone(), a[1]["choices"][0]["label"].clone(), a[1]["choices"][0]["ok"].clone()), (json!("Usage"), json!("Weekly  36% left"), json!(false)));
         st.apply(&json!({"$":"ThreadCreated","id":"t2","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"grok","model":"","at":1})); assert!(account_sections(&st, "t2", 100).is_empty());
     }
+    /// a choice list without the fields the helper did not have (`note`, `efforts`)
+    fn strip(v: &Value) -> Value { Value::Array(v.as_array().unwrap().iter().map(|c| json!({"label":c["label"],"value":c["value"],"on":c["on"]})).collect()) }
     fn fx() -> Value { serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-variants.json"))).unwrap() }
     const T: &str = "t1700000003-8";
     /// every variant the helper was dumped for: a key not in a variant's diff is the base thread's (the helper's own dump of it)
@@ -374,7 +423,12 @@ mod tests {
             for e in x["extra"].as_array().unwrap() { st.apply(e); }
             let Some(got) = keys(&st, T, 1_700_100_000, "", None) else { panic!("{name} should be computed"); };
             let diff = x["diff"].as_object().unwrap();
-            for k in ["state", "tools", "menu", "working", "phase", "picker", "claude", "permissions"] { assert_eq!(Some(&got[k]), diff.get(k).or(base.get(k)), "{name}: {k}"); }
+            for k in ["state", "tools", "menu", "working", "phase", "claude", "permissions"] { assert_eq!(Some(&got[k]), diff.get(k).or(base.get(k)), "{name}: {k}"); }
+            // the picker is the helper's, plus what 0.14's web picker drew beside it (the chip, each agent's product and state)
+            let want = diff.get("picker").or(base.get("picker")).unwrap();
+            assert_eq!(got["picker"]["label"], want["label"], "{name}: picker.label");
+            for k in ["models", "efforts"] { assert_eq!(strip(&got["picker"][k]), want[k], "{name}: picker.{k}"); }
+            assert_eq!(got["picker"]["providers"].as_array().unwrap().iter().map(|p| json!({"label":p["label"],"value":p["value"],"on":p["on"]})).collect::<Vec<_>>(), want["providers"].as_array().unwrap().clone(), "{name}: picker.providers");
             checked += 1;
         }
         assert!(checked >= 14, "{checked}");
@@ -385,10 +439,42 @@ mod tests {
         assert_eq!(usage_tail("claude", ""), ""); assert_eq!(usage_tail("codex", ""), " · ctx n/a");
         assert_eq!(usage_tail("claude", "45000/200000"), " · ctx 22% of 200k"); assert_eq!(usage_tail("claude", "900/0"), " · ctx 900");
         let p = picker("claude", "claude-opus-4", "high", "");
-        let a = picker_agents(Some(&json!({"codex": ["gpt-6"]})));
+        let a = picker_agents(Some(&json!({"probed": true, "codex": ["gpt-6"], "about": {"codex": {"cli": "codex 1"}}})));
         assert_eq!(a["codex"]["models"].as_array().unwrap().iter().map(|m| m["value"].as_str().unwrap()).collect::<Vec<_>>(), ["", "gpt-6"], "the agent's default, then its models");
-        assert_eq!(a["claude"]["efforts"][0]["value"], "", "auto first"); assert_eq!(a["grok"]["models"][0]["value"], ""); assert_eq!(picker_agents(None)["codex"]["models"].as_array().unwrap().len(), 1, "only the default before the hub has heard its models");
+        assert_eq!(a["claude"]["efforts"][0]["value"], "", "auto first"); assert_eq!(a["grok"]["models"], json!([]), "an agent that is not installed lists nothing"); assert_eq!(a["grok"]["ok"], false);
+        assert_eq!(picker_agents(None)["codex"]["models"].as_array().unwrap().len(), 1, "only the default before the hub has heard its models");
         assert_eq!(p["label"], "claude · claude-opus-4 · high"); assert_eq!(p["efforts"][3]["on"], true); assert_eq!(p["models"][0]["on"], false);
+    }
+    /// what a machine's CLIs reported (settings/models_probe.rs's shape): Claude with per-model efforts, Codex installed with labels, Grok not installed
+    fn info() -> Value {
+        json!({"probed": true, "claude": ["opus", "haiku"], "codex": ["gpt-6.1-sol", "gpt-6-luna"], "grok": [], "muse": [], "antigravity": [], "opencode": [], "pi": [], "omp": [],
+            "about": {"claude": {"cli": "2.1", "labels": {"default": "Claude Code's own default", "opus": "Opus 5.5 · claude-opus-5-5", "haiku": "Haiku 4.5 · claude-haiku-4-5"}, "efforts": {"default": ["low", "high"], "opus": ["low", "high"], "haiku": []}},
+                "codex": {"cli": "codex 1.2", "labels": {"default": "Codex's configured default", "gpt-6.1-sol": "GPT-6.1-Sol · Latest workhorse"}, "efforts": {"gpt-6.1-sol": ["low", "medium", "high", "xhigh", "max", "ultra"]}},
+                "grok": {"cli": "", "labels": {}}, "opencode": {"cli": "1.0 · lists no models", "error": "lists no models: sign in with `opencode auth login`", "labels": {}}}})
+    }
+    #[test] fn the_picker_lists_each_agents_models_with_labels_and_the_efforts_its_model_takes() {
+        let m = info();
+        let p = picker_with("claude", "opus", "high", "", Some(&m));
+        assert_eq!(p["models"].as_array().unwrap().iter().map(|c| (c["label"].as_str().unwrap(), c["note"].as_str().unwrap(), c["on"].as_bool().unwrap())).collect::<Vec<_>>(),
+            [("default", "Claude Code's own default", false), ("opus", "Opus 5.5 · claude-opus-5-5", true), ("haiku", "Haiku 4.5 · claude-haiku-4-5", false)]);
+        assert_eq!(p["efforts"].as_array().unwrap().iter().map(|c| c["value"].as_str().unwrap()).collect::<Vec<_>>(), ["", "low", "high"], "the model's own levels, auto first");
+        assert_eq!(p["models"][2]["efforts"], json!([]), "a model that takes no effort says so"); assert!(p["models"][1].get("efforts").is_none(), "the same as the default's: not repeated");
+        assert_eq!(p["chip"], "claude / opus / high"); assert_eq!(p["provider"], "claude");
+        assert_eq!(picker_with("claude", "haiku", "", "", Some(&m))["chip"], "claude / haiku", "no effort for a model that takes none"); assert_eq!(picker_with("claude", "haiku", "", "", Some(&m))["efforts"], json!([]));
+    }
+    #[test] fn each_agent_state_shows_in_the_agent_column() {
+        let m = info(); let p = picker_with("codex", "gpt-6.1-sol", "xhigh", "", Some(&m));
+        let row = |n: &str| p["providers"].as_array().unwrap().iter().find(|r| r["label"] == n).unwrap().clone();
+        assert_eq!((row("codex")["on"].clone(), row("codex")["ok"].clone(), row("codex")["note"].clone()), (json!(true), json!(true), json!("Codex CLI")), "installed: what it is");
+        assert_eq!((row("grok")["ok"].clone(), row("grok")["note"].clone()), (json!(false), json!("not installed")), "short beside its name; the model column says the rest");
+        assert_eq!(row("antigravity")["note"], "not installed"); assert_eq!(picker_agents(Some(&m))["antigravity"]["why"], "not installed: Settings > Agents installs it"); assert_eq!(row("claude")["ok"], true);
+        assert_eq!(row("opencode")["ok"], true, "installed though it lists nothing: Settings says why");
+        let mut unasked = m.clone(); unasked["probed"] = json!(false); assert_eq!(agent_ok(Some(&unasked), "grok"), (true, String::new()), "before the CLIs are asked nothing is missing");
+        assert_eq!(p["efforts"].as_array().unwrap().iter().map(|c| c["value"].as_str().unwrap()).collect::<Vec<_>>(), ["", "low", "medium", "high", "xhigh"], "kept to the levels Backplane passes to Codex");
+        assert_eq!(p["chip"], "codex / gpt-6.1-sol / xhigh"); assert_eq!(p["models"][1]["note"], "GPT-6.1-Sol · Latest workhorse");
+        assert_eq!(picker_with("opencode", "", "", "", Some(&m))["chip"], "opencode / default", "an agent with no efforts");
+        let a = picker_agents(Some(&m)); assert_eq!(a["opencode"]["why"], "lists no models: sign in with `opencode auth login`"); assert_eq!(a["codex"]["models"].as_array().unwrap().len(), 3);
+        let (parsed, cached) = picker_agents_of(Some(&m.to_string())); assert_eq!(cached, a); assert!(parsed.is_some()); assert_eq!(picker_agents_of(Some(&m.to_string())).1, a, "made once per text");
     }
     #[test] fn the_model_menu_lists_the_providers_models_default_first_and_keeps_the_threads_own() {
         let ms = json!({"claude": ["fable", "opus"], "codex": []});

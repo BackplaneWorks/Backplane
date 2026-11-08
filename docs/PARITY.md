@@ -141,7 +141,7 @@ Driven in one thread with the stand-in's `stream` mode (`tools:`, `todos:`, `age
 | 35 | Long draft over 64 KB | unchecked | |
 | 36 | Multi-line composer, paste, IME | unchecked | |
 | 37 | Queue while busy, steer, edit, remove | partial | A second message sent while a turn ran was delivered and answered after it, in order. No queue strip with edit or remove was seen; steer, edit and remove not driven. |
-| 38 | Model, effort and provider picker | unchecked | The picker keys are another lane's. |
+| 38 | Model, effort and provider picker | done | 0.14's three columns (agent, model with its label and search, effort meter); the hub asks each installed agent for its models at start and every 15 minutes (`settings/models_probe.rs`, cached in `<home>/models.cache`). Driven on Xvfb against the real CLIs: every installed agent lists its models; a codex model and effort picked in the window reached the turn's `codex exec -m ... -c model_reasoning_effort=...`. |
 | 39 | Slash commands and popups | partial | `/btw`, `/give`, `/secret`, `/intent` run on the hub (see the `/btw`, `/give` row); all four driven on both phones (4b29e0fe54); in the window only `/btw` is driven (`/give`, `/secret`, `/intent` are not). The `$`, `@`, `>`, `%` popups not driven in the window; the `>` popup driven on Android (it inserts the hub's word). |
 | 40 | `/btw` | done | See the `/btw`, `/give` row above: driven in the GPUI window and on both phones. |
 | 41 | `/give`, references, summaries | missing | `/give` as above; summaries are in row 51. |

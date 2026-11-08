@@ -10,6 +10,7 @@ PORT=${GPUI_PORT:-3843}; DISP=${GPUI_DISP:-:66}; XV=${XVFB:-$HOME/.local/xvfb-ro
 mkdir -p "$R/home" "$R/proj" "$R/bin" "$R/fakehome/.cache" "$R/shots" "$R/run"; chmod 700 "$R/run"
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ME/test/tools/claude_standin.ts" > "$R/bin/claude"; chmod +x "$R/bin/claude"
 for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$R/bin/$n"; chmod +x "$R/bin/$n"; done
+printf '#!/bin/sh\n[ "$1" = --version ] && echo "codex-cli 0.0 (stand-in)" && exit 0\nexit 1\n' > "$R/bin/codex"   # installed for the hub's models probe (settings/models_probe.rs): the picker switches only to an agent it can use
 NOW=$(date +%s)
 printf '{"$":"ProjectCreated","id":"p1","title":"keys","root":"%s","at":%s}\n{"$":"ThreadCreated","id":"t1","project":"p1","title":"keys thread","env":"local","branch":"","worktree":"","provider":"claude","model":"opus","at":%s}\n' "$R/proj" "$NOW" "$NOW" > "$R/home/events.jsonl"
 echo '[{"select":0},{"wait":280000}]' > "$R/script.json"
