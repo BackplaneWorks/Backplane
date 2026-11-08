@@ -29,6 +29,29 @@ pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     v.push(item("Delete", "row-delete", &qid, true));
     v
 }
+/// A thread's row in the sidebar's picture (top level, settled or a subthread under another), by its raw id.
+fn find_row<'a>(v: &'a Value, rid: &str) -> Option<&'a Value> {
+    match v {
+        Value::Object(m) => { if m.get("id").and_then(Value::as_str).map_or(false, |id| raw(id) == rid) && m.contains_key("title") { return Some(v) } m.values().find_map(|x| find_row(x, rid)) }
+        Value::Array(a) => a.iter().find_map(|x| find_row(x, rid)),
+        _ => None,
+    }
+}
+/// The thread's own menu: the ▾ beside its name in the top bar, and a right click on the name (the old header's thread menu). Rename and the
+/// thread's place (New subthread, Move to top level), then the hub's thread menu (Diff, Terminal, Find file, Snooze, Delete); the header's
+/// tools (Pin, Settle, Archive, Fork) are on the header itself. Empty with no thread.
+pub fn title_items(data: &Value) -> Vec<Item> {
+    let thread = &data["thread"];
+    let rid = raw(thread["id"].as_str().unwrap_or("")).to_string();
+    if rid.is_empty() { return vec![] }
+    let row = find_row(&data["projects"], &rid);
+    let project = row.map(|_| crate::keys::project_of(data, &rid)).unwrap_or_default();
+    let mut v = vec![item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
+    if !project.is_empty() && row.map_or(false, |r| r["canChild"].as_bool().unwrap_or(true)) { v.push(item("New subthread", "thread-child", &format!("{rid}|{project}"), false)); }
+    if row.map_or(false, |r| r["depth"].as_u64().unwrap_or(0) > 0) { v.push(item("Move to top level", "row-detach", &rid, false)); }
+    v.extend(super::tools::context_items(thread));
+    v
+}
 /// The items for a project's header.
 pub fn project_items(pid_raw: &str) -> Vec<Item> { vec![item("New thread", "new-thread", pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
@@ -73,6 +96,16 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
 mod tests {
     use super::*; use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn the_thread_names_menu_offers_rename_its_place_and_the_hubs_thread_menu() {
+        let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Snooze","action":"snooze","value":"","options":[{"label":"1 hour","value":"1h"}]},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},
+            "projects":[{"id":"http://h:1|p1","threads":[{"id":"http://h:1|t7","title":"x","canChild":true,"depth":0}]}]}"#);
+        let it = title_items(&d);
+        assert_eq!(it.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Rename", "Regenerate title", "New subthread", "Diff", "Snooze 1 hour", "Delete"]);
+        assert_eq!((it[0].action.as_str(), it[0].value.as_str()), ("row-rename", "t7")); assert_eq!(it[2].value, "t7|p1");
+        assert!(title_items(&j(r#"{"thread":null}"#)).is_empty(), "no thread, no menu");
+        let sub = j(r#"{"thread":{"id":"h|c1"},"projects":[{"id":"h|p1","threads":[{"id":"h|t1","title":"a","children":[{"id":"h|c1","title":"b","depth":1,"canChild":false}]}]}]}"#);
+        let names: Vec<String> = title_items(&sub).into_iter().map(|i| i.label).collect(); assert!(names.contains(&"Move to top level".to_string()) && !names.contains(&"New subthread".to_string()), "{names:?}");
+    }
     #[test] fn a_thread_row_offers_what_the_hub_does() {
         let t = j(r#"{"id":"http://h:1|t7","pinned":false,"canChild":true,"lead":[{"label":"Settle","action":"row-settle","value":"http://h:1|t7"}],"trail":[{"label":"Delete"},{"label":"Snooze","options":[{"label":"1 hour","value":"http://h:1|t7|1h"}]}]}"#);
         let it = thread_items(&t, "p1");
