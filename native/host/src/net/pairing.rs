@@ -92,7 +92,7 @@ impl Registry {
         let r = (|| -> std::io::Result<()> {
             let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
             f.write_all(body.as_bytes())?; f.sync_all()?; drop(f);
-            std::fs::rename(&tmp, &self.file)?;
+            crate::plat::fs::rename(&tmp, &self.file)?;
             crate::plat::fs::sync_dir(&self.home)
         })();
         if r.is_err() { let _ = std::fs::remove_file(&tmp); return Err("storage_unavailable".into()) }

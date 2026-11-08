@@ -25,7 +25,7 @@ pub fn write_secret_bytes(path: &Path, bytes: &[u8]) -> bool {
     use std::io::Write; use crate::plat::fs::OpenOptionsExt;
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
     let ok = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|_| f.sync_all())).is_ok();
-    ok && std::fs::rename(&tmp, path).is_ok()
+    ok && crate::plat::fs::rename(&tmp, path).is_ok()
 }
 /// 64 hex digits: 32 random bytes.
 pub fn fresh_secret() -> String { hex::encode(super::pairing::urandom(32)) }

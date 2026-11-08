@@ -248,7 +248,7 @@ impl Accounts {
     fn save(&self, g: &mut Inner) -> Result<(), ()> {
         let body = json!({"version":1,"profiles":g.profiles.iter().map(|p| { let mut o = json!({"id":p.id,"provider":p.provider,"label":p.label,"epoch":p.epoch,"fingerprint":p.fingerprint,"store":p.store}); if p.expired_at > 0 && p.state == "expired" { o["expiredAt"] = json!(p.expired_at) } o }).collect::<Vec<_>>()}).to_string();
         let tmp = self.root.join(format!("profiles.json.{}.tmp", new_id()));
-        let w = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| { std::io::Write::write_all(&mut f, body.as_bytes())?; f.sync_all() }).and_then(|_| std::fs::rename(&tmp, self.root.join("profiles.json")));
+        let w = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| { std::io::Write::write_all(&mut f, body.as_bytes())?; f.sync_all() }).and_then(|_| crate::plat::fs::rename(&tmp, self.root.join("profiles.json")));
         if w.is_err() { let _ = std::fs::remove_file(&tmp); return Err(()) }
         g.revision += 1; Ok(())
     }

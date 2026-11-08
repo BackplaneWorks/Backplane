@@ -50,6 +50,12 @@ pub mod fs {
     pub fn script_path(p: &Path) -> String { p.to_string_lossy().replace('\\', "/") }
     /// A file's mode bits as a test compares them: Windows keeps none, so the wanted ones stand.
     pub fn mode_bits(_actual: u32, want: u32) -> u32 { want }
+    /// Rename over a file: as std's, but a moment of "access denied" (another rename onto it, a program opening it) is waited out, up to a second;
+    /// on Unix the replace is one atomic step and never meets this.
+    pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<()> {
+        let mut n = 0;
+        loop { match fs::rename(&from, &to) { Err(e) if n < 100 && matches!(e.raw_os_error(), Some(5) | Some(32)) => { n += 1; std::thread::sleep(std::time::Duration::from_millis(10)) } r => return r } }
+    }
     /// Flush a folder: Windows opens one only with backup semantics, and flushes it with write access.
     pub fn sync_dir(d: &Path) -> io::Result<()> {
         use std::os::windows::fs::OpenOptionsExt as W;

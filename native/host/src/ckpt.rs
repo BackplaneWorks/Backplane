@@ -20,7 +20,7 @@ pub fn write_atomic(path: &Path, parts: &[&[u8]]) -> std::io::Result<()> {
     use std::io::Write;
     if let Some(d) = path.parent() { std::fs::create_dir_all(d)?; }
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    let r = (|| { let mut f = std::fs::File::create(&tmp)?; for p in parts { f.write_all(p)?; } drop(f); std::fs::rename(&tmp, path) })();
+    let r = (|| { let mut f = std::fs::File::create(&tmp)?; for p in parts { f.write_all(p)?; } drop(f); crate::plat::fs::rename(&tmp, path) })();
     if r.is_err() { let _ = std::fs::remove_file(&tmp); } // a full disk must not fill further with half files
     r
 }

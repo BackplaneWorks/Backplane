@@ -200,7 +200,7 @@ fn keep(home: &Path, r: &Rec, status: &str) -> std::io::Result<()> {
     let (f, tmp) = (d.join(format!("{}.json", r.id)), d.join(format!(".{}.tmp", r.id)));
     let _ = std::fs::remove_file(&tmp);
     std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?.write_all(json!({"id":r.id,"token":r.token,"thread":r.thread,"server":r.server,"status":status}).to_string().as_bytes())?;
-    std::fs::rename(&tmp, &f)?; PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token)); Ok(())
+    crate::plat::fs::rename(&tmp, &f)?; PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token)); Ok(())
 }
 fn rec_of(j: &Value) -> Option<(Rec, String)> { let (id, token) = (sv(j, "id"), sv(j, "token")); if !id_ok(id) || token.is_empty() { return None } Some((Rec { id: id.into(), token: token.into(), thread: sv(j, "thread").into(), server: sv(j, "server").into() }, sv(j, "status").to_string())) }
 /// Every record, newest first (200 at most, as `Od.resume` read).

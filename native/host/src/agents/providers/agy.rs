@@ -84,7 +84,7 @@ pub fn write_runner(root: &str) -> std::io::Result<()> {
     // a name of its own per call: two turns starting together never write the same file (pid + a counter, as pi.rs's write_atomic)
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let tmp = format!("{root}/agy.sh.{}.{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)); std::fs::write(&tmp, run_sh())?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?; std::fs::rename(&tmp, format!("{root}/agy.sh"))
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?; crate::plat::fs::rename(&tmp, format!("{root}/agy.sh"))
 }
 
 // ---- Methods and accounts ----

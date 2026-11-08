@@ -119,7 +119,7 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
         let tmp = parent.join(format!(".intent-{:x}.tmp", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())));
         let wrote = (|| -> std::io::Result<()> { use std::io::Write; use crate::plat::fs::OpenOptionsExt; let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?; f.write_all(&new)?; f.sync_all()?; Ok(()) })();
         if wrote.is_err() || h.digest(".backplane/intent.md") != st(req, "revision") { let _ = std::fs::remove_file(&tmp); return fail("Goal and notes changed while saving. Your edit is retained.") }
-        if std::fs::rename(&tmp, &dest).is_err() { let _ = std::fs::remove_file(&tmp); return fail("Goal and notes changed while saving. Your edit is retained.") }
+        if crate::plat::fs::rename(&tmp, &dest).is_err() { let _ = std::fs::remove_file(&tmp); return fail("Goal and notes changed while saving. Your edit is retained.") }
     }
     if op == "document" {
         let r = h.text(&st(req, "path"), 8192, num(req, "offset"));

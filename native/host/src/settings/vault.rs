@@ -166,7 +166,7 @@ fn write(v: &Vault, items: &[Item], backend: &str) -> Result<String, String> {
         f.sync_all().map_err(|e| e.to_string())?;
         drop(f);
         fault("rename").map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, dir.join("vault.json")).map_err(|e| e.to_string())
+        crate::plat::fs::rename(&tmp, dir.join("vault.json")).map_err(|e| e.to_string())
     })();
     if let Err(e) = r { let _ = std::fs::remove_file(&tmp); return Err(e) }
     // the rename is committed: from here the new items are what is on disk. The folder flush decides only what is claimed.

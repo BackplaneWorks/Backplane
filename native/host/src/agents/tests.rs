@@ -226,7 +226,7 @@ const DEAF: &str = "#!/bin/sh\nsleep 600\n";
 }
 /// A claude that answers a title one-shot (`--no-session-persistence`) with a quoted sentence and otherwise is the perf stand-in; never a real model.
 fn title_standin(d: &Path, answer: &str) {
-    perf_standin(d, 1); std::fs::rename(d.join("claude"), d.join("claude.real")).unwrap();
+    perf_standin(d, 1); crate::plat::fs::rename(d.join("claude"), d.join("claude.real")).unwrap();
     script(d, "claude", &format!("#!/bin/sh\ncase \"$*\" in *--no-session-persistence*) cat >/dev/null; printf '%s\\n' '{{\"type\":\"result\",\"is_error\":false,\"result\":{}}}';; *) exec \"$(dirname \"$0\")/claude.real\" \"$@\";; esac\n", serde_json::to_string(answer).unwrap().replace('\'', "'\\''")));
 }
 fn renames(ev: &[Value]) -> Vec<String> { ev.iter().filter(|e| is(e, "ThreadRenamed")).map(|e| e["title"].as_str().unwrap().to_string()).collect() }

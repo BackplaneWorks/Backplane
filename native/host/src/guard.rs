@@ -231,7 +231,7 @@ pub fn ask(g: &Path, id: &str, body: &str) -> std::io::Result<()> {
     let out = match std::fs::hard_link(&t, &r) {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let stale = std::fs::metadata(&r).and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).map_or(true, |a| a.as_secs() >= 30);
-            if stale { std::fs::rename(&t, &r) } else { Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "another request is waiting for the guard: try again in a moment")) }
+            if stale { crate::plat::fs::rename(&t, &r) } else { Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "another request is waiting for the guard: try again in a moment")) }
         }
         o => o,
     };
