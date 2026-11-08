@@ -13,6 +13,11 @@ pub fn offer(pending: bool, guarded: bool, hub_bin_env: bool, under_prefix: bool
     pending && !guarded && !hub_bin_env && !under_prefix && RELEASE_FILES.iter().all(|f| has(f))
 }
 
+/// `--install [DIR]`, the headless install (CI, scripts): no question, DIR or the default prefix. None when the arguments ask for none.
+pub fn install_arg(args: &[String]) -> Option<Option<PathBuf>> {
+    match args.get(1).map(String::as_str) { Some("--install") => Some(args.get(2).filter(|d| !d.starts_with("--")).map(PathBuf::from)), _ => None }
+}
+
 /// The tag of this build's folder: `v` and the version release.yml stamped into Cargo.toml (the updater names its builds the same way).
 pub fn tag() -> String { format!("v{}", env!("CARGO_PKG_VERSION")) }
 
@@ -48,6 +53,22 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         if t.is_dir() { copy_tree(&e.path(), &to.join(e.file_name()))? } else { std::fs::copy(e.path(), to.join(e.file_name()))?; }
     }
     Ok(())
+}
+
+/// `backplane-gpui.exe --install [DIR]`: lay this unpacked release out in DIR (default `%LOCALAPPDATA%\Backplane`, which also gets the
+/// Start-menu entry) with no question, print the installed client's path and end: 0 done, 2 not an unpacked release, 1 the copy failed.
+/// Then `DIR\backplane.exe hub run --home H --port N --builds DIR -- --foreground` starts the guard for a home, as the client would.
+#[cfg(windows)]
+pub fn headless(dir: Option<PathBuf>) -> i32 {
+    let Ok(me) = std::env::current_exe() else { return 1 };
+    let Some(src) = me.parent() else { return 1 };
+    if !RELEASE_FILES.iter().all(|f| src.join(f).is_file()) { eprintln!("--install: {} is not an unpacked release (it needs {})", src.display(), RELEASE_FILES.join(", ")); return 2 }
+    let default = std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("Backplane"));
+    let Some(prefix) = dir.or_else(|| default.clone()) else { eprintln!("--install: no folder given and no LOCALAPPDATA"); return 2 };
+    match install(src, &prefix, &tag()) {
+        Ok(app) => { if Some(&prefix) == default.as_ref() { shortcut(&prefix) } println!("{}", app.display()); 0 }
+        Err(e) => { eprintln!("--install: {e}"); 1 }
+    }
 }
 
 /// Windows, before the window opens: when `offer` says so, ask; on Install, install and start the installed client with the same arguments.
@@ -124,6 +145,13 @@ mod tests {
         assert!(!offer(true, false, false, false, |f: &str| f != "backplane.exe"), "no guard to install");
     }
 
+    #[test] fn install_takes_a_folder_or_none() {
+        let a = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(install_arg(&a(&["gpui", "--install", "D:/bp"])), Some(Some(PathBuf::from("D:/bp"))));
+        assert_eq!(install_arg(&a(&["gpui", "--install"])), Some(None));
+        assert_eq!(install_arg(&a(&["gpui", "--url", "x"])), None);
+        assert_eq!(install_arg(&a(&["gpui"])), None);
+    }
     #[test] fn the_install_is_install_sh_s_layout_and_keeps_what_is_there() {
         let (src, pre) = (tmp("src"), tmp("pre"));
         for f in ["backplane-gpui.exe", "backplane-hub.exe", "backplane.exe", "COMMIT"] { std::fs::write(src.join(f), f).unwrap(); }
