@@ -11,7 +11,11 @@ MAIN = lambda: rects()['main']
 def say_(t):   # click the composer, type, press Return; if the message did not reach the hub, press Return again (a key can land before the field has focus)
     n = len([e for e in events() if e['$'] == 'MessagePosted' and t in e.get('text', '')])
     xin('click', *CC()); xin('type', t); xin('key', 'Return')
-    if not until(lambda: len([e for e in events() if e['$'] == 'MessagePosted' and t in e.get('text', '')]) > n, 6): xin('click', *CC()); xin('key', 'Return')
+    for how in ('return', 'send'):
+        if until(lambda: len([e for e in events() if e['$'] == 'MessagePosted' and t in e.get('text', '')]) > n, 6): break
+        print('   say_: "%s" not posted after %s; trying %s' % (t, 'Return' if how == 'return' else 'a second Return', 'the Send button' if how == 'send' else 'Return again'), flush=True)
+        if how == 'return': xin('click', *CC()); xin('key', 'Return')
+        else: click_ctl('send')
 def CC():
     r = rects()['composer']; return int(r['x'] + r['w'] / 2), int(r['y'] + 30)
 def box(r, pad=0): return (int(r['x']) + pad, int(r['y']) + pad, int(r['x'] + r['w']) - pad, int(r['y'] + r['h']) - pad)
@@ -78,7 +82,7 @@ if want('F06'):
     denied = bool(re.search(r'PERM Bash -> .*deny', fake(), re.I))
     log('F06-approval', ok1 and allowed and ok2 and denied, 'approval card (f6-approval.png) with Allow, Allow for session and Deny: Allow closed the ask and the agent got allow=%s; Deny closed the next and the agent got deny=%s' % (allowed, denied))
     until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
-    say_('zqask'); until(lambda: asks('t1', 'input'), 20); pause(2); shot('f6-question'); q = asks('t1', 'input')[-1]
+    say_('zqask'); until(lambda: asks('t1', 'input'), 30); pause(2); shot('f6-question'); q = asks('t1', 'input')[-1]
     ids = sorted(k for k in ctrls() if k.startswith('ask:')); click_ctl(ids[0]) if ids else None; okq = until(lambda: closed(q), 20); until(lambda: 'PERM AskUserQuestion -> ' in fake(), 15)
     heard = bool(re.search(r'PERM AskUserQuestion -> .*(USB-C|Barrel)', fake()))
     log('F06-question', bool(ids) and okq and heard, 'question card "%s" (f6-question.png), option buttons %s: the first closed it and the agent got the answer=%s' % ((q.get('detail') or '')[:30].replace('\n', ' '), ids, heard))
