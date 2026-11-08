@@ -82,7 +82,8 @@ fn stopped_how(sigterm: bool) {
     let bin = fake_recorder("arecord", None);
     let mut r = Run::new(&["live"], &m.base, &[("PATH", Some(bin.path()))]);
     r.next("ready");
-    std::thread::sleep(Duration::from_millis(700));
+    // stop once the helper has heard the tone (a level above 0): by then it has more than the 0.1 s a commit needs, however slow the machine
+    r.next_where("level", |e| e["v"].as_i64().unwrap_or(0) > 0);
     if sigterm {
         r.term();
     } else {
@@ -188,8 +189,8 @@ fn ready_comes_again_when_the_name_is_late() {
     // pactl that takes longer than the 150 ms ready waits for it
     bin.script("pactl", &format!("/bin/sleep 0.4\n{}", fake_pactl()));
     let mut r = Run::new(&["live"], &m.base, &[("PATH", Some(bin.path()))]);
-    r.next("ready");
-    std::thread::sleep(Duration::from_millis(1500));
+    // the second ready comes when pactl answers: waited for, not timed, so a loaded machine only makes it later
+    r.next_n("ready", 2);
     r.term();
     assert_eq!(r.done(), 0);
     let readies = r.all("ready");

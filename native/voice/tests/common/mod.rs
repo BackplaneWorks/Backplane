@@ -402,6 +402,38 @@ impl Run {
         self.wait_for(ev, Duration::from_secs(30)).unwrap_or_else(|| panic!("no {ev} event; got {:?}", self.events()))
     }
 
+    /// The events named EV once there are N of them, waiting for them (a minute at most, so a missing one fails rather than hangs): a test
+    /// waits for what the helper says, never for a time.
+    pub fn next_n(&self, ev: &str, n: usize) -> Vec<Value> {
+        let end = Instant::now() + Duration::from_secs(60);
+        let mut g = self.log.events.lock().unwrap();
+        loop {
+            let got: Vec<Value> = g.iter().filter(|e| e["event"] == ev).cloned().collect();
+            if got.len() >= n {
+                return got;
+            }
+            if self.log.closed.load(Ordering::SeqCst) || Instant::now() >= end {
+                panic!("{} {ev} events, not {n}; got {:?}", got.len(), *g);
+            }
+            g = self.log.more.wait_timeout(g, Duration::from_millis(100)).unwrap().0;
+        }
+    }
+
+    /// The first event named EV that F accepts, waiting for it (a minute at most).
+    pub fn next_where(&self, ev: &str, f: impl Fn(&Value) -> bool) -> Value {
+        let end = Instant::now() + Duration::from_secs(60);
+        let mut g = self.log.events.lock().unwrap();
+        loop {
+            if let Some(e) = g.iter().find(|e| e["event"] == ev && f(e)) {
+                return e.clone();
+            }
+            if self.log.closed.load(Ordering::SeqCst) || Instant::now() >= end {
+                panic!("no {ev} event that fits; got {:?}", *g);
+            }
+            g = self.log.more.wait_timeout(g, Duration::from_millis(100)).unwrap().0;
+        }
+    }
+
     pub fn wait_for(&self, ev: &str, limit: Duration) -> Option<Value> {
         let end = Instant::now() + limit;
         let mut g = self.log.events.lock().unwrap();
