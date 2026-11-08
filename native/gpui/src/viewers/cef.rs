@@ -208,6 +208,23 @@ pub fn runtime_dir() -> Option<PathBuf> {
     cands.into_iter().find(|d| d.join("icudtl.dat").exists() && d.join("resources.pak").exists() && d.join("libcef.so").exists())
 }
 
+/// CEF reads icudtl.dat, the paks and the snapshot from the directory libcef.so was loaded from (RUNPATH `$ORIGIN`: the executable's directory, whatever a link there points at),
+/// and a missing file is a failed CHECK inside `cef_initialize` that kills the whole process. So before starting: link what is missing there from the runtime directory, and
+/// refuse (the page says why) when it still is not all there.
+#[cfg(any(target_os = "linux", test))]
+const RUNTIME_FILES: [&str; 6] = ["icudtl.dat", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak", "v8_context_snapshot.bin", "locales"];
+#[cfg(any(target_os = "linux", test))]
+fn ensure_beside(dir: &Path, exe_dir: &Path) -> Result<(), String> {
+    if dir == exe_dir { return Ok(()) }
+    for f in RUNTIME_FILES {
+        let (want, have) = (exe_dir.join(f), dir.join(f));
+        if want.exists() || !have.exists() { continue }
+        #[cfg(unix)] { let _ = std::os::unix::fs::symlink(&have, &want); }
+    }
+    let missing: Vec<&str> = RUNTIME_FILES.iter().copied().filter(|f| !exe_dir.join(f).exists()).collect();
+    if missing.is_empty() { Ok(()) } else { Err(format!("CEF's files are missing beside {} ({}) and could not be linked from {}", exe_dir.display(), missing.join(", "), dir.display())) }
+}
+
 pub struct Engine { pub cdp_port: u16, pub dir: PathBuf }
 static ENGINE: OnceLock<Result<Engine, String>> = OnceLock::new();
 
@@ -219,6 +236,8 @@ impl Engine {
     fn start() -> Result<Engine, String> {
         if std::env::var_os("BACKPLANE_CEF_OFF").is_some() { return Err("BACKPLANE_CEF_OFF is set".into()) }
         let dir = runtime_dir().ok_or_else(|| "no CEF runtime (set BACKPLANE_CEF to the runtime directory, or put it in ~/.cache/backplane/cef-runtime/".to_string() + VERSION + ")")?;
+        #[cfg(target_os = "linux")]
+        if let Some(ed) = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(Path::to_path_buf)) { ensure_beside(&dir, &ed)?; }
         let port = std::env::var("BACKPLANE_CEF_CDP_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or_else(free_port);
         let profile = std::env::var_os("BACKPLANE_CEF_PROFILE").map(PathBuf::from).unwrap_or_else(|| {
             crate::plat::user_home().unwrap_or_default().join(".cache/backplane/cef-gpui-profile")
@@ -328,6 +347,13 @@ mod tests {
         assert_eq!(unique_path(&d, "a.txt"), d.join("a.txt")); std::fs::write(d.join("a.txt"), b"x").unwrap();
         assert_eq!(unique_path(&d, "a.txt"), d.join("a (2).txt")); std::fs::write(d.join("a (2).txt"), b"x").unwrap(); assert_eq!(unique_path(&d, "a.txt"), d.join("a (3).txt"));
         assert_eq!(safe_name("../x/y.txt"), "_x_y.txt"); assert_eq!(safe_name(""), "download"); let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn runtime_files_are_linked_beside_the_executable_or_refused() {
+        let b = std::env::temp_dir().join(format!("bp-cefrt-{}", std::process::id())); let (rt, ex) = (b.join("rt"), b.join("exe")); std::fs::create_dir_all(rt.join("locales")).unwrap(); std::fs::create_dir_all(&ex).unwrap();
+        assert!(ensure_beside(&rt, &ex).is_err()); // nothing anywhere: refused, not a crash
+        for f in RUNTIME_FILES { if f != "locales" { std::fs::write(rt.join(f), b"x").unwrap(); } }
+        assert!(ensure_beside(&rt, &ex).is_ok()); for f in RUNTIME_FILES { assert!(ex.join(f).exists(), "{f}"); }
+        assert!(ensure_beside(&rt, &rt).is_ok()); let _ = std::fs::remove_dir_all(&b);
     }
     #[test] fn key_codes() { assert_eq!(vk("a"), Some(65)); assert_eq!(vk("7"), Some(55)); assert_eq!(vk("enter"), Some(13)); assert_eq!(vk("f5"), Some(116)); assert_eq!(vk("é"), None); }
     #[test] fn event_flags() { assert_eq!(flags(true, false, false, true, false, false), 2 | 16); assert_eq!(flags(false, true, true, false, false, true), 4 | 8 | 64); }

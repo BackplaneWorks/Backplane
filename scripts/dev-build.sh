@@ -148,7 +148,8 @@ if [ -n "$FEATURES" ] && { [ -f "$GT/$PROFILE/libcef.so" ] || [ -f "$RT/libcef.s
     mkdir -p "$RT/locales"; for f in resources.pak chrome_100_percent.pak chrome_200_percent.pak icudtl.dat v8_context_snapshot.bin; do [ -f "$RT/$f" ] || cp "$GT/$PROFILE/$f" "$RT/"; done
     cp -n "$GT/$PROFILE/locales/"*.pak "$RT/locales/" 2>/dev/null; cp "$GT/$PROFILE/libcef.so" "$RT/libcef.so.tmp" && strip --strip-unneeded "$RT/libcef.so.tmp" 2>/dev/null; mv "$RT/libcef.so.tmp" "$RT/libcef.so"
   fi
-  ln -s "$RT/libcef.so" "$D/libcef.so"
+  # CEF looks for icudtl.dat, the paks and the snapshot beside the libcef.so it was loaded from (the link's own directory, not the target's): link them all
+  for f in libcef.so resources.pak chrome_100_percent.pak chrome_200_percent.pak icudtl.dat v8_context_snapshot.bin locales; do ln -s "$RT/$f" "$D/$f"; done
 fi
 mark "browser helper"
 # the browser helper (tools/browser, bun): the hub looks for `backplane-browser` beside itself, and without one every Browser tab fails to open

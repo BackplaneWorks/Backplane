@@ -29,3 +29,8 @@ Default builds do not have it; the Browser tab then shows the hub's JPEG frames 
 Not done / known limits: remote JPEG frames for attached pages (`--jpeg-dir` screencast skips them, so web/phone viewers do not mirror the embedded page);
 the first click is not swallowed (it both takes over and reaches the page); no downloads/file dialogs/drag-and-drop; only `window.open` popups that CEF reports to
 `on_before_popup` become tabs (script popups lose their opener); X11 only; teach-mode recording is not wired to native clicks; GPU path untested (Xvfb software).
+
+**Layout**: CEF reads `icudtl.dat`, the paks and the snapshot from the directory `libcef.so` was loaded from (the link's own directory, not its target's). A missing file is a
+failed CHECK inside `cef_initialize` that kills the process, so `Engine::start` links what is missing beside the executable from the runtime directory and refuses (the page
+says why) if it still is not all there. `test/cef/link_only_e2e.sh` runs the dev-build layout (only a link to libcef) and asserts the window survives opening the Browser tab.
+Platforms: CEF ships on Linux only; macOS and Windows builds use the hub's frame stream (see `release.yml`).
