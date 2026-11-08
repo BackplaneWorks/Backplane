@@ -14,6 +14,7 @@ const ILL: Duration = Duration::from_secs(3);
 pub const CONFIRM: Duration = Duration::from_secs(6);
 /// Unanswered asks before the strip says so: a hub restarting for a new build is gone for a moment.
 const PATIENCE: u32 = 3;
+const NO_ANSWER: &str = "The hub is not answering";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Act { pub id: String, pub label: String }
@@ -21,15 +22,20 @@ pub struct Act { pub id: String, pub label: String }
 pub struct Bar { pub text: String, pub tone: String, pub acts: Vec<Act> }
 
 #[derive(Default)]
-pub struct State { pub bar: Option<Bar>, pub said: String, pub confirm: Option<(String, Instant)>, pub target: Option<Target>, pub guard: Option<PathBuf> }
+pub struct State { pub ever: bool, pub well: bool, pub bar: Option<Bar>, pub said: String, pub confirm: Option<(String, Instant)>, pub target: Option<Target>, pub guard: Option<PathBuf> }
 
 fn restart() -> Act { Act { id: "restart".into(), label: "Restart hub".into() } }
 fn acts(v: &Value) -> Vec<Act> { v.as_array().into_iter().flatten().filter_map(|a| Some(Act { id: a["id"].as_str()?.into(), label: a["label"].as_str()?.into() })).collect() }
 fn or_restart(a: Vec<Act>) -> Vec<Act> { if a.is_empty() { vec![restart()] } else { a } }
 
+/// The window's socket to the hub: `live` while it is Connected, `ever` once it has been (or `/healthz` has answered) since the window opened.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Sock { pub live: bool, pub ever: bool }
 /// What the strip shows, from `/healthz` and `/hub/status` (None: no answer), after `misses` unanswered asks in a row. None: nothing to say.
-pub fn bar_of(health: Option<&Value>, status: Option<&Value>, misses: u32) -> Option<Bar> {
-    let Some(h) = health else { return (misses >= PATIENCE).then(|| Bar { text: "The hub is not answering".into(), tone: "bad".into(), acts: vec![restart()] }) };
+/// A hub whose socket is Connected is answering, whatever its HTTP side says; before the first connection the window says "Connecting…" itself, so the strip waits twice as long.
+pub fn bar_of(health: Option<&Value>, status: Option<&Value>, misses: u32, sock: Sock) -> Option<Bar> {
+    let patience = if sock.ever { PATIENCE } else { 2 * PATIENCE };
+    let Some(h) = health else { return (!sock.live && misses >= patience).then(|| Bar { text: NO_ANSWER.into(), tone: "bad".into(), acts: vec![restart()] }) };
     let guard = status.map_or(&Value::Null, |s| &s["guard"]);
     match h["status"].as_str().unwrap_or("") {
         "starting" => Some(Bar { text: match h["phase"].as_str() { Some(p) if !p.is_empty() => format!("The hub is starting: {p}"), _ => "The hub is starting".into() }, tone: "info".into(), acts: vec![] }),
@@ -43,10 +49,12 @@ pub fn bar_of(health: Option<&Value>, status: Option<&Value>, misses: u32) -> Op
     }
 }
 
-/// One plain request: (status, body), None when nothing answered.
-fn call(addr: &str, method: &str, path: &str, token: &str, body: &str) -> Option<(u16, String)> {
-    let a = addr.to_socket_addrs().ok()?.next()?; let t = Duration::from_secs(5);
-    let mut s = TcpStream::connect_timeout(&a, t).ok()?; s.set_read_timeout(Some(t)).ok()?; s.set_write_timeout(Some(t)).ok()?;
+/// One request, over TLS when the hub is (a hub behind `tailscale serve`: plain HTTP to it never answers): (status, body), None when nothing answered.
+fn call(t: &Target, method: &str, path: &str, token: &str, body: &str) -> Option<(u16, String)> {
+    let addr = t.addr.as_str();
+    let a = addr.to_socket_addrs().ok()?.next()?; let d = Duration::from_secs(5);
+    let tcp = TcpStream::connect_timeout(&a, d).ok()?; tcp.set_read_timeout(Some(d)).ok()?; tcp.set_write_timeout(Some(d)).ok()?;
+    let mut s = crate::pairing::wrap(addr, tcp, t.tls).ok()?;
     s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).ok()?;
     let mut out = Vec::new(); let _ = s.take(1 << 20).read_to_end(&mut out);
     let text = String::from_utf8_lossy(&out);
@@ -54,8 +62,8 @@ fn call(addr: &str, method: &str, path: &str, token: &str, body: &str) -> Option
 }
 fn ask(t: &Target) -> (Option<Value>, Option<Value>) {
     let parse = |r: Option<(u16, String)>| r.and_then(|(_, b)| serde_json::from_str::<Value>(&b).ok());
-    let h = parse(call(&t.addr, "GET", "/healthz", "", ""));
-    let s = if h.is_some() { call(&t.addr, "GET", "/hub/status", &t.token, "").filter(|r| r.0 == 200).and_then(|r| serde_json::from_str(&r.1).ok()) } else { None };
+    let h = parse(call(t, "GET", "/healthz", "", ""));
+    let s = if h.is_some() { call(t, "GET", "/hub/status", &t.token, "").filter(|r| r.0 == 200).and_then(|r| serde_json::from_str(&r.1).ok()) } else { None };
     (h, s)
 }
 /// The request a window on the hub's machine leaves the guard when nothing answers on the network: whole, and renamed into place.
@@ -68,7 +76,7 @@ pub fn leave_request(dir: &Path, action: &str) -> std::io::Result<()> {
 /// Do it, and say how it went.
 fn send(t: Option<&Target>, guard: Option<&Path>, action: &str) -> String {
     if let Some(t) = t {
-        if let Some((code, b)) = call(&t.addr, "POST", "/hub/control", &t.token, &json!({"action": action}).to_string()) {
+        if let Some((code, b)) = call(t, "POST", "/hub/control", &t.token, &json!({"action": action}).to_string()) {
             let said = serde_json::from_str::<Value>(&b).ok().and_then(|v| v["text"].as_str().map(str::to_string)).unwrap_or_default();
             return if said.is_empty() { format!("The hub said {code}") } else { said };
         }
@@ -87,13 +95,15 @@ pub fn watch(cx: &mut Context<Backplane>, target: Option<Target>, token_file: &P
             let t2 = t.clone();
             let (h, s) = cx.background_executor().spawn(async move { ask(&t2) }).await;
             misses = if h.is_some() { 0 } else { misses + 1 };
-            let now = bar_of(h.as_ref(), s.as_ref(), misses);
-            let well = now.is_none() && h.is_some();
             if weak.update(cx, |this, cx| {
-                let b = &mut this.screens.hubbar; let stale = b.confirm.as_ref().map_or(false, |c| c.1.elapsed() > CONFIRM);
+                let live = this.status == "Connected";
+                let b = &mut this.screens.hubbar; b.ever |= live || h.is_some();
+                let now = bar_of(h.as_ref(), s.as_ref(), misses, Sock { live, ever: b.ever });
+                b.well = now.is_none() && (h.is_some() || live); let stale = b.confirm.as_ref().map_or(false, |c| c.1.elapsed() > CONFIRM);
                 if stale { b.confirm = None; }
                 if b.bar != now || stale { if now.is_none() { b.said.clear(); } b.bar = now; cx.notify(); }
             }).is_err() { break }
+            let well = weak.update(cx, |this, _| this.screens.hubbar.well).unwrap_or(false);
             cx.background_executor().timer(if well { WELL } else { ILL }).await;
         }
     }).detach();
@@ -120,6 +130,9 @@ pub fn strip(cx: &mut Context<Backplane>, s: &State, light: bool) -> Option<AnyE
         .child(div().text_size(px(11.)).text_color(c("text")).overflow_hidden().child(text)).child(row).into_any_element())
 }
 
+/// The socket came up: the hub answers, so a strip that said it did not goes at once (the next ask decides anything else).
+pub fn connected(s: &mut State) -> bool { s.ever = true; if s.bar.as_ref().map_or(false, |b| b.text == NO_ANSWER) { s.bar = None; s.said.clear(); true } else { false } }
+
 pub fn label_of(action: &str) -> &'static str { match action { "safe" => "Restart in safe mode", "rollback" => "Roll back hub", _ => "Restart hub" } }
 
 impl Backplane {
@@ -145,24 +158,43 @@ impl Backplane {
 mod tests {
     use super::*; use core::prelude::v1::test;
     #[test] fn a_well_hub_shows_nothing() {
-        assert_eq!(bar_of(Some(&json!({"status": "ok"})), Some(&json!({"notice": {"text": ""}})), 0), None);
-        assert_eq!(bar_of(Some(&json!({"status": "ok"})), None, 0), None, "a hub with no notice to give");
+        assert_eq!(bar_of(Some(&json!({"status": "ok"})), Some(&json!({"notice": {"text": ""}})), 0, UP), None);
+        assert_eq!(bar_of(Some(&json!({"status": "ok"})), None, 0, UP), None, "a hub with no notice to give");
     }
+    const UP: Sock = Sock { live: false, ever: true };
     #[test] fn a_moment_without_an_answer_is_not_news() {
-        assert_eq!(bar_of(None, None, 1), None);
-        let b = bar_of(None, None, PATIENCE).unwrap(); assert_eq!(b.tone, "bad"); assert_eq!(b.acts[0].id, "restart", "restart is on offer with nothing from the hub at all");
+        assert_eq!(bar_of(None, None, 1, UP), None);
+        let b = bar_of(None, None, PATIENCE, UP).unwrap(); assert_eq!(b.tone, "bad"); assert_eq!(b.acts[0].id, "restart", "restart is on offer with nothing from the hub at all");
     }
     #[test] fn safe_mode_comes_with_the_hubs_own_actions() {
-        let b = bar_of(Some(&json!({"status": "degraded", "safe": true})), Some(&json!({"notice": {"text": "Safe mode", "tone": "warn", "actions": [{"id": "restart", "label": "Restart normally"}]}})), 0).unwrap();
+        let b = bar_of(Some(&json!({"status": "degraded", "safe": true})), Some(&json!({"notice": {"text": "Safe mode", "tone": "warn", "actions": [{"id": "restart", "label": "Restart normally"}]}})), 0, UP).unwrap();
         assert_eq!((b.text.as_str(), b.tone.as_str(), b.acts[0].label.as_str()), ("Safe mode", "warn", "Restart normally"));
     }
     #[test] fn rescue_offers_what_the_guard_offers_and_restart_at_the_least() {
-        let b = bar_of(Some(&json!({"status": "down", "why": "panic"})), Some(&json!({"guard": {"text": "Hub is down: panic", "actions": [{"id": "rollback", "label": "Roll back to abc"}]}})), 0).unwrap();
+        let b = bar_of(Some(&json!({"status": "down", "why": "panic"})), Some(&json!({"guard": {"text": "Hub is down: panic", "actions": [{"id": "rollback", "label": "Roll back to abc"}]}})), 0, UP).unwrap();
         assert_eq!(b.acts[0].id, "rollback"); assert_eq!(b.text, "Hub is down: panic");
-        assert_eq!(bar_of(Some(&json!({"status": "down", "why": "panic"})), None, 0).unwrap().acts[0].id, "restart", "no credential for /hub/status: still a way back");
+        assert_eq!(bar_of(Some(&json!({"status": "down", "why": "panic"})), None, 0, UP).unwrap().acts[0].id, "restart", "no credential for /hub/status: still a way back");
     }
-    #[test] fn starting_is_said_and_asks_nothing() { let b = bar_of(Some(&json!({"status": "starting", "phase": "model built"})), None, 0).unwrap(); assert!(b.acts.is_empty()); assert!(b.text.contains("model built")); }
-    #[test] fn a_hung_hub_names_what_stopped() { assert!(bar_of(Some(&json!({"status": "hung", "hung": ["writer"]})), None, 0).unwrap().text.contains("writer")); }
+    #[test] fn starting_is_said_and_asks_nothing() { let b = bar_of(Some(&json!({"status": "starting", "phase": "model built"})), None, 0, UP).unwrap(); assert!(b.acts.is_empty()); assert!(b.text.contains("model built")); }
+    #[test] fn a_hung_hub_names_what_stopped() { assert!(bar_of(Some(&json!({"status": "hung", "hung": ["writer"]})), None, 0, UP).unwrap().text.contains("writer")); }
+    #[test] fn a_connected_socket_is_an_answer() {
+        // a remote hub behind tailscale serve: /healthz never answered over plain HTTP while the socket was Connected and the viewers drew
+        assert_eq!(bar_of(None, None, 99, Sock { live: true, ever: true }), None, "Connected is answering");
+        assert_eq!(bar_of(None, None, PATIENCE, Sock { live: false, ever: false }), None, "the first connection is the window's own Connecting…");
+        assert!(bar_of(None, None, 2 * PATIENCE, Sock { live: false, ever: false }).is_some(), "a hub that never comes up is still said");
+        let mut s = State { bar: bar_of(None, None, PATIENCE, UP), ..Default::default() }; assert!(s.bar.is_some());
+        assert!(connected(&mut s) && s.bar.is_none(), "it goes the moment the socket is up");
+        let mut s = State { bar: bar_of(Some(&json!({"status": "starting"})), None, 0, UP), ..Default::default() }; assert!(!connected(&mut s) && s.bar.is_some(), "what the hub said stays");
+    }
+    #[test] fn health_is_asked_over_the_hubs_own_scheme() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let addr = l.local_addr().unwrap().to_string();
+        std::thread::spawn(move || { let (mut c, _) = l.accept().unwrap(); let mut b = [0u8; 512]; let _ = c.read(&mut b); let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}"); });
+        let (h, _) = ask(&Target { addr: addr.clone(), token: "t".into(), tls: false }); assert_eq!(h.unwrap()["status"], "ok");
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let addr = l.local_addr().unwrap().to_string();
+        let seen = std::thread::spawn(move || { let (mut c, _) = l.accept().unwrap(); let mut b = [0u8; 8]; let n = c.read(&mut b).unwrap_or(0); b[..n].to_vec() });
+        let _ = ask(&Target { addr, token: "t".into(), tls: true });
+        assert_eq!(seen.join().unwrap().first(), Some(&0x16), "a TLS hub gets a TLS handshake, not a plain GET");
+    }
     #[test] fn a_request_for_the_guard_lands_whole() {
         let d = std::env::temp_dir().join(format!("bp-hubbar-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
         leave_request(&d, "restart").unwrap(); let v: Value = serde_json::from_str(&std::fs::read_to_string(d.join("request")).unwrap()).unwrap();

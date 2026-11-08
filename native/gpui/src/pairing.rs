@@ -199,8 +199,9 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
     }).clone()
 }
 /// `addr` is host:port. TLS checks the name against the system's roots.
-pub fn open(addr: &str, tls: bool) -> io::Result<Stream> {
-    let tcp = TcpStream::connect(addr)?;
+pub fn open(addr: &str, tls: bool) -> io::Result<Stream> { wrap(addr, TcpStream::connect(addr)?, tls) }
+/// A connected socket to `addr`, in TLS when `tls`.
+pub fn wrap(addr: &str, tcp: TcpStream, tls: bool) -> io::Result<Stream> {
     if !tls { return Ok(Stream::Plain(tcp)) }
     let host = addr.rsplit_once(':').map_or(addr, |(h, _)| h).trim_matches(['[', ']']).to_string();
     let name = rustls::pki_types::ServerName::try_from(host).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
