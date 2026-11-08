@@ -184,9 +184,15 @@ wrap_app! {
 fn app() -> App { AppH::new(Arc::new(switches())) }
 fn switches() -> Vec<(String, String)> {
     let mut v = vec![("use-mock-keychain".into(), String::new()), ("password-store".into(), "basic".into()), ("noerrdialogs".into(), String::new()), ("disable-features".into(), "Translate".into())];
+    if let Some(o) = ozone(std::env::var_os("DISPLAY").filter(|d| !d.is_empty()).is_some(), std::env::var_os("WAYLAND_DISPLAY").filter(|d| !d.is_empty()).is_some()) { v.push(("ozone-platform".into(), o.into())); }
     if std::env::var_os("BACKPLANE_CEF_NO_GPU").is_some() { v.push(("disable-gpu".into(), String::new())); v.push(("disable-gpu-compositing".into(), String::new())); }
     v
 }
+
+/// Chromium's display backend on Linux. The window draws through X11 (gpui's `x11` feature), so with an X server (Xwayland on a Wayland desktop) CEF uses it too:
+/// left to itself, a `WAYLAND_DISPLAY` beside `DISPLAY` makes it pick Wayland, and the windows it opens itself (DevTools) land on another server than ours.
+/// With only Wayland, Wayland. Neither: none asked (OSR needs no display; Chromium picks).
+fn ozone(x11: bool, wayland: bool) -> Option<&'static str> { if !cfg!(target_os = "linux") { return None } if x11 { Some("x11") } else if wayland { Some("wayland") } else { None } }
 
 /// First call of `main`. In a CEF helper process (renderer, gpu, ...) this runs it to its end and returns its exit code; in the browser process it does nothing.
 pub fn subprocess() -> Option<i32> {
@@ -354,6 +360,10 @@ mod tests {
         for f in RUNTIME_FILES { if f != "locales" { std::fs::write(rt.join(f), b"x").unwrap(); } }
         assert!(ensure_beside(&rt, &ex).is_ok()); for f in RUNTIME_FILES { assert!(ex.join(f).exists(), "{f}"); }
         assert!(ensure_beside(&rt, &rt).is_ok()); let _ = std::fs::remove_dir_all(&b);
+    }
+    #[test] fn chromium_draws_where_the_window_does() {
+        if cfg!(target_os = "linux") { assert_eq!(ozone(true, true), Some("x11")); assert_eq!(ozone(true, false), Some("x11")); assert_eq!(ozone(false, true), Some("wayland")); }
+        assert_eq!(ozone(false, false), None);
     }
     #[test] fn key_codes() { assert_eq!(vk("a"), Some(65)); assert_eq!(vk("7"), Some(55)); assert_eq!(vk("enter"), Some(13)); assert_eq!(vk("f5"), Some(116)); assert_eq!(vk("é"), None); }
     #[test] fn event_flags() { assert_eq!(flags(true, false, false, true, false, false), 2 | 16); assert_eq!(flags(false, true, true, false, false, true), 4 | 8 | 64); }

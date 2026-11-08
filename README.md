@@ -27,7 +27,7 @@ curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/
 backplane
 ```
 
-Linux (x64, arm64) also has a `.deb` and an AppImage on the [latest release](https://github.com/BackplaneWorks/Backplane/releases/latest).
+Linux (x64, arm64): the same one-liner, or `backplane-v<version>-linux-<arch>-native.tar.gz` from the [latest release](https://github.com/BackplaneWorks/Backplane/releases/latest), unpacked as is (the client finds the embedded browser's files beside it).
 
 **macOS (Apple silicon).** Use the same one-liner, or download `backplane-v<version>-darwin-arm64.tar.gz`. Builds are **not notarized yet**: if macOS refuses to open the app, right-click (or Control-click) it in Finder → Open → Open, or on macOS 15+ use System Settings → Privacy & Security → "Open Anyway", or run `xattr -dr com.apple.quarantine /Applications/Backplane.app`.
 

@@ -21,6 +21,7 @@ jobs:
     outputs:
       host: ${{ steps.f.outputs.host }}
       gpui: ${{ steps.f.outputs.gpui }}
+      browser: ${{ steps.f.outputs.browser }}
       guard: ${{ steps.f.outputs.guard }}
       android: ${{ steps.f.outputs.android }}
       windows: ${{ steps.f.outputs.windows }}
@@ -39,6 +40,11 @@ jobs:
             gpui:
               - 'native/gpui/**'
               - 'assets/**'
+              - '.github/workflows/ci.yml'
+            browser:
+              - 'native/gpui/**'
+              - 'test/cef/**'
+              - 'scripts/check-linux-archive.sh'
               - '.github/workflows/ci.yml'
             guard:
               - 'native/guard/**'
@@ -160,6 +166,60 @@ jobs:
         shell: bash
         run: |
           cargo nextest run --locked --no-fail-fast
+
+  # The embedded Chromium on Linux (test/cef/lifecycle_e2e.sh): the client built with feature cef, a hub, a private Xvfb with i3 and lavapipe, real X input.
+  # An https page and a file:// page load, navigation and back, typing and wheel scrolling, the Browser tab closed and reopened and its page dropped and
+  # made again with no CEF helper left over, and quitting leaves none of the helpers it ran. Then a window beside a link to libcef.so only (link_only_e2e.sh).
+  browser-linux:
+    needs: changes
+    if: needs.changes.outputs.browser == 'true'
+    name: browser ubuntu-22.04
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+      - name: system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev \
+            xvfb i3 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libxtst6 libx11-6 binutils > /dev/null
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: 1.4.4 }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/host
+            native/gpui
+          shared-key: browser-linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: build
+        run: |
+          (cd native/host && cargo build --locked --profile fast --bin backplane-hub) & a=$!
+          (cd native/gpui && cargo build --locked --profile fast --features cef) & b=$!
+          wait $a; ra=$?; wait $b; rb=$?; exit $((ra | rb))
+      - name: lifecycle
+        run: |
+          # the CEF runtime the build put beside the client (the cef crate's distribution): what a dev build and the archive carry
+          G=native/gpui/target/fast; for f in libcef.so icudtl.dat resources.pak v8_context_snapshot.bin locales/en-US.pak; do [ -e $G/$f ] || { echo "::error::$f missing beside the client"; exit 1; }; done
+          export BACKPLANE_CEF=$PWD/$G E2E_ASSETS=$PWD/assets OUT=$RUNNER_TEMP/cef-life
+          sh test/cef/lifecycle_e2e.sh $G/backplane-gpui native/host/target/fast/backplane-hub 2>&1 | grep -v '^GPUI_METRIC' | tee lifecycle.txt; test ${PIPESTATUS[0]} = 0
+      - name: link only
+        run: BACKPLANE_CEF=$PWD/native/gpui/target/fast sh test/cef/link_only_e2e.sh native/gpui/target/fast/backplane-gpui native/host/target/fast/backplane-hub
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-linux
+          path: |
+            lifecycle.txt
+            ${{ runner.temp }}/cef-life/*.log
+            ${{ runner.temp }}/cef-life/*.txt
+            ${{ runner.temp }}/cef-life/script.json
+          retention-days: 5
 
   # A hub on a temp home and the GPUI client connected to it, on the runner's desktop (WARP, no GPU): test/windows/smoke.sh.
   windows-smoke:
