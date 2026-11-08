@@ -146,7 +146,7 @@ if want('F16'):
     until(lambda: any(e['state'] == 'running' for e in t2()), 40)
     until(lambda: 'tool:interrupt' in ctrls(), 40)   # the Stop button is there while the turn runs
     trial('stop', 'ctrl period', lambda a, b, e, m: (any(x['$'] == 'TurnChanged' and x.get('state') == 'interrupted' for x in e), 'TurnChanged interrupted in the hub log'))
-    trial('settle', 'ctrl shift s', lambda a, b, e, m: (any(x['$'] == 'ThreadSettled' for x in e), 'ThreadSettled in the hub log'))
+    trial('settle', 'ctrl shift s', lambda a, b, e, m: (any(x['$'] == 'ThreadSettled' for x in e), 'ThreadSettled in the hub log'), lambda: chord('ctrl shift s'))   # settle again undoes it: thread 1 must stay in the list for the rows after this one
     log('F16', all(x[2] for x in res), '; '.join('%s %s: %s' % (n, c, 'ok' if ok else 'FAIL (' + w + ')') for n, c, ok, w in res))
 
 # ---- F17 viewers: the rail's Board, Schematic, 3D and Mech pages on a seeded KiCad board and a STEP part; zoom with the wheel, pan and orbit with the left button
@@ -239,6 +239,13 @@ if want('F18'):
                 r, g, b = d[x, y]
                 if abs(r - rgb[0]) < tol and abs(g - rgb[1]) < tol and abs(b - rgb[2]) < tol: xs += x; ys += y; n += 1
         return (xs // n, ys // n) if n * 4 >= minpx else None
+    def fresh(color, tag):   # the page is rescaled when the pane resizes (a banner, a download): look again, on a steady frame, right before each action
+        prev = None; end = time.time() + 15
+        while time.time() < end:
+            shot(tag); cur = px(tag)
+            if prev is not None and not differs(prev, cur): break
+            prev = cur; pause(1.0)
+        return find(tag, color)
     sel(1); fold_sidebar(); click_ctl('rail:Browser'); pause(4); allow_dialogs(); VW = (560, 90, win()[2] - 80, win()[3] - 30); shot('f18-open')
     def go():   # focus the page, then the address field, replace its text with the URL, Return
         allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(1.0); chord('ctrl a'); pause(0.3); xin('type', URL); xin('key1', 'Return'); allow_dialogs()
@@ -265,25 +272,29 @@ if want('F18'):
     shot('f18-page'); pause(3); fr2 = frame('b'); print('   F18 hub frame (what the poller fetches): %s then %s' % (fr1, fr2), flush=True)
     pos = {k: find('f18-page', c) for k, c in [('btn', (0, 204, 102)), ('inp', (255, 255, 102)), ('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
     res.append(('page loads and paints', loaded and all(pos.values()), 'the helper streamed the test page (the page asked its server: %s); targets found on the frame: %s' % (loaded, pos)))
-    if pos['btn']:
-        xin('click', *pos['btn']); res.append(('click', until(lambda: 'click' in names(), 20), 'a real click on the green button reached the page (it reported "click")'))
-    if pos['inp']:
-        xin('click', *pos['inp']); pause(0.5); xin('type', 'zqf18'); res.append(('type', until(lambda: any(n.startswith('input:') and 'zqf18' in n for n in names()), 20), 'typing in the page field reached the page (reported %s)' % [n for n in names() if n.startswith('input:')][-1:]))
-    cx, cy = (pos['btn'] or (500, 300))[0], (pos['btn'] or (500, 300))[1]; shot('f18-before-scroll')
+    pb = fresh((0, 204, 102), 'f18-t-btn')
+    if pb:
+        xin('click', *pb); res.append(('click', until(lambda: 'click' in names(), 20), 'a real click on the green button reached the page (it reported "click")'))
+    pi = fresh((255, 255, 102), 'f18-t-inp')
+    if pi:
+        xin('click', *pi); pause(0.5); xin('type', 'zqf18'); res.append(('type', until(lambda: any(n.startswith('input:') and 'zqf18' in n for n in names()), 20), 'typing in the page field reached the page (reported %s)' % [n for n in names() if n.startswith('input:')][-1:]))
+    cx, cy = (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2; shot('f18-before-scroll')
     xin('wheel', cx, cy, 6); res.append(('scroll', until(lambda: any(n.startswith('scroll:') for n in names()), 20), 'the wheel scrolled the page (reported %s)' % [n for n in names() if n.startswith('scroll:')][-1:]))
     pause(1.0); shot('f18-scrolled')
     xin('wheel', cx, cy, -12); pause(1.5); shot('f18-top')
-    pos2 = {k: find('f18-top', c) for k, c in [('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
+    pos2 = {'pop': True, 'dl': fresh((204, 0, 204), 'f18-t-dl')}
     if pos2['dl']:
         xin('click', *pos2['dl']); got = until(lambda: 'download-get' in names(), 30); pause(3)
         home = os.path.expanduser('~'); found = glob.glob(home + '/Downloads/f18-file*') + glob.glob(P('home') + '/**/f18-file*', recursive=True) + glob.glob(P('home') + '/**/*f18*download*', recursive=True)
         res.append(('download (known missing: a download the person starts is not kept in frame mode yet, Windows lane)' if not found else 'download', got and (bool(found) or True), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
-    pause(3); shot('f18-top2'); pos2['pop'] = find('f18-top2', (255, 136, 0)) or pos2['pop']; print('   F18: popup button at %s, server saw %s' % (pos2['pop'], names()), flush=True)   # the "Saved" banner after a download moves the page down
+    print('   F18: server saw %s' % (names(),), flush=True)   # the "Saved" banner after a download moves the page down
     if pos2['pop']:
         for _t in range(3):   # a click can arrive while the pane is still resizing after the download banner: find the button again and press until the page reports the click
-            xin('click', *pos2['pop'])
+            pp = fresh((255, 136, 0), 'f18-t-pop')
+            if not pp: continue
+            xin('click', *pp)
             if until(lambda: 'popup-click' in names(), 6): break
-            pause(2); shot('f18-top3'); pos2['pop'] = find('f18-top3', (255, 136, 0)) or pos2['pop']; print('   F18: no popup click reported yet (attempt %d); the button is at %s' % (_t + 1, pos2['pop']), flush=True)
+            print('   F18: no popup click reported yet (attempt %d)' % (_t + 1), flush=True)
         ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
         tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
         res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
