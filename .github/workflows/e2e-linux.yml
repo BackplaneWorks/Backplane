@@ -38,7 +38,7 @@ jobs:
       - name: tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends xvfb i3 xclip imagemagick python3-pil libxtst6 libx11-6 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2 libxkbcommon0 curl ca-certificates binutils x11-utils > /dev/null
+          sudo apt-get install -y -qq --no-install-recommends xvfb i3 xclip imagemagick python3-pil libxtst6 libx11-6 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2 libxkbcommon0 curl ca-certificates binutils x11-utils x11-apps x11-xserver-utils > /dev/null
           curl -fsSL https://bun.sh/install | bash -s "bun-v$(cat deploy/bun-version)" > /dev/null
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           uname -m; ls arch; ls /usr/share/vulkan/icd.d/
