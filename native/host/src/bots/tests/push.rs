@@ -88,7 +88,8 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     // a new path cannot quietly mint one: only these files may name the event or a source
     fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { walk(&p, out) } else if p.extension().map_or(false, |x| x == "rs") { out.push(p) } } }
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"); let mut files = vec![]; walk(&root, &mut files);
-    let allowed = ["push/mod.rs", "bots/tools.rs", "bots/routines.rs", "bots/mail/escalate.rs", "state/mod.rs", "bots/tests/push.rs"];
+    // import014: the hub's own one notice that a 0.14 import ended (Source::import_done, admitted only as how "import" with no bot)
+    let allowed = ["push/mod.rs", "bots/tools.rs", "bots/routines.rs", "bots/mail/escalate.rs", "state/mod.rs", "bots/tests/push.rs", "import014/mod.rs", "import014/tests.rs"];
     for f in files {
         let rel = f.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
         if allowed.contains(&rel.as_str()) { continue }

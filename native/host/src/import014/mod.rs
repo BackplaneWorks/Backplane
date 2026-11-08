@@ -110,13 +110,13 @@ pub fn start_auto(hub: &Arc<Hub>, from: Option<PathBuf>, auto: bool) -> Arc<Impo
 
 /// The import's state for every client: the info key, and a redraw of every open view (setup and Settings read it).
 /// The last state published, for every view (the card is drawn over any page, and a view carries the hub's info only on a few).
-static LAST: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
-pub fn last_published() -> Option<Value> { LAST.lock().unwrap().clone() }
+static LAST: std::sync::Mutex<Vec<(PathBuf, Value)>> = std::sync::Mutex::new(Vec::new());
+pub fn last_published(home: &Path) -> Option<Value> { LAST.lock().unwrap().iter().find(|(h, _)| h == home).map(|(_, v)| v.clone()) }
 /// An import ran in this start: the uberbot's restart wake stays asleep (it would act on 0.14's history, maybe while 0.14 still runs).
 static RAN: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 pub fn ran_this_start(home: &Path) -> bool { RAN.lock().unwrap().iter().any(|h| h == home) }
 async fn publish(hub: &Arc<Hub>, v: &Value) {
-    *LAST.lock().unwrap() = Some(v.clone());
+    { let mut l = LAST.lock().unwrap(); l.retain(|(h, _)| h != &hub.cfg.home); l.push((hub.cfg.home.clone(), v.clone())); }
     hub.set_info(INFO, &v.to_string()).await; hub.bump_views();
     let mut f = v.clone(); f["t"] = json!("migrating"); f["card"] = crate::present::onboard::import_card(v, false, false).unwrap_or(Value::Null); hub.push_all(&f); // the phones (data/1 `migrating`)
 }
