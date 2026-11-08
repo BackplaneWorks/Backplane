@@ -20,7 +20,10 @@ data class DEntry(
     val label: String = "", // a design step: what changed; a note: its name
     val agentOnly: Boolean = false, // a message only the agent reads (data/1 `agentOnly`): never shown
     val tone: String = "",  // a note: error, info…
+    val term: DTermRef? = null, // a chat terminal (feature `terms`, kind "term"): its card
 )
+/** The `term` of a kind:"term" entry: the key its screen is read and watched under, and what it ran. */
+data class DTermRef(val key: String, val id: String, val title: String, val cols: Int, val rows: Int, val cmd: String)
 data class DProject(val id: String, val title: String, val root: String, val threadCount: Int, val updatedAt: Long, val waiting: Int, val icon: String = "folder", val css: String = "", val settledCount: Int? = null) // settledCount: the hub's count (feature `settled`), null from a hub before it
 data class DThread(
     val id: String, val project: String, val title: String, val state: String, val updatedAt: Long, val pinned: Boolean, val settled: Boolean,
@@ -48,6 +51,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     o.optJSONObject("ask")?.let(::parseAsk),
     o.optJSONArray("attachments").list { DAttachment(it.str("id"), it.str("name"), it.str("mime"), it.lng("bytes")) },
     label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
+    term = o.optJSONObject("term")?.let { DTermRef(it.str("key"), it.str("id"), it.str("title"), it.optInt("cols", 80), it.optInt("rows", 24), it.str("cmd")) },
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null)
 fun parseThread(o: JSONObject) = DThread(

@@ -316,6 +316,7 @@ object DataClient {
             "project" -> o.optJSONObject("project")?.let { val p = parseProject(it); projects = (projects.filter { x -> x.id != p.id } + p).sortedByDescending { x -> x.updatedAt }; save() }
             "entry" -> o.optJSONObject("entry")?.let { put(parseEntry(it), o.optString("thread")) }
             "work" -> setWork(o.optString("thread"), o.optJSONObject("subs"))
+            "term" -> Terms.push(o)
             "locks" -> locks = parseLocks(o.optJSONArray("locks"))
             "text" -> {
                 val tid = o.optString("thread"); val eid = o.optString("entry"); val add = o.optString("append")
@@ -604,6 +605,7 @@ object DataClient {
     private fun cacheFile() = java.io.File(app.filesDir, "data-cache-v1.json")
     private fun J(o: DEntry) = JSONObject().put("id", o.id).put("kind", o.kind).put("text", o.text).put("at", o.at).apply {
         if (o.agentOnly) put("agentOnly", true)
+        o.term?.let { t -> put("term", JSONObject().put("key", t.key).put("id", t.id).put("title", t.title).put("cols", t.cols).put("rows", t.rows).put("cmd", t.cmd)) }
         o.tool?.let { put("tool", JSONObject().put("name", it.name).put("summary", it.summary).put("state", it.state)) }
         o.ask?.let { a -> put("ask", JSONObject().put("id", a.id).put("state", a.state).put("question", a.question).put("answered", a.answered ?: JSONObject.NULL)
             .put("options", JSONArray(a.options.map { JSONObject().put("id", it.id).put("label", it.label) }))) }

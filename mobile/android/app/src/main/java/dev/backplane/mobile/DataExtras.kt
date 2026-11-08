@@ -110,7 +110,8 @@ fun ProjectMenus(p: DProject, shown: Boolean, close: () -> Unit) {
     var renaming by remember(p.id) { mutableStateOf(false) }
     var removing by remember(p.id) { mutableStateOf(false) }
     var badge by remember(p.id) { mutableStateOf(false) }
-    if (shown) ActionSheet(p.title, listOf("Rename" to { renaming = true }, "Badge…" to { badge = true }, "Remove project…" to { removing = true }), close)
+    val terms = LocalTermsOpen.current
+    if (shown) ActionSheet(p.title, listOfNotNull(("Terminals" to { terms(p.id) }).takeIf { termsOn() }, "Rename" to { renaming = true }, "Badge…" to { badge = true }, "Remove project…" to { removing = true }), close)
     if (badge) BadgeSheet(p) { badge = false }
     if (renaming) TextPrompt("Rename project", p.title, "Rename", { renaming = false }) { DataClient.projectAct(p.id, "rename", it) }
     if (removing) ActionSheet("Remove “${p.title}” and its threads from the list?", listOf("Remove project" to { DataClient.projectAct(p.id, "remove") }, "Keep it" to {}), { removing = false })
