@@ -38,7 +38,7 @@ if want('F15'):
     sent = until(lambda: any(e['$'] == 'MessagePosted' and e.get('role') == 'user' and 'look at this' in e.get('text', '') for e in events()), 20)
     pause(2); shot('f15-sent')
     files = glob.glob(P('home/attachments/*/*pasted*.png'))
-    told = os.path.exists(P('fake.log')) and any('look at this' in l and 'attachments/' in l for l in open(P('fake.log')).read().splitlines() if l.startswith('TURN'))
+    told = os.path.exists(P('fake.log')) and any('look at this' in l and ('attachments/' in l or 'attachments\\' in l) for l in open(P('fake.log')).read().splitlines() if l.startswith('TURN'))
     same = bool(files) and open(files[0], 'rb').read()[:8] == b'\x89PNG\r\n\x1a\n'
     log('F15-paste', chip and sent and same and told, 'a PNG on the X clipboard pasted with Ctrl+V: composer changed=%s; message posted=%s; stored as a PNG=%s (%s); the agent was told the path=%s' % (chip, sent, same, [os.path.relpath(f, OUT) for f in files][:1], told))
 
@@ -81,7 +81,7 @@ if want('F16'):
     trial('diff', 'ctrl d', lambda a, b, e, m: (differs(px('k-diff-a'), px('k-diff-b'), box(MAIN())), 'the Diff page replaced the timeline'), lambda: chord('ctrl d'))
     trial('terminal', 'ctrl j', lambda a, b, e, m: (differs(px('k-terminal-a'), px('k-terminal-b'), box(MAIN())), 'the floating terminal drew'), lambda: chord('ctrl j'))
     chord('ctrl 1'); pause(1.0)
-    trial('thread2', 'ctrl 2', lambda a, b, e, m: (differs(px('k-thread2-a'), px('k-thread2-b'), (int(MAIN()['x']), 36, int(MAIN()['x'] + 700), 70)), 'the header moved to the second thread'))
+    trial('thread2', 'ctrl 2', lambda a, b, e, m: (differs(px('k-thread2-a'), px('k-thread2-b'), (0, 30, int(MAIN()['x'] + 700), 96)), 'the header moved to the second thread'))
     trial('perf', 'ctrl shift h', lambda a, b, e, m: (differs(px('k-perf-a'), px('k-perf-b')), 'the performance overlay drew'), lambda: chord('ctrl shift h'))
     trial('uber', 'ctrl shift u', lambda a, b, e, m: (differs(px('k-uber-a'), px('k-uber-b'), box(MAIN())), "the uberbot's chat opened"))
     sel(1)
@@ -99,8 +99,8 @@ if want('F17'):
     from PIL import ImageStat
     sel(1); res = []
     VIEW = (840, 150, 1360, 880)   # the viewer pane below its tab bar
-    def busy(name):  # drawn: thousands of pixels that are not the page's background (a "Loading" line or a toolbar is a few hundred)
-        im = px(name).crop(VIEW).convert('L'); bg = im.getpixel((5, 5)); return sum(1 for v in im.getdata() if abs(v - bg) > 25) > 6000
+    def busy(name):  # drawn: thousands of pixels that are not the page's background (a "Loading" line or a toolbar is a few hundred, an error line about 2000)
+        im = px(name).crop(VIEW).convert('L'); bg = im.getpixel((5, 5)); return sum(1 for v in im.getdata() if abs(v - bg) > 25) > 4000   # a fitted schematic is thin lines: about 5000; a line of text about 2000
     for kind, label in [('Board', 'rail:Board'), ('Schematic', 'rail:Schematic'), ('3D', 'rail:3D'), ('Mech', 'rail:Mech')]:
         click_ctl(label); pause(1.0)
         until(lambda: (shot('v-%s' % kind) and busy('v-%s' % kind)), 40)

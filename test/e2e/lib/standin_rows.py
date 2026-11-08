@@ -7,7 +7,7 @@
 #   zqecho     answers with the text it was given, so attachments and agentText can be checked
 #   zqquote D  calls order_quote for folder D
 #   zqshort    a short turn; anything else a turn of FAKE_SECS seconds
-import sys, os, json, time, select, urllib.request
+import sys, os, json, time, urllib.request
 log = os.environ.get("FAKE_LOG", "/dev/null")
 def L(s):
     open(log, "a").write(s + "\n")
@@ -27,16 +27,22 @@ if "-p" in a and "--input-format" not in a:  # one-shot text generation (titles,
     print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "Stand-in title for the thread"}), flush=True); sys.exit(0)
 sid = "fake-%d" % os.getpid()
 n = 0
-_buf = b""
+import threading, queue
+# stdin is read by a thread into a queue: select() on a pipe works on Unix only (Windows selects sockets), and a long turn must wait with a timeout
+_lines = queue.Queue()
+def _reader():
+    buf = b""
+    while True:
+        d = os.read(0, 65536)
+        if not d: _lines.put(None); return
+        buf += d
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1); _lines.put(line.decode("utf-8", "replace"))
+threading.Thread(target=_reader, daemon=True).start()
 def readline(timeout=None):
     """One line of stdin, or None at EOF; with a timeout, "" when nothing arrived (a long turn keeps listening, as the real CLI does, for the hub's interrupt)."""
-    global _buf
-    while b"\n" not in _buf:
-        if timeout is not None and not select.select([0], [], [], timeout)[0]: return ""
-        d = os.read(0, 65536)
-        if not d: return None
-        _buf += d
-    line, _buf = _buf.split(b"\n", 1); return line.decode("utf-8", "replace")
+    try: return _lines.get(timeout=timeout)
+    except queue.Empty: return ""
 interrupted = False
 while True:
     line = readline()

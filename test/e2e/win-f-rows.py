@@ -13,6 +13,7 @@ ONLY = set(sys.argv[6:])
 HERE = os.path.dirname(os.path.abspath(__file__)); REPO = os.path.abspath(os.path.join(HERE, '..', '..'))
 SW, SH = 1440, 900
 u32 = ctypes.WinDLL('user32', use_last_error=True)
+u32.VkKeyScanW.restype = ctypes.c_short
 try: ctypes.WinDLL('shcore').SetProcessDpiAwareness(2)
 except Exception: u32.SetProcessDPIAware()
 rows = []; procs = []
@@ -135,8 +136,15 @@ def xin(cmd, *a):
         move(a[0], a[1]); b = int(a[2]) if len(a) > 2 else 1; dn, up = {1: (2, 4), 2: (0x20, 0x40), 3: (8, 0x10)}[b]; send(mouse(dn)); time.sleep(0.06); send(mouse(up))
     elif cmd == 'dblclick': xin('click', a[0], a[1]); xin('click', a[0], a[1])
     elif cmd == 'type':
-        for ch in str(a[0]):  # each character as itself (KEYEVENTF_UNICODE), whatever the keyboard layout
-            send(kbd(0, ord(ch), 4), kbd(0, ord(ch), 4 | 2))
+        for ch in str(a[0]):
+            # as a keyboard types it: the key this layout has for the character (VkKeyScanW), Shift held when it says so; a character
+            # no key makes goes as itself (KEYEVENTF_UNICODE, VK_PACKET), as an on-screen keyboard or an IME sends it
+            r = u32.VkKeyScanW(ord(ch)) if ord(ch) < 0x80 else -1
+            if r == -1 or r & 0xff == 0xff: send(kbd(0, ord(ch), 4), kbd(0, ord(ch), 4 | 2)); continue
+            v, sh = r & 0xff, (r >> 8) & 1
+            if sh: key_down(0x10)
+            key_down(v); key_up(v)
+            if sh: key_up(0x10)
     elif cmd == 'key': v = vk_of(a[0]); key_down(v); key_up(v)
     elif cmd == 'chord':
         held = [vk_of(m) for m in a[:-1]]
