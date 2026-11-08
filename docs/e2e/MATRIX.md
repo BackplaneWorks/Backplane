@@ -82,7 +82,7 @@ Owned end to end by the push lane (branch `respectful-push`, thread t1793985890-
 | P06 | Badge | `respectful-push` | pass |
 | P07 | Clear on any device | `respectful-push` | pass |
 | P08 | Simulator evidence | `respectful-push` | pass |
-| P09 | TestFlight | `respectful-push` | pass (202611072342, 202611080012: VALID, internal group only) |
+| P09 | TestFlight | `respectful-push` | pass (0.15.0 RC: 202611080758 from 8976e8deb7, VALID, internal group only) |
 
 ## Builders
 
@@ -331,23 +331,23 @@ Rig: Boat sandbox (4 vCPU, 8 GB, Ubuntu 24.04), source `26ba50a0ba49496a9baf89cb
 
 ### iOS and push (lane respectful-push, t1793985890-103)
 
-Hub at 6faf730503 (built on this desktop; no sandbox), simulator on hs-mac-mini (iOS 26.5, iPhone 17 Pro, headless: simctl only, no Simulator.app window), app `dev.backplane.works` (Debug, the TestFlight bundle id). Stand-in agents throughout; a check passes from the hub's events.jsonl, the stand-in's log or the phone's own notification list, never from the driver's say-so.
+Rerun on the 0.15.0 release candidate 8976e8deb7 (rc/0.15.0): hub, simulator app and Android debug app built from it on this desktop (no sandbox), simulator on hs-mac-mini (iOS 26.5, iPhone 17 Pro, headless: simctl only, no Simulator.app window), app `dev.backplane.works` (Debug, the TestFlight bundle id). Stand-in agents throughout; a check passes from the hub's events.jsonl, the stand-in's log or the phone's own notification list, never from the driver's say-so.
 
 | ID | Result | Commit | Rig | Evidence |
 |---|---|---|---|---|
-| P01 | pass, part | 6faf730503 | Linux hub (desktop, temp home) → APNs sandbox → simulator | `cargo-q test push` 34/34 (JWT signed and checked by openssl, frames, curl config, answers). `test/e2e/push/run.sh apns`: the hub sends through api.sandbox.push.apple.com with the team's key, 18/19 steps: every alert reached the simulator through Apple. The silent clear (priority 5) was accepted by APNs (no error, the device kept) and not delivered to the simulator; Apple does not promise background pushes |
-| P02 | pass | 6faf730503 | same; Pixel 9 52220DLAQ001FC (real phone, dev.backplane.mobile.gpui) | unit tests (`every_other_path_is_refused`, `only_the_gate_can_build_an_order`); simulator 19/19 and Pixel 11/11: another bot's notify_person, a worker thread, a finished turn and an approval alone push nothing (hub PushSent unchanged); the alert's record names the uberbot's thread, title Bub |
-| P03 | pass | 6faf730503 | simulator; Pixel 9 | `a_repeat_is_refused_against_the_told_records`; the same text a second time: no banner, PushSent unchanged (both phones) |
-| P04 | pass | 6faf730503 | simulator | `quiet_hours_hold_until_they_end_and_a_needs_you_passes_only_if_allowed`; on the simulator an order in quiet hours shows nothing, then arrives when quiet hours end |
-| P05 | pass | 6faf730503 | simulator | a tap on the banner opens its thread; a tap on the approval's alert lands on the approval (`data.entry.ask`). Android's tap is not driven |
-| P06 | pass | 6faf730503 | simulator (sink) | `the_book_counts_and_clears`; the app's silent-clear handler set the icon badge from the hub's count ("56 new items" → "53") |
-| P07 | pass | 6faf730503 | simulator; Pixel 9 | `dealing_with_it_clears_every_device_and_the_badge` (two phones); answering the approval clears it on the simulator (PushCleared) and removes the notification from the Pixel |
-| P08 | pass | 6faf730503 | simulator | `test/e2e/push/run.sh sink`: 19/19 (the hub's exact payloads through `simctl push`); `test/e2e/push/android.sh` on the Pixel: 11/11 |
-| P09 | pass | c793914ba8, 6cf22b8fe8 | hs-mac-mini, App Store Connect | TestFlight 202611072342 (null-push crash fix) and 202611080012 (phone terminals): uploaded, VALID, internal group "Me" only (`asc-build.py`); new crashes are read by `scripts/mobile/testflight-crashes.sh` |
-| F06 (iOS) | pass | 6faf730503 | simulator, private hub `test/e2e/pixel-hub.mjs` | `test/e2e/ios/f-rows.sh` (FRows/test_f_rows): the approval card drawn, Allow reaches the agent as allow, Decline as deny; after Stop, the question "Which port?" is drawn and the tapped Barrel reaches the agent |
-| F07 (iOS) | pass | 6faf730503 | same | Stop (the send button while a turn runs) on a long turn: TurnChanged interrupted in the hub log |
-| F17 (iOS) | pass | 096eeda2de | same; hub and app built from 096eeda2de | Board, Schematic, 3D and Mech each drawn (no loading card left) and moved by a swipe (lit pixels change: Board 734687→118786, Schematic 48792→36162, 3D 408172→124152, Mech 392181→238274); right after the 3D tab, Mech draws bracket.step itself, not the board. Before 23c5969792 (the iOS 3D lane's fix) Mech showed a black page or the board's model after the 3D tab; an earlier "pass" here took the loading card for a drawing, so the check now also waits for it to go |
-| F21 (iOS) | pass | 6faf730503 | same | the hub killed: the app says offline; started again on the same home: the app reconnects and a message sent afterwards reaches the new hub |
+| P01 | pass, part | 8976e8deb7 | Linux hub (desktop, temp home) → APNs sandbox → simulator | `cargo-q test push` 34/34 on 8976e8deb7 (JWT signed and checked by openssl, frames, curl config, answers). `test/e2e/push/run.sh apns`: the hub sends through api.sandbox.push.apple.com with the team's key, 18/19 steps: every alert reached the simulator through Apple. The silent clear (priority 5) was accepted by APNs (no error, the device kept) and not delivered to the simulator; Apple does not promise background pushes |
+| P02 | pass | 8976e8deb7 | same; Pixel 9 52220DLAQ001FC (real phone, dev.backplane.mobile.gpui) | unit tests (`every_other_path_is_refused`, `only_the_gate_can_build_an_order`); simulator 19/19 and Pixel 11/11: another bot's notify_person, a worker thread, a finished turn and an approval alone push nothing (hub PushSent unchanged); the alert's record names the uberbot's thread, title Bub |
+| P03 | pass | 8976e8deb7 | simulator; Pixel 9 | `a_repeat_is_refused_against_the_told_records`; the same text a second time: no banner, PushSent unchanged (both phones) |
+| P04 | pass | 8976e8deb7 | simulator | `quiet_hours_hold_until_they_end_and_a_needs_you_passes_only_if_allowed`; on the simulator an order in quiet hours shows nothing, then arrives when quiet hours end |
+| P05 | pass | 8976e8deb7 | simulator | a tap on the banner opens its thread; a tap on the approval's alert lands on the approval (`data.entry.ask`). Android's tap is not driven |
+| P06 | pass | 8976e8deb7 | simulator (sink) | `the_book_counts_and_clears`; the app's silent-clear handler set the icon badge from the hub's count ("56 new items" → "53") |
+| P07 | pass | 8976e8deb7 | simulator; Pixel 9 | `dealing_with_it_clears_every_device_and_the_badge` (two phones); answering the approval clears it on the simulator (PushCleared) and removes the notification from the Pixel |
+| P08 | pass | 8976e8deb7 | simulator | `test/e2e/push/run.sh sink`: 19/19 (the hub's exact payloads through `simctl push`); `test/e2e/push/android.sh` on the Pixel: 11/11 |
+| P09 | pass | 8976e8deb7 | hs-mac-mini, App Store Connect | TestFlight 0.15.0 build 202611080758, cut from exactly 8976e8deb7 (CFBundleShortVersionString 0.15.0): uploaded, VALID, internal group "Me" only (`asc-build.py`); earlier internal builds 202611072342, 202611080012, 202611080036, 202611080154. New crashes are read by `scripts/mobile/testflight-crashes.sh` |
+| F06 (iOS) | pass | 8976e8deb7 | simulator, private hub `test/e2e/pixel-hub.mjs` | `test/e2e/ios/f-rows.sh` (FRows/test_f_rows): the approval card drawn, Allow reaches the agent as allow, Decline as deny; after Stop, the question "Which port?" is drawn and the tapped Barrel reaches the agent |
+| F07 (iOS) | pass | 8976e8deb7 | same | Stop (the send button while a turn runs) on a long turn: TurnChanged interrupted in the hub log |
+| F17 (iOS) | pass | 8976e8deb7 | same | Board, Schematic, 3D and Mech each drawn (no loading card left) and moved by a swipe (lit pixels change: Board 734687→118786, Schematic 48792→36553, 3D 408172→98541, Mech 392181→238274); right after the 3D tab, Mech draws bracket.step itself, not the board. Before 23c5969792 (the iOS 3D lane's fix) Mech showed a black page or the board's model after the 3D tab; an earlier "pass" here took the loading card for a drawing, so the check now also waits for it to go |
+| F21 (iOS) | pass | 8976e8deb7 | same | the hub killed: the app says offline; started again on the same home: the app reconnects and a message sent afterwards reaches the new hub |
 | Android release | pass | bd185c2ad7 | GitHub Actions (release.yml dry run 42447251699); Pixel 9 52220DLAQ001FC | job `build android`: `dev.backplane.mobile` 0.0.0-dryrun.android3 (code 2026110804, label "Backplane"), APK and AAB signed CN=Backplane, O=Backplane, SHA-256 ef21acdb…906e (0.14.1's key, checked in the job and again here); publish needs it. The same build under `dev.backplane.mobile.rel` installed beside the person's own app, paired and passed `test/e2e/push/android.sh` 11/11, then was uninstalled; the person's `dev.backplane.mobile` (0.1.0, debug key) unchanged before and after |
 
 ### Pairing and remote operation
