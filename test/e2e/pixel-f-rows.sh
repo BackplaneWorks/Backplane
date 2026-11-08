@@ -24,7 +24,10 @@ ime_off() { local i; for i in 1 2 3; do A shell dumpsys input_method 2>/dev/null
 A shell am start -W -a android.intent.action.VIEW -d "bpgpui://unpair" $PKG >/dev/null; sleep 3; ime_off      # start from the pairing screen, whatever the app held
 A shell am start -W -a android.intent.action.VIEW -d "bpgpui://pair?url=$INV" $PKG >/dev/null; sleep 6; ime_off; shot pair-prompt; T 301 560; sleep 8; shot sidebar
 T 170 603; sleep 3                       # Thread 1 (approval-required)
-say() { T 1000 670; sleep 0.7; A shell input text "$1"; sleep 0.7; A shell input keyevent KEYCODE_BACK; sleep 1; T 1907 779; }
+# the thread's composer is on screen (its Attach and Send controls): typing goes nowhere else (a run that typed into the pairing field left "zqapprove now" there)
+on_thread() { A shell uiautomator dump /sdcard/rows-ui.xml >/dev/null 2>&1; A shell cat /sdcard/rows-ui.xml 2>/dev/null | grep -q 'content-desc="Attach"' && A shell cat /sdcard/rows-ui.xml | grep -q 'Send'; }
+say() { on_thread || { echo "say: the thread's composer is not on screen; '$1' not typed"; shot not-on-thread; return 1; }; T 1000 670; sleep 0.7; A shell input text "$1"; sleep 0.7; A shell input keyevent KEYCODE_BACK; sleep 1; T 1907 779; }
+on_thread || { shot not-paired; ok FAIL setup "the app is not on Thread 1 of this hub after pairing (shots/not-paired.png): nothing was typed, no row ran"; exit 1; }
 wait_for() { for i in $(seq 1 ${2:-25}); do eval "$1" && return 0; sleep 1; done; return 1; }
 say 'zqapprove%snow'; wait_for "[ \$(grep -c AskOpened $EV) -ge 1 ]"; sleep 2; shot approval; T 500 303; wait_for "grep -q 'PERM Bash.*allow' $F"
 grep -q 'PERM Bash.*allow' $F && ok ok F06-phone-allow "the approval card on the phone: Allow tapped, the agent got allow" || ok FAIL F06-phone-allow "no allow reached the agent"
@@ -63,3 +66,4 @@ n=$(grep -c "after the reconnect" $EV); say 'zqshort%safter%sthe%sreconnect'; wa
 shot final
 # leave the app as the next lane finds it: unpaired, at the pairing screen
 A shell am start -W -a android.intent.action.VIEW -d "bpgpui://unpair" $PKG >/dev/null; sleep 4; shot unpaired
+A shell pm clear $PKG >/dev/null; A shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null   # and nothing typed left in its fields
