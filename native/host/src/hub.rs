@@ -74,11 +74,26 @@ pub struct Conn { pub sent: Vec<(String, Value)>, pub client: u64, pub gen: Stri
 pub fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
 /// (zone name, POSIX rule): TZ or /etc/timezone or /etc/localtime, the rule from the zone file's footer.
 fn machine_zone() -> (String, String) {
+    #[cfg(windows)] {
+        // Windows: no /etc/localtime or zoneinfo: TZ, else the system's zone key mapped to IANA, its rule from the built-in table
+        let name = std::env::var("TZ").ok().filter(|z| !z.is_empty()).or_else(windows_zone).unwrap_or_else(|| "UTC".into());
+        let rule = crate::settings::zone::rule(&name);
+        return (name, if rule.is_empty() { "UTC0".into() } else { rule })
+    }
+    #[allow(unreachable_code)]
     let name = std::env::var("TZ").ok().filter(|z| !z.is_empty()).or_else(|| std::fs::read_to_string("/etc/timezone").ok().map(|s| s.trim().to_string()))
         .or_else(|| std::fs::read_link("/etc/localtime").ok().and_then(|p| p.to_string_lossy().split("zoneinfo/").nth(1).map(str::to_string))).unwrap_or_else(|| "UTC".into());
     let rule = std::fs::read(format!("/usr/share/zoneinfo/{name}")).ok().and_then(|b| { let s = String::from_utf8_lossy(&b).into_owned(); let t = s.trim_end_matches('\n'); t.rsplit('\n').next().map(str::to_string) })
         .filter(|r| !r.is_empty() && r.len() < 80 && r.is_ascii()).unwrap_or_else(|| "UTC0".into());
     (name, rule)
+}
+#[cfg(windows)]
+fn windows_zone() -> Option<String> {
+    use windows_sys::Win32::System::Time::{GetDynamicTimeZoneInformation, DYNAMIC_TIME_ZONE_INFORMATION};
+    let mut z: DYNAMIC_TIME_ZONE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetDynamicTimeZoneInformation(&mut z) } == u32::MAX { return None }
+    let n = z.TimeZoneKeyName.iter().position(|c| *c == 0).unwrap_or(z.TimeZoneKeyName.len());
+    crate::settings::zone::from_windows(&String::from_utf16_lossy(&z.TimeZoneKeyName[..n])).map(str::to_string)
 }
 pub fn limits() -> Value { json!({"replyBytes":262144,"entries":32,"recent":24,"searchResults":25,"searchCandidates":128,"chunkBytes":65536}) }
 pub fn capabilities() -> Value { json!({"version":1,"views":{"version":1,"websocketQuery":"view=1","renderers":["mobile"],"compatibility":"explicit-only"},"data":{"proto":"data/1","features":crate::data::FEATURES}}) }

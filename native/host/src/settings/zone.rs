@@ -26,7 +26,17 @@ fn zoneinfo() -> PathBuf { std::env::var_os("BACKPLANE_ZONEINFO").map(PathBuf::f
 
 /// ZoneJob.rule: the zone's rule, "" when the name is not valid or the system does not know it. The footer is the last line of the TZif file
 /// (`tail -n 1`); a zone it cannot read that way but the system knows is taken as the offset it has now (`TZ=<name> date +%z`).
-pub fn rule(name: &str) -> String { rule_in(&zoneinfo(), name) }
+/// A system with no file for the zone (Windows has no zoneinfo at all) takes the rule from the table built in (`known`).
+pub fn rule(name: &str) -> String {
+    let dir = zoneinfo(); let r = rule_in(&dir, name);
+    if !r.is_empty() || !valid(name) || dir.join(name).exists() { return r }
+    known(name).unwrap_or_default().to_string()
+}
+#[path = "zones_table.rs"] mod table;
+/// The built-in rule of an IANA zone (scripts/gen-zones.py, from tzdata).
+pub fn known(name: &str) -> Option<&'static str> { table::ZONES.binary_search_by(|(k, _)| k.cmp(&name)).ok().map(|i| table::ZONES[i].1) }
+/// The IANA zone of a Windows time zone key name ("Pacific Standard Time"), from CLDR's windowsZones.
+pub fn from_windows(key: &str) -> Option<&'static str> { table::WINDOWS.binary_search_by(|(k, _)| k.cmp(&key)).ok().map(|i| table::WINDOWS[i].1) }
 /// `rule` against one zoneinfo folder (the tests pass their own: the environment variable is process-wide, and tests that set it race).
 fn rule_in(dir: &std::path::Path, name: &str) -> String {
     if !valid(name) { return String::new() }
@@ -75,6 +85,15 @@ impl RpcHandler for ZoneRpc {
 mod tests {
     use super::*;
     use crate::{hub::Cfg, presenter::Canned};
+    #[test] fn a_system_without_zone_files_knows_the_zones_from_the_table() {
+        assert_eq!(known("Pacific/Auckland"), Some("NZST-12NZDT,M9.5.0,M4.1.0/3"));
+        assert_eq!(known("Europe/Helsinki"), Some("EET-2EEST,M3.5.0/3,M10.5.0/4"));
+        assert_eq!(known("Nowhere/Atlantis"), None);
+        assert_eq!(from_windows("Pacific Standard Time"), Some("America/Los_Angeles"));
+        assert_eq!(from_windows("New Zealand Standard Time"), Some("Pacific/Auckland"));
+        // sorted, as the binary search needs
+        assert!(table::ZONES.windows(2).all(|w| w[0].0 < w[1].0) && table::WINDOWS.windows(2).all(|w| w[0].0 < w[1].0));
+    }
     #[test] fn zone_names_are_checked_before_any_lookup() {
         for ok in ["Europe/Helsinki", "UTC", "America/Argentina/Buenos_Aires", "Etc/GMT+5", "a"] { assert!(valid(ok), "{ok}") }
         for bad in ["", "/etc/passwd", "../x", "a//b", "Europe/", "has space", "semi;colon", &"a".repeat(65)] { assert!(!valid(bad), "{bad}") }
