@@ -4,6 +4,7 @@
 //! `turn.start`, `ask.answer`, `turn.interrupt`) run as this connection; subscriptions turn each new log line, and the streamed text of a running turn, into
 //! pushes (`thread`, `project`, `entry`, `text`, `turn`) for the lists and threads a connection asked for.
 mod ext;
+mod link;
 pub mod term;
 /// What a phone hears of a push on its socket (ext.rs `notify_of`).
 pub fn ext_notify(e: &Value) -> Value { ext::notify_of(e) }
@@ -18,7 +19,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -145,6 +146,19 @@ fn ask_opened(hub: &Hub, id: &str) -> Option<Value> {
     let lines = hub.store.range(n.saturating_sub(ASK_SCAN), n).ok()?;
     lines.iter().rev().filter(|l| l.contains("\"AskOpened\"") && l.contains(id)).filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| s(e, "id") == id)
 }
+fn far_entries(f: &Arc<dyn crate::api::FarView>, th: &str, p: &Value) -> Result<Value, Value> {
+    let before: u64 = s(p, "before").parse().unwrap_or(0);
+    let page = f.page(th, before, limit_of(p, 40, 32)).ok_or_else(|| err("unknown thread"))?;
+    let ids: HashSet<u64> = page.ids.iter().filter_map(|i| i.parse().ok()).collect();
+    let mut rows: Vec<&crate::model::Row> = page.rows.iter().filter(|r| ids.contains(&r.ord) && r.thread == th).collect();
+    rows.sort_by_key(|r| r.ord);
+    let out: Vec<Value> = rows.iter().filter_map(|r| row_entry(r)).collect();
+    let more = page.below > 0 || page.rows.iter().map(|r| r.ord).collect::<HashSet<_>>().len() > ids.len();
+    let next = if more { rows.first().map(|r| json!(r.ord.to_string())).unwrap_or(Value::Null) } else { Value::Null };
+    let title = rows.iter().find(|r| r.kind == "msg" && r.role == "user").map(|r| clip(&shown_text(&r.text), 60)).unwrap_or_default();
+    let thread = json!({"id":th,"project":"","title":title,"state":"idle","updatedAt":rows.last().map_or(0, |r| ms(r.at)),"pinned":false,"settled":false,"settledAt":0,"archived":false,"provider":"","model":"","effort":"","runtime":"","chip":"","preview":"","waiting":0,"parent":"","history":false});
+    Ok(json!({"thread":thread,"entries":out,"next":next}))
+}
 fn row_entry(r: &crate::model::Row) -> Option<Value> {
     let at = ms(r.at);
     if r.kind == "msg" {
@@ -178,6 +192,8 @@ fn live_entry(thread: &str, text: &str) -> Value { json!({"id":format!("live:{th
 
 async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     let th = s(p, "thread");
+    // a thread of a linked machine, as this hub mirrors it: its page from the mirror (no asks or live text here)
+    if th.contains('~') && !hub.model().await.threads.contains_key(th) { if let Some(f) = hub.far().filter(|f| f.has(th)) { return far_entries(&f, th, p) } }
     let m = hub.model().await;
     let asks = open_ask_counts(hub);
     let thread = thread_json(hub, &m, th, &asks).ok_or_else(|| err("unknown thread"))?;
@@ -309,6 +325,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             let next = if more { keyed.last().map(|x| json!(format!("{}:{}", x.0, x.1))).unwrap_or(Value::Null) } else { Value::Null };
             Ok(json!({"threads":items.into_iter().map(|x| x.2).collect::<Vec<_>>(),"next":next})) }
         "thread.entries" => entries(hub, p).await,
+        "link.resolve" => link::resolve(hub, p).await,
         // a buy thread's Order card (present/thread.rs `order_json`, what the desktop draws), null for any other thread; the app asks again on each push for the thread
         "thread.order" => { let th = s(p, "thread"); if th.is_empty() { return Err(err("thread")) }
             let o = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::thread::order_json(st, th, st.threads.get(th).map_or(false, |t| t.turn == crate::state::Turn::Running)))).unwrap_or(Value::Null);

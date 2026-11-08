@@ -61,10 +61,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -450,4 +450,33 @@ impl RpcHandler for FakeStar {
     assert_eq!(*seen.0.lock().unwrap(), vec![json!({"token":"m5","action":"dismiss"})]);
     hub.push_all(&json!({"t":"star","offer":null}));
     loop { let v = next(&mut ws).await; if v["t"] == "star" { assert_eq!(v["offer"], Value::Null); break } }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_link_resolve_says_what_a_link_opens_or_why_not() {
+    let root = std::env::temp_dir().join(format!("bp-links-{}", std::process::id())); let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).unwrap(); std::fs::write(root.join("src/x.rs"), "one\ntwo\n").unwrap();
+    let more = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p9\",\"title\":\"links\",\"root\":\"{}\",\"at\":1700000100}}\n{{\"$\":\"ThreadCreated\",\"id\":\"t9\",\"project\":\"p9\",\"title\":\"Nine\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000101}}\n", root.display());
+    let (_h, port) = up_with("links", &more).await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let mut n = 0u64;
+    let mut r = |u: &str, t: &str| { n += 1; json!({"id":n,"m":"link.resolve","p":{"url":u,"thread":t}}) };
+    let cases: Vec<(Value, Value)> = vec![
+        (r("backplane://thread/t1", ""), json!({"kind":"thread","thread":"t1"})),
+        (r("backplane://thread/t404", ""), json!({"kind":"none"})),
+        (r("backplane://thread/L~t9", ""), json!({"kind":"none"})),
+        (r("backplane://project/p1", ""), json!({"kind":"project","project":"p1"})),
+        (r("backplane://project/p404", ""), json!({"kind":"none"})),
+        (r("backplane://conv/room%3Anone", ""), json!({"kind":"none"})),
+        (r("backplane://person", ""), json!({"kind":"none"})),
+        (r("src/x.rs:2", "t9"), json!({"kind":"file","thread":"t9","path":"src/x.rs","line":2})),
+        (r("src/y.rs:2", "t9"), json!({"kind":"none"})),
+        (r("../etc/passwd", "t9"), json!({"kind":"none"})),
+        (r("src/x.rs", ""), json!({"kind":"none"})),
+    ];
+    for (m, want) in cases {
+        let id = m["id"].as_u64().unwrap(); ws.send(Message::Text(m.to_string().into())).await.unwrap();
+        let v = loop { let v = next(&mut ws).await; if v["t"] == "reply" && v["id"] == id { break v } };
+        let got = &v["result"]; assert_eq!(got["kind"], want["kind"], "{m}: {v}");
+        for k in ["thread", "project", "path", "line"] { if want.get(k).is_some() { assert_eq!(got[k], want[k], "{m}"); } }
+        if want["kind"] == "none" { assert!(!got["note"].as_str().unwrap_or("").is_empty(), "a refusal says why: {m}") }
+    }
+    let _ = std::fs::remove_dir_all(&root);
 }
