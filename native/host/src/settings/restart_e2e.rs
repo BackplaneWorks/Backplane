@@ -302,8 +302,8 @@ async fn the_retire_watch_cuts_a_turn_running_on_the_changed_account_but_not_one
     let cut = |l: &String| l.contains("verified identity changed");
     // a long turn runs on Work, and the identity behind Work moves: that turn is cut
     std::fs::write(b.rec.join("mode.w@x.com"), "slow:30").unwrap();
+    let before = b.turns().len(); // counted before the send: the stand-in may record its turn before deliver returns (a full gate timed out here, restart_e2e.rs:308)
     up.ag.deliver_person(&tid(0), "m-rw1", "go on", vec![]).await.unwrap();
-    let before = b.turns().len();
     // the stand-in has its turn (it records it before the slow part): the process runs on Work now, not only about to
     let end = Instant::now() + Duration::from_secs(30); while b.turns().len() <= before { assert!(Instant::now() < end, "{:?} {:?}", up.mgr.runs_on(&tid(0)), lines(&up.hub, &tid(0))); tokio::time::sleep(Duration::from_millis(20)).await }
     assert_eq!(b.turns()[before]["who"], "w@x.com"); assert_eq!(up.mgr.runs_on(&tid(0)).as_deref(), Some(ps[0].0.as_str()), "and the hub knows it runs on Work");
@@ -317,7 +317,7 @@ async fn the_retire_watch_cuts_a_turn_running_on_the_changed_account_but_not_one
     let cuts = lines(&up.hub, &tid(0)).iter().filter(|l| cut(l)).count();
     // the next start: Work is not the account the thread chose any more, so it goes to Personal, where a routine check is running: the start waits for it (launch_plan
     // waits out a check), running and on no login, and the watch runs then
-    assert!(up.mgr.hold_check(&ps[1].0), "Personal is free for the check");
+    assert!(up.mgr.hold_check(&ps[1].0).await, "Personal comes free for the check");
     let before = b.turns().len();
     // deliver returns once the start has its login, so it is sent from a task: the start is held on Personal's check while the watch runs
     let sent = { let ag = up.ag.clone(); tokio::spawn(async move { ag.deliver_person(&tid(0), "m-rw2", "and on", vec![]).await }) };
