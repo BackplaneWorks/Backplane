@@ -314,3 +314,26 @@ if want('F18'):
     for n, ok, why in res: print('   F18', n, ok, why, flush=True)
     log('F18', all(r[1] for r in res) and len(res) >= 6, '; '.join('%s: %s' % (n, 'ok' if ok else 'FAIL (' + why + ')') for n, ok, why in res))
     ensure_sidebar()
+
+
+# ---- F14X (explicit only, RELAY=1): why a Return in the terminal is lost. Per trial: a command typed, one Return, and what each hop saw: the client's term.input requests (the relay), the shell (a marker file)
+if want('F14X') and ONLY:
+    import collections
+    ensure_sidebar(); sel(1); chord('ctrl j'); pause(3)
+    stats = collections.defaultdict(lambda: [0, 0, 0]); lines = []
+    def send_return(how):
+        if how == 'cliclick': xin('key1', 'Return')
+        else:   # a Quartz keyboard event pair for the Return key (keycode 36), with a pause between down and up
+            for down in (True, False): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateKeyboardEvent(None, 36, down)); time.sleep(0.08)
+    for n in range(24):
+        how = 'cliclick' if n % 2 == 0 else 'quartz'; mk = P('f14x-%d.marker' % n); t0 = time.time(); k0 = len(SENT)
+        xin('type', 'touch ' + mk); pause(0.6); t1 = time.time(); send_return(how)
+        ran = until(lambda: os.path.exists(mk), 5)
+        reqs = [(round(t - t1, 2), p) for t, m, p in SENT[k0:] if m == 'term.input']
+        cr = [r for r in reqs if isinstance(r[1], dict) and 13 in (r[1].get('b') or [])]   # a request that carries a carriage return
+        stats[how][0] += 1; stats[how][1] += bool(cr); stats[how][2] += bool(ran)
+        lines.append('trial %d %s: Return sent by the client=%s (%s), the shell ran the command=%s' % (n, how, bool(cr), [r[0] for r in cr], ran))
+        if not ran: xin('key1', 'Return'); pause(1.0)   # clear the line for the next trial
+    for l in lines: print('   F14X', l, flush=True)
+    log('F14X', True, 'per method (trials, client sent a carriage return, shell ran it): ' + '; '.join('%s %s' % (k, tuple(v)) for k, v in stats.items()) + '. A Return the client did not send and the shell did not run is lost before or in the client; one it sent and the shell did not run is lost in the hub or the PTY.')
+    chord('ctrl j')
