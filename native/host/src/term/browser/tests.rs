@@ -109,3 +109,22 @@ fn text(body: &Value) -> String { body["$content"][0]["text"].as_str().unwrap().
     let v = views(&rx); assert_eq!(v.len(), 2); assert_eq!(v[0], json!({"t":"view","thread":"t1","kind":"browser","path":""}));
     preview(&hub, "t1", "preview_snapshot", &json!({})).await; preview(&hub, "t1", "preview_click", &json!({"x":1,"y":1})).await; assert!(views(&rx).is_empty());
 }
+
+/// A download the person started in the Browser tab: the helper's file moves into the hub's home, the windows are told, and the file is there to fetch by its id.
+#[tokio::test] async fn a_persons_download_is_kept_and_offered_to_the_windows() {
+    let (hub, d) = hub_with_helper("dl").await; let b = get(&hub).unwrap(); let rx = Tap::new(&hub, 1);
+    let src = d.join("helper-dl"); std::fs::create_dir_all(&src).unwrap(); let f = src.join("report.pdf"); std::fs::write(&f, b"%PDF bytes").unwrap();
+    b.line(&json!({"event":"download","page":"t1","name":"report.pdf","path":f.to_string_lossy(),"bytes":10}).to_string()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let push = rx.take().into_iter().find(|v| v["t"] == "browser.download").expect("the windows are told");
+    assert_eq!((push["bot"].as_str(), push["name"].as_str(), push["bytes"].as_u64()), (Some("t1"), Some("report.pdf"), Some(10)));
+    let id = push["id"].as_str().unwrap();
+    let (p, name) = b.download_path(id).await.expect("kept under its id");
+    assert!(p.starts_with(hub.cfg.home.join("browser-downloads")) && name == "report.pdf"); assert_eq!(std::fs::read(&p).unwrap(), b"%PDF bytes");
+    assert!(!f.exists(), "moved out of the helper's folder");
+    assert!(b.download_path("d0-nope").await.is_none());
+    // a failure is said, nothing kept
+    b.line(&json!({"event":"download","page":"t1","name":"x.bin","error":"canceled"}).to_string()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(rx.take().iter().any(|v| v["t"] == "browser.download" && v["error"] == "canceled"));
+}

@@ -109,6 +109,7 @@ impl Backplane {
             Event::Refs(r)=>{ self.screens.plotview.hist.refs=screens::plot::refs_of(&r); cx.notify(); }
             Event::Steps(r)=>{ self.screens.plotview.hist.steps=screens::histbar::steps_of(&r); cx.notify(); }
             Event::Sheets(rows)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); cx.notify(); }
+            Event::BrowserDownload(owner,id,name,error)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.take_download(&id,&name,&error,cx));}}},
             Event::BrowserTabs(owner,text)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.set_tabs(&text,cx));}}},
             Event::ViewShow(thread,kind,path)=>self.view_show(&thread,&kind,&path,cx),
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }

@@ -22,7 +22,7 @@ const NO_HELPER: &str = "the Backplane browser could not start: no backplane-bro
 pub const PREVIEW: &[&str] = &["preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status"];
 
 #[derive(Default)]
-struct St { input: Option<mpsc::Sender<String>>, pending: HashMap<u64, oneshot::Sender<String>>, next: u64, gen: u64, drive: HashMap<String, String>, tabs: HashMap<String, String>, cast: HashMap<String, std::time::Instant> }
+struct St { input: Option<mpsc::Sender<String>>, pending: HashMap<u64, oneshot::Sender<String>>, next: u64, gen: u64, drive: HashMap<String, String>, tabs: HashMap<String, String>, cast: HashMap<String, std::time::Instant> , downloads: Vec<(String, PathBuf, String)>}
 pub struct Browser { hub: Arc<Hub>, st: Mutex<St>, exe: Option<PathBuf>, events: tokio::sync::broadcast::Sender<Value> }
 
 static BROWSERS: OnceLock<std::sync::Mutex<HashMap<PathBuf, Arc<Browser>>>> = OnceLock::new();
@@ -39,7 +39,26 @@ fn helper_path() -> Option<PathBuf> {
 }
 pub fn fail(m: &str) -> String { json!({"ok":false,"error":m}).to_string() }
 
+const MAX_DOWNLOAD: u64 = 2 << 30;
+const DOWNLOADS_KEPT: usize = 32;
+/// GET /browser-download?id=: a person's download from the Browser tab (`take_download`), for a window to save in its Downloads. Behind the hub's credential.
+struct Downloads;
+impl crate::api::HttpHandler for Downloads {
+    fn routes(&self) -> &'static [&'static str] { &["/browser-download"] }
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a crate::auth::Req) -> crate::api::Fut<'a, crate::api::HttpReply> {
+        Box::pin(async move {
+            let id = req.param("id");
+            let Some(b) = get(hub) else { return crate::api::HttpReply::text("404 Not Found", "no browser") };
+            let Some((p, name)) = b.download_path(&id).await else { return crate::api::HttpReply::text("404 Not Found", "no such download") };
+            let quoted: String = name.chars().filter(|c| *c != '"' && !c.is_control()).collect();
+            let p2 = p.to_string_lossy().into_owned();
+            let mut r = tokio::task::spawn_blocking(move || crate::files::serve::send(&p2, "application/octet-stream", "")).await.unwrap_or_else(|_| crate::api::HttpReply::text("500 Internal Server Error", "send failed"));
+            r.extra = format!("{}Content-Disposition: attachment; filename=\"{quoted}\"\r\n", r.extra); r
+        })
+    }
+}
 pub fn start(hub: &Arc<Hub>) {
+    hub.register_http(Arc::new(Downloads));
     let b = Arc::new(Browser { hub: hub.clone(), st: Mutex::new(St::default()), exe: helper_path(), events: tokio::sync::broadcast::channel(256).0 });
     BROWSERS.get_or_init(Default::default).lock().unwrap().insert(hub.cfg.home.clone(), b.clone());
     hub.register_rpc(Arc::new(Close(b.clone())));
@@ -130,12 +149,32 @@ impl Browser {
                     if !self.hub.set_info(&format!("browser.tabs.{page}"), &o.to_string()).await { eprintln!("term: info browser.tabs.{page} refused (bounded)") }
                 }
                 "record" | "navigated" | "load" | "shield-click" | "engine" => { let _ = self.events.send(o.clone()); }
+                "download" => self.take_download(page, &o).await,
                 _ => {}
             }
             return
         }
         if let Some(id) = o.get("id").and_then(Value::as_u64) { if let Some(tx) = self.st.lock().await.pending.remove(&id) { let _ = tx.send(text.to_string()); } }
     }
+
+    /// The person's download from the helper (`download`: page, name, path, bytes): the file moves into `<home>/browser-downloads/<id>/`, a window that shows
+    /// the page is told (`browser.download`) and fetches it from `/browser-download?id=` into its Downloads. The newest DOWNLOADS_KEPT are kept.
+    async fn take_download(&self, page: &str, o: &Value) {
+        let name = o.get("name").and_then(Value::as_str).unwrap_or("download").to_string();
+        if let Some(e) = o.get("error").and_then(Value::as_str) { self.hub.push_all(&json!({"t":"browser.download","bot":page,"name":name,"error":e})); return }
+        let src = PathBuf::from(o.get("path").and_then(Value::as_str).unwrap_or(""));
+        let id = format!("d{}-{}", crate::hub::now_ms(), self.st.lock().await.downloads.len());
+        let safe: String = name.chars().map(|c| if c == '/' || c == '\\' || c.is_control() || c == ':' { '_' } else { c }).collect();
+        let dir = self.hub.cfg.home.join("browser-downloads").join(&id); let dest = dir.join(if safe.trim_matches('.').is_empty() { "download".into() } else { safe });
+        let moved = std::fs::metadata(&src).map_or(false, |m| m.is_file() && m.len() <= MAX_DOWNLOAD) && std::fs::create_dir_all(&dir).is_ok()
+            && (std::fs::rename(&src, &dest).is_ok() || (std::fs::copy(&src, &dest).is_ok() && std::fs::remove_file(&src).map_or(true, |_| true)));
+        if !moved { let _ = std::fs::remove_dir_all(&dir); self.hub.push_all(&json!({"t":"browser.download","bot":page,"name":name,"error":"the download could not be kept"})); return }
+        let bytes = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+        { let mut st = self.st.lock().await; st.downloads.push((id.clone(), dest, name.clone()));
+          while st.downloads.len() > DOWNLOADS_KEPT { let (_, p, _) = st.downloads.remove(0); if let Some(d) = p.parent() { let _ = std::fs::remove_dir_all(d); } } }
+        self.hub.push_all(&json!({"t":"browser.download","bot":page,"id":id,"name":name,"bytes":bytes}));
+    }
+    pub async fn download_path(&self, id: &str) -> Option<(PathBuf, String)> { self.st.lock().await.downloads.iter().find(|(i, _, _)| i == id).map(|(_, p, n)| (p.clone(), n.clone())) }
 
     /// A client that shows this page (a phone with its Browser tab open: `screen.jpg` is its poll) holds a lease: the helper screencasts for a few seconds from the
     /// last request. Without a request nothing is cast and no JPEG is encoded (the native window draws its own page and never asks). At most one `cast` a second per page.

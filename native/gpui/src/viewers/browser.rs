@@ -18,7 +18,19 @@ pub fn decode_jpeg(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 }
 fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)) }
 
-pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, banner: String, pub light: bool, open_error: Option<String>, opening_since: Instant, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
+pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, banner: String, pub light: bool, open_error: Option<String>, opening_since: Instant, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool>, hub_at: (String, String) }
+/// The hub's copy of a person's download (`/browser-download?id=`) written to `dir` under a name not taken there: what the page says after.
+pub fn save_download(base: &str, token: &str, id: &str, name: &str, dir: &std::path::Path) -> String {
+    let url = format!("{}/browser-download?id={id}", base.trim_end_matches('/'));
+    match get_bytes(&url, token, Duration::from_secs(300), 2 << 30) {
+        Ok((200, body)) => {
+            let _ = std::fs::create_dir_all(dir); let to = super::downloads::unique_path(dir, &super::downloads::safe_name(name));
+            match std::fs::write(&to, &body) { Ok(()) => format!("Saved {} in {}", to.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(), dir.display()), Err(e) => format!("The download of {name} could not be saved: {e}") }
+        }
+        Ok((s, _)) => format!("The download of {name} failed: the hub answered {s}"),
+        Err(e) => format!("The download of {name} failed: {e}"),
+    }
+}
 /// One GET with a bearer token over the client's own stream (plain or TLS, as the hub's address says): (status, body), the body at most `max` bytes.
 pub fn get_bytes(url: &str, token: &str, timeout: Duration, max: u64) -> Result<(u16, Vec<u8>), String> {
     // the address is the scheme and authority only: with the path in, `host_port` sees no port and dials "host:port/bots/x/screen.jpg:80" ("failed to lookup address information")
@@ -50,7 +62,7 @@ impl BrowserPage {
     /// for a thread's page: the host passes `BT.World.page`'s value), `token` the hub token (a Bearer header, never logged). The poller fetches only while
     /// `set_visible(true)`; mount the page with the tab and call `set_visible(false)` when another tab is shown.
     pub fn new(cx: &mut Context<Self>, base: String, owner: String, token: String, hub: tokio::sync::mpsc::Sender<crate::hub::Command>) -> Self {
-        let hub_tx = hub.clone(); let owner_bar = owner.clone();
+        let hub_tx = hub.clone(); let owner_bar = owner.clone(); let hub_at = (base.clone(), token.clone());
         // with the `cef` feature and a usable runtime the page is embedded Chromium (cef_page.rs); otherwise the hub's JPEG frames below
         #[cfg(feature = "cef")]
         let mut cef_why = String::new();
@@ -107,7 +119,18 @@ impl BrowserPage {
         #[cfg(not(feature = "cef"))]
         let banner = String::new();
         let status = if !cef_note2.is_empty() { cef_note2 } else if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
-        BrowserPage { #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), banner, light: false, open_error: None, opening_since: Instant::now(), image: None, retired: Vec::new(), status, stop, visible }
+        BrowserPage { #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), banner, light: false, open_error: None, opening_since: Instant::now(), image: None, retired: Vec::new(), status, stop, visible, hub_at }
+    }
+    /// A download the person started on this page (the hub's `browser.download`): fetched from the hub and saved in Downloads under a name not taken
+    /// (as the embedded browser saves its own); the note line says where, or why not.
+    pub fn take_download(&mut self, id: &str, name: &str, error: &str, cx: &mut Context<Self>) {
+        if !error.is_empty() || id.is_empty() { self.banner = format!("The download of {name} failed: {}", if error.is_empty() { "no file" } else { error }); cx.notify(); return }
+        let (base, token) = self.hub_at.clone(); let (id, name) = (id.to_string(), name.to_string());
+        self.banner = format!("Downloading {name}…"); cx.notify();
+        cx.spawn(async move |this, cx| {
+            let said = cx.background_executor().spawn(async move { save_download(&base, &token, &id, &name, &super::downloads::downloads_folder()) }).await;
+            let _ = this.update(cx, |p, cx| { p.banner = said; cx.notify(); });
+        }).detach();
     }
     /// The helper's `tabs` event for this page (info `browser.tabs.<owner>`): the tab strip and the address of the active tab.
     /// The theme of the window: light or dark (both pages draw from its tokens).
@@ -271,6 +294,21 @@ impl Bar {
 
 #[cfg(test)]
 mod tests {
+    /// A person's download fetched from the hub lands in the folder under its name, then under a name not taken; a refusal is said.
+    #[test] fn a_download_from_the_hub_lands_under_a_name_not_taken() {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || for s in l.incoming().take(3) { let mut s = s.unwrap(); let mut b = [0u8; 2048]; let n = s.read(&mut b).unwrap(); let req = String::from_utf8_lossy(&b[..n]).to_string();
+            let (st, body) = if req.contains("id=good") && req.contains("Bearer tok") { ("200 OK", "%PDF bytes") } else { ("404 Not Found", "no") };
+            let _ = write!(s, "HTTP/1.1 {st}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()); });
+        let d = std::env::temp_dir().join(format!("bp-dl-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let base = format!("http://127.0.0.1:{port}");
+        let said = super::save_download(&base, "tok", "good", "report.pdf", &d); assert!(said.starts_with("Saved report.pdf"), "{said}");
+        assert_eq!(std::fs::read(d.join("report.pdf")).unwrap(), b"%PDF bytes");
+        let said = super::save_download(&base, "tok", "good", "report.pdf", &d); assert!(said.starts_with("Saved report (2).pdf"), "{said}");
+        let said = super::save_download(&base, "tok", "gone", "x.bin", &d); assert!(said.contains("404"), "{said}"); assert!(!d.join("x.bin").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn keys_on_the_page_reach_it_as_typed_or_pressed() {
         use serde_json::json;
         assert_eq!(super::page_input("a", Some("a")), Some(json!({"op":"type","text":"a"})));

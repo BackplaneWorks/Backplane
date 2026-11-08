@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 /// The person's Downloads folder: XDG_DOWNLOAD_DIR, else ~/Downloads.
-pub fn downloads_folder() -> PathBuf { std::env::var_os("XDG_DOWNLOAD_DIR").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads"))).unwrap_or_else(std::env::temp_dir) }
+pub fn downloads_folder() -> PathBuf { std::env::var_os("XDG_DOWNLOAD_DIR").map(PathBuf::from).or_else(|| crate::plat::user_home().map(|h| h.join("Downloads"))).unwrap_or_else(std::env::temp_dir) } // Windows: %USERPROFILE%\Downloads (no HOME there)
 /// A finished download at `file` (named by the engine, e.g. a guid in a temp folder) moved into the Downloads folder as `suggested`; the file already there, or a failure, leaves `file` as it was.
 pub fn bring_to_downloads(file: &Path, suggested: &str) -> PathBuf { bring_to(&downloads_folder(), file, suggested) }
 fn bring_to(dir: &Path, file: &Path, suggested: &str) -> PathBuf {
