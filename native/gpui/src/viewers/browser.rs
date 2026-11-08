@@ -301,7 +301,7 @@ mod tests {
         std::thread::spawn(move || for s in l.incoming().take(3) { let mut s = s.unwrap(); let mut b = [0u8; 2048]; let n = s.read(&mut b).unwrap(); let req = String::from_utf8_lossy(&b[..n]).to_string();
             let (st, body) = if req.contains("id=good") && req.contains("Bearer tok") { ("200 OK", "%PDF bytes") } else { ("404 Not Found", "no") };
             let _ = write!(s, "HTTP/1.1 {st}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()); });
-        let d = std::env::temp_dir().join(format!("bp-dl-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = std::env::temp_dir().join(format!("bp-hubdl-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); // its own folder: downloads.rs and cef.rs tests remove bp-dl-<pid> in parallel
         let base = format!("http://127.0.0.1:{port}");
         let said = super::save_download(&base, "tok", "good", "report.pdf", &d); assert!(said.starts_with("Saved report.pdf"), "{said}");
         assert_eq!(std::fs::read(d.join("report.pdf")).unwrap(), b"%PDF bytes");
