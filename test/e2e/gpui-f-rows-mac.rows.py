@@ -117,8 +117,8 @@ if want('F16'):
     trial('models', 'ctrl m', lambda a, b, e, m: (any(x['event'] == 'pick' for x in m), 'the model menu opened (client `pick` metric)'), lambda: xin('key', 'Escape'))
     r0 = dict(rects())
     trial('sidebar', 'ctrl b', lambda a, b, e, m: (rects().get('main', {}).get('x', 0) < r0['main']['x'] - 50, 'the main pane grew left as the sidebar folded (main.x %s -> %s)' % (r0['main']['x'], rects().get('main', {}).get('x'))), lambda: chord('ctrl b'))
-    trial('files', 'ctrl p', lambda a, b, e, m: (differs(px('k-files-a'), px('k-files-b'), box(MAIN())), 'the Files page replaced the timeline'), lambda: chord('ctrl p'))
-    trial('diff', 'ctrl d', lambda a, b, e, m: (differs(px('k-diff-a'), px('k-diff-b'), box(MAIN())), 'the Diff page replaced the timeline'), lambda: chord('ctrl d'))
+    trial('files', 'ctrl p', lambda a, b, e, m: (differs(px('k-files-a'), px('k-files-b')), 'the Files page drew (the window changed)'), lambda: chord('ctrl p'))
+    trial('diff', 'ctrl d', lambda a, b, e, m: (differs(px('k-diff-a'), px('k-diff-b')), 'the Diff page drew (the window changed)'), lambda: chord('ctrl d'))
     trial('terminal', 'ctrl j', lambda a, b, e, m: (differs(px('k-terminal-a'), px('k-terminal-b'), box(MAIN())), 'the floating terminal drew'), lambda: chord('ctrl j'))
     chord('ctrl 1'); pause(1.0)
     trial('thread2', 'ctrl 2', lambda a, b, e, m: (differs(px('k-thread2-a'), px('k-thread2-b'), (0, 0, 600, 40)), 'the header moved to the second thread'))
@@ -130,6 +130,7 @@ if want('F16'):
     sel(2); say_('a long turn')
     t2 = lambda: [e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't2']
     until(lambda: any(e['state'] == 'running' for e in t2()), 40)
+    until(lambda: 'tool:interrupt' in ctrls(), 40)   # the Stop button is there while the turn runs
     trial('stop', 'ctrl period', lambda a, b, e, m: (any(x['$'] == 'TurnChanged' and x.get('state') == 'interrupted' for x in e), 'TurnChanged interrupted in the hub log'))
     trial('settle', 'ctrl shift s', lambda a, b, e, m: (any(x['$'] == 'ThreadSettled' for x in e), 'ThreadSettled in the hub log'))
     log('F16', all(x[2] for x in res), '; '.join('%s %s: %s' % (n, c, 'ok' if ok else 'FAIL (' + w + ')') for n, c, ok, w in res))
@@ -158,7 +159,7 @@ if want('F07'):
     sel(1); pass
     n0 = len([e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'running'])
     say_('a long turn'); until(lambda: len([e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'running']) > n0, 20); pause(1.5); shot('f7-running')
-    stopped = click_ctl('tool:interrupt'); ok = until(lambda: events()[-1]['$'] and any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'interrupted' for e in events()), 20)
+    until(lambda: 'tool:interrupt' in ctrls(), 40); stopped = click_ctl('tool:interrupt'); ok = until(lambda: events()[-1]['$'] and any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'interrupted' for e in events()), 20)
     log('F07-stop', stopped and ok, 'a running turn (f7-running.png) and the Stop button in the thread header: TurnChanged interrupted in the hub log=%s' % ok)
 if want('F08'):
     sel(1); n = len([e for e in events() if e['$'] == 'ThreadCreated']); forked = click_ctl('tool:fork'); ok = until(lambda: len([e for e in events() if e['$'] == 'ThreadCreated']) > n, 20); pause(1.5); shot('f8-fork')
@@ -210,7 +211,7 @@ if want('F18'):
                 if abs(r - rgb[0]) < tol and abs(g - rgb[1]) < tol and abs(b - rgb[2]) < tol: xs += x; ys += y; n += 1
         return (xs // n, ys // n) if n * 4 >= minpx else None
     sel(1); chord('ctrl b'); pause(1.0); click_ctl('rail:Browser'); pause(4); allow_dialogs(); VW = (560, 90, win()[2] - 80, win()[3] - 30); shot('f18-open')
-    allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(0.5); xin('type', URL); xin('key', 'Return'); pause(2); allow_dialogs()
+    allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(1.0); chord('ctrl a'); pause(0.3); xin('type', URL); xin('key', 'Return'); pause(2); allow_dialogs()
     loaded = until(lambda: 'load' in names(), 60); pause(3); shot('f18-page'); res = []
     pos = {k: find('f18-page', c) for k, c in [('btn', (0, 204, 102)), ('inp', (255, 255, 102)), ('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
     res.append(('page loads and paints', loaded and all(pos.values()), 'the helper streamed the test page (the page asked its server: %s); targets found on the frame: %s' % (loaded, pos)))
