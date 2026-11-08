@@ -8,7 +8,7 @@ try() { name=$1; PENV=$2; shift 2; N=88; rm -f /tmp/.X11-unix/X$N
   Xvfb :$N -screen 0 1440x900x24 -nolisten tcp "$@" > /tmp/xprobe-xvfb.log 2>&1 & X=$!; sleep 2
   DISPLAY=:$N xdpyinfo -queryExtensions 2>/dev/null | grep -iE 'dri3|present|glx|shm|xtest' | tr '\n' ' '; echo
   env DISPLAY=:$N $PENV VK_ICD_FILENAMES=$ICD LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$D/assets LD_LIBRARY_PATH=$D "$D/backplane-gpui" --url http://127.0.0.1:3999 --token-file /tmp/xprobe-home/token --exit-after 8000 > /tmp/xprobe-client.log 2>&1 & C=$!; sleep 6
-  DISPLAY=:$N import -window root /tmp/xprobe-$name.png 2>&1 | head -2
+  DISPLAY=:$N xwd -root -silent | convert xwd:- png:/tmp/xprobe-$name.png 2>&1 | head -2
   python3 -I -c "
 from PIL import Image, ImageStat
 s=ImageStat.Stat(Image.open('/tmp/xprobe-$name.png').convert('L')); print('$name', 'mean', round(s.mean[0],2), 'stddev', round(s.stddev[0],2))"
