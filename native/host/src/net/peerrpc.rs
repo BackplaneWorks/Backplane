@@ -29,7 +29,8 @@ impl RpcHandler for PeerRpc {
                 // the paired machines by name (and machine id), and what a text's `~machine` words mean to an agent: for clients, tests and `backplane pair`
                 "mesh.machines" => match crate::bots::api::of(hub) {
                     None => err(id, "bots are not running"),
-                    Some(b) => { let rows = b.mesh_rows();
+                    Some(b) => { if p["refresh"] == true { let c = b.mesh_candidates().await; *self.0.via.lock().unwrap() = c; }
+                        let rows = b.mesh_rows();
                         let ms: Vec<Value> = rows.iter().map(|m| json!({"name": m.name, "word": crate::bots::mesh::word(&m.name), "link": m.link, "mid": b.mid_known(&m.link).unwrap_or_default(), "away": m.away, "projects": m.projects.iter().map(|p| json!({"id": p.0, "title": p.1})).collect::<Vec<_>>()})).collect();
                         ok(id, json!({"mid": b.my_mid(), "machines": ms, "lines": crate::agents::refs::machine_lines(&rows, &s("text")), "prompt": b.machines_prompt()})) }
                 },
