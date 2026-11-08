@@ -111,7 +111,13 @@ def shot(name):
     im = Image.open(full).convert('RGB'); x, y, w, h = win(); sc = im.size[0] / float(screen_size()[0])
     im.crop((int(x * sc), int(y * sc), int((x + w) * sc), int((y + h) * sc))).save(f); os.remove(full); return f
 def set_clipboard_png(path): osa('set the clipboard to (read (POSIX file "%s") as «class PNGf»)' % path)
-def metrics(): return [json.loads(l.split('GPUI_METRIC ', 1)[1]) for l in open(P('client.log'), errors='replace') if 'GPUI_METRIC ' in l]
+def metrics():
+    out = []
+    for l in open(P('client.log'), errors='replace'):
+        if 'GPUI_METRIC ' not in l: continue
+        try: out.append(json.loads(l.split('GPUI_METRIC ', 1)[1]))
+        except Exception: pass   # a line the client is still writing
+    return out
 def rects():
     r = {}
     for m in metrics():
