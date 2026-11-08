@@ -137,6 +137,7 @@ fi
 kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"; rm -f "$DEV/.last-failure" "$DEV/.last-failure.log"
 D=$(mktemp -d "$DEV/.stage.XXXX")
 cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$VT/$PROFILE/backplane-voice" "$UT/$PROFILE/backplane" "$D/"
+cp "$ROOT/native/voice/vad/silero_vad.onnx" "$D/"   # dictation's VAD beside the helper, as in a release: local-install takes it (no download) when it matches its pin
 # the embedded Chromium: libcef.so beside the window (it is linked with RUNPATH $ORIGIN); the rest of CEF's runtime (paks, icudtl.dat, locales, snapshot) is found in
 # ~/.cache/backplane/cef-runtime/<version>, which is made once here from the build (libcef stripped: 1.4 GB with symbols, ~270 MB without), and builds link to that one libcef.
 ver=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";.*/\1/p' "$ROOT/native/gpui/src/viewers/cef.rs" | head -1); RT=${XDG_CACHE_HOME:-$HOME/.cache}/backplane/cef-runtime/$ver
