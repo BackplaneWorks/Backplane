@@ -140,14 +140,19 @@ time.sleep(2)
 import Quartz
 def cli(*a): subprocess.run(['cliclick', *a], check=False, timeout=30)
 KEYS = {'Return': 'return', 'Escape': 'esc', 'BackSpace': 'delete', 'Tab': 'tab', 'space': 'space', 'Delete': 'fwd-delete', 'Up': 'arrow-up', 'Down': 'arrow-down', 'Left': 'arrow-left', 'Right': 'arrow-right'}
+def quartz_return():
+    # Return as a Quartz key-down and key-up pair (keycode 36). cliclick's `kp:return` right after typed text was lost about half the time on the runner (80 trials, F14X: cliclick 19 of 40
+    # reached the client, Quartz 40 of 40; everything the client received reached the shell), so the injector is not the client's or the terminal's fault
+    time.sleep(0.25)
+    for down in (True, False): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateKeyboardEvent(None, 36, down)); time.sleep(0.08)
 def abs_(x, y): ox, oy, _, _ = win(); return int(ox + x), int(oy + y)
 def xin(cmd, *a):
     if cmd == 'click': x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y), 'w:60', 'c:%d,%d' % (x, y))
     elif cmd == 'type': cli('w:80', 't:' + str(a[0]))
     elif cmd == 'key':
-        cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))
+        quartz_return() if a[0] == 'Return' else cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))
         # one press: a second Return a moment later sends a message twice when the composer has not yet cleared (say_ presses again only when the hub has not seen the message)
-    elif cmd == 'key1': cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))   # one press, for a field where Return acts each time it is pressed (the address bar)
+    elif cmd == 'key1': cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower())) if a[0] != 'Return' else quartz_return()   # one press
     elif cmd == 'wheel':
         x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y)); time.sleep(0.2)
         for _ in range(abs(int(a[2]))): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, -3 if int(a[2]) > 0 else 3)); time.sleep(0.15)   # the rows say positive = scroll down; a Quartz wheel event's positive value is the other way

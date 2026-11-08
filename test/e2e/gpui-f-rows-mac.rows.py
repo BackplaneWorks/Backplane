@@ -195,10 +195,7 @@ if want('F08'):
     log('F08-fork', forked and ok, 'the Fork thread button: a new thread was created in the hub log=%s (f8-fork.png)' % ok)
 if want('F14'):
     marker = P('term.marker'); chord('ctrl j'); pause(2.5); shot('f14-open')
-    xin('type', 'touch ' + marker); ok = False
-    for _t in range(5):   # a Return can be lost before the shell has the line; a repeated `touch` is harmless
-        xin('key', 'Return')
-        if until(lambda: os.path.exists(marker), 5): ok = True; break
+    xin('type', 'touch ' + marker); pause(0.5); xin('key', 'Return'); ok = until(lambda: os.path.exists(marker), 10)   # one Return, no retry: a lost Return here is a result (F14X traced the earlier losses to the injector)
     pause(1); shot('f14-typed')
     shown = differs(px('f14-open'), px('f14-typed'))
     log('F14-terminal', ok and shown, 'the floating terminal (Ctrl+J): a command typed with the keyboard ran in a real shell (the marker file exists=%s) and the panel redrew=%s (f14-typed.png)' % (ok, shown))
