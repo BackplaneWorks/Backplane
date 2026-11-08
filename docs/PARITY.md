@@ -58,7 +58,7 @@ Each lane updates its own rows in the commit that lands the work.
 | Subagent drill-down | missing | threads-deep |
 | Your machines, one list over machines | partial | threads-deep |
 | Viewers for threads on another machine (`far.view`) | unchecked | threads-deep |
-| Real provider logos (the picker draws a coloured initial; no provider artwork found in 0.14's `src/web` either) | missing | threads-small |
+| Real provider logos: the window draws the vendor marks for Claude and OpenCode as tinted vectors (`assets/providers/*.svg`, simple-icons CC0, `NOTICE.md`) in the model picker, the model chip and the account cards; the other providers keep the coloured square with an initial. Driven in the window on Xvfb (build/gpui/shots/provider-logos/s-picker.png, s-chip.png, s-acct.png). The phones still draw initials | partial | threads-small |
 | Routine save errors on screen | done | threads-small |
 | Diff and Files toggle closed | done | threads-small |
 | **Bend-era cleanup** | | |
@@ -110,15 +110,15 @@ Rows of the old checklist (`gpui` branch, `docs/gpui/PARITY.md`, 198 rows, secti
 | 9 | Snooze | done | `ThreadSnoozed` with `until` an hour on; the row left the list. The wake at the end was not waited for. |
 | 10 | Archive / unarchive | partial | `ThreadArchived`. Unarchive not driven. |
 | 11 | Delete thread (asks first) | done | The first press showed Cancel and Delete; Cancel left no `ThreadDeleted`. A confirmed delete was not driven. |
-| 12 | Rename thread / project | partial | Thread: inline edit, `ThreadRenamed` (the box starts with the old name). Project: the project's menu is New thread and Remove project only, so no project rename from the GPUI client (the hub has `project.rename`). |
+| 12 | Rename thread / project | partial | Thread: inline edit, `ThreadRenamed` (the box starts with the old name). Project: the project's menu now has Rename (`proj-rename`, 2db7c98453; test `a_project_offers_new_thread_rename_badge_and_a_confirmed_remove`). Not driven in the window yet. |
 | 13 | Fork thread, bring back | done | Fork thread made "Fork: New thread" (`ThreadForked`, handoff turn queued) with a "Back to the original" button. |
 | 14 | Reorder threads and projects | unchecked | Drag not driven. |
 | 15 | New thread | done | The + made a thread, in a git folder with a real worktree (see Worktree controls). |
 | 16 | Add project | partial | Picker lists the folder and `..`; Add made `ProjectCreated` and a thread. mkdir and find not driven. |
 | 17 | Remove project, restore on re-add | partial | Two-press "Click again to remove project", `ProjectRemoved`; the row stays while one of its threads is open. Restore on re-add not driven. |
 | 18 | Scratch project and threads | done | See Old Scratch chats above: the desktop and both phones. |
-| 19 | Thread tree: parent, detach, reparent | partial | New subthread made `ThreadParentSet` and a child row with a fold. The row menu has no Move to top level, so detach and reparent are missing from the client. |
-| 20 | Project badge colour/icon editor | missing | No entry in the project menu, no control in the controls list. |
+| 19 | Thread tree: parent, detach, reparent | partial | New subthread made `ThreadParentSet` and a child row with a fold. A subthread's row menu now has Move to top level (`row-detach`, 2db7c98453; test `only_a_subthread_offers_to_move_to_the_top_level`); phones detach through data/1. Not driven in the window; reparent to another parent is still not in the client. |
+| 20 | Project badge colour/icon editor | partial | The project menu has Badge, the project page has the editor (`screens/badge.rs`), and its colour and icon choices are in the controls list as `look:<value>` (2db7c98453); the phones set the badge through data/1. Not driven in the window yet. |
 | 21 | Status colours, urgency order, counts | unchecked | |
 | 22 | Machine switch / one list over machines | unchecked | See Your machines above. |
 
@@ -142,7 +142,7 @@ Driven in one thread with the stand-in's `stream` mode (`tools:`, `todos:`, `age
 | 36 | Multi-line composer, paste, IME | unchecked | |
 | 37 | Queue while busy, steer, edit, remove | partial | A second message sent while a turn ran was delivered and answered after it, in order. No queue strip with edit or remove was seen; steer, edit and remove not driven. |
 | 38 | Model, effort and provider picker | unchecked | The picker keys are another lane's. |
-| 39 | Slash commands and popups | partial | `/btw`, `/give`, `/secret`, `/intent` run on the hub (see the `/btw`, `/give` row); `/btw` driven in the window, all four on both phones. The `$`, `@`, `>`, `%` popups not driven in the window; the `>` popup driven on Android (it inserts the hub's word). |
+| 39 | Slash commands and popups | partial | `/btw`, `/give`, `/secret`, `/intent` run on the hub (see the `/btw`, `/give` row); all four driven on both phones (4b29e0fe54); in the window only `/btw` is driven (`/give`, `/secret`, `/intent` are not). The `$`, `@`, `>`, `%` popups not driven in the window; the `>` popup driven on Android (it inserts the hub's word). |
 | 40 | `/btw` | done | See the `/btw`, `/give` row above: driven in the GPUI window and on both phones. |
 | 41 | `/give`, references, summaries | missing | `/give` as above; summaries are in row 51. |
 | 42 | Images in messages | unchecked | |
@@ -176,7 +176,9 @@ Driven in one thread with the stand-in's `stream` mode (`tools:`, `todos:`, `age
 | # | Row | Status | What was driven |
 |---|---|---|---|
 | 98 | Project home (goal, intent, parts, boards) | partial | Clicking the project row opens a home with the name, the folder, New thread and the thread list. With `.backplane/intent.md` and a `board.fab.json` in the folder it still showed no goal, parts or boards (the card data is the commerce lane's `fab.look`/`fab.intent` row). |
-| 99 to 101 | Ready to order bar, order progress, manufacturing review | unchecked | Commerce lane's rows. |
+| 99 | Ready to order bar | dropped | Dropped on purpose (see the Commerce section: Buy it is the first of the thread's tools instead). |
+| 100 | Order progress | done | The Order card and its steps, driven live in the window, on the Android emulator and the iOS simulator against the local order server and a Stripe double (6508e65764, 1c1fa2a9f6; `test/order/live_e2e.sh`, `live_android.sh`, `live_ios.sh`). |
+| 101 | Manufacturing review | partial | `order_review` check and record work for every agent and the gate is tested through the agent's MCP path; the live buy-thread runs (6508e65764, 1c1fa2a9f6) do not drive a review, so it is not driven on a client. |
 | 102 | Board picker (several boards) | unchecked | |
 | 104 | Board viewer | partial | A real board drew, with History, Compare, Layers and Fit. Pan, zoom, pick and layers are the E2E viewer rows (F17) and the layer-focus lane. |
 | 105 | Schematic viewer | partial | A real schematic drew, with History, Compare, Layers, Fit. Sheet navigation not driven. |
@@ -244,4 +246,4 @@ Filled in by the lanes as they meet them. A row needs what was rough and what it
 | The window's "Needs you" desktop notification stayed after the need was answered; the hub now tells the desk it told (notify.clear) once the thread has no ask open, and the window closes that notification | done | commerce |
 | A queued job's timeout ran from the moment it queued, so a long queue could time it out before it started | done: it starts at the grant | hub-tools |
 | The status plane's outside-holder line read fields the lock record does not have | done: it names the pid and command | hub-tools |
-| Provider marks were initials | missing | threads-small |
+| Provider marks were initials: done for the window (Claude and OpenCode vendor marks, see Real provider logos); the phones still draw initials | partial | threads-small |
