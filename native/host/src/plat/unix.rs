@@ -15,7 +15,9 @@ pub mod fs {
     pub fn mode_bits(actual: u32, _want: u32) -> u32 { actual }
     pub use std::fs::{canonicalize, rename};
     /// What tells a file's change: its modification time (ns since 1970), 0 when it has none.
-    pub fn change_stamp(p: &std::path::Path) -> u128 { std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos()) }
+    /// The modified time with the size folded in, as on Windows: the kernel stamps files from a coarse clock (a few ms), so two writes in a row can share
+    /// a time, and only the size tells them apart (the skills index served a SKILL.md's old text on a fast sandbox).
+    pub fn change_stamp(p: &std::path::Path) -> u128 { std::fs::metadata(p).ok().map_or(0, |m| m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos()) ^ ((m.len() as u128) << 96)) }
     /// Whether no part of an absolute path is a link (it is its own real path).
     pub fn no_link_on(p: &std::path::Path) -> std::io::Result<bool> { Ok(canonicalize(p)? == p) }
     /// Whether a path in text is absolute: it starts at /.
