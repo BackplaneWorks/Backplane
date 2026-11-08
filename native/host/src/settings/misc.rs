@@ -1,5 +1,5 @@
-//! The small Settings requests: `models.refresh` sends the models info again; the CLI probing it would redo (opencode, codex, grok, muse model listings) is not ported, so the
-//! list is the built-in one. (`update.check` and `app.update` are in `update/svc.rs`.)
+//! The small Settings requests: `models.refresh` sends the models info again and asks the CLIs once more (models_probe.rs); a list that changed
+//! follows on its own. (`update.check` and `app.update` are in `update/svc.rs`.)
 use super::models;
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
@@ -11,7 +11,9 @@ impl RpcHandler for SettingsMisc {
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, _p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = method;
-            hub.push_all(&json!({"t":"info","info":{"models":models::info(),"models.all":models::all()}})); vec![json!({"t":"reply","id":id,"ok":true})]
+            hub.push_all(&json!({"t":"info","info":{"models":models::info(),"models.all":models::all()}}));
+            if models::live() { let h = hub.clone(); tokio::spawn(async move { super::models_probe::refresh(&h).await; }); }
+            vec![json!({"t":"reply","id":id,"ok":true})]
         })
     }
 }

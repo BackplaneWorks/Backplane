@@ -187,6 +187,7 @@ async fn run(a: Args) -> Result<()> {
     let _voice = voice::session::start(&hub); // bots.voice and /voice/in, before settings::start (which then leaves bots.voice alone)
     let _push = bots.as_ref().map(|b| push::start(&hub, b.clone())); // phone push: the uberbot's gate (none without bots)
     guard::step_now("settings-start", || settings::start(hub.clone(), agents));
+    settings::models_probe::start(hub.clone()); // the agents' models: last time's at once, the CLIs asked after the window is up
     startup::mark("settings start started");
     guard::step_now("commands", || commands::start(hub.clone()));
     let _import = import014::start(&hub); // finds a 0.14 home and offers it in setup; reads nothing more until asked

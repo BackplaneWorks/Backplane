@@ -401,7 +401,17 @@ fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, auto: bool) -> Opt
     let th = s(p, "thread", ""); let to = s(p, "provider", ""); let model = s(p, "model", "");
     let from = f.threads.get(&th).map(|t| t.provider.clone()).unwrap_or_default();
     if running(f, &th) { return Some(Plan { events: vec![], reply: err(id, "a provider changes between turns: stop this one first"), stop: None, wt: None, scratch: None, act: None }) }
-    if from == to { return done(hold(f, &th, at), id) }
+    // the same agent: the model and effort it names, if any (a picker that pressed an agent and then a model before it heard the first back asks this way)
+    if from == to {
+        let mut ev = vec![];
+        if let Some(m) = p.get("model").and_then(Value::as_str).filter(|m| f.threads.get(&th).map_or(false, |t| t.model != *m)) {
+            let mut q = json!({"thread": th, "model": m}); if let Some(o) = p.as_object() { for (k, v) in o { if k != "provider" && k != "effort" { q[k] = v.clone() } } }
+            if let Some(pl) = modes(f, at, id, &q) { ev.extend(pl.events.into_iter().filter(|e| e["$"] == "ModesSet")) }
+        }
+        if let Some(e) = p.get("effort").and_then(Value::as_str) { ev.push(json!({"$":"SettingSet","key":format!("effort.{th}"),"value":effort_of(&to, e),"at":at})) }
+        ev.extend(hold(f, &th, at));
+        return done(ev, id)
+    }
     let n = f.n();
     let seen: usize = f.setting(&format!("seen.{th}.{to}")).parse().unwrap_or(0);
     let count = f.count.get(&th).copied().unwrap_or(0); let missed = count.saturating_sub(seen);
