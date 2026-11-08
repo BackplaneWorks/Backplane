@@ -454,7 +454,7 @@ impl RpcHandler for FakeStar {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_link_resolve_says_what_a_link_opens_or_why_not() {
     let root = std::env::temp_dir().join(format!("bp-links-{}", std::process::id())); let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap(); std::fs::write(root.join("src/x.rs"), "one\ntwo\n").unwrap();
-    let more = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p9\",\"title\":\"links\",\"root\":\"{}\",\"at\":1700000100}}\n{{\"$\":\"ThreadCreated\",\"id\":\"t9\",\"project\":\"p9\",\"title\":\"Nine\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000101}}\n", root.display());
+    let more = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p9\",\"title\":\"links\",\"root\":{},\"at\":1700000100}}\n{{\"$\":\"ThreadCreated\",\"id\":\"t9\",\"project\":\"p9\",\"title\":\"Nine\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000101}}\n", serde_json::Value::from(root.to_string_lossy()));   // JSON-quoted: a Windows path has backslashes
     let (_h, port) = up_with("links", &more).await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
     let mut n = 0u64;
     let mut r = |u: &str, t: &str| { n += 1; json!({"id":n,"m":"link.resolve","p":{"url":u,"thread":t}}) };
