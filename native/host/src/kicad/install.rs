@@ -222,12 +222,14 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
         let relay = tokio::spawn(async move { while let Some(l) = rx.recv().await { say(&h2, "running", p.version, &l).await } });
         let r = run(standin.as_deref(), &parent, p, &parent.join(".install.log"), |l| { let _ = tx.send(l); }).await;
         drop(tx); let _ = relay.await;
+        RUNNING.store(false, Ordering::SeqCst);
+        // Settings > CAD names the new KiCad (and its Install row goes) before the install says it is done: whoever reads "done" reads the new status with it
+        super::ipc::publish_cad(&h).await;
         match &r {
             Ok(dir) => { eprintln!("kicad: installed Backplane KiCad {} in {dir}", p.version); say(&h, "done", p.version, &format!("Installed Backplane KiCad {} in {dir}", p.version)).await }
             Err(why) => { eprintln!("kicad: install failed: {why}"); say(&h, "failed", p.version, &format!("KiCad install failed: {why}")).await }
         }
-        RUNNING.store(false, Ordering::SeqCst);
-        super::ipc::publish_cad(&h).await; h.bump_views(); // Settings > CAD now names the new KiCad (and its Install row goes)
+        h.bump_views();
     });
     Ok(started)
 }

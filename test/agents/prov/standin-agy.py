@@ -4,7 +4,7 @@
 # session/resume (no id), session/set_mode, session/set_config_option, session/prompt -> "ECHO: <text>", a tool call that completes, a permission
 # request first when the text says "perm" and the mode is not yolo; then end_turn. Lines go to $AGY_LOG with what the environment held.
 import json, os, sys
-log = os.environ.get("AGY_LOG", "/dev/null")
+log = os.environ.get("AGY_LOG", os.devnull)
 def note(s):
     with open(log, "a") as f: f.write(s + "\n")
 def say(o): sys.stdout.write(json.dumps({"jsonrpc": "2.0", **o}, ensure_ascii=False) + "\n"); sys.stdout.flush()
