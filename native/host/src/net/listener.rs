@@ -215,7 +215,7 @@ mod tests {
         let out = routes.handle(&req(main_port), 1).unwrap(); assert_eq!(out.reply.status, "200 OK", "{}", String::from_utf8_lossy(&out.reply.body));
         let b: serde_json::Value = serde_json::from_slice(&out.reply.body).unwrap();
         let (l_addr, m_addr) = (format!("http://127.0.0.1:{port}"), format!("http://127.0.0.1:{main_port}"));
-        assert_eq!(b["routes"], json!([l_addr, m_addr]), "the listener's confirmed address, then the one this request came to: {b}");
+        assert_eq!(b["routes"], json!([l_addr]), "the listener's confirmed address; the loopback one this request came to is no hint for another device: {b}");
         assert!(b["link"].as_str().unwrap().starts_with(&format!("{l_addr}/pair#invite=")), "the link names the listener's address first: {b}");
         assert_eq!(b["qr"], crate::net::qr::text(b["link"].as_str().unwrap()), "the QR encodes that link");
         // without the listener (never started) the link would name only the address the request came to

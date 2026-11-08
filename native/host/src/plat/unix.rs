@@ -124,6 +124,27 @@ pub mod time {
 pub mod net {
     /// After an answer that refused a request whose body was not read: the connection just closes (as it always has here).
     pub async fn refused_close(_s: &mut tokio::net::TcpStream) {}
+    /// The machine's IPv4 addresses that are not loopback, each with its interface's name (pairing's local network choice
+    /// leaves out a container's or a VM's bridge by name).
+    pub fn v4_interfaces() -> Vec<(String, String)> {
+        let mut out = vec![];
+        unsafe {
+            let mut ifa: *mut libc::ifaddrs = std::ptr::null_mut();
+            if libc::getifaddrs(&mut ifa) != 0 { return out }
+            let mut p = ifa;
+            while !p.is_null() {
+                let a = &*p;
+                if !a.ifa_addr.is_null() && (*a.ifa_addr).sa_family as i32 == libc::AF_INET && a.ifa_flags & (libc::IFF_LOOPBACK as u32) == 0 && a.ifa_flags & (libc::IFF_UP as u32) != 0 {
+                    let sin = &*(a.ifa_addr as *const libc::sockaddr_in);
+                    let name = if a.ifa_name.is_null() { String::new() } else { std::ffi::CStr::from_ptr(a.ifa_name).to_string_lossy().into_owned() };
+                    out.push((name, std::net::Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr)).to_string()));
+                }
+                p = a.ifa_next;
+            }
+            libc::freeifaddrs(ifa);
+        }
+        out
+    }
     /// The machine's IPv4 addresses that are not loopback.
     pub fn non_loopback_v4() -> Vec<String> {
         let mut out = vec![];

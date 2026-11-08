@@ -76,11 +76,16 @@ pub fn start_full(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool, https: b
         Ok((reg, routes)) => {
             // (the wire blanks DeviceRegistered/DeviceDropped for clients: Hub::wire_item, laws device_token_never_sent/device_drop_never_sent)
             hub.register_rpc(Arc::new(super::devices::Devices));
+            hub.register_rpc(Arc::new(super::devicespage::DevicesPage));
             let table = super::peers::PeerTable::new();
             let peering = Arc::new(super::peering::Peering::new(hub.cfg.home.clone(), reg.clone(), table.clone(), routes.clone(), tailnet, host, port));
             hub.register_http(Arc::new(super::peerhttp::PeerRoutes(peering.clone())));
             hub.register_rpc(Arc::new(super::peerrpc::PeerRpc(peering.clone())));
             hub.set_pairing(reg, Arc::new(Wired { routes: routes.clone(), hub: Arc::downgrade(hub) }));
+            // the local network addresses the person let the hub answer on (Settings → Devices), listened on again
+            let lan = Arc::new(super::lan::Lan::new(&hub.cfg.home, host, port, Arc::downgrade(hub)));
+            routes.set_lan(lan.clone());
+            if tokio::runtime::Handle::try_current().is_ok() { lan.boot(); }
             let _ = ROUTES.set(routes.clone());
             let _ = HUB.set(Arc::downgrade(hub));
             let _ = PEERING.set(peering.clone());

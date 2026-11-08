@@ -19,9 +19,9 @@ used, revoked and rate-limited codes have separate responses.
 
 The hub records every invitation it issues (hashes only, in `devices-v1.json`
 beside the devices): when it was issued, whether it was used, when and by which
-device, and whether it was revoked. **Settings → Devices → Pairing links** lists
-them, newest first, and each one not yet used, or used by a device that still
-has access, has its own Revoke. Revoking an unused link stops it from pairing
+device, and whether it was revoked. **Settings → Devices** lists each one not
+yet used, or used by a device that still has access, with its own Revoke (the
+finished ones stay in the registry but are not listed, nor are revoked devices). Revoking an unused link stops it from pairing
 anything; revoking a used one also revokes the device it paired and closes that
 device's connections. A hub pairs only with a link it issued, recorded and has
 not revoked; one it cannot record is never issued. The newest hundred finished
@@ -45,10 +45,44 @@ public code resolver. Both devices need a route to the hub, usually its LAN or
 tailnet. The hub answers `POST /auth/known` (is this origin one of the owner's
 hubs), but no client asks it yet.
 
-The hub puts listener-confirmed tailnet origins ahead of a desktop's loopback
-address. A listener bound to every interface also advertises its IPv4 routes.
-A link whose every route is loopback is marked `localOnly`. Alternative addresses
-in the link are hints, not a new tunneling service.
+Add a device asks how the other device reaches the hub: **Tailscale**, **Local
+network** or **This computer** (only those that exist; Tailscale first, then the
+local network, then this computer). Switching swaps the hub address, link, QR
+code and Copy in place: one invitation answers on every address, so its short
+code works with whichever address is shown beside it. `POST /auth/invitations`
+returns them as `addresses` (`{kind, url, link, qr, listening}`, in that order:
+the tailnet, each local network IPv4, this computer; `native/host/src/net/plan.rs`);
+each link lists its own address first in its routes, then the other remote
+addresses the hub answers on (never loopback, which on another device would
+reach that device's own hub). The older fields (`link`, `qr`, `routes`,
+`localOnly`) are the first remote address that answers, else this computer. A
+tailnet address is one a listener confirmed (the hub's tailnet listener or
+Serve), one a listener on every interface covers, or the one the request came
+through. Local network addresses are the machine's IPv4 ones without loopback,
+link-local, the tailnet's 100.64/10 or a container's or VM's bridge (docker0,
+br-*, veth*, virbr*, ...). A link whose every route is loopback is marked
+`localOnly`, and This computer says it works only on this computer. Alternative
+addresses in the link are hints, not a new tunneling service. The page shows the
+link, its QR code (dark on white with a quiet zone, which phone scanners read in
+either theme), the code beside the hub address and the time it expires; Copy link
+and Copy code put them on the clipboard. The phones draw the same rows
+(`devices.page`, docs/PHONE-DATA.md).
+
+A hub listening on loopback only (the default) does not answer on the local
+network. Choosing Local network then offers **Let the hub answer on the local
+network**: the hub opens one more listener on that address and port (`POST
+/auth/lan`, `X-Backplane-Lan: <address>`, `X-Backplane-Lan-State: on|off`,
+authorized like `POST /auth/invitations`; `native/host/src/net/lan.rs`). It is
+untrusted as the tailnet listener is for a device its owner does not own: no
+loopback trust and no owner, so only the page itself, `/hello` and pairing answer
+without a paired credential. It is plain HTTP on that network: the traffic is not
+encrypted (the page says so), so prefer Tailscale on a network you do not trust.
+The choice is kept in `<home>/lan-v1.json` and listened on again after a restart
+(an address the machine no longer has stays kept and is tried at the next start).
+**Stop answering here** under Settings → Devices closes that listener and its
+connections and forgets it. A hub started with `--host 0.0.0.0` (or that address)
+already answers there and needs none; a hub on a copied log never opens one.
+`GET /auth/devices` lists the kept addresses as `lan` (`{ip, url, listening}`).
 
 A hub on its tailnet address (`--host <100.x>`) or LAN address serves plain HTTP
 there. `--tailscale-https` or `--tailnet-only` also puts it behind
@@ -137,7 +171,8 @@ linking and its existing owner-authentication rules are unchanged.
 
 ## Validation
 
-`cd native/host && scripts/cargo-q test --offline pair_` and
+`cd native/host && scripts/cargo-q test --offline pair_`, `net::plan`, `net::lan`,
+`net::devicespage` and `present::settings::tests::devices` and
 `cd native/gpui && scripts/cargo-q test --offline pairing` check the registry, the
 routes, link parsing, refusals and the revoke paths.
 
