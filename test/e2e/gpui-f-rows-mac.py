@@ -92,7 +92,9 @@ def abs_(x, y): ox, oy, _, _ = win(); return int(ox + x), int(oy + y)
 def xin(cmd, *a):
     if cmd == 'click': x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y), 'w:60', 'c:%d,%d' % (x, y))
     elif cmd == 'type': cli('w:80', 't:' + str(a[0]))
-    elif cmd == 'key': cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))
+    elif cmd == 'key':
+        cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))
+        if a[0] == 'Return': cli('w:500', 'kp:return')   # the first Return after typed text is often taken by the text input to commit it; a second on an empty field does nothing
     elif cmd == 'wheel':
         x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y)); time.sleep(0.2)
         for _ in range(abs(int(a[2]))): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, 3 if int(a[2]) > 0 else -3)); time.sleep(0.15)
@@ -111,6 +113,17 @@ def shot(name):
     subprocess.run(['screencapture', '-x', full]); from PIL import Image
     im = Image.open(full).convert('RGB'); x, y, w, h = win(); sc = im.size[0] / float(screen_size()[0])
     im.crop((int(x * sc), int(y * sc), int((x + w) * sc), int((y + h) * sc))).save(f); os.remove(full); return f
+def allow_dialogs():   # a system sheet (\"Allow Python to find devices on local networks?\") blocks every click under it: press Allow
+    return osa('''tell application "System Events"
+ repeat with p in (every process whose background only is false or name is "UserNotificationCenter")
+  try
+   repeat with w in (every window of p)
+    if exists (button "Allow" of w) then click button "Allow" of w
+    if exists (button "Allow" of group 1 of w) then click button "Allow" of group 1 of w
+   end repeat
+  end try
+ end repeat
+end tell''')
 def set_clipboard_png(path): osa('set the clipboard to (read (POSIX file "%s") as «class PNGf»)' % path)
 def metrics():
     out = []

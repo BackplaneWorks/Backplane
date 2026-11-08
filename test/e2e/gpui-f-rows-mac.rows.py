@@ -73,7 +73,7 @@ if want('F15'):
     r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); pause(0.5)
     shot('f15-before'); chord('ctrl v'); pause(2.5); shot('f15-pasted')
     chip = differs(px('f15-before'), px('f15-pasted'), (int(r['x']), int(r['y'] - 120), int(r['x'] + r['w']), int(r['y'] + r['h'])))
-    xin('type', 'zqecho look at this'); pause(0.5); xin('key', 'Return')
+    say_('zqecho look at this')
     sent = until(lambda: any(e['$'] == 'MessagePosted' and e.get('role') == 'user' and 'look at this' in e.get('text', '') for e in events()), 20)
     pause(2); shot('f15-sent')
     files = glob.glob(P('home/attachments/*/*pasted*.png')) or glob.glob(P('home/attachments/*/*.png'))
@@ -209,8 +209,8 @@ if want('F18'):
                 r, g, b = d[x, y]
                 if abs(r - rgb[0]) < tol and abs(g - rgb[1]) < tol and abs(b - rgb[2]) < tol: xs += x; ys += y; n += 1
         return (xs // n, ys // n) if n * 4 >= minpx else None
-    sel(1); chord('ctrl b'); pause(1.0); click_ctl('rail:Browser'); pause(4); shot('f18-open')
-    chord('ctrl l'); pause(0.5); xin('type', URL); xin('key', 'Return')
+    sel(1); chord('ctrl b'); pause(1.0); click_ctl('rail:Browser'); pause(4); allow_dialogs(); VW = (560, 90, win()[2] - 80, win()[3] - 30); shot('f18-open')
+    allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(0.5); xin('type', URL); xin('key', 'Return'); pause(2); allow_dialogs()
     loaded = until(lambda: 'load' in names(), 60); pause(3); shot('f18-page'); res = []
     pos = {k: find('f18-page', c) for k, c in [('btn', (0, 204, 102)), ('inp', (255, 255, 102)), ('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
     res.append(('page loads and paints', loaded and all(pos.values()), 'the helper streamed the test page (the page asked its server: %s); targets found on the frame: %s' % (loaded, pos)))
