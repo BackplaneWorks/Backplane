@@ -136,6 +136,9 @@ jobs:
           set -e
           d=pkg; mkdir -p $d
           cp native/host/target/release/backplane-hub native/gpui/target/release/backplane-gpui native/voice/target/release/backplane-voice $d/
+          # dictation's voice activity model beside the helper, which takes it when it matches its pin (native/voice/vad/README.md): no download for it; its notice is licenses/silero-vad
+          cp native/voice/vad/silero_vad.onnx $d/
+          echo "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6  $d/silero_vad.onnx" | sha256sum -c - || { echo "::error::silero_vad.onnx is not the pinned file (native/voice/src/local.rs)"; exit 1; }
           # the guard goes in every archive: an install without it can neither update nor recover (deploy/install.sh.in refuses one)
           [ -x native/guard/target/release/backplane ] || { echo "::error::no guard (native/guard) for ${{ matrix.target }}"; exit 1; }
           cp native/guard/target/release/backplane $d/
@@ -158,7 +161,7 @@ jobs:
           git rev-parse HEAD > $d/COMMIT
           scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
           # everything a dev cut has (scripts/dev-build.sh), or the job fails: a release must not lose a feature a dev cut showed working
-          need="backplane-hub backplane-gpui backplane backplane-voice backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs"
+          need="backplane-hub backplane-gpui backplane backplane-voice silero_vad.onnx backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs"
           need="$need licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt"
           case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
           for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
@@ -175,13 +178,15 @@ jobs:
           d=pkg; mkdir -p $d
           for f in native/host/target/release/backplane-hub.exe native/host/target/release/bp-sh.exe native/gpui/target/release/backplane-gpui.exe native/guard/target/release/backplane.exe native/voice/target/release/backplane-voice.exe; do
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }; cp "$f" $d/; done
+          cp native/voice/vad/silero_vad.onnx $d/   # beside the voice helper, as on the other platforms (its notice: licenses/silero-vad)
+          echo "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6  $d/silero_vad.onnx" | sha256sum -c - || { echo "::error::silero_vad.onnx is not the pinned file (native/voice/src/local.rs)"; exit 1; }
           (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser.exe")
           (cd tools/step2glb && bun install --frozen-lockfile && bun build --compile step2glb.ts --outfile "$PWD/../../$d/backplane-step2glb.exe")
           cp -r assets $d/assets
           [ -s $d/assets/icons.json ] && [ "$(ls $d/assets/cat-rigs | wc -l)" -ge 576 ] || { echo "::error::assets/icons.json or assets/cat-rigs missing from the archive"; exit 1; }
           git rev-parse HEAD > $d/COMMIT
           scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
-          for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs \
+          for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe silero_vad.onnx backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs \
                    licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt; do
             [ -e "$d/$f" ] || { echo "::error::$f missing from the windows-x64 archive"; exit 1; }; done
           ls -la $d
