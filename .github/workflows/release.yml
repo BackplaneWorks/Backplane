@@ -183,6 +183,8 @@ jobs:
 
   publish:
     needs: [build, android]
+    # a tag publishes only with every job green; a dry run (workflow_dispatch) still makes its artifact when only android failed, without the APK/AAB
+    if: always() && needs.build.result == 'success' && (needs.android.result == 'success' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -244,7 +246,7 @@ jobs:
             out=backplane-$TAG-$t.tar.gz; [ $t != linux-x64 ] || out=backplane-$TAG-linux-x64-cef.tar.gz
             tar -C compat -czf "$out" backplane-$t
           done
-          sha256sum backplane-$TAG-*.tar.gz backplane-$TAG-*.zip backplane-$TAG-android.apk backplane-$TAG-android.aab install.sh 2>/dev/null | sort -k2 > SHA256SUMS
+          sha256sum backplane-$TAG-*.tar.gz backplane-$TAG-*.zip $(ls backplane-$TAG-android.apk backplane-$TAG-android.aab 2>/dev/null) install.sh | sort -k2 > SHA256SUMS
           cat SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
