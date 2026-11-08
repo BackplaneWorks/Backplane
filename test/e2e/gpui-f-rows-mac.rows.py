@@ -28,7 +28,7 @@ if want('F02'):
 # ---- F09 the context meter: the Context panel says "no reading yet" until a turn is counted, then shows what the thread holds and what is left
 if want('F09'):
     sel(1); click_ctl('ui:Context'); pause(1.5); shot('m-empty'); PANEL = box(MAIN())
-    xin('click', *CC()); xin('type', 'zqshort meter'); xin('key', 'Return')
+    say_('zqshort meter')
     until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 30); pause(3); shot('m-after')
     changed = differs(px('m-empty'), px('m-after'), PANEL)
     keys = sorted({e['key'].split('.')[0] + '.' + e['key'].split('.')[1] for e in events() if e['$'] == 'SettingSet' and e.get('key', '').startswith(('tok.', 'turn.last'))})
