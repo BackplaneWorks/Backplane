@@ -126,3 +126,42 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: client-rows, path: out }
+
+  client-src:
+    # the same client rows, from a build of this checkout (hub, client and the browser helper from source), for a tree newer than the last release archive
+    if: inputs.jobs == 'client-src'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/host
+            native/gpui
+          shared-key: e2e-macos
+      - uses: oven-sh/setup-bun@v2
+      - name: build the hub, the client and the browser helper
+        run: |
+          export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
+          (cd native/host && cargo build --release --bin backplane-hub --bin bp-sh) & a=$!
+          (cd native/gpui && cargo build --release) & b=$!
+          wait $a; ra=$?; wait $b; rb=$?; [ $ra = 0 ] && [ $rb = 0 ]
+          mkdir -p dist; cp native/host/target/release/backplane-hub native/gpui/target/release/backplane-gpui dist/
+          (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../dist/backplane-browser")
+          cp -r assets dist/assets; echo "$BACKPLANE_COMMIT" > dist/COMMIT; ls -l dist
+      - name: input and screenshot tools, FreeCAD
+        run: |
+          brew install cliclick
+          brew install --cask freecad
+          python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz
+      - name: client rows, from this checkout's build
+        run: |
+          set -o pipefail; mkdir -p out; B="$PWD/dist"
+          echo "built commit $(cat "$B/COMMIT")"
+          BACKPLANE_BROWSER="$B/backplane-browser" .venv/bin/python test/e2e/gpui-f-rows-mac.py "$B/backplane-gpui" "$B/backplane-hub" "$B/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
+        env:
+          ROWS: ${{ inputs.rows }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: client-rows, path: out }
