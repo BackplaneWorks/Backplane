@@ -11,9 +11,11 @@ self=$0
 while [ -L "$self" ]; do l=$(readlink "$self"); case $l in /*) self=$l ;; *) self=$(dirname "$self")/$l ;; esac; done
 prefix=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd)
 case ${1:-} in --render|--help|-h|--version) exec "$prefix/backplane-serve.0.14" "$@" ;; esac
-old= port= prev= rest=
+# 0.14's own arguments: its home and port, and its network flags, which 0.15 takes the same way (a tailscale serve mapping, a bound host)
+old= port= prev= net=
 for a in "$@"; do
-  case $prev in --home) old=$a ;; --port) port=$a ;; esac
+  case $prev in --home) old=$a ;; --port) port=$a ;; --host) net="$net --host $a" ;; esac
+  case $a in --no-tailscale|--tailscale|--tailscale-https|--tailnet-only) net="$net $a" ;; esac
   prev=$a
 done
 old=${old:-$HOME/.backplane-bend}; port=${port:-3787}
@@ -42,4 +44,4 @@ if [ -n "$tag" ] && [ "$cur" != "$tag" ] && [ -d "$prefix/builds/$tag" ]; then
       if "$G" hub status --home "$home" 2>/dev/null | grep -q -E 'Running|running'; then "$G" hub update "$tag" --home "$home" --now >> "$home/update-from-0.14.log" 2>&1; exit 0; fi
       sleep 1; i=$((i+1)); done ) < /dev/null > /dev/null 2>&1 &
 fi
-exec "$G" hub run --home "$home" --port "$port" --builds "$prefix" --build "$cur" --default --log "$home/hub.log" -- --foreground
+exec "$G" hub run --home "$home" --port "$port" --builds "$prefix" --build "$cur" --default --log "$home/hub.log" -- --foreground $net
