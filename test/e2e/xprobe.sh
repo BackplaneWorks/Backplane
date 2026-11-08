@@ -13,9 +13,9 @@ try() { name=$1; shift; N=88; rm -f /tmp/.X11-unix/X$N
 from PIL import Image, ImageStat
 s=ImageStat.Stat(Image.open('/tmp/xprobe-$name.png').convert('L')); print('$name', 'mean', round(s.mean[0],2), 'stddev', round(s.stddev[0],2))"
   grep -iE 'gpu|vulkan|error|panic' /tmp/xprobe-client.log | head -5 | cut -c1-240
-  kill $C $X 2>/dev/null; wait 2>/dev/null; }
+  kill $C $X 2>/dev/null; wait $C $X 2>/dev/null; }
 try default
 try glx +extension GLX +render -noreset
 try dri3 +extension DRI3
-kill $HUB 2>/dev/null
+kill $HUB 2>/dev/null; wait $HUB 2>/dev/null
 exit 0
