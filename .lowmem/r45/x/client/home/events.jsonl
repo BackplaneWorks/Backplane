@@ -1,0 +1,324 @@
+{"$": "ProjectCreated", "id": "p1", "title": "rows", "root": "/Users/runner/work/Backplane/Backplane/out/client/proj", "at": 1794151828}
+{"$": "ThreadCreated", "id": "t1", "project": "p1", "title": "Thread 1", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": 1794151829}
+{"$": "ThreadCreated", "id": "t2", "project": "p1", "title": "Thread 2", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": 1794151830}
+{"$": "ThreadCreated", "id": "t3", "project": "p1", "title": "Thread 3", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": 1794151831}
+{"$": "SettingSet", "key": "buy.t3", "value": "t0", "at": 1794151831}
+{"$": "ModesSet", "id": "t1", "runtime": "approval-required", "interaction": "default", "model": "", "at": 1794151831}
+{"$": "ModesSet", "id": "t2", "runtime": "full-access", "interaction": "plan", "model": "", "at": 1794151831}
+{"$":"SettingSet","key":"machine.id","value":"m44a5a8194fffadf9c6f2311e9483c31921fedc51398b749d","at":1794151828}
+{"$":"SettingSet","key":"accounts.inventory","value":"{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}","at":1794151828}
+{"$":"SettingSet","key":"allowance.codex","value":"{\"provider\":\"codex\",\"at\":0,\"attempted_at\":1794151828,\"state\":\"error\",\"auth\":\"unknown\",\"windows\":[],\"source\":\"codex-app-server\",\"phase\":\"complete\"}","at":1794151828}
+{"$":"SettingSet","key":"tz.machine","value":"UTC","at":1794151828}
+{"$":"SettingSet","key":"tz.rule.UTC","value":"UTC0","at":1794151828}
+{"$":"SettingSet","key":"tz.checked","value":"1794151828","at":1794151828}
+{"$":"SettingSet","key":"autosettle.version","value":"1","at":1794151829}
+{"$":"MessagePosted","thread":"t1","msg":"cgpui-12415-17941518307681794151855-1794151830771","role":"user","text":"zqshort meter","at":1794151855}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1794151855}
+{"$":"SettingSet","key":"turn.from.t1","value":"@cgpui-12415-17941518307681794151855-1794151830771","at":1794151855}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794151855}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794151855}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"cgpui-12415-17941518307681794151855-1794151830771\"],\"token\":\"cgpui-12415-17941518307681794151855-1794151830771\",\"eligibleAt\":0,\"sentAt\":0}","at":1794151855}
+{"$":"SettingSet","key":"fallback.input.t1","value":"zqshort meter","at":1794151855}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151855,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794151855}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151855","at":1794151855}
+{"$":"SettingSet","key":"autosettle.audience.t1","value":"person","at":1794151855}
+{"$":"SessionSet","id":"t1","session":"fake-13406","at":1794151855}
+{"$":"SettingSet","key":"tok.basis.t1","value":"c:0","at":1794151855}
+{"$":"SettingSet","key":"turn.speed.t1","value":"0/0/0/0/0/0/0/0","at":1794151855}
+{"$":"MessagePosted","thread":"t1","msg":"m13406-1:0","role":"assistant","text":"done","at":1794151855}
+{"$":"UsageSet","thread":"t1","used":31780,"window":0,"at":1794151855}
+{"$":"TurnChanged","thread":"t1","state":"completed","at":1794151855}
+{"$":"UsageSet","thread":"t1","used":0,"window":200000,"at":1794151855}
+{"$":"SettingSet","key":"tok.epoch","value":"1","at":1794151855}
+{"$":"SettingSet","key":"tok.recount","value":"b","at":1794151855}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"claude-fake","key":"u-13406-1","input":1200,"cread":30000,"cwrite":500,"output":80,"reasoning":0,"cost":10000000,"known":"irwoc","basis":"c:10000000","at":1794151855}
+{"$":"SettingSet","key":"turn.models.t1","value":"claude-fake|1200|80|30000|500|10000000|0|200000","at":1794151855}
+{"$":"SettingSet","key":"summary.at.t1","value":"1794151855","at":1794151855}
+{"$":"SettingSet","key":"alert.t1","value":"done\tturn-t1\tcgpui-12415-17941518307681794151855-1794151830771\t1794151855.35\t","at":1794151855}
+{"$":"SettingSet","key":"told.k1794151855-24-12","value":"{\"key\":\"turn-t1\",\"text\":\"Thread 1\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151855}","at":1794151855}
+{"$":"SettingSet","key":"autosettle.output.t1","value":"m13406-1:0","at":1794151855}
+{"$":"SettingSet","key":"summary.t1","value":"Title from haiku","at":1794151855}
+{"$":"SettingSet","key":"summary.at.p1","value":"1794151855","at":1794151855}
+{"$":"SettingSet","key":"summary.p1","value":"Title from haiku","at":1794151855}
+{"$":"SettingSet","key":"autosettle.read.t1","value":"m13406-1:0","at":1794151867}
+{"$":"SettingSet","key":"fallback.input.t1","value":"","at":1794151889}
+{"$":"MessagePosted","thread":"t1","msg":"cgpui-13840-17941518673801794151893-1794151867381","role":"user","text":"zqecho look at this\n\n[attachment: /Users/runner/work/Backplane/Backplane/out/client/home/attachments/t1/3d2679e8-pasted-1794151885.png]","at":1794151893}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1794151893}
+{"$":"SettingSet","key":"turn.from.t1","value":"@cgpui-13840-17941518673801794151893-1794151867381","at":1794151893}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794151893}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794151893}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"cgpui-12415-17941518307681794151855-1794151830771\",\"cgpui-13840-17941518673801794151893-1794151867381\"],\"token\":\"cgpui-13840-17941518673801794151893-1794151867381\",\"eligibleAt\":0,\"sentAt\":0}","at":1794151893}
+{"$":"SettingSet","key":"fallback.input.t1","value":"zqecho look at this\n\n[attachment: /Users/runner/work/Backplane/Backplane/out/client/home/attachments/t1/3d2679e8-pasted-1794151885.png]","at":1794151893}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151893,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794151893}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151893","at":1794151893}
+{"$":"SettingSet","key":"autosettle.audience.t1","value":"person","at":1794151893}
+{"$":"ActivityLogged","thread":"t1","act":"k1794151895-2","tone":"info","kind":"checkpoint","summary":"Saving the last turn's checkpoint…","at":1794151895}
+{"$":"ActivityLogged","thread":"t1","act":"step:51bc5ebd09a628dd12a51807b6a6bee5aaba47dc","tone":"step","kind":"kicad","summary":"{\"e\":\"cgpui-12415-17941518307681794151855-1794151830771\",\"c\":\"51bc5ebd09a628dd12a51807b6a6bee5aaba47dc\",\"p\":\"\",\"g\":\"/Users/runner/work/Backplane/Backplane/.git\",\"t\":\"/Users/runner/work/Backplane/Backplane\",\"f\":[\"A\\tout/client/proj/ecc83.kicad_pcb\",\"A\\tout/client/proj/ecc83.kicad_pro\",\"A\\tout/client/proj/ecc83.kicad_sch\"],\"w\":\"start\"}","at":1794151906}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151915,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794151915}
+{"$":"MessagePosted","thread":"t1","msg":"m13406-2:0","role":"assistant","text":"echo:  zqecho look at this\n\n[attachment: /Users/runner/work/Backplane/Backplane/out/client/home/attachments/t1/3d2679e8-pasted-1794151885.png]","at":1794151915}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151915","at":1794151915}
+{"$":"SettingSet","key":"autosettle.output.t1","value":"m13406-2:0","at":1794151915}
+{"$":"TurnChanged","thread":"t1","state":"completed","at":1794151915}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"claude-fake","key":"u-13406-2","input":1200,"cread":30000,"cwrite":500,"output":80,"reasoning":0,"cost":0,"known":"irwoc","basis":"c:10000000","at":1794151915}
+{"$":"SettingSet","key":"alert.t1","value":"done\tturn-t1\tcgpui-13840-17941518673801794151893-1794151867381\t1794151915.65\t","at":1794151915}
+{"$":"SettingSet","key":"told.k1794151915-63-2","value":"{\"key\":\"turn-t1\",\"text\":\"Thread 1: echo:  zqecho look at this\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151915}","at":1794151915}
+{"$":"SettingSet","key":"autosettle.read.t1","value":"m13406-2:0","at":1794151916}
+{"$":"MessagePosted","thread":"t1","msg":"cgpui-13840-17941518673801794151921-1794151867382","role":"user","text":"zqapprove now","at":1794151921}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1794151921}
+{"$":"SettingSet","key":"turn.from.t1","value":"@cgpui-13840-17941518673801794151921-1794151867382","at":1794151921}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794151921}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794151921}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"cgpui-12415-17941518307681794151855-1794151830771\",\"cgpui-13840-17941518673801794151893-1794151867381\",\"cgpui-13840-17941518673801794151921-1794151867382\"],\"token\":\"cgpui-13840-17941518673801794151921-1794151867382\",\"eligibleAt\":0,\"sentAt\":0}","at":1794151921}
+{"$":"SettingSet","key":"fallback.input.t1","value":"zqapprove now","at":1794151921}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151921,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794151921}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151921","at":1794151921}
+{"$":"SettingSet","key":"autosettle.audience.t1","value":"person","at":1794151921}
+{"$":"AskOpened","id":"q1794151921-3","thread":"t1","kind":"approval","tool":"Bash","detail":"echo approved-by-person","options":"","at":1794151921}
+{"$":"PendingChanged","thread":"t1","count":1,"at":1794151921}
+{"$":"SettingSet","key":"alert.t1","value":"ask\task-t1\tcgpui-13840-17941518673801794151893-1794151867381\t1794151921.80\tBash echo approved-by-person","at":1794151921}
+{"$":"SettingSet","key":"told.k1794151921-78-2","value":"{\"key\":\"ask-t1\",\"text\":\"Thread 1: Bash echo approved-by-person\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151921}","at":1794151921}
+{"$":"AskClosed","id":"q1794151921-3","answer":"accept","at":1794151927}
+{"$":"ActivityLogged","thread":"t1","act":"k1794151927-4","tone":"info","kind":"answer","summary":"Allowed: Bash echo approved-by-person","at":1794151927}
+{"$":"PendingChanged","thread":"t1","count":0,"at":1794151927}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151927,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1794151927}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151927","at":1794151927}
+{"$":"MessagePosted","thread":"t1","msg":"m13406-3:0","role":"assistant","text":"approval: {\"behavior\":\"allow\",\"updatedInput\":{\"command\":\"echo approved-by-person\",\"description\":\"say it\"}}","at":1794151927}
+{"$":"TurnChanged","thread":"t1","state":"completed","at":1794151927}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"claude-fake","key":"u-13406-3","input":1200,"cread":30000,"cwrite":500,"output":80,"reasoning":0,"cost":0,"known":"irwoc","basis":"c:10000000","at":1794151927}
+{"$":"SettingSet","key":"alert.t1","value":"done\tturn-t1\tcgpui-13840-17941518673801794151921-1794151867382\t1794151927.90\t","at":1794151927}
+{"$":"SettingSet","key":"told.k1794151927-87-3","value":"{\"key\":\"turn-t1\",\"text\":\"Thread 1: echo:  zqecho look at this\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151927}","at":1794151927}
+{"$":"SettingSet","key":"autosettle.output.t1","value":"m13406-3:0","at":1794151927}
+{"$":"MessagePosted","thread":"t1","msg":"cgpui-13840-17941518673801794151931-1794151867384","role":"user","text":"zqapprove again","at":1794151931}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1794151931}
+{"$":"SettingSet","key":"turn.from.t1","value":"@cgpui-13840-17941518673801794151931-1794151867384","at":1794151931}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794151931}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794151931}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"counting\",\"ids\":[\"cgpui-12415-17941518307681794151855-1794151830771\",\"cgpui-13840-17941518673801794151893-1794151867381\",\"cgpui-13840-17941518673801794151921-1794151867382\",\"cgpui-13840-17941518673801794151931-1794151867384\"],\"token\":\"cgpui-13840-17941518673801794151931-1794151867384\",\"eligibleAt\":0,\"sentAt\":0}","at":1794151931}
+{"$":"SettingSet","key":"fallback.input.t1","value":"zqapprove again","at":1794151931}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151931,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794151931}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151931","at":1794151931}
+{"$":"SettingSet","key":"autosettle.audience.t1","value":"person","at":1794151931}
+{"$":"ActivityLogged","thread":"t1","act":"k1794151933-5","tone":"info","kind":"checkpoint","summary":"Saving the last turn's checkpoint…","at":1794151933}
+{"$":"AskOpened","id":"q1794151934-6","thread":"t1","kind":"approval","tool":"Bash","detail":"echo approved-by-person","options":"","at":1794151934}
+{"$":"PendingChanged","thread":"t1","count":1,"at":1794151934}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151934,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"waiting for user (approval): echo approved-by-person\"}","at":1794151934}
+{"$":"SettingSet","key":"alert.t1","value":"ask\task-t1\tcgpui-13840-17941518673801794151921-1794151867382\t1794151934.107\tBash echo approved-by-person","at":1794151934}
+{"$":"SettingSet","key":"told.k1794151934-104-3","value":"{\"key\":\"ask-t1\",\"text\":\"Thread 1: Bash echo approved-by-person\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151934}","at":1794151934}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151934","at":1794151934}
+{"$":"AskClosed","id":"q1794151934-6","answer":"decline","at":1794151940}
+{"$":"ActivityLogged","thread":"t1","act":"k1794151940-7","tone":"info","kind":"answer","summary":"Denied: Bash echo approved-by-person","at":1794151940}
+{"$":"PendingChanged","thread":"t1","count":0,"at":1794151940}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151940,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1794151940}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151940","at":1794151940}
+{"$":"MessagePosted","thread":"t1","msg":"m13406-4:0","role":"assistant","text":"approval: {\"behavior\":\"deny\",\"message\":\"The user declined this tool call.\"}","at":1794151940}
+{"$":"TurnChanged","thread":"t1","state":"completed","at":1794151940}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"claude-fake","key":"u-13406-4","input":1200,"cread":30000,"cwrite":500,"output":80,"reasoning":0,"cost":0,"known":"irwoc","basis":"c:10000000","at":1794151940}
+{"$":"SettingSet","key":"alert.t1","value":"done\tturn-t1\tcgpui-13840-17941518673801794151931-1794151867384\t1794151940.118\t","at":1794151940}
+{"$":"SettingSet","key":"told.k1794151940-115-3","value":"{\"key\":\"turn-t1\",\"text\":\"Thread 1: approval: {\\\"behavior\\\":\\\"allow\\\",\\\"updatedInput\\\":{\\\"command\\\":\\\"echo approved-by-person\\\",\\\"description\\\":\\\"say it\\\"}}\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151940}","at":1794151940}
+{"$":"SettingSet","key":"autosettle.output.t1","value":"m13406-4:0","at":1794151940}
+{"$":"MessagePosted","thread":"t1","msg":"cgpui-13840-17941518673801794151942-1794151867386","role":"user","text":"zqask","at":1794151942}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1794151942}
+{"$":"SettingSet","key":"turn.from.t1","value":"@cgpui-13840-17941518673801794151942-1794151867386","at":1794151942}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794151942}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794151942}
+{"$":"SettingSet","key":"star.nudge.v1","value":"{\"status\":\"sent\",\"ids\":[\"cgpui-12415-17941518307681794151855-1794151830771\",\"cgpui-13840-17941518673801794151893-1794151867381\",\"cgpui-13840-17941518673801794151921-1794151867382\",\"cgpui-13840-17941518673801794151931-1794151867384\",\"cgpui-13840-17941518673801794151942-1794151867386\"],\"token\":\"cgpui-13840-17941518673801794151942-1794151867386\",\"eligibleAt\":1794151942,\"sentAt\":1794151942}","at":1794151942}
+{"$":"SettingSet","key":"fallback.input.t1","value":"zqask","at":1794151942}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151942,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794151942}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151942","at":1794151942}
+{"$":"SettingSet","key":"autosettle.audience.t1","value":"person","at":1794151942}
+{"$":"ActivityLogged","thread":"t1","act":"k1794151944-8","tone":"info","kind":"checkpoint","summary":"Saving the last turn's checkpoint…","at":1794151944}
+{"$":"AskOpened","id":"q1794151947-9","thread":"t1","kind":"input","tool":"AskUserQuestion","detail":"Which port?","options":"USB-C\nBarrel","at":1794151947}
+{"$":"PendingChanged","thread":"t1","count":1,"at":1794151947}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151947,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"waiting for user (input): Which port?\"}","at":1794151947}
+{"$":"SettingSet","key":"alert.t1","value":"ask\task-t1\tcgpui-13840-17941518673801794151931-1794151867384\t1794151947.135\tAskUserQuestion Which port?","at":1794151947}
+{"$":"SettingSet","key":"told.k1794151947-132-3","value":"{\"key\":\"ask-t1\",\"text\":\"Thread 1: AskUserQuestion Which port?\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151947}","at":1794151947}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151947","at":1794151947}
+{"$":"AskClosed","id":"q1794151947-9","answer":"USB-C","at":1794151953}
+{"$":"ActivityLogged","thread":"t1","act":"k1794151953-10","tone":"info","kind":"answer","summary":"Which port? → USB-C","at":1794151953}
+{"$":"PendingChanged","thread":"t1","count":0,"at":1794151953}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794151953,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1794151953}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794151953","at":1794151953}
+{"$":"MessagePosted","thread":"t1","msg":"m13406-5:0","role":"assistant","text":"answer: {\"behavior\":\"allow\",\"updatedInput\":{\"answers\":{\"Which port?\":\"USB-C\"},\"questions\":[{\"question\":\"Which port?\",\"header\":\"Port\",\"options\":[{\"label\":\"USB-C\",\"description\":\"\"},{\"label\":\"Barrel\",\"descriptio","at":1794151953}
+{"$":"TurnChanged","thread":"t1","state":"completed","at":1794151953}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"claude-fake","key":"u-13406-5","input":1200,"cread":30000,"cwrite":500,"output":80,"reasoning":0,"cost":0,"known":"irwoc","basis":"c:10000000","at":1794151953}
+{"$":"SettingSet","key":"alert.t1","value":"done\tturn-t1\tcgpui-13840-17941518673801794151942-1794151867386\t1794151953.146\t","at":1794151953}
+{"$":"SettingSet","key":"told.k1794151953-143-3","value":"{\"key\":\"turn-t1\",\"text\":\"Thread 1: approval: {\\\"behavior\\\":\\\"deny\\\",\\\"message\\\":\\\"The user declined this tool call.\\\"}\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151953}","at":1794151953}
+{"$":"SettingSet","key":"autosettle.output.t1","value":"m13406-5:0","at":1794151953}
+{"$":"MessagePosted","thread":"t2","msg":"cgpui-13840-17941518673801794151957-1794151867389","role":"user","text":"zqplan","at":1794151957}
+{"$":"TurnChanged","thread":"t2","state":"running","at":1794151957}
+{"$":"SettingSet","key":"turn.from.t2","value":"@cgpui-13840-17941518673801794151957-1794151867389","at":1794151957}
+{"$":"SettingSet","key":"restart.retry.t2","value":"","at":1794151957}
+{"$":"SettingSet","key":"provider.resume.t2","value":"","at":1794151957}
+{"$":"SettingSet","key":"fallback.input.t2","value":"zqplan","at":1794151957}
+{"$":"SettingSet","key":"liveness.t2","value":"{\"last\":1794151957,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794151957}
+{"$":"SettingSet","key":"autosettle.quiet.t2","value":"1794151957","at":1794151957}
+{"$":"SettingSet","key":"autosettle.audience.t2","value":"person","at":1794151957}
+{"$":"SessionSet","id":"t2","session":"fake-17986","at":1794151957}
+{"$":"SettingSet","key":"tok.basis.t2","value":"c:0","at":1794151957}
+{"$":"SettingSet","key":"turn.speed.t2","value":"0/0/0/0/0/0/0/0","at":1794151957}
+{"$":"AskOpened","id":"q1794151957-12","thread":"t2","kind":"plan","tool":"ExitPlanMode","detail":"1. Draw the board\n2. Route it","options":"","at":1794151957}
+{"$":"PendingChanged","thread":"t2","count":1,"at":1794151957}
+{"$":"SettingSet","key":"alert.t2","value":"ask\task-t2\t\t1794151957.163\tExitPlanMode 1. Draw the board 2. Route it","at":1794151957}
+{"$":"SettingSet","key":"told.k1794151957-161-2","value":"{\"key\":\"ask-t2\",\"text\":\"Thread 2: ExitPlanMode 1. Draw the board 2. Route it\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794151957}","at":1794151957}
+{"$":"MessagePosted","thread":"t2","msg":"m17986-1:0","role":"assistant","text":"plan: {\"behavior\":\"deny\",\"message\":\"The client captured your proposed plan. Stop here and wait for the user's feedback or implementation request.\"}","at":1794151957}
+{"$":"UsageSet","thread":"t2","used":31780,"window":0,"at":1794151957}
+{"$":"TurnChanged","thread":"t2","state":"completed","at":1794151957}
+{"$":"UsageSet","thread":"t2","used":0,"window":200000,"at":1794151957}
+{"$":"TurnUsage","thread":"t2","provider":"claude","model":"claude-fake","key":"u-17986-1","input":1200,"cread":30000,"cwrite":500,"output":80,"reasoning":0,"cost":10000000,"known":"irwoc","basis":"c:10000000","at":1794151957}
+{"$":"SettingSet","key":"turn.models.t2","value":"claude-fake|1200|80|30000|500|10000000|0|200000","at":1794151957}
+{"$":"SettingSet","key":"summary.at.t2","value":"1794151957","at":1794151957}
+{"$":"SettingSet","key":"autosettle.output.t2","value":"m17986-1:0","at":1794151957}
+{"$":"SettingSet","key":"summary.t2","value":"Title from haiku","at":1794151957}
+{"$":"SettingSet","key":"autosettle.read.t1","value":"m13406-5:0","at":1794151960}
+{"$":"ActivityLogged","thread":"t2","act":"step:2083306131ed63ec1349dff629ad6e967e0c7480","tone":"step","kind":"kicad","summary":"{\"e\":\"cgpui-13840-17941518673801794151957-1794151867389\",\"c\":\"2083306131ed63ec1349dff629ad6e967e0c7480\",\"p\":\"\",\"g\":\"/Users/runner/work/Backplane/Backplane/.git\",\"t\":\"/Users/runner/work/Backplane/Backplane\",\"f\":[\"A\\tout/client/proj/ecc83.kicad_pcb\",\"A\\tout/client/proj/ecc83.kicad_pro\",\"A\\tout/client/proj/ecc83.kicad_sch\"],\"w\":\"start\"}","at":1794151963}
+{"$":"SettingSet","key":"autosettle.read.t2","value":"m17986-1:0","at":1794151992}
+{"$":"SettingSet","key":"fallback.input.t1","value":"","at":1794152009}
+{"$":"ThreadCreated","id":"t1794152012-175","project":"p1","title":"New thread","env":"worktree","branch":"","worktree":"","provider":"claude","model":"","at":1794152012}
+{"$":"SettingSet","key":"account.thread.t1794152012-175.claude","value":"{\"id\":\"\",\"epoch\":0}","at":1794152012}
+{"$":"MessagePosted","thread":"t1","msg":"cgpui-13840-17941518673801794152019-1794151867398","role":"user","text":"a long turn","at":1794152019}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1794152019}
+{"$":"SettingSet","key":"turn.from.t1","value":"@cgpui-13840-17941518673801794152019-1794151867398","at":1794152019}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794152019}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794152019}
+{"$":"SettingSet","key":"fallback.input.t1","value":"a long turn","at":1794152019}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794152019,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794152019}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794152019","at":1794152019}
+{"$":"SettingSet","key":"autosettle.audience.t1","value":"person","at":1794152019}
+{"$":"MessagePosted","thread":"t1","msg":"live:t1:1794152019672:stopped","role":"assistant","text":"working working ","at":1794152021}
+{"$":"TurnChanged","thread":"t1","state":"interrupted","at":1794152021}
+{"$":"SettingSet","key":"stopped.cgpui-13840-17941518673801794152019-1794151867398","value":"1","at":1794152021}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794152021}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794152021}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794152021,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794152021}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794152021","at":1794152021}
+{"$":"SettingSet","key":"autosettle.output.t1","value":"live:t1:1794152019672:stopped","at":1794152021}
+{"$":"WorktreeSet","id":"t1794152012-175","branch":"backplane/9312efd9","worktree":"/Users/runner/work/Backplane/Backplane/.backplane/worktrees/backplane-9312efd9/out/client/proj","at":1794152021}
+{"$":"ActivityLogged","thread":"t1794152012-175","act":"g1794152021-195","tone":"info","kind":"git","summary":"worktree /Users/runner/work/Backplane/Backplane/.backplane/worktrees/backplane-9312efd9/out/client/proj (with the folder's uncommitted work)","at":1794152021}
+{"$":"ThreadSettled","id":"t1","manual":true,"at":1794152023}
+{"$":"ThreadUnsettled","id":"t1","at":1794152025}
+{"$":"SettingSet","key":"autosettle.read.t1","value":"live:t1:1794152019672:stopped","at":1794152027}
+{"$":"SettingSet","key":"fallback.input.t1","value":"","at":1794152069}
+{"$":"MessagePosted","thread":"t1","msg":"cgpui-13840-17941518673801794152095-1794151867408","role":"user","text":"a long turn","at":1794152095}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1794152095}
+{"$":"SettingSet","key":"turn.from.t1","value":"@cgpui-13840-17941518673801794152095-1794151867408","at":1794152095}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794152095}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794152095}
+{"$":"SettingSet","key":"fallback.input.t1","value":"a long turn","at":1794152095}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794152095,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794152095}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794152095","at":1794152095}
+{"$":"SettingSet","key":"autosettle.audience.t1","value":"person","at":1794152095}
+{"$":"SessionSet","id":"t1","session":"fake-23329","at":1794152095}
+{"$":"SettingSet","key":"tok.basis.t1","value":"c:0","at":1794152095}
+{"$":"SettingSet","key":"turn.speed.t1","value":"0/0/0/0/0/0/0/0","at":1794152095}
+{"$":"MessagePosted","thread":"t1","msg":"live:t1:1794152095629:stopped","role":"assistant","text":"working working working ","at":1794152098}
+{"$":"TurnChanged","thread":"t1","state":"interrupted","at":1794152098}
+{"$":"SettingSet","key":"stopped.cgpui-13840-17941518673801794152095-1794151867408","value":"1","at":1794152098}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794152098}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794152098}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794152098,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794152098}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794152098","at":1794152098}
+{"$":"SettingSet","key":"autosettle.output.t1","value":"live:t1:1794152095629:stopped","at":1794152098}
+{"$":"SettingSet","key":"autosettle.read.t1","value":"live:t1:1794152095629:stopped","at":1794152099}
+{"$":"ThreadCreated","id":"t1794152101-221","project":"p1","title":"Fork: Thread 1","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1794152101}
+{"$":"SettingSet","key":"account.thread.t1794152101-221.claude","value":"{\"id\":\"\",\"epoch\":0}","at":1794152101}
+{"$":"ModesSet","id":"t1794152101-221","runtime":"approval-required","interaction":"default","model":"","at":1794152101}
+{"$":"ThreadForked","id":"t1794152101-221","source":"t1","at":1794152101}
+{"$":"SettingSet","key":"account.thread.t1794152101-221.claude","value":"{\"id\":\"\",\"epoch\":0}","at":1794152101}
+{"$":"SettingSet","key":"account.thread.t1794152101-221.codex","value":"{\"id\":\"\",\"epoch\":0}","at":1794152101}
+{"$":"TurnQueued","thread":"t1794152101-221","msg":"handoff:t1","text":"[Backplane] This thread is a fork of \"Thread 1\" (t1). You continue its work from where it stands; its conversation so far, oldest first:\n\nUser: zqshort meter\n\nAssistant: done\n\nUser: zqecho look at this\n\n[attachment: /Users/runner/work/Backplane/Backplane/out/client/home/attachments/t1/3d2679e8-pasted-1794151885.png]\n\nTool checkpoint: Saving the last turn's checkpoint…\n\nTool kicad: {\"e\":\"cgpui-12415-17941518307681794151855-1794151830771\",\"c\":\"51bc5ebd09a628dd12a51807b6a6bee5aaba47dc\",\"p\":\"\",\"g\":\"/Users/runner/work/Backplane/Backplane/.git\",\"t\":\"/Users/runner/work/Backplane/Backplane\",\"f\":[\"A\\tout/client/proj/ecc83.kicad_pcb\",\"A\\tout/client/proj/ecc83.kicad_pro\",\"A\\tout/client/ ...[35 more characters]\n\nAssistant: echo:  zqecho look at this\n\n[attachment: /Users/runner/work/Backplane/Backplane/out/client/home/attachments/t1/3d2679e8-pasted-1794151885.png]\n\nUser: zqapprove now\n\nTool answer: Allowed: Bash echo approved-by-person\n\nAssistant: approval: {\"behavior\":\"allow\",\"updatedInput\":{\"command\":\"echo approved-by-person\",\"description\":\"say it\"}}\n\nUser: zqapprove again\n\nTool checkpoint: Saving the last turn's checkpoint…\n\nTool answer: Denied: Bash echo approved-by-person\n\nAssistant: approval: {\"behavior\":\"deny\",\"message\":\"The user declined this tool call.\"}\n\nUser: zqask\n\nTool checkpoint: Saving the last turn's checkpoint…\n\nTool answer: Which port? → USB-C\n\nAssistant: answer: {\"behavior\":\"allow\",\"updatedInput\":{\"answers\":{\"Which port?\":\"USB-C\"},\"questions\":[{\"question\":\"Which port?\",\"header\":\"Port\",\"options\":[{\"label\":\"USB-C\",\"description\":\"\"},{\"label\":\"Barrel\",\"descriptio\n\nUser: a long turn\n\nAssistant: working working \n\nUser: a long turn\n\nAssistant: working working working \n\n[End of the handed-over context. The user's message follows.]","at":1794152101}
+{"$":"ActivityLogged","thread":"t1","act":"k1794152101-221","tone":"info","kind":"fork","summary":"Forked into \"Fork: Thread 1\"","at":1794152101}
+{"$":"ActivityLogged","thread":"t1794152101-221","act":"g1794152101-221","tone":"info","kind":"git","summary":"working in the project folder with \"Thread 1\" (no worktree of its own): its edits change the same files","at":1794152101}
+{"$":"SettingSet","key":"account.failover.preference.t1794152101-221","value":"","at":1794152101}
+{"$":"SettingSet","key":"fallback.intent.t1794152101-221","value":"","at":1794152101}
+{"$":"AskClosed","id":"q1794151957-12","answer":"","at":1794152131}
+{"$":"PendingChanged","thread":"t2","count":0,"at":1794152131}
+{"$":"ActivityLogged","thread":"t2","act":"r1794152131-1","tone":"error","kind":"restart","summary":"Backplane restarted at 15:35 during this turn. Its plan was not answered.","at":1794152131}
+{"$":"MessagePosted","thread":"t1","msg":"cgpui-13840-17941518673801794152150-1794151867414","role":"user","text":"zqshort after the reconnect","at":1794152150}
+{"$":"TurnChanged","thread":"t1","state":"running","at":1794152150}
+{"$":"SettingSet","key":"turn.from.t1","value":"@cgpui-13840-17941518673801794152150-1794151867414","at":1794152150}
+{"$":"SettingSet","key":"restart.retry.t1","value":"","at":1794152150}
+{"$":"SettingSet","key":"provider.resume.t1","value":"","at":1794152150}
+{"$":"SettingSet","key":"fallback.input.t1","value":"zqshort after the reconnect","at":1794152150}
+{"$":"SettingSet","key":"liveness.t1","value":"{\"last\":1794152150,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794152150}
+{"$":"SettingSet","key":"autosettle.quiet.t1","value":"1794152150","at":1794152150}
+{"$":"SettingSet","key":"autosettle.audience.t1","value":"person","at":1794152150}
+{"$":"SessionSet","id":"t1","session":"fake-25190","at":1794152150}
+{"$":"SettingSet","key":"tok.basis.t1","value":"c:0","at":1794152150}
+{"$":"SettingSet","key":"turn.speed.t1","value":"0/0/0/0/0/0/0/0","at":1794152150}
+{"$":"MessagePosted","thread":"t1","msg":"m25190-1:0","role":"assistant","text":"done","at":1794152150}
+{"$":"TurnChanged","thread":"t1","state":"completed","at":1794152150}
+{"$":"TurnUsage","thread":"t1","provider":"claude","model":"claude-fake","key":"u-25190-1","input":1200,"cread":30000,"cwrite":500,"output":80,"reasoning":0,"cost":10000000,"known":"irwoc","basis":"c:10000000","at":1794152150}
+{"$":"SettingSet","key":"alert.t1","value":"done\tturn-t1\tcgpui-13840-17941518673801794152150-1794151867414\t1794152150.250\t","at":1794152150}
+{"$":"SettingSet","key":"told.k1794152150-247-3","value":"{\"key\":\"turn-t1\",\"text\":\"Thread 1: working working working\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794152150}","at":1794152150}
+{"$":"SettingSet","key":"autosettle.output.t1","value":"m25190-1:0","at":1794152150}
+{"$":"MessagePosted","thread":"t3","msg":"cgpui-13840-17941518673801794152157-1794151867417","role":"user","text":"zqquote mfg/o1","at":1794152157}
+{"$":"TurnChanged","thread":"t3","state":"running","at":1794152157}
+{"$":"SettingSet","key":"turn.from.t3","value":"@cgpui-13840-17941518673801794152157-1794151867417","at":1794152157}
+{"$":"SettingSet","key":"restart.retry.t3","value":"","at":1794152157}
+{"$":"SettingSet","key":"provider.resume.t3","value":"","at":1794152157}
+{"$":"SettingSet","key":"fallback.input.t3","value":"zqquote mfg/o1","at":1794152157}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152157,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent output\"}","at":1794152157}
+{"$":"SettingSet","key":"autosettle.quiet.t3","value":"1794152157","at":1794152157}
+{"$":"SettingSet","key":"autosettle.audience.t3","value":"person","at":1794152157}
+{"$":"SessionSet","id":"t3","session":"fake-25525","at":1794152157}
+{"$":"SettingSet","key":"tok.basis.t3","value":"c:0","at":1794152157}
+{"$":"SettingSet","key":"turn.speed.t3","value":"0/0/0/0/0/0/0/0","at":1794152157}
+{"$":"AskOpened","id":"q1794152157-4","thread":"t3","kind":"approval","tool":"order_quote","detail":"Send 1 file from mfg/o1 to Backplane's quote service? They are kept only to make what you order.\nShips to ? · \n\nboard.gbr","options":"","at":1794152157}
+{"$":"PendingChanged","thread":"t3","count":1,"at":1794152157}
+{"$":"SettingSet","key":"alert.t3","value":"ask\task-t3\t\t1794152157.267\tSend 1 file from mfg/o1 to Backplane's quote service? They are kept only to make what you order. Ships to ? ·   board.gbr","at":1794152157}
+{"$":"SettingSet","key":"told.k1794152157-265-2","value":"{\"key\":\"ask-t3\",\"text\":\"Thread 3: Send 1 file from mfg/o1 to Backplane's quote service? They are kept only to make what you order. Ships to ? ·   board.gbr\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1794152157}","at":1794152157}
+{"$":"MessagePosted","thread":"t3","msg":"m25525-1:0","role":"assistant","text":"quote: The person is asked on their screen whether to send these files (Send or Not now). End your turn now. Once they send, the files go to the order server and the quote is made (usually 1-2 minutes); the ","at":1794152157}
+{"$":"UsageSet","thread":"t3","used":31780,"window":0,"at":1794152157}
+{"$":"TurnChanged","thread":"t3","state":"completed","at":1794152157}
+{"$":"UsageSet","thread":"t3","used":0,"window":200000,"at":1794152157}
+{"$":"TurnUsage","thread":"t3","provider":"claude","model":"claude-fake","key":"u-25525-1","input":1200,"cread":30000,"cwrite":500,"output":80,"reasoning":0,"cost":10000000,"known":"irwoc","basis":"c:10000000","at":1794152157}
+{"$":"SettingSet","key":"turn.models.t3","value":"claude-fake|1200|80|30000|500|10000000|0|200000","at":1794152157}
+{"$":"SettingSet","key":"summary.at.t3","value":"1794152157","at":1794152157}
+{"$":"SettingSet","key":"autosettle.output.t3","value":"m25525-1:0","at":1794152157}
+{"$":"SettingSet","key":"summary.t3","value":"Title from haiku","at":1794152157}
+{"$":"AskClosed","id":"q1794152157-4","answer":"accept","at":1794152160}
+{"$":"ActivityLogged","thread":"t3","act":"k1794152160-5","tone":"info","kind":"answer","summary":"Allowed: order_quote Send 1 file from mfg/o1 to Backplane's quote service? They are kept only to make what you order.\nShips to ? · \n\nboard.gbr","at":1794152160}
+{"$":"PendingChanged","thread":"t3","count":0,"at":1794152160}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152160,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1794152160}
+{"$":"SettingSet","key":"autosettle.quiet.t3","value":"1794152160","at":1794152160}
+{"$":"SettingSet","key":"order.wait.t3","value":"1794152160","at":1794152160}
+{"$":"SettingSet","key":"order.quote.t3","value":"{\"id\":\"q_rig1\",\"state\":\"quoted\",\"total\":\"\",\"ddp\":false,\"payable\":false,\"label\":\"Buy now\",\"tracking\":\"\"}","at":1794152163}
+{"$":"MessagePosted","thread":"t3","msg":"m1794152163-6","role":"system","text":"[Backplane] The quote is posted in this thread. {\"status\":\"quoted\",\"total\":null,\"lead_days\":null,\"problems\":[],\"warnings\":[],\"order\":null,\"note\":\"Backplane posted the quote in this thread with NO Buy now link: it cannot be paid until its problems are fixed. Do not say a link is there. Tell the person each problem in plain words and what fixes it (for a destination that cannot be priced, ask for another country), then make a new quote.\"}","at":1794152163}
+{"$":"TurnChanged","thread":"t3","state":"running","at":1794152163}
+{"$":"SettingSet","key":"turn.from.t3","value":"@m1794152163-6","at":1794152163}
+{"$":"SettingSet","key":"restart.retry.t3","value":"","at":1794152163}
+{"$":"SettingSet","key":"provider.resume.t3","value":"","at":1794152163}
+{"$":"SettingSet","key":"order.wait.t3","value":"","at":1794152163}
+{"$":"SettingSet","key":"fallback.input.t3","value":"[Backplane] The quote is posted in this thread. {\"status\":\"quoted\",\"total\":null,\"lead_days\":null,\"problems\":[],\"warnings\":[],\"order\":null,\"note\":\"Backplane posted the quote in this thread with NO Buy now link: it cannot be paid until its problems are fixed. Do not say a link is there. Tell the person each problem in plain words and what fixes it (for a destination that cannot be priced, ask for another country), then make a new quote.\"}","at":1794152163}
+{"$":"SettingSet","key":"autosettle.quiet.t3","value":"1794152163","at":1794152163}
+{"$":"ActivityLogged","thread":"t3","act":"step:5b3568db72cc01162bfffd9101fe3a4b200d826a","tone":"step","kind":"kicad","summary":"{\"e\":\"cgpui-13840-17941518673801794152157-1794151867417\",\"c\":\"5b3568db72cc01162bfffd9101fe3a4b200d826a\",\"p\":\"\",\"g\":\"/Users/runner/work/Backplane/Backplane/.git\",\"t\":\"/Users/runner/work/Backplane/Backplane\",\"f\":[\"A\\tout/client/proj/ecc83.kicad_pcb\",\"A\\tout/client/proj/ecc83.kicad_pro\",\"A\\tout/client/proj/ecc83.kicad_sch\"],\"w\":\"start\"}","at":1794152163}
+{"$":"ActivityLogged","thread":"t3","act":"k1794152165-7","tone":"info","kind":"checkpoint","summary":"Saving the last turn's checkpoint…","at":1794152165}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152173,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152173}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152178,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152178}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152183,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152183}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152189,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152189}
+{"$":"SettingSet","key":"fallback.input.t1","value":"","at":1794152191}
+{"$":"SettingSet","key":"fallback.input.t2","value":"","at":1794152191}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152194,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152194}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152199,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152199}
+{"$":"SettingSet","key":"autosettle.read.t1","value":"m25190-1:0","at":1794152203}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152204,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152204}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152209,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152209}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152215,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152215}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152220,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152220}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152225,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152225}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152230,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152230}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152235,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152235}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152240,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152240}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152246,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152246}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152252,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152252}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152258,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152258}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152264,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152264}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152270,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152270}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152275,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152275}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152280,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152280}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152285,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152285}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152290,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152290}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152295,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152295}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152300,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152300}
+{"$":"SettingSet","key":"liveness.t3","value":"{\"last\":1794152306,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"agent tool or stream output\"}","at":1794152306}

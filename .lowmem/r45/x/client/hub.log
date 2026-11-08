@@ -1,0 +1,62 @@
+startup: +5ms listening (rss 0 MB)
+Backplane listening on http://127.0.0.1:3891
+startup: +6ms home ready (rss 0 MB)
+startup: +9ms store indexed (rss 0 MB)
+startup: +14ms model built (rss 0 MB)
+startup: +32ms bootstrapped (rss 0 MB)
+startup: +33ms presenter folded (rss 0 MB)
+startup: +34ms hub started (rss 0 MB)
+startup: +35ms session started (rss 0 MB)
+startup: +36ms net started (rss 0 MB)
+startup: +38ms files started (rss 0 MB)
+startup: +45ms settings open started (rss 0 MB)
+startup: +46ms term started (rss 0 MB)
+startup: +50ms agents: world loaded (rss 0 MB)
+startup: +50ms agents: orphans reaped (rss 0 MB)
+startup: +52ms agents: mcp started (rss 0 MB)
+startup: +53ms agents: before recover (rss 0 MB)
+startup: +54ms agents: recovered (rss 0 MB)
+startup: +54ms agents started (rss 0 MB)
+startup: +56ms bots started (rss 0 MB)
+startup: +57ms settings start started (rss 0 MB)
+startup: +57ms commands started (rss 0 MB)
+presenter: routed (rust screens, then the helper); events: 13; torn tail bytes: 0
+startup: +58ms serving (rss 0 MB)
+startup: +58ms policy state folded (rss 0 MB)
+startup: +58ms policy state booted (rss 0 MB)
+checkpoint: saved through 14 lines in 2 ms
+checkpoint: saved through 171 lines in 1 ms
+pcb3d: /Users/runner/work/Backplane/Backplane/out/client/proj/ecc83.kicad_pcb board 25 ms (parse 5, mesh 17), 15850 triangles
+pcb3d: /Users/runner/work/Backplane/Backplane/out/client/proj/ecc83.kicad_pcb parts: first 0 ms, all 0 ms (0 part frames, 11 instances boxed, 0 models failed)
+checkpoint: saved through 200 lines in 3 ms
+backplane-hub: SIGTERM received, exiting
+startup: +1ms listening (rss 0 MB)
+Backplane listening on http://127.0.0.1:3891
+startup: +2ms home ready (rss 0 MB)
+startup: +2ms store indexed (rss 0 MB)
+startup: +3ms model checkpoint loaded (200 lines) (rss 0 MB)
+startup: +3ms model built (rss 0 MB)
+startup: +3ms bootstrapped (rss 0 MB)
+startup: +4ms presenter folded (rss 0 MB)
+startup: +4ms hub started (rss 0 MB)
+startup: +4ms session started (rss 0 MB)
+startup: +5ms net started (rss 0 MB)
+startup: +5ms files started (rss 0 MB)
+startup: +7ms settings open started (rss 0 MB)
+startup: +8ms term started (rss 0 MB)
+startup: +9ms agents: world loaded (rss 0 MB)
+startup: +10ms agents: orphans reaped (rss 0 MB)
+startup: +10ms agents: mcp started (rss 0 MB)
+startup: +11ms agents: before recover (rss 0 MB)
+startup: +26ms agents: recovered (rss 0 MB)
+startup: +27ms agents started (rss 0 MB)
+startup: +28ms bots started (rss 0 MB)
+startup: +29ms settings start started (rss 0 MB)
+startup: +30ms commands started (rss 0 MB)
+presenter: routed (rust screens, then the helper); events: 235; torn tail bytes: 0
+startup: +31ms serving (rss 0 MB)
+startup: +31ms policy state folded (rss 0 MB)
+startup: +31ms policy state booted (rss 0 MB)
+checkpoint: saved through 235 lines in 20 ms
+checkpoint: saved through 315 lines in 3 ms
+backplane-hub: SIGTERM received, exiting

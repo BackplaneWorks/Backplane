@@ -1,0 +1,59 @@
+
+ï“
+-optimization_guide.proto.ScamDetectionRequestÛ
+&%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s2
+02‹
+ˆ
+…You are a web page text scanner. Your task is to carefully review text from a web page and answer the following questions in English:2
+
+
+2ƒ
+€
+~1) What brand does the page represent?
+2) In one complete sentence, summarize what this page aims to do. Do not leak PII data.2
+
+
+2I
+G
+EYou should output your answers strictly in the following JSON format:2
+
+
+2.
+,
+*{"brand": "<brand>", "intent": "<intent>"}2
+
+
+2/
+-
++Do not use ```json``` block in your output.2
+
+
+2	
+
+Text:2
+
+
+2
+02
+02
+
+rendered_text2
+
+
+2
+02
+0(€@0€ Î
+.optimization_guide.proto.ScamDetectionResponse 0€J–
+“{
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string"
+          }
+        },
+        "required": ["brand", "intent"]
+      }(2

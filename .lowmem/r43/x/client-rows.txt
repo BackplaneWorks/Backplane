@@ -1,0 +1,25 @@
+   F14X trial 0 cliclick: Return sent by the client=True ([0.63]), the shell ran the command=True
+   F14X trial 1 quartz: Return sent by the client=True ([0.05]), the shell ran the command=True
+   F14X trial 2 cliclick: Return sent by the client=True ([0.55]), the shell ran the command=True
+   F14X trial 3 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 4 cliclick: Return sent by the client=False ([]), the shell ran the command=False
+   F14X trial 5 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 6 cliclick: Return sent by the client=True ([0.58]), the shell ran the command=True
+   F14X trial 7 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 8 cliclick: Return sent by the client=True ([0.58]), the shell ran the command=True
+   F14X trial 9 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 10 cliclick: Return sent by the client=False ([]), the shell ran the command=False
+   F14X trial 11 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 12 cliclick: Return sent by the client=True ([0.58]), the shell ran the command=True
+   F14X trial 13 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 14 cliclick: Return sent by the client=True ([0.54]), the shell ran the command=True
+   F14X trial 15 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 16 cliclick: Return sent by the client=True ([0.55]), the shell ran the command=True
+   F14X trial 17 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 18 cliclick: Return sent by the client=True ([0.62]), the shell ran the command=True
+   F14X trial 19 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 20 cliclick: Return sent by the client=True ([0.54]), the shell ran the command=True
+   F14X trial 21 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+   F14X trial 22 cliclick: Return sent by the client=True ([0.55]), the shell ran the command=True
+   F14X trial 23 quartz: Return sent by the client=True ([0.01]), the shell ran the command=True
+ok   F14X per method (trials, client sent a carriage return, shell ran it): cliclick (12, 10, 10); quartz (12, 12, 12). A Return the client did not send and the shell did not run is lost before or in the client; one it sent and the shell did not run is lost in the hub or the PTY.
