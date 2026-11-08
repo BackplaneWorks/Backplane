@@ -27,10 +27,25 @@ async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status:
     // seconds the probes take and bring them back, a flicker in the switcher; publishes only after a probe)
     if peering.routes.machines_value().get("self").is_none() { hub.set_info("machines", &tailnet::machines_json(&status, peering.port, &[]).to_string()).await; }
     let j = tailnet::find(&status, peering.port, &extra).await;
+    let mut j = j;
+    let links: Vec<(String, String)> = table.with(|p| p.live().into_iter().filter(|x| p.verified(&x.id)).map(|x| (x.name, x.url)).collect());
+    // an approved link is looked for at its own address too: a hub that listens on loopback behind `tailscale serve` (https, another port) is never at
+    // `http://<tailnet ip>:<this hub's port>`, and without this the finder never lists it and its requests are refused as not the owner's
+    for (name, url) in links {
+        let have = j["peers"].as_array().map_or(false, |a| a.iter().any(|m| super::machines::hostport(m["url"].as_str().unwrap_or("")) == super::machines::hostport(&url)));
+        if have || !link_up(&url).await { continue }
+        if let Some(a) = j["peers"].as_array_mut() { a.push(serde_json::json!({"name": name, "url": url, "version": "linked", "named": true, "same_user": true})) }
+    }
     let verified: Vec<String> = table.with(|p| p.live().into_iter().filter(|x| p.verified(&x.id)).map(|x| x.url).collect());
     // the machines list clients switch between (info "machines": {"self":{name,url,domain},"peers":[...]}; self.name is "" with no tailnet)
     hub.set_info("machines", &j.to_string()).await;
     peering.routes.machines(j, verified);
+}
+/// Whether a hub answers GET /hello at `url` (http or https; the link's own address, not a guess)
+async fn link_up(url: &str) -> bool {
+    if !super::botnet::url_ok(url) { return false }
+    let a = ["-sS", "--proto", "=http,https", "-m", "4", "-H", "@-", "-w", "\n%{http_code}", "--url"].map(String::from).into_iter().chain([format!("{}/hello", url.trim_end_matches('/'))]).collect();
+    super::botnet::curl(a, String::new()).await.code == 200
 }
 /// Whether an approved link is not among the machines just found (both machines were restarting together, or it is away): the finder asks again sooner.
 fn missing_own(peering: &Peering, table: &PeerTable) -> bool {
@@ -92,5 +107,24 @@ mod tests {
         let mut r = Req::new("POST", "/bots/link", vec![("Host".into(), "h".into())]); r.body = b"{}".to_vec(); r.trusted = true; // (loopback-style trust)
         let p = PeerRoutes::preq(&r);
         assert_eq!((p.method.as_str(), p.route(), p.body.as_slice(), p.trusted, p.own_device), ("POST", "/bots/link", &b"{}"[..], true, false), "trusted is not owner trust");
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+    /// An approved link whose hub is not where the tailnet probe looks (another port, as behind `tailscale serve`) is found at its own address.
+    #[tokio::test] async fn an_approved_link_is_found_at_its_own_address() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let a = super::super::peering::tests::node("linkfind", false).await;
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let other = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { loop { let Ok((mut c, _)) = l.accept().await else { return }; tokio::spawn(async move { let mut b = [0u8; 512]; let _ = c.read(&mut b).await;
+            let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").await; }); } });
+        a.hub.commit_many(&[serde_json::json!({"$":"PeerSet","id":"pfar","name":"far","url":other,"revoked":false,"at":1}), serde_json::json!({"$":"SettingSet","key":"peer.own.pfar","value":"approved","at":1})]).await.unwrap();
+        super::super::peering::tests::settle().await;
+        find_with(&a.hub, &a.p, &a.p.table, String::new(), String::new()).await;
+        let own = a.p.table.with(|p| super::super::farsync::own_link(p, &a.p.routes.machines_value(), "pfar"));
+        assert!(own, "{}", a.p.routes.machines_value());
+        assert!(!link_up("http://127.0.0.1:1").await);
     }
 }
