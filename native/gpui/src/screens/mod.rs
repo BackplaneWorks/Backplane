@@ -45,6 +45,7 @@ pub mod strip;
 pub mod term;
 pub mod settings;
 pub mod accounts;
+pub mod combo;
 pub mod timeline;
 pub mod tools;
 pub mod viewer;

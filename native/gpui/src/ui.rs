@@ -467,13 +467,11 @@ impl Render for Backplane {
         let (pv, pm, py) = (f32::from(self.screens.popup_scroll.bounds().size.height), f32::from(self.screens.popup_scroll.max_offset().height), -f32::from(self.screens.popup_scroll.offset().y));
         let popup_bar = crate::screens::picker::thumb(pv, pv, pm, py).map(|(top, h)| div().absolute().top(px(top)).right(px(2.)).w(px(6.)).h(px(h)).bg(c("faint")).opacity(0.7));
         // chips
-        let model = thread["picker"]["models"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
-        let model_short = if model.starts_with("Claude Code") { "default".to_string() } else { model.split(" · ").next().unwrap_or("").to_lowercase() };
-        let effort = thread["picker"]["efforts"].as_array().and_then(|m| m.iter().find(|x| x["on"] == true)).map(|m| string(m, "label")).unwrap_or_default();
         // Thread permissions are read-only here and are not drawn in the composer: the web's composer chip beside the model chip is the account chip.
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
-        // Remaining provider allowance, as the hub words it ("72% left · shared"); "limit —" until the provider has reported one.
-        let allowance = { let a = string(thread, "allowance"); if a.is_empty() { "limit —".to_string() } else { a } };
+        // the one chip (screens/combo.rs): the row's width last frame, less its other controls, is what the chip may use
+        let bar_w = self.screens.acct.bar_w.get();
+        let combo_avail = if bar_w > 0. { bar_w - crate::screens::combo::OTHERS } else { 0. };
         let tools_strip = crate::screens::tools::strip(cx, light, thread, &self.local);
         let mut rail: Vec<AnyElement> = Vec::new();
         crate::screens::viewer::follow(&self.tx, thread);
@@ -605,7 +603,7 @@ impl Render for Backplane {
                     .when(!self.note.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("dim")).child(self.note.clone())))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
-                        .children(crate::screens::picker::view(cx, light, &thread, self.screens.picker_open, &self.screens.pick, &self.local.favs))
+                        .children(crate::screens::combo::menu(cx, light, &thread, self, bar_w > 0. && bar_w < 640.))
                         .children(self.screens.ctx_open.then(|| div().id("ctx-panel").max_h(px(340.)).overflow_y_scroll().px_3().py_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).flex().flex_col().gap_1()
                             .child(div().font_weight(FontWeight::BOLD).child("Context"))
                             .child(div().text_color(c("dim")).child(if ctx.is_empty() { "Nothing reported by the provider yet.".to_string() } else { format!("Held now: {}", ctx.trim_start_matches("ctx ")) }))
@@ -623,12 +621,14 @@ impl Render for Backplane {
                         .child(div().id("composer-box").border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
                         // another machine's thread: where an agent sent from here runs
                         .children(crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)))
-                        .child(div().flex().gap_2().items_center().w_full().min_w_0()
-                            .child(crate::screens::bar::fit(with_rect(div().id("model-chip"), || "ui:Model".to_string())).cursor_pointer().on_click(cx.listener(|this, _, window, cx| this.picker_toggle(window, cx))).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).font(art::mono_font()).flex().items_center().gap_2().child(crate::screens::picker::logo("claude")).child(format!("claude / {} / {}", if model_short.is_empty() { "default" } else { &model_short }, if effort.is_empty() { "auto" } else { &effort })))
-                            .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::chip(cx, light, &self.screens.acct, &crate::keys::hint(&self.local, "account")).min_w_0(), || "ui:Account".to_string())))
+                        .child(div().relative().flex().gap_2().items_center().w_full().min_w_0()
+                            .child(canvas({ let (me, cell) = (cx.entity().downgrade(), self.screens.acct.bar_w.clone()); move |b, _, cx| {
+                                let w = f32::from(b.size.width); if (cell.get() - w).abs() < 1. { return }
+                                cell.set(w); if let Some(this) = me.upgrade() { cx.defer(move |cx| this.update(cx, |_, cx| cx.notify())) }
+                            } }, |_, _, _, _| {}).absolute().size_full())
+                            .child(crate::screens::bar::fit(with_rect(crate::screens::combo::chip(cx, light, thread, combo_avail, (&crate::keys::hint(&self.local, "models"), &crate::keys::hint(&self.local, "account"))), || "ui:Model".to_string())))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("draw"), || "ui:Draw".to_string())).flex_shrink_0().cursor_pointer().tooltip(crate::keys::tip("Draw a sketch and attach it as an image", "", light)).on_click(cx.listener(|this, _, window, cx| this.pad_open(window, cx))).child(ic(light, "square-pen", 16., "dim")))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).min_w_0().overflow_hidden().cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim")).child(ctx))
-                            .child(crate::screens::bar::fit(with_rect(crate::screens::accounts::limits_chip(cx, light, &self.screens.acct, allowance).min_w_0(), || "ui:Allowance".to_string())))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string())).flex_shrink_0().cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("dictate"), || "ui:Dictate".to_string())).flex_shrink_0().cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.voice_press(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
                             .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child(crate::screens::sidebox::send_label(thread)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))

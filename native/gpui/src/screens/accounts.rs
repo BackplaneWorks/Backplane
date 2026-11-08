@@ -1,4 +1,4 @@
-//! Accounts: Settings → Accounts (add, sign in, refresh, disconnect, delete, default for new threads) and the composer's account chip with its menu.
+//! Accounts: Settings → Accounts (add, sign in, refresh, disconnect, delete, default for new threads) and the Account part of the composer's one menu (screens/combo.rs).
 //! The hub keeps the profiles (host `settings/accounts*.rs`); this file asks it with the `accounts` request (the reply's `result` is the snapshot: profiles,
 //! sign-in attempts with their link and code, and, when a thread is named, what that thread is bound to) and sends `accounts.select` for a pick.
 //! The sign-in code Claude shows is typed in a field here and goes straight to that attempt (`respond`); it is never a draft, a `bfield` or a log line.
@@ -16,8 +16,6 @@ pub struct Accounts {
     /// The thread the chip last asked about, and whether the menu under the chip is open.
     pub asked_for: String,
     pub menu: bool,
-    /// Whether the limits menu (every account's remaining allowance) is open.
-    pub limits: bool,
     /// The menu's keyboard: its digits work while this has focus (context `AccountMenu`), wherever the keyboard was.
     pub focus: Option<FocusHandle>,
     /// The profile whose Delete was pressed once (the second press deletes).
@@ -33,6 +31,8 @@ pub struct Accounts {
     pub checking: std::collections::HashSet<String>,
     /// Which provider the add box makes an account for ("" is Claude).
     pub add_provider: String,
+    /// The composer row's width as last drawn (screens/combo.rs picks the chip's words from it; 0 before the first frame).
+    pub bar_w: std::rc::Rc<std::cell::Cell<f32>>,
 }
 
 // ---- pure: what the snapshot says -----------------------------------------------------------------------------------------------------------------------
@@ -47,12 +47,6 @@ pub fn failure_of(snap: &Value, profile: &str) -> String { snap["attempts"].as_a
 pub fn binding(snap: &Value) -> (String, u64) {
     let b: Value = serde_json::from_str(snap["thread"]["binding"].as_str().unwrap_or("")).unwrap_or(Value::Null);
     (b["id"].as_str().unwrap_or("").to_string(), b["epoch"].as_u64().unwrap_or(0))
-}
-/// The chip's words: the bound account's label, else "Default".
-pub fn chip_label(snap: &Value) -> String {
-    let (id, _) = binding(snap);
-    if id.is_empty() { return "Default".into() }
-    profiles(snap).iter().find(|p| p["id"] == id.as_str()).and_then(|p| p["label"].as_str().map(str::to_string)).unwrap_or_else(|| "Unavailable".into())
 }
 /// The words and the colour token of a state.
 pub fn badge(state: &str) -> (&'static str, &'static str) {
@@ -158,7 +152,9 @@ pub fn done(this: &mut Backplane, tag: &str, ok: bool, why: &str, _cx: &mut Cont
         return
     }
     if tag == "acct-moveall" { list(this); return }
-    if tag == "acct-select" || tag == "acct-default" { if this.screens.acct.menu { this.want_focus = true } this.screens.acct.menu = false; this.screens.acct.notice.clear(); list(this); }
+    // a pick shuts the menu it was made in (screens/combo.rs)
+    if tag == "acct-select" { if this.screens.acct.menu || this.screens.picker_open { this.want_focus = true } this.screens.acct.menu = false; this.screens.picker_open = false; this.screens.acct.notice.clear(); list(this); }
+    if tag == "acct-default" { this.screens.acct.notice.clear(); list(this); }
 }
 /// The answer to "Move all threads here": how many moved, and the running ones it left (a turn is never switched under itself; they can be moved when it ends).
 pub fn moved(this: &mut Backplane, v: &Value) { this.screens.acct.info = moved_text(v); }
@@ -337,76 +333,60 @@ pub fn panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provider: 
 
 // ---- the chip's menu -------------------------------------------------------------------------------------------------------------------------------
 
-/// The menu opened or shut, from its chip or its key. Open, it has the keyboard, so its digits pick wherever the keyboard was; shut, the keyboard goes back to the message box.
-pub fn toggle(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backplane>) {
-    this.screens.acct.menu = !this.screens.acct.menu;
-    if this.screens.acct.menu {
-        this.screens.acct.notice.clear(); list(this); refresh_usage(this); // saved sign-ins are rechecked after a restart, and the limits it shows are fresh (the hub reads a profile at most every 5 minutes)
-        let h = this.screens.acct.focus.get_or_insert_with(|| cx.focus_handle()).clone(); window.focus(&h);
-    } else { this.want_focus = true }
-    cx.notify();
-}
+/// The account key: the one menu with the keyboard on its accounts (screens/combo.rs).
+pub fn toggle(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backplane>) { this.combo_account(window, cx) }
 /// A row pressed, by the mouse or its digit: a usable account is asked for; one that is not signed in goes to where it is signed in.
 fn press(this: &mut Backplane, row: &MenuRow, cx: &mut Context<Backplane>) {
     if row.usable {
         let thread = current_thread(this);
         let p = select_params(&thread, &row.profile, row.epoch, &this.screens.acct.snap);
         if this.tx.try_send(Command::Rpc("accounts.select".into(), Secret(p), "acct-select")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); }
-    } else { this.screens.acct.menu = false; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); }
+    } else { this.screens.acct.menu = false; this.screens.picker_open = false; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); }
     cx.notify();
 }
 /// The digit `n` in the open menu.
 pub fn press_nth(this: &mut Backplane, n: u8, cx: &mut Context<Backplane>) {
-    if !this.screens.acct.menu { return }
+    if !this.screens.acct.menu || !this.screens.picker_open { return }
     if let Some(r) = menu_rows(&this.screens.acct.snap, now_s()).into_iter().find(|r| r.key == Some(n)) { press(this, &r, cx) }
 }
 
-/// The menu above the chip: the default account and each saved account of the thread's provider, each with its digit and what it has left, the bound one ticked; one that cannot be used says why.
-pub fn menu(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> AnyElement {
+/// The Account part of the one menu: the default account and each saved account of the thread's provider, each with its digit and what it has left, the bound one
+/// ticked; one that cannot be used says why. It has the keyboard (context `AccountMenu`, its digits) when the account key opened the menu.
+pub fn section(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
-    let mut list = div().id("acct-menu").key_context("AccountMenu").w(px(340.)).max_h(px(420.)).overflow_y_scroll().flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).shadow_lg().occlude()
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.acct.menu = false; this.want_focus = true; cx.notify(); }));
+    let mut list = div().id("acct-menu").key_context("AccountMenu").max_h(px(300.)).overflow_y_scroll().flex().flex_col().pb_1();
     if let Some(h) = &st.focus { list = list.track_focus(h); }
     for (i, r) in menu_rows(&st.snap, now_s()).into_iter().enumerate() {
         let row = r.clone();
         let mut text = div().flex_1().min_w_0().flex().flex_col().gap(px(1.))
             .child(div().flex().items_center().gap_2()
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(13.)).text_color(c(if r.usable { "text" } else { "faint" })).child(r.label))
-                .child(div().flex_shrink_0().text_size(px(11.)).text_color(c("faint")).child(r.detail)));
+                .child(div().flex_shrink_0().max_w(px(150.)).overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c("faint")).child(r.detail)));
         if !r.left.is_empty() { text = text.child(div().overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c(if r.out { "warn" } else { "dim" })).child(r.left)); }
-        list = list.child(div().id(SharedString::from(format!("acct-m-{i}"))).flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise")))
-            .child(div().w(px(16.)).flex_shrink_0().text_size(px(11.)).text_color(c("dim")).child(r.key.map_or(String::new(), |k| k.to_string())))
+        list = list.child(div().id(SharedString::from(format!("acct-m-{i}"))).flex().items_center().gap_2().px_3().py(px(5.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise")))
+            .child(div().w(px(16.)).flex_shrink_0().text_size(px(11.)).text_color(c(if st.menu { "accent" } else { "dim" })).child(r.key.map_or(String::new(), |k| k.to_string())))
             .child(div().w(px(14.)).flex_shrink_0().child(if r.on { crate::art::icon("circle-check", 14., c("accent")) } else { div().into_any_element() }))
             .child(text)
             .on_click(cx.listener(move |this, _, _, cx| press(this, &row, cx))));
     }
     if !st.notice.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("bad")).child(st.notice.clone())); }
-    list = list.child(div().my_1().mx_2().h(px(1.)).bg(c("line")))
-        .child(div().id("acct-m-manage").flex().items_center().gap_2().px_3().py(px(7.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13.)).text_color(c("dim"))
-            .child("Manage accounts in Settings").on_click(cx.listener(|this, _, _, cx| { this.screens.acct.menu = false; this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); cx.notify(); })));
-    list.into_any_element()
+    if !st.info.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("text")).child(st.info.clone())); }
+    // the bound account's "Move all threads here", as on its card in Settings
+    let (bound, epoch) = binding(&st.snap);
+    if let Some(p) = profiles(&st.snap).into_iter().find(|p| p["id"] == bound.as_str() && p["state"] == "connected") {
+        let prov = string(&p, "provider");
+        list = list.child(div().id("acct-m-moveall").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13.)).text_color(c("dim"))
+            .child("Move all threads here").on_click(cx.listener(move |this, _, _, cx| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": bound, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } cx.notify(); })));
+    }
+    list.child(div().id("acct-m-manage").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13.)).text_color(c("dim"))
+        .child("Manage accounts in Settings").on_click(cx.listener(|this, _, _, cx| { this.screens.acct.menu = false; this.screens.picker_open = false; this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); cx.notify(); })))
 }
 
-/// The composer's account chip: the account in force, centred, opening the menu.
-pub fn chip(cx: &mut Context<Backplane>, light: bool, st: &Accounts, key: &str) -> Div {
-    let c = |n: &str| theme::color(light, n);
-    let wrap = div().relative();
-    let btn = div().id("acct-chip").h(px(30.)).min_w_0().overflow_hidden().px_3().flex().items_center().justify_center().gap_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().cursor_pointer()
-        .hover(|s| s.bg(c("raise")))
-        .child(crate::art::icon("user", 16., c("text"))).child(chip_label(&st.snap))
-        .tooltip(crate::keys::tip("Account", key, light))
-        .on_click(cx.listener(|this, _, window, cx| toggle(this, window, cx)));
-    let wrap = wrap.child(btn);
-    if st.menu { wrap.child(deferred(anchored().anchor(Corner::BottomLeft).offset(point(px(0.), px(-4.))).snap_to_window_with_margin(px(8.)).child(menu(cx, light, st))).with_priority(10)) } else { wrap }
-}
+// ---- what an account has left ----------------------------------------------------------------------------------------------------------------
 
-// ---- the limits chip -------------------------------------------------------------------------------------------------------------------------------
-
-/// One account's block in the limits menu: its name, whether the thread uses it, and a line per limit window (or why there is none).
-#[derive(Debug, PartialEq)]
-pub struct LimitBlock { pub name: String, pub bound: bool, pub lines: Vec<String>, pub note: String }
-fn window_name(scope: &str) -> String {
-    match scope { "five_hour" => "5-hour".into(), "seven_day" => "Weekly".into(), "seven_day_opus" => "Weekly Opus".into(), "seven_day_sonnet" => "Weekly Sonnet".into(), o => o.replace('_', " ") }
+fn window_name(w: &Value) -> String {
+    if let Some(l) = w["label"].as_str().filter(|l| !l.is_empty()) { return l.to_string() }
+    match w["scope"].as_str().unwrap_or("") { "five_hour" => "5-hour".into(), "seven_day" => "Weekly".into(), "seven_day_opus" => "Weekly Opus".into(), "seven_day_sonnet" => "Weekly Sonnet".into(), o => o.replace('_', " ") }
 }
 /// "in 2d 3h" / "in 4h 5m" / "in 12m" / "now" for a reset time in epoch seconds.
 pub fn resets_in(at: u64, now: u64) -> String {
@@ -417,61 +397,15 @@ pub fn resets_in(at: u64, now: u64) -> String {
 /// A window as "5-hour  72% left · resets in 3h 10m".
 pub fn window_line(w: &Value, now: u64) -> Option<String> {
     let used = w["used_percent"].as_f64().or_else(|| w["used_permille"].as_f64().map(|p| p / 10.0)).filter(|u| (0.0..=100.0).contains(u))?;
-    let mut s = format!("{}  {:.0}% left", window_name(w["scope"].as_str().unwrap_or("")), 100.0 - used);
+    let mut s = format!("{}  {:.0}% left", window_name(w), 100.0 - used);
     if let Some(r) = w["resets_at"].as_f64().filter(|r| *r > 0.0) { s.push_str(&format!(" · resets {}", resets_in(r as u64, now))) }
     Some(s)
 }
-fn block(name: String, bound: bool, al: &Value, missing: &str, now: u64) -> LimitBlock {
-    let lines: Vec<String> = al["windows"].as_array().into_iter().flatten().filter_map(|w| window_line(w, now)).collect();
-    let at = al["at"].as_u64().unwrap_or(0);
-    let reason = al["reason"].as_str().unwrap_or("");
-    let note = if lines.is_empty() { if reason.is_empty() { missing.to_string() } else { reason.to_string() } } else if at > 0 && now.saturating_sub(at) > 900 { format!("last read {}m ago", now.saturating_sub(at) / 60) } else { String::new() };
-    LimitBlock { name, bound, lines, note }
-}
-/// Every Claude account's limits: the CLI's default login, then each saved account; the one the thread uses is marked.
-pub fn limit_blocks(snap: &Value, now: u64) -> Vec<LimitBlock> {
-    let (bound, _) = binding(snap);
-    let mut out = vec![];
-    let d = &snap["default_allowance"];
-    let dmiss = if d["state"] == "unavailable" { "The Claude CLI is not signed in with a subscription, so it reports no limits." } else { "Not read yet. The hub checks every 5 minutes." };
-    out.push(block("Default account".into(), bound.is_empty(), d, dmiss, now));
-    for p in profiles(snap).iter().filter(|p| p["provider"] == "claude") {
-        let miss = if p["state"] == "unchecked" { "Checking the sign-in…" } else if p["state"] != "connected" { "Not signed in, so no limits to read. Connect it in Settings." } else { "Claude has not reported limits for this account yet." };
-        out.push(block(string(p, "label"), p["id"] == bound.as_str(), &p["allowance"], miss, now));
-    }
-    out
-}
-/// Opening the account or limits menu asks the hub to re-read each signed-in (or unchecked) account; the hub reads a profile at most every 5 minutes.
-fn refresh_usage(this: &mut Backplane) {
+/// Opening the menu asks the hub to re-read each signed-in (or unchecked) account; the hub reads a profile at most every 5 minutes.
+pub fn refresh_usage(this: &mut Backplane) {
     for p in profiles(&this.screens.acct.snap).iter().filter(|p| matches!(p["state"].as_str(), Some("connected" | "unchecked"))) { ask(this, json!({"op": "status", "profile": string(p, "id")})) }
 }
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
-fn limits_menu(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> AnyElement {
-    let c = |n: &str| theme::color(light, n);
-    let mut list = div().id("limits-menu").w(px(340.)).max_h(px(420.)).overflow_y_scroll().flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).shadow_lg().occlude()
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.acct.limits = false; cx.notify(); }));
-    list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("faint")).child("Remaining allowance per Claude account"));
-    for b in limit_blocks(&st.snap, now_s()) {
-        let mut col = div().flex().flex_col().gap(px(2.)).px_3().py(px(6.))
-            .child(div().flex().items_center().gap_2().child(div().w(px(14.)).flex_shrink_0().child(if b.bound { crate::art::icon("circle-check", 14., c("accent")) } else { div().into_any_element() }))
-                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(13.)).font_weight(FontWeight::BOLD).child(b.name.clone()))
-                .child(div().text_size(px(11.)).text_color(c("faint")).child(if b.bound { "this thread" } else { "" })));
-        for l in b.lines { col = col.child(div().pl(px(22.)).text_size(px(12.)).child(l)) }
-        if !b.note.is_empty() { col = col.child(div().pl(px(22.)).text_size(px(11.)).text_color(c("dim")).child(b.note)) }
-        list = list.child(col);
-    }
-    if !st.notice.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("bad")).child(st.notice.clone())); }
-    list.into_any_element()
-}
-/// The composer's limits chip: the thread's least remaining window, opening the per-account menu.
-pub fn limits_chip(cx: &mut Context<Backplane>, light: bool, st: &Accounts, text: String) -> Div {
-    let c = |n: &str| theme::color(light, n);
-    let btn = div().id("limits-chip").h(px(30.)).min_w_0().overflow_hidden().px_3().flex().items_center().gap_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).whitespace_nowrap().cursor_pointer()
-        .hover(|s| s.bg(c("raise"))).child(crate::art::icon("gauge", 14., c("dim"))).child(text)
-        .on_click(cx.listener(|this, _, _, cx| { this.screens.acct.limits = !this.screens.acct.limits; if this.screens.acct.limits { list(this); refresh_usage(this) } cx.notify(); }));
-    let wrap = div().relative().child(btn);
-    if st.limits { wrap.child(deferred(anchored().anchor(Corner::BottomLeft).offset(point(px(0.), px(-4.))).snap_to_window_with_margin(px(8.)).child(limits_menu(cx, light, st))).with_priority(10)) } else { wrap }
-}
 
 #[cfg(test)]
 mod tests {
@@ -490,11 +424,6 @@ mod tests {
             {"id":"d","provider":"claude","label":"Old","epoch":1,"state":"disconnected","identity":{}}],
             "attempts":[{"id":"a1","profile":"d","state":"waiting","url":"https://claude.ai/x","userCode":"","message":""}],
             "thread":{"id":"t1","provider":"claude","binding":"{\"id\":\"w\",\"epoch\":3}"},"defaults":{"claude":"{\"id\":\"w\",\"epoch\":3}"}})
-    }
-    #[test] fn the_chip_names_the_bound_account_or_says_default() {
-        assert_eq!(chip_label(&snap()), "Work"); assert_eq!(chip_label(&Value::Null), "Default");
-        let mut s = snap(); s["thread"]["binding"] = json!("{\"id\":\"\",\"epoch\":0}"); assert_eq!(chip_label(&s), "Default");
-        s["thread"]["binding"] = json!("{\"id\":\"gone\",\"epoch\":1}"); assert_eq!(chip_label(&s), "Unavailable");
     }
     #[test] fn a_card_says_who_signed_in_and_how_much_is_used() {
         let ps = profiles(&snap()); assert_eq!(identity(&ps[0]), "Claude · a@b.com · max"); assert_eq!(identity(&ps[1]), "Claude");
@@ -524,19 +453,9 @@ mod tests {
         let p = select_params("t1", "w", 3, &snap()); assert_eq!((p["thread"].clone(), p["profile"].clone(), p["epoch"].clone()), (json!("t1"), json!("w"), json!(3))); assert_eq!(p["expected"], "{\"id\":\"w\",\"epoch\":3}");
         assert_eq!(binding(&snap()), ("w".to_string(), 3));
     }
-    #[test] fn limits_list_every_account_with_what_is_left_and_why_when_nothing() {
-        let mut s = snap(); s["profiles"][0]["allowance"]["windows"][0]["resets_at"] = json!(10_000u64 + 3 * 3600 + 600);
-        s["default_allowance"] = json!({"state":"ok","at":9990,"windows":[{"scope":"seven_day","used_percent":86.0,"resets_at":10_000u64 + 2 * 86400}]});
-        let b = limit_blocks(&s, 10_000);
-        assert_eq!(b.len(), 3);
-        assert_eq!((b[0].name.as_str(), b[0].bound, b[0].lines.clone()), ("Default account", false, vec!["Weekly  14% left · resets in 2d 0h".to_string()]));
-        assert_eq!((b[1].name.as_str(), b[1].bound), ("Work", true));
-        assert_eq!(b[1].lines, vec!["5-hour  38% left · resets in 3h 10m".to_string(), "Weekly  80% left".to_string()]);
-        assert!(b[2].lines.is_empty() && b[2].note.contains("Not signed in"));
-        s["default_allowance"] = json!({"state":"unavailable","windows":[]}); assert!(limit_blocks(&s, 10_000)[0].note.contains("not signed in"));
-        assert!(limit_blocks(&Value::Null, 1)[0].note.contains("Not read yet"));
-        s["profiles"][1]["allowance"] = json!({"state":"unavailable","windows":[],"reason":"The Claude CLI did not answer within 30 seconds."}); s["profiles"][1]["state"] = json!("connected");
-        assert_eq!(limit_blocks(&s, 10_000)[2].note, "The Claude CLI did not answer within 30 seconds.");
+    #[test] fn a_window_says_what_is_left_and_when_it_resets() {
+        assert_eq!(window_line(&json!({"scope":"seven_day","used_percent":86.0,"resets_at":10_000u64 + 2 * 86400}), 10_000).unwrap(), "Weekly  14% left · resets in 2d 0h");
+        assert_eq!(window_line(&json!({"scope":"seven_day_fable","label":"Fable weekly","used_percent":0.0}), 0).unwrap(), "Fable weekly  100% left", "the hub's own name");
         assert_eq!(resets_in(5, 10), "now"); assert_eq!(resets_in(10 + 720, 10), "in 12m");
     }
 }
