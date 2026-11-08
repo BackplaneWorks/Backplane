@@ -679,7 +679,7 @@ final class Journeys: XCTestCase {
     // env: TERM_THREAD, TERM_PROJECT (rig-seed.ts), HUB_CTL (the relay's control port).
     func test_terminal() {
         d = Driver("terminal"); defer { d.finish() }
-        let screen = { d.el("term.screen") }
+        let screen = { self.d.el("term.screen") }
         let text = { (screen().value as? String) ?? "" }
         func sizes(_ t: String) -> (Int, Int)? {
             for l in t.split(separator: "\n").reversed() { let p = l.split(separator: " "); if p.count == 2, let r = Int(p[0]), let c = Int(p[1]) { return (c, r) } }
