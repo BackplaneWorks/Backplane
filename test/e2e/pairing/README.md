@@ -20,6 +20,12 @@ Most drivers also take `--restart CMD` and `--expire CMD` (restart the hub; move
 | `proto.py`, `settings_revoke.py` | none: the protocol and Settings revoke, against the hub | anywhere that reaches the hub | a hub result: write `pass, hub only` |
 | `gpui_hubs.sh`, `link.py`, `unified.py`, `bots.py` | several hubs in one client; linked hubs | see each header | |
 
+A LAUNCH for `gpui.sh` (how a client starts on its machine) must: name the client's config folder by `RIG`, so a later step with `RIG=link` reuses that client's
+settings; and after a pairing wait for the copy of itself the client starts (`pairing.rs` relaunches) before returning, or the checks read the log before
+"Connected" is in it (`test/windows/rig/gpui-start.sh` does both). RESTART and EXPIRE run where the driver runs: a driver on another machine needs them over ssh,
+else those two checks say not run. "Saved privately" (the first hub token and `hubs.json`) is mode 600 on Linux and macOS; on Windows `icacls` must list the user and no Users,
+Everyone, Authenticated Users or inherited (I) entry.
+
 `--sockets` is a command run where the hub is that prints how many connections are established to its port from the client (Linux `ss`, macOS `netstat`).
 On an emulator pass `--fresh "scripts/android-emu.sh fresh"`: it resets the app in its own process (a `pm clear` per check leaks the emulator's memory).
 A real phone (`--device "Pixel 9, a real phone"`) keeps `pm clear`. One lane at a time on a shared phone: `flock ~/.cache/pixel-<serial>.lock <command>`.
