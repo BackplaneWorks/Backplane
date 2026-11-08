@@ -19,7 +19,10 @@ for a in "$@"; do
   prev=$a
 done
 old=${old:-$HOME/.backplane-bend}; port=${port:-3787}
-case $(uname -s) in Darwin) home=${BACKPLANE_HOME:-$HOME/Library/Application Support/Backplane/hub} ;; *) home=${BACKPLANE_HOME:-$HOME/.backplane/hub} ;; esac
+# 0.15's own home. Never BACKPLANE_HOME: this runs in 0.14's process, which sets it to 0.14's home. BACKPLANE_NEW_HOME is for tests (test/update/from-014.py).
+case $(uname -s) in Darwin) home=${BACKPLANE_NEW_HOME:-$HOME/Library/Application Support/Backplane/hub} ;; *) home=${BACKPLANE_NEW_HOME:-$HOME/.backplane/hub} ;; esac
+case "$home" in "$old"|"$old"/) echo "0.15's home would be 0.14's ($old): not started" >&2; exec "$prefix/backplane-serve.0.14" "$@" ;; esac
+unset BACKPLANE_HOME
 tag=$(cat "$prefix/NEXT" 2>/dev/null || true)
 G="$prefix/backplane"
 mkdir -p "$home"
