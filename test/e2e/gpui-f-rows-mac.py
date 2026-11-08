@@ -95,6 +95,7 @@ def xin(cmd, *a):
     elif cmd == 'key':
         cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))
         if a[0] == 'Return': cli('w:500', 'kp:return')   # the first Return after typed text is often taken by the text input to commit it; a second on an empty field does nothing
+    elif cmd == 'key1': cli('w:250', 'kp:' + KEYS.get(a[0], a[0].lower()))   # one press, for a field where Return acts each time it is pressed (the address bar)
     elif cmd == 'wheel':
         x, y = abs_(a[0], a[1]); cli('m:%d,%d' % (x, y)); time.sleep(0.2)
         for _ in range(abs(int(a[2]))): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, -3 if int(a[2]) > 0 else 3)); time.sleep(0.15)   # the rows say positive = scroll down; a Quartz wheel event's positive value is the other way

@@ -212,7 +212,7 @@ if want('F18'):
         return (xs // n, ys // n) if n * 4 >= minpx else None
     sel(1); chord('ctrl b'); pause(1.0); click_ctl('rail:Browser'); pause(4); allow_dialogs(); VW = (560, 90, win()[2] - 80, win()[3] - 30); shot('f18-open')
     def go():   # focus the page, then the address field, replace its text with the URL, Return
-        allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(1.0); chord('ctrl a'); pause(0.3); xin('type', URL); xin('key', 'Return'); pause(2); allow_dialogs()
+        allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(1.0); chord('ctrl a'); pause(0.3); xin('type', URL); xin('key1', 'Return'); pause(2); allow_dialogs()   # one Return: the address bar navigates on every Return, and a second one goes to the address the tab still shows (about:blank)
     for _try in range(3):
         go()
         if until(lambda: 'load' in names(), 20): break
