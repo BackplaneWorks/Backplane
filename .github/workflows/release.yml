@@ -63,9 +63,17 @@ jobs:
           shared-key: release-${{ matrix.target }}
       - name: stamp the version
         run: |
-          v="${TAG#v}"
-          sed -i.bak -E '0,/^version = ".*"/s//version = "'"$v"'"/' native/host/Cargo.toml native/gpui/Cargo.toml
-          rm -f native/host/Cargo.toml.bak native/gpui/Cargo.toml.bak
+          # the first `version = ` line of each crate (python, not sed: macOS's sed has no `0,/re/`, and its builds kept the old version, so the guard's
+          # identity check would have refused every macOS update)
+          python3 - "${TAG#v}" native/host/Cargo.toml native/gpui/Cargo.toml  native/guard/Cargo.toml <<'PY'
+          import re, sys
+          v = sys.argv[1]
+          for p in sys.argv[2:]:
+              s = open(p).read(); t = re.sub(r'(?m)^version = ".*"$', f'version = "{v}"', s, count=1)
+              assert t != s or f'version = "{v}"' in s, p
+              open(p, "w").write(t)
+          PY
+          grep -m1 '^version' native/host/Cargo.toml
       - name: build
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
@@ -375,15 +383,19 @@ jobs:
         with: { name: release-dry-run, path: broken, run-id: "${{ github.event.inputs.broken_run }}", github-token: "${{ github.token }}" }
       - name: display (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends xvfb i3 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2 > /dev/null
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends xvfb i3 mesa-vulkan-drivers libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2 > /dev/null
       - name: rc-smoke
         run: |
+          set -o pipefail; mkdir -p logs
+          RC_DIR=$RUNNER_TEMP RC_KEEP=1 RC_LOGS=$PWD/logs bash test/update/rc-smoke.sh rel | tee smoke.txt
+      - name: update and rollback
+        # the older dry run installed, this one taken from a loopback feed, the broken one rolled back from (Windows: the zip's, in test/windows)
+        if: always() && runner.os != 'Windows' && hashFiles('first/manifest.json') != '' && hashFiles('broken/manifest.json') != ''
+        run: |
           set -o pipefail
-          RC_DIR=$RUNNER_TEMP bash test/update/rc-smoke.sh rel | tee smoke.txt
-          # update and rollback: the older dry run installed, this one taken from a loopback feed, the broken one rolled back from
-          if [ -d first ] && [ -d broken ] && [ "${{ runner.os }}" != Windows ]; then RC_DIR=$RUNNER_TEMP UPD_DIR=$RUNNER_TEMP bash test/update/install-e2e.sh first rel broken | tee -a smoke.txt; fi
+          RC_DIR=$RUNNER_TEMP UPD_DIR=$RUNNER_TEMP bash test/update/install-e2e.sh first rel broken | tee update.txt
       - name: the way from 0.14
-        if: matrix.target == 'linux-x64' || matrix.target == 'darwin-arm64'
+        if: always() && (matrix.target == 'linux-x64' || matrix.target == 'darwin-arm64')
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           set -o pipefail
@@ -397,5 +409,7 @@ jobs:
           name: smoke-${{ matrix.target }}
           path: |
             smoke.txt
+            update.txt
             from014.txt
+            logs/
           retention-days: 7

@@ -29,7 +29,7 @@ export HOME=$T/u BACKPLANE_AGENTS=$T/agents BACKPLANE_UPDATE_FEED=http://127.0.0
 unset BACKPLANE_BUILDS BACKPLANE_GUARD BACKPLANE_NO_UPDATE BACKPLANE_COPY BACKPLANE_HOME
 mkdir -p "$BACKPLANE_AGENTS"
 G=$PREFIX/backplane$X
-PIDS=; trap '[ -x "$G" ] && "$G" hub stop --home "$H" > /dev/null 2>&1; for p in $PIDS; do kill $p 2>/dev/null; done; [ -n "${RC_KEEP:-}" ] || rm -rf "$T"' EXIT
+PIDS=; trap '[ -x "$G" ] && "$G" hub stop --home "$H" > /dev/null 2>&1; for p in $PIDS; do kill $p 2>/dev/null; done; [ -z "${RC_LOGS:-}" ] || { mkdir -p "$RC_LOGS"; cp "$T"/*.log "$RC_LOGS"/ 2>/dev/null; cp "$H/hub.log" "$RC_LOGS/hub-home.log" 2>/dev/null; }; [ -n "${RC_KEEP:-}" ] || rm -rf "$T"' EXIT
 echo '[]' > "$T/feed/releases.json"
 (cd "$T/feed" && exec "$PY" -I -m http.server $FP --bind 127.0.0.1) > "$T/feed.log" 2>&1 & PIDS="$PIDS $!"
 (cd "$ROOT/test/cef/page" && exec "$PY" -I -m http.server $PP --bind 127.0.0.1) > "$T/page.log" 2>&1 & PIDS="$PIDS $!"
@@ -75,7 +75,9 @@ JSON
 run_client() {
   local c=("$B/backplane-gpui$X" --url "http://127.0.0.1:$P" --token-file "$H/token" --exit-after 30)
   case $TGT in
-    linux-*)   # a private display with a window manager (without one nothing is drawn); XVFB names an unpacked Xvfb where none is installed
+    linux-*)   # software Vulkan where the machine has no GPU (a CI runner): lavapipe
+      [ -n "${VK_ICD_FILENAMES:-}" ] || export VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)
+      # a private display with a window manager (without one nothing is drawn); XVFB names an unpacked Xvfb where none is installed
       local d=$((300 + $$ % 300)) r; r=$(mktemp -d /tmp/bpr.XXXX); chmod 700 "$r"   # sockets only: a short path (i3 fails past 107 bytes)
       ${XVFB:-Xvfb} :$d -screen 0 1400x900x24 -nolisten tcp > "$T/xvfb.log" 2>&1 & local xp=$!; sleep 1
       printf 'new_window none\nfor_window [class=".*"] border none\nipc-socket %s/i3.sock\n' "$r" > "$T/i3.conf"
@@ -96,9 +98,9 @@ case $TGT in
     if grep -q 'GPUI_METRIC.*"title":"cef-test-start"' "$T/client.log" && ! grep -q 'embedded browser unavailable' "$T/client.log"; then ok browser-tab "the embedded Chromium loaded and painted the local page: $(grep -o '"paints":[0-9]*' "$T/client.log" | tail -1)"
     else no browser-tab "no painted page (embedded browser: $(grep -o 'embedded browser unavailable[^"]*\|"cef":"[^"]*' "$T/client.log" | head -1)); last report: ${rep:0:200}"; fi ;;
   *)
-    # no CEF here: the Browser tab is the hub's frame stream from backplane-browser (docs/install.md)
-    if grep -q -i 'browser' "$H/hub.log" 2>/dev/null && grep -q -E 'frame|screencast' "$H/hub.log" 2>/dev/null; then ok browser-tab "the hub's browser helper streamed frames to the Browser tab (no CEF on $TGT, as documented)"
-    else no browser-tab "no frames from the browser helper (hub log: $(grep -i browser "$H/hub.log" 2>/dev/null | tail -2 | tr '\n' ' ' | cut -c1-200))"; fi ;;
+    # no CEF here (docs/install.md): the Browser tab opens on the hub's frame stream; its frames from backplane-browser are F18's, run by this platform's lane
+    if grep '"event":"cef"' "$T/client.log" | grep -q 'built without the cef feature' && grep -q '"event":"usable"' "$T/client.log" && ! grep -q -i 'panicked' "$T/client.log"; then ok browser-tab "the Browser tab opened in frame-stream mode (no CEF on $TGT, as documented); its frames are the F18 row's"
+    else no browser-tab "the Browser tab did not open: $(grep -o '"event":"cef"[^}]*' "$T/client.log" | tail -1 | cut -c1-160) $(grep -i panicked "$T/client.log" | head -1 | cut -c1-120)"; fi ;;
 esac
 "$G" hub stop --home "$H" > /dev/null 2>&1
 
