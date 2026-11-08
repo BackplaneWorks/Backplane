@@ -104,7 +104,10 @@ jobs:
           (cd tools/step2glb && bun install --frozen-lockfile && bun build --compile step2glb.ts --outfile "$PWD/../../$d/backplane-step2glb")
           # Linux: CEF's runtime beside the client, where viewers/cef.rs runtime_dir looks in an install (libcef stripped: ~1.4 GB with symbols, ~270 MB without)
           case "${{ matrix.target }}" in linux-*)
-            R=native/gpui/target/release
+            # the cef crate's distribution in its OUT_DIR (kept by the build cache, unlike the copy beside the binary, which a cached build leaves out)
+            R=$(dirname "$(find native/gpui/target/release/build -path '*cef-dll-sys*' -name libcef.so | head -1)")
+            [ -f "$R/libcef.so" ] || R=native/gpui/target/release
+            echo "CEF runtime from $R"
             for f in libcef.so resources.pak chrome_100_percent.pak chrome_200_percent.pak icudtl.dat v8_context_snapshot.bin; do [ -f $R/$f ] || { echo "::error::CEF runtime file $f missing from the build"; exit 1; }; cp $R/$f $d/; done
             for f in libvk_swiftshader.so libvulkan.so.1 vk_swiftshader_icd.json; do [ ! -f $R/$f ] || cp $R/$f $d/; done
             cp -r $R/locales $d/locales; strip --strip-unneeded $d/libcef.so ;;
