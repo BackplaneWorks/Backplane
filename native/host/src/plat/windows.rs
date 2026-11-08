@@ -325,6 +325,9 @@ pub mod net {
         let _ = s.shutdown().await; let mut b = vec![0u8; 16384]; let mut n = 0usize;
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), async { while n < (1 << 20) { match s.read(&mut b).await { Ok(0) | Err(_) => break, Ok(k) => n += k } } }).await;
     }
+    /// The machine's IPv4 addresses that are not loopback, with an interface name (none here: Windows names adapters by
+    /// GUID, so pairing's local network choice tells a VM's switch only by its address).
+    pub fn v4_interfaces() -> Vec<(String, String)> { non_loopback_v4().into_iter().map(|ip| (String::new(), ip)).collect() }
     /// The machine's IPv4 addresses that are not loopback, of adapters that are up.
     pub fn non_loopback_v4() -> Vec<String> {
         use windows_sys::Win32::{NetworkManagement::{IpHelper::*, Ndis::IfOperStatusUp}, Networking::WinSock::{AF_INET, SOCKADDR_IN}};

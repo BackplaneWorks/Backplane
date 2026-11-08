@@ -86,12 +86,13 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // a photo of a pairing code, read on the phone (Pair.kt's pairingFromImage)
+    // a pairing code read on the phone: a photo (Pair.kt's pairingFromImage) and the in-app scanner's camera frames (Scanner.kt)
     implementation("com.google.zxing:core:3.5.3")
-    // the pairing code scanner (Google Play services, no camera permission)
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
-    // it brings an old Fragment; the ActivityResult APIs need 1.3 or later
-    implementation("androidx.fragment:fragment-ktx:1.8.5")
+    // the in-app scanner's camera (no Google Play services)
+    val camerax = "1.4.1"
+    implementation("androidx.camera:camera-camera2:$camerax")
+    implementation("androidx.camera:camera-lifecycle:$camerax")
+    implementation("androidx.camera:camera-view:$camerax")
     testImplementation("junit:junit:4.13.2")
     // the real org.json for unit tests (android.jar's is a stub)
     testImplementation("org.json:json:20240303")
