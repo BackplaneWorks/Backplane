@@ -240,7 +240,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     let provider = cur.provider.clone();
     let head = |col: usize, title: &str| div().px_3().pt_2().pb_1().flex().justify_between().text_size(px(11.)).text_color(if col == cur.col { c("accent") } else { c("faint") }).child(title.to_uppercase()).child(cap(col, cur.col));
     // the agent column: each agent, what it is dim beside it; the cursor's row raised with the accent edge, the thread's own ticked
-    let mut agents = div().id("picker-agents").w(px(210.)).flex_shrink_0().flex().flex_col().border_r_1().border_color(c("line")).child(head(0, "Agent"));
+    let mut agents = div().id("picker-agents").w(px(236.)).flex_shrink_0().flex().flex_col().border_r_1().border_color(c("line")).child(head(0, "Agent"));
     for (ci, ch) in rows.iter().find(|s| s.action == "provider").map(|s| s.choices.clone()).unwrap_or_default().into_iter().enumerate() {
         let (here, value) = (ch.value == cur.provider, ch.value.clone());
         agents = agents.child(div().id(SharedString::from(format!("pick-a-{ci}"))).flex().items_center().gap_2().px_3().py_1().cursor_pointer().hover(|st| st.bg(c("raise")))
