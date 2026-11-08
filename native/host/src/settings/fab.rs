@@ -176,6 +176,16 @@ pub async fn opts(hub: &Arc<Hub>, thread: &str) -> Opts {
     Opts { estimates: est, server, buy_threads: ids }
 }
 
+/// The project home's card (`fab.look {project}`): the same card for the project's own folder (its goal, the parts its fab files name, its boards), marked with
+/// its `project`. The home shows no price and no Buy it, so the order server is never asked. A removed or unknown project answers the empty card.
+pub async fn look_project(hub: &Arc<Hub>, project: &str) -> Value {
+    let root = { let m = hub.model().await; m.projects.get(project).filter(|p| !p.removed).map(|p| std::path::PathBuf::from(&p.root)) };
+    let home = hub.cfg.home.clone();
+    let mut c = tokio::task::spawn_blocking(move || look_in(&home, root.as_deref(), "", false, "", &[])).await.unwrap_or_else(|_| card("", "", &[], 0, &Value::Null, false, &[], "", ""));
+    c["project"] = json!(project);
+    c
+}
+
 /// Od.look: the card for a thread's folder (no folder: the empty card).
 pub async fn look(hub: &Arc<Hub>, thread: &str) -> Value {
     let o = opts(hub, thread).await;
@@ -209,6 +219,8 @@ pub fn look_in(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, serv
 /// The answer to `fab.look` / `fab.intent` (the hub calls this for `fab.look` itself, to keep the read for the view's policy, and the handler below for `fab.intent`).
 pub async fn reply(hub: &Arc<Hub>, id: &Value, method: &str, p: &Value) -> Value {
     let thread = p.get("thread").and_then(Value::as_str).unwrap_or("");
+    // the project home asks by project (it is no thread)
+    if method == "fab.look" && thread.is_empty() { if let Some(pr) = p.get("project").and_then(Value::as_str).filter(|x| !x.is_empty()) { return json!({"t":"reply","id":id,"ok":true,"result":look_project(hub, pr).await}) } }
     if method == "fab.intent" {
         // the person's own words for .backplane/intent.md, then the card; a copy writes nothing into the project
         if crate::copy::on() { return json!({"t":"reply","id":id,"ok":false,"error":crate::copy::HOME_ONLY}) }
@@ -302,6 +314,11 @@ mod tests {
         // estimates off: nothing is asked, the card has no error
         hub.commit(&json!({"$":"SettingSet","key":"order.estimates","value":"off","at":3})).await.unwrap();
         let c = call("fab.look", json!({"thread":"t1"})).await["result"].clone(); assert_eq!((c["error"].clone(), c["estimates"].clone()), (json!(""), json!(false)));
+        // the project home asks by project: the same card for the project's folder, with no estimate asked
+        let c = call("fab.look", json!({"project":"p1"})).await["result"].clone();
+        assert_eq!((c["project"].clone(), c["goal"].clone(), c["parts"].clone(), c["error"].clone(), c["label"].clone()), (json!("p1"), json!("An amplifier for the desk."), json!([{"name":"Amp","kind":"pcb","path":"amp.fab.json"}]), json!(""), json!("")));
+        assert!(c.get("ready").is_none() && c.get("buy").is_none(), "no Ready to order and no Buy it on the home");
+        let c = call("fab.look", json!({"project":"ghost"})).await["result"].clone(); assert_eq!((c["parts"].clone(), c["intent"].clone()), (json!([]), json!("")), "an unknown project: the empty card");
         // a thread with no folder: the empty card
         let c = call("fab.look", json!({"thread":"missing"})).await["result"].clone(); assert_eq!((c["parts"].clone(), c["intent"].clone(), c["boards"].clone()), (json!([]), json!(""), json!(0)));
         assert!(!std::fs::read_dir(home.join("secrets")).map(|d| d.flatten().any(|e| e.file_name().to_string_lossy().starts_with("o-"))).unwrap_or(false), "no curl file is left behind");

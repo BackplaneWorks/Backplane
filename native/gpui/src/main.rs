@@ -97,7 +97,7 @@ impl Backplane {
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());self.adopt_new(cx);
             },
             Event::Plot(b)=>self.plot_received(b,cx),
-            Event::Answer(id,reply)=>screens::improvements::answered(self,id,reply,cx),
+            Event::Answer(id,reply)=>if !screens::projects::answered(self,id,&reply,cx) {screens::improvements::answered(self,id,reply,cx)},
             Event::Data(tag,v)=>if tag=="acct-moveall" {screens::accounts::moved(self,&v)} else {screens::accounts::got(self,v,cx)},
             Event::Voice(f)=>self.voice_frame(f,cx),
             Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
@@ -147,8 +147,9 @@ impl Backplane {
     }
     pub fn focus_search(&mut self,cx:&mut Context<Self>){if !self.sidebar_open{self.sidebar_toggle(cx);}self.ui_epoch+=1;self.screens.projects.focus=Some("search");cx.notify();}
     fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {self.select_id(id,cx);self.input.focus_handle(cx).focus(window);}
-    /// A project's name was clicked: its page (its threads, a New thread button) opens in the main area, at once, from what the sidebar holds.
-    pub fn open_project(&mut self,pid:String,cx:&mut Context<Self>){self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();}
+    /// A project's name was clicked: its page (its threads, a New thread button) opens in the main area, at once, from what the sidebar holds; the folder's goal and notes,
+    /// parts and boards follow when the hub answers (screens::projects::ask_home).
+    pub fn open_project(&mut self,pid:String,cx:&mut Context<Self>){screens::projects::ask_home(self,&pid);self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();}
     fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.project_page=None;self.ui_epoch+=1;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
         
