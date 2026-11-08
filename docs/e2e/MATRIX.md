@@ -6,87 +6,117 @@ The grids are kept by the lead. Each lane writes only its own section at the end
 
 Other lanes own these, and their rows here are filled from their reports: onboarding, CI, `$` skills, voice and other parity additions, hub resilience.
 
+## Release v0.15.0
+
+Published 2026-11-08 from `d2685dbf68` (tag `v0.15.0`, branch `rc/0.15.0-3`): rc.2 (`43c39bd105`) plus the 0.14 install race fix and the import responsiveness fix. The grids below are the release's evidence: each cell names the candidate it ran on, and the lane sections under "Lane results" hold the run ids and logs. Linux x64 and Windows are from rc.3's archives (`Linux, release archive v0.15.0-rc.3`, `Windows, release archive v0.15.0-rc.3`, plus the VM's rc.2 section for rows rc.3 did not touch); Linux arm64 from `Linux arm64, release archive v0.15.0-rc.2` and the rc.3 container run; macOS from `macOS, release candidate v0.15.0-rc.2` on a macos-latest runner (rc.3 changed no client or hub row it ran, and its 0.14 path re-passed on rc.3). Phones from `iOS and push`. Published assets were checked against SHA256SUMS and the signed manifest (release.pub, key 6c899f869be656d3).
+
 ## Features
 
-| ID | Feature | Linux | macOS | Windows |
-|---|---|---|---|---|
-| | **Core** | | | |
-| F01 | Hub boots on a temp home, `/hello` answers | pass | pass | pass (`windows smoke`, run 42429479397, 10837b209d) |
-| F02 | Client connects; sidebar and projects load | pass | pass (rc.2 archive, run 42511714431) | pass, part: an empty home, WARP (`windows smoke`, run 42429479397) |
-| F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
-| F04 | Stand-in turn streams; restart ends running turns as interrupted | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
-| F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | pass, hub only, part: the stand-in provider tests that run there (scripts/ci-hub-windows-filter.sh skips the rest) |
-| F06 | Runtime modes, approvals, questions, plans | not run | pass: approval, question, plan (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
-| F07 | Queue, steer, stop, held queue resume | not run | pass (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
-| F08 | Fork, bring back, provider switch | not run | not run | pass (Windows Server 2022 VM, see its section) |
-| F09 | Todos, context meter, drafts survive a crash | not run | pass (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
-| F10 | Inboxes, orchestration tools, subthreads panel | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
-| F11 | Model picker, effort, project picker, project badges | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
-| F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
-| F13 | Titles and the text generation model | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
-| F14 | Terminal | not run | pass, hub only | pass, hub only: ConPTY (term::tests on windows-latest; the flood test is skipped) |
-| F15 | Attachments and image paste | not run | pass (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
-| F16 | Keybindings | not run | pass, 12 of 12 keys (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
-| F17 | Viewers: board, schematic, 3D, STEP | not run | pass, 4 of 4 viewers (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
-| F18 | Browser tab (CEF) | not run | pass, part: frame-stream helper (no CEF on macOS); page, click, type, scroll, popup, download, input after it (rc.2 archive, run 42511714431) | pass, part: frame-stream helper, no embedded Chromium (Windows Server 2022 VM, see its section) |
-| F19 | Bots and rooms | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
-| F20 | File browser and downloads | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
-| F21 | Reconnect, resume from sequence, outbox, long session | not run | pass (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
-| F22 | Ordering flow up to the quote; no order placed | not run | not run | pass (Windows Server 2022 VM, see its section) |
-| F23 | A killed hub leaves no agent behind | pass, hub only | pass | pass (Windows Server 2022 VM, see its section) |
-| | **Install and CAD** | | | |
-| C01 | Package installs and starts on a clean user | pass | pass | pass |
-| C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | pass | pass, part: ERC and DRC, no export | pass, part: Backplane KiCad 10.99.0-bp.6 installs through kicad.install and reports status ok (`windows-install`, run 42430879930); no export |
-| C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | pass, part: install not run | pass, part: install not run | pass, part: no agent's FreeCAD script (Windows Server 2022 VM, see its section) |
-| | **Remote operation** | | | |
-| R01 | Restart the hub from another machine | pass | pass | pass |
-| R02 | Update: channel, Check now, download, checksum, swap, restart | pass | pass | pass |
-| R03 | Rollback after a bad update | pass | pass | pass |
-| | **Settings: each control persists across restart and takes effect** | | | |
-| S01 | Appearance | pass, part: hub side (theme and sidebar view the hub sends) | not run | pass (Windows Server 2022 VM, see its section) |
-| S02 | Threads | pass | not run | pass (Windows Server 2022 VM, see its section) |
-| S03 | Agents | pass | not run | pass (Windows Server 2022 VM, see its section) |
-| S04 | Writing | persists, effect not proven | not run | pass (Windows Server 2022 VM, see its section) |
-| S05 | CAD | pass | not run | pass (Windows Server 2022 VM, see its section) |
-| S06 | Ordering | pass, part: Ordering on/off | not run | pass (Windows Server 2022 VM, see its section) |
-| S07 | Devices | pass | not run | pass (Windows Server 2022 VM, see its section) |
-| S08 | Network | pass, part: update channel | not run | pass (Windows Server 2022 VM, see its section) |
-| S09 | Voice | persists, effect not proven | not run | pass (Windows Server 2022 VM, see its section) |
-| S10 | Keys | pass, part: hub side (add, list, prompt, forget) | not run | pass (Windows Server 2022 VM, see its section) |
-| S11 | Timezone | pass | not run | pass (Windows Server 2022 VM, see its section) |
-| S12 | Usage | pass, part: page in the menu, totals by unit test | not run | pass (Windows Server 2022 VM, see its section) |
-| S13 | About | pass | not run | pass (Windows Server 2022 VM, see its section) |
-| S14 | Privacy | pass | not run | pass (Windows Server 2022 VM, see its section) |
+| ID | Feature | Linux x64 | Linux arm64 | macOS arm64 | Windows x64 |
+|---|---|---|---|---|---|
+| | **Core** | | | | |
+| F01 | Hub boots on a temp home, `/hello` answers | pass | pass | pass | pass |
+| F02 | Client connects; sidebar and projects load | pass | pass (26.04 X server) | pass | pass |
+| F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | pass, hub only | pass, hub only |
+| F04 | Stand-in turn streams; restart ends running turns as interrupted | pass | pass | pass | pass, part |
+| F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | pass, stand-ins (8 of 8) | pass on the runner's 22.04; Antigravity fails in a 26.04 container (open, 0.15.1) | pass, hub tests only | pass, part |
+| F06 | Runtime modes, approvals, questions, plans | pass | pass | pass | pass |
+| F07 | Queue, steer, stop, held queue resume | pass | pass | pass | pass |
+| F08 | Fork, bring back, provider switch | pass | pass | pass | pass |
+| F09 | Todos, context meter, drafts survive a crash | pass | pass | pass | pass |
+| F10 | Inboxes, orchestration tools, subthreads panel | pass, hub only | pass, hub only | pass, hub only | pass, hub only |
+| F11 | Model picker, effort, project picker, project badges | pass, hub only | pass, hub only | not run | pass, hub only |
+| F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | pass, hub only: PR not run | pass, hub only: PR not run | pass, part: no PR | pass, hub only |
+| F13 | Titles and the text generation model | pass, hub only | pass, hub only | not run | pass, hub only |
+| F14 | Terminal | pass | pass | pass | pass (floating; inline not driven) |
+| F15 | Attachments and image paste | pass | pass | pass | pass |
+| F16 | Keybindings | pass, 12 of 12 | pass | pass, 12 of 12 | pass, 12 of 12 |
+| F17 | Viewers: board, schematic, 3D, STEP | pass | pass | pass, 4 of 4 | pass, 4 of 4 |
+| F18 | Browser tab | pass: embedded Chromium, 23 of 23 | pass: embedded Chromium, 23 of 23 | pass, part: frame-stream helper (no CEF on macOS) | pass, part: frame-stream helper (no CEF on Windows) |
+| F19 | Bots and rooms | pass, hub only | pass, hub only | pass, hub only | pass, hub only |
+| F20 | File browser and downloads | pass, hub only | pass, hub only | pass, hub only | pass, hub only |
+| F21 | Reconnect, resume from sequence, outbox, long session | pass | pass | pass | pass |
+| F22 | Ordering flow up to the quote; no order placed | pass: no order | pass: no order | pass | pass |
+| F23 | A killed hub leaves no agent behind | pass, hub only | pass, hub only | pass | pass |
+| | **Install and CAD** | | | | |
+| C01 | Package installs and starts on a clean user (release archive, its install.sh or zip) | pass | pass (release smoke) | pass (release smoke) | pass (SmartScreen, Install question) |
+| C02 | KiCad: Settings → CAD path, kicad-cli ERC/DRC and exports from the hub | pass | not run | pass | pass |
+| C03 | FreeCAD: Settings → CAD path, STEP through FreeCAD; an agent's FreeCAD script | pass, part: no agent script | not run | pass, part: install not run | pass, part: no agent script |
+| | **Remote operation** | | | | |
+| R01 | Restart the hub from another machine | pass | not run | pass | pass |
+| R02 | Update: channel, Check now, download, signature and checksum, swap, probation | pass, and v0.14.200 → published v0.15.0 | pass (release smoke) | pass (release smoke) | pass, and v0.14.200 → published v0.15.0 by Check now |
+| R03 | Rollback after a bad update | pass | pass (release smoke) | pass (release smoke) | pass (VM, v0.14.94) |
+| | **Settings: each control persists across restart and takes effect** | | | | |
+| S01 | Appearance | pass, part: hub side | persists (walk) | persists, effect not proven | pass |
+| S02 | Threads | pass | persists (walk) | pass, part | pass |
+| S03 | Agents | pass | persists (walk) | persists, effect not proven | pass |
+| S04 | Writing | pass | persists (walk) | persists, effect not proven | pass |
+| S05 | CAD | pass | persists (walk) | pass | pass |
+| S06 | Ordering | pass, part | persists (walk) | persists, effect not proven | pass |
+| S07 | Devices | pass | persists (walk) | persists, effect not proven | pass |
+| S08 | Network | pass, part | persists (walk) | persists, effect not proven | pass |
+| S09 | Voice | pass | persists (walk) | persists, effect not proven | pass |
+| S10 | Keys | pass, part: hub side | persists (walk) | persists, effect not proven | pass |
+| S11 | Timezone | pass | persists (walk) | pass | pass |
+| S12 | Usage | pass, part | persists (walk) | persists, effect not proven | pass |
+| S13 | About | pass | persists (walk) | persists, effect not proven | pass |
+| S14 | Privacy | pass | persists (walk) | pass, part | pass |
+
+## 0.14 → 0.15
+
+| ID | What | Result | Where |
+|---|---|---|---|
+| U01 | 0.14.1's own Update installs 0.15 on 0.14's port, a 0.14-paired phone still works, 0.14's home byte-identical | pass | rc.3 code (v0.14.110): Linux 10/10, macOS 10/10 |
+| U02 | the way back: a 0.15 that dies at start, 0.14 runs again | pass | rc.3 code (v0.14.111): Linux 6/6, macOS 5 runs of 6/6 (rc.2 failed 4 of 5: the install race, fixed) |
+| I20 | a large home (63 projects, 1,000 threads, 399k lines), plain and throttled past probation: never rolled back while migrating, proven after | pass | rc.3 code: 12/12 and 12/12 |
+| I20-crash | 0.15 dies at 30% of the import: falls back to 0.14, the next 0.15 resumes, no id missing or twice against a clean import of the same snapshot | pass | rc.3 code: 11/11 (3 extra messages are 0.14's own, written after the snapshot) |
+| I00-I14 | first-run import of every kind of 0.14 data | pass | see `0.14 import` |
+| I15-I19 | progress shown and the hub responsive during the import: hub, desktop (setup and after Update), Android, iOS | pass | rc.3 (I18 Android on 017382768d, same code) |
+| I16 (Windows) | the progress card on Windows | pass | rc.3, VM |
+
+Windows 0.14 had no self-update: Windows users download the zip and import on first run.
 
 ## Pairing
 
-Rows are the hub, columns the client. Each cell is LAN / tailnet. Same-platform cells count too.
+Rows are the hub, columns the client. Each cell is LAN / tailnet, checks passed, on rc.2 (`43c39bd105`; rc.3 changed no pairing code). Evidence: `Pairing and remote operation`.
 
-| Hub ↓ Client → | Linux | macOS | Windows | iOS | Android |
-|---|---|---|---|---|---|
-| Linux | not run / not run | not run / not run | not run / pass (17/17) | not run / not run | not run / not run |
-| macOS | not run / not run | not run / not run | not run / pass (16/17: before the ACL fix) | not run / not run | not run / not run |
-| Windows | not run / not run | not run / not run | not run / not run | not run / not run | not run / not run |
+| Hub ↓ Client → | Linux GPUI | macOS GPUI | Windows GPUI | iOS simulator | Android emulator | Pixel 9 | iPhone |
+|---|---|---|---|---|---|---|---|
+| Linux | 19/19 / 19/19 (and `tailscale serve` 19/19; same machine on 127.0.0.1 19/19) | not run | not run / 17/17 | not run / 17/17 | 23/23 / 23/23 | 23/23 / not run | not run (the person) |
+| macOS | 19/19 / 19/19 | same runner 19/19 (PA-M1), and on 127.0.0.1 19/19 (PA-M2) | not run / 17/17 | 17/17 / 17/17 | 23/23 / 23/23 | 23/23 / not run | not run |
+| Windows | not run / 17/17 | not run | not run | not run / 15/15 | not run / 21/21 | not run | not run |
+
+Release archive: its install.sh and guard 25/25, its GPUI client 19/19 on LAN, tailnet and `serve`, the release Android app on the Pixel 23/23, a fresh Ubuntu 24.04 install 19/19 (PA-R7). Not run: macOS client to another machine (no GUI session on the Mac mini; the runner is not on the tailnet), Windows over LAN (the VM has none with us), the Pixel over tailnet (no Tailscale on it), the real iPhone (the person, TestFlight 202611081324).
+
+## Phones
+
+| ID | What | iOS | Android |
+|---|---|---|---|
+| F06 | approval, question, plan | pass (simulator, rc.2) | pass (Pixel 9, rc.3) |
+| F07 | Stop | pass | pass |
+| F17 | Board, Schematic, 3D, Mech | pass | pass |
+| F21 | offline, reconnect | pass | pass |
+| Release build | signed and installs | TestFlight 0.15.0 build 202611081324, internal only | v0.15.0 APK and AAB, signed with 0.14.1's certificate (ef21acdb…), side id installed and paired on the Pixel |
 
 ## Push notifications
 
-Owned end to end by the push lane (branch `respectful-push`, thread t1793985890-103). No E2E lane takes these rows. Evidence goes in that lane's own section under `docs/e2e/`.
+Owned by the push lane (`iOS and push`). On rc.2 (`43c39bd105`).
 
-| ID | Feature | Owner | Result |
-|---|---|---|---|
-| P01 | APNs sender | `respectful-push` | pass, part: real APNs sandbox delivered every alert to the simulator; a background clear was accepted by APNs but not delivered (best effort) |
-| P02 | Uberbot-only gate | `respectful-push` | pass |
-| P03 | Dedupe | `respectful-push` | pass |
-| P04 | Quiet hours | `respectful-push` | pass |
-| P05 | Deep link | `respectful-push` | pass (iOS) |
-| P06 | Badge | `respectful-push` | pass |
-| P07 | Clear on any device | `respectful-push` | pass |
-| P08 | Simulator evidence | `respectful-push` | pass |
-| P09 | TestFlight | `respectful-push` | pass (0.15.0 rc.2: 202611081324 from 43c39bd105, VALID, internal group only) |
+| ID | Feature | Result |
+|---|---|---|
+| P01 | APNs sender | pass, part: every alert delivered through the APNs sandbox; a background clear accepted but not delivered to the simulator |
+| P02 | Uberbot-only gate | pass |
+| P03 | Dedupe | pass |
+| P04 | Quiet hours | pass |
+| P05 | Deep link | pass (iOS; Android's tap not driven) |
+| P06 | Badge | pass |
+| P07 | Clear on any device | pass |
+| P08 | Simulator and Pixel evidence | pass (sink 19/19, Pixel 11/11) |
+| P09 | TestFlight | pass (0.15.0 build 202611081324) |
 
 ## Builders
 
-| Platform | Builder | State on 2026-11-06 |
+| Platform | Builder | State on 2026-11-08 |
 |---|---|---|
 | Linux | desktop, `backplane`, Boat sandboxes | Builds are allowed on all three. UI rigs run on `backplane` or Boat, which have Xvfb. |
 | macOS | `hs-mac-mini` (arm64) | Rust and Xcode present. KiCad and FreeCAD not installed. |
