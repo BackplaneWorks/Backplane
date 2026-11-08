@@ -12,6 +12,9 @@ on:
         default: "42482640273"
       archive_tag:
         default: "v0.15.0-rc.1"
+      pairing_host:
+        description: "address the pairing job's hub listens on (empty: the runner's own interface address; 127.0.0.1 to test the loopback refusal)"
+        default: ""
       rows:
         description: "client rows to run (space separated, empty: all)"
         default: ""
@@ -179,13 +182,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: test/e2e/mac-install-archive.sh ${{ inputs.archive_run }} ${{ inputs.archive_tag }}
       - name: pairing, hub and client on this runner
+        env:
+          PAIR_HOST: ${{ inputs.pairing_host }}
         run: |
           set -u; mkdir -p out; W="$PWD/pairwork"; mkdir -p "$W/agents"
           for n in claude codex grok muse opencode; do printf '#!/bin/sh\nexit 1\n' > "$W/agents/$n"; chmod +x "$W/agents/$n"; done
           export HUB="$BUILD/backplane-hub" AGENTS="$W/agents"
           echo "installed build $(cat "$BUILD/COMMIT") (${{ inputs.archive_tag }})"
           # a link that names a loopback address is refused for a hub that other machines would reach, so the hub listens on the runner's own interface address (still one machine: nothing crosses a network)
-          IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1); echo "hub address $IP"
+          IP=${PAIR_HOST:-$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1)}; echo "hub address $IP"
           sh test/e2e/pairing/mac-hub.sh start "$W/hub" 3900 "$IP"
           M="sh $PWD/test/e2e/pairing/mac-hub.sh"
           BASE=http://$IP:3900 TOKEN="$W/hub/token" GPUI="$BUILD/backplane-gpui" WORK="$W" LAUNCH="$PWD/test/e2e/pairing/gpui-start-mac.sh" \
@@ -217,13 +222,15 @@ jobs:
           mkdir -p dist; cp native/host/target/release/backplane-hub native/gpui/target/release/backplane-gpui dist/; echo "$BACKPLANE_COMMIT" > dist/COMMIT
           echo "BUILD=$PWD/dist" >> "$GITHUB_ENV"
       - name: pairing, hub and client on this runner
+        env:
+          PAIR_HOST: ${{ inputs.pairing_host }}
         run: |
           set -u; mkdir -p out; W="$PWD/pairwork"; mkdir -p "$W/agents"
           for n in claude codex grok muse opencode; do printf '#!/bin/sh\nexit 1\n' > "$W/agents/$n"; chmod +x "$W/agents/$n"; done
           export HUB="$BUILD/backplane-hub" AGENTS="$W/agents"
           echo "source build $(cat "$BUILD/COMMIT")"
           # a link that names a loopback address is refused for a hub that other machines would reach, so the hub listens on the runner's own interface address (still one machine: nothing crosses a network)
-          IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1); echo "hub address $IP"
+          IP=${PAIR_HOST:-$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1)}; echo "hub address $IP"
           sh test/e2e/pairing/mac-hub.sh start "$W/hub" 3900 "$IP"
           M="sh $PWD/test/e2e/pairing/mac-hub.sh"
           BASE=http://$IP:3900 TOKEN="$W/hub/token" GPUI="$BUILD/backplane-gpui" WORK="$W" LAUNCH="$PWD/test/e2e/pairing/gpui-start-mac.sh" \
