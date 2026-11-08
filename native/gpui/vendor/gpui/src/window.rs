@@ -1955,7 +1955,9 @@ impl Window {
         if let Some(input_handler) = self.platform_window.take_input_handler() {
             self.rendered_frame.input_handlers.push(Some(input_handler));
         }
+        crate::audit::begin();
         self.draw_roots(cx);
+        { let v = self.viewport_size(); crate::audit::end(f32::from(v.width), f32::from(v.height), self.scale_factor()); }
         self.dirty_views.clear();
         self.next_frame.window_active = self.active.get();
 
@@ -2884,6 +2886,7 @@ impl Window {
         let scale_factor = self.scale_factor();
         let content_mask = self.content_mask();
         let opacity = self.element_opacity();
+        if crate::audit::on() { let bg = quad.background.opacity(opacity); crate::audit::quad(quad.bounds, &self.content_mask(), !bg.is_transparent() && bg.solid.a >= 0.9); }
         self.next_frame.scene.insert_primitive(Quad {
             order: 0,
             bounds: quad.bounds.scale(scale_factor),

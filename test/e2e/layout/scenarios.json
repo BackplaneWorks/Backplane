@@ -1,0 +1,567 @@
+{
+ "scenarios": [
+  {
+   "name": "home",
+   "steps": [
+    {
+     "select": 0
+    }
+   ]
+  },
+  {
+   "name": "sidebar-fold",
+   "steps": [
+    {
+     "click": "ui:Fold sidebar"
+    },
+    {
+     "wait": 600
+    }
+   ],
+   "after": [
+    {
+     "click": "ui:Fold sidebar"
+    },
+    {
+     "wait": 400
+    }
+   ]
+  },
+  {
+   "name": "picker",
+   "steps": [
+    {
+     "click": "ui:Model"
+    },
+    {
+     "wait": 1500
+    }
+   ],
+   "after": [
+    {
+     "escape": true
+    },
+    {
+     "wait": 500
+    }
+   ],
+   "onscreen": [
+    "picker"
+   ],
+   "present": [
+    "picker-agents",
+    "picker-list",
+    "pick-m-0"
+   ],
+   "min_w": {
+    "picker-list": 160
+   }
+  },
+  {
+   "name": "palette",
+   "steps": [
+    {
+     "click": "ui:Jump or run a command"
+    },
+    {
+     "wait": 800
+    }
+   ],
+   "after": [
+    {
+     "escape": true
+    },
+    {
+     "wait": 400
+    }
+   ]
+  },
+  {
+   "name": "thread-menu",
+   "steps": [
+    {
+     "click": "ui:Thread menu"
+    },
+    {
+     "wait": 800
+    }
+   ],
+   "after": [
+    {
+     "escape": true
+    },
+    {
+     "wait": 400
+    }
+   ]
+  },
+  {
+   "name": "hub-menu",
+   "steps": [
+    {
+     "click": "hub:menu"
+    },
+    {
+     "wait": 800
+    }
+   ],
+   "after": [
+    {
+     "escape": true
+    },
+    {
+     "wait": 400
+    }
+   ]
+  },
+  {
+   "name": "improvements",
+   "steps": [
+    {
+     "click": "ui:Improvements"
+    },
+    {
+     "wait": 1000
+    }
+   ],
+   "after": [
+    {
+     "escape": true
+    },
+    {
+     "wait": 400
+    }
+   ]
+  },
+  {
+   "name": "settings-open",
+   "steps": [
+    {
+     "open_settings": true
+    },
+    {
+     "wait": 1500
+    }
+   ]
+  },
+  {
+   "name": "settings-device",
+   "steps": [
+    {
+     "click": "set-nav:@device"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-hubs",
+   "steps": [
+    {
+     "click": "set-nav:@hubs"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-accounts",
+   "steps": [
+    {
+     "click": "set-nav:@accounts"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-appearance",
+   "steps": [
+    {
+     "click": "set-nav:appearance"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-threads",
+   "steps": [
+    {
+     "click": "set-nav:threads"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-agents",
+   "steps": [
+    {
+     "click": "set-nav:agents"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-writing",
+   "steps": [
+    {
+     "click": "set-nav:writing"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-cad",
+   "steps": [
+    {
+     "click": "set-nav:cad"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-ordering",
+   "steps": [
+    {
+     "click": "set-nav:ordering"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-network",
+   "steps": [
+    {
+     "click": "set-nav:network"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-devices",
+   "steps": [
+    {
+     "click": "set-nav:devices"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-machines",
+   "steps": [
+    {
+     "click": "set-nav:machines"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-voice",
+   "steps": [
+    {
+     "click": "set-nav:voice"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-keys",
+   "steps": [
+    {
+     "click": "set-nav:keys"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-timezone",
+   "steps": [
+    {
+     "click": "set-nav:timezone"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-rules",
+   "steps": [
+    {
+     "click": "set-nav:rules"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-usage",
+   "steps": [
+    {
+     "click": "set-nav:usage"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-setup",
+   "steps": [
+    {
+     "click": "set-nav:setup"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-import",
+   "steps": [
+    {
+     "click": "set-nav:import"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-about",
+   "steps": [
+    {
+     "click": "set-nav:about"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-privacy",
+   "steps": [
+    {
+     "click": "set-nav:privacy"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-developer",
+   "steps": [
+    {
+     "click": "set-nav:developer"
+    },
+    {
+     "wait": 900
+    }
+   ],
+   "after": [
+    {
+     "escape": true
+    },
+    {
+     "wait": 500
+    }
+   ]
+  },
+  {
+   "name": "viewer-board",
+   "steps": [
+    {
+     "click": "rail:Board"
+    },
+    {
+     "wait": 2500
+    }
+   ],
+   "after": [
+    {
+     "click": "rail:Board"
+    },
+    {
+     "wait": 600
+    }
+   ]
+  },
+  {
+   "name": "viewer-schematic",
+   "steps": [
+    {
+     "click": "rail:Schematic"
+    },
+    {
+     "wait": 2500
+    }
+   ],
+   "after": [
+    {
+     "click": "rail:Schematic"
+    },
+    {
+     "wait": 600
+    }
+   ]
+  },
+  {
+   "name": "viewer-3d",
+   "steps": [
+    {
+     "click": "rail:3D"
+    },
+    {
+     "wait": 2500
+    }
+   ],
+   "after": [
+    {
+     "click": "rail:3D"
+    },
+    {
+     "wait": 600
+    }
+   ]
+  },
+  {
+   "name": "viewer-mech",
+   "steps": [
+    {
+     "click": "rail:Mech"
+    },
+    {
+     "wait": 2500
+    }
+   ],
+   "after": [
+    {
+     "click": "rail:Mech"
+    },
+    {
+     "wait": 600
+    }
+   ]
+  },
+  {
+   "name": "viewer-files",
+   "steps": [
+    {
+     "click": "rail:Files"
+    },
+    {
+     "wait": 2500
+    }
+   ],
+   "after": [
+    {
+     "click": "rail:Files"
+    },
+    {
+     "wait": 600
+    }
+   ]
+  },
+  {
+   "name": "viewer-diff",
+   "steps": [
+    {
+     "click": "rail:Diff"
+    },
+    {
+     "wait": 2500
+    }
+   ],
+   "after": [
+    {
+     "click": "rail:Diff"
+    },
+    {
+     "wait": 600
+    }
+   ]
+  },
+  {
+   "name": "viewer-review",
+   "steps": [
+    {
+     "click": "rail:Review"
+    },
+    {
+     "wait": 2500
+    }
+   ],
+   "after": [
+    {
+     "click": "rail:Review"
+    },
+    {
+     "wait": 600
+    }
+   ]
+  },
+  {
+   "name": "viewer-terminal",
+   "steps": [
+    {
+     "click": "rail:Terminal"
+    },
+    {
+     "wait": 2500
+    }
+   ],
+   "after": [
+    {
+     "click": "rail:Terminal"
+    },
+    {
+     "wait": 600
+    }
+   ]
+  },
+  {
+   "name": "streaming",
+   "steps": [
+    {
+     "select": 1
+    },
+    {
+     "type": "zqtool lay out the layout checks"
+    },
+    {
+     "send": true
+    },
+    {
+     "wait": 3000
+    }
+   ]
+  }
+ ]
+}

@@ -7,6 +7,7 @@
 extern crate self as gpui;
 
 #[macro_use]
+pub mod audit;
 mod action;
 mod app;
 

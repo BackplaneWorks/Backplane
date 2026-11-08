@@ -531,6 +531,11 @@ impl TextLayout {
         let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let text_style = window.text_style();
+        if crate::audit::on() {
+            let w = element_state.lines.iter().map(|l| f32::from(l.size(line_height).width)).fold(0.0, f32::max);
+            let h: f32 = element_state.lines.iter().map(|l| f32::from(l.size(line_height).height)).sum();
+            crate::audit::text(text, bounds, w, h, &window.content_mask());
+        }
         for line in &element_state.lines {
             line.paint_background(
                 line_origin,

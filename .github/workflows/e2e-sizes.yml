@@ -1,0 +1,96 @@
+# The size matrix (docs/e2e/SIZES.md): the GPUI client at several window sizes and text scales, layout audited and shot, on GitHub-hosted Linux, Windows and macOS.
+# Per push: the quick set (800x600 and 1280x720 at 100%). By hand or nightly: the whole matrix, one job per size.
+name: e2e-sizes
+on:
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "every size and text scale (otherwise the quick set)"
+        type: boolean
+        default: true
+  schedule:
+    - cron: "17 4 * * *"
+  pull_request:
+    paths:
+      - "native/gpui/**"
+      - "test/e2e/layout/**"
+      - "scripts/e2e-sizes.sh"
+      - ".github/workflows/e2e-sizes.yml"
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+        size: ${{ (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full)) && fromJSON('["quick"]') || fromJSON('["800x600","1024x640","1280x720","1920x1080","hidpi-2880x1920"]') }}
+    name: sizes ${{ matrix.os }} ${{ matrix.size }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+        if: runner.os == 'Linux'
+      - name: system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev xvfb i3 x11-xserver-utils mesa-vulkan-drivers libvulkan1 python3-pil > /dev/null
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/host
+            native/gpui
+          shared-key: sizes-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-python@v5
+        if: runner.os != 'Linux'
+        with: { python-version: "3.12" }
+      - name: pillow
+        if: runner.os != 'Linux'
+        run: python -m pip install pillow
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version-file: deploy/bun-version }
+      - name: build
+        run: |
+          (cd native/host && cargo build --locked --bin backplane-hub)
+          (cd native/gpui && cargo build --locked)
+      - name: sizes
+        run: |
+          set -o pipefail
+          EXE=""; [ "$RUNNER_OS" = Windows ] && EXE=.exe
+          case "$RUNNER_OS" in Linux) plat=linux;; Windows) plat=windows;; macOS) plat=mac;; esac
+          sel=(--sizes "${{ matrix.size }}"); [ "${{ matrix.size }}" = quick ] && sel=(--sizes 800x600,1280x720 --text 100)
+          PY=python3; [ "$RUNNER_OS" = Windows ] && PY=python
+          # a bare display for the Linux runner; the other two have their desktop session
+          if [ "$RUNNER_OS" = Linux ]; then
+            export BACKPLANE_NO_UPDATE=1
+          fi
+          $PY -W ignore test/e2e/layout/matrix.py --platform $plat --client native/gpui/target/debug/backplane-gpui$EXE --hub native/host/target/debug/backplane-hub$EXE --assets assets --out "$RUNNER_TEMP/sizes" "${sel[@]}" 2>&1 | tee sizes.txt
+      - name: summary
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/sizes/report.md" ] && cat "$RUNNER_TEMP/sizes/report.md" >> "$GITHUB_STEP_SUMMARY"
+          true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sizes-${{ matrix.os }}-${{ matrix.size }}
+          path: |
+            sizes.txt
+            ${{ runner.temp }}/sizes/report.md
+            ${{ runner.temp }}/sizes/report.json
+            ${{ runner.temp }}/sizes/contact-*.png
+            ${{ runner.temp }}/sizes/*/findings.json
+            ${{ runner.temp }}/sizes/*/shots/*.png
+            ${{ runner.temp }}/sizes/*/client.log
+          retention-days: 7

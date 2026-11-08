@@ -70,6 +70,17 @@ f.write("settings-walk\t%s\twalk\t%d controls walked on %d pages, %d not applied
 for r in (bad+lost)[:20]: f.write("settings-walk\tFAIL\t%s/%s\t%s\n"%(r.get('page'),r.get('label') or r.get('key'),json.dumps(r)[:200]))
 PY
 if [ -d "$ASSETS" ]; then run client-rows python3 -W ignore test/e2e/gpui-f-rows.py "$GUI" "$HUB" "$ASSETS" "$OUT/client" 3891 77; parse client-rows "$OUT/client-rows.log"; else add client-rows skip all "no assets folder at $ASSETS"; fi
+if [ -d "$ASSETS" ] && [ "${NO_SIZES:-0}" != 1 ]; then run sizes scripts/e2e-sizes.sh ${E2E_SHORT:+--quick} --client "$GUI" --hub "$HUB" --assets "$ASSETS" "$OUT/sizes"
+  python3 - "$OUT/sizes/report.json" "$OUT/results.tsv" <<'PY'
+import json,sys
+try: rep=json.load(open(sys.argv[1]))
+except Exception as e: open(sys.argv[2],'a').write("sizes\tFAIL\tsizes\tno report: %s\n"%e); sys.exit()
+f=open(sys.argv[2],'a')
+for r in rep:
+    n="%s-t%d"%(r['size'],r['text_pct']); f.write("sizes\t%s\t%s\t%d screens, %d new findings, %d known (shots and findings.json under sizes/%s)\n"%('FAIL' if r['new'] else 'ok',n,r['screens'],len(r['new']),len(r['known']),n))
+    for x in r['new'][:5]: f.write("sizes\tFAIL\t%s/%s\t%s %s: %s\n"%(n,x['scenario'],x['rule'],x['text'][:50],x['detail'][:120]))
+PY
+fi
 run cef env OUT="$OUT/cef" DISP=:78 E2E_ASSETS="${E2E_ASSETS:-$ASSETS}" sh test/cef/cef_e2e.sh "$GUI" "$HUB"
 python3 - "$OUT/cef.log" "$OUT/results.tsv" <<'PY'
 import sys,re

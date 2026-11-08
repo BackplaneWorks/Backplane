@@ -1831,6 +1831,9 @@ impl Interactivity {
                         .insert(debug_selector.clone(), bounds);
                 }
 
+                if crate::audit::on() {
+                    if let Some(ElementId::Name(n)) = global_id.and_then(|g| g.0.last()) { crate::audit::div(n, bounds, &window.content_mask()); }
+                }
                 self.paint_hover_group_handler(window, cx);
 
                 if style.visibility == Visibility::Hidden {

@@ -52,3 +52,4 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
 
 - `src/window.rs`: `DispatchEventResult` is `pub` (was `pub(crate)`), so the client's test-mode `pointer` script step can call the public
   `Window::dispatch_event` with a mouse move, down and up at a control's rect (scripted e2e only; no behaviour change).
+- `src/audit.rs`, hooks in window.rs, elements/text.rs, elements/div.rs: the layout audit (records painted text, named divs, opaque quads; off unless enabled), for the size-matrix e2e.

@@ -1,0 +1,25 @@
+{
+  "desktop": [
+    {"name": "800x600", "w": 800, "h": 600, "dpi": 96},
+    {"name": "1024x640", "w": 1024, "h": 640, "dpi": 96},
+    {"name": "1280x720", "w": 1280, "h": 720, "dpi": 96},
+    {"name": "1920x1080", "w": 1920, "h": 1080, "dpi": 96},
+    {"name": "hidpi-2880x1920", "w": 2880, "h": 1920, "dpi": 192}
+  ],
+  "text_pct": [80, 100, 125],
+  "phones": {
+    "ios": [
+      {"name": "iPhone SE (3rd generation)", "class": "small"},
+      {"name": "iPhone 16", "class": "regular"},
+      {"name": "iPhone 16 Pro Max", "class": "large"},
+      {"name": "iPad (10th generation)", "class": "tablet"}
+    ],
+    "android": [
+      {"name": "small", "w": 360, "h": 640, "density": 160},
+      {"name": "regular", "w": 411, "h": 891, "density": 420},
+      {"name": "large", "w": 480, "h": 1040, "density": 480},
+      {"name": "tablet", "w": 800, "h": 1280, "density": 240}
+    ],
+    "orientations": ["portrait", "landscape"]
+  }
+}
