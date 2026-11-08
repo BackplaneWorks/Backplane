@@ -98,3 +98,16 @@ pub fn machine_lines(ms: &[crate::session::composer::mention::MachineRow], text:
     }
     out
 }
+
+#[cfg(test)]
+mod machine_tests {
+    use crate::session::composer::mention::MachineRow;
+    #[test] fn a_machine_word_tells_the_agent_how_to_work_there() {
+        let ms = vec![MachineRow { name: "Desk Top".into(), link: "L1".into(), away: true, projects: vec![("L1~p1".into(), "Boards".into())], threads: vec![("L1~t1-4".into(), "Fix lamp".into())] }];
+        let l = super::machine_lines(&ms, "do it on ~desk-top %boards, then >fix-lamp (not ~nowhere)");
+        assert_eq!(l.len(), 3, "{l:?}");
+        assert!(l[0].contains("thread_launch") && l[0].contains("away now") && l[0].contains("(id p1)"), "{l:?}");
+        assert!(l[1].contains("project \"p1\"") && l[2].contains("thread_read"), "{l:?}");
+        assert!(super::machine_lines(&ms, "%boards alone").is_empty());
+    }
+}
