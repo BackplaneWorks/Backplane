@@ -1,5 +1,6 @@
 #!/bin/bash
 # windows-check.sh [host|gpui|all]: `cargo check --target x86_64-pc-windows-gnu --all-targets` of the hub and/or the client on this Linux machine,
+# windows-check.sh --xwin [DIR]: release-target programs (x86_64-pc-windows-msvc, cargo-xwin; PROFILE, default fast) of the hub, guard, bp-sh and client in DIR
 # windows-check.sh --build [DIR]: Windows programs made here (debug): backplane-hub.exe, bp-sh.exe, backplane-gpui.exe and llvm-mingw's libunwind.dll
 #   in DIR (default build/windows), linked for x86_64-pc-windows-gnullvm (llvm-mingw has no libgcc, which the -gnu target links), to copy to a Windows machine.
 # through scripts/cargo-q (build slots, sccache). C code in dependencies (ring, the client's) is compiled by llvm-mingw's clang, in user space:
@@ -12,6 +13,29 @@ tc=${WIN_LLVM_MINGW:-$(ls -d "$HOME"/.local/opt/llvm-mingw-* 2>/dev/null | sort 
 [ -x "$tc/bin/x86_64-w64-mingw32-clang" ] || { echo "windows-check: no llvm-mingw (set WIN_LLVM_MINGW, or unpack one into ~/.local/opt)" >&2; exit 2; }
 rustup target list --installed | grep -qx x86_64-pc-windows-gnu || { echo "windows-check: rustup target add x86_64-pc-windows-gnu" >&2; exit 2; }
 export CC_x86_64_pc_windows_gnu=$tc/bin/x86_64-w64-mingw32-clang CXX_x86_64_pc_windows_gnu=$tc/bin/x86_64-w64-mingw32-clang++ AR_x86_64_pc_windows_gnu=$tc/bin/llvm-ar
+if [ "${1:-}" = --xwin ]; then
+  # x86_64-pc-windows-msvc through cargo-xwin (Microsoft's CRT and SDK, fetched once into ~/.cache/cargo-xwin): the release target.
+  # The client is built with PROFILE (default fast: no debug assertions), so it draws with the shader bytes in native/gpui/vendor/gpui/windows-shaders.
+  rustup target list --installed | grep -qx x86_64-pc-windows-msvc || { echo "windows-check: rustup target add x86_64-pc-windows-msvc" >&2; exit 2; }
+  command -v cargo-xwin >/dev/null || { echo "windows-check: cargo install --locked cargo-xwin" >&2; exit 2; }
+  llvm=${WIN_LLVM:-$(ls -d /usr/lib/llvm-*/bin 2>/dev/null | sort -V | tail -1)}
+  [ -x "$llvm/clang-cl" ] && [ -x "$llvm/llvm-rc" ] || { echo "windows-check: no clang-cl/llvm-rc (set WIN_LLVM to an LLVM bin folder)" >&2; exit 2; }
+  out=${2:-$HERE/build/windows}; mkdir -p "$out"; prof=${PROFILE:-fast}
+  bin=${BP_TMP:-$HOME/.cache/bp-tmp}/xwin-bin; mkdir -p "$bin"
+  command -v lld-link >/dev/null || [ -x "$llvm/lld-link" ] || ln -sf "$tc/bin/lld-link" "$bin/lld-link"   # only lld-link from llvm-mingw, not its clang
+  export PATH=$llvm:$bin:$PATH XWIN_ACCEPT_LICENSE=1 RC_x86_64_pc_windows_msvc=$llvm/llvm-rc
+  unset CC_x86_64_pc_windows_gnu CXX_x86_64_pc_windows_gnu AR_x86_64_pc_windows_gnu
+  tgt=${CARGO_TARGET_DIR:-${BP_TMP:-$HOME/.cache/bp-tmp}/target-winmsvc}; export CARGO_TARGET_DIR=$tgt
+  (cd "$HERE/native/host" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof" --bin backplane-hub --bin bp-sh)
+  (cd "$HERE/native/guard" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile release)   # the guard has no fast profile
+  (cd "$HERE/native/gpui" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof")
+  d=$prof; [ "$d" = dev ] && d=debug
+  for f in backplane-hub.exe bp-sh.exe backplane-gpui.exe; do cp "$tgt/x86_64-pc-windows-msvc/$d/$f" "$out/"; done
+  cp "$tgt/x86_64-pc-windows-msvc/release/backplane.exe" "$out/"
+  git -C "$HERE" rev-parse HEAD > "$out/COMMIT"
+  echo "windows-check: $out holds $(cd "$out" && ls | tr '\n' ' ')"
+  exit 0
+fi
 if [ "${1:-}" = --build ]; then
   rustup target list --installed | grep -qx x86_64-pc-windows-gnullvm || { echo "windows-check: rustup target add x86_64-pc-windows-gnullvm" >&2; exit 2; }
   out=${2:-$HERE/build/windows}; mkdir -p "$out"; T=x86_64_pc_windows_gnullvm
