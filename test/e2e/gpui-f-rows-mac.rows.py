@@ -282,22 +282,26 @@ if want('F18'):
     xin('wheel', cx, cy, 6); res.append(('scroll', until(lambda: any(n.startswith('scroll:') for n in names()), 20), 'the wheel scrolled the page (reported %s)' % [n for n in names() if n.startswith('scroll:')][-1:]))
     pause(1.0); shot('f18-scrolled')
     xin('wheel', cx, cy, -12); pause(1.5); shot('f18-top')
-    pos2 = {'pop': True, 'dl': fresh((204, 0, 204), 'f18-t-dl')}
-    if pos2['dl']:
-        xin('click', *pos2['dl']); got = until(lambda: 'download-get' in names(), 30); pause(3)
-        home = os.path.expanduser('~'); found = glob.glob(home + '/Downloads/f18-file*') + glob.glob(P('home') + '/**/f18-file*', recursive=True) + glob.glob(P('home') + '/**/*f18*download*', recursive=True)
-        res.append(('download (known missing: a download the person starts is not kept in frame mode yet, Windows lane)' if not found else 'download', got and (bool(found) or True), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
-    print('   F18: server saw %s' % (names(),), flush=True)   # the "Saved" banner after a download moves the page down
-    if pos2['pop']:
-        for _t in range(3):   # a click can arrive while the pane is still resizing after the download banner: find the button again and press until the page reports the click
-            pp = fresh((255, 136, 0), 'f18-t-pop')
-            if not pp: continue
-            xin('click', *pp)
-            if until(lambda: 'popup-click' in names(), 6): break
-            print('   F18: no popup click reported yet (attempt %d)' % (_t + 1), flush=True)
-        ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
-        tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
-        res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
+    # the popup first, the download after it, then one more click: input to the page after a download is a row of its own
+    for _t in range(3):
+        pp = fresh((255, 136, 0), 'f18-t-pop')
+        if not pp: continue
+        xin('click', *pp)
+        if until(lambda: 'popup-click' in names(), 6): break
+        print('   F18: no popup click reported yet (attempt %d)' % (_t + 1), flush=True)
+    ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
+    tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
+    res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
+    pause(6)   # the popup closes itself after 4 s: the first tab is the view again
+    pd = fresh((204, 0, 204), 'f18-t-dl')
+    if pd:
+        xin('click', *pd); got = until(lambda: 'download-get' in names(), 30); pause(3)
+        home = os.path.expanduser('~'); found = glob.glob(home + '/Downloads/f18-file*') + glob.glob(P('home') + '/**/f18-file*', recursive=True)
+        res.append(('download', got and bool(found), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
+        n_click = names().count('click'); pb2 = fresh((0, 204, 102), 'f18-t-btn2')
+        if pb2: xin('click', *pb2)
+        res.append(('input after a download', bool(pb2) and until(lambda: names().count('click') > n_click, 15), 'a click on the green button after the download reached the page (clicks reported %d -> %d)' % (n_click, names().count('click'))))
+    print('   F18: server saw %s' % (names(),), flush=True)
     shot('f18-end')
     for n, ok, why in res: print('   F18', n, ok, why, flush=True)
     log('F18', all(r[1] for r in res) and len(res) >= 6, '; '.join('%s: %s' % (n, 'ok' if ok else 'FAIL (' + why + ')') for n, ok, why in res))

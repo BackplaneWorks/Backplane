@@ -22,7 +22,7 @@ let last=0;addEventListener('scroll',()=>{const y=Math.round(scrollY);if(Math.ab
 addEventListener('message',e=>ev('message:'+e.data));
 </script>"""
 POPUP = b"""<!doctype html><title>popup</title><body style="background:#ffcc00"><p style="font-size:40px">popup page</p><script>
-fetch('/ev/popup-loaded',{keepalive:true});if(window.opener){window.opener.postMessage("hi-from-popup","*");fetch('/ev/popup-has-opener',{keepalive:true})}</script>"""
+fetch('/ev/popup-loaded',{keepalive:true});if(window.opener){window.opener.postMessage("hi-from-popup","*");fetch('/ev/popup-has-opener',{keepalive:true})}setTimeout(()=>window.close(),4000)</script>"""
 def serve():
     events = []
     class H(http.server.BaseHTTPRequestHandler):
