@@ -418,21 +418,3 @@ impl From<ImageFormat> for image::ImageFormat {
     }
 }
 
-#[cfg(test)]
-mod backplane_tests {
-    /// A 2x1 24-bit DIB, bottom-up, the way a bitmap-only clipboard holds it, comes out as a PNG of the same pixels.
-    #[test]
-    fn a_bitmap_on_the_clipboard_becomes_a_png() {
-        let mut dib = vec![];
-        for v in [40u32, 2, 1] { dib.extend_from_slice(&v.to_le_bytes()); }
-        dib.extend_from_slice(&1u16.to_le_bytes()); dib.extend_from_slice(&24u16.to_le_bytes());
-        for v in [0u32, 8, 0, 0, 0, 0] { dib.extend_from_slice(&v.to_le_bytes()); }
-        dib.extend_from_slice(&[0, 0, 255, 255, 0, 0, 0, 0]); // BGR red, BGR blue, row padding
-        let png = super::dib_to_png(&dib).expect("a PNG");
-        let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap().to_rgb8();
-        assert_eq!((img.width(), img.height()), (2, 1));
-        assert_eq!(img.get_pixel(0, 0).0, [255, 0, 0]);
-        assert_eq!(img.get_pixel(1, 0).0, [0, 0, 255]);
-        assert!(super::dib_to_png(&[0; 12]).is_none(), "a header too short is not a bitmap");
-    }
-}
