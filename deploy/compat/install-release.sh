@@ -26,6 +26,14 @@ commit=$(tr -d ' \n' < "$src/manifest.json" | sed -n 's/.*"commit":"\([0-9a-f]*\
 [ -n "$version" ] && [ -n "$commit" ] || { echo "manifest names no version or commit; nothing replaced" >&2; exit 1; }
 
 mkdir -p "$prefix/builds"
+# One run at a time. 0.14 runs this once per install it starts, and Update then Update now starts two: two runs at once could each see 0.14's server
+# still in place and the later one copy the shim over 0.14's kept copy, leaving no 0.14 to go back to. A lock left by a run that died goes after 10 minutes.
+lock="$prefix/.install-release.lock" n=0
+until mkdir "$lock" 2>/dev/null; do
+  if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir "$lock" 2>/dev/null; continue; fi
+  n=$((n+1)); [ $n -lt 600 ] || { echo "another install of a release is still running in $prefix; nothing replaced" >&2; exit 1; }; sleep 1
+done
+trap 'rmdir "$lock" 2>/dev/null' EXIT
 if [ ! -d "$prefix/builds/$tag" ]; then
   stage="$prefix/builds/.stage-$tag-$$"; rm -rf "$stage"; mkdir "$stage"
   tar -xzf "$src/native.tar.gz" -C "$stage" --no-same-owner
@@ -36,8 +44,11 @@ if [ ! -d "$prefix/builds/$tag" ]; then
 fi
 
 # 0.14 set aside, once: the shim's marker says the server here is already ours
+# (kept only if it is 0.14's: a copy that carries the shim's marker is never kept, and a kept 0.14 is never replaced by anything but 0.14)
 if ! grep -q BACKPLANE-0.15-SHIM "$prefix/backplane-serve" 2>/dev/null; then
-  cp -p "$prefix/backplane-serve" "$prefix/backplane-serve.0.14.new" && mv -f "$prefix/backplane-serve.0.14.new" "$prefix/backplane-serve.0.14"
+  cp -p "$prefix/backplane-serve" "$prefix/backplane-serve.0.14.new"
+  if grep -q BACKPLANE-0.15-SHIM "$prefix/backplane-serve.0.14.new" 2>/dev/null; then rm -f "$prefix/backplane-serve.0.14.new"
+  else mv -f "$prefix/backplane-serve.0.14.new" "$prefix/backplane-serve.0.14"; fi
   [ ! -f "$prefix/backplane" ] || grep -q 'backplane hub' "$prefix/backplane" 2>/dev/null || cp -p "$prefix/backplane" "$prefix/backplane.0.14"
 fi
 # the guard, then the shim, each beside and renamed over (0.14's running server keeps its own file open; its re-exec finds the shim)
