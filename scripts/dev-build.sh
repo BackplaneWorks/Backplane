@@ -131,12 +131,7 @@ elif [ "$GATE" = 1 ]; then
   run() { n=$1; dir=$2; shift 2; l=$(mktemp "$DEV/.t.XXXX"); t=$(bpt_new); tds+=("$t"); ( cd "$dir" && TMPDIR=$t CARGO_MANIFEST_DIR="$dir" "$@" ) > "$l" 2>&1 9>&- & pids+=($!); names+=("$n"); logs+=("$l")
     # a machine with fewer than 16 cores (a Boat box) runs the test programs one after another: side by side they starve each other's timing-sensitive tests (a recorder "that fails at once" is judged within 500 ms)
     if [ "$ncpu" -lt 16 ]; then wait "${pids[-1]}"; st[${#pids[@]}-1]=$?; fi; }
-  # scripts/gate-slow.txt: tests that run for most of a minute alone. Libtest starts tests in name order, so such a test starting late is the whole run's tail; each gets its own process from the start
-  # (--exact, full path) and the main process skips it. Every test still runs once.
-  slow=(); slowskip=(); while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) slow+=("$l"); slowskip+=(--skip "$l");; esac; done < "$HERE/gate-slow.txt"
-  if [ "${SKIP[hub]}" != 1 ]; then for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LH"); do
-    for t in "${slow[@]}"; do run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}" --exact "$t"; done
-    run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}" "${slowskip[@]}"; done; fi
+  if [ "${SKIP[hub]}" != 1 ]; then for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LH"); do run "hub tests" "$ROOT/native/host" "$x" "${skips[@]}"; done; fi
   if [ "${SKIP[window]}" != 1 ]; then for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LW"); do run "window tests" "$ROOT/native/gpui" "$x"; done; fi
   if [ "${SKIP[voice]}" != 1 ]; then for x in $(sed -n 's/^ *Executable .*(\(.*\))$/\1/p' "$LV"); do run "voice tests" "$ROOT/native/voice" "$x"; done; fi
   rm -f "$LH" "$LW" "$LV"
