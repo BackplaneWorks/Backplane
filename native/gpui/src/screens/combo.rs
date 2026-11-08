@@ -1,6 +1,6 @@
 //! The composer's one chip: the provider's mark, the model, the effort, the account and what its binding limit has left, in the hub's words (`thread.combo`,
-//! host present/keys.rs `combo`), at the width there is. A click, the model key or the account key opens one menu with three parts: Model (the picker: search,
-//! stars, effort), Account (each login with what it has left, digits pick, Move all threads here) and Usage (the thread's account's windows with their resets and
+//! host present/keys.rs `combo`), at the width there is. A click, the model key or the account key opens one menu with three parts: Model (the picker: agent,
+//! model with search and stars, effort; the menu's whole width), Account (each login with what it has left, digits pick, Move all threads here) and Usage (the thread's account's windows with their resets and
 //! its extra usage). The model key puts the keyboard in the search, the account key on the accounts (their digits); the other key moves it, the same key shuts it.
 use super::accounts;
 use crate::{string, theme, Backplane};
@@ -72,7 +72,7 @@ pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Bac
     let head = |t: &str, hint: String, on: bool| div().px_3().pt_2().pb_1().flex().justify_between().text_size(px(11.)).text_color(c(if on { "accent" } else { "faint" })).child(t.to_uppercase()).child(hint);
     let mut side = div().flex().flex_col().min_w_0();
     if accounts_on {
-        side = side.child(head("Account", if st.menu { "1–9".into() } else { this.key_hint("account") }, st.menu)).child(accounts::section(cx, light, st));
+        let acct = div().flex_1().min_w_0().flex().flex_col().child(head("Account", if st.menu { "1–9".into() } else { this.key_hint("account") }, st.menu)).child(accounts::section(cx, light, st));
         let (rows, notes) = usage_rows(&thread["combo"]);
         let mut u = div().flex().flex_col().px_3().pb_2().gap(px(2.)).text_size(px(12.));
         for r in rows {
@@ -81,11 +81,13 @@ pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Bac
                 .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c("faint")).child(r.resets)));
         }
         for n in notes { u = u.child(div().text_size(px(11.)).text_color(c("dim")).child(n)) }
-        side = side.child(div().mx_2().my_1().h(px(1.)).bg(c("line"))).child(head("Usage", String::new(), false)).child(u);
+        let usage = div().flex_1().min_w_0().flex().flex_col().child(head("Usage", String::new(), false)).child(u);
+        // under the picker: Account beside Usage when the composer is wide, one over the other when it is narrow
+        side = if narrow { side.child(acct).child(div().mx_2().my_1().h(px(1.)).bg(c("line"))).child(usage) } else { side.flex_row().items_start().child(acct).child(usage.border_l_1().border_color(c("line"))) };
     }
-    let model_col = div().flex_1().min_w_0().flex().flex_col().child(head("Model", if st.menu { this.key_hint("models") } else { "↑↓ ←→ Tab".into() }, !st.menu)).children(model);
-    let body = if narrow { div().flex().flex_col().child(model_col).when(accounts_on, |d| d.child(div().h(px(1.)).bg(c("line"))).child(side)) }
-        else { div().flex().child(model_col).when(accounts_on, |d| d.child(div().w(px(1.)).bg(c("line"))).child(side.w(px(360.)).flex_shrink_0())) };
+    // the picker (screens/picker.rs: agent, model and effort, each column with its own head and keys) takes the menu's whole width, Account and Usage under it
+    let model_col = div().w_full().min_w_0().flex().flex_col().children(model);
+    let body = div().flex().flex_col().child(model_col).when(accounts_on, |d| d.child(div().h(px(1.)).bg(c("line"))).child(side));
     Some(div().id("combo-menu").border_1().border_color(c("line")).bg(c("panel")).child(body).into_any_element())
 }
 
