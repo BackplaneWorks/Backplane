@@ -73,7 +73,8 @@ hang, affecting popup login flows. Popup links are covered and pass. The
 the reproduced stall; its proposed fix remains an unvalidated draft. The release
 workflow runs `tools/browser/test/popup-cef.ts` as a required functional gate;
 this remains a release blocker, with no waiver or Chromium source build.
-macOS, Windows, and native Wayland embedding are later work.
+This page describes the older X11 child-window host (`tools/cef`). The GPUI client embeds Chromium off-screen on Linux, macOS and Windows
+(docs/browser-gpui-cef.md).
 
 Build a Linux x64 release with `BACKPLANE_CEF_RELEASE=1 scripts/build.sh`,
 then `scripts/package.sh VERSION linux-x64`. The package refuses missing or

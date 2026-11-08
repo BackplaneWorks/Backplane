@@ -59,4 +59,3 @@ A debug client compiles its shaders at run time from the path of gpui's sources 
 
 - KiCad on Windows: the IPC transport and socket discovery are written and unit-tested, not run against a real KiCad. KiCad 10 export and the release scripts take POSIX paths (their tests are skipped).
 - Tests skipped on Windows, each group with why: `scripts/ci-hub-windows-filter.sh`. "Debt" groups are to be ported; the others are Unix by design (Git sh's own pids and signals, symlinks and hard links, mode bits).
-- CEF (the browser tab) is not packaged for Windows.

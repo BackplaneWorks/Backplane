@@ -27,7 +27,7 @@ On Linux and macOS, press Update in 0.14 as usual: 0.15 installs beside it, star
 
 ## What each platform's archive carries
 
-Every archive holds the hub, the desktop client, the guard, `backplane-voice` (dictation), `backplane-browser` (the Browser tab's helper), `backplane-step2glb` (STEP to GLB without FreeCAD) and `assets/` with the generated icons and cat rigs; `release.yml` fails a build that misses any. On Linux the client also has the embedded Chromium (feature `cef`) with its runtime beside it (`libcef.so`, the `.pak` files, `icudtl.dat`, `v8_context_snapshot.bin`, `locales/`). On macOS and Windows the client is built without it: the Browser tab shows the page as the hub's helper draws it (a frame stream), not an embedded browser.
+Every archive holds the hub, the desktop client, the guard, `backplane-voice` (dictation), `backplane-browser` (the Browser tab's helper), `backplane-step2glb` (STEP to GLB without FreeCAD) and `assets/` with the generated icons and cat rigs; `release.yml` fails a build that misses any. The client also has the embedded Chromium (feature `cef`) with its runtime beside it: on Linux `libcef.so`, the `.pak` files, `icudtl.dat`, `v8_context_snapshot.bin` and `locales/`; on Windows the same with `libcef.dll` and `chrome_elf.dll`; on macOS `Chromium Embedded Framework.framework` and the `Backplane Helper*.app` helper apps. The Browser tab is that Chromium inside the window on every platform.
 
 ## Phones
 

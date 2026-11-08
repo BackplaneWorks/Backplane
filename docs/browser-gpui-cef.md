@@ -1,13 +1,22 @@
 # The Browser tab: embedded Chromium (CEF)
 
-The desktop Browser tab is a real Chromium inside the GPUI window. **It is built in by default**: `scripts/dev-build.sh` (and so `scripts/main-build.sh`) build
-`backplane-gpui` with `--features cef`, and publish `libcef.so` beside it. Nothing about the page goes through the hub: no frames, no JPEG, no network.
+The desktop Browser tab is a real Chromium inside the GPUI window, the same way on Linux (X11, and Wayland desktops through XWayland), macOS and Windows.
+**It is built in by default**: `scripts/dev-build.sh` (and so `scripts/main-build.sh`), `scripts/mac-build.sh`, `scripts/windows-check.sh --xwin` and `release.yml`
+build `backplane-gpui` with `--features cef` and put the engine's runtime beside it (`scripts/cef-runtime-files.sh`). Nothing about the page goes through the hub: no frames, no JPEG, no network.
 
 ## What the embedded page is
 CEF **off-screen rendering, in this process** (the `cef` crate, `=154.5.0`, CEF 154.0.34): Chromium paints each frame into a BGRA buffer (`on_paint`), the client
 copies it into a gpui image and draws it in the pane. The view's size is the pane's size (it fills the pane, resizes with it, honours the display scale), the
-frame rate is CEF's 30 fps. CEF runs on its own UI thread (multi-threaded message loop); its helper processes (renderer, GPU, utility) are this same executable run again with
-`--type=...` (`cef::subprocess()` is the first thing `main` does). The profile (cookies, storage) is `~/.cache/backplane/cef-gpui-profile`.
+frame rate is CEF's 30 fps. The profile (cookies, storage) is `~/.cache/backplane/cef-gpui-profile` (Windows: `%LOCALAPPDATA%\backplane\cef-gpui-profile`).
+
+| | Linux | Windows | macOS |
+|---|---|---|---|
+| engine | `libcef.so` beside the client (RUNPATH `$ORIGIN`) | `libcef.dll`, `chrome_elf.dll` beside the client | `Chromium Embedded Framework.framework` beside the client (or in `../Frameworks`), loaded at run time (`cef_mac.rs`) |
+| CEF's thread | its own UI thread (multi-threaded message loop) | the same | gpui's main thread: an external message pump, run only when CEF asks for work (`cef_page.rs` `drive_pump`, at most every 1/30 s while asked) |
+| helper processes | the client itself, run again with `--type=...` (`cef::subprocess()` first in `main`) | the same | `Backplane Helper.app` and its `(GPU)`, `(Renderer)`, `(Plugin)`, `(Alerts)` twins beside the client, each a copy of the small `backplane-cef-helper` (`scripts/cef-mac-helpers.sh`; copies, as an update refuses links) |
+| window system | X11, pinned (`--ozone-platform=x11`): on a Wayland desktop the client runs through XWayland and so does Chromium | none needed | gpui's `NSApplication` answers Chromium's `CrAppControlProtocol` (`vendor/gpui/PATCH.md`); keys carry Mac key codes (`cef_mac::key_code`) |
+
+The sandbox is off on every platform (`no_sandbox`), as it was on Linux.
 
 A *windowed* child (an X11 window parented into the gpui window) was considered and not used: gpui draws the whole window through one Vulkan swapchain, so a child X window
 would sit on top of every gpui overlay (menus, popups, the tour, the settings dialog), would need its position and clipping kept in step with the layout, and could not be
@@ -21,7 +30,8 @@ Input is native: mouse (move, buttons, double click, wheel), keys, text and IME 
 file dialogs (gpui's own picker), popups as tabs, **F12 / Ctrl+Shift+I** (DevTools in a window of its own). Downloads go to `~/Downloads`.
 
 ## Build and runtime
-- `scripts/dev-build.sh` builds the window with `GPUI_FEATURES=cef` (default; `GPUI_FEATURES=` for none). CEF's distribution is cached once in `CEF_PATH`
+- `scripts/dev-build.sh` builds the window with `GPUI_FEATURES=cef` (default; `GPUI_FEATURES=` for none). `scripts/mac-build.sh` (Mac mini, `MAC_DEST` for a lane's own
+  copy) puts the framework and helper apps in its `dist/`; `scripts/windows-check.sh --xwin DIR` puts the Windows runtime in DIR (clang-cl builds CEF's wrapper there). CEF's distribution is cached once in `CEF_PATH`
   (`~/.cache/backplane/cef-rs`; the `cef` crate downloads it on the first build and compiles its small C++ wrapper, a few minutes once).
 - The runtime other than `libcef.so` (paks, `icudtl.dat`, locales, snapshot) lives in `~/.cache/backplane/cef-runtime/<version>`, made once from the build with `libcef.so`
   stripped (270 MB instead of 1.4 GB). Every published build dir holds `libcef.so` as a link to that one file; the window is linked with RUNPATH `$ORIGIN`.
@@ -46,6 +56,9 @@ bordered address field that shows the page's address when not being edited (the 
 app's tokens, light and dark.
 
 ## Tests
+`test/cef/agent_proof.py CLIENT HUB HELPER ASSETS OUT` runs on any desktop (Linux X11 or Wayland, macOS, Windows; e2e-macos.yml job `browser`, test/windows/rig/sess.sh on
+Windows): a hub with the stand-in agent, the Browser tab, and the agent's `preview_navigate`, `preview_click`, `preview_evaluate` and `preview_snapshot` (with its screenshot)
+against a local page, checked from the client's own report of its embedded page; it saves the window and the agent's screenshot.
 `test/cef/cef_e2e.sh CLIENT HUB` (embedded page: input, agent, lease, file dialog, DevTools, teach, performance), `bar_e2e.sh` (the fallback's bar and tabs; `THEME=light|dark`,
 `NOHELPER=1` for the missing-helper message), `open_e2e.sh HUB`, `shots.sh` (screenshots, including a real https site). All need a private Xvfb (the scripts start one) and the
 shared `flock /tmp/bp-heavy.lock` rules.
@@ -53,4 +66,5 @@ shared `flock /tmp/bp-heavy.lock` rules.
 ## Known gaps
 - **Downloads:** `can_download` is called, but CEF never reaches `on_before_download`, so nothing is saved (`test/cef/cef_e2e.sh` reports it red).
 - **Popups keep no opener:** `window.open` pages open as tabs and load, but `window.opener` is not set in them (red in the same script).
-- X11 only; GPU rendering is untested; no video codecs.
+- DevTools (F12) opens a window of Chromium's own, outside gpui. GPU rendering is untested on macOS and Windows beyond the proof runs; no video codecs.
+- Native Wayland: the client itself is X11-only (gpui's `x11` backend), so a Wayland desktop runs it, and Chromium, through XWayland.
