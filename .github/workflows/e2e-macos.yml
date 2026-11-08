@@ -7,11 +7,17 @@ on:
       jobs:
         description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), all"
         default: all
+      archive_run:
+        description: "release dry run whose darwin-arm64 archive the client rows run from, installed with its install.sh"
+        default: "42451126435"
+      archive_tag:
+        default: "v0.14.93"
       rows:
         description: "client rows to run (space separated, empty: all)"
         default: ""
 permissions:
   contents: read
+  actions: read
 jobs:
   probe:
     if: inputs.jobs == 'probe' || inputs.jobs == 'all'
@@ -90,24 +96,31 @@ jobs:
         with: { name: hub-rows, path: out, include-hidden-files: true }
 
   client:
-    needs: build
     if: inputs.jobs == 'client' || inputs.jobs == 'all'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { name: dist, path: dist }
-      - name: input and screenshot tools
+      - name: install the release archive with its own installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh run download ${{ inputs.archive_run }} -n release-dry-run -D rel
+          ls -l rel
+          export BACKPLANE_ARCHIVE="$PWD/rel/backplane-${{ inputs.archive_tag }}-darwin-arm64.tar.gz" BACKPLANE_PREFIX="$PWD/inst" BACKPLANE_HOME="$PWD/inst-home" BACKPLANE_NO_DESKTOP_APP= 
+          sh rel/install.sh --quiet
+          B="$PWD/inst/builds/${{ inputs.archive_tag }}"; ls -l "$B"; cat "$B/COMMIT"
+          echo "BUILD=$B" >> "$GITHUB_ENV"
+      - name: input and screenshot tools, FreeCAD
         run: |
           brew install cliclick
           brew install --cask freecad   # the Mech viewer asks the hub for FreeCAD
           python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz
-      - name: client rows
+      - name: client rows, from the installed archive
         run: |
-          chmod +x dist/*; mkdir -p out
-          echo "client+hub commit $(cat dist/COMMIT)"
-          set -o pipefail
-          .venv/bin/python test/e2e/gpui-f-rows-mac.py "$PWD/dist/backplane-gpui" "$PWD/dist/backplane-hub" "$PWD/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
+          set -o pipefail; mkdir -p out
+          echo "installed build $(cat "$BUILD/COMMIT") (${{ inputs.archive_tag }}); browser helper: $(ls -l "$BUILD/backplane-browser" 2>&1)"
+          BACKPLANE_BROWSER="$BUILD/backplane-browser" .venv/bin/python test/e2e/gpui-f-rows-mac.py "$BUILD/backplane-gpui" "$BUILD/backplane-hub" "$BUILD/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
         env:
           ROWS: ${{ inputs.rows }}
       - uses: actions/upload-artifact@v4
