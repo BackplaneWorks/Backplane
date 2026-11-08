@@ -630,11 +630,15 @@ object NativeMessages {
 
   // native.pair.scanner.instructions
   fun native_pair_scanner_instructions(tag: String): String =
-    if (tag == "ja") ("Backplaneの「設定」にあるQRコードにカメラを向けてください。") else ("Point the camera at the code in Backplane's Settings (QR code).")
+    if (tag == "ja") ("パソコンのBackplaneで「設定」→「Devices」→「Add a device」に表示されるQRコードにカメラを向けてください。") else ("Point the camera at the code in Settings, Devices, Add a device on the computer.")
 
   // native.pair.scanner.invalid
   fun native_pair_scanner_invalid(tag: String): String =
     if (tag == "ja") ("Backplaneのペアリング用コードではありません") else ("Not a Backplane pairing code")
+
+  // native.pair.scanner.light
+  fun native_pair_scanner_light(tag: String): String =
+    if (tag == "ja") ("ライト") else ("Light")
 
   // native.pair.scanner.title
   fun native_pair_scanner_title(tag: String): String =
@@ -642,7 +646,7 @@ object NativeMessages {
 
   // native.pair.scanner.unavailable
   fun native_pair_scanner_unavailable(tag: String): String =
-    if (tag == "ja") ("読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください") else ("The scanner needs Google Play services: paste the link instead")
+    if (tag == "ja") ("カメラを起動できませんでした。コードの写真を選ぶか、リンクを貼り付けてください") else ("The camera did not start: choose a photo of the code or paste the link instead")
 
   // native.pair.tailnet
   fun native_pair_tailnet(tag: String): String =
