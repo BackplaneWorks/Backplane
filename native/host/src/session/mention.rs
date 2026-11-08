@@ -249,4 +249,21 @@ mod tests {
         assert!(rows(&st, "t2-2", "plain words").is_empty());
         assert_eq!(rows(&st, "t2-2", ">").len(), 2, "a bare sigil lists what there is");
     }
+    #[test] fn a_machine_word_is_offered_and_picks_what_follows_from_that_machine() {
+        set_machines(vec![MachineRow { name: "Desk Top".into(), link: "L1".into(), away: false, projects: vec![("L1~p1".into(), "Boards".into())], threads: vec![("L1~t1-4".into(), "Fix lamp".into())] },
+                          MachineRow { name: "laptop".into(), link: "L2".into(), away: true, projects: vec![], threads: vec![] }]);
+        let st = State::new();
+        let w = |d: &str| rows(&st, "t", d).iter().map(|x| (x["word"].as_str().unwrap().to_string(), x["desc"].as_str().unwrap().to_string())).collect::<Vec<_>>();
+        assert_eq!(w("on ~"), [("~desk-top".into(), "machine · here".into()), ("~laptop".into(), "machine · away".into())]);
+        assert_eq!(w("~la").len(), 1);
+        assert_eq!(w("~desk-top %b"), [("%boards".into(), "project · Desk Top".into())], "after a machine, % is that machine's");
+        assert_eq!(w("~desk-top >f")[0].0, ">fix-lamp");
+        assert!(w("%b").is_empty(), "without a machine, % is this machine's (none here)");
+        let r = refs_in(&st, "h", "run on ~desk-top %boards and >fix-lamp, not ~nowhere");
+        let got: Vec<(String, String, String)> = r.iter().map(|x| (x["word"].as_str().unwrap().into(), x["kind"].as_str().unwrap().into(), x["id"].as_str().unwrap().into())).collect();
+        assert_eq!(got, [("~desk-top".into(), "machine".into(), "".into()), ("%boards".into(), "project".into(), "h|L1~p1".into()), (">fix-lamp".into(), "thread".into(), "h|L1~t1-4".into())]);
+        let l = crate::agents::refs::machine_lines(&machines(), "do it on ~desk-top %boards");
+        assert!(l[0].contains("thread_launch") && l[0].contains("p1") && l[1].contains("project \"p1\""), "{l:?}");
+        set_machines(vec![]);
+    }
 }
