@@ -21,7 +21,7 @@ All of it is in `native/host/src/plat/` (`unix.rs` is the calls the hub always m
 - Terminals are ConPTY (`term/pty_windows.rs`); a terminal's key (`x:t1:...`) is saved as a file name with `%XX` for what Windows refuses.
 - KiCad's nng `ipc://<path>` socket is the named pipe `\\.\pipe\<path>`.
 - A `#!` script runs through the interpreter its first line names.
-- Updates: a Windows install takes `backplane-<tag>-windows-x64.zip` (`rel::archive_name`), checks it like a tar.gz (size, sha256 from the signed manifest, every member listed and inside its folder before a byte is written), unpacks it with Windows' own `%SystemRoot%\\System32\\tar.exe` (bsdtar: Git's GNU tar, often first on PATH, reads no zip) and needs `backplane-hub.exe` at its top.
+- Updates: a Windows install takes `backplane-<tag>-windows-x64-native.zip` (`rel::archive_name`), checks it like a tar.gz (size, sha256 from the signed manifest, every member listed and inside its folder before a byte is written), unpacks it with Windows' own `%SystemRoot%\\System32\\tar.exe` (bsdtar: Git's GNU tar, often first on PATH, reads no zip) and needs `backplane-hub.exe` at its top.
 - The vault's master key is kept in the Credential Manager (`backplane-vault/<id>`).
 - Paths: `\\?\` is dropped from resolved paths, a path is absolute as `C:\`, `C:/`, `\\host` or `/`, a relative one may not climb through `\` or name a drive, agent paths are recognised as `C:\x`, `C:/x` or `/c/x`.
 - Ctrl+C, Ctrl+Break, closing the console, logoff and shutdown end the hub (exit 130).
