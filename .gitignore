@@ -12,3 +12,4 @@ native/host/target/
 native/host/target-guard/
 native/gpui/target/
 native/voice/target/
+.lowmem/
