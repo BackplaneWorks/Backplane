@@ -198,7 +198,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     let (view_h, max, y) = (f32::from(pick.scroll.bounds().size.height), f32::from(pick.scroll.max_offset().height), -f32::from(pick.scroll.offset().y));
     let bar = thumb(view_h, view_h, max, y).map(|(top, h)| div().absolute().top(px(top)).right(px(2.)).w(px(6.)).h(px(h)).bg(c("faint")).opacity(0.7));
     let search = pick.search.clone().map(|s| div().px_3().py_1().border_b_1().border_color(c("line")).flex().items_center().gap_2().child(div().text_color(c("faint")).child("⌕")).child(div().flex_1().child(s)));
-    Some(div().id("picker").flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).children(search)
+    Some(div().id("picker").flex().flex_col().children(search)
         .child(div().relative().child(col).children(bar)).into_any_element())
 }
 
@@ -206,6 +206,10 @@ impl Backplane {
     /// The model chip or its key: open or shut the menu; opening clears the search and puts the keyboard in it.
     pub(crate) fn picker_toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.screens.picker_open { self.picker_close(cx); return; }
+        self.picker_show(window, cx);
+    }
+    /// Open the menu (screens/combo.rs) with the keyboard in the model search.
+    pub(crate) fn picker_show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.screens.picker_open = true; self.screens.pick.cur = None;
         if self.screens.pick.search.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
@@ -228,7 +232,7 @@ impl Backplane {
     pub(crate) fn picker_keys(&self) -> bool { self.screens.picker_open && !self.screens.palette.open && self.screens.lightbox.is_none() && !self.screens.acct.menu && !super::settings::is_open(self) }
     /// Shut the menu: the cursor and the search go, the keyboard goes back to the composer.
     pub(crate) fn picker_close(&mut self, cx: &mut Context<Self>) {
-        self.screens.picker_open = false; self.screens.pick.cur = None; self.want_focus = true; cx.notify();
+        self.screens.picker_open = false; self.screens.acct.menu = false; self.screens.pick.cur = None; self.want_focus = true; cx.notify();
     }
     fn picker_shown(&self) -> Option<Shown> { shown(&self.data["thread"], &self.screens.pick, &self.local.favs) }
     fn picker_store(&mut self, c: Cursor) { self.screens.pick.cur = Some((string(&self.data["thread"], "id"), c)); self.picker_reveal(); }

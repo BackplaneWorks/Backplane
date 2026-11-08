@@ -268,8 +268,8 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, OpenFiles, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail("view-kind", "files", cx));
     let el = on!(el, StopTurn, |this: &mut Backplane, _, cx: &mut Context<Backplane>| if has_tool(&this.data, "interrupt") { let _ = this.tx.try_send(Command::Action("interrupt".into(), String::new())); cx.notify(); });
     let el = on!(el, SettleThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| for a in ["settle", "unsettle"] { if has_tool(&this.data, a) { let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); break } });
-    let el = on!(el, ModelPicker, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.data["thread"].is_object() { this.picker_toggle(w, cx) });
-    let el = on!(el, AccountMenu, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.data["thread"].is_object() { crate::screens::accounts::toggle(this, w, cx) });
+    let el = on!(el, ModelPicker, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.data["thread"].is_object() { this.combo_model(w, cx) });
+    let el = on!(el, AccountMenu, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.data["thread"].is_object() { this.combo_account(w, cx) });
     macro_rules! picks { ($el:expr, $($n:literal $a:ty),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::accounts::press_nth(this, $n, cx)); )* e }} }
     let el = picks!(el, 1 Account1, 2 Account2, 3 Account3, 4 Account4, 5 Account5, 6 Account6, 7 Account7, 8 Account8, 9 Account9);
     use crate::screens::picker::Key;
