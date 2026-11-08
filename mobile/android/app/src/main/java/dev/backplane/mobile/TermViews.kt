@@ -176,12 +176,14 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
     val cols = maxOf(2, (area.width / tp.cw).toInt()); val rows = maxOf(2, (area.height / tp.lh).toInt())
     val online = DataClient.conn == DataClient.Conn.ONLINE
     // the grid that fits changed (rotation, font size, the keyboard): the pty takes the new size, every client then gets a snapshot
-    LaunchedEffect(key, cols, rows, online, area == IntSize.Zero) { if (online && area != IntSize.Zero) Terms.resize(key, cols, rows) }
+    val sized = area.width > 0 && area.height > 0
+    LaunchedEffect(key, cols, rows, online, sized) { if (online && sized) Terms.resize(key, cols, rows) }
     val focus = remember { FocusRequester() }
     val kb = LocalSoftwareKeyboardController.current
     val clip = LocalClipboardManager.current
     LaunchedEffect(key) { focus.requestFocus(); kb?.show() }
     var tf by remember { mutableStateOf(TextFieldValue(SENT, TextRange(SENT.length))) }
+    var last by remember { mutableStateOf(SENT) }
 
     fun out(b: ByteArray) { scroll = 0; Terms.send(key, b) }
     fun typed(cp: Int) {
@@ -192,7 +194,10 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
     fun paste() { clip.getText()?.text?.takeIf { it.isNotEmpty() }?.let { out(sc.vt.paste(it)) } }
 
     Column(Modifier.fillMaxSize().background(dcs.background)) {
-        DBar(sc.vt.title().ifEmpty { sc.title.ifEmpty { title0 } }, back) {
+        // a landscape screen with the keyboard up gives its rows to the terminal: the bar returns with the keyboard down
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        val tight = LocalContext.current.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE && WindowInsets.isImeVisible
+        if (!tight) DBar(sc.vt.title().ifEmpty { sc.title.ifEmpty { title0 } }, back) {
             val state = sc.stateLine
             if (state.isNotEmpty()) DMono(state, termStateColor(state), 11, Modifier.padding(end = 8.dp).testTag("term.state"))
             if (sc.running) DBtn("Stop", false, modifier = Modifier.testTag("term.stop"), danger = true) { Terms.stop(key) }
@@ -230,11 +235,12 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
             // the keyboard's door: a field nobody sees; what it receives is the program's input
             BasicTextField(
                 tf, { nv ->
+                    // what changed since the last text seen (not since the sentinel: several characters can arrive before the field is rebuilt)
                     val t = nv.text; var p = 0
-                    while (p < SENT.length && p < t.length && t[p] == SENT[p]) p++
-                    repeat(SENT.length - p) { out(sc.vt.key(65288, 8, 0)) }
+                    while (p < last.length && p < t.length && t[p] == last[p]) p++
+                    repeat(last.length - p) { out(sc.vt.key(65288, 8, 0)) }
                     var i = p; while (i < t.length) { val cp = t.codePointAt(i); typed(cp); i += Character.charCount(cp) }
-                    tf = TextFieldValue(SENT, TextRange(SENT.length))
+                    if (t.length > 64 || t.length < 2) { last = SENT; tf = TextFieldValue(SENT, TextRange(SENT.length)) } else { last = t; tf = nv }
                 },
                 Modifier.size(1.dp).focusRequester(focus).testTag("term.input").onPreviewKeyEvent { ev ->
                     if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
