@@ -16,6 +16,8 @@ pub const STEPS: &[(&str, &str, f64, f64)] = &[
 struct P {
     from: String, started_ms: u64, phase: &'static str, done: u64, total: u64, unit: &'static str,
     projects: (u64, u64), threads: (u64, u64), current: String, samples: VecDeque<(u64, u64)>, secrets: bool, at_ms: u64,
+    /// the longest a chunk held the store's writer, and the policies' lock (ms): what a client's request may wait behind
+    hold_write_ms: u64, hold_fold_ms: u64, chunks: u64, hold_sync_ms: u64, hold_apply_ms: u64,
 }
 
 #[derive(Default)]
@@ -47,6 +49,10 @@ impl Progress {
         let mut p = self.p.lock().unwrap(); p.done = done; p.at_ms = now_ms; p.samples.push_back((now_ms, done));
         while p.samples.len() > 2 && p.samples.front().map_or(false, |s| now_ms.saturating_sub(s.0) > 10_000) { p.samples.pop_front(); }
     }
+    /// One chunk's holds: the writer (its append, fsync, model and fold) and the policies' lock.
+    pub fn held(&self, write_ms: u64, fold_ms: u64) { let mut p = self.p.lock().unwrap(); p.hold_write_ms = p.hold_write_ms.max(write_ms); p.hold_fold_ms = p.hold_fold_ms.max(fold_ms); p.chunks += 1;
+        let t = crate::hub::RAW_TIMES.load(std::sync::atomic::Ordering::Relaxed); p.hold_sync_ms = p.hold_sync_ms.max(t >> 32); p.hold_apply_ms = p.hold_apply_ms.max(t & 0xffff_ffff); }
+    pub fn holds(&self) -> Value { let p = self.p.lock().unwrap(); json!({"write_ms_max": p.hold_write_ms, "fold_ms_max": p.hold_fold_ms, "chunks": p.chunks, "fsync_ms_max": p.hold_sync_ms, "apply_ms_max": p.hold_apply_ms}) }
     pub fn totals(&self, projects: u64, threads: u64) { let mut p = self.p.lock().unwrap(); p.projects.1 = projects; p.threads.1 = threads; }
     /// A written chunk: projects and threads made in it, and the last thread's name.
     pub fn made(&self, projects: u64, threads: u64, current: Option<String>) { let mut p = self.p.lock().unwrap(); p.projects.0 += projects; p.threads.0 += threads; if let Some(c) = current { p.current = c; } }

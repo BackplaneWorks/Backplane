@@ -27,8 +27,11 @@ static NOW: std::sync::Mutex<Option<Arc<progress::Progress>>> = std::sync::Mutex
 pub fn migrating() -> Option<Value> { NOW.lock().unwrap().as_ref().map(|p| p.public()) }
 /// The same with the names, for the person's own clients (data/1 hello).
 pub fn migrating_full() -> Option<Value> { NOW.lock().unwrap().as_ref().map(|p| p.full(crate::hub::now_ms())) }
-/// Lines per write: each is one append and fsync, one fold, one progress note.
-const CHUNK: usize = 2000;
+/// Lines per write: each is one append and fsync and one fold, and a client's write waits behind at most one. The size follows how long the last one held
+/// the writer and the policies (`next_chunk`): about `HOLD_MS` at most, so a slow or loaded machine writes smaller chunks rather than stall a request.
+const CHUNK_MIN: usize = 100; const CHUNK_MAX: usize = 2000; const HOLD_MS: u64 = 100;
+/// The next chunk's size after one of `n` lines held for `ms`: halved when it took over 1.5 times the target, doubled when under half of it.
+pub fn next_chunk(n: usize, ms: u64) -> usize { if ms > HOLD_MS * 3 / 2 { (n / 2).max(CHUNK_MIN) } else if ms < HOLD_MS / 2 { (n * 2).min(CHUNK_MAX) } else { n } }
 
 fn user_folder() -> Option<PathBuf> { std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|v| !v.is_empty()).map(PathBuf::from) }
 fn same(a: &Path, b: &Path) -> bool { crate::plat::fs::canonicalize(a).unwrap_or_else(|_| a.into()) == crate::plat::fs::canonicalize(b).unwrap_or_else(|_| b.into()) }
@@ -202,25 +205,32 @@ impl Importer {
         prog.step("writing", total as u64, "events", now());
         let throttle = Some(self.throttle_ms.load(std::sync::atomic::Ordering::Relaxed)).filter(|ms| *ms > 0); // tests only: a slow import on purpose
         let mut titles: std::collections::HashMap<String, String> = Default::default();
-        for ch in p.lines.chunks(CHUNK) {
+        let (mut at, mut size) = (0usize, 500usize);
+        while at < total {
+            let ch = &p.lines[at..(at + size).min(total)]; at += ch.len();
             let (mut np, mut nt, mut cur) = (0, 0, None);
             for l in ch { match crate::session::event_type(l) {
                 Some("ProjectCreated") => { np += 1; if let Ok(v) = serde_json::from_str::<Value>(l) { titles.insert(v["id"].as_str().unwrap_or("").into(), v["title"].as_str().unwrap_or("").into()); } }
                 Some("ThreadCreated") => { nt += 1; if let Ok(v) = serde_json::from_str::<Value>(l) { let pt = titles.get(v["project"].as_str().unwrap_or("")).cloned().unwrap_or_default();
                     let t = v["title"].as_str().unwrap_or("").chars().take(80).collect::<String>(); cur = Some(if pt.is_empty() { t } else { format!("{pt} \u{b7} {t}") }); } }
                 _ => {} } }
+            let parsed: Vec<Value> = ch.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect(); // (before the writer: a request waits for none of this)
+            let tw = std::time::Instant::now();
             match hub.import_lines(ch.to_vec()).await {
-                Ok(end) => crate::statehost::fold_quiet(hub, end - ch.len() as u64 + 1, ch.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect()),
+                Ok(end) => { let w = tw.elapsed().as_millis() as u64; let tf = std::time::Instant::now();
+                    let f = crate::statehost::fold_quiet(hub, end - ch.len() as u64 + 1, parsed); // (the longest single hold of the policies' lock)
+                    prog.held(w, f); size = next_chunk(ch.len(), w.max(tf.elapsed().as_millis() as u64)); }
                 Err(e) => { err = format!("{e:#}"); break }
             }
             done += ch.len(); prog.made(np, nt, cur); prog.at(done as u64, now());
-            if let Some(ms) = throttle { tokio::time::sleep(std::time::Duration::from_millis(ms)).await; }
+            // tests only: a slow import on purpose, the same per 2,000 lines whatever the chunk
+            if let Some(ms) = throttle { tokio::time::sleep(std::time::Duration::from_millis(ms * ch.len() as u64 / 2000)).await; }
         }
         prog.step("finishing", 0, "", now());
         if !err.is_empty() { return self.failed(hub, &from, &format!("Writing into this hub stopped after {done} of {total} events: {err}")).await }
         let mut c = p.counts.clone(); c.devices = devices;
         let r = json!({"state":"done","from":from,"counts":c,"bots":p.bots.iter().map(|(_, n)| n).collect::<Vec<_>>(),"devices":devices,"accounts":accounts.added,"signin":accounts.signin,"keys":keys.added,
-            "files":fr.copied,"secrets":secrets,"at":now() / 1000,"elapsed_s":prog.full(now())["elapsed_s"],"notes":notes(&p, &old, secrets, extra)});
+            "files":fr.copied,"secrets":secrets,"at":now() / 1000,"elapsed_s":prog.full(now())["elapsed_s"],"holds":prog.holds(),"notes":notes(&p, &old, secrets, extra)});
         let _ = hub.commit(&json!({"$":"SettingSet","key":DONE,"value":r.to_string(),"at":now() / 1000})).await;
         // one notice for the phones that were away (the push book's rules: quiet hours, mutes)
         if c.lines > 0 { let text = format!("Your 0.14 work is here: {}", crate::present::onboard::import_counted(&json!(c)));
