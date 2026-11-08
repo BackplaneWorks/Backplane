@@ -12,26 +12,26 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 |---|---|---|---|---|
 | | **Core** | | | |
 | F01 | Hub boots on a temp home, `/hello` answers | pass | pass | pass (`windows smoke`, run 42429479397, 10837b209d) |
-| F02 | Client connects; sidebar and projects load | pass | pass (rc.1 archive, run 42489602486) | pass, part: an empty home, WARP (`windows smoke`, run 42429479397) |
+| F02 | Client connects; sidebar and projects load | pass | pass (rc.2 archive, run 42511714431) | pass, part: an empty home, WARP (`windows smoke`, run 42429479397) |
 | F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
 | F04 | Stand-in turn streams; restart ends running turns as interrupted | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
 | F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | pass, hub only, part: the stand-in provider tests that run there (scripts/ci-hub-windows-filter.sh skips the rest) |
-| F06 | Runtime modes, approvals, questions, plans | not run | pass: approval, question, plan (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
-| F07 | Queue, steer, stop, held queue resume | not run | pass (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
+| F06 | Runtime modes, approvals, questions, plans | not run | pass: approval, question, plan (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
+| F07 | Queue, steer, stop, held queue resume | not run | pass (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
 | F08 | Fork, bring back, provider switch | not run | not run | pass (Windows Server 2022 VM, see its section) |
-| F09 | Todos, context meter, drafts survive a crash | not run | pass (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
+| F09 | Todos, context meter, drafts survive a crash | not run | pass (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
 | F10 | Inboxes, orchestration tools, subthreads panel | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F11 | Model picker, effort, project picker, project badges | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F13 | Titles and the text generation model | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F14 | Terminal | not run | pass, hub only | pass, hub only: ConPTY (term::tests on windows-latest; the flood test is skipped) |
-| F15 | Attachments and image paste | not run | pass (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
-| F16 | Keybindings | not run | pass, 12 of 12 keys (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
-| F17 | Viewers: board, schematic, 3D, STEP | not run | pass, 4 of 4 viewers (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
-| F18 | Browser tab (CEF) | not run | pass, part: frame-stream helper (no CEF on macOS); page, click, type, scroll, popup, download, input after it (rc.1 archive, run 42489602486) | pass, part: frame-stream helper, no embedded Chromium (Windows Server 2022 VM, see its section) |
+| F15 | Attachments and image paste | not run | pass (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
+| F16 | Keybindings | not run | pass, 12 of 12 keys (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
+| F17 | Viewers: board, schematic, 3D, STEP | not run | pass, 4 of 4 viewers (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
+| F18 | Browser tab (CEF) | not run | pass, part: frame-stream helper (no CEF on macOS); page, click, type, scroll, popup, download, input after it (rc.2 archive, run 42511714431) | pass, part: frame-stream helper, no embedded Chromium (Windows Server 2022 VM, see its section) |
 | F19 | Bots and rooms | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F20 | File browser and downloads | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
-| F21 | Reconnect, resume from sequence, outbox, long session | not run | pass (rc.1 archive, run 42489602486) | pass (Windows Server 2022 VM, see its section) |
+| F21 | Reconnect, resume from sequence, outbox, long session | not run | pass (rc.2 archive, run 42511714431) | pass (Windows Server 2022 VM, see its section) |
 | F22 | Ordering flow up to the quote; no order placed | not run | not run | pass (Windows Server 2022 VM, see its section) |
 | F23 | A killed hub leaves no agent behind | pass, hub only | pass | pass (Windows Server 2022 VM, see its section) |
 | | **Install and CAD** | | | |
@@ -283,6 +283,24 @@ The darwin-arm64 archive of release dry run 42482640273, installed with that run
 
 One run of the client rows was clean on every row: 42494679347 (CAL, F02, F06 approval, question and plan, F07, F08, F09 meter and draft, F14, F15, F16 12 of 12 keys, F17 4 of 4 viewers, F18 page, click, type, scroll, popup, download and input after it, F21, F22), with the driver's Return fixed and no message ever re-sent. The earlier passes 42485912897, 42488217505 and 42489602486 each had one failing row (F18 download; F16, a bug in my retry; F14, the input tool). The hub rows' last run, 42489602486, was clean except that F04 passed only through a retry; F04 is the hub's stall (above), for rc.2.
 
+### macOS, release candidate v0.15.0-rc.2 (commit 43c39bd105), macos-latest runner
+
+The darwin-arm64 archive of release dry run 42509812215, installed with that run's own `install.sh` (`test/e2e/mac-install-archive.sh`; the installed COMMIT is 43c39bd105), on a runner with a logged-in GUI session (a 1024x768 virtual display). Workflow `e2e-macos.yml` (dispatch only), run 42511714431 for everything but the loopback pairing cell, run 42511733811 for that. Every job passed in a single run.
+
+| ID | Result | Run | Evidence |
+|---|---|---|---|
+| F01, F03, F04, F07-F10, F12, F14, F19-F21, F23 (hub) | pass, hub only | 42511714431 | `mac-hub-rows.mjs`: 16 of 16 |
+| F04 (hub) | pass | 42511714431 | one `setting.set restart.continue=off`: reply ok after 0.1 s and written to the hub's log; after the restart the turn ended `interrupted`, not resumed. The rc.1 stall (the hub silent for 20-40 s after the second turn started, the write lost) did not happen: the checkpoint wait fix works here |
+| S01-S14 effects (hub) | pass | 42511714431 | `mac-effects.mjs` 7 of 7; `settings-walk.mjs` 89 controls, 0 not applied, 0 persist failures |
+| C02 | pass | 42511714431 | ERC + DRC and the exports (gerbers, bom, cpl, step, pdfs) with the app's `kicad-cli`; the CAD page names the CLI that was set; 5 of 5 checks |
+| C03 | pass, part: install not run | 42511714431 | `mac-c03.mjs` 4 of 4, `mac-c03-agent.mjs` 3 of 3 (FreeCAD 1.1.4 by brew cask) |
+| F02, F06, F07, F08, F09, F14, F15, F21, F22 | pass | 42511714431 | the client rows from the installed archive, real input (`cliclick`, Quartz events incl. Return as a key pair, a real clipboard) and `screencapture`; no message was re-sent |
+| F16 | pass, 12 of 12 | 42511714431 | palette, models, sidebar, files, diff, terminal, thread 2, performance, uberbot, new, stop, settle |
+| F17 | pass, 4 of 4 | 42511714431 | Board, Schematic, 3D, Mech drawn; wheel and drag change each |
+| F18 | pass, part: frame-stream helper | 42511714431 | no CEF on macOS: page loads and paints from the helper's frames; click, typing, wheel, popup (loaded, has its opener), a download that lands in `~/Downloads`, and a click after it |
+| PA-M1 | pass (19/19) | 42511714431 | macOS hub (installed rc.2, temp home) <-> macOS GPUI client, same runner, the runner's own interface address 192.168.64.3 (one machine; no network crossed); `gpui.sh` with `gpui-start-mac.sh`, `mac-hub.sh` |
+| PA-M2 | pass (19/19) | 42511733811 | the same, the hub on loopback 127.0.0.1 (one machine; no network crossed): link, short code, wrong, used, revoked and expired codes, backplane:// ask, Cancel, confirm, revoke, re-pair, hub restart. On rc.1's client the same cell failed every link case (11/19: a link naming loopback was refused); rc.2 pairs |
+
 ### Windows
 
 Rig: GitHub `windows-latest` (Windows Server 2025, 10.0.26100), no GPU (the client draws on WARP, "Microsoft Basic Render Driver"). `docs/windows.md` says how the port works and what it still lacks.
@@ -474,7 +492,8 @@ Rerun on the 0.15.0 release candidate 2, 43c39bd105 (rc/0.15.0-2): hub, simulato
 | R02/R03 linux-x64, linux-arm64, macOS, Windows | pass | 988c9c93cd | the four runners above | release.yml dry run 42471203815 (v0.14.101 on 988c9c93cd; first v0.14.100 = 42460758492, broken v0.14.102 = 42460760842, its hub panics at start), smoke job on the target's own GitHub runner: `test/update/install-e2e.sh` 3/3 on each (Windows from the zip): v0.14.100 installed, v0.14.101 taken from a loopback feed, verified against release.pub, staged, proven, CURRENT moved; v0.14.102 dies at its start, marked bad, back on v0.14.101 |
 | U01 0.14 -> 0.15 linux-x64, macOS | pass | 988c9c93cd | GitHub ubuntu-22.04 and macos-latest | release.yml dry run 42471203815 (v0.14.101 on 988c9c93cd; first v0.14.100 = 42460758492, broken v0.14.102 = 42460760842, its hub panics at start), smoke job on the target's own GitHub runner: `test/update/from-014.py` 8/8 on each: 0.14.1 installed from its own release, a device paired, Update pressed (0.14's app.update); 0.14's updater takes the 0.14-format archive via SHA256SUMS and runs our install-release.sh; the guard runs 0.15 on 0.14's port, proven with EXPECT; GET /import/0.14/run done; the 0.14-paired device accepted without pairing again; 0.14's home byte-identical and with nothing of 0.15's. Also the desktop (Ubuntu 26.04) on v0.14.93 = 42451126435 |
 | U02 0.14 way back linux-x64, macOS | pass | 988c9c93cd | the same runners | release.yml dry run 42471203815 (v0.14.101 on 988c9c93cd; first v0.14.100 = 42460758492, broken v0.14.102 = 42460760842, its hub panics at start), smoke job on the target's own GitHub runner: `from-014.py --panics` 6/6 on each: the broken 0.15 dies on probation, is marked bad, the guard runs 0.14 again on its own port; 0.14's home has nothing of 0.15's. Also the desktop on v0.14.94 = 42451128208 |
-| PA-M1 | pass (19/19), source build; rc archive to come | 8d4a749 (a build of the checkout; the rc.2 archive is the cell to cite) | macOS hub (macos-latest runner, temp home) ↔ macOS GPUI client (same runner, logged-in GUI session), the runner's own interface address 192.168.64.10 (one machine; no network crossed) | `test/e2e/pairing/gpui.sh` with `gpui-start-mac.sh` and `mac-hub.sh`; workflow `e2e-macos.yml` job `pairing-src`, run 42498223702; link, short code, wrong, used and revoked codes, expired code (expiresAt moved back, hub restarted), backplane:// ask, Cancel, confirm, revoke while connected, re-pair, hub restart with the same credential. A link that names loopback is refused (a first run on 127.0.0.1 passed the code cases and failed every link case: 11/19), so the hub listens on the runner's interface address. Cross-machine macOS cells (PA04, PA14) stay not run: the runner is not on the tailnet |
+| PA-M1 | pass (19/19) | 43c39bd105 (rc.2 archive) | macOS hub (macos-latest runner, installed v0.15.0-rc.2, temp home) ↔ macOS GPUI client (same runner, logged-in GUI session), the runner's own interface address 192.168.64.3 (one machine; no network crossed) | `test/e2e/pairing/gpui.sh` with `gpui-start-mac.sh` and `mac-hub.sh`; workflow `e2e-macos.yml` job `pairing`, run 42511714431 (a source build earlier passed 19/19: run 42498223702). Cross-machine macOS cells (PA04, PA14) stay not run: the runner is not on the tailnet |
+| PA-M2 | pass (19/19) | 43c39bd105 (rc.2 archive) | same, the hub on loopback 127.0.0.1 (one machine; no network crossed) | `gpui.sh`, `pairing_host=127.0.0.1`, run 42511733811. rc.1's client refused a link that names loopback: the same cell was 11/19 (every link case failed) on the source build, run 42496906969 |
 
 
 ### Test-honesty lane (branch honest-tests)
