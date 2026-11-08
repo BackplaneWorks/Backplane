@@ -211,7 +211,12 @@ if want('F18'):
                 if abs(r - rgb[0]) < tol and abs(g - rgb[1]) < tol and abs(b - rgb[2]) < tol: xs += x; ys += y; n += 1
         return (xs // n, ys // n) if n * 4 >= minpx else None
     sel(1); chord('ctrl b'); pause(1.0); click_ctl('rail:Browser'); pause(4); allow_dialogs(); VW = (560, 90, win()[2] - 80, win()[3] - 30); shot('f18-open')
-    allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(1.0); chord('ctrl a'); pause(0.3); xin('type', URL); xin('key', 'Return'); pause(2); allow_dialogs()
+    def go():   # focus the page, then the address field, replace its text with the URL, Return
+        allow_dialogs(); xin('click', (VW[0] + VW[2]) // 2, (VW[1] + VW[3]) // 2); pause(0.5); chord('ctrl l'); pause(1.0); chord('ctrl a'); pause(0.3); xin('type', URL); xin('key', 'Return'); pause(2); allow_dialogs()
+    for _try in range(3):
+        go()
+        if until(lambda: 'load' in names(), 20): break
+        print('   F18: the page had not loaded after attempt %d; typing the address again' % (_try + 1), flush=True)
     loaded = until(lambda: 'load' in names(), 60); pause(5); shot('f18-page'); res = []
     import urllib.request, hashlib
     def frame(tag):   # the hub's own newest frame for the page (what the client's poller fetches), saved for the artifact
