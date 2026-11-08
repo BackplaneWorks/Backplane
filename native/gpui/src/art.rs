@@ -299,3 +299,31 @@ pub fn probe_rect(id: String) -> AnyElement {
     }).absolute().top_0().left_0().size_full().into_any_element()
 }
 pub fn ctl_rects() -> std::collections::HashMap<String, [f32; 4]> { CTL_RECTS.lock().unwrap().clone().unwrap_or_default() }
+
+#[cfg(test)]
+mod generated_assets_tests {
+    use std::path::Path;
+    /// Every icon the client names in its code is in the repo's assets/icons.json, and every cat rig is there (assets/GENERATED.md): a release
+    /// archive carries these files as they are, and without them the client draws empty boxes ("icon X not in icons.json").
+    #[test] fn the_generated_assets_cover_what_the_client_draws() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let icons: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("icons.json")).expect("assets/icons.json")).expect("icons.json is JSON");
+        let mut used = std::collections::BTreeSet::new(); let mut todo = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        while let Some(d) = todo.pop() { for e in std::fs::read_dir(&d).unwrap().flatten() { let p = e.path();
+            if p.is_dir() { todo.push(p); continue } if p.extension().map_or(true, |x| x != "rs") { continue }
+            let text = std::fs::read_to_string(&p).unwrap();
+            for (at, w) in text.match_indices("ic(").chain(text.match_indices("icon(")) {
+                // the call itself, not a word ending in it (metric(, topic( ...)
+                if text[..at].chars().last().map_or(false, |c| c.is_alphanumeric() || c == '_') { continue }
+                let rest = &text[at + w.len()..text.len().min(at + 48)]; let Some(q) = rest.find('"') else { continue };
+                // the first argument (icon("x") or ic(light, "x")), not a colour further on (c("accent"))
+                let pre = rest[..q].trim(); if !(pre.is_empty() || (pre.ends_with(',') && pre[..pre.len() - 1].chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.'))) { continue }
+                let name: String = rest[q + 1..].chars().take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-').collect();
+                if !name.is_empty() && rest[q + 1 + name.len()..].starts_with('"') { used.insert(name); }
+            } } }
+        assert!(used.len() >= 10, "the scan found the icon names: {used:?}");
+        let missing: Vec<_> = used.iter().filter(|n| icons.get(n.as_str()).is_none()).collect();
+        assert!(missing.is_empty(), "icons the client names but assets/icons.json lacks: {missing:?}");
+        let rigs = std::fs::read_dir(root.join("cat-rigs")).expect("assets/cat-rigs").count(); assert_eq!(rigs, 72 * 8, "a rig for every look and mood");
+    }
+}
