@@ -37,13 +37,14 @@ import json,sys
 try: rows=json.load(open(sys.argv[1]))
 except Exception as e: open(sys.argv[2],'a').write("settings-walk\tFAIL\twalk\tno result file: %s\n"%e); sys.exit()
 ctl=[r for r in rows if r.get('control') in ('chip','form')]
-bad=[r for r in ctl if not (r.get('applied') and r.get('persisted'))]
+bad=[r for r in ctl if not r.get('applied')]
+per=[r for r in rows if r.get('persist')]; lost=[r for r in per if not r.get('lit_after_restart')]
 f=open(sys.argv[2],'a')
-f.write("settings-walk\t%s\twalk\t%d controls walked on %d pages, %d not applied or not persisted; effect proven for %d (the rest is S01-S14's effect rows, owned by the test-honesty lane)\n"%('FAIL' if bad else 'ok',len(ctl),len({r.get('page') for r in ctl}),len(bad),len([r for r in ctl if r.get('effect')])))
-for r in bad[:20]: f.write("settings-walk\tFAIL\t%s/%s\t%s\n"%(r.get('page'),r.get('label'),json.dumps(r)[:200]))
+f.write("settings-walk\t%s\twalk\t%d controls walked on %d pages, %d not applied; %d of them re-read after a hub restart, %d lost their value. Effect proofs are S01-S14's, not this walk's\n"%('FAIL' if bad or lost else 'ok',len(ctl),len({r.get('page') for r in ctl}),len(bad),len(per),len(lost)))
+for r in (bad+lost)[:20]: f.write("settings-walk\tFAIL\t%s/%s\t%s\n"%(r.get('page'),r.get('label') or r.get('key'),json.dumps(r)[:200]))
 PY
 if [ -d "$ASSETS" ]; then run client-rows python3 -W ignore test/e2e/gpui-f-rows.py "$GUI" "$HUB" "$ASSETS" "$OUT/client" 3891 77; parse client-rows "$OUT/client-rows.log"; else add client-rows skip all "no assets folder at $ASSETS"; fi
-OUT=$OUT/cef DISP=:78 run cef sh test/cef/cef_e2e.sh "$GUI" "$HUB"
+run cef env OUT="$OUT/cef" DISP=:78 sh test/cef/cef_e2e.sh "$GUI" "$HUB"
 python3 - "$OUT/cef.log" "$OUT/results.tsv" <<'PY'
 import sys,re
 f=open(sys.argv[2],'a')
@@ -53,7 +54,7 @@ for l in open(sys.argv[1],errors='replace'):
 PY
 if [ $PHONE = 1 ] && adb devices 2>/dev/null | grep -q "^52220DLAQ001FC.device"; then
   echo "== phone rows (waiting for the lock)"; flock ~/.cache/pixel-52220DLAQ001FC.lock test/e2e/pixel-f-rows.sh "$HUB" "$OUT/phone" > "$OUT/phone-rows.log" 2>&1; parse phone-rows "$OUT/phone-rows.log"
-else add phone-rows skip all "not run: ${PHONE/1/no Pixel attached}"; [ $PHONE = 0 ] && add phone-rows skip all "not run: --no-phone"; fi
+elif [ $PHONE = 0 ]; then add phone-rows skip all "not run: --no-phone"; else add phone-rows skip all "not run: the Pixel 9 (52220DLAQ001FC) is not attached"; fi
 python3 - "$OUT" "$SHA" "$DIRTY" <<'PY'
 import sys,collections,datetime,subprocess
 out,sha,dirty=sys.argv[1:4]

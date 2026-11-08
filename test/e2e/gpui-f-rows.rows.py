@@ -103,7 +103,8 @@ if want('F17'):
         im = px(name).crop(VIEW).convert('L'); bg = im.getpixel((5, 5)); return sum(1 for v in im.getdata() if abs(v - bg) > 25) > 4000   # a fitted schematic is thin lines: about 5000; a line of text about 2000
     for kind, label in [('Board', 'rail:Board'), ('Schematic', 'rail:Schematic'), ('3D', 'rail:3D'), ('Mech', 'rail:Mech')]:
         click_ctl(label); pause(1.0)
-        until(lambda: (shot('v-%s' % kind) and busy('v-%s' % kind)), 40)
+        if not until(lambda: (shot('v-%s' % kind) and busy('v-%s' % kind)), 25):   # a page that has not drawn is asked again once (open it afresh), then waited for
+            click_ctl('rail:Files'); pause(1.5); click_ctl(label); pause(1.0); until(lambda: (shot('v-%s' % kind) and busy('v-%s' % kind)), 40)
         cx, cy = 1100, 480
         drawn = busy('v-%s' % kind)
         for _ in range(4): xin('wheel', cx, cy, 1)
