@@ -60,6 +60,8 @@ struct DataRoot: View {
         }
         .fullScreenCover(item: Binding(get: { client.terms.fullscreen }, set: { client.terms.fullscreen = $0 })) { TermFullView(client: client, route: $0) }
         .onChange(of: client.pendingThread) { _, id in if let id { path.append(id); client.pendingThread = nil } }
+        .onChange(of: client.linkTarget) { _, t in if let t { follow(t); client.linkTarget = nil } }
+        .overlay(alignment: .bottom) { DLinkNote(client: client) }
         .onOpenURL { route($0) }
         .onChange(of: client.pushThread, initial: true) { _, t in if !t.isEmpty { var p = NavigationPath(); p.append(t); path = p; client.pushThread = "" } }
         // an alert that a sign-in expired: Settings, Accounts, that account, its sign-in started
@@ -67,6 +69,20 @@ struct DataRoot: View {
         // a newly paired (or forgotten) hub starts again on the list
         .onChange(of: client.links.isEmpty) { _, _ in path = NavigationPath() }
         .onChange(of: client.link) { _, _ in path = NavigationPath() }
+    }
+
+    /// A link the hub resolved: its screen, inside the app. A thread or file is pushed over what is open; a project is the list at its group; a room is its page.
+    private func follow(_ t: DLinkTarget) {
+        switch t.kind {
+        case .thread: path.append(t.id)
+        case .file: path.append(DViewerRoute(id: t.id, file: t.path, line: t.line))
+        case .project: path = NavigationPath(); client.focusProject = t.id
+        case .room:
+            Task {
+                if !client.rooms.contains(where: { $0.id == t.id }) { await client.loadBots() }
+                if let r = client.rooms.first(where: { $0.id == t.id }) { path.append(r) } else { client.say("That room is not on this hub.") }
+            }
+        }
     }
 
     /// This app's links, its one handler: backplane://thread/<id> opens that thread, backplane://account/<id> that account's sign-in; any other (a pairing link) asks first (DataClient.opened).
@@ -92,6 +108,7 @@ struct DataThreadsView: View {
     @State private var badgeProject: DProject?
     @State private var projectTitle = ""
     @State private var shut = Set(UserDefaults.standard.stringArray(forKey: "data.projects.shut") ?? [])
+    @State private var flash = ""   // the project a link just opened
 
     private var botThreads: Set<String> { Set(client.bots.map(\.thread)) }
     private func toggle(_ p: DProject) {
@@ -145,7 +162,7 @@ struct DataThreadsView: View {
         .navigationDestination(for: String.self) { DataThreadView(client: client, id: $0) }
         .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in
-            if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t) }
+            if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
             else { DLoading(text: client.conn == .online ? "Loading the thread…" : "Connecting to the hub…") } // never a blank page while the thread list comes
         }
         .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else { DataImprovementsView(client: client) } }
@@ -169,6 +186,16 @@ struct DataThreadsView: View {
     }
 
     private var list: some View {
+        ScrollViewReader { proxy in listBody
+            .onChange(of: client.focusProject, initial: true) { _, id in
+                guard !id.isEmpty else { return }
+                shut.remove(id); UserDefaults.standard.set(Array(shut), forKey: "data.projects.shut")
+                flash = id; client.focusProject = ""
+                Task { try? await Task.sleep(nanoseconds: 150_000_000); withAnimation { proxy.scrollTo("project." + id, anchor: .top) }; try? await Task.sleep(nanoseconds: 2_500_000_000); if flash == id { flash = "" } }
+            }
+        }
+    }
+    private var listBody: some View {
         List {
             if client.projects.isEmpty && client.listsLoaded {
                 VStack(alignment: .leading, spacing: 10) {
@@ -257,7 +284,7 @@ struct DataThreadsView: View {
             Button { newThread = p.id } label: { Image(systemName: "plus").font(.system(size: 14)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).contentShape(Rectangle()) }
                 .buttonStyle(.plain).accessibilityLabel("New thread in \(p.title)").accessibilityIdentifier("data.thread.new." + p.id)
         }
-        .padding(.leading, 10).padding(.trailing, 2).dataRow()
+        .padding(.leading, 10).padding(.trailing, 2).background(flash == p.id ? BackplaneDesign.accent.opacity(0.18) : Color.clear).id("project." + p.id).dataRow()
         .contextMenu { if client.has("actions") { Button("Rename", systemImage: "pencil") { projectTitle = p.title; renamingProject = p }; Button("Badge", systemImage: "paintpalette") { badgeProject = p }; Button("Remove project", systemImage: "trash", role: .destructive) { projectMenu = p } } }
     }
     private func threadRow(_ t: DThread) -> some View {
@@ -824,7 +851,7 @@ struct DataEntryRow: View {
                             if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).accessibilityIdentifier("data.entry.image") }
                         }
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
-                        if !entry.text.isEmpty { Text(entry.text).dmono(13).foregroundStyle(BackplaneDesign.text).lineSpacing(3).textSelection(.enabled) }
+                        if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
                     }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised)
                     if entry.sending { Text("Sending…").dmono(11).foregroundStyle(BackplaneDesign.faint) }
                     else if entry.failed { Button("Not sent · Retry") { client.retry(thread, entry) }.dmono(11).foregroundStyle(BackplaneDesign.bad) }
@@ -833,7 +860,7 @@ struct DataEntryRow: View {
             }.padding(.vertical, 4).accessibilityIdentifier("data.entry.user")
         case "assistant":
             VStack(alignment: .leading, spacing: 4) {
-                DataMarkdown(text: entry.text)
+                DataMarkdown(text: entry.text, thread: thread)
                 if !entry.live { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
             }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("data.entry.assistant")
         case "tool", "step":
@@ -845,7 +872,7 @@ struct DataEntryRow: View {
         default:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if !entry.label.isEmpty { Text(entry.label).dmono(12, bold: true) }
-                Text(entry.text).dmono(12).textSelection(.enabled)
+                DLinkText(text: entry.text, size: 12, thread: thread)
                 Spacer(minLength: 0)
             }.foregroundStyle(entry.tone == "error" ? BackplaneDesign.bad : BackplaneDesign.dim).padding(.vertical, 3)
         }

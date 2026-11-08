@@ -111,11 +111,6 @@ func dMdBlocks(_ src: String) -> [DMdBlock] {
 
 private struct Fmt { var bold = false, italic = false, strike = false, link: URL? = nil }
 
-private func isUrlStart(_ s: [Character], _ i: Int) -> Bool {
-    if i > 0, s[i - 1].isLetter || s[i - 1].isNumber { return false }
-    for p in ["http://", "https://", "backplane://"] where i + p.count <= s.count && String(s[i..<i + p.count]) == p { return true }
-    return false
-}
 private func find(_ s: [Character], _ tok: [Character], from: Int) -> Int? {
     guard from >= 0, !tok.isEmpty, s.count >= tok.count else { return nil }
     var i = from
@@ -148,7 +143,8 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
             let tick = [Character](repeating: "`", count: n)
             if let e = find(s, tick, from: i + n) {
                 flush(); var inner = String(s[(i + n)..<e]); if inner.hasPrefix(" "), inner.hasSuffix(" "), !inner.trimmed.isEmpty { inner = inner.trimmed }
-                put(inner, f, code: true); i = e + n; continue
+                var g = f; if dIsPathText(inner), let u = dPathURL(inner) { g.link = u }
+                put(inner, g, code: true); i = e + n; continue
             }
             plain += String(tick); i += n; continue
         }
@@ -164,20 +160,13 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
                     if let sp = url.firstIndex(of: " ") { url = String(url[..<sp]) }
                     url = url.trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
                     let label = Array(s[(st + 1)..<close])
-                    flush(); var g = f; g.link = URL(string: url) ?? URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+                    flush(); var g = f; g.link = dIsPathText(url) ? dPathURL(url) : (URL(string: url) ?? URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""))
                     if c == "!" { put(label.isEmpty ? url : String(label), g) } else { inl(label, g, size, &out, depth + 1) }
                     i = end + 1; continue
                 }
             }
         }
-        if isUrlStart(s, i) {
-            var e = i; while e < s.count, !s[e].isWhitespace, !"<>\"'".contains(s[e]) { e += 1 }
-            while e > i, ".,;:!?)]}*_".contains(s[e - 1]) {
-                if s[e - 1] == ")" { let seg = s[i..<e]; if seg.filter({ $0 == "(" }).count >= seg.filter({ $0 == ")" }).count { break } }
-                e -= 1
-            }
-            let url = String(s[i..<e]); flush(); var g = f; g.link = URL(string: url); put(url, g); i = e; continue
-        }
+        if let (e, u) = dWebLink(s, i) { flush(); var g = f; g.link = u; put(String(s[i..<e]), g); i = e; continue }
         if c == "*" || c == "_", i + 2 < s.count, s[i + 1] == c, !s[i + 2].isWhitespace, c == "*" || i == 0 || !(s[i - 1].isLetter || s[i - 1].isNumber) {
             let tok = [c, c]; var e = find(s, tok, from: i + 2)
             while let x = e, x > 0, s[x - 1].isWhitespace { e = find(s, tok, from: x + 2) }
@@ -200,6 +189,8 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
             }
             if e > i + 1 { flush(); var g = f; g.italic = true; inl(Array(s[(i + 1)..<e]), g, size, &out, depth + 1); i = e + 1; continue }
         }
+        // emails, phone numbers and file paths in running text
+        if let (e, u) = dAutoLink(s, i) { flush(); var g = f; g.link = u; put(String(s[i..<e]), g); i = e; continue }
         plain.append(c); i += 1
     }
     flush()
@@ -228,19 +219,25 @@ final class DMdPics {
 
 struct DataMarkdown: View {
     let text: String
+    /// the thread the message is in: a file path in it is looked for in that thread's project
+    var thread = ""
     var body: some View {
         DMdBlocks(blocks: dMdBlocks(text))
-            .environment(\.openURL, OpenURLAction { url in dMdOpen(url) })
+            .environment(\.openURL, OpenURLAction { url in dMdOpen(url, thread: thread) })
     }
 }
 
-/// A thread link opens that thread; anything else goes to the system.
-@MainActor func dMdOpen(_ url: URL) -> OpenURLAction.Result {
-    if url.scheme == "backplane" || url.scheme == AppIdentity.scheme {
-        if url.host == "thread" { let id = url.pathComponents.dropFirst().first ?? ""; if !id.isEmpty { DataClient.shared.pendingThread = id } }
-        return .handled
+/// What a tap on a link does (DataLinks.swift): web addresses, emails and phone numbers go to the system (Safari, Mail, Phone); a backplane:// link or a path is
+/// asked of the hub and opens its screen here, or says why it cannot.
+@MainActor func dMdOpen(_ url: URL, thread: String = "") -> OpenURLAction.Result {
+    #if DEBUG
+    DataClient.shared.lastLink = url.absoluteString
+    #endif
+    switch url.scheme {
+    case "http", "https", "mailto", "tel": return .systemAction
+    case "backplane", AppIdentity.scheme, dPathScheme: DataClient.shared.openLink(url, thread: thread); return .handled
+    default: return .discarded
     }
-    return url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" ? .systemAction : .discarded
 }
 
 private struct DMdBlocks: View {

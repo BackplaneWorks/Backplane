@@ -5,7 +5,8 @@ import PDFKit
 // on the data/1 viewer requests (native/host/src/data/ext.rs). Plots and models arrive as the hub's own binary frames (DataClient routes them to `plots`)
 // and are drawn by the app's Metal view (PlotCanvasView: pinch, pan, orbit, tap to inspect). Written without a simulator run: compile-checked only.
 
-struct DViewerRoute: Hashable { var id: String }
+/// `file` and `line`: a link to a file (src/x.rs:12) opens the viewer at it
+struct DViewerRoute: Hashable { var id: String; var file = ""; var line = 0 }
 struct DEntryRow: Decodable, Identifiable { var dir: Bool; var size: Int; var name: String; var id: String { name }
     enum CodingKeys: String, CodingKey { case dir, size, name }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); dir = c.bool(.dir); size = c.int(.size); name = c.str(.name) } }
@@ -86,9 +87,18 @@ private func plainViewer(open: String, source: String, picked: String, off: UInt
 struct DataViewerView: View {
     let client: DataClient
     let thread: DThread
-    @State private var tab = "Files"
+    var openFile = ""
+    var line = 0
+    @State private var tab: String
     @State private var target: (tab: String, path: String)?
     @State private var files: DProjectFiles?
+    init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0) {
+        self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
+        // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
+        let e = ext(openFile)
+        _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" ? "Board" : e == "kicad_sch" ? "Schematic" : ["step", "stp", "glb"].contains(e) ? "Mech" : "Files")
+        _target = State(initialValue: e == "kicad_pcb" ? ("Board", openFile) : e == "kicad_sch" ? ("Schematic", openFile) : ["step", "stp", "glb"].contains(e) ? ("Mech", openFile) : nil)
+    }
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -110,7 +120,7 @@ struct DataViewerView: View {
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
                 case "Mech": DataMechTab(client: client, thread: thread, open: target?.tab == "Mech" ? target!.path : nil)
-                case "Files": DataFilesTab(client: client, thread: thread) { target = $0; tab = $0.tab }
+                case "Files": DataFilesTab(client: client, thread: thread, start: ext(openFile) == "kicad_pcb" || ext(openFile) == "kicad_sch" ? "" : openFile, line: line) { target = $0; tab = $0.tab }
                 default: DataBrowserTab(client: client, thread: thread)
                 }
             }
@@ -119,7 +129,7 @@ struct DataViewerView: View {
         .dataBar(thread.title.isEmpty ? "New thread" : thread.title)
         .task(id: client.conn == .online) {
             guard files == nil else { return }
-            files = await client.viewerFiles(thread.id); if !(files?.pcb ?? "").isEmpty && tab == "Files" { tab = "Board" }
+            files = await client.viewerFiles(thread.id); if !(files?.pcb ?? "").isEmpty && tab == "Files" && openFile.isEmpty { tab = "Board" }
             #if DEBUG || BP_MEASURE
             // a check without hands: BACKPLANE_VTAB opens that tab (BACKPLANE_SELECT=viewer:<thread> opens the viewer)
             if let t = ProcessInfo.processInfo.environment["BACKPLANE_VTAB"], tabs.contains(t) { tab = t }
@@ -365,14 +375,18 @@ private func sizeText(_ n: Int) -> String { n < 1024 ? "\(n) B" : n < 1 << 20 ? 
 struct DataFilesTab: View {
     let client: DataClient
     let thread: DThread
+    var start = ""
+    var line = 0
     let open: ((tab: String, path: String)) -> Void
     @State private var dir = ""
     @State private var list: [DEntryRow]?
     @State private var err = ""
     @State private var preview: String?
+    @State private var started = false
+    @State private var previewLine = 0
     var body: some View {
         VStack(spacing: 0) {
-            if let p = preview { DataFilePreview(client: client, thread: thread, path: p) { preview = nil } }
+            if let p = preview { DataFilePreview(client: client, thread: thread, path: p, line: previewLine) { preview = nil; previewLine = 0 } }
             else {
                 HStack {
                     if !dir.isEmpty { Button("..") { dir = dir.split(separator: "/").dropLast().joined(separator: "/") }.font(.system(.subheadline, design: .monospaced).bold()).accessibilityIdentifier("data.files.up") }
@@ -400,6 +414,11 @@ struct DataFilesTab: View {
             }
         }
         .task(id: dir) { list = nil; err = ""; do { list = try await client.entries(thread.id, path: dir) } catch { self.err = error.localizedDescription } }
+        .onAppear {
+            // a linked file: its folder behind it, the file open at the line
+            guard !started, !start.isEmpty else { return }
+            started = true; dir = start.split(separator: "/").dropLast().joined(separator: "/"); preview = start; previewLine = line
+        }
     }
 }
 
@@ -407,6 +426,7 @@ struct DataFilePreview: View {
     let client: DataClient
     let thread: DThread
     let path: String
+    var line = 0
     let close: () -> Void
     @State private var data: Data?
     @State private var failed = false
@@ -420,13 +440,34 @@ struct DataFilePreview: View {
                 if imageExt.contains(ext(path)), let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().padding(8).accessibilityIdentifier("data.preview.image") }
                 else if ext(path) == "pdf" { DataPDFView(data: d).accessibilityIdentifier("data.preview.pdf") }
                 else if d.count < 200_000, !d.contains(0) {
-                    ScrollView { let t = String(decoding: d, as: UTF8.self)
-                        (ext(path) == "md" ? Text(.init(t)) : Text(t)).font(.system(.footnote, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading).padding(12) }.accessibilityIdentifier("data.preview.text")
+                    let t = String(decoding: d, as: UTF8.self)
+                    if line > 0 { DataLinedText(text: t, line: line).accessibilityIdentifier("data.preview.text") }
+                    else { ScrollView { (ext(path) == "md" ? Text(.init(t)) : Text(t)).font(.system(.footnote, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading).padding(12) }.accessibilityIdentifier("data.preview.text") }
                 } else { Text("No preview for this file (\(sizeText(d.count))).").foregroundStyle(.secondary).padding(16) }
             } else { ProgressView().padding(24) }
             Spacer(minLength: 0)
         }
         .task(id: path) { data = nil; failed = false; data = await client.fileBytes(thread.id, path); failed = data == nil }
+    }
+}
+/// A file with its line numbers, scrolled to the line a link named and that line marked.
+struct DataLinedText: View {
+    let text: String, line: Int
+    var body: some View {
+        let lines = text.components(separatedBy: "\n")
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { i, l in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(i + 1)").font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
+                            Text(l.isEmpty ? " " : l).font(.system(.footnote, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
+                        }.padding(.vertical, 1).background(i + 1 == line ? BackplaneDesign.accent.opacity(0.22) : Color.clear).id(i + 1)
+                            .accessibilityIdentifier(i + 1 == line ? "data.preview.line" : "data.preview.l\(i + 1)")
+                    }
+                }.padding(.vertical, 8).textSelection(.enabled)
+            }.onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { proxy.scrollTo(max(1, line - 3), anchor: .top) } }
+        }
     }
 }
 struct DataPDFView: UIViewRepresentable {

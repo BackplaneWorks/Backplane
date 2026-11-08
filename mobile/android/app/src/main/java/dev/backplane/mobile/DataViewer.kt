@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
@@ -42,14 +43,16 @@ private val tabs = listOf("Board", "Schematic", "3D", "Split", "Mech", "Files", 
 private data class Target(val tab: String, val path: String)
 
 @Composable
-fun ViewerScreen(thread: DThread, back: () -> Unit) {
-    var tab by remember { mutableStateOf("Files") }
-    var target by remember { mutableStateOf<Target?>(null) }
+fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> Unit) {
+    // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
+    val fx = ext(file)
+    var tab by remember { mutableStateOf(when { file.isEmpty() -> "Files"; fx == "kicad_pcb" -> "Board"; fx == "kicad_sch" -> "Schematic"; fx in setOf("step", "stp", "glb") -> "Mech"; else -> "Files" }) }
+    var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" -> Target("Board", file); fx == "kicad_sch" -> Target("Schematic", file); fx in setOf("step", "stp", "glb") -> Target("Mech", file); else -> null }) }
     var files by remember { mutableStateOf<DataClient.ProjectFiles?>(null) }
     val online = DataClient.conn == DataClient.Conn.ONLINE
     LaunchedEffect(thread.id, online) {
         if (files != null) return@LaunchedEffect
-        files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files?.pcb?.isNotEmpty() == true && tab == "Files") tab = "Board"
+        files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files?.pcb?.isNotEmpty() == true && tab == "Files" && file.isEmpty()) tab = "Board"
         DataClient.openViewerTab?.takeIf { it in tabs }?.let { tab = it; DataClient.openViewerTab = null }
     }
     DisposableEffect(thread.id) { onDispose { DataClient.stopWatch(thread.id) } }
@@ -70,7 +73,7 @@ fun ViewerScreen(thread: DThread, back: () -> Unit) {
                 "Diff" -> DiffTab(thread)
                 "Review" -> ReviewTab(thread)
                 "Mech" -> MechTab(thread, target?.path?.takeIf { target?.tab == "Mech" })
-                "Files" -> FilesTab(thread) { t -> target = t; tab = t.tab }
+                "Files" -> FilesTab(thread, if (fx == "kicad_pcb" || fx == "kicad_sch") "" else file, line) { t -> target = t; tab = t.tab }
                 else -> BrowserTab(thread)
             }
         }
@@ -252,13 +255,15 @@ private val textExt = setOf("txt", "md", "csv", "json", "log", "yaml", "yml", "t
 private fun ext(name: String) = name.substringAfterLast('.', "").lowercase()
 
 @Composable
-private fun FilesTab(thread: DThread, open: (Target) -> Unit) {
-    var dir by remember { mutableStateOf("") }
+private fun FilesTab(thread: DThread, start: String, startLine: Int, open: (Target) -> Unit) {
+    // a linked file: its folder behind it, the file open at the line
+    var dir by remember { mutableStateOf(start.substringBeforeLast('/', "")) }
     var list by remember { mutableStateOf<List<DataClient.Entry>?>(null) }
     var err by remember { mutableStateOf("") }
-    var preview by remember { mutableStateOf<String?>(null) }
+    var preview by remember { mutableStateOf<String?>(start.ifEmpty { null }) }
+    var previewLine by remember { mutableStateOf(startLine) }
     LaunchedEffect(thread.id, dir) { list = null; err = ""; runCatching { DataClient.entries(thread.id, dir) }.onSuccess { list = it }.onFailure { err = it.message ?: "" } }
-    if (preview != null) { FilePreview(thread, preview!!) { preview = null }; return }
+    if (preview != null) { FilePreview(thread, preview!!, previewLine) { preview = null; previewLine = 0 }; return }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (dir.isNotEmpty()) DMono("..", dcs.primary, 13, Modifier.clickable { dir = dir.substringBeforeLast('/', "") }.padding(end = 12.dp).testTag("files.up"), bold = true)
@@ -292,10 +297,25 @@ private fun FilesTab(thread: DThread, open: (Target) -> Unit) {
         }
     }
 }
+/** A file with its line numbers, scrolled to the line a link named and that line marked. */
+@Composable
+private fun LinedText(text: String, line: Int) {
+    val lines = remember(text) { text.split('\n') }
+    val st = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(line) { st.scrollToItem((line - 4).coerceIn(0, (lines.size - 1).coerceAtLeast(0))) }
+    LazyColumn(Modifier.fillMaxSize().testTag("preview.text"), state = st) {
+        items(lines.size) { i ->
+            Row(Modifier.fillMaxWidth().background(if (i + 1 == line) dcs.primary.copy(alpha = .22f) else Color.Transparent).then(if (i + 1 == line) Modifier.testTag("preview.line") else Modifier).padding(vertical = 1.dp)) {
+                Text("${i + 1}", Modifier.width(44.dp).padding(end = 8.dp), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                Text(lines[i].ifEmpty { " " }, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
+            }
+        }
+    }
+}
 private fun size(n: Long) = when { n < 1024 -> "$n B"; n < 1 shl 20 -> "${n / 1024} KB"; else -> "${n shr 20} MB" }
 
 @Composable
-private fun FilePreview(thread: DThread, path: String, close: () -> Unit) {
+private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () -> Unit) {
     var bytes by remember(path) { mutableStateOf<ByteArray?>(null) }
     var failed by remember(path) { mutableStateOf(false) }
     LaunchedEffect(path) { bytes = DataClient.fileBytes(thread.id, path); failed = bytes == null }
@@ -316,6 +336,7 @@ private fun FilePreview(thread: DThread, path: String, close: () -> Unit) {
             ext(path) == "pdf" -> PdfPreview(b)
             ext(path) in textExt || b.size < 200_000 && b.none { it.toInt() == 0 } -> {
                 val text = remember(b) { String(b, Charsets.UTF_8).take(200_000) }
+                if (line > 0) { LinedText(text, line); return@Column }
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp).testTag("preview.text")) {
                     if (ext(path) == "md") MdText(text) else Text(text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
                 }

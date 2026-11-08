@@ -232,6 +232,72 @@ final class Journeys: XCTestCase {
 
     // The composer's own commands on a Rust hub seeded by the lane rig (project "demo": t1 "Fix the ecc83 board", t2 "BOM review"; stand-in agents):
     // the Send button reads the hub's label, /btw answers in a card and posts nothing, /give hands over, /secret opens the masked box, /intent saves.
+    // Links in a message (docs/PHONE-DATA.md "Links in messages"): the hub is scripts/mobile/data-hub.sh with LINKS=1 (thread t3 "Links" holds every kind, test/mobile/links-fixture.md).
+    // A tap on each kind; what the system was handed is read from the app's debug "link.last", what opened inside the app from its own screens.
+    func test_data_links() {
+        d = Driver("data-links"); defer { d.finish() }
+        d.app.terminate()
+        d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1", "BACKPLANE_SELECT": "t3"]; d.app.launch(); d.skipTour()
+        // the system's notification question, once per fresh simulator
+        let sbAlert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Allow"]
+        if sbAlert.waitForExistence(timeout: 8) { sbAlert.tap() }
+        let msg = d.el("data.entry.assistant")
+        guard d.step("the Links thread opens", timeout: 30, act: {}, expect: { msg.exists && d.label("Link check").exists }) else { return }
+        try? d.app.debugDescription.write(toFile: "\(d.out)/data-links-tree.txt", atomically: true, encoding: .utf8)
+        d.shot("links-thread")
+        func link(_ text: String) -> XCUIElement {
+            let l = d.app.links[text]
+            if l.exists { return l }
+            return d.app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        }
+        func tapLink(_ text: String) {
+            let l = link(text); if !l.waitForExistence(timeout: 6) { return }
+            // a link inside a longer line: the element is the whole Text; tap where the link is (its text's share of the line)
+            if d.app.links[text].exists { l.tap(); return }
+            let f = l.frame; let full = l.label as NSString; let r = full.range(of: text)
+            let x = (CGFloat(r.location) + CGFloat(r.length) / 2) / max(1, CGFloat(full.length))
+            l.coordinate(withNormalizedOffset: CGVector(dx: min(0.95, x), dy: 0.5)).tap(); _ = f
+        }
+        func last() -> String { d.el("link.last").label }
+        func backToThread() { let b = d.app.navigationBars.buttons.element(boundBy: 0); if b.exists { b.tap() }; _ = d.el("thread.composer").waitForExistence(timeout: 5) }
+        func openLinksThread() { if !d.el("thread.composer").exists || !msg.exists { d.tap(d.el("data.thread.row.t3")) }; _ = msg.waitForExistence(timeout: 8) }
+
+        // the system's handlers: the app is left (Safari, Mail, Phone) or the system asks; what it was handed is the app's debug "link.last"
+        func lastSafe() -> String { d.app.state == .runningForeground ? last() : "" }
+        func system(_ name: String, _ text: String, _ want: String) {
+            d.step(name, act: { tapLink(text) }, expect: { d.app.state != .runningForeground || lastSafe().hasPrefix(want) })
+            d.shot("link-" + name.replacingOccurrences(of: " ", with: "-"))
+            let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            for b in ["Cancel", "OK", "Close", "Not Now"] where sb.alerts.buttons[b].exists { sb.alerts.buttons[b].tap() }
+            d.app.activate(); _ = msg.waitForExistence(timeout: 10)
+            d.step(name + " was handed to the system", act: {}, expect: { last().hasPrefix(want) })
+        }
+        system("web link", "the docs", "https://example.com/docs")
+        system("bare address", "https://example.org/bare", "https://example.org/bare")
+        system("email", "dev@example.com", "mailto:dev@example.com")
+        system("phone number", "+1 555 123 4567", "tel:+15551234567")
+        // backplane links open inside the app
+        d.step("thread link", act: { tapLink("the BOM review") }, expect: { d.label("BOM review").waitForExistence(timeout: 10) && d.el("thread.composer").exists })
+        d.shot("link-thread"); backToThread()
+        d.step("room link", act: { tapLink("backplane://conv/room%3Ar1") }, expect: { d.el("data.room.post").waitForExistence(timeout: 10) })
+        d.shot("link-room")
+        let rb = d.app.navigationBars.buttons.element(boundBy: 0); if rb.exists { rb.tap() }
+        d.step("file at a line", act: { openLinksThread(); tapLink("src/main.rs:12") }, expect: { d.el("data.preview.line").waitForExistence(timeout: 10) })
+        d.step("the file is the one named", act: {}, expect: { d.label("line 12 of src/main.rs").exists })
+        d.shot("link-file"); backToThread(); backToThread()
+        d.step("a path without a line", act: { openLinksThread(); tapLink("src/main.rs:3") }, expect: { d.label("line 3 of src/main.rs").waitForExistence(timeout: 10) })
+        backToThread(); backToThread()
+        // a link the hub cannot resolve says so
+        d.step("a thread that is gone", act: { openLinksThread(); tapLink("backplane://thread/t404") }, expect: { d.el("link.note").waitForExistence(timeout: 6) })
+        d.shot("link-note"); _ = !d.el("link.note").waitForExistence(timeout: 1)
+        d.step("a thread on a machine not mirrored", act: { sleep(4); tapLink("backplane://thread/lab~t9") }, expect: { d.el("link.note").waitForExistence(timeout: 6) })
+        sleep(4)
+        d.step("a missing file", act: { tapLink("src/nothing.rs:1") }, expect: { d.el("link.note").waitForExistence(timeout: 6) })
+        // the project link last: it leaves the thread for the list
+        d.step("project link", act: { sleep(4); tapLink("backplane://project/p1") }, expect: { d.el("data.project.add").waitForExistence(timeout: 10) && d.el("data.project.p1").exists })
+        d.shot("link-project")
+    }
+
     func test_data_commands() {
         d = Driver("data-commands"); defer { d.finish() }
         d.launch()
