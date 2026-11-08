@@ -1241,7 +1241,7 @@ queued for it.
   launcher gets, from `<link>~<thread>`.
 - **plane_read with `machine`.** Asks the other hub (`mcp.call plane_read`) for its plane as text; its thread, bot, room and
   routine ids are named `<link>~<id>`.
-- **Rooms.** A room may have members on one other linked machine, written `name@machine` (the machine's name or its link id;
+- **Rooms.** A room may have members on any number of linked machines, written `name@machine` (the machine's name or its link id;
   `room_create`, `bots.room`, `bot_send` to `name@machine`). Each hub keeps its own copy of the room under the same id, so Bots shows
   it on both. The copy is kept in step with `bots.room_sync {room, name, members, deleted}`: made, changed (a join or leave) and
   deleted rooms reach the other hub, which stores a bot of the sender as `name@<link>` and its own as bot ids; a room with none of its
@@ -1252,9 +1252,11 @@ queued for it.
 - **Joining and leaving.** `room_join` and `room_leave` change the caller's own membership; with `machine` they ask the machine the
   room lives on (`bots.room_join`, `bots.room_leave`), and the room is copied back. `bot_list` shows the bots of linked machines as
   `name@machine`.
-- **Limits.** One other machine per room. A private message (`direct`) to a bot elsewhere is refused: give a `topic`. A report or post
+- **The mesh.** Every pair of machines has its own link and talks directly; there is no relay (a down route is down, and nothing is sent by way of a third machine). A link id is per pair, so a bot of a third machine travels as `name@<machine id>` (`machine-id` in the home, told on `bots.hello`, `bots/mesh.rs`) and is stored as `name@<this machine's link to it>`; one this machine has no link to is dropped. Whoever makes a change or a post sends it to every machine with members in the room; a state a machine already holds is not stored again, so nothing loops. Names are unique (`~name`, `name@machine`, `machine:` in tools): a repeat gets `-2`, a rename (Settings → Machines → Rename a machine) may not clash. A machine's page lists the machines its linked machines are linked to; Pair there asks the linked machine for a code from that one (`bots.mesh_code`, only over an owner's own link), then pairs by that code, and the person approves once on the other machine.
+- **`~machine` in the composer.** `~` offers the paired machines (here or away); after one, `%` and `>` offer that machine's projects and threads. The agent is told the machine, its state and projects, and that work "on ~x" is `thread_launch` with `machine`; the prompt lists the paired machines (`<machines>`). `mesh.machines {text}` returns the same for clients and tests.
+- **Limits.** A private message (`direct`) to a bot elsewhere is refused: give a `topic`. A report or post
   to a machine that is away is lost after its retries (posts: the next change of the room is the retry); there is no queue.
 
 Tests: `bots::tests::a_room_with_a_bot_on_another_machine…` and its neighbours (two hubs, a transport that calls the other's
-`far_received`), `net::rpc::tests::far_mcp_…` (the gate, over signed HTTP), and `test/e2e/pairing/bots.py` (two real hubs with the
+`far_received`), `net::rpc::tests::far_mcp_…` (the gate, over signed HTTP), and `test/e2e/pairing/mesh3.py` (three real hubs: pair through a machine, rename, a room with a bot on each, launch/send/plane_read all six ways, `~machine`) and `test/e2e/pairing/bots.py` (two real hubs with the
 stand-in agent: launch, report, `thread_send`, a shared room both ways, `plane_read`, then the link un-verified).
