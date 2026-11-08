@@ -17,11 +17,13 @@ Run the install.sh one-liner above: the same layout, with the default home in `~
 
 ## Windows (x64, experimental)
 
-Download `backplane-v0.14.0-windows-x64.zip`, extract the **whole** archive into a writable folder, and run `Backplane.exe` (keep `resources/` beside it). No WSL is needed. Shell commands need Cygwin tools: use the bundled runtime if present, otherwise run [the Windows setup script](../scripts/setup-windows.ps1). Install your agent CLIs separately. FreeCAD and the [Backplane KiCad runtime](https://github.com/BackplaneWorks/Backplane_KiCad/releases) are installed separately too: set `BACKPLANE_FREECAD` and `BACKPLANE_KICAD` to them, then restart. Closing the window leaves the hub running.
+Download `backplane-<tag>-windows-x64-native.zip`, extract the **whole** archive into a folder, and run `backplane-gpui.exe`. The exe is not signed yet, so Windows SmartScreen warns the first time (see below). The first run asks **Install Backplane to %LOCALAPPDATA%\Backplane? (needed for updates)**: Install copies the release to `%LOCALAPPDATA%\Backplane\builds\<tag>`, puts the guard (`backplane.exe`, which updates, restarts and rolls back the hub) at `%LOCALAPPDATA%\Backplane`, adds **Backplane** to the Start menu and starts from there; the folder you extracted can then be deleted. Not now runs it from the extracted folder, without updates, and asks again next time. Git for Windows is needed (the hub's shell commands use its `sh`); install your agent CLIs, KiCad and FreeCAD separately (Settings → CAD finds them). Closing the window leaves the hub running.
+
+To remove Backplane: quit it and stop the hub (`%LOCALAPPDATA%\Backplane\backplane.exe hub stop`), then delete the folder `%LOCALAPPDATA%\Backplane` and the Start-menu entry `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Backplane.lnk`. Your projects, threads and settings stay in the hub's home, `%APPDATA%\Backplane\hub` (and the window's settings in `%APPDATA%\backplane-gpui`); delete those too to remove everything.
 
 ## From 0.14
 
-On Linux and macOS, press Update in 0.14 as usual: 0.15 installs beside it, starts on the same port and offers to import 0.14's projects, threads, bots and paired phones (docs/deploy.md, "From 0.14"). Link your other machines again in Settings, Devices. If 0.15 fails to start, 0.14 comes back by itself. On Windows, 0.14 cannot update itself: quit it, download `backplane-<tag>-windows-x64-native.zip` from the release, extract it and run `backplane-gpui.exe`; its setup offers the same import.
+On Linux and macOS, press Update in 0.14 as usual: 0.15 installs beside it, starts on the same port and offers to import 0.14's projects, threads, bots and paired phones (docs/deploy.md, "From 0.14"). Link your other machines again in Settings, Devices. If 0.15 fails to start, 0.14 comes back by itself. On Windows, 0.14 cannot update itself: quit it, download `backplane-<tag>-windows-x64-native.zip` from the release, extract it and run `backplane-gpui.exe` (Install, as above); its setup offers the same import.
 
 ## Phones
 

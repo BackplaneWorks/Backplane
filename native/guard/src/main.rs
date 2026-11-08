@@ -178,7 +178,8 @@ fn open_app() -> i32 {
     let app = prefix.join("builds").join(&cur).join(if cfg!(windows) { "backplane-gpui.exe" } else { "backplane-gpui" });
     if cur.is_empty() || !app.is_file() { eprint!("{USAGE}"); return 2 }
     #[cfg(unix)] { use std::os::unix::process::CommandExt; let e = Command::new(&app).exec(); eprintln!("cannot open {}: {e}", app.display()); 1 }
-    #[cfg(not(unix))] { Command::new(&app).status().map_or(1, |s| s.code().unwrap_or(1)) }
+    // Windows: start the app and end at once, so the console this program has (the Start-menu shortcut opens it minimised) closes with it
+    #[cfg(not(unix))] { Command::new(&app).spawn().map_or_else(|e| { eprintln!("cannot open {}: {e}", app.display()); 1 }, |_| 0) }
 }
 
 fn main() {

@@ -9,6 +9,7 @@ mod input;
 mod keys;
 mod plat;
 mod launch;
+mod install;
 mod local;
 mod pairing;
 mod hubs;
@@ -219,6 +220,8 @@ fn main()->anyhow::Result<()> {
     let started=Instant::now();let config=hub::Config::parse()?;let exit_after=config.exit_after;
     if config.swatches||config.gallery||config.fonts||std::env::var_os("BACKPLANE_GPUI_RECTS").is_some(){art::enable_rects();}
     script::metric(started,"process_start",serde_json::json!({}));
+    // Windows: an unpacked release asks to install itself where the guard can update it (install.rs); on Install the installed one runs
+    #[cfg(windows)] if install::maybe_install(config.pending) { return Ok(()) }
     let app=Application::new();
     // macOS hands a backplane:// link to the app itself, at launch and while it runs
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});
