@@ -142,6 +142,22 @@ Each lane's rows: `| ID | result | commit | rig | evidence |`.
 | S13 | pass | 37c30e1cf8 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | about: one read-only row with the version; no controls |
 | S14 | pass | 37c30e1cf8 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | privacy: Off applied; On did NOT re-enable (the chip sent `setting.set`, which the hub refuses for `telemetry.share=on`; no client sent `telemetry.choice`). Fixed in efa3eb26df and the presenter whitelist; Reset id applied + persisted |
 
+### Linux, release archive v0.15.0-rc.2
+
+The second release candidate: commit `43c39bd105` (branch `rc/0.15.0-2`), dry run 42509812215, `archive-linux-x64` (sha256 `920f99532260…`; the archive's COMMIT file says `43c39bd105`). Installed by `install.sh` into a private prefix, home and port with the guard running its hub; the rows use the installed hub, client, assets, CEF runtime and browser helper. One command: `scripts/e2e-linux.sh --archive <tar.gz>` with the phone, driver scripts from `fe0411c214` (main after the RC; the Linux drivers are the ones rc.1 ran). Run 2026-11-08 18:56 UTC on the desktop, llvmpipe (frame budgets are not judged). The archive was never published or uploaded; the copies are deleted.
+
+| driver | ok | fail | not run |
+|---|---|---|---|
+| install | 1 | 0 | 0 |
+| hub rows (`linux-f-rows.mjs`: F01-F22 hub halves, F05 on all 8 providers, S04) | 32 | 0 | 0 |
+| settings walk (89 controls on 11 pages, 34 re-read after a hub restart) | 1 | 0 | 0 |
+| client rows (`gpui-f-rows.py`, installed client, real X input) | 13 | 0 | 0 |
+| CEF (`cef_e2e.sh`, the archive's own runtime and browser helper) | 23 | 0 | 0 |
+| phone rows (`pixel-f-rows.sh`, Pixel 9, one lock for the whole run) | 6 | 0 | 0 |
+| checkpoint stall (`ckpt-stall.mjs` against the installed hub, a `git` slow by 10 s at `write-tree`) | all ok | 0 | 0 |
+
+The checkpoint stall that blocked rc.1 is gone in rc.2: while turn 2 waits for turn 1's 10 s end capture (the "Saving the last turn's checkpoint…" activity appears after 2 s), a second client's `setting.set` and `threads.list` answer in 21 ms, so do the same client's (they took about 18 s on rc.1's code), a turn on another thread starts in 21 ms and the setting is written; turn 2's own reply comes at once and its agent starts after the capture. Stop during the wait and a failed start after it are covered by the hub tests `stop_while_a_turn_waits_for_the_checkpoint_cancels_the_start` and `a_failed_start_after_the_wait_is_shown_as_a_failed_turn_with_its_reason`.
+
 ### Linux, release archive v0.15.0-rc.1
 
 The release candidate: commit `8976e8deb7` (branch `rc/0.15.0`), dry run 42482640273, `archive-linux-x64` (sha256 `69989ca64c40…`; the archive's COMMIT file says `8976e8deb7`). Installed by `install.sh` into a private prefix, home and port with the guard running its hub; the rows use the installed hub, client, assets, CEF runtime and browser helper. One command: `scripts/e2e-linux.sh --archive <tar.gz>` with the phone; driver scripts from `b0672a0150` (identical to the RC's for `scripts/e2e-linux.sh`, `test/e2e` and `test/cef`). Run 2026-11-08 13:28 UTC on the desktop, llvmpipe (frame budgets are not judged). The archive was never published or uploaded; the copies are deleted.
