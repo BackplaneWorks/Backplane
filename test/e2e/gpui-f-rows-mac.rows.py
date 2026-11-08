@@ -13,6 +13,14 @@ def ensure_sidebar():   # the sidebar is open when `main` starts at the sidebar'
         if rects().get('main', {}).get('x', 0) > 100 and 'thread:t1' in ctrls(): return True
         xin('click', *CC()); chord('ctrl b'); pause(1.5)
     return False
+def card(cid, done, tries=4):   # press a card's button; the card may not be laid out yet, or move (a checkpoint row appears), so look at the controls again and retry until it closes
+    for i in range(tries):
+        pause(2.0); shot('card-%s-%d' % (cid.replace(':', '_'), i)); ids = sorted(k for k in ctrls() if k.startswith('ask:'))
+        if cid == 'first': c = ids[0] if ids else None
+        else: c = cid if cid in ctrls() else None
+        if c: click_ctl(c)
+        if until(done, 8): return True
+    return False
 def say_(t):   # click the composer, type, press Return; if the message did not reach the hub, press Return again (a key can land before the field has focus)
     n = len([e for e in events() if e['$'] == 'MessagePosted' and t in e.get('text', '')])
     xin('click', *CC()); xin('type', t); xin('key', 'Return')
@@ -79,16 +87,16 @@ if want('F06'):
     closed = lambda a: any(e['$'] == 'AskClosed' and e.get('id') == a['id'] for e in events())
     sel(1); pass
     say_('zqapprove now'); until(lambda: asks('t1', 'approval'), 20); pause(2); shot('f6-approval')
-    a1 = asks('t1', 'approval')[-1]; click_ctl('ask:0:0'); ok1 = until(lambda: closed(a1), 20); until(lambda: 'PERM Bash -> ' in fake(), 15)
+    a1 = asks('t1', 'approval')[-1]; ok1 = card('ask:0:0', lambda: closed(a1)); until(lambda: 'PERM Bash -> ' in fake(), 15)
     allowed = bool(re.search(r'PERM Bash -> .*allow', fake(), re.I))
     until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
     n = len(asks('t1', 'approval')); say_('zqapprove again'); until(lambda: len(asks('t1', 'approval')) > n, 20); pause(2)
-    a2 = asks('t1', 'approval')[-1]; click_ctl('ask:0:2'); ok2 = until(lambda: closed(a2), 20); until(lambda: re.search(r'PERM Bash -> .*deny', fake(), re.I), 15)
+    a2 = asks('t1', 'approval')[-1]; ok2 = card('ask:0:2', lambda: closed(a2)); until(lambda: re.search(r'PERM Bash -> .*deny', fake(), re.I), 15)
     denied = bool(re.search(r'PERM Bash -> .*deny', fake(), re.I))
     log('F06-approval', ok1 and allowed and ok2 and denied, 'approval card (f6-approval.png) with Allow, Allow for session and Deny: Allow closed the ask and the agent got allow=%s; Deny closed the next and the agent got deny=%s' % (allowed, denied))
     until(lambda: any(e['$'] == 'TurnChanged' and e.get('thread') == 't1' and e.get('state') == 'completed' for e in events()), 20)
     say_('zqask'); until(lambda: asks('t1', 'input'), 30); pause(2); shot('f6-question'); q = asks('t1', 'input')[-1]
-    ids = sorted(k for k in ctrls() if k.startswith('ask:')); click_ctl(ids[0]) if ids else None; okq = until(lambda: closed(q), 20); until(lambda: 'PERM AskUserQuestion -> ' in fake(), 15)
+    ids = sorted(k for k in ctrls() if k.startswith('ask:')); okq = card('first', lambda: closed(q)); until(lambda: 'PERM AskUserQuestion -> ' in fake(), 15)
     heard = bool(re.search(r'PERM AskUserQuestion -> .*(USB-C|Barrel)', fake()))
     log('F06-question', bool(ids) and okq and heard, 'question card "%s" (f6-question.png), option buttons %s: the first closed it and the agent got the answer=%s' % ((q.get('detail') or '')[:30].replace('\n', ' '), ids, heard))
     sel(2); say_('zqplan'); until(lambda: asks('t2', 'plan'), 20); pause(2); shot('f6-plan'); pl = asks('t2', 'plan')
