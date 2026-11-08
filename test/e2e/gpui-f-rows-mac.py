@@ -169,6 +169,14 @@ def differs(a, b, box=None):
     return ImageChops.difference(a, b).getbbox() is not None
 def want(i):
     return not ONLY or i in ONLY
-exec(open(os.path.join(HERE, 'gpui-f-rows-mac.rows.py')).read())
+# each row is a block starting `if want('ID'):`; a row that raises is a FAIL with the error, and the next row still runs
+import traceback
+_segs = re.split(r'(?m)^(?=if want\()', open(os.path.join(HERE, 'gpui-f-rows-mac.rows.py')).read())
+exec(_segs[0])
+for _seg in _segs[1:]:
+    _rid = re.match(r"if want\('([^']+)'\)", _seg).group(1)
+    try: exec(_seg)
+    except Exception as _e:
+        log(_rid, False, 'the row stopped with %s: %s (at %s)' % (type(_e).__name__, _e, traceback.format_exc().strip().splitlines()[-3].strip()[:200]))
 cleanup()
 sys.exit(0 if all(r['ok'] for r in rows) else 1)
