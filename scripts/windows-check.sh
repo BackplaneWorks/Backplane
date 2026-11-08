@@ -13,6 +13,8 @@ tc=${WIN_LLVM_MINGW:-$(ls -d "$HOME"/.local/opt/llvm-mingw-* 2>/dev/null | sort 
 [ -x "$tc/bin/x86_64-w64-mingw32-clang" ] || { echo "windows-check: no llvm-mingw (set WIN_LLVM_MINGW, or unpack one into ~/.local/opt)" >&2; exit 2; }
 rustup target list --installed | grep -qx x86_64-pc-windows-gnu || { echo "windows-check: rustup target add x86_64-pc-windows-gnu" >&2; exit 2; }
 export CC_x86_64_pc_windows_gnu=$tc/bin/x86_64-w64-mingw32-clang CXX_x86_64_pc_windows_gnu=$tc/bin/x86_64-w64-mingw32-clang++ AR_x86_64_pc_windows_gnu=$tc/bin/llvm-ar
+# the client's manifest (vendored gpui embeds it for a Windows target built here): llvm-mingw's windres
+export RC_x86_64_pc_windows_gnu=$tc/bin/x86_64-w64-mingw32-windres RC_x86_64_pc_windows_gnullvm=$tc/bin/x86_64-w64-mingw32-windres
 if [ "${1:-}" = --xwin ]; then
   # x86_64-pc-windows-msvc through cargo-xwin (Microsoft's CRT and SDK, fetched once into ~/.cache/cargo-xwin): the release target.
   # The client is built with PROFILE (default fast: no debug assertions), so it draws with the shader bytes in native/gpui/vendor/gpui/windows-shaders.

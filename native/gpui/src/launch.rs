@@ -160,7 +160,7 @@ pub fn pair(addr: &str, code: &str) -> Result<(String, PathBuf)> {
     let file = dir.join("hub-token");
     let mut o = std::fs::OpenOptions::new(); o.create(true).write(true).truncate(true);
     #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; o.mode(0o600); }
-    std::io::Write::write_all(&mut o.open(&file)?, token.as_bytes())?;
+    std::io::Write::write_all(&mut o.open(&file)?, token.as_bytes())?; crate::plat::make_private(&file)?;
     Ok((addr.to_string(), file))
 }
 

@@ -157,6 +157,7 @@ fn write_private(path: &Path, body: &str) -> io::Result<()> {
     let mut o = std::fs::OpenOptions::new(); o.write(true).create(true).truncate(true);
     #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; o.mode(0o600); }
     let mut f = o.open(&tmp)?; f.write_all(body.as_bytes())?; f.sync_all()?; drop(f);
+    crate::plat::make_private(&tmp)?; // a rename keeps it
     std::fs::rename(&tmp, path)
 }
 fn parse_list(text: &str) -> Option<Vec<Hub>> {
