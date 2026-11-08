@@ -1,0 +1,2 @@
+# Tests the build gate runs in a process of their own, from the start (full path, one per line): each runs for most of a minute alone, so started late in libtest's name order it is the whole run's tail.
+settings::restart_e2e::a_storm_of_twenty_restarts_mid_turn_never_fails_a_start_on_the_accounts
