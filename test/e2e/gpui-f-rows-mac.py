@@ -42,7 +42,7 @@ seed = [{'$': 'ProjectCreated', 'id': 'p1', 'title': 'rows', 'root': P('proj'), 
 seed += [{'$': 'SettingSet', 'key': 'buy.t3', 'value': 't0', 'at': now + 3}, {'$': 'ModesSet', 'id': 't1', 'runtime': 'approval-required', 'interaction': 'default', 'model': '', 'at': now + 3}, {'$': 'ModesSet', 'id': 't2', 'runtime': 'full-access', 'interaction': 'plan', 'model': '', 'at': now + 3}]
 open(P('home/events.jsonl'), 'w').write(''.join(json.dumps(e) + '\n' for e in seed))
 env = dict(os.environ)
-env.update(LC_ALL='C', BACKPLANE_AGENTS=P('bin'), BACKPLANE_NO_UPDATE='1', SHELL='/bin/sh', FAKE_LOG=P('fake.log'), FAKE_SECS='600', PATH=P('bin') + ':' + os.environ['PATH'], BACKPLANE_ORDER_SERVER='http://127.0.0.1:%d' % order_srv.server_address[1])
+env.update(BACKPLANE_BROWSER_DEBUG='1', LC_ALL='C', BACKPLANE_AGENTS=P('bin'), BACKPLANE_NO_UPDATE='1', SHELL='/bin/sh', FAKE_LOG=P('fake.log'), FAKE_SECS='600', PATH=P('bin') + ':' + os.environ['PATH'], BACKPLANE_ORDER_SERVER='http://127.0.0.1:%d' % order_srv.server_address[1])
 def spawn(args, log_name, e=None, cwd=None):
     p = subprocess.Popen(args, env=e or env, cwd=cwd, stdout=open(P(log_name), 'ab'), stderr=subprocess.STDOUT); procs.append(p); return p
 def cleanup(*_):
