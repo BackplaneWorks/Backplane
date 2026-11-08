@@ -3,7 +3,7 @@
 # the client drew nothing on a bare Xvfb 21.1.4/21.1.12). Run as root in the container, with the checkout as the cwd.
 set -x; export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends xvfb i3 xclip imagemagick python3-pil libxtst6 libx11-6 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2t64 libxkbcommon0 curl ca-certificates binutils x11-utils x11-apps x11-xserver-utils git unzip xdotool xauth iproute2 procps python3 libfontconfig1 libfreetype6 libxcb1 file > /dev/null || apt-get install -y -qq xvfb i3 xclip imagemagick python3-pil mesa-vulkan-drivers curl ca-certificates unzip git x11-utils x11-apps x11-xserver-utils > /dev/null
+apt-get install -y -qq --no-install-recommends xvfb i3 xclip imagemagick python3-pil libxtst6 libx11-6 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2t64 libxkbcommon0 libcups2t64 libdrm2 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxext6 libxi6 libpango-1.0-0 libcairo2 libatspi2.0-0t64 libdbus-1-3 libexpat1 libwayland-client0 libxcb-xkb1 curl ca-certificates binutils x11-utils x11-apps x11-xserver-utils git unzip xdotool xauth iproute2 procps python3 libfontconfig1 libfreetype6 libxcb1 file || apt-get install -y -qq xvfb i3 xclip imagemagick python3-pil mesa-vulkan-drivers curl ca-certificates unzip git x11-utils x11-apps x11-xserver-utils > /dev/null
 curl -fsSL https://bun.sh/install | bash -s "bun-v$(cat deploy/bun-version)" > /dev/null; export PATH=$HOME/.bun/bin:$PATH
 cat /etc/os-release | head -2; dpkg -s xvfb | grep ^Version; uname -m
 A=$(ls "$2"/*.tar.gz | head -1)
