@@ -12,6 +12,9 @@ on:
       target:
         description: "linux-arm64 (ubuntu-22.04-arm) or linux-x64 (ubuntu-22.04)"
         default: "linux-arm64"
+      image:
+        description: "run the steps inside this container image (a newer X server), e.g. ubuntu:26.04; empty: on the runner"
+        default: ""
       probe_only:
         description: "only the display probe"
         type: boolean
@@ -36,6 +39,7 @@ jobs:
           run-id: ${{ inputs.archive_run }}
           github-token: ${{ github.token }}
       - name: tools
+        if: ${{ !inputs.image }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends xvfb i3 xclip imagemagick python3-pil libxtst6 libx11-6 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2 libxkbcommon0 curl ca-certificates binutils x11-utils x11-apps x11-xserver-utils > /dev/null
@@ -43,6 +47,7 @@ jobs:
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           uname -m; ls arch; ls /usr/share/vulkan/icd.d/
       - name: display probe
+        if: ${{ !inputs.image }}
         continue-on-error: true
         run: |
           mkdir pr && tar -xzf "$(ls arch/*.tar.gz | head -1)" -C pr
@@ -50,12 +55,17 @@ jobs:
           cp /tmp/xprobe-*.png . 2>/dev/null || true
           rm -rf pr
       - name: e2e-linux
-        if: ${{ !inputs.probe_only }}
+        if: ${{ !inputs.image && !inputs.probe_only }}
         run: |
           set -o pipefail
           export E2E_SHORT=1 E2E_SLOW=1
           git config --global user.email e2e@example.invalid; git config --global user.name e2e
           scripts/e2e-linux.sh --archive "$(ls arch/*.tar.gz | head -1)" --no-phone "$RUNNER_TEMP/e2e" 2>&1 | tee e2e.txt
+      - name: in a container
+        if: ${{ inputs.image }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/e2e"
+          docker run --rm --privileged -v "$PWD:/w" -v "$RUNNER_TEMP:$RUNNER_TEMP" -w /w ${{ inputs.image }} bash test/e2e/ci-container.sh ${{ inputs.probe_only && 'probe' || 'full' }} arch "$RUNNER_TEMP/e2e" 2>&1 | tee e2e.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
