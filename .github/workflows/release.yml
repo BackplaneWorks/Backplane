@@ -389,8 +389,8 @@ jobs:
           set -o pipefail; mkdir -p logs
           RC_DIR=$RUNNER_TEMP RC_KEEP=1 RC_LOGS=$PWD/logs bash test/update/rc-smoke.sh rel | tee smoke.txt
       - name: update and rollback
-        # the older dry run installed, this one taken from a loopback feed, the broken one rolled back from (Windows: the zip's, in test/windows)
-        if: always() && runner.os != 'Windows' && hashFiles('first/manifest.json') != '' && hashFiles('broken/manifest.json') != ''
+        # the older dry run installed (Windows: its zip's --install), this one taken from a loopback feed, the broken one rolled back from
+        if: always() && hashFiles('first/manifest.json') != '' && hashFiles('broken/manifest.json') != ''
         run: |
           set -o pipefail
           RC_DIR=$RUNNER_TEMP UPD_DIR=$RUNNER_TEMP bash test/update/install-e2e.sh first rel broken | tee update.txt
