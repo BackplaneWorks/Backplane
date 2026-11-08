@@ -66,6 +66,8 @@ print("" if not m else "%s %s %s/%s %s%% fold=%s status=%s" % (m.get("phase"), m
     sleep 0.5
   done
   local took; took=$(echo "$(date +%s.%N) - $t0" | bc)
+  grep -q '"name":"migrate:running"' "$R/win.log" && ok "$name: the desktop showed the import card while it ran" || bad "$name: the desktop never showed the import card"
+  grep -q '"TurnChanged","thread":"t1790292962-8017"' "$HUB/events.jsonl" && bad "$name: the imported uberbot ran a turn" || ok "$name: the imported uberbot stayed asleep"
   if [ -f "$OUT/shots/$name-running-1.png" ] && [ -f "$OUT/shots/$name-running-2.png" ]; then
     [ "$(md5sum <"$OUT/shots/$name-running-1.png")" != "$(md5sum <"$OUT/shots/$name-running-2.png")" ] && ok "$name: the desktop's card moved between two looks mid-import" || bad "$name: the desktop's card stood still"
   else bad "$name: no mid-import screenshots"; fi
