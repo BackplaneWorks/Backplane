@@ -20,6 +20,11 @@ from proto import Hub, Socket as Ws  # noqa: E402
 
 v014, rel = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
 panics = "--panics" in sys.argv
+def opt(name, default=""):
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
+# --large P,T,L: a 0.14 home shaped like a person's, written by the import lane's test/fixtures/make-v014-home.py (P projects, T threads, about L lines);
+# --throttle MS: the import slowed on purpose (BACKPLANE_IMPORT_THROTTLE_MS, test-only), so it runs past the guard's probation window
+large, throttle = opt("--large"), opt("--throttle")
 PASS, FAIL = [], []
 def ok(name, detail=""): PASS.append(name); print(f"PASS {name:12} {detail}", flush=True)
 def no(name, detail=""): FAIL.append(name); print(f"FAIL {name:12} {detail}", flush=True)
@@ -79,6 +84,13 @@ try:
     serve = os.path.join(prefix, "backplane-serve")
     if r.returncode != 0 or not os.access(serve, os.X_OK): no("install-014", (r.stdout + r.stderr)[-300:]); raise SystemExit
     ok("install-014", f"0.14.1's install.sh laid out {prefix}")
+    if large:
+        pp, tt, ll = large.split(",")
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "..", "fixtures", "make-v014-home.py"), h14, "--large", pp, tt, ll], capture_output=True, text=True, timeout=1800)
+        if r.returncode != 0: no("large-home", (r.stdout + r.stderr)[-300:]); raise SystemExit
+        lines = sum(1 for _ in open(os.path.join(h14, "events.jsonl"), "rb"))
+        ok("large-home", f"a 0.14 home of {pp} projects, {tt} threads, {lines} lines")
+    if throttle: env["BACKPLANE_IMPORT_THROTTLE_MS"] = throttle
     log014 = open(os.path.join(T, "serve-014.log"), "ab")
     p = subprocess.Popen([serve, "--home", h14, "--port", str(port), "--no-tailscale", "--foreground"], env=env, stdout=log014, stderr=log014, stdin=subprocess.DEVNULL, start_new_session=True)
     procs.append(p)
@@ -132,6 +144,33 @@ try:
         if bad and back: ok("back-to-014", f"{tag} died, marked bad, the guard runs 0.14 again on {port}: {gstat().get('text')}")
         else: no("back-to-014", f"bad={bool(bad)} build={gstat().get('build')} state={gstat().get('state')}")
     else:
+        # the move to 0.15 imports 0.14's home by itself (the shim sets BACKPLANE_IMPORT_AUTO): watch it from outside, as the new app and phones would.
+        # While it runs the hub answers /hello and /healthz with the progress, the guard keeps it on probation without failing it, and only then proves it.
+        def health():
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=5); c.request("GET", "/healthz"); r = c.getresponse(); return r.status, json.loads(r.read() or b"{}")
+        seen, hello_ok, rolled, t0 = [], 0, False, time.time()
+        deadline = time.time() + (3600 if large else 400)
+        while time.time() < deadline:
+            g = gstat()
+            if os.path.exists(os.path.join(prefix, "BAD")) and tag in open(os.path.join(prefix, "BAD")).read(): rolled = True; break
+            try:
+                st, h = health(); m = h.get("migrating")
+                if isinstance(m, dict) and m.get("state") == "running":
+                    seen.append((round(time.time() - t0), m.get("done", 0), m.get("total", 0), g.get("build"), g.get("stable")))
+                    try:
+                        if b"migrating" in hello(): hello_ok += 1
+                    except Exception: pass
+            except Exception: pass
+            if g.get("build") == tag and g.get("stable") is True and (not large or seen): break
+            time.sleep(2)
+        if large or throttle:
+            if rolled: no("migrating", f"the guard rolled {tag} back while it imported: {open(os.path.join(prefix, 'BAD')).read().strip()[:160]}")
+            elif not seen: no("migrating", "no import progress was ever reported on /healthz")
+            else:
+                dones = [d for _, d, _, _, _ in seen]; unproven = all(not s for *_, s in seen); span = seen[-1][0] - seen[0][0]
+                rising = dones == sorted(dones) and dones[-1] > dones[0]
+                if rising and unproven and hello_ok: ok("migrating", f"{len(seen)} progress samples over {span} s ({dones[0]} -> {dones[-1]} of {seen[-1][2]}), /hello carried it {hello_ok} times, the build stayed on probation and was never failed")
+                else: no("migrating", f"rising={rising} unproven-while-importing={unproven} hello={hello_ok} samples={seen[:3]}...{seen[-2:]}")
         on15 = until(400, lambda: gstat().get("build") == tag and gstat().get("stable") is True)
         if not on15: no("on-015", f"build={gstat().get('build')} state={gstat().get('state')} text={gstat().get('text')}"); raise SystemExit
         h14_at_proof = tree(h14)

@@ -126,6 +126,12 @@ pub fn refuse_remote(a: &Action, recent_remote: &[u64], now: u64, target: Option
     None
 }
 
+/// Whether what `/healthz` said holds the "proven" clock back: history still folding, or a migration (0.14's import) under way. Such a hub is well and stays on
+/// probation; its stable seconds start when both are over. A crash or missed probes meanwhile still fail it.
+pub fn holds_proof(health: &serde_json::Value) -> bool {
+    health["folding"].as_u64().unwrap_or(0) > 0 || health["migrating"]["state"] == "running" || health["status"] == "migrating"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +231,16 @@ mod tests {
     #[test] fn actions_parse() {
         assert_eq!(Action::parse("restart", ""), Some(Action::Restart)); assert_eq!(Action::parse("normal", ""), Some(Action::Restart));
         assert_eq!(Action::parse("use", "b"), Some(Action::Use("b".into()))); assert_eq!(Action::parse("use", ""), None); assert_eq!(Action::parse("x", ""), None);
+    }
+    #[test] fn a_migration_or_a_fold_holds_the_proof_back() {
+        use serde_json::json;
+        assert!(holds_proof(&json!({"status": "ok", "folding": 2})));
+        assert!(holds_proof(&json!({"status": "migrating", "folding": 1, "migrating": {"state": "running", "phase": "copying", "done": 120000, "total": 462847}})));
+        assert!(holds_proof(&json!({"status": "ok", "folding": 0, "migrating": {"state": "running", "done": 1, "total": 9}})), "running, whatever folding says");
+        assert!(!holds_proof(&json!({"status": "ok", "folding": 0, "migrating": {"state": "done", "done": 9, "total": 9}})), "a finished import no longer holds it");
+        assert!(!holds_proof(&json!({"status": "ok", "folding": 0, "migrating": {"state": "failed"}})), "nor a failed one: the start is judged as any other");
+        assert!(!holds_proof(&json!({"status": "ok", "folding": 0})), "nothing running: the clock runs");
+        assert!(!holds_proof(&json!({"status": "ok", "folding": 0, "migrating": null})));
+        assert!(!holds_proof(&serde_json::Value::Null), "an old build's /hello says neither");
     }
 }

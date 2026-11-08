@@ -40,7 +40,8 @@ if [ -x "$prefix/backplane-serve.0.14" ]; then
 fi
 cur=$(cat "$prefix/CURRENT" 2>/dev/null || true)
 [ -n "$cur" ] && [ -d "$prefix/builds/$cur" ] || { cur=v0.14-legacy; printf '%s\n' "$cur" > "$prefix/CURRENT"; }
-export BACKPLANE_IMPORT_FROM="$old"
+# the person pressed Update in 0.14: 0.15 brings 0.14's projects across by itself, in the background, with progress (BACKPLANE_IMPORT_AUTO; keys stay for setup to ask)
+export BACKPLANE_IMPORT_FROM="$old" BACKPLANE_IMPORT_AUTO=1
 # once the guard runs, the move to 0.15 on probation (the same request a normal update makes)
 if [ -n "$tag" ] && [ "$cur" != "$tag" ] && [ -d "$prefix/builds/$tag" ]; then
   ( i=0; while [ $i -lt 300 ]; do
