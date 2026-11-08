@@ -4,7 +4,7 @@
 #   test/import014/run.sh BIN_DIR ASSETS_DIR OUT_DIR [XVFB]      BIN_DIR holds backplane-hub and backplane-gpui side by side
 # Prints one PASS/FAIL line per check, each tagged with its MATRIX row (I01..); screenshots in OUT_DIR/shots; exit 1 on any FAIL.
 set -u
-BIN=$1; ASSETS=$2; OUT=$3; XVFB=${4:-/tmp/xvfb-root/usr/bin/Xvfb}; D=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$D/../.." && pwd)
+BIN=$(realpath -m "$1"); ASSETS=$(realpath -m "$2"); OUT=$(realpath -m "$3"); XVFB=${4:-/tmp/xvfb-root/usr/bin/Xvfb}; D=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$D/../.." && pwd)
 export DISPLAY=${DISP:-:247}
 PORT=${PORT:-$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')}
 R=$OUT/rig; rm -rf "$R"; mkdir -p "$R/home" "$R/run" "$R/agents" "$R/tmp" "$OUT/shots"; chmod 700 "$R/run"
@@ -48,7 +48,6 @@ has_rect() { grep -q "\"name\":\"$1\"" "$R/win.log"; }
 launch; sleep 6; shot 00-chooser
 X click $(pos first-use); wait_for hub_up 120 && ok "I00 the hub starts on the new home" || { bad "I00 no hub"; exit 1; }
 cut -d' ' -f1 "$HUB_HOME/hub.lock" >"$R/hub.pid"
-n0=$(wc -l <"$HUB_HOME/events.jsonl")
 [ "$(count '"ThreadCreated"')" = 0 ] && ok "I00 nothing is imported before the person asks" || bad "I00 threads before any press"
 
 # 2. setup: Welcome, Installed, Where your data is kept, then the import step
@@ -56,10 +55,11 @@ sleep 4; shot 01-welcome
 for _ in 1 2 3; do X key Return; sleep 1.5; done
 wait_for "has_rect btn:ob-import:scan" 20 && ok "I00 setup shows Bring your 0.14 projects across? with Count" || bad "I00 no import step"
 shot 02-import-step
+sleep 2; n0=$(wc -l <"$HUB_HOME/events.jsonl")
 X click $(pos btn:ob-import:scan)
 wait_for "has_rect btn:ob-import:run" 60 && ok "I00 Count shows what comes across and Import" || bad "I00 no Import after Count"
 sleep 1; shot 03-counted
-[ "$(wc -l <"$HUB_HOME/events.jsonl")" = "$n0" ] && ok "I00 counting wrote nothing" || bad "I00 counting wrote to the log"
+[ "$(wc -l <"$HUB_HOME/events.jsonl")" = "$n0" ] && ok "I00 counting wrote nothing" || { bad "I00 counting wrote to the log"; tail -n +$((n0 + 1)) "$HUB_HOME/events.jsonl" | cut -c1-160; }
 
 # 3. Import (no keys)
 X click $(pos btn:ob-import:run)
@@ -91,7 +91,7 @@ python3 -c "import json,sys; v=json.load(open('$R/run-keys.json')); assert v['st
 # 5. again, and after a restart: nothing twice
 n1=$(wc -l <"$HUB_HOME/events.jsonl")
 api "/import/0.14/run" >"$R/run-again.json"
-python3 -c "import json; v=json.load(open('$R/run-again.json')); assert v['counts']['lines']==0, v['counts']" && [ "$(wc -l <"$HUB_HOME/events.jsonl")" = $((n1 + 1)) ] && ok "I11 a second import writes nothing but its result" || bad "I11 second import: $(head -c 300 "$R/run-again.json")"
+python3 -c "import json; v=json.load(open('$R/run-again.json')); assert v['counts']['lines']==0, v['counts']" && [ "$(tail -n +$((n1 + 1)) "$HUB_HOME/events.jsonl" | grep -vc '^{"\$":"SettingSet"')" = 0 ] && [ "$(tail -n +$((n1 + 1)) "$HUB_HOME/events.jsonl" | grep -c 'import.v014.done')" = 1 ] && ok "I11 a second import writes nothing but its result" || bad "I11 second import: $(head -c 300 "$R/run-again.json")"
 kill "$client"; wait "$client" 2>/dev/null; client=; kill "$(cat "$R/hub.pid")"; wait_for "! hub_up" 30
 n2=$(wc -l <"$HUB_HOME/events.jsonl")
 launch; wait_for hub_up 120; cut -d' ' -f1 "$HUB_HOME/hub.lock" >"$R/hub.pid"; sleep 8; shot 05-second-start

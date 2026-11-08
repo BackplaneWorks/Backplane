@@ -257,7 +257,9 @@ impl Accounts {
         self.mutate_save(|g| {
             for p in list {
                 let (id, provider, epoch) = (p["id"].as_str().unwrap_or(""), p["provider"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0));
-                if !valid_id(id) || !matches!(provider, "claude" | "codex") || epoch < 1 || g.profiles.len() >= 40 || g.profiles.iter().any(|x| x.id == id) { continue }
+                // one here already: with its login now copied, a sign-in it was asked for is no longer owed (the next check says how it stands)
+                if let Some(x) = g.profiles.iter_mut().find(|x| x.id == id) { if signed_in && x.state == "expired" { x.state = "unchecked".into(); x.expired_at = 0; x.message = String::new(); n += 1; } continue }
+                if !valid_id(id) || !matches!(provider, "claude" | "codex") || epoch < 1 || g.profiles.len() >= 40 { continue }
                 let store = p["store"].as_str().filter(|s| valid_id(s)).unwrap_or("").to_string();
                 let (state, expired_at, message) = if signed_in { ("unchecked".to_string(), 0, String::new()) } else { ("expired".to_string(), now, EXPIRED_SHORT.to_string()) };
                 g.profiles.push(Profile { id: id.into(), provider: provider.into(), label: label(p["label"].as_str().unwrap_or("")), epoch, fingerprint: p["fingerprint"].as_str().unwrap_or("").into(), store, state, identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message, expired_at, proven_at: 0 });
