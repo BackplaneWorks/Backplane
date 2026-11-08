@@ -8,7 +8,7 @@ Backplane 0.14 (the Bend hub and its Electron app, tags `v0.14.0`, `v0.14.1`, `m
 | --- | --- | --- | --- |
 | Linux | `~/.backplane-bend` | `~/.local/share/backplane` | `~/.backplane/hub` |
 | macOS | `~/.backplane-bend` (`/Users/<you>`) | the app | `~/Library/Application Support/Backplane/hub` |
-| Windows | `%USERPROFILE%\.backplane-bend` | `%LOCALAPPDATA%\Backplane` | `%APPDATA%\Backplane\hub` |
+| Windows | `%USERPROFILE%\.backplane-bend` (the desktop app), or `<cygwin root>\home\<user>\.backplane-bend` (the hub-only launcher `Run-Backplane.ps1`, under Cygwin; the root is `BACKPLANE_CYGWIN_ROOT`, `%LOCALAPPDATA%\Backplane\cygwin64` or `C:\cygwin64`) | `%LOCALAPPDATA%\Backplane` | `%APPDATA%\Backplane\hub` |
 
 0.14's desktop app put its home at `os.homedir()/.backplane-bend` on every system (`desktop/main.cjs`). The 0.14 home is never a 0.15 home (`launch::home_problem`). Bots kept their working folders in `<home>/bots/<id>`. 0.15 keeps them in `~/.backplane/bots/<id>`.
 
@@ -65,7 +65,7 @@ What is in a 0.14 home:
 - **Settings, Import from 0.14:** the same rows, at any time.
 - **RPC:** `import.v014` with `{op: "scan" | "run", secrets: bool}`. It answers at once, and progress and the result go to the hub info key `import.v014`, as JSON text. The last result is also the setting `import.v014.done`.
 - **HTTP**, with the home's token: `GET /import/0.14` returns what would come (or the last result), and `GET /import/0.14/run[?secrets=1]` imports and answers the result.
-- **Where it looks:** `BACKPLANE_IMPORT_FROM`, else `<user folder>/.backplane-bend`. A home under the temp folder (tests) looks only at the variable. A copy of a real log (`BACKPLANE_COPY=1`) imports nothing.
+- **Where it looks:** `BACKPLANE_IMPORT_FROM`, else each place in the table above that holds a 0.14 home, the one whose log was written last. A home under the temp folder (tests) looks only at the variable. A copy of a real log (`BACKPLANE_COPY=1`) imports nothing.
 - **The 0.14 to 0.15 update path:** 0.14.1's updater installs 0.15 and its shim starts the 0.15 guard on the new default home with `BACKPLANE_IMPORT_FROM` set to the home 0.14 ran with. The person then sees the setup step, as on a fresh install.
 
 ## Tests
