@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 object DataClient {
     enum class Conn { OFFLINE, CONNECTING, ONLINE }
     private lateinit var app: Context
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val http = OkHttpClient.Builder().pingInterval(0, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()
 
     var conn by mutableStateOf(Conn.OFFLINE); private set
@@ -432,6 +432,10 @@ object DataClient {
     // ---- the hub's additions to data/1 (features actions, search, models, mentions, bots, notify)
     fun has(f: String) = f in features
     var openFromIntent by mutableStateOf<String?>(null)
+    /** A tapped link the hub resolved (DataLinks.kt): the root screen opens it. A link that opens nothing leaves a short note; a project link scrolls the list to it. */
+    var linkTarget by mutableStateOf<LinkTarget?>(null)
+    var linkNote by mutableStateOf("")
+    var focusProject by mutableStateOf("")
     /** An account whose sign-in an alert's tap (or backplane://account/<id>) opens. */
     var openAccount by mutableStateOf<String?>(null)
     // a tapped notification's approval: the thread scrolls to it once it is loaded

@@ -172,7 +172,7 @@ struct DataRoomView: View {
                     ForEach(posts) { p in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(p.from.isEmpty ? "you" : p.from).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent)
-                            Text(p.text).dmono(13).textSelection(.enabled)
+                            DLinkText(text: p.text)
                         }
                     }
                 }.padding()

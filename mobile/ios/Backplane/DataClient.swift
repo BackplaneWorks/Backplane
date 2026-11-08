@@ -10,6 +10,15 @@ import UserNotifications
 final class DataClient {
     /// A thread a link in a message asked to open (backplane://thread/<id>); the root screen takes it.
     var pendingThread: String?
+    /// a tapped link the hub resolved (DataLinks.swift): the root screen opens it; a link that opens nothing leaves a short note
+    var linkTarget: DLinkTarget?
+    var linkNote = ""
+    /// a project a link named: the list opens its group and scrolls to it
+    var focusProject = ""
+    #if DEBUG
+    /// the link the last tap handed on (the UI tests read it: a system handler cannot be observed from the app)
+    var lastLink = ""
+    #endif
     static let shared = DataClient()
     enum Conn: String { case offline, connecting, online }
 

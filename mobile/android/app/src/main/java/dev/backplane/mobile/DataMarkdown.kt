@@ -135,18 +135,19 @@ fun mdBlocks(src: String): List<MdBlock> {
     return parse(src.replace("\r\n", "\n").split('\n')).also { blockCache.put(src, it) }
 }
 
-/** The link a tap follows. A thread link opens that thread; anything else goes to the system. */
+/** The link a tap follows (DataLinks.kt): web addresses, emails and phone numbers go to the system; a backplane:// link or a path is asked of the hub and opens its screen here, or says why not. */
 object MdLinks {
     var ctx: android.content.Context? = null
+    /** the thread whose messages are on show: a path in them is looked for in its project */
+    var thread: String = ""
     fun open(url: String) {
-        val u = runCatching { android.net.Uri.parse(url) }.getOrNull() ?: return
-        if (u.scheme == "backplane" || u.scheme == BuildConfig.URL_SCHEME) {
-            if (u.host == "thread") u.pathSegments.firstOrNull()?.let { DataClient.openFromIntent = it }
-            return
+        val c = ctx
+        val scheme = url.substringBefore(':', "")
+        when {
+            url.startsWith(PATH_SCHEME) || scheme == "backplane" || scheme == BuildConfig.URL_SCHEME -> DataClient.openLink(url, thread)
+            scheme == "http" || scheme == "https" || scheme == "mailto" -> c?.let { runCatching { it.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+            scheme == "tel" -> c?.let { runCatching { it.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
         }
-        if (u.scheme != "http" && u.scheme != "https" && u.scheme != "mailto") return
-        val c = ctx ?: return
-        runCatching { c.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, u).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 }
 
@@ -158,8 +159,6 @@ fun mdInline(s: String, p: MdPalette): AnnotatedString {
     inlineCache.get(key)?.let { return it }
     return buildAnnotatedString { inl(s, p, 0) }.also { inlineCache.put(key, it) }
 }
-
-private fun isUrlStart(s: String, i: Int) = (s.startsWith("http://", i) || s.startsWith("https://", i) || s.startsWith("backplane://", i)) && (i == 0 || !s[i - 1].isLetterOrDigit())
 
 private fun AnnotatedString.Builder.link(url: String, p: MdPalette, body: AnnotatedString.Builder.() -> Unit) {
     withLink(LinkAnnotation.Clickable(url, TextLinkStyles(SpanStyle(color = p.link, textDecoration = TextDecoration.Underline))) { MdLinks.open(url) }) { body() }
@@ -175,7 +174,12 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int) {
         if (c == '`') {
             var n = 0; while (i + n < s.length && s[i + n] == '`') n++
             val tick = "`".repeat(n); val e = s.indexOf(tick, i + n)
-            if (e > 0) { withStyle(SpanStyle(fontFamily = BpMono, color = p.code, background = p.codeBg, fontSize = 12.5.sp)) { append(s.substring(i + n, e).trim('`').let { if (it.startsWith(" ") && it.endsWith(" ") && it.isNotBlank()) it.trim() else it }) }; i = e + n; continue }
+            if (e > 0) {
+                val inner = s.substring(i + n, e).trim('`').let { if (it.startsWith(" ") && it.endsWith(" ") && it.isNotBlank()) it.trim() else it }
+                val code: AnnotatedString.Builder.() -> Unit = { withStyle(SpanStyle(fontFamily = BpMono, color = p.code, background = p.codeBg, fontSize = 12.5.sp)) { append(inner) } }
+                if (isPathText(inner)) link(pathLink(inner), p) { code() } else code()
+                i = e + n; continue
+            }
             append(tick); i += n; continue
         }
         if (c == '!' && s.startsWith("![", i) || c == '[') {
@@ -186,18 +190,15 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int) {
                 var pd = 0; var k = close + 1; var end = -1
                 while (k < s.length) { if (s[k] == '(') pd++ else if (s[k] == ')') { pd--; if (pd == 0) { end = k; break } }; k++ }
                 if (end > 0) {
-                    val url = s.substring(close + 2, end).trim().removePrefix("<").substringBefore(' ').removeSuffix(">")
+                    val url = s.substring(close + 2, end).trim().removePrefix("<").substringBefore(' ').removeSuffix(">").let { if (isPathText(it)) pathLink(it) else it }
                     val label = s.substring(st + 1, close)
                     link(url, p) { if (c == '!') append(label.ifEmpty { url }) else inl(label, p, depth + 1) }
                     i = end + 1; continue
                 }
             }
         }
-        if (isUrlStart(s, i)) {
-            var e = i; while (e < s.length && !s[e].isWhitespace() && s[e] !in "<>\"'") e++
-            while (e > i && s[e - 1] in ".,;:!?)]}*_") { if (s[e - 1] == ')' && s.substring(i, e).count { it == '(' } >= s.substring(i, e).count { it == ')' }) break; e-- }
-            val url = s.substring(i, e); link(url, p) { append(url) }; i = e; continue
-        }
+        val wl = webLink(s, i)
+        if (wl != null) { val url = wl.url; link(url, p) { append(url) }; i = wl.end; continue }
         if ((c == '*' || c == '_') && s.startsWith("$c$c", i) && i + 2 < s.length && !s[i + 2].isWhitespace() && (c == '*' || i == 0 || !s[i - 1].isLetterOrDigit())) {
             val tok = "$c$c"; var e = s.indexOf(tok, i + 2)
             while (e > 0 && s[e - 1].isWhitespace()) e = s.indexOf(tok, e + 2)
@@ -218,6 +219,9 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int) {
             }
             if (e > i + 1) { withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { inl(s.substring(i + 1, e), p, depth + 1) }; i = e + 1; continue }
         }
+        // emails, phone numbers and file paths in running text
+        val al = autoLink(s, i)
+        if (al != null) { val t = s.substring(i, al.end); link(al.url, p) { append(t) }; i = al.end; continue }
         append(c); i++
     }
 }
@@ -243,7 +247,7 @@ private fun heading(level: Int) = when (level) { 1 -> 18; 2 -> 16; 3 -> 14 else 
 fun MdText(src: String, modifier: Modifier = Modifier, thread: String? = null) {
     val dcs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
-    SideEffect { MdLinks.ctx = ctx.applicationContext }
+    SideEffect { MdLinks.ctx = ctx.applicationContext; MdLinks.thread = thread ?: "" }
     val dark = dcs.background.red < .5f
     val pal = remember(dcs, dark) { MdPalette(dcs.onSurface, dcs.onSurface, dcs.surfaceContainerHigh, dcs.primary, dark) }
     val blocks = remember(src) { mdBlocks(src) }

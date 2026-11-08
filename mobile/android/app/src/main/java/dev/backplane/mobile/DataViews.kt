@@ -69,7 +69,7 @@ internal fun dAgo(ms: Long): String {
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
-private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
+private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
 
 @Composable
 fun DataRoot() {
@@ -77,13 +77,27 @@ fun DataRoot() {
     // an expired sign-in's alert: that account, its sign-in started
     LaunchedEffect(DataClient.openAccount) { DataClient.openAccount?.let { page = Page.Account(it, true); DataClient.openAccount = null } }
     LaunchedEffect(DataClient.openFromIntent) { DataClient.openFromIntent?.let { page = if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it); DataClient.openFromIntent = null } }
+    // a link the hub resolved (DataLinks.kt): its screen
+    LaunchedEffect(DataClient.linkTarget) {
+        val t = DataClient.linkTarget ?: return@LaunchedEffect
+        DataClient.linkTarget = null
+        when (t.kind) {
+            LinkTarget.Kind.THREAD -> page = Page.Thread(t.id)
+            LinkTarget.Kind.FILE -> page = Page.Viewer(t.id, t.path, t.line)
+            LinkTarget.Kind.PROJECT -> { DataClient.focusProject = t.id; page = Page.Home }
+            LinkTarget.Kind.ROOM -> {
+                if (DataClient.rooms.none { it.id == t.id }) runCatching { DataClient.loadBots() }
+                DataClient.rooms.firstOrNull { it.id == t.id }?.let { page = Page.Room(it) } ?: DataClient.say("That room is not on this hub.")
+            }
+        }
+    }
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
             Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders }, { page = Page.New(it) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, "Terminal") { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
-            is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it) { page = Page.Thread(p.id) } }
+            is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
             is Page.Thread -> { BackHandler { page = Page.Home }; ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }) { page = Page.Home } }
@@ -96,6 +110,7 @@ fun DataRoot() {
             is Page.New -> { BackHandler { page = Page.Home }; NewThreadScreen(p.project, { page = Page.Home }) { page = Page.Thread(it) } }
         } }
         DataClient.askLink?.let { AskPair(it) }
+        LinkNote()
     }
 }
 
@@ -241,6 +256,17 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
     val termsOpen = LocalTermsOpen.current
     LaunchedEffect(DataClient.conn) { DataClient.refresh(); if (DataClient.conn == DataClient.Conn.ONLINE && DataClient.has("bots")) runCatching { DataClient.loadBots() } }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var flash by remember { mutableStateOf("") }
+    val rowOf = remember { mutableMapOf<String, Int>() }   // a project's header row in the list
+    // a project link: its group opens, the list scrolls to it and its row is marked for a moment
+    LaunchedEffect(DataClient.focusProject, DataClient.projects.size) {
+        val id = DataClient.focusProject; if (id.isEmpty() || DataClient.projects.none { it.id == id }) return@LaunchedEffect
+        shut = shut - id; prefs.edit().putStringSet("projects.shut", shut).apply(); flash = id; DataClient.focusProject = ""
+        kotlinx.coroutines.delay(150)
+        rowOf[id]?.let { listState.animateScrollToItem(it) }
+        kotlinx.coroutines.delay(2500); if (flash == id) flash = ""
+    }
     Column(Modifier.fillMaxSize().background(dcs.surfaceVariant)) {
         DBar(DataClient.hubName.ifEmpty { "Backplane" }, null, { dismiss ->
             DataClient.links.drop(1).mapNotNull { Pairing.key(it) }.forEach { k -> DropdownMenuItem({ Text(k, fontFamily = BpMono) }, { dismiss(); DataClient.useHub(k) }, Modifier.testTag("home.hub.use.$k")) }
@@ -265,12 +291,17 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 Text(if (DataClient.listsLoaded) "No projects yet" else "Loading…", color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
                 if (DataClient.listsLoaded) { Spacer(Modifier.height(12.dp)); DBtn("Add a project", true, true, onClick = addProject) }
             }
-        } else LazyColumn(Modifier.fillMaxSize().testTag("home.list")) {
-            items(DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, "uberbot") { open(b.thread) } }
+        } else LazyColumn(Modifier.fillMaxSize().testTag("home.list"), state = listState) {
+            val uber = DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }
+            items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, "uberbot") { open(b.thread) } }
+            var at = uber.size; rowOf.clear()
             for (p in projects) {
                 val closed = p.id in shut
+                rowOf[p.id] = at; at += 1
+                if (!closed) { val g0 = ThreadGroups.split(threads, p.id); val n0 = ThreadGroups.count(p.settledCount, g0.settled.size); at += g0.active.size + (if (g0.active.isEmpty() && n0 == 0) 1 else 0) + (if (n0 > 0) 1 else 0)
+                    if (n0 > 0 && p.id in DataClient.settledOpen) at += g0.settled.size + (if (p.id in DataClient.settledMore) 1 else 0) }
                 item(key = "p:${p.id}") {
-                    Row(Modifier.fillMaxWidth().height(40.dp).combinedClickable(onClick = {
+                    Row(Modifier.fillMaxWidth().height(40.dp).background(if (flash == p.id) dcs.primary.copy(alpha = .18f) else Color.Transparent).combinedClickable(onClick = {
                         shut = if (closed) shut - p.id else shut + p.id; prefs.edit().putStringSet("projects.shut", shut).apply()
                     }, onLongClick = { projMenu = p }).padding(start = 10.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
@@ -581,7 +612,7 @@ private fun EntryRow(tid: String, e: DEntry) {
         "user" -> Column(Modifier.fillMaxWidth().padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
             e.localImages.forEach { Pic(it, 160); Spacer(Modifier.height(4.dp)) }
             e.attachments.filter { e.localImages.isEmpty() }.forEach { PicById(it.id, 160); Spacer(Modifier.height(4.dp)) }
-            if (e.text.isNotEmpty()) Box(Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) { Text(e.text, color = dcs.onSurface, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = BpMono) }
+            if (e.text.isNotEmpty()) Box(Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) { LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19) }
             if (e.sending) DMono("sending…", dfaint, modifier = Modifier.padding(top = 3.dp))
             else if (e.failed) DMono("not sent · retry", dcs.error, modifier = Modifier.clickable { DataClient.retry(tid, e) }.padding(top = 3.dp))
             else DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 3.dp))
@@ -596,7 +627,7 @@ private fun EntryRow(tid: String, e: DEntry) {
         else -> Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
             val c = if (e.tone == "error") dcs.error else dcs.onSurfaceVariant
             if (e.label.isNotEmpty()) { Text(e.label, color = c, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)) }
-            Text(e.text, color = c, fontSize = 12.sp, fontFamily = BpMono)
+            LinkText(e.text, tid, color = c, size = 12)
         }
     }
 }

@@ -4,7 +4,7 @@
 set -eu
 BUN=$(command -v bun)   # before PATH is cut down below
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}
-H=${H:-$ROOT/build/mobile/hub}; PORT=${PORT:-3841}; HUBBIN=${HUBBIN:-$ROOT/build/mobile/target/fast/backplane-hub}
+H=${H:-$ROOT/build/mobile/hub}; PORT=${PORT:-3841}; HOST=${HOST:-127.0.0.1}; HUBBIN=${HUBBIN:-$ROOT/build/mobile/target/fast/backplane-hub}
 case "${1:-}" in
 start)
   rm -rf $H/home $H/proj; mkdir -p $H/home $H/proj $H/bin
@@ -19,7 +19,9 @@ start)
   (cd $H/proj && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm "start" && printf 'The tube socket moves 2 mm left.\n' >> README.md && echo '{}' > $H/proj/.gitignore.tmp && rm $H/proj/.gitignore.tmp)
   mkdir -p $H/home/shots; [ "${LIVE:-}" = 1 ] || cp $ROOT/test/mobile/browser-frame.jpg $H/home/shots/t1.jpg   # a browser page's newest frame for the thread t1
   printf '# Notes\n\nThe tube socket moves 2 mm left.\n' > $H/proj/docs/notes.md
-  python3 - "$H" <<'PY'
+  # LINKS=1: a file the link check opens (src/main.rs, 24 lines) and a thread "Links" whose messages hold every kind of link (test/mobile/links-fixture.md)
+  mkdir -p $H/proj/src; i=1; while [ $i -le 24 ]; do echo "// line $i of src/main.rs" >> $H/proj/src/main.rs; i=$((i+1)); done
+  ROOT=$ROOT python3 - "$H" <<'PY'
 import json,sys,time
 H=sys.argv[1]; N=int(time.time())
 ev=[{"$":"ProjectCreated","id":"p1","title":"demo","root":H+"/proj","at":N},
@@ -36,6 +38,12 @@ ev=[{"$":"ProjectCreated","id":"p1","title":"demo","root":H+"/proj","at":N},
     {"$":"BotSet","id":"b1","name":"ada","thread":"tb1","look":3,"persona":"","at":N},
     {"$":"RoomSet","id":"r1","name":"lab","members":"ada","at":N},
     {"$":"ThreadCreated","id":"t2","project":"p1","title":"BOM review","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":N}]
+import os
+if os.environ.get("LINKS") == "1":
+    fx=open(os.path.join(os.environ["ROOT"],"test/mobile/links-fixture.md")).read().rstrip("\n")
+    ev+=[{"$":"ThreadCreated","id":"t3","project":"p1","title":"Links","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":N+2},
+         {"$":"MessagePosted","thread":"t3","msg":"m1","role":"user","text":"Where is it? backplane://thread/t2 and src/main.rs:5, mail me@example.com","at":N+2},
+         {"$":"MessagePosted","thread":"t3","msg":"m2","role":"assistant","text":fx,"at":N+3}]
 open(H+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))
 PY
   # STEP models: the console FreeCAD only (the hub tries FreeCAD's GUI first, which hangs headless on this machine: no `freecad` on the hub's PATH, no GUI to find)
@@ -44,8 +52,8 @@ PY
   [ "${LIVE:-}" = 1 ] && { printf '#!/bin/sh\nexport BACKPLANE_CHROME=${CHROME:-/usr/bin/google-chrome}\nexec %s %s/tools/browser/src/main.ts "$@"\n' "$BUN" "$ROOT" > $H/bin/backplane-browser; chmod +x $H/bin/backplane-browser; export BACKPLANE_BROWSER=$H/bin/backplane-browser; }
   export BACKPLANE_AGENTS=$H/bin BACKPLANE_NO_UPDATE=1 BP_STANDIN_MODE=${STANDIN:-stream} BP_STREAM_N=8 BP_STREAM_MS=200
   cd $H/proj
-  nohup systemd-run --user --scope -q nice -n 10 $HUBBIN --home $H/home --port $PORT --host 127.0.0.1 --no-tailscale --foreground > $H/hub.log 2>&1 &
-  echo $! > $H/pid; sleep 4; curl -s -m3 http://127.0.0.1:$PORT/hello | head -c 160; echo ;;
-link) echo "http://10.0.2.2:$PORT/#token=$(cat $H/home/token)" ;;
+  nohup systemd-run --user --unit=bp-data-hub-$PORT -q --collect nice -n 10 $HUBBIN --home $H/home --port $PORT --host $HOST --no-tailscale --foreground > $H/hub.log 2>&1 &
+  echo $! > $H/pid; sleep 4; curl -s -m3 http://$HOST:$PORT/hello | head -c 160; echo ;;
+link) echo "http://${LINKHOST:-10.0.2.2}:$PORT/#token=$(cat $H/home/token)" ;;
 stop) kill "$(cat $H/pid)" 2>/dev/null || true; rm -f $H/pid; echo stopped ;;
 esac
