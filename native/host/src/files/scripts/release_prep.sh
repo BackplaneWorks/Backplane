@@ -25,5 +25,7 @@ mkdir "$t/src"
 tar -xf "$t/source.tar" -C "$t/src"
 links=$(find "$t/src" -type l -print)
 [ -z "$links" ] || { echo 'snapshot contains symlinks; release inputs must be committed regular files'; exit 1; }
-printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$t" "$t/src/$p" "$gd" "$top" "$c" "$prev" "$pc" "$final" "$stage" "$lock" "$object"
+# the paths as the hub can open them: Git for Windows' sh says /c/x and /tmp/x, which only it understands; cygpath -m says C:/x
+w() { if command -v cygpath >/dev/null 2>&1; then cygpath -m -- "$1"; else printf '%s\n' "$1"; fi; }
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$(w "$t")" "$(w "$t/src/$p")" "$(w "$gd")" "$(w "$top")" "$c" "$prev" "$pc" "$(w "$final")" "$(w "$stage")" "$(w "$lock")" "$object"
 trap - 0
