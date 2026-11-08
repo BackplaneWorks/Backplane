@@ -142,6 +142,36 @@ Each lane's rows: `| ID | result | commit | rig | evidence |`.
 | S13 | pass | 37c30e1cf8 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | about: one read-only row with the version; no controls |
 | S14 | pass | 37c30e1cf8 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | privacy: Off applied; On did NOT re-enable (the chip sent `setting.set`, which the hub refuses for `telemetry.share=on`; no client sent `telemetry.choice`). Fixed in efa3eb26df and the presenter whitelist; Reset id applied + persisted |
 
+### Linux, release archive v0.15.0-rc.3
+
+The third release candidate: commit `d2685dbf68` (branch `rc/0.15.0-3`), dry run 42523148512. Same method as rc.2: `install.sh` (filled in from `deploy/install.sh.in`) installs the archive into a private prefix, home and port under the guard, and the drivers (from `edb2690f3d`) run against the installed hub, client, assets, CEF runtime and browser helper. The archives were never published; the copies are deleted.
+
+**x64** (`archive-linux-x64`, sha256 `7e32bd8e1427…`; desktop, Pixel 9 for the phone rows):
+
+| driver | ok | fail | not run |
+|---|---|---|---|
+| install | 1 | 0 | 0 |
+| hub rows (the import fix touches the hub) | 32 | 0 | 0 |
+| settings walk | 1 | 0 | 0 |
+| client rows | 13 | 0 | 0 |
+| CEF | 23 | 0 | 0 |
+| phone rows | 6 | 0 | 0 |
+
+**Import progress card (I15, I16)**, `test/import014/progress.sh` on the archive's own `backplane-hub` and `backplane-gpui` (a 0.14 home of 50 projects, 5,000 threads, 295,076 events, 101 MB, imported slowly so it can be watched; a private Xvfb :271 with i3, real clicks): both ways it begins pass 10 of 10. Setup (Count, then Import): the desktop showed the card at once and it moved between two looks, `/healthz` said migrating with a fold held and status ok, progress moved at least every 2 s (longest wait 0.58 s), `/hello` answered within 1 s every time, the summary (51 projects, 5,003 threads, 195,003 messages, 295,076 events) was right, Continue saved that it was seen, and the imported uberbot stayed asleep. After 0.14's Update (`BACKPLANE_IMPORT_AUTO`): the same 10, longest progress wait 0.59 s. (An earlier attempt here failed 5 checks only because the import lane's own run used the same X display :247 at the same time and the two windows tiled side by side; the script now refuses a display in use.)
+
+**arm64** (`archive-linux-arm64`), GitHub's `ubuntu-22.04-arm` runner with the steps run inside an `ubuntu:26.04` container (`e2e-linux.yml -f image=ubuntu:26.04`, runs 42525200603, 42526005550, 42527367965):
+
+| driver | ok | fail | not run |
+|---|---|---|---|
+| install | 1 | 0 | 0 |
+| hub rows | 31 | 1 | 0 |
+| settings walk | 1 | 0 | 0 |
+| client rows | 13 | 0 | 0 |
+| CEF | 23 | 0 | 0 |
+| phone rows | 0 | 0 | 1 (no phone on a runner) |
+
+The client rows pass on arm64 once the X server is newer: on the runner's own Ubuntu 22.04 (Xvfb 21.1.4, Mesa 23.2) the client's window came out black in every screenshot (6 of 13 client rows then failed, see the rc.2 arm64 section); in the 26.04 container (Xvfb 21.1.22, Mesa 26.0) all 13 pass. So the black window was the old X server, not the arm64 client. One hub row fails there on all three runs: `F05-antigravity` (the permission turn opened its ask and the ask was accepted, but the turn still shows as running after 60 s; the plain turn, the other seven providers and every other hub row pass). It passes on the 22.04 runner and on x64, and the Antigravity stand-in is a Python script, so it is most likely the stand-in under 26.04's Python, not the hub; the hub row logs (`hub.log`, `fake.log`) hold no trace of the stand-in's turn, so the cause is open.
+
 ### Linux, release archive v0.15.0-rc.2
 
 The second release candidate: commit `43c39bd105` (branch `rc/0.15.0-2`), dry run 42509812215, `archive-linux-x64` (sha256 `920f99532260…`; the archive's COMMIT file says `43c39bd105`). Installed by `install.sh` into a private prefix, home and port with the guard running its hub; the rows use the installed hub, client, assets, CEF runtime and browser helper. One command: `scripts/e2e-linux.sh --archive <tar.gz>` with the phone, driver scripts from `fe0411c214` (main after the RC; the Linux drivers are the ones rc.1 ran). Run 2026-11-08 18:56 UTC on the desktop, llvmpipe (frame budgets are not judged). The archive was never published or uploaded; the copies are deleted.
@@ -171,7 +201,7 @@ The same candidate (`43c39bd105`, dry run 42509812215) on its `archive-linux-arm
 | CEF (`cef_e2e.sh`, the archive's own runtime) | 23 | 0 | 0 |
 | phone rows | 0 | 0 | 1 (no phone on a runner) |
 
-The hub, the Settings walk and CEF all pass on aarch64 as on x64: the archive's hub, client, voice helper, CEF runtime and browser helper run there. The client rows are not a pass: the 7 that fail are the rows judged from what the window draws (F09 meter and draft, F15 paste, F16 chords, F17 viewers, F21 reconnect, F22 card), and on this runner's Xvfb the client's window is black in every screenshot, while the client itself runs (its own metrics log the GPU, the first frame, "Connected", and `ctrl m`, `ctrl b`, `ctrl n` act). The 6 rows judged from the hub's log pass (F06 cards, F07, F08, F14 terminal). The cause is open, not a client bug shown: ImageMagick 6's `import` returns black for any root there (a plain red one too), so the rig now reads the screen with `xwd` when `import` is black, which draws the i3 bar but still not the Vulkan window; no Mesa window-system variant tried (`MESA_VK_WSI_DEBUG=sw`, `noshm`, `linear`, GLX) changed it (`test/e2e/xprobe.sh`, probe runs 42518770734 to 42520455391). A person's arm64 desktop with a real display, or another capture of that Xvfb, is the next try. Found and fixed on the way (in the drivers, not the product): the runner has no git identity (the push row), a 1.5 s fixed wait after a revert was too short on a slow runner, and the input-latency bound is 1500 ms there (`E2E_SLOW`) instead of 400 ms.
+The hub, the Settings walk and CEF all pass on aarch64 as on x64: the archive's hub, client, voice helper, CEF runtime and browser helper run there. The client rows are not a pass: the 7 that fail are the rows judged from what the window draws (F09 meter and draft, F15 paste, F16 chords, F17 viewers, F21 reconnect, F22 card), and on this runner's Xvfb the client's window is black in every screenshot, while the client itself runs (its own metrics log the GPU, the first frame, "Connected", and `ctrl m`, `ctrl b`, `ctrl n` act). The 6 rows judged from the hub's log pass (F06 cards, F07, F08, F14 terminal). The cause is open, not a client bug shown: ImageMagick 6's `import` returns black for any root there (a plain red one too), so the rig now reads the screen with `xwd` when `import` is black, which draws the i3 bar but still not the Vulkan window; no Mesa window-system variant tried (`MESA_VK_WSI_DEBUG=sw`, `noshm`, `linear`, GLX) changed it (`test/e2e/xprobe.sh`, probe runs 42518770734 to 42520455391). (Settled with rc.3: a newer X server in an `ubuntu:26.04` container draws it, see that section.) Found and fixed on the way (in the drivers, not the product): the runner has no git identity (the push row), a 1.5 s fixed wait after a revert was too short on a slow runner, and the input-latency bound is 1500 ms there (`E2E_SLOW`) instead of 400 ms.
 
 ### Linux, release archive v0.15.0-rc.1
 
