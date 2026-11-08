@@ -244,6 +244,28 @@ impl Accounts {
         }
         Accounts { root, inner: Mutex::new(inner), resolve }
     }
+    /// The registry's folder (`<home>/providers/accounts-v1`).
+    pub fn root(&self) -> &Path { &self.root }
+    /// Profile ids in the registry now.
+    pub fn ids(&self) -> Vec<String> { self.inner.lock().unwrap().profiles.iter().map(|p| p.id.clone()).collect() }
+    /// The 0.14 import: profiles of another home's registry (its `profiles.json` entries) whose folders were copied under `root` first. Each valid
+    /// one whose id is not here yet is added; with `signed_in` false its login was not copied, so it reads expired and asks for a sign-in.
+    /// Ok(how many were added); Err when the registry is locked or could not be written (nothing changed then).
+    pub fn adopt(&self, list: &[Value], signed_in: bool) -> Result<usize, ()> {
+        if !self.inner.lock().unwrap().load_error.is_empty() { return Err(()) }
+        let now = now_s(); let mut n = 0;
+        self.mutate_save(|g| {
+            for p in list {
+                let (id, provider, epoch) = (p["id"].as_str().unwrap_or(""), p["provider"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0));
+                if !valid_id(id) || !matches!(provider, "claude" | "codex") || epoch < 1 || g.profiles.len() >= 40 || g.profiles.iter().any(|x| x.id == id) { continue }
+                let store = p["store"].as_str().filter(|s| valid_id(s)).unwrap_or("").to_string();
+                let (state, expired_at, message) = if signed_in { ("unchecked".to_string(), 0, String::new()) } else { ("expired".to_string(), now, EXPIRED_SHORT.to_string()) };
+                g.profiles.push(Profile { id: id.into(), provider: provider.into(), label: label(p["label"].as_str().unwrap_or("")), epoch, fingerprint: p["fingerprint"].as_str().unwrap_or("").into(), store, state, identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message, expired_at, proven_at: 0 });
+                n += 1;
+            }
+        })?;
+        Ok(n)
+    }
     /// Writes the registry (temp file, then rename). The revision moves only when the file is good; a failure is the op's failure.
     fn save(&self, g: &mut Inner) -> Result<(), ()> {
         let body = json!({"version":1,"profiles":g.profiles.iter().map(|p| { let mut o = json!({"id":p.id,"provider":p.provider,"label":p.label,"epoch":p.epoch,"fingerprint":p.fingerprint,"store":p.store}); if p.expired_at > 0 && p.state == "expired" { o["expiredAt"] = json!(p.expired_at) } o }).collect::<Vec<_>>()}).to_string();

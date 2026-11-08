@@ -80,6 +80,22 @@ impl Registry {
         }
         Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { devices, invites, attempts: vec![], claims: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
     }
+    /// The 0.14 import: another home's paired devices (its devices-v1.json `devices`). Each live, valid one whose id and token hash are not here yet is
+    /// added as it was, so a phone paired with 0.14 is let in by this hub without pairing again. Ok(how many were added).
+    pub fn adopt(&self, devices: &[Value]) -> Result<usize, String> {
+        let mut g = self.inner.lock().unwrap();
+        let mut all = g.devices.clone(); let mut n = 0;
+        for d in devices {
+            if !valid_device(d) || !live(d) || all.iter().any(|x| x["id"] == d["id"] || x["hash"] == d["hash"]) { continue }
+            all.push(d.clone()); n += 1;
+        }
+        if n == 0 { return Ok(0) }
+        let inv = g.invites.clone();
+        self.persist(&mut g, all, inv)?;
+        Ok(n)
+    }
+    /// The ids and token hashes paired now.
+    pub fn device_keys(&self) -> Vec<(String, String)> { self.inner.lock().unwrap().devices.iter().map(|d| (d["id"].as_str().unwrap_or("").to_string(), d["hash"].as_str().unwrap_or("").to_string())).collect() }
     fn rand_hex(&self, n: usize) -> String { hex::encode((self.random)(n)) }
     /// Eight characters of the code alphabet (no 0, 1, I, O): a device code and a machine code look alike.
     fn short_code(&self) -> String { (self.random)(8).iter().map(|x| ALPHA[(*x & 31) as usize] as char).collect() }

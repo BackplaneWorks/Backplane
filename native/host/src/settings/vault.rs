@@ -242,6 +242,20 @@ pub fn open(home: &Path) -> Value {
     })
 }
 
+/// The 0.14 import: every secret of another home's vault (`<home>/secrets/vault.json`), opened with that home's own key (its keychain entry is
+/// named by its path, or its vault.key file): (name, purpose, value). Reads only; Err says why it would not open (no vault is Ok(empty)).
+pub fn read_other(home: &Path) -> Result<Vec<(String, String, String)>, String> {
+    let other = Vault { home: home.to_path_buf(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };
+    let text = match std::fs::read_to_string(spath(&other, "vault.json")) { Ok(t) => t, Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]), Err(e) => return Err(format!("its vault could not be read ({e})")) };
+    let doc: Value = serde_json::from_str(&text).map_err(|_| "its vault is not valid JSON".to_string())?;
+    let bad = bad_doc(&doc); if !bad.is_empty() { return Err(bad) }
+    let items: Vec<Item> = doc["items"].as_array().cloned().unwrap_or_default().iter().map(item_of).collect();
+    if items.is_empty() { return Ok(vec![]) }
+    let backend = doc["key"].as_str().unwrap_or("").to_string();
+    if backend == "dpapi" { return Err("its key is in Windows DPAPI, which this version cannot open".into()) }
+    let key = key_get(&other, &backend).ok_or_else(|| if backend == "file" { "its key file is missing".to_string() } else { format!("the {backend} did not give its key") })?;
+    items.iter().map(|it| open1(&key, &it.name, &it.iv, &it.ct).map(|v| (it.name.clone(), it.purpose.clone(), v)).map_err(|_| format!("{} does not open with its key", it.name))).collect()
+}
 pub fn status() -> Value { with(|v| status_of(v)) }
 /// VaultFx.list: the metadata, never a value.
 pub fn list() -> Value { with(|v| Value::Array(v.items.iter().map(meta).collect())) }
@@ -515,6 +529,24 @@ mod tests {
         std::fs::write(h.join("secrets/vault.json"), serde_json::to_string_pretty(&doc).unwrap()).unwrap();
         assert_eq!(open(&h)["locked"], false);
         assert_eq!(super::super::mask::mask_with(&super::super::mask::all(), "x value-from-the-js-hub"), format!("x {}", "\u{2022}".repeat(21)));
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    /// The 0.14 import reads another home's vault with that home's own key and leaves it, and this vault, as they were.
+    #[test] fn another_homes_vault_is_read_with_its_own_key() {
+        let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner()); env_file();
+        let h = test_home("other"); assert_eq!(read_other(&h), Ok(vec![]), "no vault: nothing");
+        let key = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
+        std::fs::create_dir_all(h.join("secrets")).unwrap(); std::fs::write(h.join("secrets/vault.key"), format!("{key}\n")).unwrap();
+        let k = hex_key(key).unwrap(); let (iv, ct) = seal(&k, "fab-token", "tok-123456").unwrap();
+        let doc = json!({"v":1,"key":"file","items":[{"name":"fab-token","purpose":"orders","iv":iv,"ct":ct}]});
+        std::fs::write(h.join("secrets/vault.json"), doc.to_string()).unwrap();
+        let before = std::fs::read(h.join("secrets/vault.json")).unwrap();
+        assert_eq!(read_other(&h), Ok(vec![("fab-token".into(), "orders".into(), "tok-123456".into())]));
+        assert_eq!(std::fs::read(h.join("secrets/vault.json")).unwrap(), before);
+        std::fs::write(h.join("secrets/vault.key"), format!("{}\n", "00".repeat(32))).unwrap();
+        assert!(read_other(&h).unwrap_err().contains("does not open"));
+        std::fs::write(h.join("secrets/vault.json"), json!({"v":1,"key":"dpapi","items":[{"name":"x","iv":"a","ct":"b"}]}).to_string()).unwrap();
+        assert!(read_other(&h).unwrap_err().contains("DPAPI"));
         let _ = std::fs::remove_dir_all(&h);
     }
     #[test] fn a_vault_that_does_not_parse_or_open_locks_and_nothing_is_written_over_it() {

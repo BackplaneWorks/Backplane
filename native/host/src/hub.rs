@@ -61,7 +61,8 @@ pub fn frame_bytes(v: &Value) -> usize {
         Value::Array(a) => 2 + a.iter().map(|x| frame_bytes(x) + 1).sum::<usize>(), Value::Object(o) => 2 + o.iter().map(|(k, x)| k.len() + 3 + frame_bytes(x)).sum::<usize>() }
 }
 
-struct Commit { events: Vec<Value>, done: tokio::sync::oneshot::Sender<Result<u64>> }
+/// `raw`: lines brought in whole from another log (the 0.14 import, `import_lines`): written byte for byte, folded and announced, never seen by a transform or an observer.
+struct Commit { events: Vec<Value>, raw: Vec<String>, done: tokio::sync::oneshot::Sender<Result<u64>> }
 
 /// One WebSocket connection's identity and its single open view.
 /// Client numbers are unique in the process, not per hub: what is keyed by the number alone (the account grant, session::forget, a detach) must never reach
@@ -218,7 +219,7 @@ impl Hub {
         if self.mirror_feed.get().is_some() { self.mirrors.clear(); } // (given again by the feed below)
         self.need_resync.store(true, Relaxed);
         let (done, rx) = tokio::sync::oneshot::channel();
-        if self.commits.send(Commit { events: vec![], done }).is_ok() { let _ = rx.await; }
+        if self.commits.send(Commit { events: vec![], raw: vec![], done }).is_ok() { let _ = rx.await; }
         // the mirrors live only in the presenter (net lane): give them back
         if let Some(f) = self.mirror_feed.get().cloned() { f.replay(&self.arc()).await }
     }
@@ -259,14 +260,45 @@ impl Hub {
         let (done, rx) = tokio::sync::oneshot::channel();
         // settings lane: a stored secret never reaches the log, the model, the presenter or a client (Hub.step.go, Secret.changes)
         let mut events = events.to_vec(); crate::settings::mask::events(&mut events);
-        self.commits.send(Commit { events, done }).map_err(|_| anyhow::anyhow!("hub is stopping"))?;
+        self.commits.send(Commit { events, raw: vec![], done }).map_err(|_| anyhow::anyhow!("hub is stopping"))?;
         rx.await?
+    }
+    /// History brought in from another log (the 0.14 import): each line as it was, durable, then folded into the model and the presenter and
+    /// announced to the log's followers, in the writer's order. No transform and no observer sees them: they are past events, not news (no push,
+    /// no alert, no feed to a linked machine, no policy reaction). The caller refolds the policies around the import (`state::host::refold_*`).
+    /// Every line must be one whole JSON event without a newline.
+    pub async fn import_lines(&self, lines: Vec<String>) -> Result<u64> {
+        if lines.iter().any(|l| l.contains('\n')) { anyhow::bail!("an imported line holds a newline") }
+        let (done, rx) = tokio::sync::oneshot::channel();
+        self.commits.send(Commit { events: vec![], raw: lines, done }).map_err(|_| anyhow::anyhow!("hub is stopping"))?;
+        rx.await?
+    }
+    async fn write_raw(hub: &Arc<Hub>, c: Commit) {
+        let (lines, done) = (c.raw, c.done);
+        let store = hub.store.clone(); let owned = lines.clone();
+        let wrote = tokio::task::spawn_blocking(move || store.append_many(&owned.iter().map(String::as_str).collect::<Vec<_>>())).await;
+        match wrote {
+            Ok(Ok(first_idx)) => {
+                { let mut m = hub.model.lock().await; for (i, l) in lines.iter().enumerate() { m.apply_line((first_idx + i + 1) as u32, l); } }
+                let all: Vec<Value> = lines.iter().filter_map(|l| serde_json::from_str::<Value>(&crate::store::clean(l)).ok()).collect();
+                if hub.need_resync.swap(false, Relaxed) { if let Err(e) = hub.fold_log().await { eprintln!("presenter resync failed: {e:#}"); hub.need_resync.store(true, Relaxed); } }
+                else { for ch in all.chunks(200) { let _ = hub.presenter.fold(&json!({"t":"changes","items":ch,"now":now_ms()})).await; } }
+                let n = hub.store.len() as u64; hub.signal_seq.store(n, Relaxed); let _ = hub.changed.send(n);
+                let _ = done.send(Ok((first_idx + lines.len()) as u64));
+            }
+            Ok(Err(e)) => { let _ = done.send(Err(anyhow::anyhow!("{e:#}"))); }
+            Err(e) => { let _ = done.send(Err(anyhow::anyhow!("{e}"))); }
+        }
     }
 
     async fn writer(hub: Arc<Hub>, mut rx: tokio::sync::mpsc::UnboundedReceiver<Commit>) {
-        while let Some(first) = rx.recv().await {
+        let mut held: Option<Commit> = None;
+        loop {
+            let first = match held.take() { Some(c) => c, None => match rx.recv().await { Some(c) => c, None => break } };
+            // an import's lines go alone, in their place in the queue
+            if !first.raw.is_empty() { Hub::write_raw(&hub, first).await; continue }
             let mut batch = vec![first];
-            while let Ok(c) = rx.try_recv() { batch.push(c); }
+            while let Ok(c) = rx.try_recv() { if !c.raw.is_empty() { held = Some(c); break } batch.push(c); }
             // the policies get the batch before it is written: their events join the same write and fsync (Shelve.auto.fix)
             let transforms: Vec<Arc<dyn Transform>> = hub.transforms.read().unwrap().clone();
             let base = hub.store.len() as u64 + 1; // the 1-based line of the batch's first event (only this task appends)

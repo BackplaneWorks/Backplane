@@ -28,6 +28,9 @@ impl AuthRoute for Wired {
 /// M.PeerSet{peer, "", "", revoked True, now}
 pub fn unpeer_event(link: &str, at: u64) -> serde_json::Value { serde_json::json!({"$":"PeerSet","id":link,"name":"","url":"","revoked":true,"at":at}) }
 
+static REGS: std::sync::Mutex<Vec<(std::path::PathBuf, std::sync::Weak<Registry>)>> = std::sync::Mutex::new(Vec::new());
+/// The device registry running for `home` (the 0.14 import adds 0.14's paired devices to it).
+pub fn registry(home: &std::path::Path) -> Option<Arc<Registry>> { REGS.lock().unwrap().iter().find(|(h, _)| h == home).and_then(|(_, w)| w.upgrade()) }
 /// Pairing.start: a registry that is invalid, or belongs to another hub token, stops the hub with its
 /// reason and leaves the file as it was ("existing pairings were preserved").
 pub fn open(home: &std::path::Path, host: &str, port: u16) -> Result<(Arc<Registry>, Arc<AuthRoutes>), String> {
@@ -35,6 +38,7 @@ pub fn open(home: &std::path::Path, host: &str, port: u16) -> Result<(Arc<Regist
     // the registry's owner is the hub token: with no token yet there is no owner to bind it to
     if root.is_empty() { return Err("the hub token does not exist yet; the device registry starts after it".to_string()) }
     let reg = Arc::new(Registry::open(home, &root).map_err(|_| "Cannot read or initialize device registry; existing pairings were preserved".to_string())?);
+    REGS.lock().unwrap().retain(|(h, w)| w.strong_count() > 0 && h != home); REGS.lock().unwrap().push((home.to_path_buf(), Arc::downgrade(&reg)));
     Ok((reg.clone(), Arc::new(AuthRoutes::new(reg, host, port, super::qr::text))))
 }
 
