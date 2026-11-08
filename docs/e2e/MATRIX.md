@@ -158,6 +158,21 @@ The second release candidate: commit `43c39bd105` (branch `rc/0.15.0-2`), dry ru
 
 The checkpoint stall that blocked rc.1 is gone in rc.2: while turn 2 waits for turn 1's 10 s end capture (the "Saving the last turn's checkpoint…" activity appears after 2 s), a second client's `setting.set` and `threads.list` answer in 21 ms, so do the same client's (they took about 18 s on rc.1's code), a turn on another thread starts in 21 ms and the setting is written; turn 2's own reply comes at once and its agent starts after the capture. Stop during the wait and a failed start after it are covered by the hub tests `stop_while_a_turn_waits_for_the_checkpoint_cancels_the_start` and `a_failed_start_after_the_wait_is_shown_as_a_failed_turn_with_its_reason`.
 
+### Linux arm64, release archive v0.15.0-rc.2
+
+The same candidate (`43c39bd105`, dry run 42509812215) on its `archive-linux-arm64` (sha256 `b8893344319f…`), on GitHub's `ubuntu-22.04-arm` runner (aarch64, 4 cores, Ubuntu 22.04, Mesa 23.2.1 lavapipe, Xvfb 21.1.4, system packages), by `.github/workflows/e2e-linux.yml` (run 42520689106, drivers from `3669a1c4dc`): `install.sh` installs the archive into a private prefix, home and port under the guard, then `scripts/e2e-linux.sh --archive` runs the drivers against the installed files. No phone. Artifacts deleted afterwards.
+
+| driver | ok | fail | not run |
+|---|---|---|---|
+| install | 1 | 0 | 0 |
+| hub rows (`linux-f-rows.mjs`) | 32 | 0 | 0 |
+| settings walk | 1 | 0 | 0 |
+| client rows (`gpui-f-rows.py`) | 6 | 7 | 0 |
+| CEF (`cef_e2e.sh`, the archive's own runtime) | 23 | 0 | 0 |
+| phone rows | 0 | 0 | 1 (no phone on a runner) |
+
+The hub, the Settings walk and CEF all pass on aarch64 as on x64: the archive's hub, client, voice helper, CEF runtime and browser helper run there. The client rows are not a pass: the 7 that fail are the rows judged from what the window draws (F09 meter and draft, F15 paste, F16 chords, F17 viewers, F21 reconnect, F22 card), and on this runner's Xvfb the client's window is black in every screenshot, while the client itself runs (its own metrics log the GPU, the first frame, "Connected", and `ctrl m`, `ctrl b`, `ctrl n` act). The 6 rows judged from the hub's log pass (F06 cards, F07, F08, F14 terminal). The cause is open, not a client bug shown: ImageMagick 6's `import` returns black for any root there (a plain red one too), so the rig now reads the screen with `xwd` when `import` is black, which draws the i3 bar but still not the Vulkan window; no Mesa window-system variant tried (`MESA_VK_WSI_DEBUG=sw`, `noshm`, `linear`, GLX) changed it (`test/e2e/xprobe.sh`, probe runs 42518770734 to 42520455391). A person's arm64 desktop with a real display, or another capture of that Xvfb, is the next try. Found and fixed on the way (in the drivers, not the product): the runner has no git identity (the push row), a 1.5 s fixed wait after a revert was too short on a slow runner, and the input-latency bound is 1500 ms there (`E2E_SLOW`) instead of 400 ms.
+
 ### Linux, release archive v0.15.0-rc.1
 
 The release candidate: commit `8976e8deb7` (branch `rc/0.15.0`), dry run 42482640273, `archive-linux-x64` (sha256 `69989ca64c40…`; the archive's COMMIT file says `8976e8deb7`). Installed by `install.sh` into a private prefix, home and port with the guard running its hub; the rows use the installed hub, client, assets, CEF runtime and browser helper. One command: `scripts/e2e-linux.sh --archive <tar.gz>` with the phone; driver scripts from `b0672a0150` (identical to the RC's for `scripts/e2e-linux.sh`, `test/e2e` and `test/cef`). Run 2026-11-08 13:28 UTC on the desktop, llvmpipe (frame budgets are not judged). The archive was never published or uploaded; the copies are deleted.
