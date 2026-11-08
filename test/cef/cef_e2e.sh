@@ -8,7 +8,7 @@ HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd); MAIN=${GPU
 fp() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])'; }
 CLIENT=$1; HUB=$2; OUT=${OUT:-/tmp/cef-e2e}; DISP=${DISP:-:77}; HPORT=${HPORT:-$(fp)}; PPORT=${PPORT:-$(fp)}; CDP=${CDP:-$(fp)}
 RT=${BACKPLANE_CEF:-$HOME/.cache/backplane/cef-runtime/154.0.34}
-XV=$MAIN/build/gpui/xvfb
+XV=${XVFB_ROOT:-}; for d in $XV $MAIN/build/gpui/xvfb $HOME/.cache/xvfb-root $HOME/.local/xvfb-root; do [ -x "$d/usr/bin/Xvfb" ] && { XV=$d; break; }; done   # an unpacked Xvfb (no Xvfb package on the desktop)
 rm -rf "$OUT"; mkdir -p "$OUT/home" "$OUT/proj" "$OUT/bin" "$OUT/fakehome/.cache"
 [ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP in use"; exit 2; }
 printf '#!/bin/sh\nexec %s %s "$@"\n' "$(command -v bun)" "$ROOT/test/tools/claude_standin.ts" > "$OUT/bin/claude"; chmod +x "$OUT/bin/claude"
@@ -69,7 +69,7 @@ echo "window at $WX,$WY view origin $VX,$VY"
 # agent first (page belongs to the agent): its read of document.title
 waitfor '"event":"mark"' 400 || { echo "FAIL no human mark"; exit 1; }
 sleep 1
-A1=$(grep 'MCPCALL' "$OUT/standin.log" | sed -n 1p | cut -c1-300 || true)
+A1=$(grep 'MCPCALL' "$OUT/standin.log" | uniq | sed -n 1p | cut -c1-300 || true)
 check "agent (preview_evaluate via hub) read the page the user sees before any click" "$(echo "$A1" | grep -q 'cef-test-start' && echo 1 || echo 0)" "$A1"
 T0=$(title); check "CDP sees the initial title" "$([ "$T0" = cef-test-start ] && echo 1 || echo 0)" "$T0"
 # the person clicks the button with real X events: page-local (100+80, 80+24)
@@ -146,8 +146,8 @@ echo "measured: ${FPS} fps painted into the gpui image (animated page, software 
 check "the page animates at a usable frame rate (${FPS} fps, software GL)" "$(python3 -c "print(1 if float('${FPS:-0}')>=15 else 0)")" "$FPS"
 check "input to visible change is fast (click to changed pixel ${LAT} ms)" "$(python3 -c "print(1 if 0<=float('${LAT:--1}')<400 else 0)")" "$LAT"
 check "a resize reaches a painted frame quickly (${RSZ} ms)" "$(python3 -c "print(1 if 0<=float('${RSZ:--1}')<600 else 0)")" "$RSZ"
-A2=$(grep 'MCPCALL' "$OUT/standin.log" | sed -n 2p | cut -c1-300 || true)
-A3=$(grep 'MCPCALL' "$OUT/standin.log" | sed -n 3p | cut -c1-300 || true)
+A2=$(grep 'MCPCALL' "$OUT/standin.log" | uniq | sed -n 2p | cut -c1-300 || true)
+A3=$(grep 'MCPCALL' "$OUT/standin.log" | uniq | sed -n 3p | cut -c1-300 || true)
 check "agent refused while the person drives" "$(echo "$A2" | grep -qi 'person has the browser' && echo 1 || echo 0)" "$A2"
 check "after hand back the agent sees the person's input (typed:hello)" "$(echo "$A3" | grep -q 'typed:hello' && echo 1 || echo 0)" "$A3"
 TABS=$(grep '"non_white_samples"' "$OUT/client.log" | tail -1 | grep -o '"tabs":[0-9]*' | cut -d: -f2); check "the popup became a second tab (tabs=$TABS)" "$([ "${TABS:-0}" = 2 ] && echo 1 || echo 0)" "$TABS"

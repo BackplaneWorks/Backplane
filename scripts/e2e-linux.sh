@@ -69,7 +69,7 @@ f.write("settings-walk\t%s\twalk\t%d controls walked on %d pages, %d not applied
 for r in (bad+lost)[:20]: f.write("settings-walk\tFAIL\t%s/%s\t%s\n"%(r.get('page'),r.get('label') or r.get('key'),json.dumps(r)[:200]))
 PY
 if [ -d "$ASSETS" ]; then run client-rows python3 -W ignore test/e2e/gpui-f-rows.py "$GUI" "$HUB" "$ASSETS" "$OUT/client" 3891 77; parse client-rows "$OUT/client-rows.log"; else add client-rows skip all "no assets folder at $ASSETS"; fi
-run cef env OUT="$OUT/cef" DISP=:78 sh test/cef/cef_e2e.sh "$GUI" "$HUB"
+run cef env OUT="$OUT/cef" DISP=:78 E2E_ASSETS="${E2E_ASSETS:-$ASSETS}" sh test/cef/cef_e2e.sh "$GUI" "$HUB"
 python3 - "$OUT/cef.log" "$OUT/results.tsv" <<'PY'
 import sys,re
 f=open(sys.argv[2],'a')
