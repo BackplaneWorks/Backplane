@@ -183,3 +183,44 @@ if want('F22'):
     quoted = until(lambda: any(e['$'] == 'SettingSet' and e.get('key') == 'order.quote.t3' and e.get('value') for e in events()), 40); pause(3); shot('f22-quote')
     clean = not any('pay' in x[1] or 'buy' in x[1] or 'checkout' in x[1] for x in ORDER_SEEN)
     log('F22-card', bool(ask) and before == 0 and sent and quoted and clean, 'the files card (f22-files-card.png, buttons %s) opened with nothing uploaded before Send (no POST to the order server)=%s; Send pressed with the mouse: the hub uploaded to the stand-in order server and the quote card was set=%s (f22-quote.png); requests seen %s, none to pay or buy=%s' % (ids, before == 0, quoted, [x[0] + ' ' + x[1] for x in ORDER_SEEN], clean))
+
+
+# ---- F18 the Browser tab in frame-stream mode (a release archive carries CEF only on Linux): the hub's browser helper streams the page, the window's mouse, wheel and keys go to it
+if want('F18'):
+    sys.path.insert(0, os.path.join(HERE, 'lib')); import f18_page
+    pport, EVT = f18_page.serve(); names = lambda: [n for _, n in EVT]; URL = 'http://127.0.0.1:%d/' % pport
+    from PIL import Image
+    def find(name, rgb, tol=30, minpx=400):   # the centre of the pixels of that colour on a shot (window coordinates), None when there are fewer than minpx
+        im = px(name); w, h = im.size; xs = ys = n = 0; d = im.load()
+        for y in range(0, h, 2):
+            for x in range(0, w - 80, 2):
+                r, g, b = d[x, y]
+                if abs(r - rgb[0]) < tol and abs(g - rgb[1]) < tol and abs(b - rgb[2]) < tol: xs += x; ys += y; n += 1
+        return (xs // n, ys // n) if n * 4 >= minpx else None
+    sel(1); chord('ctrl b'); pause(1.0); click_ctl('rail:Browser'); pause(4); shot('f18-open')
+    chord('ctrl l'); pause(0.5); xin('type', URL); xin('key', 'Return')
+    loaded = until(lambda: 'load' in names(), 60); pause(3); shot('f18-page'); res = []
+    pos = {k: find('f18-page', c) for k, c in [('btn', (0, 204, 102)), ('inp', (255, 255, 102)), ('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
+    res.append(('page loads and paints', loaded and all(pos.values()), 'the helper streamed the test page (the page asked its server: %s); targets found on the frame: %s' % (loaded, pos)))
+    if pos['btn']:
+        xin('click', *pos['btn']); res.append(('click', until(lambda: 'click' in names(), 20), 'a real click on the green button reached the page (it reported "click")'))
+    if pos['inp']:
+        xin('click', *pos['inp']); pause(0.5); xin('type', 'zqf18'); res.append(('type', until(lambda: any(n.startswith('input:') and 'zqf18' in n for n in names()), 20), 'typing in the page field reached the page (reported %s)' % [n for n in names() if n.startswith('input:')][-1:]))
+    cx, cy = (pos['btn'] or (500, 300))[0], (pos['btn'] or (500, 300))[1]; shot('f18-before-scroll')
+    xin('wheel', cx, cy, 6); res.append(('scroll', until(lambda: any(n.startswith('scroll:') for n in names()), 20), 'the wheel scrolled the page (reported %s)' % [n for n in names() if n.startswith('scroll:')][-1:]))
+    pause(1.0); shot('f18-scrolled')
+    xin('wheel', cx, cy, -12); pause(1.5); shot('f18-top')
+    pos2 = {k: find('f18-top', c) for k, c in [('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
+    if pos2['pop']:
+        xin('click', *pos2['pop']); ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
+        tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
+        res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
+    if pos2['dl']:
+        click_ctl('rail:Browser'); pause(0.5)
+        xin('click', *pos2['dl']); got = until(lambda: 'download-get' in names(), 30); pause(3)
+        home = os.path.expanduser('~'); found = glob.glob(home + '/Downloads/f18-file*') + glob.glob(P('home') + '/**/f18-file*', recursive=True) + glob.glob(P('home') + '/**/*f18*download*', recursive=True)
+        res.append(('download', got and bool(found), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
+    shot('f18-end')
+    for n, ok, why in res: print('   F18', n, ok, why, flush=True)
+    log('F18', all(r[1] for r in res) and len(res) >= 6, '; '.join('%s: %s' % (n, 'ok' if ok else 'FAIL (' + why + ')') for n, ok, why in res))
+    ensure_sidebar()
