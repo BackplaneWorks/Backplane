@@ -121,7 +121,18 @@ fn about(st: &State, info: &Value) -> Vec<Value> {
         Some("cef") => r.push(row("Browser", "Embedded Chromium in this window.", vec![])),
         _ => {}
     }
+    // where the third-party notices are (licenses/ beside the programs, in every release archive): a desktop client names its own and opens it;
+    // any other client is told the hub's
+    match info["client"]["licenses"].as_str().filter(|p| !p.is_empty()) {
+        Some(p) => r.push(row("Open-source notices", &format!("The licences of the third-party software in Backplane are in {p}."), vec![btn("Open folder", "open-licenses", "", false)])),
+        None => if let Some(p) = licenses_dir() { r.push(row("Open-source notices", &format!("The licences of the third-party software in Backplane are in {} on the hub's machine.", p.display()), vec![])) },
+    }
     r
+}
+/// licenses/ beside the hub's own program, when this install has it (every release archive does; a dev build may not)
+fn licenses_dir() -> Option<std::path::PathBuf> {
+    let me = std::env::current_exe().ok()?; let me = std::fs::canonicalize(&me).unwrap_or(me);
+    let d = me.parent()?.join("licenses"); d.join("README.md").is_file().then_some(d)
 }
 
 const PROVIDERS: &[&str] = &["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"];
@@ -607,6 +618,15 @@ mod tests {
         assert!(notes(json!({"kind": "desktop", "browser": "frames"})).iter().any(|n| n.starts_with("Frame mode")));
         assert!(notes(json!({"kind": "desktop", "browser": "cef"})).iter().any(|n| n.contains("Embedded Chromium")));
         assert!(!about(json!({"kind": "phone"})).contains(&"Browser".to_string()), "a phone says nothing of a browser");
+    }
+    #[test] fn about_says_where_the_open_source_notices_are() {
+        let rows = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); v["rows"].as_array().unwrap().clone() };
+        let r = rows(json!({"kind": "desktop", "browser": "frames", "licenses": "/opt/bp/builds/v0.15.0/licenses"}));
+        let n = r.iter().find(|r| r["label"] == "Open-source notices").expect("a notices row");
+        assert!(n["note"].as_str().unwrap().contains("/opt/bp/builds/v0.15.0/licenses"));
+        assert_eq!(n["buttons"][0]["action"], "open-licenses"); assert_eq!(n["buttons"][0]["value"], "", "the client opens its own folder, never a path the hub sends");
+        // a client without one (a phone, a dev build): only the hub's own folder, named and never opened, and none at all in a test binary
+        assert!(rows(json!({"kind": "phone"})).iter().filter(|r| r["label"] == "Open-source notices").all(|r| r["buttons"].as_array().unwrap().is_empty()));
     }
     #[test] fn developer_replays_setup_and_the_star_suggestion() {
         let sess = json!({"open": {"settings": true}, "drafts": {"@settings.page": "developer"}, "rid": 5});

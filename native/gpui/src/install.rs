@@ -156,9 +156,11 @@ mod tests {
         let (src, pre) = (tmp("src"), tmp("pre"));
         for f in ["backplane-gpui.exe", "backplane-hub.exe", "backplane.exe", "COMMIT"] { std::fs::write(src.join(f), f).unwrap(); }
         std::fs::create_dir_all(src.join("assets/icon")).unwrap(); std::fs::write(src.join("assets/icon/a.svg"), "svg").unwrap();
+        std::fs::create_dir_all(src.join("licenses/rust")).unwrap(); std::fs::write(src.join("licenses/rust/hub.txt"), "notices").unwrap();
         let app = install(&src, &pre, "v0.15.0").unwrap();
         assert_eq!(app, pre.join("builds/v0.15.0/backplane-gpui.exe")); assert!(app.is_file());
         assert_eq!(std::fs::read_to_string(pre.join("builds/v0.15.0/assets/icon/a.svg")).unwrap(), "svg");
+        assert_eq!(std::fs::read_to_string(pre.join("builds/v0.15.0/licenses/rust/hub.txt")).unwrap(), "notices", "the notices come with the build (Settings > About names them)");
         assert_eq!(std::fs::read_to_string(pre.join("backplane.exe")).unwrap(), "backplane.exe");
         assert_eq!(std::fs::read_to_string(pre.join("CURRENT")).unwrap(), "v0.15.0\n");
         // a second release: its build is added, the guard replaced, CURRENT left to the guard to move

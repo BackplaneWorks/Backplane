@@ -2,6 +2,7 @@
 name = "backplane-guard"
 version = "0.15.0"
 edition = "2021"
+publish = false
 description = "`backplane`: keeps a Backplane hub running and restarts it on Windows, Linux and macOS. Shares no code with the hub, so a broken hub build cannot break its own recovery."
 
 [[bin]]
