@@ -388,6 +388,22 @@ Rig: a Windows Server 2022 VM (10.0.20348, 4 vCPU, 16 GB, no GPU: the client dra
 
 Windows bugs found here and fixed, each with a test where one fits: the client opened a console window (and the hub's children could); an image copied as a bitmap only pasted nothing; message images with Windows paths never showed; the hub looked for its helpers (browser, step2glb, voice, plot) without `.exe`; a Windows install had no guard (now it asks to install, and `--install` for scripts); `hub.lock` hid its port from other processes; time zones were all UTC; Claude's system prompt was cut at 8186 characters; a refused upload's 413 was lost to a reset; release exports could not find the snapshot (Git's sh paths); FreeCAD in Program Files was not found and a Windows path in `freecad.path` was not taken; two tests quoted Windows paths badly (main's Windows CI was red on them).
 
+### Windows, release archive v0.15.0-rc.3
+
+The release candidate: commit `d2685dbf68` (rc.2 plus the 0.14 install race fix and the import responsiveness fix), dry run 42523148512, `archive-windows-x64` (sha256 `1fa7770d7bb4…`, COMMIT `d2685dbf68`). At once: windows-latest (`windows-rc.yml` on rc.3's tree plus the F21 check fix, run 42525162238) and the Windows Server 2022 VM (the kept v0.14.200 install set aside and put back). Every copy was deleted after the run.
+
+| ID | Result | Rig | Evidence |
+|---|---|---|---|
+| F05-F22, hub side | pass | windows-latest | `linux-f-rows.mjs` on rc.3's backplane-hub.exe: every row, F21-long 150 / 150 after the restart / 0 ids twice / the thread idle, F12-push with the runner's git identity |
+| S01-S14 | pass | windows-latest and VM | `s-effects.mjs` 14/14 and S04, S12 (windows-latest); S09 on the VM below |
+| Settings walk | pass | windows-latest | 89 controls, 0 not applied, 0 lost across a restart |
+| C01 (headless) | pass | windows-latest | `backplane-gpui.exe --install` exit 0; CURRENT v0.15.0-rc.3; the guard and the whole zip under builds\; a Start-menu entry; the guard's hub answers and runs d2685dbf68; update.status current 0.15.0-rc.3; `backplane hub restart` replaced the hub (4768 -> 3452); vadBundled |
+| C01 | pass | VM, WARP | `win-r.ps1 install v0.15.0-rc.3`: download mark, SmartScreen, Run anyway, the Install question, Install, home; builds holds v0.15.0-rc.3 only, the whole zip with silero_vad.onnx |
+| Onboarding | pass | VM, WARP | the installed client walked to `onboard.done` = 1 |
+| I16 (Windows) | pass | VM, WARP | `win-import.rows.py` on rc.3's programs: a 0.14 home of 50 projects, 5,000 threads, 295,076 events imported by itself; the card showed and moved between two looks (`import-running-1.png` at 45%, "About 40 s left in this step"); /healthz migrating 92 looks over 48 s, ok, a fold held; the longest wait for progress 0.66 s; /hello never slow; the summary 51 projects, 5,003 threads, 195,003 messages; Continue saved import.v014.ack; the imported uberbot stayed asleep |
+| S09 | pass | VM | `voice-effect.mjs` beside I16 (no window): `local-status` vadBundled on an empty folder, the model ready in 52 s, speech heard, a Dictionary line rewrote a word, its × put it back |
+| F client rows, F18, F23, C02, C03, R01, pairing | not rerun on rc.3 | | rc.3 changes the 0.14 install race and the import's responsiveness only; these passed on rc.2 above (43c39bd105) |
+
 ### Windows, release archive v0.15.0-rc.2
 
 The release candidate: commit `43c39bd105`, dry run 42509812215, `archive-windows-x64` (`backplane-v0.15.0-rc.2-windows-x64-native.zip`, sha256 `54204ba6b0cc…`, COMMIT `43c39bd105`). Two machines at once: the Windows Server 2022 VM for what needs a desktop (installed as a person installs it with the kept v0.14.200 install set aside and put back afterwards, then the zip's own programs on their own homes and ports), and GitHub's windows-latest (`.github/workflows/windows-rc.yml`, runs 42513713116 and 42514108349) for the hub-side rows and the install from the zip. The drivers are the RC commit's own `test/`, plus `test/e2e/win-import.rows.py` (new). The pairing hub is the RC's `archive-linux-x64`. Every copy was deleted after the run.
