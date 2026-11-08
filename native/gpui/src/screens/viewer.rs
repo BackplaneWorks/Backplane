@@ -109,6 +109,14 @@ pub fn file_listed_only(kind: &str) -> bool { !matches!(kind, "folder" | "board"
 /// diff.revert.confirm (i18n/en.msg)
 const REVERT_ASK: &str = "Put the files back as they were when this thread began? Every change shown below is undone, committed ones and new files too. Commits stay in git.";
 
+/// The Diff page's buttons as the harness's controls: (id, label, action, value); none while Diff is not on show.
+pub fn diff_controls(diff: &Value) -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
+    if !diff.is_object() { return vec![] }
+    let mut v = vec![("git-commit_push", "Commit", "git", "commit_push"), ("git-commit_push_pr", "PR", "git", "commit_push_pr"), ("revert-ask", "Revert", "revert", "ask")];
+    if diff["reverting"] == true { v.push(("revert-confirm", "Revert", "revert", "confirm")); v.push(("revert-cancel", "Cancel", "revert-no", "")); }
+    v
+}
+
 fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().text_size(px(12.));

@@ -510,6 +510,17 @@ mod tests {
         // the Allowance chip's text (keys.rs `allowance`) and the picker's other agents (`pickerAgents`) are Backplane's own: the recorded helper reply has no such keys
         assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "pickerAgents" | "secretBox" | "commands")).count(), want.as_object().unwrap().len());
     }
+    // Diff opened on thread A leaves the session's panel on; a view of thread B (the + makes it and goes there) is accepted, not refused as an unported page
+    #[test] fn a_view_of_another_thread_after_diff_on_one_is_accepted() {
+        let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
+        let mut st = State::new();
+        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
+        let mut params = p["params"].clone();
+        params["session"]["sel"] = json!(th); params["session"]["panel"] = json!(true);
+        params["session"]["info"] = json!({"view.kind:tA": "diff", "panel:tA": "1", "diff:tA": "diff --git a/x b/x\n"});
+        let got = thread_object(&st, "h", th, &params, "").expect("thread B is drawn while A's Diff left the panel on");
+        assert!(got["diff"].is_null(), "B has no Diff of its own on show");
+    }
     // a thread that sent messages into other threads still opens: those rows are left out of its page
     #[test] fn rows_this_thread_sent_elsewhere_are_left_out_not_refused() {
         let rows = json!([["9", "9", "t:t:1", "u", "t", "msg", "user", "", "to u", "9"], ["8", "8", "m1", "t", "", "msg", "user", "", "hi", "8"]]);
