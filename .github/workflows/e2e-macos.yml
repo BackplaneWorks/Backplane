@@ -7,6 +7,9 @@ on:
       jobs:
         description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), all"
         default: all
+      rows:
+        description: "client rows to run (space separated, empty: all)"
+        default: ""
 permissions:
   contents: read
 jobs:
@@ -85,3 +88,26 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: hub-rows, path: out, include-hidden-files: true }
+
+  client:
+    needs: build
+    if: inputs.jobs == 'client' || inputs.jobs == 'all'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+      - name: input and screenshot tools
+        run: |
+          brew install cliclick
+          python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz
+      - name: client rows
+        run: |
+          chmod +x dist/*; mkdir -p out
+          echo "client+hub commit $(cat dist/COMMIT)"
+          .venv/bin/python test/e2e/gpui-f-rows-mac.py "$PWD/dist/backplane-gpui" "$PWD/dist/backplane-hub" "$PWD/assets" "$PWD/out/client" 3891 ${ROWS:-} 2>&1 | tee out/client-rows.txt
+        env:
+          ROWS: ${{ inputs.rows }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: client-rows, path: out }
