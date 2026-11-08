@@ -9,9 +9,9 @@ on:
         default: all
       archive_run:
         description: "release dry run whose darwin-arm64 archive the client rows run from, installed with its install.sh"
-        default: "42451126435"
+        default: "42471203815"
       archive_tag:
-        default: "v0.14.93"
+        default: "v0.14.101"
       rows:
         description: "client rows to run (space separated, empty: all)"
         default: ""
@@ -79,6 +79,7 @@ jobs:
         run: brew install --cask freecad kicad
       - name: macOS hub rows
         run: |
+          ls -l /Applications/KiCad/KiCad.app/Contents/MacOS/ 2>&1 | head -5; ls -l /opt/homebrew/bin/kicad-cli; KICAD_CLI=$(python3 -c 'import os;print(os.path.realpath("/opt/homebrew/bin/kicad-cli"))'); echo "kicad-cli: $KICAD_CLI"; export KICAD_CLI
           set -o pipefail
           chmod +x dist/*; mkdir -p out; export HOME_BEFORE=$HOME
           echo "hub commit $(cat dist/COMMIT)"
@@ -88,7 +89,7 @@ jobs:
           node test/e2e/mac-effects.mjs "$PWD/dist/backplane-hub" "$PWD/out/effects" 3860 2>&1 | tee out/effects.txt || ok=1
           node test/e2e/mac-c03.mjs "$PWD/dist/backplane-hub" "$PWD/out/c03" 3840 "$FC" 2>&1 | tee out/c03.txt || ok=1
           node test/e2e/mac-c03-agent.mjs "$PWD/dist/backplane-hub" "$PWD/out/c03-agent" 3850 "$FC" 2>&1 | tee out/c03-agent.txt || ok=1
-          KICAD_CLI=/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli node test/e2e/cad-rows.mjs "$PWD/dist/backplane-hub" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
+          KICAD_CLI="$KICAD_CLI" node test/e2e/cad-rows.mjs "$PWD/dist/backplane-hub" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
           node test/e2e/settings-walk.mjs "$PWD/dist/backplane-hub" "$PWD/out/walk" 3830 2>&1 | tee out/walk.txt || ok=1
           exit $ok
       - uses: actions/upload-artifact@v4
