@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 use std::{fs::{self, File}, path::PathBuf, process::{Command, Stdio}, time::Duration};
 use store::{Dir, now};
 
-const USAGE: &str = "usage: backplane pair [--machine | --join ADDRESS CODE | --requests | --approve ID | --deny ID]   pair a device or a machine (backplane pair --help)
+const USAGE: &str = "usage: backplane                            the desktop app of the build that runs
+       backplane pair [--machine | --join ADDRESS CODE | --requests | --approve ID | --deny ID]   pair a device or a machine (backplane pair --help)
        backplane hub status                 what the hub is doing, what failed last
        backplane hub restart [--now]          restart it (--now: cut running turns; they carry on after)
        backplane hub safe [--now]             restart with agents, routines and bots paused
@@ -168,12 +169,25 @@ fn hub(a: &[String]) -> i32 {
     }
 }
 
+/// `backplane` with no arguments opens the desktop app of the build that runs (`<prefix>/builds/<CURRENT>/backplane-gpui`, deploy/install.sh.in's layout).
+/// 0.14's `backplane` opened its app, and the link and menu entry an updated 0.14 install keeps still call this name.
+fn open_app() -> i32 {
+    let me = match std::env::current_exe() { Ok(p) => p, Err(e) => { eprintln!("{e}"); return 1 } };
+    let prefix = me.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let cur = fs::read_to_string(prefix.join("CURRENT")).unwrap_or_default().trim().to_string();
+    let app = prefix.join("builds").join(&cur).join(if cfg!(windows) { "backplane-gpui.exe" } else { "backplane-gpui" });
+    if cur.is_empty() || !app.is_file() { eprint!("{USAGE}"); return 2 }
+    #[cfg(unix)] { use std::os::unix::process::CommandExt; let e = Command::new(&app).exec(); eprintln!("cannot open {}: {e}", app.display()); 1 }
+    #[cfg(not(unix))] { Command::new(&app).status().map_or(1, |s| s.code().unwrap_or(1)) }
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let code = match a.first().map(String::as_str) {
         Some("hub") => hub(&a[1..]),
         Some("pair") => pair::run(&a[1..]),
         Some("--version") => { println!("backplane {}", env!("CARGO_PKG_VERSION")); 0 }
+        None => open_app(),
         _ => { eprint!("{USAGE}"); 2 }
     };
     std::process::exit(code)

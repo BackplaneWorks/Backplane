@@ -138,6 +138,9 @@ pub fn verify(bytes: &[u8], sig: &[u8], keyid: &str, keys: &[(String, [u8; 32])]
     ed25519_compact::PublicKey::new(*k).verify(bytes, &s).map_err(|_| "the release's signature does not match".to_string())
 }
 
+/// A target's archive in a release: `-native` so 0.14's updater, which takes the first asset ending in `<platform>.tar.gz`, never picks it; a zip on Windows.
+pub fn archive_name(tag: &str, target: &str) -> String { format!("backplane-{tag}-{target}-native.{}", if target.starts_with("windows") { "zip" } else { "tar.gz" }) }
+
 /// What a verified manifest must say to be this release for this machine on this channel: a signature proves who wrote it, not that it is the one that was asked for.
 pub fn pick<'a>(m: &'a Manifest, tag: &str, channel: &str, target: &str) -> Result<&'a Asset, String> {
     if m.tag != tag || !tag_ok(tag) { return Err("the manifest is for another release".into()) }
@@ -145,7 +148,7 @@ pub fn pick<'a>(m: &'a Manifest, tag: &str, channel: &str, target: &str) -> Resu
     if m.channel != tag_channel(tag) { return Err("the manifest's channel does not match its tag".into()) }
     if channel != "beta" && m.channel != "stable" { return Err("that release is not on this channel".into()) }
     let a = m.assets.get(target).ok_or_else(|| format!("no build for {target} in this release yet"))?;
-    if a.name != format!("backplane-{tag}-{target}.tar.gz") { return Err("the manifest names an unexpected file".into()) }
+    if a.name != archive_name(tag, target) { return Err("the manifest names an unexpected file".into()) }
     if a.sha256.len() != 64 || !a.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) { return Err("the manifest's checksum is malformed".into()) }
     if a.size == 0 || a.size > MAX_ASSET { return Err("the manifest's size is out of range".into()) }
     Ok(a)
@@ -161,7 +164,7 @@ mod tests {
     fn keys_for(p: &KeyPair) -> Vec<(String, [u8; 32])> { vec![("k1".into(), *p.pk)] }
     const SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     fn manifest(tag: &str, channel: &str) -> Manifest {
-        let t = format!(r#"{{"schema":1,"tag":"{tag}","version":"{}","channel":"{channel}","commit":"c","assets":{{"linux-x64":{{"name":"backplane-{tag}-linux-x64.tar.gz","sha256":"{SHA}","size":9}}}}}}"#, &tag[1..]);
+        let t = format!(r#"{{"schema":1,"tag":"{tag}","version":"{}","channel":"{channel}","commit":"c","assets":{{"linux-x64":{{"name":"backplane-{tag}-linux-x64-native.tar.gz","sha256":"{SHA}","size":9}}}}}}"#, &tag[1..]);
         parse(t.as_bytes()).unwrap()
     }
 

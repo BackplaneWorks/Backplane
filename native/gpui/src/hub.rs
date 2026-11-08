@@ -48,7 +48,7 @@ impl Config {
         }
         config.hub=config.hub.trim_end_matches('/').to_string();
         config.hub=crate::pairing::ws_of(&config.hub);
-        ensure!((config.hub.starts_with("ws://")||config.hub.starts_with("wss://")) && !config.hub.contains(['?','#','@']) && !config.hub.trim_end_matches('/').ends_with(":3787"),"experiment needs an explicit ws:// or wss:// hub on a separate port");
+        ensure!((config.hub.starts_with("ws://")||config.hub.starts_with("wss://")) && !config.hub.contains(['?','#','@']),"the hub must be an explicit ws:// or wss:// address"); // 3787 is allowed: a 0.14 install updated to 0.15 keeps its port, so paired devices find it
         let token_path=std::fs::canonicalize(&config.token_file).context("experiment token file missing; start its hub first")?;
         ensure!(!token_path.starts_with(PathBuf::from(home).join(".backplane-bend")),"live home refused");
         Ok(config)

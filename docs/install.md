@@ -19,6 +19,10 @@ Run the install.sh one-liner above: the same layout, with the default home in `~
 
 Download `backplane-v0.14.0-windows-x64.zip`, extract the **whole** archive into a writable folder, and run `Backplane.exe` (keep `resources/` beside it). No WSL is needed. Shell commands need Cygwin tools: use the bundled runtime if present, otherwise run [the Windows setup script](../scripts/setup-windows.ps1). Install your agent CLIs separately. FreeCAD and the [Backplane KiCad runtime](https://github.com/BackplaneWorks/Backplane_KiCad/releases) are installed separately too: set `BACKPLANE_FREECAD` and `BACKPLANE_KICAD` to them, then restart. Closing the window leaves the hub running.
 
+## From 0.14
+
+On Linux and macOS, press Update in 0.14 as usual: 0.15 installs beside it, starts on the same port and offers to import 0.14's projects, threads, bots and paired phones (docs/deploy.md, "From 0.14"). Link your other machines again in Settings, Devices. If 0.15 fails to start, 0.14 comes back by itself. On Windows, 0.14 cannot update itself: quit it, download `backplane-<tag>-windows-x64-native.zip` from the release, extract it and run `backplane-gpui.exe`; its setup offers the same import.
+
 ## Phones
 
 - **iOS:** install through TestFlight with an invitation.

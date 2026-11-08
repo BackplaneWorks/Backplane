@@ -37,7 +37,7 @@ release() { # release TAG SHOWN KEY [FAULT]
   local tag=$1 shown=$2 key=$3 fault=${4:-} d=$T/$CUR/feed/$1 w=$T/$CUR/w/$1
   mkdir -p "$d" "$w"
   printf '#!/bin/sh\n%sexec "%s/backplane-hub" --version-string %s "$@"\n' "${fault:+BACKPLANE_FAULT=$fault }" "$BIN" "$shown" > "$w/backplane-hub"; chmod +x "$w/backplane-hub"
-  local a=backplane-$tag-$TGT.tar.gz; tar -czf "$d/$a" -C "$w" backplane-hub
+  local a=backplane-$tag-$TGT-native.tar.gz; tar -czf "$d/$a" -C "$w" backplane-hub
   python3 -I - "$d/manifest.json" "$tag" "$COMMIT" "$TGT" "$d/$a" <<'PY'
 import hashlib, json, os, sys
 out, tag, commit, tgt, arc = sys.argv[1:]

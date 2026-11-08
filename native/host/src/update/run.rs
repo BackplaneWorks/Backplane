@@ -160,7 +160,7 @@ mod tests {
             let b = self.files.get(url).ok_or("404")?; if b.len() as u64 > max { return Err("too big".into()) } fs::write(out, b).map_err(|e| e.to_string())
         }
         fn release(&mut self, tag: &str, archive: &[u8]) -> Listed {
-            let name = format!("backplane-{tag}-{T}.tar.gz");
+            let name = format!("backplane-{tag}-{T}-native.tar.gz");
             let m = json!({"schema":1,"tag":tag,"version":&tag[1..],"channel":rel::tag_channel(tag),"commit":"c","assets":{T:{"name":name,"sha256":sha(archive),"size":archive.len()}}}).to_string().into_bytes();
             let s = pair().sk.sign(&m, None).as_ref().to_vec();
             let mut urls = BTreeMap::new();

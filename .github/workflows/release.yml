@@ -83,7 +83,7 @@ jobs:
           (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser") || echo "no browser helper built"
           cp -r assets $d/assets
           git rev-parse HEAD > $d/COMMIT
-          name=backplane-$TAG-${{ matrix.target }}.tar.gz
+          name=backplane-$TAG-${{ matrix.target }}-native.tar.gz   # -native: 0.14's updater takes any asset ending in <platform>.tar.gz (rel::archive_name)
           tar -C $d -czf $name .
           echo "ARCHIVE=$name" >> $GITHUB_ENV
       # Windows: a zip, as 0.14 shipped (backplane-<tag>-windows-x64.zip): the hub, the client, the guard and bp-sh (the hub's sh go-between, src/bin/bp-sh.rs) beside them.
@@ -97,7 +97,7 @@ jobs:
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }; cp "$f" $d/; done
           cp -r assets $d/assets
           git rev-parse HEAD > $d/COMMIT
-          name=backplane-$TAG-${{ matrix.target }}.zip
+          name=backplane-$TAG-${{ matrix.target }}-native.zip
           (cd $d && 7z a -tzip -r "../$name" . > /dev/null)
           echo "ARCHIVE=$name" >> $GITHUB_ENV
       - uses: actions/upload-artifact@v4
@@ -198,8 +198,8 @@ jobs:
           import hashlib, json, glob, os, sys
           tag, v, ch, sha = sys.argv[1:5]
           assets = {}
-          for f in sorted(glob.glob(f"backplane-{tag}-*.tar.gz") + glob.glob(f"backplane-{tag}-*.zip")):
-              t = f[len(f"backplane-{tag}-"):].removesuffix(".tar.gz").removesuffix(".zip")
+          for f in sorted(glob.glob(f"backplane-{tag}-*-native.tar.gz") + glob.glob(f"backplane-{tag}-*-native.zip")):
+              t = f[len(f"backplane-{tag}-"):].removesuffix(".tar.gz").removesuffix(".zip").removesuffix("-native")
               assets[t] = {"name": f, "sha256": hashlib.sha256(open(f, "rb").read()).hexdigest(), "size": os.path.getsize(f)}
           open("manifest.json", "w").write(json.dumps({"schema": 1, "tag": tag, "version": v, "channel": ch, "commit": sha, "assets": assets}, indent=1))
           PY
@@ -207,7 +207,7 @@ jobs:
         run: |
           # deploy/install.sh.in with this release's version and each archive's sha256: the script vouches for what it downloads
           set -e
-          sum() { f=backplane-$TAG-$1.tar.gz; [ -f "$f" ] && sha256sum "$f" | cut -d' ' -f1 || true; }
+          sum() { f=backplane-$TAG-$1-native.tar.gz; [ -f "$f" ] && sha256sum "$f" | cut -d' ' -f1 || true; }
           sed -e "s|@REPO@|${{ github.repository }}|" -e "s|@VERSION@|$TAG|" -e "s|@SHA_LINUX_X64@|$(sum linux-x64)|" \
               -e "s|@SHA_LINUX_ARM64@|$(sum linux-arm64)|" -e "s|@SHA_DARWIN_ARM64@|$(sum darwin-arm64)|" deploy/install.sh.in > install.sh
           if grep -q '@[A-Z_0-9]*@' install.sh; then echo "::error::install.sh still has a placeholder"; exit 1; fi
@@ -223,6 +223,25 @@ jobs:
           openssl pkeyutl -sign -inkey k.pem -rawin -in manifest.json -out manifest.json.sig
           rm -f k.pem; printf '%s' "$KEY_ID" > manifest.json.keyid
           echo "signed=true" >> $GITHUB_OUTPUT
+      - name: the way from 0.14
+        run: |
+          # 0.14's updater (src/server/update.bend, v0.14.1) takes the first asset ending in <platform>.tar.gz (linux-x64: linux-x64-cef.tar.gz), checks it
+          # against SHA256SUMS and runs backplane-<platform>/install-release.sh from it: deploy/compat/ lays 0.15 out and hands over to the guard (docs/deploy.md)
+          set -e
+          native=$(ls backplane-$TAG-*-native.tar.gz)
+          for plat in linux-x64 linux-arm64 darwin-arm64 darwin-x64; do
+            case "$native" in *"$plat.tar.gz"*) echo "::error::a -native archive ends in 0.14's suffix $plat.tar.gz"; exit 1;; esac
+          done
+          for t in linux-x64 linux-arm64 darwin-arm64; do
+            n=backplane-$TAG-$t-native.tar.gz; [ -f "$n" ] || continue
+            d=compat/backplane-$t; mkdir -p $d
+            cp deploy/compat/install-release.sh deploy/compat/backplane-serve.sh $d/; cp "$n" $d/native.tar.gz; printf '%s\n' "$n" > $d/NATIVE; printf '%s\n' "$TAG" > $d/VERSION
+            cp manifest.json $d/; [ ! -f manifest.json.sig ] || cp manifest.json.sig manifest.json.keyid $d/
+            out=backplane-$TAG-$t.tar.gz; [ $t != linux-x64 ] || out=backplane-$TAG-linux-x64-cef.tar.gz
+            tar -C compat -czf "$out" backplane-$t
+          done
+          sha256sum backplane-$TAG-*.tar.gz backplane-$TAG-*.zip backplane-$TAG-android.apk backplane-$TAG-android.aab install.sh 2>/dev/null | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: release-dry-run
@@ -230,6 +249,9 @@ jobs:
             backplane-*.tar.gz
             backplane-*.zip
             install.sh
+            SHA256SUMS
+            backplane-*-android.apk
+            backplane-*-android.aab
             manifest.json
             manifest.json.sig
             manifest.json.keyid
@@ -241,7 +263,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           pre=; case "$TAG" in *-*) pre=--prerelease;; esac
-          gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz backplane-*.zip install.sh
+          gh release create "$TAG" $pre --draft --title "$TAG" --notes "" backplane-*.tar.gz backplane-*.zip backplane-$TAG-android.apk backplane-$TAG-android.aab install.sh SHA256SUMS
           # all three signed files, or the updater counts the release as half published and never offers it (update/run.rs SIGNED)
           gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
           gh release edit "$TAG" --draft=false
