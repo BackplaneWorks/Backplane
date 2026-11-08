@@ -9,6 +9,7 @@
 #   warn              a rejected rate_limit_event, and the turn ends well all the same, in one read
 #   auth              the login failed mid-turn
 #   exit-limit        the limit on stderr, and the process ends with no result
+#   slow:<s>          a word of progress at once, then the answer after <s> seconds (a turn a restart cuts mid-way)
 # @DIR@/usage.<who> is that login's usage reading, the `rate_limits` of the CLI's get_usage answer.
 # A store with a file `dead` in it is a login whose OAuth session died (Nov 7, Claude Code 2.1.319): `auth status` still names the account, every turn fails with
 # "Failed to authenticate: OAuth session expired and could not be refreshed", and get_usage is refused with "OAuth refresh token is no longer valid; run /login".
@@ -17,8 +18,9 @@ import json, os, sys, time, uuid
 D = "@DIR@"
 me = os.path.basename(sys.argv[0]); a = sys.argv[1:]
 home = os.environ.get("CLAUDE_CONFIG_DIR" if me == "claude" else "CODEX_HOME", "")
-login = os.path.join(home, "login.json" if me == "claude" else "auth.json")
-who = json.load(open(login))["email"] if home and os.path.exists(login) else "default"
+# with no profile's store, the CLI's own login: signed in only when @DIR@/default.login names who
+login = os.path.join(home, "login.json" if me == "claude" else "auth.json") if home else os.path.join(D, "default.login")
+who = json.load(open(login))["email"] if os.path.exists(login) else "default"
 def mode():
     try: return open(os.path.join(D, "mode." + who)).read().strip()
     except OSError: return "ok"
@@ -37,6 +39,9 @@ def claude_turn(line, sid):
     text = c if isinstance(c, str) else " ".join(b.get("text", "") for b in c if isinstance(b, dict))
     lc("queued"); say({"type": "system", "subtype": "init", "session_id": sid, "cwd": os.getcwd(), "tools": ["Bash"], "model": "fake", "permissionMode": "bypassPermissions", "apiKeySource": "none", "claude_code_version": "2.0.0" if old else "2.1.286"}); lc("started")
     record(resume, text)
+    if m.startswith("slow:"):
+        say({"type": "assistant", "message": {"id": "a" + uuid.uuid4().hex, "role": "assistant", "content": [{"type": "text", "text": "working, by " + who}], "usage": {"input_tokens": 1, "output_tokens": 1}}, "session_id": sid})
+        time.sleep(float(m.split(":")[1]))
     if m == "exit-limit": print("Error: You've hit your usage limit. Try again later.", file=sys.stderr, flush=True); os._exit(1)
     if m == "expired":
         words = "Failed to authenticate: OAuth session expired and could not be refreshed"
@@ -63,7 +68,9 @@ def claude_turn(line, sid):
 
 if me == "claude":
     if a[:2] == ["auth", "status"]:
-        if home and os.path.exists(login):
+        try: time.sleep(float(open(os.path.join(D, "authslow")).read().strip())) # @DIR@/authslow: a slow status check (the account inventory loading after a restart)
+        except (OSError, ValueError): pass
+        if os.path.exists(login):
             j = json.load(open(login)); j.update({"loggedIn": True, "authMethod": "claude.ai", "configDirectory": home}); print(json.dumps(j))
         else: print(json.dumps({"loggedIn": False}))
         sys.exit(0)

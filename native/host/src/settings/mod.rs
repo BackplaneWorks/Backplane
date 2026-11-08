@@ -27,6 +27,8 @@ pub mod keys;
 mod e2e;
 #[cfg(test)]
 mod failover_e2e;
+#[cfg(test)]
+mod restart_e2e;
 pub mod mask;
 pub mod misc;
 pub mod onboard;

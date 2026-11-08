@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod mailroom; mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -25,9 +25,26 @@ pub const BATCH_BYTES: usize = 64 << 10; // "one read" of the agent's output (De
 pub const LIVE_CAP: usize = 262144;   // Live.cap: a thread's streamed-but-unposted text
 pub const BURST: usize = 4;           // Rec.burst: turns a restart carries on at once
 pub const CARRY_GAP_S: u64 = 3;       // the rest follow one at a time, this far apart
-/// How long a start on a named account waits for the account manager. A restart recovers threads and carries their turns on (Agents::start) before
-/// settings::start hands the agents the manager; a continue in that gap failed with "Accounts are not available". It is there within a second or so.
-pub const ACCOUNTS_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long a start on a named account waits for its account to be ready (a status check the inventory is running on it) before it goes on another login.
+/// The account manager itself is the hub's, there from the agents' first moment (settings/accounts_hub.rs `manager`): no start waits for it.
+pub const ACCOUNTS_WAIT: std::time::Duration = std::time::Duration::from_secs(180);
+/// A start that still could not get an account tries again by itself, this many times (the uberbot's threads: ACCOUNT_RETRIES_BUB), each wait longer (`account_backoff`).
+pub const ACCOUNT_RETRIES: u32 = 6;
+pub const ACCOUNT_RETRIES_BUB: u32 = 12;
+/// The wait before retry `n` (0-based): 5 s doubling to at most 2 minutes. A test waits a tenth of a second doubling to at most 0.4 s.
+pub fn account_backoff(n: u32) -> std::time::Duration {
+    if cfg!(test) { return std::time::Duration::from_millis((100u64 << n.min(2)).min(400)) }
+    std::time::Duration::from_secs((5u64 << n.min(5)).min(120))
+}
+/// Whether a start's error is about the accounts (not the folder, the CLI or the session): the start waits and tries again instead of failing the turn.
+pub fn account_err(e: &str) -> bool {
+    ["Accounts are not available", "Reconnect and select this account", "status check did not finish", "Account identity changed", "Account storage failed", "select this account again"].iter().any(|k| e.contains(k))
+}
+#[cfg(test)] static FAIL_NEXT: StdMutex<Option<HashMap<(std::path::PathBuf, String), u32>>> = StdMutex::new(None);
+/// Tests: the next `n` starts of `thread` on `hub` find no account at all, whatever the fallbacks (a start with no route to any login).
+#[cfg(test)] pub fn account_fail_next(hub: &Hub, thread: &str, n: u32) { FAIL_NEXT.lock().unwrap().get_or_insert_with(HashMap::new).insert((hub.cfg.home.clone(), thread.to_string()), n); }
+#[cfg(test)] fn account_failing(hub: &Hub, thread: &str) -> bool { let mut g = FAIL_NEXT.lock().unwrap(); match g.as_mut().and_then(|m| m.get_mut(&(hub.cfg.home.clone(), thread.to_string()))) { Some(n) if *n > 0 => { *n -= 1; true } _ => false } }
+#[cfg(not(test))] fn account_failing(_: &Hub, _: &str) -> bool { false }
 pub const RECENT: usize = 256;        // message ids remembered per thread against a resend
 
 #[derive(Default)]
@@ -47,6 +64,8 @@ pub enum Cmd {
     /// Wake.ride: add a message to the thread's ride (see `Agents::wake_ride`).
     WakeRide { id: String, text: String, start: bool, reply: oneshot::Sender<Result<(), String>> },
     Steer { text: String, reply: oneshot::Sender<Result<(), String>> },
+    /// A Claude start that could not get an account goes again (`Actor::account_retry`): the message that started the turn (msg, text, what the agent gets).
+    Retry { msg: String, text: String, agent_text: String },
 }
 
 /// The hub's one agent manager, for hub-side callers that were not handed it (commands, bots).
@@ -73,14 +92,12 @@ fn set(k: String, v: String, at: u64) -> Value { json!({"$":"SettingSet","key":k
 fn wait_key(th: &str) -> String { format!("carry.wait.{th}") }
 
 impl Agents {
-    /// The account manager, waiting for it while the hub is still starting (see [`ACCOUNTS_WAIT`]); None only if it never came.
-    pub async fn accounts_ready(&self) -> Option<Arc<crate::settings::accounts_io::Accounts>> {
-        let t0 = std::time::Instant::now();
-        loop {
-            if let Some(m) = self.accounts.get() { return Some(m.clone()) }
-            if t0.elapsed() >= ACCOUNTS_WAIT { return None }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
+    /// The account manager: the hub's own, taken from it if this start has not yet (it has, before its recovery: `start_host`).
+    pub fn accounts_mgr(&self) -> Arc<crate::settings::accounts_io::Accounts> { self.accounts.get_or_init(|| crate::settings::accounts_hub::manager(&self.hub, self.cli.clone())).clone() }
+    /// The uberbot's own thread or one of its mailroom lanes: carried on first after a restart, and given the most tries to start.
+    pub fn priority(w: &World, th: &str) -> bool {
+        let bub = w.setting("uber.bot"); if bub.is_empty() { return false }
+        w.bots.get(bub).map_or(false, |b| !b.2 && b.1 == th) || th.starts_with(&format!("mailcoord-{bub}-")) || th.starts_with(&format!("run-{bub}-"))
     }
     pub async fn start(hub: Arc<Hub>) -> Result<Arc<Agents>> { let h = host::HostInfo::probe(&hub.cfg.home); Agents::start_host(hub, Cli::from_env(), h).await }
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
@@ -92,6 +109,7 @@ impl Agents {
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
         if no_dir && !crate::copy::on() { tokio::task::spawn_blocking(|| { let _ = proc::search_dirs(); }); } // the login shell's PATH is read now, off the workers, not inside the person's first send
         crate::startup::mark("agents: world loaded");
+        let _ = ag.accounts_mgr(); // the account manager before any turn is carried on (see ACCOUNTS_WAIT)
         { let a = ag.clone(); crate::ckpt::register(move |store| a.world.blocking_lock().save(store)); }
         let home = hub.cfg.home.to_string_lossy().into_owned(); let h2 = home.clone();
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&h2)).await.unwrap_or(0); proc::set_owner(&home);
@@ -113,6 +131,7 @@ impl Agents {
         let _ = HANDLE.set(ag.clone()); hub.set_far_mcp(Arc::new(far::FarServe(Arc::downgrade(&ag)))); tasks::watch(&ag); if !crate::guard::safe() { let a = ag.clone(); tokio::spawn(async move { a.work_rearm().await; a.locks_start() }); } if !repair.is_empty() { let a = ag.clone(); tokio::spawn(async move { a.task_repair_run(repair).await }); }
         hub.register_rpc(Arc::new(Rpc(ag.clone())));
         hub.register_http(Arc::new(devturns::DevTurns(ag.clone())));
+        hub.register_http(Arc::new(devturns::AccountRetry(ag.clone())));
         hub.register_http(Arc::new(locks::Http(ag.clone())));
         wake::Wakes::start(ag.clone()).await; // wake_on / wake_list / wake_cancel
         Ok(ag)
@@ -258,8 +277,9 @@ impl Agents {
                 if !crate::copy::on() && world::carry_may(t, w.setting("restart.continue")) && !th.starts_with("run") && !th.starts_with("mailcoord-") { carry.push((t.running_at, th.clone())) }
                 else { ev.push(set(wait_key(th), String::new(), now)); cut_threads.push(th.clone()) }
             }
-            carry.sort();
-            let carry: Vec<String> = carry.into_iter().map(|c| c.1).collect();
+            // the uberbot and its mailroom lanes first, so the person can always reach it; then the longest running
+            let mut carry: Vec<(bool, u64, String)> = carry.into_iter().map(|(at, th)| (!Agents::priority(&w, &th), at, th)).collect(); carry.sort();
+            let carry: Vec<String> = carry.into_iter().map(|c| c.2).collect();
             for th in carry.iter().skip(BURST) { if w.setting(&wait_key(th)) != "1" { ev.push(set(wait_key(th), "1".into(), now)) } }
             (ev, carry, cut_threads)
         };
@@ -274,7 +294,9 @@ impl Agents {
             tokio::spawn(async move { tokio::time::sleep(std::time::Duration::from_secs(hold)).await; if let Some(ag) = me.upgrade() { ag.carry_all(carry).await } });
             return
         }
-        self.carry_all(carry).await
+        // in the background: a carried turn's start may wait (its account's status check, a retry), and the hub's start must never wait on it. Nov 7 it did: each carry
+        // waited a minute for an account manager that only came once this start returned
+        let me = self.clone(); tokio::spawn(async move { me.carry_all(carry).await });
     }
     async fn carry_all(self: &Arc<Self>, carry: Vec<String>) {
         let rest = carry.iter().skip(BURST).cloned().collect::<Vec<_>>();
@@ -304,6 +326,29 @@ impl Agents {
         let extra = if waited { vec![note, set(wait_key(th), String::new(), now)] } else { vec![note] };
         let text = format!("{} {}", world::CARRY_TEXT, rules::CARRY_CUT);
         if let Err(e) = self.deliver(th, &id, &text, Some(("backplane".into(), "carry".into(), String::new())), extra).await { eprintln!("agents: carrying on {th}: {e}") }
+    }
+}
+
+/// The note a turn whose start failed on the accounts is started again with (`account_retry_failed`).
+pub const ACCOUNT_RETRY_TEXT: &str = "[Backplane] This turn could not start because no account could take it; an account is there now, so it starts again. Continue the interrupted work from its current state.";
+impl Agents {
+    /// Every thread whose newest turn failed at its start on an account error, with nothing newer from anyone since: it starts again (the outside watchdog's guard, and
+    /// the same rule a person's resend follows). The threads started.
+    pub async fn account_retry_failed(self: &Arc<Self>) -> Vec<String> {
+        let ths: Vec<String> = { let w = self.world().await; w.threads.iter().filter(|(_, t)| t.turn == "failed" && !t.archived && !t.deleted).map(|(id, _)| id.clone()).collect() };
+        if ths.is_empty() { return vec![] }
+        // the failure is the thread's newest entry: a spawn row on the accounts, then its failed turn (the recent log is enough: the watchdog asks within a minute)
+        let mut last: HashMap<String, Value> = HashMap::new();
+        { let n = self.hub.store.len(); for l in self.hub.store.range(n.saturating_sub(20000), n).unwrap_or_default() { if !(l.contains("\"ActivityLogged\"") || l.contains("\"MessagePosted\"")) { continue }
+            if let Ok(e) = serde_json::from_str::<Value>(&l) { if let Some(t) = e["thread"].as_str().filter(|t| ths.iter().any(|x| x == t)) { last.insert(t.to_string(), e); } } } }
+        let mut out = vec![];
+        for th in ths {
+            let Some(e) = last.get(&th) else { continue };
+            if !(e["$"] == "ActivityLogged" && e["kind"] == "spawn" && account_err(e["summary"].as_str().unwrap_or(""))) { continue }
+            let id = format!("t:backplane:{}", hub_id("ar", now_s(), self.seq()));
+            if self.deliver(&th, &id, ACCOUNT_RETRY_TEXT, Some(("backplane".into(), "account-retry".into(), String::new())), vec![]).await.is_ok() { out.push(th) }
+        }
+        out
     }
 }
 
@@ -421,6 +466,10 @@ struct Actor {
     codex: bool, prov: String, model: String, next_ride: bool, driver: Option<Box<dyn providers::Driver>>, asked: HashMap<String, Value>,
     /// Claude: the session id the process was started with (`--resume`, "" for a new one; cleared once it says init), the message that started it (msg, text, what the agent gets), and a count of starts
     steer_now: bool, resumed: String, spawn_in: Option<(String, String, String)>, spawn_n: u64,
+    /// The tries a start that could not get an account has had (`account_retry`); 0 once a process starts
+    acct_tries: u32,
+    /// The start went on another login, or back on its own (`account_route`): its new or older session gets the recent conversation with the message
+    handover: bool,
     /// A usage limit or failed login this turn's lines have shown, until the turn's end says what comes of it (settings/driver.rs `on_line`)
     limit_seen: Option<crate::settings::fallback::Limit>,
 }
@@ -440,7 +489,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_ends: Arc::new(HistEnds::default()), hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, limit_seen: None } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_ends: Arc::new(HistEnds::default()), hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -480,6 +529,11 @@ impl Actor {
             Cmd::StartQueued { text, taken, reply } => { let r = self.start_queued(text, taken).await; let _ = reply.send(r); }
             Cmd::WakeRide { id, text, start, reply } => { let r = self.wake_ride(id, text, start).await; let _ = reply.send(r); }
             Cmd::Steer { text, reply } => { let r = self.steer(text).await; let _ = reply.send(r); }
+            Cmd::Retry { msg, text, agent_text } => {
+                // only the start still waiting: its turn running with no process, and no newer message taken meanwhile (that one started its own)
+                let (t, cwd) = { let w = self.ag.world().await; (w.threads.get(&self.th).cloned(), w.cwd(&self.th)) };
+                match t { Some(t) if t.turn == "running" && self.live_proc.is_none() && self.last_user == msg && !t.archived && !t.deleted => self.claude_send(&t, &cwd, &msg, &text, &agent_text, now_s()).await, _ => self.acct_tries = 0 }
+            }
             Cmd::Answer { ask, answer } => { if let Some(req) = self.asked.remove(&ask) { let lines = self.driver.as_mut().map(|d| d.answer(&req, &answer)).unwrap_or_default(); if let Some(p) = &self.live_proc { for l in lines { let _ = p.input.try_send(l); } } } }
         }
     }
@@ -636,15 +690,14 @@ impl Actor {
         let Some(made) = providers::driver(&t.provider) else { self.fail(format!("{} threads are not run by the Rust hub yet", t.provider), "spawn", &format!("spawn-{now}")).await; return };
         let mut prog = match (if self.person { self.person_prog(made.cli) } else { self.ag.cli.resolve(made.cli) }) { Ok(p) => p, Err(e) => { let hint = made.driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
         self.stop().await; self.lines = None; self.exit = None;
-        // as for Claude (`spawn`): a thread bound to a named account runs under that profile's own home, after its identity is rechecked; a stale or disconnected one never falls back to the default login
-        let (mut acct_env, mut acct_args, mut busy) = (vec![], vec![], None);
+        // as for Claude (`spawn`): a thread bound to a named account runs under that profile's own home, after its identity is rechecked; one that cannot start goes on another login (`account_route`)
+        let (mut acct_env, mut acct_args, mut busy, mut session_over) = (vec![], vec![], None, None::<String>);
         if !self.person && crate::settings::accounts::supported(&t.provider) {
             let raw = self.ag.hub.setting(&crate::settings::accounts::binding_key(&th, &t.provider)).await.unwrap_or_default();
             let b: Value = serde_json::from_str(&raw).unwrap_or(Value::Null); let id = b["id"].as_str().unwrap_or("").to_string();
             if !id.is_empty() {
-                let Some(mgr) = self.ag.accounts.get().cloned() else { self.fail("could not start codex: Accounts are not available; select the default account".into(), "spawn", &format!("spawn-{now}")).await; return };
-                match mgr.launch_plan(&id, &b["epoch"].as_u64().unwrap_or(0).to_string(), &t.provider).await {
-                    Ok(plan) => { prog = plan.program; acct_env = plan.env; acct_args = plan.args; busy = Some(crate::settings::accounts_hub::Busy::new(mgr, &id)); }
+                match self.account_route(&b, &id, &t.provider).await {
+                    Ok((plan, s)) => { if let Some((plan, busy_on)) = plan { prog = plan.program; acct_env = plan.env; acct_args = plan.args; busy = Some(busy_on); } session_over = s; }
                     Err(e) => { if self.login_refused(&e).await { return } self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
                 }
             }
@@ -652,7 +705,7 @@ impl Actor {
         let gen = format!("{now}-{}", self.ag.seq()); self.ag.set_gen(&th, &gen);
         let prompt = self.ag.prompt_for(&th, cwd).await;
         let (effort, think, session) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.threads.get(&th).map(|x| x.session.clone()).unwrap_or_else(|| t.session.clone())) };
-        let session = if self.person { String::new() } else { session }; // a copied session is never resumed in side-by-side mode
+        let session = if self.person { String::new() } else { session_over.unwrap_or(session) }; // a copied session is never resumed in side-by-side mode; another login's is not either (`account_route`)
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let (host, cwd2, text2, prov2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone());
         let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
@@ -768,12 +821,17 @@ impl Actor {
     /// Claude: the process (started if it is not the right one) takes the message on its input.
     async fn claude_send(&mut self, t: &world::T, cwd: &str, msg: &str, text: &str, agent_text: &str, now: u64) {
         if crate::copy::person_turn_allowed() && !self.person { return } // side-by-side: nothing but a person's turn writes to a real agent
-        let th = self.th.clone(); let (cwd, msg, text, agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
+        let th = self.th.clone(); let (cwd, msg, text, mut agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
         let key = rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think);
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
         if self.live_proc.as_ref().map_or(true, |p| p.person != self.person || (p.key != key && !self.cmds.open(""))) {
             self.stop().await; self.lines = None; self.exit = None;
-            if let Err(e) = self.spawn(t, &cwd, key).await { if self.login_refused(&e).await { return } self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+            if let Err(e) = self.spawn(t, &cwd, key).await {
+                if self.login_refused(&e).await { return }
+                if account_err(&e) && self.account_retry(&msg, &text, &agent_text, &e).await { return }
+                self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+            self.acct_tries = 0;
+            if std::mem::take(&mut self.handover) { let ctx = crate::commands::lost_session_context(&self.ag.hub, &th, &text).await; if !ctx.is_empty() { agent_text = format!("{ctx}\n\n{agent_text}") } }
             self.spawn_in = Some((msg.to_string(), text.to_string(), agent_text.to_string()));
         }
         let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
@@ -840,20 +898,95 @@ impl Actor {
         let c = self.person_child()?; std::env::split_paths(&c.path).map(|d| d.join(cli)).find(|p| p.is_file()).ok_or_else(|| format!("{cli} is not installed for the person (looked in their PATH and the usual install directories under {})", c.home.display()))
     }
 
+    /// One line on the thread about its account (kind `account-start`: not progress, so a restart's carry-on still never repeats itself, world.rs `carry_text_last`).
+    async fn account_note(&mut self, tone: &str, text: String) {
+        let (now, th) = (now_s(), self.th.clone());
+        self.commit(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("ac", now, self.ag.seq()),"tone":tone,"kind":"account-start","summary":text,"at":now})]).await;
+    }
+    /// The login a start bound to account `id` runs on. Its own account, waited for while a status check runs on it (the inventory after a restart; said once when that takes a
+    /// while), up to ACCOUNTS_WAIT. If it cannot start a turn: an expired sign-in with another account to take over goes to the driver's failover (Err EXPIRED, `login_refused`:
+    /// the thread moves with its context); otherwise another saved account of the provider, and last the CLI's own login (Ok None), said in one line. Err: no route to any login.
+    /// Ok: the plan (None: the CLI's own login), and the session to resume when it is not the thread's current one (`Some("")`: a new one, the conversation handed over).
+    /// A session belongs to the login it ran on: the thread's own is kept in the fallback record (`fallback_key`) and resumed when the thread is back on its account.
+    async fn account_route(&mut self, b: &Value, id: &str, provider: &str) -> Result<(Option<(crate::settings::accounts_io::LaunchPlan, crate::settings::accounts_hub::Busy)>, Option<String>), String> {
+        use crate::settings::{accounts_hub as ah, accounts_io::EXPIRED};
+        if account_failing(&self.ag.hub, &self.th) { return Err("Accounts are not available; select the default account".into()) }
+        let (mgr, hub) = (self.ag.accounts_mgr(), self.ag.hub.clone());
+        let epoch = b["epoch"].as_u64().unwrap_or(0).to_string();
+        let name = |m: &crate::settings::accounts_io::Accounts, id: &str| m.snapshot()["profiles"].as_array().and_then(|a| a.iter().find(|p| p["id"] == id).and_then(|p| p["label"].as_str().map(str::to_string))).filter(|l| !l.is_empty()).unwrap_or_else(|| "This thread's account".into());
+        let t0 = Instant::now(); let mut said = false;
+        let own = loop {
+            let fut = mgr.launch_plan(id, &epoch, provider); tokio::pin!(fut);
+            let r = if said { fut.await } else { tokio::select! { r = &mut fut => r, _ = tokio::time::sleep(Duration::from_secs(3)) => { said = true; let n = name(&mgr, id); self.account_note("info", format!("Waiting for accounts: checking {n} before the turn starts")).await; fut.await } } };
+            match r { Err(e) if e.contains("status check did not finish") && t0.elapsed() < ACCOUNTS_WAIT => continue, r => break r }
+        };
+        let fb_key = ah::fallback_key(&self.th);
+        let rec: Value = serde_json::from_str(&hub.setting(&fb_key).await.unwrap_or_default()).unwrap_or(Value::Null);
+        let (on_fallback, current) = (rec.is_object(), rec["id"].as_str().unwrap_or("").to_string());
+        let e = match own {
+            Ok(plan) => {
+                if !on_fallback { return Ok((Some((plan, ah::Busy::new(mgr, id))), None)) }
+                let _ = hub.commit_many(&[set(fb_key, String::new(), now_s())]).await; // back on its own account, in its own session
+                return Ok((Some((plan, ah::Busy::new(mgr, id))), Some(rec["session"].as_str().unwrap_or("").to_string())))
+            }
+            Err(e) => e,
+        };
+        let own_session = if on_fallback { rec["session"].as_str().unwrap_or("").to_string() } else { self.ag.world().await.threads.get(&self.th).map(|t| t.session.clone()).unwrap_or_default() };
+        // the session to go on in: the one it already runs on the same fallback, else a new one
+        let session_for = |target: &str| if on_fallback && current == target { None } else { Some(String::new()) };
+        let others = ah::others(&hub, &mgr, provider, id).await;
+        if e.contains(EXPIRED) && !others.is_empty() { return Err(e) }
+        let n = name(&mgr, id);
+        for (oid, oepoch, olabel) in others {
+            if let Ok(plan) = mgr.launch_plan(&oid, &oepoch.to_string(), provider).await {
+                let session = session_for(&oid);
+                let _ = hub.commit_many(&[set(fb_key, json!({"id":oid,"epoch":oepoch,"from":id,"session":own_session}).to_string(), now_s())]).await;
+                if session.is_some() { self.account_note("info", format!("Started on {}: {n} cannot start a turn now ({e})", if olabel.is_empty() { "another account" } else { &olabel })).await; }
+                return Ok((Some((plan, ah::Busy::new(mgr, &oid))), session))
+            }
+        }
+        if !mgr.default_login(provider).await { return Err(e) }
+        let session = session_for("");
+        let _ = hub.commit_many(&[set(fb_key, json!({"id":"","from":id,"session":own_session}).to_string(), now_s())]).await;
+        if session.is_some() { self.account_note("info", format!("Started on this computer's own {} login: {n} cannot start a turn now ({e})", ah::provider_title(provider))).await; }
+        Ok((None, session))
+    }
+    /// A Claude start that could not get an account on any route: said in one line, and tried again by itself after a wait (`account_backoff`); the turn stays running, nobody has
+    /// to send it again. The uberbot's threads get the most tries. False when the tries are spent: the turn fails, and the person gets the one sign-in alert.
+    async fn account_retry(&mut self, msg: &str, text: &str, agent_text: &str, e: &str) -> bool {
+        let (bub, title) = { let w = self.ag.world().await; (Agents::priority(&w, &self.th), w.threads.get(&self.th).map(|t| t.title.clone()).unwrap_or_default()) };
+        let max = if bub { ACCOUNT_RETRIES_BUB } else { ACCOUNT_RETRIES };
+        if self.acct_tries >= max {
+            self.acct_tries = 0;
+            let raw = self.ag.hub.setting(&crate::settings::accounts::binding_key(&self.th, "claude")).await.unwrap_or_default();
+            let id = serde_json::from_str::<Value>(&raw).ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
+            let title = if title.is_empty() { "a turn".to_string() } else { format!("\u{201c}{title}\u{201d}") };
+            crate::settings::accounts_hub::alert_start(&self.ag.hub, "claude", &id, &title, e).await;
+            return false
+        }
+        let wait = account_backoff(self.acct_tries); self.acct_tries += 1;
+        self.account_note("info", format!("Waiting for an account to start on: {e}. Trying again in {} s.", wait.as_secs().max(1))).await;
+        let (tx, cmd) = (self.ag.actor(&self.th), Cmd::Retry { msg: msg.into(), text: text.into(), agent_text: agent_text.into() });
+        tokio::spawn(async move { tokio::time::sleep(wait).await; let _ = tx.send(cmd).await; });
+        true
+    }
+
     async fn spawn(&mut self, t: &world::T, cwd: &str, key: String) -> Result<(), String> {
+        self.handover = false;
         remake_folder(cwd, &self.ag.world().await.roots.get(&t.project).cloned().unwrap_or_default()).await?;
         let mut prog = if self.person { self.person_prog("claude")? } else { self.ag.cli.resolve("claude")? };
         let (now, th) = (now_s(), self.th.clone());
-        // a thread bound to a named account runs under that profile's own CLAUDE_CONFIG_DIR, after its identity is rechecked (no model turn); a stale or disconnected one never falls back to the default login
-        let (mut acct_env, mut acct_args, mut busy) = (vec![], vec![], None);
+        // a thread bound to a named account runs under that profile's own CLAUDE_CONFIG_DIR, after its identity is rechecked (no model turn); one that cannot start a turn now
+        // goes on another of the provider's saved accounts, then on the CLI's own login, said in one line (`account_route`)
+        let (mut acct_env, mut acct_args, mut busy, mut session) = (vec![], vec![], None, t.session.clone());
         if !self.person {
             let raw = self.ag.hub.setting(&crate::settings::accounts::binding_key(&th, "claude")).await.unwrap_or_default(); // the hub's own settings: the agents' world does not track this key
             let b: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
             let id = b["id"].as_str().unwrap_or("").to_string();
             if !id.is_empty() {
-                let Some(mgr) = self.ag.accounts_ready().await else { return Err("Accounts are not available; select the default account".into()) };
-                let plan = mgr.launch_plan(&id, &b["epoch"].as_u64().unwrap_or(0).to_string(), "claude").await?;
-                prog = plan.program; acct_env = plan.env; acct_args = plan.args; busy = Some(crate::settings::accounts_hub::Busy::new(mgr, &id));
+                let (plan, s) = self.account_route(&b, &id, "claude").await?;
+                if let Some((plan, busy_on)) = plan { prog = plan.program; acct_env = plan.env; acct_args = plan.args; busy = Some(busy_on); }
+                if let Some(s) = s { session = s; self.handover = true; }
             }
         }
         let gen = format!("{now}-{}", self.ag.seq()); // Hub.gen: the process's generation, which its MCP URL names
@@ -862,12 +995,12 @@ impl Actor {
         let plugins: Vec<String> = self.ag.host.kistack.iter().map(|k| k.to_string_lossy().into_owned()).collect();
         let (effort, think) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think) };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
-        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &t.session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url });
+        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url });
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load
         self.ag.set_gen(&th, &gen);
         let p = if self.person { proc::spawn_person(&self.person_child()?, &prog, &args, std::path::Path::new(cwd), &[]) } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &acct_env) }.map_err(|e| e.to_string())?;
-        self.cmds = cmds::Cmds::new(); self.wait.clear(); self.resumed = if self.person { String::new() } else { t.session.clone() }; self.spawn_n += 1;
+        self.cmds = cmds::Cmds::new(); self.wait.clear(); self.resumed = if self.person { String::new() } else { session.clone() }; self.spawn_n += 1;
         self.ag.stats.procs_spawned.fetch_add(1, Relaxed);
         self.live_proc = Some(Live { input: p.input, pid: p.pid, key, person: self.person, _busy: busy }); self.lines = Some(p.lines); self.exit = Some(p.exit);
         Ok(())

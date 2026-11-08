@@ -82,6 +82,37 @@ pub fn signin_alert(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, 
     Some(json!({"profile":id,"epoch":p["epoch"],"provider":provider,"label":p["label"],"text":format!("{} sign-in expired: tap to sign in again", provider_title(provider)),"link":format!("account:{id}"),"at":now}))
 }
 
+/// Where a start may go when its own account cannot start a turn: the provider's other saved accounts that may (connected, or not yet checked since the restart: the
+/// launch checks it), not held by a limit that is still on, in the order they were saved. `(id, epoch, label)`.
+pub async fn others(hub: &Arc<Hub>, mgr: &Accounts, provider: &str, except: &str) -> Vec<(String, u64, String)> {
+    let snap = mgr.snapshot(); let now = now_ms() / 1000;
+    let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("account.limit.").map(|(k, _)| k.to_string()).collect() };
+    let mut held = std::collections::HashMap::new();
+    for k in keys { if let Some(v) = hub.setting(&k).await { held.insert(k, v); } }
+    let get = |k: &str| held.get(k).cloned().unwrap_or_default();
+    snap["profiles"].as_array().into_iter().flatten().filter(|p| p["provider"] == provider && p["id"] != except && matches!(p["state"].as_str(), Some("connected" | "unchecked")))
+        .filter(|p| !fb::hold_current(&get, provider, p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0), "", now))
+        .map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["epoch"].as_u64().unwrap_or(0), p["label"].as_str().unwrap_or("").to_string())).collect()
+}
+/// What a start that cannot run on any login records, once: the same record an expired sign-in makes (`signin_alert`), so the push module sends the person the one
+/// needs_you alert in the uberbot's name. None when one is recorded already (until an account is back and the record is emptied).
+pub fn start_alert(get: &dyn Fn(&str) -> String, provider: &str, profile: &str, title: &str, why: &str, now: u64) -> Option<Value> {
+    if !get(&alert_key(provider)).is_empty() { return None }
+    let link = if profile.is_empty() { String::new() } else { format!("account:{profile}") };
+    Some(json!({"profile":profile,"provider":provider,"text":format!("{} sign-in needed: no account could start {title} ({why})", provider_title(provider)),"link":link,"at":now,"start":true}))
+}
+static ALERTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Records `start_alert` for a thread that could not start, checked and written under one lock so two threads failing at once make one alert.
+pub async fn alert_start(hub: &Arc<Hub>, provider: &str, profile: &str, title: &str, why: &str) -> bool {
+    let _g = ALERTING.lock().await;
+    let cur = hub.setting(&alert_key(provider)).await.unwrap_or_default();
+    let Some(rec) = start_alert(&|k: &str| if k == alert_key(provider) { cur.clone() } else { String::new() }, provider, profile, title, why, now_ms() / 1000) else { return false };
+    hub.commit_many(&[json!({"$":"SettingSet","key":alert_key(provider),"value":rec.to_string(),"at":now_ms() / 1000})]).await.is_ok()
+}
+/// The setting a start that fell back writes: the login this thread's process runs on now, while its binding still names its own account. The watch below does not take
+/// that thread for one whose account was retired under it.
+pub fn fallback_key(thread: &str) -> String { format!("account.fallback.{thread}") }
+
 /// One snapshot that changed: the log, the clients, and the turns that lost their account.
 pub async fn found(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Value) { found_seen(hub, agents, snapshot, &mut Seen::new()).await }
 pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Value, seen: &mut Seen) {
@@ -99,6 +130,7 @@ pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: 
     for (id, provider) in running {
         let raw = hub.setting(&accounts::binding_key(&id, &provider)).await.unwrap_or_default();
         if !retired(&raw, &inventory) { continue }
+        if !hub.setting(&fallback_key(&id)).await.unwrap_or_default().is_empty() { continue } // it runs on another login already: its own account's change is not its business now
         let _ = hub.commit_many(&[json!({"$":"TurnChanged","thread":id,"state":"interrupted","at":at}),
             json!({"$":"ActivityLogged","thread":id,"act":format!("account-retired:{at}"),"tone":"error","kind":"account","summary":"This account's verified identity changed or disconnected. Check status and explicitly select an account to continue.","at":at})]).await;
         if let Some(a) = agents { let _ = a.stop(&id).await; }
@@ -196,16 +228,14 @@ pub async fn holds(hub: &Arc<Hub>, profiles: &Value, model: &str) -> Value {
 
 /// The manager for this hub's home (provider CLIs resolved like the agents'), its RPC, and the 1-second watch that tells everyone of a change.
 pub fn start(hub: &Arc<Hub>, agents: Option<Arc<Agents>>) -> Arc<Accounts> { start_cli(hub, agents, crate::agents::proc::Cli::from_env()) }
+/// The hub's one account manager, opened on first use (a cheap read of the private registry). The agents take it before their recovery carries any turn on, settings::start
+/// takes the same one: neither start waits on the other. Nov 7: the manager was made by settings::start, after `Agents::start` returned, while that start's recovery waited a
+/// minute per carried turn for it; every turn a restart cut on a saved account failed with "Accounts are not available".
+pub fn manager(hub: &Arc<Hub>, cli: crate::agents::proc::Cli) -> Arc<Accounts> { hub.accounts.get_or_init(|| Arc::new(Accounts::open(&hub.cfg.home, Arc::new(move |p: &str| cli.resolve(p))))).clone() }
 /// `start` with the provider CLIs found by `cli` (a test gives it a folder of stand-ins).
 pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents::proc::Cli) -> Arc<Accounts> {
-    let mgr = Arc::new(Accounts::open(&hub.cfg.home, Arc::new(move |p: &str| cli.resolve(p))));
-    if let Some(a) = &agents { let _ = a.accounts.set(mgr.clone()); }
-    else {
-        // the agents' start overran its budget (guard::step answers None and the agents go on starting in the background): they still get the manager once they are up. On
-        // Nov 7 they did not, and every start on a named account waited its minute and failed with "Accounts are not available" until the next restart.
-        let (h, m) = (hub.clone(), mgr.clone());
-        tokio::spawn(async move { for _ in 0..1200 { if let Some(a) = crate::agents::handle().filter(|a| Arc::ptr_eq(&a.hub, &h)) { let _ = a.accounts.set(m); return } tokio::time::sleep(std::time::Duration::from_millis(250)).await } });
-    }
+    let mgr = manager(hub, cli);
+    if let Some(a) = &agents { let _ = a.accounts.set(mgr.clone()); } // the agents' start overran its budget: they take the same manager from the hub when they get to it
     hub.register_rpc(Arc::new(AccountsRpc::new(mgr.clone())));
     let (h, m) = (hub.clone(), mgr.clone());
     tokio::spawn(async move {

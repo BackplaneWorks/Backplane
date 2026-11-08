@@ -30,7 +30,7 @@ pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub det
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct World { /** a thread's queued hand-overs (`handoff:*`), (msg, text): the conversation a switch or a fork owes the agent, which goes with its next turn */ #[serde(default)] pub handoffs: HashMap<String, Vec<(String, String)>>, pub home: String, pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
-const KEYS: &[&str] = &["lock.warning.", "locks.lease.minutes", "carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n."];
+const KEYS: &[&str] = &["lock.warning.", "locks.lease.minutes", "carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n.", "uber.bot"];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
 
 pub const CARRY_TEXT: &str = "Backplane restarted while you were working. Continue where you left off.";
@@ -124,7 +124,7 @@ impl World {
             },
             "ActivityLogged" => if let Some(x) = self.threads.get_mut(&g("thread")) {
                 if g("tone") == "review" { self.reviews.entry(g("thread")).or_default().push((g("kind"), g("summary"), v.get("at").and_then(Value::as_u64).unwrap_or(0))) } // Idx.review: a thread's review ops, in order
-                x.newest = g("act"); if g("kind") != "restart" { x.carry_text_last = false } },
+                x.newest = g("act"); if !matches!(g("kind").as_str(), "restart" | "account-start") { x.carry_text_last = false } },
             "UsageSet" => { let k = format!("usage.{}", g("thread")); let old = self.setting(&k).to_string(); let (u, w) = (v.get("used").and_then(Value::as_u64).unwrap_or(0), v.get("window").and_then(Value::as_u64).unwrap_or(0));
                 let keep = |new: u64, old: u64| if new == 0 { old } else { new };
                 let ps: Vec<u64> = old.split('/').map(num).collect(); self.st.insert(k, format!("{}/{}", keep(u, *ps.first().unwrap_or(&0)), keep(w, *ps.get(1).unwrap_or(&0)))); }

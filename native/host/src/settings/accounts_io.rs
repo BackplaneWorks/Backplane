@@ -782,6 +782,12 @@ impl Accounts {
         }.await;
         r
     }
+    /// Whether the provider CLI's own login (no profile) can start a turn now: the last route a start on an account has (agents `account_route`). Claude is asked
+    /// (`auth status`, a few hundred ms, only when a start falls back); an API key in the environment is a login; Codex's own login is taken as there.
+    pub async fn default_login(self: &Arc<Self>, provider: &str) -> bool {
+        if provider != "claude" || std::env::var_os("ANTHROPIC_API_KEY").is_some() { return true }
+        matches!(self.cli(None, "claude", &["auth", "status"]).await, Ok((0, d)) if d["loggedIn"] == true)
+    }
     /// A current Claude child may publish its passive usage windows (accounts.js `observe`); anything else changes nothing.
     pub fn observe(&self, profile: &str, epoch: &str, raw: &str) -> Value {
         let Ok(p) = self.profile(profile) else { return self.snapshot() };

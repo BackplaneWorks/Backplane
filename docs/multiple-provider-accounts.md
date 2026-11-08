@@ -36,6 +36,17 @@ Phones: Settings, Accounts (data/1 feature `accounts`, docs/PHONE-DATA.md) lists
 
 A limit's reset comes from the provider's field, the time after a bar in Claude Code's words, the time in its words ("resets Nov 12, 3am (America/New_York)", read in that zone), a `rate_limit_event` seen earlier in the turn, or the fullest window of the account's own allowance. A hold ends at its reset. One whose limit named no reset is tried again an hour after it was met (`UNKNOWN_HOLD_S`): a turn is the test, and an account still out is held again. Any hold ends early when a reading newer than it shows allowance left in every window that applies, or when a turn completes on that login (and model). The CLI's own login is held and cleared the same way, its reading the default allowance (`allowance.claude`). A failed login ends only when the sign-in is proven again (above), or when the person picks that account. Once the account a thread left has reset, the thread goes back to it between turns with its own session and a note (`account.failover.preference.<thread>`). An explicit account, provider, model or mode choice replaces that. Defaults for new threads are unchanged.
 
+## A start that cannot run on its account
+
+A start never fails on account availability while any route to a working login exists (Nov 7: every restart with turns cut on a saved account failed each carried turn with "Accounts are not available"; the agents' recovery waited for an account manager it was only given after it returned).
+
+- The account manager is the hub's own (`settings/accounts_hub.rs` `manager`), there before the agents carry any turn on; the agents' recovery carries turns on in the background, so the hub's start never waits on a turn's start.
+- A start waits for a status check already running on its account (the inventory after a restart) up to 3 minutes, saying "Waiting for accounts: checking Work before the turn starts" once if that takes more than 3 s.
+- If the account cannot start a turn: an expired sign-in with another account to take over fails over as above. Otherwise the turn starts on another saved account of the provider that is connected or unchecked and not held, else on the CLI's own login when it is signed in, and the thread says so in one line ("Started on Personal: Work cannot start a turn now (...)"). That turn runs in a new session with the recent conversation handed over; the thread's own session is kept (`account.fallback.<thread>`) and resumed, with the conversation handed over, when its account can start again.
+- With no route at all, the turn stays running and tries again by itself (5 s doubling to 2 minutes; 6 tries, 12 for the uberbot's thread and its mailroom lanes), said in one line each time. Only when the tries are spent does it fail, and the person gets one needs_you alert through the sign-in record ("Claude sign-in needed: ...", `account.signin.alert.claude`).
+- After a restart the uberbot's thread and its mailroom lanes are carried on first.
+- The outside watchdog treats any start failure on the accounts as a guard failure: it logs it, notifies once and asks the hub to start those turns again (`POST /dev/account-retry`).
+
 ## Choosing an account
 
 The Account chip opens with Ctrl+Shift+A (⌘⇧A; rebindable in Settings). The menu has the keyboard: `1`…`9` pick the rows, Esc shuts it. Each row shows what the account has left, or `out, resets 15:40` from the hub, and the current one is ticked.
