@@ -13,6 +13,7 @@ pub mod mentions;
 mod copy_gate;
 pub mod accounts_io;
 pub mod accounts_phone;
+pub mod claude_usage;
 pub mod diagnostics;
 pub mod driver;
 pub mod fab; pub mod skill_install;
