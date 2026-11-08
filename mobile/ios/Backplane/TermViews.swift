@@ -28,6 +28,7 @@ private struct TermCardSurface: UIViewRepresentable {
     func updateUIView(_ v: TermSurface, context: Context) {
         let r = TermCard.rows(screen.vt.lines(0), cursor: screen.vt.cursor, n: shown)
         v.lines = r.lines; v.cursor = r.cursorRow.map { (screen.vt.cursor.x, $0) }
+        v.isAccessibilityElement = true; v.accessibilityLabel = "Terminal screen"; v.accessibilityValue = r.lines.map { $0.runs.map(\.text).joined() }.joined(separator: "\n")
         _ = rev
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView v: TermSurface, context: Context) -> CGSize? {

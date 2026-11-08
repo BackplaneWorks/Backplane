@@ -10,7 +10,7 @@ start)
   rm -rf "$RIG"; mkdir -p "$RIG/home" "$RIG/proj" "$RIG/bin"; git -C "$RIG/proj" init -q; touch "$RIG/proj/alpha.txt" "$RIG/proj/beta.txt" "$RIG/proj/gamma.txt"
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$HOME/.bun/bin/bun" "$ROOT/test/tools/claude_standin.ts" > "$RIG/bin/claude"
   for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$RIG/bin/$n"; done; chmod +x "$RIG"/bin/*
-  systemd-run --user --unit bp-iterm-hub -q -p WorkingDirectory="$RIG/proj" -E BACKPLANE_AGENTS="$RIG/bin" -E BACKPLANE_NO_UPDATE=1 -E FAKE_LOG="$RIG/standin.log" -E TZ=Etc/UTC -E TMPDIR="$BP_TMP" \
+  systemd-run --user --unit bp-iterm-hub -q -p WorkingDirectory="$RIG/proj" -E BACKPLANE_AGENTS="$RIG/bin" -E BACKPLANE_NO_UPDATE=1 -E BP_STREAM_N=1 -E FAKE_LOG="$RIG/standin.log" -E TZ=Etc/UTC -E TMPDIR="$BP_TMP" \
     "$HUB" --home "$RIG/home" --port "$PORT" --host "$IP" --no-tailscale --foreground
   systemd-run --user --unit bp-iterm-relay -q /usr/bin/python3 "$ROOT/scripts/mobile/tcp-relay.py" "$IP" $((PORT+1)) "$IP" "$PORT" "$RIG/cut"
   echo "rig: hub $IP:$PORT, relay $IP:$((PORT+1)) (control $((PORT+2))), $RIG";;
