@@ -24,7 +24,13 @@ fresh link; before=$(live); l=$(inv link); steps link "[{\"wait\":1500},{\"pair_
 RIG=link run link 9
 ok "link pairs and the client connects" "$(says link '"status":"Connected"')"
 ok "link: the hub lists one more live device" "$([ "$(live)" = $((before+1)) ]; echo $?)"
-ok "link: credential and hub saved privately" "$([ "$(stat -c %a "$W/rig/link/config/backplane-gpui/hubs/$(ls "$W/rig/link/config/backplane-gpui/hubs" | head -1)" 2>/dev/null || stat -f %Lp "$W/rig/link/config/backplane-gpui/hubs/$(ls "$W/rig/link/config/backplane-gpui/hubs" | head -1)")" = 600 ]; echo $?)"
+# private: mode 600 on Unix; on Windows (Git's sh) the file's ACL: the user, SYSTEM and Administrators only, nothing inherited (icacls)
+private() { case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) a=$(icacls "$(cygpath -w "$1")" 2>/dev/null); echo "$a" | grep -q "$USERNAME" && ! echo "$a" | grep -qE 'Users:|Everyone|Authenticated Users|\(I\)' ;;
+  *) [ "$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1")" = 600 ] ;;
+esac; }
+hd="$W/rig/link/config/backplane-gpui"
+ok "link: credential and hub saved privately" "$(private "$hd/hubs/$(ls "$hd/hubs" | grep -m1 '\.token$')" && private "$hd/hubs.json"; echo $?)"
 sec=$(python3 -c "print('$l'.split('invite=')[1].split('&')[0])"); tok=$(cat "$W/rig/link/config/backplane-gpui/hubs/"*.token 2>/dev/null | head -1)
 ok "link: no secret or credential in the client's log" "$(grep -qE "$sec|${tok:-nothing-saved}" "$L/gpui-link.out"; [ $? = 1 ]; echo $?)"
 # short code

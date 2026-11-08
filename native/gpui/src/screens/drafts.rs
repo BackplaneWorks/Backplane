@@ -52,7 +52,7 @@ pub fn save(path: &Path, drafts: &HashMap<String, String>) {
         use std::io::Write;
         let mut o = std::fs::OpenOptions::new(); o.write(true).create(true).truncate(true);
         #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; o.mode(0o600); }
-        o.open(&tmp).and_then(|mut f| f.write_all(text.as_bytes())).is_ok()
+        o.open(&tmp).and_then(|mut f| f.write_all(text.as_bytes())).is_ok() && crate::plat::make_private(&tmp).is_ok()
     };
     if ok { let _ = std::fs::rename(tmp, path); }
 }

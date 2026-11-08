@@ -40,11 +40,67 @@ pub fn private_dir(p: &std::path::Path) -> bool {
     #[cfg(unix)] { use std::os::unix::fs::{DirBuilderExt, PermissionsExt}; std::fs::DirBuilder::new().recursive(true).mode(0o700).create(p).is_ok() && std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700)).is_ok() }
     #[cfg(windows)] { std::fs::create_dir_all(p).is_ok() }
 }
-/// Create or truncate a file only this user may read (0600).
+/// Create or truncate a file only this user may read (0600; Windows: make_private).
 pub fn private_file(p: &std::path::Path) -> std::io::Result<std::fs::File> {
     let mut o = std::fs::OpenOptions::new(); o.write(true).create(true).truncate(true);
     #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; o.mode(0o600); }
-    o.open(p)
+    let f = o.open(p)?; make_private(p)?; Ok(f)
+}
+/// Windows: the file's access is this user, SYSTEM and Administrators, full control, nothing inherited (a protected DACL). A file under
+/// %APPDATA% gets that from its folder anyway; one written elsewhere (a settings folder the person chose) inherited Users and Authenticated Users.
+/// Unix: the mode the file was opened with (0600) already says it.
+pub fn make_private(p: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)] { win_acl::user_only(p) }
+    #[cfg(not(windows))] { let _ = p; Ok(()) }
+}
+#[cfg(windows)]
+mod win_acl {
+    use windows_sys::Win32::{Foundation::{CloseHandle, LocalFree, HANDLE}, Security::{Authorization::*, *}, System::Threading::{GetCurrentProcess, OpenProcessToken}};
+    fn wide(s: &str) -> Vec<u16> { s.encode_utf16().chain(Some(0)).collect() }
+    /// The current user's SID as text (S-1-5-21-...).
+    fn user_sid() -> std::io::Result<String> {
+        unsafe {
+            let mut tok: HANDLE = std::ptr::null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut tok) == 0 { return Err(std::io::Error::last_os_error()) }
+            let mut buf = vec![0u8; 512]; let mut len = 0u32;
+            let ok = GetTokenInformation(tok, TokenUser, buf.as_mut_ptr() as _, buf.len() as u32, &mut len); CloseHandle(tok);
+            if ok == 0 { return Err(std::io::Error::last_os_error()) }
+            let tu = &*(buf.as_ptr() as *const TOKEN_USER);
+            let mut s: windows_sys::core::PWSTR = std::ptr::null_mut();
+            if ConvertSidToStringSidW(tu.User.Sid, &mut s) == 0 { return Err(std::io::Error::last_os_error()) }
+            let n = (0..).take_while(|&i| *s.add(i) != 0).count();
+            let out = String::from_utf16_lossy(std::slice::from_raw_parts(s, n)); LocalFree(s as _); Ok(out)
+        }
+    }
+    pub fn user_only(p: &std::path::Path) -> std::io::Result<()> {
+        let sddl = wide(&format!("D:P(A;;FA;;;{})(A;;FA;;;SY)(A;;FA;;;BA)", user_sid()?));
+        unsafe {
+            let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+            if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, std::ptr::null_mut()) == 0 { return Err(std::io::Error::last_os_error()) }
+            let (mut present, mut defaulted, mut dacl) = (0, 0, std::ptr::null_mut());
+            let got = GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted);
+            let path = wide(&p.to_string_lossy());
+            let r = if got == 0 { Err(std::io::Error::last_os_error()) } else {
+                match SetNamedSecurityInfoW(path.as_ptr(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, std::ptr::null_mut(), std::ptr::null_mut(), dacl, std::ptr::null()) { 0 => Ok(()), e => Err(std::io::Error::from_raw_os_error(e as i32)) }
+            };
+            LocalFree(sd as _); r
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        /// A file written in a folder that lets every user read: after make_private only the user, SYSTEM and Administrators are on it, none inherited.
+        #[test] fn a_private_file_lists_only_the_user_system_and_administrators() {
+            let d = std::env::temp_dir().join(format!("bp-acl-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+            let f = d.join("x.token"); std::fs::write(&f, "secret").unwrap();
+            super::user_only(&f).unwrap();
+            let out = std::process::Command::new("icacls").arg(&f).output().unwrap(); let t = String::from_utf8_lossy(&out.stdout).to_string();
+            let user = std::env::var("USERNAME").unwrap();
+            assert!(t.contains(&user) && t.contains("NT AUTHORITY\\SYSTEM") && t.contains("BUILTIN\\Administrators"), "{t}");
+            for wide in ["Users:", "Everyone", "Authenticated Users", "(I)"] { assert!(!t.contains(wide), "{wide} on a private file: {t}") }
+            assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret", "still the user's to read");
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
 }
 
 /// The user's own folder: $HOME (Windows: %USERPROFILE% when HOME is not set, as outside Git's shell).
