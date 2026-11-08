@@ -80,7 +80,7 @@ impl JobGuard { fn new(a: &Arc<Agents>) -> JobGuard { a.stats.jobs.fetch_add(1, 
 impl Drop for JobGuard { fn drop(&mut self) { self.0.stats.jobs.fetch_sub(1, Relaxed); } }
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
-pub struct Agents { pub guards: locks::Guards, carry_gone: std::sync::atomic::AtomicBool, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
+pub struct Agents { pub hist_ends: StdMutex<HashMap<String, Arc<HistEnds>>>, pub guards: locks::Guards, carry_gone: std::sync::atomic::AtomicBool, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
     pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>>, pub order_asks: StdMutex<HashMap<String, crate::settings::order::Asked>>, pub mailroom: std::sync::OnceLock<Arc<dyn mailroom::Mailroom>>, /** the account manager (set by the accounts mod): a thread bound to a named account is launched through it */ pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>, cut: StdMutex<Vec<String>> }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -92,6 +92,8 @@ fn set(k: String, v: String, at: u64) -> Value { json!({"$":"SettingSet","key":k
 fn wait_key(th: &str) -> String { format!("carry.wait.{th}") }
 
 impl Agents {
+    /// The end captures of a thread still running (the thread's actor waits on them before starting its next turn; a test holds one).
+    pub(crate) fn ends_of(&self, th: &str) -> Arc<HistEnds> { self.hist_ends.lock().unwrap().entry(th.to_string()).or_default().clone() }
     /// The account manager: the hub's own, taken from it if this start has not yet (it has, before its recovery: `start_host`).
     pub fn accounts_mgr(&self) -> Arc<crate::settings::accounts_io::Accounts> { self.accounts.get_or_init(|| crate::settings::accounts_hub::manager(&self.hub, self.cli.clone())).clone() }
     /// The uberbot's own thread or one of its mailroom lanes: carried on first after a restart, and given the most tries to start.
@@ -103,7 +105,7 @@ impl Agents {
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let no_dir = cli.dir().is_none();
-        let ag = Arc::new(Agents { guards: Default::default(), carry_gone: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
+        let ag = Arc::new(Agents { hist_ends: Default::default(), guards: Default::default(), carry_gone: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
             mailroom: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), order_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
         ag.world.lock().await.home = hub.cfg.home.to_string_lossy().into_owned();
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
@@ -456,6 +458,8 @@ struct EndDone(Arc<HistEnds>);
 impl Drop for EndDone { fn drop(&mut self) { self.0.n.fetch_sub(1, Relaxed); self.0.done.notify_waiters() } }
 struct Actor {
     hist_ends: Arc<HistEnds>,
+    /// The reply of the command being handled, until it is sent: sent early (the events are durable) when the turn has to wait for the earlier turn's end capture, so the caller is not held for it
+    early: Option<oneshot::Sender<Result<(), String>>>,
     hist_tx: Option<mpsc::Sender<(Option<JobGuard>, HistJob)>>, person: bool,
     ag: Arc<Agents>, th: String, cx: Cx, live_proc: Option<Live>,
     lines: Option<mpsc::Receiver<String>>, exit: Option<oneshot::Receiver<Exit>>,
@@ -488,7 +492,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { hist_ends: Arc::new(HistEnds::default()), hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { early: None, hist_ends: ag.ends_of(&th), hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -522,11 +526,11 @@ impl Actor {
 
     async fn cmd(&mut self, c: Cmd) {
         match c {
-            Cmd::User { person, msg, text, role, origin, extra, reply } => { let r = self.user(person, msg, text, role, origin, extra).await; let _ = reply.send(r); }
+            Cmd::User { person, msg, text, role, origin, extra, reply } => { self.early = Some(reply); let r = self.user(person, msg, text, role, origin, extra).await; if let Some(re) = self.early.take() { let _ = re.send(r); } }
             Cmd::Interrupt { reply } => { self.interrupt().await; let _ = reply.send(()); }
             Cmd::Stop { reply } => { self.cx.running = false; if self.live_proc.is_some() { self.ag.stats.procs_exited.fetch_add(1, Relaxed); } self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.asked.clear(); self.live_proc = None; let _ = reply.send(()); }
-            Cmd::StartQueued { text, taken, reply } => { let r = self.start_queued(text, taken).await; let _ = reply.send(r); }
-            Cmd::WakeRide { id, text, start, reply } => { let r = self.wake_ride(id, text, start).await; let _ = reply.send(r); }
+            Cmd::StartQueued { text, taken, reply } => { self.early = Some(reply); let r = self.start_queued(text, taken).await; if let Some(re) = self.early.take() { let _ = re.send(r); } }
+            Cmd::WakeRide { id, text, start, reply } => { self.early = Some(reply); let r = self.wake_ride(id, text, start).await; if let Some(re) = self.early.take() { let _ = re.send(r); } }
             Cmd::Steer { text, reply } => { let r = self.steer(text).await; let _ = reply.send(r); }
             Cmd::Retry { msg, text, agent_text } => {
                 // only the start still waiting: its turn running with no process, and no newer message taken meanwhile (that one started its own)
@@ -601,7 +605,7 @@ impl Actor {
         if let Some(ph) = first_title { let (ag, th2) = (self.ag.clone(), th.clone()); tokio::spawn(async move { if let Err(e) = ag.retitle(&th2, Some(&ph), false).await { eprintln!("titles: {th2}: kept the first line: {e}") } }); }
         self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
-        self.jobs_start(&cwd, &msg); ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone(), CKPT_SAY).await;
+        self.jobs_start(&cwd, &msg); self.settle_ends().await;
         // the person's message starts the turn: the <terminals> note follows it (and the chat's unpinned terminals stop)
         let rv_block = { let w = self.ag.world().await; let ops: Vec<_> = w.reviews.get(&th).map(|v| v.iter().filter_map(|(k, sm, at)| crate::files::kicad::review::of(crate::files::kicad::review::TONE, k, sm, *at)).collect()).unwrap_or_default(); crate::files::kicad::review::prompt(&crate::files::kicad::review::fold(&ops)) }; // Review.agent: the open comments follow every message
         let text_ref = { let w = self.ag.world().await; let model_lines: Vec<String> = refs.iter().map(|r| r.line()).collect(); format!("{text}{}", refs::block(&w, &th, &text, &model_lines)) }; // Refs.agent: the text, then what it references (@ > % # words, then the `&model` lines, one block)
@@ -646,7 +650,7 @@ impl Actor {
         let handed = if taken { String::new() } else { self.handed(&mut ev, now).await }; // what was queued is `text` when it is all taken; otherwise the hand-overs go with this turn and the rest stays
         let text = if handed.is_empty() { text } else { format!("{handed}\n\n{text}") };
         self.commit(ev).await;
-        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone(), CKPT_SAY).await;
+        self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, ""); self.settle_ends().await;
         if self.codex { self.codex_run(&t, &cwd, &text).await } else { let msg = hub_id("q", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &text, &text, now).await }
         Ok(())
     }
@@ -751,7 +755,7 @@ impl Actor {
         // Ride.start: an idle thread starts a turn with the waiting rides
         self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone();
         let mut ev = codex::ride_done(&th, &v, "with a new turn", now); ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone(), CKPT_SAY).await;
+        self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); self.jobs_start(&cwd, &codex::ride_last(&v)); self.settle_ends().await;
         let input = codex::ride_input(&v);
         if self.codex { self.codex_run(&t, &cwd, &input).await } else { let msg = hub_id("w", now, self.ag.seq()); self.claude_send(&t, &cwd, &msg, &input, &input, now).await }
         Ok(())
@@ -765,7 +769,7 @@ impl Actor {
         let Some(t) = t else { return }; if ride.is_empty() || t.archived || t.deleted || providers::driver(&t.provider).is_none() { return }
         let now = now_s(); let mut ev = codex::ride_done(&th, &ride, "with a new turn", now);
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone(), CKPT_SAY).await;
+        self.commit(ev).await; self.cwd = cwd.clone(); self.jobs_start(&cwd, &codex::ride_last(&ride)); self.settle_ends().await;
         self.codex_run(&t, &cwd, &codex::ride_input(&ride)).await;
     }
 
@@ -845,6 +849,12 @@ impl Actor {
     }
 
     /// Hub.post.go: a new turn's design baseline (checkpoint 0 and a step), taken in the background.
+    /// Before a turn's input reaches the agent: wait for the earlier turn's end captures. Only this thread's start waits (the actor is this thread's own task): when it has to, the caller
+    /// is answered first, the events being durable, so a client that sent the message is not held (and with it everything else it asks on its connection) for the capture.
+    async fn settle_ends(&mut self) {
+        if self.hist_ends.n.load(Relaxed) > 0 { if let Some(re) = self.early.take() { let _ = re.send(Ok(())); } }
+        ends_settled(self.hist_ends.clone(), self.ag.clone(), self.th.clone(), CKPT_SAY).await
+    }
     fn jobs_start(&mut self, cwd: &str, entry: &str) { self.hist(HistJob::Start(cwd.to_string(), entry.to_string())) }
     /// A tool call ended (Steps.claude): a step after it. A turn ended (Ended.out): a step and a checkpoint.
     fn jobs_step(&mut self, entry: &str) { let cwd = self.cwd.clone(); self.hist(HistJob::Step(cwd, entry.to_string())) }

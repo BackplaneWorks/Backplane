@@ -57,3 +57,32 @@ async fn a_turn_waiting_for_the_earlier_checkpoint_says_so_and_goes_on_when_it_e
     tokio::time::sleep(Duration::from_millis(200)).await; assert!(!log_from(&hub, from).await.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "checkpoint"), "nothing was waited for: nothing said");
     ag.shutdown();
 }
+
+/// A turn that waits for the earlier turn's end capture holds back only its own start: the person's message is answered at once (its events are durable), a setting written from another
+/// client and another thread's turn go through meanwhile, and the waiting turn starts, once, after the capture.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_turn_waiting_for_the_checkpoint_holds_back_nothing_else_and_starts_after_it() {
+    let bin = dir("ckpt-hold-bin"); script(&bin, "claude", WRITER);
+    let (hub, ag, _home, work) = start("ckpt-hold", |w| base_log(w, 2, ""), |_| Cli::standin(&bin)).await;
+    let t2 = "t1700001001-1";
+    hub.register_rpc(Arc::new(crate::settings::set::SettingSet { agents: Some(ag.clone()) }));    // the settings handler of a real hub, which the agents' own tests do not register
+    let held = ag.ends_of(T1); held.n.fetch_add(1, Relaxed);                                     // thread 1's earlier end capture is still running
+    let from = len(&hub).await; let t = Instant::now();
+    let r = tokio::time::timeout(Duration::from_secs(5), rpc(&hub, "turn.start", json!({"thread":T1,"text":"please write held.txt"}))).await.expect("the message is answered while its turn waits");
+    assert_eq!(r["ok"], true); assert!(t.elapsed() < Duration::from_secs(1), "answered at once, not after the capture: {:?}", t.elapsed());
+    until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "checkpoint")).await;     // it says it waits (after CKPT_SAY)
+    // another client's setting and another thread's turn, meanwhile
+    let t = Instant::now(); let s = tokio::time::timeout(Duration::from_secs(5), rpc(&hub, "setting.set", json!({"key":"restart.continue","value":"off"}))).await.expect("setting.set is answered while a turn waits");
+    assert_eq!(s["ok"], true); assert!(t.elapsed() < Duration::from_secs(1), "setting.set took {:?} while a turn waited for a checkpoint", t.elapsed());
+    assert_eq!(hub.setting("restart.continue").await.as_deref(), Some("off"), "and the setting was written");
+    let t = Instant::now(); assert_eq!(rpc(&hub, "turn.start", json!({"thread":t2,"text":"please write other.txt"})).await["ok"], true); assert!(t.elapsed() < Duration::from_secs(1));
+    for _ in 0..100 { if work.join("other.txt").exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    assert!(work.join("other.txt").exists(), "another thread's turn runs meanwhile");
+    assert!(!work.join("held.txt").exists(), "the waiting turn has not started its agent yet");
+    held.n.fetch_sub(1, Relaxed); held.done.notify_waiters();                                         // the capture ends
+    for _ in 0..100 { if work.join("held.txt").exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    assert!(work.join("held.txt").exists(), "the waiting turn starts once the capture is over");
+    let ev = until(&hub, from, 20, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() >= 2).await;
+    assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "please write held.txt").count(), 1, "the message is posted once");
+    ag.shutdown();
+}
