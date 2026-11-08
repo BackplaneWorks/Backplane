@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       jobs:
-        description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), all"
+        description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), pairing (test/e2e/pairing/gpui.sh, hub and client on this runner), all"
         default: all
       archive_run:
         description: "release dry run whose darwin-arm64 archive the client rows run from, installed with its install.sh"
@@ -167,3 +167,29 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: client-rows, path: out }
+
+  pairing:
+    # the pairing lane's gpui.sh with the hub of the installed archive and the GPUI client on the same runner, over loopback: one machine, no network crossed
+    if: inputs.jobs == 'pairing' || inputs.jobs == 'all'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install the release archive with its own installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test/e2e/mac-install-archive.sh ${{ inputs.archive_run }} ${{ inputs.archive_tag }}
+      - name: pairing, hub and client on this runner
+        run: |
+          set -u; mkdir -p out; W="$PWD/pairwork"; mkdir -p "$W/agents"
+          for n in claude codex grok muse opencode; do printf '#!/bin/sh\nexit 1\n' > "$W/agents/$n"; chmod +x "$W/agents/$n"; done
+          export HUB="$BUILD/backplane-hub" AGENTS="$W/agents"
+          echo "installed build $(cat "$BUILD/COMMIT") (${{ inputs.archive_tag }})"
+          sh test/e2e/pairing/mac-hub.sh start "$W/hub" 3900 127.0.0.1
+          M="sh $PWD/test/e2e/pairing/mac-hub.sh"
+          BASE=http://127.0.0.1:3900 TOKEN="$W/hub/token" GPUI="$BUILD/backplane-gpui" WORK="$W" LAUNCH="$PWD/test/e2e/pairing/gpui-start-mac.sh" \
+            RESTART="$M restart $W/hub 3900 127.0.0.1" EXPIRE="$M expire $W/hub 3900 127.0.0.1" \
+            sh test/e2e/pairing/gpui.sh 2>&1 | tee out/pairing.txt
+          rc=$?; cp -R "$W/logs" out/logs 2>/dev/null; cp "$W/hub.log" out/hub.log 2>/dev/null; exit $rc
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: pairing, path: out }
