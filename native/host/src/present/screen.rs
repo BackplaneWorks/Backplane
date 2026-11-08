@@ -27,6 +27,8 @@ impl super::Screen for Recent {
         let Some(policies)=crate::statehost::policies() else { return refused("state.not-started") };
         let setup=text(params,"action").starts_with("ob-") || policies.with_state(|st|super::onboard::due(st,&params["session"])).unwrap_or(false);
         let withinfo; let params=if super::settings::is_open(&params["session"]) || params["target"]["kind"]=="thread" || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if super::settings::page(&params["session"])=="devices" { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.reg.list(); } } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { params };
+        // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
+        let withmig; let params=match crate::import014::last_published(&_hub.cfg.home) { Some(v) => { let mut c=params.clone(); c["importV014"]=v; withmig=c; &withmig } None => params };
         let m=_hub.mirrors();
         match policies.with_state(|st|m.shown(|far| { let map=unified_of(st,far,&|id|m.origin(id)); let marks: HashMap<String,Value>=far.iter().map(|(n,_)|(n.clone(),m.mark(n))).collect(); recent_unified(st,far,&Unified{ far:&map, marks:&marks },params) })) { Some(out)=>out,None=>refused("state.booting") }
     }
@@ -417,7 +419,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     if let Some(t)=super::onboard::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null),&super::onboard::Client::of(p),&super::onboard::home_dir()) { shown["tour"]=t; }
     { let r=super::onboard::resume(st,&session); if !r.is_null() { shown["setup"]=r; } }
     // a 0.14 home coming across: over everything, setup included (import014)
-    let mi=crate::import014::last_published().map(|v| json!({"import.v014": v.to_string()})).unwrap_or(Value::Null);
+    let mi=p.get("importV014").filter(|v| v.is_object()).map(|v| json!({"import.v014": v.to_string()})).unwrap_or(Value::Null);
     if let Some(m)=super::onboard::import_overlay(st,&session,&mi) { shown["migrate"]=m; }
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
