@@ -5,7 +5,7 @@
 # notification list (dumpsys notification), never from the hub alone; a step that must see nothing waits QUIET seconds and checks the hub's count too.
 set -u
 SERIAL=${1:?adb serial}; HUB=$(realpath "${2:?hub binary}"); APK=$(realpath "${3:?debug apk}"); ROOT=$(cd "$(dirname "$0")/../../.." && pwd); OUT=${4:-$ROOT/build/push-e2e/android}
-PKG=dev.backplane.mobile.gpui; PORT=${PORT:-3870}; CTL=http://127.0.0.1:$((PORT+1)); QUIET=${QUIET:-10}
+PKG=${PKG:-dev.backplane.mobile.gpui}; SCHEME=${SCHEME:-bpgpui}; [ "$PKG" = dev.backplane.mobile ] && { echo "never the person's own app (dev.backplane.mobile)"; exit 1; }; PORT=${PORT:-3870}; CTL=http://127.0.0.1:$((PORT+1)); QUIET=${QUIET:-10}
 mkdir -p "$HOME/.cache/respectful-push" "$OUT"; T=$(mktemp -d "$HOME/.cache/respectful-push/and.XXXXXX"); rm -f "$OUT"/*.png
 A() { adb -s "$SERIAL" "$@"; }
 pids=(); stop() { curl -s -m3 "$CTL/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; pkill -f -- "--home $T/home" 2>/dev/null; A reverse --remove tcp:$PORT >/dev/null 2>&1; rm -rf "$T"; }
@@ -42,7 +42,7 @@ home() { A shell input keyevent KEYCODE_HOME; sleep 1; }
 A install -r -g "$APK" > "$OUT/install.log" 2>&1 || { echo "install failed"; cat "$OUT/install.log"; exit 1; }
 A shell pm clear $PKG >/dev/null; A shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null
 A shell cmd notification allow_listener >/dev/null 2>&1
-LINK=$(python3 -c "import urllib.parse,sys;print('bpgpui://pair?url='+urllib.parse.quote('http://127.0.0.1:$PORT/#token=$TOK',safe=''))")
+LINK=$(python3 -c "import urllib.parse,sys;print('$SCHEME://pair?url='+urllib.parse.quote('http://127.0.0.1:$PORT/#token=$TOK',safe=''))")
 A shell am start -W -a android.intent.action.VIEW -d "'$LINK'" $PKG > /dev/null
 # the question before an outside link pairs: tap its Pair once it is on screen
 ui() { A shell uiautomator dump /sdcard/bp-ui.xml >/dev/null 2>&1; A shell cat /sdcard/bp-ui.xml 2>/dev/null; A shell rm -f /sdcard/bp-ui.xml; }

@@ -6,7 +6,7 @@
 set -u
 MODE=${1:?sink or apns}; HUB=${2:?hub binary}; ROOT=$(cd "$(dirname "$0")/../../.." && pwd); OUT=${3:-$ROOT/build/push-e2e/$MODE}
 mkdir -p "$HOME/.cache/respectful-push"; T=$(mktemp -d "$HOME/.cache/respectful-push/e2e.XXXXXX"); PORT=${PORT:-3860}; MAC_DIR=${MAC_DIR:-backplane-ios-push}; SIM=${SIM:-bp-push}; APP_ID=${APP_ID:-dev.backplane.works}
-M=${MAC_SSH:-$HOME/.cache/respectful-push/mac-ssh}; mkdir -p "$OUT"
+M=${MAC_SSH:-$HOME/.cache/respectful-push/mac-ssh}; rm -rf "$OUT"; mkdir -p "$OUT"   # no result of an earlier run is ever read as this one's
 pids=(); stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; pkill -f -- "--home $T/home" 2>/dev/null; }
 trap stop EXIT; trap "exit 143" INT TERM HUP
 cd "$ROOT/test/e2e/push"
@@ -29,7 +29,8 @@ $M hs-mac-mini "
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer; cd ~/$MAC_DIR
 while [ -d /tmp/bp-mac-heavy.lock ]; do sleep 5; done
 xcrun simctl boot $U 2>/dev/null; xcrun simctl bootstatus $U -b >/dev/null 2>&1
-xcrun simctl uninstall $U $APP_ID 2>/dev/null; xcrun simctl install $U ios/build/dd-push/Build/Products/Debug-iphonesimulator/Backplane.app || exit 3
+for b in dev.backplane.gpui dev.backplane.works $APP_ID; do xcrun simctl uninstall $U \$b 2>/dev/null; done   # one app with the name, so its home-screen icon is unique
+xcrun simctl install $U ios/build/dd-push/Build/Products/Debug-iphonesimulator/Backplane.app || exit 3
 printf %s '$TOK' > e2e-token; rm -rf e2e-out; mkdir -p e2e-out
 lockf -k /tmp/bp-mac-heavy.lockf nice -n 10 xcodebuild build-for-testing -quiet -project e2e/E2E.xcodeproj -scheme BackplaneE2E -sdk iphonesimulator -destination 'platform=iOS Simulator,id=$U' -derivedDataPath e2e-dd CODE_SIGNING_ALLOWED=NO > e2e-out/build.log 2>&1 || { tail -20 e2e-out/build.log; exit 4; }
 xcrun simctl io $U recordVideo --codec h264 --force e2e-out/push.mp4 >/dev/null 2>&1 & REC=\$!
