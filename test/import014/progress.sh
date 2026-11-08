@@ -38,7 +38,9 @@ scenario() { # scenario NAME auto(0|1)
   fi
   env -i "${ENV[@]}" "$BIN/backplane-gpui" >>"$R/win.log" 2>&1 & client=$!
   local pos="python3 $ROOT/test/onboarding/pos.py $R/win.log"
-  sleep 6; X click $($pos first-use)
+  # the chooser's button, once the window has drawn it (a loaded machine draws later than a fixed wait allows)
+  wait_for "grep -q '\"name\":\"first-use\"' $R/win.log" 120 || { bad "$name: the window never drew its chooser"; return; }
+  sleep 1; X click $($pos first-use)
   wait_for "curl --noproxy '*' -sf -m2 http://127.0.0.1:$PORT/hello >/dev/null" 120 || { bad "$name: no hub"; return; }
   [ -f "$R/hub.pid" ] || cut -d' ' -f1 "$HUB/hub.lock" >"$R/hub.pid"
   if [ "$auto" = 0 ]; then
