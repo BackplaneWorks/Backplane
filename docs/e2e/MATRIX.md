@@ -1,6 +1,6 @@
 # End-to-end matrix
 
-Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. `deferred, no VM` marks Windows: the person dropped it for now on 2026-11-06, and it is neither a pass nor a fail. `pass, hub only` means the hub did it with no client involved, and `pass, part` names what ran: neither counts as a full pass. `persists, effect not proven` means the control saved and survived a restart, but nothing showed it doing anything, and that is not a pass. `wine` results sit in their own section: Wine on Boat is not Windows, and they never fill a Windows cell. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
+Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. Windows cells come from GitHub's `windows-latest` runners (Windows Server 2025, 10.0.26100, no GPU: WARP); `deferred, no VM` marks a Windows row nothing has run yet, neither a pass nor a fail. `pass, hub only` means the hub did it with no client involved, and `pass, part` names what ran: neither counts as a full pass. `persists, effect not proven` means the control saved and survived a restart, but nothing showed it doing anything, and that is not a pass. `wine` results sit in their own section: Wine on Boat is not Windows, and they never fill a Windows cell. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
 
 The grids are kept by the lead. Each lane writes only its own section at the end of this file, so parallel rebases do not collide.
 
@@ -11,11 +11,11 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | ID | Feature | Linux | macOS | Windows |
 |---|---|---|---|---|
 | | **Core** | | | |
-| F01 | Hub boots on a temp home, `/hello` answers | pass | pass | deferred, no VM |
-| F02 | Client connects; sidebar and projects load | pass | not run | deferred, no VM |
-| F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | deferred, no VM |
-| F04 | Stand-in turn streams; restart ends running turns as interrupted | pass, hub only | pass, hub only | deferred, no VM |
-| F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | deferred, no VM |
+| F01 | Hub boots on a temp home, `/hello` answers | pass | pass | pass (`windows smoke`, run 42429479397, 10837b209d) |
+| F02 | Client connects; sidebar and projects load | pass | not run | pass, part: an empty home, WARP (`windows smoke`, run 42429479397) |
+| F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
+| F04 | Stand-in turn streams; restart ends running turns as interrupted | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
+| F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | pass, hub only, part: the stand-in provider tests that run there (scripts/ci-hub-windows-filter.sh skips the rest) |
 | F06 | Runtime modes, approvals, questions, plans | not run | not run | deferred, no VM |
 | F07 | Queue, steer, stop, held queue resume | not run | not run | deferred, no VM |
 | F08 | Fork, bring back, provider switch | not run | not run | deferred, no VM |
@@ -24,7 +24,7 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | F11 | Model picker, effort, project picker, project badges | not run | not run | deferred, no VM |
 | F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | not run | not run | deferred, no VM |
 | F13 | Titles and the text generation model | not run | not run | deferred, no VM |
-| F14 | Terminal | not run | pass, hub only | deferred, no VM |
+| F14 | Terminal | not run | pass, hub only | pass, hub only: ConPTY (term::tests on windows-latest; the flood test is skipped) |
 | F15 | Attachments and image paste | not run | not run | deferred, no VM |
 | F16 | Keybindings | not run | not run | deferred, no VM |
 | F17 | Viewers: board, schematic, 3D, STEP | not run | not run | deferred, no VM |
@@ -33,10 +33,10 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | F20 | File browser and downloads | not run | not run | deferred, no VM |
 | F21 | Reconnect, resume from sequence, outbox, long session | not run | not run | deferred, no VM |
 | F22 | Ordering flow up to the quote; no order placed | not run | not run | deferred, no VM |
-| F23 | A killed hub leaves no agent behind | pass, hub only | pass | deferred, no VM |
+| F23 | A killed hub leaves no agent behind | pass, hub only | pass | not run: skipped, the stand-ins report Git sh pids |
 | | **Install and CAD** | | | |
 | C01 | Package installs and starts on a clean user | not run | not run | deferred, no VM |
-| C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | pass | pass, part: ERC and DRC, no export | deferred, no VM |
+| C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | pass | pass, part: ERC and DRC, no export | pass, part: Backplane KiCad 10.99.0-bp.6 installs through kicad.install and reports status ok (`windows-install`, run 42430879930); no export |
 | C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | pass, part: install not run | pass, part: install not run | deferred, no VM |
 | | **Remote operation** | | | |
 | R01 | Restart the hub from another machine | pass | pass | deferred, no VM |
@@ -90,7 +90,7 @@ Owned end to end by the push lane (branch `respectful-push`, thread t1793985890-
 |---|---|---|
 | Linux | desktop, `backplane`, Boat sandboxes | Builds are allowed on all three. UI rigs run on `backplane` or Boat, which have Xvfb. |
 | macOS | `hs-mac-mini` (arm64) | Rust and Xcode present. KiCad and FreeCAD not installed. |
-| Windows | none | deferred, no VM. The port was never finished: neither crate had `cfg(windows)` code when this was checked, and `docs/windows.md` still describes the removed Electron and Bun stack. |
+| Windows | GitHub `windows-latest` (CI: hub, client, guard, smoke; `windows-install`; release `windows-x64`); this desktop cross-builds (`scripts/windows-check.sh --build`) | No machine of our own yet: a mini PC may come, fed from builds made here over the tailnet. |
 | iOS | simulators on `hs-mac-mini` | Real phones only with the person present. |
 | Android | emulator; Pixel 9 on the desktop | Real phones only with the person present. |
 
@@ -191,23 +191,16 @@ Hub-only rows drove the hub over its websocket with stand-in agents; no client r
 
 ### Windows
 
-Deferred, no VM. The lane stopped with nothing landed and never compiled or ran Windows.
-
-Windows blockers, from reading the source at `ed50df6d35`, not from compile errors. The real error count is unknown.
-
-- Hub terminal: POSIX pty only, needs ConPTY (`term/pty.rs`, `term/mod.rs`).
-- Hub sockets: Unix sockets, and the KiCad IPC path needs a Windows transport (`kicad/nng.rs`, `kicad/kipc.rs`, `kicad/ipc.rs`, `proc.rs`).
-- Hub processes: `kill`, `setsid`, `pre_exec` and `tokio::signal::unix` need Job Objects or an equivalent (`agents/proc.rs`, `agents/work.rs`, `term/pty.rs`, `settings/vault.rs`, `main.rs`, `copy.rs`, `agents/providers/mod.rs`).
-- Hub file APIs: 24 `PermissionsExt`, 15 `symlink`, 5 `MetadataExt`, 4 `ExitStatusExt`, 4 `OpenOptionsExt`, 3 `DirBuilderExt`, 2 `FileExt`, plus `OsStrExt` and `AsRawFd`.
-- Hub libc: 79 direct uses, including `flock`, `getifaddrs`, `localtime_r`, `setrlimit`, `O_NOFOLLOW` and `getuid`.
-- Hub paths: Unix paths and tools hard-coded in at least 25 files, and 18 `HOME` or `XDG_` uses.
-- Hub vault: only macOS keychain and Linux keyring backends (`settings/vault.rs`).
-- Client: `Cargo.toml` declares `gpui` only for Linux and macOS. `gpui-0.2.2/build.rs` compiles Windows shaders only on a Windows build host. Linux or Unix-only paths in `screens/place.rs`, `screens/improvements.rs`, `screens/capture.rs` and `screens/timeline.rs`. CEF packaging is unproven.
-- Helpers and packaging: no Windows handling in `tools/cef/CMakeLists.txt`, `tools/*/build.ts` or `scripts/`, apart from `build-step2glb.sh`.
-- Docs: `docs/windows.md` and `docs/windows-cad.md` still describe the removed Electron and Bun stack.
+Rig: GitHub `windows-latest` (Windows Server 2025, 10.0.26100), no GPU (the client draws on WARP, "Microsoft Basic Render Driver"). `docs/windows.md` says how the port works and what it still lacks.
 
 | ID | Result | Commit | Rig | Evidence |
 |---|---|---|---|---|
+| F01 | pass | 10837b209d | windows-latest | ci `windows smoke` run 42429479397: `test/windows/smoke.sh`, a hub on a temp home answers `/hello`, writes its token, stops on request |
+| F02 | pass, part: an empty home | 10837b209d | windows-latest, WARP | same run: the client's `first_frame`, `gpu` (Microsoft Basic Render Driver) and `usable` metrics, exit 0 after `--exit-after 25` |
+| F03, F04, F05, F14 | pass, hub only | 10837b209d | windows-latest | ci `hub windows-latest 1/2` and `2/2`: the hub's tests less `scripts/ci-hub-windows-filter.sh` (each skip with why); at 10837b209d 1/2 was red on one test only, `fold_inputs::tests::every_fold_reach_is_an_input_or_written_down` (module paths with `\`), fixed in the next landing |
+| C02 | pass, part: install and status | e6c1e697a2 | windows-latest | `windows-install` run 42430879930: the real Backplane KiCad download, digest and SHA256SUMS, unpacked under a folder with a space, `kicad.status` ok; Claude Code and Codex installs answer `--version` |
+| Release | pass, dry run | windows-port-4 (cccfd3c63c) | windows-latest | release run 42410701648 (`v0.0.0-dryrun.win1`): `backplane-v0.0.0-dryrun.win1-windows-x64.zip` with the hub, client, guard and bp-sh in the signed manifest |
+| Cross-check | pass | 9551074a09 | this desktop | `scripts/windows-check.sh` (cargo check, x86_64-pc-windows-gnu, both crates) and `--build` (x86_64-pc-windows-gnullvm .exe files, not yet run on Windows) |
 
 ### Wine
 
