@@ -29,7 +29,7 @@ export async function startHub({bin,home,port,standins,host,extraEnv={},extraArg
  const args=direct?[]:['--user','--scope','--quiet','-p',`MemoryMax=${cap}`,'-p','MemorySwapMax=0',...(unsetEnv.length?['env',...unsetEnv.flatMap(k=>['-u',k])]:[]),bin];if(direct)args.push('--home',home,'--port',String(port),'--no-tailscale','--foreground');else args.push('--home',home,'--port',String(port),'--no-tailscale','--foreground');
  if(host)args.push('--host',host);
  for(const a of extraArgs)args.push(a); // e.g. the Rust hub's --policy-bin and --window-bin
- const env={...process.env,DISPLAY:'',WAYLAND_DISPLAY:'',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_PEERS:'',BACKPLANE_AGENTS:standins,PATH:`${standins}:${process.env.PATH}`,FAKE_LOG:`${home}/fake.log`,...extraEnv};
+ const env={...process.env,DISPLAY:'',WAYLAND_DISPLAY:'',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_PEERS:'',BACKPLANE_AGENTS:standins,PATH:`${standins}${process.platform==='win32'?';':':'}${process.env.PATH}`,FAKE_LOG:`${home}/fake.log`,...extraEnv};
  for(const k of unsetEnv)if(direct)delete env[k];delete env.BUN_BE_BUN; // the script runner may be the hub binary itself in bun mode; the hub it starts must not be
  const proc=direct?spawn(bin,args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']}):spawn('systemd-run',args,{env,stdio:['ignore',log?'pipe':'ignore',log?'pipe':'ignore']});
  if(log){const fs=fsm;const o=fs.openSync(log,'a');proc.stdout.on('data',d=>fs.writeSync(o,d));proc.stderr.on('data',d=>fs.writeSync(o,d))}
@@ -37,12 +37,14 @@ export async function startHub({bin,home,port,standins,host,extraEnv={},extraArg
  let seenPid=NaN;const tStart=Date.now();
  for(let i=0;i<9000;i++){try{if((await fetch(`http://${h}:${port}/hello`)).status===200)break}catch{}
   if(i%10===0){const m=/^(\d+)/.exec(rd(`${home}/hub.lock`));if(m){const q=Number(m[1]);if(q!==seenPid)seenPid=q}
-   if(Number.isFinite(seenPid)&&!existsSync(`/proc/${seenPid}`)&&Date.now()-tStart>3000){const e=new Error('hub exited before answering /hello after '+((Date.now()-tStart)/1000).toFixed(0)+' s (pid '+seenPid+')');e.hubExited=true;throw e}}
+   if(Number.isFinite(seenPid)&&!(existsSync('/proc')?existsSync(`/proc/${seenPid}`):pidAlive(seenPid))&&Date.now()-tStart>3000){const e=new Error('hub exited before answering /hello after '+((Date.now()-tStart)/1000).toFixed(0)+' s (pid '+seenPid+')');e.hubExited=true;throw e}}
   await sleep(100)}
  // the hub pid: read hub.lock "<pid> <port> flock"
  let pid=NaN;for(let i=0;i<50;i++){const m=/^(\d+)/.exec(rd(`${home}/hub.lock`));if(m){pid=Number(m[1]);break}await sleep(100)}
  // COMMON.md rule: verify from the hub's own environ that it runs stand-in agents only, before any turn
- try{const env=existsSync(`/proc/${pid}/environ`)?readFileSync(`/proc/${pid}/environ`,'utf8').split('\0'):execFileSync('ps',['eww','-p',String(pid)]).toString().split(/\s+/); /* no /proc (macOS): the process environment through ps */ const a=env.find(x=>x.startsWith('BACKPLANE_AGENTS='));if(!a||a.slice(17)!==standins){try{process.kill(pid,'SIGTERM')}catch{}throw Error('hub does not run stand-in agents only: '+a)}}catch(e){if(String(e).includes('stand-in'))throw e;throw Error('cannot verify BACKPLANE_AGENTS of hub '+pid+': '+e)}
+ // Windows has no other process's environment to read: the hub was started here with exactly this env (BACKPLANE_AGENTS=standins, set above)
+ if(process.platform==='win32'){if(env.BACKPLANE_AGENTS!==standins)throw Error('hub does not run stand-in agents only');}
+ else try{const env=existsSync(`/proc/${pid}/environ`)?readFileSync(`/proc/${pid}/environ`,'utf8').split('\0'):execFileSync('ps',['eww','-p',String(pid)]).toString().split(/\s+/); /* no /proc (macOS): the process environment through ps */ const a=env.find(x=>x.startsWith('BACKPLANE_AGENTS='));if(!a||a.slice(17)!==standins){try{process.kill(pid,'SIGTERM')}catch{}throw Error('hub does not run stand-in agents only: '+a)}}catch(e){if(String(e).includes('stand-in'))throw e;throw Error('cannot verify BACKPLANE_AGENTS of hub '+pid+': '+e)}
  return {proc,pid,home,port,host:h,token:rd(`${home}/token`).trim(),url:`http://${h}:${port}`};
 }
 /** Whether a pid is still there (kill 0): /proc does not exist on macOS. */
