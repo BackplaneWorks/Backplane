@@ -123,7 +123,7 @@ if want('F16'):
                 if ok: break
             return ok, why
         chord(chord_); ok, why = look()
-        if not ok and not differs(a, px('k-%s-b' % name)) and len(events()) == n0: chord(chord_); ok, why = look(); why += ' (the key was pressed twice: nothing had changed after the first)'
+        if not ok and not differs(px('k-%s-a' % name), px('k-%s-b' % name)) and len(events()) == n0: chord(chord_); ok, why = look(); why += ' (the key was pressed twice: nothing had changed after the first)'
         if undo: undo(); pause(0.8)
         res.append((name, chord_, ok, why)); print('   ', name, chord_, ok, why, flush=True)
     sel(1)
