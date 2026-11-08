@@ -2,7 +2,7 @@
 """The Android app's pairing on an emulator through its real UI: uiautomator finds the controls, `input` types and taps, and the hub says whether it worked.
 A simulator result: it counts for the app and the protocol, not for a real phone.
 
-  android.py --base http://HOST:PORT --token-file T --adb 'CMD' --sockets 'CMD' [--restart 'CMD'] [--expire 'CMD'] [--device 'a real Pixel 9 (USB)'] [--fresh 'CMD']
+  android.py --base http://HOST:PORT --token-file T --adb 'CMD' --sockets 'CMD' [--restart 'CMD'] [--expire 'CMD'] [--device 'a real Pixel 9 (USB)'] [--fresh 'CMD'] [--pkg dev.backplane.mobile.rel --scheme bprel]
 
 --adb is the prefix that reaches your own emulator. --sockets prints how many sockets are established to the hub from outside, run where the hub is.
 """
@@ -10,7 +10,7 @@ import argparse, os, re, shlex, subprocess, sys, time, urllib.parse, xml.etree.E
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from proto import Hub, check, finish, report, secret_of
 
-PKG, ACT = "dev.backplane.mobile.gpui", "dev.backplane.mobile.DataActivity"
+PKG, ACT, SCHEME = "dev.backplane.mobile.gpui", "dev.backplane.mobile.DataActivity", "bpgpui"  # (--pkg, --scheme: a release side app is dev.backplane.mobile.rel, bprel)
 
 
 class Phone:
@@ -20,7 +20,9 @@ class Phone:
         if self.fresh_cmd:  # the app resets itself in its own process (an emulator keeps each dead app process's rendering memory: scripts/android-emu.sh fresh)
             subprocess.run(self.fresh_cmd, shell=True, capture_output=True); time.sleep(1); self.launch(); return
         self.sh(f"pm clear {PKG}"); self.sh(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS"); self.launch()  # (the first-run permission dialog would cover the app)
-    def stored_link(self): return "link" in self.sh(f"run-as {PKG} cat shared_prefs/data.xml")  # (a debug build: its own prefs, read as the app)
+    def stored_link(self):  # its own prefs, read as the app: a debug build only (None for a release build, which run-as refuses)
+        out = self.sh(f"run-as {PKG} cat shared_prefs/data.xml 2>&1")
+        return None if "not debuggable" in out or "unknown package" in out else "link" in out
     def launch(self):  # (a shade left down by another run, or a system crash dialog such as a fresh emulator's "Bluetooth keeps stopping", would cover the app)
         self.sh("cmd statusbar collapse"); b = self.button("Close app")
         if b is not None: self.tap(b); time.sleep(1)
@@ -113,10 +115,12 @@ def left_pairing(p): t = p.texts(); return bool(t) and "Pair with a hub" not in 
 
 
 def main():
+    global PKG, SCHEME
     a = argparse.ArgumentParser()
     for n in ("--base", "--token-file", "--adb", "--sockets"): a.add_argument(n, required=True)
-    a.add_argument("--device", default="Android emulator (a simulator result)"); a.add_argument("--fresh", default="", help="a host command that resets the app in its process, instead of pm clear"); a.add_argument("--restart", default=""); a.add_argument("--expire", default="")
+    a.add_argument("--device", default="Android emulator (a simulator result)"); a.add_argument("--pkg", default=PKG); a.add_argument("--scheme", default=SCHEME); a.add_argument("--fresh", default="", help="a host command that resets the app in its process, instead of pm clear"); a.add_argument("--restart", default=""); a.add_argument("--expire", default="")
     o = a.parse_args()
+    PKG, SCHEME = o.pkg, o.scheme
     hub, p = Hub(o.base, open(o.token_file).read().strip()), Phone(o.adb, o.fresh)
     print(f"route {hub.base}, {o.device}", flush=True)
 
@@ -133,7 +137,8 @@ def main():
     check("link: the app holds a socket to the hub", sockets(o.sockets) >= 1)
     check("link: the app has left pairing", left_pairing(p), p.texts()[:90])
     had = p.stored_link(); p.fresh()
-    check("a fresh start after pairing leaves no hub stored and shows pairing", had and not p.stored_link() and on_pair_screen(p) and "Re-pair" not in p.texts(), f"stored before {had}, after {p.stored_link()}")
+    if had is None: report("a fresh start after pairing leaves no hub stored", "not run", "a release build: its stored settings cannot be read"); check("a fresh start after pairing shows pairing", on_pair_screen(p) and "Re-pair" not in p.texts(), p.texts()[:90])
+    else: check("a fresh start after pairing leaves no hub stored and shows pairing", had and not p.stored_link() and on_pair_screen(p) and "Re-pair" not in p.texts(), f"stored before {had}, after {p.stored_link()}")
 
     # a short code
     p.fresh(); n0 = live(hub); st, inv = hub.invite()
@@ -164,12 +169,12 @@ def main():
     # a link from outside the app
     time.sleep(61)
     p.fresh(); n0 = live(hub); st, inv = hub.invite()
-    p.open_link("bpgpui://pair?url=" + urllib.parse.quote(inv["link"], safe=""))
+    p.open_link(f"{SCHEME}://pair?url=" + urllib.parse.quote(inv["link"], safe=""))
     origin = hub.base
-    check("a bpgpui:// link names its hub and asks", "Pair with this hub?" in p.texts() and origin in p.texts() and live(hub) == n0, p.texts()[:110])
+    check(f"a {SCHEME}:// link names its hub and asks", "Pair with this hub?" in p.texts() and origin in p.texts() and live(hub) == n0, p.texts()[:110])
     b = p.button("Cancel"); p.tap(b) if b is not None else None; time.sleep(1.5)
     check("Cancel pairs nothing", live(hub) == n0 and "Pair with this hub?" not in p.texts())
-    p.open_link("bpgpui://pair?url=" + urllib.parse.quote(inv["link"], safe=""))
+    p.open_link(f"{SCHEME}://pair?url=" + urllib.parse.quote(inv["link"], safe=""))
     b = p.button("Pair", last=True); p.tap(b) if b is not None else None; time.sleep(5)  # (the question is drawn over the pairing form, whose own Pair comes first in the tree)
     check("confirming the question pairs", live(hub) == n0 + 1, p.texts()[:90])
 
