@@ -239,7 +239,7 @@ pub fn servers() -> String { IPC.get().map(|i| i.lines.lock().unwrap().clone()).
 fn newest_in(dir: &Path) -> Vec<PathBuf> {
     let mut v: Vec<String> = std::fs::read_dir(dir).map(|d| d.flatten().filter_map(|e| e.file_name().into_string().ok()).collect()).unwrap_or_default();
     v.sort_by(|a, b| if a == b { std::cmp::Ordering::Equal } else if ks::version_ge(a, b) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
-    v.into_iter().flat_map(|n| [dir.join(&n).join("bin/kicad-cli"), dir.join(n).join("bin/kicad-cli.exe")]).collect()
+    v.into_iter().flat_map(|n| [dir.join(&n).join("bin").join("kicad-cli"), dir.join(n).join("bin").join("kicad-cli.exe")]).collect()
 }
 /// Publish what this machine has for Settings > CAD: info `kicad.cli`, `kicad.version`, `kicad.status`, `kicad.source` and `freecad` (empty when absent).
 pub async fn publish_cad(hub: &Arc<Hub>) {
@@ -272,7 +272,7 @@ pub async fn runtime(hub: &Arc<Hub>) -> Env {
     if let Some(s) = hub.setting("kicad.path").await.filter(|s| !s.is_empty()) {
         // the field takes the command line itself, or a folder that holds it (an install's bin/, or a macOS KiCad.app)
         let p = PathBuf::from(&s);
-        if p.is_dir() { for r in ["kicad-cli", "kicad-cli.exe", "bin/kicad-cli", "bin/kicad-cli.exe", "Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"] { c.push(p.join(r)) } } else { c.push(p) }
+        if p.is_dir() { for r in ["kicad-cli", "kicad-cli.exe", "bin/kicad-cli", "bin/kicad-cli.exe", "Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"] { c.push(r.split('/').fold(p.to_path_buf(), |a, s| a.join(s))) } } else { c.push(p) }
     }
     if let Some(s) = std::env::var_os("BACKPLANE_KICAD_CLI").filter(|s| !s.is_empty()) { c.push(s.into()) }
     if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kicad/bin/kicad-cli"))) { c.push(d) }
