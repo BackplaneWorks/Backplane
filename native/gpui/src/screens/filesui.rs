@@ -303,7 +303,8 @@ fn small_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static 
         .on_click(cx.listener(move |this, _, w, cx| act(this, d.clone(), Some(w), cx))).into_any_element()
 }
 
-pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &FilesUi) -> AnyElement {
+/// `actions`: the viewer pane's own controls (screens::viewer), at the end of the page's bar.
+pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &FilesUi, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let rows = viewer::file_rows(files);
     let q = ui.filter.as_ref().map(|f| f.read(cx).content.to_string()).unwrap_or_default();
@@ -322,7 +323,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     let mut bar = div().flex().items_center().gap_2().px_3().py_2().border_b_1().border_color(c("line"))
         .child(div().id("fm-up").px_1().cursor_pointer().when(at_root, |d| d.opacity(0.35)).child(crate::art::icon("arrow-up", 14., c("text"))).on_click(cx.listener(|this, _, w, cx| act(this, Do::Up, Some(w), cx))))
         .child(crumbs);
-    bar = bar.child(small_btn(cx, light, "fm-new", "folder-plus", "New", Do::NewFolder)).child(small_btn(cx, light, "fm-upload", "arrow-up", "Upload", Do::PickUpload)).child(small_btn(cx, light, "fm-zip", "download", "Zip", Do::DownloadDir));
+    bar = bar.child(small_btn(cx, light, "fm-new", "folder-plus", "New", Do::NewFolder)).child(small_btn(cx, light, "fm-upload", "arrow-up", "Upload", Do::PickUpload)).child(small_btn(cx, light, "fm-zip", "download", "Zip", Do::DownloadDir)).child(actions);
     let mut col = div().size_full().flex().flex_col().relative();
     if let Some(f) = focus.clone() { col = col.track_focus(&f); }
     col = col.key_context("FilesPage").on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| {
@@ -386,7 +387,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
 }
 
 /// An image, PDF or text file the hub opened from the Files tab: a bar (Back, name, Download) over the preview.
-pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, open: &str, viewer: &Value, ui: &FilesUi, images: &super::images::Images, target: Option<&Target>) -> AnyElement {
+pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, open: &str, viewer: &Value, ui: &FilesUi, images: &super::images::Images, target: Option<&Target>, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let name = viewer["file"]["name"].as_str().unwrap_or("").to_string();
     let url = viewer["file"]["url"].as_str().unwrap_or("").to_string();
@@ -399,6 +400,7 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
             .child(div().id("pdf-prev").px_2().cursor_pointer().when(p <= 1, |d| d.opacity(0.35)).child(crate::art::icon("chevron-left", 14., c("text"))).on_click(cx.listener(move |this, _, _, cx| { if p > 1 { ask_pdf(this, p - 1); cx.notify(); } })))
             .child(div().id("pdf-next").px_2().cursor_pointer().when(p >= n, |d| d.opacity(0.35)).child(crate::art::icon("chevron-right", 14., c("text"))).on_click(cx.listener(move |this, _, _, cx| { if p < n { ask_pdf(this, p + 1); cx.notify(); } })));
     }
+    let bar = bar.child(actions);
     let img_el = |url: &str| -> AnyElement {
         match images.get(target, url) {
             Slot::Ready(img) => { let (w, h) = super::images::dims(&img.bytes).map_or((480., 360.), |(w, h)| super::images::fit(w, h, 480., 4000.)); div().p_3().child(div().w(px(w)).h(px(h)).flex_none().child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain))).into_any_element() }

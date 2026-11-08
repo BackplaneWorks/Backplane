@@ -120,7 +120,8 @@ fn chip(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on:
 }
 
 /// The bar: History and Compare buttons; while a comparison shows, its label, Old/Diff/New and ×; the open menu (the steps' ticks with previous/next/play, or the versions).
-pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView) -> AnyElement {
+/// `trailing`: the viewer pane's own controls, at the row's end (they wrap under the chips in a narrow pane).
+pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, trailing: Option<AnyElement>) -> AnyElement {
     let hist = &pv.hist;
     let c = |n: &str| theme::color(light, n);
     let mut row = div().flex().flex_wrap().items_center().gap_1().px_3().py_1();
@@ -131,6 +132,7 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView) -> AnyEle
         for (i, l) in ["Old", "Diff", "New"].iter().enumerate() { let m = i as u8; row = row.child(chip(cx, light, format!("cmp-mode-{i}"), l.to_string(), cmp.mode == m, move |app, _| mode(app, m))); }
         row = row.child(chip(cx, light, "cmp-off".into(), "×".into(), false, |app, _| set(app, None)));
     }
+    if let Some(t) = trailing { row = row.child(div().flex_1()).child(t); }
     let mut col = div().flex().flex_col().child(row);
     if pv.menu == 2 {
         let mut ticks = div().flex().flex_wrap().items_center().gap_1().px_3().pb_1();
