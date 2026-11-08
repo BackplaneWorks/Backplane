@@ -354,17 +354,20 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         project["color"]=json!(color); project["css"]=json!(super::badge::css_of(color));
         project["machine"]=json!(machine);
         if machine.is_empty() && text(&session["drafts"],"@look")==owner { project["look"]=super::badge::editor(owner,setting(st,&format!("project.color.{owner}")),icon); }
-        if !machine.is_empty() { sidebar::label_rows(&mut project,&un.mark(machine)); }
+        // another machine's project: its marker after the name ("on desktop"); this machine's has none
+        if !machine.is_empty() { let m=un.mark(machine); sidebar::label_rows(&mut project,&m); project["mark"]=m; }
         // the same repository on a linked machine: its threads in this project, each row naming its machine
         if let Some(ps)=partners.get(owner).filter(|_|machine.is_empty()) {
-            let mut machines: Vec<Value>=vec![];
+            let (mut machines,mut marks): (Vec<Value>,Vec<Value>)=(vec![],vec![]);
             for (m,_,fp,fid) in ps {
                 let Some(mut fproj)=fp.project(fid,&mut |kind,ids| { let (mut indices,pager)=ns.slice_ids(ids,kind,fid,row_limit,thread); indices.sort_unstable(); (indices,pager) }) else { continue };
                 sidebar::label_rows(&mut fproj,&un.mark(m));
                 sidebar::join_project(&mut project,fproj,&row_key);
-                if !machines.contains(&json!(m)) { machines.push(json!(m)); }
+                if !machines.contains(&json!(m)) { machines.push(json!(m)); marks.push(un.mark(m)); }
             }
             project["machines"]=json!(machines);
+            // the machines it is also on, after its name ("also on desktop"); each of their rows keeps its own marker
+            project["also"]=json!(sidebar::also_label(&marks)); project["marks"]=json!(marks);
         }
         Some(project)
     }).collect();
@@ -506,8 +509,11 @@ mod state_tests {
         let rows: Vec<(&str,Option<&str>)>=ps[0]["threads"].as_array().unwrap().iter().map(|r|(r["id"].as_str().unwrap(),r["mark"]["short"].as_str())).collect();
         assert_eq!(rows,[("h|L~t9",Some("framework")),("h|t1",None),("h|L~t8",Some("framework"))],"newest first across both machines; this machine's row has no marker");
         assert!(ps[0]["threads"][1].get("mark").is_none() && ps[0]["threads"][1].get("machine").is_none(),"this machine's row is as it was");
-        assert_eq!(ps[0]["threads"][0]["mark"],json!({"name":"framework","short":"framework","away":true}),"away when that machine did not answer");
+        assert_eq!(ps[0]["threads"][0]["mark"],crate::mirror::mark_of("framework",true),"away when that machine did not answer");
         assert_eq!(ps[0]["machines"],json!(["framework"])); assert_eq!(ps[1]["threads"][0]["mark"]["name"],"framework");
+        // the project header: the merged one says where else it is, the other machine's says where it is, this machine's own says nothing
+        assert_eq!((ps[0]["also"].as_str(),ps[0]["marks"][0]["short"].as_str(),ps[0].get("mark")),(Some("also on framework"),Some("framework"),None));
+        assert_eq!((ps[1]["mark"]["label"].as_str(),ps[1].get("also")),(Some("on framework"),None));
         // without the map (a machine that did not say its origins) the two stay apart, as before
         let v=recent_far(&st,&far,&params()).unwrap(); assert_eq!(v["shown"]["projects"].as_array().unwrap().len(),3);
         // the Active view: the linked thread names its machine and this hub's project
@@ -515,7 +521,7 @@ mod state_tests {
         let v=recent_unified(&st,&far,&un,&a).unwrap(); let act=v["shown"]["active"].as_array().unwrap();
         let t9=act.iter().find(|r|r["id"]=="h|L~t9").unwrap(); assert_eq!((t9["projectId"].as_str(),t9["project"].as_str(),t9["machine"].as_str()),(Some("h|p1"),Some("backplane-gpui"),Some("framework")));
         // the thread header of another machine's thread has its marker with the full name; this machine's has none
-        assert_eq!(header_mark(&far,&f,&un),Some(json!({"name":"framework","short":"framework","away":true}))); assert_eq!(header_mark(&far,&st,&un),None);
+        assert_eq!(header_mark(&far,&f,&un),Some(crate::mirror::mark_of("framework",true))); assert_eq!(header_mark(&far,&st,&un),None);
         assert_eq!(t9["mark"]["short"],"framework"); assert!(act.iter().find(|r|r["id"]=="h|t1").unwrap().get("mark").is_none());
         assert_eq!(act.iter().find(|r|r["id"]=="h|L~u1").unwrap()["projectId"],"h|L~q1");
         let _=std::fs::remove_dir_all(&d);

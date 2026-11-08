@@ -54,6 +54,31 @@ pub fn machine_mark(light: bool, mark: &Value, full: bool, id: &str) -> Option<A
     Some(div().id(SharedString::from(format!("mark-{id}"))).flex_shrink_0().max_w(px(if full { 200. } else { 80. })).overflow_hidden().text_ellipsis().whitespace_nowrap()
         .text_size(px(11.)).text_color(theme::color(light, "faint")).opacity(o).tooltip(crate::keys::tip(&hover, "", light)).child(t).into_any_element())
 }
+/// Where a project or thread is when it is another machine's, as the hub words it (`mark.label` "on desktop"; a project of this machine that
+/// is also on others: its `also` "also on desktop"): the text, its opacity (dimmer when away) and the hover (the full name). None: this machine's, drawn as always.
+pub fn place_text(mark: &Value, also: &str) -> Option<(String, f32, String)> {
+    if mark["name"].as_str().map_or(true, str::is_empty) { return (!also.is_empty()).then(|| (also.to_string(), 1.0, also.to_string())) }
+    let (_, o, hover) = machine_text(mark, true)?;
+    let l = mark["label"].as_str().filter(|l| !l.is_empty()).map_or_else(|| format!("on {}", mark["short"].as_str().unwrap_or("")), str::to_string);
+    Some((if o < 1.0 { format!("{l} · away") } else { l }, o, hover))
+}
+/// The one place mark: the link icon and the words, quiet (the `faint` text of either theme), the full name on hover. `id` keeps the hover unique.
+pub fn place(light: bool, mark: &Value, also: &str, id: &str) -> Option<AnyElement> {
+    let (t, o, hover) = place_text(mark, also)?;
+    let col = theme::color(light, "dim");
+    Some(div().id(SharedString::from(format!("place-{id}"))).flex_shrink_0().flex().items_center().gap(px(3.)).max_w(px(220.)).overflow_hidden().whitespace_nowrap()
+        .text_size(px(11.)).text_color(col).opacity(o).tooltip(crate::keys::tip(&hover, "", light))
+        .child(art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)).into_any_element())
+}
+/// The note under the composer of another machine's thread: where an agent sent from here runs (`mark.runs` "runs on desktop"). None for this machine's.
+pub fn runs_text(mark: &Value) -> Option<String> {
+    mark["name"].as_str().filter(|n| !n.is_empty())?;
+    Some(mark["runs"].as_str().filter(|r| !r.is_empty()).map_or_else(|| format!("runs on {}", mark["short"].as_str().unwrap_or("")), str::to_string))
+}
+/// A page header's source on another machine: "desktop: boards/x.kicad_pcb"; this machine's is just what it shows.
+pub fn from_machine(mark: &Value, what: &str) -> String {
+    match mark["short"].as_str().filter(|s| !s.is_empty() && !mark["name"].as_str().unwrap_or("").is_empty()) { Some(m) if what.is_empty() => m.to_string(), Some(m) => format!("{m}: {what}"), None => what.to_string() }
+}
 #[cfg(test)]
 mod tests {
     use super::*; use core::prelude::v1::test;
@@ -73,5 +98,16 @@ mod tests {
         let a = serde_json::json!({"name":"desk","short":"desk","away":true});
         assert_eq!(machine_text(&a, false), Some(("desk".into(), 0.5, "desk · away".into()))); assert_eq!(machine_text(&a, true).unwrap().0, "desk · away");
         assert_eq!(machine_text(&Value::Null, false), None, "this machine's threads look as they always did");
+    }
+    #[test] fn a_place_reads_the_same_everywhere_and_a_local_one_says_nothing() {
+        let m = serde_json::json!({"name":"desktop.tail.ts.net","short":"desktop","away":false,"label":"on desktop","runs":"runs on desktop"});
+        assert_eq!(place_text(&m, ""), Some(("on desktop".into(), 1.0, "desktop.tail.ts.net".into())));
+        let a = serde_json::json!({"name":"desktop","short":"desktop","away":true,"label":"on desktop","runs":"runs on desktop"});
+        assert_eq!(place_text(&a, "").map(|p| (p.0, p.1)), Some(("on desktop · away".into(), 0.5)));
+        assert_eq!(place_text(&Value::Null, "also on desktop").unwrap().0, "also on desktop", "a merged project says where else it is");
+        assert_eq!(place_text(&Value::Null, ""), None, "a project of this machine looks as it always did");
+        assert_eq!((runs_text(&m).as_deref(), runs_text(&Value::Null)), (Some("runs on desktop"), None));
+        assert_eq!((from_machine(&m, "boards/x.kicad_pcb"), from_machine(&Value::Null, "boards/x.kicad_pcb")), ("desktop: boards/x.kicad_pcb".to_string(), "boards/x.kicad_pcb".to_string()));
+        assert_eq!(from_machine(&m, ""), "desktop");
     }
 }

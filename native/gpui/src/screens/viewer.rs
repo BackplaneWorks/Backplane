@@ -141,6 +141,23 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value) -> AnyEleme
 
 /// One plot canvas: the frame it is given (or what the hub says instead) and, when `layers` is on, the hub's layer list beside it.
 /// The viewer's boards (`viewer.boards`: label, path from the project's folder, on show).
+/// What the pane shows, for its header beside the machine it comes from (`badge::from_machine`): the board on show, a file opened from Files,
+/// the folder in Files, the Mech part, else the page's name.
+pub fn source(viewer: &Value, diff_on: bool) -> String {
+    if diff_on { return "Diff".into() }
+    let open = viewer["open"].as_str().unwrap_or("");
+    let on = boards(viewer).into_iter().find(|b| b.2).map(|b| b.1);
+    // a key is `<n>|<root>|<file>`: a file opened from Files is its path
+    let keyed = || string(viewer, "key").splitn(3, '|').nth(2).filter(|f| !f.is_empty() && !f.contains('|')).map(|f| f.rsplit('/').next().unwrap_or(f).to_string());
+    let named = match open {
+        "board" | "schematic" | "3d" => on.or_else(keyed),
+        "files" => Some(crumbs(&viewer["files"]).iter().skip(1).map(|c| c.label.as_str()).collect::<Vec<_>>().join("/")).filter(|p| !p.is_empty()),
+        "image" | "pdf" | "text" => Some(string(&viewer["file"], "name")).filter(|n| !n.is_empty()),
+        "mech" => Some(string(&viewer["mech"], "rel")).filter(|n| !n.is_empty()),
+        _ => None,
+    };
+    named.unwrap_or_else(|| tabs(viewer).into_iter().find(|t| t.on).map_or_else(|| open.to_string(), |t| t.label))
+}
 pub fn boards(viewer: &Value) -> Vec<(String, String, bool)> {
     viewer["boards"].as_array().into_iter().flatten().map(|b| (string(b, "label"), string(b, "value"), b["on"].as_bool().unwrap_or(false))).collect()
 }
@@ -266,6 +283,12 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let diff_on = thread["diff"].is_object();
     let mut bar = div().h(px(34.)).flex_shrink_0().flex().items_center().gap_1().px_2().border_b_1().border_color(c("line"));
     for (i, t) in tabs(viewer).into_iter().enumerate() { bar = bar.child(btn(cx, light, format!("vtab-{i}"), t.label, t.on && !diff_on, view_kind(&t.value))); }
+    // another machine's thread: which machine the page comes from, and what it shows ("desktop: boards/x.kicad_pcb")
+    if let Some((_, o, hover)) = super::badge::place_text(&thread["mark"], "") {
+        let t = super::badge::from_machine(&thread["mark"], &source(viewer, diff_on)); let col = c("dim");
+        bar = bar.child(div().id("viewer-from").ml_2().min_w_0().flex().items_center().gap(px(3.)).overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(col).opacity(o)
+            .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
+    }
     if has_design(viewer) { bar = bar.child(div().flex_1()).child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open())); } else { bar = bar.child(div().flex_1()); }
     bar = bar.child(div().id("viewer-close").px_2().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("Close")
         .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close()); cx.notify(); })));
@@ -359,6 +382,16 @@ mod tests {
         assert!(has_design(&serde_json::json!({"choices":[{"label":"Board","value":"board"},{"label":"Files","value":"files"}]})));
         assert!(has_design(&serde_json::json!({"choices":[{"label":"Schematic","value":"schematic"}]})));
         assert!(!has_design(&serde_json::json!({"choices":[{"label":"Files","value":"files"}]}))); assert!(!has_design(&serde_json::json!({})));
+    }
+    #[test] fn a_pane_names_what_it_shows() {
+        let j = |s: &str| serde_json::from_str::<Value>(s).unwrap();
+        assert_eq!(source(&j(r#"{"open":"board","key":"0|/p|","boards":[{"label":"boards/a","value":"boards/a.kicad_pcb","on":false},{"label":"boards/x","value":"boards/x.kicad_pcb","on":true}]}"#), false), "boards/x.kicad_pcb");
+        assert_eq!(source(&j(r#"{"open":"board","key":"0|/p|/p/hw/y.kicad_pcb"}"#), false), "y.kicad_pcb", "a board opened from Files");
+        assert_eq!(source(&j(r#"{"open":"schematic","key":"1|/p|","choices":[{"label":"Schematic","value":"schematic","on":true}]}"#), false), "Schematic", "the project's own: the page's name");
+        assert_eq!(source(&j(r#"{"open":"files","files":{"trail":[{"label":"Project"},{"label":"boards"},{"label":"x"}]}}"#), false), "boards/x");
+        assert_eq!(source(&j(r#"{"open":"files","files":{"trail":[{"label":"Project"}]},"choices":[{"label":"Files","value":"files","on":true}]}"#), false), "Files");
+        assert_eq!(source(&j(r#"{"open":"image","file":{"name":"shot.png"}}"#), false), "shot.png");
+        assert_eq!(source(&j(r#"{"open":"board"}"#), true), "Diff");
         assert!(matches!(kicad_open(), Command::Action(a, v) if a == "kicad-open" && v.is_empty()));
     }
     #[test] fn tabs_files_and_diff_parse_from_the_hubs_rows() {

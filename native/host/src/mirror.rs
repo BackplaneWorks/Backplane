@@ -129,10 +129,12 @@ pub fn short_name(name: &str) -> String {
 }
 /// The marker on a thread of another machine, wherever threads are listed (sidebar rows, the Active view, the thread header):
 /// `short` on the row, `name` in the header and on hover, `away` when that machine did not answer (drawn dimmer, "away" after it).
-/// A thread of this machine has none.
+/// A thread of this machine has none. `label` ("on desktop") goes after a project's name (its sidebar header, the window's breadcrumb), `runs`
+/// ("runs on desktop") under the composer: where an agent sent from there runs. One wording everywhere, the phones' too (docs/PHONE-DATA.md).
 pub fn mark_of(machine: &str, away: bool) -> Value {
     if machine.is_empty() { return Value::Null }
-    serde_json::json!({"name": machine, "short": short_name(machine), "away": away})
+    let short = short_name(machine);
+    serde_json::json!({"name": machine, "short": short, "away": away, "label": format!("on {short}"), "runs": format!("runs on {short}")})
 }
 
 /// Ask each linked machine for its projects' origins (machine_list) now and every minute, so the sidebar can show a repository
@@ -185,12 +187,12 @@ mod origin_tests {
         let m = Mirrors::default(); m.set_origins("L", &s(&[("a", "github.com/o/r"), ("b", "")])); assert_eq!((m.origin("L~a").as_str(), m.origin("L~b").as_str()), ("github.com/o/r", ""));
         m.set_origins("L", &s(&[("c", "x/y")])); assert_eq!((m.origin("L~a").as_str(), m.origin("L~c").as_str()), ("", "x/y"));
         m.set_names(Arc::new(|| vec![("L".to_string(), "framework-1".to_string())]));
-        assert_eq!(m.mark("framework-1"), serde_json::json!({"name":"framework-1","short":"framework-1","away":false}));
+        assert_eq!(m.mark("framework-1"), serde_json::json!({"name":"framework-1","short":"framework-1","away":false,"label":"on framework-1","runs":"runs on framework-1"}));
         m.set_away("L", true); assert_eq!(m.mark("framework-1")["away"], true); m.set_away("L", false); assert_eq!(m.mark("framework-1")["away"], false);
     }
     #[test] fn a_marker_is_short_on_the_row_and_full_in_the_header_and_none_for_this_machine() {
         assert_eq!(mark_of("", false), Value::Null);
-        assert_eq!(mark_of("framework-1.tail9e0cf2.ts.net", true), serde_json::json!({"name":"framework-1.tail9e0cf2.ts.net","short":"framework-1","away":true}));
+        assert_eq!(mark_of("framework-1.tail9e0cf2.ts.net", true), serde_json::json!({"name":"framework-1.tail9e0cf2.ts.net","short":"framework-1","away":true,"label":"on framework-1","runs":"runs on framework-1"}));
         assert_eq!(short_name("a-very-long-machine-name"), "A"); assert_eq!(short_name("desk"), "desk");
     }
 }
