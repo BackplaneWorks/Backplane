@@ -317,6 +317,39 @@ Rig: a Windows Server 2022 VM (10.0.20348, 4 vCPU, 16 GB, no GPU: the client dra
 
 Windows bugs found here and fixed, each with a test where one fits: the client opened a console window (and the hub's children could); an image copied as a bitmap only pasted nothing; message images with Windows paths never showed; the hub looked for its helpers (browser, step2glb, voice, plot) without `.exe`; a Windows install had no guard (now it asks to install, and `--install` for scripts); `hub.lock` hid its port from other processes; time zones were all UTC; Claude's system prompt was cut at 8186 characters; a refused upload's 413 was lost to a reset; release exports could not find the snapshot (Git's sh paths); FreeCAD in Program Files was not found and a Windows path in `freecad.path` was not taken; two tests quoted Windows paths badly (main's Windows CI was red on them).
 
+### Windows Server 2022 VM, release archive v0.15.0-rc.1
+
+The release candidate: commit `8976e8deb7` (branch `rc/0.15.0`), dry run 42482640273, `archive-windows-x64` (`backplane-v0.15.0-rc.1-windows-x64-native.zip`; its COMMIT file says `8976e8deb7`; it holds `silero_vad.onnx` and `licenses/`). Installed as a person installs it, and its own programs (the zip unpacked) for the rows that start their own hub and window. The drivers are the RC commit's own `test/`. The pairing hub is the RC's `archive-linux-x64` on the desktop. Every copy of both archives was deleted after the run.
+
+| ID | Result | Commit | Rig | Evidence |
+|---|---|---|---|---|
+| C01 | pass | 8976e8deb7 (rc.1 zip) | VM, WARP | `test/update/win-r.ps1 install v0.15.0-rc.1`: the zip with a downloaded file's mark, extracted by the shell, double-clicked: SmartScreen, More info, Run anyway; the Install question, Install; the first screen, then home. status.json build v0.15.0-rc.1 commit 8976e8deb7, CURRENT v0.15.0-rc.1, `update.status` current 0.15.0-rc.1 |
+| Onboarding | pass | 8976e8deb7 (installed) | VM, WARP | the installed client's first run walked with Enter through every step to `onboard.done` = 1 (the steps that need an action recorded as skipped) |
+| R01 | pass | 8976e8deb7 (installed) | VM ↔ desktop, tailnet | a fresh rc.1 install (builds: v0.15.0-rc.1 only), its guard on the tailnet address; the RC's own Linux guard CLI on the desktop, `backplane hub restart --now --url http://<vm>:3800 --token-file ...`: the hub process replaced (pid 4604 -> 1272), /hello 200 after |
+| R02 | not run on rc.1: an `-rc` tag is not an update target by design | 8976e8deb7 | VM | `update/rel.rs` `tag_ok` takes vX.Y.Z, -beta.N and -nightly only (a tag becomes a folder; its test refuses `v0.15.1-rc.1`): an installed v0.14.200 (main 2410616651 with its version stamped as release.yml stamps it, installed from its zip) with v0.15.0-rc.1 in a loopback feed says "Up to date" on stable and on beta, as it must. The update path stands on v0.14.95 -> v0.14.101 (988c9c93cd, above) and the release workflow's runner smoke; the published v0.15.0 is checked from that v0.14.200 install, kept on the VM for it |
+| R03 | not run | | | needs a second build, broken on purpose and signed with the release key; covered by the release workflow's runner smoke and v0.14.94 above |
+| F05 | pass | 8976e8deb7 (its programs) | VM | `linux-f-rows.mjs`: each provider's stand-in (claude, codex, grok, opencode, muse, pi, omp, antigravity) through the hub: a plain turn completes; a permission turn opens an ask, accepted, completes; codex's session resumed |
+| F06 | pass | same | VM, WARP | window: approval card (Allow and Deny reach the agent), question card, plan card; hub: approvals, a declined one, the question's answer, plan mode, a question after Stop |
+| F07 | pass | same | VM, WARP | window: Stop on a running turn (TurnChanged interrupted); hub: a held interrupted turn and a model choice |
+| F08 | pass | same | VM, WARP | window: Fork made a new thread; hub: the fork's hand-off back to the source |
+| F09 | pass | same | VM, WARP | the context panel changed once the turn was counted (TurnUsage); an unsent draft back after killing the client |
+| F10, F11, F13, F19, F20 | pass, hub only | same | VM | an agent's MCP thread_list; thread modes, effort, project rename; naming from the first line and the text model; a bot's turn; /files/get, /files/zip, a path outside 400, no token 401 |
+| F12 | pass, hub only | same | VM | checkpoints and revert; commit and push to a bare remote; create_pr refused with no forge |
+| F14 | pass, part: the floating terminal | same | VM, WARP, ConPTY | Ctrl+J, a command typed with real keys ran in a real shell (marker file) |
+| F15 | pass | same | VM, WARP | a pasted PNG stored and told to the agent; POST /attach and the cap (60 MB accepted, 513 MB refused with its 413 after the upload) |
+| F16 | pass | same | VM, WARP | every shortcut: palette, models, sidebar, files, diff, terminal, thread 2, perf, uber, new, stop, settle |
+| F17 | pass | same | VM, WARP | Board, Schematic, 3D and Mech drawn, wheel and drag change each (the zip's backplane-step2glb.exe); the hub's mech.render wrote the four views |
+| F18 | pass, part: frame-stream helper, no embedded Chromium | same (the zip's backplane-browser.exe) | VM, WARP, Git's usr\bin first on PATH | `ROWS=win-f18.rows.py win-f-rows.py F18`: Chrome for Testing downloaded and unpacked by System32's tar.exe; page drawn, a click, typing, the wheel, the popup as a new tab, the download in Downloads |
+| F21 | pass | same | VM, WARP | the window through a hub restart (a message after it reached the new hub); outbox retry posted once; 150 messages kept across a restart; resume |
+| F22 | pass | same | VM, WARP | the files card, nothing uploaded before Send; after it the quote upload with its manifest and the quote card |
+| F23 | pass | same | VM | `test/windows/rig/f23.ps1`: python3 stand-in under the hub, the hub killed with taskkill /F, nothing left after 5 s |
+| C02 | pass | same | VM | `cad-rows.mjs` with Backplane KiCad 10.99.0-bp.6: Settings > CAD path accepted and named; ERC 43 and DRC 27 warnings; the release exports (gerbers, BOM, CPL, board and schematic PDFs, STEP) |
+| C03 | pass, part: no agent's FreeCAD script | same | VM | the CAD page's FreeCAD row finds C:\Program Files\FreeCAD 1.1\bin\freecadcmd.exe |
+| S01-S14 | pass | same | VM | `s-effects.mjs` (S01 theme and thread list, S02 the 413, S03 agent model, provider and thinking, S05 kicad.ipc, S06 ordering, S07 Add a device and Revoke, S08 channel, S10 API keys, S11 time zone, S13 About says 0.15.0-rc.1, S14 nothing sent in Off or On); `linux-f-rows.mjs` S04 (the writing model and provider) and S12 (one more turn on the Usage page); S09 below |
+| S09 | pass | same | VM | `voice-effect.mjs`: `local-status` on an empty folder `"vadBundled":true` (the zip's silero_vad.onnx); the local model downloaded from the page (ready in 44 s); recorded speech heard as spoken; a Dictionary line rewrote a word; its × put it back |
+| Settings walk | pass | same | VM | `settings-walk.mjs`: 89 controls walked, 0 not applied, 0 lost across a hub restart |
+| Pairing | pass (17/17) | 8976e8deb7 client and hub | Linux hub (the RC's archive, desktop) ↔ Windows client, tailnet | `test/e2e/pairing/gpui.sh`: link, short code, wrong and used codes, revoked code, backplane:// question and Cancel, confirm, revoke while connected, Re-pair; the saved credential private; expiry and hub restart not run (their commands run on the desktop); LAN not run (no LAN with the desktop) |
+
 ### Wine
 
 Label `wine`. Wine is not Windows; nothing here fills a Windows cell.
