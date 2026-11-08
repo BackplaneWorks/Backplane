@@ -21,7 +21,9 @@ fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h
 pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, banner: String, pub light: bool, open_error: Option<String>, opening_since: Instant, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool> }
 /// One GET with a bearer token over the client's own stream (plain or TLS, as the hub's address says): (status, body), the body at most `max` bytes.
 pub fn get_bytes(url: &str, token: &str, timeout: Duration, max: u64) -> Result<(u16, Vec<u8>), String> {
-    let (addr, tls) = crate::pairing::host_port(url);
+    // the address is the scheme and authority only: with the path in, `host_port` sees no port and dials "host:port/bots/x/screen.jpg:80" ("failed to lookup address information")
+    let authority = url.split_once("://").map_or(("", url), |(sc, r)| (sc, r.split('/').next().unwrap_or(r)));
+    let (addr, tls) = crate::pairing::host_port(&format!("{}://{}", authority.0, authority.1));
     let path = url.split_once("://").map_or(url, |(_, r)| r).split_once('/').map_or("/".to_string(), |(_, p)| format!("/{p}"));
     let mut s = crate::pairing::open(&addr, tls).map_err(|e| e.to_string())?; s.set_timeouts(timeout).map_err(|e| e.to_string())?;
     std::io::Write::write_all(&mut s, format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").as_bytes()).map_err(|e| e.to_string())?;
@@ -256,6 +258,15 @@ impl Bar {
 
 #[cfg(test)]
 mod tests {
+    // the frame poller's request goes to the hub's host and port, with the path in the request line (it once dialled the whole URL as a host name)
+    #[test] fn a_frame_fetch_dials_the_host_and_port_not_the_path() {
+        use std::io::{Read, Write}; let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let port = l.local_addr().unwrap().port();
+        let h = std::thread::spawn(move || { let (mut c, _) = l.accept().unwrap(); let mut b = [0u8; 2048]; let n = c.read(&mut b).unwrap(); let req = String::from_utf8_lossy(&b[..n]).to_string();
+            c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n\xff\xd8\x00").unwrap(); req });
+        let got = super::get_bytes(&format!("http://127.0.0.1:{port}/bots/t1/screen.jpg"), "tok", std::time::Duration::from_secs(3), 1 << 20).unwrap();
+        assert_eq!(got, (200, vec![0xff, 0xd8, 0])); let req = h.join().unwrap();
+        assert!(req.starts_with("GET /bots/t1/screen.jpg HTTP/1.1\r\n") && req.contains(&format!("Host: 127.0.0.1:{port}\r\n")) && req.contains("Authorization: Bearer tok"), "{req}");
+    }
     #[test] fn a_frame_answer_is_read_whole_or_de_chunked() {
         let whole = b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n\xff\xd8\x00".to_vec();
         assert_eq!(super::parse_response(&whole).unwrap(), (200, vec![0xff, 0xd8, 0]));
