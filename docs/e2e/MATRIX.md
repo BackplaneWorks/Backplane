@@ -142,6 +142,24 @@ Each lane's rows: `| ID | result | commit | rig | evidence |`.
 | S13 | pass | 37c30e1cf8 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | about: one read-only row with the version; no controls |
 | S14 | pass | 37c30e1cf8 | Boat bx_vnxbr9nr (Ubuntu 24.04, 4 vCPU, software GL) | privacy: Off applied; On did NOT re-enable (the chip sent `setting.set`, which the hub refuses for `telemetry.share=on`; no client sent `telemetry.choice`). Fixed in efa3eb26df and the presenter whitelist; Reset id applied + persisted |
 
+### Linux, release archive v0.14.93
+
+The same Linux rows against the release archive, not a dev build: dry run 42451126435 (`archive-linux-x64`, sha256 `efabbd8a883b…`, COMMIT file `2958b9046a`), installed by `install.sh` (filled in from `deploy/install.sh.in` with the archive's sha256) into a private prefix, home and port, the guard running its hub. The rows then use the installed hub, client, assets, CEF runtime and browser helper. One command: `scripts/e2e-linux.sh --archive <tar.gz> --no-phone`; driver scripts from `67fc7928ee`'s tree. The archive was never published or uploaded; the copies are deleted.
+
+| Row | Result | Evidence |
+|---|---|---|
+| install | pass | `install.sh` with `BACKPLANE_ARCHIVE`: the guard started the installed hub on its private port and `/hello` answered; the archive holds `backplane-hub`, `backplane-gpui`, `backplane`, `backplane-browser`, `backplane-step2glb`, `backplane-voice`, `libcef.so`, `icudtl.dat`, `resources.pak`, `v8_context_snapshot.bin`, `locales/`, `assets/`, `COMMIT`: nothing a dev build has beside it is missing |
+| F01-F04, F06-F15, F17, F19-F22 (hub rows) | pass | `linux-f-rows.mjs` on the installed hub: 29 of 30 rows ok, including `mech.render` through the shipped `backplane-step2glb` |
+| F05 | pass, 6 of 7 providers; Codex not run | Claude, Grok, OpenCode, Muse, Pi, Oh My Pi and Antigravity on their stand-ins as processes (a plain turn, a permission ask answered); Codex has no process-level stand-in: its in-process tests cover it |
+| S04 | **fail** | the archive predates the Writing fix: `text.provider` and `text.model` never reached the agents' state, so Settings > Writing changed nothing (the title and summary calls always ran `claude -p --model claude-haiku-5-5`). Fixed on main by `23c592646c`; the release candidate must contain it |
+| settings walk | 3 not applied | 86 of 89 controls apply, and the 34 re-read after a hub restart all kept their value. Not applied: Voice > Speech to text `local` and `cloud`, Voice > Local model `parakeet-v3` (the value is logged, the page does not show it lit). The same three on a dev build, so not an archive defect: the voice lane's S09 |
+| F06-F08, F09, F14-F17, F21 (client rows) | pass | `gpui-f-rows.py` with the installed client and its assets: 13 of 13, real X input on a private Xvfb with i3 |
+| F18 | pass | `cef_e2e.sh` with the archive's client, CEF runtime and browser helper: 23 of 23 (page paints, input, download lands in Downloads, teach, popup with its opener, 30 fps in software GL) |
+| phone | not run | no Pixel run on the archive (the suite ran with `--no-phone`) |
+| linux-arm64 archive | not run | no arm64 Linux machine: the Boat sandboxes are x86_64 (checked with `uname -m` on a probe sandbox, deleted) and the desktop is x86_64 |
+
+Two things this run fixed in the rig, not the archive: the CEF script looked for an Xvfb at a path that no longer exists, and counted the stand-in's duplicated log lines as separate calls.
+
 ### macOS
 
 Hub-only rows drove the hub over its websocket with stand-in agents; no client ran (no window may open on the console session). Hub test suite on macOS: green after the fixes below (1919 passed, 0 failed, 7 ignored; `~/bp-e2e/logs/test-host.log`).
