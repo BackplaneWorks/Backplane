@@ -44,8 +44,9 @@ PILOT_NOTE = ("Pilot: ordering through Backplane is still being tested. This che
               "order them from any fabricator with the files Backplane exported to the mfg folder of your project.")
 # Paying paused (FAB_PAUSED=1): Buy now shows PAUSED_NOTE instead of opening
 # Stripe, and checkouts still open are expired; quotes and paid orders carry on
+# (FAB_PAUSED_NOTE replaces the text, e.g. to name a fab on this server only)
 PAUSED = env("FAB_PAUSED", "0") == "1"
-PAUSED_NOTE = ("Thanks for your interest. As of November 8 we have temporarily paused paying through here; we'll be back soon. "
+PAUSED_NOTE = env("FAB_PAUSED_NOTE") or ("Thanks for your interest. As of November 8 we have temporarily paused paying through here; we'll be back soon. "
                "You can ask Backplane to export the manufacturing files and order them directly from a PCB manufacturer.")
 MOUSER_KEY = env("MOUSER_API_KEY")
 TI_KEY = env("TI_API_KEY")
