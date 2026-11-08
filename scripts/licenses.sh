@@ -28,9 +28,9 @@ put playwright-core "$pw/LICENSE" "$pw/NOTICE" "$pw/ThirdPartyNotices.txt"
 oc=$root/tools/step2glb/node_modules/occt-import-js
 put step2glb "$oc/dist/license.occt.txt" "$oc/dist/license.occt-import-js.txt"
 
-# CEF (Linux, where the client embeds it): CEF's licence, and Chromium's credits from the distribution the build used (the cef crate's OUT_DIR,
+# CEF (every platform's client embeds it): CEF's licence, and Chromium's credits from the distribution the build used (the cef crate's OUT_DIR,
 # else the copy cef-dll-sys put beside the binary)
-case "$t" in linux-*)
+case "$t" in linux-*|darwin-*|windows-*)
   # GPUI_RELEASE: where the client was built (default native/gpui/target/release)
   rel=${GPUI_RELEASE:-$root/native/gpui/target/release}
   credits=$(find "$rel/build" -path '*cef-dll-sys*' -name CREDITS.html 2>/dev/null | head -1 || true)

@@ -16,6 +16,7 @@ pub struct CefPage {
 
 impl CefPage {
     pub fn new(cx: &mut Context<Self>, owner: String, hub: tokio::sync::mpsc::Sender<Command>, port: u16) -> Self {
+        if cef::EXTERNAL_PUMP { drive_pump(cx); }
         let (wake, rx) = async_channel::bounded::<()>(1);
         cx.spawn(async move |weak, cx| {
             while rx.recv().await.is_ok() {
@@ -93,7 +94,7 @@ impl CefPage {
         let o = self.bounds.lock().unwrap().map(|b| b.origin).unwrap_or_default();
         (f32::from(p.x - o.x) as i32, f32::from(p.y - o.y) as i32)
     }
-    fn mods(m: &Modifiers, buttons: u32) -> u32 { cef::flags(m.shift, m.control, m.alt, false, false, false) | buttons }
+    fn mods(m: &Modifiers, buttons: u32) -> u32 { cef::flags(m.shift, m.control, m.alt, false, false, false) | if m.platform { cef::COMMAND } else { 0 } | buttons }
     fn take_over(&mut self) { if !self.taken { self.taken = true; self.rpc(serde_json::json!({"bot": self.owner, "op": "takeover"})); } }
     fn hand_back(&mut self, cx: &mut Context<Self>) { if self.taken { self.taken = false; self.rpc(serde_json::json!({"bot": self.owner, "op": "handback"})); cx.notify(); } }
     fn go(&mut self, cx: &mut Context<Self>) {
@@ -246,5 +247,31 @@ impl EntityInputHandler for CefPage {
         Some(Bounds::new(element_bounds.origin + point(px(self.last_mouse.0 as f32), px(self.last_mouse.1 as f32)), size(px(1.), px(18.))))
     }
     fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> { None }
+}
+/// macOS: CEF's work runs on gpui's main thread when CEF asks for it (cef.rs `PUMP`), once for the process, for as long as it runs. A request
+/// for later waits for its time unless a sooner one comes; a delay is never longer than 1/30 s (CEF's own clients cap it the same way).
+fn drive_pump<T: 'static>(cx: &mut Context<T>) {
+    static ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if ON.swap(true, std::sync::atomic::Ordering::SeqCst) { return }
+    let rx = cef::pump_requests(); let ex = cx.background_executor().clone();
+    cx.spawn(async move |_, _| {
+        use futures_util::future::{select, Either};
+        let mut due: Option<std::time::Instant> = Some(std::time::Instant::now());
+        loop {
+            let at = |d: i64| std::time::Instant::now() + std::time::Duration::from_millis(d.clamp(0, 33) as u64);
+            match due {
+                None => match rx.recv().await { Ok(d) => due = Some(at(d)), Err(_) => return },
+                Some(t) => {
+                    let wait = t.saturating_duration_since(std::time::Instant::now());
+                    if wait.is_zero() { due = None; cef::pump_work(); continue }
+                    match select(std::pin::pin!(rx.recv()), std::pin::pin!(ex.timer(wait))).await {
+                        Either::Left((Ok(d), _)) => { let n = at(d); if n < t { due = Some(n); } }
+                        Either::Left((Err(_), _)) => return,
+                        Either::Right(_) => { due = None; cef::pump_work(); }
+                    }
+                }
+            }
+        }
+    }).detach();
 }
 pub fn engine_port() -> Result<u16, String> { match Engine::get() { Ok(e) => Ok(e.cdp_port), Err(e) => Err(e.clone()) } }
