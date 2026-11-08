@@ -70,8 +70,11 @@ pub fn rows(p: &Prefs, info: &Value, term: &str, key_err: &str) -> Vec<Value> {
     let mut dict: Vec<Value> = vec![btn("Add", "voice-term", "", true)];
     dict.extend(entries.iter().map(|(k, v)| btn(&format!("{v} ×"), "setting", &format!("{k}="), false)));
     let fixes: Vec<Value> = learned.iter().map(|(k, v)| { let x = Learned::parse(v); btn(&format!("{} → {} · {}× ×", &k[vdict::L_PRE.len()..], x.out, x.yes), "setting", &format!("{k}="), x.trusted()) }).collect();
+    let local_ready = { let l = parsed(info, "voice.local"); let id = vdict::model_id(set(p, "voice.model", "")); let m = l["models"].as_array().and_then(|a| a.iter().find(|m| m["id"] == id)).cloned().unwrap_or(Value::Null); ready(&l, &m) };
+    let eng_note = if eng == "local" && !local_ready { "On this machine is chosen: it works once the local model below is downloaded. Until then dictation does not start." }
+        else { "Where your speech becomes text. Auto uses the local model once it is downloaded, else OpenAI." };
     vec![
-        row("Speech to text", "Where your speech becomes text. Auto uses the local model once it is downloaded, else OpenAI.", vec![btn("Auto", "setting", "voice.engine=auto", eng == "auto"), btn("On this machine", "setting", "voice.engine=local", eng == "local"), btn("OpenAI", "setting", "voice.engine=cloud", eng == "cloud")]),
+        row("Speech to text", eng_note, vec![btn("Auto", "setting", "voice.engine=auto", eng == "auto"), btn("On this machine", "setting", "voice.engine=local", eng == "local"), btn("OpenAI", "setting", "voice.engine=cloud", eng == "cloud")]),
         model_rows(p, info), key_row(info, key_err), mic_row(p, info),
         json!({"label": "Dictionary", "note": if entries.is_empty() { "No dictionary entries yet. One a line. KiCad = key cad (a term and how it sounds), jason -> JSON (a replacement), !um (a word to drop)." } else { "One a line. KiCad = key cad (a term and how it sounds), jason -> JSON (a replacement), !um (a word to drop)." },
             "fields": [{"name": "vterm", "hint": "Add a term", "secret": false, "value": term}], "buttons": dict}),
@@ -88,6 +91,14 @@ mod tests {
     fn prefs(kv: &[(&str, &str)]) -> Prefs { kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() }
     fn local(installed: bool) -> Value { json!({"voice.local": json!({"platform":"linux-x64","supported":true,"runtime":installed,"vad":installed,"models":[{"id":"parakeet-v2","label":"Parakeet v2","size":482468385u64,"installed":installed}]}).to_string()}) }
     fn find<'a>(rows: &'a [Value], label: &str) -> &'a Value { rows.iter().find(|r| r["label"] == label).unwrap() }
+    #[test] fn on_this_machine_chosen_before_the_model_is_downloaded_says_so() {
+        let local = |installed: bool| json!({"voice.local": json!({"supported": true, "runtime": installed, "vad": installed, "models": [{"id": "parakeet-v2", "label": "P", "size": 1000000, "installed": installed}]}).to_string()});
+        let note = |p: &Prefs, i: &Value| find(&rows(p, i, "", ""), "Speech to text")["note"].as_str().unwrap().to_string();
+        assert!(note(&prefs(&[("voice.engine", "local")]), &local(false)).contains("works once the local model below is downloaded"));
+        assert!(!note(&prefs(&[("voice.engine", "local")]), &local(true)).contains("downloaded. Until"), "ready: the plain note");
+        assert!(!note(&prefs(&[("voice.engine", "cloud")]), &local(false)).contains("Until then"), "OpenAI needs no download");
+        assert_eq!(find(&rows(&prefs(&[("voice.engine", "local")]), &local(false), "", ""), "Speech to text")["buttons"][1]["on"], true, "and the chip stays lit");
+    }
     fn labels(r: &Value) -> Vec<String> { r["buttons"].as_array().unwrap().iter().map(|b| b["label"].as_str().unwrap().to_string()).collect() }
     #[test] fn the_engine_chips_say_the_setting() {
         let r = rows(&prefs(&[("voice.engine", "cloud")]), &json!({}), "", ""); let b = &r[0]["buttons"];
