@@ -1652,3 +1652,16 @@ async fn tool_of(ag: &Arc<Agents>, name: &str) -> Arc<dyn mcp::ToolSet> { ag.too
     assert!(ag.tool_work_list(other).await.1["work"].as_array().unwrap().is_empty());
     assert!(!log_from(&hub, from).await.iter().any(|e| turn_is(e, "running") && e["thread"] == other), "the report did not start the settled thread"); ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn the_writing_setting_names_threads_and_without_it_haiku_does() { // Settings > Writing: the one-shot's provider and model
+    let sd = dir("wr-bin"); let log = sd.join("argv");
+    script(&sd, "claude", &format!("#!/bin/sh\ncat > /dev/null\necho \"claude $*\" >> {}\nprintf '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Claude title\"}}\\n'\n", log.display()));
+    script(&sd, "codex", &format!("#!/bin/sh\ncat > /dev/null\necho \"codex $*\" >> {}\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"type\":\"agent_message\",\"text\":\"Codex title\"}}}}\\n'\n", log.display()));
+    let (hub, ag, _h, _w) = start("wr", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    let argv = || std::fs::read_to_string(&log).unwrap_or_default().lines().last().unwrap_or("").to_string();
+    let set = |k: &str, v: &str| { let hub = hub.clone(); let (k, v) = (k.to_string(), v.to_string()); async move { hub.commit(&json!({"$":"SettingSet","key":k,"value":v,"at":1700000070})).await.unwrap(); tokio::time::sleep(Duration::from_millis(100)).await } };
+    assert_eq!(ag.write_title(T1, "design a board").await.as_deref(), Some("Claude title")); assert!(argv().contains("--model claude-haiku-5-5"), "no setting: Haiku: {}", argv());
+    set("text.model", "sonnet").await; assert_eq!(ag.write_title(T1, "design a board").await.as_deref(), Some("Claude title")); assert!(argv().starts_with("claude") && argv().contains("--model sonnet"), "the chosen model: {}", argv());
+    set("text.provider", "codex").await; set("text.model", "").await; assert_eq!(ag.write_title(T1, "design a board").await.as_deref(), Some("Codex title")); assert!(argv().starts_with("codex exec") && argv().contains("-m gpt-6-luna"), "the chosen provider, its light model: {}", argv());
+    ag.shutdown();
+}

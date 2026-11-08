@@ -24,7 +24,8 @@ def out(o):
     print(json.dumps(o), flush=True)
 if "-p" in a and "--input-format" not in a:  # one-shot text generation (titles, summaries)
     sys.stdin.read(); L("ONESHOT")
-    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "Stand-in title for the thread"}), flush=True); sys.exit(0)
+    model = a[a.index("--model") + 1] if "--model" in a else "default"   # the writing model the hub chose: the title says which
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "Stand-in title for the thread" if model == "default" else "Title from " + model}), flush=True); sys.exit(0)
 sid = "fake-%d" % os.getpid()
 n = 0
 import threading, queue

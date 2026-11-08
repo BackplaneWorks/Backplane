@@ -3,17 +3,21 @@
 // usage: bun test/e2e/linux-f-rows.mjs HUB_BIN OUT_DIR [PORT]  -> OUT_DIR/rows.json (one entry per check: {id, ok, ev}) and one line per check on stdout.
 // Rows that need the window (frames, key presses, drafts, the CEF browser) are not here: they are the client lane's and are listed in rows.json under "notDriven".
 import {spawn} from 'node:child_process';
-import {mkdirSync,rmSync,writeFileSync,readFileSync,chmodSync,copyFileSync,readdirSync,existsSync,openSync} from 'node:fs';
+import {mkdirSync,rmSync,writeFileSync,readFileSync,chmodSync,copyFileSync,readdirSync,existsSync,openSync,symlinkSync} from 'node:fs';
 import http from 'node:http';
 import {encode,decode} from '../wire.mjs';
 const [BIN,OUT,PORT_ARG]=process.argv.slice(2); const PORT=Number(PORT_ARG||3881);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 rmSync(OUT,{recursive:true,force:true}); mkdirSync(OUT+'/bin',{recursive:true}); mkdirSync(OUT+'/proj/sub',{recursive:true});
 const HOME=OUT+'/home', AG=OUT+'/bin', HERE=new URL('.',import.meta.url).pathname;
-copyFileSync(HERE+'lib/standin_rows.py',AG+'/claude'); for(const n of['codex','grok','muse','opencode','agy','pi','omp']) writeFileSync(`${AG}/${n}`,'#!/bin/sh\nexit 1\n');
+copyFileSync(HERE+'lib/standin_rows.py',AG+'/claude'); writeFileSync(`${AG}/agy`,'#!/bin/sh\nexit 1\n');writeFileSync(`${AG}/codex`,'#!/bin/sh\n# a stand-in for the one-shot `codex exec` only (the writing model): logs its argv, answers one agent_message; any other use exits 1\ncase "$1" in exec) echo "CODEX-ONESHOT $*" >> "$FAKE_LOG"; m=default; p=; for a in "$@"; do [ "$p" = -m ] && m=$a; p=$a; done; printf \'{"type":"item.completed","item":{"type":"agent_message","text":"Codex title from %s"}}\\n\' "$m";; *) exit 1;; esac\n');
+// the other providers' stand-ins are the scripts the hub's in-process provider tests use (test/agents/): ACP for Grok and OpenCode, MSP for Muse, Pi's and Oh My Pi's RPC; Antigravity's agent is a managed install, so its stand-in sits at the installed path
+const PR=HERE+'../agents/';for(const [n,f] of [['grok','standin-acp.sh'],['opencode','standin-acp.sh'],['muse','prov/standin-muse.py'],['pi','prov-pi/standin-pi.sh'],['omp','prov-pi/standin-omp.sh']])copyFileSync(PR+f,`${AG}/${n}`);
+mkdirSync(`${OUT}/home/antigravity/1.3.0`,{recursive:true});copyFileSync(PR+'prov/standin-agy.py',`${OUT}/home/antigravity/1.3.0/agy_acp_server.par`);copyFileSync(PR+'prov/agy-turn.jsonl',`${OUT}/home/antigravity/1.3.0/agy-turn.jsonl`);
 for(const f of readdirSync(AG)) chmodSync(`${AG}/${f}`,0o755);
+writeFileSync(`${AG}/sh`,'#!/bin/sh\nexec /bin/sh "$@"\n');chmodSync(`${AG}/sh`,0o755);   // with BACKPLANE_AGENTS the hub resolves every program it starts from that folder, and Antigravity's runner script is started through sh
 writeFileSync(OUT+'/proj/readme.txt','e2e fixture\n');
-const rows=[]; const log=(id,ok,ev)=>{rows.push({id,ok,ev});console.log(`${ok?'ok  ':'FAIL'} ${id} ${ev}`)};
+const rows=[]; const skip=(id,ev)=>{rows.push({id,ok:null,ev});console.log(`skip ${id} ${ev}`)}; const log=(id,ok,ev)=>{rows.push({id,ok,ev});console.log(`${ok?'ok  ':'FAIL'} ${id} ${ev}`)};
 const FAKE=OUT+'/fake.log'; const fake=()=>existsSync(FAKE)?readFileSync(FAKE,'utf8'):'';
 // a stand-in order server: the quote upload and the poll, recording what it was sent
 const orderSeen=[]; const srv=http.createServer((q,s)=>{const b=[];q.on('data',d=>b.push(d));q.on('end',()=>{const body=Buffer.concat(b).toString('latin1');orderSeen.push({m:q.method,u:q.url,len:body.length,manifest:/name="manifest"/.test(body)});
@@ -49,11 +53,19 @@ await c.rpc('project.add',{path:OUT+'/proj'}); await until(()=>has(e=>e.$==='Pro
 const P=events().find(e=>e.$==='ProjectCreated').id;
 const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,env:'local',...extra})).thread;
 
-// F05 providers: the claude stand-in speaks the protocol; the others' stand-ins exit 1, which must surface as a failed turn, not a hang
+// F05 providers: every provider's stand-in (not a model) through the hub as a process, over the websocket: a plain turn completes with an assistant message; a permission turn opens an ask, the answer reaches the agent
 {const T=await mk('prov');await c.rpc('turn.start',{thread:T,text:'zqecho one'});const ok=await finished(T);
  const says=events().filter(e=>e.$==='MessagePosted'&&e.thread===T&&e.role==='assistant').map(e=>e.text).join('|');
- const res=[];for(const p of['codex','grok','opencode','muse']){const T2=await mk('prov-'+p,{provider:p});await c.rpc('turn.start',{thread:T2,text:'hello'});await until(()=>turnStates(T2).some(s=>s!=='running'),20000);res.push(`${p}:${turnStates(T2).at(-1)}`)}
- log('F05',ok&&/echo: .*zqecho one/.test(says),`claude stand-in turn ended, echoed ${JSON.stringify(says).slice(0,80)}; process-level stand-ins for the other providers exit 1: ${res.join(' ')}. Each provider's own protocol is covered by the hub's in-process tests (cargo test providers), not here`)}
+ log('F05-claude',ok&&/echo: .*zqecho one/.test(says),`claude stand-in turn ended, echoed ${JSON.stringify(says).slice(0,80)}`);
+ const PROV=[['grok','hello grok','zqask go'],['opencode','hello opencode','zqask go'],['muse','hello muse','perm please'],['pi','hello pi','zqask go'],['omp','hello omp','zqask go'],['antigravity','zq hello','zq perm please']];
+ for(const [p,hello,ask] of PROV){
+  const T1=await mk('prov-'+p,{provider:p});await c.rpc('turn.start',{thread:T1,text:hello});const done=await until(()=>turnStates(T1).some(s=>s==='completed'||s==='failed'),60000);
+  const said=events().some(e=>e.$==='MessagePosted'&&e.thread===T1&&e.role==='assistant'&&(e.text||'').length>0);const st=turnStates(T1).at(-1);
+  const T2=await mk('prov-ask-'+p,{provider:p});await c.rpc('thread.modes',{thread:T2,runtime:'approval-required'});await sleep(300);await c.rpc('turn.start',{thread:T2,text:ask});
+  const asked=await until(()=>has(e=>e.$==='AskOpened'&&e.thread===T2),30000);const a=events().find(e=>e.$==='AskOpened'&&e.thread===T2);
+  const an=a?await c.rpc('ask.answer',{id:a.id,answer:'accept'}):{ok:false};const fin=await until(()=>turnStates(T2).some(s=>s==='completed'||s==='failed'),60000);
+  log('F05-'+p,done&&st==='completed'&&said&&asked&&an.ok&&fin&&turnStates(T2).at(-1)==='completed',`${p}: a plain turn ${st} with an assistant message=${said}; a permission turn opened an ask=${asked} (${(a?.detail||'').slice(0,30).replace(/\n/g,' ')}), accepted ok=${an.ok}, then ${turnStates(T2).at(-1)}`)}
+ skip('F05-codex','not run: no process-level stand-in exists for Codex; its driver is covered by the hub\'s in-process tests with recorded fixtures')}
 
 // F06 runtime modes, approvals, questions, plans
 {const T=await mk('modes');const m=await c.rpc('thread.modes',{thread:T,runtime:'approval-required'});await until(()=>has(e=>e.$==='ModesSet'&&e.id===T&&e.runtime==='approval-required'),5000);
@@ -89,6 +101,17 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const an=ask?await c.rpc('ask.answer',{id:ask.id,answer:'Barrel'}):{ok:false};await finished(T,2);
  log('F06-ask-after-stop',it.ok&&logged&&pushed&&an.ok&&/PERM AskUserQuestion -> .*Barrel/.test(fake())&&/INTERRUPTED turn/.test(fake()),`Stop on a long turn (the stand-in answers the hub's interrupt and keeps its process=${/INTERRUPTED turn/.test(fake())}); the next turn's question: AskOpened in the hub log=${logged}, pushed to the connected client=${pushed}, the answer reached the agent=${/PERM AskUserQuestion -> .*Barrel/.test(fake())}`)}
 
+// S04 Writing: the writing provider and model decide the one-shot that names threads (argv of the stand-in, and the title it answers)
+{const T=await mk('New thread');await c.rpc('turn.start',{thread:T,text:'zqshort name this thread'});await finished(T);
+ const titles=()=>events().filter(e=>e.$==='ThreadRenamed'&&e.id===T).map(e=>e.title);const oneshots=()=>fake().split('\n').filter(l=>/^START .*"-p", "--model"/.test(l)||/^CODEX-ONESHOT/.test(l));
+ await c.rpc('setting.set',{key:'text.provider',value:'claude'});await c.rpc('setting.set',{key:'text.model',value:'sonnet'});await sleep(500);
+ const r1=await c.rpc('thread.retitle',{thread:T});const t1=r1.result?.title;const a1=oneshots().at(-1)||'';
+ await c.rpc('setting.set',{key:'text.provider',value:'codex'});await c.rpc('setting.set',{key:'text.model',value:''});await sleep(500);
+ const r2=await c.rpc('thread.retitle',{thread:T});const t2=r2.result?.title;const a2=oneshots().at(-1)||'';
+ await c.rpc('setting.set',{key:'text.provider',value:''});await c.rpc('setting.set',{key:'text.model',value:''});await sleep(500);
+ const r3=await c.rpc('thread.retitle',{thread:T});const t3=r3.result?.title;const a3=oneshots().at(-1)||'';
+ log('S04',r1.ok&&/--model", "sonnet"/.test(a1)&&t1==='Title from sonnet'&&r2.ok&&/^CODEX-ONESHOT exec/.test(a2)&&/^Codex title/.test(t2||'')&&r3.ok&&/--model", "haiku"/.test(a3),`Writing > model: with the writing model sonnet the title call ran \`claude -p --model sonnet\` and the title came back "${t1}"; Writing > provider codex: the call went to \`codex exec\` ("${t2}"); both cleared: the light default (\`--model haiku\`) again. The chips persist (settings walk); this is the effect`)}
+
 // F08 bring back, after a fork
 {const A=await mk('forkme');await c.rpc('turn.start',{thread:A,text:'zqshort fork source'});await finished(A);
  const n=events().filter(e=>e.$==='ThreadCreated').length;const f=await c.rpc('thread.fork',{thread:A});await until(()=>events().filter(e=>e.$==='ThreadCreated').length>n,8000);
@@ -108,9 +131,9 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
 
 // F13 titles: the first message names an untitled thread through the text model (the stand-in answers `claude -p`), and Regenerate title replaces it
 {const T=await mk('New thread');await c.rpc('turn.start',{thread:T,text:'zqshort design a USB-C power board'});
- const names=()=>events().filter(e=>e.$==='ThreadRenamed'&&e.id===T).map(e=>e.title);const named=await until(()=>names().includes('Stand-in title for the thread'),30000);const t1=names().join(' > ');
+ const names=()=>events().filter(e=>e.$==='ThreadRenamed'&&e.id===T).map(e=>e.title);const named=await until(()=>names().some(t=>/^Title from /.test(t)),30000);const t1=names().join(' > ');
  const r=await c.rpc('thread.retitle',{thread:T});
- log('F13',named&&names()[0]!=='Stand-in title for the thread'&&r.ok&&!!r.result?.title,`a new thread is named from its first line, then by the text model: "${t1}"; thread.retitle ok=${r.ok} -> "${r.result?.title}" (the text model here is the stand-in's -p mode, so this proves the hub's wiring, not a model's quality)`)}
+ log('F13',named&&!/^Title from /.test(names()[0])&&r.ok&&!!r.result?.title,`a new thread is named from its first line, then by the text model: "${t1}"; thread.retitle ok=${r.ok} -> "${r.result?.title}" (the text model here is the stand-in's -p mode, so this proves the hub's wiring, not a model's quality)`)}
 
 // F15 an attachment: POST /attach stores it under attachments/<thread>/, the message carries agentText with its path, the agent sees it
 {const T=await mk('attach');const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64');
@@ -147,7 +170,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const noUpload=orderSeen.length===0;
  const an=ask?await c.rpc('ask.answer',{id:ask.id,answer:'accept'}):{ok:false};
  const quoted=await until(()=>!!settingOf(`order.quote.${T}`),30000);
- log('F22',op&&noUpload&&an.ok&&quoted&&orderSeen.some(s=>s.m==='POST'&&s.manifest)&&!orderSeen.some(s=>/pay|buy|checkout/.test(s.u)),`approval card for the files opened (${ask?.detail?.split('\n')[0]?.slice(0,50)}), nothing uploaded before the answer=${noUpload}, after it POST /v1/quotes carried the manifest, quote card set=${quoted} (${(settingOf('order.quote.'+T)||'').slice(0,60)}); requests seen ${orderSeen.map(s=>s.m+' '+s.u).join(', ')}; no pay or buy request`)}
+ log('F22',op&&noUpload&&an.ok&&quoted&&orderSeen.some(s=>s.m==='POST'&&s.manifest)&&!orderSeen.some(s=>/pay|buy|checkout/.test(s.u)),`approval card for the files opened (${ask?.detail?.split('\n')[0]?.slice(0,50)}), nothing uploaded before the answer=${noUpload}, after it POST /v1/quotes carried the manifest, quote card set=${quoted}, answer reply ok=${an.ok} ${an.error||''} (${(settingOf('order.quote.'+T)||'').slice(0,60)}); requests seen ${orderSeen.map(s=>s.m+' '+s.u).join(', ')}; no pay or buy request`)}
 
 
 // F09 the context meter: a finished turn leaves its token and context readings in the hub's settings (the meter itself is drawn by the client)
