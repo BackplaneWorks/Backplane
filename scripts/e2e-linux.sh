@@ -77,6 +77,14 @@ for l in open(sys.argv[1],errors='replace'):
     m=re.match(r'^(PASS|FAIL) (.*)$',l.rstrip())
     if m: f.write("cef\t%s\tcef\t%s\n"%('ok' if m.group(1)=='PASS' else 'FAIL',m.group(2)[:200]))
 PY
+run cef-link env HPORT=3893 BACKPLANE_CEF="${BACKPLANE_CEF:-$HOME/.cache/backplane/cef-runtime/154.0.34}" sh test/cef/link_only_e2e.sh "$GUI" "$HUB"
+python3 - "$OUT/cef-link.log" "$OUT/results.tsv" <<'PY'
+import sys,re
+f=open(sys.argv[2],'a')
+for l in open(sys.argv[1],errors='replace'):
+    m=re.match(r'^(PASS|FAIL) (.*)$',l.rstrip())
+    if m: f.write("cef-link\t%s\tcef-link\t%s\n"%('ok' if m.group(1)=='PASS' else 'FAIL',m.group(2)[:200]))
+PY
 if [ $PHONE = 1 ] && adb devices 2>/dev/null | grep -q "^52220DLAQ001FC.device"; then
   echo "== phone rows (waiting for the lock)"; test/e2e/pixel-f-rows.sh "$HUB" "$OUT/phone" > "$OUT/phone-rows.log" 2>&1; parse phone-rows "$OUT/phone-rows.log"
 elif [ $PHONE = 0 ]; then add phone-rows skip all "not run: --no-phone"; else add phone-rows skip all "not run: the Pixel 9 (52220DLAQ001FC) is not attached"; fi
