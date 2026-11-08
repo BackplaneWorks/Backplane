@@ -1,0 +1,324 @@
+{
+ "scenarios": [
+  {
+   "name": "pair-start",
+   "pre": "unpair",
+   "steps": [],
+   "text": [
+    "Pair with a hub"
+   ]
+  },
+  {
+   "name": "pair-confirm",
+   "pre": "unpair",
+   "steps": [
+    {
+     "link": "pair"
+    }
+   ],
+   "modal": true,
+   "text": [
+    "Pair with this hub?"
+   ]
+  },
+  {
+   "name": "pair-code",
+   "pre": "unpair",
+   "steps": [
+    {
+     "scroll": true
+    }
+   ],
+   "text": [
+    "Pair with code"
+   ]
+  },
+  {
+   "name": "home",
+   "steps": [],
+   "scroll": true,
+   "text": [
+    "e2e thread 0"
+   ]
+  },
+  {
+   "name": "hub-picker",
+   "steps": [
+    {
+     "tap": "^10\\.0\\.2\\.2:\\d+$"
+    },
+    {
+     "wait": 800
+    }
+   ],
+   "popup": true
+  },
+  {
+   "name": "new-thread",
+   "steps": [
+    {
+     "tap": "^New thread$"
+    },
+    {
+     "wait": 1000
+    }
+   ]
+  },
+  {
+   "name": "thread",
+   "steps": [
+    {
+     "tap": "^e2e thread 0$"
+    },
+    {
+     "wait": 1200
+    }
+   ],
+   "text": [
+    "Send"
+   ],
+   "scroll": true
+  },
+  {
+   "name": "picker",
+   "steps": [
+    {
+     "tap": "^e2e thread 0$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^default$"
+    },
+    {
+     "wait": 1000
+    }
+   ],
+   "text": [
+    "MODEL",
+    "EFFORT"
+   ],
+   "scroll": true
+  },
+  {
+   "name": "thread-menu",
+   "steps": [
+    {
+     "tap": "^e2e thread 0$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^More$"
+    },
+    {
+     "wait": 800
+    }
+   ],
+   "popup": true,
+   "text": [
+    "Rename"
+   ]
+  },
+  {
+   "name": "delete-dialog",
+   "steps": [
+    {
+     "tap": "^e2e thread 0$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^More$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^Delete"
+    },
+    {
+     "wait": 800
+    }
+   ],
+   "modal": true
+  },
+  {
+   "name": "thread-viewer",
+   "steps": [
+    {
+     "tap": "^e2e thread 0$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^Viewer$"
+    },
+    {
+     "wait": 2500
+    }
+   ]
+  },
+  {
+   "name": "streaming",
+   "steps": [
+    {
+     "tap": "^e2e thread 1$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "EditText"
+    },
+    {
+     "type": "stream a long turn for the layout check"
+    },
+    {
+     "hide_keyboard": true
+    },
+    {
+     "tap": "^Send$"
+    },
+    {
+     "wait": 3500
+    }
+   ],
+   "scroll": false
+  },
+  {
+   "name": "composer-keyboard",
+   "steps": [
+    {
+     "tap": "^e2e thread 2$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "EditText"
+    },
+    {
+     "type": "typing with the keyboard open"
+    },
+    {
+     "wait": 800
+    }
+   ]
+  },
+  {
+   "name": "bot",
+   "steps": [
+    {
+     "tap": "^Bub$"
+    },
+    {
+     "wait": 1500
+    }
+   ]
+  },
+  {
+   "name": "room",
+   "steps": [
+    {
+     "tap": "^e2e-room$"
+    },
+    {
+     "wait": 1500
+    }
+   ]
+  },
+  {
+   "name": "settings",
+   "steps": [
+    {
+     "tap": "^Settings$"
+    },
+    {
+     "wait": 1200
+    }
+   ],
+   "scroll": true,
+   "text": [
+    "HUBS",
+    "UPDATES"
+   ]
+  },
+  {
+   "name": "settings-accounts",
+   "steps": [
+    {
+     "tap": "^Settings$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^Accounts$"
+    },
+    {
+     "wait": 1200
+    }
+   ],
+   "scroll": true
+  },
+  {
+   "name": "settings-hub",
+   "steps": [
+    {
+     "tap": "^Settings$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^Hub$"
+    },
+    {
+     "wait": 1200
+    }
+   ],
+   "scroll": true
+  },
+  {
+   "name": "settings-add-hub",
+   "steps": [
+    {
+     "tap": "^Settings$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^Add a hub$"
+    },
+    {
+     "wait": 1200
+    }
+   ],
+   "scroll": true
+  },
+  {
+   "name": "settings-improvements",
+   "steps": [
+    {
+     "tap": "^Settings$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^Improvements$"
+    },
+    {
+     "wait": 1500
+    }
+   ],
+   "scroll": true
+  }
+ ]
+}
