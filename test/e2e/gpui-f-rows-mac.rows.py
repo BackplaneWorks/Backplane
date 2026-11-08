@@ -325,7 +325,7 @@ if want('F14X') and ONLY:
         if how == 'cliclick': xin('key1', 'Return')
         else:   # a Quartz keyboard event pair for the Return key (keycode 36), with a pause between down and up
             for down in (True, False): Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateKeyboardEvent(None, 36, down)); time.sleep(0.08)
-    for n in range(24):
+    for n in range(int(os.environ.get('F14X_N', '80'))):
         how = 'cliclick' if n % 2 == 0 else 'quartz'; mk = P('f14x-%d.marker' % n); t0 = time.time(); k0 = len(SENT)
         xin('type', 'touch ' + mk); pause(0.6); t1 = time.time(); send_return(how)
         ran = until(lambda: os.path.exists(mk), 5)
