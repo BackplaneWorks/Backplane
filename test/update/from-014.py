@@ -262,7 +262,12 @@ try:
         tok15 = open(os.path.join(h15, "token")).read().strip(); hub15 = Hub(base, tok15)
         st, summary = hub15.call("GET", "/import/0.14", hub15.bearer())
         st2, result = hub15.call("GET", "/import/0.14/run", hub15.bearer())
-        if st2 == 200: json.dump(result, open(os.path.join(T, "import-result.json"), "w"))   # a clean import's counts: what --crash-import --expect-from checks a resumed one against
+        # the automatic import's result (GET /import/0.14 answers it once done): a clean import's counts, what --crash-import --expect-from checks a resumed one against.
+        # /run here is a second import of the same home: it must write nothing (every line already here)
+        if st == 200: json.dump(summary, open(os.path.join(T, "import-result.json"), "w"))
+        if st2 == 200 and summary.get("state") == "done":
+            rc = result.get("counts", {}); again = {k: rc.get(k) for k in ("projects", "threads", "messages", "lines")}
+            ok("import-again", f"a second import of the same home wrote nothing ({rc.get('already')} lines already here)") if not any(again.values()) else no("import-again", f"a second import wrote {again}")
         if st == 200 and st2 == 200: ok("import", f"found {summary.get('from')}: {json.dumps(result)[:160]}")
         else: no("import", f"/import/0.14 {st}, /run {st2}: {str(result)[:160]} (the 0.14-import lane's route)")
         if device:
