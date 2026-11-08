@@ -688,6 +688,10 @@ final class Journeys: XCTestCase {
         d.app.terminate()
         d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_SELECT": d.env["TERM_THREAD"] ?? "", "BACKPLANE_PERFORMANCE": "1"]
         d.app.launch(); d.skipTour()
+        // the system's notification question (a fresh simulator): Allow
+        let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = sb.buttons["Allow"]
+        if allow.waitForExistence(timeout: 8) { allow.tap() }
         guard d.step("the chat terminal's card", timeout: 40, act: {}, expect: { d.el("data.entry.term").exists && d.label("card line 3").exists }) else { return }
         d.step("the card says its command is done", act: {}, expect: { d.label("done 0").exists })
         d.shot("1-card")
