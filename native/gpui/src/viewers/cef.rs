@@ -41,6 +41,10 @@ pub struct Tab {
     resize_at: Mutex<Option<(std::time::Instant, u32)>>, resize_done: Mutex<f64>,
 }
 
+/// The native cursor handle in `on_cursor_change` (unused: the page maps CEF's cursor type to gpui's), as each OS's bindings name it.
+#[cfg(target_os = "linux")] type CursorH = ::std::os::raw::c_ulong;
+#[cfg(windows)] type CursorH = cef::CursorHandle;
+#[cfg(target_os = "macos")] type CursorH = *mut u8;
 fn s(x: Option<&CefString>) -> String { x.map(|c| c.to_string()).unwrap_or_default() }
 
 wrap_render_handler! {
@@ -70,7 +74,7 @@ wrap_display_handler! {
             if frame.map_or(false, |f| f.is_main() == 1) { eprintln!("GPUI_LOG {{\"cef_address\":{}}}", serde_json::Value::String(s(url))); self.tab.st.lock().unwrap().url = s(url); let _ = self.tab.wake.try_send(()); }
         }
         fn on_title_change(&self, _b: Option<&mut Browser>, title: Option<&CefString>) { self.tab.st.lock().unwrap().title = s(title); let _ = self.tab.wake.try_send(()); }
-        fn on_cursor_change(&self, _b: Option<&mut Browser>, _c: ::std::os::raw::c_ulong, ty: CursorType, _i: Option<&CursorInfo>) -> ::std::os::raw::c_int {
+        fn on_cursor_change(&self, _b: Option<&mut Browser>, _c: CursorH, ty: CursorType, _i: Option<&CursorInfo>) -> ::std::os::raw::c_int {
             *self.tab.cursor.lock().unwrap() = cur_of(ty); let _ = self.tab.wake.try_send(()); true as _
         }
     }
