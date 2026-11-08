@@ -180,10 +180,17 @@ impl Policy {
     }
     /// The 0.14 import wrote these lines (no transform saw them): they join the state the views read, and nothing is derived from them (they are history, not
     /// news). While the start's own fold runs they are kept for it like any batch.
-    pub fn fold_quiet(&self, first_seq: u64, events: Vec<Value>) {
-        let mut g = self.lock();
-        if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, events)); return }
-        for e in &events { g.core.st.apply(e); }
+    /// The lock is taken per 100 events, so a client's batch waits behind one slice, not the chunk. Answers the longest it held the lock (ms).
+    pub fn fold_quiet(&self, first_seq: u64, events: Vec<Value>) -> u64 {
+        { let mut g = self.lock(); if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, events)); return 0 } }
+        let mut most = 0;
+        for slice in events.chunks(100) {
+            let t = std::time::Instant::now(); let mut g = self.lock();
+            if let Some(buf) = g.booting.as_mut() { buf.push((first_seq, slice.to_vec())); continue } // (a refold began meanwhile: it replays these)
+            for e in slice { g.core.st.apply(e); }
+            drop(g); most = most.max(t.elapsed().as_millis() as u64);
+        }
+        most
     }
     /// The 0.14 import is about to write lines no transform sees: hold every batch from now on, as a start does, until `finish_boot` folds the
     /// log again (`host::refold_end`). False when a fold is already pending (its own `finish_boot` covers the import too).
