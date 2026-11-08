@@ -1,6 +1,6 @@
 #!/bin/bash
 # windows-check.sh [host|gpui|all]: `cargo check --target x86_64-pc-windows-gnu --all-targets` of the hub and/or the client on this Linux machine,
-# windows-check.sh --xwin [DIR]: release-target programs (x86_64-pc-windows-msvc, cargo-xwin; PROFILE, default fast) of the hub, guard, bp-sh and client in DIR
+# windows-check.sh --xwin [DIR]: release-target programs (x86_64-pc-windows-msvc, cargo-xwin; PROFILE, default fast) of the hub, guard, bp-sh, client and voice helper in DIR
 # windows-check.sh --build [DIR]: Windows programs made here (debug): backplane-hub.exe, bp-sh.exe, backplane-gpui.exe and llvm-mingw's libunwind.dll
 #   in DIR (default build/windows), linked for x86_64-pc-windows-gnullvm (llvm-mingw has no libgcc, which the -gnu target links), to copy to a Windows machine.
 # through scripts/cargo-q (build slots, sccache). C code in dependencies (ring, the client's) is compiled by llvm-mingw's clang, in user space:
@@ -31,8 +31,10 @@ if [ "${1:-}" = --xwin ]; then
   (cd "$HERE/native/host" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof" --bin backplane-hub --bin bp-sh)
   (cd "$HERE/native/guard" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile release)   # the guard has no fast profile
   (cd "$HERE/native/gpui" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof")
+  (cd "$HERE/native/voice" && "$HERE/scripts/cargo-q" xwin build --offline --target x86_64-pc-windows-msvc --profile "$prof" --bin backplane-voice)   # dictation's helper, beside the hub
   d=$prof; [ "$d" = dev ] && d=debug
-  for f in backplane-hub.exe bp-sh.exe backplane-gpui.exe; do cp "$tgt/x86_64-pc-windows-msvc/$d/$f" "$out/"; done
+  for f in backplane-hub.exe bp-sh.exe backplane-gpui.exe backplane-voice.exe; do cp "$tgt/x86_64-pc-windows-msvc/$d/$f" "$out/"; done
+  cp "$HERE/native/voice/vad/silero_vad.onnx" "$HERE/native/voice/vad/silero_vad.LICENSE" "$out/"   # as release.yml ships it
   cp "$tgt/x86_64-pc-windows-msvc/release/backplane.exe" "$out/"
   git -C "$HERE" rev-parse HEAD > "$out/COMMIT"
   echo "windows-check: $out holds $(cd "$out" && ls | tr '\n' ' ')"

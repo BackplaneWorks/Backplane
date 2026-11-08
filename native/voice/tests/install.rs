@@ -44,6 +44,7 @@ fn sha512(b: &[u8]) -> String {
 }
 
 const DIR: &str = "model-dir";
+const MODEL_FILES: [(&str, &[u8]); 4] = [("encoder.int8.onnx", b"e"), ("decoder.int8.onnx", b"d"), ("joiner.int8.onnx", b"j"), ("tokens.txt", b"t")];
 
 struct Rig {
     files: Files,
@@ -62,8 +63,12 @@ fn rig() -> Rig {
         ("model-dir/tokens.txt", b"t"),
         ("model-dir/test_wavs/0.wav", b"w"),
     ]);
+    // the same files packed again another way (upstream's repack), one tampered with, and the files one by one (the second source)
+    let repack = tbz(&[("model-dir/README.md", b"new notes".as_slice()), ("model-dir/tokens.txt", b"t"), ("model-dir/joiner.int8.onnx", b"j"), ("model-dir/decoder.int8.onnx", b"d"), ("model-dir/encoder.int8.onnx", b"e")]);
+    let tampered = tbz(&[("model-dir/encoder.int8.onnx", b"E".as_slice()), ("model-dir/decoder.int8.onnx", b"d"), ("model-dir/joiner.int8.onnx", b"j"), ("model-dir/tokens.txt", b"t")]);
     let vad = b"silero".to_vec();
-    let files = HashMap::from([("/rt.tgz".to_string(), rt.clone()), ("/m.tar.bz2".to_string(), model.clone()), ("/vad.onnx".to_string(), vad.clone())]);
+    let mut files = HashMap::from([("/rt.tgz".to_string(), rt.clone()), ("/m.tar.bz2".to_string(), model.clone()), ("/vad.onnx".to_string(), vad.clone()), ("/repack.tar.bz2".to_string(), repack), ("/tampered.tar.bz2".to_string(), tampered)]);
+    for (n, b) in MODEL_FILES { files.insert(format!("/hf/{n}"), b.to_vec()); files.insert(format!("/hf-bad/{n}"), if n == "tokens.txt" { b"T".to_vec() } else { b.to_vec() }); }
     let f = Files::start(files);
     let pins = Pins {
         runtimes: vec![(plat(), Pin { url: format!("{}/rt.tgz", f.base), size: None, sha256: None, sha512: Some(sha512(&rt)) })],
@@ -71,9 +76,13 @@ fn rig() -> Rig {
             id: "m".into(),
             label: "The Model".into(),
             dir: DIR.into(),
+            size: model.len() as u64,
             pin: Pin { url: format!("{}/redirect/m.tar.bz2", f.base), size: Some(model.len() as u64), sha256: Some(sha256(&model)), sha512: None },
+            mirror: None,
+            files: MODEL_FILES.iter().map(|(n, b)| (n.to_string(), b.len() as u64, sha256(b))).collect(),
         }],
         vad: Pin { url: format!("{}/vad.onnx", f.base), size: Some(vad.len() as u64), sha256: Some(sha256(&vad)), sha512: None },
+        vad_bundled: None,
     };
     Rig { files: f, pins }
 }
@@ -184,4 +193,117 @@ fn a_status_of_the_real_pins_is_unchanged_by_an_empty_folder() {
     let s = local::status(t.path());
     assert_eq!(s["models"].as_array().unwrap().len(), 2);
     assert_eq!(s["supported"], serde_json::json!(true));
+}
+
+/// The archive as upstream may repack it: no archive checksum to match, the pinned files decide.
+fn unpinned(r: &mut Rig, archive: &str) {
+    r.pins.models[0].pin = Pin { url: format!("{}/redirect/{archive}", r.files.base), size: None, sha256: None, sha512: None };
+}
+
+#[test]
+fn a_repacked_archive_with_the_same_files_installs() {
+    let mut r = rig();
+    unpinned(&mut r, "repack.tar.bz2");
+    let t = tempfile::tempdir().unwrap();
+    run(t.path(), &r.pins).0.unwrap();
+    assert_eq!(std::fs::read(t.path().join(DIR).join("encoder.int8.onnx")).unwrap(), b"e");
+    assert_eq!(std::fs::read_to_string(t.path().join("ready-m")).unwrap(), "ok");
+    assert!(no_stage(t.path()));
+}
+
+#[test]
+fn a_tampered_file_is_refused_and_nothing_is_left_in_place() {
+    let mut r = rig();
+    unpinned(&mut r, "tampered.tar.bz2");
+    let t = tempfile::tempdir().unwrap();
+    assert_eq!(run(t.path(), &r.pins).0.unwrap_err(), "The Model: encoder.int8.onnx does not match its pin");
+    assert!(!t.path().join(DIR).exists());
+    assert!(!t.path().join("ready-m").exists());
+    assert!(no_stage(t.path()));
+    // a file missing from the archive is refused the same way
+    let mut r = rig();
+    r.pins.models[0].files.push(("extra.onnx".into(), 1, sha256(b"x")));
+    let t = tempfile::tempdir().unwrap();
+    assert_eq!(run(t.path(), &r.pins).0.unwrap_err(), "The Model: extra.onnx is not in the archive");
+}
+
+#[test]
+fn the_second_source_is_used_when_the_archive_fails_or_does_not_match() {
+    for archive in ["gone.tar.bz2", "tampered.tar.bz2"] {
+        let mut r = rig();
+        unpinned(&mut r, archive);
+        r.pins.models[0].mirror = Some(format!("{}/redirect/hf/", r.files.base));
+        let t = tempfile::tempdir().unwrap();
+        let (ok, seen) = run(t.path(), &r.pins);
+        ok.unwrap_or_else(|e| panic!("{archive}: {e}"));
+        for (n, b) in MODEL_FILES { assert_eq!(std::fs::read(t.path().join(DIR).join(n)).unwrap(), b, "{archive}: {n}"); }
+        assert_eq!(std::fs::read_to_string(t.path().join("ready-m")).unwrap(), "ok");
+        assert!(no_stage(t.path()));
+        // its progress is one download of all the files
+        let last = seen.iter().filter(|s| s.0 == "The Model" && s.3 == "download").next_back().unwrap();
+        assert_eq!((last.1, last.2), (4, 4), "{archive}");
+    }
+    // both sources wrong: a hard failure that names both, nothing in place
+    let mut r = rig();
+    unpinned(&mut r, "tampered.tar.bz2");
+    r.pins.models[0].mirror = Some(format!("{}/hf-bad/", r.files.base));
+    let t = tempfile::tempdir().unwrap();
+    assert_eq!(run(t.path(), &r.pins).0.unwrap_err(), "The Model: encoder.int8.onnx does not match its pin; second source: The Model: checksum mismatch (tokens.txt)");
+    assert!(!t.path().join(DIR).exists());
+    assert!(!t.path().join("ready-m").exists());
+    assert!(no_stage(t.path()));
+}
+
+#[test]
+fn a_gateway_timeout_is_tried_again_and_a_lasting_one_is_the_error() {
+    std::env::set_var("BACKPLANE_VOICE_RETRY_MS", "5");
+    // two 504s, then the file: installed, with no second source
+    let mut r = rig();
+    r.pins.vad.url = format!("{}/504/2/vad.onnx", r.files.base);
+    let t = tempfile::tempdir().unwrap();
+    run(t.path(), &r.pins).0.unwrap();
+    assert_eq!(std::fs::read(vad_path(t.path())).unwrap(), b"silero");
+    // 504s every time: the last answer is the error, after four tries
+    let mut r = rig();
+    r.pins.vad.url = format!("{}/504/99/vad.onnx", r.files.base);
+    let t = tempfile::tempdir().unwrap();
+    assert_eq!(run(t.path(), &r.pins).0.unwrap_err(), "voice activity model: HTTP 504");
+    assert_eq!(r.files.hits.load(Ordering::SeqCst), 4);
+    // a 404 is not tried again
+    let mut r = rig();
+    r.pins.vad.url = format!("{}/gone", r.files.base);
+    let t = tempfile::tempdir().unwrap();
+    run(t.path(), &r.pins).0.unwrap_err();
+    assert_eq!(r.files.hits.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn the_vad_beside_the_helper_is_used_and_one_that_does_not_match_is_not() {
+    // a release: the shipped copy, and no VAD to download
+    let mut r = rig();
+    let b = tempfile::tempdir().unwrap();
+    std::fs::write(b.path().join("silero_vad.onnx"), b"silero").unwrap();
+    r.pins.vad_bundled = Some(b.path().join("silero_vad.onnx"));
+    r.pins.vad.url = format!("{}/gone", r.files.base);
+    let t = tempfile::tempdir().unwrap();
+    let (ok, seen) = run(t.path(), &r.pins);
+    ok.unwrap();
+    assert_eq!(std::fs::read(vad_path(t.path())).unwrap(), b"silero");
+    assert!(!seen.iter().any(|s| s.0 == "voice activity model"), "nothing downloaded for it: {seen:?}");
+    assert!(b.path().join("silero_vad.onnx").exists(), "the shipped copy stays");
+    assert_eq!(local::status_with(&tempfile::tempdir().unwrap().path(), &r.pins)["vadBundled"], serde_json::json!(true), "an empty folder's status says a copy is beside the helper");
+    // a copy that is not the pinned file: downloaded instead
+    let mut r = rig();
+    std::fs::write(b.path().join("silero_vad.onnx"), b"silerx").unwrap();
+    r.pins.vad_bundled = Some(b.path().join("silero_vad.onnx"));
+    assert_eq!(local::status_with(&tempfile::tempdir().unwrap().path(), &r.pins)["vadBundled"], serde_json::json!(false));
+    let t = tempfile::tempdir().unwrap();
+    run(t.path(), &r.pins).0.unwrap();
+    assert_eq!(std::fs::read(vad_path(t.path())).unwrap(), b"silero");
+    // a build without one (dev): downloaded
+    let mut r = rig();
+    r.pins.vad_bundled = Some(b.path().join("none.onnx"));
+    let t = tempfile::tempdir().unwrap();
+    run(t.path(), &r.pins).0.unwrap();
+    assert_eq!(std::fs::read(vad_path(t.path())).unwrap(), b"silero");
 }
