@@ -254,8 +254,8 @@ pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents
     tokio::spawn(async move {
         let (mut last, mut seen) = (String::new(), Seen::new());
         loop {
-            // the background recheck of connected accounts: never on a copy of a log, never on a test hub (stand-in agents)
-            if !crate::copy::on() && std::env::var_os("BACKPLANE_AGENTS").is_none() { let m2 = m.clone(); tokio::spawn(async move { m2.refresh().await }); }
+            // the background recheck of connected accounts: never on a copy of a log, never on a test hub (stand-in agents) unless its rig asks (BACKPLANE_USAGE_READ)
+            if !crate::copy::on() && (std::env::var_os("BACKPLANE_AGENTS").is_none() || std::env::var("BACKPLANE_USAGE_READ").map_or(false, |v| v == "1")) { let m2 = m.clone(); tokio::spawn(async move { m2.refresh().await }); }
             let snap = m.snapshot(); let text = snap.to_string();
             if text != last { last = text; found_seen(&h, &agents, &snap, &mut seen).await; }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;

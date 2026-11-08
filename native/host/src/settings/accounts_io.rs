@@ -2,7 +2,8 @@
 //! store of its own under `<home>/providers/accounts-v1/<profile>[/<store>]`. Ops (`request`): list, add, status, login (a sign-in attempt that shows a link, and for
 //! Claude takes the pasted code), respond, cancel, rename, disconnect, remove. No inference request is ever made: status asks the CLI who is signed in
 //! (`claude auth status`, Codex's `account/read`), the allowance reads are the providers' own read-only usage requests, and nothing but allowlisted metadata
-//! leaves this module (raw CLI output is never kept, logged or sent; a profile's credentials never leave the CLI's store).
+//! leaves this module (raw CLI output is never kept, logged or sent; a profile's credentials never leave the CLI's store, except its access token read for the
+//! usage request: claude_usage.rs).
 //! Every child is a provider CLI resolved like the agents' (the stand-in folder in a test hub, else PATH) and made through the process gate (Kind::Agent).
 //! Any failure of an op answers the same generic message the JS hub gives; what a sign-in failed on is one of a few fixed sentences.
 use serde_json::{json, Value};
@@ -263,7 +264,8 @@ impl Accounts {
             }
         }
         // the usage read with the login's own token, on a real hub only (a test's, a stand-in's and a copy's read the CLI)
-        let real = !cfg!(test) && std::env::var_os("BACKPLANE_AGENTS").map_or(true, |v| v.is_empty()) && std::env::var("BACKPLANE_COPY").map_or(true, |v| v != "1");
+        // (BACKPLANE_USAGE_READ=1: a rig with stand-in agents reads the logins copied into its temp home for real; a copy never does)
+        let real = !cfg!(test) && (std::env::var_os("BACKPLANE_AGENTS").map_or(true, |v| v.is_empty()) || std::env::var("BACKPLANE_USAGE_READ").map_or(false, |v| v == "1")) && std::env::var("BACKPLANE_COPY").map_or(true, |v| v != "1");
         let usage = real.then(|| (super::claude_usage::curl(), super::claude_usage::default_dir()));
         Accounts { root, inner: Mutex::new(inner), resolve, usage: Mutex::new(usage), usage_locks: Mutex::new(HashMap::new()) }
     }
