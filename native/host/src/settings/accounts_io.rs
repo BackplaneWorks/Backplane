@@ -18,6 +18,9 @@ const FAILURES: &[(&str, &str)] = &[
     ("directory", "Claude did not report this account's private directory. Update Claude Code and try again."),
     ("verification", "The provider sign-in finished, but the saved subscription account could not be verified. Try Connect / Login again."),
 ];
+/// Why a usage read has no windows: the CLI says the account has no plan limits, or the answer had none.
+const NO_LIMITS: &str = "Claude does not report limits for this account (it may not be a subscription plan).";
+const NO_WINDOWS: &str = "Claude reported no limit windows for this account.";
 const SIGNIN_DEFAULT: &str = "Sign-in could not be verified. Retry or check the provider CLI installation.";
 const DIRECTORY_ERR: &str = "Claude must report its isolated account directory (Claude Code 2.1.268 or later)";
 
@@ -93,6 +96,18 @@ fn unset_env(k: &str) -> bool {
         || ["CLAUDE_CODE_OAUTH", "CLAUDE_CODE_API_KEY", "CLAUDE_CODE_AUTH", "CLAUDE_CODE_PROFILE", "CLAUDE_CODE_SESSION"].iter().any(|p| k.starts_with(p))
 }
 
+/// One usage reading of a Claude login.
+#[derive(Debug)]
+pub struct Usage { pub windows: Vec<Value>, pub extra: Option<Value>, pub source: &'static str }
+impl Usage {
+    /// The allowance a reading makes (`email`: the login it was read with, for the CLI's own login whose email is not in a profile).
+    pub fn allowance(self, at: u64, email: &str) -> Value {
+        let mut a = json!({"provider":"claude","state":"ok","at":at,"attempted_at":at,"auth":"claude.ai","source":self.source,"windows":self.windows});
+        if let Some(x) = self.extra { a["extra"] = x }
+        if !email.is_empty() { a["email"] = json!(email) }
+        a
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Profile { pub id: String, pub provider: String, pub label: String, pub epoch: u64, pub fingerprint: String, pub store: String, pub state: String, pub identity: Value, pub catalog: Vec<Value>, pub allowance: Option<Value>, pub checked_at: u64, pub message: String,
     /// When its sign-in was found dead (0: it was not): kept in the registry, so a restart still knows it must be signed in again.
@@ -155,7 +170,12 @@ struct Inner { profiles: Vec<Profile>, attempts: Vec<Attempt>, jobs: HashMap<Str
 /// A launch waiting or running on a profile; dropped (finished, refused or its future dropped) it leaves the queue, so the profile is never stranded.
 struct Queued { me: Arc<Accounts>, id: String }
 impl Drop for Queued { fn drop(&mut self) { let mut g = self.me.inner.lock().unwrap(); if let Some(n) = g.launching.get_mut(&self.id) { *n = n.saturating_sub(1); if *n == 0 { g.launching.remove(&self.id); } } } }
-pub struct Accounts { root: PathBuf, inner: Mutex<Inner>, resolve: Arc<dyn Fn(&str) -> Result<PathBuf, String> + Send + Sync> }
+pub struct Accounts { root: PathBuf, inner: Mutex<Inner>, resolve: Arc<dyn Fn(&str) -> Result<PathBuf, String> + Send + Sync>,
+    /// Claude's usage read with each login's own token (claude_usage.rs): the request, and the CLI's own store. None in a test hub, a stand-in hub and a copy:
+    /// the stand-in CLI's `get_usage` is read instead.
+    usage: Mutex<Option<(super::claude_usage::Get, Option<PathBuf>)>>,
+    /// One usage read (and the token refresh it may need) at a time per login ("" is the CLI's own).
+    usage_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {
     if let Some(parent) = dir.parent() { if !parent.exists() { std::fs::DirBuilder::new().recursive(true).mode(0o700).create(parent)?; } }
@@ -242,7 +262,10 @@ impl Accounts {
                 }
             }
         }
-        Accounts { root, inner: Mutex::new(inner), resolve }
+        // the usage read with the login's own token, on a real hub only (a test's, a stand-in's and a copy's read the CLI)
+        let real = !cfg!(test) && std::env::var_os("BACKPLANE_AGENTS").map_or(true, |v| v.is_empty()) && std::env::var("BACKPLANE_COPY").map_or(true, |v| v != "1");
+        let usage = real.then(|| (super::claude_usage::curl(), super::claude_usage::default_dir()));
+        Accounts { root, inner: Mutex::new(inner), resolve, usage: Mutex::new(usage), usage_locks: Mutex::new(HashMap::new()) }
     }
     /// The registry's folder (`<home>/providers/accounts-v1`).
     pub fn root(&self) -> &Path { &self.root }
@@ -368,29 +391,52 @@ impl Accounts {
         }).await.unwrap_or_else(|_| Err("The Claude CLI did not answer within 30 seconds.".to_string()));
         let _ = child.start_kill(); r
     }
-    /// The windows Claude reports for a profile (or the default login), or why there are none.
-    async fn claude_usage(&self, p: Option<&Profile>) -> Result<Vec<Value>, String> {
+    /// A test's usage request and CLI store (the real hub's are set in `open`).
+    #[cfg(test)]
+    pub fn set_usage(&self, get: super::claude_usage::Get, default_dir: Option<PathBuf>) { *self.usage.lock().unwrap() = Some((get, default_dir)) }
+    /// The usage endpoint asked with the login's own token (claude_usage.rs), or None when this login has no token the hub can read (no store file: a keychain
+    /// login, an API key) and the CLI is asked instead. An expired token is refreshed by the CLI itself first: one start of it in that store, whose startup
+    /// refreshes it under the CLI's own lock; a 401 gets the same once, in case the token was replaced under the read.
+    async fn usage_direct(&self, p: Option<&Profile>) -> Option<Result<Value, String>> {
+        use super::claude_usage as cu;
+        let (get, default_dir) = self.usage.lock().unwrap().clone()?;
+        let dir = match p { Some(p) => self.directory(p).ok()?, None => default_dir? };
+        let lock = self.usage_locks.lock().unwrap().entry(p.map_or(String::new(), |p| p.id.clone())).or_default().clone();
+        let _one = lock.lock().await;
+        let mut login = cu::read_login(&dir)?;
+        if !login.fresh(now_ms()) {
+            let _ = self.claude_read(p, "models").await;
+            login = cu::read_login(&dir)?;
+            if !login.fresh(now_ms()) { return None }
+        }
+        let mut r = get(login.token.clone()).await;
+        if matches!(r, Ok((401, _))) {
+            let _ = self.claude_read(p, "models").await;
+            if let Some(again) = cu::read_login(&dir).filter(|l| l.token != login.token && l.fresh(now_ms())) { r = get(again.token).await }
+        }
+        Some(match r { Ok((200, body)) if body.is_object() => Ok(body), Ok((200, _)) => Err("Claude's usage service answered with something else than usage.".into()), Ok((code, _)) => Err(cu::refusal(code)), Err(e) => Err(e) })
+    }
+    /// The windows Claude reports for a profile (or the default login), its extra usage, and where they were read; or why there are none.
+    async fn claude_usage(&self, p: Option<&Profile>) -> Result<Usage, String> {
+        use super::claude_usage as cu;
+        if let Some(r) = self.usage_direct(p).await {
+            let body = r?; let w = cu::windows(&body);
+            return if w.is_empty() { Err(NO_WINDOWS.into()) } else { Ok(Usage { windows: w, extra: cu::extra(&body), source: "claude-oauth-usage" }) }
+        }
         let r = self.claude_read(p, "usage").await?;
-        if r["rate_limits_available"] != true { return Err("Claude does not report limits for this account (it may not be a subscription plan).".into()) }
+        if r["rate_limits_available"] != true { return Err(NO_LIMITS.into()) }
         let w = Self::claude_windows(&r);
-        if w.is_empty() { Err("Claude reported no limit windows for this account.".into()) } else { Ok(w) }
+        if w.is_empty() { Err(NO_WINDOWS.into()) } else { Ok(Usage { windows: w, extra: cu::extra(&r["rate_limits"]), source: "claude-cli-usage" }) }
     }
     async fn claude_models(&self, p: &Profile) -> Vec<Value> {
         let Some(r) = self.claude_control(Some(p), "models").await else { return vec![] };
         r["models"].as_array().cloned().unwrap_or_default().into_iter().take(40).filter(|x| x["value"].is_string()).map(|x| json!({"id":label(x["value"].as_str().unwrap_or("")),"label":label(x["displayName"].as_str().or(x["value"].as_str()).unwrap_or("")),
             "efforts":x["supportedEffortLevels"].as_array().map(|a| a.iter().take(12).map(|y| json!(label(y.as_str().unwrap_or("")))).collect::<Vec<_>>()).unwrap_or_default()})).collect()
     }
-    /// accounts.js claudeWindows
+    /// accounts.js claudeWindows: the windows of Claude Code's `get_usage` answer (its `rate_limits` is the usage endpoint's body).
     pub fn claude_windows(reading: &Value) -> Vec<Value> {
         if reading["rate_limits_available"] != true { return vec![] }
-        let mut out = vec![];
-        for (scope, minutes) in [("five_hour", 300u64), ("seven_day", 10080), ("seven_day_opus", 10080), ("seven_day_sonnet", 10080)] {
-            let w = &reading["rate_limits"][scope]; let Some(u) = w["utilization"].as_f64().filter(|u| (0.0..=100.0).contains(u)) else { continue };
-            let mut o = json!({"name":scope,"scope":scope,"shared":scope == "five_hour" || scope == "seven_day","used_percent":u,"window_minutes":minutes});
-            if let Some(r) = w["resets_at"].as_str().and_then(parse_iso).filter(|r| *r > 0) { o["resets_at"] = json!(r) }
-            out.push(o);
-        }
-        out
+        super::claude_usage::windows(&reading["rate_limits"])
     }
     /// accounts.js windows (Codex's rate limits)
     pub fn codex_windows(limits: &Value) -> Vec<Value> {
@@ -430,11 +476,11 @@ impl Accounts {
             // a login found dead is read every check: the usage read is the one request that proves it works again (no inference request is made)
             if new_login || asked || p.state == "expired" || at == 0 || now_s().saturating_sub(at) >= 300 {
                 self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s());
-                let read = self.claude_read(Some(&p), "usage").await;
-                match &read { Ok(_) => fact = Fact::Proven, Err(reason) if fb_auth(reason) => fact = Fact::Refused, Err(_) => {} }
-                let windows = read.and_then(|r| if r["rate_limits_available"] != true { Err("Claude does not report limits for this account (it may not be a subscription plan).".to_string()) } else { let w = Self::claude_windows(&r); if w.is_empty() { Err("Claude reported no limit windows for this account.".into()) } else { Ok(w) } });
-                match windows {
-                    Ok(windows) => { let n = now_s(); allowance = Some(json!({"provider":"claude","state":"ok","at":n,"attempted_at":n,"auth":"claude.ai","source":"claude-cli-usage","windows":windows})) }
+                let read = self.claude_usage(Some(&p)).await;
+                // an answer without windows is still an answer the provider gave with this login
+                match &read { Ok(_) => fact = Fact::Proven, Err(reason) if fb_auth(reason) => fact = Fact::Refused, Err(reason) if reason == NO_WINDOWS || reason == NO_LIMITS => fact = Fact::Proven, Err(_) => {} }
+                match read {
+                    Ok(u) => { allowance = Some(u.allowance(now_s(), "")) }
                     Err(reason) => {
                         // a failed read is tried again in a minute, not five; the last good reading stays, else the reason is what the account shows
                         self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s().saturating_sub(240));
@@ -477,7 +523,7 @@ impl Accounts {
     }
 }
 
-fn parse_iso(s: &str) -> Option<u64> {
+pub fn parse_iso(s: &str) -> Option<u64> {
     // 2026-11-05T12:00:00Z or with fractional seconds / +00:00
     let t = s.trim(); if t.len() < 20 { return None }
     let (y, mo, d, h, mi, se): (i64, i64, i64, i64, i64, i64) = (t.get(0..4)?.parse().ok()?, t.get(5..7)?.parse().ok()?, t.get(8..10)?.parse().ok()?, t.get(11..13)?.parse().ok()?, t.get(14..16)?.parse().ok()?, t.get(17..19)?.parse().ok()?);
@@ -861,7 +907,7 @@ impl Accounts {
             // the read was refused as a dead login: said now, before the next turn of it finds out
             if matches!(&r, Err(reason) if fb_auth(reason)) { self.expire(&id, p.epoch); continue }
             let _ = self.with_profile(&id, |slot, g| { match r {
-                Ok(windows) => slot.allowance = Some(json!({"provider":"claude","state":"ok","at":n,"attempted_at":n,"auth":"claude.ai","source":"claude-cli-usage","windows":windows})),
+                Ok(u) => slot.allowance = Some(u.allowance(n, "")),
                 Err(reason) => if slot.allowance.as_ref().map_or(true, |a| a["state"] != "ok") { slot.allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":n,"source":"claude-cli-usage","reason":reason,"windows":[]})) },
             } g.revision += 1; });
         }
@@ -881,7 +927,7 @@ impl Accounts {
                     let ident = hex::encode(Sha256::digest(json!([data["email"], data["accountUuid"].as_str().or(data["userId"].as_str()), data["orgUuid"].as_str().or(data["organizationId"].as_str())]).to_string().as_bytes()));
                     let changed = { let mut g = self.inner.lock().unwrap(); let c = g.default_identity != ident; if c { g.default_allowance = None } g.default_identity = ident; c }; let _ = changed;
                     match self.claude_usage(None).await {
-                        Ok(windows) => { let n = now_s(); let mut g = self.inner.lock().unwrap(); g.default_allowance = Some(json!({"provider":"claude","state":"ok","auth":"claude.ai","at":n,"attempted_at":n,"source":"claude-cli-usage","windows":windows})); g.revision += 1; }
+                        Ok(u) => { let n = now_s(); let mut g = self.inner.lock().unwrap(); g.default_allowance = Some(u.allowance(n, &label(data["email"].as_str().unwrap_or("")))); g.revision += 1; }
                         Err(reason) => { let mut g = self.inner.lock().unwrap(); self.refresh_at_retry(&mut g); if g.default_allowance.as_ref().map_or(true, |a| a["state"] != "ok") { g.default_allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now,"source":"claude-cli-usage","reason":reason,"windows":[]})); g.revision += 1; } }
                     }
                 } else { let mut g = self.inner.lock().unwrap(); g.default_identity.clear(); g.default_allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now,"source":"claude-cli-usage","windows":[]})); g.revision += 1; }
@@ -1014,17 +1060,54 @@ for l in sys.stdin:
     }
     #[test] fn allowance_windows_are_read_as_the_js_hub_reads_them() {
         let w = Accounts::claude_windows(&json!({"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":42.5,"resets_at":"2026-11-05T12:00:00Z"},"seven_day":{"utilization":120},"seven_day_opus":{"utilization":3}}}));
-        assert_eq!(w.len(), 2); assert_eq!((w[0]["name"].clone(), w[0]["shared"].clone(), w[0]["window_minutes"].clone(), w[0]["resets_at"].clone()), (json!("five_hour"), json!(true), json!(300), json!(1_793_880_000u64)));
-        assert_eq!(w[1]["scope"], "seven_day_opus"); assert_eq!(w[1]["shared"], false); assert!(Accounts::claude_windows(&json!({"rate_limits_available":false})).is_empty());
+        assert_eq!(w.len(), 3); assert_eq!((w[0]["name"].clone(), w[0]["shared"].clone(), w[0]["window_minutes"].clone(), w[0]["resets_at"].clone()), (json!("five_hour"), json!(true), json!(300), json!(1_793_880_000u64)));
+        assert_eq!(w[1]["used_percent"], 100.0, "over the limit is out, not unknown"); assert_eq!(w[2]["scope"], "seven_day_opus"); assert_eq!(w[2]["shared"], false); assert!(Accounts::claude_windows(&json!({"rate_limits_available":false})).is_empty());
         let c = Accounts::codex_windows(&json!({"rateLimits":{"limitId":"codex","primary":{"usedPercent":10,"resetsAt":5,"windowDurationMins":300},"secondary":{"usedPercent":-1}}}));
         assert_eq!(c.len(), 1); assert_eq!((c[0]["name"].clone(), c[0]["used_percent"].clone(), c[0]["window_minutes"].clone()), (json!("codex/primary"), json!(10.0), json!(300.0)));
+    }
+    /// Each login's usage is read with its own token from its own store; the CLI's own login with the one in its store; an expired token is not sent (the CLI is
+    /// asked instead); a 401 is a dead login; nothing of one account lands on another.
+    #[tokio::test(flavor = "multi_thread")] async fn each_account_reads_its_own_usage_with_its_own_token() {
+        use super::super::claude_usage::{tests::{BUSY, RECORDED}, Get};
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (h, sd) = dirs("own"); let a = mgr(&h, &sd);
+        let (wa, _) = a.plant("claude", "kellyhlord@gmail.com", "k@example.com", Value::Null).await; let (wb, _) = a.plant("claude", "Work", "w@example.com", Value::Null).await;
+        let creds = |dir: &Path, tok: &str, exp: u64| std::fs::write(dir.join(".credentials.json"), json!({"claudeAiOauth":{"accessToken":tok,"refreshToken":"r","expiresAt":exp}}).to_string()).unwrap();
+        let later = now_ms() + 3_600_000;
+        let (da, db) = (a.directory(&a.profile(&wa).unwrap()).unwrap(), a.directory(&a.profile(&wb).unwrap()).unwrap());
+        creds(&da, "tok-A", later); creds(&db, "tok-B", later);
+        let dd = h.join("cli-login"); std::fs::create_dir_all(&dd).unwrap(); creds(&dd, "tok-D", later);
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let s2 = seen.clone();
+        let get: Get = Arc::new(move |t: String| { s2.lock().unwrap().push(t.clone()); Box::pin(async move { match t.as_str() {
+            "tok-A" => Ok((200, serde_json::from_str::<Value>(RECORDED).unwrap())), "tok-B" => Ok((200, serde_json::from_str::<Value>(BUSY).unwrap())),
+            "tok-D" => Ok((200, json!({"five_hour":{"utilization":5.0},"seven_day":{"utilization":63.0,"resets_at":"2026-11-11T17:00:00Z"}}))), _ => Ok((401, Value::Null)) } }) });
+        a.set_usage(get, Some(dd.clone()));
+        let ua = a.claude_usage(Some(&a.profile(&wa).unwrap())).await.unwrap();
+        assert_eq!((ua.source, ua.windows[0]["scope"].clone(), ua.windows[0]["used_percent"].clone()), ("claude-oauth-usage", json!("seven_day"), json!(64.0)));
+        assert_eq!(ua.extra.as_ref().unwrap()["limit"], "$50.00");
+        let ub = a.claude_usage(Some(&a.profile(&wb).unwrap())).await.unwrap(); assert_eq!(ub.windows[0]["used_percent"], 81.5);
+        let ud = a.claude_usage(None).await.unwrap(); assert_eq!((ud.windows[1]["scope"].clone(), ud.windows[1]["used_percent"].clone()), (json!("seven_day"), json!(63.0)));
+        assert_eq!(*seen.lock().unwrap(), ["tok-A", "tok-B", "tok-D"], "each read went with its own login's token");
+        // a status check keeps the reading on that account only
+        let s = a.request(&json!({"op":"status","profile":wa,"asked":true})).await; let (pa, pb) = (prof(&s, &wa), prof(&s, &wb));
+        assert_eq!((pa["allowance"]["state"].clone(), pa["allowance"]["source"].clone(), pa["allowance"]["windows"][0]["used_percent"].clone()), (json!("ok"), json!("claude-oauth-usage"), json!(64.0)), "{pa}");
+        assert!(pb["allowance"].is_null(), "the other account is not touched: {pb}");
+        // an expired token is not sent: the CLI is started in that store (its startup refreshes it), and with no fresh token its own reading is used
+        seen.lock().unwrap().clear(); creds(&db, "tok-B", now_ms().saturating_sub(1000));
+        let ub = a.claude_usage(Some(&a.profile(&wb).unwrap())).await.unwrap();
+        assert_eq!((ub.source, ub.windows[0]["used_percent"].clone()), ("claude-cli-usage", json!(42.5))); assert!(seen.lock().unwrap().is_empty(), "no request with an expired token");
+        // a token the service refuses is a dead login, in the words the failover reads
+        creds(&db, "tok-dead", later);
+        let e = a.claude_usage(Some(&a.profile(&wb).unwrap())).await.unwrap_err(); assert!(super::super::fallback::auth_text(&e), "{e}"); assert!(!e.contains("tok-dead"));
+        let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_usage_read_that_fails_says_why() {
         let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let (h, sd) = dirs("usage"); let a = mgr(&h, &sd);
         let script = CLAUDE.replace("resp = {\"rate_limits_available\": True,", "resp = {\"rate_limits_available\": os.environ.get(\"STANDIN_USAGE\") != \"none\",");
         let path = sd.join("claude"); std::fs::write(&path, script).unwrap();
-        std::env::set_var("STANDIN_USAGE", "ok"); let w = a.claude_usage(None).await.unwrap(); assert_eq!(w[0]["scope"], "five_hour");
+        std::env::set_var("STANDIN_USAGE", "ok"); let w = a.claude_usage(None).await.unwrap().windows; assert_eq!(w[0]["scope"], "five_hour");
         std::env::set_var("STANDIN_USAGE", "none"); let e = a.claude_usage(None).await.unwrap_err(); assert!(e.contains("does not report limits"), "{e}");
         std::env::remove_var("STANDIN_USAGE"); let _ = std::fs::remove_dir_all(&h);
     }

@@ -189,6 +189,8 @@ pub fn profile_model(profile: &Value, model: &str) -> bool { let xs = profile["c
 /// Usage.applies: a model-specific window counts only for that model.
 fn applies(w: &Value, model: &str) -> bool {
     let scope = w["scope"].as_str().unwrap_or("");
+    // a model's own weekly limit (claude_usage.rs) binds that model only
+    if let Some(m) = w["model"].as_str().filter(|m| !m.is_empty()) { return model.to_lowercase().contains(m) }
     (!matches!(scope, "seven_day_opus" | "opus") || model.contains("opus")) && (!matches!(scope, "seven_day_sonnet" | "sonnet") || model.contains("sonnet"))
 }
 /// Usage.score: the remaining allowance in thousandths of a percent across the applicable live windows (the largest use counts); None when unknown.

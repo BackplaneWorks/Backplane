@@ -33,7 +33,7 @@ pub fn changes(get: &dyn Fn(&str) -> String, snapshot: &Value, at: u64) -> Vec<V
 /// Hub.accounts.allowance: the default Claude login's windows, kept as a setting once the collector has a reading.
 pub fn allowance(get: &dyn Fn(&str) -> String, snapshot: &Value, now: u64, at: u64) -> Option<Value> {
     let o = &snapshot["default_allowance"];
-    if o["provider"] == "claude" && o["source"] == "claude-cli-usage" && o["attempted_at"].as_u64().unwrap_or(0) <= now && get("allowance.claude") != o.to_string() {
+    if o["provider"] == "claude" && matches!(o["source"].as_str(), Some("claude-cli-usage" | "claude-oauth-usage")) && o["attempted_at"].as_u64().unwrap_or(0) <= now && get("allowance.claude") != o.to_string() {
         Some(json!({"$":"SettingSet","key":"allowance.claude","value":o.to_string(),"at":at}))
     } else { None }
 }

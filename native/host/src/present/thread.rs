@@ -80,7 +80,7 @@ fn civil(z: i64) -> (i64, usize, i64) {
 }
 fn hm(w: u64) -> String { format!("{:02}:{:02}", (w % 86400) / 3600, (w % 3600) / 60) }
 /// Stamp.clock: "14:05" on the day it is now, "Tue 14 Nov 14:05" on another, both on the wall clock of the person's zone
-fn clock(at: u64, now: u64, zone: &Rule) -> String {
+pub(crate) fn clock(at: u64, now: u64, zone: &Rule) -> String {
     let (w, wn) = (zone.wall(at), zone.wall(now));
     if w / 86400 == wn / 86400 { return hm(w) }
     let days = (w / 86400) as i64; let (_, m, d) = civil(days);
@@ -327,7 +327,7 @@ fn state_keys_refusal(st: &State,id: &str) -> &'static str {
 
 /// Zone.person / Sched.person: the person's zone as a rule. UTC names are built in; any other is the rule the hub stored (`tz.rule.<name>`);
 /// a zone with no usable rule reads as UTC, as Sched.person.k does. None: a lean State may have dropped the rule, so the time stamps degrade.
-fn person_zone(st: &State) -> Option<Rule> {
+pub(crate) fn person_zone(st: &State) -> Option<Rule> {
     let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
     let first = |a: &'static str, b: &'static str, c: &'static str| { for k in [a, b, c] { if !get(k).is_empty() { return get(k).to_string() } } "UTC".to_string() };
     let name = first("person.tz", "person.tz.device", "tz.machine");

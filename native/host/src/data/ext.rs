@@ -15,7 +15,8 @@
 //! (review.bom / review.checks: Markdown the hub writes) · `review.tick {thread, index}` → `{ticked:{tasks}}` · `review.comment {thread, op: add|edit|resolve|reopen|drop, text?, id?, parent?, file?, layer?, x?, y?, item?}` → `{}` ·
 //! `review.list {thread}` → `{comments:[{id, text, by, at, parent, resolved, file, layer, x, y, item}]}` (the thread's review acts folded, oldest first).
 //! Picker (feature "picker"): `thread.picker {thread?, provider?, model?, effort?, runtime?}` → `{picker:{chip, sections:[{title, action, choices:[{label, value, on, ok, why}]}]}}` (a thread's own, or a new thread's from what is given) ·
-//! `thread.pick {thread, action: model|effort|provider|runtime, value}` → `{thread}`: the desktop's picker, the same requests it sends.
+//! `thread.pick {thread, action: model|effort|provider|runtime|account, value}` → `{thread}`: the desktop's picker, the same requests it sends (a thread's picker also lists
+//! its Account, `value` "<profile>\u{1f}<epoch>" or "" for the CLI's own login, and its Usage, rows to read).
 //! Pushes on a `lists` subscription: `{"k":"notify","kind":"needs_you"|"done"|"reminder"|"digest","thread","ask","key","title","body","badge","through"}` when the uberbot's gate lets one
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
@@ -52,7 +53,14 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let provider = pick("provider", { let d = setting("agent.provider"); if d.is_empty() { "claude".into() } else { d } });
     let model = pick("model", if p.get("provider").is_some() { String::new() } else { setting("agent.model") });
     let models: Value = serde_json::from_str(&crate::settings::models::all()).unwrap_or(Value::Null);
-    Ok(json!({"picker":picker_sections(&models, &provider, &model, &pick("effort", String::new()), &pick("runtime", "approval-required".into()))}))
+    let mut out = picker_sections(&models, &provider, &model, &pick("effort", String::new()), &pick("runtime", "approval-required".into()));
+    // a thread's: its account and what that has left, the one chip's words as the desktop draws it (a new thread has no account yet)
+    if !th.is_empty() && p.get("provider").is_none() {
+        let (extra, combo) = crate::statehost::policies().and_then(|x| x.with_state(|st| { let n = crate::hub::now_ms() / 1000; (crate::present::keys::account_sections(st, th, n), crate::present::keys::combo_of(st, th, n)) })).unwrap_or_default();
+        if let Some(a) = out["sections"].as_array_mut() { let at = a.iter().position(|x| x["action"] == "provider").unwrap_or(a.len()); for (i, x) in extra.into_iter().enumerate() { a.insert(at + i, x) } }
+        if let Some(c) = combo["full"].as_str().filter(|c| !c.is_empty()) { out["chip"] = json!(c) }
+    }
+    Ok(json!({"picker":out}))
 }
 
 /// A thread's background work and locks, the rows the desktop's panel shows.
@@ -165,7 +173,15 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
                 "effort" => rpc(hub, c, "thread.effort", json!({"thread":th,"effort":value})).await,
                 "provider" => rpc(hub, c, "thread.provider", json!({"thread":th,"provider":value})).await,
                 "runtime" => rpc(hub, c, "thread.modes", json!({"thread":th,"runtime":value})).await,
-                _ => return Some(Err(err("action: model, effort, provider or runtime"))),
+                // the account the thread runs on: the desktop's accounts.select, as the binding is now
+                "account" => {
+                    let (profile, epoch) = value.split_once('\u{1f}').map_or((value, 0), |(a, b)| (a, b.parse::<u64>().unwrap_or(0)));
+                    let provider = hub.model().await.threads.get(th).map(|t| t.provider.clone()).unwrap_or_default();
+                    let expected = setting_of(&crate::settings::accounts::binding_key(th, &provider));
+                    rpc(hub, c, "accounts.select", json!({"thread":th,"profile":profile,"epoch":epoch,"expected":expected})).await
+                }
+                "usage" => return Some(Err(err("usage rows are to read"))),
+                _ => return Some(Err(err("action: model, effort, provider, runtime or account"))),
             };
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }

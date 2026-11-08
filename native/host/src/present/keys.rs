@@ -106,7 +106,7 @@ pub fn allowance_text(snapshot: &Value, provider: &str, model: &str, now_s: u64)
     let mut left: Option<u64> = None; let mut shared = true;
     for w in snapshot["windows"].as_array().map(Vec::as_slice).unwrap_or_default() {
         let scope = w["scope"].as_str().unwrap_or("");
-        let applies = provider == "codex" || scope == "shared" || scope == "five_hour" || scope == "seven_day" || (scope == "opus" && m.contains("opus")) || (scope == "sonnet" && m.contains("sonnet"));
+        let applies = match w["model"].as_str().filter(|x| !x.is_empty()) { Some(x) => m.contains(x), None => provider == "codex" || scope == "shared" || scope == "five_hour" || scope == "seven_day" || (scope == "opus" && m.contains("opus")) || (scope == "sonnet" && m.contains("sonnet")) };
         if !applies { continue }
         let used = w["used_permille"].as_f64().or_else(|| w["used_percent"].as_f64().map(|p| p * 10.0));
         let Some(used) = used.filter(|u| (0.0..=1000.0).contains(u)) else { return String::new() };
@@ -123,10 +123,109 @@ fn allowance_of(st: &State, id: &str, provider: &str) -> Value {
     let bound = serde_json::from_str::<Value>(get(&format!("account.thread.{id}.{provider}"))).ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
     if bound.is_empty() { return serde_json::from_str(get(&format!("allowance.{provider}"))).unwrap_or(Value::Null) }
     let p = serde_json::from_str::<Value>(get("accounts.inventory")).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter().find(|p| p["id"].as_str() == Some(bound.as_str())).unwrap_or(Value::Null);
+    profile_allowance(&p, provider)
+}
+/// A saved account's allowance as a thread reads it: its windows' scopes in the thread's words (five_hour and seven_day are the shared pool).
+fn profile_allowance(p: &Value, provider: &str) -> Value {
     let mut a = p["allowance"].clone();
     if a.is_object() { a["provider"] = json!(provider); let ws = a["windows"].as_array().cloned().unwrap_or_default().into_iter().map(|mut w| {
         let sc = w["scope"].as_str().unwrap_or("").to_string(); w["scope"] = json!(match sc.as_str() { "five_hour" | "seven_day" => "shared", "seven_day_opus" => "opus", "seven_day_sonnet" => "sonnet", o => o }); w }).collect::<Vec<_>>(); a["windows"] = json!(ws) }
     a
+}
+/// The account a thread runs on, as the combined chip names it: (short name, email, saved). A saved account is its label (an email label: its name part); the CLI's
+/// own login is its email's name part when its reading says the email, else "default".
+fn account_of(st: &State, id: &str, provider: &str, snapshot: &Value) -> (String, String, bool) {
+    let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
+    let short = |s: &str| s.split('@').next().unwrap_or("").to_string();
+    let bound = serde_json::from_str::<Value>(get(&format!("account.thread.{id}.{provider}"))).ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
+    if bound.is_empty() { let e = snapshot["email"].as_str().unwrap_or(""); return (if e.is_empty() { "default".into() } else { short(e) }, e.to_string(), false) }
+    let p = serde_json::from_str::<Value>(get("accounts.inventory")).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter().find(|p| p["id"].as_str() == Some(bound.as_str())).unwrap_or(Value::Null);
+    let (label, email) = (p["label"].as_str().unwrap_or(""), p["identity"]["email"].as_str().unwrap_or(""));
+    let name = if label.is_empty() { short(email) } else if label.contains('@') { short(label) } else { label.to_string() };
+    (if name.is_empty() { "account".into() } else { name }, email.to_string(), true)
+}
+/// Model.short: the chip's name of a model. Claude's ids read as their family and version ("claude-opus-5-5" → "Opus 5.5", "sonnet" → "Sonnet", a dated id loses its
+/// date); another provider's id is as it is; none is "default".
+pub fn model_short(model: &str) -> String {
+    if model.is_empty() { return "default".into() }
+    let m = model.strip_prefix("claude-").unwrap_or(model);
+    let fam = ["opus", "sonnet", "haiku", "fable"];
+    let mut parts = m.split('-');
+    let first = parts.next().unwrap_or("");
+    let base = first.split('[').next().unwrap_or(first);
+    if !fam.contains(&base) { return model.to_string() }
+    let ver: Vec<&str> = parts.filter(|x| !x.is_empty() && x.len() < 8 && x.chars().all(|c| c.is_ascii_digit())).collect();
+    let mut name = format!("{}{}", base[..1].to_uppercase(), &base[1..]);
+    if !ver.is_empty() { name = format!("{name} {}", ver.join(".")) }
+    format!("{name}{}", &first[base.len()..])
+}
+/// Limit.tone: the colour a remaining percentage reads in ("" plain, "warn" under a quarter, "bad" under a tenth).
+pub fn tone(left: Option<u64>) -> &'static str { match left { Some(l) if l < 10 => "bad", Some(l) if l < 25 => "warn", _ => "" } }
+/// The combined chip of the composer (model, effort, account, the binding limit) and what its menu's Usage part lists, from the thread's allowance snapshot
+/// (`allowance_of`). `full`/`mid`/`short` are the chip's words at each width; `left` the least remaining percent of the windows that apply (None: no current
+/// reading); `windows` every window of the account with its reset (`zone` words it); `extra` the extra-usage line; `tip` all of it for the hover.
+pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, account: (&str, &str, bool), zone: &super::tz::Rule, now_s: u64) -> Value {
+    let accounts = matches!(provider, "claude" | "codex");
+    let left = allowance_text(snapshot, provider, model, now_s).split('%').next().and_then(|x| x.parse::<u64>().ok());
+    let (m, e) = (model_short(model), if effort.is_empty() { "auto".to_string() } else { effort.to_string() });
+    let mut full = vec![m.clone(), e.clone()]; let mut mid = vec![m.clone()]; let mut short = vec![m.clone()];
+    if accounts { full.push(account.0.to_string()); mid.push(account.0.to_string()); }
+    if let Some(l) = left { full.push(format!("{l}% left")); mid.push(format!("{l}%")); short.push(format!("{l}%")); }
+    let ml = model.to_lowercase();
+    let windows: Vec<Value> = if !accounts || snapshot["provider"].as_str().is_some_and(|p| p != provider) { vec![] } else { snapshot["windows"].as_array().into_iter().flatten().filter_map(|w| {
+        let used = w["used_permille"].as_f64().map(|p| p / 10.0).or_else(|| w["used_percent"].as_f64()).filter(|u| (0.0..=100.0).contains(u))?;
+        let scope = w["scope"].as_str().unwrap_or("");
+        let label = w["label"].as_str().map(str::to_string).unwrap_or_else(|| match scope { "five_hour" => "5-hour".into(), "seven_day" | "shared" => "Weekly".into(), "seven_day_opus" | "opus" => "Opus weekly".into(), "seven_day_sonnet" | "sonnet" => "Sonnet weekly".into(), o => w["name"].as_str().unwrap_or(o).to_string() });
+        let applies = match w["model"].as_str().filter(|x| !x.is_empty()) { Some(x) => ml.contains(x), None => !matches!(scope, "opus" | "seven_day_opus") || ml.contains("opus") } && (!matches!(scope, "sonnet" | "seven_day_sonnet") || ml.contains("sonnet"));
+        let reset = w["resets_at"].as_f64().map(|r| r as u64).filter(|r| *r > now_s);
+        let l = ((100.0 - used).floor()).max(0.0) as u64;
+        Some(json!({"label":label,"left":l,"tone":tone(Some(l)),"applies":applies,"resets_at":reset,"resets":reset.map(|r| super::thread::clock(r, now_s, zone)).unwrap_or_default()}))
+    }).collect() };
+    let x = &snapshot["extra"];
+    let extra = if x.is_object() { format!("Extra usage {}{}{}", x["used"].as_str().unwrap_or("$0"), x["limit"].as_str().map(|l| format!(" of {l}")).unwrap_or_default(),
+        if x["enabled"] == true { String::new() } else { let r = x["reason"].as_str().unwrap_or("").replace('_', " "); if r.is_empty() { " · off".into() } else { format!(" · off ({r})") } }) } else { String::new() };
+    let note = if !accounts { String::new() } else if windows.is_empty() { snapshot["reason"].as_str().filter(|r| !r.is_empty()).unwrap_or("No limit reading yet.").to_string() } else { String::new() };
+    let mut tip = vec![];
+    if accounts { let who = if account.1.is_empty() { account.0.to_string() } else { account.1.to_string() }; tip.push(if account.2 { format!("{who} (saved account)") } else { format!("{who} (the CLI's own login)") }) }
+    for w in &windows { tip.push(format!("{}  {}% left{}", w["label"].as_str().unwrap_or(""), w["left"], w["resets"].as_str().filter(|r| !r.is_empty()).map(|r| format!(" · resets {r}")).unwrap_or_default())) }
+    if !extra.is_empty() { tip.push(extra.clone()) }
+    if !note.is_empty() { tip.push(note.clone()) }
+    json!({"model":m,"effort":e,"account":if accounts { account.0 } else { "" },"email":account.1,"saved":account.2,"left":left,"tone":tone(left),
+        "full":full.join(" · "),"mid":mid.join(" · "),"short":short.join(" · "),"windows":windows,"extra":extra,"note":note,"tip":tip.join("\n")})
+}
+/// The combined chip of a thread (`combo`), from the state.
+pub fn combo_of(st: &State, id: &str, now_s: u64) -> Value {
+    let Some(t) = st.threads.get(id) else { return Value::Null };
+    let snap = allowance_of(st, id, &t.provider);
+    let acct = account_of(st, id, &t.provider, &snap);
+    let effort = st.settings.get(&format!("effort.{id}")).map(String::as_str).unwrap_or("");
+    combo(&snap, &t.provider, &t.model, effort, (&acct.0, &acct.1, acct.2), &super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc), now_s)
+}
+/// The phones' picker for a thread on an account provider: an Account section (the CLI's own login, then each saved account of the provider, with what it has
+/// left; a press is `thread.pick {action: account, value: "<profile>\u{1f}<epoch>"}`, "" the CLI's own) and a Usage section (the thread's account's windows with
+/// their resets, its extra usage; rows to read, not to press). Empty for other providers.
+pub fn account_sections(st: &State, id: &str, now_s: u64) -> Vec<Value> {
+    let Some(t) = st.threads.get(id) else { return vec![] };
+    let provider = t.provider.as_str();
+    if !matches!(provider, "claude" | "codex") { return vec![] }
+    let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
+    let bound = serde_json::from_str::<Value>(get(&format!("account.thread.{id}.{provider}"))).ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
+    let left = |a: &Value| allowance_text(a, provider, &t.model, now_s).split('%').next().and_then(|x| x.parse::<u64>().ok()).map(|l| format!(" · {l}% left")).unwrap_or_default();
+    let dflt: Value = serde_json::from_str(get(&format!("allowance.{provider}"))).unwrap_or(Value::Null);
+    let mut choices = vec![json!({"label":format!("Default (CLI login){}", if provider == "claude" { left(&dflt) } else { String::new() }),"value":"","on":bound.is_empty(),"ok":true,"why":""})];
+    for p in serde_json::from_str::<Value>(get("accounts.inventory")).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter().filter(|p| p["provider"] == provider) {
+        let ok = p["state"] == "connected";
+        let why = match p["state"].as_str().unwrap_or("") { "connected" => "", "expired" => "Sign-in expired. Sign in again in Settings, Accounts.", "unchecked" => "Not checked yet.", "connecting" => "Signing in.", _ => "Not signed in." };
+        choices.push(json!({"label":format!("{}{}", p["label"].as_str().unwrap_or(""), left(&profile_allowance(&p, provider))),"value":format!("{}\u{1f}{}", p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0)),
+            "on":p["id"].as_str() == Some(bound.as_str()),"ok":ok,"why":why}));
+    }
+    let c = combo_of(st, id, now_s);
+    let mut usage: Vec<Value> = c["windows"].as_array().into_iter().flatten().map(|w| json!({"label":format!("{}  {}% left", w["label"].as_str().unwrap_or(""), w["left"]),"value":"","on":false,"ok":false,
+        "why":w["resets"].as_str().filter(|r| !r.is_empty()).map(|r| format!("resets {r}")).unwrap_or_default()})).collect();
+    for k in ["extra", "note"] { if let Some(x) = c[k].as_str().filter(|x| !x.is_empty()) { usage.push(json!({"label":x,"value":"","on":false,"ok":false,"why":""})) } }
+    let mut out = vec![json!({"title":"Account","action":"account","choices":choices})];
+    if !usage.is_empty() { out.push(json!({"title":"Usage","action":"usage","choices":usage})) }
+    out
 }
 /// Mob.picker.ctx.loc with no models info: the model chip, the model menu (the thread's own model only: the hub's model list is not here), the efforts the
 /// provider takes and the providers. This is what the helper draws before it has heard the hub's models.
@@ -196,6 +295,7 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models: Option<&Value>)
     m.insert("pickerAgents".into(), picker_agents(models));
     m.insert("claude".into(), json!(t.provider == "claude"));
     m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
+    m.insert("combo".into(), combo_of(st, id, now_s));
     Some(m)
 }
 
@@ -210,6 +310,55 @@ mod tests {
         assert_eq!(allowance_text(&json!({"windows":[{"scope":"shared","used_permille":null}]}), "claude", "", 100), "");
         assert_eq!(allowance_text(&json!({"windows":[{"scope":"shared","used_permille":100,"resets_at":50}]}), "claude", "", 100), "", "a passed reset is no current reading");
         assert_eq!(allowance_text(&snap, "grok", "", 100), "");
+    }
+    #[test] fn a_models_short_name_is_its_family_and_version() {
+        for (id, want) in [("", "default"), ("claude-opus-5-5", "Opus 5.5"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("claude-sonnet-4-5-20250929", "Sonnet 4.5"), ("claude-fable-5-1", "Fable 5.1"), ("opus[1m]", "Opus[1m]"), ("gpt-5.1-codex", "gpt-5.1-codex"), ("claude-mystery-1", "claude-mystery-1")] {
+            assert_eq!(model_short(id), want, "{id}")
+        }
+    }
+    /// The recorded reading of a saved Max account (64% of the week used, nothing in the 5-hour window, a Fable weekly limit, extra usage off).
+    fn reading() -> Value { json!({"provider":"claude","state":"ok","source":"claude-oauth-usage","windows":[
+        {"scope":"shared","label":"Weekly","used_percent":64.0,"resets_at":1_794_416_400u64},
+        {"scope":"seven_day_fable","label":"Fable weekly","model":"fable","used_percent":0.0,"resets_at":1_794_416_400u64}],
+        "extra":{"enabled":false,"used":"$0.00","limit":"$50.00","percent":0.0,"reason":"out_of_credits"}}) }
+    #[test] fn the_one_chip_says_model_effort_account_and_the_binding_limit_at_every_width() {
+        let now = 1_794_175_561; let utc = super::super::tz::Rule::utc();
+        let c = combo(&reading(), "claude", "claude-opus-5-5", "", ("kellyhlord", "kellyhlord@gmail.com", true), &utc, now);
+        assert_eq!((c["full"].as_str().unwrap(), c["mid"].as_str().unwrap(), c["short"].as_str().unwrap()), ("Opus 5.5 · auto · kellyhlord · 36% left", "Opus 5.5 · kellyhlord · 36%", "Opus 5.5 · 36%"));
+        assert_eq!((c["left"].clone(), c["tone"].clone()), (json!(36), json!("")));
+        assert_eq!(c["windows"][0], json!({"label":"Weekly","left":36,"tone":"","applies":true,"resets_at":1_794_416_400u64,"resets":"Wed 11 Nov 17:00"}));
+        assert_eq!((c["windows"][1]["label"].clone(), c["windows"][1]["applies"].clone()), (json!("Fable weekly"), json!(false)), "Fable's own limit does not bind Opus");
+        assert_eq!(c["extra"], "Extra usage $0.00 of $50.00 · off (out of credits)");
+        assert_eq!(c["tip"], "kellyhlord@gmail.com (saved account)\nWeekly  36% left · resets Wed 11 Nov 17:00\nFable weekly  100% left · resets Wed 11 Nov 17:00\nExtra usage $0.00 of $50.00 · off (out of credits)");
+        // a Fable thread is bound by the fuller of the two; low and out read in their colours
+        let mut r = reading(); r["windows"][1]["used_percent"] = json!(95.5);
+        let f = combo(&r, "claude", "claude-fable-5-1", "high", ("default", "", false), &utc, now);
+        assert_eq!((f["full"].as_str().unwrap(), f["tone"].as_str().unwrap()), ("Fable 5.1 · high · default · 4% left", "bad"));
+        assert_eq!((tone(Some(24)), tone(Some(25)), tone(Some(0)), tone(None)), ("warn", "", "bad", ""));
+        // no reading: no number is made up, and the tip says why
+        let n = combo(&json!({"provider":"claude","state":"unavailable","windows":[],"reason":"Claude is limiting usage reads right now (429); the last reading stays."}), "claude", "", "", ("work", "w@x.com", true), &utc, now);
+        assert_eq!((n["full"].as_str().unwrap(), n["short"].as_str().unwrap(), n["left"].clone()), ("default · auto · work", "default", Value::Null));
+        assert!(n["tip"].as_str().unwrap().ends_with("(429); the last reading stays."));
+        // an agent with no accounts: model and effort only
+        let g = combo(&Value::Null, "grok", "grok-4", "low", ("default", "", false), &utc, now);
+        assert_eq!((g["full"].as_str().unwrap(), g["account"].as_str().unwrap(), g["tip"].as_str().unwrap()), ("grok-4 · low", "", ""));
+    }
+    #[test] fn a_thread_reads_its_bound_accounts_numbers_or_the_cli_logins() {
+        let mut st = State::new();
+        st.apply(&json!({"$":"ThreadCreated","id":"t1","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"claude-opus-5-5","at":1}));
+        let inv = json!({"version":1,"revision":1,"profiles":[{"id":"k","provider":"claude","label":"kellyhlord@gmail.com","epoch":2,"state":"connected","identity":{"email":"kellyhlord@gmail.com"},"allowance":{"state":"ok","windows":[{"scope":"seven_day","label":"Weekly","used_percent":64.0}]}},
+            {"id":"w","provider":"claude","label":"Work","epoch":1,"state":"expired","identity":{"email":"w@x.com"},"allowance":null}]});
+        for (k, v) in [("accounts.inventory", inv.to_string()), ("allowance.claude", json!({"provider":"claude","state":"ok","email":"me@home.org","windows":[{"scope":"five_hour","used_percent":10.0},{"scope":"seven_day","used_percent":37.0}]}).to_string())] {
+            st.apply(&json!({"$":"SettingSet","key":k,"value":v,"at":2}));
+        }
+        let c = combo_of(&st, "t1", 100); assert_eq!(c["full"], "Opus 5.5 · auto · me · 63% left", "the CLI's own login: its email's name");
+        st.apply(&json!({"$":"SettingSet","key":"account.thread.t1.claude","value":"{\"id\":\"k\",\"epoch\":2}","at":3}));
+        let c = combo_of(&st, "t1", 100); assert_eq!(c["full"], "Opus 5.5 · auto · kellyhlord · 36% left"); assert_eq!(c["email"], "kellyhlord@gmail.com");
+        let a = account_sections(&st, "t1", 100);
+        assert_eq!(a[0]["choices"], json!([{"label":"Default (CLI login) · 63% left","value":"","on":false,"ok":true,"why":""},{"label":"kellyhlord@gmail.com · 36% left","value":"k\u{1f}2","on":true,"ok":true,"why":""},
+            {"label":"Work","value":"w\u{1f}1","on":false,"ok":false,"why":"Sign-in expired. Sign in again in Settings, Accounts."}]));
+        assert_eq!((a[1]["title"].clone(), a[1]["choices"][0]["label"].clone(), a[1]["choices"][0]["ok"].clone()), (json!("Usage"), json!("Weekly  36% left"), json!(false)));
+        st.apply(&json!({"$":"ThreadCreated","id":"t2","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"grok","model":"","at":1})); assert!(account_sections(&st, "t2", 100).is_empty());
     }
     fn fx() -> Value { serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-variants.json"))).unwrap() }
     const T: &str = "t1700000003-8";
