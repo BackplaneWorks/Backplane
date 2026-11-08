@@ -16,7 +16,7 @@ import hashlib, http.client, json, os, shutil, signal, socket, struct, subproces
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "e2e", "pairing"))
-from proto import Hub, Ws  # noqa: E402
+from proto import Hub, Socket as Ws  # noqa: E402
 
 v014, rel = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
 panics = "--panics" in sys.argv
@@ -63,7 +63,7 @@ exec {real_curl} "$@"
 os.chmod(shim, 0o755)
 env = {k: v for k, v in os.environ.items() if not k.startswith("BACKPLANE_")}
 env.update(HOME=home_user, PATH=os.path.join(T, "shim") + ":" + env.get("PATH", "/usr/bin:/bin"), BACKPLANE_PREFIX=prefix, BACKPLANE_BIN=binp,
-           BACKPLANE_NO_DESKTOP_APP="1", BACKPLANE_NO_DESKTOP="1", BACKPLANE_HOME=h15, BACKPLANE_GUARD_STABLE="10")
+           BACKPLANE_NO_DESKTOP_APP="1", BACKPLANE_NO_DESKTOP="1", BACKPLANE_NEW_HOME=h15, BACKPLANE_GUARD_STABLE="10")
 procs = []
 def stop():
     g = os.path.join(prefix, "backplane")
