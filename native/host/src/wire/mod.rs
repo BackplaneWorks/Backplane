@@ -71,6 +71,19 @@ pub fn response(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<u8> 
     v.extend_from_slice(body); v
 }
 
+/// After a body handler refused before reading the body (an upload over its cap): the answer is written, the write side ends, and what the client
+/// still sends is read and dropped until it stops (end of stream), goes quiet for 5 s, or 60 s have passed, never more than it declared. A socket
+/// closed with unread input resets the connection (Windows always), and a client that sends its whole body before reading the answer, as most do,
+/// then saw a broken upload instead of "too big".
+pub async fn drain_refused(s: &mut TcpStream, declared: u64) {
+    use tokio::io::AsyncReadExt;
+    let _ = s.shutdown().await; let mut b = vec![0u8; 1 << 16]; let mut n = 0u64;
+    let end = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+    while n <= declared {
+        let left = end.saturating_duration_since(tokio::time::Instant::now()); if left.is_zero() { break }
+        match tokio::time::timeout(left.min(std::time::Duration::from_secs(5)), s.read(&mut b)).await { Ok(Ok(k)) if k > 0 => n += k as u64, _ => break }
+    }
+}
 pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
     // health first: it asks nothing of the views, the presenter, the log or the credentials
     if req.route() == "/healthz" {
@@ -92,8 +105,7 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         let r = h.call_body(&hub.arc(), &req, crate::api::Body::new(&mut s, len.unwrap(), expect)).await;
         let out = response_for(r.status, &r.ctype, &r.extra, &r.body);
         s.write_all(&out).await?;
-        // a refusal (the attach cap) answers before the body is read: on Windows a close with unread input resets and the client loses the answer
-        if r.status.starts_with('2') { s.shutdown().await.ok(); } else { crate::plat::net::refused_close(&mut s).await; }
+        if r.status.starts_with('2') { s.shutdown().await.ok(); } else { drain_refused(&mut s, len.unwrap()).await; }
         return Ok(());
     }
     if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {

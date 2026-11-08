@@ -480,3 +480,20 @@ impl RpcHandler for FakeStar {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// An upload over the cap: the client sends its whole body before it reads (as most do), and still gets the 413 and why, not a reset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn an_oversized_upload_gets_its_413_after_sending_everything() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (hub, port) = up("cap").await; crate::files::imgroutes::start(&hub);
+    hub.commit(&json!({"$":"SettingSet","key":"files.max.mb","value":"1","at":1700000500})).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let n = 24usize << 20; // 24 MB over a 1 MB cap
+    let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    s.write_all(format!("POST /attach?thread=t1&key=k9&name=big.bin&token=tok HTTP/1.1\r\nHost: x\r\nContent-Type: application/octet-stream\r\nContent-Length: {n}\r\n\r\n").as_bytes()).await.unwrap();
+    let chunk = vec![7u8; 1 << 20]; let mut sent = 0usize;
+    while sent < n { if s.write_all(&chunk).await.is_err() { break } sent += chunk.len(); }
+    let mut out = Vec::new(); let read = s.read_to_end(&mut out).await;
+    let text = String::from_utf8_lossy(&out);
+    assert!(read.is_ok(), "the answer was read, not reset ({sent} of {n} bytes sent): {read:?}");
+    assert!(text.starts_with("HTTP/1.1 413"), "{text}"); assert!(text.contains("upload.cap"), "it says why: {text}");
+}
