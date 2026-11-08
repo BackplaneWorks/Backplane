@@ -116,12 +116,15 @@ impl Agents {
         } }
         self.shot(provider, &model, BTW_SYSTEM, &input, &Launch::default()).await.unwrap_or_default()
     }
-    /// A thread's title from `text`: Haiku under the thread's own account (else the default login), then Haiku on the default login, then Codex's light model.
+    /// A thread's title from `text`: the Writing setting's provider and model when the person chose one, else Haiku under the thread's own account (else the default login), then Haiku on the default login, then Codex's light model.
     /// The cleaned title, or None (each failed attempt is logged).
     pub async fn write_title(&self, thread: &str, text: &str) -> Option<String> {
         let input: String = text.chars().take(4000).collect();
         if input.trim().is_empty() { return None }
         let mut tries: Vec<(&str, String, Launch, &str)> = vec![];
+        // Settings > Writing: a provider or model the person chose is what names threads (the page says so); with neither set, Haiku as before
+        let (tp, tm) = { let w = self.world().await; (w.setting("text.provider").to_string(), w.setting("text.model").to_string()) };
+        if !tp.trim().is_empty() || !tm.trim().is_empty() { let (p, m) = pick(&tp, &tm); if p == "claude" || p == "codex" { tries.push((p, m, Launch::default(), "the Writing setting")) } }
         let raw = self.hub.setting(&crate::settings::accounts::binding_key(thread, "claude")).await.unwrap_or_default();
         let b: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
         let id = b["id"].as_str().unwrap_or("").to_string();
