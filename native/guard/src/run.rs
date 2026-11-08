@@ -250,10 +250,11 @@ impl Guard {
                     Some(at) => {
                         if well || answered { misses = 0 } else { misses += 1; last_said = said.clone(); say(&format!("health check {misses} of {} failed: {}", self.tm.misses, said.chars().take(160).collect::<String>())) }
                         if misses >= self.tm.misses { let why = format!("stopped answering: {}", last_said.chars().take(160).collect::<String>()); return self.kill_hung(&mut child, &why) }
-                        // the clock that proves a build starts when its folds are over: a crash at the end of a long fold is the start failing
-                        let folding = serde_json::from_str::<Value>(&said).map_or(false, |v| v["folding"].as_u64().unwrap_or(0) > 0);
-                        if folding { ready_at = Some(Instant::now()); }
-                        if !folding && !self.stable && at.elapsed().as_secs() >= self.tm.stable { self.stable = true; self.d.add_good(&self.build); self.pin(); say(&format!("{} started cleanly", Self::short(&self.build))); if self.probation.take().is_some() { if let Some(b) = &self.b { b.publish(&self.build); } } self.publish(); }
+                        // the clock that proves a build starts when its folds and any migration are over: a crash at the end of a long fold or import is the
+                        // start failing, while a long import itself is not (plan::holds_proof)
+                        let busy = plan::holds_proof(&serde_json::from_str::<Value>(&said).unwrap_or(Value::Null));
+                        if busy { ready_at = Some(Instant::now()); }
+                        if !busy && !self.stable && at.elapsed().as_secs() >= self.tm.stable { self.stable = true; self.d.add_good(&self.build); self.pin(); say(&format!("{} started cleanly", Self::short(&self.build))); if self.probation.take().is_some() { if let Some(b) = &self.b { b.publish(&self.build); } } self.publish(); }
                     }
                 }
             }
