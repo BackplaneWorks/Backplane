@@ -231,7 +231,7 @@ mod tests {
         let r = Rig::new("zip"); let mut f = Feed::new(); let l = f.release_for("v0.16.0", "windows-x64", b"zipped"); let k = keys();
         let a = Ask { current: "0.15.0", channel: "stable", target: "windows-x64", keys: &k, bad: &[] };
         let x = find(&a, &[l], &r.d.join("scratch"), &|u, o, m| f.get(u, o, m)).unwrap().unwrap();
-        assert_eq!(x.asset.name, "backplane-v0.16.0-windows-x64.zip");
+        assert_eq!(x.asset.name, "backplane-v0.16.0-windows-x64-native.zip");
         let seen = RefCell::new(String::new());
         let unzip = |a: &Path, d: &Path| -> Result<(), String> { *seen.borrow_mut() = a.file_name().unwrap().to_string_lossy().into(); fs::write(d.join("backplane-hub.exe"), b"MZ").map_err(|e| e.to_string()) };
         let d = stage(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &unzip).unwrap();
