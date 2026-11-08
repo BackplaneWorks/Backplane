@@ -30,7 +30,7 @@ if want('F15'):
     for x in range(20, 44):
         for y in range(12, 36): im.putpixel((x, y), (40, 200, 60))
     im.save(img)
-    subprocess.Popen(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', img], env=denv); pause(0.5)
+    clip_image(img); pause(0.5)
     r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); pause(0.5)
     shot('f15-before'); chord('ctrl v'); pause(2.5); shot('f15-pasted')
     chip = differs(px('f15-before'), px('f15-pasted'), (int(r['x']), int(r['y'] - 120), int(r['x'] + r['w']), int(r['y'] + r['h'])))
@@ -123,7 +123,8 @@ if want('F08'):
     sel(1); n = len([e for e in events() if e['$'] == 'ThreadCreated']); forked = click_ctl('tool:fork'); ok = until(lambda: len([e for e in events() if e['$'] == 'ThreadCreated']) > n, 20); pause(1.5); shot('f8-fork')
     log('F08-fork', forked and ok, 'the Fork thread button: a new thread was created in the hub log=%s (f8-fork.png)' % ok)
 if want('F14'):
-    marker = P('term.marker'); chord('ctrl j'); pause(2.5); shot('f14-open')
+    marker = P('term.marker').replace('\\', '/');   # the terminal's shell is POSIX sh, Git's on Windows
+    chord('ctrl j'); pause(2.5); shot('f14-open')
     xin('type', 'touch ' + marker); xin('key', 'Return'); ok = until(lambda: os.path.exists(marker), 15); pause(1); shot('f14-typed')
     shown = differs(px('f14-open'), px('f14-typed'))
     log('F14-terminal', ok and shown, 'the floating terminal (Ctrl+J): a command typed with the keyboard ran in a real shell (the marker file exists=%s) and the panel redrew=%s (f14-typed.png)' % (ok, shown))
