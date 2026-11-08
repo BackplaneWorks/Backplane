@@ -213,7 +213,7 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     let (h, imp) = (r.hub.clone(), r.imp.clone());
     let run = tokio::spawn(async move { imp.run(&h, false).await });
     let t0 = std::time::Instant::now(); let (mut last, mut last_at, mut gaps, mut seen_running, mut slow) = (String::new(), t0, vec![], 0, vec![]);
-    let (mut health_ok, mut phases, mut frozen) = (0, std::collections::BTreeSet::new(), 0);
+    let (mut health_ok, mut phases, mut frozen, mut samples) = (0, std::collections::BTreeSet::new(), 0, Vec::<(u128, u128, u128, u128)>::new());
     while !run.is_finished() {
         let now = r.hub.info_now()[INFO].as_str().unwrap_or("").to_string();
         if now != last { let v: Value = serde_json::from_str(&now).unwrap_or(Value::Null);
@@ -222,7 +222,11 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
         if seen_running > 0 && !run.is_finished() {
             let a = std::time::Instant::now(); r.hub.commit(&json!({"$":"SettingSet","key":"ui.probe","value":format!("{}", a.elapsed().as_nanos()),"at":1})).await.unwrap(); let w = a.elapsed();
             let a = std::time::Instant::now(); let n = r.hub.model().await.threads.len(); let rd = a.elapsed();
-            if w.as_millis() > 1000 || rd.as_millis() > 1000 { slow.push((w.as_millis(), rd.as_millis(), n)); }
+            // the runtime's own lateness, which no lock explains: a 1 ms sleep and a blocking-pool round trip
+            let a = std::time::Instant::now(); tokio::time::sleep(std::time::Duration::from_millis(1)).await; let late = a.elapsed().as_millis().saturating_sub(1);
+            let a = std::time::Instant::now(); let _ = tokio::task::spawn_blocking(|| ()).await; let pool = a.elapsed().as_millis();
+            samples.push((w.as_millis(), rd.as_millis(), late, pool));
+            if w.as_millis() > 1000 || rd.as_millis() > 1000 { slow.push((w.as_millis(), rd.as_millis(), n, late, pool)); }
             let (_, hz) = crate::guard::health(); if hz["migrating"]["state"] == "running" && hz["folding"].as_u64().unwrap_or(0) > 0 { health_ok += 1; }
             if !crate::statehost::booted(&r.hub) { frozen += 1; } // the views read the policies' state: it must answer the whole time
         }
@@ -230,10 +234,17 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     }
     let res = run.await.unwrap();
     let took = t0.elapsed();
+    let mx = |f: fn(&(u128, u128, u128, u128)) -> u128| samples.iter().map(f).max().unwrap_or(0);
+    eprintln!("IMPORT-RESPONSIVE samples={} write_max={}ms read_max={}ms sleep_late_max={}ms pool_max={}ms holds={} slow={slow:?}", samples.len(), mx(|s| s.0), mx(|s| s.1), mx(|s| s.2), mx(|s| s.3), res["holds"]);
     assert!(took.as_secs() >= 4, "the throttle made it long enough to watch: {took:?}");
     assert!(seen_running >= 4, "{seen_running} running updates in {took:?}");
     assert!(gaps.iter().skip(1).all(|g| *g <= 2000), "an update at least every 2 s: {gaps:?}");
-    assert!(slow.is_empty(), "a write or a read took over a second mid-import: {slow:?}");
+    // what the import holds a request for beyond the disk: its model apply and its fold into the policies, each chunk (sized to stay near 100 ms)
+    let h = &res["holds"]; let (apply, fold, fsync) = (h["apply_ms_max"].as_u64().unwrap_or(0), h["fold_ms_max"].as_u64().unwrap_or(0), h["fsync_ms_max"].as_u64().unwrap_or(0));
+    assert!(apply <= 300 && fold <= 300, "the import held the writer or the policies too long per chunk: {h}");
+    // a read never waits on the disk: within a second, always. A write waits for at most one import fsync ahead of its own: a second plus that, which is the disk's
+    assert!(samples.iter().all(|s| s.1 <= 1000), "a read took over a second mid-import: {slow:?}");
+    assert!(samples.iter().all(|s| s.0 <= 1000 + fsync as u128), "a write took over a second plus one fsync ({fsync} ms) mid-import: {slow:?} {h}");
     assert!(health_ok > 0, "/healthz said migrating with a fold held");
     assert_eq!(frozen, 0, "the views' state stopped answering during the import (the clients would freeze)");
     assert!(phases.contains("writing") && phases.contains("reading"), "{phases:?}");
@@ -251,4 +262,11 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     let _again = start_auto(&r.hub, Some(r.old.clone()), true); tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     assert!(r.hub.store.range(n, r.hub.store.len()).unwrap().iter().all(|l| !l.contains(DONE)), "a finished import is not run again at the next start");
     drop(imp);
+}
+
+/// A chunk that held the writer too long makes the next one smaller, a quick one larger, within bounds: a request never waits behind much.
+#[test] fn chunks_follow_how_long_the_last_one_held() {
+    assert_eq!(next_chunk(500, 400), 250); assert_eq!(next_chunk(150, 900), 100, "never below the floor");
+    assert_eq!(next_chunk(500, 10), 1000); assert_eq!(next_chunk(1500, 1), 2000, "never above the ceiling");
+    assert_eq!(next_chunk(500, 100), 500, "on target: kept");
 }

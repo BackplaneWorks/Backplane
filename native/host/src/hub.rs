@@ -63,6 +63,8 @@ pub fn frame_bytes(v: &Value) -> usize {
 
 /// `raw`: lines brought in whole from another log (the 0.14 import, `import_lines`): written byte for byte, folded and announced, never seen by a transform or an observer.
 struct Commit { events: Vec<Value>, raw: Vec<String>, done: tokio::sync::oneshot::Sender<Result<u64>> }
+/// The last imported batch's time in the writer: its append and fsync (high 32 bits, ms) and its fold into the model (low). For the import's own record of what a request waited behind.
+pub static RAW_TIMES: AtomicU64 = AtomicU64::new(0);
 
 /// One WebSocket connection's identity and its single open view.
 /// Client numbers are unique in the process, not per hub: what is keyed by the number alone (the account grant, session::forget, a detach) must never reach
@@ -291,13 +293,16 @@ impl Hub {
     async fn write_raw(hub: &Arc<Hub>, c: Commit) {
         let (lines, done) = (c.raw, c.done);
         let store = hub.store.clone(); let owned = lines.clone();
+        let t0 = std::time::Instant::now();
         let wrote = tokio::task::spawn_blocking(move || store.append_many(&owned.iter().map(String::as_str).collect::<Vec<_>>())).await;
+        let t_sync = t0.elapsed().as_millis() as u64;
         match wrote {
             Ok(Ok(first_idx)) => {
                 { let mut m = hub.model.lock().await; for (i, l) in lines.iter().enumerate() { m.apply_line((first_idx + i + 1) as u32, l); } }
-                let all: Vec<Value> = lines.iter().filter_map(|l| serde_json::from_str::<Value>(&crate::store::clean(l)).ok()).collect();
+                RAW_TIMES.store((t_sync << 32) | (t0.elapsed().as_millis() as u64 - t_sync).min(u32::MAX as u64), Relaxed);
+                // (parsed only for a presenter that keeps the log: the hub's own takes none, and a client's write waits while this runs)
                 if hub.need_resync.swap(false, Relaxed) { if let Err(e) = hub.fold_log().await { eprintln!("presenter resync failed: {e:#}"); hub.need_resync.store(true, Relaxed); } }
-                else { for ch in all.chunks(200) { let _ = hub.presenter.fold(&json!({"t":"changes","items":ch,"now":now_ms()})).await; } }
+                else if hub.presenter.wants_log() { let all: Vec<Value> = lines.iter().filter_map(|l| serde_json::from_str::<Value>(&crate::store::clean(l)).ok()).collect(); for ch in all.chunks(200) { let _ = hub.presenter.fold(&json!({"t":"changes","items":ch,"now":now_ms()})).await; } }
                 let n = hub.store.len() as u64; hub.signal_seq.store(n, Relaxed); let _ = hub.changed.send(n);
                 let _ = done.send(Ok((first_idx + lines.len()) as u64));
             }
