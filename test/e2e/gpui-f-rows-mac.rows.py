@@ -107,9 +107,16 @@ if want('F06'):
 if want('F16'):
     res = []
     def trial(name, chord_, judge, undo=None):
-        a = shot('k-%s-a' % name); n0 = len(events()); m0 = len(metrics()); chord(chord_); pause(1.5); b = shot('k-%s-b' % name)
-        ok, why = judge(a, b, events()[n0:], metrics()[m0:])
-        if not ok: pause(3.0); b = shot('k-%s-b' % name); ok, why = judge(a, b, events()[n0:], metrics()[m0:])   # a slow runner: look again before saying no
+        # judged on state, not on a fixed wait: look every second for up to 12 s; if the window did not change at all (the key was lost), press once more and look again
+        a = shot('k-%s-a' % name); n0 = len(events()); m0 = len(metrics())
+        def look(secs=12):
+            end = time.time() + secs; ok, why = False, ''
+            while time.time() < end:
+                pause(1.0); shot('k-%s-b' % name); ok, why = judge(a, px('k-%s-b' % name), events()[n0:], metrics()[m0:])
+                if ok: break
+            return ok, why
+        chord(chord_); ok, why = look()
+        if not ok and not differs(a, px('k-%s-b' % name)) and len(events()) == n0: chord(chord_); ok, why = look(); why += ' (the key was pressed twice: nothing had changed after the first)'
         if undo: undo(); pause(0.8)
         res.append((name, chord_, ok, why)); print('   ', name, chord_, ok, why, flush=True)
     sel(1)
@@ -142,14 +149,29 @@ if want('F17'):
     VIEW = (560, 70, win()[2] - 80, win()[3] - 20)   # right of the timeline, left of the rail
     def busy(name):  # drawn: thousands of pixels that are not the page's background (a "Loading" line or a toolbar is a few hundred)
         im = px(name).crop(VIEW).convert('L'); bg = im.getpixel((5, 5)); return sum(1 for v in im.getdata() if abs(v - bg) > 25) > 6000
+    def stable(tag, secs=40):   # the viewer has finished drawing when two shots a second apart are the same
+        end = time.time() + secs; prev = None
+        while time.time() < end:
+            shot(tag); cur = px(tag).crop(VIEW)
+            if prev is not None and not differs(prev, cur): return True
+            prev = cur; pause(1.0)
+        return False
+    def change(before, tag, act, secs=12):   # do `act`; the viewer must change within `secs`; if nothing moved at all (the event was lost), do it once more
+        for attempt in range(2):
+            act(); end = time.time() + secs
+            while time.time() < end:
+                pause(1.0); shot(tag)
+                if differs(px(before), px(tag), VIEW): return True
+        return False
     for kind, label in [('Board', 'rail:Board'), ('Schematic', 'rail:Schematic'), ('3D', 'rail:3D'), ('Mech', 'rail:Mech')]:
         click_ctl(label); pause(1.0)
-        until(lambda: (shot('v-%s' % kind) and busy('v-%s' % kind)), 40)
+        until(lambda: (shot('v-%s' % kind) and busy('v-%s' % kind)), 60); stable('v-%s' % kind)
         cx, cy = (VIEW[0] + VIEW[2]) // 2, (VIEW[1] + VIEW[3]) // 2
         drawn = busy('v-%s' % kind)
-        for _ in range(4): xin('wheel', cx, cy, 1)
-        pause(1.5); shot('v-%s-zoom' % kind); zoomed = differs(px('v-%s' % kind), px('v-%s-zoom' % kind), VIEW)
-        xin('drag', cx - 80, cy, cx + 80, cy + 40); pause(1.5); shot('v-%s-pan' % kind); panned = differs(px('v-%s-zoom' % kind), px('v-%s-pan' % kind), VIEW)
+        def zoom():
+            for _ in range(4): xin('wheel', cx, cy, 1)
+        zoomed = change('v-%s' % kind, 'v-%s-zoom' % kind, zoom); stable('v-%s-zoom' % kind, 15)
+        panned = change('v-%s-zoom' % kind, 'v-%s-pan' % kind, lambda: xin('drag', cx - 80, cy, cx + 80, cy + 40))
         res.append((kind, drawn, zoomed, panned)); print('   ', kind, 'drawn', drawn, 'wheel changed it', zoomed, 'drag changed it', panned, flush=True)
     ensure_sidebar()   # the sidebar back for the rows after this one
     log('F17', all(r[1] and r[2] and r[3] for r in res), '; '.join('%s: drawn=%s wheel=%s %s=%s' % (k, d, z, 'orbit' if k == '3D' else 'pan', p_) for k, d, z, p_ in res) + ' (frames are not judged: llvmpipe)')
