@@ -12,26 +12,26 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 |---|---|---|---|---|
 | | **Core** | | | |
 | F01 | Hub boots on a temp home, `/hello` answers | pass | pass | pass (`windows smoke`, run 42429479397, 10837b209d) |
-| F02 | Client connects; sidebar and projects load | pass | not run | pass, part: an empty home, WARP (`windows smoke`, run 42429479397) |
+| F02 | Client connects; sidebar and projects load | pass | pass (runner run 42474003421) | pass, part: an empty home, WARP (`windows smoke`, run 42429479397) |
 | F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
 | F04 | Stand-in turn streams; restart ends running turns as interrupted | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
 | F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | pass, hub only, part: the stand-in provider tests that run there (scripts/ci-hub-windows-filter.sh skips the rest) |
-| F06 | Runtime modes, approvals, questions, plans | not run | not run | deferred, no VM |
-| F07 | Queue, steer, stop, held queue resume | not run | not run | deferred, no VM |
+| F06 | Runtime modes, approvals, questions, plans | not run | pass, source build (run 42471112134); release archive: approval only (run 42474003421) | deferred, no VM |
+| F07 | Queue, steer, stop, held queue resume | not run | pass, source build (run 42471112134); archive: fail in run 42474003421, pass in 42454941978 | deferred, no VM |
 | F08 | Fork, bring back, provider switch | not run | not run | deferred, no VM |
-| F09 | Todos, context meter, drafts survive a crash | not run | not run | deferred, no VM |
+| F09 | Todos, context meter, drafts survive a crash | not run | pass (run 42474003421, archive) | deferred, no VM |
 | F10 | Inboxes, orchestration tools, subthreads panel | not run | not run | deferred, no VM |
 | F11 | Model picker, effort, project picker, project badges | not run | not run | deferred, no VM |
 | F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | not run | not run | deferred, no VM |
 | F13 | Titles and the text generation model | not run | not run | deferred, no VM |
 | F14 | Terminal | not run | pass, hub only | pass, hub only: ConPTY (term::tests on windows-latest; the flood test is skipped) |
-| F15 | Attachments and image paste | not run | not run | deferred, no VM |
-| F16 | Keybindings | not run | not run | deferred, no VM |
-| F17 | Viewers: board, schematic, 3D, STEP | not run | not run | deferred, no VM |
-| F18 | Browser tab (CEF) | not run | not run | deferred, no VM |
+| F15 | Attachments and image paste | not run | pass, source build (run 42471112134); archive: pass in 42454941978, fail in 42474003421 | deferred, no VM |
+| F16 | Keybindings | not run | pass, 12 of 12 keys (runs 42458427024, 42474003421); one key flakes per other run | deferred, no VM |
+| F17 | Viewers: board, schematic, 3D, STEP | not run | pass, 4 of 4 viewers (runs 42469212549, 42474003421); Mech pan flaked in 42471112134 | deferred, no VM |
+| F18 | Browser tab (CEF) | not run | pass, part: frame-stream helper; a download the person starts known missing (run 42471112134). Release archive v0.14.93: fail, the frame poller bug (run 42474003421) | deferred, no VM |
 | F19 | Bots and rooms | not run | not run | deferred, no VM |
 | F20 | File browser and downloads | not run | not run | deferred, no VM |
-| F21 | Reconnect, resume from sequence, outbox, long session | not run | not run | deferred, no VM |
+| F21 | Reconnect, resume from sequence, outbox, long session | not run | pass, source build (run 42471112134); archive: fail in 42474003421 | deferred, no VM |
 | F22 | Ordering flow up to the quote; no order placed | not run | not run | deferred, no VM |
 | F23 | A killed hub leaves no agent behind | pass, hub only | pass | not run: skipped, the stand-ins report Git sh pids |
 | | **Install and CAD** | | | |
@@ -206,6 +206,29 @@ Hub-only rows drove the hub over its websocket with stand-in agents; no client r
 | S12 | not run | 489505f966 | hs-mac-mini macOS 26.5 arm64, hub release build, no window (console session logged in, no window allowed) | the Settings script of the Linux lane (settings-walk.mjs) drives the hub view over /proc-based helpers and was not given to this lane; GUI not run |
 | S13 | not run | 489505f966 | hs-mac-mini macOS 26.5 arm64, hub release build, no window (console session logged in, no window allowed) | the Settings script of the Linux lane (settings-walk.mjs) drives the hub view over /proc-based helpers and was not given to this lane; GUI not run |
 | S14 | pass, part: nothing is sent in any state | 6e44184379 | hs-mac-mini macOS 26.5 arm64, hub release build, no window | privacy: `test/e2e/mac-effects.mjs` walked Off (`setting.set`, stored off), On via `setting.set` (refused on purpose, `reserved` in settings/telemetry.rs: a stale click must not re-enable; stays off), On via `telemetry.choice` with the page's token (what the On button sends; stored on). The hub opened no non-loopback connection over 10 s in Off or On. This build has no sender or endpoint (`may_send` is always false), so the choice shows only in what is stored |
+
+### macOS, GitHub macos-latest runner (logged-in GUI session, a 1024x768 virtual display)
+
+Workflow `e2e-macos.yml` (dispatch only): the hub rows from a build of the checkout (`hub` job), the client rows either from the release archive installed with its own `install.sh` (`client` job, v0.14.93 from dry run 42451126435) or from a build of the checkout (`client-src`). The client is driven with real input (`cliclick`, Quartz wheel events, a real clipboard) and screenshots (`screencapture`) by `test/e2e/gpui-f-rows-mac.py`; a row passes from the hub's log, the client's metrics or pixels. Nothing opens a window on hs-mac-mini.
+
+| ID | Result | Run | Rig | Evidence |
+|---|---|---|---|---|
+| F01, F03, F04, F07-F10, F12, F14, F19-F21, F23 (hub) | pass, hub only | 42472527483 | macos-latest, hub built from the checkout | `mac-hub-rows.mjs`: 15 checks, 0 FAIL; F23 a killed hub leaves no agent |
+| S01-S14 (hub) | persists, effect proven for files.max.mb, person.tz, telemetry, restart.continue, agent.provider/model, update.channel, order.enabled | 42472527483 | same | `settings-walk.mjs` 89 controls, 0 not applied, 0 persist failures; `mac-effects.mjs` 7 of 7 |
+| C02 | pass, part | 42472527483 | same, KiCad 10.0.7 by brew cask | the hub ran ERC + DRC and the exports (gerbers, bom, cpl, step, pdfs); one sub-check failed: the CAD page named `/opt/homebrew/bin/kicad-cli`, not the app path set in `kicad.path` (not explained) |
+| C03 | pass, part: install not run | 42472527483 | same, FreeCAD 1.1.4 by brew cask | `mac-c03.mjs` 4 of 4 and `mac-c03-agent.mjs` 3 of 3: the path control is used by the hub and told to agents |
+| F02 | pass | 42474003421 (archive), 42471112134 (source) | macos-latest, real client window | first frame, usable, project and 3 threads, "Connected" (f02.png) |
+| F06 | pass on a source build; archive: approval pass, question/plan row stopped | 42471112134; 42474003421 | same | approval card Allow and Deny reach the agent; question and plan cards (screenshots kept). On the archive the question card did not open in time in 42474003421 (it passed in 42453710270) |
+| F07 | pass on a source build and in 42454941978; archive fail in 42474003421 | 42471112134 | same | the Stop button ends the turn in the hub log |
+| F08, F14 | pass | 42474003421 | same | fork button creates a thread; the floating terminal runs a typed command in a real shell |
+| F09 | pass | 42474003421 | same | the Context panel changes after a counted turn; an unsent draft survives killing the client |
+| F15 | pass on a source build and in 42454941978; archive fail in 42474003421 | 42471112134 | same | a PNG on the real clipboard pasted, stored, and named to the agent; in 42474003421 the agent's turn line did not show the path within 30 s |
+| F16 | pass, 12 of 12 | 42474003421 (archive), 42458427024 | same | palette, models (Ctrl+M), sidebar, files, diff, terminal, thread 2, performance, uberbot, new, stop (Ctrl+.), settle; each judged by pixels or the hub log. Other runs: one key flaked (files, diff, uber or stop) |
+| F17 | pass, 4 of 4 viewers | 42474003421 (archive), 42469212549 | same | Board, Schematic, 3D, Mech drawn; wheel and drag change them (Mech needs FreeCAD; the viewer says so when it is missing). Mech pan flaked in 42471112134 |
+| F18 | pass, part: frame-stream helper | 42471112134 | same, source build | page loads and paints from the helper's frames; a real click, typing, wheel scroll and a popup (loaded, has its opener) reach the page; the download link is followed and the server sends the attachment, but no file lands (known missing: a download the person starts is not kept in frame mode). Release archive v0.14.93: fail: the Browser tab never fetched a frame ("hub unreachable: failed to lookup address information"): the poller dialled the whole URL as a host name; fixed in 4deeea2ee2 (run 42474003421: the hub never made a frame) |
+| F21 | pass on a source build | 42471112134 | same | the hub restarted on the same home: the status line changed while down, and a message typed after reconnecting reached the new hub. Archive: fail in 42474003421 (status check) |
+| F22 | pass on a source build | 42471112134 | same | files card, Send, quote card; nothing paid. Archive: fail in 42474003421 |
+
 
 ### Windows
 
