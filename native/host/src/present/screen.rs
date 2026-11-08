@@ -417,7 +417,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     if let Some(t)=super::onboard::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null),&super::onboard::Client::of(p),&super::onboard::home_dir()) { shown["tour"]=t; }
     { let r=super::onboard::resume(st,&session); if !r.is_null() { shown["setup"]=r; } }
     // a 0.14 home coming across: over everything, setup included (import014)
-    if let Some(m)=super::onboard::import_overlay(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) { shown["migrate"]=m; }
+    let mi=crate::import014::last_published().map(|v| json!({"import.v014": v.to_string()})).unwrap_or(Value::Null);
+    if let Some(m)=super::onboard::import_overlay(st,&session,&mi) { shown["migrate"]=m; }
     let mut overlay=shown.clone();
     for project in overlay["projects"].as_array_mut().unwrap() { project.as_object_mut().unwrap().remove("machine"); }
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});

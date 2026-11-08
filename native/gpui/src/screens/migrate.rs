@@ -30,6 +30,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, m: &Value) -> Option<AnyEl
         row = row.child(d.child(string(b, "label")).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })));
     }
     card = card.child(row);
+    // the card's own rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named by its state: `migrate:running`, `migrate:done`, `migrate:failed`
+    let card = if crate::art::rects_on() { let n = format!("migrate:{}", string(m, "state")); card.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { card };
     // the window behind is dimmed and takes no input: nothing behind the card can be pressed into a half-made state
     Some(div().id("migrate").absolute().top_0().left_0().size_full().flex().items_center().justify_center().occlude()
         .child(div().absolute().top_0().left_0().size_full().bg(c("bg")).opacity(0.92)).child(card).into_any_element())

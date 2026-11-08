@@ -129,6 +129,8 @@ impl Bots {
     /// The turn itself, when there is an uberbot and this machine holds its conversation.
     pub async fn wake_uber(&self, why: &str) -> Result<bool, String> {
         let now = now_s();
+        // an uberbot that came with a 0.14 import in this start was not restarted: it would read 0.14's halted threads as its own, maybe while 0.14 still runs them
+        if crate::import014::ran_this_start(&self.hub.cfg.home) { return Ok(false) }
         let th = { let w = self.world().await; let bot = w.uber_bot(); if bot.is_empty() || !w.holder_me() { return Ok(false) } w.bot(&bot).map(|b| b.thread.clone()).unwrap_or_default() };
         if th.is_empty() { return Ok(false) }
         self.inbox.deliver_system(&th, &self.id("m", now), &restarted_text(why), None).await?;

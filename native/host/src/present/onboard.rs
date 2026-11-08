@@ -161,7 +161,7 @@ fn home(f: &Facts, c: &Client) -> Step {
 /// The import as the hub info `import.v014` tells it. None: no 0.14 home on this computer and nothing imported.
 pub fn import_info(info: &Value) -> Option<Value> { info["import.v014"].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).filter(|v| v["state"].is_string() && v["state"] != "none") }
 fn num(v: &Value, k: &str) -> u64 { v[k].as_u64().unwrap_or(0) }
-fn many(n: u64, one: &str, more: &str) -> String { format!("{n} {}", if n == 1 { one } else { more }) }
+fn many(n: u64, one: &str, more: &str) -> String { format!("{} {}", thousands(n), if n == 1 { one } else { more }) }
 /// "12 projects, 1045 threads with 170677 messages, 6 bots with 1293 memories, ..." for what is not zero.
 pub fn import_counted(c: &Value) -> String {
     let mut parts = vec![];
