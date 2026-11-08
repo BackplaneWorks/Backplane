@@ -114,7 +114,7 @@ jobs:
       - name: input and screenshot tools, FreeCAD
         run: |
           brew install cliclick
-          brew install --cask freecad   # the Mech viewer asks the hub for FreeCAD
+          brew install --cask freecad || echo "FreeCAD did not install (a download error): the Mech viewer row will say so"   # the Mech viewer asks the hub for FreeCAD
           python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz
       - name: client rows, from the installed archive
         run: |
@@ -155,7 +155,7 @@ jobs:
       - name: input and screenshot tools, FreeCAD
         run: |
           brew install cliclick
-          brew install --cask freecad
+          brew install --cask freecad || echo "FreeCAD did not install (a download error): the Mech viewer row will say so"
           python3 -m venv .venv && .venv/bin/pip install -q pillow pyobjc-framework-Quartz
       - name: client rows, from this checkout's build
         run: |
