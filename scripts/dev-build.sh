@@ -35,6 +35,8 @@ phase() { if [ -n "$BX" ]; then local p; p=$(tail -c 30000 "$LOG" 2>/dev/null | 
 ticker() { while :; do e=$(( $(date +%s) - start )); d=$e; [ "$d" -gt $((est*95/100)) ] && d=$((est*95/100)); left=$((est-e)); [ "$left" -lt 0 ] && left=0
   [ -n "${BP_REMOTE_CORE:-}" ] && { p=$(cat "$PH" 2>/dev/null); [ "$p" = "${lastp:-}" ] || { echo "bp-phase: $p" >&2; lastp=$p; }; }   # on a Boat box: the phase goes to the caller on stderr
   status building "Building $(phase): ${e}s, about ${left}s to go" "$d" "$est"; sleep 2; done; }
+# per-phase seconds, one line each in the build log ("time: compiling tests 41s"), so a slow build says where it went; a phase skipped because its inputs are the last good build's says so ("skip: ...")
+TP=$(date +%s.%N); TN=; mark() { local n; n=$(date +%s.%N); [ -z "$TN" ] || printf 'time: %s %.0fs\n' "$TN" "$(awk -v a="$n" -v b="$TP" 'BEGIN{print a-b}')"; TP=$n; TN=$1; [ -z "$1" ] || echo "$1" > "$PH"; }
 ticker & TK=$!
 # a haiku on what this build adds (commits since MAIN_PREV, the tip built before), made by Haiku while the build runs; a miss costs nothing
 HK=$(mktemp "$DEV/.haiku.XXXX"); HKP=
@@ -45,7 +47,7 @@ tds=()
 trap cleanup EXIT
 # The slot is held by the wrapper at the top (below); the compiler cache and the cargo -j (about 2 GB of free memory a job) are set here.
 bq_cc; [ -n "$J" ] || J=$(bq_jobs)
-echo "hub" > "$PH"
+mark "hub"
 fail() { kill $TK 2>/dev/null; why=$(grep -m1 -E '^(error|test .* FAILED)' "$LOG" | cut -c1-110); printf '%s\n' "$1: ${why:-see the log}" > "$DEV/.last-failure"; cp "$LOG" "$DEV/.last-failure.log" 2>/dev/null
   status failed "Build failed in $1: ${why:-see $DEV/.last-failure.log}" 0 0; tail -20 "$LOG" >&2; [ -n "${BP_REMOTE_CORE:-}" ] || sleep 8; exit 1; }
 skips=(); while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) skips+=(--skip "$l");; esac; done < "$HERE/gate-skip.txt"
@@ -59,20 +61,20 @@ CG() { ( cd "$1" && CARGO_TARGET_DIR="$2" taskset -c 0-$((ncpu - 1)) nice -n 10 
 # CEF_PATH (the cef crate downloads it on the first build); if that build fails the window is built without it and says so in the Browser tab ("embedded browser unavailable").
 FEATURES=${GPUI_FEATURES-cef}; export CEF_PATH=${CEF_PATH:-$HOME/.cache/backplane/cef-rs}
 # the voice helper: the hub looks for `backplane-voice` beside itself
-voicestep() { echo "voice" > "$PH"; CG "$ROOT/native/voice" "$VT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-voice > "$LOG" 2>&1 || fail voice; }
+voicestep() { mark "voice"; CG "$ROOT/native/voice" "$VT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-voice > "$LOG" 2>&1 || fail voice; }
 winstep() {
-  echo "window" > "$PH"
+  mark "window"
   if [ -n "$FEATURES" ] && ! CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" $OFFLINE -j "$J" --features "$FEATURES" > "$LOG" 2>&1; then
     cp "$LOG" "$DEV/.cef-build.log" 2>/dev/null; echo "warning: the window did not build with $FEATURES (see $DEV/.cef-build.log): building it without" >&2; FEATURES=
   fi
   if [ -z "$FEATURES" ]; then CG "$ROOT/native/gpui" "$GT" build --profile "$PROFILE" $OFFLINE -j "$J" > "$LOG" 2>&1 || fail window; fi
 }
 # `backplane`, the guard (native/guard): a small crate of its own, built first
-guardstep() { echo "guard" > "$PH"; CG "$ROOT/native/guard" "$UT" build --profile "$PROFILE" $OFFLINE -j "$J" > "$LOG" 2>&1 || fail guard; }
+guardstep() { mark "guard"; CG "$ROOT/native/guard" "$UT" build --profile "$PROFILE" $OFFLINE -j "$J" > "$LOG" 2>&1 || fail guard; }
 # On a Boat box (every local slot taken, lib-boat.sh): this same script runs there with BP_REMOTE_CORE=1 (the tests and the four builds, no stage, no publish), its output
 # comes back into $LOG, and the programs are copied back to $HT/$GT/$VT/$UT/$PROFILE, hashed on the box and again here. The stage, the smoke start and the publish below stay local.
 boat_core() {
-  BJOB="$(date +%s)-$$"; echo "boat" > "$PH"; local pullcef=0 ver RT body rc PULL f
+  BJOB="$(date +%s)-$$"; mark "boat"; local pullcef=0 ver RT body rc PULL f
   BOXID=$(bo_box "$BX") || { bo_down "no box"; exit 98; }
   bo_say "all build slots are busy: $([ "$GATE" = 1 ] && echo 'testing and ')building on Boat bp-build-$BX ($BOXID)"
   bo_sync "$BOXID" "$ROOT" "$BJOB" || { bo_down "could not copy the worktree to $BOXID"; exit 98; }
@@ -85,7 +87,7 @@ boat_core() {
   [ "$rc" = 0 ] || fail "$(phase)"
   grep '^gate: ' "$LOG"
   f=$(sed -n 's/^bp-features: //p' "$LOG" 2>/dev/null | tail -1); [ -z "$f" ] || FEATURES=$f   # (what the box ended up building the window with)
-  echo "copying" > "$PH"; PULL=$(mktemp -d "$DEV/.pull.XXXX")
+  mark "copying"; PULL=$(mktemp -d "$DEV/.pull.XXXX")
   bo_pull "$BOXID" "$BJOB" /home/user/target "$PULL" >> "$LOG" 2>&1 || { rm -rf "$PULL"; fail "copy from the box"; }
   cpart() { mkdir -p "$2/$PROFILE"; cp -f "$PULL/$1/$PROFILE/$3" "$2/$PROFILE/"; }
   cpart host "$HT" backplane-hub; cpart gpui "$GT" backplane-gpui; cpart voice "$VT" backplane-voice; cpart guard "$UT" backplane
@@ -93,8 +95,8 @@ boat_core() {
   rm -rf "$PULL"; echo "built on Boat bp-build-$BX ($BOXID)" > "$DEV/.built-on-boat"; }
 if [ -n "$BX" ]; then boat_core
 elif [ "$GATE" = 1 ]; then
-  echo "guard tests" > "$PH"; CG "$ROOT/native/guard" "$UT" test $OFFLINE -j "$J" > "$LOG" 2>&1 || fail "guard tests"
-  echo "compiling tests" > "$PH"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX"); LV=$(mktemp "$DEV/.t.XXXX")
+  mark "guard tests"; CG "$ROOT/native/guard" "$UT" test $OFFLINE -j "$J" > "$LOG" 2>&1 || fail "guard tests"
+  mark "compiling tests"; LH=$(mktemp "$DEV/.t.XXXX"); LW=$(mktemp "$DEV/.t.XXXX"); LV=$(mktemp "$DEV/.t.XXXX")
   CG "$ROOT/native/host" "$HT" test $OFFLINE -j "$J" --no-run > "$LH" 2>&1 & ph=$!
   CG "$ROOT/native/gpui" "$GT" test $OFFLINE -j "$J" --no-run > "$LW" 2>&1 & pw=$!
   # the voice tests take env!("CARGO_BIN_EXE_backplane-voice"), which came out undefined through sccache ("not defined at compile time") and is fine without it; its deps are already built in $VT
@@ -102,7 +104,7 @@ elif [ "$GATE" = 1 ]; then
   wait $ph || { cp "$LH" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "hub tests"; }
   wait $pw || { cp "$LW" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "window tests"; }
   wait $pv || { cp "$LV" "$LOG"; rm -f "$LH" "$LW" "$LV"; fail "voice tests"; }
-  echo "testing" > "$PH"; names=(); pids=(); logs=(); st=()
+  mark "testing"; names=(); pids=(); logs=(); st=()
   # each test program gets its own TMPDIR (tests make dirs under temp_dir() and never remove them; lib-buildslot.sh bpt_new), removed after a pass, kept (bounded) after a failure
   run() { n=$1; dir=$2; shift 2; l=$(mktemp "$DEV/.t.XXXX"); t=$(bpt_new); tds+=("$t"); ( cd "$dir" && TMPDIR=$t CARGO_MANIFEST_DIR="$dir" "$@" ) > "$l" 2>&1 9>&- & pids+=($!); names+=("$n"); logs+=("$l")
     # a machine with fewer than 16 cores (a Boat box) runs the test programs one after another: side by side they starve each other's timing-sensitive tests (a recorder "that fails at once" is judged within 500 ms)
@@ -118,12 +120,12 @@ elif [ "$GATE" = 1 ]; then
   rm -f "${logs[@]}"
   # the builds come after the tests, not beside them: a build at -j28 starves the timing-sensitive hub tests (reconnect_loses_nothing_under_streaming_load and others fail under that load)
   guardstep
-  echo "hub" > "$PH"; CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
+  mark "hub"; CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
   voicestep
   winstep
 else
   guardstep
-  echo "hub" > "$PH";    CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
+  mark "hub";    CG "$ROOT/native/host" "$HT" build --profile "$PROFILE" $OFFLINE -j "$J" --bin backplane-hub > "$LOG" 2>&1 || fail hub
   voicestep
   winstep
 fi
@@ -134,8 +136,8 @@ if [ -n "${BP_REMOTE_CORE:-}" ]; then   # on a Boat box: the programs and their 
     for f in "$GT/$PROFILE/locales/"*.pak; do fl+=("${f#$T/}"); done; fi
   printf '%s\n' "${fl[@]}" > "$BP_JOB/artifacts"; sha256sum "${fl[@]}" > "$BP_JOB/sha256"; exit 0
 fi
-kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"; rm -f "$DEV/.last-failure" "$DEV/.last-failure.log"
-D=$(mktemp -d "$DEV/.stage.XXXX")
+mark ""; kill $TK 2>/dev/null; echo $(( $(date +%s) - start )) > "$SECS"; rm -f "$DEV/.last-failure" "$DEV/.last-failure.log"
+D=$(mktemp -d "$DEV/.stage.XXXX"); mark "stage"
 cp "$HT/$PROFILE/backplane-hub" "$GT/$PROFILE/backplane-gpui" "$VT/$PROFILE/backplane-voice" "$UT/$PROFILE/backplane" "$D/"
 cp "$ROOT/native/voice/vad/silero_vad.onnx" "$D/"   # dictation's VAD beside the helper, as in a release: local-install takes it (no download) when it matches its pin
 # the embedded Chromium: libcef.so beside the window (it is linked with RUNPATH $ORIGIN); the rest of CEF's runtime (paks, icudtl.dat, locales, snapshot) is found in
@@ -148,18 +150,20 @@ if [ -n "$FEATURES" ] && { [ -f "$GT/$PROFILE/libcef.so" ] || [ -f "$RT/libcef.s
   fi
   ln -s "$RT/libcef.so" "$D/libcef.so"
 fi
+mark "browser helper"
 # the browser helper (tools/browser, bun): the hub looks for `backplane-browser` beside itself, and without one every Browser tab fails to open
 command -v bun >/dev/null 2>&1 && { . "$ROOT/scripts/bun-pin.sh"; bun_pin_check bun; }   # a release builds it with deploy/bun-version's Bun
 if command -v bun >/dev/null 2>&1 && ( cd "$ROOT/tools/browser" && bun install --frozen-lockfile >/dev/null 2>&1 && bun build.ts "$D/backplane-browser" >/dev/null 2>&1 ); then :
 else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-browser; [ -x "$prev" ] && cp "$prev" "$D/" || echo "warning: no browser helper built (bun missing or the build failed) and none to reuse" >&2; fi
+mark "assets"
 A=${ASSETS:-$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/assets}; [ -d "$A" ] && cp -r "$A" "$D/assets"
 git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
 [ -z "$HKP" ] || wait "$HKP" 2>/dev/null; [ -s "$HK" ] && cp "$HK" "$D/HAIKU"
 # the last gate: this hub, under this guard, starts and restarts on a real-shaped home, and the build now current can still read what it wrote. Nothing is published otherwise.
 if [ -z "${SKIP_SMOKE:-}" ] || [ -n "$BX" ]; then   # (a build made on a Boat box is always smoke-started here, whatever SKIP_SMOKE says)
-  status building "Smoke start of $(cat "$D/COMMIT")" "$est" "$est"
+  mark "smoke start"; status building "Smoke start of $(cat "$D/COMMIT")" "$est" "$est"
   SMOKE_DIR="$DEV" "$HERE/smoke-start.sh" "$D" "$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)" > "$LOG" 2>&1 || fail "smoke start"
 fi
-[ "$CUT" = 0 ] && { echo "built in $D"; D=; exit 0; }
-status ready "Build $(cat "$D/COMMIT") ready: publishing" "$est" "$est"
-"$HERE/dev-cut.sh" "$D" 9>&-
+[ "$CUT" = 0 ] && { mark ""; echo "time: total $(( $(date +%s) - start ))s"; echo "built in $D"; D=; exit 0; }
+status ready "Build $(cat "$D/COMMIT") ready: publishing" "$est" "$est"; mark "publish"
+"$HERE/dev-cut.sh" "$D" 9>&-; rc=$?; mark ""; echo "time: total $(( $(date +%s) - start ))s"; exit $rc
