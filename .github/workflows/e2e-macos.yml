@@ -9,9 +9,9 @@ on:
         default: all
       archive_run:
         description: "release dry run whose darwin-arm64 archive the client rows run from, installed with its install.sh"
-        default: "42471783563"
+        default: "42482640273"
       archive_tag:
-        default: "v0.0.0-dryrun.gradle1"
+        default: "v0.15.0-rc.1"
       rows:
         description: "client rows to run (space separated, empty: all)"
         default: ""
@@ -43,7 +43,7 @@ jobs:
         with: { name: probe, path: out }
 
   build:
-    if: inputs.jobs == 'hub' || inputs.jobs == 'all'
+    if: inputs.jobs == 'build'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,31 +66,34 @@ jobs:
         with: { name: dist, path: dist }
 
   hub:
-    needs: build
+    # the macOS hub rows against the hub of the installed release archive
     if: inputs.jobs == 'hub' || inputs.jobs == 'all'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { name: dist, path: dist }
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
+      - name: install the release archive with its own installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test/e2e/mac-install-archive.sh ${{ inputs.archive_run }} ${{ inputs.archive_tag }}
       - name: FreeCAD and KiCad
-        run: brew install --cask freecad kicad
+        run: |
+          brew install --cask freecad || echo "FreeCAD did not install (a download error)"
+          brew install --cask kicad || echo "KiCad did not install (a download error)"
       - name: macOS hub rows
         run: |
-          ls -l /Applications/KiCad/KiCad.app/Contents/MacOS/ 2>&1 | head -5; ls -l /opt/homebrew/bin/kicad-cli; KICAD_CLI=$(python3 -c 'import os;print(os.path.realpath("/opt/homebrew/bin/kicad-cli"))'); echo "kicad-cli: $KICAD_CLI"; export KICAD_CLI
-          set -o pipefail
-          chmod +x dist/*; mkdir -p out; export HOME_BEFORE=$HOME
-          echo "hub commit $(cat dist/COMMIT)"
-          ok=0
-          node test/e2e/mac-hub-rows.mjs "$PWD/dist/backplane-hub" "$PWD/out/hub-rows" 3801 2>&1 | tee out/hub-rows.txt || ok=1
+          set -o pipefail; mkdir -p out
+          H="$BUILD/backplane-hub"; echo "hub of the installed archive: $(cat "$BUILD/COMMIT")"
+          KICAD_CLI=$(python3 -c 'import os;print(os.path.realpath("/opt/homebrew/bin/kicad-cli"))'); echo "kicad-cli: $KICAD_CLI"; export KICAD_CLI
           FC=/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd
-          node test/e2e/mac-effects.mjs "$PWD/dist/backplane-hub" "$PWD/out/effects" 3860 2>&1 | tee out/effects.txt || ok=1
-          node test/e2e/mac-c03.mjs "$PWD/dist/backplane-hub" "$PWD/out/c03" 3840 "$FC" 2>&1 | tee out/c03.txt || ok=1
-          node test/e2e/mac-c03-agent.mjs "$PWD/dist/backplane-hub" "$PWD/out/c03-agent" 3850 "$FC" 2>&1 | tee out/c03-agent.txt || ok=1
-          KICAD_CLI="$KICAD_CLI" node test/e2e/cad-rows.mjs "$PWD/dist/backplane-hub" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
-          node test/e2e/settings-walk.mjs "$PWD/dist/backplane-hub" "$PWD/out/walk" 3830 2>&1 | tee out/walk.txt || ok=1
+          ok=0
+          node test/e2e/mac-hub-rows.mjs "$H" "$PWD/out/hub-rows" 3801 2>&1 | tee out/hub-rows.txt || ok=1
+          node test/e2e/mac-effects.mjs "$H" "$PWD/out/effects" 3860 2>&1 | tee out/effects.txt || ok=1
+          node test/e2e/mac-c03.mjs "$H" "$PWD/out/c03" 3840 "$FC" 2>&1 | tee out/c03.txt || ok=1
+          node test/e2e/mac-c03-agent.mjs "$H" "$PWD/out/c03-agent" 3850 "$FC" 2>&1 | tee out/c03-agent.txt || ok=1
+          node test/e2e/cad-rows.mjs "$H" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
+          node test/e2e/settings-walk.mjs "$H" "$PWD/out/walk" 3830 2>&1 | tee out/walk.txt || ok=1
           exit $ok
       - uses: actions/upload-artifact@v4
         if: always()
@@ -104,22 +107,7 @@ jobs:
       - name: install the release archive with its own installer
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          tag="${{ inputs.archive_tag }}"
-          if gh run download ${{ inputs.archive_run }} -n release-dry-run -D rel 2>/dev/null; then echo "installer from the dry run's own release-dry-run artifact"
-          else
-            # the dry run's publish job did not run: only the archive is there. The installer is the one release.yml makes, filled in the same way from deploy/install.sh.in
-            gh run download ${{ inputs.archive_run }} -n archive-darwin-arm64 -D rel
-            sha=$(shasum -a 256 "rel/backplane-$tag-darwin-arm64-native.tar.gz" | cut -d' ' -f1)
-            sed -e "s|@REPO@|${{ github.repository }}|" -e "s|@VERSION@|$tag|" -e "s|@SHA_LINUX_X64@||" -e "s|@SHA_LINUX_ARM64@||" -e "s|@SHA_DARWIN_ARM64@|$sha|" deploy/install.sh.in > rel/install.sh
-            if grep -q '@[A-Z_0-9]*@' rel/install.sh; then echo "install.sh still has a placeholder"; exit 1; fi
-          fi
-          ls -l rel
-          export BACKPLANE_ARCHIVE="$PWD/rel/backplane-$tag-darwin-arm64-native.tar.gz" BACKPLANE_PREFIX="$PWD/inst" BACKPLANE_HOME="$PWD/inst-home" BACKPLANE_NO_DESKTOP_APP=
-          sh rel/install.sh --quiet
-          B="$PWD/inst/builds/$tag"; ls -l "$B"; cat "$B/COMMIT"
-          echo "BUILD=$B" >> "$GITHUB_ENV"
+        run: test/e2e/mac-install-archive.sh ${{ inputs.archive_run }} ${{ inputs.archive_tag }}
       - name: input and screenshot tools, FreeCAD
         run: |
           brew install cliclick
