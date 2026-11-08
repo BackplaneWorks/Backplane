@@ -83,11 +83,13 @@ final class FRows: XCTestCase {
                 d.tap(tabb)
                 let surface = d.el(kind == "Mech" ? "data.mech.surface" : "data.viewer.surface")   // Mech's solid has its own surface
                 var before = (0, Data())
-                d.step("F17 \(kind) is drawn", timeout: 60, act: {}, expect: { guard surface.exists, surface.frame.height > 150 else { return false }; before = self.lit(surface); return before.0 > 6000 })
+                // drawn: lit, and no longer saying it is loading (a loading card is bright too, and its spinner moves)
+                let loading = d.label("Loading 3D model")
+                d.step("F17 \(kind) is drawn", timeout: 120, act: {}, expect: { guard surface.exists, surface.frame.height > 150, !loading.exists else { return false }; before = self.lit(surface); return before.0 > 6000 })
                 d.shot("v-\(kind)")
                 if surface.exists { surface.swipeLeft() } else { d.note("F17 \(kind): no surface to swipe") }; sleep(2)
                 let after = surface.exists ? lit(surface) : (0, Data())
-                d.step("F17 \(kind) moves under a swipe", timeout: 1, act: {}, expect: { after.1 != before.1 })
+                d.step("F17 \(kind) moves under a swipe", timeout: 1, act: {}, expect: { after.1 != before.1 && after.0 != before.0 && !loading.exists })
                 d.note("F17 \(kind): \(before.0) lit pixels before the swipe, \(after.0) after")
             }
             if d.el("viewer.close").exists { d.tap(d.el("viewer.close")) }
