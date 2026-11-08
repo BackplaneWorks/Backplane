@@ -10,10 +10,14 @@ pub struct Listener { pub routes: Vec<String>, pub machines: Value, pub peers: V
 pub struct AuthRoutes {
     pub reg: Arc<Registry>, host: String, port: u16, state: Mutex<Listener>,
     qr: fn(&str) -> String,
+    /// the local network listening the person chose (`net::lan`); none until the hub installs it
+    lan: std::sync::OnceLock<Arc<super::lan::Lan>>,
+    /// this machine's (interface, IPv4) pairs; a test gives its own
+    ifaces: fn() -> Vec<(String, String)>,
 }
 pub struct Outcome { pub reply: HttpReply, pub close: Vec<u64>, pub unpeer: Option<String> }
 
-pub const ROUTES: &[&str] = &["/auth/enroll", "/auth/invitations", "/auth/devices", "/auth/revoke", "/auth/known", "/auth/pair", "/auth/cache"];
+pub const ROUTES: &[&str] = &["/auth/enroll", "/auth/invitations", "/auth/devices", "/auth/revoke", "/auth/known", "/auth/pair", "/auth/cache", "/auth/lan"];
 
 fn json_reply(status: &'static str, body: &Value, extra: &str) -> HttpReply {
     HttpReply { status, ctype: "application/json".into(), extra: format!("Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n{extra}"), body: body.to_string().into_bytes() }
@@ -21,7 +25,18 @@ fn json_reply(status: &'static str, body: &Value, extra: &str) -> HttpReply {
 
 impl AuthRoutes {
     pub fn new(reg: Arc<Registry>, host: &str, port: u16, qr: fn(&str) -> String) -> AuthRoutes {
-        AuthRoutes { reg, host: host.into(), port, qr, state: Mutex::new(Listener { routes: vec![], machines: json!({}), peers: vec![] }) }
+        AuthRoutes { reg, host: host.into(), port, qr, state: Mutex::new(Listener { routes: vec![], machines: json!({}), peers: vec![] }), lan: Default::default(), ifaces: super::lan::interfaces }
+    }
+    /// The same with the machine's interfaces as a test sets them.
+    #[cfg(test)]
+    pub fn with_ifaces(mut self, ifaces: fn() -> Vec<(String, String)>) -> AuthRoutes { self.ifaces = ifaces; self }
+    pub fn set_lan(&self, lan: Arc<super::lan::Lan>) { let _ = self.lan.set(lan); }
+    pub fn lan(&self) -> Option<Arc<super::lan::Lan>> { self.lan.get().cloned() }
+    /// The registry's list with the local network addresses the person let the hub answer on (`lan`) and the main listener's host.
+    pub fn devices(&self) -> Value {
+        let mut j = self.reg.list();
+        if j.is_object() { j["lan"] = self.lan().map_or(json!([]), |l| l.list()); j["host"] = json!(self.host); }
+        j
     }
     /// Pairing.address: a listener-confirmed reachable origin (Serve or the tailnet bind), credentials stripped.
     pub fn address(&self, link: &str) {
@@ -41,24 +56,31 @@ impl AuthRoutes {
         if cookie.is_empty() { owner::param(&req.target, "token") } else { cookie }
     }
     /// A private invitation made from inside the hub (Settings → Devices → Add a device): the same one `POST /auth/invitations` makes, with the QR code of its link.
+    /// Its `addresses` (`plan::plan`) carry no QR code here: the page draws the one for the address it shows.
     pub fn invite(&self) -> Value {
         // the hub's own address stands in for the Host header an HTTP request would have carried (a hub bound to everything names its interfaces itself)
         let authority = if self.host == "0.0.0.0" { String::new() } else { format!("{}:{}", self.host, self.port) };
-        let mut j = self.reg.create(&self.create_routes(&authority, false));
-        if let Some(l) = j["link"].as_str().map(str::to_string) { j["qr"] = json!((self.qr)(&l)); }
+        self.create(&authority, false)
+    }
+    /// The invitation and every address it may be shown with (`plan::plan`): the tailnet, each local network address, this computer.
+    fn create(&self, authority: &str, https: bool) -> Value {
+        let routes = self.state.lock().unwrap().routes.clone();
+        let bound = self.lan().map(|l| l.bound()).unwrap_or_default();
+        let (default, choices) = super::plan::plan(&routes, &self.host, self.port, authority, https, &(self.ifaces)(), &bound);
+        self.reg.create_with(&default, &choices)
+    }
+    /// The QR code of the default link and of each address's own link.
+    fn with_qrs(&self, mut j: Value) -> Value {
+        let link = j["link"].as_str().unwrap_or("").to_string();
+        if link.is_empty() { return j }
+        j["qr"] = json!((self.qr)(&link));
+        if let Some(xs) = j["addresses"].as_array_mut() { for x in xs.iter_mut() { let l = x["link"].as_str().unwrap_or("").to_string(); x["qr"] = json!((self.qr)(&l)); } }
         j
     }
-    fn create_routes(&self, authority: &str, https: bool) -> Vec<String> {
-        let mut routes = self.state.lock().unwrap().routes.clone();
-        // This exact origin already authenticated the issuing client. Other hints are only local interfaces
-        // on which this listener is bound.
-        if !authority.is_empty() && authority.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'[' | b']' | b':')) {
-            routes.push(format!("{}{authority}", if https { "https://" } else { "http://" }));
-        }
-        if self.host == "0.0.0.0" { for ip in non_loopback_v4() { routes.push(format!("http://{ip}:{}", self.port)) } }
-        else if self.host != "127.0.0.1" && self.host != "localhost" { routes.push(format!("http://{}:{}", self.host, self.port)) }
-        let remote: Vec<String> = routes.iter().filter(|x| !is_loopback(x)).cloned().collect();
-        if remote.is_empty() { routes } else { remote }
+    /// POST /auth/lan (`X-Backplane-Lan: <address>`, `X-Backplane-Lan-State: on|off`) and Settings → Devices: let the hub answer on a local network address too, or stop.
+    pub fn lan_set(&self, ip: &str, on: bool) -> Value {
+        let Some(lan) = self.lan() else { return json!({"error": "lan_unavailable"}) };
+        if on { lan.on(ip) } else { lan.off(ip) }
     }
 
     /// None when `req` is not an /auth route. `client` is the connection id (Pairing.resolve remembers /ws ones).
@@ -90,6 +112,7 @@ impl AuthRoutes {
             if req.method != want || !owner::cache_request("GET", hs, &token) { return Some(denied()) }
             match route {
                 "/auth/invitations" => ("create", String::new()),
+                "/auth/lan" => (if req.header("x-backplane-lan-state") == "off" { "lan-off" } else { "lan-on" }, req.header("x-backplane-lan").to_string()),
                 "/auth/devices" => ("list", String::new()),
                 "/auth/revoke" => if req.header("x-backplane-invitation").is_empty() { ("revoke", req.header("x-backplane-device").to_string()) } else { ("uninvite", req.header("x-backplane-invitation").to_string()) },
                 _ => ("known", req.header("x-backplane-origin").to_string()),
@@ -98,10 +121,11 @@ impl AuthRoutes {
         let https = req.header("origin").starts_with("https://") || (req.header("origin").is_empty() && req.header("x-backplane-scheme") == "https");
         let j = match op {
             "enroll" => self.reg.enroll(&secret, req.header("x-backplane-name")),
-            "list" => self.reg.list(),
+            "list" => self.devices(),
+            "lan-on" | "lan-off" => self.lan_set(&secret, op == "lan-on"),
             "revoke" => self.reg.revoke(&secret),
             "uninvite" => self.reg.uninvite(&secret),
-            "create" => self.reg.create(&self.create_routes(req.header("host"), https)),
+            "create" => self.create(req.header("host"), https),
             _ => { let g = self.state.lock().unwrap(); let mut rs = g.routes.clone(); rs.push(format!("http://{}:{}", self.host, self.port));
                 json!({"known": pairing::known(&secret, &rs, &g.machines, &g.peers)}) }
         };
@@ -112,7 +136,7 @@ impl AuthRoutes {
         let link = j["link"].as_str().unwrap_or("");
         let body = if op == "enroll" {
             if native || !error.is_empty() { j.clone() } else { json!({"ok": true, "device": j["id"].as_str().unwrap_or("")}) }
-        } else if link.is_empty() { j.clone() } else { let mut b = j.clone(); b["qr"] = json!((self.qr)(link)); b };
+        } else if link.is_empty() { j.clone() } else { self.with_qrs(j.clone()) };
         let status = if error.is_empty() { "200 OK" } else if error == "rate_limited" { "429 Too Many Requests" } else { "400 Bad Request" };
         let cookies = if credential.is_empty() { String::new() } else { owner::pair_cookies(credential, https) };
         Some(Outcome { reply: json_reply(status, &body, &cookies), close, unpeer })
@@ -126,11 +150,6 @@ pub fn revoked(op: &str, j: &Value) -> (Vec<u64>, Option<String>) {
     (close, (op == "uninvite").then(|| j["peer"].as_str().filter(|p| !p.is_empty()).map(str::to_string)).flatten())
 }
 
-fn is_loopback(x: &str) -> bool {
-    let r = x.strip_prefix("http://").or_else(|| x.strip_prefix("https://")).unwrap_or("");
-    r.starts_with("localhost") || r.starts_with("127.") || r.starts_with("[::1]")
-}
-fn non_loopback_v4() -> Vec<String> { crate::plat::net::non_loopback_v4() }
 
 #[cfg(test)]
 mod tests {
@@ -140,7 +159,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bp-net-routes-{tag}-{}-{}", std::process::id(), hex::encode(pairing::urandom(4))));
         std::fs::create_dir_all(&dir).unwrap();
         let r = Arc::new(Registry::open(&dir, "root").unwrap());
-        let a = AuthRoutes::new(r, host, 3787, |l| format!("QR:{l}")); a.address("https://me.tail.ts.net/ignored?x=1#y");
+        let a = AuthRoutes::new(r, host, 3787, |l| format!("QR:{l}")).with_ifaces(Vec::new); a.address("https://me.tail.ts.net/ignored?x=1#y");
         (a, dir)
     }
     fn req(method: &str, target: &str, hs: &[(&str, &str)]) -> Req { Req::new(method, target, hs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()) }
@@ -229,7 +248,7 @@ mod tests {
         let b = body(&a.handle(&req("POST", "/auth/invitations", &[("Authorization", "Bearer root"), ("Host", "localhost:3787")]), 1).unwrap());
         assert_eq!(b["routes"], json!(["https://me.tail.ts.net"]), "the loopback host header is not offered while a remote address exists");
         let (c, dir2) = setup("addr2", "127.0.0.1");
-        let r = c.create_routes("evil host;", false); assert!(r.iter().all(|x| !x.contains("evil")), "{r:?}");
+        let r = c.create("evil host;", false); assert!(!r.to_string().contains("evil"), "{r}");
         let _ = (std::fs::remove_dir_all(dir), std::fs::remove_dir_all(dir2));
     }
     /// Settings → Add a device on a hub bound to 127.0.0.1 with no tailnet listener (`--no-tailscale`): the link names only this computer, and says so
@@ -237,12 +256,50 @@ mod tests {
     #[test] fn pair_a_loopback_hub_invites_with_local_only_until_it_has_a_tailnet_address() {
         let dir = std::env::temp_dir().join(format!("bp-net-routes-local-{}-{}", std::process::id(), hex::encode(pairing::urandom(4))));
         std::fs::create_dir_all(&dir).unwrap();
-        let a = AuthRoutes::new(Arc::new(Registry::open(&dir, "root").unwrap()), "127.0.0.1", 3797, |l| format!("QR:{l}"));
+        let a = AuthRoutes::new(Arc::new(Registry::open(&dir, "root").unwrap()), "127.0.0.1", 3797, |l| format!("QR:{l}")).with_ifaces(Vec::new);
         let j = a.invite();
         assert_eq!(j["localOnly"], true, "{j}"); assert_eq!(j["routes"], json!(["http://127.0.0.1:3797"]));
         a.address("http://100.64.84.41:3797");
         let j = a.invite();
         assert_eq!(j["localOnly"], false, "{j}"); assert!(j["link"].as_str().unwrap().starts_with("http://100.64.84.41:3797/pair#invite="), "{j}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    fn home_ifaces() -> Vec<(String, String)> { vec![("lo".into(), "127.0.0.1".into()), ("enp9s0".into(), "192.168.77.2".into()), ("docker0".into(), "172.17.0.1".into()), ("ts0".into(), "100.101.102.103".into())] }
+    /// One invitation, shown at each address (Tailscale, the local network, this computer): each its own link and QR code, the same code;
+    /// the older fields stay the default address's.
+    #[test] fn pair_an_invitation_names_every_address_it_can_be_shown_with() {
+        let dir = std::env::temp_dir().join(format!("bp-net-routes-addrs-{}-{}", std::process::id(), hex::encode(pairing::urandom(4))));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = AuthRoutes::new(Arc::new(Registry::open(&dir, "root").unwrap()), "127.0.0.1", 3871, |l| format!("QR:{l}")).with_ifaces(home_ifaces);
+        a.address("http://100.101.102.103:3871");
+        let b = body(&a.handle(&req("POST", "/auth/invitations", &[("Authorization", "Bearer root"), ("Host", "127.0.0.1:3871")]), 1).unwrap());
+        let xs = b["addresses"].as_array().unwrap();
+        let k: Vec<(&str, &str, bool)> = xs.iter().map(|x| (x["kind"].as_str().unwrap(), x["url"].as_str().unwrap(), x["listening"].as_bool().unwrap())).collect();
+        assert_eq!(k, [("tailnet", "http://100.101.102.103:3871", true), ("lan", "http://192.168.77.2:3871", false), ("local", "http://127.0.0.1:3871", true)]);
+        let token = b["link"].as_str().unwrap().split("invite=").nth(1).unwrap().split('&').next().unwrap().to_string();
+        for x in xs {
+            let l = x["link"].as_str().unwrap();
+            assert!(l.starts_with(&format!("{}/pair#invite={token}&routes=", x["url"].as_str().unwrap())), "{l}");
+            assert!(!l.contains("127.0.0.1") || x["kind"] == "local", "loopback is never a hint for another device: {l}");
+            assert_eq!(x["qr"].as_str().unwrap(), format!("QR:{l}"));
+        }
+        assert_eq!(b["link"], xs[0]["link"], "the default is the first remote address that answers");
+        assert_eq!((b["routes"].clone(), b["localOnly"].clone()), (json!(["http://100.101.102.103:3871"]), json!(false)));
+        // made inside the hub (Settings): the same addresses, no QR codes (the page draws the shown one)
+        let j = a.invite();
+        assert_eq!(j["addresses"].as_array().unwrap().len(), 3); assert!(j.get("qr").is_none() && j["addresses"][0].get("qr").is_none(), "{j}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    /// POST /auth/lan is authorized as /auth/invitations is; without the hub's listener machinery it says it cannot listen.
+    #[test] fn pair_lan_route_needs_a_credential() {
+        let (a, dir) = setup("lan", "127.0.0.1");
+        let hs = |c: &'static str| vec![("Authorization", c), ("X-Backplane-Lan", "192.168.77.2"), ("X-Backplane-Lan-State", "on")];
+        assert_eq!(a.handle(&req("POST", "/auth/lan", &hs("Bearer wrong")), 1).unwrap().reply.status, "401 Unauthorized");
+        assert_eq!(a.handle(&req("GET", "/auth/lan", &hs("Bearer root")), 1).unwrap().reply.status, "401 Unauthorized");
+        let o = a.handle(&req("POST", "/auth/lan", &hs("Bearer root")), 1).unwrap();
+        assert_eq!((o.reply.status, body(&o)["error"].clone()), ("400 Bad Request", json!("lan_unavailable")));
+        let l = body(&a.handle(&req("GET", "/auth/devices", &[("Authorization", "Bearer root")]), 1).unwrap());
+        assert_eq!((l["lan"].clone(), l["host"].clone()), (json!([]), json!("127.0.0.1")));
         let _ = std::fs::remove_dir_all(dir);
     }
     #[test] fn pair_known_over_http() {

@@ -145,7 +145,10 @@ impl Registry {
     pub fn holds(&self, token: &str) -> bool { !token.is_empty() && self.resolve(token, 0, "") == token }
 
     /// POST /auth/invitations: a private invitation, recorded before it is handed out, good ten minutes.
-    pub fn create(&self, routes: &[String]) -> Value {
+    pub fn create(&self, routes: &[String]) -> Value { self.create_with(routes, &[]) }
+    /// `create`, and the same invitation shown at each address an invitation may point to (`plan::plan`): `addresses`, each
+    /// `{kind, url, link, listening}`, its own link (that address first in its routes). One token and one code answer on all.
+    pub fn create_with(&self, routes: &[String], choices: &[super::plan::Choice]) -> Value {
         let mut g = self.inner.lock().unwrap();
         let at = (self.now)();
         if g.invites.iter().filter(|x| !is_machine(x) && open(x, at)).count() >= OPEN_LIMIT { return Self::err("too_many_invitations") }
@@ -159,8 +162,13 @@ impl Registry {
         let (devs, next) = (g.devices.clone(), self.trim(next));
         if let Err(e) = self.persist(&mut g, devs, next) { return Self::err(&e) }
         let local_only = unique.iter().all(|x| local_origin(x));
-        let frag = format!("invite={token}&routes={}", pct(&Value::from(unique.clone()).to_string()));
-        json!({"id": entry["id"], "code": code, "expiresAt": at + INVITE_MS, "routes": unique, "localOnly": local_only, "link": format!("{}/pair#{frag}", unique[0])})
+        let link = |rs: &[String]| format!("{}/pair#invite={token}&routes={}", rs[0], pct(&Value::from(rs.to_vec()).to_string()));
+        let addresses: Vec<Value> = choices.iter().filter(|c| good_route(&c.url)).map(|c| {
+            let mut rs: Vec<String> = vec![];
+            for r in std::iter::once(&c.url).chain(c.routes.iter()) { if good_route(r) && !rs.contains(r) { rs.push(r.clone()) } }
+            json!({"kind": c.kind, "url": c.url, "link": link(&rs), "listening": c.listening})
+        }).collect();
+        json!({"id": entry["id"], "code": code, "expiresAt": at + INVITE_MS, "routes": unique, "localOnly": local_only, "link": link(&unique), "addresses": addresses})
     }
 
     /// POST /auth/enroll: the invitation's secret (or its short code) for a new device credential. Ten

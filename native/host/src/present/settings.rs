@@ -201,32 +201,140 @@ pub fn loopback_invite(invite: &str) -> bool {
 }
 fn row_tone(label: &str, note: &str, tone: &str) -> Value { let mut r = row(label, note, vec![]); r["tone"] = json!(tone); r }
 
-/// Settings → Devices: the paired devices and the pairing links (net/pairing.rs `Registry::list`, put in `info.devices` by the presenter's caller), and Add a device (an invitation of this hub's own, made by `device-invite`).
-fn devices(session: &Value, info: &Value) -> Vec<Value> {
+/// Settings → Devices: Add a device, the paired devices, the local network addresses the hub was let answer on, and the pairing
+/// links (net/pairing.rs `Registry::list` with `lan` and `host`, put in `info.devices` by the presenter's caller: `routes::AuthRoutes::devices`).
+/// An invitation made here (`device-invite`, kept in the draft `@invite`) carries every address it can be shown with (net/plan.rs): the
+/// person picks Tailscale, Local network or This computer (`device-addr`, the draft `@pair.url`), and the page shows that address's own link,
+/// its QR code and the short code beside the hub address. A local network address the hub does not answer on yet offers to let it answer
+/// there (`device-lan-on`), and one it answers on because the person let it offers to stop (`device-lan-off`). The phones draw the same rows
+/// (`devices.page`, net/devicespage.rs).
+pub fn devices(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     let inv: Value = serde_json::from_str(draft(session, "@invite")).unwrap_or(Value::Null);
+    let list = &info["devices"];
+    let now = info["now"].as_u64().unwrap_or_else(|| crate::hub::now_ms());
     let mut r = vec![];
     if let Some(link) = inv["link"].as_str() {
-        let mut row = row("Pairing link", link, vec![btn("Add another", "device-invite", "", false)]);
-        row["qr"] = json!(inv["qr"].as_str().unwrap_or("").lines().map(str::to_string).collect::<Vec<_>>());
-        row["qrnote"] = json!(format!("Code {} · works once, for ten minutes", inv["code"].as_str().unwrap_or("")));
-        r.push(row);
-        if inv["localOnly"] == true { r.push(row_tone("Only this computer", LOCAL_DEVICE, "warn")) }
+        let at = inv["expiresAt"].as_u64().unwrap_or(0);
+        let until = crate::agents::rules::when(&zone_of(st).0, at / 1000, now / 1000);
+        // the registry says when it was used or revoked meanwhile (by a device that scanned it, or from another screen)
+        let rec = list["invitations"].as_array().into_iter().flatten().find(|i| !s(&inv, "id").is_empty() && s(i, "id") == s(&inv, "id"));
+        let done = match rec.map(|i| s(i, "state")) {
+            Some("used") => Some(format!("Used{}. Each link pairs one device.", rec.map(|i| s(i, "deviceName")).filter(|n| !n.is_empty()).map_or(String::new(), |n| format!(" by {n}")))),
+            Some("revoked") => Some("Revoked.".to_string()),
+            _ => None,
+        };
+        if let Some(d) = done { r.push(row("Pairing link", &d, vec![btn("Add a device", "device-invite", "", false)])) }
+        else if at > now { r.extend(invitation(&inv, link, &until, draft(session, "@pair.url"), list)) }
+        else { r.push(row("Pairing link", &format!("Expired at {until}. Each link works for ten minutes."), vec![btn("Add a device", "device-invite", "", false)])) }
     } else if let Some(e) = inv["error"].as_str() { r.push(row("Add a device", &format!("Could not make an invitation: {e}."), vec![btn("Try again", "device-invite", "", false)])) }
     else { r.push(row("Add a device", "Makes a link, a QR code and a short code for one new device. Each works once, for ten minutes.", vec![btn("Add a device", "device-invite", "", false)])) }
-    let list = &info["devices"];
+    let e = draft(session, "@lan.err");
+    if !e.is_empty() { r.push(row_tone("Local network", e, "bad")) }
+    // the paired devices (a revoked one is kept in the registry, and would only bury these)
     for d in list["devices"].as_array().into_iter().flatten() {
         let name = if s(d, "name").is_empty() { s(d, "id") } else { s(d, "name") };
-        let revoked = d["revoked"].as_bool().unwrap_or(false) || s(d, "revoked") == "true";
-        r.push(row(name, if revoked { "Revoked" } else { "Paired" }, if revoked { vec![] } else { vec![btn("Revoke", "device-revoke", s(d, "id"), false)] }));
+        if d["revoked"].as_bool().unwrap_or(false) || s(d, "revoked") == "true" { continue }
+        r.push(row(name, "Paired", vec![btn("Revoke", "device-revoke", s(d, "id"), false)]));
     }
+    for x in list["lan"].as_array().into_iter().flatten() {
+        let note = if x["listening"] == true { "The hub also answers here: plain HTTP on that network, not encrypted. Every device still has to pair." } else { "Kept, but this computer does not have this address now." };
+        r.push(row(&format!("Local network · {}", s(x, "url")), note, vec![btn("Stop answering here", "device-lan-off", s(x, "ip"), false)]));
+    }
+    // the links that still mean something: open ones, and used ones whose device is still paired (revoking one revokes its device);
+    // the registry keeps a hundred closed ones, which would only bury these
     for i in list["invitations"].as_array().into_iter().flatten() {
         let (state, kind) = (s(i, "state"), s(i, "kind"));
         if kind == "machine" { continue } // a machine invite is Bots' (linking a machine)
-        let who = if s(i, "deviceName").is_empty() { String::new() } else { format!(" · {}", s(i, "deviceName")) };
         let live = state == "open" || (state == "used" && i["deviceRevoked"] != true);
-        r.push(row(&format!("Pairing link · {state}{who}"), "", if live { vec![btn("Revoke", "device-uninvite", s(i, "id"), false)] } else { vec![] }));
+        if !live { continue }
+        let who = if s(i, "deviceName").is_empty() { String::new() } else { format!(" · {}", s(i, "deviceName")) };
+        r.push(row(&format!("Pairing link · {state}{who}"), "", vec![btn("Revoke", "device-uninvite", s(i, "id"), false)]));
     }
     r
+}
+/// What each kind of address is called on the choice.
+fn kind_word(k: &str) -> &'static str { match k { "tailnet" => "Tailscale", "lan" => "Local network", _ => "This computer" } }
+fn host_of(url: &str) -> &str {
+    let r = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")).unwrap_or(url);
+    let a = r.split(|c| c == '/' || c == '?' || c == '#').next().unwrap_or("");
+    a.rsplit_once(':').map_or(a, |(h, _)| h)
+}
+/// The addresses of an invitation (an invitation made before addresses existed has its one link), each answering as the hub answers now:
+/// a local network address answers when the main listener covers it or the person let the hub answer there (`info.devices.lan`, `.host`).
+fn addresses(inv: &Value, list: &Value) -> Vec<Value> {
+    let mut xs: Vec<Value> = inv["addresses"].as_array().cloned().unwrap_or_default();
+    if xs.is_empty() { xs.push(json!({"kind": if inv["localOnly"] == true { "local" } else { "" }, "url": inv["routes"][0].as_str().unwrap_or(""), "link": inv["link"], "listening": true})) }
+    if let Some(host) = list["host"].as_str() {
+        for x in xs.iter_mut().filter(|x| x["kind"] == "lan") {
+            let ip = host_of(s(x, "url")).to_string();
+            let let_on = list["lan"].as_array().into_iter().flatten().any(|l| s(l, "ip") == ip && l["listening"] == true);
+            x["listening"] = json!(host == "0.0.0.0" || host == ip || let_on);
+        }
+    }
+    xs
+}
+/// The invitation's rows: the address choice, then the shown address's link, QR code and code (or the offer to answer there).
+fn invitation(inv: &Value, default_link: &str, until: &str, want: &str, list: &Value) -> Vec<Value> {
+    let xs = addresses(inv, list);
+    let kinds: Vec<&str> = ["tailnet", "lan", "local"].into_iter().filter(|k| xs.iter().any(|x| x["kind"] == *k)).collect();
+    let lans: Vec<&Value> = xs.iter().filter(|x| x["kind"] == "lan").collect();
+    // the one asked for; else Tailscale, the local network (the first that answers) or this computer, in that order; else the default link's
+    let shown = xs.iter().find(|x| !want.is_empty() && s(x, "url") == want)
+        .or_else(|| match kinds.first() { Some(&"lan") => lans.iter().find(|x| x["listening"] == true).or(lans.first()).copied(), Some(k) => xs.iter().find(|x| x["kind"] == *k), None => None })
+        .or_else(|| xs.iter().find(|x| s(x, "link") == default_link)).or(xs.first()).cloned().unwrap_or(Value::Null);
+    let kind = s(&shown, "kind");
+    let mut r = vec![];
+    let note = match kind {
+        "tailnet" => "Over your tailnet: the other device needs Tailscale, signed in to the same tailnet.",
+        "lan" if shown["listening"] == true => "Plain HTTP on this network: the traffic is not encrypted, though every device still has to pair. Prefer Tailscale on a network you do not trust.",
+        _ => "",
+    };
+    if kinds.len() > 1 {
+        let pick = |k: &str| { let to = if k == "lan" { lans.iter().find(|x| x["listening"] == true).or(lans.first()).map_or("", |x| s(x, "url")) } else { xs.iter().find(|x| x["kind"] == k).map_or("", |x| s(x, "url")) }; btn(kind_word(k), "device-addr", to, k == kind) };
+        r.push(row("Reach this hub by", note, kinds.iter().map(|k| pick(k)).collect()));
+    } else if !note.is_empty() { r.push(row(kind_word(kind), note, vec![])) }
+    if kind == "lan" && lans.len() > 1 { r.push(row("Local network address", "", lans.iter().map(|x| btn(s(x, "url"), "device-addr", s(x, "url"), s(x, "url") == s(&shown, "url"))).collect())) }
+    let ip = host_of(s(&shown, "url")).to_string();
+    if shown["listening"] == true {
+        let link = s(&shown, "link");
+        let code = s(inv, "code");
+        let mut row_l = row("Pairing link", link, vec![btn("Copy link", "copy", link, false), btn("Copy code", "copy", code, false), btn("Add another", "device-invite", "", false)]);
+        row_l["qr"] = json!(crate::net::qr::text(link).lines().map(str::to_string).collect::<Vec<_>>());
+        let hub = s(&shown, "url").trim_start_matches("http://").trim_start_matches("https://");
+        row_l["qrnote"] = json!(format!("Code {code} · hub {hub} · works once, until {until}"));
+        r.push(row_l);
+    } else {
+        r.push(row("Local network", &format!("The hub does not answer at {} yet: it listens only on this computer. Letting it answer there opens plain HTTP on this network (not encrypted); every device still has to pair, and you can turn it off here or under Devices.", s(&shown, "url")),
+            vec![btn("Let the hub answer on the local network", "device-lan-on", &ip, false)]));
+    }
+    if kind == "local" || (kind.is_empty() && inv["localOnly"] == true) {
+        let other: Vec<&str> = kinds.iter().filter(|k| **k != "local").map(|k| kind_word(k)).collect();
+        r.push(row_tone("Only this computer", &if other.is_empty() { LOCAL_DEVICE.to_string() } else { format!("This link works only on this computer. Choose {} to pair another device.", other.join(" or ")) }, "warn"));
+    }
+    r
+}
+
+/// Settings → Devices' presses (the desktop's view actions and the phones' `devices.page.act`): the session patch. The registry is the hub's
+/// own, the one /auth/invitations uses; local network listening is `net::lan`'s. None for another action.
+pub fn device_act(action: &str, value: &str) -> Option<Value> {
+    let Some(routes) = crate::net::start::routes() else { return Some(json!({"drafts": {"@invite": json!({"error": "no_registry"}).to_string()}})) };
+    Some(match action {
+        "device-invite" => json!({"drafts": {"@invite": routes.invite().to_string(), "@pair.url": "", "@lan.err": ""}}),
+        "device-addr" => json!({"drafts": {"@pair.url": value, "@lan.err": ""}}),
+        "device-lan-on" | "device-lan-off" => {
+            let j = routes.lan_set(value, action == "device-lan-on");
+            let err = match j["error"].as_str() {
+                None => String::new(),
+                Some("lan_unknown") => format!("{value} is not one of this computer's local network addresses now."),
+                Some("copy") => "A hub on a copied log does not listen on the network.".into(),
+                Some(_) => format!("The hub could not listen on {value}: the port may be taken there."),
+            };
+            json!({"drafts": {"@lan.err": err}})
+        }
+        "device-revoke" => { crate::net::start::revoke("revoke", value); json!({}) }
+        "device-uninvite" => { crate::net::start::revoke("uninvite", value); json!({}) }
+        _ => return None,
+    })
 }
 
 /// Zone.person's source: a zone chosen here, else the phone's, else this machine's
@@ -458,7 +566,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(session, info), "machines" => crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string()), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string()), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -497,14 +605,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "board-done" => { send(session, hub, "board.set", json!({"item": {"id": value, "status": "done"}}), &mut cmds, &mut rid); json!({}) }
         "board-drop" => { send(session, hub, "board.drop", json!({"id": value}), &mut cmds, &mut rid); json!({}) }
         // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
-        "device-invite" | "device-revoke" | "device-uninvite" => {
-            let Some(routes) = crate::net::start::routes() else { return Some(Out { patch: json!({"drafts": {"@invite": json!({"error": "no_registry"}).to_string()}}), cmds }) };
-            match action {
-                "device-invite" => json!({"drafts": {"@invite": routes.invite().to_string()}}),
-                "device-revoke" => { crate::net::start::revoke("revoke", value); json!({}) }
-                _ => { crate::net::start::revoke("uninvite", value); json!({}) }
-            }
-        }
+        "device-invite" | "device-revoke" | "device-uninvite" | "device-addr" | "device-lan-on" | "device-lan-off" => return device_act(action, value).map(|patch| Out { patch, cmds }),
         "kicad-path" => {
             if !session["drafts"]["@f.kpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
             let raw = draft(session, "@f.kpath").trim().to_string();
@@ -643,13 +744,13 @@ mod tests {
         assert_eq!(r[1]["label"], "Add a device"); assert_eq!(r[1]["buttons"][0]["action"], "device-invite");
         let by = |l: &str| r.iter().find(|x| x["label"] == l).unwrap_or_else(|| panic!("{l}")).clone();
         assert_eq!((by("Phone")["buttons"][0]["action"].as_str(), by("Phone")["buttons"][0]["value"].as_str()), (Some("device-revoke"), Some("d1")));
-        assert!(by("Old")["buttons"].as_array().unwrap().is_empty(), "a revoked device has nothing to revoke");
+        assert!(r.iter().all(|x| x["label"] != "Old"), "a revoked device is history, not listed");
         assert_eq!(by("Pairing link · open")["buttons"][0]["action"], "device-uninvite");
-        assert!(by("Pairing link · used · Phone")["buttons"].as_array().unwrap().is_empty());
-        assert_eq!(r.len(), 1 + 1 + 2 + 2, "a machine invite is Bots' and is not listed");
+        assert!(r.iter().all(|x| x["label"] != "Pairing link · used · Phone"), "a used link whose device was revoked is history, not listed");
+        assert_eq!(r.len(), 1 + 1 + 1 + 1, "a machine invite is Bots' and is not listed");
     }
     #[test] fn a_device_link_that_names_only_this_computer_says_so() {
-        let inv = |local: bool| json!({"link": "http://127.0.0.1:3797/pair#invite=x", "code": "ABCD2345", "qr": "", "localOnly": local}).to_string();
+        let inv = |local: bool| json!({"link": "http://127.0.0.1:3797/pair#invite=x", "code": "ABCD2345", "expiresAt": FAR, "routes": [if local { "http://127.0.0.1:3797" } else { "http://100.64.1.2:3797" }], "localOnly": local}).to_string();
         let r = pg_rows("devices", &[], json!({}), json!({}));
         assert!(r.iter().all(|x| x["label"] != "Only this computer"), "no invitation, no note");
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "devices", "@invite": inv(true)}}), &json!({}));
@@ -657,6 +758,69 @@ mod tests {
         assert_eq!((w["note"].as_str(), w["tone"].as_str()), (Some(LOCAL_DEVICE), Some("warn")));
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "devices", "@invite": inv(false)}}), &json!({}));
         assert!(v["rows"].as_array().unwrap().iter().all(|x| x["label"] != "Only this computer"), "a reachable link has no note");
+    }
+    const FAR: u64 = 4_000_000_000_000;
+    /// An invitation as `routes::AuthRoutes::invite` makes it: one code, an address of each kind, each its own link.
+    fn invite3(lan_listening: bool) -> String {
+        json!({"id": "i9", "code": "GZCYJVVP", "expiresAt": FAR, "link": "http://100.101.102.103:3871/pair#invite=t&routes=a", "routes": ["http://100.101.102.103:3871"], "localOnly": false, "addresses": [
+            {"kind": "tailnet", "url": "http://100.101.102.103:3871", "link": "http://100.101.102.103:3871/pair#invite=t&routes=a", "listening": true},
+            {"kind": "lan", "url": "http://192.168.77.2:3871", "link": "http://192.168.77.2:3871/pair#invite=t&routes=b", "listening": lan_listening},
+            {"kind": "local", "url": "http://127.0.0.1:3871", "link": "http://127.0.0.1:3871/pair#invite=t&routes=c", "listening": true}]}).to_string()
+    }
+    fn dev_rows(drafts: Value, devices: Value) -> Vec<Value> {
+        let mut d = json!({"@settings.page": "devices"}); for (k, v) in drafts.as_object().unwrap() { d[k] = v.clone() }
+        view(&st(&[]), &json!({"open": {"settings": true}, "drafts": d}), &json!({"devices": devices, "now": 1_000_000_000_000u64}))["rows"].as_array().unwrap().clone()
+    }
+    fn by<'a>(r: &'a [Value], l: &str) -> &'a Value { r.iter().find(|x| x["label"] == l).unwrap_or_else(|| panic!("no row {l}: {r:?}")) }
+    /// Add a device: Tailscale first, its own link and QR code, the code beside the hub address and the expiry; the link and code copy.
+    #[test] fn devices_an_invitation_shows_the_chosen_address_link_qr_code_and_expiry() {
+        let r = dev_rows(json!({"@invite": invite3(false)}), json!({"devices": [], "invitations": [], "lan": [], "host": "127.0.0.1"}));
+        let pick = by(&r, "Reach this hub by");
+        let chips: Vec<(&str, &str, bool)> = pick["buttons"].as_array().unwrap().iter().map(|b| (b["label"].as_str().unwrap(), b["value"].as_str().unwrap(), b["on"] == true)).collect();
+        assert_eq!(chips, [("Tailscale", "http://100.101.102.103:3871", true), ("Local network", "http://192.168.77.2:3871", false), ("This computer", "http://127.0.0.1:3871", false)]);
+        assert!(pick["note"].as_str().unwrap().contains("Tailscale"));
+        let l = by(&r, "Pairing link");
+        assert_eq!(l["note"], "http://100.101.102.103:3871/pair#invite=t&routes=a");
+        assert_eq!(l["qr"], json!(crate::net::qr::text("http://100.101.102.103:3871/pair#invite=t&routes=a").lines().collect::<Vec<_>>()), "the QR code of that address's own link");
+        let qn = l["qrnote"].as_str().unwrap();
+        assert!(qn.starts_with("Code GZCYJVVP · hub 100.101.102.103:3871 · works once, until "), "{qn}");
+        let acts: Vec<(&str, &str)> = l["buttons"].as_array().unwrap().iter().map(|b| (b["action"].as_str().unwrap(), b["value"].as_str().unwrap())).collect();
+        assert_eq!(acts, [("copy", "http://100.101.102.103:3871/pair#invite=t&routes=a"), ("copy", "GZCYJVVP"), ("device-invite", "")]);
+        assert!(r.iter().all(|x| x["label"] != "Only this computer"));
+    }
+    /// Local network on a loopback hub: no link to hand out, the offer to answer there (plain HTTP said); once it answers, the link, and Stop.
+    #[test] fn devices_the_local_network_is_offered_then_shown_then_stopped() {
+        let want = json!({"@invite": invite3(false), "@pair.url": "http://192.168.77.2:3871"});
+        let r = dev_rows(want.clone(), json!({"devices": [], "invitations": [], "lan": [], "host": "127.0.0.1"}));
+        assert!(r.iter().all(|x| x["label"] != "Pairing link"), "no link for an address the hub does not answer on");
+        let offer = by(&r, "Local network");
+        assert!(offer["note"].as_str().unwrap().contains("plain HTTP"));
+        assert_eq!((offer["buttons"][0]["action"].as_str(), offer["buttons"][0]["value"].as_str()), (Some("device-lan-on"), Some("192.168.77.2")));
+        assert_eq!(by(&r, "Reach this hub by")["buttons"][1]["on"], true);
+        // the person let it: the same invitation's local network link (its listening flag from the hub now, not from when it was made)
+        let lan = json!([{"ip": "192.168.77.2", "url": "http://192.168.77.2:3871", "listening": true}]);
+        let r = dev_rows(want.clone(), json!({"devices": [], "invitations": [], "lan": lan, "host": "127.0.0.1"}));
+        assert_eq!(by(&r, "Pairing link")["note"], "http://192.168.77.2:3871/pair#invite=t&routes=b");
+        assert!(by(&r, "Pairing link")["qrnote"].as_str().unwrap().contains("hub 192.168.77.2:3871"));
+        assert!(by(&r, "Reach this hub by")["note"].as_str().unwrap().contains("not encrypted"));
+        assert_eq!(by(&r, "Local network · http://192.168.77.2:3871")["buttons"][0]["action"], "device-lan-off", "stopped under Devices");
+        // a hub on every interface answers there anyway: nothing to stop
+        let r = dev_rows(want, json!({"devices": [], "invitations": [], "lan": [], "host": "0.0.0.0"}));
+        assert!(r.iter().any(|x| x["label"] == "Pairing link") && r.iter().all(|x| x["label"] != "Local network"));
+    }
+    #[test] fn devices_this_computer_warns_and_an_expired_link_says_so() {
+        let r = dev_rows(json!({"@invite": invite3(true), "@pair.url": "http://127.0.0.1:3871"}), json!({"devices": [], "invitations": [], "lan": [], "host": "127.0.0.1"}));
+        assert_eq!(by(&r, "Only this computer")["note"], "This link works only on this computer. Choose Tailscale or Local network to pair another device.");
+        let mut old: Value = serde_json::from_str(&invite3(true)).unwrap(); old["expiresAt"] = json!(999_999_000_000u64);
+        let r = dev_rows(json!({"@invite": old.to_string()}), json!({}));
+        let x = by(&r, "Pairing link"); assert!(x["note"].as_str().unwrap().starts_with("Expired at ") && x.get("qr").is_none(), "{x}");
+        assert_eq!(x["buttons"][0]["action"], "device-invite");
+        // used meanwhile (a phone scanned it): no QR code to scan again
+        let r = dev_rows(json!({"@invite": invite3(true)}), json!({"invitations": [{"id": "i9", "kind": "device", "state": "used", "deviceName": "Pixel"}]}));
+        let x = by(&r, "Pairing link"); assert_eq!((x["note"].as_str(), x.get("qr").is_none()), (Some("Used by Pixel. Each link pairs one device."), true));
+        // a lan choice that failed says why
+        let r = dev_rows(json!({"@lan.err": "The hub could not listen on 192.168.77.2: the port may be taken there."}), json!({}));
+        assert_eq!(by(&r, "Local network")["tone"], "bad");
     }
     #[test] fn loopback_addresses_and_invites() {
         for u in ["http://127.0.0.1:3797", "https://localhost", "http://[::1]:1", "http://127.1.2.3:9"] { assert!(loopback(u), "{u}") }
