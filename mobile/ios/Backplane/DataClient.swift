@@ -257,7 +257,7 @@ final class DataClient {
         case "reply":
             guard let id = o["id"] as? Int ?? (o["id"] as? Double).map(Int.init), let k = calls.removeValue(forKey: id) else { return }
             if o["ok"] as? Bool == true {
-                k.resume(returning: (try? JSONSerialization.data(withJSONObject: o["result"] ?? [:])) ?? Data("{}".utf8))
+                k.resume(returning: o["result"].flatMap { $0 is NSNull ? nil : WireJSON.data($0) } ?? Data("{}".utf8))
             } else if let e = o["error"] as? [String: Any] {
                 k.resume(throwing: DError(code: e["code"] as? String ?? "ERROR", message: e["message"] as? String ?? ""))
             } else { k.resume(throwing: DError(code: "ERROR", message: o["error"] as? String ?? "The hub refused")) }
@@ -273,7 +273,7 @@ final class DataClient {
     func call<T: Decodable>(_ m: String, _ p: [String: Any] = [:], as: T.Type = T.self) async throws -> T {
         guard conn != .offline, let task else { throw DError(code: "OFFLINE", message: "Offline") }
         let id = nextId; nextId += 1
-        let msg = try JSONSerialization.data(withJSONObject: ["id": id, "m": m, "p": p])
+        guard let msg = WireJSON.data(["id": id, "m": m, "p": p]) else { throw DError(code: "BAD_PARAMS", message: "Not JSON: \(m)") }
         let data: Data = try await withCheckedThrowingContinuation { k in
             calls[id] = k
             task.send(.string(String(decoding: msg, as: UTF8.self))) { [weak self] e in
@@ -439,10 +439,8 @@ final class DataClient {
         guard let k = o["k"] as? String else { return }
         if k == "btw", let th = o["thread"] as? String, let q = o["q"] as? String, btw[th]?.q == q { btw[th] = Btw(q: q, a: o["a"] as? String ?? ""); return }
         if k == "secret" { let th = o["thread"] as? String ?? ""; Task { await refreshSecretAsks(th) }; return }
-        func decode<T: Decodable>(_ key: String, _ type: T.Type) -> T? {
-            guard let v = o[key], let d = try? JSONSerialization.data(withJSONObject: v) else { return nil }
-            return try? JSONDecoder().decode(T.self, from: d)
-        }
+        // a null (`"subs":null` when a thread's work ends) or any non-JSON value decodes to nil instead of raising
+        func decode<T: Decodable>(_ key: String, _ type: T.Type) -> T? { WireJSON.decode(o[key], as: type) }
         switch k {
         case "thread": if let t = decode("thread", DThread.self) { upsert(t); if t.history { historyMoved() } }
         case "thread.removed":
