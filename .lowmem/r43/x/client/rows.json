@@ -1,9 +1,0 @@
-{
- "rows": [
-  {
-   "id": "F14X",
-   "ok": true,
-   "ev": "per method (trials, client sent a carriage return, shell ran it): cliclick (12, 10, 10); quartz (12, 12, 12). A Return the client did not send and the shell did not run is lost before or in the client; one it sent and the shell did not run is lost in the hub or the PTY."
-  }
- ]
-}
