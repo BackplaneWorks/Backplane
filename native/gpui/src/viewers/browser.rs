@@ -103,8 +103,11 @@ impl BrowserPage {
         // why this is the hub-frame fallback, said in the tab for as long as it is (never silently a slower browser)
         #[cfg(feature = "cef")]
         let banner = cef_why.clone();
-        #[cfg(not(feature = "cef"))]
+        #[cfg(all(not(feature = "cef"), not(windows)))]
         let banner = "embedded browser unavailable: this build has no CEF support (built without the cef feature)".to_string();
+        // Windows: the hub's frames are the browser by design (a release carries no embedded Chromium there), not a fallback to warn about
+        #[cfg(all(not(feature = "cef"), windows))]
+        let banner = String::new();
         let status = if !cef_note2.is_empty() { cef_note2 } else if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
         BrowserPage { #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), banner, light: false, open_error: None, opening_since: Instant::now(), image: None, retired: Vec::new(), status, stop, visible }
     }
