@@ -259,13 +259,13 @@ The darwin-arm64 archive of release dry run 42482640273, installed with that run
 | F02, F09, F15 | pass | 42489602486 | sidebar and threads, Context panel and drafts, a pasted PNG named to the agent |
 | F06 | pass | 42489602486 | approval Allow and Deny, the question card, the plan card, each reaching the agent |
 | F07, F08 | pass | 42489602486 | Stop ends the running turn; Fork creates a thread |
-| F14 | pass in 42488217505; fail in 42489602486 | | the floating terminal: typed command ran in a real shell; once the Return was lost twice (the command stayed on the line, f14-typed.png); the row now presses Return until it runs |
+| F14 | pass | 42494679347 | the floating terminal: one Return after the typed command ran it. The earlier failures (once in 42489602486, the rc.1 first pass) were the runner's input tool: `F14X`, 80 trials with a recording relay between the client and the hub: `cliclick kp:return` reached the client 19 of 40 times, a Quartz key pair 40 of 40, and every Return the client got was run by the shell (59 of 59). So nothing is lost in the client, the hub or the PTY; the driver now sends Return as a Quartz pair and presses once |
 | F16 | pass, 12 of 12 | 42489602486 | palette, models, sidebar, files, diff, terminal, thread 2, performance, uberbot, new, stop, settle |
 | F17 | pass, 4 of 4 | 42489602486 | Board, Schematic, 3D, Mech drawn; wheel and drag change each |
 | F18 | pass, part: frame-stream helper | 42489602486 | no CEF on macOS: the page loads and paints from the helper's frames; real click, typing, wheel, popup (loaded, has its opener), a download that lands in `~/Downloads` and the hub's downloads folder, and a click after the download. A lost click on the link was taken at -24 px from the centre of its visible colour (the link sits at the bottom edge of the frame) |
 | F21, F22 | pass | 42489602486 | hub restart and reconnect; the files card, Send and the quote card (nothing paid) |
 
-Not one run was clean on every row: each of 42485912897, 42488217505 and 42489602486 had one failing row (F18 download; F16, a bug in my retry; F14). F04 is the one that is the hub's, not the driver's.
+One run of the client rows was clean on every row: 42494679347 (CAL, F02, F06 approval, question and plan, F07, F08, F09 meter and draft, F14, F15, F16 12 of 12 keys, F17 4 of 4 viewers, F18 page, click, type, scroll, popup, download and input after it, F21, F22), with the driver's Return fixed and no message ever re-sent. The earlier passes 42485912897, 42488217505 and 42489602486 each had one failing row (F18 download; F16, a bug in my retry; F14, the input tool). The hub rows' last run, 42489602486, was clean except that F04 passed only through a retry; F04 is the hub's stall (above), for rc.2.
 
 ### Windows
 
