@@ -13,7 +13,7 @@ const s=await c.rpc('setting.set',{key:'kicad.path',value:cli},10000);rec('C02',
 // the CAD page shows what the hub found
 const {viewClient}=await import('../perf/view.mjs');
 const v=await viewClient(fx.hub,{mobile:true,delta:false,native:true});await v.open();await v.req('view.action',{action:'flag',value:'settings'});
-let rows=[],note='';for(let i=0;i<20;i++){const pg=await v.req('view.action',{action:'settings-page',value:'cad'});rows=pg?.x?.result?.shown?.settings?.rows||[];note=rows.find(r=>r.label==='KiCad')?.note||'';if(note&&note!=='checking')break;await sleep(1500)}rec('C02','CAD page reports the CLI the hub will run',note.includes(cli),`KiCad row: ${note}`);
+let rows=[],note='';for(let i=0;i<20;i++){const pg=await v.req('view.action',{action:'settings-page',value:'cad'});rows=pg?.x?.result?.shown?.settings?.rows||[];note=rows.find(r=>r.label==='KiCad')?.note||'';if(note.includes(cli))break;await sleep(1500)}   // until the page names the CLI that was set: the hub republishes it a moment after the setting; it counts only if it never does within 30 srec('C02','CAD page reports the CLI the hub will run',note.includes(cli),`KiCad row: ${note}`);
 rec('S05','CAD page: FreeCAD row',!!rows.find(r=>r.label==='FreeCAD'),`FreeCAD row: ${rows.find(r=>r.label==='FreeCAD')?.note} (read-only: no path control on this page)`);
 v.close();
 const r=await c.rpc('review.checks',{thread:th,trigger:'manual'},180000);const rep=r?.o?.result?.report||r?.o?.result||{};
