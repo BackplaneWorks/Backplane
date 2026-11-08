@@ -23,7 +23,7 @@ fn snapshot(d: &Path) -> Vec<(String, u64, String, std::time::SystemTime)> {
 }
 /// Sees every batch the ordinary way in: none of the import's lines may reach it.
 struct Probe(AtomicUsize);
-impl Observer for Probe { fn committed(&self, _h: &Arc<Hub>, events: &[Value], _f: u32) { self.0.fetch_add(events.iter().filter(|e| e["$"] != "SettingSet").count(), SeqCst); } }
+impl Observer for Probe { fn committed(&self, _h: &Arc<Hub>, events: &[Value], _f: u32) { self.0.fetch_add(events.iter().filter(|e| e["$"] != "SettingSet" && e["$"] != "PushOrdered").count(), SeqCst); } }
 
 struct Rig { hub: Arc<Hub>, imp: Arc<Importer>, old: PathBuf, home: PathBuf, probe: Arc<Probe>, _reg: Arc<crate::net::pairing::Registry> }
 async fn rig(tag: &str) -> Rig { let dir = tmp(tag); let old = old_home(&dir); rig_on(&dir, old).await }
@@ -131,7 +131,7 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     let res = r.imp.run(&r.hub, false).await;
     assert_eq!(res["counts"]["messages"], 2, "{res}");
     let new: Vec<String> = r.hub.store.range(n, r.hub.store.len()).unwrap();
-    assert_eq!(new.iter().filter(|l| !l.starts_with("{\"$\":\"SettingSet\"")).count(), 2, "the two messages and nothing else: {new:?}");
+    assert_eq!(new.iter().filter(|l| !l.starts_with("{\"$\":\"SettingSet\"") && !l.starts_with("{\"$\":\"PushOrdered\"")).count(), 2, "the two messages and nothing else: {new:?}");
     assert_eq!(has(&r.hub, "m1790176000-90"), 1);
 }
 
@@ -196,4 +196,57 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     assert_eq!(again["counts"]["lines"], 0); assert_eq!(r.hub.store.len(), n + 1);
     assert_eq!(snapshot(&old), before, "the copy is unchanged");
     println!("REAL ok");
+}
+
+/// A 0.14 home of `p` projects, `t` threads and about `l` lines, from the fixture writer's large mode.
+fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
+    let old = dir.join("big"); let gen = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/make-v014-home.py");
+    let st = std::process::Command::new("python3").arg("-I").arg(&gen).arg(&old).arg("--large").args([p.to_string(), t.to_string(), l.to_string()]).current_dir(dir).status().unwrap();
+    assert!(st.success()); old
+}
+
+/// The person's requirement: a long import shows itself the whole time. Progress is published at least every 2 s (the ticker's every second), the hub answers a
+/// write and a read within a second meanwhile, /healthz says migrating with a fold held (the guard keeps the build unproven), and the summary is right.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_long_import_reports_progress_every_second_and_the_hub_answers_meanwhile() {
+    let dir = tmp("long"); let old = big_home(&dir, 10, 500, 30000);
+    let r = rig_on(&dir, old).await; r.imp.throttle_ms.store(500, std::sync::atomic::Ordering::Relaxed);
+    let (h, imp) = (r.hub.clone(), r.imp.clone());
+    let run = tokio::spawn(async move { imp.run(&h, false).await });
+    let t0 = std::time::Instant::now(); let (mut last, mut last_at, mut gaps, mut seen_running, mut slow) = (String::new(), t0, vec![], 0, vec![]);
+    let (mut health_ok, mut phases) = (0, std::collections::BTreeSet::new());
+    while !run.is_finished() {
+        let now = r.hub.info_now()[INFO].as_str().unwrap_or("").to_string();
+        if now != last { let v: Value = serde_json::from_str(&now).unwrap_or(Value::Null);
+            if v["state"] == "running" { seen_running += 1; gaps.push(last_at.elapsed().as_millis()); phases.insert(v["phase"].as_str().unwrap_or("").to_string()); }
+            last = now; last_at = std::time::Instant::now(); }
+        if seen_running > 0 && !run.is_finished() {
+            let a = std::time::Instant::now(); r.hub.commit(&json!({"$":"SettingSet","key":"ui.probe","value":format!("{}", a.elapsed().as_nanos()),"at":1})).await.unwrap(); let w = a.elapsed();
+            let a = std::time::Instant::now(); let n = r.hub.model().await.threads.len(); let rd = a.elapsed();
+            if w.as_millis() > 1000 || rd.as_millis() > 1000 { slow.push((w.as_millis(), rd.as_millis(), n)); }
+            let (_, hz) = crate::guard::health(); if hz["migrating"]["state"] == "running" && hz["folding"].as_u64().unwrap_or(0) > 0 { health_ok += 1; }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let res = run.await.unwrap();
+    let took = t0.elapsed();
+    assert!(took.as_secs() >= 4, "the throttle made it long enough to watch: {took:?}");
+    assert!(seen_running >= 4, "{seen_running} running updates in {took:?}");
+    assert!(gaps.iter().skip(1).all(|g| *g <= 2000), "an update at least every 2 s: {gaps:?}");
+    assert!(slow.is_empty(), "a write or a read took over a second mid-import: {slow:?}");
+    assert!(health_ok > 0, "/healthz said migrating with a fold held");
+    assert!(phases.contains("writing") && phases.contains("reading"), "{phases:?}");
+    assert!(crate::import014::migrating().is_none() && crate::guard::health().1.get("migrating").is_none(), "nothing migrating once done");
+    let c = &res["counts"]; assert_eq!((res["state"].as_str(), c["projects"].as_u64(), c["threads"].as_u64()), (Some("done"), Some(10 + 1), Some(500 + 3)), "the large part and the small fixture's own: {res}");
+    assert_eq!(r.hub.model().await.threads.len(), 500 + 3, "every thread that came is in the model");
+}
+
+/// After 0.14's Update (BACKPLANE_IMPORT_AUTO) the import begins on its own and ends with the summary; a start after it has finished does not run it again.
+#[tokio::test] async fn after_an_update_the_import_runs_by_itself_once() {
+    let r = rig("auto").await; // (rig made it without auto)
+    let imp = start_auto(&r.hub, Some(r.old.clone()), true);
+    let mut done = false; for _ in 0..200 { if r.hub.setting(DONE).await.is_some() { done = true; break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
+    assert!(done, "the import ran by itself"); let n = r.hub.store.len();
+    let _again = start_auto(&r.hub, Some(r.old.clone()), true); tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(r.hub.store.range(n, r.hub.store.len()).unwrap().iter().all(|l| !l.contains(DONE)), "a finished import is not run again at the next start");
+    drop(imp);
 }

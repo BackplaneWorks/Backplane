@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 # Writes test/fixtures/v014-home: a small Backplane 0.14 home for the 0.14 import's tests (native/host/src/import014). Each event has the shape
 # v0.14.1 wrote (field order included); the names, ids, text and keys are made up. Run from the repo root: python3 test/fixtures/make-v014-home.py
-import json, os, shutil
-D = 'test/fixtures/v014-home'
+# A large home for the progress and probation tests (not committed): make-v014-home.py OUT --large PROJECTS THREADS LINES writes OUT with that many projects
+# and threads, and history lines spread over the threads (messages and tool activity, long texts), plus the small home's bots, rooms and devices.
+import json, os, shutil, sys
+args = sys.argv[1:]
+D = args[0] if args and not args[0].startswith('--') else 'test/fixtures/v014-home'
+LARGE = tuple(int(x) for x in args[args.index('--large') + 1:args.index('--large') + 4]) if '--large' in args else None
 shutil.rmtree(D, ignore_errors=True); os.makedirs(D)
 E = []
 def e(**k):
@@ -66,6 +70,19 @@ e(t="PeerSet", id="p97a9070fbff5a66b", name="laptop", url="http://laptop.example
 e(t="DeployBuilt", id="d1", at=1790349576)
 e(t="CtxNoted", thread=T1, at=1790349577)
 e(t="SettingSet", key="told.k1792001002-105187-1", value="1", at=1792001002)
+if LARGE:
+    P, T, L = LARGE
+    words = "board schematic regulator footprint layer via trace net clearance pad stencil silkscreen copper ground plane decoupling capacitor".split()
+    pids = [f"p1791000000-{i}" for i in range(P)]
+    for i, pid in enumerate(pids): e(t="ProjectCreated", id=pid, title=f"Project {i:03d}", root=f"~/Documents/large/p{i:03d}", at=1791000000 + i)
+    per = max(1, (L - P - T) // max(T, 1))
+    for j in range(T):
+        tid = f"t1791100000-{j}"; at = 1791100000 + j * 10
+        e(t="ThreadCreated", id=tid, project=pids[j % P], title=f"Thread {j:05d} " + " ".join(words[(j + k) % len(words)] for k in range(3)), env="local", branch="", worktree="", provider="claude", model="opus", at=at)
+        for k in range(per):
+            text = " ".join(words[(j * 7 + k * 3 + n) % len(words)] for n in range(40))
+            if k % 3 == 2: e(t="ActivityLogged", thread=tid, act=f"e{j}-{k}", tone="tool", kind="claude", summary=text[:120], at=at + k)
+            else: e(t="MessagePosted", thread=tid, msg=f"m{j}-{k}", role="user" if k % 3 == 0 else "assistant", text=text, at=at + k)
 # a torn tail: 0.14 was writing when the import read it
 open(f'{D}/events.jsonl', 'w').write('\n'.join(E) + '\n{"$":"MessagePosted","thread":"%s","msg":"torn' % T1)
 json.dump({"version": 1, "owner": "c" * 64, "devices": [

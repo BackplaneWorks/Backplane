@@ -41,6 +41,8 @@ impl Source {
     pub fn notify(w: &World, bot: &str) -> Option<Source> { w.triage_owner(bot).then(|| Source { how: "notify", bot: bot.into() }) }
     /// A reminder the person scheduled (no bot's name on it), or one the uberbot set with remind_person.
     pub fn reminder(w: &World, r: &Routine) -> Option<Source> { (r.kind == "remind" && (r.by.is_empty() || w.triage_owner(&r.by))).then(|| Source { how: "reminder", bot: r.by.clone() }) }
+    /// The hub's own word that bringing a 0.14 home across is over (import014): one notice, to the phones that were away. Nothing else may use it.
+    pub(crate) fn import_done() -> Source { Source { how: "import", bot: String::new() } }
     /// The one event a push starts from.
     pub fn order(&self, id: &str, reason: &str, thread: &str, ask: &str, text: &str, at: u64) -> Value {
         json!({"$":"PushOrdered","id":id,"how":self.how,"bot":self.bot,"reason":reason,"thread":thread,"ask":ask,"text":short(text, 500),"at":at})
@@ -49,7 +51,7 @@ impl Source {
 /// The worker's own check of an order: a known way, and the uberbot's name on a notify.
 pub fn admit(e: &Value, w: &World) -> bool {
     let (how, bot) = (e["how"].as_str().unwrap_or(""), e["bot"].as_str().unwrap_or(""));
-    match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), _ => false }
+    match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), "import" => bot.is_empty() && e["reason"] == "import", _ => false }
 }
 /// What a client may not write (`setting.set`).
 pub fn reserved(key: &str) -> bool { key == BOOK || key.starts_with(SIGNIN) }
@@ -148,6 +150,8 @@ impl crate::api::Observer for Watch {
             Some("AskClosed") => tx.send(Msg::Asked(e["id"].as_str().unwrap_or("").into())),
             Some("MessagePosted") if e["role"] == "user" && crate::state::fam::turnend::policy_direct(e["msg"].as_str().unwrap_or(""), e["text"].as_str().unwrap_or("")) => tx.send(Msg::Spoke(e["thread"].as_str().unwrap_or("").into())),
             Some("SettingSet") if matches!(e["key"].as_str(), Some(QUIET | QUIET_URGENT)) => tx.send(Msg::Prefs),
+            // the person saw the import's summary: its notice leaves the book (it has no thread to be seen in)
+            Some("SettingSet") if e["key"].as_str() == Some(crate::import014::ACK) => tx.send(Msg::Seen(String::new())),
             Some("SettingSet") if e["key"].as_str().map_or(false, |k| k.starts_with(SIGNIN)) => tx.send(Msg::SignIn(e["key"].as_str().unwrap_or("").into(), e["value"].as_str().unwrap_or("").into())),
             _ => Ok(()),
         }; }

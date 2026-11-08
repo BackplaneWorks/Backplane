@@ -14,6 +14,19 @@ const LOGINS: &[&str] = &[".credentials.json", "auth.json", "login.json"];
 #[derive(Default, Clone)]
 pub struct Copied { pub copied: usize, pub notes: Vec<Value>, pub profiles: Vec<Value> }
 
+thread_local! {
+    /// Files copied by this thread's `copy_counted`, and who hears about them (every 25 files).
+    static COPIED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static HEARS: std::cell::RefCell<Option<Box<dyn Fn(u64) + Send>>> = const { std::cell::RefCell::new(None) };
+}
+fn copied_one() { COPIED.with(|c| { let n = c.get() + 1; c.set(n); if n % 25 == 0 { HEARS.with(|h| if let Some(f) = h.borrow().as_ref() { f(n) }) } }) }
+/// `copy`, telling `at` how many files it has copied as it goes.
+pub fn copy_counted(old: &Path, home: &Path, bots: &[(String, String)], hooks: &[String], secrets: bool, have_profiles: &[String], at: Box<dyn Fn(u64) + Send>) -> Copied {
+    COPIED.with(|c| c.set(0)); HEARS.with(|h| *h.borrow_mut() = Some(at));
+    let r = copy(old, home, bots, hooks, secrets, have_profiles);
+    HEARS.with(|h| *h.borrow_mut() = None); r
+}
+
 /// Copies `src` into `dst`: folders and files (links are skipped), never over a file that is there. `skip` names files left out. Returns files copied.
 pub fn copy_tree(src: &Path, dst: &Path, skip: &[&str]) -> std::io::Result<usize> {
     let mut n = 0; std::fs::create_dir_all(dst)?;
@@ -22,7 +35,7 @@ pub fn copy_tree(src: &Path, dst: &Path, skip: &[&str]) -> std::io::Result<usize
         if ty.is_symlink() || skip.iter().any(|k| name.to_str() == Some(*k)) { continue }
         if ty.is_dir() { n += copy_tree(&s, &d, skip)?; continue }
         if d.exists() { continue }
-        std::fs::copy(&s, &d)?; n += 1;
+        std::fs::copy(&s, &d)?; n += 1; copied_one();
     }
     Ok(n)
 }

@@ -130,6 +130,8 @@ pub struct Folding;
 impl Folding { pub fn begin() -> Folding { FOLDING.fetch_add(1, Relaxed); Folding } }
 impl Drop for Folding { fn drop(&mut self) { FOLDING.fetch_sub(1, Relaxed); } }
 
+/// Whether the start is over (the hub serves).
+pub fn is_ready() -> bool { READY.load(Relaxed) }
 /// The start is over: from here the hub answers everything.
 pub fn ready() { READY.store(true, Relaxed); phase("ready"); }
 
@@ -139,7 +141,10 @@ pub fn health() -> (&'static str, Value) {
     let status = if !READY.load(Relaxed) { "starting" } else if !hung.is_empty() { "hung" } else if !degraded.is_empty() { "degraded" } else { "ok" };
     let code = if matches!(status, "ok" | "degraded") { "200 OK" } else { "503 Service Unavailable" };
     let phase = dir().and_then(|d| std::fs::read_to_string(d.join("phase")).ok()).unwrap_or_default();
-    (code, json!({"status": status, "phase": phase.trim(), "safe": safe(), "control": 1, "guarded": supervised(), "folding": FOLDING.load(Relaxed), "hung": hung, "degraded": degraded.iter().map(|(w, _)| w).collect::<Vec<_>>()}))
+    let mut v = json!({"status": status, "phase": phase.trim(), "safe": safe(), "control": 1, "guarded": supervised(), "folding": FOLDING.load(Relaxed), "hung": hung, "degraded": degraded.iter().map(|(w, _)| w).collect::<Vec<_>>()});
+    // a 0.14 home coming across: well, and not yet proven (it holds a Folding too); the guard and the watchdog read it as progress, never as a hang
+    if let Some(m) = crate::import014::migrating() { v["migrating"] = m; }
+    (code, v)
 }
 
 /// Before the hub exists: the listener is bound first, and this answers it until the start is over. A client treats it as "not yet", as it would a refused connection.

@@ -100,10 +100,14 @@ fn ids_in(k: &str) -> Vec<&str> {
 }
 
 /// Whole lines of `path` up to `upto` bytes, cleaned as the store reads them; a torn tail is not a line.
-fn each_line(path: &Path, upto: u64, mut f: impl FnMut(&str)) -> std::io::Result<()> {
+fn each_line(path: &Path, upto: u64, mut f: impl FnMut(&str)) -> std::io::Result<()> { each_line_at(path, upto, &|_| {}, &mut f) }
+/// `each_line`, telling `at` how many bytes it has read, about every 4 MB.
+fn each_line_at(path: &Path, upto: u64, at: &dyn Fn(u64), f: &mut dyn FnMut(&str)) -> std::io::Result<()> {
     let r = BufReader::with_capacity(1 << 20, std::fs::File::open(path)?.take(upto));
+    let (mut read, mut told) = (0u64, 0u64);
     for l in r.split(b'\n') {
-        let l = l?; if l.is_empty() { continue }
+        let l = l?; read += l.len() as u64 + 1; if read - told >= 4 << 20 { told = read; at(read) }
+        if l.is_empty() { continue }
         let Ok(s) = std::str::from_utf8(&l) else { continue };
         let s = s.strip_suffix('\r').unwrap_or(s);
         f(&crate::store::clean(s));
@@ -123,8 +127,10 @@ pub fn whole_size(path: &Path) -> std::io::Result<u64> {
     Ok(0)
 }
 
-pub fn plan(log: &Path, have: &Have, o: Opts) -> std::io::Result<Plan> {
-    let upto = whole_size(log)?;
+pub fn plan(log: &Path, have: &Have, o: Opts) -> std::io::Result<Plan> { plan_with(log, have, o, &|_, _| {}) }
+/// `plan`, telling `read(bytes, of)` how far it is: three passes over the old log, so `of` is three times its size.
+pub fn plan_with(log: &Path, have: &Have, o: Opts, read: &dyn Fn(u64, u64)) -> std::io::Result<Plan> {
+    let upto = whole_size(log)?; let of = upto * 3;
     // ---- first pass: what exists at the end of the old log ----
     let (mut projects, mut removed) = (HashMap::<String, u64>::new(), HashSet::<String>::new());
     let mut threads: HashMap<String, (String, u64)> = HashMap::new(); // id -> (project, hash of ThreadCreated)
@@ -136,7 +142,7 @@ pub fn plan(log: &Path, have: &Have, o: Opts) -> std::io::Result<Plan> {
     let mut devices: HashMap<String, bool> = HashMap::new(); // token -> live at the end
     let mut settings: HashMap<String, (String, u64)> = HashMap::new();
     let mut uber: Option<String> = None; let mut peers = 0usize; let mut hooks: HashMap<String, String> = HashMap::new();
-    each_line(log, upto, |l| {
+    each_line_at(log, upto, &|b| read(b, of), &mut |l: &str| {
         let Some(t) = crate::session::event_type(l) else { return };
         let h = || line_hash(l);
         match t {
@@ -179,7 +185,7 @@ pub fn plan(log: &Path, have: &Have, o: Opts) -> std::io::Result<Plan> {
     let ok_routine = |id: &str| !routines_gone.contains(id) && routines.get(id).map_or(false, |b| bk.contains(b));
     let hk: HashSet<String> = if o.secrets { hooks.iter().filter(|(_, b)| bk.contains(*b)).map(|(id, _)| id.clone()).collect() } else { HashSet::new() };
     let mut last_device: HashMap<String, u64> = HashMap::new(); // token -> hash of its last DeviceRegistered/DevicePrefs line (only those come)
-    each_line(log, upto, |l| { match crate::session::event_type(l) { Some("DeviceRegistered") | Some("DevicePrefs") => { let tok = fld(l, "token"); if devices.get(tok) == Some(&true) { last_device.insert(format!("{}{tok}", crate::session::event_type(l).unwrap_or("")), line_hash(l)); } } _ => {} } })?;
+    each_line_at(log, upto, &|b| read(upto + b, of), &mut |l: &str| { match crate::session::event_type(l) { Some("DeviceRegistered") | Some("DevicePrefs") => { let tok = fld(l, "token"); if devices.get(tok) == Some(&true) { last_device.insert(format!("{}{tok}", crate::session::event_type(l).unwrap_or("")), line_hash(l)); } } _ => {} } })?;
     let wanted_devices: HashSet<u64> = last_device.values().copied().collect();
 
     // ---- second pass: the lines, in the old log's order ----
@@ -192,7 +198,7 @@ pub fn plan(log: &Path, have: &Have, o: Opts) -> std::io::Result<Plan> {
         if o.keep { out.push(line) }
     };
     let mut seen_bot: HashSet<String> = HashSet::new(); let mut seen_room: HashSet<String> = HashSet::new(); let mut seen_routine: HashSet<String> = HashSet::new();
-    each_line(log, upto, |l| {
+    each_line_at(log, upto, &|b| read(2 * upto + b, of), &mut |l: &str| {
         let Some(t) = crate::session::event_type(l) else { return };
         if let Some(key) = thread_key(t) {
             let th = fld(l, key); if !tk.contains(th) { return }
