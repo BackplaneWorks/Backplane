@@ -1,16 +1,20 @@
 #!/bin/bash
 # The phone halves of F06, F07, F17 and F21 on the Pixel 9 (dev.backplane.mobile.gpui, landscape 2424x1080), through real touches (adb input) against a private hub on a temp home:
-#   flock -o ~/.cache/pixel-52220DLAQ001FC.lock test/e2e/pixel-f-rows.sh HUB_BIN OUT_DIR
-#   (-o: the lock's fd is not inherited, so a hub this script starts never holds the phone's lock; its hubs are found by their home, whatever the binary is called)
+#   test/e2e/pixel-f-rows.sh HUB_BIN OUT_DIR
+#   The script takes ~/.cache/pixel-52220DLAQ001FC.lock itself (lib/pixel-lock.sh) and holds it for the whole run, in a process group it kills before the lock is let go: nothing it starts
+#   survives it, and no adb call can happen outside the lock. Do not wrap it in another flock (the two would wait for each other). Every adb call goes through A()/inp() (lib/pixel-adb.sh);
+#   inp refuses to touch or type unless the gpui app is what the phone shows (Google Play or the launcher on top stops the run), and `say` checks it is on Thread 1 first.
 # Taps are in the 2000-wide frame screenshots are shown in (x1.21 to the screen). A check passes from the hub's events.jsonl or the stand-in's log, or from changed pixels on the viewer; never from the driver's say-so.
 # Never touches the iPhone; only the gpui app package (dev.backplane.mobile.gpui, never the person's dev.backplane.mobile). The phone reaches the private hub over the LAN
 # The hub listens on loopback; the phone reaches it through `adb reverse` (removed when the rows end). The app refuses an invitation that names only 127.0.0.1 ("this phone cannot reach it"),
 # so the invitation also names this machine's LAN address (PIXEL_HOST, default: the address on the route to the internet), which the desktop's firewall refuses: the app pairs and
 # connects through the loopback route, i.e. the tunnel.
-set -u; HUB=$(realpath "$1"); O=$2; PORT=${PORT:-3893}; S=52220DLAQ001FC; PKG=dev.backplane.mobile.gpui; HERE=$(cd "$(dirname "$0")" && pwd)
-A() { adb -s $S "$@"; }; shot() { A exec-out screencap -p > "$O/shots/$1.png"; }
-T() { A shell input tap $(python3 -c "print(int($1*1.21), int($2*1.21))"); }
+set -u; HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib/pixel-lock.sh"; pixel_locked_run "$0" "$@"
+HUB=$(realpath "$1"); O=$2; PORT=${PORT:-3893}; S=52220DLAQ001FC; PKG=dev.backplane.mobile.gpui; . "$HERE/lib/pixel-adb.sh"
+shot() { A exec-out screencap -p > "$O/shots/$1.png"; }
+T() { inp tap $(python3 -c "print(int($1*1.21), int($2*1.21))"); }
 res=(); ok() { echo "$1 $2 $3"; res+=("{\"id\":\"$2\",\"ok\":$( [ "$1" = ok ] && echo true || echo false),\"ev\":\"$3\"}"); }
+pixel_abort() { ok FAIL guard "$1"; exit 3; }   # called by inp when the app is not what the phone shows: nothing more is typed or touched
 export PIXEL_HOST=${PIXEL_HOST:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')}
 [ -n "$PIXEL_HOST" ] || { echo "no LAN address for the hub (set PIXEL_HOST)"; exit 2; }
 rm -rf "$O"; mkdir -p "$O/shots"; (bun "$HERE/pixel-hub.mjs" "$HUB" "$O/hub" $PORT > "$O/hub.out" 2>&1 &); sleep 8
@@ -20,14 +24,16 @@ A reverse tcp:$PORT tcp:$PORT >/dev/null
 A shell pm grant $PKG android.permission.POST_NOTIFICATIONS >/dev/null 2>&1   # a cleared app asks for it at its first screen and the prompt would cover the rows (this package only)
 A shell am force-stop $PKG
 INV=$(python3 -c "import json,urllib.parse;print(urllib.parse.quote(json.load(open('$O/hub/state.json'))['invite'],safe=''))")
-ime_off() { local i; for i in 1 2 3; do A shell dumpsys input_method 2>/dev/null | grep -q 'mInputShown=true' || return 0; A shell input keyevent KEYCODE_BACK; sleep 1; done; }   # a keyboard left up by an earlier run covers the buttons
+ime_off() { local i; for i in 1 2 3; do A shell dumpsys input_method 2>/dev/null | grep -q 'mInputShown=true' || return 0; inp keyevent KEYCODE_BACK; sleep 1; done; }   # a keyboard left up by an earlier run covers the buttons
 A shell am start -W -a android.intent.action.VIEW -d "bpgpui://unpair" $PKG >/dev/null; sleep 3; ime_off      # start from the pairing screen, whatever the app held
 A shell am start -W -a android.intent.action.VIEW -d "bpgpui://pair?url=$INV" $PKG >/dev/null; sleep 6; ime_off; shot pair-prompt; T 301 560; sleep 8; shot sidebar
 T 170 603; sleep 3                       # Thread 1 (approval-required)
 # the thread's composer is on screen (its Attach and Send controls): typing goes nowhere else (a run that typed into the pairing field left "zqapprove now" there)
 on_thread() { A shell uiautomator dump /sdcard/rows-ui.xml >/dev/null 2>&1; A shell cat /sdcard/rows-ui.xml 2>/dev/null | grep -q 'content-desc="Attach"' && A shell cat /sdcard/rows-ui.xml | grep -q 'Send'; }
-say() { on_thread || { echo "say: the thread's composer is not on screen; '$1' not typed"; shot not-on-thread; return 1; }; T 1000 670; sleep 0.7; A shell input text "$1"; sleep 0.7; A shell input keyevent KEYCODE_BACK; sleep 1; T 1907 779; }
-on_thread || { shot not-paired; ok FAIL setup "the app is not on Thread 1 of this hub after pairing (shots/not-paired.png): nothing was typed, no row ran"; exit 1; }
+REF=$HERE/lib/pixel-title-thread1.png
+on_thread1() { shot title-check; if [ -n "${PIXEL_MAKE_REF:-}" ] && [ ! -f "$REF" ]; then python3 -W ignore "$HERE/lib/pixel_title.py" "$O/shots/title-check.png" "$REF" --save; fi; python3 -W ignore "$HERE/lib/pixel_title.py" "$O/shots/title-check.png" "$REF"; }
+say() { fg_ok && on_thread && on_thread1 || { echo "say: not typing '$1': the phone does not show the gpui app on Thread 1 with its composer (it shows $(fg_now))"; shot not-on-thread; ok FAIL guard "not typing: the phone does not show the gpui app on Thread 1 with its composer (it shows $(fg_now))"; exit 3; }; T 1000 670; sleep 0.7; inp text "$1"; sleep 0.7; inp keyevent KEYCODE_BACK; sleep 1; T 1907 779; }
+on_thread && on_thread1 || { shot not-paired; ok FAIL setup "the app is not on Thread 1 of this hub after pairing (shots/not-paired.png): nothing was typed, no row ran"; exit 1; }
 wait_for() { for i in $(seq 1 ${2:-25}); do eval "$1" && return 0; sleep 1; done; return 1; }
 say 'zqapprove%snow'; wait_for "[ \$(grep -c AskOpened $EV) -ge 1 ]"; sleep 2; shot approval; T 500 303; wait_for "grep -q 'PERM Bash.*allow' $F"
 grep -q 'PERM Bash.*allow' $F && ok ok F06-phone-allow "the approval card on the phone: Allow tapped, the agent got allow" || ok FAIL F06-phone-allow "no allow reached the agent"
@@ -45,8 +51,8 @@ for v in "Board 70 211" "Schematic 250 211" "3D 403 211" "Mech 660 211"; do set 
   # ready = something is drawn, nothing moves without a touch (a spinner or a redrawing loading card would), and it is the right thing: the board's 3D page is the green board model,
   # the Mech page is the grey part (not the board's model, not a "Loading" card); a card that sits there still fails the swipe test below
   st='{"bright":0,"green":0,"blue":0,"still":false}'
-  for k in $(seq 1 14); do sleep 4; A shell input swipe 1210 680 1212 682 60; sleep 1; shot v-$kind; sleep 2; shot v-$kind-b; st=$(python3 -W ignore $PS "$O/shots/v-$kind.png" "$O/shots/v-$kind-b.png"); ready $kind "$st" && break; done
-  A shell input swipe $D 500; sleep 2; shot v-$kind-moved
+  for k in $(seq 1 14); do sleep 4; inp swipe 1210 680 1212 682 60; sleep 1; shot v-$kind; sleep 2; shot v-$kind-b; st=$(python3 -W ignore $PS "$O/shots/v-$kind.png" "$O/shots/v-$kind-b.png"); ready $kind "$st" && break; done
+  inp swipe $D 500; sleep 2; shot v-$kind-moved
   mv=$(python3 -W ignore -c "
 from PIL import Image,ImageChops
 h=lambda n:Image.open('$O/shots/%s.png'%n).convert('RGB').crop((0,330,2424,1000))

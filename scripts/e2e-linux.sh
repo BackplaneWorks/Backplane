@@ -10,7 +10,7 @@
 #   settings walk  test/e2e/settings-walk.mjs     every control on every Settings page, applied and persisted over a restart
 #   client rows    test/e2e/gpui-f-rows.py        the GPUI window on a private Xvfb + i3 with real X input
 #   CEF            test/cef/cef_e2e.sh            the embedded Chromium in the window
-#   phone rows     test/e2e/pixel-f-rows.sh       the Pixel 9, under ~/.cache/pixel-52220DLAQ001FC.lock (skipped with --no-phone, or when no device is attached)
+#   phone rows     test/e2e/pixel-f-rows.sh       the Pixel 9; the script takes ~/.cache/pixel-52220DLAQ001FC.lock itself and holds it for its whole run (skipped with --no-phone, or when no device is attached)
 # OUT_DIR/summary.md is the paste: the commit, what ran, counts per driver, every failure with its evidence. Exit 0 only when nothing failed.
 # Frame budgets are not judged: llvmpipe is software rendering. A row that was not run says why (skip), never pass.
 set -u
@@ -78,7 +78,7 @@ for l in open(sys.argv[1],errors='replace'):
     if m: f.write("cef\t%s\tcef\t%s\n"%('ok' if m.group(1)=='PASS' else 'FAIL',m.group(2)[:200]))
 PY
 if [ $PHONE = 1 ] && adb devices 2>/dev/null | grep -q "^52220DLAQ001FC.device"; then
-  echo "== phone rows (waiting for the lock)"; flock ~/.cache/pixel-52220DLAQ001FC.lock test/e2e/pixel-f-rows.sh "$HUB" "$OUT/phone" > "$OUT/phone-rows.log" 2>&1; parse phone-rows "$OUT/phone-rows.log"
+  echo "== phone rows (waiting for the lock)"; test/e2e/pixel-f-rows.sh "$HUB" "$OUT/phone" > "$OUT/phone-rows.log" 2>&1; parse phone-rows "$OUT/phone-rows.log"
 elif [ $PHONE = 0 ]; then add phone-rows skip all "not run: --no-phone"; else add phone-rows skip all "not run: the Pixel 9 (52220DLAQ001FC) is not attached"; fi
 python3 - "$OUT" "$SHA" "$DIRTY" "$LABEL" "${ARCHIVE:+$(sha256sum "$ARCHIVE" | cut -c1-12)}" <<'PY'
 import sys,collections,datetime,subprocess
