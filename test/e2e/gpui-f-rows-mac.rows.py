@@ -224,7 +224,11 @@ if want('F18'):
             rq = urllib.request.Request('http://127.0.0.1:%d/bots/t1/screen.jpg' % PORT, headers={'Authorization': 'Bearer ' + open(P('home/token')).read().strip()})
             b = urllib.request.urlopen(rq, timeout=5).read(); open(P('shots', 'f18-hubframe-%s.jpg' % tag), 'wb').write(b); return len(b), hashlib.md5(b).hexdigest()[:8]
         except Exception as e: return 0, str(e)[:60]
-    fr1 = frame('a'); pause(3); fr2 = frame('b'); print('   F18 hub frame (what the poller fetches): %s then %s' % (fr1, fr2), flush=True)
+    for _ in range(15):   # the hub's frame follows the page: wait for it to stop being the blank one
+        fr1 = frame('a')
+        if fr1[0] > 3000: break
+        pause(2)
+    shot('f18-page'); pause(3); fr2 = frame('b'); print('   F18 hub frame (what the poller fetches): %s then %s' % (fr1, fr2), flush=True)
     pos = {k: find('f18-page', c) for k, c in [('btn', (0, 204, 102)), ('inp', (255, 255, 102)), ('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
     res.append(('page loads and paints', loaded and all(pos.values()), 'the helper streamed the test page (the page asked its server: %s); targets found on the frame: %s' % (loaded, pos)))
     if pos['btn']:
