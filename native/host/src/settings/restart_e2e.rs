@@ -84,6 +84,11 @@ async fn all(hub: &Arc<Hub>, ths: &[String], state: &str, secs: u64) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
+/// Until no thread's provider process holds any saved account (`Accounts::runs_on`): a stopped turn's child is gone, so a disconnect is not refused or raced.
+async fn quiet(mgr: &Arc<Accounts>, ths: &[String]) {
+    let end = Instant::now() + Duration::from_secs(60);
+    while ths.iter().any(|t| mgr.runs_on(t).is_some()) { assert!(Instant::now() < end, "a child still holds an account: {:?}", ths.iter().map(|t| (t, mgr.runs_on(t))).collect::<Vec<_>>()); tokio::time::sleep(Duration::from_millis(20)).await }
+}
 fn threads(n: usize) -> Vec<String> { let mut v = vec![BUB_T.to_string()]; v.extend((0..n).map(tid)); v }
 /// A fresh home holding what `from` holds (its log and its private account registry and stores): the next start of the hub. The old hub keeps its own files, so nothing
 /// it still writes on its way out lands in the new one's log.
@@ -129,7 +134,7 @@ async fn a_bound_profile_that_cannot_start_falls_back_to_another_account_then_to
     all(&up.hub, &threads(1), "completed", 60).await;
     // Work is signed out on the side (its store is gone): the next start cannot run on it
     let gone = up.mgr.snapshot()["profiles"][0]["id"].as_str().unwrap().to_string(); assert_eq!(gone, ps[0].0);
-    for th in threads(1) { up.ag.stop(&th).await.unwrap() } tokio::time::sleep(Duration::from_millis(300)).await; // no child of it still runs
+    for th in threads(1) { up.ag.stop(&th).await.unwrap() } quiet(&up.mgr, &threads(1)).await; // no child of it still runs
     let r = up.mgr.request(&json!({"op":"disconnect","profile":gone})).await; assert_eq!(r["error"], "", "{r}");
     let before = b.turns().len();
     up.ag.deliver_person(&tid(0), "m-fb1", "go on", vec![]).await.unwrap();
@@ -138,7 +143,7 @@ async fn a_bound_profile_that_cannot_start_falls_back_to_another_account_then_to
     let said: Vec<String> = lines(&up.hub, &tid(0)).into_iter().filter(|l| l.starts_with("Started on")).collect();
     assert_eq!(said, vec!["Started on Personal: Work cannot start a turn now (Reconnect and select this account before starting a turn)".to_string()], "one line");
     // and with Personal gone too, the computer's own Claude login
-    up.ag.stop(&tid(0)).await.unwrap(); tokio::time::sleep(Duration::from_millis(300)).await;
+    up.ag.stop(&tid(0)).await.unwrap(); quiet(&up.mgr, &threads(1)).await;
     let r = up.mgr.request(&json!({"op":"disconnect","profile":ps[1].0})).await; assert_eq!(r["error"], "", "{r}");
     std::fs::write(b.rec.join("default.login"), json!({"email":"me@x.com"}).to_string()).unwrap(); // the CLI's own login is signed in
     up.ag.deliver_person(&tid(0), "m-fb2", "and on", vec![]).await.unwrap();
@@ -279,5 +284,52 @@ async fn the_watchdogs_retry_starts_again_only_the_turns_that_failed_on_the_acco
     all(&up.hub, &[tid(0)], "completed", 30).await;
     assert_eq!(b.turns().len(), before + 1); assert!(b.turns()[before]["text"].as_str().unwrap().contains(crate::agents::ACCOUNT_RETRY_TEXT));
     assert_eq!(turn_of(&up.hub, &tid(1)).await, "failed", "not an account failure: left to the person");
+    up.ag.shutdown(); let _ = std::fs::remove_dir_all(&home);
+}
+
+/// The retire watch (accounts_hub::found) cuts a running turn whose account was signed out or changed under it. A turn shows running from the moment its message is taken,
+/// before its spawn has tried the account; one sent right after Work was signed out was cut by the watch in that window ("verified identity changed or disconnected") while
+/// its start was taking Personal, and ended interrupted (restart_e2e's fallback test under load, macOS CI). Here the window is held open on purpose: Personal's sign-in check
+/// is slow, and the watch runs inside it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_retire_watch_cuts_a_turn_running_on_the_changed_account_but_not_one_still_choosing_its_login() {
+    let b = bins("rw"); let home = fresh("rw-home");
+    let ps = saved_home(&home, &b, 1, &["Personal"]).await;
+    let up = boot(&home, &b).await;
+    all(&up.hub, &threads(1), "completed", 60).await;
+    for th in threads(1) { up.ag.stop(&th).await.unwrap() } quiet(&up.mgr, &threads(1)).await;
+    let cut = |l: &String| l.contains("verified identity changed");
+    // a long turn runs on Work, and the identity behind Work moves: that turn is cut
+    std::fs::write(b.rec.join("mode.w@x.com"), "slow:30").unwrap();
+    up.ag.deliver_person(&tid(0), "m-rw1", "go on", vec![]).await.unwrap();
+    let before = b.turns().len();
+    // the stand-in has its turn (it records it before the slow part): the process runs on Work now, not only about to
+    let end = Instant::now() + Duration::from_secs(30); while b.turns().len() <= before { assert!(Instant::now() < end, "{:?} {:?}", up.mgr.runs_on(&tid(0)), lines(&up.hub, &tid(0))); tokio::time::sleep(Duration::from_millis(20)).await }
+    assert_eq!(b.turns()[before]["who"], "w@x.com"); assert_eq!(up.mgr.runs_on(&tid(0)).as_deref(), Some(ps[0].0.as_str()), "and the hub knows it runs on Work");
+    let store = std::fs::read_dir(home.join("providers/accounts-v1").join(&ps[0].0)).unwrap().flatten().map(|e| e.path()).find(|p| p.join("login.json").exists()).expect("Work's store");
+    std::fs::write(store.join("login.json"), json!({"email":"someone-else@x.com"}).to_string()).unwrap();
+    let s = up.mgr.request(&json!({"op":"status","profile":ps[0].0})).await; assert_eq!(s["error"], "", "{s}");
+    accounts_hub::found(&up.hub, &Some(up.ag.clone()), &up.mgr.snapshot()).await;
+    assert!(lines(&up.hub, &tid(0)).iter().any(cut), "the turn on the changed account is cut: {:?}", lines(&up.hub, &tid(0)));
+    assert_eq!(turn_of(&up.hub, &tid(0)).await, "interrupted");
+    quiet(&up.mgr, &threads(1)).await; let _ = std::fs::remove_file(b.rec.join("mode.w@x.com"));
+    let cuts = lines(&up.hub, &tid(0)).iter().filter(|l| cut(l)).count();
+    // the next start: Work is not the account the thread chose any more, so it goes to Personal, where a routine check is running: the start waits for it (launch_plan
+    // waits out a check), running and on no login, and the watch runs then
+    assert!(up.mgr.hold_check(&ps[1].0), "Personal is free for the check");
+    let before = b.turns().len();
+    // deliver returns once the start has its login, so it is sent from a task: the start is held on Personal's check while the watch runs
+    let sent = { let ag = up.ag.clone(); tokio::spawn(async move { ag.deliver_person(&tid(0), "m-rw2", "and on", vec![]).await }) };
+    let end = Instant::now() + Duration::from_secs(30); while turn_of(&up.hub, &tid(0)).await != "running" { assert!(Instant::now() < end, "{:?}", lines(&up.hub, &tid(0))); tokio::time::sleep(Duration::from_millis(20)).await }
+    assert!(!sent.is_finished(), "the start waits on Personal's check");
+    assert_eq!(up.mgr.runs_on(&tid(0)), None, "still choosing its login: {:?}", lines(&up.hub, &tid(0)));
+    accounts_hub::found(&up.hub, &Some(up.ag.clone()), &up.mgr.snapshot()).await; // the watch, in the window
+    assert_eq!(lines(&up.hub, &tid(0)).iter().filter(|l| cut(l)).count(), cuts, "a turn on no login yet is not cut: {:?}", lines(&up.hub, &tid(0)));
+    assert_eq!(turn_of(&up.hub, &tid(0)).await, "running");
+    assert!(!sent.is_finished(), "and is still waiting: the watch ran inside the window");
+    up.mgr.release_check(&ps[1].0); sent.await.unwrap().unwrap();
+    all(&up.hub, &[tid(0)], "completed", 60).await;
+    assert_eq!(b.turns()[before..].iter().map(|t| t["who"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>(), vec!["p0@x.com".to_string()], "it went on under Personal: {:#?}", b.turns());
+    assert_eq!(lines(&up.hub, &tid(0)).iter().filter(|l| l.starts_with("Started on")).count(), 1, "said once: {:?}", lines(&up.hub, &tid(0)));
     up.ag.shutdown(); let _ = std::fs::remove_dir_all(&home);
 }

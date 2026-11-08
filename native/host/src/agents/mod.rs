@@ -924,9 +924,9 @@ impl Actor {
         let (on_fallback, current) = (rec.is_object(), rec["id"].as_str().unwrap_or("").to_string());
         let e = match own {
             Ok(plan) => {
-                if !on_fallback { return Ok((Some((plan, ah::Busy::new(mgr, id))), None)) }
+                if !on_fallback { return Ok((Some((plan, ah::Busy::for_thread(mgr, id, &self.th))), None)) }
                 let _ = hub.commit_many(&[set(fb_key, String::new(), now_s())]).await; // back on its own account, in its own session
-                return Ok((Some((plan, ah::Busy::new(mgr, id))), Some(rec["session"].as_str().unwrap_or("").to_string())))
+                return Ok((Some((plan, ah::Busy::for_thread(mgr, id, &self.th))), Some(rec["session"].as_str().unwrap_or("").to_string())))
             }
             Err(e) => e,
         };
@@ -941,7 +941,7 @@ impl Actor {
                 let session = session_for(&oid);
                 let _ = hub.commit_many(&[set(fb_key, json!({"id":oid,"epoch":oepoch,"from":id,"session":own_session}).to_string(), now_s())]).await;
                 if session.is_some() { self.account_note("info", format!("Started on {}: {n} cannot start a turn now ({e})", if olabel.is_empty() { "another account" } else { &olabel })).await; }
-                return Ok((Some((plan, ah::Busy::new(mgr, &oid))), session))
+                return Ok((Some((plan, ah::Busy::for_thread(mgr, &oid, &self.th))), session))
             }
         }
         if !mgr.default_login(provider).await { return Err(e) }

@@ -150,7 +150,7 @@ struct Attempt { id: String, profile: String, state: String, url: String, user_c
 
 enum Cmd { Respond(String), Cancel }
 #[derive(Default)]
-struct Inner { profiles: Vec<Profile>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>> }
+struct Inner { profiles: Vec<Profile>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>, runs_on: HashMap<String, (String, u64)>, runs_seq: u64 }
 
 /// A launch waiting or running on a profile; dropped (finished, refused or its future dropped) it leaves the queue, so the profile is never stranded.
 struct Queued { me: Arc<Accounts>, id: String }
@@ -520,6 +520,15 @@ impl Accounts {
     }
     /// The profile's state now ("" when there is none).
     pub fn state_of(&self, id: &str) -> String { self.inner.lock().unwrap().profiles.iter().find(|p| p.id == id).map(|p| p.state.clone()).unwrap_or_default() }
+    /// Thread `th`'s provider process runs on profile `id` from now on (accounts_hub::Busy::for_thread): the token ends it in `run_off`, and only it, so the guard of a process
+    /// that was replaced cannot clear its successor's record.
+    pub fn run_on(&self, th: &str, id: &str) -> u64 { let mut g = self.inner.lock().unwrap(); g.runs_seq += 1; let t = g.runs_seq; g.runs_on.insert(th.to_string(), (id.to_string(), t)); t }
+    pub fn run_off(&self, th: &str, token: u64) { let mut g = self.inner.lock().unwrap(); if g.runs_on.get(th).map_or(false, |(_, t)| *t == token) { g.runs_on.remove(th); } }
+    /// Tests: a routine check (the 5-minute refresh) holds profile `id` until `release_check`, so a start on it waits in launch_plan, running and on no login.
+    #[cfg(test)] pub fn hold_check(&self, id: &str) -> bool { self.begin(id, "refresh", false).is_ok() }
+    #[cfg(test)] pub fn release_check(&self, id: &str) { self.end(id, "refresh") }
+    /// The profile thread `th`'s live provider process runs on; None while none runs on a saved profile (a turn still choosing its login, or one on the CLI's own).
+    pub fn runs_on(&self, th: &str) -> Option<String> { self.inner.lock().unwrap().runs_on.get(th).map(|(id, _)| id.clone()) }
     pub fn child_ended(&self, id: &str) { let mut g = self.inner.lock().unwrap(); if let Some(n) = g.busy.get_mut(id) { *n = n.saturating_sub(1); if *n == 0 { g.busy.remove(id); } } }
 
     /// A request on a profile: refused while another is in progress, or a launch is queued (accounts.js `jobs` / `launchQueues`). `check_busy`: also while a provider
