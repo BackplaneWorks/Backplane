@@ -140,15 +140,17 @@ jobs:
             native/host
             native/gpui
           shared-key: e2e-macos
-      - uses: oven-sh/setup-bun@v2
-      - name: build the hub, the client and the browser helper
+      - name: build the hub and the client, take the browser helper from the archive
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
           (cd native/host && cargo build --release --bin backplane-hub --bin bp-sh) & a=$!
           (cd native/gpui && cargo build --release) & b=$!
           wait $a; ra=$?; wait $b; rb=$?; [ $ra = 0 ] && [ $rb = 0 ]
           mkdir -p dist; cp native/host/target/release/backplane-hub native/gpui/target/release/backplane-gpui dist/
-          (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../dist/backplane-browser")
+          # the browser helper (tools/browser, a bun program) comes from the release archive: bun's download is not always reachable from a runner
+          gh run download ${{ inputs.archive_run }} -n archive-darwin-arm64 -D arc && tar -xzf arc/*.tar.gz -C arc && cp arc/backplane-browser dist/backplane-browser
           cp -r assets dist/assets; echo "$BACKPLANE_COMMIT" > dist/COMMIT; ls -l dist
       - name: input and screenshot tools, FreeCAD
         run: |
