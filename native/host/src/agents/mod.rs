@@ -178,6 +178,9 @@ impl Agents {
         tx
     }
     /// Every actor ends and takes its process (and the process's group) with it.
+    /// No further turn of the restart's line is carried on (the ones already started run on). The restart-storm test calls it before it restarts the hub, so no carry lands in the
+    /// instant before the cut (one carried and cut before it did anything is left stopped by design, world.rs carry_twice_once).
+    pub fn carry_hold(&self) { self.carry_gone.store(true, Relaxed) }
     pub fn shutdown(&self) { self.carry_gone.store(true, Relaxed); self.actors.lock().unwrap().clear(); }
     pub fn actors(&self) -> usize { self.actors.lock().unwrap().len() }
 
@@ -302,7 +305,7 @@ impl Agents {
     }
     async fn carry_all(self: &Arc<Self>, carry: Vec<String>) {
         let rest = carry.iter().skip(BURST).cloned().collect::<Vec<_>>();
-        for th in carry.iter().take(BURST) { self.carry_on(th).await }
+        for th in carry.iter().take(BURST) { if self.carry_gone.load(Relaxed) { return } self.carry_on(th).await } // a shutdown (or `carry_hold`) ends the line here too
         if rest.is_empty() { return }
         let me = Arc::downgrade(self);
         tokio::spawn(async move {
