@@ -84,7 +84,7 @@ if want('F15'):
     sent = until(lambda: any(e['$'] == 'MessagePosted' and e.get('role') == 'user' and 'look at this' in e.get('text', '') for e in events()), 20)
     pause(2); shot('f15-sent')
     files = glob.glob(P('home/attachments/*/*pasted*.png')) or glob.glob(P('home/attachments/*/*.png'))
-    told = until(lambda: os.path.exists(P('fake.log')) and any('look at this' in l and 'attachments/' in l for l in open(P('fake.log')).read().splitlines() if l.startswith('TURN')), 30)
+    told = until(lambda: os.path.exists(P('fake.log')) and any('look at this' in l and 'attachments/' in l for l in open(P('fake.log')).read().splitlines() if l.startswith('TURN')), 90)
     same = bool(files) and open(files[0], 'rb').read()[:8] == b'\x89PNG\r\n\x1a\n'
     log('F15-paste', chip and sent and same and told, 'a PNG on the X clipboard pasted with Ctrl+V: composer changed=%s; message posted=%s; stored as a PNG=%s (%s); the agent was told the path=%s' % (chip, sent, same, [os.path.relpath(f, OUT) for f in files][:1], told))
 

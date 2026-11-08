@@ -79,7 +79,8 @@ const it=await c.rpc('turn.interrupt',{thread:L}); const ints=await until(()=>ha
 log('F07',it.ok&&ints,`turn.interrupt ok=${it.ok} turn left running=${ints} (${events().filter(e=>e.$==='TurnChanged'&&e.thread===L).map(e=>e.state).join('>')})`);
 await c.rpc('turn.start',{thread:L,text:'long turn 2'}); await until(()=>events().filter(e=>e.$==='TurnChanged'&&e.thread===L&&e.state==='running').length>=2,5000);
 // F07 held queue: not here (a model choice holds only work that waits, so a fresh message is never held): linux-f-rows.mjs drives it with an interrupted turn
-await c.rpc('setting.set',{key:'restart.continue',value:'off'});
+// the setting must be in the hub's log before it is killed: a restart that finds restart.continue unset carries the turn on (default), so a lost write would read as a hub bug
+for(let t=0;t<3&&!events().some(e=>e.$==='SettingSet'&&e.key==='restart.continue'&&e.value==='off');t++){const r=await c.rpc('setting.set',{key:'restart.continue',value:'off'});await until(()=>events().some(e=>e.$==='SettingSet'&&e.key==='restart.continue'&&e.value==='off'),5000);if(!events().some(e=>e.$==='SettingSet'&&e.key==='restart.continue'&&e.value==='off'))console.log(`   F04: setting.set restart.continue=off attempt ${t+1}: reply ${JSON.stringify(r).slice(0,160)}, nothing logged`)}
 // F21 part: since-resume before the restart
 const nBefore=events().length;
 c.ws.close(); try{process.kill(pid0,'SIGTERM')}catch{} await sleep(2500);
