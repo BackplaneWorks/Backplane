@@ -30,8 +30,22 @@ large, throttle = opt("--large"), opt("--throttle")
 # every 0.14 thread and message it keeps is in 0.15's log exactly once
 crash = opt("--crash-import")
 # --expect-from FILE: a clean import of the same home (a plain run's kept import-result.json): the resumed import must reach its threads and messages
-expect = json.load(open(opt("--expect-from"))).get("counts", {}) if opt("--expect-from") else {}
+expect_once = json.load(open(opt("--expect-from"))).get("once") if opt("--expect-from") else None
 PASS, FAIL = [], []
+def ids(path, kind, key):   # how often each id of a kind of line is in a log
+    n = {}
+    for l in open(path, errors="replace"):
+        if f'"{kind}"' not in l: continue
+        try: v = json.loads(l)
+        except Exception: continue
+        if v.get("$") == kind: n[v.get(key)] = n.get(v.get(key), 0) + 1
+    return n
+def once(h14, h15):   # per kind: 0.14's ids that are in 0.15's log more than once, and exactly once
+    out = {}
+    for kind, key in (("ThreadCreated", "id"), ("MessagePosted", "msg")):
+        old, new = ids(os.path.join(h14, "events.jsonl"), kind, key), ids(os.path.join(h15, "events.jsonl"), kind, key)
+        out[kind] = {"twice": sum(1 for k in old if new.get(k, 0) > 1), "once": sum(1 for k in old if new.get(k, 0) == 1)}
+    return out
 def ok(name, detail=""): PASS.append(name); print(f"PASS {name:12} {detail}", flush=True)
 def no(name, detail=""): FAIL.append(name); print(f"FAIL {name:12} {detail}", flush=True)
 def free_port():
@@ -213,23 +227,10 @@ try:
         st2, result = hub15.call("GET", "/import/0.14", hub15.bearer()) if on else (0, {})
         if not on or result.get("state") != "done": no("resume", f"layout {r.returncode} update {r2.returncode} {(r2.stdout + r2.stderr)[-160:]} build={gstat().get('build')} import={str(result)[:160]}")
         else:
-            def ids(path, kind, key):
-                n = {}
-                for l in open(path, errors="replace"):
-                    if f'"{kind}"' not in l: continue
-                    try: v = json.loads(l)
-                    except Exception: continue
-                    if v.get("$") == kind: n[v.get(key)] = n.get(v.get(key), 0) + 1
-                return n
-            e14, e15 = os.path.join(h14, "events.jsonl"), os.path.join(h15, "events.jsonl")
-            out = []
-            for kind, key, cnt in (("ThreadCreated", "id", "threads"), ("MessagePosted", "msg", "messages")):
-                old, new = ids(e14, kind, key), ids(e15, kind, key)
-                twice = [k for k in old if new.get(k, 0) > 1]; there = sum(1 for k in old if new.get(k, 0) == 1)
-                want = expect.get(cnt, there)   # without --expect-from: only that nothing came twice
-                out.append((kind, len(twice), there, want))
+            got = once(h14, h15); clean = expect_once or {}
+            out = [(k, v["twice"], v["once"], clean.get(k, {}).get("once", v["once"])) for k, v in got.items()]   # without --expect-from: only that nothing came twice
             if all(t == 0 and there == want for _, t, there, want in out):
-                ok("resume", f"{gtag} finished the import ({', '.join(f'{there} {k}' for k, _, there, _ in out)}, each once{", as a clean import of this home brings" if expect else ""}); elapsed {result.get('elapsed_s')} s")
+                ok("resume", f"{gtag} finished the import ({', '.join(f'{there} {k}' for k, _, there, _ in out)}, each once{", as a clean import of this home brings" if expect_once else ""}); elapsed {result.get('elapsed_s')} s")
             else: no("resume", f"(kind, twice, there once, a clean import) {out}")
             if device:
                 w2 = Ws(hub15, device); hi = w2.hello() if w2.status == 101 else None
@@ -278,7 +279,10 @@ try:
         st2, result = hub15.call("GET", "/import/0.14/run", hub15.bearer())
         # the automatic import's result (GET /import/0.14 answers it once done): a clean import's counts, what --crash-import --expect-from checks a resumed one against.
         # /run here is a second import of the same home: it must write nothing (every line already here)
-        if st == 200: json.dump(summary, open(os.path.join(T, "import-result.json"), "w"))
+        if st == 200:
+            o = once(h14, h15); summary["once"] = o; json.dump(summary, open(os.path.join(T, "import-result.json"), "w"))
+            if any(v["twice"] for v in o.values()): no("import-once", f"0.14 ids in 0.15's log more than once: {o}")
+            else: ok("import-once", "every 0.14 thread and message in 0.15's log once: " + ", ".join(f"{v['once']} {k}" for k, v in o.items()))
         if st2 == 200 and summary.get("state") == "done":
             rc = result.get("counts", {}); again = {k: rc.get(k) for k in ("projects", "threads", "messages", "lines")}
             ok("import-again", f"a second import of the same home wrote nothing ({rc.get('already')} lines already here)") if not any(again.values()) else no("import-again", f"a second import wrote {again}")
