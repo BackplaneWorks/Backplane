@@ -382,5 +382,7 @@ mod tests {
         let (top, h) = thumb(300., 300., 300., 300.).unwrap(); assert_eq!(top + h, 300.);
         assert!(thumb(300., 300., 1_000_000., 0.).unwrap().1 >= 24.);
     }
+    #[test] fn vendor_marks_for_claude_and_opencode_only() { for p in ["claude", "opencode"] { assert!(crate::art::mark_path(p).map_or(false, |s| s.len() > 3), "{p}"); } for p in ["codex", "grok", "muse", "pi", "omp", "antigravity", "mystery"] { assert!(crate::art::mark_path(p).is_none(), "{p}"); } }
+    #[test] fn paths_parse_relative_and_absolute() { use crate::art::{parse_d, Seg}; let s = parse_d("M22 24H2V0h20zM17 4.8H7v14.4h10z"); assert_eq!(s.len(), 10); assert!(matches!(s[3], Seg::L(x, y) if x == 22. && y == 0.)); assert!(matches!(s[8], Seg::L(x, y) if x == 17. && (y - 19.2).abs() < 1e-4)); }
     #[test] fn every_provider_has_a_mark() { for p in ["claude", "codex", "grok", "muse", "opencode", "pi", "omp", "antigravity", "mystery"] { assert!(!mark(p).1.is_empty()); } }
 }
