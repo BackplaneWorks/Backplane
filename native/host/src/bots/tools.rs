@@ -127,7 +127,7 @@ impl Bots {
             }
             "room_join" | "room_leave" => self.t_room_membership(w, &b, now, name == "room_join", a).await,
             "room_post" => {
-                let Some(room) = find_room(&w, gs(a, "room")).cloned() else { return fail("no such room (see room_list)") };
+                let Some(room) = find_room(&w, gs(a, "room")).cloned() else { return fail("no such room here (room_list). A room on another machine: room_join it with `machine` first (it is copied here), then post; or bot_send name@machine") };
                 let rr = RoomRef { id: room.id, name: room.name, members: room.members };
                 self.t_post(w, &b, now, &rr, gs(a, "text"), vec![], later, |_| said("posted")).await
             }
