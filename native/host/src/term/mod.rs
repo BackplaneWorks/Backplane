@@ -335,7 +335,7 @@ pub async fn find_act(hub: &Arc<Hub>, thread: &str, id: &str) -> Option<(String,
 
 struct TermRpc(Arc<Terms>);
 impl RpcHandler for TermRpc {
-    fn methods(&self) -> &'static [&'static str] { &["term.open", "term.input", "term.resize", "term.snap", "term.restart"] }
+    fn methods(&self) -> &'static [&'static str] { &["term.open", "term.input", "term.resize", "term.snap", "term.restart", "term.stop"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let ok = || vec![json!({"t":"reply","id":id,"ok":true})];
@@ -348,6 +348,8 @@ impl RpcHandler for TermRpc {
                 }
                 "term.resize" => { t.resize(thread, u(p, "cols", 80).min(1000) as u16, u(p, "rows", 24).min(1000) as u16).await; ok() }
                 "term.snap" => { let r = ok(); t.snap(who.client, s(p, "key")).await; r }
+                // a card's Stop: hang the terminal up (a chat terminal's or a client's own shell)
+                "term.stop" => { let k = s(p, "key"); if !t.read_known(k).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"no such terminal"})] } t.kill(k).await; ok() }
                 "term.restart" => {
                     let term = s(p, "id");
                     let Some((sum, _)) = find_act(hub, thread, term).await else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"no such terminal"})] };

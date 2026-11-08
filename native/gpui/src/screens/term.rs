@@ -13,7 +13,9 @@ use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 actions!(term, [Copy, Paste]);
 
-pub const MAX_SCREENS: usize = 8;
+pub const MAX_SCREENS: usize = 24;
+/// A chat terminal's card shows this many rows until it is expanded.
+pub const CARD_ROWS: usize = 8;
 /// One term.input request carries at most this many bytes (the hub takes up to 256 KB); a long paste goes as several.
 const MAX_INPUT: usize = 65536;
 pub const FONT_PX: f32 = 13.;
@@ -21,7 +23,9 @@ pub const LINE_PX: f32 = 17.;
 const PAD: f32 = 10.;
 const HEAD: f32 = 28.;
 
-struct Screen { vt: Vt, pid: i32, used: u64 }
+/// A screen this client holds: the panel's shells and the chat terminals' cards share them (a popped-out card is the same screen).
+/// `state` is the hub's word for it (running, done N, exited N, stopped; "" before the hub said), `focus` a card's keyboard.
+struct Screen { vt: Vt, pid: i32, used: u64, state: String, focus: Option<FocusHandle>, open: bool, home: (u16, u16) }
 /// A selection by the mouse: (absolute row, column) at each end; rows count from the top of the scrollback.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Sel { pub a: (usize, usize), pub b: (usize, usize) }
@@ -48,6 +52,12 @@ pub struct Term {
     tick: u64,
     /// The harness's `keys` step, typed on the next frame.
     pub script: Option<String>,
+    /// A card asked for the keyboard (a click by the harness; focused on the next frame).
+    pub focus_card: Option<String>,
+    /// A card popped out by the harness: the panel takes the keyboard on the next frame.
+    pub focus_panel: bool,
+    /// The card that has the keyboard this frame (worked out before the rows are drawn).
+    pub card_focused: Option<String>,
 }
 
 /// What Ctrl+J (or a backtick) does now.
@@ -108,10 +118,32 @@ pub fn selected_text(vt: &Vt, s: &Sel) -> String {
     out.join("\n")
 }
 
+pub struct CardView<'a> { pub vt: &'a Vt, pub state: &'a str, pub focus: Option<&'a FocusHandle>, pub open: bool, pub home: (u16, u16) }
+/// The rows of a screen a card shows: (first row, how many). Collapsed, the CARD_ROWS that end at the cursor or the last written row,
+/// whichever is lower (a full-screen program shows its top); expanded, all of them.
+pub fn card_window(vt: &Vt, open: bool) -> (usize, usize) {
+    let rows = vt.rows();
+    if open || rows <= CARD_ROWS { return (0, rows) }
+    if vt.alt() { return (0, CARD_ROWS) }
+    let lines = vt.lines(0);
+    let last = lines.iter().rposition(|l| !l.runs.is_empty()).map_or(0, |i| i + 1);
+    let end = last.max(vt.cursor().y + 1).min(rows);
+    (end.saturating_sub(CARD_ROWS), CARD_ROWS)
+}
+/// What a card's header says of its state.
+pub fn state_word(state: &str) -> String {
+    match state {
+        "" | "running" => "running".into(), "stopped" => "stopped".into(), "failed to start" => "failed to start".into(),
+        s => match (s.strip_prefix("done "), s.strip_prefix("exited ")) { (Some(c), _) => format!("done · exit {c}"), (_, Some(c)) => format!("exited {c}"), _ => s.into() },
+    }
+}
+/// A terminal whose program still runs (a done command's shell still takes keys).
+pub fn live(state: &str) -> bool { state.is_empty() || state == "running" || state.starts_with("done ") }
+
 impl Term {
     pub fn new(focus: FocusHandle) -> Term { Term { focus: Some(focus), ..Term::new_detached() } }
     pub fn new_detached() -> Term {
-        Term { open: false, key: String::new(), screens: HashMap::new(), focus: None, size: (100, 24), cell: (8., LINE_PX), grid: Rc::new(Cell::new(Bounds::default())), sel: None, dragging: false, scroll: 0, tick: 0, script: None }
+        Term { open: false, key: String::new(), screens: HashMap::new(), focus: None, size: (100, 24), cell: (8., LINE_PX), grid: Rc::new(Cell::new(Bounds::default())), sel: None, dragging: false, scroll: 0, tick: 0, script: None, focus_card: None, card_focused: None, focus_panel: false }
     }
     pub fn focused(&self, window: &Window) -> bool { self.focus.as_ref().is_some_and(|f| f.is_focused(window)) }
     pub fn take_keys(&self, window: &mut Window) { if let Some(f) = &self.focus { f.focus(window) } }
@@ -126,15 +158,31 @@ impl Term {
             let Some(old) = self.screens.iter().filter(|(k, _)| *k != &self.key).min_by_key(|(_, s)| s.used).map(|(k, _)| k.clone()) else { break };
             self.screens.remove(&old);
         }
-        self.screens.insert(key.into(), Screen { vt: Vt::new(self.size.0 as usize, self.size.1 as usize), pid: 0, used: tick });
+        self.screens.insert(key.into(), Screen { vt: Vt::new(self.size.0 as usize, self.size.1 as usize), pid: 0, used: tick, state: String::new(), focus: None, open: false, home: (0, 0) });
         true
     }
+    /// A card's screen: made at the entry's size when this client holds none (True: ask the hub for a snapshot). Its keyboard is made once.
+    pub fn ensure_card(&mut self, key: &str, cols: u16, rows: u16, focus: impl FnOnce() -> FocusHandle) -> bool {
+        let fresh = self.ensure(key);
+        let s = self.screens.get_mut(key).unwrap();
+        if fresh { s.vt = Vt::new(cols as usize, rows as usize) }
+        s.home = (cols, rows);
+        if s.focus.is_none() { s.focus = Some(focus()) }
+        fresh
+    }
+    pub fn card(&self, key: &str) -> Option<CardView<'_>> { self.screens.get(key).map(|s| CardView { vt: &s.vt, state: &s.state, focus: s.focus.as_ref(), open: s.open, home: s.home }) }
+    pub fn card_toggle(&mut self, key: &str) { if let Some(s) = self.screens.get_mut(key) { s.open = !s.open } }
+    pub fn card_focus(&self, key: &str) -> Option<FocusHandle> { self.screens.get(key).and_then(|s| s.focus.clone()) }
+    fn card_keys(&self) -> impl Iterator<Item = (&String, &FocusHandle)> { self.screens.iter().filter_map(|(k, s)| s.focus.as_ref().map(|f| (k, f))) }
+    pub fn has_card(&self, key: &str) -> bool { self.screens.get(key).map_or(false, |s| s.focus.is_some()) }
+    pub fn state_of(&self, key: &str) -> &str { self.screens.get(key).map_or("", |s| s.state.as_str()) }
     /// A `term` frame of the hub. Frames of terminals this client holds no screen for are not its (a chat terminal, another thread's shell
     /// it never opened). A new process (another pid) starts on a blank screen; a snapshot (`reset`) replaces the screen.
     /// Answers the emulator's replies (a cursor report...) for the shell on show, and whether the screen's size differs from the panel's.
-    pub fn frame(&mut self, key: &str, pid: Option<i32>, bytes: &[u8], reset: Option<(usize, usize)>) -> (Vec<u8>, bool) {
+    pub fn frame(&mut self, key: &str, pid: Option<i32>, bytes: &[u8], reset: Option<(usize, usize)>, state: Option<&str>) -> (Vec<u8>, bool) {
         let (cols, rows) = (self.size.0 as usize, self.size.1 as usize);
         let Some(s) = self.screens.get_mut(key) else { return (vec![], false) };
+        if let Some(st) = state { s.state = st.to_string(); if bytes.is_empty() && reset.is_none() { return (vec![], false) } }
         if let Some((c, r)) = reset { s.vt = Vt::new(c, r); }
         else if let Some(p) = pid.filter(|p| *p > 0) { if s.pid > 0 && s.pid != p { s.vt = Vt::new(cols, rows); } }
         if let Some(p) = pid.filter(|p| *p > 0) { s.pid = p; }
@@ -146,11 +194,11 @@ impl Term {
             (if self.open { replies } else { vec![] }, off)
         } else { (vec![], false) }
     }
-    /// The panel's grid changed to `cols` x `rows`: every screen is cut to it. True when that is news for the hub.
+    /// The panel's grid changed to `cols` x `rows`: the screen on show is cut to it (a card keeps its own size). True when that is news for the hub.
     pub fn resize(&mut self, cols: u16, rows: u16) -> bool {
         let fresh = self.size != (cols, rows);
         self.size = (cols, rows);
-        for s in self.screens.values_mut() { if (s.vt.cols(), s.vt.rows()) != (cols as usize, rows as usize) { s.vt.resize(cols as usize, rows as usize) } }
+        if let Some(s) = self.screens.get_mut(&self.key) { if (s.vt.cols(), s.vt.rows()) != (cols as usize, rows as usize) { s.vt.resize(cols as usize, rows as usize) } }
         fresh
     }
     /// The cell under a window position: (absolute row, column).
@@ -184,6 +232,8 @@ impl Backplane {
     pub(crate) fn term_hide(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.screens.term.open { return false }
         let t = &mut self.screens.term; t.open = false; t.dragging = false;
+        // a chat terminal popped out goes back to its card's size
+        if let Some(home) = t.card(&t.key).map(|c| c.home).filter(|h| h.0 > 0) { let key = t.key.clone(); self.term_rpc("term.resize", json!({"thread": key, "cols": home.0, "rows": home.1})); }
         self.want_focus = true; self.ui_epoch += 1; cx.notify(); true
     }
     fn term_act(&mut self, what: Toggle, window: &mut Window, cx: &mut Context<Self>) {
@@ -195,17 +245,72 @@ impl Backplane {
     }
     /// Shift+Esc.
     pub(crate) fn term_dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // in a card, Shift+Esc gives the keyboard back to the message box
+        if self.screens.term.card_focused.is_some() { self.want_focus = true; cx.notify(); return }
         let t = &self.screens.term; if let Some(what) = dismiss(t.open, t.focused(window)) { self.term_act(what, window, cx); }
     }
     /// A `term` frame from the hub.
-    pub(crate) fn term_frame(&mut self, key: &str, pid: Option<i32>, bytes: &[u8], reset: Option<(usize, usize)>, cx: &mut Context<Self>) {
-        let (replies, off) = self.screens.term.frame(key, pid, bytes, reset);
-        if off { let (c, r) = self.screens.term.size; self.screens.term.resize(c, r); self.term_rpc("term.resize", json!({"thread": key, "cols": c, "rows": r})); }
+    pub(crate) fn term_frame(&mut self, key: &str, pid: Option<i32>, bytes: &[u8], reset: Option<(usize, usize)>, state: Option<String>, cx: &mut Context<Self>) {
+        let rows_before = self.screens.term.card(key).map(|c| card_window(c.vt, c.open).1);
+        let (replies, off) = self.screens.term.frame(key, pid, bytes, reset, state.as_deref());
+        // the panel puts a screen of another size back to its own, only while it shows it (a phone may hold it at another size meanwhile)
+        if off && self.screens.term.open { let (c, r) = self.screens.term.size; self.screens.term.resize(c, r); self.term_rpc("term.resize", json!({"thread": key, "cols": c, "rows": r})); }
         self.term_send(replies);
-        if key == self.screens.term.key && self.screens.term.open { cx.notify(); }
+        if (key == self.screens.term.key && self.screens.term.open) || self.screens.term.has_card(key) {
+            // a card that grew or shrank is measured again
+            if rows_before.is_some() && rows_before != self.screens.term.card(key).map(|c| card_window(c.vt, c.open).1) { self.card_remeasure(key); }
+            cx.notify();
+        }
+    }
+    /// The timeline row of a card is measured again (its height changed).
+    fn card_remeasure(&mut self, key: &str) {
+        let i = self.data["thread"]["entries"].as_array().and_then(|es| es.iter().position(|e| e["kind"] == "term" && e["key"] == key));
+        if let Some(i) = i { crate::screens::glue::splice_keeping(&self.timeline, i..i + 1, 1); }
+    }
+    fn card_input(&mut self, key: &str, bytes: Vec<u8>) {
+        if bytes.is_empty() { return }
+        for chunk in bytes.chunks(MAX_INPUT) { self.term_rpc("term.input", json!({"thread": key, "b": chunk})); }
+    }
+    /// A key pressed in a card: the panel's rules (the app keeps only its own shortcuts, keys.rs's `Terminal` context).
+    fn card_key(&mut self, key: &str, e: &KeyDownEvent, cx: &mut Context<Self>) {
+        let Some(c) = self.screens.term.card(key) else { return };
+        if !live(c.state) { return }
+        let bytes = bytes_for(&e.keystroke, c.vt);
+        if bytes.is_empty() { return }
+        self.card_input(key, bytes); cx.stop_propagation(); cx.notify();
+    }
+    fn card_paste(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else { return };
+        let Some(c) = self.screens.term.card(key) else { return };
+        let bytes = c.vt.paste(&text); self.card_input(key, bytes); cx.notify();
+    }
+    /// Expand or collapse a card.
+    pub(crate) fn card_expand(&mut self, key: &str, cx: &mut Context<Self>) { self.screens.term.card_toggle(key); self.card_remeasure(key); self.ui_epoch += 1; cx.notify(); }
+    /// The card in the floating panel: the same session, at the panel's size, with the keyboard (put away, it goes back to the card's size).
+    pub(crate) fn card_pop(&mut self, key: &str, window: Option<&mut Window>, cx: &mut Context<Self>) {
+        let t = &mut self.screens.term; t.open = true; t.key = key.to_string(); t.sel = None; t.scroll = 0; t.ensure(key);
+        let (c, r) = t.size; t.resize(c, r);
+        self.term_rpc("term.resize", json!({"thread": key, "cols": c, "rows": r}));
+        match window { Some(w) => self.screens.term.take_keys(w), None => self.screens.term.focus_panel = true }
+        self.ui_epoch += 1; cx.notify();
+    }
+    /// Stop a card's program (the hub hangs it up), or run its command again once it ended.
+    pub(crate) fn card_stop(&mut self, key: &str, cx: &mut Context<Self>) {
+        let st = self.screens.term.state_of(key).to_string();
+        if live(&st) { self.term_rpc("term.stop", json!({"key": key})); }
+        else if let Some((th, id)) = key.strip_prefix("x:").and_then(|r| r.rsplit_once(':')) { self.term_rpc("term.restart", json!({"thread": th, "id": id})); }
+        self.ui_epoch += 1; cx.notify();
+    }
+    /// The card asks for the keyboard (a click; the harness's click lands on the next frame).
+    pub(crate) fn card_take_keys(&mut self, key: &str, window: Option<&mut Window>, cx: &mut Context<Self>) {
+        match (window, self.screens.term.card_focus(key)) { (Some(w), Some(f)) => f.focus(w), _ => self.screens.term.focus_card = Some(key.to_string()) }
+        self.ui_epoch += 1; cx.notify();
     }
     /// A new connection to the hub (the first, or after a drop): what was printed meanwhile is lost, so the shell on show is asked for again.
     pub(crate) fn term_rejoin(&mut self) {
+        // the cards' screens are drawn again from snapshots: what they printed meanwhile reached no screen here
+        let cards: Vec<String> = self.screens.term.card_keys().map(|(k, _)| k.clone()).filter(|k| *k != self.screens.term.key || !self.screens.term.open).collect();
+        for k in cards { self.term_rpc("term.snap", json!({"key": k})); }
         let t = &self.screens.term;
         if !t.open || t.key.is_empty() { return }
         let (key, (c, r)) = (t.key.clone(), t.size);
@@ -221,9 +326,15 @@ impl Backplane {
     }
     /// Every frame: the panel follows the thread on screen, and its grid the window's size.
     pub(crate) fn term_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(k) = self.screens.term.focus_card.take() { if let Some(f) = self.screens.term.card_focus(&k) { f.focus(window) } }
+        if std::mem::take(&mut self.screens.term.focus_panel) { self.screens.term.take_keys(window) }
+        let focused = self.screens.term.card_keys().find(|(_, f)| f.is_focused(window)).map(|(k, _)| k.clone()); self.screens.term.card_focused = focused;
         if !self.screens.term.open { return }
         let key = crate::screens::attach::raw_id(&self.selected).to_string();
-        if !key.is_empty() && key != self.screens.term.key {
+        // the panel follows the thread on screen: its own shell, or a card of it popped out
+        let shown = self.screens.term.key.clone();
+        let of_thread = shown == key || shown.strip_prefix("x:").and_then(|r| r.rsplit_once(':')).map_or(false, |(th, _)| th == key);
+        if !key.is_empty() && !of_thread {
             let focused = self.screens.term.focused(window);
             self.term_show(window, cx);
             if !focused { self.want_focus = true; }
@@ -262,6 +373,71 @@ impl Backplane {
         t.scroll = (t.scroll as i64 + n).clamp(0, hist as i64) as usize; cx.notify();
     }
 }
+
+impl Backplane {
+    /// A chat terminal in the timeline (an entry of kind `term`): its live screen, a few rows tall until expanded; a click gives it the keyboard
+    /// (the panel's key rules); Expand, Pop out (the floating panel, the same session) and Stop or Run again. Once the program ended it stays as
+    /// its last screen. The screen comes from the hub's `term` frames under the entry's `key`, a snapshot first.
+    pub(crate) fn term_card(&mut self, e: &serde_json::Value, light: bool, cx: &mut Context<Self>) -> AnyElement {
+        let c = |n: &str| theme::color(light, n);
+        let s = |k: &str| e[k].as_str().unwrap_or("").to_string();
+        let (id, key, title) = (s("id"), s("key"), s("title"));
+        let (cols, rows) = (e["cols"].as_u64().unwrap_or(80) as u16, e["rows"].as_u64().unwrap_or(24) as u16);
+        if key.is_empty() { return div().into_any_element() }
+        let fresh = self.screens.term.ensure_card(&key, cols, rows, || cx.focus_handle());
+        if fresh { self.term_rpc("term.snap", json!({"key": key})); }
+        for (op, label) in [("focus", "Terminal"), ("expand", "Expand"), ("pop", "Pop out"), ("stop", "Stop")] {
+            self.controls.push(crate::script::CtlEntry { id: format!("term-{op}:{id}"), label: format!("{label} · {title}"), ctl: crate::script::Ctl::Term(op.into(), key.clone()) });
+            // (the harness names a card by its title too: its id is the hub's, known only once it opened)
+            self.controls.push(crate::script::CtlEntry { id: format!("term-{op}:@{title}"), label: format!("{label} · {title}"), ctl: crate::script::Ctl::Term(op.into(), key.clone()) });
+        }
+        let focused = self.screens.term.card_focused.as_deref() == Some(key.as_str());
+        let popped = self.screens.term.open && self.screens.term.key == key;
+        let cw = self.screens.term.cell.0;
+        let Some(cv) = self.screens.term.card(&key) else { return div().into_any_element() };
+        let (top, n) = card_window(cv.vt, cv.open);
+        let lines = cv.vt.lines(0); let cur = cv.vt.cursor(); let vcols = cv.vt.cols();
+        let (state, open, focus) = (cv.state.to_string(), cv.open, cv.focus.cloned());
+        let name = cv.vt.title().to_string();
+        let running = live(&state);
+        let label = if name.is_empty() || name == title { title.clone() } else { format!("{title} · {name}") };
+        let fg = |x: u32| rgb(x);
+        let mut body = div().relative().font(crate::art::mono_font()).text_size(px(FONT_PX)).line_height(px(LINE_PX)).text_color(fg(vt::DEFAULT_FG)).whitespace_nowrap().overflow_hidden()
+            .w(px(vcols as f32 * cw)).max_w_full().h(px(n as f32 * LINE_PX));
+        for (i, line) in lines.iter().skip(top).take(n).enumerate() {
+            let mut row = div().absolute().left_0().top(px(i as f32 * LINE_PX)).h(px(LINE_PX)).flex();
+            for r in &line.runs { row = row.child(div().text_color(fg(r.fg)).when(r.bg != vt::DEFAULT_BG, |d| d.bg(fg(r.bg))).when(r.bold, |d| d.font_weight(FontWeight::BOLD)).when(r.underline, |d| d.underline()).child(r.text.clone())); }
+            body = body.child(row);
+        }
+        if running && cur.visible && cur.y >= top && cur.y < top + n {
+            let k = div().absolute().left(px(cur.x as f32 * cw)).top(px((cur.y - top) as f32 * LINE_PX)).w(px(cw)).h(px(LINE_PX));
+            body = body.child(if focused { k.bg(rgba(0xd9dce4aa)) } else { k.border_1().border_color(rgb(0x5a6070)) });
+        }
+        let btn = |tag: &str, text: String| div().id(SharedString::from(format!("{tag}-{id}"))).px_1().cursor_pointer().text_color(rgb(0x8a90a0)).hover(|s| s.text_color(rgb(vt::DEFAULT_FG))).child(text);
+        let state_color = if running { c("ok") } else if state == "stopped" || state == "failed to start" || state.starts_with("exited ") && state != "exited 0" { c("bad") } else { rgb(0x8a90a0).into() };
+        let (k1, k2, k3) = (key.clone(), key.clone(), key.clone());
+        let head = div().h(px(26.)).px_2().flex().items_center().gap_3().border_b_1().border_color(rgb(0x2a2f3a)).text_size(px(11.))
+            .child(div().flex_shrink_0().child(crate::ui::ic(light, "terminal", 12., "dim")))
+            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(rgb(vt::DEFAULT_FG)).child(label))
+            .when(focused, |d| d.child(div().whitespace_nowrap().text_color(rgb(0x8a90a0)).child("Shift+Esc back to the message")))
+            .child(div().whitespace_nowrap().text_color(state_color).child(if popped { format!("{} · in the panel", state_word(&state)) } else { state_word(&state) }))
+            .child(btn("tstop", if running { "Stop".into() } else { "Run again".into() }).on_click(cx.listener(move |this, _, _, cx| { this.card_stop(&k1, cx); cx.stop_propagation(); })))
+            .when(rows as usize > CARD_ROWS || open, |d| d.child(btn("texp", if open { "Collapse".into() } else { "Expand".into() }).on_click(cx.listener(move |this, _, _, cx| { this.card_expand(&k2, cx); cx.stop_propagation(); }))))
+            .child(btn("tpop", "Pop out".into()).on_click(cx.listener(move |this, _, window, cx| { this.card_pop(&k3, Some(window), cx); cx.stop_propagation(); })));
+        let (kk, kp, kf) = (key.clone(), key.clone(), key.clone());
+        let mut card = div().id(SharedString::from(format!("term-card-{id}"))).flex().flex_col().max_w_full().bg(rgb(vt::DEFAULT_BG)).border_1()
+            .border_color(if focused { c("accent") } else { c("line") }).child(head).child(div().p(px(6.)).child(body))
+            .when(!running, |d| d.opacity(0.85));
+        if let Some(f) = focus {
+            card = card.track_focus(&f).key_context("Terminal")
+                .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| this.card_key(&kk, ev, cx)))
+                .on_action(cx.listener(move |this, _: &Paste, _, cx| this.card_paste(&kp, cx)))
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, window, cx| { this.card_take_keys(&kf, Some(window), cx); }));
+        }
+        crate::ui::with_rect(div().id(SharedString::from(format!("e-{id}"))), move || format!("term:{}", e_id(&key))).w_full().py_2().child(card).into_any_element()
+    }
+}
+fn e_id(key: &str) -> String { key.rsplit(':').next().unwrap_or("").to_string() }
 
 /// The panel, while it is open.
 pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &crate::local::Local, title: &str, t: &Term) -> Option<AnyElement> {
@@ -363,20 +539,37 @@ mod tests {
     }
     #[test] fn frames_draw_only_screens_it_holds_and_a_new_shell_starts_blank() {
         let mut t = Term { size: (20, 4), ..Term::new_detached() };
-        assert_eq!(t.frame("t1", Some(9), b"hi", None), (vec![], false), "a screen it never opened is not drawn");
+        assert_eq!(t.frame("t1", Some(9), b"hi", None, None), (vec![], false), "a screen it never opened is not drawn");
         assert!(t.ensure("t1")); t.key = "t1".into(); t.open = true;
-        t.frame("t1", Some(9), b"hello", None);
+        t.frame("t1", Some(9), b"hello", None, None);
         assert_eq!(row_text(t.vt().unwrap(), t.vt().unwrap().history()), "hello");
-        let (replies, _) = t.frame("t1", Some(9), b"\x1b[6n", None); assert_eq!(replies, b"\x1b[1;6R", "the cursor report goes back to the shell");
-        t.frame("t1", Some(10), b"new", None); assert_eq!(row_text(t.vt().unwrap(), 0), "new", "another pid: a new shell on a blank screen");
-        t.frame("t1", None, b"\x1b[2;1Hsnap", Some((30, 6))); let vt = t.vt().unwrap(); assert_eq!((vt.cols(), vt.rows()), (30, 6)); assert_eq!(row_text(vt, 1), "snap");
-        assert_eq!(t.frame("t1", None, b"", None).1, true, "a snapshot of another size is cut to the panel's");
-        t.open = false; assert_eq!(t.frame("t1", Some(10), b"\x1b[6n", None).0, b"", "a hidden terminal leaves the replies to whoever shows it");
+        let (replies, _) = t.frame("t1", Some(9), b"\x1b[6n", None, None); assert_eq!(replies, b"\x1b[1;6R", "the cursor report goes back to the shell");
+        t.frame("t1", Some(10), b"new", None, None); assert_eq!(row_text(t.vt().unwrap(), 0), "new", "another pid: a new shell on a blank screen");
+        t.frame("t1", None, b"\x1b[2;1Hsnap", Some((30, 6)), None); let vt = t.vt().unwrap(); assert_eq!((vt.cols(), vt.rows()), (30, 6)); assert_eq!(row_text(vt, 1), "snap");
+        assert_eq!(t.frame("t1", None, b"", None, None).1, true, "a snapshot of another size is cut to the panel's");
+        t.open = false; assert_eq!(t.frame("t1", Some(10), b"\x1b[6n", None, None).0, b"", "a hidden terminal leaves the replies to whoever shows it");
     }
     #[test] fn screens_are_bounded() {
         let mut t = Term::new_detached();
-        for i in 0..20 { t.ensure(&format!("t{i}")); t.key = format!("t{i}"); }
-        assert_eq!(t.screens.len(), MAX_SCREENS); assert!(t.has("t19") && !t.has("t0"));
+        for i in 0..(MAX_SCREENS + 12) { t.ensure(&format!("t{i}")); t.key = format!("t{i}"); }
+        assert_eq!(t.screens.len(), MAX_SCREENS); assert!(t.has(&format!("t{}", MAX_SCREENS + 11)) && !t.has("t0"));
+    }
+    #[test] fn a_card_shows_the_rows_that_end_at_the_cursor_until_expanded() {
+        let mut v = Vt::new(40, 24); assert_eq!(card_window(&v, false), (0, CARD_ROWS), "a blank screen shows its top");
+        for i in 0..12 { v.feed(format!("line {i}\r\n").as_bytes()); } // the cursor on row 12
+        assert_eq!(card_window(&v, false), (13 - CARD_ROWS, CARD_ROWS)); assert_eq!(card_window(&v, true), (0, 24), "expanded: every row");
+        let mut s = Vt::new(40, 5); s.feed(b"a\r\nb"); assert_eq!(card_window(&s, false), (0, 5), "a small terminal is all shown");
+        let mut a = Vt::new(40, 24); a.feed(b"\x1b[?1049h\x1b[20;1Hbottom"); assert_eq!(card_window(&a, false), (0, CARD_ROWS), "a full-screen program shows its top");
+    }
+    #[test] fn a_cards_state_reads_as_words_and_says_whether_it_takes_keys() {
+        assert_eq!(state_word("running"), "running"); assert_eq!(state_word("done 0"), "done · exit 0"); assert_eq!(state_word("exited 3"), "exited 3"); assert_eq!(state_word("stopped"), "stopped");
+        assert!(live("") && live("running") && live("done 1")); assert!(!live("exited 0") && !live("stopped") && !live("failed to start"));
+    }
+    #[test] fn a_state_frame_changes_only_the_state_and_cards_keep_their_size_when_the_panel_resizes() {
+        let mut t = Term::new_detached(); t.ensure("x:t:1"); t.frame("x:t:1", None, b"", Some((60, 10)), None); t.frame("x:t:1", Some(4), b"hi", None, None);
+        t.frame("x:t:1", None, b"", None, Some("done 0")); assert_eq!(t.state_of("x:t:1"), "done 0"); assert!(row_text(&t.screens["x:t:1"].vt, 0).starts_with("hi"));
+        t.key = "t".into(); t.ensure("t"); t.resize(100, 30); assert_eq!((t.screens["x:t:1"].vt.cols(), t.screens["x:t:1"].vt.rows()), (60, 10), "the card is not the panel");
+        assert_eq!(t.screens["t"].vt.cols(), 100);
     }
     #[test] fn a_selection_copies_its_text() {
         let mut vt = Vt::new(20, 3); vt.feed(b"one two\r\nthree   \r\nfour");
