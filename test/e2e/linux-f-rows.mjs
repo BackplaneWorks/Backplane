@@ -206,7 +206,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const t=(await c.rpc('thread.create',{project:GP,title:'wt2',env:'worktree'})).thread;await sleep(2500);const wt=events().find(e=>e.$==='WorktreeSet'&&e.id===t)?.worktree;
  await c.rpc('turn.start',{thread:t,text:'zqwrite first.txt'});await finished(t);await c.rpc('turn.start',{thread:t,text:'zqwrite second.txt'});await finished(t,2);
  const both=existsSync(wt+'/first.txt')&&existsSync(wt+'/second.txt');
- const rv=await c.rpc('git.revert',{thread:t,turn:1});await sleep(1500);
+ const rv=await c.rpc('git.revert',{thread:t,turn:1});await until(()=>!existsSync(wt+'/second.txt'),20000);await sleep(300);   // the revert's files go a moment after its reply: a slow runner needs more than a fixed 1.5 s
  const after={first:existsSync(wt+'/first.txt'),second:existsSync(wt+'/second.txt')};
  const cm=await c.rpc('git.act',{thread:t,action:'commit',message:'e2e work'});
  const ps=await c.rpc('git.act',{thread:t,action:'push'});
