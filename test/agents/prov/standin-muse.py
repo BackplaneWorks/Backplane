@@ -4,7 +4,7 @@
 # todos and turn/completed; an approval/request first when the text says "perm" and the mode is not allowAll (the turn waits for approval/decide).
 # Every line it reads goes to $MUSE_LOG (with its argv first).
 import json, os, sys
-log = os.environ.get("MUSE_LOG", "/dev/null")
+log = os.environ.get("MUSE_LOG", os.devnull)
 def note(s):
     with open(log, "a") as f: f.write(s + "\n")
 def say(o):

@@ -122,10 +122,10 @@ mod tests {
         if reach == "crate::statehost" || reach.starts_with("crate::statehost::") { return Some("state/host.rs".into()) } // `#[path]` in main.rs
         for n in (1..=segs.len()).rev() {
             let p = base.join(segs[..n].join("/"));
-            for c in [p.with_extension("rs"), p.join("mod.rs")] { if root.join(&c).is_file() { return Some(c.to_string_lossy().into_owned()) } }
+            for c in [p.with_extension("rs"), p.join("mod.rs")] { if root.join(&c).is_file() { return Some(c.to_string_lossy().replace('\\', "/")) } }
         }
         // no file by that name: an item of the module itself (`super::head` in bots/mail/mailbox.rs is bots/mail/mod.rs)
-        for c in [base.join("mod.rs"), base.with_extension("rs"), PathBuf::from("main.rs")] { if root.join(&c).is_file() && c != Path::new(".rs") { return Some(c.to_string_lossy().into_owned()) } }
+        for c in [base.join("mod.rs"), base.with_extension("rs"), PathBuf::from("main.rs")] { if root.join(&c).is_file() && c != Path::new(".rs") { return Some(c.to_string_lossy().replace('\\', "/")) } }
         None
     }
     #[test] fn every_fold_reach_is_an_input_or_written_down() {
