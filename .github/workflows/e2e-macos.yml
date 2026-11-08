@@ -9,9 +9,9 @@ on:
         default: all
       archive_run:
         description: "release dry run whose darwin-arm64 archive the client rows run from, installed with its install.sh"
-        default: "42471203815"
+        default: "42471783563"
       archive_tag:
-        default: "v0.14.101"
+        default: "v0.0.0-dryrun.gradle1"
       rows:
         description: "client rows to run (space separated, empty: all)"
         default: ""
@@ -106,11 +106,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          gh run download ${{ inputs.archive_run }} -n release-dry-run -D rel
+          tag="${{ inputs.archive_tag }}"
+          if gh run download ${{ inputs.archive_run }} -n release-dry-run -D rel 2>/dev/null; then echo "installer from the dry run's own release-dry-run artifact"
+          else
+            # the dry run's publish job did not run: only the archive is there. The installer is the one release.yml makes, filled in the same way from deploy/install.sh.in
+            gh run download ${{ inputs.archive_run }} -n archive-darwin-arm64 -D rel
+            sha=$(shasum -a 256 "rel/backplane-$tag-darwin-arm64-native.tar.gz" | cut -d' ' -f1)
+            sed -e "s|@REPO@|${{ github.repository }}|" -e "s|@VERSION@|$tag|" -e "s|@SHA_LINUX_X64@||" -e "s|@SHA_LINUX_ARM64@||" -e "s|@SHA_DARWIN_ARM64@|$sha|" deploy/install.sh.in > rel/install.sh
+            if grep -q '@[A-Z_0-9]*@' rel/install.sh; then echo "install.sh still has a placeholder"; exit 1; fi
+          fi
           ls -l rel
-          export BACKPLANE_ARCHIVE="$PWD/rel/backplane-${{ inputs.archive_tag }}-darwin-arm64-native.tar.gz" BACKPLANE_PREFIX="$PWD/inst" BACKPLANE_HOME="$PWD/inst-home" BACKPLANE_NO_DESKTOP_APP= 
+          export BACKPLANE_ARCHIVE="$PWD/rel/backplane-$tag-darwin-arm64-native.tar.gz" BACKPLANE_PREFIX="$PWD/inst" BACKPLANE_HOME="$PWD/inst-home" BACKPLANE_NO_DESKTOP_APP=
           sh rel/install.sh --quiet
-          B="$PWD/inst/builds/${{ inputs.archive_tag }}"; ls -l "$B"; cat "$B/COMMIT"
+          B="$PWD/inst/builds/$tag"; ls -l "$B"; cat "$B/COMMIT"
           echo "BUILD=$B" >> "$GITHUB_ENV"
       - name: input and screenshot tools, FreeCAD
         run: |
