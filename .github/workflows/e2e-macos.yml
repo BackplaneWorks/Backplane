@@ -184,10 +184,12 @@ jobs:
           for n in claude codex grok muse opencode; do printf '#!/bin/sh\nexit 1\n' > "$W/agents/$n"; chmod +x "$W/agents/$n"; done
           export HUB="$BUILD/backplane-hub" AGENTS="$W/agents"
           echo "installed build $(cat "$BUILD/COMMIT") (${{ inputs.archive_tag }})"
-          sh test/e2e/pairing/mac-hub.sh start "$W/hub" 3900 127.0.0.1
+          # a link that names a loopback address is refused for a hub that other machines would reach, so the hub listens on the runner's own interface address (still one machine: nothing crosses a network)
+          IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1); echo "hub address $IP"
+          sh test/e2e/pairing/mac-hub.sh start "$W/hub" 3900 "$IP"
           M="sh $PWD/test/e2e/pairing/mac-hub.sh"
-          BASE=http://127.0.0.1:3900 TOKEN="$W/hub/token" GPUI="$BUILD/backplane-gpui" WORK="$W" LAUNCH="$PWD/test/e2e/pairing/gpui-start-mac.sh" \
-            RESTART="$M restart $W/hub 3900 127.0.0.1" EXPIRE="$M expire $W/hub 3900 127.0.0.1" \
+          BASE=http://$IP:3900 TOKEN="$W/hub/token" GPUI="$BUILD/backplane-gpui" WORK="$W" LAUNCH="$PWD/test/e2e/pairing/gpui-start-mac.sh" \
+            RESTART="$M restart $W/hub 3900 $IP" EXPIRE="$M expire $W/hub 3900 $IP" \
             sh test/e2e/pairing/gpui.sh 2>&1 | tee out/pairing.txt
           rc=$?; cp -R "$W/logs" out/logs 2>/dev/null; cp "$W/hub.log" out/hub.log 2>/dev/null; exit $rc
       - uses: actions/upload-artifact@v4
@@ -220,10 +222,12 @@ jobs:
           for n in claude codex grok muse opencode; do printf '#!/bin/sh\nexit 1\n' > "$W/agents/$n"; chmod +x "$W/agents/$n"; done
           export HUB="$BUILD/backplane-hub" AGENTS="$W/agents"
           echo "source build $(cat "$BUILD/COMMIT")"
-          sh test/e2e/pairing/mac-hub.sh start "$W/hub" 3900 127.0.0.1
+          # a link that names a loopback address is refused for a hub that other machines would reach, so the hub listens on the runner's own interface address (still one machine: nothing crosses a network)
+          IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1); echo "hub address $IP"
+          sh test/e2e/pairing/mac-hub.sh start "$W/hub" 3900 "$IP"
           M="sh $PWD/test/e2e/pairing/mac-hub.sh"
-          BASE=http://127.0.0.1:3900 TOKEN="$W/hub/token" GPUI="$BUILD/backplane-gpui" WORK="$W" LAUNCH="$PWD/test/e2e/pairing/gpui-start-mac.sh" \
-            RESTART="$M restart $W/hub 3900 127.0.0.1" EXPIRE="$M expire $W/hub 3900 127.0.0.1" \
+          BASE=http://$IP:3900 TOKEN="$W/hub/token" GPUI="$BUILD/backplane-gpui" WORK="$W" LAUNCH="$PWD/test/e2e/pairing/gpui-start-mac.sh" \
+            RESTART="$M restart $W/hub 3900 $IP" EXPIRE="$M expire $W/hub 3900 $IP" \
             sh test/e2e/pairing/gpui.sh 2>&1 | tee out/pairing.txt
           rc=$?; cp -R "$W/logs" out/logs 2>/dev/null; cp "$W/hub.log" out/hub.log 2>/dev/null; exit $rc
       - uses: actions/upload-artifact@v4
