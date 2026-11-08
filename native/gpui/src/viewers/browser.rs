@@ -171,6 +171,18 @@ impl Render for BrowserPage {
     }
 }
 
+/// A key on the page as the helper takes it: a character typed, or a named key pressed. Space is typed: gpui names it "space" with no
+/// character on Windows, and it was dropped there.
+pub fn page_input(key: &str, key_char: Option<&str>) -> Option<serde_json::Value> {
+    match key_char {
+        Some(c) if !c.is_empty() && key != "enter" => Some(serde_json::json!({"op": "type", "text": c})),
+        _ if key == "space" => Some(serde_json::json!({"op": "type", "text": " "})),
+        _ => {
+            let k = match key { "enter" => "Enter", "backspace" => "Backspace", "tab" => "Tab", "escape" => "Escape", "left" => "ArrowLeft", "right" => "ArrowRight", "up" => "ArrowUp", "down" => "ArrowDown", "delete" => "Delete", "home" => "Home", "end" => "End", "pageup" => "PageUp", "pagedown" => "PageDown", _ => "" };
+            (!k.is_empty()).then(|| serde_json::json!({"op": "press", "key": k}))
+        }
+    }
+}
 /// The normal browser chrome over the hub's frames: back, forward, reload, an address field, tabs (select, close, new) and the person's mouse, wheel and keys on the page.
 /// Everything goes to the hub as `bots.browser` (the toolbar commands and the person's input; the first one takes the page over from the agent, and "Hand back"
 /// returns it), the tabs come back as the helper's `tabs` event (info `browser.tabs.<owner>`).
@@ -230,7 +242,7 @@ impl Bar {
         }
         if (m.control || m.platform) && k.key == "l" { window.focus(&self.bar_focus); self.edit = true; cx.stop_propagation(); return }
         if (m.control || m.platform) && !m.alt { return }
-        match &k.key_char { Some(c) if !c.is_empty() && k.key != "enter" => self.input(serde_json::json!({"op": "type", "text": c})), _ => { let key = match k.key.as_str() { "enter" => "Enter", "backspace" => "Backspace", "tab" => "Tab", "escape" => "Escape", "left" => "ArrowLeft", "right" => "ArrowRight", "up" => "ArrowUp", "down" => "ArrowDown", "delete" => "Delete", "home" => "Home", "end" => "End", "pageup" => "PageUp", "pagedown" => "PageDown", _ => "" }; if !key.is_empty() { self.input(serde_json::json!({"op": "press", "key": key})); } } }
+        if let Some(v) = page_input(&k.key, k.key_char.as_deref()) { self.input(v); }
         cx.stop_propagation();
     }
     fn render(&mut self, light: bool, size: Option<(f32, f32)>, content: AnyElement, window: &mut Window, cx: &mut Context<BrowserPage>) -> AnyElement {
@@ -261,6 +273,15 @@ impl Bar {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn keys_on_the_page_reach_it_as_typed_or_pressed() {
+        use serde_json::json;
+        assert_eq!(super::page_input("a", Some("a")), Some(json!({"op":"type","text":"a"})));
+        assert_eq!(super::page_input("space", None), Some(json!({"op":"type","text":" "})), "Windows names space with no character");
+        assert_eq!(super::page_input("space", Some(" ")), Some(json!({"op":"type","text":" "})));
+        assert_eq!(super::page_input("enter", Some("\n")), Some(json!({"op":"press","key":"Enter"})));
+        assert_eq!(super::page_input("backspace", None), Some(json!({"op":"press","key":"Backspace"})));
+        assert_eq!(super::page_input("f13", None), None);
+    }
     // the frame poller's request goes to the hub's host and port, with the path in the request line (it once dialled the whole URL as a host name)
     #[test] fn a_frame_fetch_dials_the_host_and_port_not_the_path() {
         use std::io::{Read, Write}; let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let port = l.local_addr().unwrap().port();
