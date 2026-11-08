@@ -16,7 +16,7 @@ natively with typed Codable structs, cache-first. Fresh-home screens only: proje
 Project = {id, title, root, origin, threadCount, updatedAt, waiting, icon, color, css}
           origin = the folder's git origin remote, normalized (`github.com/o/r`; "" for none): the key that makes one repository on two machines one project
 Thread  = {id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, preview, waiting, parent, mark?}
-          mark? = {name, short, away}: the machine the thread runs on when it is another one (see One project across machines); absent for this hub's
+          mark? = {name, short, away, label, runs}: the machine the thread runs on when it is another one (see One project across machines); absent for this hub's
           state ∈ "idle" | "working" | "asking" | "failed"; preview ≤ 140 chars; waiting = open asks
 Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?}
           kind ∈ "user" | "assistant" | "tool" | "ask" | "note" | "step"
@@ -146,9 +146,23 @@ A thread of this machine has no `mark` and looks as it always did. Draw it quiet
 a row, `name` in the header and on hover; `away: true` draws it dimmer and says "away". GPUI: `screens/badge.rs` `machine_text`/`machine_mark`
 (the palette adds ` · short` to the place). Display only: the linked machine's threads never feed this hub's policies.
 
+The place mark (2026-11-07): one icon and one wording wherever a remote project or thread shows, quiet, readable in both themes; LOCAL
+looks exactly as before. The hub words it (`mirror::mark_of`, `sidebar::also_label`): `mark.label` "on desktop", `mark.runs` "runs on desktop".
+- another machine's project row: `mark` (the machine's marker); draw the link icon and `label` after its name;
+- this machine's project that is also on linked machines: `also` "also on desktop" (and `marks`, their markers); draw it the same way;
+- an open thread of another machine (`shown.thread.mark`): the breadcrumb "Project · <link> on desktop"; `runs` above the composer;
+  a page's header (Board, Schematic, Files, Diff, the terminal) names where it comes from: "desktop: boards/x.kicad_pcb" (`short` + ": " + what it shows);
+- `away: true`: dimmer, " · away" after the words.
+A window on another computer's hub (the desktop's hub picker, or `--url` off loopback) shows it all the time: a thin accent line along the
+top, "on desktop" beside the name, the address in the picker (GPUI `hubs::elsewhere`). A phone is always away from its hub and names it already.
+GPUI: `screens/badge.rs` `place_text`/`place`/`runs_text`/`from_machine`, `screens/viewer.rs` `source`.
+
 data/1: `Project.origin`; `Thread.mark?` has the same shape and meaning (absent for this hub's threads). data/1's thread lists are still
 this hub's own threads, so the phones draw `mark` when present; listing, opening and sending to a linked machine's threads on the
-phones (and in the composer's `>thread` mentions, which read this hub's threads only) is not done yet.
+phones (and in the composer's `>thread` mentions, which read this hub's threads only) is not done yet. Left for the phones, in order:
+data/1 lists a linked machine's projects and threads (`Project.mark?`/`also?` as above, `Thread.mark?`), then each app decodes them
+(iOS `DProject`/`DThread`, Android `DProject`/`DThread`) and draws the place mark on the project header and thread row, the thread's
+header, and `runs` above the composer. Until data/1 lists them a phone never receives a mark, so there is nothing to draw yet.
 
 ## The composer's commands (feature `commands`; `native/host/src/data/ext.rs`, `session/composer.rs`)
 `/btw`, `/give`, `/secret` and `/intent` are never messages: `message.send` refuses them ("This app is too old ... Nothing was sent."), so an old app posts nothing.
