@@ -54,7 +54,11 @@ struct DataRoot: View {
             if let s = ProcessInfo.processInfo.environment["BACKPLANE_OPEN_URL"], let u = URL(string: s) { try? await Task.sleep(for: .seconds(1)); route(u) }
             #endif
         }
-        .onChange(of: phase) { _, p in if p == .active { client.foreground() } }
+        .onChange(of: phase) { _, p in
+            if p == .background { client.terms.pause() }
+            if p == .active { client.terms.resume(); client.foreground() }
+        }
+        .fullScreenCover(item: Binding(get: { client.terms.fullscreen }, set: { client.terms.fullscreen = $0 })) { TermFullView(client: client, route: $0) }
         .onChange(of: client.pendingThread) { _, id in if let id { path.append(id); client.pendingThread = nil } }
         .onOpenURL { route($0) }
         .onChange(of: client.pushThread, initial: true) { _, t in if !t.isEmpty { var p = NavigationPath(); p.append(t); path = p; client.pushThread = "" } }
@@ -123,6 +127,7 @@ struct DataThreadsView: View {
                     ForEach(client.links.dropFirst().compactMap { Pairing.key($0) }, id: \.self) { k in
                         Button(k) { client.useHub(k) }.accessibilityIdentifier("data.hub.use.\(k)")
                     }
+                    if client.has("terms") { Button("Terminals") { path.append(DTermsRoute(project: "")) }.accessibilityIdentifier("data.hub.terms") }
                     Button("Add a hub") { client.pairingError = ""; client.adding = true }.accessibilityIdentifier("data.hub.add")
                 } label: {
                     HStack(spacing: 8) {
@@ -145,6 +150,7 @@ struct DataThreadsView: View {
         }
         .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else { DataImprovementsView(client: client) } }
         .navigationDestination(for: DAccountRoute.self) { DataAccountView(client: client, route: $0) }
+        .navigationDestination(for: DTermsRoute.self) { DataTermsView(client: client, project: $0.project) }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
         .alert("Rename project", isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
             TextField("Title", text: $projectTitle)
@@ -244,6 +250,10 @@ struct DataThreadsView: View {
                     Spacer(minLength: 0)
                 }.frame(height: 40).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityIdentifier("data.project." + p.id)
+            if client.has("terms") {
+                Button { path.append(DTermsRoute(project: p.id)) } label: { Image(systemName: "terminal").font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim).frame(width: 36, height: 40).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).accessibilityLabel("Terminals in \(p.title)").accessibilityIdentifier("data.terms." + p.id)
+            }
             Button { newThread = p.id } label: { Image(systemName: "plus").font(.system(size: 14)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).contentShape(Rectangle()) }
                 .buttonStyle(.plain).accessibilityLabel("New thread in \(p.title)").accessibilityIdentifier("data.thread.new." + p.id)
         }
@@ -830,6 +840,8 @@ struct DataEntryRow: View {
             DataToolRow(entry: entry).accessibilityIdentifier("data.entry.tool")
         case "ask":
             DataAskCard(client: client, thread: thread, entry: entry)
+        case "term" where client.has("terms") && entry.term != nil:
+            DataTermCard(client: client, info: entry.term!)
         default:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if !entry.label.isEmpty { Text(entry.label).dmono(12, bold: true) }
