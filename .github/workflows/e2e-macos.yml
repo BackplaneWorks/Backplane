@@ -43,7 +43,7 @@ jobs:
         with: { name: probe, path: out }
 
   build:
-    if: inputs.jobs != 'probe'
+    if: inputs.jobs == 'hub' || inputs.jobs == 'all'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +107,7 @@ jobs:
           set -e
           gh run download ${{ inputs.archive_run }} -n release-dry-run -D rel
           ls -l rel
-          export BACKPLANE_ARCHIVE="$PWD/rel/backplane-${{ inputs.archive_tag }}-darwin-arm64.tar.gz" BACKPLANE_PREFIX="$PWD/inst" BACKPLANE_HOME="$PWD/inst-home" BACKPLANE_NO_DESKTOP_APP= 
+          export BACKPLANE_ARCHIVE="$PWD/rel/backplane-${{ inputs.archive_tag }}-darwin-arm64-native.tar.gz" BACKPLANE_PREFIX="$PWD/inst" BACKPLANE_HOME="$PWD/inst-home" BACKPLANE_NO_DESKTOP_APP= 
           sh rel/install.sh --quiet
           B="$PWD/inst/builds/${{ inputs.archive_tag }}"; ls -l "$B"; cat "$B/COMMIT"
           echo "BUILD=$B" >> "$GITHUB_ENV"

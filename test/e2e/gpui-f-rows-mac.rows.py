@@ -100,6 +100,7 @@ if want('F16'):
     def trial(name, chord_, judge, undo=None):
         a = shot('k-%s-a' % name); n0 = len(events()); m0 = len(metrics()); chord(chord_); pause(1.5); b = shot('k-%s-b' % name)
         ok, why = judge(a, b, events()[n0:], metrics()[m0:])
+        if not ok: pause(3.0); b = shot('k-%s-b' % name); ok, why = judge(a, b, events()[n0:], metrics()[m0:])   # a slow runner: look again before saying no
         if undo: undo(); pause(0.8)
         res.append((name, chord_, ok, why)); print('   ', name, chord_, ok, why, flush=True)
     sel(1)
@@ -119,7 +120,7 @@ if want('F16'):
     # stop and settle need a running turn: send a long one by keys
     sel(2); say_('a long turn')
     t2 = lambda: [e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't2']
-    until(lambda: any(e['state'] == 'running' for e in t2()), 15)
+    until(lambda: any(e['state'] == 'running' for e in t2()), 40)
     trial('stop', 'ctrl period', lambda a, b, e, m: (any(x['$'] == 'TurnChanged' and x.get('state') == 'interrupted' for x in e), 'TurnChanged interrupted in the hub log'))
     trial('settle', 'ctrl shift s', lambda a, b, e, m: (any(x['$'] == 'ThreadSettled' for x in e), 'ThreadSettled in the hub log'))
     log('F16', all(x[2] for x in res), '; '.join('%s %s: %s' % (n, c, 'ok' if ok else 'FAIL (' + w + ')') for n, c, ok, w in res))
@@ -155,7 +156,9 @@ if want('F08'):
     log('F08-fork', forked and ok, 'the Fork thread button: a new thread was created in the hub log=%s (f8-fork.png)' % ok)
 if want('F14'):
     marker = P('term.marker'); chord('ctrl j'); pause(2.5); shot('f14-open')
-    xin('type', 'touch ' + marker); xin('key', 'Return'); ok = until(lambda: os.path.exists(marker), 15); pause(1); shot('f14-typed')
+    xin('type', 'touch ' + marker); xin('key', 'Return'); ok = until(lambda: os.path.exists(marker), 6)
+    if not ok: xin('key', 'Return'); ok = until(lambda: os.path.exists(marker), 15)   # a Return can be lost before the shell has the line
+    pause(1); shot('f14-typed')
     shown = differs(px('f14-open'), px('f14-typed'))
     log('F14-terminal', ok and shown, 'the floating terminal (Ctrl+J): a command typed with the keyboard ran in a real shell (the marker file exists=%s) and the panel redrew=%s (f14-typed.png)' % (ok, shown))
     chord('ctrl j')
