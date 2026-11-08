@@ -74,7 +74,14 @@ time.sleep(6)
 # ---- helpers
 def xin(*a): subprocess.run(['python3', XIN, *map(str, a)], env=denv, check=False, timeout=30)
 def shot(name):
-    f = P('shots', name + '.png'); subprocess.run(['import', '-window', 'root', f], env=denv); return f
+    f = P('shots', name + '.png'); subprocess.run(['import', '-window', 'root', f], env=denv)
+    # ImageMagick's `import` returned an all-black image of a red root on the aarch64 CI runner (Ubuntu 22.04's ImageMagick 6); xwd reads the same screen correctly
+    try:
+        from PIL import Image
+        if shutil.which('xwd') and Image.open(f).convert('L').getextrema()[1] == 0:
+            subprocess.run(['sh', '-c', 'xwd -root -silent | convert xwd:- "png:$1"', 'sh', f], env=denv, check=False)
+    except Exception: pass
+    return f
 def clip_image(img): subprocess.Popen(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', img], env=denv)
 def metrics(): return [json.loads(l.split('GPUI_METRIC ', 1)[1]) for l in open(P('client.log'), errors='replace') if 'GPUI_METRIC ' in l]
 def rects():
