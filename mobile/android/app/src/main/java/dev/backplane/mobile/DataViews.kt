@@ -630,6 +630,8 @@ private fun EntryRow(tid: String, e: DEntry) {
         }
         "assistant" -> Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
             MdText(e.text, thread = tid)
+            // the pictures the reply names (the hub lists them as attachments), tap for the full size
+            e.attachments.forEach { Spacer(Modifier.height(6.dp)); PicById(it.id, 240, zoom = true) }
             if (!e.live) DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 4.dp))
         }
         "tool", "step" -> Box(Modifier.padding(horizontal = 12.dp)) { ToolRow(e) }
@@ -805,10 +807,19 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
     val bmp = remember(b) { android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
     if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.heightIn(max = size.dp).widthIn(max = (size * 1.5).toInt().dp).border(BorderStroke(1.dp, dcs.outlineVariant)), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
 }
-@Composable private fun PicById(id: String, size: Int) {
+@Composable private fun PicById(id: String, size: Int, zoom: Boolean = false) {
     var b by remember(id) { mutableStateOf<ByteArray?>(null) }
+    var full by remember(id) { mutableStateOf(false) }
     LaunchedEffect(id) { b = DataClient.picture(id) }
-    b?.let { Pic(it, size) } ?: Box(Modifier.size(size.dp, (size / 2).dp).background(dcs.surfaceVariant))
+    val bytes = b
+    if (bytes == null) { Box(Modifier.size(size.dp, (size / 2).dp).background(dcs.surfaceVariant)); return }
+    Box(if (zoom) Modifier.clickable { full = true }.testTag("thread.image") else Modifier) { Pic(bytes, size) }
+    if (full) androidx.compose.ui.window.Dialog(onDismissRequest = { full = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        val bmp = remember(bytes) { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black).clickable { full = false }, contentAlignment = Alignment.Center) {
+            if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+        }
+    }
 }
 
 // ---- improvements (the same as iOS's): a GitHub issue draft opens in the browser, or the text starts a thread on the hub
