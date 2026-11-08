@@ -24,11 +24,16 @@ A small Python service behind nginx on a Debian host.
 - `/admin`: paid orders, to place by hand. Takes `?k=$FAB_ADMIN_TOKEN` once, which then
   becomes a cookie.
 
-The person sees four lines and a total:
+The person sees three lines and a total, four for the US:
 - manufacturing;
-- shipping (the cheapest duty-paid express);
-- duties and taxes (`duties.py`);
-- the service and price-assurance fee: `FAB_FEE` (10%), and `FAB_FEE_CNC` (20%) on CNC parts, folded into the quote's Manufacturing line (no separate fee line).
+- shipping (the cheapest duty-paid express, as the fab's checkout charges it: the pack adds the
+  packing of assembled boards to the weight and a margin over the fab's calculator);
+- duties and taxes (`duties.py`), with the courier's fee for paying them on each duty-paid parcel;
+- for the US, sales tax (estimated) on the goods and shipping at the ship-to state's average
+  combined rate (`ship_region` in the manifest, a two-letter state code); without a state, a high
+  rate, and the quote says so. Stripe's address is checked against it when the order is paid: the
+  order list flags a different state with the difference to refund or ask for;
+- the service and price-assurance fee: `FAB_FEE` (10%) of every line, taxes included, and `FAB_FEE_CNC` (20%) on CNC parts, folded into the quote's Manufacturing line (no separate fee line).
 
 Components come from the fab's own stock first: fab code or MPN, its attrition and
 minimums. Mouser is used for the rest, marked up by `FAB_SOURCED_MARKUP` for the fab's

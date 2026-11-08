@@ -13,7 +13,7 @@ import pathlib
 import re
 import zipfile
 
-from . import catalog, config
+from . import catalog, config, duties
 
 SPEC = 1
 COUNTRY = re.compile(r"^[A-Z]{2}$")
@@ -75,6 +75,13 @@ def check_manifest(m):
         what = REGIONS.get(country)
         raise Bad(f"ship_to {country} is {what}, not a country: ask which country it ships to" if what
                   else f"ship_to {country} is not a country's ISO code: ask which country it ships to")
+    # the US state it ships to (its sales tax); optional, and only read for the US
+    region = m.get("ship_region") or ""
+    if country != "US":
+        region = ""
+    elif region and (not isinstance(region, str) or region.strip().upper() not in duties.US_SALES_TAX):
+        raise Bad("ship_region must be a US state's two-letter code, like GA or WA (or left out)")
+    region = region.strip().upper()
     files = m.get("files")
     if not isinstance(files, dict) or not files or len(files) > config.MAX_FILES:
         raise Bad("files must list each file's sha256")
@@ -133,7 +140,7 @@ def check_manifest(m):
                     "files": roles, "assemble": assemble, "given": given})
     title = m.get("title", "")
     title = title[:80] if isinstance(title, str) else ""
-    return {"spec": SPEC, "ship_to": country, "title": title, "parts": out, "files": clean_files}
+    return {"spec": SPEC, "ship_to": country, "ship_region": region, "title": title, "parts": out, "files": clean_files}
 
 
 def _unzip(zpath, dest, budget):

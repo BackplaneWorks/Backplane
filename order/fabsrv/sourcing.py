@@ -155,6 +155,7 @@ def components(v, lines, boards):
     lib = v.library(keys) if lines else {}
     total, extended, extra_days = 0.0, 0, 0
     rows, problems, warnings, sourced, standard_only = [], [], [], [], []
+    xray = 0  # placements a board of parts only standard assembly places (BGA, LGA...): the fab X-rays each
     elsewhere = []
     for key, ln in zip(keys, lines):
         usage = ln["qty"] * boards
@@ -166,6 +167,7 @@ def components(v, lines, boards):
                 extended += 1 if st["library"] == "extended" else 0
                 if st.get("standard_only"):
                     standard_only.append(ln["mpn"] or st["mpn"])
+                    xray += ln["qty"]
                 rows.append({"refs": ln["refs"][:8], "mpn": ln["mpn"] or st["mpn"], "status": "stocked", "library": st["library"]})
                 continue
             warnings.append(f"{ln['mpn'] or st['mpn']}: only {st['stock']} in the fab's stock; sourced instead")
@@ -197,4 +199,4 @@ def components(v, lines, boards):
         warnings.append(f"{len(sourced)} part{'s' if len(sourced) != 1 else ''} bought from a distributor for this order "
                         f"(about {SOURCED_DAYS} more days)")
     return {"total": round(total, 2), "unique": len(lines), "extended": extended, "lines": rows,
-            "problems": problems, "warnings": warnings, "extra_days": extra_days, "standard_only": standard_only}
+            "problems": problems, "warnings": warnings, "extra_days": extra_days, "standard_only": standard_only, "xray_parts": xray}
