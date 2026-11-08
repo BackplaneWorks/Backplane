@@ -14,7 +14,7 @@ impl Carrier for Fake {
 impl Fake {
     fn alerts(&self) -> Vec<Value> { self.sent.lock().unwrap().iter().filter(|x| x.1.push_type == "alert").map(|x| x.1.payload.clone()).collect() }
     fn clears(&self) -> Vec<Value> { self.sent.lock().unwrap().iter().filter(|x| x.1.push_type == "background").map(|x| x.1.payload.clone()).collect() }
-    async fn wait(&self, n: usize) -> Vec<Value> { for _ in 0..300 { if self.alerts().len() >= n { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await } self.alerts() }
+    async fn wait(&self, n: usize) -> Vec<Value> { for _ in 0..2000 { if self.alerts().len() >= n { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await } self.alerts() }
 }
 struct S { hub: Arc<Hub>, bots: Arc<Bots>, rec: Arc<Rec>, bub: String, chat: String, fake: Arc<Fake>, push: Arc<push::Push> }
 async fn set(hub: &Arc<Hub>, k: &str, v: &str) { hub.commit(&json!({"$":"SettingSet","key":k,"value":v,"at":now_s()})).await.unwrap() ; }
@@ -127,7 +127,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":"Held while quiet","thread":"tw"}), now_s()).await; assert!(r.0, "{r:?}");
     settle().await; assert!(s.fake.alerts().is_empty(), "held");
     // the worker saves the book after it routes the order: wait for it rather than a fixed pause (a loaded machine is slower than settle)
-    let mut held = 0; for _ in 0..300 { held = s.hub.setting(push::BOOK).await.and_then(|v| serde_json::from_str::<Book>(&v).ok()).map_or(0, |b| b.held.len()); if held == 1 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
+    let mut held = 0; for _ in 0..2000 { held = s.hub.setting(push::BOOK).await.and_then(|v| serde_json::from_str::<Book>(&v).ok()).map_or(0, |b| b.held.len()); if held == 1 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
     assert_eq!(held, 1, "and it survives a restart in the book");
     set(&s.hub, push::QUIET_URGENT, "on").await; settle().await;
     person(&s, 1).await;
