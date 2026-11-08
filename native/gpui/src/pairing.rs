@@ -64,9 +64,21 @@ pub fn loopback(origin: &str) -> bool {
     h == "localhost" || h == "[::1]" || (h.starts_with("127.") && h.bytes().all(|c| c.is_ascii_digit() || c == b'.'))
 }
 pub fn only_local(routes: &[String]) -> bool { !routes.is_empty() && routes.iter().all(|r| loopback(r)) }
-/// Why a link cannot pair a hub on another machine (None: it can). An address the person typed is their word.
+/// Whether something answers at one of these loopback addresses on this computer: a link that names only its hub's own computer is fine on that
+/// computer (the desktop client beside its hub). A refused connection comes back at once; half a second at most per address.
+pub fn answers_here(routes: &[String]) -> bool {
+    routes.iter().filter(|r| loopback(r)).any(|r| {
+        let (addr, _) = host_port(r);
+        let host = addr.rsplit_once(':').map_or(addr.as_str(), |(h, _)| h);
+        let addr = if host == "localhost" { addr.replacen("localhost", "127.0.0.1", 1) } else { addr.replace(['[', ']'], "") };
+        let addr = if addr.matches(':').count() > 1 { addr.rsplit_once(':').map(|(h, p)| format!("[{h}]:{p}")).unwrap_or(addr) } else { addr };
+        addr.parse::<std::net::SocketAddr>().map_or(false, |a| std::net::TcpStream::connect_timeout(&a, Duration::from_millis(500)).is_ok())
+    })
+}
+/// Why a link cannot pair (None: it can). A link naming only its hub's own computer is refused unless that hub is on this computer: the
+/// phones refuse it outright (no phone is its hub's computer); this desktop client first tries it here. An address the person typed is their word.
 pub fn refusal(i: &Invitation) -> Option<&'static str> {
-    (i.from_link && only_local(&i.routes)).then_some("This invitation names only its hub's own computer (127.0.0.1), so this device cannot reach it. Start the hub with Tailscale on, or on an address this device can reach, then make a new invitation.")
+    (i.from_link && only_local(&i.routes) && !answers_here(&i.routes)).then_some("This invitation names only its hub's own computer (127.0.0.1), so this device cannot reach it. Start the hub with Tailscale on, or on an address this device can reach, then make a new invitation.")
 }
 /// A hub address and a short code, spaces, dashes and case forgiven.
 pub fn from_code(address: &str, code: &str) -> Option<Invitation> {
@@ -276,13 +288,26 @@ mod tests {
         let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(relaunch_args(&v(&["--url", "http://h:1", "--token-file", "/t", "--theme", "dark", "--script", "/s", "backplane://pair?url=x", "--pair", "l", "--exit-after", "9"])), v(&["--theme", "dark", "--exit-after", "9"]));
     }
-    #[test] fn a_link_naming_only_the_hubs_own_computer_is_refused_for_a_remote_hub_with_the_reason() {
-        let l = format!("http://127.0.0.1:3797/pair#invite={SECRET}&routes=%5B%22http%3A%2F%2F127.0.0.1%3A3797%22%5D");
-        assert!(submit(&l, "", "").unwrap_err().contains("own computer"));
+    #[test] fn a_link_naming_only_the_hubs_own_computer_is_refused_when_no_hub_answers_here_with_the_reason() {
+        let closed = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();   // (bound, then dropped: nothing listens)
+        let l = format!("http://127.0.0.1:{closed}/pair#invite={SECRET}&routes=%5B%22http%3A%2F%2F127.0.0.1%3A{closed}%22%5D");
+        assert!(submit(&l, "", "").unwrap_err().contains("own computer"), "no hub on this computer: refused, with the phones' words");
+        assert!(submit(&format!("http://localhost:{closed}/pair#invite={SECRET}"), "", "").unwrap_err().contains("own computer"), "localhost too");
         let ok = format!("http://127.0.0.1:3797/pair#invite={SECRET}&routes=%5B%22http%3A%2F%2F100.64.1.2%3A3797%22%5D");
         assert_eq!(submit(&ok, "", "").unwrap().routes, vec!["http://127.0.0.1:3797", "http://100.64.1.2:3797"], "one reachable address is enough");
         assert!(submit("", "127.0.0.1:3801", "ABCD2345").is_ok(), "an address the person typed is their word");
         assert!(!loopback("http://localhost.evil.com:1") && loopback("http://localhost:1") && loopback("http://[::1]:1") && !loopback("http://127.evil.com:1"));
+    }
+    #[test] fn a_link_naming_only_the_hubs_own_computer_pairs_when_that_hub_is_on_this_computer() {
+        // a one-shot hub on this computer's loopback: the desktop client beside its hub takes the link and pairs
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap(); let port = l.local_addr().unwrap().port();
+        let h = std::thread::spawn(move || { for _ in 0..2 { let Ok((mut s, _)) = l.accept() else { return }; let mut b = [0u8; 2048]; let n = s.read(&mut b).unwrap_or(0);
+            if n == 0 { continue }   // (the reachability probe connects and closes)
+            let body = format!(r#"{{"token":"{SECRET}"}}"#); let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()); return } });
+        let link = format!("http://127.0.0.1:{port}/pair#invite={SECRET}&routes=%5B%22http%3A%2F%2F127.0.0.1%3A{port}%22%5D");
+        let i = submit(&link, "", "").expect("a hub answers here: the link is taken");
+        assert_eq!(exchange(&i, "t"), Ok((format!("http://127.0.0.1:{port}"), SECRET.to_string())), "and it pairs");
+        h.join().unwrap();
     }
     #[test] fn every_address_is_tried_in_order_and_only_an_unreachable_one_moves_on() {
         // nothing listens on the first (a closed port); the second is a one-shot hub answering the exchange
