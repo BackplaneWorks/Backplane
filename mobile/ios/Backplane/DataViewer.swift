@@ -43,11 +43,12 @@ extension DataClient {
         var p: [String: Any] = ["thread": thread, "kind": kind]; if !path.isEmpty { p["path"] = path }
         let slot = kind.hasPrefix("3d") ? [hubName, thread, kind, path].joined(separator: "|") : ""
         // (a stop changes nothing here: it may come after the next viewer has begun, and that one drops the last one's plots itself)
-        if !kind.isEmpty { let kept = plots.begin(slot); if !kept.isEmpty { p["kept"] = kept } }
+        var serial = 0
+        if !kind.isEmpty { let b = plots.begin(slot); serial = b.serial; if !b.kept.isEmpty { p["kept"] = b.kept } }
         do {
             let r: DWatch = try await call("viewer.watch", p)
-            if !kind.isEmpty { plots.shown(r.keys.isEmpty ? PlotStore.keys(kind: kind, root: r.root, path: path) : r.keys) }
-        } catch { if !kind.isEmpty { plots.failed() }; throw error }
+            if !kind.isEmpty { plots.shown(r.keys.isEmpty ? PlotStore.keys(kind: kind, root: r.root, path: path) : r.keys, of: serial) }
+        } catch { if !kind.isEmpty { plots.failed(of: serial) }; throw error }
     }
     func layers(_ kind: String, present: UInt32, own: UInt32, focus: String, action: String = "", value: String = "") async -> DLayers? {
         try? await call("viewer.layers", ["kind": kind, "present": present, "off": own, "focus": focus, "action": action, "value": value])
@@ -344,16 +345,17 @@ struct DataMechSolid: View {
     let path: String
     @State private var error = ""
     var body: some View {
-        let mesh = client.plots.mesh.flatMap { ($0.key.hasPrefix("2|") || $0.key.hasPrefix("3|")) ? $0 : nil }
+        let mesh = client.plots.mesh.flatMap { $0.key.hasSuffix("/" + path) ? $0 : nil } // the part asked for, never the board's model of the 3D tab
         ZStack {
             if let v = plainViewer(open: "mech", source: "mech|" + path, picked: "", off: 0, dim: 0, lift: 255) {
                 PlotCanvasView(frame: nil, mesh: mesh, scope: thread.id, viewer: v, pick: { _ in }).accessibilityIdentifier("data.mech.surface")
+                    .accessibilityValue(mesh?.mesh == nil ? "" : mesh!.key) // what is drawn, by its key (the tests read it)
             }
             let say = !error.isEmpty ? error : (mesh.map { $0.decoding ? "" : $0.none } ?? "")
             if !say.isEmpty { Text(say).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
             else if mesh?.mesh == nil || mesh?.decoding == true { DLoading(text: "Loading 3D model…") }
         }
-        .task(id: path) { error = ""; do { try await client.watch(thread.id, kind: "3d-bare", path: path) } catch { self.error = error.localizedDescription } }
+        .task(id: path) { error = ""; do { try await client.watch(thread.id, kind: "3d", path: path) } catch { self.error = error.localizedDescription } }
     }
 }
 

@@ -31,6 +31,17 @@ class PlotStoreGateTest {
         assertEquals(true, g.wanted("2|$a|")); assertEquals(true, g.wanted("0|$a|")); assertEquals(false, g.wanted("1|$a|"))
     }
 
+    @Test fun theAnswerOfAViewerThatWasLeftOpensNothing() {
+        // 3D tab, then Mech before the 3D watch was answered: the 3D answer comes late and must not let the board's model into Mech
+        val g = ViewGate<String>()
+        val threeD = g.begin(); val mech = g.begin()
+        g.park("2|$a|", "board model")
+        assertEquals(emptyList<String>(), g.shown(PlotStore.keys("3d", a, ""), threeD))
+        assertNull("still waiting for Mech's own answer", g.wanted("2|$a|"))
+        assertEquals(emptyList<String>(), g.shown(PlotStore.keys("3d", a, "mech/bracket.step"), mech))
+        assertEquals(false, g.wanted("2|$a|"))
+    }
+
     @Test fun aNewerParkedPlotOfAKeyReplacesTheOlder() {
         val g = ViewGate<String> { _, _ -> true }
         g.begin(); g.park("0|$a|", "old"); g.park("0|$a|", "new")

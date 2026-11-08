@@ -536,12 +536,13 @@ object DataClient {
      *  a 3D view shows its own cached model once the hub names that model's file among the view's. A stop changes nothing here. */
     suspend fun watch(tid: String, kind: String, path: String = "") {
         val slot = if (kind.startsWith("3d")) listOf(hubName, tid, kind, path).joinToString("|") else ""
-        val kept = if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.begin(slot) } else ""
+        val begun = if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.begin(slot) } else null
+        val kept = begun?.kept.orEmpty(); val serial = begun?.serial ?: 0
         val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept) }) }
-            catch (e: Exception) { if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.failed() }; throw e }
+            catch (e: Exception) { if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.failed(serial) }; throw e }
         if (kind.isEmpty()) return
         val keys = r.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
-        withContext(Dispatchers.Main) { plots.shown(keys.ifEmpty { PlotStore.keys(kind, r.optString("root"), path) }) }
+        withContext(Dispatchers.Main) { plots.shown(keys.ifEmpty { PlotStore.keys(kind, r.optString("root"), path) }, serial) }
     }
     /** `viewer.layers`: what a press does, and what to draw; the rules are the hub's (present/viewer.rs `layer_reply`). `rows`: the layers, then a comparison's marks. */
     data class LayerRow(val layer: Int, val name: String, val on: Boolean, val active: Boolean)

@@ -375,12 +375,14 @@ private class PlotMeshAssets {
 class ViewGate<T>(private val same: (T, T) -> Boolean = { _, _ -> true }) {
     var accept: Set<String>? = emptySet(); private set
     private val parked = ArrayList<Pair<String, T>>()
-    fun begin() { accept = null; parked.clear() }
+    /** The latest watch: only its answer (`shown` of this serial) opens the gate; an older one's, for a viewer that was left, is dropped */
+    var serial = 0; private set
+    fun begin(): Int { accept = null; parked.clear(); return ++serial }
     fun stop() { accept = emptySet(); parked.clear() }
     /** true: show it; false: drop it; null: park it (the view's keys are not known yet) */
     fun wanted(key: String): Boolean? = accept?.contains(key)
     fun park(key: String, item: T) { parked.removeAll { it.first == key && same(it.second, item) }; parked.add(key to item) }
-    fun shown(keys: Collection<String>): List<T> { val a = keys.toSet(); accept = a; val out = parked.filter { it.first in a }.map { it.second }; parked.clear(); return out }
+    fun shown(keys: Collection<String>, of: Int = serial): List<T> { if (of != serial) return emptyList(); val a = keys.toSet(); accept = a; val out = parked.filter { it.first in a }.map { it.second }; parked.clear(); return out }
 }
 
 class PlotStore {
@@ -413,22 +415,25 @@ class PlotStore {
 
     /** A viewer switches (a tab, a file, a thread): what the last one showed goes at once, plots for it are dropped from now on, and the
      *  view's own cached model (`slot`: hub, thread, kind, path) waits to be named. Returns `viewer.watch {kept}` ("" for no cached model). */
-    fun begin(slot: String): String {
+    class Begun(val kept: String, val serial: Int)
+    fun begin(slot: String): Begun {
         this.slot = slot
-        gate.begin(); frame = null; mesh = null; parts.reset() // the last view's parts go with its model
+        val serial = gate.begin(); frame = null; mesh = null; parts.reset() // the last view's parts go with its model
         assets.issue("", assets.epoch()) // a model still decoding for the last view is not shown
         disk = if (slot.isEmpty()) null else MeshDisk.load(slot)
-        val o = disk ?: return ""
-        return (o["key"] as String) + "\t" + PlotMesh.id(o["mesh"] as ByteArray)
+        val o = disk ?: return Begun("", serial)
+        return Begun((o["key"] as String) + "\t" + PlotMesh.id(o["mesh"] as ByteArray), serial)
     }
     /** The hub named the view's plots: what waited for them is shown, the rest dropped; the cached model shows if it is of this view's file. */
-    fun shown(keys: List<String>) {
-        for (p in gate.shown(keys)) { if (p.f != null) { frame = p.f; keepFrame() } else if (p.o != null) route(p.o) }
+    fun shown(keys: List<String>, serial: Int) {
+        if (serial != gate.serial) return // the answer for a viewer that was left
+        for (p in gate.shown(keys, serial)) { if (p.f != null) { frame = p.f; keepFrame() } else if (p.o != null) route(p.o) }
         disk?.let { o -> val key = o["key"] as String; if (gate.wanted(key) == true && mesh?.key != key) showDisk(o, key) }
         disk = null
     }
     /** The watch failed (no hub): the view's own cached model is all there is to show. */
-    fun failed() {
+    fun failed(serial: Int) {
+        if (serial != gate.serial) return
         gate.stop()
         disk?.let { o -> val key = o["key"] as String; gate.shown(listOf(key)); showDisk(o, key) }
         disk = null

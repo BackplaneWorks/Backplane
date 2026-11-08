@@ -647,6 +647,44 @@ final class Journeys: XCTestCase {
         d.shot("a-again")
     }
 
+    // Mech after the 3D tab: the part asked for is drawn (or loading), never the board's model left from the 3D tab and never a black page.
+    // HUB_VIEWER_THREAD: a thread of a project with a board and mech/<a STEP> (test/e2e/pixel-hub.mjs's: ecc83 and mech/bracket.step).
+    func test_data_mech() {
+        d = Driver("data-mech"); defer { d.finish() }
+        let t = d.env["HUB_VIEWER_THREAD"] ?? ""
+        guard !t.isEmpty else { d.block("needs HUB_VIEWER_THREAD (a thread of a project with a board and a STEP under mech/)"); return }
+        d.app.terminate(); d.app.launchArguments = ["-app.alerts", "<false/>"]
+        d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1", "BACKPLANE_SELECT": "viewer:" + t, "BACKPLANE_VTAB": "3D"]
+        d.app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let no = springboard.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Don'")).firstMatch
+        if no.waitForExistence(timeout: 4) { no.tap() }
+        let three = d.el("data.viewer.surface"), mech = d.el("data.mech.surface")
+        guard d.step("the board's 3D model is drawn", timeout: 60, act: {}, expect: { ((three.value as? String) ?? "").contains("2|") }) else { return }
+        d.tap(d.el("data.vtab.Mech"))
+        let chip = d.app.buttons.matching(NSPredicate(format: "label ENDSWITH '.step' OR label ENDSWITH '.STEP' OR label ENDSWITH '.stp'")).firstMatch
+        guard d.step("Mech lists the part", timeout: 20, act: {}, expect: { chip.exists }) else { return }
+        let name = chip.label
+        d.tap(chip)
+        let value = { (mech.value as? String) ?? "" }
+        d.step("right after: loading or the part, never the board's model", act: {}, expect: {
+            mech.exists && (d.el("data.viewer.loading").exists || value().hasSuffix("/" + name) || value().contains("/" + name))
+        })
+        d.metrics["mech_right_after"] = value()
+        // drawn means pixels: the share of the surface (sampled every 4 px) that is not the black ground. (On the Nov 7 build Mech held the
+        // part's model, watched as `3d-bare`, and drew nothing: a black page.)
+        func lit() -> Int {
+            guard let cg = mech.screenshot().image.cgImage, let data = cg.dataProvider?.data, let px = CFDataGetBytePtr(data) else { return -1 }
+            let bpp = cg.bitsPerPixel / 8; var n = 0
+            for y in stride(from: 0, to: cg.height, by: 4) { for x in stride(from: 0, to: cg.width, by: 4) {
+                let i = y * cg.bytesPerRow + x * bpp; if Int(px[i]) + Int(px[i + 1]) + Int(px[i + 2]) > 90 { n += 1 } } }
+            return n
+        }
+        d.step("the part is drawn", timeout: 90, act: {}, expect: { value().hasSuffix(name) && lit() > 400 })
+        d.metrics["mech_lit_samples"] = lit()
+        d.shot("mech")
+    }
+
     func test_downloads() {
         d = Driver("downloads"); defer { d.finish() }
         d.launch(); tab("Threads")
