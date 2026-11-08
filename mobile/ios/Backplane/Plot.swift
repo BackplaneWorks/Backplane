@@ -376,6 +376,8 @@ final class PlotStore {
     @ObservationIgnored private var parked: [(key: String, o: [String: Any]?, f: PlotFrame?)] = []
     /// This view's cached model (MeshDisk), drawn once the hub names its key among the view's
     @ObservationIgnored private var disk: [String: Any]?
+    /// The latest watch (`begin`): only its answer opens the gate
+    @ObservationIgnored private var watching = 0
     /// A 3D model's frames other than the model (`parts`, `part`: kicad's native board mesher streams the parts after the board), already
     /// gated to the view on show; the parts' decoding hooks in here. A `parts` frame may come alone when the phone's kept model was the board.
     @ObservationIgnored var more: ((String, [String: Any]) -> Void)?
@@ -388,16 +390,18 @@ final class PlotStore {
 
     /// A viewer switches (a tab, a file, a thread): what the last one showed goes at once, plots for it are dropped from now on, and the
     /// view's own cached model (`slot`: hub, thread, kind, path) waits to be named. Returns `viewer.watch {kept}` ("" for no cached model).
-    func begin(_ slot: String) -> String {
-        self.slot = slot
+    /// `serial` names the watch: the answer of an older one (a viewer left before its watch was answered) is not this view's.
+    func begin(_ slot: String) -> (kept: String, serial: Int) {
+        self.slot = slot; watching += 1
         accept = nil; parked = []; frame = nil; mesh = nil; parts.reset() // the last view's parts go with its model
         _ = assets.issue("", epoch: assets.epoch()) // a model still decoding for the last view is not shown
         disk = slot.isEmpty ? nil : MeshDisk.load(slot)
-        guard let o = disk, let key = o["key"] as? String, let bytes = o["mesh"] as? Data else { return "" }
-        return key + "\t" + PlotMesh.id(bytes)
+        guard let o = disk, let key = o["key"] as? String, let bytes = o["mesh"] as? Data else { return ("", watching) }
+        return (key + "\t" + PlotMesh.id(bytes), watching)
     }
     /// The hub named the view's plots: what waited for them is shown, the rest dropped; the cached model shows if it is of this view's file.
-    func shown(_ keys: [String]) {
+    func shown(_ keys: [String], of serial: Int) {
+        guard serial == watching else { return } // the answer for a viewer that was left: its plots are not this one's
         accept = Set(keys)
         let waiting = parked; parked = []
         for p in waiting where accept!.contains(p.key) {
@@ -407,7 +411,8 @@ final class PlotStore {
         disk = nil
     }
     /// The watch failed (no hub): the view's own cached model is all there is to show.
-    func failed() {
+    func failed(of serial: Int) {
+        guard serial == watching else { return }
         accept = []; parked = []
         if let o = disk, let key = o["key"] as? String { accept = [key]; showDisk(o, key) }
         disk = nil
