@@ -188,8 +188,17 @@ try:
         else: no("back-to-014", f"build={gstat().get('build')} state={gstat().get('state')} hello={said[:80]!r}")
         if before is None or at_bad is None: no("old-home", "0.14's home was not seen at 0.15's start and at its failure")
         elif before != at_bad:
+            # the guard starts 0.14 again within moments of the crash, and 0.14 writes its own home as it starts (hub.lock, its store): a change made after the
+            # crash (the build's marker) is that; one made before it, while 0.15 imported, is 0.15 writing into 0.14's home
             changed = sorted(k for k in set(before) | set(at_bad) if before.get(k) != at_bad.get(k))
-            no("old-home", f"0.14's home changed while the import ran: {changed[:5]}")
+            died_ns = os.stat(os.path.join(h15, "dry-run-crashed")).st_mtime_ns if died else 0
+            def mt(k):
+                try: return os.stat(os.path.join(h14, k)).st_mtime_ns
+                except OSError: return None
+            early = [k for k in changed if mt(k) is None or mt(k) <= died_ns]
+            if early: no("old-home", f"0.14's home changed while 0.15 imported: {early[:5]} (all changed: {changed[:5]})")
+            elif marks(): no("old-home", f"0.15 wrote into 0.14's home: {marks()}")
+            else: ok("old-home", f"0.14's home is byte-identical ({len(before)} files) from 0.15's start to its crash; after it, 0.14 starting again wrote its own {changed[:4]}")
         elif marks(): no("old-home", f"0.15 wrote into 0.14's home: {marks()}")
         else: ok("old-home", f"0.14's home is byte-identical ({len(before)} files) from 0.15's start to its failure, and has nothing of 0.15's")
         # 2. the next 0.15 (GOOD_DIR's, laid out by its own install-release.sh as 0.14's updater would) picks the import up and finishes it, nothing twice
