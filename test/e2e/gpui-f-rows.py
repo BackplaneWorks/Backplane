@@ -75,6 +75,7 @@ time.sleep(6)
 def xin(*a): subprocess.run(['python3', XIN, *map(str, a)], env=denv, check=False, timeout=30)
 def shot(name):
     f = P('shots', name + '.png'); subprocess.run(['import', '-window', 'root', f], env=denv); return f
+def clip_image(img): subprocess.Popen(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', img], env=denv)
 def metrics(): return [json.loads(l.split('GPUI_METRIC ', 1)[1]) for l in open(P('client.log'), errors='replace') if 'GPUI_METRIC ' in l]
 def rects():
     r = {}
