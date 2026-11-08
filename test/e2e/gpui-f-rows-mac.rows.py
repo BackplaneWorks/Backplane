@@ -106,13 +106,13 @@ if want('F16'):
     trial('diff', 'ctrl d', lambda a, b, e, m: (differs(px('k-diff-a'), px('k-diff-b'), box(MAIN())), 'the Diff page replaced the timeline'), lambda: chord('ctrl d'))
     trial('terminal', 'ctrl j', lambda a, b, e, m: (differs(px('k-terminal-a'), px('k-terminal-b'), box(MAIN())), 'the floating terminal drew'), lambda: chord('ctrl j'))
     chord('ctrl 1'); pause(1.0)
-    trial('thread2', 'ctrl 2', lambda a, b, e, m: (differs(px('k-thread2-a'), px('k-thread2-b'), (int(MAIN()['x']), 36, int(MAIN()['x'] + 500), 70)), 'the header moved to the second thread'))
+    trial('thread2', 'ctrl 2', lambda a, b, e, m: (differs(px('k-thread2-a'), px('k-thread2-b'), (0, 0, 600, 40)), 'the header moved to the second thread'))
     trial('perf', 'ctrl shift h', lambda a, b, e, m: (differs(px('k-perf-a'), px('k-perf-b')), 'the performance overlay drew'), lambda: chord('ctrl shift h'))
     trial('uber', 'ctrl shift u', lambda a, b, e, m: (differs(px('k-uber-a'), px('k-uber-b'), box(MAIN())), "the uberbot's chat opened"))
     sel(1)
     trial('new', 'ctrl n', lambda a, b, e, m: (any(x['$'] == 'ThreadCreated' for x in e), 'ThreadCreated in the hub log'))
     # stop and settle need a running turn: send a long one by keys
-    sel(2); r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); xin('type', 'a long turn'); xin('key', 'Return')
+    sel(2); say_('a long turn')
     t2 = lambda: [e for e in events() if e['$'] == 'TurnChanged' and e.get('thread') == 't2']
     until(lambda: any(e['state'] == 'running' for e in t2()), 15)
     trial('stop', 'ctrl period', lambda a, b, e, m: (any(x['$'] == 'TurnChanged' and x.get('state') == 'interrupted' for x in e), 'TurnChanged interrupted in the hub log'))
@@ -122,19 +122,20 @@ if want('F16'):
 # ---- F17 viewers: the rail's Board, Schematic, 3D and Mech pages on a seeded KiCad board and a STEP part; zoom with the wheel, pan and orbit with the left button
 if want('F17'):
     from PIL import ImageStat
-    sel(1); res = []
-    VIEW = box(MAIN(), 4)   # the main pane, where the viewer draws
+    sel(1); res = []; chord('ctrl b'); pause(1.5)   # a 1024 px window has no room for sidebar, timeline and viewer at once
+    VIEW = (560, 70, win()[2] - 80, win()[3] - 20)   # right of the timeline, left of the rail
     def busy(name):  # drawn: thousands of pixels that are not the page's background (a "Loading" line or a toolbar is a few hundred)
         im = px(name).crop(VIEW).convert('L'); bg = im.getpixel((5, 5)); return sum(1 for v in im.getdata() if abs(v - bg) > 25) > 6000
     for kind, label in [('Board', 'rail:Board'), ('Schematic', 'rail:Schematic'), ('3D', 'rail:3D'), ('Mech', 'rail:Mech')]:
         click_ctl(label); pause(1.0)
         until(lambda: (shot('v-%s' % kind) and busy('v-%s' % kind)), 40)
-        cx, cy = int(MAIN()['x'] + MAIN()['w'] / 2), int(MAIN()['y'] + MAIN()['h'] / 2)
+        cx, cy = (VIEW[0] + VIEW[2]) // 2, (VIEW[1] + VIEW[3]) // 2
         drawn = busy('v-%s' % kind)
         for _ in range(4): xin('wheel', cx, cy, 1)
         pause(1.5); shot('v-%s-zoom' % kind); zoomed = differs(px('v-%s' % kind), px('v-%s-zoom' % kind), VIEW)
         xin('drag', cx - 80, cy, cx + 80, cy + 40); pause(1.5); shot('v-%s-pan' % kind); panned = differs(px('v-%s-zoom' % kind), px('v-%s-pan' % kind), VIEW)
         res.append((kind, drawn, zoomed, panned)); print('   ', kind, 'drawn', drawn, 'wheel changed it', zoomed, 'drag changed it', panned, flush=True)
+    chord('ctrl b'); pause(1.0)   # the sidebar back for the rows after this one
     log('F17', all(r[1] and r[2] and r[3] for r in res), '; '.join('%s: drawn=%s wheel=%s %s=%s' % (k, d, z, 'orbit' if k == '3D' else 'pan', p_) for k, d, z, p_ in res) + ' (frames are not judged: llvmpipe)')
 
 # ---- F07 stop, F08 fork, F14 terminal, F21 reconnect: through the buttons and keys of the window
@@ -159,7 +160,7 @@ if want('F21'):
     for _ in range(100):
         if subprocess.run(['curl', '-s', '-m1', '-o', '/dev/null', 'http://127.0.0.1:%d/hello' % PORT]).returncode == 0: break
         time.sleep(0.2)
-    pause(12); shot('f21-back'); xin('click', *CC()); xin('type', 'zqshort after the reconnect'); xin('key', 'Return')
+    pause(12); shot('f21-back'); say_('zqshort after the reconnect')
     ok = until(lambda: any(e['$'] == 'MessagePosted' and 'after the reconnect' in e.get('text', '') for e in events()), 30)
     ds = differs(px('f21-up'), px('f21-down'), (0, win()[3] - 40, 263, win()[3] - 4))
     log('F21-reconnect', ok and ds, 'the hub was stopped and started again on the same home: the status line changed while it was down=%s, and after reconnecting a message typed in the window reached the new hub process=%s (f21-*.png)' % (ds, ok))
@@ -170,7 +171,7 @@ if want('F22'):
     os.makedirs(P('proj/mfg/o1'), exist_ok=True); gbr = b'G04*\nM02*\n'; open(P('proj/mfg/o1/board.gbr'), 'wb').write(gbr)
     json.dump({'files': {'board.gbr': {'sha256': hashlib.sha256(gbr).hexdigest()}}}, open(P('proj/mfg/o1/manifest.json'), 'w'))
     sel(3)  # the third thread is a buy thread from the seed (SettingSet buy.t3)
-    r = rects()['composer']; xin('click', int(r['x'] + r['w'] / 2), int(r['y'] + 30)); xin('type', 'zqquote mfg/o1'); xin('key', 'Return')
+    say_('zqquote mfg/o1')
     until(lambda: any(e['$'] == 'AskOpened' and e.get('tool') == 'order_quote' for e in events()), 30); pause(2); shot('f22-files-card')
     ask = [e for e in events() if e['$'] == 'AskOpened' and e.get('tool') == 'order_quote']; before = len([x for x in ORDER_SEEN if x[0] == 'POST'])
     ids = sorted(k for k in ctrls() if k.startswith('ask:')); sent = click_ctl(ids[0]) if ids else False
