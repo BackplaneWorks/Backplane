@@ -1,6 +1,6 @@
 # End-to-end matrix
 
-Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. Windows cells come from GitHub's `windows-latest` runners (Windows Server 2025, 10.0.26100, no GPU: WARP); `deferred, no VM` marks a Windows row nothing has run yet, neither a pass nor a fail. `pass, hub only` means the hub did it with no client involved, and `pass, part` names what ran: neither counts as a full pass. `persists, effect not proven` means the control saved and survived a restart, but nothing showed it doing anything, and that is not a pass. `wine` results sit in their own section: Wine on Boat is not Windows, and they never fill a Windows cell. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
+Rust-only Backplane on `main`: hub `native/host`, client `native/gpui`. Results are `pass`, `fail` or `not run`. Windows cells come from GitHub's `windows-latest` runners (Windows Server 2025, 10.0.26100, no GPU: WARP) or from a Windows Server 2022 VM (its own section below, an interactive session, WARP). `pass, hub only` means the hub did it with no client involved, and `pass, part` names what ran: neither counts as a full pass. `persists, effect not proven` means the control saved and survived a restart, but nothing showed it doing anything, and that is not a pass. `wine` results sit in their own section: Wine on Boat is not Windows, and they never fill a Windows cell. A result needs evidence: a commit, the rig, and a log path or test name. `not run` says why. A Linux result never stands in for another platform.
 
 The grids are kept by the lead. Each lane writes only its own section at the end of this file, so parallel rebases do not collide.
 
@@ -16,47 +16,47 @@ Other lanes own these, and their rows here are filled from their reports: onboar
 | F03 | Threads: create, rename, pin, archive, delete, settle, snooze, order | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
 | F04 | Stand-in turn streams; restart ends running turns as interrupted | pass, hub only | pass, hub only | pass, hub only (hub tests on windows-latest) |
 | F05 | Providers via stand-ins: Claude, Codex, Grok, OpenCode, Muse, Antigravity, Pi, Oh My Pi | not run | not run | pass, hub only, part: the stand-in provider tests that run there (scripts/ci-hub-windows-filter.sh skips the rest) |
-| F06 | Runtime modes, approvals, questions, plans | not run | pass, source build (run 42471112134); release archive: approval only (run 42474003421) | deferred, no VM |
-| F07 | Queue, steer, stop, held queue resume | not run | pass, source build (run 42471112134); archive: fail in run 42474003421, pass in 42454941978 | deferred, no VM |
-| F08 | Fork, bring back, provider switch | not run | not run | deferred, no VM |
-| F09 | Todos, context meter, drafts survive a crash | not run | pass (run 42474003421, archive) | deferred, no VM |
-| F10 | Inboxes, orchestration tools, subthreads panel | not run | not run | deferred, no VM |
-| F11 | Model picker, effort, project picker, project badges | not run | not run | deferred, no VM |
-| F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | not run | not run | deferred, no VM |
-| F13 | Titles and the text generation model | not run | not run | deferred, no VM |
+| F06 | Runtime modes, approvals, questions, plans | not run | pass, source build (run 42471112134); release archive: approval only (run 42474003421) | pass (Windows Server 2022 VM, see its section) |
+| F07 | Queue, steer, stop, held queue resume | not run | pass, source build (run 42471112134); archive: fail in run 42474003421, pass in 42454941978 | pass (Windows Server 2022 VM, see its section) |
+| F08 | Fork, bring back, provider switch | not run | not run | pass (Windows Server 2022 VM, see its section) |
+| F09 | Todos, context meter, drafts survive a crash | not run | pass (run 42474003421, archive) | pass (Windows Server 2022 VM, see its section) |
+| F10 | Inboxes, orchestration tools, subthreads panel | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
+| F11 | Model picker, effort, project picker, project badges | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
+| F12 | Git: worktree threads, checkpoints, diff, revert, commit and push, PR | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
+| F13 | Titles and the text generation model | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
 | F14 | Terminal | not run | pass, hub only | pass, hub only: ConPTY (term::tests on windows-latest; the flood test is skipped) |
-| F15 | Attachments and image paste | not run | pass, source build (run 42471112134); archive: pass in 42454941978, fail in 42474003421 | deferred, no VM |
-| F16 | Keybindings | not run | pass, 12 of 12 keys (runs 42458427024, 42474003421); one key flakes per other run | deferred, no VM |
-| F17 | Viewers: board, schematic, 3D, STEP | not run | pass, 4 of 4 viewers (runs 42469212549, 42474003421); Mech pan flaked in 42471112134 | deferred, no VM |
-| F18 | Browser tab (CEF) | not run | pass, part: frame-stream helper; a download the person starts known missing (run 42471112134). Release archive v0.14.93: fail, the frame poller bug (run 42474003421) | deferred, no VM |
-| F19 | Bots and rooms | not run | not run | deferred, no VM |
-| F20 | File browser and downloads | not run | not run | deferred, no VM |
-| F21 | Reconnect, resume from sequence, outbox, long session | not run | pass, source build (run 42471112134); archive: fail in 42474003421 | deferred, no VM |
-| F22 | Ordering flow up to the quote; no order placed | not run | not run | deferred, no VM |
-| F23 | A killed hub leaves no agent behind | pass, hub only | pass | not run: skipped, the stand-ins report Git sh pids |
+| F15 | Attachments and image paste | not run | pass, source build (run 42471112134); archive: pass in 42454941978, fail in 42474003421 | pass (Windows Server 2022 VM, see its section) |
+| F16 | Keybindings | not run | pass, 12 of 12 keys (runs 42458427024, 42474003421); one key flakes per other run | pass (Windows Server 2022 VM, see its section) |
+| F17 | Viewers: board, schematic, 3D, STEP | not run | pass, 4 of 4 viewers (runs 42469212549, 42474003421); Mech pan flaked in 42471112134 | pass (Windows Server 2022 VM, see its section) |
+| F18 | Browser tab (CEF) | not run | pass, part: frame-stream helper; a download the person starts known missing (run 42471112134). Release archive v0.14.93: fail, the frame poller bug (run 42474003421) | pass, part: frame-stream helper, no embedded Chromium (Windows Server 2022 VM, see its section) |
+| F19 | Bots and rooms | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
+| F20 | File browser and downloads | not run | not run | pass, hub only (Windows Server 2022 VM, see its section) |
+| F21 | Reconnect, resume from sequence, outbox, long session | not run | pass, source build (run 42471112134); archive: fail in 42474003421 | pass (Windows Server 2022 VM, see its section) |
+| F22 | Ordering flow up to the quote; no order placed | not run | not run | pass (Windows Server 2022 VM, see its section) |
+| F23 | A killed hub leaves no agent behind | pass, hub only | pass | pass (Windows Server 2022 VM, see its section) |
 | | **Install and CAD** | | | |
 | C01 | Package installs and starts on a clean user | pass | pass | pass |
 | C02 | KiCad: install, Settings → CAD path, kicad-cli export and DRC run from the hub | pass | pass, part: ERC and DRC, no export | pass, part: Backplane KiCad 10.99.0-bp.6 installs through kicad.install and reports status ok (`windows-install`, run 42430879930); no export |
-| C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | pass, part: install not run | pass, part: install not run | deferred, no VM |
+| C03 | FreeCAD: install, Settings → CAD path, script run and STEP export from the hub | pass, part: install not run | pass, part: install not run | pass, part: no agent's FreeCAD script (Windows Server 2022 VM, see its section) |
 | | **Remote operation** | | | |
 | R01 | Restart the hub from another machine | pass | pass | pass |
 | R02 | Update: channel, Check now, download, checksum, swap, restart | pass | pass | pass |
 | R03 | Rollback after a bad update | pass | pass | pass |
 | | **Settings: each control persists across restart and takes effect** | | | |
-| S01 | Appearance | pass, part: hub side (theme and sidebar view the hub sends) | not run | deferred, no VM |
-| S02 | Threads | pass | not run | deferred, no VM |
-| S03 | Agents | pass | not run | deferred, no VM |
-| S04 | Writing | persists, effect not proven | not run | deferred, no VM |
-| S05 | CAD | pass | not run | deferred, no VM |
-| S06 | Ordering | pass, part: Ordering on/off | not run | deferred, no VM |
-| S07 | Devices | pass | not run | deferred, no VM |
-| S08 | Network | pass, part: update channel | not run | deferred, no VM |
-| S09 | Voice | persists, effect not proven | not run | deferred, no VM |
-| S10 | Keys | pass, part: hub side (add, list, prompt, forget) | not run | deferred, no VM |
-| S11 | Timezone | pass | not run | deferred, no VM |
-| S12 | Usage | pass, part: page in the menu, totals by unit test | not run | deferred, no VM |
-| S13 | About | pass | not run | deferred, no VM |
-| S14 | Privacy | pass | not run | deferred, no VM |
+| S01 | Appearance | pass, part: hub side (theme and sidebar view the hub sends) | not run | pass (Windows Server 2022 VM, see its section) |
+| S02 | Threads | pass | not run | pass (Windows Server 2022 VM, see its section) |
+| S03 | Agents | pass | not run | pass (Windows Server 2022 VM, see its section) |
+| S04 | Writing | persists, effect not proven | not run | pass (Windows Server 2022 VM, see its section) |
+| S05 | CAD | pass | not run | pass (Windows Server 2022 VM, see its section) |
+| S06 | Ordering | pass, part: Ordering on/off | not run | pass (Windows Server 2022 VM, see its section) |
+| S07 | Devices | pass | not run | pass (Windows Server 2022 VM, see its section) |
+| S08 | Network | pass, part: update channel | not run | pass (Windows Server 2022 VM, see its section) |
+| S09 | Voice | persists, effect not proven | not run | pass (Windows Server 2022 VM, see its section) |
+| S10 | Keys | pass, part: hub side (add, list, prompt, forget) | not run | pass (Windows Server 2022 VM, see its section) |
+| S11 | Timezone | pass | not run | pass (Windows Server 2022 VM, see its section) |
+| S12 | Usage | pass, part: page in the menu, totals by unit test | not run | pass (Windows Server 2022 VM, see its section) |
+| S13 | About | pass | not run | pass (Windows Server 2022 VM, see its section) |
+| S14 | Privacy | pass | not run | pass (Windows Server 2022 VM, see its section) |
 
 ## Pairing
 
@@ -64,9 +64,9 @@ Rows are the hub, columns the client. Each cell is LAN / tailnet. Same-platform 
 
 | Hub ↓ Client → | Linux | macOS | Windows | iOS | Android |
 |---|---|---|---|---|---|
-| Linux | not run / not run | not run / not run | deferred, no VM | not run / not run | not run / not run |
-| macOS | not run / not run | not run / not run | deferred, no VM | not run / not run | not run / not run |
-| Windows | deferred, no VM | deferred, no VM | deferred, no VM | deferred, no VM | deferred, no VM |
+| Linux | not run / not run | not run / not run | not run / pass (17/17) | not run / not run | not run / not run |
+| macOS | not run / not run | not run / not run | not run / pass (16/17: before the ACL fix) | not run / not run | not run / not run |
+| Windows | not run / not run | not run / not run | not run / not run | not run / not run | not run / not run |
 
 ## Push notifications
 
@@ -279,17 +279,17 @@ Rig: a Windows Server 2022 VM (10.0.20348, 4 vCPU, 16 GB, no GPU: the client dra
 | S01 | pass | e40c200a1b (main 079287572b) | VM | `s-effects.mjs`: theme and thread-list view the hub sends; settings walk |
 | S02 | pass | e40c200a1b | VM | `files.max.mb`: a 200 MB upload refused at 128, taken at 512; walk |
 | S03 | pass | e40c200a1b | VM | model, provider and thinking chips reach the stand-in's argv; walk |
-| S04 | persists, effect not proven | 9d861edbf2 | VM | settings walk: applied, lit after a hub restart |
+| S04 | pass | 2e7b84a151 with this landing's probes | VM | `linux-f-rows.mjs` S04: with the writing model `sonnet` the title call ran `claude -p --model sonnet` and the title came back from it; with the writing provider `codex` the call went to `codex exec`; both cleared, the light default (Haiku) again; the chips persist (settings walk) |
 | S05 | pass | e40c200a1b | VM | `kicad.ipc` changes the agent's prompt; the CAD page names KiCad and FreeCAD (C02, C03) |
 | S06 | pass | e40c200a1b | VM | `order.enabled` changes the agent's prompt (18924 vs 12343 characters); fixed on the way: Claude's prompt was cut at 8186 characters on Windows, now passed in a file |
-| S07 | persists, effect not proven | 9d861edbf2 | VM | settings walk; devices pair and revoke (Pairing below) |
+| S07 | pass | 2e7b84a151 with this landing's probes | VM | `s-effects.mjs` S07: Settings > Devices > Add a device made a pairing link; enrolling with its secret -> 200, the same link again -> 400; the device's token on `/auth/devices` -> 200 and the page lists it as Paired; Revoke on the page: the token -> 401, the page says Revoked. Pairing a real Windows client: Pairing below |
 | S08 | pass | e40c200a1b | VM | `update.check` follows the channel |
-| S09 | persists, effect not proven | 9d861edbf2 with release v0.14.95's backplane-voice.exe | VM | settings walk: the voice chips applied and lit after a restart |
+| S09 | pass | this landing's voice fix (built as 6608ddf68b before the rebase), the VAD from beside the helper | VM | `test/e2e/voice-effect.mjs`, the window's upload path (`bots.voice start` with src=client, the audio POSTed to `/voice/in`): `local-status` on an empty folder says `"vadBundled":true`; engine On this machine, the local model downloaded from the page (Parakeet v2, ready in 64 s; the VAD copied in from the archive's copy, sha256 9e2449e1…, not downloaded); a recorded WAV (the model's test speech) heard as spoken; a Dictionary line `Zebrafile = certainly` added from the page rewrote it in the next dictation; its × put the word back. An earlier run (VAD seeded) passed the same with speech from Windows' own synthesizer (`test/windows/rig/say.ps1`). Found here: upstream's repacked model archives failed every new install's checksum, fixed in this landing |
 | S10 | pass | e40c200a1b | VM | an API key added, listed, named in the agent's prompt without its value, forgotten |
 | S11 | pass | e40c200a1b | VM | a time zone set: times shown in Pacific/Auckland (18:29 against 05:29 UTC); fixed on the way: every zone was UTC on Windows (a built-in zone table, Windows' own zone mapped to IANA) |
-| S12 | persists, effect not proven | 9d861edbf2 | VM | settings walk |
+| S12 | pass | 2e7b84a151 with this landing's probes | VM | `linux-f-rows.mjs` S12: Settings > Usage, the claude row before one more turn "168 turns · input 201,600 · ... · $0.1700", after "169 turns · input 202,800 · cache read 5,070,000 · cache write 84,500 · output 13,520 · $0.1800" (the stand-in reports 1,200 input, 30,000 cache read, 500 cache write, 80 output, $0.01 a turn) |
 | S13 | pass | e40c200a1b | VM | data/1 hello version and the About page agree |
-| S14 | persists, effect not proven | 9d861edbf2 | VM | settings walk: `telemetry.share` |
+| S14 | pass | 2e7b84a151 with this landing's probes | VM | `s-effects.mjs` S14: Off via `setting.set` stored off; On via `setting.set` refused on purpose (still off); On via `telemetry.choice` with the page's token stored on; the hub's own TCP sockets (`netstat -ano`, 5 seen) had no connection to another machine over 10 s in Off or in On |
 | Settings walk | pass | 9d861edbf2 | VM | `settings-walk.mjs`: 89 controls, 89 applied, 0 lost across a hub restart |
 | Pairing | pass (17/17) | 98eb84fa57 client; the pairing lane's hubs | Linux hub ↔ Windows client, tailnet | `test/e2e/pairing/gpui.sh` on the VM with `LAUNCH=test/windows/rig/gpui-start.sh`: link, short code, wrong and used codes, revoked code, backplane:// question and Cancel, revoke while connected, Re-pair, the saved token and hub list private (icacls: the user, SYSTEM and Administrators only; fixed on the way: they inherited Users when written outside %APPDATA%); expiry and hub restart not run (their commands run on the desktop); LAN not run: the VM has no LAN with the desktop |
 | Pairing | pass (16/17) | 9d861edbf2 client | macOS hub ↔ Windows client, tailnet | same driver before the ACL fix: the one fail was the then Unix-only mode check; LAN not run |

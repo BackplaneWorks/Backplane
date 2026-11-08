@@ -53,6 +53,7 @@ const settingOf=k=>{let v;for(const e of events())if(e.$==='SettingSet'&&e.key==
 const turnStates=t=>events().filter(e=>e.$==='TurnChanged'&&e.thread===t).map(e=>e.state);
 const finished=(t,n=1)=>until(()=>turnStates(t).filter(s=>s!=='running').length>=n,30000);
 const pid0=await start(); let c=await connect(); await sleep(1500);
+for(const ev of ['uncaughtException','unhandledRejection'])process.on(ev,e=>{console.error(e);try{process.kill(Number(/^(\d+)/.exec(readFileSync(HOME+'/hub.lock','utf8'))[1]),'SIGTERM')}catch{};srv.close();process.exit(1)}); // a probe that throws must not leave its hub running
 await c.rpc('project.add',{path:OUT+'/proj'}); await until(()=>has(e=>e.$==='ProjectCreated'));
 const P=events().find(e=>e.$==='ProjectCreated').id;
 const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,env:'local',...extra})).thread;
@@ -229,6 +230,13 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const ls=await c.rpc('mech.list',{thread:T});const r=await c.rpc('mech.render',{thread:T,path:'mech/bracket.step'});await sleep(500);
  const pngs=existsSync(OUT+'/proj/mech/renders')?readdirSync(OUT+'/proj/mech/renders').filter(f=>f.endsWith('.png')):[];
  log('F17-mech',ls.ok&&r.ok&&pngs.length>0,`mech.list ok=${ls.ok} (${JSON.stringify(ls.result||ls.error).slice(0,70)}); mech.render ok=${r.ok} ${(r.result?.text||r.error||'').slice(0,80)}; renders written ${pngs.join(',')}`)}
+
+// S12 Usage: Settings > Usage adds up what the agents reported (the stand-in's result carries Claude's usage and cost): one more turn is one more on the claude row, its tokens and cost added
+{const {viewClient}=await import('../perf/view.mjs');const h={host:'127.0.0.1',port:PORT,token:token(),url:`http://127.0.0.1:${PORT}`};
+ const page=async()=>{const v=await viewClient(h,{mobile:true,delta:false,native:true});await v.open();await v.req('view.action',{action:'flag',value:'settings'});const g=await v.req('view.action',{action:'settings-page',value:'usage'});v.close();return g?.x?.result?.shown?.settings?.rows||[]};
+ const of=rows=>{const n=rows.find(r=>r.label==='claude')?.note||'';const g=re=>Number((re.exec(n)?.[1]||'0').replace(/,/g,''));return {n,turns:g(/^([\d,]+) turns?/),input:g(/input ([\d,]+)/),cread:g(/cache read ([\d,]+)/),output:g(/output ([\d,]+)/),cost:/\$[\d.]+/.exec(n)?.[0]||''}};
+ const before=of(await page());const T=await mk('usage');await c.rpc('turn.start',{thread:T,text:'zqecho count me'});await finished(T);await sleep(800);const after=of(await page());
+ log('S12',after.turns===before.turns+1&&after.input-before.input===1200&&after.cread-before.cread===30000&&after.output-before.output===80&&after.cost!==''&&after.cost!==before.cost,`Settings > Usage, claude row before one more turn: "${before.n}"; after: "${after.n}" (the stand-in reports 1,200 input, 30,000 cache read, 80 output, $0.01 a turn)`)}
 
 writeFileSync(OUT+'/rows.json',JSON.stringify({rows,notDriven:['F09 context meter and crash drafts (client)','F16 keybindings (client key events)','F17 viewer frames (client)','F18 CEF browser (build not made here)']},null,1));
 try{process.kill(Number(/^(\d+)/.exec(readFileSync(HOME+'/hub.lock','utf8'))[1]),'SIGTERM')}catch{} srv.close(); await sleep(500); process.exit(0);
