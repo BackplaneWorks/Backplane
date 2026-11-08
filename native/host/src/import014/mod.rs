@@ -100,7 +100,7 @@ pub fn start_auto(hub: &Arc<Hub>, from: Option<PathBuf>, auto: bool) -> Arc<Impo
         };
         publish(&h, &v).await;
         if auto && done.is_empty() && m.from.is_some() {
-            while !crate::guard::is_ready() && !cfg!(test) { tokio::time::sleep(std::time::Duration::from_millis(200)).await; }
+            while !(crate::guard::is_ready() || cfg!(test)) || !crate::statehost::booted(&h) { tokio::time::sleep(std::time::Duration::from_millis(200)).await; }
             eprintln!("import: bringing the 0.14 home across (BACKPLANE_IMPORT_AUTO)");
             m.run(&h, false).await;
         }
@@ -189,8 +189,7 @@ impl Importer {
         let devices = files::adopt_devices(&hub.cfg.home, &old);
         let keys = if secrets { files::adopt_vault(&old) } else { files::Keys::default() };
         if let Some(n) = &keys.note { extra.push(n.clone()) }
-        // the lines, with the policies holding their batches until the log is folded again; a client's request waits for at most one chunk
-        let owned = crate::statehost::refold_begin(hub);
+        // the lines: each chunk joins the policies' state as it is written (the views keep answering, nothing is derived); a client's request waits for at most one chunk
         let total = p.lines.len(); let mut done = 0usize; let mut err = String::new();
         prog.step("writing", total as u64, "events", now());
         let throttle = Some(self.throttle_ms.load(std::sync::atomic::Ordering::Relaxed)).filter(|ms| *ms > 0); // tests only: a slow import on purpose
@@ -202,12 +201,14 @@ impl Importer {
                 Some("ThreadCreated") => { nt += 1; if let Ok(v) = serde_json::from_str::<Value>(l) { let pt = titles.get(v["project"].as_str().unwrap_or("")).cloned().unwrap_or_default();
                     let t = v["title"].as_str().unwrap_or("").chars().take(80).collect::<String>(); cur = Some(if pt.is_empty() { t } else { format!("{pt} \u{b7} {t}") }); } }
                 _ => {} } }
-            if let Err(e) = hub.import_lines(ch.to_vec()).await { err = format!("{e:#}"); break }
+            match hub.import_lines(ch.to_vec()).await {
+                Ok(end) => crate::statehost::fold_quiet(hub, end - ch.len() as u64 + 1, ch.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect()),
+                Err(e) => { err = format!("{e:#}"); break }
+            }
             done += ch.len(); prog.made(np, nt, cur); prog.at(done as u64, now());
             if let Some(ms) = throttle { tokio::time::sleep(std::time::Duration::from_millis(ms)).await; }
         }
         prog.step("finishing", 0, "", now());
-        crate::statehost::refold_end(hub, owned);
         if !err.is_empty() { return self.failed(hub, &from, &format!("Writing into this hub stopped after {done} of {total} events: {err}")).await }
         let mut c = p.counts.clone(); c.devices = devices;
         let r = json!({"state":"done","from":from,"counts":c,"bots":p.bots.iter().map(|(_, n)| n).collect::<Vec<_>>(),"devices":devices,"accounts":accounts.added,"signin":accounts.signin,"keys":keys.added,
