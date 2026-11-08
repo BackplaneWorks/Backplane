@@ -138,6 +138,7 @@ internal fun DBar(title: String, back: (() -> Unit)?, titleMenu: (@Composable Co
 
 @Composable
 private fun ConnBanner(hub: () -> Unit) {
+    MigrateBanner()
     HubBanner(hub)
     StarBanner()
     if (DataClient.conn == DataClient.Conn.ONLINE) return

@@ -32,7 +32,9 @@ object DataClient {
     var listsLoaded by mutableStateOf(false); private set
     var features by mutableStateOf<Set<String>>(emptySet()); private set
     var notice by mutableStateOf(HubNotice()); private set   // hello `notice`, newer from /hub/status: the banner
-    var star by mutableStateOf<DStarOffer?>(null); private set   // the GitHub star suggestion (feature "star"): shown while the hub says so
+    var star by mutableStateOf<DStarOffer?>(null); private set
+    var migrating by mutableStateOf<DMigrateCard?>(null); private set   // a 0.14 home coming across: hello `migrating`, then each `migrating` frame (DataMigrate.kt)
+    var migrateOpen by mutableStateOf(false)   // the GitHub star suggestion (feature "star"): shown while the hub says so
     // the composer's own commands (hello.commands): the hub's table; none of them is ever a message
     data class Word(val word: String, val label: String, val desc: String)
     var commands by mutableStateOf<List<Word>>(emptyList()); private set
@@ -121,7 +123,7 @@ object DataClient {
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
     fun unpair() { links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
-    private fun reset() { notice = HubNotice(); star = null; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
+    private fun reset() { notice = HubNotice(); star = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
     fun connect() {
@@ -166,6 +168,7 @@ object DataClient {
                 if (!o.optString("proto").startsWith("data/")) { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
                 features = o.optJSONArray("features")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
                 notice = HubRescue.notice(o.optJSONObject("notice"))
+                heardMigrating(o.optJSONObject("migrating"))
                 commands = o.optJSONArray("commands")?.let { a -> (0 until a.length()).map { val w = a.getJSONObject(it); Word(w.optString("word"), w.optString("label"), w.optString("desc")) } } ?: emptyList()
                 conn = Conn.ONLINE; failure = ""; backoff = 250; plots.reset()
                 scope.launch { synchronise(g) }
@@ -179,6 +182,7 @@ object DataClient {
             "voice" -> DataVoice.frame(o)
             "plot" -> scope.launch(Dispatchers.Main) { plots.receiveJSON(o) } // why a view has nothing to show (plots themselves are binary)
             "star" -> { star = DStarOffer.of(o.optJSONObject("offer")) }
+            "migrating" -> heardMigrating(o)
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
         }
     }
@@ -500,16 +504,24 @@ object DataClient {
 
     // alerts: only what the hub's gate lets through reaches here (native/host/src/push): this phone has no push service, so it hears them on its socket while the app lives
     private val alertTag = "push"
+    private fun heardMigrating(m: JSONObject?) { migrating = DMigrateCard.of(m); if (migrating == null) migrateOpen = false }
+    /** A press on the card's button: the hub's own onboard.act (setup's buttons). Once the hub has taken a press on a finished card (Continue, Not now, Retry)
+     *  that card is over; a running import's frames bring the next one. */
+    suspend fun migrateAct(card: DMigrateCard, b: DMigrateButton) {
+        call("onboard.act", JSONObject().put("action", b.action).put("value", b.value))
+        if (!card.running && migrating == card) { migrating = null; migrateOpen = false }
+    }
     private fun notify(o: JSONObject) {
         if (foreground) return
         if (!AppSettings.alertsOn() && !o.optBoolean("through")) return
         val tid = o.optString("thread"); val key = o.optString("key"); val ask = o.optString("ask")
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         nm.createNotificationChannel(android.app.NotificationChannel("data-alerts", "Alerts", android.app.NotificationManager.IMPORTANCE_DEFAULT))
-        val intent = android.content.Intent(app, DataActivity::class.java).putExtra("thread", tid).putExtra("ask", ask).putExtra("link", o.optString("link")).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        // a notice of the hub's own (kind import) has no thread: its tap opens the lists
+        val intent = android.content.Intent(app, DataActivity::class.java).apply { if (tid.isNotEmpty()) putExtra("thread", tid) }.putExtra("ask", ask).putExtra("link", o.optString("link")).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val open = android.app.PendingIntent.getActivity(app, key.hashCode(), intent, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
         val n = android.app.Notification.Builder(app, "data-alerts").setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle(o.optString("title").ifEmpty { "Backplane" })
-            .setContentText(o.optString("body")).setGroup(tid).setNumber(o.optInt("badge")).setContentIntent(open).setAutoCancel(true).build()
+            .setContentText(o.optString("body")).apply { if (tid.isNotEmpty()) setGroup(tid) }.setNumber(o.optInt("badge")).setContentIntent(open).setAutoCancel(true).build()
         nm.notify(alertTag, key.hashCode(), n)
     }
     // what was dealt with leaves this phone, by its key
