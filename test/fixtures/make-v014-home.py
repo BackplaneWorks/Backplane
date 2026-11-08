@@ -3,7 +3,7 @@
 # v0.14.1 wrote (field order included); the names, ids, text and keys are made up. Run from the repo root: python3 test/fixtures/make-v014-home.py
 # A large home for the progress and probation tests (not committed): make-v014-home.py OUT --large PROJECTS THREADS LINES writes OUT with that many projects
 # and threads, and history lines spread over the threads (messages and tool activity, long texts), plus the small home's bots, rooms and devices.
-import json, os, shutil, sys
+import hashlib, json, os, shutil, sys
 args = sys.argv[1:]
 D = args[0] if args and not args[0].startswith('--') else 'test/fixtures/v014-home'
 LARGE = tuple(int(x) for x in args[args.index('--large') + 1:args.index('--large') + 4]) if '--large' in args else None
@@ -85,7 +85,10 @@ if LARGE:
             else: e(t="MessagePosted", thread=tid, msg=f"m{j}-{k}", role="user" if k % 3 == 0 else "assistant", text=text, at=at + k)
 # a torn tail: 0.14 was writing when the import read it
 open(f'{D}/events.jsonl', 'w').write('\n'.join(E) + '\n{"$":"MessagePosted","thread":"%s","msg":"torn' % T1)
-json.dump({"version": 1, "owner": "c" * 64, "devices": [
+# a home 0.14 can boot: its pairing.js wants devices-v1.json's owner to be the sha256 of the home's token (a made-up one)
+TOKEN = "0" * 32
+open(f'{D}/token', 'w').write(TOKEN)
+json.dump({"version": 1, "owner": hashlib.sha256(TOKEN.encode()).hexdigest(), "devices": [
     {"id": "1" * 32, "hash": "2" * 64, "name": "Phone", "createdAt": 1790213400000, "lastSeen": 1790213400000, "revoked": False},
     {"id": "3" * 32, "hash": "4" * 64, "name": "Old tablet", "createdAt": 1790213400000, "lastSeen": 1790213400000, "revoked": True}]}, open(f'{D}/devices-v1.json', 'w'))
 pid, sid = "5e70d94b-6252-4f29-8eed-d3bd8c4b961a", "02b33ae0-d452-432d-8838-bc364d86404d"
