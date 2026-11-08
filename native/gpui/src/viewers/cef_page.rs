@@ -206,6 +206,8 @@ impl CefPage {
         let Some(t) = self.tab().cloned() else { return json!({"ok": false, "error": "no tab"}) };
         if let Some(i) = v["tab"].as_u64() { if (i as usize) < self.tabs.len() { self.active = i as usize; self.image = None; if let Some(t) = self.tab() { t.hidden(false); } } cx.notify(); return json!({"ok": true, "tab": i}) }
         if let Some(u) = v["goto"].as_str() { t.navigate(u); return json!({"ok": true, "goto": u}) }
+        if v["back"].as_bool() == Some(true) { t.back(); return json!({"ok": true, "back": true}) }
+        if v["forward"].as_bool() == Some(true) { t.forward(); return json!({"ok": true, "forward": true}) }
         if let Some(a) = v["click"].as_array() {
             let (x, y) = (a.first().and_then(|n| n.as_f64()).unwrap_or(0.) as i32, a.get(1).and_then(|n| n.as_f64()).unwrap_or(0.) as i32);
             self.take_over(); t.focus(true); t.mouse_move(x, y, 0, false); t.mouse_click(x, y, 16, 0, false, 1); t.mouse_click(x, y, 0, 0, true, 1); return json!({"ok": true, "click": [x, y]})
@@ -229,6 +231,9 @@ impl CefPage {
         let _ = held;
     }
 }
+/// The page going away (its thread left, the window closing) closes its browsers: CEF's client holds each `Tab`, and the `Tab` holds its browser, so
+/// nothing else would, and every renderer the page ran would stay alive until the process quits.
+impl Drop for CefPage { fn drop(&mut self) { for t in self.tabs.drain(..) { t.close(); } } }
 impl EntityInputHandler for CefPage {
     fn text_for_range(&mut self, _: Range<usize>, _: &mut Option<Range<usize>>, _: &mut Window, _: &mut Context<Self>) -> Option<String> { None }
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> { Some(UTF16Selection { range: 0..0, reversed: false }) }

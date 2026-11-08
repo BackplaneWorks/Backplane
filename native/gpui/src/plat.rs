@@ -121,3 +121,22 @@ pub fn cache_base() -> Option<std::path::PathBuf> {
     #[cfg(windows)] let x = x.or_else(|| std::env::var_os("LOCALAPPDATA").filter(|p| !p.is_empty()).map(std::path::PathBuf::from));
     x.or_else(|| user_home().map(|h| h.join(".cache")))
 }
+
+/// Why this window cannot open on Linux's displays, when it cannot: it draws through X11 only (gpui's `x11` feature), so a Wayland session without Xwayland
+/// (`WAYLAND_DISPLAY` and no `DISPLAY`) is said plainly instead of gpui's panic ("neither DISPLAY nor WAYLAND_DISPLAY is set").
+pub fn display_problem(display: Option<&str>, wayland: Option<&str>) -> Option<String> {
+    if !cfg!(target_os = "linux") || display.map_or(false, |d| !d.is_empty()) { return None }
+    Some(match wayland.filter(|w| !w.is_empty()) {
+        Some(w) => format!("Backplane's window draws through X11 and this Wayland session ({w}) has no X server: DISPLAY is not set. Enable Xwayland (most compositors start it on demand; sway: `xwayland enable`) and start Backplane from the session, or set DISPLAY."),
+        None => "No display: neither DISPLAY nor WAYLAND_DISPLAY is set. Start Backplane from a desktop session (an X server or Xwayland).".into(),
+    })
+}
+#[cfg(test)]
+mod display_tests {
+    #[test] fn a_wayland_session_without_xwayland_is_said_not_panicked() {
+        if !cfg!(target_os = "linux") { return }
+        assert_eq!(super::display_problem(Some(":0"), Some("wayland-1")), None);
+        assert!(super::display_problem(None, Some("wayland-1")).unwrap().contains("Xwayland"));
+        assert!(super::display_problem(Some(""), None).unwrap().contains("No display"));
+    }
+}

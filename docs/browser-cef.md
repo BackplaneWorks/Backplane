@@ -24,7 +24,17 @@ Default builds do not have it; the Browser tab then shows the hub's JPEG frames 
   The attach path assumes the client and hub share a machine (loopback).
 - **Hub presenter**: the Rust hub's viewer panel now accepts kind `browser` (`present/viewer.rs`), which was missing, so the tab could not be opened.
 - **Test**: `test/cef/cef_e2e.sh CLIENT HUB` (private Xvfb + i3, local hub, stand-in agent, local page; real XTest mouse/keys via `xinput.py`; CDP; the agent through
-  the hub's MCP `preview_evaluate`). Script steps: `{"cef":{"goto":url|"click":[x,y]|"type":text|"handback":true|"report":true}}`.
+  the hub's MCP `preview_evaluate`). Script steps: `{"cef":{"goto":url|"back"|"forward":true|"click":[x,y]|"type":text|"handback":true|"report":true}}`.
+  `test/cef/lifecycle_e2e.sh CLIENT HUB` (CI job `browser-linux`): an https and a file:// page load, navigation and back, real X typing and wheel scrolling,
+  the Browser tab closed and reopened and its page dropped (another thread) and made again with no CEF helper growing, and quitting leaves none of the helpers it
+  ran (descendants of the client's pid, checked by pid). `E2E_DISPLAY=:N` runs it on an X server already up (e.g. a headless sway's Xwayland: this desktop's Xvfb has no lavapipe).
+- **Closing**: a page going away (its thread left) closes its browsers (`Drop for CefPage`): CEF's client holds each `Tab`, which holds its browser, so nothing else would,
+  and every renderer it ran would live until the client quit. Quitting needs no `cef::shutdown`: the helpers exit with the browser process (asserted by the lifecycle test).
+- **Display**: the window draws through X11 only (gpui's `x11` feature). CEF is pinned to `--ozone-platform=x11` (Xwayland on a Wayland desktop), so a
+  `WAYLAND_DISPLAY` beside it does not move Chromium's own windows (DevTools) to another server. Wayland without Xwayland: the client says so and exits (status 3)
+  instead of gpui's panic (`plat::display_problem`).
+- **Archive**: `scripts/check-linux-archive.sh` (release.yml, every Linux build) unpacks the archive and fails unless libcef.so, icudtl.dat, resources.pak,
+  chrome_100/200_percent.pak, v8_context_snapshot.bin and locales/ are beside backplane-gpui, with RUNPATH `$ORIGIN` and libcef.so resolving to that copy.
 
 Not done / known limits: remote JPEG frames for attached pages (`--jpeg-dir` screencast skips them, so web/phone viewers do not mirror the embedded page);
 the first click is not swallowed (it both takes over and reaches the page); no downloads/file dialogs/drag-and-drop; only `window.open` popups that CEF reports to

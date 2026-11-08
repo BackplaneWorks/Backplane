@@ -184,6 +184,10 @@ jobs:
           name=backplane-$TAG-${{ matrix.target }}-native.tar.gz   # -native: 0.14's updater takes any asset ending in <platform>.tar.gz (rel::archive_name)
           tar -C $d -czf $name .
           echo "ARCHIVE=$name" >> $GITHUB_ENV
+      # the archive as a person unpacks it: CEF's files beside the client, libcef.so found through $ORIGIN (scripts/check-linux-archive.sh)
+      - name: check the archive (Linux)
+        if: runner.os == 'Linux'
+        run: scripts/check-linux-archive.sh "$ARCHIVE"
       # Windows: a zip, as 0.14 shipped (backplane-<tag>-windows-x64.zip): the hub, the client, the guard and bp-sh (the hub's sh go-between, src/bin/bp-sh.rs) beside them.
       # The client is a release build, so gpui's HLSL shaders were compiled here by the Windows SDK's fxc.exe; its manifest by rc.exe.
       - name: package (Windows)
