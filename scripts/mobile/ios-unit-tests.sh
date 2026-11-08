@@ -16,3 +16,5 @@ run thread-groups ThreadGroupsTests.swift "" ThreadGroups.swift
 run voice-edit VoiceEditTests.swift "$ROOT/test/fixtures/voice-edits.json" VoiceEdit.swift
 run plot-parts PlotPartsTests.swift "" Plot.swift PlotParts.swift
 run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift
+run term-stream TermStreamTests.swift "" TermStream.swift
+run vt VtTests.swift "" Vt.swift
