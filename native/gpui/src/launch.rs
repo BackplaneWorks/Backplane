@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{path::{Path, PathBuf}, time::{Duration, Instant}};
 
-/// The first port a home's hub tries. 3787 is 0.14's and the client refuses it.
+/// The first port a new home's hub tries (an updated 0.14 install keeps 0.14's port, 3787).
 pub const PORT_FIRST: u16 = 3800;
 pub const PORT_LAST: u16 = 3899;
 

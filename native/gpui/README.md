@@ -14,7 +14,7 @@ or directly: `build/gpui/linux/backplane-gpui --url http://HOST:PORT --token-fil
 
 ## Flags
 
-- `--url http://HOST:PORT` (also `ws://`; `--hub` is an alias). Refuses port 3787 and the live home.
+- `--url http://HOST:PORT` (also `ws://`; `--hub` is an alias). Refuses a token file inside 0.14's home (`~/.backplane-bend`); port 3787 is allowed, since an updated 0.14 install keeps it.
 - `--token-file FILE` (default `~/.backplane-gpui/token`; the token is never logged).
 - `--exit-after SECONDS` quit after that long.
 - `--script FILE` or env `BACKPLANE_GPUI_SCRIPT=FILE`: replay input steps (below). The app quits 300 ms after the last step.

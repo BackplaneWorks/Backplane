@@ -110,7 +110,7 @@ bp_done
 
 prefix=${BACKPLANE_PREFIX:-$HOME/.local/share/backplane}
 bin=${BACKPLANE_BIN:-$HOME/.local/bin}
-name="backplane-$VER-$os-$arch.tar.gz"
+name="backplane-$VER-$os-$arch-native.tar.gz"
 mkdir -p "$prefix/builds" "$bin"
 tmp=$(mktemp -d "$prefix/builds/.install.XXXXXX")   # beside the builds, on the same disk: the last step is a rename
 trap bp_cleanup 0

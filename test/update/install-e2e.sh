@@ -29,7 +29,7 @@ commit_of() { python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))[
 says() { local h; h=$(hello); [ "${h%% *}" = "${2#v}" ] && case "$(commit_of "$1")" in "${h#* }"*) true;; *) false;; esac; }
 on() { [ "$(st build)" = "$2" ] && [ "$(st stable)" = True ] && says "$1" "$2"; }
 # the feed: the releases given, as GitHub lists them, served on loopback
-feed() { for d in "$@"; do t=$(tag "$d"); mkdir -p "$F/$t"; cp "$d"/manifest.json* "$d"/backplane-"$t"-*.tar.gz "$F/$t/"; done
+feed() { for d in "$@"; do t=$(tag "$d"); mkdir -p "$F/$t"; cp "$d"/manifest.json* "$d"/backplane-"$t"-*-native.tar.gz "$F/$t/"; done
   python3 -I - "$F" "$FP" "$@" > "$F/releases.json" <<'PY'
 import json, os, sys
 f, port = sys.argv[1], sys.argv[2]
@@ -43,7 +43,7 @@ printf '%s\n' '{"$":"SettingSet","key":"update.channel","value":"beta","at":1}' 
 feed "$NEXT"   # on the feed from the start: the hub's first check takes it
 
 # 1. install: the release laid out, the guard started, the guard starting the hub
-BACKPLANE_ARCHIVE="$FIRST/backplane-$T1-$TGT.tar.gz" sh "$FIRST/install.sh" --quiet > "$T/install.log" 2>&1 < /dev/null; rc=$?
+BACKPLANE_ARCHIVE="$FIRST/backplane-$T1-$TGT-native.tar.gz" sh "$FIRST/install.sh" --quiet > "$T/install.log" 2>&1 < /dev/null; rc=$?
 if [ $rc != 0 ]; then no install "install.sh failed ($rc): $(tail -2 "$T/install.log")"
 elif ! [ -x "$G" ] || ! [ -x "$BACKPLANE_PREFIX/builds/$T1/backplane-hub" ] || [ "$(cat "$BACKPLANE_PREFIX/CURRENT")" != "$T1" ] || ! [ -L "$BACKPLANE_BIN/backplane" ]; then no install "layout: $(ls "$BACKPLANE_PREFIX" "$BACKPLANE_PREFIX/builds" 2>&1 | tr '\n' ' ')"
 elif ! until_ 90 eval '[ "$(st build)" = "$T1" ] && says "$FIRST" "$T1"'; then no install "the guard did not bring up $T1 (state $(st state), /hello $(hello))"

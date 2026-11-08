@@ -6,7 +6,7 @@ Dev machines do not use this: `scripts/dev-build.sh` builds `native/host` and `n
 
 ## Installing: the guard from the first start
 
-A release archive (`backplane-<tag>-<target>.tar.gz`) holds `backplane-hub`, `backplane-gpui`, `backplane` (the guard), `assets/` and `COMMIT`; `release.yml` builds the guard for every target and fails the job when it is missing. `install.sh` (`deploy/install.sh.in`, filled in by `release.yml` with the version and each archive's sha256, published beside the archives) checks the archive and lays it out as the guard expects, under `BACKPLANE_PREFIX` (`~/.local/share/backplane`):
+A release archive (`backplane-<tag>-<target>-native.tar.gz`; the `-native` keeps 0.14's updater, which takes any asset ending in `<platform>.tar.gz`, from picking it) holds `backplane-hub`, `backplane-gpui`, `backplane` (the guard), `assets/` and `COMMIT`; `release.yml` builds the guard for every target and fails the job when it is missing. `install.sh` (`deploy/install.sh.in`, filled in by `release.yml` with the version and each archive's sha256, published beside the archives) checks the archive and lays it out as the guard expects, under `BACKPLANE_PREFIX` (`~/.local/share/backplane`):
 
 - `builds/<tag>/`: the unpacked release, made by one rename;
 - `CURRENT`: the build that runs;
@@ -14,6 +14,17 @@ A release archive (`backplane-<tag>-<target>.tar.gz`) holds `backplane-hub`, `ba
 - `~/.local/bin/backplane-app`: the desktop app of `CURRENT`.
 
 Nothing starts the hub directly. The desktop app finds this layout around itself (`launch::guarded_install`) and starts its home's hub with `backplane hub run --home <home> --port <port> --builds <prefix> --default`; a build tree with no such layout still starts `backplane-hub` beside it. With no desktop app (`BACKPLANE_NO_DESKTOP_APP=1`), or with `BACKPLANE_START=1`, the installer starts the guard itself for `BACKPLANE_HOME` on `BACKPLANE_PORT`. Run again while that home's guard runs, the installer asks it `backplane hub update <tag>`: the new build on probation.
+
+## From 0.14
+
+0.14 updates itself its own way (`src/server/update.bend` at v0.14.1): when the person presses Update it takes the first release asset ending in `<platform>.tar.gz` (on linux-x64 `linux-x64-cef.tar.gz`), checks it against the release's `SHA256SUMS`, unpacks it, runs `backplane-<platform>/install-release.sh <src> <prefix>` from it and re-execs `<prefix>/backplane-serve` with its own arguments. So every release also carries, for linux-x64, linux-arm64 and darwin-arm64, a 0.14-format archive and `SHA256SUMS` (`release.yml`, "the way from 0.14"), and the 0.15 archives are named `-native` so 0.14 never takes one. The 0.14-format archive holds the native archive, the signed manifest and `deploy/compat/`:
+
+- `install-release.sh` checks the native archive against the manifest, lays it out as `builds/<tag>/` with `EXPECT` (the manifest's version and commit), copies 0.14's server to `backplane-serve.0.14` and its launcher to `backplane.0.14`, puts the guard at `<prefix>/backplane`, writes `NEXT` and replaces `backplane-serve` with the shim. Each file is written beside and renamed in; a failure leaves 0.14 as it was.
+- The shim (`backplane-serve.sh`), on 0.14's re-exec, writes `builds/v0.14-legacy/backplane-hub` (0.14's server with 0.14's home and arguments) and starts the guard on **0.14's port**, so phones and machines paired to it, and a `tailscale serve` mapping, still reach it. The guard starts on 0.14, then is asked `backplane hub update <NEXT>`: 0.15 on probation, with the identity check against `EXPECT`. If 0.15 fails, the guard goes straight back to 0.14, so something always runs.
+- 0.15 gets its own home (`~/.backplane/hub`; macOS `~/Library/Application Support/Backplane/hub`). The shim passes 0.14's home as `BACKPLANE_IMPORT_FROM`; 0.15's setup offers to bring its projects, threads, bots and paired devices across (nothing is written until the person confirms; `GET /import/0.14`, `/import/0.14/run`). Paired phones keep working once imported; linked machines are linked again in Settings, Devices. 0.14's home is only read.
+- `backplane` with no arguments opens 0.15's desktop app, so 0.14's link and menu entry keep working.
+
+0.14 on Windows never updated itself: install 0.15 from `backplane-<tag>-windows-x64-native.zip` by hand (docs/install.md).
 
 ## Who updates itself
 
