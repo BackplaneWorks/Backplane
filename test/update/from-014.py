@@ -247,7 +247,7 @@ try:
             try:
                 st, h = health(); m = h.get("migrating")
                 if isinstance(m, dict) and m.get("state") == "running":
-                    seen.append((round(time.time() - t0), m.get("done", 0), m.get("total", 0), g.get("build"), g.get("stable")))
+                    seen.append((round(time.time() - t0), m.get("done", 0), m.get("total", 0), g.get("build"), g.get("stable"), m.get("phase", "")))
                     try:
                         if b"migrating" in hello(): hello_ok += 1
                     except Exception: pass
@@ -258,10 +258,15 @@ try:
             if rolled: no("migrating", f"the guard rolled {tag} back while it imported: {open(os.path.join(prefix, 'BAD')).read().strip()[:160]}")
             elif not seen: no("migrating", "no import progress was ever reported on /healthz")
             else:
-                dones = [d for _, d, _, _, _ in seen]; unproven = all(not s for *_, s in seen); span = seen[-1][0] - seen[0][0]
-                rising = dones == sorted(dones) and (dones[-1] > dones[0] or len(seen) == 1)
-                if rising and unproven and hello_ok: ok("migrating", (f"{len(seen)} progress samples over {span} s ({dones[0]} -> {dones[-1]} of {seen[-1][2]})" if len(seen) > 1 else f"the import ran within one sample ({dones[0]} of {seen[0][2]})") + f", /hello carried it {hello_ok} times, the build stayed on probation and was never failed")
-                else: no("migrating", f"rising={rising} unproven-while-importing={unproven} hello={hello_ok} samples={seen[:3]}...{seen[-2:]}")
+                # the import goes through steps, each with its own count (reading: bytes; writing: events; finishing: none): progress rises within each step,
+                # and the writing step is the one the card's bar follows
+                unproven = all(not x[4] for x in seen); span = seen[-1][0] - seen[0][0]
+                steps = {}
+                for x in seen: steps.setdefault(x[5], []).append(x[1])
+                rising = all(v == sorted(v) for v in steps.values()) and (len(steps.get("writing", [])) <= 1 or steps["writing"][-1] > steps["writing"][0])
+                w = [x for x in seen if x[5] == "writing"] or seen; dones = [x[1] for x in w]
+                if rising and unproven and hello_ok: ok("migrating", (f"{len(seen)} progress samples over {span} s (steps {', '.join(steps)}; writing {dones[0]} -> {dones[-1]} of {w[-1][2]})" if len(seen) > 1 else f"the import ran within one sample ({dones[0]} of {seen[0][2]})") + f", /hello carried it {hello_ok} times, the build stayed on probation and was never failed")
+                else: no("migrating", f"rising={rising} unproven-while-importing={unproven} hello={hello_ok} steps={ {k: (v[0], v[-1], len(v)) for k, v in steps.items()} }")
         on15 = until(400, lambda: gstat().get("build") == tag and gstat().get("stable") is True)
         if not on15: no("on-015", f"build={gstat().get('build')} state={gstat().get('state')} text={gstat().get('text')}"); raise SystemExit
         h14_at_proof = tree(h14)
