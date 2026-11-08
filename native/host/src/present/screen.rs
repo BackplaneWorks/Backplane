@@ -728,7 +728,7 @@ mod thread_binding_tests {
             let (st,p,expected)=fixture(lean);
             let out=recent(&st,&p).expect("plain thread root is supported");
             // the Allowance chip's text (keys.rs `allowance`), the picker's other agents (`pickerAgents`) and the masked box and the composer's commands (`secretBox`, `commands`; `btw` is the helper's own key) are Backplane's own: the recorded helper reply has no such keys
-            let bare=|mut t:Value|{ for k in ["allowance","pickerAgents","secretBox","commands"] { t.as_object_mut().unwrap().remove(k); } t };
+            let bare=|mut t:Value|{ for k in ["allowance","combo","pickerAgents","secretBox","commands"] { t.as_object_mut().unwrap().remove(k); } t };
             assert_eq!(bare(out["shown"]["thread"].clone()),expected); assert_eq!(bare(out["overlay"]["j"]["thread"].clone()),expected);
             assert_eq!(out["session"]["sel"],p["target"]["id"]); assert_eq!(out["window"],p["window"]);
             assert_eq!(out["shown"]["nativeSidebar"],1);
