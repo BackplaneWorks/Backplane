@@ -212,20 +212,24 @@ async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_a
     let out = turn(t2).await; assert!(out.contains("\"completed\""), "{out}");
     let ran: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(ran[1]["dir"], "", "a thread on the default login runs with no CLAUDE_CONFIG_DIR, not under a profile or the one the hub inherited: {}", ran[1]["dir"]);
-    // a profile whose sign-in moved on is never silently swapped for the default
+    // a profile whose sign-in moved on is never silently swapped for the default: with no other login it is not swapped at all
     let s = mgr.request(&json!({"op":"disconnect","profile":id})).await; assert_ne!(s["error"], "", "an account a running thread uses cannot be signed out under it");
     assert_eq!(s["profiles"][0]["state"], "connected");
     ag.stop(T1).await.unwrap(); tokio::time::sleep(Duration::from_millis(300)).await;
     let s = mgr.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!(s["error"], "", "{s}");
-    let out = turn(T1).await; assert!(out.contains("\"failed\"") && out.contains("Reconnect and select this account"), "a disconnected account is refused, not replaced: {out}");
+    // with no other account and the CLI's own login not signed in there is no route: it waits and tries again by itself (agents `account_retry`) and ends with the reason,
+    // or, as the account's change reaches the watch first, is stopped with what to do (accounts_hub `retired`)
+    let out = turn(T1).await; assert!(out.contains("Reconnect and select this account") && out.contains("Trying again in"), "no route to any login: {out}");
+    assert!(out.contains("\"failed\"") || out.contains("explicitly select an account"), "{out}");
     assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2, "and no process was started for it");
     ag.shutdown(); let _ = std::fs::remove_dir_all(&home);
 }
 
-/// After a restart the agents recover threads and carry their turns on before settings::start hands them the account manager: a start on a named
-/// account in that gap waits for the manager and then runs under the account, instead of failing with "Accounts are not available".
+/// After a restart the agents recover threads and carry their turns on before settings::start runs. They used to get the account manager only from settings::start, so a
+/// start on a named account in that gap waited for it, and the recovery that waited kept `Agents::start` from returning (Nov 7). Now the manager is the hub's: the agents
+/// have it from their first moment, settings::start takes the same one, and a start in the gap runs under the account at once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_start_on_a_named_account_before_the_hub_has_its_account_manager_waits_for_it() {
+async fn the_agents_have_the_hubs_account_manager_before_settings_start_and_share_it() {
     use crate::plat::fs::PermissionsExt;
     let home = dir("acct-late-home"); let work = dir("acct-late-work"); let sd = dir("acct-late-bin");
     // the same stand-in, minus its turn log (the other account test owns STANDIN_LOG): the session id it reports names the folder it ran under
@@ -234,24 +238,19 @@ async fn a_start_on_a_named_account_before_the_hub_has_its_account_manager_waits
     std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"fixture\",\"root\":{},\"at\":1700000000}}\n{{\"$\":\"ThreadCreated\",\"id\":\"{T1}\",\"project\":\"p1\",\"title\":\"x\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap())).unwrap();
     let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
-    // a manager the agents do not have yet, with a signed-in profile the thread is bound to
-    let cli = Cli::standin(&sd); let mgr = Arc::new(settings::accounts_io::Accounts::open(&home, Arc::new(move |p: &str| cli.resolve(p))));
+    let mgr = ag.accounts.get().cloned().expect("the agents have the hub's account manager from their start, before settings::start");
+    assert!(Arc::ptr_eq(&mgr, &settings::accounts_hub::manager(&hub, Cli::standin(&sd))), "one manager per hub");
     let s = mgr.request(&json!({"op":"add","provider":"claude","label":"Work"})).await; let id = s["profiles"][0]["id"].as_str().unwrap().to_string();
     mgr.request(&json!({"op":"login","profile":id})).await;
     let aid = async { for _ in 0..200 { let s = mgr.snapshot(); if s["attempts"][0]["state"] == "waiting" { return s["attempts"][0]["id"].as_str().unwrap().to_string() } tokio::time::sleep(Duration::from_millis(50)).await } panic!("no link") }.await;
     assert_eq!(mgr.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"CODE#STATE123"})).await["error"], "");
     let epoch = async { for _ in 0..200 { let s = mgr.snapshot(); if s["profiles"][0]["state"] == "connected" { return s["profiles"][0]["epoch"].as_u64().unwrap() } tokio::time::sleep(Duration::from_millis(50)).await } panic!("never connected") }.await;
     hub.commit(&json!({"$":"SettingSet","key":format!("account.thread.{T1}.claude"),"value":json!({"id":id,"epoch":epoch}).to_string(),"at":2})).await.unwrap();
-    assert!(ag.accounts.get().is_none(), "the agents start without it, as after a restart");
     let before = hub.store.len(); let c = Caller { gen: "1".into(), client: 1 };
-    let start = { let hub = hub.clone(); tokio::spawn(async move { hub.rpc_for("turn.start").unwrap().call(&hub, &c, &json!(7), "turn.start", &json!({"thread":T1,"text":"go on"})).await }) };
-    tokio::time::sleep(Duration::from_millis(800)).await;
-    let early = hub.store.range(before, usize::MAX).unwrap().join("\n");
-    assert!(!early.contains("\"failed\"") && !early.contains("Accounts are not available"), "the start waits for the manager, it does not fail: {early}");
-    let _ = ag.accounts.set(mgr.clone()); // settings::start, a moment later
-    let r = start.await.unwrap(); assert_eq!(r[0]["ok"], true, "{r:?}");
+    let r = hub.rpc_for("turn.start").unwrap().call(&hub, &c, &json!(7), "turn.start", &json!({"thread":T1,"text":"go on"})).await; assert_eq!(r[0]["ok"], true, "{r:?}");
     let out = async { for _ in 0..200 { let ev = hub.store.range(before, usize::MAX).unwrap().join("\n"); if ev.contains("\"completed\"") || ev.contains("\"failed\"") { return ev } tokio::time::sleep(Duration::from_millis(50)).await } panic!("the turn never ended") }.await;
-    assert!(out.contains("\"completed\"") && !out.contains("Accounts are not available"), "it ran once the manager came: {out}");
+    assert!(out.contains("\"completed\"") && !out.contains("Accounts are not available"), "it ran before settings::start: {out}");
     assert!(!out.contains("\"s-default\""), "under the bound account's own folder, not the default login: {out}");
+    let late = settings::accounts_hub::start_cli(&hub, Some(ag.clone()), Cli::standin(&sd)); assert!(Arc::ptr_eq(&late, &mgr), "settings::start takes the same manager");
     ag.shutdown(); let _ = std::fs::remove_dir_all(&home);
 }

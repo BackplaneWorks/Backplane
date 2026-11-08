@@ -1,3 +1,5 @@
+//! POST /dev/account-retry: the outside watchdog's guard (scripts/hub-watchdog.sh `account_check`): every turn whose start failed on an account error and that nobody has sent
+//! again starts again now (`Agents::account_retry_failed`); the answer is `{"retried":[threads]}`. Behind the same token.
 //! GET /dev/turns: how many turns this hub is running, as a count and nothing else. scripts/dev-reload.sh asks before it restarts the hub for a new
 //! test build: a restart cuts a running turn, and on a copy nothing resumes it. The hub checks the pairing token first (default-deny).
 use super::Agents;
@@ -14,6 +16,18 @@ impl HttpHandler for DevTurns {
             if req.method != "GET" { return HttpReply::text("404 Not Found", "not found") }
             let n = { let w = self.0.world().await; running(w.threads.values().map(|t| t.turn.as_str())) };
             HttpReply { status: "200 OK", ctype: "application/json".into(), extra: "Cache-Control: no-store\r\n".into(), body: body(n) }
+        })
+    }
+}
+
+pub struct AccountRetry(pub Arc<Agents>);
+impl HttpHandler for AccountRetry {
+    fn routes(&self) -> &'static [&'static str] { &["/dev/account-retry"] }
+    fn call<'a>(&'a self, _hub: &'a Arc<Hub>, req: &'a Req) -> Fut<'a, HttpReply> {
+        Box::pin(async move {
+            if req.method != "POST" { return HttpReply::text("405 Method Not Allowed", "POST only") }
+            let ths = self.0.account_retry_failed().await;
+            HttpReply { status: "200 OK", ctype: "application/json".into(), extra: "Cache-Control: no-store\r\n".into(), body: serde_json::json!({"retried":ths}).to_string().into_bytes() }
         })
     }
 }

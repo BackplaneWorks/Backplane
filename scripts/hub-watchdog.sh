@@ -11,6 +11,8 @@
 #   A dead watcher is started again. Each restart waits longer than the one before (WATCHDOG_BACKOFF, doubling, at most WATCHDOG_BACKOFF_MAX), so it can never become a restart loop.
 #   The hub's disk and the temp folder: either nearly full (under 1 GiB, or under 5 % and 10 GiB: the guard's rule) is logged and put on the desktop once, and again when there is room.
 #   A full /tmp (a RAM tmpfs shared by every agent) fails agents' writes with ENOSPC or EDQUOT just as a full disk does; restarting the hub does not free it.
+#   A start that failed on the accounts ("could not start claude: Accounts are not available", a profile to reconnect): the hub retries those itself, so any in the log
+#   is a guard failure. Each one is logged, put on the desktop once a batch, and the hub is asked to start those turns again (POST /dev/account-retry, the token on stdin).
 #   Every action goes to $D/watchdog.log.
 # Env: FRESH_DIR, FRESH_PORT, GPUI_DEV_DIR, FRESH_TAILNET_PORT, DISPLAY (as fresh.sh), WATCHDOG_TRIES (3), WATCHDOG_BOOT (900 s), WATCHDOG_WAIT (120 s for a restart to answer), WATCHDOG_BACKOFF (120 s),
 #      WATCHDOG_BACKOFF_MAX (3600 s), WATCHDOG_CALM (600 s of health before the backoff resets), WATCHDOG_WATCHER (0: do not look after fresh-watch.sh).
@@ -45,6 +47,23 @@ space_check() {
     elif [ "$(get "low-$k")" = 1 ]; then put "low-$k" 0; log "room again on $mnt: $((free/1073741824)) GB free"; fi
   done
 }
+# account_check: the spawn failures on the accounts written since the last look (the log's offset in $ST/acct-offset; the first look starts at the end, so history is not news)
+ACCT_RE='"kind":"spawn","summary":"could not start [a-z]*: [^"]*(Accounts are not available|Reconnect and select this account|status check did not finish|select this account again)'
+account_check() {
+  local ev=$D/home/events.jsonl off size new n ths r
+  [ -f "$ev" ] || return 0
+  size=$(stat -c %s "$ev" 2>/dev/null || echo 0); off=$(get acct-offset -1)
+  if [ "$off" = -1 ] || [ "$size" -lt "$off" ]; then put acct-offset "$size"; return 0; fi
+  [ "$size" -gt "$off" ] || return 0
+  new=$(tail -c +"$((off + 1))" "$ev" | head -c "$((size - off))" | grep -E "$ACCT_RE")
+  put acct-offset "$size"
+  [ -n "$new" ] || return 0
+  n=$(printf '%s\n' "$new" | wc -l); ths=$(printf '%s\n' "$new" | grep -o '"thread":"[^"]*"' | cut -d'"' -f4 | sort -u | tr '\n' ' ')
+  log "account guard: $n start(s) failed on the accounts: ${ths% }; asking the hub to start them again"
+  command -v notify-send > /dev/null && notify-send -a Backplane "Backplane: a turn could not start on an account" "$n start(s): ${ths% }. Retrying." 2>/dev/null &
+  r=$(printf 'Authorization: Bearer %s\n' "$(cat "$D/home/token" 2>/dev/null)" | curl -s -m10 -X POST -H @- "http://127.0.0.1:$PORT/dev/account-retry" 2>/dev/null) || r="no answer"
+  log "account guard: the hub answered: $r"
+}
 watcher_up() { pgrep -f "fresh-watch\.sh" > /dev/null; }
 relaunching() { # the watcher is swapping builds right now: its own status says so, and it is fresh
   local f=$DEV/STATUS; [ -f "$f" ] && grep -q '"phase":"relaunching"' "$f" && [ $(( $(now) - $(stat -c %Y "$f") )) -lt "$WAIT" ]
@@ -78,6 +97,7 @@ check() {
     # a healthy check says so on the first one and then hourly, so the log shows the watchdog is alive without a line every 30 s
     [ $(( $(now) - $(get said-ok) )) -lt 3600 ] || { log "healthy: /hello on $PORT answers ($(health)), fresh-watch.sh $(watcher_up && echo alive || echo not running)"; put said-ok "$(now)"; }
     put fails 0; put started-at 0
+    account_check
     if [ "$(get step)" != 0 ] && [ $(( $(now) - $(get last-restart) )) -ge "$CALM" ]; then log "calm for $CALM s: backoff reset"; put step 0; put after 0; fi
     return
   fi
