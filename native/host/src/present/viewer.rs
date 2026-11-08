@@ -32,6 +32,8 @@ fn default_part(ps: &[String]) -> Option<&String> {
 pub fn mech_current(ps: &[String], chosen: &str) -> Option<String> { ps.iter().find(|p| p.as_str() == chosen).or_else(|| default_part(ps)).cloned() }
 fn abs_of(root: &str, rel: &str) -> String { if crate::plat::fs::is_abs(rel) { rel.to_string() } else { format!("{root}/{rel}") } }
 /// The source a Mech page asks the hub for: the part as a 3D model ("" with no part).
+/// A project's parts: listed from its folder here; a project on another machine is not on this disk, so only the part an agent showed is known.
+fn parts_of(root: &str, sel: &str, chosen: &str) -> Vec<String> { if sel.contains('~') { if chosen.is_empty() { vec![] } else { vec![chosen.to_string()] } } else { mech_parts(root) } }
 fn mech_want(root: &str, ps: &[String], chosen: &str) -> (String, String) {
     match mech_current(ps, chosen) { Some(p) if !root.is_empty() => { let a = abs_of(root, &p); (format!("2|{root}|{a}"), a) }, _ => (String::new(), String::new()) }
 }
@@ -57,7 +59,7 @@ fn simple(st: &State, session: &Value, sel: &str) -> bool {
     let (d, info) = (&session["drafts"], &session["info"]);
     // (Diff and Review, which pages.rs draws, may be on show: a drawing or a close puts them away)
     let own = !pages::kind_of(session, sel).is_empty();
-    !sel.is_empty() && !sel.contains('~') && !sel.starts_with("project-home-") && !sel.starts_with('@') && st.threads.contains_key(sel)
+    !sel.is_empty() && !sel.starts_with("project-home-") && !sel.starts_with('@') && st.threads.contains_key(sel)
         && (own || !session["panel"].as_bool().unwrap_or(false))
         && s(d, "@view.bare").is_empty()
         && (own || (s(info, &format!("view.path:{sel}")).is_empty() && s(info, &format!("view.kind:{sel}")).is_empty()))
@@ -91,7 +93,7 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let kind = if kind == "files" && files_kind(prev) { "" } else { kind };
     let root = root_of(st, sel);
     // what the hub is asked to watch: the kind and path View.ask sends (Mech's part is a 3D model; a split watches three sources)
-    let (want, wkind, wpath) = if kind == "mech" { let ps = mech_parts(&root); let part = part.strip_prefix(&format!("{root}/")).unwrap_or(part); let (w, a) = mech_want(&root, &ps, part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a) } else { (key(kind, &root), kind.to_string(), String::new()) };
+    let (want, wkind, wpath) = if kind == "mech" { let part = part.strip_prefix(&format!("{root}/")).unwrap_or(part); let ps = parts_of(&root, sel, part); let (w, a) = mech_want(&root, &ps, part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a) } else { (key(kind, &root), kind.to_string(), String::new()) };
     let at = s(d, "@view.at");
     let mut rid = session["rid"].as_u64().unwrap_or(0);
     let mut before = Vec::new();
@@ -102,7 +104,9 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
         // View.ask: the kind, the root, the path ("" for the project's own file) and the board tree ("")
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
+        // a thread of another machine (`<link>~<id>`, drawn from that machine's mirror: its root is a folder over there): the watch goes to it (`on`)
+        let on = if sel.contains('~') { format!(",\"on\":{}", jstr(sel.split('~').next().unwrap_or(""))) } else { String::new() };
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"{on}}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -380,7 +384,8 @@ fn project_title(st: &State, sel: &str) -> String { st.threads.get(sel).and_then
 /// The Files page: trail, rows, the folder's zip (Files.json).
 fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
     // the folder is watched on disk while this page shows it (files/watch_dir.rs): a change there makes the hub tell the views to draw it again
-    let listed = if root.is_empty() { Err("This thread has no project folder.".to_string()) } else { crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| e.to_string()) };
+    // a project on another machine (`<link>~<id>`): its folder is listed there, not read from this disk
+    let listed = if sel.contains('~') { Err("This project is on another machine: its folder is shown there.".to_string()) } else if root.is_empty() { Err("This thread has no project folder.".to_string()) } else { crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| e.to_string()) };
     if let Ok(t) = &listed { crate::files::watch_dir::touch(root, dir, crate::files::watch_dir::signature(t)); }
     let (rows, err) = match listed { Ok(t) => (rows_of(&t, sel, dir), String::new()), Err(e) => (vec![], e) };
     json!({"trail": files_trail(dir), "rows": rows, "ready": true, "error": err, "zip": down_url(sel, dir, true), "zipName": zip_name(&project_title(st, sel), dir)})
@@ -463,12 +468,12 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     let mut v = match kind {
         // Mech: the part on show as a 3D model (View.want: "2|<root>|<abs part>"), the parts as chips (Mech.json)
         "mech" => {
-            let ps = mech_parts(&root); let cur = mech_current(&ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
+            let ps = parts_of(&root, sel, s(&session["drafts"], &format!("@mech.part:{sel}"))); let cur = mech_current(&ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
             let (want, _) = mech_want(&root, &ps, s(&session["drafts"], &format!("@mech.part:{sel}")));
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("mech")); o.insert("key".into(), json!(want));
             let chips: Vec<Value> = ps.iter().map(|p| json!({"label": stem(p), "value": p, "on": cur.as_deref() == Some(p.as_str())})).collect();
-            o.insert("mech".into(), json!({"say": if root.is_empty() { "Loading…" } else if ps.is_empty() { "No parts yet. Ask an agent to model one: it designs it in FreeCAD, keeps it in mech/, and renders it here." } else { "" },
+            o.insert("mech".into(), json!({"say": if root.is_empty() { "Loading…" } else if sel.contains('~') && ps.is_empty() { "This project is on another machine: its parts are listed there. A part an agent shows opens here." } else if ps.is_empty() { "No parts yet. Ask an agent to model one: it designs it in FreeCAD, keeps it in mech/, and renders it here." } else { "" },
                 "note": "", "parts": chips, "rel": cur.clone().unwrap_or_default(), "busy": false, "render": "Create renders", "err": "",
                 "name": cur.as_deref().map(stem).unwrap_or_default(), "path": cur.as_deref().map(|p| abs_of(&root, p)).unwrap_or_default(), "shots": [], "empty": ""}));
             v
@@ -523,6 +528,30 @@ mod tests {
         // from a board: the watch is stopped
         let board = json!({"sel": th, "rid": 5, "drafts": {format!("@view:{th}"): "board", "@view.at": "0|/tmp/soak2|"}, "open": {}, "adding": false, "panel": false, "info": {}});
         assert_eq!(view_action(&st, "h", &board, "browser").unwrap().before.len(), 1);
+    }
+    /// A thread of another machine (drawn from its mirror, `<link>~<id>`; its project's folder is a folder over there): the viewer opens, and the watch goes to that machine.
+    #[test] fn a_thread_of_another_machine_opens_the_viewer_and_its_watch_goes_there() {
+        let mut st = State::new();
+        for l in [r#"{"$":"ProjectCreated","id":"L~p1","title":"Board","root":"/desk/board","at":1}"#, r#"{"$":"ThreadCreated","id":"L~t1","project":"L~p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}"#] { st.apply_line(l); }
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let session = json!({"sel": "L~t1", "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
+        let o = view_action(&st, "h", &session, "board").expect("a far thread opens the viewer");
+        let w: Value = serde_json::from_str(o.before[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((w["m"].as_str(), w["p"]["on"].as_str(), w["p"]["root"].as_str(), w["p"]["kind"].as_str()), (Some("kicad.watch"), Some("L"), Some("/desk/board"), Some("board")));
+        let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
+        let v = viewer_json(&st, &template, &s2).expect("and draws it");
+        assert_eq!((v["open"].as_str(), v["key"].as_str()), (Some("board"), Some("0|/desk/board|")));
+        // this machine's own thread asks for no machine
+        let (mine, th) = state(); let own = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
+        assert!(!view_action(&mine, "h", &own, "board").unwrap().before[0]["text"].as_str().unwrap().contains("\"on\""));
+    }
+    #[test] fn a_part_an_agent_showed_on_another_machine_opens_in_mech_there() {
+        let mut st = State::new();
+        for l in [r#"{"$":"ProjectCreated","id":"L~p1","title":"Board","root":"/desk/board","at":1}"#, r#"{"$":"ThreadCreated","id":"L~t1","project":"L~p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}"#] { st.apply_line(l); }
+        let session = json!({"sel": "L~t1", "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
+        let o = view_action(&st, "h", &session, "mech\t/desk/board/mech/a.step").unwrap();
+        let w: Value = serde_json::from_str(o.before[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((w["p"]["kind"].as_str(), w["p"]["path"].as_str(), w["p"]["on"].as_str()), (Some("3d"), Some("/desk/board/mech/a.step"), Some("L")));
     }
     #[test] fn a_panel_the_helper_opened_is_not_drawn_as_an_idle_viewer() {
         let (st, th) = state();

@@ -16,6 +16,7 @@ pub mod devices;
 pub mod far;
 pub mod feed;
 pub mod farsync;
+pub mod farview;
 pub mod farstore;
 pub mod listener;
 pub mod machinespage;

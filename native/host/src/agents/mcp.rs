@@ -213,6 +213,8 @@ impl Mcp {
                 // the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client that does not answer in 2 s leaves the last report, marked
                 let before = crate::files::kicad::watch::viewer_state(thread).0;
                 ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")}));
+                // (the owner's windows on other machines show it too)
+                { let (hub, ann) = (ag.hub.clone(), json!({"thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")})); tokio::spawn(async move { hub.far_announce("viewer.show", &ann).await }); }
                 let mut now = crate::files::kicad::watch::viewer_state(thread);
                 for _ in 0..40 { if now.0 > before { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
                 (true, json!({"shown":sv(&a, "path"),"viewer":now.1,"settled":now.0 > before}))

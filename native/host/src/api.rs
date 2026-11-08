@@ -147,6 +147,10 @@ pub trait MirrorFeed: Send + Sync {
 /// consulted first by `Hub::request`. `wants` decides from the method and params; `call` answers (the owner's reply with the caller's id).
 pub trait FarRouter: Send + Sync {
     fn wants(&self, method: &str, params: &Value) -> bool;
+    /// The same, knowing which client asks (a window's viewer reads follow the machine its watch is on).
+    fn wants_for(&self, _client: u64, method: &str, params: &Value) -> bool { self.wants(method, params) }
+    /// Tell every machine of the owner's something, once (an agent's viewer_show: the windows there show it too). Best effort.
+    fn announce<'a>(&'a self, _hub: &'a Arc<Hub>, _method: &'a str, _params: &'a Value) -> Fut<'a, ()> { Box::pin(async {}) }
     /// Answers at once with the frames to send now (an error, or none when the answer comes later through `Hub::push(client, ..)`): the connection never waits on another machine.
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, client: u64, id: &'a Value, method: &'a str, params: &'a Value) -> Fut<'a, Vec<Value>>;
     /// An agent's (or a bot's) tool call about another machine: `tool` with `args` runs there for the thread `from` (its id here), as a signed `mcp.call`.
