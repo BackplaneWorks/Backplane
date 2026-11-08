@@ -11,6 +11,7 @@
 //! `import.v014.done`, so it outlives a restart.
 pub mod files;
 pub mod plan;
+pub mod progress;
 #[cfg(test)] mod tests;
 
 use crate::{api::{Caller, Fut, HttpHandler, HttpReply, RpcHandler}, auth::Req, hub::Hub};
@@ -19,8 +20,15 @@ use std::{path::{Path, PathBuf}, sync::Arc};
 
 pub const INFO: &str = "import.v014";
 pub const DONE: &str = "import.v014.done";
+/// The person saw the summary (the time of the result they saw): the desktop's overlay and the phones' banner stop showing it, and its notice leaves the push book.
+pub const ACK: &str = "import.v014.ack";
+/// What runs now, as everyone may see it (`/healthz`, `/hello`): None when no import runs.
+static NOW: std::sync::Mutex<Option<Arc<progress::Progress>>> = std::sync::Mutex::new(None);
+pub fn migrating() -> Option<Value> { NOW.lock().unwrap().as_ref().map(|p| p.public()) }
+/// The same with the names, for the person's own clients (data/1 hello).
+pub fn migrating_full() -> Option<Value> { NOW.lock().unwrap().as_ref().map(|p| p.full(crate::hub::now_ms())) }
 /// Lines per write: each is one append and fsync, one fold, one progress note.
-const CHUNK: usize = 4000;
+const CHUNK: usize = 2000;
 
 fn user_folder() -> Option<PathBuf> { std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|v| !v.is_empty()).map(PathBuf::from) }
 fn same(a: &Path, b: &Path) -> bool { crate::plat::fs::canonicalize(a).unwrap_or_else(|_| a.into()) == crate::plat::fs::canonicalize(b).unwrap_or_else(|_| b.into()) }
@@ -66,12 +74,20 @@ pub fn have_of(store: &crate::store::Store) -> plan::Have {
     h
 }
 
-pub struct Importer { pub from: Option<PathBuf>, busy: tokio::sync::Mutex<()>, me: std::sync::Weak<Importer> }
+pub struct Importer { pub from: Option<PathBuf>, busy: tokio::sync::Mutex<()>, me: std::sync::Weak<Importer>,
+    /// ms slept after each chunk written: a slow import on purpose, for tests (BACKPLANE_IMPORT_THROTTLE_MS)
+    pub throttle_ms: std::sync::atomic::AtomicU64 }
 
 /// Finds the old home and says so in the hub info; registers the RPC and the routes. Reads nothing more until asked. A copy of a real log imports nothing.
-pub fn start(hub: &Arc<Hub>) -> Arc<Importer> { start_from(hub, if crate::copy::on() { None } else { source(&hub.cfg.home) }) }
-pub fn start_from(hub: &Arc<Hub>, from: Option<PathBuf>) -> Arc<Importer> {
-    let me = Arc::new_cyclic(|w| Importer { from, busy: Default::default(), me: w.clone() });
+/// BACKPLANE_IMPORT_AUTO=1 (set by the 0.14 to 0.15 update's shim: the person pressed Update in 0.14): the import begins by itself once the hub serves, on every start until
+/// it has finished, without keys (those still need the person's yes). Without it a fresh install waits for the person's Import.
+pub fn start(hub: &Arc<Hub>) -> Arc<Importer> {
+    let from = if crate::copy::on() { None } else { source(&hub.cfg.home) };
+    start_auto(hub, from, std::env::var("BACKPLANE_IMPORT_AUTO").as_deref() == Ok("1"))
+}
+pub fn start_from(hub: &Arc<Hub>, from: Option<PathBuf>) -> Arc<Importer> { start_auto(hub, from, false) }
+pub fn start_auto(hub: &Arc<Hub>, from: Option<PathBuf>, auto: bool) -> Arc<Importer> {
+    let me = Arc::new_cyclic(|w| Importer { from, busy: Default::default(), me: w.clone(), throttle_ms: std::sync::atomic::AtomicU64::new(std::env::var("BACKPLANE_IMPORT_THROTTLE_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(0)) });
     hub.register_rpc(me.clone()); hub.register_http(me.clone());
     let (h, m) = (hub.clone(), me.clone());
     tokio::spawn(async move {
@@ -83,12 +99,30 @@ pub fn start_from(hub: &Arc<Hub>, from: Option<PathBuf>) -> Arc<Importer> {
             (None, true) => return,
         };
         publish(&h, &v).await;
+        if auto && done.is_empty() && m.from.is_some() {
+            while !crate::guard::is_ready() && !cfg!(test) { tokio::time::sleep(std::time::Duration::from_millis(200)).await; }
+            eprintln!("import: bringing the 0.14 home across (BACKPLANE_IMPORT_AUTO)");
+            m.run(&h, false).await;
+        }
     });
     me
 }
 
 /// The import's state for every client: the info key, and a redraw of every open view (setup and Settings read it).
-async fn publish(hub: &Arc<Hub>, v: &Value) { hub.set_info(INFO, &v.to_string()).await; hub.bump_views(); }
+async fn publish(hub: &Arc<Hub>, v: &Value) {
+    hub.set_info(INFO, &v.to_string()).await; hub.bump_views();
+    let mut f = v.clone(); f["t"] = json!("migrating"); f["card"] = crate::present::onboard::import_card(v, false, false).unwrap_or(Value::Null); hub.push_all(&f); // the phones (data/1 `migrating`)
+}
+
+/// What a phone shows on connect (data/1 hello `migrating`): the import running, or its result until the person has seen it (ACK); null otherwise.
+pub async fn phone_state(hub: &Arc<Hub>) -> Value {
+    if let Some(mut m) = migrating_full() { m["card"] = crate::present::onboard::import_card(&m, false, false).unwrap_or(Value::Null); return m }
+    let done = hub.setting(DONE).await.unwrap_or_default(); if done.is_empty() { return Value::Null }
+    let mut v: Value = serde_json::from_str(&done).unwrap_or(Value::Null);
+    let seen = hub.setting(ACK).await.unwrap_or_default();
+    if !v.is_object() || seen == v["at"].to_string() { return Value::Null }
+    v["state"] = json!("done"); v["card"] = crate::present::onboard::import_card(&v, false, false).unwrap_or(Value::Null); v
+}
 
 /// The notes on what stays behind, as codes the words are chosen for (present/onboard.rs `import_note`).
 fn notes(p: &plan::Plan, old: &Path, secrets: bool, extra: Vec<Value>) -> Vec<Value> {
@@ -125,43 +159,70 @@ impl Importer {
         let Some(old) = self.from.clone() else { return json!({"state":"none"}) };
         let Ok(_one) = self.busy.try_lock() else { return json!({"state":"running","from":old.to_string_lossy(),"why":"An import is running already."}) };
         let from = old.to_string_lossy().into_owned();
-        publish(hub, &json!({"state":"running","from":from,"done":0,"of":0})).await;
-        let (store, o) = (hub.store.clone(), old.clone());
-        let p = match tokio::task::spawn_blocking(move || { let have = have_of(&store); plan::plan(&o.join("events.jsonl"), &have, plan::Opts { secrets, keep: true }) }).await {
+        let now = crate::hub::now_ms;
+        // what runs, for /healthz, /hello and the clients, and the guard's word that this start is not proven until it is over
+        let prog = Arc::new(progress::Progress::default()); prog.begin(&from, secrets, now());
+        *NOW.lock().unwrap() = Some(prog.clone()); let _folding = crate::guard::Folding::begin();
+        struct Clear; impl Drop for Clear { fn drop(&mut self) { *NOW.lock().unwrap() = None; } }
+        let _clear = Clear;
+        let tick = { let (h, p) = (hub.clone(), prog.clone()); tokio::spawn(async move { loop { publish(&h, &p.full(now())).await; tokio::time::sleep(std::time::Duration::from_secs(1)).await; } }) };
+        struct Stop(tokio::task::JoinHandle<()>); impl Drop for Stop { fn drop(&mut self) { self.0.abort() } }
+        let _tick = Stop(tick);
+        let (store, o, p2) = (hub.store.clone(), old.clone(), prog.clone());
+        let p = match tokio::task::spawn_blocking(move || { let have = have_of(&store); p2.step("reading", 0, "bytes", now());
+            plan::plan_with(&o.join("events.jsonl"), &have, plan::Opts { secrets, keep: true }, &|b, of| { if b == 0 { return } p2.step_total(of); p2.at(b, now()) }) }).await {
             Ok(Ok(p)) => p,
-            Ok(Err(e)) => return self.failed(hub, &from, &format!("The 0.14 log could not be read: {e}.")).await,
+            Ok(Err(e)) => return self.failed(hub, &from, &format!("The 0.14 log could not be read: {e}")).await,
             Err(e) => return self.failed(hub, &from, &format!("{e}")).await,
         };
+        prog.totals(p.counts.projects as u64, p.counts.threads as u64);
         // files first: the lines name them (bots' folders, accounts), and a cut-off import copies again without harm
+        prog.step("copying", 0, "files", now());
         let (h2, o2, bots) = (hub.cfg.home.clone(), old.clone(), p.bots.clone());
         let hooks = p.hooks.clone();
         let have_profiles = crate::settings::accounts_hub::live(&hub.cfg.home).map(|m| m.ids()).unwrap_or_default();
-        let fr = tokio::task::spawn_blocking(move || files::copy(&o2, &h2, &bots, &hooks, secrets, &have_profiles)).await.unwrap_or_default();
+        let p3 = prog.clone();
+        let fr = tokio::task::spawn_blocking(move || files::copy_counted(&o2, &h2, &bots, &hooks, secrets, &have_profiles, Box::new(move |n| p3.at(n, now())))).await.unwrap_or_default();
         let mut extra = fr.notes.clone();
         let accounts = files::adopt_accounts(&hub.cfg.home, secrets, &fr);
         if let Some(n) = &accounts.note { extra.push(n.clone()) }
         let devices = files::adopt_devices(&hub.cfg.home, &old);
         let keys = if secrets { files::adopt_vault(&old) } else { files::Keys::default() };
         if let Some(n) = &keys.note { extra.push(n.clone()) }
-        // the lines, with the policies holding their batches until the log is folded again
+        // the lines, with the policies holding their batches until the log is folded again; a client's request waits for at most one chunk
         let owned = crate::statehost::refold_begin(hub);
         let total = p.lines.len(); let mut done = 0usize; let mut err = String::new();
+        prog.step("writing", total as u64, "events", now());
+        let throttle = Some(self.throttle_ms.load(std::sync::atomic::Ordering::Relaxed)).filter(|ms| *ms > 0); // tests only: a slow import on purpose
+        let mut titles: std::collections::HashMap<String, String> = Default::default();
         for ch in p.lines.chunks(CHUNK) {
+            let (mut np, mut nt, mut cur) = (0, 0, None);
+            for l in ch { match crate::session::event_type(l) {
+                Some("ProjectCreated") => { np += 1; if let Ok(v) = serde_json::from_str::<Value>(l) { titles.insert(v["id"].as_str().unwrap_or("").into(), v["title"].as_str().unwrap_or("").into()); } }
+                Some("ThreadCreated") => { nt += 1; if let Ok(v) = serde_json::from_str::<Value>(l) { let pt = titles.get(v["project"].as_str().unwrap_or("")).cloned().unwrap_or_default();
+                    let t = v["title"].as_str().unwrap_or("").chars().take(80).collect::<String>(); cur = Some(if pt.is_empty() { t } else { format!("{pt} \u{b7} {t}") }); } }
+                _ => {} } }
             if let Err(e) = hub.import_lines(ch.to_vec()).await { err = format!("{e:#}"); break }
-            done += ch.len();
-            publish(hub, &json!({"state":"running","from":from,"done":done,"of":total})).await;
+            done += ch.len(); prog.made(np, nt, cur); prog.at(done as u64, now());
+            if let Some(ms) = throttle { tokio::time::sleep(std::time::Duration::from_millis(ms)).await; }
         }
+        prog.step("finishing", 0, "", now());
         crate::statehost::refold_end(hub, owned);
-        if !err.is_empty() { return self.failed(hub, &from, &format!("Writing to this home failed after {done} of {total} events: {err}. Import again to finish: what is here already is not written twice.")).await }
+        if !err.is_empty() { return self.failed(hub, &from, &format!("Writing into this hub stopped after {done} of {total} events: {err}")).await }
         let mut c = p.counts.clone(); c.devices = devices;
         let r = json!({"state":"done","from":from,"counts":c,"bots":p.bots.iter().map(|(_, n)| n).collect::<Vec<_>>(),"devices":devices,"accounts":accounts.added,"signin":accounts.signin,"keys":keys.added,
-            "files":fr.copied,"secrets":secrets,"at":crate::hub::now_ms() / 1000,"notes":notes(&p, &old, secrets, extra)});
-        let _ = hub.commit(&json!({"$":"SettingSet","key":DONE,"value":r.to_string(),"at":crate::hub::now_ms() / 1000})).await;
+            "files":fr.copied,"secrets":secrets,"at":now() / 1000,"elapsed_s":prog.full(now())["elapsed_s"],"notes":notes(&p, &old, secrets, extra)});
+        let _ = hub.commit(&json!({"$":"SettingSet","key":DONE,"value":r.to_string(),"at":now() / 1000})).await;
+        // one notice for the phones that were away (the push book's rules: quiet hours, mutes)
+        if c.lines > 0 { let text = format!("Your 0.14 work is here: {}", crate::present::onboard::import_counted(&json!(c)));
+            let _ = hub.commit(&crate::push::Source::import_done().order(&format!("import-{}", now()), "import", "", "", &text, now() / 1000)).await; }
+        drop(_tick); *NOW.lock().unwrap() = None;
         publish(hub, &r).await;
         r
     }
     async fn failed(&self, hub: &Arc<Hub>, from: &str, why: &str) -> Value {
-        let v = json!({"state":"failed","from":from,"why":why}); publish(hub, &v).await; v
+        *NOW.lock().unwrap() = None;
+        let v = json!({"state":"failed","from":from,"why":why.trim_end_matches('.')}); publish(hub, &v).await; v
     }
 }
 

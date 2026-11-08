@@ -17,6 +17,8 @@ use tokio_tungstenite::tungstenite::{handshake::server::ErrorResponse, protocol:
 pub fn hello_body(version: &str, commit: &str, side_by_side: bool) -> Value {
     let mut v = json!({"backplane":version,"busy":0,"commit":commit});
     if side_by_side { v["sideBySide"] = json!(true); }
+    // a 0.14 home coming across: numbers only (this answer needs no credential), so a client can show progress the moment the hub answers
+    if let Some(m) = crate::import014::migrating() { v["migrating"] = m; }
     v
 }
 /// The same fact in the hub info the views read (info values are text): `sideBySide` = "1" when on, no key when off.

@@ -68,9 +68,20 @@ What is in a 0.14 home:
 - **Where it looks:** `BACKPLANE_IMPORT_FROM`, else each place in the table above that holds a 0.14 home, the one whose log was written last. A home under the temp folder (tests) looks only at the variable. A copy of a real log (`BACKPLANE_COPY=1`) imports nothing.
 - **The 0.14 to 0.15 update path:** 0.14.1's updater installs 0.15 and its shim starts the 0.15 guard on the new default home with `BACKPLANE_IMPORT_FROM` set to the home 0.14 ran with. The person then sees the setup step, as on a fresh install.
 
+## Progress
+
+A long import shows itself the whole time (`import014/progress.rs`). The steps are reading the 0.14 log (by bytes), copying files, writing the lines (events, projects n/N, threads n/N, the thread now) and finishing. The estimate is the current step's measured rate over its last ten seconds, and none until a second of work. A ticker publishes the state every second, even in the middle of a step:
+- the info key `import.v014` (the desktop: an overlay with the bar, counts and the project now, which cannot be closed while it runs, then the summary until Continue);
+- data/1 `migrating` frames and `hello.migrating`, with the same card for the phones;
+- `migrating` on `/healthz` and `/hello`: numbers only, no names, since they need no credential.
+
+`/healthz` stays `ok` and holds a `Folding` while it runs, so the guard keeps the build on probation and proves it only after the import (remote-op's `plan::holds_proof`). The import never makes the hub answer `hung`. The hub serves throughout: the reading is off the runtime threads, and a client's write waits for at most one 2,000-line chunk.
+
+A failure says what failed, that the 0.14 folder is untouched, and offers Retry, which picks up where it stopped. When the import ends, one push notice tells the phones. After 0.14's Update installs 0.15, the shim sets `BACKPLANE_IMPORT_AUTO=1` and the import begins by itself on every start until it has finished, without keys.
+
 ## Tests
 
-- `cargo test import014`: the fixture home `test/fixtures/v014-home` (written by `test/fixtures/make-v014-home.py`, made-up content in 0.14.1's shapes), copied to a temp folder. The tests cover:
+- `cargo test import014`: a long import, from a home written by the generator's large mode (`make-v014-home.py OUT --large P T L`) and slowed by `throttle_ms`, publishes progress at least every 2 s, answers a write and a read within 1 s meanwhile, holds a fold on `/healthz` and ends with the right summary; an import after an update runs by itself once. The fixture home `test/fixtures/v014-home` (written by `test/fixtures/make-v014-home.py`, made-up content in 0.14.1's shapes), copied to a temp folder. The tests cover:
   - what comes across and what stays;
   - no observer sees an imported line;
   - files and profiles are copied, and logins only with keys;

@@ -166,7 +166,8 @@ fn many(n: u64, one: &str, more: &str) -> String { format!("{n} {}", if n == 1 {
 pub fn import_counted(c: &Value) -> String {
     let mut parts = vec![];
     if num(c, "projects") > 0 { parts.push(many(num(c, "projects"), "project", "projects")) }
-    if num(c, "threads") > 0 || num(c, "messages") > 0 { parts.push(format!("{} with {}", many(num(c, "threads"), "thread", "threads"), many(num(c, "messages"), "message", "messages"))) }
+    if num(c, "threads") > 0 { parts.push(format!("{} with {}", many(num(c, "threads"), "thread", "threads"), many(num(c, "messages"), "message", "messages"))) }
+    else if num(c, "messages") > 0 { parts.push(format!("{} in threads already here", many(num(c, "messages"), "new message", "new messages"))) }
     if num(c, "bots") > 0 || num(c, "memories") > 0 { parts.push(format!("{} with {}", many(num(c, "bots"), "bot", "bots"), many(num(c, "memories"), "memory", "memories"))) }
     if num(c, "rooms") > 0 || num(c, "posts") > 0 { parts.push(format!("{} with {}", many(num(c, "rooms"), "room", "rooms"), many(num(c, "posts"), "post", "posts"))) }
     if num(c, "routines") > 0 { parts.push(many(num(c, "routines"), "routine", "routines")) }
@@ -224,6 +225,49 @@ pub fn import_rows(info: &Value) -> Vec<Value> {
         _ => { let mut r = row("The import stopped", s(&v, "why"), vec![btn("Try again", "ob-import", "scan", true)]); r["tone"] = json!("warn"); rows.push(r) }
     }
     rows
+}
+fn thousands(n: u64) -> String { let s = n.to_string(); let mut o = String::new(); for (i, c) in s.chars().enumerate() { if i > 0 && (s.len() - i) % 3 == 0 { o.push(',') } o.push(c) } o }
+/// The window over everything while a 0.14 home comes across, and after it until the person has seen what came (`import014::ACK`); a failure until they
+/// retry or put it off for this launch (`@import.later`). The desktop draws it as it is: a title, a body, the bar (`pct`), lines and buttons. It has no close
+/// while the import runs: the hub serves meanwhile, and the window comes back on every client until the import ends.
+pub fn import_overlay(st: &State, session: &Value, info: &Value) -> Option<Value> {
+    let v = import_info(info)?;
+    import_card(&v, set(st, super::super::import014::ACK) == v["at"].to_string(), draft(session, "@import.later") == "1")
+}
+/// The card for one import state (the info key's value, or a data/1 `migrating` frame): what the desktop's overlay and the phones' banner show. `seen`: the
+/// person has seen this result; `later`: they put off a failure for now.
+pub fn import_card(v: &Value, seen: bool, later: bool) -> Option<Value> {
+    let v = v.clone();
+    let btns = |b: Vec<Value>| Value::Array(b);
+    match s(&v, "state") {
+        "running" => {
+            let (p, t) = (&v["projects"], &v["threads"]);
+            let mut lines = vec![];
+            if v["phase"] == "writing" { lines.push(format!("{} of {} projects \u{b7} {} of {} threads \u{b7} {} of {} events", thousands(p[0].as_u64().unwrap_or(0)), thousands(p[1].as_u64().unwrap_or(0)), thousands(t[0].as_u64().unwrap_or(0)), thousands(t[1].as_u64().unwrap_or(0)), thousands(num(&v, "done")), thousands(num(&v, "total")))); }
+            else if v["phase"] == "reading" && num(&v, "total") > 0 { lines.push(format!("{} of {} MB read", num(&v, "done") >> 20, num(&v, "total") >> 20)); }
+            else if v["phase"] == "copying" { lines.push(format!("{} files copied", thousands(num(&v, "done")))); }
+            if !s(&v, "current").is_empty() { lines.push(format!("Now: {}", s(&v, "current"))); }
+            lines.push(match v["eta_s"].as_u64() { Some(e) if e >= 60 => format!("About {} min left in this step.", (e + 59) / 60), Some(e) => format!("About {e} s left in this step."), None => "Measuring how long this step takes.".into() });
+            Some(json!({"state": "running", "title": "Bringing your 0.14 work across\u{2026}", "body": format!("{}. Backplane works meanwhile, and your 0.14 folder is only read.", s(&v, "what")), "pct": num(&v, "pct"), "lines": lines, "buttons": btns(vec![])}))
+        }
+        "done" => {
+            if seen { return None }
+            let c = &v["counts"];
+            let what = if num(c, "lines") == 0 { "Nothing new came across: everything was here already.".to_string() } else { import_counted(c) };
+            let mut lines: Vec<String> = v["notes"].as_array().into_iter().flatten().map(import_note).filter(|(_, t)| !t.is_empty()).map(|(_, t)| t).collect();
+            if let Some(e) = v["elapsed_s"].as_u64() { lines.insert(0, format!("It took {} s.", e.max(1))); }
+            let mut b = vec![btn("Continue", "ob-import", &format!("ack:{}", v["at"]), true)];
+            if v["secrets"] != true { b.push(btn("Import with keys", "ob-import", "run-secrets", false)); }
+            Some(json!({"state": "done", "title": "Your 0.14 work is here", "body": what, "pct": 100, "lines": lines, "buttons": btns(b)}))
+        }
+        "failed" => {
+            if later { return None }
+            let from = s(&v, "from");
+            Some(json!({"state": "failed", "title": "The import stopped", "body": format!("{}. Your 0.14 data{} is untouched. Retry picks up where it stopped: nothing comes twice.", s(&v, "why").trim_end_matches('.'), if from.is_empty() { String::new() } else { format!(" in {from}") }),
+                "pct": Value::Null, "lines": [], "buttons": btns(vec![btn("Retry", "ob-import", "retry", true), btn("Not now", "ob-import", "later", false)])}))
+        }
+        _ => None,
+    }
 }
 /// Setup's import step: only on a desktop, and only when this computer has 0.14 data or an import was made.
 fn import(f: &Facts, c: &Client) -> Option<Step> {
@@ -643,7 +687,13 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         "ob-install" => { if value.is_empty() { return None } send(hub, &mut rid, &mut cmds, "onboard.install", json!({"tool": value})); json!({}) }
         "ob-kicad-install" => { send(hub, &mut rid, &mut cmds, "kicad.install", json!({"consent": true})); json!({}) }
         "ob-check" => { send(hub, &mut rid, &mut cmds, "onboard.check", json!({})); json!({}) }
-        "ob-import" => { let (op, secrets) = match value { "scan" => ("scan", false), "run" => ("run", false), "run-secrets" => ("run", true), _ => return None }; send(hub, &mut rid, &mut cmds, "import.v014", json!({"op": op, "secrets": secrets})); json!({}) }
+        "ob-import" => {
+            if let Some(at) = value.strip_prefix("ack:") { put(hub, &mut rid, &mut cmds, super::super::import014::ACK, at); return Some(Out { patch: json!({}), cmds }) }
+            if value == "later" { return Some(Out { patch: json!({"drafts": {"@import.later": "1"}}), cmds }) }
+            let (op, secrets) = match value { "scan" => ("scan", false), "run" => ("run", false), "run-secrets" => ("run", true), "retry" => ("run", import_info(info).map_or(false, |v| v["secrets"] == true)), _ => return None };
+            send(hub, &mut rid, &mut cmds, "import.v014", json!({"op": op, "secrets": secrets}));
+            json!({"drafts": {"@import.later": ""}})
+        }
         "ob-usage" => {
             if value != "on" && value != "off" { return None }
             put(hub, &mut rid, &mut cmds, "onboard.usage", value);
@@ -781,6 +831,20 @@ mod tests {
         [json!({"state":"found","from":"/home/a/.backplane-bend"}), json!({"state":"scanning","from":"/f"}), json!({"state":"ready","from":"/f","counts":c,"notes":notes}), json!({"state":"ready","from":"/f","counts":{"lines":0},"notes":[]}),
          json!({"state":"running","from":"/f","done":4000,"of":9000}), json!({"state":"running","from":"/f","done":0,"of":0}), json!({"state":"done","from":"/f","counts":c,"notes":notes}), json!({"state":"done","counts":{"lines":0}}),
          json!({"state":"failed","from":"/f","why":"The 0.14 log could not be read: denied."})].into_iter().map(|v| json!({"import.v014": v.to_string()})).collect()
+    }
+    #[test] fn the_import_card_runs_without_a_close_and_ends_with_the_summary_until_seen() {
+        let run = json!({"state":"running","phase":"writing","what":"Writing projects and threads","done":4000,"total":9000,"pct":60,"eta_s":75,"projects":[3,12],"threads":[40,300],"current":"Nordic \u{b7} Pick a regulator"});
+        let c = import_card(&run, false, false).unwrap(); assert_eq!(c["buttons"], json!([]), "no way out while it runs"); assert_eq!(c["pct"], 60);
+        let lines = c["lines"].to_string(); assert!(lines.contains("3 of 12 projects") && lines.contains("40 of 300 threads") && lines.contains("Now: Nordic") && lines.contains("About 2 min left"), "{lines}");
+        let done = json!({"state":"done","at":77,"counts":{"projects":2,"threads":3,"messages":9,"lines":20},"notes":[],"elapsed_s":12,"secrets":false});
+        let d = import_card(&done, false, false).unwrap(); assert_eq!(d["body"], "2 projects and 3 threads with 9 messages."); assert_eq!(d["buttons"][0]["value"], "ack:77");
+        assert!(import_card(&done, true, false).is_none(), "seen: gone");
+        let failed = json!({"state":"failed","from":"/h/.backplane-bend","why":"The 0.14 log could not be read: denied"});
+        let f = import_card(&failed, false, false).unwrap(); assert!(f["body"].as_str().unwrap().contains("Your 0.14 data in /h/.backplane-bend is untouched")); assert_eq!(f["buttons"][0]["value"], "retry");
+        assert!(import_card(&failed, false, true).is_none(), "put off for now");
+        let st = cst(blank(), &[]); let i = json!({"import.v014": done.to_string()});
+        let o = act(&st, "h", &sess(json!({})), &i, &desk(), "/h", "ob-import", "ack:77").unwrap();
+        let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap(); assert_eq!((sent["p"]["key"].as_str(), sent["p"]["value"].as_str()), (Some("import.v014.ack"), Some("77")));
     }
     #[test] fn the_import_step_shows_only_with_0_14_data_and_each_press_asks_the_hub() {
         let st = cst(blank(), &[]);
@@ -966,6 +1030,9 @@ mod tests {
         } } }
         for st in import_samples() { walk(&Value::Array(import_rows(&st)), &mut out); if let Some(x) = import(&Facts::of(&cst(blank(), &[]), &st), &desk()) { out.push(x.title); out.push(x.body) } }
         walk(&Value::Array(import_rows(&json!({}))), &mut out);
+        let running = json!({"state":"running","phase":"writing","what":"Writing projects and threads","done":4000,"total":9000,"pct":60,"eta_s":75,"projects":[3,12],"threads":[40,300],"current":"Nordic \u{b7} Pick a regulator","from":"/f"});
+        for v in [running.clone(), json!({"state":"running","phase":"reading","what":"Reading the 0.14 log","done":1<<20,"total":9<<20,"pct":3,"eta_s":null}), json!({"state":"running","phase":"copying","what":"Copying","done":25,"total":0,"eta_s":5})] { walk(&import_card(&v, false, false).unwrap(), &mut out); }
+        for st in import_samples() { let v: Value = serde_json::from_str(st["import.v014"].as_str().unwrap()).unwrap(); if let Some(c) = import_card(&v, false, false) { walk(&c, &mut out); } }
         out.sort(); out.dedup(); out
     }
     #[test] fn the_update_words_follow_how_the_hub_was_installed() {
