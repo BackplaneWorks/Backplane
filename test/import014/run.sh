@@ -6,6 +6,7 @@
 set -u
 BIN=$(realpath -m "$1"); ASSETS=$(realpath -m "$2"); OUT=$(realpath -m "$3"); XVFB=${4:-/tmp/xvfb-root/usr/bin/Xvfb}; D=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$D/../.." && pwd)
 export DISPLAY=${DISP:-:247}
+[ -e "/tmp/.X11-unix/X${DISPLAY#:}" ] && { echo "display $DISPLAY is in use (another rig?): set DISP to a free one"; exit 2; } # two rigs on one display click each other's windows
 PORT=${PORT:-$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')}
 R=$OUT/rig; rm -rf "$R"; mkdir -p "$R/home" "$R/run" "$R/agents" "$R/tmp" "$OUT/shots"; chmod 700 "$R/run"
 fails=0; pids=(); client=

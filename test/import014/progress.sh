@@ -9,6 +9,7 @@
 set -u
 BIN=$(realpath -m "$1"); ASSETS=$(realpath -m "$2"); OUT=$(realpath -m "$3"); XVFB=${4:-/tmp/xvfb-root/usr/bin/Xvfb}; D=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$D/../.." && pwd)
 export DISPLAY=${DISP:-:247}
+[ -e "/tmp/.X11-unix/X${DISPLAY#:}" ] && { echo "display $DISPLAY is in use (another rig?): set DISP to a free one"; exit 2; } # two rigs on one display click each other's windows
 P=${BIG_P:-50}; T=${BIG_T:-5000}; L=${BIG_L:-300000}; THROTTLE=${THROTTLE:-250}
 mkdir -p "$OUT/shots"; fails=0; pids=(); client=
 cleanup() { [ -n "$client" ] && kill "$client" 2>/dev/null; for f in "$OUT"/*/hub.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; done; kill "${pids[@]}" 2>/dev/null; }
