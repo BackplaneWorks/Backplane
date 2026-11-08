@@ -44,7 +44,7 @@ pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: Pat
 
 impl Plots {
     pub fn new(home: &std::path::Path) -> Arc<Plots> {
-        let bin = std::env::var_os("BACKPLANE_PLOT_BIN").map(PathBuf::from).unwrap_or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("backplane-serve"))).unwrap_or_else(|| "backplane-serve".into()));
+        let bin = std::env::var_os("BACKPLANE_PLOT_BIN").map(PathBuf::from).unwrap_or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(format!("backplane-serve{}", std::env::consts::EXE_SUFFIX)))).unwrap_or_else(|| "backplane-serve".into()));
         let dir = home.join("plot"); let _ = std::fs::create_dir_all(&dir);
         Arc::new(Plots { gen: Default::default(), st: Mutex::new(State::default()), bin, dir, home: home.to_path_buf(), readers: tokio::sync::Semaphore::new(READERS), solid: tokio::sync::Mutex::new(()) })
     }
