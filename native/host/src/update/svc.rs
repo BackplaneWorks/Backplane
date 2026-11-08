@@ -35,14 +35,22 @@ fn curl(url: &str, out: &Path, max: u64) -> Result<(), String> {
     if o.status.success() { Ok(()) } else { Err(format!("could not reach the release feed (curl {})", o.status.code().unwrap_or(-1))) }
 }
 /// Listed and checked (`run::members_ok`) before anything is written, then unpacked owning nothing but what this hub owns.
+/// A zip (a Windows build, `run::stage` names it `archive.zip`) goes through Windows' own `tar.exe`, bsdtar, which reads zip and lists it the same way;
+/// Git's GNU tar, often first on PATH there, reads no zip.
 fn tar(a: &Path, d: &Path) -> Result<(), String> {
+    let zip = a.extension().is_some_and(|e| e == "zip");
+    let prog = tar_program(zip); let z = if zip { "" } else { "z" };
     let list = |flag: &str| -> Result<String, String> {
-        let o = proc::std_cmd(Kind::Local, "tar").arg(flag).arg(a).env("LC_ALL", "C").output().map_err(|e| format!("tar: {e}"))?;
+        let o = proc::std_cmd(Kind::Local, &prog).arg(flag).arg(a).env("LC_ALL", "C").output().map_err(|e| format!("tar: {e}"))?;
         if o.status.success() { Ok(String::from_utf8_lossy(&o.stdout).into_owned()) } else { Err("the archive would not unpack".into()) }
     };
-    run::members_ok(&list("-tzf")?, &list("-tvzf")?)?;
-    let o = proc::std_cmd(Kind::Local, "tar").args(["--no-same-owner", "--no-same-permissions", "-xzf"]).arg(a).arg("-C").arg(d).output().map_err(|e| format!("tar: {e}"))?;
+    run::members_ok(&list(&format!("-t{z}f"))?, &list(&format!("-tv{z}f"))?)?;
+    let o = proc::std_cmd(Kind::Local, &prog).args(["--no-same-owner", "--no-same-permissions", &format!("-x{z}f")]).arg(a).arg("-C").arg(d).output().map_err(|e| format!("tar: {e}"))?;
     if o.status.success() { Ok(()) } else { Err("the archive would not unpack".into()) }
+}
+fn tar_program(zip: bool) -> std::ffi::OsString {
+    if cfg!(windows) && zip { if let Some(r) = std::env::var_os("SystemRoot") { return std::path::Path::new(&r).join("System32").join("tar.exe").into() } }
+    "tar".into()
 }
 /// `BAD`, the guard's list: id, tab, why.
 fn bad_lines(builds: &Path) -> Vec<(String, String)> {
@@ -210,6 +218,36 @@ mod tests {
         let hard = mk("hard.tgz", &["in/backplane-hub", "in/twin"]);
         for (a, why) in [(&up, "outside"), (&abs, "outside"), (&hard, "hard link")] { let e = tar(a, &out).unwrap_err(); assert!(e.contains(why), "{a:?}: {e}"); assert_eq!(fs::read_dir(&out).unwrap().count(), 0, "nothing written"); }
         tar(&good, &out).unwrap(); assert!(out.join("backplane-hub").is_file());
+        let _ = fs::remove_dir_all(&d);
+    }
+    /// A zip of stored members, written by hand so a test can make the names a real tool would not.
+    #[cfg(windows)] fn zip_of(members: &[(&str, &[u8])]) -> Vec<u8> {
+        let crc = |b: &[u8]| { let mut c = !0u32; for &x in b { c ^= x as u32; for _ in 0..8 { c = if c & 1 != 0 { (c >> 1) ^ 0xedb8_8320 } else { c >> 1 }; } } !c };
+        let (mut out, mut cd) = (vec![], vec![]);
+        for (name, body) in members {
+            let (off, c, n, l) = (out.len() as u32, crc(body), name.len() as u16, body.len() as u32);
+            for (buf, central) in [(&mut out, false), (&mut cd, true)] {
+                buf.extend_from_slice(if central { &[0x50, 0x4b, 1, 2, 20, 0] } else { &[0x50, 0x4b, 3, 4] });
+                buf.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]); for v in [c, l, l] { buf.extend_from_slice(&v.to_le_bytes()); }
+                buf.extend_from_slice(&n.to_le_bytes()); buf.extend_from_slice(&[0, 0]);
+                if central { buf.extend_from_slice(&[0; 10]); buf.extend_from_slice(&off.to_le_bytes()); }
+                buf.extend_from_slice(name.as_bytes()); if !central { buf.extend_from_slice(body); }
+            }
+        }
+        let (at, len, k) = (out.len() as u32, cd.len() as u32, members.len() as u16); out.extend(cd);
+        out.extend_from_slice(&[0x50, 0x4b, 5, 6, 0, 0, 0, 0]); for v in [k, k] { out.extend_from_slice(&v.to_le_bytes()); }
+        out.extend_from_slice(&len.to_le_bytes()); out.extend_from_slice(&at.to_le_bytes()); out.extend_from_slice(&[0, 0]); out
+    }
+    /// Windows' own tar.exe on a Windows build's zip: one that escapes is refused before a byte is written, a good one unpacks with its folders.
+    #[cfg(windows)] #[test] fn a_zip_is_listed_before_it_is_written() {
+        let d = std::env::temp_dir().join(format!("bp-upd-zip-{}", std::process::id())); let _ = fs::remove_dir_all(&d);
+        let out = d.join("out"); fs::create_dir_all(&out).unwrap();
+        let mk = |n: &str, m: &[(&str, &[u8])]| { let a = d.join(n); fs::write(&a, zip_of(m)).unwrap(); a };
+        let up = mk("up.zip", &[("backplane-hub.exe", b"MZ"), ("../evil", b"x")]);
+        let abs = mk("abs.zip", &[("C:/evil", b"x")]);
+        for (a, why) in [(&up, "outside"), (&abs, "outside")] { let e = tar(a, &out).unwrap_err(); assert!(e.contains(why), "{a:?}: {e}"); assert_eq!(fs::read_dir(&out).unwrap().count(), 0, "nothing written"); }
+        let good = mk("good.zip", &[("backplane-hub.exe", b"MZ"), ("assets/", b""), ("assets/a.txt", b"hi")]);
+        tar(&good, &out).unwrap(); assert_eq!(fs::read(out.join("backplane-hub.exe")).unwrap(), b"MZ"); assert_eq!(fs::read(out.join("assets/a.txt")).unwrap(), b"hi");
         let _ = fs::remove_dir_all(&d);
     }
 }
