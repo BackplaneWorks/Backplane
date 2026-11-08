@@ -51,10 +51,11 @@ object Pairing {
     fun codeLink(address: String, code: String): String? {
         val compact = code.replace(" ", "").replace("-", "").uppercase()
         if (!Regex("[A-Z2-9]{8}").matches(compact)) return null
-        val u = Uri.parse(if (address.contains("://")) address else "http://$address")
-        if (u.scheme !in setOf("http", "https") || u.host.isNullOrEmpty() || u.userInfo != null) return null
-        // (encodedFragment: fragment() would encode the "=", and invitation() would find no code)
-        return u.buildUpon().path("/pair").clearQuery().encodedFragment("code=$compact").build().toString()
+        // string rules (HubList.origin: http(s), a host, no user info), so PairingLinkTest runs it on the JVM; the "=" stays as it is
+        // (Uri.Builder's fragment() would write %3D, and invitation() would find no code)
+        val o = HubList.origin(if (address.contains("://")) address.trim() else "http://" + address.trim()) ?: return null
+        if (o.substringAfter("://").substringBefore(':').isEmpty()) return null
+        return "$o/pair#code=$compact"
     }
     fun message(error: String): String = when(error) {
         "wrong_code" -> "That code is not correct. Check it and try again."
