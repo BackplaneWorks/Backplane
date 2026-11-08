@@ -246,7 +246,6 @@ if want('F18'):
     xin('wheel', cx, cy, -12); pause(1.5); shot('f18-top')
     pos2 = {k: find('f18-top', c) for k, c in [('pop', (255, 136, 0)), ('dl', (204, 0, 204))]}
     if pos2['dl']:
-        click_ctl('rail:Browser'); pause(0.5)
         xin('click', *pos2['dl']); got = until(lambda: 'download-get' in names(), 30); pause(3)
         home = os.path.expanduser('~'); found = glob.glob(home + '/Downloads/f18-file*') + glob.glob(P('home') + '/**/f18-file*', recursive=True) + glob.glob(P('home') + '/**/*f18*download*', recursive=True)
         res.append(('download (known missing: a download the person starts is not kept in frame mode yet, Windows lane)' if not found else 'download', got and (bool(found) or True), 'the link was followed and the server sent an attachment (%s); files named f18-file* after it: %s' % (got, found or 'none found in ~/Downloads or the hub home')))
