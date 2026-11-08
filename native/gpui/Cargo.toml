@@ -9,6 +9,16 @@ default = []
 # Embedded Chromium (OSR) in the Browser tab; needs libcef.so at run time (see docs/browser-cef.md). Off: the hub-frame JPEG poller.
 cef = ["dep:cef"]
 
+[[bin]]
+name = "backplane-gpui"
+path = "src/main.rs"
+
+# macOS: the executable of CEF's helper bundles (viewers/cef.rs NEED_MACOS)
+[[bin]]
+name = "backplane-cef-helper"
+path = "src/bin/backplane-cef-helper.rs"
+required-features = ["cef"]
+
 [dependencies]
 cef = { version = "=154.5.0", default-features = false, optional = true }
 anyhow = "1"

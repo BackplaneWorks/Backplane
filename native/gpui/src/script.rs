@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String) }
@@ -54,6 +54,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if v["fit"].as_bool() == Some(true) { Some(Step::Fit) }
         else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
         else if v["cef"].is_object() { Some(Step::Cef(v["cef"].clone())) }
+        else if v["browser"].is_object() { Some(Step::Browser(v["browser"].clone())) }
         else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
         else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
         else if let Some(a) = v["zoom"].as_array() { Some(Step::Zoom(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_f64).unwrap_or(0.5) as f32)) }
@@ -266,6 +267,10 @@ impl Backplane {
                   match page { Some(p) => { let r = p.update(cx, |c, cx| c.script(&cmd, cx)); self.m("cef", r); } None => { let v = self.data["thread"]["viewer"].clone(); self.m("cef", json!({"ok": false, "error": "no embedded page", "have_page": self.screens.browser.is_some(), "viewer_open": v["open"], "viewer_keys": v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>())})) } } }
                 #[cfg(not(feature = "cef"))]
                 { let _ = cmd; self.m("cef", json!({"ok": false, "error": "built without the cef feature"})); }
+                self.pump(cx);
+            }
+            Step::Browser(cmd) => { // {"browser":{"op":...}}: the Browser tab's page, embedded or the hub's frames (viewers/browser.rs BrowserPage::script)
+                match self.screens.browser.as_ref().map(|(_, p)| p.clone()) { Some(p) => { let r = p.update(cx, |b, cx| b.script(&cmd, cx)); self.m("browser", r); } None => self.m("browser", json!({"ok": false, "error": "no Browser page", "op": cmd["op"]})) }
                 self.pump(cx);
             }
             Step::Mark(name) => { self.m("mark", json!({"name": name})); self.pump(cx); }
