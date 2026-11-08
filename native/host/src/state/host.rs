@@ -164,6 +164,10 @@ static POLICIES: OnceLock<Arc<Policies>> = OnceLock::new();
 /// `refold_end` after its last folds the whole log again, as a start does. True from begin when this call owns the fold.
 static FOLDS: std::sync::Mutex<Vec<(std::path::PathBuf, std::sync::Weak<Policy>)>> = std::sync::Mutex::new(Vec::new());
 fn policy_of(hub: &Hub) -> Option<Arc<Policy>> { FOLDS.lock().unwrap().iter().find(|(h, _)| h == &hub.cfg.home).and_then(|(_, w)| w.upgrade()) }
+/// Lines the 0.14 import wrote, into the policies' state (the views read it), with nothing derived: `Policy::fold_quiet`.
+pub fn fold_quiet(hub: &Hub, first_seq: u64, events: Vec<serde_json::Value>) { if let Some(p) = policy_of(hub) { p.fold_quiet(first_seq, events) } }
+/// Whether the policies' start fold is over (an import that begins by itself waits for it).
+pub fn booted(hub: &Hub) -> bool { policy_of(hub).map_or(true, |p| p.with_state(|_| ()).is_some()) }
 pub fn refold_begin(hub: &Hub) -> bool { policy_of(hub).map_or(false, |p| p.begin_refold()) }
 pub fn refold_end(hub: &Arc<Hub>, owned: bool) { if !owned { return } if let Some(p) = policy_of(hub) { tokio::spawn(boot_task(p, hub.clone(), crate::guard::Folding::begin())); } }
 /// The policies, once `start` has run: for actors that cannot be handed them (agents: `Policies::line` per provider line, `read` on a view open)

@@ -213,7 +213,7 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     let (h, imp) = (r.hub.clone(), r.imp.clone());
     let run = tokio::spawn(async move { imp.run(&h, false).await });
     let t0 = std::time::Instant::now(); let (mut last, mut last_at, mut gaps, mut seen_running, mut slow) = (String::new(), t0, vec![], 0, vec![]);
-    let (mut health_ok, mut phases) = (0, std::collections::BTreeSet::new());
+    let (mut health_ok, mut phases, mut frozen) = (0, std::collections::BTreeSet::new(), 0);
     while !run.is_finished() {
         let now = r.hub.info_now()[INFO].as_str().unwrap_or("").to_string();
         if now != last { let v: Value = serde_json::from_str(&now).unwrap_or(Value::Null);
@@ -224,6 +224,7 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
             let a = std::time::Instant::now(); let n = r.hub.model().await.threads.len(); let rd = a.elapsed();
             if w.as_millis() > 1000 || rd.as_millis() > 1000 { slow.push((w.as_millis(), rd.as_millis(), n)); }
             let (_, hz) = crate::guard::health(); if hz["migrating"]["state"] == "running" && hz["folding"].as_u64().unwrap_or(0) > 0 { health_ok += 1; }
+            if !crate::statehost::booted(&r.hub) { frozen += 1; } // the views read the policies' state: it must answer the whole time
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
@@ -234,6 +235,7 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     assert!(gaps.iter().skip(1).all(|g| *g <= 2000), "an update at least every 2 s: {gaps:?}");
     assert!(slow.is_empty(), "a write or a read took over a second mid-import: {slow:?}");
     assert!(health_ok > 0, "/healthz said migrating with a fold held");
+    assert_eq!(frozen, 0, "the views' state stopped answering during the import (the clients would freeze)");
     assert!(phases.contains("writing") && phases.contains("reading"), "{phases:?}");
     assert!(crate::import014::migrating().is_none() && crate::guard::health().1.get("migrating").is_none(), "nothing migrating once done");
     let c = &res["counts"]; assert_eq!((res["state"].as_str(), c["projects"].as_u64(), c["threads"].as_u64()), (Some("done"), Some(10 + 1), Some(500 + 3)), "the large part and the small fixture's own: {res}");
