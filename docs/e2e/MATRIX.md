@@ -220,6 +220,61 @@ Rig: GitHub `windows-latest` (Windows Server 2025, 10.0.26100), no GPU (the clie
 | Release | pass, dry run | windows-port-4 (cccfd3c63c) | windows-latest | release run 42410701648 (`v0.0.0-dryrun.win1`): `backplane-v0.0.0-dryrun.win1-windows-x64.zip` with the hub, client, guard and bp-sh in the signed manifest |
 | Cross-check | pass | 9551074a09 | this desktop | `scripts/windows-check.sh` (cargo check, x86_64-pc-windows-gnu, both crates) and `--build` (x86_64-pc-windows-gnullvm .exe files, not yet run on Windows) |
 
+### Windows Server 2022 VM (lane t1794109095-63)
+
+Rig: a Windows Server 2022 VM (10.0.20348, 4 vCPU, 16 GB, no GPU: the client draws on WARP, "Microsoft Basic Render Driver"), reached over the tailnet, with an autologon desktop session; jobs that open windows run there (`test/windows/rig/sess.sh`), screenshots by `shot.ps1`, input by SendInput. Builds are made on the Linux desktop (`scripts/windows-check.sh --xwin`: x86_64-pc-windows-msvc through cargo-xwin; the client in the `fast` profile with gpui's shaders compiled once on Windows, `scripts/windows-shaders.sh`) and copied over (`deploy.sh`), unless the row names a release zip. Stand-in agents only. A lane build's changes are on main as named; logs are on the VM under `C:\bp\runs`.
+
+| ID | Result | Commit | Rig | Evidence |
+|---|---|---|---|---|
+| F01 | pass | 20a3fd50b5 (main 75f4c69894) | VM, temp homes | every driver below starts its hub on a temp home and waits for `/hello`; the installed hub answers it from the desktop over the tailnet (R01) |
+| F02 | pass | 20a3fd50b5 | VM, WARP, client area 1440x900 | `test/e2e/win-f-rows.py` seeds a project and three threads; every window row draws them (screenshots `C:\bp\runs\frows\shots`) |
+| F04 | pass, part: a turn streams; restart not driven | 50a05fb373 | VM | `linux-f-rows.mjs` (hub) F05: the Claude stand-in's turn ended and its echo was posted |
+| F05 | pass, part: Claude's stand-in | 50a05fb373 | VM | same; the other providers' stand-ins exit 1 in that run of the driver |
+| F06 | pass | 20a3fd50b5 (window), 50a05fb373 (hub) | VM, WARP | window: approval card Allow and Deny reach the agent, question card answered, plan card; hub: the same plus a question after a Stop |
+| F07 | pass | 20a3fd50b5 | VM, WARP | window: Stop in the thread header on a long turn, TurnChanged interrupted; Ctrl+. too (F16); hub: F07-held |
+| F08 | pass | 20a3fd50b5 | VM, WARP | window: Fork thread made a new thread; hub: fork and bring back |
+| F09 | pass | 20a3fd50b5 | VM, WARP | window: the Context panel changed once TurnUsage was logged; a draft survived killing and restarting the client |
+| F10 | pass, hub only | 50a05fb373 | VM | an agent's MCP `thread_list` answered |
+| F11 | pass, hub only | 50a05fb373 | VM | `thread.modes` model and `thread.effort` logged and passed to the stand-in |
+| F12 | pass, hub only | 50a05fb373 | VM, Git for Windows | two turns' checkpoints, revert to the first, commit and push to a bare remote, PR refused without a forge |
+| F13 | pass, hub only | 50a05fb373 | VM | a new thread named from its first line, then by the text model |
+| F14 | pass, part: the floating terminal | 20a3fd50b5 | VM, WARP, ConPTY | window: Ctrl+J opened Git's sh in the project folder; a command typed with real keys ran (the marker file exists); inline terminals not driven |
+| F15 | pass | 20a3fd50b5 (window), 9d861edbf2 (hub cap) | VM, WARP | window: an image on the real clipboard as a bitmap only (no PNG format) pasted with Ctrl+V, stored as PNG, the agent told its path, shown in the thread; hub: /attach stores and announces; over the cap the client reads 413 `upload.cap` even after sending all of a 24 MB body (`an_oversized_upload_gets_its_413_after_sending_everything`, Windows CI run 42455589952) |
+| F16 | pass | 20a3fd50b5 | VM, WARP | window: 12 of 12 chords (palette, models, sidebar, files, diff, terminal, Ctrl+2, perf overlay, uberbot, new, stop, settle) |
+| F17 | pass, part: Mech through FreeCAD | 20a3fd50b5 (Board, Schematic, 3D), 4dbd5d2a29 (Mech) | VM, WARP | window: Board, Schematic and 3D drawn, zoom by wheel, pan and orbit by drag; hub: `mech.render` of a STEP through FreeCAD 1.1.4 found by the hub, four views written |
+| F19 | pass, hub only | 50a05fb373 | VM | a bot created and its turn answered on the stand-in |
+| F20 | pass, hub only | 50a05fb373 | VM | /files/get with Content-Disposition, /files/zip, a path outside refused, no token 401 |
+| F21 | pass | 20a3fd50b5 (window), 50a05fb373 (hub) | VM, WARP | window: hub stopped and started on the same home, the status line changed, a message after reconnecting reached the new hub; hub: outbox retry, 150 messages across a restart, resume from since |
+| F22 | pass | 20a3fd50b5 | VM, WARP | window and hub: the files card opened with nothing uploaded, Send uploaded to a stand-in order server, the quote card set; no pay or buy request |
+| Onboarding | pass | 6ccdd3b7f9 (main 75f4c69894) | VM, WARP, installed from the zip | first run "Where should Backplane keep your data?" then all 27 steps to `onboard.done` (Enter; the steps that need an action recorded as skipped); fixed on the way: the Installed step's wording |
+| C01 | pass | 6ccdd3b7f9 and release zip v0.14.93 (dry run 42451126435) | VM, WARP | the zip with a downloaded file's mark, extracted by the shell, started as a double-click: SmartScreen "Windows protected your PC" (More info: App backplane-gpui.exe, Publisher Unknown publisher; Run anyway), then "Install Backplane to ...\AppData\Local\Backplane?" Install: builds\<tag>, CURRENT, the guard, a Start-menu entry; the client relaunched from there and its hub ran under the guard |
+| C02 | pass | 43f85b7cb7 (main 079287572b) | VM | `cad-rows.mjs`: the hub's `kicad.install` installed Backplane KiCad 10.99.0-bp.6 (%LOCALAPPDATA%\Backplane\kicad); Settings > CAD path accepted and named exactly; ERC and DRC run (43 and 27 warnings); release exports gerbers, BOM, CPL, board and schematic PDFs and STEP |
+| C03 | pass, part: no agent's FreeCAD script | 4dbd5d2a29 (main 079287572b) | VM | FreeCAD 1.1.4 by its own installer (checksum checked); the hub finds it in Program Files (CAD page row); a STEP rendered through it (F17) |
+| R01 | pass | release v0.14.95 (dry run 42451310963) installed; guard CLI from the desktop | VM ↔ desktop, tailnet | `backplane hub restart --now --url http://<vm>:3800 --token-file ...` from the desktop: the guard answered, the hub process was replaced, /hello 200 after |
+| R02 | pass | v0.14.93 -> v0.14.95 (dry runs 42451126435, 42451310963) | VM, feed on loopback (`BACKPLANE_UPDATE_FEED`), release key | `test/update/win-r.ps1`: update now; v0.14.95 fetched, sha256 and signature checked, unpacked by Windows' tar.exe, run on probation and proven (guard: stable, good v0.14.95); the bad v0.14.94 skipped |
+| R03 | pass | v0.14.94 (dry run 42451128208, its hub panics) | same | v0.14.94 fetched and tried, exit 101, back on v0.14.93, `BAD: v0.14.94 exit 101`, the hub says "v0.14.94 failed its health check, so this build stayed" |
+| S01 | pass | e40c200a1b (main 079287572b) | VM | `s-effects.mjs`: theme and thread-list view the hub sends; settings walk |
+| S02 | pass | e40c200a1b | VM | `files.max.mb`: a 200 MB upload refused at 128, taken at 512; walk |
+| S03 | pass | e40c200a1b | VM | model, provider and thinking chips reach the stand-in's argv; walk |
+| S04 | persists, effect not proven | 9d861edbf2 | VM | settings walk: applied, lit after a hub restart |
+| S05 | pass | e40c200a1b | VM | `kicad.ipc` changes the agent's prompt; the CAD page names KiCad and FreeCAD (C02, C03) |
+| S06 | pass | e40c200a1b | VM | `order.enabled` changes the agent's prompt (18924 vs 12343 characters); fixed on the way: Claude's prompt was cut at 8186 characters on Windows, now passed in a file |
+| S07 | persists, effect not proven | 9d861edbf2 | VM | settings walk; devices pair and revoke (Pairing below) |
+| S08 | pass | e40c200a1b | VM | `update.check` follows the channel |
+| S09 | persists, effect not proven | 9d861edbf2 with release v0.14.95's backplane-voice.exe | VM | settings walk: the voice chips applied and lit after a restart |
+| S10 | pass | e40c200a1b | VM | an API key added, listed, named in the agent's prompt without its value, forgotten |
+| S11 | pass | e40c200a1b | VM | a time zone set: times shown in Pacific/Auckland (18:29 against 05:29 UTC); fixed on the way: every zone was UTC on Windows (a built-in zone table, Windows' own zone mapped to IANA) |
+| S12 | persists, effect not proven | 9d861edbf2 | VM | settings walk |
+| S13 | pass | e40c200a1b | VM | data/1 hello version and the About page agree |
+| S14 | persists, effect not proven | 9d861edbf2 | VM | settings walk: `telemetry.share` |
+| Settings walk | pass | 9d861edbf2 | VM | `settings-walk.mjs`: 89 controls, 89 applied, 0 lost across a hub restart |
+| Pairing | pass (17/17) | 98eb84fa57 client; the pairing lane's hubs | Linux hub ↔ Windows client, tailnet | `test/e2e/pairing/gpui.sh` on the VM with `LAUNCH=test/windows/rig/gpui-start.sh`: link, short code, wrong and used codes, revoked code, backplane:// question and Cancel, revoke while connected, Re-pair, the saved token and hub list private (icacls: the user, SYSTEM and Administrators only; fixed on the way: they inherited Users when written outside %APPDATA%); expiry and hub restart not run (their commands run on the desktop); LAN not run: the VM has no LAN with the desktop |
+| Pairing | pass (16/17) | 9d861edbf2 client | macOS hub ↔ Windows client, tailnet | same driver before the ACL fix: the one fail was the then Unix-only mode check; LAN not run |
+| F18 | not run yet | | | the Browser tab on Windows is the hub's helper's frames (no embedded Chromium in a release) |
+| F23 | not run | | | the hub test is skipped on Windows: the stand-ins report Git sh's own pids |
+
+Windows bugs found here and fixed, each with a test where one fits: the client opened a console window (and the hub's children could); an image copied as a bitmap only pasted nothing; message images with Windows paths never showed; the hub looked for its helpers (browser, step2glb, voice, plot) without `.exe`; a Windows install had no guard (now it asks to install, and `--install` for scripts); `hub.lock` hid its port from other processes; time zones were all UTC; Claude's system prompt was cut at 8186 characters; a refused upload's 413 was lost to a reset; release exports could not find the snapshot (Git's sh paths); FreeCAD in Program Files was not found and a Windows path in `freecad.path` was not taken; two tests quoted Windows paths badly (main's Windows CI was red on them).
+
 ### Wine
 
 Label `wine`. Wine is not Windows; nothing here fills a Windows cell.
