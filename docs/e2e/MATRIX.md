@@ -266,6 +266,7 @@ Hub at 6faf730503 (built on this desktop; no sandbox), simulator on hs-mac-mini 
 | F07 (iOS) | pass | 6faf730503 | same | Stop (the send button while a turn runs) on a long turn: TurnChanged interrupted in the hub log |
 | F17 (iOS) | fail | 6faf730503 | same | Board, Schematic, 3D draw and move under a swipe. Mech passed in the last run (429220 lit pixels) but showed a black page in an earlier one: the iOS 3D lane found a race (a late 3D answer taken as Mech's, any model accepted); fix pending in t1794013338-118 |
 | F21 (iOS) | pass | 6faf730503 | same | the hub killed: the app says offline; started again on the same home: the app reconnects and a message sent afterwards reaches the new hub |
+| Android release | pass | bd185c2ad7 | GitHub Actions (release.yml dry run 42447251699); Pixel 9 52220DLAQ001FC | job `build android`: `dev.backplane.mobile` 0.0.0-dryrun.android3 (code 2026110804, label "Backplane"), APK and AAB signed CN=Backplane, O=Backplane, SHA-256 ef21acdb…906e (0.14.1's key, checked in the job and again here); publish needs it. The same build under `dev.backplane.mobile.rel` installed beside the person's own app, paired and passed `test/e2e/push/android.sh` 11/11, then was uninstalled; the person's `dev.backplane.mobile` (0.1.0, debug key) unchanged before and after |
 
 ### Pairing and remote operation
 
