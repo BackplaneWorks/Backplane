@@ -198,3 +198,55 @@ impl crate::api::FarMcp for Srv {
     let r = signed(&b, &a, &l, json!({"id":0,"m":"mcp.call","p":{"tool":"thread_send","from":"x~tb","args":{}}})).await; assert_eq!(r.code, 400, "{}", r.body);
     assert_eq!(srv.0.lock().unwrap().len(), 1);
 }
+
+/// The owner's viewer method: it pushes a frame to whoever asked (as the plots do), and answers.
+struct Viewer(Mutex<Vec<(String, u64)>>);
+impl RpcHandler for Viewer {
+    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info"] }
+    fn call<'a>(&'a self, h: &'a Arc<Hub>, w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            self.0.lock().unwrap().push((m.to_string(), w.client));
+            if m == "kicad.watch" && p["kind"] != "" { h.push(w.client, json!({"t":"plot","key":"0|/r|","none":"drawn on the owner"})); h.push_raw(w.client, vec![9, 8, 7]); }
+            vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":["0|/r|"],"root":p["root"],"on":p["on"]}})]
+        })
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn far_a_window_watches_a_project_of_another_machine_and_the_frames_it_draws_come_here() {
+    let (a, _fa) = side("va1", false, false).await; let (b, _fb) = side("vb1", false, false).await;
+    let v = Arc::new(Viewer(Default::default())); a.hub.register_rpc(v.clone());
+    let l = link(&a, &b, true).await;
+    let client = b.hub.fresh_client(); let mut ob = b.hub.attach(client);
+    let mut c = Conn { sent: vec![], client, gen: "t".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    // the watch names the machine; the reply is the owner's, and what the owner draws arrives as pushes to this window
+    let sent = b.hub.request(&mut c, &json!({"id": 5, "m": "kicad.watch", "p": {"kind":"board","root":"/r","path":"","tree":"","on": l}})).await;
+    assert!(sent.is_empty(), "the answer comes later: the connection never waits on another machine");
+    let (mut reply, mut plot, mut raw) = (None, None, None);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline && (reply.is_none() || plot.is_none() || raw.is_none()) {
+        match tokio::time::timeout(std::time::Duration::from_secs(3), ob.recv()).await {
+            Ok(Some(crate::hub::Out::Value(f))) => if f["t"] == "reply" { reply = Some(f) } else if f["t"] == "plot" { plot = Some(f) },
+            Ok(Some(crate::hub::Out::Raw(r))) => raw = Some(r), _ => {} }
+    }
+    let r = reply.expect("a reply"); assert_eq!((r["id"].clone(), r["ok"].clone(), r["result"]["root"].clone()), (json!(5), json!(true), json!("/r")));
+    assert!(r["result"]["on"].is_null(), "the owner is not told to send it on: {r}");
+    assert_eq!(plot.expect("the owner's plot frame")["none"], "drawn on the owner"); assert_eq!(raw.expect("a binary frame as it was"), vec![9, 8, 7]);
+    // a read about a piece names only the plot's key: it goes where the watch is
+    let sent = b.hub.request(&mut c, &json!({"id": 6, "m": "kicad.info", "p": {"key":"0|/r|","at":1,"idx":2}})).await;
+    assert!(sent.is_empty(), "{sent:?}");
+    let got = loop { match tokio::time::timeout(std::time::Duration::from_secs(5), ob.recv()).await { Ok(Some(crate::hub::Out::Value(f))) if f["id"] == 6 => break f, Ok(Some(_)) => {}, _ => panic!("no answer to the read") } };
+    assert_eq!(got["ok"], true);
+    let seen = v.0.lock().unwrap().clone(); assert_eq!(seen.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["kicad.watch", "kicad.info"], "both ran on the owner");
+    assert_eq!(seen[0].1, seen[1].1, "for the same window of its own");
+    // the owner takes viewer reads only from its own machines, and only the viewers'
+    let bad = signed(&b, &a, &l, json!({"id":0,"m":"viewer.call","p":{"sub":1,"m":"turn.start","p":{}}})).await; assert_eq!(bad.code, 200);
+    assert_eq!(serde_json::from_str::<Value>(&bad.body).unwrap()["ok"], false, "{}", bad.body);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn far_a_drawing_an_agent_shows_is_shown_in_the_windows_of_the_other_machine() {
+    let (a, _fa) = side("va2", false, false).await; let (b, _fb) = side("vb2", false, false).await;
+    let l = link(&a, &b, true).await;
+    let client = b.hub.fresh_client(); let mut ob = b.hub.attach(client);
+    a.hub.far_announce("viewer.show", &json!({"thread": "t9", "path": "/r/x.kicad_pcb", "kind": "board"})).await;
+    let f = loop { match tokio::time::timeout(std::time::Duration::from_secs(5), ob.recv()).await { Ok(Some(crate::hub::Out::Value(f))) if f["t"] == "view" => break f, Ok(Some(_)) => {}, _ => panic!("nothing shown") } };
+    assert_eq!((f["thread"].clone(), f["kind"].clone(), f["path"].clone()), (json!(format!("{l}~t9")), json!("board"), json!("/r/x.kicad_pcb")), "the thread is the owner's, named through the link");
+}

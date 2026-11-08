@@ -336,6 +336,8 @@ impl Hub {
         r.mcp(&self.arc(), link, from, tool, args).await
     }
     /// The machines this hub may act on: (link id, name, address)
+    /// A thing every other machine of the owner's should hear (see `FarRouter::announce`).
+    pub async fn far_announce(self: &Arc<Self>, m: &str, p: &Value) { if let Some(r) = self.far_router.get().cloned() { r.announce(self, m, p).await } }
     pub fn far_machines(&self) -> Vec<(String, String, String)> { self.far_router.get().map(|r| r.machines()).unwrap_or_default() }
     /// The display-only states of the linked machines' mirrors (the sidebar); never the policy state.
     pub fn mirrors(&self) -> &crate::mirror::Mirrors { &self.mirrors }
@@ -505,7 +507,7 @@ impl Hub {
         // a copy of a log: git that writes and acting on the machine are told, not run (copy.rs)
         if crate::copy::rpc_refused(m) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::copy::GIT_TOLD})] }
         // a request naming a thing on a linked machine goes there (net lane: Far.rpc.go)
-        if routed { if let Some(r) = self.far_router.get().cloned() { let p = msg.get("p").unwrap_or(&Value::Null); if r.wants(m, p) { return r.call(&self.arc(), c.client, &id, m, p).await } } }
+        if routed { if let Some(r) = self.far_router.get().cloned() { let p = msg.get("p").unwrap_or(&Value::Null); if r.wants_for(c.client, m, p) { return r.call(&self.arc(), c.client, &id, m, p).await } } }
         if m == "fab.look" {
             let reply = crate::settings::fab::reply(&self.arc(), &id, "fab.look", msg.get("p").unwrap_or(&Value::Null)).await; // settings/fab.rs: the project card
             // the hub's own read, applied to this view's held state by the policy on its next V (Fab.reply)

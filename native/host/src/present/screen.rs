@@ -153,7 +153,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         },
         // the viewer panel opened on a drawing (or closed): the watch, the project card's look, the boards (present/viewer.rs); other pages are not ported
         "view" => {
-            let Some(o)=super::viewer::view_action(st,hub,&session,value) else { return refused("action.view-unported") };
+            // a thread of another machine is drawn from that machine's mirror (its project folder is a folder over there); the watch it asks for goes there too
+            let vsel=text(&session,"sel").to_string();
+            let vst: &State=far.iter().map(|(_,f)|*f).find(|f|vsel.contains('~') && f.threads.contains_key(vsel.as_str())).unwrap_or(st);
+            let Some(o)=super::viewer::view_action(vst,hub,&session,value) else { return refused("action.view-unported") };
             crate::session::patch::merge(&mut session,&o.patch);
             cmds=[read_cmds.clone(),o.before].concat();
             crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds);
