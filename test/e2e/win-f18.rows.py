@@ -19,7 +19,7 @@ if want('F18'):
     open(os.path.join(pg, 'file.txt'), 'w').write('f18 download\n')
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(http.server.SimpleHTTPRequestHandler, directory=pg))
     threading.Thread(target=srv.serve_forever, daemon=True).start(); url = 'http://127.0.0.1:%d/index.html' % srv.server_address[1]
-    VIEW = (826, 172, 1367, 899)   # the frame below the browser's bar (1440x900 client area)
+    VIEW = (826, 143, 1367, 899)   # the frame below the browser's bar (1440x900 client area, no banner)
     def find(name, ok):   # the bounding box of the pixels `ok` likes in the frame of shot `name`
         im = px(name).crop(VIEW); w, h = im.size; d = im.load(); xs, ys = [], []
         for y in range(0, h, 2):
@@ -42,7 +42,7 @@ if want('F18'):
         return n
     res = []
     sel(1); click_ctl('rail:Browser'); pause(12); shot('b0-open')
-    xin('click', 1150, 151); pause(0.5); chord('ctrl a'); xin('type', url); xin('key', 'Return'); pause(8); shot('b1-page')
+    xin('click', 1150, 122); pause(0.5); chord('ctrl a'); xin('type', url); xin('key', 'Return'); pause(8); shot('b1-page')
     bb = find('b1-page', green); res.append(('page drawn (its button seen in the frame)', bool(bb)))
     if bb:
         xin('click', *centre(bb)); pause(4); shot('b2-clicked'); res.append(('a click on the button reached the page (it turned red)', bool(find('b2-clicked', red))))
@@ -50,7 +50,7 @@ if want('F18'):
     if tb:
         xin('click', *centre(tb)); pause(1); xin('type', 'hello windows'); pause(3); shot('b3-typed')
         res.append(('typing reached the field', differs(px('b2-clicked' if bb else 'b1-page'), px('b3-typed'), (tb[0] + 8, tb[1] + 8, tb[2] - 8, tb[3] - 8))))
-    else: res.append(('typing reached the field', False))
+    else: res.append(('typing reached the field', False)); shot('b3-typed')   # the next step compares with it
     for _ in range(6): xin('wheel', 1100, 600, -1)
     pause(3); shot('b4-scrolled'); res.append(('the wheel scrolled the page', differs(px('b3-typed'), px('b4-scrolled'), VIEW)))
     for _ in range(12): xin('wheel', 1100, 600, 1)
@@ -59,7 +59,7 @@ if want('F18'):
     if pb: xin('click', *centre(pb)); pause(6); shot('b6-popup')
     res.append(('the popup opened as a new tab (%d -> %d tabs)' % (n0, tab_count()), bool(pb) and tab_count() > n0))
     dl = os.path.join(P('fakehome'), 'Downloads', 'file.txt')
-    xin('click', 860, 117); pause(4); shot('b7-back')   # back to the page's own tab (the popup took the front)
+    xin('click', 860, 88); pause(4); shot('b7-back')   # back to the page's own tab (the popup took the front)
     db = find('b7-back', cyan)
     if db: xin('click', *centre(db)); until(lambda: os.path.exists(dl), 30); shot('b8-download')
     res.append(('the download landed in Downloads', os.path.exists(dl) and open(dl).read() == 'f18 download\n'))
