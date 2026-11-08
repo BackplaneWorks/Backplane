@@ -110,7 +110,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
  const r2=await c.rpc('thread.retitle',{thread:T});const t2=r2.result?.title;const a2=oneshots().at(-1)||'';
  await c.rpc('setting.set',{key:'text.provider',value:''});await c.rpc('setting.set',{key:'text.model',value:''});await sleep(500);
  const r3=await c.rpc('thread.retitle',{thread:T});const t3=r3.result?.title;const a3=oneshots().at(-1)||'';
- log('S04',r1.ok&&/--model", "sonnet"/.test(a1)&&t1==='Title from sonnet'&&r2.ok&&/^CODEX-ONESHOT exec/.test(a2)&&/^Codex title/.test(t2||'')&&r3.ok&&/--model", "haiku"/.test(a3),`Writing > model: with the writing model sonnet the title call ran \`claude -p --model sonnet\` and the title came back "${t1}"; Writing > provider codex: the call went to \`codex exec\` ("${t2}"); both cleared: the light default (\`--model haiku\`) again. The chips persist (settings walk); this is the effect`)}
+ log('S04',r1.ok&&/--model", "sonnet"/.test(a1)&&t1==='Title from sonnet'&&r2.ok&&/^CODEX-ONESHOT exec/.test(a2)&&/^Codex title/.test(t2||'')&&r3.ok&&/--model", "claude-haiku/.test(a3),`Writing > model: with the writing model sonnet the title call ran \`claude -p --model sonnet\` and the title came back "${t1}"; Writing > provider codex: the call went to \`codex exec\` ("${t2}"); both cleared: the light default (Haiku) again. The chips persist (settings walk); this is the effect`)}
 
 // F08 bring back, after a fork
 {const A=await mk('forkme');await c.rpc('turn.start',{thread:A,text:'zqshort fork source'});await finished(A);
