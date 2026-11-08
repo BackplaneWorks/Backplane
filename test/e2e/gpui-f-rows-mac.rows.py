@@ -283,22 +283,22 @@ if want('F18'):
     pause(1.0); shot('f18-scrolled')
     xin('wheel', cx, cy, -12); pause(1.5); shot('f18-top')
     # the popup first, the download after it, then one more click: input to the page after a download is a row of its own
-    for _t in range(3):
+    for _t in range(4):
         pp = fresh((255, 136, 0), 'f18-t-pop')
         if not pp: continue
-        xin('click', *pp)
-        if until(lambda: 'popup-click' in names(), 6): break
+        dy = [0, -12, -24, 12][_t]; xin('click', pp[0], pp[1] + dy)
+        if until(lambda: 'popup-click' in names(), 6): print('   F18: the popup button took the click at %+d px from the centre found on the frame (attempt %d)' % (dy, _t + 1), flush=True); break
         print('   F18: no popup click reported yet (attempt %d)' % (_t + 1), flush=True)
     ok = until(lambda: 'popup-loaded' in names(), 30); pause(2); shot('f18-popup')
     tabs = [json.loads(l.split('"browser_tabs":', 1)[1].rsplit('}', 1)[0]) for l in open(P('client.log'), errors='replace') if '"browser_tabs"' in l][-1:]
     res.append(('popup', ok and 'popup-has-opener' in names(), 'the popup button opened a page that loaded (%s) and had its opener (%s); the tab list the client got last: %s' % (ok, 'popup-has-opener' in names(), (tabs[0] if tabs else '')[:200])))
     pause(6)   # the popup closes itself after 4 s: the first tab is the view again
     pd = None
-    for _t in range(3):   # the view is the first tab again only after the popup closed: look, press, and press again until the page reports the click
+    for _t in range(4):   # the view is the first tab again only after the popup closed: look, press, and press again until the page reports the click
         pd = fresh((204, 0, 204), 'f18-t-dl')
         if not pd: pause(3); continue
-        xin('click', *pd)
-        if until(lambda: 'download-click' in names(), 6): break
+        dy = [0, -12, -24, 12][_t]; xin('click', pd[0], pd[1] + dy)   # a second and third press a little higher, a fourth lower: where the page takes the click tells whether the frame and the page disagree about the height
+        if until(lambda: 'download-click' in names(), 6): print('   F18: the download link took the click at %+d px from the centre found on the frame (attempt %d)' % (dy, _t + 1), flush=True); break
         print('   F18: no download click reported yet (attempt %d)' % (_t + 1), flush=True)
     if pd:
         got = until(lambda: 'download-get' in names(), 30); pause(3)
