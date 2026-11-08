@@ -11,8 +11,8 @@ Default builds do not have it; the Browser tab then shows the hub's JPEG frames 
   The binary links `libcef.so` dynamically with `RUNPATH=$ORIGIN` (the cef crate copies it beside the binary), so a `cef` build needs libcef next to it
   to start at all; the JPEG fallback applies when the runtime *directory* (paks, icudtl.dat) is missing or CEF refuses to start (a reason is logged `GPUI_LOG {"cef":…}`
   and said in the page). Do not put the runtime dir on `LD_LIBRARY_PATH`: it carries its own `libvulkan.so.1`, which breaks the GPU stack.
-- **Processes**: one engine per client process (`viewers/cef.rs`: multi-threaded message loop, `no_sandbox`, windowless). CEF's helper processes are this
-  same executable re-run with `--type=…`; `main()` calls `cef::subprocess()` first. Profile: `~/.cache/backplane/cef-gpui-profile` (`BACKPLANE_CEF_PROFILE`).
+- **Processes**: one engine per client process (`viewers/cef.rs`: `no_sandbox`, windowless; the per-platform details are in browser-gpui-cef.md). On Linux and
+  Windows CEF's helper processes are this same executable re-run with `--type=…`; `main()` calls `cef::subprocess()` first. Profile: `~/.cache/backplane/cef-gpui-profile` (`BACKPLANE_CEF_PROFILE`).
   `BACKPLANE_CEF_NO_GPU=1` disables GPU (needed on Xvfb).
 - **Page** (`viewers/cef_page.rs`): OSR frames (BGRA, 30 fps) become a gpui image; address bar (Enter, Ctrl+L, paste), back/forward/reload/stop, tabs, `+` new tab,
   popups (`window.open`, `target=_blank`) open as new tabs; mouse move/click/double-click/wheel, keys (+ copy/cut/paste/select-all/undo), text through gpui's
@@ -28,9 +28,9 @@ Default builds do not have it; the Browser tab then shows the hub's JPEG frames 
 
 Not done / known limits: remote JPEG frames for attached pages (`--jpeg-dir` screencast skips them, so web/phone viewers do not mirror the embedded page);
 the first click is not swallowed (it both takes over and reaches the page); no downloads/file dialogs/drag-and-drop; only `window.open` popups that CEF reports to
-`on_before_popup` become tabs (script popups lose their opener); X11 only; teach-mode recording is not wired to native clicks; GPU path untested (Xvfb software).
+`on_before_popup` become tabs (script popups lose their opener); teach-mode recording is not wired to native clicks; GPU path untested (Xvfb software).
 
 **Layout**: CEF reads `icudtl.dat`, the paks and the snapshot from the directory `libcef.so` was loaded from (the link's own directory, not its target's). A missing file is a
 failed CHECK inside `cef_initialize` that kills the process, so `Engine::start` links what is missing beside the executable from the runtime directory and refuses (the page
 says why) if it still is not all there. `test/cef/link_only_e2e.sh` runs the dev-build layout (only a link to libcef) and asserts the window survives opening the Browser tab.
-Platforms: CEF ships on Linux only; macOS and Windows builds use the hub's frame stream (see `release.yml`).
+Platforms: Linux, macOS and Windows (docs/browser-gpui-cef.md); the layout above is Linux's.
