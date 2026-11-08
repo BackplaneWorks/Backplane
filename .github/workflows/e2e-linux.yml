@@ -12,6 +12,10 @@ on:
       target:
         description: "linux-arm64 (ubuntu-22.04-arm) or linux-x64 (ubuntu-22.04)"
         default: "linux-arm64"
+      probe_only:
+        description: "only the display probe"
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -46,6 +50,7 @@ jobs:
           cp /tmp/xprobe-*.png . 2>/dev/null || true
           rm -rf pr
       - name: e2e-linux
+        if: ${{ !inputs.probe_only }}
         run: |
           set -o pipefail
           export E2E_SHORT=1 E2E_SLOW=1
