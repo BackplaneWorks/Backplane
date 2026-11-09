@@ -215,7 +215,7 @@ impl CefPage {
         if v["handback"].as_bool() == Some(true) { self.hand_back(cx); return json!({"ok": true}) }
         let (w, h, lit) = self.stats;
         let s = t.st.lock().unwrap();
-        json!({"ok": true, "url": s.url, "title": s.title, "loading": s.loading, "frame": [w, h], "non_white_samples": lit, "taken": self.taken, "paints": t.paints.load(std::sync::atomic::Ordering::Relaxed), "click_to_pixel_ms": self.lat_ms, "resize_to_frame_ms": t.resize_ms(), "view_x": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.x)), "view_y": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.y)), "tabs": self.tabs.len(), "cdp_port": self.port})
+        json!({"ok": true, "url": s.url, "title": s.title, "loading": s.loading, "frame": [w, h], "non_white_samples": lit, "taken": self.taken, "paints": t.paints.load(std::sync::atomic::Ordering::Relaxed), "click_to_pixel_ms": self.lat_ms, "resize_to_frame_ms": t.resize_ms(), "view_x": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.x)), "view_y": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.y)), "tabs": self.tabs.len(), "cdp_port": self.port, "pumped": cef::pumped()})
     }
     fn mouse(&mut self, e: &MouseDownEvent, b: u8, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus); self.bar_edit = false; self.take_over();
