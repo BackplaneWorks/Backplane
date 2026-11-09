@@ -359,6 +359,17 @@ impl Backplane {
                     .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), value.clone())); cx.notify(); })).into_any_element());
                 if settled_open { for t in project["settled"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", true, &mut ctl)); } if let Some(row) = pager_row(cx, format!("pg-s-{pid_thr}"), &project["settledPage"], light, &mut ctl) { rows.push(row); } }
             }
+            // the Archived shelf: under Settled, folded until opened (the hub's `arch:<project>` flag); a row's menu brings it back
+            let arch_n = project["archivedCount"].as_u64().unwrap_or_else(|| project["archived"].as_array().map_or(0, |a| a.len() as u64));
+            let arch_open = project["archOpen"].as_bool().unwrap_or(false);
+            if arch_n > 0 || arch_open {
+                let value = string(project, "value");
+                ctl.push(CtlEntry { id: format!("archived:{pid_set}"), label: format!("Archived ({arch_n})"), ctl: Ctl::Node("flag".into(), value.clone()) });
+                rows.push(with_rect(div().id(SharedString::from(format!("archived-{pid_set}"))), { let p = pid_set.clone(); move || format!("archived:{p}") }).flex().items_center().gap_1().pl(px(6.)).pr_3().h(px(26.)).text_size(px(11.)).text_color(c("faint")).cursor_pointer().hover(|s| s.bg(c("raise")))
+                    .child(div().w(px(16.)).flex_shrink_0().child(ic(light, if arch_open { "chevron-down" } else { "chevron-right" }, 14., "dim"))).child(format!("Archived ({arch_n})"))
+                    .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), value.clone())); cx.notify(); })).into_any_element());
+                if arch_open { for t in project["archived"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", true, &mut ctl)); } if let Some(row) = pager_row(cx, format!("pg-a-{pid_thr}"), &project["archivedPage"], light, &mut ctl) { rows.push(row); } }
+            }
         }
         // the Active view: threads that need the person first, then the settled ones folded under "Settled N"
         for t in self.data["active"].as_array().into_iter().flatten() {
@@ -773,7 +784,7 @@ impl Render for Backplane {
             // a 0.14 home coming across: over setup and everything else of the window
             .children(crate::screens::migrate::view(cx, light, &self.data["migrate"]))
             // the right-click menu of a sidebar row, over everything
-            .children(self.screens.ctx.clone().map(|m| crate::screens::ctxmenu::render(cx, light, &m)))
+            .children(self.screens.ctx.clone().map(|m| { for it in &m.items { ctl.push(CtlEntry { id: format!("ctx:{}", it.label), label: it.label.clone(), ctl: Ctl::Node(it.action.clone(), it.value.clone()) }); } crate::screens::ctxmenu::render(cx, light, &m) }))
             .children(crate::perf::on().then(|| crate::perf::overlay(light, &crate::keys::hint(&self.local, "perf"))))
             .into_any_element();
         self.controls = ctl;

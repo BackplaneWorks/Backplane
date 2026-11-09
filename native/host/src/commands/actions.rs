@@ -95,6 +95,12 @@ pub fn act(req: &Req) -> Option<ActOut> {
         }
         // a subthread to the top level of its project (thread.detach)
         "row-detach" => { if v.is_empty() { return None } a.rpc("thread.detach", json!({"thread": v})); a.set("@del", ""); a.set("@menu", ""); }
+        // a thread under another of its project (`<thread>|<parent>`, thread.reparent; the hub refuses a cycle or another project)
+        "row-reparent" => {
+            let Some((th, parent)) = v.split_once('|') else { return None };
+            if th.is_empty() || parent.is_empty() || th == parent { return None }
+            a.rpc("thread.reparent", json!({"thread": th, "parent": parent})); a.set("@del", ""); a.set("@menu", "");
+        }
         // the project's menu: Rename opens the same rename box a thread's does, on the project (rename-save sends project.rename)
         "proj-rename" => {
             if v.is_empty() { return None }
@@ -193,6 +199,8 @@ mod tests {
         assert_eq!(o.cmds[0]["text"].as_str().unwrap(), "{\"id\":3,\"m\":\"setting.set\",\"p\":{\"key\":\"project.color.p1\",\"value\":\"pink\"}}");
         assert!(run("look-set", "agent.provider=codex", &sess).is_none() && run("look-set", "project.icon.p1=skull", &sess).is_none(), "only the badge settings, only listed values");
         let o = run("row-detach", "t2", &sess).unwrap(); assert_eq!(o.cmds[0]["text"].as_str().unwrap(), "{\"id\":3,\"m\":\"thread.detach\",\"p\":{\"thread\":\"t2\"}}");
+        let o = run("row-reparent", "t2|t1", &sess).unwrap(); assert_eq!(o.cmds[0]["text"].as_str().unwrap(), "{\"id\":3,\"m\":\"thread.reparent\",\"p\":{\"thread\":\"t2\",\"parent\":\"t1\"}}");
+        assert!(run("row-reparent", "t2", &sess).is_none() && run("row-reparent", "t2|t2", &sess).is_none() && run("row-reparent", "|t1", &sess).is_none(), "a move needs a thread and another parent");
     }
     // Add project: open, type, go in, add; the add sends project.add with the path and arms the want for the first thread; close clears
     #[test] fn the_folder_picker_actions_set_the_text_and_add_sends_the_request() {

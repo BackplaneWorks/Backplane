@@ -143,6 +143,8 @@ fn thread_json(st: &State, o: &Opts, ix: &HashMap<String, u8>, r: &Row, shelf: u
         0 => vec![swipe("Settle", "row-settle", qid.clone(), "settle", vec![])],
         1 => vec![swipe("Unsettle", "row-unsettle", qid.clone(), "settle", vec![])],
         2 => vec![swipe("Wake", "row-snooze", format!("{qid}|off"), "settle", vec![])],
+        // an archived row (the Archived shelf) brings itself back
+        3 if t.archived => vec![swipe("Unarchive", "row-unarchive", qid.clone(), "settle", vec![])],
         _ => vec![],
     };
     let snooze = vec![json!({"label": "1 hour", "value": format!("{qid}|1h")}), json!({"label": "Tomorrow", "value": format!("{qid}|tomorrow")}), json!({"label": "1 week", "value": format!("{qid}|1w")})];
@@ -361,6 +363,8 @@ impl Plan<'_> {
             let mut rows=if enabled || narrow { tree_rows(st,roots,o.selected,&self.kids_by) }else{vec![]};
             if narrow { rows.retain(|r|r.id==o.selected || self.tree_hit(r.id)); }
             if narrow && !rows.is_empty() { match kind { "settled"=>project["open"]=json!(true), "archived"=>project["archOpen"]=json!(true), _=>{} } }
+            // a search counts what it found on a folded shelf, not the whole shelf
+            if narrow { let n=rows.iter().filter(|r|r.depth==0).count(); match kind { "settled"=>{ project["settledCount"]=json!(n); project["shelf"]=json!(format!("Settled {n}")); }, "archived"=>project["archivedCount"]=json!(n), _=>{} } }
             let ids: Vec<&str>=rows.iter().map(|r|r.id).collect();
             let (indices,pager)=choose(kind,&ids);
             let values: Vec<Value>=indices.into_iter().filter_map(|i|rows.get(i)).map(|r| {
@@ -542,6 +546,22 @@ mod tests {
         let s = fold(&[PC, &tc("a", 11), &tc("b", 12), &tc("c", 13), r#"{"$":"ThreadOrdered","id":"a","section":"active","key":"8","at":14}"#, r#"{"$":"ThreadOrdered","id":"b","section":"active","key":"4","at":15}"#]);
         let open = HashSet::new(); let v = projects(&s, &opts(&open, 100));
         let ids: Vec<&str> = v[0]["threads"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect(); assert_eq!(ids, ["h|b", "h|a", "h|c"]);
+    }
+    #[test] fn a_search_counts_only_what_it_found_on_the_folded_shelves() {
+        let mut s = fold(&[PC, &tc("a", 11), &tc("b", 12), &tc("c", 13), r#"{"$":"ThreadSettled","id":"b","manual":true,"at":14}"#, r#"{"$":"ThreadArchived","id":"c","archived":true,"at":15}"#]);
+        s.threads.get_mut("a").unwrap().title = "Footprint review".into();
+        let open = HashSet::new(); let o = Opts { hub: "h", now: 100, selected: "", open: &open, older_open: false, query: "footprint" };
+        let plan = plan(&s, &o); let p = plan.project("p1", &mut |_, ids| ((0..ids.len()).collect(), Value::Null)).unwrap();
+        assert_eq!((p["threads"].as_array().unwrap().len(), p["settledCount"].as_u64(), p["archivedCount"].as_u64()), (1, Some(0), Some(0)));
+        let o2 = Opts { query: "", ..o }; let plan = super::plan(&s, &o2); let p = plan.project("p1", &mut |_, ids| ((0..ids.len()).collect(), Value::Null)).unwrap();
+        assert_eq!((p["settledCount"].as_u64(), p["archivedCount"].as_u64()), (Some(1), Some(1)), "no search: the whole shelves");
+    }
+    #[test] fn an_archived_row_says_so_and_offers_to_come_back() {
+        let s = fold(&[PC, &tc("a", 11), &tc("b", 12), r#"{"$":"ThreadArchived","id":"a","archived":true,"at":13}"#]);
+        let mut open = HashSet::new(); open.insert("arch:p1".to_string()); let v = projects(&s, &opts(&open, 100));
+        let arch = v[0]["archived"].as_array().unwrap(); assert_eq!(arch.len(), 1);
+        assert_eq!((arch[0]["lead"][0]["action"].as_str(), arch[0]["lead"][0]["value"].as_str()), (Some("row-unarchive"), Some("h|a")));
+        let live = &v[0]["threads"][0]; assert_eq!((live["id"].as_str(), live["lead"][0]["action"].as_str()), (Some("h|b"), Some("row-settle")));
     }
     #[test] fn a_child_thread_hangs_under_its_parent_when_the_parent_is_open() {
         let s = fold(&[PC, &tc("a", 11), &tc("b", 12), r#"{"$":"SettingSet","key":"thread.parent.b","value":"a","at":13}"#, r#"{"$":"SettingSet","key":"thread.tree.a","value":"1","at":14}"#]);
