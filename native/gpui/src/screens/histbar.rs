@@ -18,6 +18,8 @@ pub struct Step { pub c: String, pub p: String, pub t: u64, pub old: String, pub
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Steps { pub git: String, pub top: String, pub pcb: String, pub sch: String, pub file: String, pub kind: String, pub live: String, pub note: String, pub steps: Vec<Step> }
 pub fn steps_of(v: &Value) -> Option<Steps> {
+    // the hub refused (a far machine's hub that has no history.steps, a thread gone): the bar says so instead of loading for ever
+    if v.is_null() { return Some(Steps { live: "Live".into(), note: "The design history could not be read here.".into(), ..Steps::default() }) }
     if !v.is_object() { return None }
     let g = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let (git, top, file) = (g("git"), g("top"), g("file"));
@@ -106,7 +108,8 @@ pub fn set(app: &mut Backplane, c: Option<Cmp>) {
     let bits = crate::viewers::layers::bits(&app.data["thread"]["viewer"]);
     let c = c.map(|c| Cmp { bits, ..c });
     let path = match &c { Some(c) => shown(c), None => if kind == "board" { String::new() } else { own } };
-    app.screens.plotview.compare = c; app.screens.plotview.menu = 0; app.screens.plotview.view = None;
+    // (the camera stays: versions of one file share its family, so the canvas keeps its view from step to step, as 0.14's merged scene did)
+    app.screens.plotview.compare = c; app.screens.plotview.menu = 0;
     if app.screens.plotview.compare.is_none() { app.screens.plotview.hist.at = None; app.screens.plotview.hist.playing = false; }
     watch(app, &path);
 }
@@ -289,6 +292,15 @@ pub fn resolved(app: &mut Backplane, r: &Value, cx: &mut Context<Backplane>) {
     pick(app, if v["side"] == "b" { 1 } else { 0 }, path, name.to_string());
 }
 
+/// Whether the frame on hand and the one asked for are both the viewer's file (`key`) or a version or comparison of it, so the one on hand
+/// may stay on the canvas while the other loads (never another file's or another project's).
+pub fn same_file(key: &str, have: &str, want: &str) -> bool {
+    let of = |k: &str| k.strip_prefix(key).is_some_and(|r| r.is_empty() || r.starts_with("git\t") || r.starts_with("diff\n"));
+    !key.is_empty() && of(have) && of(want)
+}
+/// Escape shuts the compare menu first (0.14's scrim took it).
+pub fn escape(app: &mut Backplane) -> bool { if app.screens.plotview.menu == 0 { return false } app.screens.plotview.menu = 0; true }
+
 /// The menu's rows of versions: (label, what it is, what a press does).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Pick { Step(usize), Commit(String, String), /** the working copy */ Live }
@@ -444,7 +456,7 @@ mod tests {
                       {"c": "b2", "p": "a1", "t": 9, "old": "OLD2", "new": "NEW2", "label": "Step 2", "tip": "Step 2 · 14:09", "title": "Step 2 of 2", "detail": "Saved 14:09 · After Edit", "entry": "tu1", "id": "step:b2"}]})).unwrap();
         assert_eq!((s.steps.len(), s.steps[1].old.as_str(), s.steps[1].new.as_str(), s.live.as_str()), (2, "OLD2", "NEW2", "Live · 1 of 2 changes"));
         assert_eq!(s.steps[0].title, "Step 1 of 2 · before the agent's edits"); assert_eq!(s.steps[1].entry, "tu1");
-        assert!(steps_of(&Value::Null).is_none());
+        assert_eq!(steps_of(&Value::Null).map(|s| (s.steps.len(), s.note)), Some((0, "The design history could not be read here.".to_string())), "a refusal is said, not loaded for ever"); assert!(steps_of(&json!("x")).is_none());
         let old = steps_of(&json!({"git": "/p/.git", "top": "/p", "pcb": "/p/b.kicad_pcb", "file": "/p/b.kicad_pcb", "steps": [{"c": "a1", "p": "", "t": 5}, {"c": "b2", "p": "a1", "t": 9}]})).unwrap();
         assert_eq!(old.steps[1].new, "git\t/p/.git\tb2\t2\t/p/b.kicad_pcb"); assert_eq!(old.steps[1].old, "git\t/p/.git\ta1\t2\t/p/b.kicad_pcb"); assert_eq!(old.steps[0].old, "");
         assert_eq!((old.steps[1].label.as_str(), old.live.as_str()), ("Step 2", "Live · 2 steps"));
@@ -463,6 +475,12 @@ mod tests {
         let h = Steps { steps: vec![Step { new: "N1".into(), ..Step::default() }, Step { old: "N1".into(), new: "N2".into(), ..Step::default() }, Step { old: "N2".into(), new: "N3".into(), ..Step::default() }], ..Steps::default() };
         assert_eq!(near(&h, 1, 1, 0), ("N1".to_string(), "diff\nN2\nN3".to_string()), "a first step has no old: it shows as it is");
         assert_eq!(near(&h, 0, 2, 0), (String::new(), "N2".to_string())); assert_eq!(near(&h, 2, 1, 8), ("diff\nN1\nN2\n8".to_string(), String::new()));
+    }
+    #[test] fn a_version_of_the_file_on_show_stays_while_the_next_loads() {
+        let k = "0|/p|";
+        assert!(same_file(k, "0|/p|", "0|/p|git\t/p/.git\tc1\t2\t/p/b.kicad_pcb")); assert!(same_file(k, "0|/p|diff\nA\nB", "0|/p|"));
+        assert!(!same_file(k, "0|/p|/p/other.kicad_pcb", "0|/p|"), "another board of the project is not kept"); assert!(!same_file(k, "0|/q|", "0|/p|"), "nor another project's");
+        assert!(!same_file("", "x", "y"));
     }
     #[test] fn the_arrows_go_as_0_14s_did() {
         assert_eq!(back(None, 3), Some(2), "from live, back is the newest step"); assert_eq!(back(Some(2), 3), Some(1)); assert_eq!(back(Some(0), 3), Some(0)); assert_eq!(back(None, 0), None);
