@@ -13,6 +13,19 @@ const CH: f32 = 7.3;
 const FRAME: f32 = 52.;
 /// What the composer's row spends on its other controls (Draw, the context chip, Attach, Dictate, Send and the gaps between).
 pub const OTHERS: f32 = 350.;
+/// The context chip's frame (padding, border, the gauge and its gap) and the part of OTHERS that is not the context chip ("ctx NN%" was counted in it).
+const TOK_FRAME: f32 = 46.;
+const FIXED: f32 = OTHERS - (TOK_FRAME + 7. * CH);
+/// The row's split between the one chip and the context chip: the context chip says tokens, cost and context (`tok`) while the chip's short form
+/// still fits beside it, else the context alone (`ctx`), so the chip never shows a word cut in half. Returns (the chip's px, the context chip's words).
+pub fn split(bar_w: f32, combo: &Value, tok: &str, ctx: &str) -> (f32, String) {
+    let words = |t: &str| TOK_FRAME + t.chars().count() as f32 * CH;
+    if bar_w <= 0. { return (0., if tok.is_empty() { ctx.to_string() } else { tok.to_string() }) }
+    let short = string(combo, "short");
+    let need = FRAME + short.chars().count() as f32 * CH;
+    let text = if !tok.is_empty() && (ctx.is_empty() || bar_w - FIXED - words(tok) >= need) { tok } else { ctx };
+    (bar_w - FIXED - words(text), text.to_string())
+}
 
 /// Chip.words: the longest of the hub's three forms (full, mid, short) that fits `avail` px; the full one while the width is not known yet (0).
 pub fn words(combo: &Value, avail: f32) -> String {
@@ -181,6 +194,15 @@ mod tests {
     use serde_json::json;
     fn combo() -> Value { json!({"full":"Opus 5.5 · auto · kellyhlord · 36% left","mid":"Opus 5.5 · kellyhlord · 36%","short":"Opus 5.5 · 36%","tone":"","tip":"kellyhlord@gmail.com (saved account)\nWeekly  36% left · resets Wed 11 Nov 17:00",
         "windows":[{"label":"Weekly","left":36,"tone":"","applies":true,"resets":"Wed 11 Nov 17:00"},{"label":"Fable weekly","left":100,"tone":"","applies":false,"resets":""}],"extra":"Extra usage $0.00 of $50.00 · off (out of credits)","note":""}) }
+    #[test] fn the_token_words_give_way_before_the_chip_cuts_a_word() {
+        let tok = "885k tok · $0.0915 · ctx 44%";
+        // a wide row: both say everything
+        let (avail, text) = split(1232., &combo(), tok, "ctx 44%"); assert_eq!(text, tok); assert_eq!(words(&combo(), avail), string(&combo(), "full"));
+        // the row beside an open viewer (532 px): the context alone, and the chip keeps a whole form
+        let (avail, text) = split(532., &combo(), tok, "ctx 44%"); assert_eq!(text, "ctx 44%"); assert!(FRAME + string(&combo(), "short").chars().count() as f32 * CH <= avail);
+        // nothing measured yet, or no context words: the hub's token words as they are
+        assert_eq!(split(0., &combo(), tok, "ctx 44%"), (0., tok.to_string())); assert_eq!(split(532., &combo(), tok, "").1, tok);
+    }
     #[test] fn the_chip_says_as_much_as_fits() {
         let c = combo();
         assert_eq!(words(&c, 0.), "Opus 5.5 · auto · kellyhlord · 36% left", "not measured yet: all of it");
