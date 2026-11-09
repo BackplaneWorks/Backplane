@@ -75,7 +75,7 @@ pub fn picker(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &Boa
             .when(!folder.is_empty(), |d| d.child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(10.)).text_color(c("dim")).child(folder))))
         .child(crate::art::icon("chevron-down", 12., c("dim")))
         .on_click(cx.listener(|this, _, window, cx| toggle(this, window, cx)));
-    let mut wrap = div().relative().flex_shrink().min_w_0().child(btn);
+    let mut wrap = div().relative().flex().flex_shrink().min_w_0().child(btn);
     if ui.open {
         let q = find_text(ui, cx);
         let rows = matching(&all, &q);

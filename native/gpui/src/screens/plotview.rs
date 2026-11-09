@@ -269,7 +269,8 @@ pub fn probe_one(app: &mut Backplane, slot: usize, key: &str, card: &super::plot
     if key.is_empty() { return }
     let get = |k: &str| card.rows.iter().find(|r| r.0 == k).map(|r| r.1.clone()).filter(|v| !v.is_empty());
     let tag: &'static str = ["probe0", "probe1", "probe2"][slot.min(2)];
-    for (name, value) in [("ref", get("ref")), ("net", get("net"))] {
+    // (a schematic pin names its part as `symbol`: the part is probed)
+    for (name, value) in [("ref", get("ref").or_else(|| get("symbol"))), ("net", get("net"))] {
         let Some(value) = value else { continue };
         if name == "net" && !key.starts_with("0|") { continue }
         let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": name, "value": value})), tag));
