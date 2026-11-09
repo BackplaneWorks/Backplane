@@ -140,7 +140,15 @@ object DataClient {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { scope.launch { lost(g, "closed") } }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 val st = response?.code ?: 0
-                scope.launch { if (g == gen && (st == 401 || st == 403)) needsRepair = true; lost(g, if (st == 0) (t.message ?: "offline") else "HTTP $st") }
+                // the words a person reads in Settings: not the socket's ("failed to connect to /192.168.77.2 (port 3871) from /10.0.2.16")
+                val why = when {
+                    st != 0 -> "The hub answered HTTP $st"
+                    t is java.net.ConnectException || t is java.net.NoRouteToHostException -> "Can't reach $hubName: is it running, and is this phone on its network (or tailnet)?"
+                    t is java.net.SocketTimeoutException -> "$hubName did not answer in time."
+                    t is java.net.UnknownHostException -> "$hubName: no such address on this network."
+                    else -> t.message ?: "offline"
+                }
+                scope.launch { if (g == gen && (st == 401 || st == 403)) needsRepair = true; lost(g, why) }
             }
         })
         watchdog = scope.launch { while (isActive) { delay(10_000); if (g != gen) return@launch; if (System.currentTimeMillis() - heard > 40_000) { lost(g, "silent"); return@launch } } }
