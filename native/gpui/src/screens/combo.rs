@@ -66,7 +66,7 @@ pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32
     div().id("model-chip").relative().cursor_pointer().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).hover(|s| s.bg(c("raise")))
         .text_size(px(12.)).font(crate::art::mono_font()).flex().items_center().gap_2()
         .child(canvas(move |b, _, _| at.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full()).child(crate::art::probe("modelchip"))
-        .child(super::picker::logo(&provider)).child(div().min_w_0().overflow_hidden().text_color(c(tone(combo))).child(text))
+        .child(super::picker::logo(&provider)).child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(c(tone(combo))).child(text))
         .when(!tipped.is_empty() && !menu_open, |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tipped.clone(), light)).into()))
         .on_click(cx.listener(|this, _, window, cx| this.combo_click(window, cx)))
 }
