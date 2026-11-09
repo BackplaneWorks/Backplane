@@ -7,7 +7,7 @@ use crate::{hub::Command, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Do { Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, Hub(String) }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
@@ -26,7 +26,9 @@ pub struct Palette { pub focus: bool, pub open: bool, pub input: Option<Entity<C
     /// "Search in thread": the thread (its raw id) the box searches, "" for the whole palette
     pub scope: String,
     /// what the hub found said (`thread.search`) for `hits_q`; the ask in flight is `asked` with its tag
-    pub hits: Vec<Item>, pub hits_q: String, asked: (u64, String), seq: u64 }
+    pub hits: Vec<Item>, pub hits_q: String, asked: (u64, String), seq: u64,
+    /// the threads whose title has every word, from the hub (the sidebar's rows are only its first page), for `hits_q`
+    pub titles: Vec<Item> }
 
 /// Ask tags of the palette's searches (above the project page's).
 pub const TAG: u64 = 1 << 49;
@@ -46,6 +48,10 @@ pub fn hit_items(result: &Value, hub_of: &dyn Fn(&str) -> String) -> Vec<Item> {
         Item { label: string(h, "text"), place, kind: if h["role"] == "user" { "you said" } else { "agent said" }, what: Do::Message(hub_of(&th), string(h, "msg")), row: Value::Null }
     }).collect()
 }
+/// The hub's title hits (`thread.search`'s `titles`) as thread items, with their project as the place.
+pub fn title_items(result: &Value, hub_of: &dyn Fn(&str) -> String) -> Vec<Item> {
+    result["titles"].as_array().into_iter().flatten().map(|t| Item { label: string(t, "title"), place: string(t, "project"), kind: "thread", what: Do::Thread(hub_of(&string(t, "thread"))), row: Value::Null }).collect()
+}
 /// The palette's answer (false: not the palette's tag).
 pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
     if tag < TAG { return false }
@@ -53,7 +59,7 @@ pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<
     if tag != p.asked.0 || reply["ok"] != true { return true }
     let data = this.data.clone();
     let hub_of = move |raw: &str| super::tools::qualify(&data, raw);
-    p.hits = hit_items(&reply["result"], &hub_of); p.hits_q = p.asked.1.clone();
+    p.hits = hit_items(&reply["result"], &hub_of); p.titles = title_items(&reply["result"], &hub_of); p.hits_q = p.asked.1.clone();
     cx.notify(); true
 }
 
@@ -125,9 +131,13 @@ pub fn found(all: Vec<Item>, q: &str, n: usize) -> Vec<Item> {
 
 /// What the box lists for this text: in a thread's search only what was said there; else the jumps and commands, then what was said.
 pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
-    let hits: Vec<Item> = if search_of(&p.q).as_deref() == Some(p.hits_q.as_str()) { p.hits.clone() } else { vec![] };
+    let answered = search_of(&p.q).as_deref() == Some(p.hits_q.as_str());
+    let hits: Vec<Item> = if answered { p.hits.clone() } else { vec![] };
     if !p.scope.is_empty() { return hits }
-    let mut v = found(items(data), &p.q, 10);
+    // the sidebar's rows, then the hub's title hits for threads it does not hold (settled, older pages)
+    let mut all = items(data);
+    if answered { let held: std::collections::HashSet<Do> = all.iter().map(|it| it.what.clone()).collect(); all.extend(p.titles.iter().filter(|t| !held.contains(&t.what)).cloned()); }
+    let mut v = found(all, &p.q, 10);
     let room = 14usize.saturating_sub(v.len());
     v.extend(hits.into_iter().take(room)); v
 }
@@ -172,7 +182,7 @@ impl Backplane {
         input.update(cx, |i, cx| { i.set(String::new(), cx); i.popup_open = true; i.set_placeholder("Jump to a thread, run a command or find what was said"); });
         self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.open = true; self.screens.palette.scope.clear();
         // what an earlier opening found is not this one's (a thread's search must never show another thread's hits)
-        self.screens.palette.hits.clear(); self.screens.palette.hits_q.clear(); self.screens.palette.asked = (0, String::new());
+        self.screens.palette.hits.clear(); self.screens.palette.titles.clear(); self.screens.palette.hits_q.clear(); self.screens.palette.asked = (0, String::new());
         self.screens.palette.focus = true; cx.notify();
     }
     pub(crate) fn palette_close(&mut self, cx: &mut Context<Self>) -> bool {
@@ -238,6 +248,15 @@ mod tests {
     fn data() -> Value { json!({"thread": {"tools": [{"label": "Pin", "action": "pin"}, {"label": "Delete", "action": "delete"}], "menu": []},
         "projects": [{"id": "h|p1", "title": "Demo", "threads": [{"id": "h|t1", "title": "Board layout review"}, {"id": "h|t2", "title": "Power budget"}], "settled": [{"id": "h|t3", "title": "Old notes"}]}]}) }
     #[test] fn a_prefix_beats_a_word_beats_letters_in_order() { assert_eq!((rank("Board layout", "boa"), rank("Board layout", "lay"), rank("Board layout", "blt"), rank("Board layout", "zz"), rank("x", "")), (3, 2, 1, 0, 1)); }
+    #[test] fn a_thread_the_sidebar_does_not_hold_is_found_by_its_title_from_the_hub() {
+        let res = json!({"hits": [], "titles": [{"thread": "t1", "title": "Board layout review", "project": "Demo"}, {"thread": "t9", "title": "Old board notes", "project": "Amp"}]});
+        let titles = title_items(&res, &|raw| format!("h|{raw}"));
+        let mut p = Palette { q: "board".into(), titles, hits_q: "board".into(), ..Default::default() };
+        let l = listed(&data(), &p);
+        assert_eq!(l.iter().filter(|i| i.what == Do::Thread("h|t1".into())).count(), 1, "a held row is listed once");
+        assert!(l.iter().any(|i| i.what == Do::Thread("h|t9".into()) && i.place == "Amp" && i.kind == "thread"), "{l:?}");
+        p.q = "boar".into(); assert!(!listed(&data(), &p).iter().any(|i| i.what == Do::Thread("h|t9".into())), "an answer for another text is not shown");
+    }
     #[test] fn an_old_scratch_chat_is_found_by_its_title() {
         let d = serde_json::json!({"conversationHistory": {"jump": [{"id": "h|s1", "title": "zebra scratch chat"}]}, "legacy": [{"id": "h|s2", "title": "live chat"}]});
         let found: Vec<_> = items(&d).into_iter().filter(|i| i.kind == "thread").collect();
