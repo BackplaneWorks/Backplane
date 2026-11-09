@@ -96,15 +96,46 @@ impl Carrier for Apns {
                 let line = json!({"type":f.push_type,"priority":f.priority,"collapse":f.collapse,"topic":d.bundle,"env":d.env,"payload":f.payload});
                 return match std::fs::write(Path::new(&dir).join(format!("{n:04}-{}.json", f.push_type)), line.to_string()) { Ok(_) => Sent::Ok, Err(e) => Sent::Later(e.to_string()) }
             }
-            let get = |k: &'static str| { let hub = hub.clone(); async move { hub.setting(k).await.unwrap_or_default() } };
-            let (key, kid, team) = (get("push.apns.key").await, get("push.apns.keyid").await, get("push.apns.team").await);
-            if key.is_empty() || kid.is_empty() || team.is_empty() || !Path::new(&key).is_file() {
-                if !self.told.swap(true, Ordering::SeqCst) { eprintln!("backplane: push: phones are registered but push.apns.key, push.apns.keyid and push.apns.team are not all set, or the key file is missing") }
+            let Some((key, kid, team, _)) = credentials(&hub).await else {
+                if !self.told.swap(true, Ordering::SeqCst) { eprintln!("backplane: push: phones are registered but push.apns.key, push.apns.keyid and push.apns.team are not all set (nor ~/.config/backplane/apns.env), or the key file is missing") }
                 return Sent::Later("APNs is not configured".into())
-            }
+            };
             let jwt = match self.jwt(&key, &kid, &team, now_ms() / 1000) { Ok(j) => j, Err(e) => return Sent::Later(e) };
             let (url, home, topic) = (format!("{}/3/device/{}", host(&d.env), d.token), hub.cfg.home.clone(), d.bundle.clone());
             match tokio::task::spawn_blocking(move || post(&home, &url, &jwt, &topic, &f)).await { Ok(Ok((code, body))) => outcome(&code, &body), Ok(Err(e)) => Sent::Later(e), Err(_) => Sent::Later("the delivery task failed".into()) }
         })
     }
+}
+
+/// Where the fallback is read: `BACKPLANE_APNS_ENV`, else `~/.config/backplane/apns.env` (the key file defaults to `apns/AuthKey_<key id>.p8` in the same folder).
+pub fn env_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("BACKPLANE_APNS_ENV").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".config/backplane/apns.env")))
+}
+/// `export NAME=value` lines (quotes allowed) as pairs; anything else is skipped.
+fn env_pairs(text: &str) -> Vec<(String, String)> {
+    text.lines().filter_map(|l| {
+        let l = l.trim().strip_prefix("export ").unwrap_or(l.trim()); if l.starts_with('#') { return None }
+        let (k, v) = l.split_once('=')?; Some((k.trim().to_string(), v.trim().trim_matches(|c| c == '"' || c == '\'').to_string()))
+    }).collect()
+}
+/// The three values push needs: each setting when it is set, else the env file's (`BACKPLANE_APNS_KEY_ID`, `BACKPLANE_APNS_TEAM_ID`, `BACKPLANE_APNS_PRIVATE_KEY_PATH`, else the
+/// key file beside it named for the key id). None unless all three are there and the key file exists. The last is where they came from; the values are never logged.
+pub fn resolve(set: (String, String, String), env: Option<(&str, &Path)>) -> Option<(String, String, String, &'static str)> {
+    let (mut key, mut kid, mut team) = set; let mut from = "settings";
+    if let Some((text, dir)) = env {
+        let pairs = env_pairs(text); let get = |k: &str| pairs.iter().find(|p| p.0 == k).map(|p| p.1.clone()).unwrap_or_default();
+        let used = key.is_empty() || kid.is_empty() || team.is_empty();
+        if kid.is_empty() { kid = get("BACKPLANE_APNS_KEY_ID") }
+        if team.is_empty() { team = get("BACKPLANE_APNS_TEAM_ID") }
+        if key.is_empty() { key = get("BACKPLANE_APNS_PRIVATE_KEY_PATH"); if key.is_empty() && !kid.is_empty() { key = dir.join("apns").join(format!("AuthKey_{kid}.p8")).to_string_lossy().into_owned() } }
+        if used { from = "apns.env" }
+    }
+    (!key.is_empty() && !kid.is_empty() && !team.is_empty() && Path::new(&key).is_file()).then_some((key, kid, team, from))
+}
+/// The hub's push credentials: its settings, then the env file.
+pub async fn credentials(hub: &Arc<Hub>) -> Option<(String, String, String, &'static str)> {
+    let get = |k: &'static str| { let hub = hub.clone(); async move { hub.setting(k).await.unwrap_or_default() } };
+    let set = (get("push.apns.key").await, get("push.apns.keyid").await, get("push.apns.team").await);
+    let env = env_path().and_then(|p| std::fs::read_to_string(&p).ok().map(|t| (t, p)));
+    resolve(set, env.as_ref().map(|(t, p)| (t.as_str(), p.parent().unwrap_or(Path::new(".")))))
 }

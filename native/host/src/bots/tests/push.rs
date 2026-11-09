@@ -417,3 +417,18 @@ async fn flip(s: &S, st: &mut crate::state::State, k: &str, v: &str) { press(s, 
     for e in [json!({"$":"RoutineSet","id":"r2","bot":ada,"name":"stretch","cron":"","prompt":"stretch","on":true,"at":past}), json!({"$":"RoutinePlan","id":"r2","once":past + 30,"tz":"person","kind":"remind","at":past})] { s.hub.commit(&e).await.unwrap(); }
     assert_eq!(s.bots.tick_at(past + 40).await, 1); assert_eq!(s.fake.wait(1).await[0]["aps"]["alert"]["body"], "stretch");
 }
+
+#[test] fn apns_credentials_come_from_the_settings_else_the_env_file_so_push_cannot_silently_be_off() {
+    let d = std::env::temp_dir().join(format!("bp-apns-env-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("apns")).unwrap();
+    std::fs::write(d.join("apns/AuthKey_KID1.p8"), "k").unwrap(); std::fs::write(d.join("own.p8"), "k").unwrap();
+    let env = "export BACKPLANE_APNS_TEAM_ID=TEAM1\nexport BACKPLANE_APNS_KEY_ID=\"KID1\"\n# c\nexport BACKPLANE_APNS_BUNDLE_ID=x.y\n";
+    let none = || (String::new(), String::new(), String::new());
+    assert_eq!(apns::resolve(none(), None), None, "nothing set, no file: off");
+    let r = apns::resolve(none(), Some((env, &d))).unwrap(); assert_eq!((r.1.as_str(), r.2.as_str(), r.3), ("KID1", "TEAM1", "apns.env"), "empty settings: the env file, the key beside it named for the key id");
+    assert!(r.0.ends_with("apns/AuthKey_KID1.p8"));
+    let own = d.join("own.p8").to_string_lossy().into_owned();
+    let r = apns::resolve((own.clone(), "K".into(), "T".into()), Some((env, &d))).unwrap(); assert_eq!((r.0, r.1, r.2, r.3), (own.clone(), "K".into(), "T".into(), "settings"), "settings win and the file is not used");
+    let env2 = format!("{env}export BACKPLANE_APNS_PRIVATE_KEY_PATH={own}\n"); assert_eq!(apns::resolve(none(), Some((&env2, &d))).unwrap().0, own, "the file's own key path");
+    assert_eq!(apns::resolve(none(), Some(("export BACKPLANE_APNS_KEY_ID=KID9\n", &d))), None, "a team missing, or a key file that is not there: off");
+    let _ = std::fs::remove_dir_all(&d);
+}

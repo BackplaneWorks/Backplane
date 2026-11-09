@@ -197,6 +197,8 @@ pub fn start_with(hub: &Arc<Hub>, bots: Arc<Bots>, carrier: Arc<dyn Carrier>) ->
     hub.register_observer(Arc::new(Watch(p.clone())));
     hub.register_rpc(Arc::new(PushRpc(p.clone())));
     hub.register_rpc(Arc::new(page::NotifyPage(bots.clone())));
+    // said once at start, so a hub that cannot push says so in its log (never the values)
+    { let hub = hub.clone(); tokio::spawn(async move { match apns::credentials(&hub).await { Some((.., from)) => eprintln!("backplane: push: APNs configured (from {from})"), None => eprintln!("backplane: push: APNs is not configured: set push.apns.key, push.apns.keyid and push.apns.team, or write ~/.config/backplane/apns.env") } }); }
     tokio::spawn(Worker { hub: hub.clone(), bots, carrier, book: Book::default() }.run(rx));
     p
 }
