@@ -458,6 +458,9 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
     };
     let done: Value = serde_json::from_str(i("kicad.install")).unwrap_or_default();
     let kicad = if done["state"] == "done" && !i("kicad.cli").is_empty() { format!("{kicad}. Installed by Backplane just now.") } else { kicad };
+    // a path set below that holds no KiCad is passed over for the next one found (kicad/ipc.rs `runtime`): say so, as FreeCAD's row does
+    let kset = set(st, "kicad.path", "").trim().trim_end_matches('/');
+    let kicad = if !kset.is_empty() && !i("kicad.cli").is_empty() && !i("kicad.cli").starts_with(kset) { format!("{kicad}. Nothing runs at {kset}, so this one is used.") } else { kicad };
     let path = if session["drafts"]["@f.kpath"].is_string() { draft(session, "@f.kpath") } else { set(st, "kicad.path", "") };
     let free = if i("freecad").is_empty() { if set(st, "freecad.path", "").is_empty() { "FreeCAD was not found. Mechanical parts are made with it.".to_string() } else { "FreeCAD was not found at that path.".to_string() } } else { i("freecad").to_string() };
     let fpath = if session["drafts"]["@f.fpath"].is_string() { draft(session, "@f.fpath") } else { set(st, "freecad.path", "") };
@@ -917,6 +920,14 @@ mod tests {
         let o = act("h", &json!({"rid": 4, "drafts": {}}), "kicad-install", "").unwrap(); assert!(o.cmds.is_empty(), "no consent without the ask");
         let o = act("h", &json!({"rid": 4, "drafts": {"@kinstall": "ask"}}), "kicad-install", "").unwrap();
         assert_eq!(o.cmds[0]["text"].as_str().unwrap(), r#"{"id":4,"m":"kicad.install","p":{"consent":true}}"#); assert_eq!(o.patch["drafts"]["@kinstall"], "");
+    }
+    #[test] fn a_kicad_path_that_holds_no_kicad_is_said_to_be_passed_over() {
+        let used = json!({"kicad.cli": "/usr/bin/kicad-cli", "kicad.version": "10.0.6"});
+        let bad = cad_with(&st(&[("kicad.path", "/nonexistent/kicad-cli")]), &json!({"drafts": {}}), &used, None);
+        assert_eq!(bad[0]["note"], "version 10.0.6 · /usr/bin/kicad-cli. Nothing runs at /nonexistent/kicad-cli, so this one is used.");
+        let folder = cad_with(&st(&[("kicad.path", "/opt/kicad/")]), &json!({"drafts": {}}), &json!({"kicad.cli": "/opt/kicad/bin/kicad-cli", "kicad.version": "9.0.1"}), None);
+        assert_eq!(folder[0]["note"], "version 9.0.1 · /opt/kicad/bin/kicad-cli", "a folder that holds the one used is fine");
+        assert_eq!(cad_with(&st(&[]), &json!({"drafts": {}}), &used, None)[0]["note"], "version 10.0.6 · /usr/bin/kicad-cli");
     }
     #[test] fn cad_sets_the_freecad_path_on_a_press() {
         let r = pg_rows("cad", &[], json!({}), json!({"kicad.cli": "/usr/bin/kicad-cli"}));
