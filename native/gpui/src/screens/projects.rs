@@ -201,10 +201,9 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
     if threads.is_empty() { out.push(div().text_color(c("dim")).child("No threads yet.").into_any_element()); }
     for t in threads {
         let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or(&id).to_string();
-        let dot = match t["state"].as_str().unwrap_or("") { "running" => c("accent"), "failed" => c("bad"), _ => c("ok") };
         ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
         out.push(div().id(SharedString::from(format!("page-thread-{raw}"))).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("raise")))
-            .child(div().w(px(6.)).h(px(6.)).rounded_full().bg(dot)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
+            .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
             .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx))).into_any_element());
     }
     out
