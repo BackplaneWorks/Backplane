@@ -109,6 +109,7 @@ struct DataThreadsView: View {
     @State private var badgeProject: DProject?
     @State private var projectTitle = ""
     @State private var shut = Set(UserDefaults.standard.stringArray(forKey: "data.projects.shut") ?? [])
+    @State private var treeOpen = Set(UserDefaults.standard.stringArray(forKey: "data.tree.open") ?? []) // parents whose subthreads show
     @State private var flash = ""   // the project a link just opened
 
     private var botThreads: Set<String> { Set(client.bots.map(\.thread)) }
@@ -210,9 +211,9 @@ struct DataThreadsView: View {
             ForEach(client.projects) { p in
                 projectHeader(p)
                 if !shut.contains(p.id) {
-                    let g = ThreadGroups.split(client.threads, project: p.id, hidden: botThreads)
+                    let g = ThreadGroups.splitNested(client.threads, project: p.id, hidden: botThreads)
                     let n = ThreadGroups.count(hub: p.settledCount, loaded: g.settled.count)
-                    ForEach(g.active) { threadRow($0) }
+                    ForEach(ThreadGroups.tree(g.active, all: g.all, open: treeOpen), id: \.t.id) { treeRow($0) }
                     if g.active.isEmpty && n == 0 { Text("No threads").dmono(12).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32).dataRow() }
                     if n > 0 {
                         let open = client.settledOpen.contains(p.id)
@@ -221,7 +222,7 @@ struct DataThreadsView: View {
                                 .foregroundStyle(BackplaneDesign.faint).padding(.leading, 30).frame(height: 32).contentShape(Rectangle())
                         }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.settled." + p.id)
                         if open {
-                            ForEach(g.settled) { threadRow($0) }
+                            ForEach(ThreadGroups.tree(g.settled, all: g.all, open: treeOpen), id: \.t.id) { treeRow($0) }
                             if client.settledMore[p.id] != nil {
                                 Button { Task { await client.loadSettled(p.id, more: true) } } label: { Text("More").dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
                                     .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.settled.more." + p.id)
@@ -289,8 +290,15 @@ struct DataThreadsView: View {
         .padding(.leading, 10).padding(.trailing, 2).background(flash == p.id ? BackplaneDesign.accent.opacity(0.18) : Color.clear).id("project." + p.id).dataRow()
         .contextMenu { if client.has("actions") { Button("Rename", systemImage: "pencil") { projectTitle = p.title; renamingProject = p }; Button("Badge", systemImage: "paintpalette") { badgeProject = p }; Button("Remove project", systemImage: "trash", role: .destructive) { projectMenu = p } } }
     }
-    private func threadRow(_ t: DThread) -> some View {
-        Button { path.append(t.id) } label: { DataThreadRow(thread: t) }
+    private func treeRow(_ r: ThreadGroups.Node<DThread>) -> some View {
+        threadRow(r.t, depth: r.depth, kids: r.kids)
+    }
+    private func threadRow(_ t: DThread, depth: Int = 0, kids: Int = 0) -> some View {
+        let on = treeOpen.contains(t.id)
+        return Button { path.append(t.id) } label: { DataThreadRow(thread: t, depth: depth, kids: kids, open: on) {
+            if on { treeOpen.remove(t.id) } else { treeOpen.insert(t.id) }
+            UserDefaults.standard.set(Array(treeOpen), forKey: "data.tree.open")
+        } }
             .buttonStyle(.plain).dataRow()
             .contextMenu { if client.has("actions") { DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting) } }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -342,9 +350,21 @@ struct DataConnectionBanner: View {
 
 struct DataThreadRow: View {
     let thread: DThread
+    var depth = 0, kids = 0, open = false
+    var toggle: () -> Void = {}
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            DDot(color: dStateColor(thread.state)).padding(.top, 6).frame(width: 14)
+            // a parent's chevron (left of its dot) shows or hides its subagents and subthreads; a child sits a step in
+            HStack(alignment: .top, spacing: 0) {
+                Group {
+                    if kids > 0 {
+                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint)
+                            .frame(width: 22, height: 22).contentShape(Rectangle()).highPriorityGesture(TapGesture().onEnded { toggle() })
+                            .accessibilityLabel(open ? "Hide its \(kids) subthreads" : "Show its \(kids) subthreads").accessibilityAddTraits(.isButton).accessibilityIdentifier("data.thread.kids." + thread.id)
+                    } else { Color.clear.frame(width: 22, height: 22) }
+                }.padding(.top, -2)
+                DStatusDot(thread: thread).padding(.top, 5).frame(width: 14)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if thread.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.accent) }
@@ -353,10 +373,11 @@ struct DataThreadRow: View {
                 if !thread.preview.isEmpty { Text(thread.preview.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1) }
             }
             Spacer(minLength: 0)
+            if kids > 0 && !open { Text("\(kids)").dmono(11).foregroundStyle(BackplaneDesign.faint) }
             if thread.waiting > 0 { Text("\(thread.waiting)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad) }
             Text(dAgo(thread.updatedAt)).dmono(11).foregroundStyle(BackplaneDesign.faint)
         }
-        .padding(.leading, 26).padding(.trailing, 12).padding(.vertical, 8).opacity(thread.settled ? 0.55 : 1).contentShape(Rectangle())
+        .padding(.leading, 4 + 16 * CGFloat(min(depth, 4))).padding(.trailing, 12).padding(.vertical, 8).opacity(thread.settled ? 0.55 : 1).contentShape(Rectangle())
     }
 }
 
@@ -648,7 +669,7 @@ struct DataThreadView: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 DHeading(text: "State")
-                if let t = thread { DDot(color: dStateColor(t.state)); Text(dStateWord(t.state)).dmono(11).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("data.thread.state") }
+                if let t = thread { DStatusDot(thread: t, size: 6); Text(dStatusWord(t)).dmono(11).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("data.thread.state") }
                 Spacer()
                 if let t = thread, client.has("actions") {
                     strip(t.pinned ? "Unpin" : "Pin", on: t.pinned) { Task { await client.threadAct(id, t.pinned ? "unpin" : "pin") } }

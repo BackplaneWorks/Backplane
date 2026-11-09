@@ -110,7 +110,7 @@ struct DProject: Codable, Equatable, Identifiable {
     }
 }
 
-struct DThread: Codable, Equatable, Identifiable, ShelvedThread {
+struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var id: String
     var project: String
     var title: String
@@ -129,12 +129,13 @@ struct DThread: Codable, Equatable, Identifiable, ShelvedThread {
     var waiting: Int
     var parent: String   // the thread it is a subthread of; "" at the top level
     var history: Bool    // an old Scratch chat (feature history): listed under Conversation history, never under a project
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history }
+    var status: String   // the sidebar dot's word (feature status): finished is the desktop's green dot (a turn done, not yet settled); "" from an older hub
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); settled = c.bool(.settled); settledAt = c.int(.settledAt); archived = c.bool(.archived)
-        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history)
+        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status)
     }
 }
 
