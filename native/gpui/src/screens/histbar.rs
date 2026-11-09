@@ -108,7 +108,8 @@ pub fn set(app: &mut Backplane, c: Option<Cmp>) {
     let bits = crate::viewers::layers::bits(&app.data["thread"]["viewer"]);
     let c = c.map(|c| Cmp { bits, ..c });
     let path = match &c { Some(c) => shown(c), None => if kind == "board" { String::new() } else { own } };
-    app.screens.plotview.compare = c; app.screens.plotview.menu = 0; app.screens.plotview.view = None;
+    // (the camera stays: versions of one file share its family, so the canvas keeps its view from step to step, as 0.14's merged scene did)
+    app.screens.plotview.compare = c; app.screens.plotview.menu = 0;
     if app.screens.plotview.compare.is_none() { app.screens.plotview.hist.at = None; app.screens.plotview.hist.playing = false; }
     watch(app, &path);
 }
@@ -291,6 +292,12 @@ pub fn resolved(app: &mut Backplane, r: &Value, cx: &mut Context<Backplane>) {
     pick(app, if v["side"] == "b" { 1 } else { 0 }, path, name.to_string());
 }
 
+/// Whether the frame on hand and the one asked for are both the viewer's file (`key`) or a version or comparison of it, so the one on hand
+/// may stay on the canvas while the other loads (never another file's or another project's).
+pub fn same_file(key: &str, have: &str, want: &str) -> bool {
+    let of = |k: &str| k.strip_prefix(key).is_some_and(|r| r.is_empty() || r.starts_with("git\t") || r.starts_with("diff\n"));
+    !key.is_empty() && of(have) && of(want)
+}
 /// Escape shuts the compare menu first (0.14's scrim took it).
 pub fn escape(app: &mut Backplane) -> bool { if app.screens.plotview.menu == 0 { return false } app.screens.plotview.menu = 0; true }
 
@@ -468,6 +475,12 @@ mod tests {
         let h = Steps { steps: vec![Step { new: "N1".into(), ..Step::default() }, Step { old: "N1".into(), new: "N2".into(), ..Step::default() }, Step { old: "N2".into(), new: "N3".into(), ..Step::default() }], ..Steps::default() };
         assert_eq!(near(&h, 1, 1, 0), ("N1".to_string(), "diff\nN2\nN3".to_string()), "a first step has no old: it shows as it is");
         assert_eq!(near(&h, 0, 2, 0), (String::new(), "N2".to_string())); assert_eq!(near(&h, 2, 1, 8), ("diff\nN1\nN2\n8".to_string(), String::new()));
+    }
+    #[test] fn a_version_of_the_file_on_show_stays_while_the_next_loads() {
+        let k = "0|/p|";
+        assert!(same_file(k, "0|/p|", "0|/p|git\t/p/.git\tc1\t2\t/p/b.kicad_pcb")); assert!(same_file(k, "0|/p|diff\nA\nB", "0|/p|"));
+        assert!(!same_file(k, "0|/p|/p/other.kicad_pcb", "0|/p|"), "another board of the project is not kept"); assert!(!same_file(k, "0|/q|", "0|/p|"), "nor another project's");
+        assert!(!same_file("", "x", "y"));
     }
     #[test] fn the_arrows_go_as_0_14s_did() {
         assert_eq!(back(None, 3), Some(2), "from live, back is the newest step"); assert_eq!(back(Some(2), 3), Some(1)); assert_eq!(back(Some(0), 3), Some(0)); assert_eq!(back(None, 0), None);
