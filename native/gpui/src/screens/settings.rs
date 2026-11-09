@@ -245,6 +245,9 @@ pub fn send_todo(this: &mut Backplane, cx: &mut Context<Backplane>) {
 }
 
 /// Enter in a typed field: a room's or a remote bot's post box sends, as on the window.
+/// What Enter in the masked box saves: the hub's packed Save of the open `thread.secretBox` (None when no box is open).
+pub fn secret_enter(data: &Value) -> Option<String> { Some(string(&data["thread"]["secretBox"], "save")).filter(|s| !s.is_empty()) }
+
 pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
     if name.starts_with("ob") && super::onboard::submit(this, name, cx) { return }
     match name { "rpost" => super::bots::send_post(this, "rpost", "room-post", cx), "rtext" => super::bots::send_post(this, "rtext", "remote-send", cx), "title" => { // Enter in the rename box saves, as its Rename button does (nothing for a blank title)
@@ -254,6 +257,8 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
         }
         // Enter in a settings field is its row's Save
         "whurl" | "whsec" | "tzname" => { flush_fields(this); let a = match name { "whurl" => "hook-url", "whsec" => "hook-secret", _ => "tz-set" }; let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); }
+        // Enter in the masked box (the name or the value) is its Save
+        "sname" | "sval" => if let Some(packed) = secret_enter(&this.data) { save_vault(this, &Btn { label: "Save".into(), action: "secret-save".into(), value: packed, on: true }, cx); },
         "todonew" => send_todo(this, cx),
         n if n.starts_with("todo.") => { flush_fields(this); let _ = this.tx.try_send(Command::Action("todo-text".into(), n[5..].to_string())); cx.notify(); }
         n => if let Some(a) = n.strip_prefix("sp.") { super::bots::send_space(this, a, cx) } }
@@ -467,6 +472,10 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn enter_in_the_masked_box_is_its_save() {
+        assert_eq!(secret_enter(&serde_json::json!({"thread":{"secretBox":{"save":"@secret\u{1f}gh"}}})).as_deref(), Some("@secret\u{1f}gh"));
+        assert_eq!(secret_enter(&serde_json::json!({"thread":{}})), None, "no box, nothing to save");
+    }
     #[test] fn the_dialog_fits_a_small_window() {
         assert_eq!(fit(1400., 900.), Fit { pad: 24., nav: 220., gutter: 24., rows: 1040. - 2. - 220. - 48. }, "a desktop window");
         let f = fit(1024., 600.); assert_eq!(f.pad, 8., "a short window keeps its height for the rows");

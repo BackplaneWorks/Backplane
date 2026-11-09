@@ -8,6 +8,10 @@ use serde_json::Value;
 /// The popup's highlighted row after Up (-1) or Down (1): it goes round.
 pub fn popup_step(ix: usize, d: i32, n: usize) -> usize { (ix as i32 + d).rem_euclid(n.max(1) as i32) as usize }
 
+/// Whether the highlighted popup row is what Enter completes: not when it is a slash command already typed out in full (`/settle` then Enter runs it;
+/// completing it to `/settle ` would take a second Enter). Tab always completes.
+pub fn enter_completes(word: &str, draft: &str) -> bool { !(word.starts_with('/') && draft.trim_end_matches(' ') == word && !draft.contains('\n')) }
+
 impl Backplane {
     /// A composer event (paste, drop, picked files): start the uploads off the UI thread; say why when nothing starts.
     pub(crate) fn attach_event(&mut self, event: &ComposerEvent, cx: &mut Context<Self>) {
@@ -111,8 +115,12 @@ impl Backplane {
         self.data["thread"]["skills"].as_array().into_iter().flatten().map(|s| s.get("word").or_else(|| s.get("name")).and_then(Value::as_str).unwrap_or("").to_string()).filter(|w| !w.is_empty()).collect()
     }
     /// Choose the highlighted row: the hub puts its word where the one being typed is.
-    pub(crate) fn popup_pick(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn popup_pick(&mut self, cx: &mut Context<Self>) -> bool { self.popup_pick_by(cx, false) }
+    /// Enter on an open popup: completes the row, except a command typed in full, which is sent.
+    pub(crate) fn popup_enter(&mut self, cx: &mut Context<Self>) -> bool { self.popup_pick_by(cx, true) }
+    fn popup_pick_by(&mut self, cx: &mut Context<Self>, enter: bool) -> bool {
         let rows = self.popup_rows();
+        if enter { if let Some(w) = rows.get(self.screens.popup_ix.min(rows.len().saturating_sub(1))) { if !enter_completes(w, &self.input.read(cx).content) { return false; } } }
         let Some(word) = rows.get(self.screens.popup_ix.min(rows.len().saturating_sub(1))).cloned() else { return false };
         let _ = self.tx.try_send(Command::Action("skill".into(), word)); self.await_completion(cx); cx.notify(); true
     }
@@ -285,6 +293,11 @@ pub fn far_from(max: f32, y: f32) -> bool { max - y > FAR }
 
 #[cfg(test)]
 mod tests {
+    #[core::prelude::v1::test] fn enter_runs_a_command_typed_in_full_and_completes_the_rest() {
+        use super::enter_completes as e;
+        assert!(!e("/settle", "/settle"), "typed out: Enter runs it"); assert!(!e("/settle", "/settle "), "a trailing space too");
+        assert!(e("/settle", "/set"), "a prefix completes"); assert!(e("@ada", "@ada"), "a reference completes"); assert!(e("/intent", "/intent\nx"), "a draft past the word is not a command being typed");
+    }
     #[core::prelude::v1::test] fn latest_is_offered_only_when_the_reader_is_well_above_the_end() {
         assert!(!super::far_from(10_000., 10_000.), "at the end"); assert!(!super::far_from(10_000., 9_500.), "a little above it");
         assert!(super::far_from(10_000., 2_000.), "far up a long thread"); assert!(!super::far_from(0., 0.), "a thread shorter than the screen");
