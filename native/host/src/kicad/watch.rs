@@ -106,12 +106,17 @@ impl Plots {
     }
     /// kicad.watch kind "split": the schematic (`path` is its sheet, "" the root), the board and the board's 3D model at once, each its own
     /// plot (full chunks, no carry: the panes are separate sources) and the 3D model's board plot shared with the board pane.
-    pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str) -> Vec<String> {
+    /// `board` (absolute, "" the project's own): a board picked in the Boards menu: its file and the schematic beside it are the sources, keyed by their paths.
+    pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str, board: &str) -> Vec<String> {
         let f = project::read(root);
-        let sch = if path.is_empty() { f.sch.clone() } else { path.to_string() };
+        let picked = !board.is_empty();
+        let own_sch = if picked { board.strip_suffix(".kicad_pcb").map(|b| format!("{b}.kicad_sch")).filter(|p| std::path::Path::new(p).is_file()).unwrap_or_default() } else { f.sch.clone() };
+        let sch = if path.is_empty() { own_sch.clone() } else { path.to_string() };
+        let pcb = if picked { board.to_string() } else { f.pcb.clone() };
+        let (sch_at, pcb_at) = if picked { (if path.is_empty() { own_sch.as_str() } else { path }, board) } else { (path, "") };
         let mut views: Vec<(u32, String, String)> = vec![];
-        if !sch.is_empty() { views.push((1, key(1, root, path), sch.clone())) }
-        if !f.pcb.is_empty() { views.push((0, key(0, root, ""), f.pcb.clone())); views.push((2, key(2, root, ""), f.pcb.clone())) }
+        if !sch.is_empty() { views.push((1, key(1, root, sch_at), sch.clone())) }
+        if !pcb.is_empty() { views.push((0, key(0, root, pcb_at), pcb.clone())); views.push((2, key(2, root, pcb_at), pcb.clone())) }
         let keys: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
@@ -529,7 +534,9 @@ impl RpcHandler for KicadRpc {
                     if !kind.is_empty() && !super::known_root(hub, &root, &path).await { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that folder is not in this project"})] }
                     // kept: "<key>\t<id>" (an older phone sends the id alone)
                     let k = s("kept");
-                    let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree")) }
+                    // (a board picked in the Boards menu must be a file of this folder)
+                    let board = s("board"); if !board.is_empty() && !(board.ends_with(".kicad_pcb") && !board.contains("..") && board.starts_with(&format!("{root}/"))) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that board is not in this project"})] }
+                    let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board) }
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k)) };
                     vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":keys}})]
                 }
