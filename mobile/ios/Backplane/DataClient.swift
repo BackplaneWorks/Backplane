@@ -39,6 +39,7 @@ final class DataClient {
     let plots = PlotStore()
     let voice = VoiceModel()
     let machines = MachinesModel()
+    let notify = NotifyModel()
     let devices = DevicesModel()
     let terms = TermStore()
     private(set) var shot = 0
@@ -123,6 +124,7 @@ final class DataClient {
         loadOutbox()
         voice.client = self
         machines.client = self
+        notify.client = self
         devices.client = self
         terms.client = self
         #if DEBUG

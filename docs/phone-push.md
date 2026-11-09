@@ -39,6 +39,10 @@ In order:
 
 A collapsed push links its items' thread when they share one, else the uberbot's. Held items are kept in `push.book`, so a restart keeps them.
 
+## Where the person sets it
+
+Settings → Notifications on the desktop (GPUI) and on both phones (`notify.page`, `docs/PHONE-DATA.md`), one page the hub draws: Notify me for (`notify.needs`, `notify.settled`, `notify.reminders`, `notify.all`), quiet hours (`notify.quiet`), urgent asks (`notify.quiet.urgent`) and a mute per phone (`DevicePrefs`). Each decides something in the hub, not in a client: needs and settled write the thread's alert record or leave it quiet (`state/turnend.rs`), everything lets any completed or failed turn end write one, reminders gate a reminder's alert (`bots/routines.rs`), and quiet, urgent and mute are the Respect list above. A phone's own Alerts switch (iOS) is the same mute. Tests: `bots/tests/push.rs` (`each_notify_switch_changes...`, `the_pages_...`).
+
 ## What a phone gets
 
 `aps.thread-id` groups by thread; `thread`, `ask`, `key` and `kind` ride beside it. The body is the first line, at most 180 characters. A tap opens the thread, at the approval when there is one.

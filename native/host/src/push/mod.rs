@@ -17,6 +17,7 @@
 //! thread (settings/alerts.rs decides that, as it does for the desk itself; `alert` below). Each is one order, through the same respect, book and collapsing as any other;
 //! the uberbot's own orders are unchanged.
 pub mod apns;
+pub mod page;
 
 use crate::{bots::{rpc::Bots, world::{Device, Routine, World}}, hub::{now_ms, Hub}};
 use serde::{Deserialize, Serialize};
@@ -152,7 +153,7 @@ pub fn hears(d: &Device, through: bool) -> bool { d.kind == "alert" && d.platfor
 pub enum Sent { Ok, Dead, Later(String) }
 pub trait Carrier: Send + Sync { fn send(self: Arc<Self>, hub: Arc<Hub>, d: Device, frame: apns::Frame) -> futures_util::future::BoxFuture<'static, Sent>; }
 
-enum Msg { Order(Value), Asked(String), Spoke(String), Seen(String), Prefs, SignIn(String, String) }
+enum Msg { Devices, Order(Value), Asked(String), Spoke(String), Seen(String), Prefs, SignIn(String, String) }
 pub struct Push { tx: mpsc::UnboundedSender<Msg> }
 impl Push {
     /// `push.seen`: a device opened the thread.
@@ -163,6 +164,7 @@ impl crate::api::Observer for Watch {
     fn committed(&self, _hub: &Arc<Hub>, events: &[Value], _first: u32) {
         for e in events { let tx = &self.0.tx; let _ = match e["$"].as_str() {
             Some("PushOrdered") => tx.send(Msg::Order(e.clone())),
+            Some("DeviceRegistered" | "DeviceDropped" | "DevicePrefs") => tx.send(Msg::Devices),
             Some("AskClosed") => tx.send(Msg::Asked(e["id"].as_str().unwrap_or("").into())),
             Some("MessagePosted") if e["role"] == "user" && crate::state::fam::turnend::policy_direct(e["msg"].as_str().unwrap_or(""), e["text"].as_str().unwrap_or("")) => tx.send(Msg::Spoke(e["thread"].as_str().unwrap_or("").into())),
             Some("SettingSet") if matches!(e["key"].as_str(), Some(QUIET | QUIET_URGENT)) => tx.send(Msg::Prefs),
@@ -194,6 +196,7 @@ pub fn start_with(hub: &Arc<Hub>, bots: Arc<Bots>, carrier: Arc<dyn Carrier>) ->
     let p = Arc::new(Push { tx });
     hub.register_observer(Arc::new(Watch(p.clone())));
     hub.register_rpc(Arc::new(PushRpc(p.clone())));
+    hub.register_rpc(Arc::new(page::NotifyPage(bots.clone())));
     tokio::spawn(Worker { hub: hub.clone(), bots, carrier, book: Book::default() }.run(rx));
     p
 }
@@ -203,6 +206,7 @@ fn now_s() -> u64 { now_ms() / 1000 }
 impl Worker {
     async fn run(mut self, mut rx: mpsc::UnboundedReceiver<Msg>) {
         self.book = self.hub.setting(BOOK).await.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+        self.publish_devices().await;
         loop {
             // a timer only while something is held; nothing runs otherwise
             let wait = self.book.next().map(|t| Duration::from_secs(t.saturating_sub(now_s())));
@@ -213,8 +217,11 @@ impl Worker {
             match msg { None => return, Some(None) => self.flush().await, Some(Some(m)) => self.on(m).await }
         }
     }
+    /// The phones that hear a push, for the Notifications page (`info["push.devices"]`: handles, never tokens).
+    async fn publish_devices(&self) { let v = { let w = self.bots.world().await; page::devices_info(w.devices.values()) }; self.hub.set_info("push.devices", &v).await; }
     async fn on(&mut self, m: Msg) {
         match m {
+            Msg::Devices => self.publish_devices().await,
             Msg::Order(e) => self.order(e).await,
             Msg::Asked(id) => self.deal(move |i| !id.is_empty() && i.ask == id).await,
             // an approval stays until it is answered: looking at it is not dealing with it

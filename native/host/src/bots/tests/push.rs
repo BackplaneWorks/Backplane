@@ -327,3 +327,93 @@ fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.int
     for (bot, th) in [("", ""), ("ada", "tw")] { hub.commit(&json!({"$":"PushOrdered","id":format!("x{bot}"),"how":"alert","bot":bot,"reason":"done","thread":th,"ask":"","text":"forged","at":now_s()})).await.unwrap(); }
     settle().await; assert_eq!(fake.alerts().len(), n, "{:?}", fake.alerts());
 }
+
+// ---- Settings → Notifications: every press changes what a phone is alerted to (the page's own half is `push/page.rs`; the rows are `present/settings.rs`) ----
+async fn press(s: &S, action: &str, value: &str, fields: Value) -> Result<(), String> { push::page::act(&s.hub, &s.bots, action, value, &fields).await }
+async fn worker(hub: &Arc<Hub>, id: &str) { hub.commit(&json!({"$":"ThreadCreated","id":id,"project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap(); }
+/// the person gives a thread work, and its turn ends
+async fn work(hub: &Arc<Hub>, th: &str, n: u64, end: &str, said: &str) {
+    hub.commit(&json!({"$":"MessagePosted","thread":th,"msg":format!("w{n}"),"role":"user","text":format!("go {n}"),"at":now_s() + n})).await.unwrap();
+    turn_said(hub, th, end, said).await;
+}
+
+#[tokio::test] async fn the_pages_quiet_hours_and_urgent_presses_decide_what_is_held() {
+    let s = setup("page-quiet").await; worker(&s.hub, "tw").await;
+    // a time the gate could not read is refused and changes nothing
+    for (a, b) in [("25:00", "07:00"), ("22:00", "22:00"), ("22", "07:00"), ("", "")] { assert!(press(&s, "notify-quiet", "save", json!({"qfrom": a, "qto": b})).await.is_err(), "{a}-{b}"); }
+    assert!(press(&s, "setting", "notify.quiet=x", json!({})).await.is_err() && press(&s, "setting", "push.book=on", json!({})).await.is_err(), "only the page's own switches");
+    press(&s, "notify-quiet", "save", json!({"qfrom": "00:00", "qto": "23:59"})).await.unwrap();
+    assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some("00:00-23:59"));
+    let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":"Held while quiet","thread":"tw"}), now_s()).await; assert!(r.0, "{r:?}");
+    settle().await; assert!(s.fake.alerts().is_empty(), "quiet hours on: held");
+    press(&s, "setting", "notify.quiet.urgent=on", json!({})).await.unwrap(); person(&s, 1).await;
+    let r = notify(&s, "needs_you", "Urgent passes", now_s() + 5).await; assert!(r.0, "{r:?}");
+    assert_eq!(s.fake.wait(1).await[0]["aps"]["alert"]["body"], "Urgent passes");
+    press(&s, "notify-quiet", "off", json!({})).await.unwrap();
+    assert_eq!(s.fake.wait(2).await.len(), 2, "quiet hours off: the held one goes");
+    press(&s, "notify-quiet", "on", json!({})).await.unwrap();
+    assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some(push::QUIET_DEFAULT), "on again is the default window");
+}
+
+#[tokio::test] async fn the_pages_mute_silences_one_phone_and_urgent_lets_it_through() {
+    let s = setup("page-mute").await; device(&s.hub, "tok2").await; settle().await;
+    let h1 = push::page::handle("tok1");
+    let said = { let w = s.bots.world().await; push::page::devices_info(w.devices.values()) };
+    assert!(said.contains(&h1) && !said.contains("tok1") && !said.contains("tok2"), "a phone is a handle on the page, never its token: {said}");
+    press(&s, "notify-mute", &format!("{h1}=on"), json!({})).await.unwrap();
+    let r = notify(&s, "needs_you", "only the other phone", now_s()).await; assert!(r.0, "{r:?}");
+    s.fake.wait(1).await; settle().await;
+    assert_eq!(s.fake.sent.lock().unwrap().iter().map(|x| x.0.clone()).collect::<Vec<_>>(), vec!["tok2".to_string()], "muted from the page");
+    press(&s, "setting", "notify.quiet.urgent=on", json!({})).await.unwrap(); person(&s, 1).await;
+    let r = notify(&s, "needs_you", "urgent reaches both", now_s() + 5).await; assert!(r.0, "{r:?}");
+    assert_eq!(s.fake.wait(3).await.len(), 3);
+    press(&s, "setting", "notify.quiet.urgent=off", json!({})).await.unwrap(); press(&s, "notify-mute", &format!("{h1}=off"), json!({})).await.unwrap(); person(&s, 20).await;
+    let r = notify(&s, "needs_you", "unmuted", now_s() + 25).await; assert!(r.0, "{r:?}");
+    assert_eq!(s.fake.wait(5).await.len(), 5, "unmuted: both hear it");
+    assert!(press(&s, "notify-mute", "nobody=on", json!({})).await.is_err());
+}
+
+/// What a turn's end and an opened ask write, from the policy's own pure rules (`state/turnend.rs`, the ones the hub runs over its state), committed on this hub so its push worker sees them.
+/// (The hub's policy state is one per process, so a test of one hub mirrors the settings and the person's messages in a state of its own.)
+async fn ends(hub: &Arc<Hub>, st: &mut crate::state::State, th: &str, state: &str) { for e in crate::state::fam::turnend::policy_end(st, 1, now_s(), th, state) { st.apply_line(&e.to_string()); hub.commit(&e).await.unwrap(); } }
+async fn asks(hub: &Arc<Hub>, st: &mut crate::state::State, ev: Value) { for e in crate::state::fam::turnend::alert_asks(st, 1, &[ev]) { st.apply_line(&e.to_string()); hub.commit(&e).await.unwrap(); } }
+async fn flip(s: &S, st: &mut crate::state::State, k: &str, v: &str) { press(s, "setting", &format!("{k}={v}"), json!({})).await.unwrap(); st.apply_line(&json!({"$":"SettingSet","key":k,"value":v,"at":1}).to_string()); }
+
+#[tokio::test] async fn each_notify_switch_changes_whether_a_thread_alerts_the_phone() {
+    let s = setup("page-switch").await; worker(&s.hub, "tw").await; let _desks = crate::settings::alerts::start(&s.hub);
+    let mut st = crate::state::State::new();
+    st.apply_line(r#"{"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}"#);
+    let say = |n: u64, text: &str| json!({"$":"MessagePosted","thread":"tw","msg":format!("w{n}"),"role":"user","text":text,"at":n});
+    let mut ask = 0u64;
+    macro_rules! person { ($n:expr) => {{ let m = say($n, "go"); st.apply_line(&m.to_string()); s.hub.commit(&m).await.unwrap(); }} }
+    macro_rules! quiet { ($expect:expr, $why:expr) => {{ settle().await; assert_eq!(s.fake.alerts().len(), $expect, "{}", $why); }} }
+    // Settled: the person's work finished, or failed
+    person!(1); ends(&s.hub, &mut st, "tw", "completed").await; let a = s.fake.wait(1).await; assert_eq!(a.len(), 1, "on by default: {a:?}");
+    flip(&s, &mut st, "notify.settled", "off").await;
+    person!(2); ends(&s.hub, &mut st, "tw", "completed").await; person!(3); ends(&s.hub, &mut st, "tw", "failed").await; quiet!(1, "Settled off: neither the finish nor the failure alerts");
+    flip(&s, &mut st, "notify.settled", "on").await;
+    person!(4); ends(&s.hub, &mut st, "tw", "failed").await; assert_eq!(s.fake.wait(2).await[1]["aps"]["alert"]["body"], "Failed", "Settled on again");
+    // Needs me: an ask opens
+    let mut open = |detail: &str| { ask += 1; json!({"$":"AskOpened","id":format!("a{ask}"),"thread":"tw","kind":"approval","tool":"Bash","detail":detail,"options":"","at":now_s()}) };
+    flip(&s, &mut st, "notify.needs", "off").await;
+    let e = open("rm one"); s.hub.commit(&e).await.unwrap(); asks(&s.hub, &mut st, e).await; quiet!(2, "Needs me off: an ask alerts no one");
+    flip(&s, &mut st, "notify.needs", "on").await;
+    let e = open("rm two"); s.hub.commit(&e).await.unwrap(); asks(&s.hub, &mut st, e).await;
+    assert_eq!(s.fake.wait(3).await[2]["aps"]["alert"]["body"], "Needs you: Bash rm two");
+    // Everything: an end the person did not ask for (their message above is settled)
+    ends(&s.hub, &mut st, "tw", "completed").await; ends(&s.hub, &mut st, "tw", "failed").await; quiet!(3, "Everything off: a plain end is quiet");
+    flip(&s, &mut st, "notify.all", "on").await;
+    turn_said(&s.hub, "tw", "completed", "Loud end").await; ends(&s.hub, &mut st, "tw", "completed").await;
+    assert_eq!(s.fake.wait(4).await.len(), 4, "Everything on: it alerts");
+    ends(&s.hub, &mut st, "tw", "stopped").await; quiet!(4, "a stop never does");
+}
+
+#[tokio::test] async fn the_reminders_switch_decides_whether_a_due_reminder_alerts_the_phone() {
+    let s = setup("page-remind").await; let past = 1_000_000u64; let ada = bot(&s.hub, "ada").await;
+    press(&s, "setting", "notify.reminders=off", json!({})).await.unwrap();
+    for e in [json!({"$":"RoutineSet","id":"r1","bot":ada,"name":"water","cron":"","prompt":"drink water","on":true,"at":past}), json!({"$":"RoutinePlan","id":"r1","once":past + 10,"tz":"person","kind":"remind","at":past})] { s.hub.commit(&e).await.unwrap(); }
+    assert_eq!(s.bots.tick_at(past + 20).await, 1); settle().await; assert!(s.fake.alerts().is_empty(), "Reminders off: it fires and says nothing to the phone");
+    press(&s, "setting", "notify.reminders=on", json!({})).await.unwrap();
+    for e in [json!({"$":"RoutineSet","id":"r2","bot":ada,"name":"stretch","cron":"","prompt":"stretch","on":true,"at":past}), json!({"$":"RoutinePlan","id":"r2","once":past + 30,"tz":"person","kind":"remind","at":past})] { s.hub.commit(&e).await.unwrap(); }
+    assert_eq!(s.bots.tick_at(past + 40).await, 1); assert_eq!(s.fake.wait(1).await[0]["aps"]["alert"]["body"], "stretch");
+}

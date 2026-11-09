@@ -83,7 +83,7 @@ impl Echo {
 #[derive(Default)]
 pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool, /** the Hubs page of this device */ pub hubs: bool }
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
-const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
+const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "notifications", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
 /// How the dialog fits a window of `w` x `h` px: the margin around it, the page list's width, and whether a row's controls go under its words
 /// (a narrow page has no room beside them). The page list and the rows each scroll on their own, so nothing is out of reach on a short window.
@@ -129,7 +129,7 @@ fn nav_icon_el(icon: AnyElement) -> Div { div().flex_shrink_0().child(icon) }
 fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(t)) }
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
-    match page { "appearance" => "sun", "threads" => "message-square", "agents" => "cpu", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
+    match page { "appearance" => "sun", "threads" => "message-square", "notifications" => "bell", "agents" => "cpu", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
         "devices" => "link", "network" => "globe", "voice" => "mic", "keys" => "code", "timezone" => "clock", "rules" => "circle-check", "usage" => "gauge", "about" => "book", "privacy" => "file-text", _ => "settings" }
 }
 /// The hub shows its page menu (rows that are each one `settings-page` button naming a page) or one page (its first row is the way back).
@@ -256,7 +256,7 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
             if let Some(c) = super::tools::rename_save(&id, &text) { flush_fields(this); let _ = this.tx.try_send(c); cx.notify(); }
         }
         // Enter in a settings field is its row's Save
-        "whurl" | "whsec" | "tzname" => { flush_fields(this); let a = match name { "whurl" => "hook-url", "whsec" => "hook-secret", _ => "tz-set" }; let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); }
+        "whurl" | "whsec" | "tzname" | "qfrom" | "qto" => { flush_fields(this); let (a, v) = match name { "whurl" => ("hook-url", ""), "whsec" => ("hook-secret", ""), "tzname" => ("tz-set", ""), _ => ("notify-quiet", "save") }; let _ = this.tx.try_send(Command::Action(a.into(), v.into())); cx.notify(); }
         // Enter in the masked box (the name or the value) is its Save
         /* i18n-ok: a button the row draws through trs */ "sname" | "sval" => if let Some(packed) = secret_enter(&this.data) { save_vault(this, &Btn { label: "Save".into(), action: "secret-save".into(), value: packed, on: true }, cx); },
         "todonew" => send_todo(this, cx),
@@ -572,7 +572,7 @@ mod tests {
         assert_eq!(shown(&[]), Shown::Other);
     }
     #[test] fn every_page_has_an_icon_in_the_set_and_the_search_filters_titles_by_substring() {
-        let icons: Vec<String> = ["sun", "message-square", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "circle-check", "gauge", "book", "file-text", "settings", "search", "x"].iter().map(|s| s.to_string()).collect();
+        let icons: Vec<String> = ["sun", "message-square", "bell", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "circle-check", "gauge", "book", "file-text", "settings", "search", "x"].iter().map(|s| s.to_string()).collect();
         for g in GROUPS { for p in g { assert!(icons.contains(&nav_icon(p).to_string()), "{p}"); } }
         assert!(nav_matches("Appearance", "") && nav_matches("Appearance", " ear") && nav_matches("Appearance", "APP") && !nav_matches("Appearance", "zzz"));
         assert_eq!(group_of("zzz"), GROUPS.len());

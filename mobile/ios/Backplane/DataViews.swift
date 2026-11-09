@@ -1224,7 +1224,8 @@ struct DataSettingsView: View {
                 if settings.alerts { onOff("Alert sound", $settings.alertSound, id: "settings.sound") }
                 onOff("Haptics", $settings.haptics, id: "settings.haptics")
                 Text("Off: only what you let through reaches this phone. Alerts come from your uberbot.").dmono(11).foregroundStyle(BackplaneDesign.dim)
-                if client.has("push") { DLine(); DataQuietSection(client: client) }
+                // an older hub has no Notifications page: its quiet hours and urgent switch are drawn here
+                if client.has("push") && !client.has("notifysettings") { DLine(); DataQuietSection(client: client) }
                 DLine()
                 DHeading(text: "Hubs")
                 let keys = client.links.compactMap { Pairing.key($0) }
@@ -1253,6 +1254,7 @@ struct DataSettingsView: View {
                 if client.has("voice") { DataVoiceSection(client: client); DLine() }
                 if client.has("devices") { DataDevicesSection(client: client); DLine() }
                 if client.has("machines") { DataMachinesSection(client: client); DLine() }
+                if client.has("notifysettings") { DataNotifySection(client: client); DLine() }
                 NavigationLink(value: DPage(name: "improvements")) { Text("Improvements") }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
                 DLine()
                 let i = Bundle.main.infoDictionary
