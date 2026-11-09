@@ -168,6 +168,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
         .into_any_element())
 }
 
+/// The top bar's place while a project's page is on show: the project's name (its page stands for the selection, not the last thread).
+pub fn page_title(data: &Value, page: Option<&str>) -> Option<String> { page.and_then(|p| find(data, p)).map(|p| string(p, "title")) }
 /// The sidebar's project with this (raw) id.
 pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
     data["projects"].as_array()?.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))
