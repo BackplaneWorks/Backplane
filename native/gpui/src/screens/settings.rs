@@ -332,7 +332,11 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { 0. }, if r.qr.is_empty() { 0. } else { r.qr.len() as f32 * 4. + 16. });
     // the words keep their least width beside the controls (never squeezed to a letter a line), or the whole row's under a stack
     let mut left = div().flex().flex_col().gap_1().min_w_0();
-    left = if stack { left.w_full() } else { left.flex_1().min_w(px(LABEL_MIN)) };
+    // beside the controls, the words get the row's width less the controls' (their widest line, field or QR code), as a fixed width: a flex
+    // share alone let a long note be measured wider than its column in setup's page, and run on under the button
+    let right_w = { let mut at = 0; let mut w = 0f32; for &n in &lines { w = w.max(widths[at..at + n].iter().sum::<f32>() + 4. * (n.max(1) - 1) as f32); at += n; }
+        w.max(if has_field { field_w } else { 0. }).max(if r.qr.is_empty() { 0. } else { r.qr.len() as f32 * 4. + 16. }) };
+    left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
     if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(r.label.clone())); }
     if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(r.note.clone())); }
     let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(CONTROLS_MAX)) };
@@ -356,7 +360,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
             }).collect::<Vec<_>>()));
         }
     }
-    let line = if stack { div().flex().flex_col().gap_2() } else { div().flex().items_center().gap(px(GAP)) };
+    let line = if stack { div().flex().flex_col().gap_2() } else { div().flex().items_center().justify_between().gap(px(GAP)) };
     line.py_3().border_b_1().border_color(c("line")).child(left).child(right).into_any_element()
 }
 
