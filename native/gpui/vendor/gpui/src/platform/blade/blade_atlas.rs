@@ -25,6 +25,9 @@ struct BladeAtlasState {
     tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
     initializations: Vec<AtlasTextureId>,
     uploads: Vec<PendingUpload>,
+    /// Textures no image uses any more, each with the frames it must still wait: the frame that last drew one may still be on the GPU
+    /// when it is removed (the renderer waits for a frame only at the end of the next one's draw), so it is destroyed two frames later.
+    graveyard: Vec<(BladeAtlasTexture, u8)>,
 }
 
 #[cfg(gles)]
@@ -32,6 +35,7 @@ unsafe impl Send for BladeAtlasState {}
 
 impl BladeAtlasState {
     fn destroy(&mut self) {
+        for (mut texture, _) in self.graveyard.drain(..) { texture.destroy(&self.gpu); }
         self.storage.destroy(&self.gpu);
         self.upload_belt.destroy(&self.gpu);
     }
@@ -54,6 +58,7 @@ impl BladeAtlas {
             tiles_by_key: Default::default(),
             initializations: Vec::new(),
             uploads: Vec::new(),
+            graveyard: Vec::new(),
         }))
     }
 
@@ -63,6 +68,7 @@ impl BladeAtlas {
 
     pub fn before_frame(&self, gpu_encoder: &mut gpu::CommandEncoder) {
         let mut lock = self.0.lock();
+        lock.bury();
         lock.flush(gpu_encoder);
     }
 
@@ -118,7 +124,7 @@ impl PlatformAtlas for BladeAtlas {
                 lock.storage[id.kind]
                     .free_list
                     .push(texture.id.index as usize);
-                texture.destroy(&lock.gpu);
+                lock.graveyard.push((texture, 2));
             } else {
                 *texture_slot = Some(texture);
             }
@@ -222,6 +228,12 @@ impl BladeAtlasState {
     fn upload_texture(&mut self, id: AtlasTextureId, bounds: Bounds<DevicePixels>, bytes: &[u8]) {
         let data = self.upload_belt.alloc_bytes(bytes, &self.gpu);
         self.uploads.push(PendingUpload { id, bounds, data });
+    }
+
+    /// A frame begins: the textures removed two frames ago are no longer read by the GPU (`graveyard`).
+    fn bury(&mut self) {
+        let gpu = self.gpu.clone();
+        self.graveyard.retain_mut(|(texture, frames)| { *frames -= 1; if *frames == 0 { texture.destroy(&gpu); false } else { true } });
     }
 
     fn flush_initializations(&mut self, encoder: &mut gpu::CommandEncoder) {
