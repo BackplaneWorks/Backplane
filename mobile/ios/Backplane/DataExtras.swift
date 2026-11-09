@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // The data/1 additions on the phone (hub features actions, search, models, mentions, bots; native/host/src/data/ext.rs), the same as the Android app's DataExtras.kt:
 // thread and project actions, search, the model picker, the mention bar over the composer, bots and rooms. (Written without a Mac to compile on; see docs/mobile-desktop-parity.md.)
@@ -293,5 +294,23 @@ struct DataFindInThread: View {
                 hits = await client.searchIn(thread, w)
             }
         }
+    }
+}
+
+/// The camera, for a photo to attach (Attach, Take a photo): the system's own capture screen; `done` gets the photo as JPEG, or nil when cancelled.
+struct DCamera: UIViewControllerRepresentable {
+    let done: (Data?) -> Void
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let p = UIImagePickerController(); p.sourceType = .camera; p.delegate = context.coordinator; return p
+    }
+    func updateUIViewController(_ c: UIImagePickerController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(done) }
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let done: (Data?) -> Void
+        init(_ done: @escaping (Data?) -> Void) { self.done = done }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            done((info[.originalImage] as? UIImage)?.jpegData(compressionQuality: 0.85))
+        }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { done(nil) }
     }
 }
