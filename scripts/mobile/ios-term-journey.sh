@@ -4,7 +4,7 @@
 #   scripts/mobile/ios-term-journey.sh        env: M (the ssh wrapper), SIM_UDID, OUT
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); . "$ROOT/scripts/lib-bptmp.sh"
-M=${M:-/home/h/Documents/i2cjak/backplane-gpui/build/gpui/mac-ssh}; U=${SIM_UDID:-E3BC1B9E-AE4D-498C-97AF-B22FE897B41F}; OUT=${OUT:-$BP_TMP/iterm/shots/ios}
+M=${M:-$(git -C "$(dirname "$0")" worktree list --porcelain | awk 'NR==1{print substr($0,10)}')/build/gpui/mac-ssh}; U=${SIM_UDID:-E3BC1B9E-AE4D-498C-97AF-B22FE897B41F}; OUT=${OUT:-$BP_TMP/iterm/shots/ios}
 IP=$(tailscale ip -4 | head -1); D=bp-iterm; R=$BP_TMP/iterm-rig
 mkdir -p "$OUT"
 "$ROOT/scripts/mobile/ios-term-rig.sh" stop; sleep 2; "$ROOT/scripts/mobile/ios-term-rig.sh" start || exit 1; sleep 7
