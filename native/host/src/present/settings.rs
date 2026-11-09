@@ -84,7 +84,7 @@ fn threads(st: &State, session: &Value) -> Vec<Value> {
     let bad = draft(session, "@hook.err") == "bad";
     let mut v = vec![
         row("Worker grace (minutes)", &settle_note(idle), chips(&["0", "5", "10", "15", "30", "60"], idle, "settle.idle.minutes")),
-        row("Personal grace (minutes)", "Read, completed personal conversations settle after this quiet period (240 minutes is four hours). 0 disables the timer.", chips(&["0", "60", "120", "240", "480"], set(st, "settle.personal.minutes", "240"), "settle.personal.minutes")),
+        row("Personal grace (minutes)", "Read, completed threads of your own settle after this quiet period. 0 (the default) never settles them; threads that bots or launches started settle on their own.", chips(&["0", "60", "120", "240", "480"], set(st, "settle.personal.minutes", "0"), "settle.personal.minutes")),
         row("Short grace for read conversations", "Use the worker grace for personal conversations once their reply is read and the work is complete.", chips(&["on", "off"], onoff(set(st, "settle.done", "off") == "on"), "settle.done")),
         row("Continue after a restart", "Turns a restart cuts short go on by themselves.", chips(&["on", "off"], onoff(set(st, "restart.continue", "on") != "off"), "restart.continue")),
         // thread.env (commands/plan.rs): what the + and a phone's new thread get; a thread asked for with its own env keeps it
