@@ -21,7 +21,14 @@ data class DEntry(
     val agentOnly: Boolean = false, // a message only the agent reads (data/1 `agentOnly`): never shown
     val tone: String = "",  // a note: error, info…
     val term: DTermRef? = null, // a chat terminal (feature `terms`, kind "term"): its card
+    val handoff: DHandoff? = null, // a `/give` received (kind "handoff"): its card
 )
+/** A `/give` received: where it came from, the person's note, the summary and what the work touched; a reference opens by `link.resolve {url, thread}`. */
+data class DHandoff(val from: String, val title: String, val note: String, val summary: String, val refs: List<DRef>)
+data class DRef(val kind: String, val label: String, val url: String, val thread: String)
+fun parseHandoff(o: JSONObject) = DHandoff(o.str("from"), o.str("title"), o.str("note"), o.str("summary"), o.optJSONArray("refs").list { DRef(it.str("kind"), it.str("label"), it.str("url"), it.str("thread")) })
+fun handoffJson(h: DHandoff): JSONObject = JSONObject().put("from", h.from).put("title", h.title).put("note", h.note).put("summary", h.summary)
+    .put("refs", JSONArray(h.refs.map { JSONObject().put("kind", it.kind).put("label", it.label).put("url", it.url).put("thread", it.thread) }))
 /** The `term` of a kind:"term" entry: the key its screen is read and watched under, and what it ran. */
 data class DTermRef(val key: String, val id: String, val title: String, val cols: Int, val rows: Int, val cmd: String)
 /** Where a project or thread of another machine runs (docs/PHONE-DATA.md, Your machines): `short` on a row, `name` in the header, `label` "on desktop" after a project's name, `runs` "runs on desktop" over the composer; `away` draws it dimmer. */
@@ -64,6 +71,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     o.optJSONArray("attachments").list { DAttachment(it.str("id"), it.str("name"), it.str("mime"), it.lng("bytes")) },
     label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
     term = o.optJSONObject("term")?.let { DTermRef(it.str("key"), it.str("id"), it.str("title"), it.optInt("cols", 80), it.optInt("rows", 24), it.str("cmd")) },
+    handoff = o.optJSONObject("handoff")?.let(::parseHandoff),
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) })

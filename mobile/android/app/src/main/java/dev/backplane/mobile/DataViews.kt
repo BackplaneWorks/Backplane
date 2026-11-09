@@ -767,11 +767,29 @@ private fun EntryRow(tid: String, e: DEntry) {
         }
         "tool", "step" -> Box(Modifier.padding(horizontal = 12.dp)) { ToolRow(e) }
         "ask" -> AskCard(tid, e)
+        "handoff" -> HandoffCard(tid, e)
         "term" -> if (e.term != null && termsOn()) TermCard(e)
         else -> Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
             val c = if (e.tone == "error") dcs.error else dcs.onSurfaceVariant
             if (e.label.isNotEmpty()) { Text(e.label, color = c, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)) }
             LinkText(e.text, tid, color = c, size = 12)
+        }
+    }
+}
+
+/** A `/give` received: the way back, the summary, the note, and what the work touched, each reference opening what it names (the hub's `link.resolve`). */
+@Composable
+private fun HandoffCard(tid: String, e: DEntry) {
+    val h = e.handoff ?: return
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("handoff.card")) {
+        DMono("‹ Handed over from ${h.title}", dcs.primary, 11, Modifier.clickable { DataClient.openLink("backplane://thread/${h.from}", tid) }.testTag("handoff.back"))
+        Text(h.summary, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, modifier = Modifier.padding(top = 6.dp).testTag("handoff.summary"))
+        if (h.note.isNotEmpty()) DMono("Note: ${h.note}", dcs.onSurfaceVariant, 12, Modifier.padding(top = 4.dp), lines = 4)
+        h.refs.forEachIndexed { i, r ->
+            val mark = when (r.kind) { "thread" -> "▸"; "message" -> "“"; "board" -> "▦"; else -> "·" }
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { DataClient.openLink(if (r.kind == "file" || r.kind == "board") PATH_SCHEME + r.url else r.url, r.thread) }.padding(horizontal = 8.dp, vertical = 6.dp).testTag("handoff.ref.$i")) {
+                DMono(mark, dcs.primary, 12, bold = true); Spacer(Modifier.width(8.dp)); DMono(r.label, dcs.onSurface, 12, Modifier.weight(1f))
+            }
         }
     }
 }

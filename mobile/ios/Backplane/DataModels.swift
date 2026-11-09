@@ -71,12 +71,13 @@ struct DEntry: Codable, Equatable, Identifiable {
     var tool: DTool?
     var ask: DAsk?
     var term: DTermInfo?   // a chat terminal (feature `terms`, kind "term")
+    var handoff: DHandoff?   // a `/give` received (kind "handoff"): its card
     var attachments: [DAttachment] = []
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, attachments }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -90,8 +91,21 @@ struct DEntry: Codable, Equatable, Identifiable {
         tool = try? c.decode(DTool.self, forKey: .tool)
         ask = try? c.decode(DAsk.self, forKey: .ask)
         term = try? c.decode(DTermInfo.self, forKey: .term)
+        handoff = try? c.decode(DHandoff.self, forKey: .handoff)
         attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []
     }
+}
+
+/// A `/give` received (docs/PHONE-DATA.md, Handoffs): where it came from, the person's note, the summary and what the work touched; a reference opens by `link.resolve {url, thread}`.
+struct DHandoff: Codable, Equatable {
+    var from: String; var title: String; var note: String; var summary: String; var refs: [DRef]
+    enum CodingKeys: String, CodingKey { case from, title, note, summary, refs }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); from = c.str(.from); title = c.str(.title); note = c.str(.note); summary = c.str(.summary); refs = (try? c.decode([DRef].self, forKey: .refs)) ?? [] }
+}
+struct DRef: Codable, Equatable {
+    var kind: String; var label: String; var url: String; var thread: String
+    enum CodingKeys: String, CodingKey { case kind, label, url, thread }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); kind = c.str(.kind); label = c.str(.label); url = c.str(.url); thread = c.str(.thread) }
 }
 
 /// Where a project or thread of another machine runs (docs/PHONE-DATA.md, Your machines): `short` on a row, `name` in the header, `label` "on desktop" after a project's name,
