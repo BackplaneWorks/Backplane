@@ -255,7 +255,14 @@ impl Plots {
             if !Self::board3d_native(&hub).await { return }
             let cli = super::ipc::runtime(&hub).await.cli;
             let _ = tokio::task::spawn_blocking(move || {
-                let r = std::panic::catch_unwind(|| pcb3d::stream::prewarm(&std::fs::read(&pcb).unwrap_or_default(), &pcb, &cli, &stepglb::machine(&home), &pcb3d::models::Cache::standard()));
+                let bytes = std::fs::read(&pcb).unwrap_or_default();
+                // the board's own model too, kept by content, so its first 3D view reads it back instead of meshing it (Thunderscope: 1.5 s)
+                let rev = stamp(&pcb).rev;
+                let _ = std::panic::catch_unwind(|| if let Ok(made) = pcb3d::stream::board_model_kept(&bytes, &std::path::Path::new(&stepglb::cache_dir()).join("boards"), !stepglb::have(&pcb3d::stream::glb_path(&pcb, &rev).to_string_lossy())) {
+                    if !made.layers.is_empty() { let name = std::path::Path::new(&pcb).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(); pcb3d::stream::keep_glb(&made.layers, &name, &pcb, &rev) }
+                });
+                #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); } // the meshing's memory goes back
+                let r = std::panic::catch_unwind(|| pcb3d::stream::prewarm(&bytes, &pcb, &cli, &stepglb::machine(&home), &pcb3d::models::Cache::standard()));
                 match r { Ok(Ok((n, fresh, ms))) if fresh > 0 => eprintln!("pcb3d: prewarm {pcb}: {fresh} of {n} part models converted in {ms:.0} ms"), Ok(Err(e)) => eprintln!("pcb3d: prewarm {pcb}: {e}"), _ => {} }
             }).await;
         });
@@ -271,7 +278,10 @@ impl Plots {
                 let t = std::time::Instant::now();
                 let bytes = plotread::version(&f);
                 let abs = f.rsplit(['\t', '\n']).next().unwrap_or(&f).to_string();
-                let made = pcb3d::stream::board_model(&bytes)?;
+                // kept by content: a reopened board (after a restart, in another worktree, an old version) is read back, not meshed again;
+                // a file whose own GLB is not kept yet is meshed (its layers make that GLB)
+                let glb_kept = is_version(&f) || stepglb::have(&pcb3d::stream::glb_path(&abs, &stamp(&f).rev).to_string_lossy());
+                let made = pcb3d::stream::board_model_kept(&bytes, &std::path::Path::new(&stepglb::cache_dir()).join("boards"), !glb_kept)?;
                 let tris = made.plot.solid.as_ref().map_or(0, |s| s.n as u64);
                 eprintln!("pcb3d: {abs} board {:.0} ms (parse {:.0}, mesh {:.0}), {tris} triangles", t.elapsed().as_secs_f64() * 1000.0, made.ms.0, made.ms.1);
                 let plan = if kind == 3 { None } else {
@@ -282,7 +292,7 @@ impl Plots {
                     plotgen::write_infos(&infos.to_string_lossy(), &pcb3d::stream::missing_note(&p));
                     Some(Arc::new((p, tris)))
                 };
-                if !is_version(&f) { // the GLB, kept by revision: one per board
+                if !is_version(&f) && !made.layers.is_empty() { // the GLB, kept by revision: one per board
                     let (layers, name, rev) = (made.layers, std::path::Path::new(&abs).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), stamp(&f).rev);
                     std::thread::spawn(move || pcb3d::stream::keep_glb(&layers, &name, &abs, &rev));
                 }

@@ -40,6 +40,48 @@ pub fn board_budget(b: &Board) -> usize {
     let parts = b.footprints.iter().filter(|f| f.models.iter().any(|m| !m.hide && !m.path.trim().is_empty())).count();
     if parts > 150 { mesh::MOST_TRIS_WITH_PARTS } else { mesh::MOST_TRIS }
 }
+/// `board_model`, kept by the file's content in `dir` across restarts, worktrees and saved versions: the solid and the seat are read back
+/// (Thunderscope: 1.7 s to mesh, a few ms to read 6 MB), the board parsed again (its parts are planned from it). A model read back has no
+/// `layers` (they make the board's own GLB, kept the first time: `want_layers` says one is needed and nothing is read back then).
+pub fn board_model_kept(bytes: &[u8], dir: &Path, want_layers: bool) -> Result<Made, String> {
+    let file = dir.join(format!("board-solid-v1-{}-{}-{:016x}-{}.bin", mesh::MOST_TRIS, mesh::MOST_TRIS_WITH_PARTS, super::super::plot::mesh_id(bytes), bytes.len()));
+    if !want_layers {
+        if let Some((so, seat)) = std::fs::read(&file).ok().and_then(|b| read_kept(&b)) {
+            let t = Instant::now();
+            let board = parse::board(bytes)?;
+            return Ok(Made { plot: solid::plot(Some(so)), board, seat, layers: vec![], ms: (t.elapsed().as_secs_f64() * 1000.0, 0.0) });
+        }
+    }
+    let made = board_model(bytes)?;
+    if let Some(so) = &made.plot.solid {
+        let _ = std::fs::create_dir_all(dir);
+        let tmp = file.with_extension(format!("bin.{}.part", std::process::id()));
+        if std::fs::write(&tmp, write_kept(so, made.seat)).is_err() || crate::plat::fs::rename(&tmp, &file).is_err() { let _ = std::fs::remove_file(&tmp); }
+        prune_kept(dir, 24);
+    }
+    Ok(made)
+}
+fn write_kept(so: &super::super::plot::Solid, seat: (f64, f64)) -> Vec<u8> {
+    let mut o = Vec::with_capacity(48 + so.d.len());
+    o.extend(b"BPS1"); o.extend(so.n.to_le_bytes()); for v in so.b { o.extend(v.to_le_bytes()) }
+    o.extend(seat.0.to_le_bytes()); o.extend(seat.1.to_le_bytes()); o.extend(&so.d);
+    o
+}
+fn read_kept(b: &[u8]) -> Option<(super::super::plot::Solid, (f64, f64))> {
+    if b.len() < 48 || &b[..4] != b"BPS1" { return None }
+    let u = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+    let f = |i: usize| f64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+    let (n, bx) = (u(4), std::array::from_fn(|k| u(8 + 4 * k)));
+    if n == 0 { return None }
+    Some((super::super::plot::Solid { n, b: bx, d: b[48..].to_vec() }, (f(32), f(40))))
+}
+/// The newest `keep` kept boards stay.
+fn prune_kept(dir: &Path, keep: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut fs: Vec<(std::time::SystemTime, PathBuf)> = rd.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("board-solid-")).filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path()))).collect();
+    if fs.len() <= keep { return }
+    fs.sort(); for (_, p) in &fs[..fs.len() - keep] { let _ = std::fs::remove_file(p); }
+}
 /// The front seat is the highest point of the front copper (else the laminate's top), the back's the lowest of the back copper.
 fn seat_of(layers: &[super::Layer], b: &Board) -> (f64, f64) {
     let z = |name: &str, top: bool| layers.iter().filter(|l| l.name == name).flat_map(|l| l.pos.iter().map(|p| p[2] as f64)).fold(None, |a: Option<f64>, z| Some(match a { None => z, Some(a) => if top { a.max(z) } else { a.min(z) } }));
@@ -378,6 +420,16 @@ mod tests {
         b.footprints = (0..151).map(|i| { let mut f = fp(i as f64, 0.0, 0.0, Side::Top); f.models = vec![mr("R.step")]; f }).collect();
         assert_eq!(board_budget(&b), super::super::mesh::MOST_TRIS_WITH_PARTS);
         b.footprints.truncate(150); assert_eq!(board_budget(&b), super::super::mesh::MOST_TRIS);
+    }
+    #[test] fn a_board_model_is_kept_by_content_and_read_back_the_same() {
+        let d = std::env::temp_dir().join(format!("bp-kept-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let bytes = b"(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 20 10) (layer \"Edge.Cuts\") (width 0.1)))".to_vec();
+        let a = board_model_kept(&bytes, &d, false).unwrap(); assert!(!a.layers.is_empty(), "made the first time");
+        let b = board_model_kept(&bytes, &d, false).unwrap(); assert!(b.layers.is_empty(), "read back");
+        assert_eq!((a.plot.solid, a.seat), (b.plot.solid, b.seat));
+        assert!(!board_model_kept(&bytes, &d, true).unwrap().layers.is_empty(), "made again when its layers are wanted");
+        let mut other = bytes.clone(); other.extend(b" "); assert!(!board_model_kept(&other, &d, false).unwrap().layers.is_empty(), "another content is another model");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_model_encodes_as_the_boards_mesh_does() {
         let t = [Tri3 { a: [0.01, 0.02, 0.03], b: [1.0, 0.0, 0.0], c: [0.0, 1.0, 0.0], color: 0xff0000 }];
