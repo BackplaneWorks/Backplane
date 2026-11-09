@@ -5,6 +5,10 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -52,7 +56,26 @@ internal val dfaint @Composable get() = Color(if (dlight) 0xFF72777F else 0xFF5C
 internal val dview @Composable get() = Color(if (dlight) 0xFFF5F4EF else 0xFF08090B)
 // a thread's activity, one colour each (native/gpui/src/ui.rs `side_thread`): green working; red wanting the person or failed; grey otherwise
 @Composable internal fun dStateColor(s: String) = when (s) { "working" -> dok; "asking", "failed" -> dcs.error; else -> dfaint }
+/** A row's dot as the desktop's sidebar draws it (gpui siderow.rs `dot_of`): the hub's word for the thread (`status`) picks the colour and the shape; finished is the
+ *  green dot (a turn done, not yet settled: ready for you to look at). An older hub sends no word: the turn's state decides. */
+internal data class DotLook(val color: Color, val round: Boolean, val hollow: Boolean)
+@Composable internal fun dotOf(t: DThread): DotLook = when (t.status) {
+    "blocked" -> DotLook(dcs.error, false, false)
+    "failed" -> DotLook(dcs.error, false, true)
+    "stalled" -> DotLook(dwarn, false, false)
+    "active", "working" -> DotLook(dcs.primary, true, false)
+    "waiting", "monitoring" -> DotLook(dcs.primary.copy(alpha = .55f), true, true)
+    "finished" -> DotLook(dok, true, false)
+    "" -> when (t.state) { "working" -> DotLook(dcs.primary, true, false); "asking" -> DotLook(dcs.error, false, false); "failed" -> DotLook(dcs.error, false, true); else -> DotLook(dfaint, true, false) }
+    else -> DotLook(dfaint, true, false)
+}
+@Composable internal fun StatusDot(t: DThread, size: Int = 7) {
+    val d = dotOf(t); val shape = if (d.round) androidx.compose.foundation.shape.CircleShape else RectangleShape
+    Box(Modifier.size(size.dp).then(if (d.hollow) Modifier.border(BorderStroke(1.5.dp, d.color), shape) else Modifier.background(d.color, shape)).testTag("dot.${t.status.ifEmpty { t.state }}"))
+}
 internal fun dStateWord(s: String) = when (s) { "working" -> "working"; "asking" -> "needs you"; "failed" -> "failed"; else -> "inactive" }
+/** The STATE strip's word: the hub's (`status`) when it sends one, as the desktop's header says it; else the turn's. */
+internal fun dStatusWord(t: DThread) = when (t.status) { "" -> dStateWord(t.state); "active" -> "working"; "blocked" -> "needs you"; else -> t.status }
 private val dClock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
 private val dDay = java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.getDefault())
 /** A message's time: the clock today, the day too on another. */
@@ -100,7 +123,7 @@ fun DataRoot() {
             is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
-            is Page.Thread -> { BackHandler { page = Page.Home }; ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }) { page = Page.Home } }
+            is Page.Thread -> { BackHandler { page = Page.Home }; ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }) { page = Page.Home } }
             Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }, { page = Page.Hub(Page.Settings) }, { page = Page.Accounts }) { page = Page.Improve } }
             Page.Accounts -> { BackHandler { page = Page.Settings }; AccountsScreen({ page = Page.Settings }) { page = Page.Account(it, false) } }
             is Page.Account -> { BackHandler { page = Page.Accounts }; key(p) { AccountScreen(p.id, p.start) { page = Page.Accounts } } } // each opening its own screen: an alert's tap reads the account afresh and starts the sign-in
@@ -265,6 +288,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
+    var treeOpen by remember { mutableStateOf(prefs.getStringSet("tree.open", emptySet())!!.toSet()) } // parents whose subthreads show
     val termsOpen = LocalTermsOpen.current
     LaunchedEffect(DataClient.conn) { DataClient.refresh(); if (DataClient.conn == DataClient.Conn.ONLINE && DataClient.has("bots")) runCatching { DataClient.loadBots() } }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -309,8 +333,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             for (p in projects) {
                 val closed = p.id in shut
                 rowOf[p.id] = at; at += 1
-                if (!closed) { val g0 = ThreadGroups.split(threads, p.id); val n0 = ThreadGroups.count(p.settledCount, g0.settled.size); at += g0.active.size + (if (g0.active.isEmpty() && n0 == 0) 1 else 0) + (if (n0 > 0) 1 else 0)
-                    if (n0 > 0 && p.id in DataClient.settledOpen) at += g0.settled.size + (if (p.id in DataClient.settledMore) 1 else 0) }
+                if (!closed) { val g0 = ThreadGroups.split(threads, p.id); val n0 = ThreadGroups.count(p.settledCount, g0.settled.size); at += ThreadGroups.tree(g0.active, g0.all, treeOpen).size + (if (g0.active.isEmpty() && n0 == 0) 1 else 0) + (if (n0 > 0) 1 else 0)
+                    if (n0 > 0 && p.id in DataClient.settledOpen) at += ThreadGroups.tree(g0.settled, g0.all, treeOpen).size + (if (p.id in DataClient.settledMore) 1 else 0) }
                 item(key = "p:${p.id}") {
                     Row(Modifier.fillMaxWidth().height(40.dp).background(if (flash == p.id) dcs.primary.copy(alpha = .18f) else Color.Transparent).combinedClickable(onClick = {
                         shut = if (closed) shut - p.id else shut + p.id; prefs.edit().putStringSet("projects.shut", shut).apply()
@@ -327,7 +351,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 if (!closed) {
                     val g = ThreadGroups.split(threads, p.id)
                     val n = ThreadGroups.count(p.settledCount, g.settled.size)
-                    items(g.active, key = { "t:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+                    items(ThreadGroups.tree(g.active, g.all, treeOpen), key = { "t:${it.t.id}" }) { r -> TreeRow(r, treeOpen, { treeOpen = it; prefs.edit().putStringSet("tree.open", it).apply() }, open) }
                     if (g.active.isEmpty() && n == 0) item("none:${p.id}") { DMono("No threads", dfaint, 12, Modifier.padding(start = 34.dp, top = 6.dp, bottom = 8.dp)) }
                     if (n > 0) {
                         val on = p.id in DataClient.settledOpen
@@ -337,7 +361,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                             }
                         }
                         if (on) {
-                            items(g.settled, key = { "t:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+                            items(ThreadGroups.tree(g.settled, g.all, treeOpen), key = { "t:${it.t.id}" }) { r -> TreeRow(r, treeOpen, { treeOpen = it; prefs.edit().putStringSet("tree.open", it).apply() }, open) }
                             if (p.id in DataClient.settledMore) item("settled.more:${p.id}") {
                                 val more = rememberCoroutineScope()
                                 Row(Modifier.fillMaxWidth().height(32.dp).clickable { more.launch { DataClient.loadSettled(p.id, more = true) } }.padding(start = 34.dp).testTag("home.settled.more.${p.id}"), verticalAlignment = Alignment.CenterVertically) { DMono("More", dfaint, 11) }
@@ -347,7 +371,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 }
             }
             val known = projects.map { it.id }.toSet()
-            items(threads.filter { it.project !in known }, key = { "t:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+            items(threads.filter { it.project !in known }, key = { "t:${it.id}" }) { t -> ThreadRow(t, { open(t.id) }) }
             // Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
             if (hist.count > 0) {
                 item("history") {
@@ -356,7 +380,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                         DMono(hist.title.uppercase(), dcs.onSurfaceVariant, 12, Modifier.weight(1f))
                     }
                 }
-                items(hist.shown(DataClient.historyOpen), key = { "h:${it.id}" }) { t -> ThreadRow(t) { open(t.id) } }
+                items(hist.shown(DataClient.historyOpen), key = { "h:${it.id}" }) { t -> ThreadRow(t, { open(t.id) }) }
                 if (DataClient.historyOpen && hist.next != null) item("history.more") {
                     val more = rememberCoroutineScope()
                     Row(Modifier.fillMaxWidth().height(32.dp).clickable { more.launch { DataClient.loadHistory(more = true) } }.padding(start = 34.dp).testTag("home.history.more"), verticalAlignment = Alignment.CenterVertically) { DMono("More", dfaint, 11) }
@@ -374,16 +398,29 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
 
 @Composable
 internal fun ThreadRowPublic(t: DThread, onClick: () -> Unit) = ThreadRow(t, onClick)
+@Composable
+private fun TreeRow(r: ThreadGroups.Node, openSet: Set<String>, setOpen: (Set<String>) -> Unit, open: (String) -> Unit) {
+    val on = r.t.id in openSet
+    ThreadRow(r.t, { open(r.t.id) }, r.depth, r.kids, on) { setOpen(if (on) openSet - r.t.id else openSet + r.t.id) }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ThreadRow(t: DThread, onClick: () -> Unit) {
+private fun ThreadRow(t: DThread, onClick: () -> Unit, depth: Int = 0, kids: Int = 0, open: Boolean = false, toggle: () -> Unit = {}) {
     var menu by remember { mutableStateOf(false) }
     ThreadMenus(t, menu, { menu = false })
-    Row(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(start = 30.dp, end = 12.dp, top = 8.dp, bottom = 8.dp).alpha(if (t.settled) .55f else 1f), verticalAlignment = Alignment.Top) {
-        Box(Modifier.padding(top = 6.dp)) { DDot(dStateColor(t.state)) }
+    // a subagent or subthread sits one step in under its parent; a parent's chevron (left of its dot, where the project's is) shows or hides its children
+    LaunchedEffect(t.id) { DataClient.prefetch(t.id) } // read ahead while it shows (the iOS app's onAppear)
+    Row(Modifier.fillMaxWidth()
+        // the finger going down reads it again: by the tap's end the thread is usually here (the person: the phone must be fast, 09-26, 11-05)
+        .pointerInput(t.id) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false); DataClient.prefetch(t.id, touch = true) } }
+        .combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(start = (8 + 16 * depth.coerceAtMost(4)).dp, end = 12.dp).alpha(if (t.settled) .55f else 1f).testTag("row.${t.id}"), verticalAlignment = Alignment.Top) {
+        Box(Modifier.width(22.dp).height(36.dp).then(if (kids > 0) Modifier.clickable(onClick = toggle).testTag("row.kids.${t.id}") else Modifier), contentAlignment = Alignment.Center) {
+            if (kids > 0) Icon(if (open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, if (open) "Hide its $kids subthreads" else "Show its $kids subthreads", tint = dfaint, modifier = Modifier.size(16.dp))
+        }
+        Box(Modifier.padding(top = 14.dp)) { StatusDot(t) }
         Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (t.pinned) { Icon(Icons.Default.PushPin, "Pinned", tint = dcs.primary, modifier = Modifier.size(11.dp)); Spacer(Modifier.width(5.dp)) }
                 Text(t.title.ifEmpty { "New thread" }, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -391,8 +428,11 @@ private fun ThreadRow(t: DThread, onClick: () -> Unit) {
             if (t.preview.isNotEmpty()) Text(t.preview.replace("**", "").replace("`", ""), color = dfaint, fontSize = 11.sp, fontFamily = BpMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(8.dp))
-        if (t.waiting > 0) { DMono("${t.waiting}", dcs.error, 11, bold = true); Spacer(Modifier.width(6.dp)) }
-        DMono(dAgo(t.updatedAt), dfaint)
+        Row(Modifier.padding(top = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (kids > 0 && !open) { DMono("$kids", dfaint, 11, Modifier.testTag("row.kidcount.${t.id}")); Spacer(Modifier.width(6.dp)) }
+            if (t.waiting > 0) { DMono("${t.waiting}", dcs.error, 11, bold = true); Spacer(Modifier.width(6.dp)) }
+            DMono(dAgo(t.updatedAt), dfaint)
+        }
     }
 }
 
@@ -430,7 +470,7 @@ private fun LocksStrip(open: (String) -> Unit) {
 private fun StateStrip(t: DThread) {
     Column(Modifier.background(dcs.surfaceVariant)) {
         Row(Modifier.fillMaxWidth().height(32.dp).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            DMono("STATE", dfaint); Spacer(Modifier.width(8.dp)); DDot(dStateColor(t.state)); Spacer(Modifier.width(6.dp)); DMono(dStateWord(t.state), dcs.onSurface, modifier = Modifier.testTag("thread.state"))
+            DMono("STATE", dfaint); Spacer(Modifier.width(8.dp)); StatusDot(t, 6); Spacer(Modifier.width(6.dp)); DMono(dStatusWord(t), dcs.onSurface, modifier = Modifier.testTag("thread.state"))
             Spacer(Modifier.weight(1f))
             if (DataClient.has("actions")) {
                 StripCell(if (t.pinned) "Unpin" else "Pin", t.pinned) { DataClient.threadAct(t.id, if (t.pinned) "unpin" else "pin") }
@@ -446,11 +486,14 @@ private fun StateStrip(t: DThread) {
 }
 
 @Composable
-private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: () -> Unit) {
+private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (String) -> Unit, back: () -> Unit) {
     val scope = rememberCoroutineScope()
     DisposableEffect(id) { DataClient.openThread(id); onDispose { DataClient.closeThread(id) } }
     val thread = DataClient.threads.firstOrNull { it.id == id }
-    val list = DataClient.entries[id] ?: emptyList()
+    // a message sent while a turn runs waits in the queue (its strip over the composer), not in the conversation, until the agent takes it
+    val queue = DataClient.queues[id] ?: emptyList()
+    val all = DataClient.entries[id] ?: emptyList()
+    val list = remember(all, queue) { if (queue.isEmpty()) all else { val q = queue.map { it.msg }.toSet(); all.filter { it.id !in q && (it.clientId == null || it.clientId !in q) } } }
     val running = thread?.state == "working" || thread?.state == "asking"
     val rows = remember(list, running) { DataFold.rows(list, running) }
     val state = rememberLazyListState()
@@ -480,17 +523,53 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, uri) }; if (b != null) pending.add(b) else notice = "That picture could not be read." }
     }
-    var menu by remember { mutableStateOf(false) }; var models by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }; var models by remember { mutableStateOf(false) }; var finding by remember(id) { mutableStateOf(false) }
+    val rowsNow by rememberUpdatedState(rows); var found by remember(id) { mutableStateOf("") } // the row Search in thread went to, marked for a moment
     var order by remember(id) { mutableStateOf<DataClient.Order?>(null) }
     LaunchedEffect(id, list.size, thread?.state, DataClient.conn) { if (DataClient.has("order")) runCatching { DataClient.order(id) }.onSuccess { order = it } }
+    LaunchedEffect(id, all.size, thread?.state, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.loadQueue(id) } }
+    // Buy it: the hub's button for this thread (a KiCad project or fab files ready to order), asked again when the turn ends
+    var buy by remember(id) { mutableStateOf<DataClient.Buy?>(null) }; var buying by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(id, thread?.state, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE && thread?.state != "working") runCatching { DataClient.buyOf(id) }.onSuccess { buy = it } }
+    val startBuy: () -> Unit = { if (!buying) { buying = true; scope.launch { try { val t = DataClient.buy(id); if (t.isNotEmpty()) go(t) } catch (e: Exception) { notice = e.message ?: "Buy it did not start." } finally { buying = false } } } }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    // the camera's photo (Take a photo, by Attach): into the app's cache through its FileProvider, then made ready like a chosen one
+    var shotUri by remember(id) { mutableStateOf<android.net.Uri?>(null) }
+    val shoot = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.TakePicture()) { ok ->
+        val u = shotUri; if (ok && u != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, u) }; if (b != null) pending.add(b) else notice = "That photo could not be read." }
+    }
+    fun takePhoto() = runCatching {
+        val dir = java.io.File(ctx.cacheDir, "camera").apply { mkdirs() }
+        dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.delete() }
+        val u = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg"))
+        shotUri = u; shoot.launch(u)
+    }.onFailure { notice = "The camera did not start." }
+    val camAsk = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) { notice = ""; takePhoto() } else notice = "Camera access is off for Backplane. Turn it on in Settings, or choose a photo instead."
+    }
+    var attachMenu by remember { mutableStateOf(false) }
     var drawing by remember(id) { mutableStateOf(false) }
     if (drawing) DrawPadSheet({ drawing = false }) { pending.add(it); notice = "" }
     var openRuns by remember(id) { mutableStateOf(emptySet<String>()) }
-    thread?.let { t -> ThreadMenus(t, menu, { menu = false }) { back() }; if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
+    thread?.let { t -> ThreadMenus(t, menu, { menu = false }, { back() }, if (DataClient.has("search")) ({ finding = true }) else null, buy?.label?.let { it to startBuy }); if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
+    if (finding) FindInThread(id, { finding = false }) { msg ->
+        // the message's row, loading earlier pages until it is there (a few at most)
+        scope.launch {
+            var n = 0
+            while (n++ < 30) {
+                val now = rowsNow; val at = now.indexOfFirst { r -> r is DRow.Entry && (r.entry.id == msg) || r is DRow.Fold && r.fold.items.any { it.id == msg } }
+                if (at >= 0) { stick = false; state.scrollToItem(at + if (DataClient.older[id] != null) 1 else 0); found = now[at].id; kotlinx.coroutines.delay(2500); if (found == now[at].id) found = ""; break }
+                if (DataClient.older[id] == null) { notice = "That message is no longer in this thread."; break }
+                DataClient.loadOlder(id); kotlinx.coroutines.delay(400)
+            }
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         DBar(thread?.title ?: "", back) {
-            if (thread != null && DataClient.has("viewers")) IconButton(onClick = viewer, modifier = Modifier.testTag("thread.viewer")) { Icon(Icons.Default.Dashboard, "Viewer", tint = dcs.onSurfaceVariant) }
+            // Buy it when there is something to buy; the thread's menu; the viewers in the corner (the person's order, 11-04)
+            buy?.let { b -> IconButton(onClick = startBuy, enabled = !buying, modifier = Modifier.testTag("thread.buy")) { Icon(Icons.Default.ShoppingCart, b.label, tint = dcs.primary) } }
             if (thread != null && DataClient.has("actions")) IconButton(onClick = { menu = true }, modifier = Modifier.testTag("thread.more")) { Icon(Icons.Default.MoreVert, "More", tint = dcs.onSurfaceVariant) }
+            if (thread != null && DataClient.has("viewers")) IconButton(onClick = viewer, modifier = Modifier.testTag("thread.viewer")) { Icon(Icons.Default.Dashboard, "Viewer", tint = dcs.onSurfaceVariant) }
         }
         ConnBanner(hub)
         thread?.let { StateStrip(it) }
@@ -498,9 +577,11 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("thread.list"), state = state, contentPadding = PaddingValues(vertical = 8.dp)) {
             if (DataClient.older[id] != null) item("older") { Box(Modifier.fillMaxWidth().clickable { DataClient.loadOlder(id) }.padding(10.dp), contentAlignment = Alignment.Center) { DMono("load earlier", dfaint) } }
             items(rows, key = { it.id }) { r ->
+                Box(Modifier.background(if (found == r.id) dcs.primary.copy(alpha = .16f) else Color.Transparent)) {
                 when (r) {
                     is DRow.Entry -> EntryRow(id, r.entry)
                     is DRow.Fold -> FoldRow(r.fold, r.fold.id in openRuns) { openRuns = if (r.fold.id in openRuns) openRuns - r.fold.id else openRuns + r.fold.id }
+                }
                 }
             }
             if (list.isEmpty() && DataClient.listsLoaded) item("empty") { DMono("Start a conversation.", dcs.onSurfaceVariant, 13, Modifier.padding(14.dp)) }
@@ -510,6 +591,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
         order?.let { OrderCard(it) }
         MentionPopup(draft) { put(it) }
         DataClient.btw[id]?.let { b -> BtwCard(b) { DataClient.closeBtw(id) } }
+        if (queue.isNotEmpty()) QueueStrip(id, queue) { put(if (draft.isBlank()) it else draft.trimEnd() + "\n\n" + it) }
         val asked = DataClient.secretAsks[id]?.firstOrNull()
         if (box != null || asked != null) SecretBox(id, box ?: asked?.name ?: "", asked?.takeIf { box == null || it.name == box }, { box = null })
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -521,7 +603,15 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
             DField(field, { DataClient.setField(id, it) }, "Ask anything: @bot, >thread, %project, #room, &model, \$skill, /btw", Modifier.testTag("thread.composer"), 6, dcs.primary)
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { "default" }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
-                Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) pick.launch("image/*") else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.attach"), contentAlignment = Alignment.Center) { Icon(Icons.Default.AttachFile, "Attach", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) attachMenu = true else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.AttachFile, "Attach", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    DropdownMenu(attachMenu, { attachMenu = false }) {
+                        DropdownMenuItem({ Text("Choose a photo", fontFamily = BpMono) }, { attachMenu = false; pick.launch("image/*") }, Modifier.testTag("thread.attach.pick"), leadingIcon = { Icon(Icons.Default.Image, null) })
+                        DropdownMenuItem({ Text("Take a photo", fontFamily = BpMono) }, { attachMenu = false
+                            if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) takePhoto() else camAsk.launch(android.Manifest.permission.CAMERA)
+                        }, Modifier.testTag("thread.attach.camera"), leadingIcon = { Icon(Icons.Default.PhotoCamera, null) })
+                    }
+                }
                 Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) drawing = true else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, "Draw", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
                 if (dictate) MicChip(DataVoice.on(id)) {
                     if (DataVoice.on(id) || androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id)
@@ -531,7 +621,9 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, back: 
                 if (running && blank) DBtn("Stop", false, modifier = Modifier.testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
                 else DBtn(word?.label ?: "Send", true, !blank, Modifier.testTag("thread.send")) {
                     notice = ""
-                    if (word == null) { if (dictate) DataVoice.sent(id); DataClient.send(id, draft, pending.toList()); pending.clear(); stick = true }
+                    // sent: the keyboard goes away, so the reply has the screen (a tap on the box brings it back)
+                    // (focus first: the keyboard's word in progress is committed before the box empties, never after it)
+                    if (word == null) { val text = draft; focus.clearFocus(); if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList()); pending.clear(); stick = true }
                     // a command of the composer: the hub runs it; a refusal leaves the draft and says why
                     else { val text = draft.trim(); scope.launch { try {
                         val r = DataClient.runCommand(id, text)

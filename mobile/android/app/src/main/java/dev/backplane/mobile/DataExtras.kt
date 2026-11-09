@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -57,7 +58,9 @@ fun TextPrompt(title: String, initial: String, ok: String, close: () -> Unit, do
 }
 
 /** The actions of a thread, as the desktop's header and row menu offer them. */
-fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit): List<Pair<String, () -> Unit>> = buildList {
+fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit, search: (() -> Unit)? = null, buy: Pair<String, () -> Unit>? = null): List<Pair<String, () -> Unit>> = buildList {
+    buy?.let { add(it) } // Buy it heads the thread's tools, as on the desktop
+    search?.let { add("Search in thread" to it) }
     add((if (t.pinned) "Unpin" else "Pin") to { DataClient.threadAct(t.id, if (t.pinned) "unpin" else "pin"); Unit })
     add((if (t.settled) "Unsettle" else "Settle") to { DataClient.threadAct(t.id, if (t.settled) "unsettle" else "settle"); Unit })
     add((if (t.archived) "Unarchive" else "Archive") to { DataClient.threadAct(t.id, if (t.archived) "unarchive" else "archive"); Unit })
@@ -67,10 +70,10 @@ fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit): Li
 }
 
 @Composable
-fun ThreadMenus(t: DThread, shown: Boolean, close: () -> Unit, deleted: () -> Unit = {}) {
+fun ThreadMenus(t: DThread, shown: Boolean, close: () -> Unit, deleted: () -> Unit = {}, search: (() -> Unit)? = null, buy: Pair<String, () -> Unit>? = null) {
     var renaming by remember(t.id) { mutableStateOf(false) }
     var deleting by remember(t.id) { mutableStateOf(false) }
-    if (shown) ActionSheet(t.title, threadActions(t, { renaming = true }, { deleting = true }), close)
+    if (shown) ActionSheet(t.title, threadActions(t, { renaming = true }, { deleting = true }, search, buy), close)
     if (renaming) TextPrompt("Rename thread", t.title, "Rename", { renaming = false }) { DataClient.threadAct(t.id, "rename", it) }
     if (deleting) ActionSheet("Delete “${t.title}”? This cannot be undone.", listOf("Delete thread" to { DataClient.threadAct(t.id, "delete"); deleted() }, "Keep it" to {}), { deleting = false })
 }
@@ -224,5 +227,67 @@ fun RoomScreen(room: DataClient.Room, back: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             DBtn("Post", true, draft.isNotBlank(), Modifier.testTag("room.post")) { val t = draft; draft = ""; scope.launch { runCatching { DataClient.roomPost(room.id, t) }; load() } }
         }
+    }
+}
+
+/** "Search in thread" (the thread's menu): what was said here with every word typed, newest first (the hub's `search` with `thread`); a tap goes to the message. The box
+ *  takes the keyboard at once: the person asked to search. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FindInThread(tid: String, close: () -> Unit, go: (String) -> Unit) {
+    var q by remember { mutableStateOf("") }
+    var hits by remember { mutableStateOf<List<DataClient.Hit>?>(null) }
+    var err by remember { mutableStateOf("") }
+    LaunchedEffect(q) { if (q.isBlank()) { hits = null; return@LaunchedEffect }; kotlinx.coroutines.delay(250); try { hits = DataClient.searchIn(tid, q.trim()); err = "" } catch (e: Exception) { err = e.message ?: "" } }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    ModalBottomSheet(onDismissRequest = close, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).testTag("find")) {
+            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                DMono("SEARCH IN THREAD", dcs.onSurfaceVariant, 11, Modifier.weight(1f))
+                DMono("Done", dcs.primary, 13, Modifier.clickable(onClick = close).padding(8.dp).testTag("find.done"), bold = true)
+            }
+            Box(Modifier.padding(horizontal = 12.dp)) { DField(q, { q = it }, "Words said in this thread", Modifier.focusRequester(focus).testTag("find.field")) }
+            LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+            Spacer(Modifier.height(8.dp)); DLine()
+            val h = hits
+            when {
+                err.isNotEmpty() -> DMono(err, dcs.error, 12, Modifier.padding(14.dp))
+                h == null -> {}
+                h.isEmpty() -> DMono("nothing said here matches “${q.trim()}”", dfaint, 12, Modifier.padding(14.dp).testTag("find.none"))
+                else -> LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                    items(h, key = { it.msg + it.at }) { x ->
+                        Column(Modifier.fillMaxWidth().clickable { close(); go(x.msg) }.padding(horizontal = 14.dp, vertical = 10.dp).testTag("find.hit")) {
+                            DMono((if (x.role == "user") "you" else "agent") + " · " + dAgo(x.at), dfaint, 11)
+                            Text(x.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, maxLines = 3)
+                        }
+                        DLine()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** What waits for the agent (the desktop's queue strip over the composer): each message's first line and the buttons the hub gives it (Steer sends it into the running turn now,
+ *  Edit takes it back into the draft, Remove drops it). */
+@Composable
+fun QueueStrip(tid: String, rows: List<DataClient.QRow>, edit: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var err by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("thread.queue"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        rows.forEach { r ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                DMono(r.tag.uppercase(), dfaint, 10); Spacer(Modifier.width(8.dp))
+                DMono(r.text, dcs.onSurface, 12, Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
+                r.buttons.filter { it.action != "q-up" }.forEach { b ->
+                    DMono(b.label, if (b.action == "q-steer") dcs.primary else if (b.action == "q-remove") dcs.error else dcs.onSurfaceVariant, 12,
+                        Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { scope.launch { try { val t = DataClient.queueAct(tid, b); if (b.action == "q-edit" && t.isNotEmpty()) edit(t); err = "" } catch (e: Exception) { err = e.message ?: "" } } }
+                            .padding(horizontal = 10.dp, vertical = 5.dp).testTag("queue.${b.action}"), bold = b.action == "q-steer")
+                }
+            }
+        }
+        if (err.isNotEmpty()) DMono(err, dcs.error, 11)
     }
 }
