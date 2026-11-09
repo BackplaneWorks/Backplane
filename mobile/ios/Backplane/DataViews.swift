@@ -1097,7 +1097,7 @@ struct DataHandoffCard: View {
     let client: DataClient
     let thread: String
     let handoff: DHandoff
-    private func open(_ r: DRef) {
+    private func open(_ r: DHandoffRef) {
         let file = r.kind == "file" || r.kind == "board"
         let text = file ? dPathScheme + ":" + (r.url.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? r.url) : r.url
         if let u = URL(string: text) { client.openLink(u, thread: r.thread) }
