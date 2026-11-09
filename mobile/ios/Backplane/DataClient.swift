@@ -391,6 +391,17 @@ final class DataClient {
         threads = r.threads.sorted { $0.updatedAt > $1.updatedAt } + (split ? threads.filter { old in old.settled && !r.threads.contains(where: { $0.id == old.id }) } : [])
         listNext = r.next; listsLoaded = true; scheduleSave()
         if split { for p in settledOpen { await loadSettled(p, g: g) } }
+        await parentsOf(g)
+    }
+    /// The parents of subagents and subthreads the list left out (a settled one): read one by one, so a child sits under its parent, as on the desktop. A few at most.
+    private func parentsOf(_ g: Int) async {
+        let have = Set(threads.map(\.id))
+        var seen = Set<String>()
+        for pid in threads.map(\.parent) where !pid.isEmpty && !have.contains(pid) && seen.insert(pid).inserted && seen.count <= 20 {
+            guard let r: DEntriesPage = try? await call("thread.entries", ["thread": pid, "limit": 1]), g == gen, let t = r.thread else { continue }
+            if !threads.contains(where: { $0.id == t.id }) { threads.append(t) }
+        }
+        scheduleSave()
     }
     func setSettled(open on: Bool, _ project: String) {
         if on { settledOpen.insert(project) } else { settledOpen.remove(project) }
