@@ -73,7 +73,8 @@ impl First {
         let code = secret.unwrap_or(typed);
         if code.trim().is_empty() { self.error = "Type the short code from the other computer.".into(); cx.notify(); return }
         self.busy = format!("Pairing with {addr}."); self.error.clear();
-        let (config, started) = (self.config.clone(), self.started);
+        // a paired credential: when the hub later refuses it (revoked in its Devices), the window says so and offers pairing again (hub.rs `refused`)
+        let (config, started) = (Config { paired: true, ..self.config.clone() }, self.started);
         cx.spawn_in(window, async move |this, cx| {
             let got = cx.background_executor().spawn(async move { launch::pair(&addr, &code) }).await;
             match got {
