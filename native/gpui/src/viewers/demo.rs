@@ -88,4 +88,4 @@ impl Demo {
         Demo { page }
     }
 }
-impl Render for Demo { fn render(&mut self, _w: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement { div().size_full().bg(rgb(0x0d0f12)).child(self.page.clone()) } }
+impl Render for Demo { fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement { self.page.update(cx, |p, _| p.collect(w)); div().size_full().bg(rgb(0x0d0f12)).child(self.page.clone()) } }
