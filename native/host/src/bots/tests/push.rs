@@ -58,13 +58,7 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     let ada = bot(&s.hub, "ada").await; let ada_th = s.bots.world().await.bot(&ada).unwrap().thread.clone();
     let r = s.bots.tool_call(&ada_th, "notify_person", &json!({"reason":"needs_you","text":"ada wants a push"})).await; assert!(r.0, "{r:?}");
     assert!(r.1.to_string().contains("no direct person alert"), "{r:?}");
-    // a worker thread's turn end and failure, and an alert record written straight onto the uberbot's own thread, as the mailroom's tell does
-    s.hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
-    turn_said(&s.hub, "tw", "completed", "all done").await; turn_said(&s.hub, "tw", "failed", "broke").await;
-    for (k, v) in [("alert.tw", "done\tturn-tw\tm\t1.1\t"), ("alert.tw", "fail\tturn-tw\tm\t1.2\t"), ("alert.tw", "merged\tm-tw\tm\t1.3\tbranch")] { set(&s.hub, k, v).await }
-    set(&s.hub, &format!("alert.{}", s.chat), "note\ttell-1\tm\t1.4\tthe mailroom says").await;
-    // a worker's ask
-    s.hub.commit(&json!({"$":"AskOpened","id":"a9","thread":"tw","tool":"Bash","detail":"rm x","at":2})).await.unwrap();
+    // (a thread's alert record is a push of its own unless a focused desk shows the thread: a_threads_alert_reaches_the_phone_unless_a_focused_desk_shows_it)
     // a routine's turn that is not a reminder, and a reminder another bot planned, even after a toggle
     let past = 1_000_000u64;
     for e in [json!({"$":"RoutineSet","id":"w1","bot":ada,"name":"work","cron":"","prompt":"p","on":true,"at":past}), json!({"$":"RoutinePlan","id":"w1","once":past + 10,"tz":"person","kind":"","at":past}),
@@ -301,4 +295,35 @@ fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.int
     until(&s.hub, |l| l.iter().any(|e| e["$"] == "PushCleared")).await;
     assert_eq!(s.fake.alerts().len(), 1, "no second alert");
     assert!(push::reserved("account.signin.alert.claude"), "no client may write it");
+}
+
+// 0.14's rule (src/server/push.bend): an alert is a push of its own, raised when a thread's alert record is written, unless a desk in use is showing the thread
+#[tokio::test] async fn a_threads_alert_reaches_the_phone_unless_a_focused_desk_shows_it() {
+    let (hub, bots, _rec) = start("push-alert", "").await;
+    set(&hub, push::QUIET, "off").await; set(&hub, push::BURST, "0").await; device(&hub, "tok1").await;
+    let fake = Arc::new(Fake::default()); let _p = push::start_with(&hub, bots.clone(), fake.clone());
+    let desks = crate::settings::alerts::start(&hub);
+    for (id, title) in [("tw", "Worker"), ("tv", "Viewed")] { hub.commit(&json!({"$":"ThreadCreated","id":id,"project":"","title":title,"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap(); }
+    turn_said(&hub, "tw", "completed", "Done: the board is routed.\nMore below.").await;
+    // a desk in use, focused on tv
+    let _o = hub.attach(7); desks.say(7, "tv", true, now_s());
+    set(&hub, "alert.tw", "done\tturn-tw\tm\t1.1\t").await;
+    let a = fake.wait(1).await; assert_eq!(a.len(), 1, "{a:?}");
+    assert_eq!((a[0]["aps"]["alert"]["title"].as_str(), a[0]["aps"]["alert"]["body"].as_str(), a[0]["thread"].as_str()), (Some("Worker"), Some("Done: the board is routed."), Some("tw")), "the last reply's line: {a:?}");
+    until(&hub, |l| l.iter().any(|e| e["$"] == "PushSent" && e["kind"] == "done")).await;
+    let ordered = log(&hub).into_iter().find(|e| e["$"] == "PushOrdered").unwrap(); assert_eq!((ordered["how"].as_str(), ordered["bot"].as_str()), (Some("alert"), Some("")));
+    // the focused desk shows tv: its end is the desk's, not the phone's
+    set(&hub, "alert.tv", "done\tturn-tv\tm\t1.2\t").await; settle().await; assert_eq!(fake.alerts().len(), 1, "{:?}", fake.alerts());
+    // an ask: needs_you, with its ask so its answer clears it; a failure; a merge; a note
+    hub.commit(&json!({"$":"AskOpened","id":"a7","thread":"tw","tool":"Bash","detail":"rm x","at":2})).await.unwrap();
+    set(&hub, "alert.tw", "ask\task-tw\tm\t1.3\tBash rm x").await;
+    let a = fake.wait(2).await; assert_eq!((a[1]["aps"]["alert"]["body"].as_str(), a[1]["ask"].as_str(), a[1]["kind"].as_str()), (Some("Needs you: Bash rm x"), Some("a7"), Some("needs_you")), "{a:?}");
+    for (v, body) in [("fail\tturn-tw\tm\t1.4\t", "Failed"), ("merged\tm-tw\tm\t1.5\tbranch", "Merged: branch"), ("note\ttell-1\tm\t1.6\tthe mailroom says", "the mailroom says")] {
+        let n = fake.alerts().len(); set(&hub, "alert.tw", v).await; let a = fake.wait(n + 1).await; assert_eq!(a[n]["aps"]["alert"]["body"].as_str(), Some(body), "{a:?}");
+    }
+    // a quiet record (no kind) is no alert
+    let n = fake.alerts().len(); set(&hub, "alert.tw", "\t\tm\t1.7\t").await; settle().await; assert_eq!(fake.alerts().len(), n);
+    // an order in this way's name about no thread, or in a bot's name, is refused
+    for (bot, th) in [("", ""), ("ada", "tw")] { hub.commit(&json!({"$":"PushOrdered","id":format!("x{bot}"),"how":"alert","bot":bot,"reason":"done","thread":th,"ask":"","text":"forged","at":now_s()})).await.unwrap(); }
+    settle().await; assert_eq!(fake.alerts().len(), n, "{:?}", fake.alerts());
 }
