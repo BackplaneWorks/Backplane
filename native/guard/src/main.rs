@@ -5,6 +5,7 @@ use std::{fs::{self, File}, path::PathBuf, process::{Command, Stdio}, time::Dura
 use store::{Dir, now};
 
 const USAGE: &str = "usage: backplane                            the desktop app of the build that runs
+       backplane --headless [--home DIR] [--port N] [--foreground]   the hub alone, for phones and other computers, in the background
        backplane pair [--machine | --join ADDRESS CODE | --requests | --approve ID | --deny ID]   pair a device or a machine (backplane pair --help)
        backplane hub status                 what the hub is doing, what failed last
        backplane hub restart [--now]          restart it (--now: cut running turns; they carry on after)
@@ -182,10 +183,51 @@ fn open_app() -> i32 {
     #[cfg(not(unix))] { Command::new(&app).spawn().map_or_else(|e| { eprintln!("cannot open {}: {e}", app.display()); 1 }, |_| 0) }
 }
 
+/// `backplane --headless`: the hub alone, no window (a server, or a desktop whose phones should reach it with the app closed), as 0.14's
+/// `backplane --headless` did. It runs under the guard like the one the desktop app starts, in the background unless `--foreground`, and the
+/// command ends once it answers. A hub already running for that home is left as it is; one that ran before starts as it ran (`hub restart`).
+fn headless(a: &[String]) -> i32 {
+    let (mut home, mut port, mut fg) = (None::<PathBuf>, 0u16, false);
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--headless" => {}, "--foreground" => fg = true,
+            "--home" => home = Some(value(a, &mut i).into()), "--port" => port = value(a, &mut i).parse().unwrap_or(0),
+            _ => { eprint!("{USAGE}"); return 2 }
+        }
+        i += 1;
+    }
+    let user = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
+    let home = home.or_else(|| std::env::var_os("BACKPLANE_HOME").map(PathBuf::from)).or_else(|| store::pointer().and_then(|p| fs::read_to_string(p).ok()).map(|s| PathBuf::from(s.trim())))
+        .unwrap_or_else(|| match std::env::consts::OS { "macos" => user.join("Library/Application Support/Backplane/hub"), "windows" => user.join("AppData").join("Roaming").join("Backplane").join("hub"), _ => user.join(".backplane/hub") });
+    let d = Dir::of(&home);
+    if guard_up(&d) { let st = d.json("status.json"); println!("The hub already runs for {} (port {}).", home.display(), st["port"]); return 0 }
+    let started = if !d.json("launch.json").is_null() && port == 0 && !fg { start_guard(&d, false) } else {
+        let me = match std::env::current_exe() { Ok(p) => p, Err(e) => { eprintln!("{e}"); return 1 } };
+        let prefix = me.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        if !prefix.join("CURRENT").is_file() { eprintln!("no builds next to {}: run the hub with `backplane hub run`", me.display()); return 2 }
+        let port = if port != 0 { port } else { match (3800..=3899).find(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok()) { Some(p) => p, None => { eprintln!("no free port between 3800 and 3899: give --port"); return 1 } } };
+        if let Err(e) = fs::create_dir_all(&home) { eprintln!("cannot make {}: {e}", home.display()); return 1 }
+        let args: Vec<String> = ["run", "--home", &home.to_string_lossy(), "--port", &port.to_string(), "--host", "127.0.0.1", "--builds", &prefix.to_string_lossy(), "--default", "--", "--foreground"].iter().map(|s| s.to_string()).collect();
+        if fg { return hub(&args) }
+        let log = match fs::OpenOptions::new().create(true).append(true).open(home.join("hub.log")) { Ok(f) => f, Err(e) => { eprintln!("cannot write {}: {e}", home.join("hub.log").display()); return 1 } };
+        let mut c = Command::new(&me); c.arg("hub").args(&args).stdin(Stdio::null()).stdout(log.try_clone().map(Stdio::from).unwrap_or(Stdio::null())).stderr(Stdio::from(log));
+        sys::detach(&mut c);
+        c.spawn().map(|_| ()).map_err(|e| e.to_string())
+    };
+    if let Err(e) = started { eprintln!("{e}"); return 1 }
+    // the guard writes its status once it has started the hub
+    for _ in 0..100 { if guard_up(&d) { break } std::thread::sleep(Duration::from_millis(100)); }
+    let code = wait_up(&d);
+    if code == 0 { println!("Backplane's hub runs in the background for {} (port {}). Pair a phone: backplane pair. Stop it: backplane hub stop.", home.display(), d.json("status.json")["port"]); }
+    code
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let code = match a.first().map(String::as_str) {
         Some("hub") => hub(&a[1..]),
+        Some("--headless") => headless(&a),
         Some("pair") => pair::run(&a[1..]),
         Some("--version") => { println!("backplane {}", env!("CARGO_PKG_VERSION")); 0 }
         None => open_app(),
