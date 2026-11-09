@@ -377,12 +377,36 @@ fn split_edge(cx: &mut Context<Backplane>, light: bool, main: bool, row: bool) -
     d.on_click(reset).into_any_element()
 }
 /// A pane's head (0.14's combo-head): its name, and × to put it away.
-fn split_head(cx: &mut Context<Backplane>, light: bool, pane: &'static str, name: &'static str) -> Div {
+fn split_head(cx: &mut Context<Backplane>, light: bool, pane: &'static str, name: &'static str, more: Option<AnyElement>) -> Div {
     let c = |n: &str| theme::color(light, n);
     div().flex_none().h(px(26.)).flex().items_center().gap_2().pl_2().pr_1().bg(c("panel")).border_b_1().border_color(c("line"))
-        .child(div().flex_1().min_w_0().text_size(px(10.)).text_color(c("dim")).child(name.to_uppercase()))
+        .child(div().flex_none().text_size(px(10.)).text_color(c("dim")).child(name.to_uppercase())).children(more).child(div().flex_1())
         .child(div().id(SharedString::from(format!("split-hide-{pane}"))).p(px(3.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip(&format!("Hide the {name}"), "", light))
             .child(crate::art::icon("x", 13., c("dim"))).on_click(cx.listener(move |this, _, _, cx| split_set(this, |p| p.hide = split_flip(&p.hide, pane), true, cx))))
+}
+/// The schematic pane's Sheets menu: the sheet on show, and the design's sheets (indented by depth) under it while open; a press shows that sheet in the pane.
+fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot::Sheet], key: &str, open: bool) -> Option<AnyElement> {
+    if sheets.len() < 2 { return None }
+    let c = |n: &str| theme::color(light, n);
+    let here = |i: usize, sh: &super::plot::Sheet| if i == 0 { key.ends_with('|') || !sheets.iter().skip(1).any(|x| key.ends_with(&x.file)) } else { key.ends_with(&sh.file) };
+    let cur = sheets.iter().enumerate().find(|(i, sh)| here(*i, sh)).map(|(i, sh)| if i == 0 { "Top sheet".to_string() } else { sh.name.clone() }).unwrap_or_else(|| "Top sheet".into());
+    let btn = div().id("split-sheets").flex().items_center().gap_1().px_1().text_size(px(11.)).cursor_pointer().border_1().border_color(c(if open { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
+        .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(cur)).child(crate::art::icon("chevron-down", 11., c("dim")))
+        .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(1); pv.sheets_open = !pv.sheets_open; cx.notify(); }));
+    let mut wrap = div().relative().child(btn);
+    if open {
+        let mut list = div().id("split-sheets-list").mt(px(2.)).min_w(px(220.)).max_h(px(420.)).overflow_y_scroll().flex().flex_col().p_1().text_size(px(12.)).bg(c("panel")).border_1().border_color(c("line")).shadow_lg().occlude()
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.pv(1).sheets_open = false; cx.notify(); }));
+        for (i, sh) in sheets.iter().enumerate() {
+            let file = if i == 0 { String::new() } else { sh.file.clone() };
+            let on = here(i, sh);
+            list = list.child(div().id(SharedString::from(format!("split-sheet-{i}"))).pl(px(6. + 10. * sh.depth as f32)).pr_2().py(px(3.)).cursor_pointer().text_color(c(if on { "accent" } else { "text" })).hover(|s| s.bg(c("raise")))
+                .child(if i == 0 { "Top sheet".to_string() } else { sh.name.clone() })
+                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-sheet".into(), file.clone())); this.screens.pv(1).sheets_open = false; cx.notify(); })));
+        }
+        wrap = wrap.child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(list)).with_priority(3));
+    }
+    Some(wrap.into_any_element())
 }
 /// The bar's pane toggles (lit while shown) and the probed piece as a chip (0.14's combo-picks and probe-chip): a tap on a part or net in any pane names it here
 /// instead of a card over the drawing; × or Escape clears it in every pane.
@@ -441,13 +465,15 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
     let wide = split_box(0).map_or(true, |b| b.size.width >= b.size.height);
     let [sch_pv, brd_pv] = pvs;
     let pane = |head: Div, body: AnyElement| div().flex().flex_col().min_w_0().min_h_0().child(head).child(div().relative().flex_1().min_h_0().min_w_0().child(body));
-    let sch = s_on.then(|| { let h = split_head(cx, light, "sch", "Schematic"); let b = plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &[], None); pane(h, b) });
-    let brd = b_on.then(|| { let h = split_head(cx, light, "pcb", "Board"); let b = plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], None); pane(h, b) });
+    // the schematic pane's sheets (0.14's combo-sheets): the sheet on show in its head, the hierarchy in a menu under it
+    let sheets_el = split_sheets(cx, light, &plot.sheets, &string(panes[0], "key"), sch_pv.sheets_open);
+    let sch = s_on.then(|| { let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &[], None); pane(h, b) });
+    let brd = b_on.then(|| { let h = split_head(cx, light, "pcb", "Board", None); let b = plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], None); pane(h, b) });
     let d3 = t_on.then(|| {
         let want3 = string(panes[2], "key");
         if let Some(s) = solid { if s.read(cx).reserve != 0. { s.update(cx, |p, cx| { p.reserve = 0.; cx.notify(); }); } }
         let model: AnyElement = match solid { Some(s) if solid_ready(&want3, have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => status_row(light, "Loading the model…", None) };
-        let h = split_head(cx, light, "3d", "3D"); pane(h, model)
+        let h = split_head(cx, light, "3d", "3D", None); pane(h, model)
     });
     // the side group: the board and the 3D, one beside (or over) the other with the divider between them
     let side_row = !wide;

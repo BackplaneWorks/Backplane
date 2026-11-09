@@ -120,8 +120,10 @@ impl Plots {
         let keys: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
-          st.subs.remove(&client);
+          // a pane whose source stays (another sheet in the schematic pane: the board and the 3D stay) keeps what this client holds of it: nothing is sent again
+          let mut old = st.subs.remove(&client).unwrap_or_default();
           for (k, ky, file) in views {
+              if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
               st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: file.clone(), ..Default::default() });
               s.file = file;
