@@ -19,7 +19,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -89,14 +89,15 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let preview = m.page(&hub.store, id, 0, 8).ok().and_then(|p| p.rows.iter().find(|r| r.kind == "msg" && !r.text.trim().is_empty()).map(|r| clip(&shown_text(&r.text), PREVIEW))).unwrap_or_default();
     let (pinned, settled, settled_at) = flags(hub, id);
     // a model chosen within the provider is a ModesSet (the policy state), a switch of provider a ProviderSet (the model's fold)
-    let (model, effort, runtime, combo) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default(),
-        crate::present::keys::combo_of(st, id, crate::hub::now_ms() / 1000)))).unwrap_or_default();
+    // `status`: the sidebar dot's word (signal.rs, children's work included): "finished" is the desktop's green dot, a turn done and not yet settled
+    let (model, effort, runtime, combo, status) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default(),
+        crate::present::keys::combo_of(st, id, crate::hub::now_ms() / 1000), crate::signal::index(st).get(id).map_or("", |n| crate::signal::display_name(st, *n, id))))).unwrap_or_default();
     let model = if model.is_empty() { t.model.clone() } else { model };
     // the composer's one chip: the model and what the account has left (present/keys.rs `combo`, its short form: a phone's row has room for about 20 characters;
     // the picker's title says it all)
     let chip = combo["short"].as_str().filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, &effort));
     Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"settledAt":settled_at,"archived":t.archived,
-        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH}))
+        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && flags_of(i).1).count();
@@ -120,8 +121,12 @@ fn page_of(mut items: Vec<(u64, String, Value)>, limit: usize, before: &str) -> 
 }
 fn limit_of(p: &Value, dflt: usize, max: usize) -> usize { p.get("limit").and_then(Value::as_u64).map_or(dflt, |n| (n as usize).clamp(1, max)) }
 
-fn ask_options(kind: &str, options: &str) -> Value {
-    if kind == "approval" { return json!([{"id":"accept","label":"Allow"},{"id":"session","label":"Allow for this session"},{"id":"decline","label":"Decline"}]) }
+/// The buttons of an ask, in the desktop's words (present/thread.rs asks_json): the files' approval of a buy thread is Send or Not now, a settings proposal Approve or Reject.
+fn ask_options(kind: &str, tool: &str, options: &str) -> Value {
+    if kind == "approval" { return match tool {
+        "order_quote" => json!([{"id":"accept","label":"Send"},{"id":"decline","label":"Not now"}]),
+        "settings_proposal" => json!([{"id":"accept","label":"Approve"},{"id":"decline","label":"Reject"}]),
+        _ => json!([{"id":"accept","label":"Allow"},{"id":"session","label":"Allow for this session"},{"id":"decline","label":"Decline"}]) } }
     let labels: Vec<String> = match serde_json::from_str::<Value>(options) {
         Ok(Value::Array(xs)) => xs.iter().filter_map(|x| x.as_str().map(str::to_string).or_else(|| x["label"].as_str().map(str::to_string))).collect(),
         _ => options.split(|c| c == '\n' || c == '|').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
@@ -130,8 +135,9 @@ fn ask_options(kind: &str, options: &str) -> Value {
 }
 fn ask_entry(e: &Value, answered: Option<&str>) -> Value {
     let (kind, tool, detail) = (s(e, "kind"), s(e, "tool"), s(e, "detail"));
-    let q = if kind == "approval" { if detail.is_empty() { tool.to_string() } else { format!("{tool}: {detail}") } } else { detail.to_string() };
-    let mut ask = json!({"id":s(e,"id"),"state":if answered.is_some() {"answered"} else {"open"},"question":q,"options":ask_options(kind, s(e, "options"))});
+    let q = if kind == "approval" && tool == "order_quote" { format!("Send these files for a quote?\n{detail}") }
+        else if kind == "approval" { if detail.is_empty() { tool.to_string() } else { format!("{tool}: {detail}") } } else { detail.to_string() };
+    let mut ask = json!({"id":s(e,"id"),"state":if answered.is_some() {"answered"} else {"open"},"question":q,"options":ask_options(kind, tool, s(e, "options"))});
     if let Some(a) = answered { ask["answered"] = json!(a) }
     json!({"id":format!("ask:{}",s(e,"id")),"kind":"ask","text":q,"at":ms(e["at"].as_u64().unwrap_or(0)),"ask":ask})
 }
@@ -487,7 +493,10 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
     let _detach = Detach(hub.clone(), conn.client);
     if !hub.admit_blocking(conn.client, token).await { return Ok(()) }
-    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home)),"migrating":crate::import014::phone_state(&hub).await}), json_mode)).await?;
+    // `name`: the machine's name (BACKPLANE_NAME, else its host name), for the phone's title instead of the address it was paired at
+    static NAME: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    let name = NAME.get_or_init(crate::net::botnet::name).await.clone();
+    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home)),"migrating":crate::import014::phone_state(&hub).await}), json_mode)).await?;
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
