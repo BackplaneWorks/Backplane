@@ -524,6 +524,18 @@ class PlotRenderer : GLSurfaceView.Renderer {
     }
 
     // the picked piece, drawn bright over everything (GL thread)
+    /** Many pieces lit at once (a net or a part the cross-probe found): their caps and fills in one buffer, drawn as the picked piece is. */
+    fun highlightAll(ps: List<Pair<PlotChunk, PlotChunk.Piece>>) {
+        if (ps.isEmpty()) { hiCaps = 0; hiTris = 0; hiLayer = -1; return }
+        val caps = FloatArray(ps.sumOf { it.second.caps.count() } * 5); val tris = FloatArray(ps.sumOf { it.second.tris.count() } * 6)
+        var ci = 0; var ti = 0
+        for ((c, p) in ps) {
+            if (p.caps.count() > 0) { System.arraycopy(c.caps, p.caps.first * 5, caps, ci, p.caps.count() * 5); ci += p.caps.count() * 5 }
+            if (p.tris.count() > 0) { System.arraycopy(c.tris, p.tris.first * 6, tris, ti, p.tris.count() * 6); ti += p.tris.count() * 6 }
+        }
+        put(bufs[4], caps); put(bufs[5], tris)
+        hiCaps = ps.sumOf { it.second.caps.count() }; hiTris = ps.sumOf { it.second.tris.count() } * 3; hiLayer = ps.first().first.layer
+    }
     fun highlight(c: PlotChunk?, p: PlotChunk.Piece?) {
         if (c == null || p == null) { hiCaps = 0; hiTris = 0; hiLayer = -1; return }
         put(bufs[4], c.caps.copyOfRange(p.caps.first * 5, (p.caps.last + 1) * 5))
@@ -782,7 +794,7 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
     fun bindSource(key: String) {
         if (key == stateKey) return
         savePose(); stateKey = key; pendingPose = poses[key]
-        fitted = false; box = FloatArray(0); edge = FloatArray(0); chunks = emptyList(); shown = null; shownMesh = null; picked = ""; shownGen = -1; shownParts = 0
+        fitted = false; box = FloatArray(0); edge = FloatArray(0); chunks = emptyList(); shown = null; shownMesh = null; picked = ""; lit = emptyList(); shownGen = -1; shownParts = 0
         flingX = 0f; flingY = 0f
         queueEvent { renderer.load(emptyList(), emptySet()); renderer.mesh(null); renderer.partsReset(); renderer.highlight(null, null); renderer.slab(FloatArray(0), 0) }
     }
@@ -930,6 +942,17 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         fitted = true
     }
 
+    // the cross-probe's pieces ("chunk,info" each), drawn bright; the empty list clears them (back to the picked piece, if any)
+    private var lit = emptyList<String>()
+    fun markAll(ps: List<String>) {
+        if (ps == lit) return
+        lit = ps
+        if (ps.isEmpty()) { val p = picked; picked = "\u0001"; mark(p); return }
+        val found = ps.mapNotNull { k -> val x = k.split(",").mapNotNull { it.toIntOrNull() }; val c = if (x.size == 2) chunks.getOrNull(x[0]) else null; c?.pieces?.firstOrNull { it.info == x[1] }?.let { c to it } }
+        picked = ""
+        queueEvent { renderer.highlightAll(found) }
+        requestRender()
+    }
     // the picked piece ("chunk,info" of the held chunks), drawn bright
     fun mark(p: String) {
         if (p == picked) return
