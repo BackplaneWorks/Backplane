@@ -312,6 +312,22 @@ mod tests {
         let z = tmp("zip"); std::fs::write(format!("{z}/s.kicad_sch"), "(s)").unwrap(); std::fs::create_dir_all(format!("{z}/.backplane/history.git")).unwrap();
         let s4 = step_capture(&z, "th", &reg).await; assert!(s4.contains(".backplane/history.git") && std::fs::read_dir(format!("{z}/.backplane")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("untrusted")), "{s4:?}");
     }
+    #[tokio::test] async fn a_registered_history_stays_when_its_device_number_changes() {
+        let f = tmp("remount"); let home = tmp("remounthome"); let reg = format!("{home}/history.trusted");
+        std::fs::write(format!("{f}/s.kicad_sch"), "(kicad_sch)").unwrap();
+        let s1 = step_capture(&f, "th", &reg).await; let c1 = s1.split('\n').next().unwrap().to_string(); assert_eq!(c1.len(), 40, "{s1:?}");
+        // after a reboot the same folder may sit on another device number (btrfs): only the inode and the path name it
+        let line = std::fs::read_to_string(&reg).unwrap(); let (dev_ino, path) = line.trim_end().split_once(' ').unwrap();
+        std::fs::write(&reg, format!("{}:{} {path}\n", "999", dev_ino.split_once(':').unwrap().1)).unwrap();
+        std::fs::write(format!("{f}/s.kicad_sch"), "(kicad_sch 2)").unwrap();
+        let s2 = step_capture(&f, "th", &reg).await;
+        assert_eq!(s2.split('\n').nth(1).unwrap(), c1, "the next step follows the last: {s2:?}");
+        assert!(!std::fs::read_dir(format!("{f}/.backplane")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("untrusted")), "not moved aside");
+        // another folder's inode on that path is still not trusted
+        std::fs::write(&reg, format!("1:1 {path}\n")).unwrap(); std::fs::write(format!("{f}/s.kicad_sch"), "(kicad_sch 3)").unwrap();
+        let _ = step_capture(&f, "th", &reg).await;
+        assert!(std::fs::read_dir(format!("{f}/.backplane")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("untrusted")));
+    }
     // Copy.write: a copy runs only what a caller listed as a read; everything else is refused, whatever it is
     #[test] fn a_copy_refuses_every_command_not_listed_as_a_read() {
         assert!(write_refused(true, true, "touch").is_some()); assert!(write_refused(true, true, "git").unwrap().contains("BACKPLANE_COPY=1"));
