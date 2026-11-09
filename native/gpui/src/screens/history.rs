@@ -36,15 +36,34 @@ pub fn merge(mut rows: Vec<Value>, fresh: Vec<Value>) -> Vec<Value> {
 /// shared sits above everything: it is the page just older than the rows held.
 pub fn splice(rows: Vec<Value>, page: Vec<Value>) -> Vec<Value> {
     let Some((first, j)) = first_shared(&rows, &page) else { return page.into_iter().chain(rows).collect() };
-    let shared: HashSet<&str> = rows.iter().map(id).collect();
-    let last_in_page = page.iter().rposition(|r| shared.contains(id(r))).unwrap_or(j);
-    let last = rows.iter().rposition(|r| id(r) == id(&page[last_in_page])).unwrap_or(first);
-    let keep_top = if j > 0 && first <= 1 { 0 } else { first };
+    let (keep_top, last, last_in_page) = splice_plan(&rows, &page, first, j);
     let tail = rows[last + 1..].to_vec();
     let mut out: Vec<Value> = rows[..keep_top].to_vec();
     out.extend(page.into_iter().take(last_in_page + 1));
     out.extend(tail);
     out
+}
+/// Where a page goes: the rows held kept on top (`..keep_top`), the last held row it replaces (`last`), and its own last row that goes in (`last_in_page`).
+fn splice_plan(rows: &[Value], page: &[Value], first: usize, j: usize) -> (usize, usize, usize) {
+    let shared: HashSet<&str> = rows.iter().map(id).collect();
+    let last_in_page = page.iter().rposition(|r| shared.contains(id(r))).unwrap_or(j);
+    let last = rows.iter().rposition(|r| id(r) == id(&page[last_in_page])).unwrap_or(first);
+    (if j > 0 && first <= 1 { 0 } else { first }, last, last_in_page)
+}
+/// `splice` and what it changed (as `changed(&rows, &spliced, 0)` says), without copying the rows held: they are moved, and only the stretch the
+/// page replaces is compared. A long thread read far back holds thousands of rows; each page that lands used to copy and compare all of them.
+pub fn splice_changed(mut rows: Vec<Value>, page: Vec<Value>) -> (Vec<Value>, Range<usize>, Range<usize>) {
+    let Some((first, j)) = first_shared(&rows, &page) else {
+        let (n, held) = (page.len(), rows.len());
+        let (a, b) = if n == 0 { (held..held, held..held) } else { (0..0, 0..n) };
+        return (page.into_iter().chain(rows).collect(), a, b);
+    };
+    let (keep_top, last, last_in_page) = splice_plan(&rows, &page, first, j);
+    if last + 1 < keep_top { let spliced = splice(rows.clone(), page); let (a, b) = changed(&rows, &spliced, 0); return (spliced, a, b); } // (no such page from the hub)
+    let (a, b) = changed(&rows[keep_top..=last], &page[..=last_in_page], 0);
+    let tail = rows.split_off(last + 1); rows.truncate(keep_top);
+    rows.extend(page.into_iter().take(last_in_page + 1)); rows.extend(tail);
+    (rows, a.start + keep_top..a.end + keep_top, b.start + keep_top..b.end + keep_top)
 }
 
 fn same_row(a: &Value, b: &Value) -> bool {
@@ -96,6 +115,26 @@ mod tests {
     }
     #[test] fn an_older_page_replaces_the_cut_head_of_a_run() {
         assert_eq!(ids(&splice(rows(&["fold:7", "m", "n"]), rows(&["a", "fold:1", "m"]))), ["a", "fold:1", "m", "n"]);
+    }
+    #[test] fn splice_changed_says_what_splice_and_changed_say() {
+        let row = |id: &str, t: &str| serde_json::json!({"id": id, "text": t});
+        let held = |v: &[(&str, &str)]| v.iter().map(|(i, t)| row(i, t)).collect::<Vec<_>>();
+        let cases: Vec<(Vec<Value>, Vec<Value>)> = vec![
+            (held(&[("c", ""), ("d", ""), ("e", "")]), held(&[("a", ""), ("b", ""), ("c", ""), ("d", "")])),
+            (held(&[("c", ""), ("d", ""), ("e", "")]), held(&[("a", ""), ("b", ""), ("c", "new"), ("d", "")])),
+            (held(&[("fold:7", ""), ("m", ""), ("n", "")]), held(&[("a", ""), ("fold:1", ""), ("m", "")])),
+            (held(&[("c", "")]), held(&[("a", ""), ("b", "")])),
+            (held(&[("c", "")]), vec![]),
+            (held(&[("a", ""), ("fold:1", ""), ("m", ""), ("z", "")]), held(&[("fold:1", ""), ("t1", ""), ("t2", ""), ("m", "")])),
+            (held(&[("a", ""), ("fold:1", ""), ("t1", ""), ("t2", ""), ("m", ""), ("z", "")]), held(&[("fold:1", ""), ("m", "")])),
+            (held(&[("x", ""), ("y", ""), ("p", ""), ("q", ""), ("r", "")]), held(&[("o", ""), ("p", "x"), ("q", "")])),
+            (vec![], held(&[("a", "")])),
+        ];
+        for (rows, page) in cases {
+            let want = splice(rows.clone(), page.clone()); let (a, b) = changed(&rows, &want, 0);
+            let (got, x, y) = splice_changed(rows.clone(), page.clone());
+            assert_eq!(ids(&got), ids(&want), "{rows:?} + {page:?}"); assert_eq!(got, want); assert_eq!((x, y), (a, b), "{rows:?} + {page:?}");
+        }
     }
     #[test] fn an_older_page_with_no_overlap_sits_above() { assert_eq!(ids(&splice(rows(&["c"]), rows(&["a", "b"]))), ["a", "b", "c"]); }
     #[test] fn a_page_read_again_opens_a_run_in_the_middle_and_leaves_the_rest() {
