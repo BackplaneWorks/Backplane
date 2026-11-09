@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CryptoKit
 import UIKit
 import UserNotifications
 
@@ -922,6 +923,8 @@ final class DataClient {
         if status == .authorized || status == .provisional || status == .ephemeral { UIApplication.shared.registerForRemoteNotifications() }
     }
     func tokenGot(_ token: String) { pushToken = token; Task { await registerPush() } }
+    /// The name the hub's Notifications page gives this phone (native/host/src/push/page.rs `handle`: twelve hex digits of the token's SHA-256); empty with no token.
+    var pushHandle: String { pushToken.map { SHA256.hash(data: Data($0.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined() } ?? "" }
     private func registerPush() async {
         guard has("push"), let t = pushToken else { return }
         #if DEBUG
