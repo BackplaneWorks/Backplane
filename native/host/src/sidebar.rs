@@ -149,7 +149,21 @@ fn thread_json(st: &State, o: &Opts, ix: &HashMap<String, u8>, r: &Row, shelf: u
     let trail = vec![swipe("Delete", "row-delete", qid.clone(), "danger", vec![]), swipe("Snooze", "row-snooze", String::new(), "", snooze)];
     let title = if t.title == "New thread" { "New thread".to_string() } else { t.title.clone() };
     json!({"depth": r.depth, "expanded": r.expanded, "children": r.children, "id": qid, "title": title, "state": state_word(t), "ago": when,
-           "agents": agents_note(st, id), "pinned": t.pinned, "status": signal::display_name(st, ix[id], id), "canChild": !t.deleted, "lead": lead, "trail": trail})
+           "agents": agents_note(st, id), "pinned": t.pinned, "status": signal::display_name(st, ix[id], id), "want": want(st, id, signal::display_name(st, ix[id], id)), "canChild": !t.deleted, "lead": lead, "trail": trail})
+}
+
+/// Side.want (0.14): what a red row wants, said where its age goes: "approval" (a permission waits), "question" (an ask is open), "failed"
+/// (its turn failed and nothing waits); "" for any other row. The same word ranks the palette's threads that wait on the person (Urg.rank).
+pub fn want(st: &State, id: &str, status: &str) -> &'static str {
+    match status {
+        "failed" => "failed",
+        "blocked" => {
+            if st.ask_data.iter().any(|a| a.1 == id && a.2 == "approval") { "approval" }
+            else if st.asks.values().any(|(th, open)| *open && th == id) { "question" }
+            else if st.threads.get(id).map_or(false, |t| t.pending > 0) { "approval" } else { "" }
+        }
+        _ => "",
+    }
 }
 
 /// Signal.display.note: a stall says why; else the subagent badge (Subs.count.ix: unfinished child tasks + subagent rows at work)
@@ -478,6 +492,15 @@ mod tests {
     fn tc(id: &str, at: u64) -> String { format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":{at}}}"#) }
     fn opts<'a>(open: &'a HashSet<String>, now: u64) -> Opts<'a> { Opts { hub: "h", now, selected: "", open, older_open: false, query: "" } }
 
+    // Side.want: a red row says what it wants; the rest say nothing
+    #[test] fn a_red_row_says_what_it_wants() {
+        let turn = |th: &str, state: &str| format!(r#"{{"$":"TurnChanged","thread":"{th}","state":"{state}","at":20}}"#);
+        let ask = |id: &str, th: &str, kind: &str| format!(r#"{{"$":"AskOpened","id":"{id}","thread":"{th}","kind":"{kind}","tool":"Bash","detail":"x","options":"","at":21}}"#);
+        let s = fold(&[PC, &tc("t1", 11), &tc("t2", 12), &tc("t3", 13), &tc("t4", 14), &turn("t1", "failed"), &ask("a1", "t2", "approval"), &ask("a2", "t3", "question"), &turn("t4", "running")]);
+        let ix = signal::index(&s); let w = |id: &str| want(&s, id, signal::display_name(&s, ix[id], id));
+        assert_eq!([w("t1"), w("t2"), w("t3"), w("t4")], ["failed", "approval", "question", ""]);
+        assert_eq!(want(&s, "t1", "finished"), "", "only a red row wants something");
+    }
     // law kids_bot_child_shown: a bot's delegated child is never hidden under the bot
     #[test] fn kids_bot_child_shown() {
         let d = r#"{"$":"TaskDelegated","task":"k1","parent":"t1","child":"t2","depth":1,"provider":"claude","model":"","at":12}"#;

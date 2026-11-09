@@ -14,8 +14,8 @@ pub trait ViewMethod: Send + Sync {
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, conn: &'a mut Conn, id: &'a Value, method: &'a str, params: &'a Value) -> Fut<'a, Vec<Value>>;
 }
 
-/// Registers this lane's handlers. Nothing yet.
 mod actor;
+pub mod search;
 #[allow(dead_code)] pub mod composer;
 #[allow(dead_code)] pub mod dispatch;
 #[allow(dead_code)] pub mod patch;
@@ -26,7 +26,8 @@ pub mod pages;
 pub mod event_type;
 pub use event_type::event_type;
 pub use actor::{forget, is_job, record_answer, record_read, record_read_bound, record_reply, record_reply_bound, record_reply_bound_m, replied, replied_late, take_reads};
-pub fn start(_hub: &Arc<Hub>) {}
+/// Registers this lane's handlers: `thread.search` (search.rs), what was said in every thread or in one.
+pub fn start(hub: &Arc<Hub>) { hub.register_rpc(Arc::new(search::Search)); }
 
 pub const REPLY_BYTES: usize = 262144;
 pub const CONTROL_CHARS: usize = 32768 / 6; // core Part.take(text, 32768): left / 6 characters a part
