@@ -63,11 +63,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev
       # the cef crate builds CEF's C++ wrapper with CMake and Ninja (Windows: MSVC's cl.exe on PATH; its link.exe is given to cargo by path in the build
-      # step, as Git's /usr/bin/link comes first on bash's PATH)
+      # step below)
       - uses: seanmiddleditch/gha-setup-ninja@v5
         if: runner.os != 'Linux'
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
+      - name: MSVC's link.exe for every cargo step (Git's /usr/bin/link comes first on bash's PATH)
+        if: runner.os == 'Windows'
+        run: echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$(cygpath -w "$(which -a link.exe | grep -i msvc | head -1)")" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -92,7 +95,6 @@ jobs:
       - name: build
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
-          if [ "${{ runner.os }}" = Windows ]; then export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER="$(cygpath -w "$(which -a link.exe | grep -i msvc | head -1)")"; fi
           (cd native/host && cargo build --release --bin backplane-hub --bin bp-sh) & a=$!
           # the client with the embedded Chromium (feature cef) on every desktop target (docs/browser-cef-port.md). Without a usable runtime beside it the
           # Browser tab says why and shows the hub's frames from backplane-browser (viewers/cef.rs runtime_dir)
