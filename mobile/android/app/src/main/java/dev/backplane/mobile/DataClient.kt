@@ -79,6 +79,8 @@ object DataClient {
         System.getenv("BACKPLANE_LINK")?.let { links = it.split(' ').filter(String::isNotBlank) }
         loadCache()
         if (link != null) connect()
+        // while threads work the process stays (LiveService): their alerts reach this phone with the app off screen
+        scope.launch { androidx.compose.runtime.snapshotFlow { threads.filter { it.state == "working" && !it.archived && !it.history }.map { it.title } to foreground }.collect { (w, front) -> LiveService.sync(app, w, front) } }
     }
     private fun prefs() = app.getSharedPreferences("data", Context.MODE_PRIVATE)
 
