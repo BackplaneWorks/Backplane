@@ -17,6 +17,8 @@ pub struct Registry {
     /// Where each code block's Copy button was painted this frame (for the check harness), by index.
     pub copies: Vec<(usize, Bounds<Pixels>)>,
     pub copy_seen: usize,
+    /// The target of the link under the pointer, shown at the corner of the timeline.
+    pub hover: String,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
@@ -26,7 +28,7 @@ pub type Reg = Rc<RefCell<Registry>>;
 pub const VIEWER_COPIES: usize = 1000;
 
 impl Default for Registry {
-    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0 } }
+    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0, hover: String::new() } }
 }
 
 impl Registry {
@@ -241,6 +243,21 @@ fn copy_probe(reg: &Reg, ix: usize) -> impl IntoElement {
     canvas(|b, _, _| b, move |_, b, _, _| { reg.borrow_mut().copies.push((ix, b)); }).absolute().size_full()
 }
 
+/// A list: a marker column and the item, its nested lists below it one step in. Bullets change with the level (• ◦ ▪), numbers keep their own count.
+fn list_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str, level: usize) -> AnyElement {
+    let Block::List { ordered, start, items } = b else { return block_el(cx, reg, light, b, key) };
+    let c = |n: &str| theme::color(light, n);
+    let mut col = div().flex().flex_col().gap_1();
+    if level == 0 { col = col.pl(px(8.)); }
+    for (i, it) in items.iter().enumerate() {
+        let mark = if *ordered { format!("{}.", start + i as u64) } else { ["•", "◦", "▪"][level % 3].to_string() };
+        let mut body = div().flex_1().min_w_0().flex().flex_col().gap_1().child(text(reg, light, it.spans.clone(), Kind::Body));
+        for (k, s) in it.sub.iter().enumerate() { body = body.child(list_el(cx, reg, light, s, &format!("{key}-{i}-{k}"), level + 1)); }
+        col = col.child(div().flex().gap_2().child(div().min_w(px(18.)).flex_shrink_0().text_color(c("dim")).child(mark)).child(body));
+    }
+    col.into_any_element()
+}
+
 fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     match b {
@@ -248,10 +265,7 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
         Block::Heading(l, s) => div().text_size(px(match l { 1 => 20., 2 => 17., 3 => 15., _ => 14. })).mt_1().child(text(reg, light, s.clone(), Kind::Head)).into_any_element(),
         Block::Quote(s) => div().border_l_2().border_color(c("line")).pl_3().child(text(reg, light, s.clone(), Kind::Quote)).into_any_element(),
         Block::Rule => div().h(px(1.)).w_full().bg(c("line")).my_1().into_any_element(),
-        Block::List { ordered, start, items } => div().flex().flex_col().gap_1().pl(px(8.)).children(items.iter().enumerate().map(|(i, it)| {
-            let mark = if *ordered { format!("{}.", start + i as u64) } else { "•".to_string() };
-            div().flex().gap_2().child(div().min_w(px(18.)).flex_shrink_0().text_color(c("dim")).child(mark)).child(div().flex_1().min_w_0().child(text(reg, light, it.clone(), Kind::Body))).into_any_element()
-        }).collect::<Vec<_>>()).into_any_element(),
+        Block::List { .. } => list_el(cx, reg, light, b, key, 0),
         Block::Code(t, tokens) => {
             let copy = t.clone();
             let copy_ix = { let mut r = reg.borrow_mut(); let n = r.copy_seen; r.copy_seen += 1; n };
@@ -396,7 +410,11 @@ impl Backplane {
         drop(r); cx.notify();
     }
     pub(crate) fn timeline_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
-        if !self.screens.reg.borrow().dragging { return; }
+        if !self.screens.reg.borrow().dragging {
+            let under = self.timeline_pos(e.position).and_then(|p| self.screens.reg.borrow().link_at(p).map(|l| super::linkroute::target(&l.href))).unwrap_or_default();
+            if under != self.screens.reg.borrow().hover { self.screens.reg.borrow_mut().hover = under; cx.notify(); }
+            return;
+        }
         if let Some(pos) = self.timeline_pos(e.position) { self.screens.reg.borrow_mut().extend(pos); cx.notify(); }
     }
     pub(crate) fn timeline_up(&mut self, e: &MouseUpEvent, cx: &mut Context<Self>) {
@@ -406,10 +424,13 @@ impl Backplane {
         let (collapsed, pos) = { let r = self.screens.reg.borrow(); (r.sel.collapsed(), self.timeline_pos(e.position)) };
         let link = pos.filter(|_| collapsed).and_then(|p| self.screens.reg.borrow().link_at(p).cloned());
         if let Some(l) = link {
-            if l.file { let _ = self.tx.try_send(Command::Action("file-open".into(), l.href)); }
-            else if l.href.starts_with("https://") || l.href.starts_with("http://") { cx.open_url(&l.href); }
-            // a thread or project, of this machine or another one: the hub says what it opens (`link-open`)
-            else if crate::pairing::is_open_link(&l.href) { let _ = self.tx.try_send(Command::Action("link-open".into(), l.href)); }
+            self.screens.reg.borrow_mut().hover.clear();
+            match super::linkroute::route(&l.href, l.file) {
+                super::linkroute::Route::File(p) => { let _ = self.tx.try_send(Command::Action("file-open".into(), p)); }
+                super::linkroute::Route::Web(u) => cx.open_url(&u),
+                super::linkroute::Route::Hub(u) => { self.note.clear(); let _ = self.tx.try_send(Command::Action("link-open".into(), u)); }
+                super::linkroute::Route::Note(n) => self.note = n.to_string(),
+            }
         }
         // a finished selection is the X11 PRIMARY selection too (middle-click paste in other apps)
         #[cfg(target_os = "linux")]

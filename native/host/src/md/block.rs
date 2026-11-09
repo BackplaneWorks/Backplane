@@ -1,7 +1,7 @@
 //! Md.render's block layer: lines classified, then folded into paragraphs, lists, quotes, tables and code.
 use super::{el, inline::inline, Loc, Node};
 
-enum Line { Fence, Head(usize, String), Item(String), Num(String, String), Quote(String), Row(Vec<String>), Sep(String), Hr, Blank, Text(String) }
+enum Line { Fence, Head(usize, String), Item(usize, String), Num(usize, String, String), Quote(String), Row(Vec<String>), Sep(String), Hr, Blank, Text(String) }
 
 fn trim_start(s: &str) -> &str { s.trim_start_matches(|c: char| c == ' ' || ('\t'..='\r').contains(&c)) }
 fn trim(s: &str) -> &str { trim_start(s).trim_end_matches(|c: char| c == ' ' || ('\t'..='\r').contains(&c)) }
@@ -19,24 +19,50 @@ fn cells(t: &str) -> Vec<String> {
     v.into_iter().map(|c| trim(c).to_string()).collect()
 }
 
+/// How far a line is indented: a space is 1, a tab 4 (what sets a list item's level).
+fn indent(l: &str) -> usize { l.chars().take_while(|c| *c == ' ' || *c == '\t').map(|c| if c == '\t' { 4 } else { 1 }).sum() }
+
+/// One item of a list block: its indent, its number when ordered, its text.
+struct It { ind: usize, num: Option<String>, text: String }
+
+/// The list that starts at `its[*i]`: items at its indent, a deeper item opening a list inside the item before it. A change of kind at the same
+/// indent ends the list (the caller starts the next one); an item less indented than the first ends it too.
+fn tree(its: &[It], i: &mut usize) -> Node {
+    let (ind, ordered) = (its[*i].ind, its[*i].num.is_some());
+    let mut lis: Vec<Node> = vec![];
+    while *i < its.len() && its[*i].ind >= ind {
+        let it = &its[*i];
+        if it.ind > ind {
+            let sub = tree(its, i);
+            match lis.last_mut() { Some(Node::El { kids, .. }) => kids.push(sub), _ => lis.push(el("li", vec![sub])) }
+            continue;
+        }
+        if it.num.is_some() != ordered { break }
+        *i += 1;
+        lis.push(match &it.num { Some(n) => Node::El { tag: "li", attrs: vec![("value", n.clone())], kids: inline(&it.text) }, None => el("li", inline(&it.text)) });
+    }
+    el(if ordered { "ol" } else { "ul" }, lis)
+}
+
 /// Md.line
 fn classify(l: &str) -> Line {
     let t = trim_start(l);
+    let ind = indent(l);
     if t.starts_with("```") { return Line::Fence }
     let n = t.chars().take_while(|&c| c == '#').count();
     let r: String = t.chars().skip(n).collect();
     if n > 0 && n < 7 && r.starts_with(' ') { return Line::Head(n, trim_start(&r).to_string()) }
-    if t.starts_with("- ") || t.starts_with("* ") || t.starts_with("+ ") { return Line::Item(t.chars().skip(2).collect()) }
+    if t.starts_with("- ") || t.starts_with("* ") || t.starts_with("+ ") { return Line::Item(ind, t.chars().skip(2).collect()) }
     if is_hr(trim(t)) { return Line::Hr }
     if t.starts_with('|') { return if is_sep(t) { Line::Sep(l.to_string()) } else { Line::Row(cells(t)) } }
     if t.starts_with('>') { return Line::Quote(trim_start(&t.chars().skip(1).collect::<String>()).to_string()) }
     let d = t.chars().take_while(|c| c.is_ascii_digit()).count();
     let r: String = t.chars().skip(d).collect();
-    if d > 0 && d < 10 && (r.starts_with(". ") || r.starts_with(") ")) { return Line::Num(t.chars().take(d).collect(), r.chars().skip(2).collect()) }
+    if d > 0 && d < 10 && (r.starts_with(". ") || r.starts_with(") ")) { return Line::Num(ind, t.chars().take(d).collect(), r.chars().skip(2).collect()) }
     if trim(t).is_empty() { Line::Blank } else { Line::Text(l.to_string()) }
 }
 
-enum Blk { None, Para(Vec<String>), Code(Vec<String>), List(Vec<String>), Ol(Vec<(String, String)>), Quote(Vec<String>), Table(Vec<(bool, Vec<String>)>) }
+enum Blk { None, Para(Vec<String>), Code(Vec<String>), Items(Vec<It>), Quote(Vec<String>), Table(Vec<(bool, Vec<String>)>) }
 
 fn codeblock(lc: Loc, ls: &[String]) -> Node {
     let text = ls.join("\n");
@@ -50,8 +76,7 @@ fn close(lc: Loc, b: Blk, out: &mut Vec<Node>) {
         Blk::None => {}
         Blk::Para(ls) => out.push(el("p", inline(&ls.join("\n")))),
         Blk::Code(ls) => out.push(codeblock(lc, &ls)),
-        Blk::List(xs) => out.push(el("ul", xs.iter().map(|x| el("li", inline(x))).collect())),
-        Blk::Ol(xs) => out.push(el("ol", xs.iter().map(|(n, t)| Node::El { tag: "li", attrs: vec![("value", n.clone())], kids: inline(t) }).collect())),
+        Blk::Items(xs) => { let mut i = 0; while i < xs.len() { out.push(tree(&xs, &mut i)); } }
         Blk::Quote(ls) => out.push(el("blockquote", inline(&ls.join("\n")))),
         Blk::Table(rs) => out.push(el("table", rs.iter().map(|(head, cs)| el("tr", cs.iter().map(|c| el(if *head { "th" } else { "td" }, inline(c))).collect())).collect())),
     }
@@ -69,10 +94,10 @@ pub fn render(lc: Loc, s: &str) -> Vec<Node> {
             (Blk::Code(mut ls), _) => { ls.push(raw.to_string()); Blk::Code(ls) }
             (b, Line::Fence) => { close(lc, b, &mut out); Blk::Code(vec![]) }
             (b, Line::Head(n, t)) => { close(lc, b, &mut out); out.push(head(n, &t)); Blk::None }
-            (Blk::List(mut xs), Line::Item(t)) => { xs.push(t); Blk::List(xs) }
-            (b, Line::Item(t)) => { close(lc, b, &mut out); Blk::List(vec![t]) }
-            (Blk::Ol(mut xs), Line::Num(n, t)) => { xs.push((n, t)); Blk::Ol(xs) }
-            (b, Line::Num(n, t)) => { close(lc, b, &mut out); Blk::Ol(vec![(n, t)]) }
+            (Blk::Items(mut xs), Line::Item(ind, t)) => { xs.push(It { ind, num: None, text: t }); Blk::Items(xs) }
+            (b, Line::Item(ind, t)) => { close(lc, b, &mut out); Blk::Items(vec![It { ind, num: None, text: t }]) }
+            (Blk::Items(mut xs), Line::Num(ind, n, t)) => { xs.push(It { ind, num: Some(n), text: t }); Blk::Items(xs) }
+            (b, Line::Num(ind, n, t)) => { close(lc, b, &mut out); Blk::Items(vec![It { ind, num: Some(n), text: t }]) }
             (Blk::Quote(mut ls), Line::Quote(t)) => { ls.push(t); Blk::Quote(ls) }
             (b, Line::Quote(t)) => { close(lc, b, &mut out); Blk::Quote(vec![t]) }
             (Blk::Table(mut rs), Line::Row(cs)) => { rs.push((false, cs)); Blk::Table(rs) }
