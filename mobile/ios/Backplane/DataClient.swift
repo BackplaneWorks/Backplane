@@ -45,6 +45,11 @@ final class DataClient {
     private(set) var shotBot = ""
     private(set) var bots: [DBot] = []
     private(set) var work: [String: DWork] = [:]
+    // a subagent's own view (feature subview): read whole, then pushed whole as it moves; one open at a time
+    private(set) var subView: DSubView?
+    private(set) var subGone = false
+    private var subOpen: DSubRoute?
+    private var subSub = 0
     private(set) var locks: [DLock] = []
     private(set) var rooms: [DRoom] = []
     // what the hub says it can do beyond the base of data/1 (hello.features); a hub that names none takes no pictures
@@ -323,6 +328,7 @@ final class DataClient {
             await loadStar()
             terms.resync()
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
+            if let r = subOpen { subSub = 0; await readSub(r, g) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
     func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks(); await loadHistory() }
@@ -471,6 +477,22 @@ final class DataClient {
         NSLog("Backplane open cached=%@ ms=%.1f", String(hadCopy), Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
         #endif
     }
+    func openSub(_ r: DSubRoute) {
+        closeSub(); subOpen = r; subGone = false
+        let g = gen; Task { await readSub(r, g) }
+    }
+    private func readSub(_ r: DSubRoute, _ g: Int) async {
+        guard let s: DSubReply = try? await call("subscribe", ["topic": "sub", "thread": r.thread, "key": r.key]) else { return }
+        guard g == gen, subOpen == r else { _ = try? await call("unsubscribe", ["sub": s.sub], as: DEmpty.self); return }
+        subSub = s.sub
+        guard let v: DSubViewReply = try? await call("thread.sub", ["thread": r.thread, "key": r.key]), subOpen == r else { return }
+        subView = v.view; subGone = v.view == nil
+    }
+    func closeSub() {
+        subOpen = nil; subView = nil; subGone = false
+        let s = subSub; subSub = 0
+        if s != 0, conn == .online { Task { _ = try? await call("unsubscribe", ["sub": s], as: DEmpty.self) } }
+    }
     func closeThread(_ id: String) {
         if open == id { open = nil }
         let sub = threadSub; threadSub = 0
@@ -526,6 +548,8 @@ final class DataClient {
             if let tid = o["thread"] as? String, let e = decode("entry", DEntry.self) { put(e, in: tid) }
         case "work":
             if let tid = o["thread"] as? String { work[tid] = decode("subs", DWork.self) }
+        case "sub":
+            if let tid = o["thread"] as? String, let key = o["key"] as? String, subOpen == DSubRoute(thread: tid, key: key), let v = decode("view", DSubView.self) { subView = v; subGone = false }
         case "locks":
             locks = decode("locks", [DLock].self) ?? []
         case "text":

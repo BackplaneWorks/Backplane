@@ -61,10 +61,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -336,6 +336,30 @@ impl crate::api::RpcHandler for PushState {
     hub.commit(&json!({"$":"ActivityLogged","thread":"t2","act":"a8","tone":"tool","kind":"Bash","summary":"ls","at":1700000031})).await.unwrap();
     let v = loop { let v = next(&mut ws).await; if v["k"] == "entry" { break v } };
     assert_eq!(v["entry"]["id"], "a8", "a design base is not pushed either"); assert_eq!(v["entry"]["tool"]["name"], "Bash"); assert_eq!(v["entry"]["at"], 1700000031000u64);
+}
+// lane 2: a subagent's own timeline, opened from its Agent call (`tool.sub`), read whole and pushed as it moves
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_a_subagents_view_is_read_from_its_call_and_pushed_as_it_moves() {
+    let (hub, port) = up("subview").await;
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await; assert!(hello["features"].as_array().unwrap().iter().any(|x| x == "subview"));
+    for e in [json!({"$":"ActivityLogged","thread":"t1","act":"c9","tone":"tool","kind":"Agent","summary":"Survey","at":1700000040}),
+        json!({"$":"ActivityLogged","thread":"@sub:t1","act":"c9/about","tone":"c9","kind":"about","summary":"{\"type\":\"Explore\",\"model\":\"\",\"prompt\":\"Find the boards.\",\"description\":\"Survey\"}","at":1700000040}),
+        json!({"$":"ActivityLogged","thread":"@sub:t1","act":"c9/s1","tone":"c9","kind":"Bash","summary":"ls","at":1700000041}),
+        json!({"$":"ActivityLogged","thread":"@sub:t1","act":"c9/s1/result","tone":"c9","kind":"result","summary":"{\"use\":\"s1\",\"text\":\"main.kicad_pcb\",\"error\":false}","at":1700000042})] { hub.commit(&e).await.unwrap(); }
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t1"})).await;
+    let call = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["id"] == "c9").unwrap().clone(); assert_eq!(call["tool"]["sub"], "c9", "the Agent call names its subagent");
+    let r = ask(&mut ws, 2, "thread.sub", json!({"thread":"t1","key":"c9"})).await; let v = &r["result"]["view"];
+    assert_eq!((v["title"].as_str(), v["ask"].as_str(), v["key"].as_str()), (Some("Survey"), Some("Find the boards."), Some("c9")));
+    let kinds: Vec<&str> = v["entries"].as_array().unwrap().iter().map(|e| e["kind"].as_str().unwrap()).collect(); assert_eq!(kinds, ["user", "tool"]);
+    assert_eq!((v["entries"][1]["tool"]["name"].as_str(), v["entries"][1]["tool"]["result"].as_str()), (Some("Bash"), Some("main.kicad_pcb")));
+    assert!(ask(&mut ws, 3, "thread.sub", json!({"thread":"t1","key":"nope"})).await["result"]["view"].is_null());
+    assert_eq!(ask(&mut ws, 4, "thread.sub", json!({"thread":"t1"})).await["ok"], false);
+    let sub = ask(&mut ws, 5, "subscribe", json!({"topic":"sub","thread":"t1","key":"c9"})).await; assert_eq!(sub["ok"], true); let n = sub["result"]["sub"].as_u64().unwrap();
+    assert_eq!(ask(&mut ws, 6, "subscribe", json!({"topic":"sub","thread":"nope","key":"c9"})).await["ok"], false);
+    hub.commit(&json!({"$":"ActivityLogged","thread":"@sub:t2","act":"c9/x","tone":"c9","kind":"say","summary":"another thread's","at":1700000043})).await.unwrap();
+    hub.commit(&json!({"$":"ActivityLogged","thread":"@sub:t1","act":"c9/m1:0","tone":"c9","kind":"say","summary":"One board.","at":1700000044})).await.unwrap();
+    let v = loop { let v = next(&mut ws).await; if v["k"] == "sub" { break v } };
+    assert_eq!((v["sub"].as_u64(), v["thread"].as_str(), v["key"].as_str()), (Some(n), Some("t1"), Some("c9")));
+    let es = v["view"]["entries"].as_array().unwrap(); assert_eq!((es.len(), es[2]["kind"].as_str(), es[2]["text"].as_str()), (3, Some("assistant"), Some("One board.")));
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_picker_offers_what_the_desktop_does_and_a_pick_is_its_request() {
     let (_hub, port) = up("picker").await;

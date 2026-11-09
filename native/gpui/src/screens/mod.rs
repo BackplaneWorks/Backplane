@@ -37,6 +37,7 @@ pub mod pad;
 pub mod padview;
 pub mod palette;
 pub mod panels;
+pub mod subview;
 pub mod place;
 pub mod plot;
 pub mod projects;

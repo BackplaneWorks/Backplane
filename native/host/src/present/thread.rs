@@ -276,7 +276,10 @@ pub(crate) fn plain_act(e: &Ent) -> Value {
 fn act(e: &Ent, run: &str) -> Value {
     if is_step(e) { return json!({"id": e.id, "kind": "step", "text": step_row(e), "value": e.id, "run": run}) }
     let text = if e.text == e.akind { String::new() } else { e.text.clone() };
-    json!({"id": e.id, "kind": "act", "tone": e.role, "label": shown_name(&e.akind), "text": text, "run": run})
+    let mut a = json!({"id": e.id, "kind": "act", "tone": e.role, "label": shown_name(&e.akind), "text": text, "run": run});
+    // an Agent or Task call opens its subagent's own view (panels.rs `sub_view`)
+    let sub = super::panels::sub_key(&e.akind, &e.id); if e.role == "tool" && !sub.is_empty() { a["sub"] = json!(sub) }
+    a
 }
 
 
@@ -464,6 +467,8 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     // the agent's to-do list and its background work (null while there is none; the client opens and shuts them)
     o.insert("todos".into(), super::panels::todos(st, thread));
     o.insert("subs".into(), subs);
+    // the subagent the window has open over this thread (session `sub`), its own timeline: the client draws it in place of the entries, with a way back
+    o.insert("subView".into(), if params["subView"]["thread"].as_str() == Some(thread) { params["subView"].clone() } else { Value::Null });
     // Render.native_screen: thread.earlier = window.remaining when the host sent a window, else the page's own hidden count (0 on the newest page)
     let earlier = if params["window"].is_object() { params["window"]["remaining"].as_u64().unwrap_or(0) } else { 0 };
     o.insert("earlier".into(), json!(earlier));
@@ -537,7 +542,7 @@ mod tests {
         let got = as_helper(&got);
         for (k, w) in want.as_object().unwrap() { if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w); continue } assert_eq!(got.get(k), Some(w), "key {k}"); }
         // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`), the picker's other agents (`pickerAgents`) and the header's project (`project`) are Backplane's own: the recorded helper reply has no such keys
-        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project")).count(), want.as_object().unwrap().len());
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView")).count(), want.as_object().unwrap().len());
     }
     // Diff opened on thread A leaves the session's panel on; a view of thread B (the + makes it and goes there) is accepted, not refused as an unported page
     #[test] fn a_view_of_another_thread_after_diff_on_one_is_accepted() {

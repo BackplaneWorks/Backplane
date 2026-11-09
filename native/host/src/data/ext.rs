@@ -210,6 +210,9 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         }
         "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
         "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(hub, s(p, "thread")).await})),
+        // feature "subview": one subagent's own timeline (present/panels.rs `sub_view`), opened from its fold row's `tool.sub` or its Subagents row's `key`
+        "thread.sub" => { let (th, k) = (s(p, "thread"), s(p, "key")); if th.is_empty() || k.is_empty() { return Some(Err(err("thread and key"))) }
+            Ok(json!({"thread":th,"key":k,"view":hub.sub_view_for(th, k).await})) }
         // feature "queue": what waits for the agent, the desktop's strip over the composer (session/composer.rs `queue_json`): `thread.queue {thread}` → `{rows, more}`;
         // `queue.act {thread, action, value}` → `{}` presses a row's button as the row names it (q-steer, q-remove, q-up, q-resume); q-edit takes the message out of the queue
         // and answers `{text}`, for the app to put back into the draft

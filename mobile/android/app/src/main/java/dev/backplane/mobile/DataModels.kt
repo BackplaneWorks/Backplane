@@ -9,7 +9,7 @@ private fun JSONObject.lng(k: String): Long = optLong(k, 0L)
 private fun <T> JSONArray?.list(f: (JSONObject) -> T): List<T> = if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it)?.let(f) }
 
 data class DOption(val id: String, val label: String)
-data class DTool(val name: String, val summary: String, val state: String)
+data class DTool(val name: String, val summary: String, val state: String, val sub: String = "", val result: String = "") // sub: an Agent call's subagent (feature subview); result: a subagent's tool result
 data class DAsk(val id: String, val state: String, val question: String, val options: List<DOption>, val answered: String?) { val open get() = state == "open" }
 data class DAttachment(val id: String, val name: String, val mime: String, val bytes: Long)
 data class DEntry(
@@ -59,7 +59,7 @@ fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"
 fun parseEntry(o: JSONObject) = DEntry(
     o.str("id"), o.str("kind"), o.str("text"), o.lng("at"), o.optString("clientId", "").ifEmpty { null }, o.optString("replaces", "").ifEmpty { null },
     o.optBoolean("live", false),
-    o.optJSONObject("tool")?.let { DTool(it.str("name"), it.str("summary"), it.str("state")) },
+    o.optJSONObject("tool")?.let { DTool(it.str("name"), it.str("summary"), it.str("state"), it.str("sub"), it.str("result")) },
     o.optJSONObject("ask")?.let(::parseAsk),
     o.optJSONArray("attachments").list { DAttachment(it.str("id"), it.str("name"), it.str("mime"), it.lng("bytes")) },
     label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
@@ -77,11 +77,16 @@ fun parseThreads(a: JSONArray?) = a.list(::parseThread)
 fun parseEntries(a: JSONArray?) = a.list(::parseEntry).mapIndexed { i, e -> if (e.id.isEmpty()) e.copy(id = "~$i:${e.kind}:${e.at}") else e }
 
 // A thread's background work and locks (thread.work, the "work" push): the rows the hub decides, each with what its button sends.
-data class DWorkRow(val title: String, val kind: String, val state: String, val doing: String, val act: String, val value: String, val label: String)
+data class DWorkRow(val title: String, val kind: String, val state: String, val doing: String, val act: String, val value: String, val label: String, val key: String = "", val meta: String = "") // key: a subagent's, to open its view
 data class DWork(val word: String, val live: Int, val rows: List<DWorkRow>)
 // Who holds a lock (locks.list, the "locks" push): `line` is the hub's words for it.
 data class DLock(val name: String, val holder: String, val thread: String, val line: String, val waiting: Int)
-fun parseWork(o: JSONObject) = DWork(o.str("word"), o.optInt("live", 0), o.optJSONArray("rows").list { DWorkRow(it.str("title"), it.str("kind"), it.str("state"), it.str("doing"), it.str("act"), it.str("value"), it.str("label")) })
+fun parseWork(o: JSONObject) = DWork(o.str("word"), o.optInt("live", 0), o.optJSONArray("rows").list { DWorkRow(it.str("title"), it.str("kind"), it.str("state"), it.str("doing"), it.str("act"), it.str("value"), it.str("label"), if (it.has("detail") && !it.isNull("detail")) it.str("key") else "", it.str("meta")) })
+/** One subagent's own view (feature subview: `thread.sub`, the `sub` push): its head as its panel row says it, and its steps as entries, oldest first. */
+data class DSubView(val key: String, val thread: String, val title: String, val state: String, val live: Boolean, val meta: String, val took: String, val where: String, val ask: String,
+    val outcome: String, val act: String, val value: String, val label: String, val more: Int, val entries: List<DEntry>)
+fun parseSubView(o: JSONObject) = DSubView(o.str("key"), o.str("thread"), o.str("title"), o.str("state"), o.optBoolean("live"), o.str("meta"), o.str("took"), o.str("where"), o.str("ask"),
+    o.str("outcome"), o.str("act"), o.str("value"), o.str("label"), o.optInt("more", 0), o.optJSONArray("entries").list(::parseEntry))
 fun parseLocks(a: JSONArray?) = a.list { DLock(it.str("name"), it.str("holder"), it.str("thread"), it.str("line"), it.optInt("waiting", 0)) }
 
 /** Conversation history (`history.list`): the old Scratch chats. `live` always have a row; `rows` only while the group is open; `count` is every chat. */

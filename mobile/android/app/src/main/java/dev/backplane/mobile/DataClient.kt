@@ -214,6 +214,7 @@ object DataClient {
             coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { loadHistory() } }
             syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
+            subOpen?.let { (t, k) -> subSub = 0; runCatching { readSub(t, k, g) } }
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
     }
     suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks(); loadHistory() } } }
@@ -231,6 +232,26 @@ object DataClient {
     /** A chat of the group moved (a push): ask the hub for the group again, once for a burst. */
     private fun historyMoved() { if (historyDue) return; historyDue = true; scope.launch { kotlinx.coroutines.delay(300); historyDue = false; loadHistory() } }
     var work by mutableStateOf<Map<String, DWork>>(emptyMap()); private set
+    // ---- a subagent's own view (feature subview): read whole, then pushed whole as it moves; one open at a time
+    var subView by mutableStateOf<DSubView?>(null); private set
+    var subGone by mutableStateOf(false); private set
+    private var subOpen: Pair<String, String>? = null; private var subSub = 0
+    fun openSub(thread: String, key: String) {
+        closeSub(); subOpen = thread to key; subGone = false
+        scope.launch { runCatching { readSub(thread, key, gen) } }
+    }
+    private suspend fun readSub(thread: String, key: String, g: Int) {
+        val s = call("subscribe", JSONObject().put("topic", "sub").put("thread", thread).put("key", key)).optInt("sub")
+        if (g != gen || subOpen != thread to key) { runCatching { call("unsubscribe", JSONObject().put("sub", s)) }; return }
+        subSub = s
+        val v = call("thread.sub", JSONObject().put("thread", thread).put("key", key)).optJSONObject("view")
+        if (subOpen == thread to key) { subView = v?.let(::parseSubView); subGone = v == null }
+    }
+    fun closeSub() {
+        subOpen = null; subView = null; subGone = false
+        val s = subSub; subSub = 0
+        if (s != 0 && conn == Conn.ONLINE) scope.launch { runCatching { call("unsubscribe", JSONObject().put("sub", s)) } }
+    }
     var locks by mutableStateOf<List<DLock>>(emptyList()); private set
     private suspend fun loadStar() { if (has("star")) star = DStarOffer.of(call("star.offer").optJSONObject("offer")) }
     /** open (the banner also opens the page) or dismiss: final, the banner goes at once */
@@ -368,6 +389,7 @@ object DataClient {
             "project" -> o.optJSONObject("project")?.let { val p = parseProject(it); projects = (projects.filter { x -> x.id != p.id } + p).sortedByDescending { x -> x.updatedAt }; save() }
             "entry" -> o.optJSONObject("entry")?.let { put(parseEntry(it), o.optString("thread")) }
             "work" -> setWork(o.optString("thread"), o.optJSONObject("subs"))
+            "sub" -> if (subOpen == o.optString("thread") to o.optString("key")) o.optJSONObject("view")?.let { subView = parseSubView(it); subGone = false }
             "term" -> Terms.push(o)
             "locks" -> locks = parseLocks(o.optJSONArray("locks"))
             "text" -> {

@@ -38,6 +38,8 @@ pub struct Cx {
     pub deadlines: std::collections::HashSet<String>, pub timeout_setting: String,
     /// the allowance.claude setting, and whether the thread uses the default account (named accounts keep their own collector)
     pub allowance: String, pub default_account: bool,
+    /// Sub.fg: the Agent/Task calls of this process that run in the foreground; their tool result is what the subagent answered
+    pub fg_subs: std::collections::HashSet<String>,
 }
 
 /// How a line is judged by the command ledger (cmds.rs): the legacy rule (the result ends the turn), or the ledger's:
@@ -236,11 +238,31 @@ impl Cx {
         }
         out
     }
+    /// Sub.results: a subagent's tool results, each in its log beside its call (`{use, text, error}`; the text cut at RESULT_MAX characters)
+    fn sub_results(&self, o: &Value, call: &str, at: u64) -> Vec<Value> {
+        let log = bg::log(&self.thread);
+        o.get("message").and_then(|m| m.get("content")).and_then(Value::as_array).into_iter().flatten().filter(|b| s(b, "type") == "tool_result" && !s(b, "tool_use_id").is_empty()).map(|b| {
+            let id = s(b, "tool_use_id"); let err = b.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+            json!({"$":"ActivityLogged","thread":log,"act":format!("{call}/{id}/result"),"tone":call,"kind":"result","summary":json!({"use":id,"text":cut(&all_text(b.get("content").unwrap_or(&Value::Null)), RESULT_MAX),"error":err}).to_string(),"at":at})
+        }).collect()
+    }
+    /// Sub.reply: a foreground subagent's answer is its Agent call's result in the agent's own line; noted in its log (`{text, error}`) as it ends
+    fn sub_replies(&mut self, o: &Value, at: u64, out: &mut Vec<Value>) {
+        if self.fg_subs.is_empty() { return }
+        for b in o.get("message").and_then(|m| m.get("content")).and_then(Value::as_array).into_iter().flatten() {
+            let id = s(b, "tool_use_id"); if s(b, "type") != "tool_result" || !self.fg_subs.remove(id) { continue }
+            let err = b.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+            out.push(json!({"$":"ActivityLogged","thread":bg::log(&self.thread),"act":format!("{id}/reply"),"tone":id,"kind":"reply","summary":json!({"text":cut(&all_text(b.get("content").unwrap_or(&Value::Null)), RESULT_MAX),"error":err}).to_string(),"at":at}));
+        }
+    }
     /// Sub.about: what an Agent call's subagent was asked, its type and model, noted in its log
-    fn sub_about(&self, b: &Value, at: u64, out: &mut Vec<Value>) {
-        let name = s(b, "name"); let id = s(b, "id"); if !(name == "Agent" || name == "Task") || id.is_empty() { return }
+    fn sub_about(&mut self, b: &Value, at: u64, out: &mut Vec<Value>) {
+        let name = s(b, "name"); let id = s(b, "id"); if !is_sub_tool(name) || id.is_empty() { return }
         let i = b.get("input").unwrap_or(&Value::Null); let p = s(i, "prompt"); let p = if p.chars().count() > 1500 { format!("{}…", p.chars().take(1500).collect::<String>()) } else { p.to_string() };
-        out.push(json!({"$":"ActivityLogged","thread":bg::log(&self.thread),"act":format!("{id}/about"),"tone":id,"kind":"about","summary":json!({"type":s(i, "subagent_type"),"model":s(i, "model"),"prompt":p}).to_string(),"at":at}));
+        let mut about = json!({"type":s(i, "subagent_type"),"model":s(i, "model"),"prompt":p});
+        // a foreground one has no task_started to name it (Bg.mark's start): its description is its title
+        if !i.get("run_in_background").and_then(Value::as_bool).unwrap_or(false) { if self.fg_subs.len() > 256 { self.fg_subs.clear() } self.fg_subs.insert(id.to_string()); about["description"] = json!(s(i, "description")); }
+        out.push(json!({"$":"ActivityLogged","thread":bg::log(&self.thread),"act":format!("{id}/about"),"tone":id,"kind":"about","summary":about.to_string(),"at":at}));
     }
     /// Claude.todos: an assistant message's todo tools, for the model to fold into the thread's list
     fn todos_of(&self, m: &Value, at: u64, out: &mut Vec<Value>) {
@@ -282,7 +304,7 @@ impl Cx {
     pub fn line_flow(&mut self, o: &Value, at: u64, flow: Flow) -> Fx {
         let mut fx = Fx::default();
         let call = s(o, "parent_tool_use_id");
-        if !call.is_empty() { if s(o, "type") == "assistant" { fx.events = self.sub_blocks(o, call, at) } return fx } // Sub.line
+        if !call.is_empty() { match s(o, "type") { "assistant" => fx.events = self.sub_blocks(o, call, at), "user" => fx.events = self.sub_results(o, call, at), _ => {} } return fx } // Sub.line
         self.seq += 1;
         match s(o, "type") {
             "system" => {
@@ -324,7 +346,7 @@ impl Cx {
                 self.window(o, at, &mut ev); self.turn_usage(o, at, &mut ev);
                 fx.events = ev;
             }
-            "user" => { let mut ev = vec![]; self.named(o, at, &mut ev); fx.events = ev }
+            "user" => { let mut ev = vec![]; self.named(o, at, &mut ev); self.sub_replies(o, at, &mut ev); fx.events = ev }
             "rate_limit_event" => { let mut ev = vec![]; self.limits(o, at, &mut ev); self.allowance(o, at, &mut ev); fx.events = ev }
             _ => {}
         }
@@ -351,6 +373,13 @@ impl Cx {
     }
 }
 
+/// The tool names that start a subagent (Claude's Task, renamed Agent)
+pub fn is_sub_tool(name: &str) -> bool { name == "Agent" || name == "Task" }
+/// Sub.result.max: how much of a subagent's tool result its log keeps
+pub const RESULT_MAX: usize = 4000;
+fn cut(t: &str, n: usize) -> String { if t.chars().count() > n { format!("{}…", t.chars().take(n).collect::<String>()) } else { t.to_string() } }
+/// Every text block of a tool result, joined (a string result as it is)
+fn all_text(c: &Value) -> String { match c { Value::Array(a) => a.iter().filter(|x| s(x, "type") == "text" || x.get("text").is_some()).map(|x| s(x, "text")).collect::<Vec<_>>().join("\n"), Value::String(x) => x.clone(), _ => String::new() } }
 fn result_text(c: &Value) -> String { match c { Value::Array(a) => a.first().map(|x| s(x, "text").to_string()).unwrap_or_default(), Value::String(x) => x.clone(), _ => String::new() } }
 /// Todo.result: the number in a TaskCreate result ("Task #3 created successfully: ..."), or "" for anything else
 pub fn todo_result(text: &str) -> String { if !text.starts_with("Task #") { return String::new() } text.split('#').nth(1).map(|r| r.chars().take_while(|c| c.is_ascii_digit()).collect()).unwrap_or_default() }
@@ -457,6 +486,22 @@ mod tests {
         assert_eq!(a.events, vec![json!({"$":"ActivityLogged","thread":"@sub:t1","act":"call1/ms1:0","tone":"call1","kind":"say","summary":"Checked it.","at":100}), json!({"$":"ActivityLogged","thread":"@sub:t1","act":"call1/st1","tone":"call1","kind":"Read","summary":"/tmp/f.kicad_mod","at":100})]);
         assert!(a.deltas.is_empty() && !a.delta_end && c.used == 0, "its text, partial text and usage are not the agent's");
         assert_eq!(run(&mut c, r#"{"type":"stream_event","parent_tool_use_id":"call1","event":{}}"#), Fx::default());
+    }
+    #[test] fn the_presenter_opens_a_subagent_from_the_same_tools() { for n in ["Agent", "Task", "Bash", "TaskCreate", ""] { assert_eq!(is_sub_tool(n), !crate::present::panels::sub_key(n, "x").is_empty(), "{n}") } }
+    #[test] fn a_subagents_tool_results_and_a_foreground_ones_answer_go_to_its_log() {
+        let mut c = Cx::new("t1"); c.running = true;
+        let r = run(&mut c, r#"{"type":"user","parent_tool_use_id":"call1","message":{"content":[{"type":"tool_result","tool_use_id":"st1","content":[{"type":"text","text":"line 1"},{"type":"text","text":"line 2"}],"is_error":true}]}}"#);
+        assert_eq!(r.events.len(), 1); let e = &r.events[0];
+        assert_eq!((e["thread"].as_str(), e["act"].as_str(), e["tone"].as_str(), e["kind"].as_str()), (Some("@sub:t1"), Some("call1/st1/result"), Some("call1"), Some("result")));
+        assert_eq!(serde_json::from_str::<Value>(e["summary"].as_str().unwrap()).unwrap(), json!({"use":"st1","text":"line 1\nline 2","error":true}));
+        // a foreground Agent call: its result is the subagent's answer; a background one's ("Async agent launched") is not
+        let a = run(&mut c, r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"fg1","name":"Agent","input":{"description":"Survey","prompt":"Look.","subagent_type":"Explore"}},{"type":"tool_use","id":"bg1","name":"Agent","input":{"prompt":"Later.","run_in_background":true}}]}}"#);
+        let about: Value = serde_json::from_str(a.events.iter().find(|e| e["act"] == "fg1/about").unwrap()["summary"].as_str().unwrap()).unwrap(); assert_eq!(about["description"], "Survey");
+        let u = run(&mut c, r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"fg1","content":"Found two."},{"type":"tool_result","tool_use_id":"bg1","content":"Async agent launched: x"}]}}"#);
+        let replies: Vec<&Value> = u.events.iter().filter(|e| e["kind"] == "reply").collect();
+        assert_eq!(replies.len(), 1); assert_eq!((replies[0]["act"].as_str(), replies[0]["tone"].as_str()), (Some("fg1/reply"), Some("fg1")));
+        assert_eq!(serde_json::from_str::<Value>(replies[0]["summary"].as_str().unwrap()).unwrap()["text"], "Found two.");
+        assert!(run(&mut c, r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"fg1","content":"again"}]}}"#).events.iter().all(|e| e["kind"] != "reply"), "once");
     }
     #[test] fn the_result_records_window_turn_usage_speed_and_models_once() {
         let mut c = Cx::new("t1"); c.running = true; c.tok_basis = "c:0".into();

@@ -92,7 +92,7 @@ internal fun dAgo(ms: Long): String {
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
-private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
+private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
 
 @Composable
 fun DataRoot() {
@@ -123,7 +123,8 @@ fun DataRoot() {
             is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
-            is Page.Thread -> { BackHandler { page = Page.Home }; ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }) { page = Page.Home } }
+            is Page.Thread -> { BackHandler { page = Page.Home }; CompositionLocalProvider(LocalOpenSub provides { k -> page = Page.Sub(p.id, k) }) { ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }) { page = Page.Home } } }
+            is Page.Sub -> { BackHandler { page = Page.Thread(p.id) }; SubScreen(p.id, p.key) { page = Page.Thread(p.id) } }
             Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }, { page = Page.Hub(Page.Settings) }, { page = Page.Accounts }) { page = Page.Improve } }
             Page.Accounts -> { BackHandler { page = Page.Settings }; AccountsScreen({ page = Page.Settings }) { page = Page.Account(it, false) } }
             is Page.Account -> { BackHandler { page = Page.Accounts }; key(p) { AccountScreen(p.id, p.start) { page = Page.Accounts } } } // each opening its own screen: an alert's tap reads the account afresh and starts the sign-in
@@ -468,9 +469,13 @@ private fun WorkPanel(id: String, w: DWork) {
     val open = chosen ?: (w.live > 0)
     Column(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("thread.work")) {
         DMono("BACKGROUND WORK · ${w.word.uppercase()}", dcs.onSurfaceVariant, 11, Modifier.fillMaxWidth().clickable { chosen = !open }.testTag("thread.work.head"))
+        val openSub = LocalOpenSub.current
         if (open) w.rows.forEach { r ->
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { DMono(r.title, dcs.onSurface, 12); DMono(r.doing.ifEmpty { "${r.kind} · ${r.state}" }, dfaint, 11) }
+            // a subagent's row opens its own view (feature subview)
+            val sub = r.key.isNotEmpty() && DataClient.has("subview")
+            Row(Modifier.fillMaxWidth().clickable(enabled = sub) { openSub(r.key) }.padding(top = 4.dp).testTag(if (sub) "thread.work.sub.${r.key}" else "thread.work.row"), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { DMono(r.title, dcs.onSurface, 12); if (r.meta.isNotEmpty()) DMono(r.meta, dfaint, 11); DMono(r.doing.ifEmpty { "${r.kind} · ${r.state}" }, dfaint, 11) }
+                if (sub) { Icon(Icons.Default.ChevronRight, "Open", tint = dcs.primary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
                 if (r.label.isNotEmpty()) DBtn(r.label, false, modifier = Modifier.testTag("thread.work.${r.act}.${r.value}")) { DataClient.workAct(id, r) }
             }
         }
@@ -684,9 +689,12 @@ private fun ToolRow(e: DEntry) {
     val step = e.kind == "step"
     val name = if (step) "" else e.tool?.name ?: "tool"
     val what = if (step) e.label.ifEmpty { "Design change" } else if (e.tool?.summary.isNullOrEmpty()) "" else e.text
-    Row(Modifier.fillMaxWidth().clickable { whole = !whole }.padding(start = 8.dp, top = 3.dp, bottom = 3.dp)) {
+    // an Agent call opens its subagent's own view (feature subview); any other call shows all of itself
+    val sub = e.tool?.sub.orEmpty().takeIf { it.isNotEmpty() && DataClient.has("subview") }; val openSub = LocalOpenSub.current
+    Row(Modifier.fillMaxWidth().clickable { if (sub != null) openSub(sub) else whole = !whole }.padding(start = 8.dp, top = 3.dp, bottom = 3.dp).testTag(if (sub != null) "tool.sub.$sub" else "tool.${e.id}"), verticalAlignment = Alignment.CenterVertically) {
         if (name.isNotEmpty()) { Text(name, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)) }
-        Text(what, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = if (whole) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
+        Text(what, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = if (whole) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        if (sub != null) { Spacer(Modifier.width(8.dp)); DMono("Open", dcs.primary, 12); Icon(Icons.Default.ChevronRight, null, tint = dcs.primary, modifier = Modifier.size(14.dp)) }
     }
 }
 
