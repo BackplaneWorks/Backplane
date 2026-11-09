@@ -17,6 +17,7 @@ XP=; if [ -z "${DISPLAY:-}" ]; then DISPLAY=:79; export DISPLAY; Xvfb :79 -scree
 trap 'kill $HP $XP 2>/dev/null || true; rm -rf "$O"' EXIT INT TERM
 n=0; until curl -s -m1 -o /dev/null http://127.0.0.1:$HPORT/hello; do sleep 0.2; n=$((n+1)); [ $n -gt 100 ] && { echo "FAIL hub did not start"; exit 1; }; done
 echo '[{"select":0},{"wait":1500},{"click":"rail:Browser"},{"wait":6000}]' > "$O/script.json"
-rc=0; BACKPLANE_CEF=$RT BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF_PROFILE=$O/profile timeout 90 "$O/win/backplane-gpui" --url http://127.0.0.1:$HPORT --token-file "$O/home/token" --script "$O/script.json" --exit-after 20 > "$O/client.log" 2>&1 || rc=$?
+ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)   # lavapipe on an Xvfb (no DRI3 for a hardware driver)
+rc=0; env ${ICD:+VK_ICD_FILENAMES=$ICD} BACKPLANE_GPUI_ASSETS=${E2E_ASSETS:-$(cd "$(dirname "$0")/../.." && pwd)/assets} BACKPLANE_CEF=$RT BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF_PROFILE=$O/profile timeout 90 "$O/win/backplane-gpui" --url http://127.0.0.1:$HPORT --token-file "$O/home/token" --script "$O/script.json" --exit-after 20 > "$O/client.log" 2>&1 || rc=$?
 [ $rc = 0 ] || { echo "FAIL the window died opening the Browser tab (exit $rc)"; tail -5 "$O/client.log"; exit 1; }
-grep -q '"cef_created"' "$O/client.log" && echo "PASS Browser tab opened and the window survived" || { echo "FAIL no browser was created"; grep -v GPUI_METRIC "$O/client.log" | tail -5; exit 1; }
+grep -q '"cef_created"' "$O/client.log" && echo "PASS Browser tab opened and the window survived" || { echo "FAIL no browser was created"; grep -v 'GPUI_METRIC {"event":"frame\|asset_missing' "$O/client.log" | tail -15; exit 1; }
