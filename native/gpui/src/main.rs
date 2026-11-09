@@ -191,6 +191,14 @@ impl Backplane {
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
     fn do_send(&mut self,cx:&mut Context<Self>) {if self.popup_pick(cx){return;}self.ui_epoch+=1;
         let text=self.input.read(cx).content.to_string();
+        // a project's page on show: Send starts a thread in that project with this first message (0.14's home composer), never the thread
+        // that was open before the page (it is not on screen)
+        if let Some(pid)=self.project_page.clone().filter(|p|screens::projects::find(&self.data,p).is_some()) {
+            if text.trim().is_empty()||self.status!="Connected"||self.screens.projects.first_send.is_some() {return;}
+            self.screens.projects.first_send=Some((self.selected.rsplit('|').next().unwrap_or("").to_string(),text,Instant::now()));
+            self.input.update(cx,|i,cx|i.set(String::new(),cx));
+            self.arm_new();let _=self.tx.try_send(Command::Action("new-thread".into(),pid));cx.notify();return;
+        }
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());
         if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {if !text.trim().is_empty()&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();self.note.clear();}cx.notify();
