@@ -434,7 +434,21 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
 #[derive(Clone, PartialEq)]
 enum Topic { Lists, Thread(String), Sub(String, String) }
 #[derive(Default)]
-struct Subs { far_rows: HashMap<String, (HashSet<String>, String)>, far_seen: Option<HashMap<String, String>>, next: u64, subs: Vec<(u64, Topic)>, live: HashSet<String>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
+struct Subs { far_rows: HashMap<String, (HashSet<String>, String)>, far_seen: Option<HashMap<String, String>>, next: u64, subs: Vec<(u64, Topic)>, live: HashMap<String, Streams>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
+/// A thread's streamed replies on one connection. Frames (deltas, their end) and log lines (the reply's final message) reach the connection on two channels, so
+/// the final message of a reply a person's message cut can arrive after the next reply has begun streaming. Each stream has its own entry (`live:<thread>`, then
+/// `live:<thread>.<n>`), a stream ends at its `delta_end` frame (which comes in order with the deltas), and a final message replaces the oldest stream that ended
+/// without one; one that arrives before its stream's end replaces the open stream, and that end is then owed.
+#[derive(Default, Debug)]
+pub(crate) struct Streams { open: Option<u64>, ended: std::collections::VecDeque<u64>, owed: u32, next: u64 }
+impl Streams {
+    pub(crate) fn id(th: &str, n: u64) -> String { if n == 0 { format!("live:{th}") } else { format!("live:{th}.{n}") } }
+    /// A delta: the stream it belongs to, and whether it starts here.
+    pub(crate) fn delta(&mut self) -> (u64, bool) { match self.open { Some(n) => (n, false), None => { let n = self.next; self.next += 1; self.open = Some(n); (n, true) } } }
+    pub(crate) fn end(&mut self) { if let Some(n) = self.open.take() { if self.owed > 0 { self.owed -= 1 } else { self.ended.push_back(n) } } }
+    /// A reply's final message: the stream it replaces, if any.
+    pub(crate) fn finished(&mut self) -> Option<u64> { if let Some(n) = self.ended.pop_front() { return Some(n) } let n = self.open.take()?; self.owed += 1; Some(n) }
+}
 impl Subs {
     fn threads(&self, th: &str) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Thread(th.into())).map(|(i, _)| *i).collect() }
     /// the subscriptions to one subagent's view, `(sub, key)` for thread `th`; `key` None: every one of the thread's
@@ -472,9 +486,9 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 if crate::present::thread::agent_only(role, s(&e, "text")) { en["agentOnly"] = json!(true) }
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
-                let replaced = kind == "assistant" && subs.live.remove(&th);
-                if replaced { en["replaces"] = json!(format!("live:{th}")) }
-                if replaced || kind != "assistant" || !s(&e, "text").trim().is_empty() { entry = Some(en) }
+                let replaced = if kind == "assistant" { subs.live.get_mut(&th).and_then(|l| l.finished()) } else { None };
+                if let Some(n) = replaced { en["replaces"] = json!(Streams::id(&th, n)) }
+                if replaced.is_some() || kind != "assistant" || !s(&e, "text").trim().is_empty() { entry = Some(en) }
             }
             "MessageAttached" => { let id = s(&e, "msg"); let mut en = json!({"id":id,"kind":"user","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"attachments":e["attachments"]}); if let Some(x) = recalled(id) { en["text"] = x["text"].clone(); if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } entry = Some(en) }
             "ActivityLogged" => entry = act_entry(&th, s(&e, "act"), s(&e, "tone"), s(&e, "kind"), s(&e, "summary"), ms(e["at"].as_u64().unwrap_or(0))),
@@ -552,11 +566,14 @@ fn far_seed(hub: &Hub, subs: &mut Subs, th: &str) {
 fn live_pushes(f: &Value, subs: &mut Subs) -> Vec<Value> {
     let th = s(f, "thread").to_string(); let mut out = vec![];
     match s(f, "t") {
-        "delta" => { let first = subs.live.insert(th.clone()); let text = s(f, "text");
+        "delta" => { let (n, first) = subs.live.entry(th.clone()).or_default().delta(); let text = s(f, "text"); let id = Streams::id(&th, n);
             for sub in subs.threads(&th) {
-                if first { out.push(d(sub, "entry", json!({"thread":th,"entry":live_entry(&th, "")}))) }
-                out.push(d(sub, "text", json!({"thread":th,"entry":format!("live:{th}"),"append":text,"at":now_ms()})));
+                if first { let mut e = live_entry(&th, ""); e["id"] = json!(id); out.push(d(sub, "entry", json!({"thread":th,"entry":e}))) }
+                out.push(d(sub, "text", json!({"thread":th,"entry":id,"append":text,"at":now_ms()})));
             } }
+        "delta_end" => { if let Some(l) = subs.live.get_mut(&th) { l.end() } }
+        // what a thread's queue strip shows changed with no line in the log (a message on its way to another machine: net/farsend.rs): ask thread.queue again
+        "queue" => for sub in subs.threads(&th) { out.push(d(sub, "queue", json!({"thread":th}))) },
         _ => {}
     }
     out

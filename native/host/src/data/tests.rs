@@ -559,3 +559,51 @@ impl RpcHandler for FakeStar {
     let a = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "ask").cloned().unwrap();
     assert_eq!(a["ask"]["options"][0]["label"], "Allow", "any other approval keeps Allow: {a}");
 }
+
+/// A phone's message to a thread on a linked machine goes through the far router (held there while that machine is away, cutting into its turn when it arrives),
+/// never refused as "unknown thread"; pictures are refused with why; its queue rows' buttons go the same way.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_a_message_to_a_thread_on_another_machine_goes_through_the_far_router() {
+    struct View; impl crate::api::FarView for View { fn has(&self, t: &str) -> bool { t == "L1~ta" } fn page(&self, _t: &str, _b: u64, _l: usize) -> Option<crate::model::Page> { None } fn latest_context(&self, _t: &str) -> Vec<crate::model::Row> { vec![] } }
+    struct Router(std::sync::Mutex<Vec<(String, Value)>>);
+    impl crate::api::FarRouter for Router {
+        fn wants(&self, _m: &str, p: &Value) -> bool { p["thread"].as_str().map_or(false, |t| t.contains('~')) }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _c: u64, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+            Box::pin(async move { self.0.lock().unwrap().push((m.to_string(), p.clone())); if m == "turn.start" { vec![json!({"t":"reply","id":id,"ok":true,"result":{"held":true}})] } else { vec![] } })
+        }
+        // data/1 asks and waits for the answer (net/rpc.rs Router::ask: a message is held there and answered at once)
+        fn ask<'a>(&'a self, _h: &'a Arc<Hub>, _c: u64, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Option<Value>> {
+            Box::pin(async move { if !self.wants(m, p) { return None } self.0.lock().unwrap().push((m.to_string(), p.clone())); Some(json!({"t":"reply","id":id,"ok":true,"result":if m == "turn.start" { json!({"held":true}) } else { json!({}) }})) })
+        }
+    }
+    let (hub, port) = up("farsend").await;
+    hub.set_far(Arc::new(View)); let r = Arc::new(Router(Default::default())); hub.set_far_router(r.clone());
+    let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let a = ask(&mut ws, 1, "message.send", json!({"thread":"L1~ta","text":"cut in there","clientId":"far-1"})).await;
+    assert_eq!((a["ok"].as_bool(), a["result"]["entry"]["clientId"].as_str()), (Some(true), Some("far-1")), "{a}");
+    let seen = r.0.lock().unwrap().clone(); assert_eq!(seen.len(), 1); assert_eq!((seen[0].0.as_str(), seen[0].1["thread"].as_str(), seen[0].1["text"].as_str(), seen[0].1["msg"].as_str()), ("turn.start", Some("L1~ta"), Some("cut in there"), Some("far-1")));
+    let png = "iVBORw0K";
+    assert_eq!(ask(&mut ws, 2, "message.send", json!({"thread":"L1~ta","text":"x","attachments":[{"name":"a.png","mime":"image/png","data":png}]})).await["ok"], false, "pictures are not sent there yet");
+    assert_eq!(ask(&mut ws, 3, "message.send", json!({"thread":"L1~zz","text":"x"})).await["ok"], false, "a thread no mirror has is unknown");
+    let q = ask(&mut ws, 4, "queue.act", json!({"thread":"L1~ta","action":"q-remove","value":"m9"})).await; assert_eq!(q["ok"], true, "{q}");
+    assert_eq!(r.0.lock().unwrap().last().map(|x| x.0.clone()).as_deref(), Some("queue.remove"), "a far queue button goes to that machine");
+    // the thread can be subscribed to, and hears when its held rows change (a message delivered once that machine is back: the row clears)
+    let sub = ask(&mut ws, 5, "subscribe", json!({"topic":"thread","thread":"L1~ta"})).await; assert_eq!(sub["ok"], true, "{sub}");
+    let _ = hub.frames.send(json!({"t":"queue","thread":"L1~ta"}));
+    let push = loop { let v = next(&mut ws).await; if v["t"] == "d" && v["k"] == "queue" { break v } };
+    assert_eq!((push["thread"].as_str(), push["sub"].as_u64()), (Some("L1~ta"), sub["result"]["sub"].as_u64()));
+}
+
+/// A reply cut by a message: its final message replaces its own stream's entry even when it comes after the next reply began streaming, so the new reply's
+/// first words stay (they were lost before: the final message replaced the one shared `live:<thread>` entry).
+#[test] fn data_a_cut_replys_final_message_replaces_its_own_stream_not_the_next() {
+    use super::Streams;
+    let mut l = Streams::default();
+    assert_eq!(l.delta(), (0, true)); assert_eq!(l.delta(), (0, false)); // the first reply streams
+    l.end(); // it is cut: its end comes in order with the deltas
+    assert_eq!(l.delta(), (1, true), "the next reply has an entry of its own"); assert_eq!(Streams::id("t", 1), "live:t.1");
+    assert_eq!(l.finished(), Some(0), "the first reply's final message, late, replaces the first stream");
+    assert_eq!(l.delta(), (1, false)); l.end(); assert_eq!(l.finished(), Some(1));
+    // a final message before its stream's end: it replaces the open stream, and that end closes nothing else
+    assert_eq!(l.delta(), (2, true)); assert_eq!(l.finished(), Some(2)); l.end(); assert_eq!(l.delta(), (3, true)); assert_eq!(l.finished(), Some(3));
+    assert_eq!(Streams::default().finished(), None, "a final message with no stream replaces nothing");
+}

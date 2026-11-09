@@ -91,9 +91,10 @@ fn thread_key(t: &str) -> Option<&'static str> {
 /// The mailroom's own working threads (mail runs and coordinator back offices): never a person's thread.
 fn run_thread(id: &str) -> bool { id.starts_with("run") || id.starts_with("mailcoord-") }
 
-/// Settings that still mean something in this version: a person's choices, and notes about the things that come across.
+/// Settings that still mean something in this version: a person's choices, and notes about the things that come across. (0.14's `followup`, queue or
+/// steer for a message sent while a turn runs, is not one: every message cuts into the running turn now.)
 pub(super) fn keeps_setting(k: &str) -> bool {
-    const EXACT: &[&str] = &["agent.provider", "agent.model", "agent.lang", "ui.theme", "sidebar.view", "voice.device", "notify.all", "followup", "restart.continue",
+    const EXACT: &[&str] = &["agent.provider", "agent.model", "agent.lang", "ui.theme", "sidebar.view", "voice.device", "notify.all", "restart.continue",
         "text.provider", "text.model", "order.enabled", "order.estimates", "order.server", "kicad.ipc", "kicad.path", "freecad.path"];
     // buy.<thread> marks a buy thread (its tools, its Order card), buy.last.<thread> its design thread's newest, order.quote.<thread> the card's quote;
     // order.wait is not kept: a quote still being made is waited on again from its record (files::copy_orders, order::resume)

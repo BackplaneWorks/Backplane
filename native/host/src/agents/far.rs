@@ -58,8 +58,16 @@ impl Agents {
         if far::is(thread) { return Some(fail("a thread on another machine cannot ask a third")) }
         let args = localized(&link, a);
         if name == "thread_wait" { return Some(self.far_wait(&link, thread, &args).await) }
+        // a message to a thread there: one id for every try, so a send whose answer was lost and goes again is taken once
+        let args = if name == "thread_send" { let mut x = args; x["_msg"] = json!(hub_id("fs", now_s(), self.seq_n())); x } else { args };
         Some(match self.hub.far_call(&link, thread, tool, &args).await {
             Ok((ok, body)) => (ok, prefixed(&link, body)),
+            // that machine cannot be reached now: the message waits here (net/farsend.rs) and goes, cutting into whatever runs there, the moment it is back
+            Err(e) if name == "thread_send" && e == "that machine is away" && crate::net::farsend::global().is_some() => {
+                let out = crate::net::farsend::global().unwrap(); let id = args["_msg"].as_str().unwrap_or("").to_string();
+                out.hold_m(sv(a, "threadId"), &link, "mcp.call", &id, json!({"tool": "thread_send", "from": thread, "args": args}), crate::net::farsend::now_ms());
+                (true, json!({"threadId": sv(a, "threadId"), "state": "held", "note": format!("{e}: it waits here and is delivered, as an interrupt of whatever runs there, when that machine is back")}))
+            }
             Err(e) => fail(&e),
         })
     }
@@ -129,10 +137,16 @@ impl Agents {
         let (ag, thread, to, text) = (self.clone(), thread.to_string(), to.to_string(), text.to_string());
         tokio::spawn(async move {
             let link = far::link(&to); let args = json!({"to": far::local(&to), "text": text, "thread": far::id(&link, &thread)});
-            for n in 0..4u64 {
-                match ag.hub.far_call(&link, &thread, "launch_report", &args).await { Ok((true, _)) => return, Ok((false, b)) => { eprintln!("agents: report to {to} refused: {b}"); return } Err(_) => tokio::time::sleep(std::time::Duration::from_secs(2 << n)).await }
+            match ag.hub.far_call(&link, &thread, "launch_report", &args).await {
+                Ok((true, _)) => {}
+                Ok((false, b)) => eprintln!("agents: report to {to} refused: {b}"),
+                // that machine is away: the report waits in the far outbox (net/farsend.rs) and goes when it is back, cutting into the launcher's turn there
+                Err(e) if e != "that machine is away" => eprintln!("agents: report to {to} could not be sent: {e}"),
+                Err(e) => match crate::net::farsend::global() {
+                    Some(out) => out.hold_m(&to, &link, "mcp.call", &hub_id("fr", now_s(), ag.seq_n()), json!({"tool": "launch_report", "from": thread, "args": args}), crate::net::farsend::now_ms()),
+                    None => eprintln!("agents: report to {to} could not be sent: {e}"),
+                },
             }
-            eprintln!("agents: report to {to} could not be sent");
         });
     }
 }

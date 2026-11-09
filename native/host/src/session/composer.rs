@@ -240,6 +240,11 @@ pub fn queue_json(queue: &[(String, String)], running: bool) -> (Value, Value) {
     (Value::Array(rows), json!(if more > 0 { format!("{more} more") } else { String::new() }))
 }
 
+/// The rows a thread's strip shows ahead of its queue that the hub's state does not hold: a thread elsewhere's messages that have not reached its machine
+/// (net/farsend.rs registers its `rows_now` at startup; nothing when no machine can be linked).
+pub static UNSENT: std::sync::OnceLock<fn(&str) -> Vec<Value>> = std::sync::OnceLock::new();
+pub fn unsent_rows(thread: &str) -> Vec<Value> { UNSENT.get().map(|f| f(thread)).unwrap_or_default() }
+
 pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; /// the bot whose thread this is
     fn bot_of(&self, _thread: &str) -> Option<String> { None } fn account_params(&self, thread: &str) -> bool; /// the thread's named account binding, as its setting text (Accounts.owner); None when it has none (Accounts.named)
     fn account_binding(&self, _thread: &str) -> Option<String> { None }
@@ -255,7 +260,7 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
     match s(params, "action") {
         "draft" => draft(hub, session, s(params, "value")),
         // a queued row's buttons (queue_json): each a queue request about the open thread; Edit also puts the message back in the draft, after what is there
-        "q-steer" | "q-remove" | "q-up" | "q-edit" | "q-resume" => {
+        "q-steer" | "q-remove" | "q-up" | "q-edit" | "q-resume" | "o-edit" | "o-remove" => {
             let sel = s(session, "sel"); if !safe(sel) { return None }
             let v = s(params, "value"); let (msg, rest) = v.split_once('\u{1f}').unwrap_or((v, ""));
             if msg.is_empty() && s(params, "action") != "q-resume" { return None }
@@ -263,12 +268,14 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
                 "q-steer" => ("queue.steer", json!({"thread": sel, "msg": msg})),
                 "q-up" => ("queue.move", json!({"thread": sel, "msg": msg, "to": rest.parse::<u64>().ok()?})),
                 "q-resume" => ("queue.resume", json!({"thread": sel})),
+                // a message that has not reached the thread's machine (net/farsend.rs): taken out here, never asked of that machine
+                "o-edit" | "o-remove" => ("outbox.remove", json!({"of": sel, "msg": msg})),
                 _ => ("queue.remove", json!({"thread": sel, "msg": msg})),
             };
             let rid = session["rid"].as_u64().unwrap_or(0);
             let mut patch = json!({"rid": rid + 1});
             let mut cmds = vec![];
-            if s(params, "action") == "q-edit" {
+            if matches!(s(params, "action"), "q-edit" | "o-edit") {
                 let text = rest;
                 let d = draft_of(session, sel); let merged = if d.trim().is_empty() { text.to_string() } else { format!("{d}\n\n{text}") };
                 patch["drafts"] = json!({ sel: merged });
@@ -381,6 +388,10 @@ mod tests {
         let o = act(&p("q-edit", "m1\u{1f}queued words"), &Plain).unwrap();
         assert_eq!(req(&o)["m"], "queue.remove"); assert_eq!(o.session_patch["drafts"]["t1"], "mine\n\nqueued words", "after what is in the draft");
         assert!(act(&p("q-steer", ""), &Plain).is_none()); assert!(act(&p("q-up", "m2\u{1f}x"), &Plain).is_none());
+        // a message not yet at the thread's machine (net/farsend.rs): out of this hub's outbox, `of` so it is never sent on to that machine
+        assert_eq!(req(&act(&p("o-remove", "m3"), &Plain).unwrap()), json!({"id": 5, "m": "outbox.remove", "p": {"of": "t1", "msg": "m3"}}));
+        let o = act(&p("o-edit", "m3\u{1f}unsent words"), &Plain).unwrap();
+        assert_eq!(req(&o)["m"], "outbox.remove"); assert_eq!(o.session_patch["drafts"]["t1"], "mine\n\nunsent words");
     }
     #[test] fn a_reply_is_a_counted_block_the_clients_take_apart() {
         let b = reply_block("m1", "line one\nline two");

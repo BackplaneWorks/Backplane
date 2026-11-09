@@ -9,7 +9,7 @@
 //! refused 403. NOT ported here: `mcp.call` (remote agents' tools, `Fm.serve`), `uber.sync`, and the viewers' reads: they answer 501 and say so.
 //!
 //! `OwnerLink` (the bots lane's transport for `owner.mail`): a signed POST of the request to a linked machine, only to one of the owner's own.
-use super::{far, farsync::FarSync, peering::PReq};
+use super::{far, farsend::{self, Outbox}, farsync::FarSync, peering::PReq};
 use crate::{api::{Fut, FarRouter, HttpHandler, HttpReply}, bots::mail::owner::OwnerLink, hub::{Conn, Hub}};
 use serde_json::{json, Value};
 use std::sync::{atomic::{AtomicU64, Ordering::Relaxed}, Arc};
@@ -35,11 +35,19 @@ mod tests;
 const IN_FLIGHT: usize = 8;
 /// Where a window's viewers are drawn: client -> (the link of the machine it watches, that watch's root over there).
 type Watching = Arc<std::sync::Mutex<std::collections::HashMap<u64, (String, String)>>>;
-pub struct Router { sync: Arc<FarSync>, copy: bool, waiting: Arc<std::sync::Mutex<std::collections::HashMap<u64, usize>>>, watching: Watching, pulling: Arc<std::sync::Mutex<std::collections::HashSet<u64>>> }
+pub struct Router { sync: Arc<FarSync>, copy: bool, waiting: Arc<std::sync::Mutex<std::collections::HashMap<u64, usize>>>, watching: Watching, pulling: Arc<std::sync::Mutex<std::collections::HashSet<u64>>>,
+    /// a person's messages to threads elsewhere that have not reached their machine yet (net/farsend.rs), and whether its worker runs
+    pub out: Arc<Outbox>, working: std::sync::atomic::AtomicBool }
 impl Router {
     pub fn new(sync: Arc<FarSync>) -> Router { Router::with_copy(sync, crate::copy::on()) }
     /// `copy`: a hub on a copy of a log reaches no other machine: a request about a thing elsewhere is answered with an error here and no connection is made
-    pub fn with_copy(sync: Arc<FarSync>, copy: bool) -> Router { Router { sync, copy, waiting: Default::default(), watching: Default::default(), pulling: Default::default() } }
+    pub fn with_copy(sync: Arc<FarSync>, copy: bool) -> Router { Router::with_outbox(sync, copy, Outbox::open(None)) }
+    pub fn with_outbox(sync: Arc<FarSync>, copy: bool, out: Arc<Outbox>) -> Router { Router { sync, copy, waiting: Default::default(), watching: Default::default(), pulling: Default::default(), out, working: Default::default() } }
+    /// Start the worker that posts the held messages (once): at startup, for what a restart left held, and on the first message held.
+    pub fn work(&self, hub: &Arc<Hub>) {
+        if self.copy || self.working.swap(true, Relaxed) { return }
+        tokio::spawn(send_held(self.sync.clone(), Arc::downgrade(hub), self.out.clone()));
+    }
     /// The machine a window's viewer read goes to: the one named by its params, else the one its watch is on (a read about a piece it tapped names only the plot's key).
     fn viewer_link(&self, client: u64, m: &str, p: &Value) -> String {
         let named = far::params_link(p);
@@ -79,6 +87,17 @@ struct Parts { sync: Arc<FarSync>, waiting: Arc<std::sync::Mutex<std::collection
 impl Router {
     fn parts(&self) -> Parts { Parts { sync: self.sync.clone(), waiting: self.waiting.clone(), watching: self.watching.clone(), pulling: self.pulling.clone() } }
     /// The machine a request goes to, or the error frames to answer at once; counts it as waiting (`Parts::run` gives it back).
+    /// A person's message to a thread on one of the owner's machines, answering now or away: held here and answered at once (net/farsend.rs); the worker takes it
+    /// there, where it cuts into the running turn, and the thread's queue strip shows it while it has not arrived. None for anything else.
+    fn hold(&self, hub: &Arc<Hub>, id: &Value, m: &str, p: &Value) -> Option<Value> {
+        if m != "turn.start" || self.copy { return None }
+        let l = far::params_link(p); if l.is_empty() || !self.sync.mine(&l) { return None }
+        let mut local = far::params_local(p, &l); if let Some(o) = local.as_object_mut() { o.remove("on"); }
+        if local["msg"].as_str().map_or(true, str::is_empty) { local["msg"] = json!(format!("m{}-{}", farsend::now_ms(), hub.fresh_client())); }
+        let th = p["thread"].as_str().unwrap_or("").to_string();
+        self.out.hold(&th, &l, local, farsend::now_ms()); self.work(hub);
+        Some(json!({"t":"reply","id":id,"ok":true,"result":{"held":true}}))
+    }
     fn plan(&self, client: u64, id: &Value, m: &str, p: &Value) -> Result<String, Vec<Value>> {
         let viewer = super::farview::is_viewer(m);
         let l = if viewer { self.viewer_link(client, m, p) } else { far::params_link(p) };
@@ -133,6 +152,7 @@ impl FarRouter for Router {
     }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, client: u64, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
+            if let Some(r) = self.hold(hub, id, m, p) { return vec![r] }
             let l = match self.plan(client, id, m, p) { Ok(l) => l, Err(e) => return e };
             // (Far.rpc.job): the request is out on a task of its own and the answer is pushed when it comes; this connection goes on meanwhile
             let (me, hub, id, m, p) = (self.parts(), hub.clone(), id.clone(), m.to_string(), p.clone());
@@ -143,6 +163,7 @@ impl FarRouter for Router {
     fn ask<'a>(&'a self, hub: &'a Arc<Hub>, client: u64, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Option<Value>> {
         Box::pin(async move {
             if !self.wants_for(client, m, p) { return None }
+            if let Some(r) = self.hold(hub, id, m, p) { return Some(r) }
             let l = match self.plan(client, id, m, p) { Ok(l) => l, Err(mut e) => return Some(e.remove(0)) };
             Some(self.parts().run(hub, client, id, m, p, &l).await)
         })
@@ -150,7 +171,7 @@ impl FarRouter for Router {
     fn mcp<'a>(&'a self, hub: &'a Arc<Hub>, link: &'a str, from: &'a str, tool: &'a str, args: &'a Value) -> Fut<'a, Result<(bool, Value), String>> {
         Box::pin(async move {
             if self.copy { return Err("a hub on a copied log does not reach other machines".into()) }
-            if !self.sync.own(link) { return Err(format!("no machine of yours is linked as {link} (machine_list shows them)")) }
+            if !self.sync.own(link) { if self.sync.mine(link) { return Err("that machine is away".into()) } return Err(format!("no machine of yours is linked as {link} (machine_list shows them)")) }
             let body = json!({"id": 0, "m": "mcp.call", "p": {"tool": tool, "from": from, "args": args}}).to_string();
             let (code, text) = post(&self.sync, hub, link, &body).await;
             match code {
@@ -164,6 +185,41 @@ impl FarRouter for Router {
     }
     fn machines(&self) -> Vec<(String, String, String)> { machines_of(&self.sync) }
 }
+/// The worker of the held messages: each thread's oldest goes to its machine (several machines at once), the owner's answer decides (farsend::outcome), and when
+/// what the strip shows changes the views are told (the window asks again) and the phones get a `queue` push for the thread.
+async fn send_held(sync: Arc<FarSync>, hub: std::sync::Weak<Hub>, out: Arc<Outbox>) {
+    let busy: Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+    let mut shown = vec![];
+    loop {
+        let Some(h) = hub.upgrade() else { return };
+        let now = farsend::now_ms();
+        let b = busy.lock().unwrap().clone();
+        for item in farsend::due(&out.items(), now, &b) {
+            busy.lock().unwrap().push(item.msg.clone());
+            let (sync, hub2, out2, busy2) = (sync.clone(), h.clone(), out.clone(), busy.clone());
+            tokio::spawn(async move {
+                let body = item.body().to_string();
+                let (code, text) = post(&sync, &hub2, &item.link, &body).await;
+                out2.answered(&item.msg, code, &text, farsend::now_ms());
+                busy2.lock().unwrap().retain(|m| *m != item.msg);
+                out2.kick.notify_one();
+            });
+        }
+        let now_shown = out.shown(farsend::now_ms());
+        if now_shown != shown {
+            let mut threads: Vec<String> = now_shown.iter().chain(shown.iter()).map(|x| x.0.clone()).collect(); threads.sort(); threads.dedup();
+            for t in threads { let _ = h.frames.send(json!({"t":"queue","thread":t})); }
+            h.bump_views(); shown = now_shown;
+        }
+        drop(h);
+        tokio::select! { _ = out.kick.notified() => {}, _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {} }
+    }
+}
+/// The owner's side: the ids of the messages a linked machine posted lately, so one it posts again (its answer was lost on the way) runs once.
+static TAKEN: std::sync::Mutex<std::collections::VecDeque<String>> = std::sync::Mutex::new(std::collections::VecDeque::new());
+fn taken_before(link: &str, msg: &str) -> bool { !msg.is_empty() && TAKEN.lock().unwrap().iter().any(|k| *k == format!("{link}/{msg}")) }
+fn taken(link: &str, msg: &str) { if msg.is_empty() { return } let mut t = TAKEN.lock().unwrap(); t.push_back(format!("{link}/{msg}")); while t.len() > 512 { t.pop_front(); } }
+
 /// The start of the error `mcp` gives when the machine answered 501: it is up, on a build that cannot take the request.
 pub const OLDER: &str = "that machine runs an older Backplane: update it there";
 /// The owner's own machines this hub is linked to: (link id, name, address)
@@ -256,9 +312,11 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     let Some(feed) = sync.feed.get() else { return HttpReply::text("503 Service Unavailable", "not ready") };
     if !feed.allowed(m, &p) { return HttpReply::text("403 Forbidden", "not something this machine shares") }
     // as a local client's request (Far.client), here and never onward: the reply frame is the answer
+    let msg = if m == "turn.start" { p["msg"].as_str().unwrap_or("").to_string() } else { String::new() };
+    if taken_before(&link, &msg) { return json_reply(&json!({"t":"reply","id":0,"ok":true})) }
     let mut c = Conn { sent: vec![], client: hub.fresh_client(), gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     let out = hub.request_here(&mut c, &json!({"id": 0, "m": m, "p": p})).await;
-    match out.into_iter().find(|v| v["t"] == "reply") { Some(v) => json_reply(&v), None => HttpReply::text("500 Internal Server Error", "no answer") }
+    match out.into_iter().find(|v| v["t"] == "reply") { Some(v) => { if v["ok"] == true { taken(&link, &msg) } json_reply(&v) } None => HttpReply::text("500 Internal Server Error", "no answer") }
 }
 /// The bots lane's requests between machines: a room's members, a post in it
 const FAR_BOTS: &[&str] = &["bots.room_sync", "bots.room_post", "bots.list", "bots.room_join", "bots.room_leave", "bots.hello"];
