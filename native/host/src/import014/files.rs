@@ -90,6 +90,21 @@ pub fn copy(old: &Path, home: &Path, bots: &[(String, String)], hooks: &[String]
     }
     r
 }
+/// 0.14's quotes and orders (`orders/q_*.json`, the same records this hub keeps) of the threads that came across, so their Buy now links and
+/// their progress (paid, placed, shipped) go on here; never over a record that is here. Private as the hub keeps them: 0600 in a 0700 folder.
+pub fn copy_orders(old: &Path, home: &Path, threads: &std::collections::HashSet<String>) -> usize {
+    let mut n = 0;
+    for e in std::fs::read_dir(old.join("orders")).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(id) = name.strip_suffix(".json") else { continue };
+        if !crate::settings::order::id_ok(id) || !e.file_type().map_or(false, |t| t.is_file()) { continue }
+        let Some(j) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
+        if j["id"].as_str() != Some(id) || !threads.contains(j["thread"].as_str().unwrap_or("")) { continue }
+        let d = home.join("orders").join(&name); if d.exists() { continue }
+        if private_copy(&e.path(), &d) { n += 1 }
+    }
+    n
+}
 /// A folder only its owner may open (0700).
 fn private(d: &Path) { use crate::plat::fs::PermissionsExt; let _ = std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o700)); }
 /// A secret file copied with its folder 0700 and itself 0600.

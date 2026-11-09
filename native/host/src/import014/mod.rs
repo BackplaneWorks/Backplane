@@ -197,6 +197,9 @@ impl Importer {
         let mut extra = fr.notes.clone();
         let accounts = files::adopt_accounts(&hub.cfg.home, secrets, &fr);
         if let Some(n) = &accounts.note { extra.push(n.clone()) }
+        // the quotes and orders of the threads coming across (followed from the next start, as at any start)
+        let threads: std::collections::HashSet<String> = p.lines.iter().filter(|l| crate::session::event_type(l) == Some("ThreadCreated")).map(|l| plan::fld(l, "id").to_string()).collect();
+        let (h3, o3) = (hub.cfg.home.clone(), old.clone()); let _ = tokio::task::spawn_blocking(move || files::copy_orders(&o3, &h3, &threads)).await;
         let devices = files::adopt_devices(&hub.cfg.home, &old);
         let keys = if secrets { files::adopt_vault(&old) } else { files::Keys::default() };
         if let Some(n) = &keys.note { extra.push(n.clone()) }
