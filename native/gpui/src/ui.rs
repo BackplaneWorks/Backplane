@@ -596,6 +596,9 @@ impl Render for Backplane {
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
                     // another machine's thread: "Project · on desktop" (this machine's looks as always)
                     .when(has_thread, |d| d.children(crate::screens::badge::place(light, &thread["mark"], "", "crumb").map(|p| div().flex().items_center().gap_2().child(div().text_color(c("faint")).child("·")).child(p))))
+                    // a buy thread's title is marked an Order with the cart, as 0.14's was (the hub sends its Order card only for a buy thread)
+                    .when(has_thread && thread["order"].is_object(), |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("order-mark").flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("accent"))
+                        .tooltip(crate::keys::tip("This thread orders the project's parts", "", light)).child(ic(light, "shopping-cart", 12., "accent")).child("Order")))
                     .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").font_weight(FontWeight::BOLD).child(string(thread, "title"))
                         // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu
                         .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
