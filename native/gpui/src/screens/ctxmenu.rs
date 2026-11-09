@@ -16,6 +16,8 @@ pub struct Menu { pub at: Point<Pixels>, pub items: Vec<Item>, /// the item whos
 pub const LOCAL_SEARCH: &str = "local:search-thread";
 /// A project's "Intent…" (0.14): its page, which shows what the project is for and edits it. The window's own, nothing sent.
 pub const LOCAL_INTENT: &str = "local:intent";
+/// A thread's "Move under…": the window's own second menu, the threads it may go under (`parent_choices`); each sends `row-reparent`.
+pub const LOCAL_MOVE: &str = "local:move";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm } }
@@ -29,11 +31,28 @@ pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     for o in t["trail"].as_array().into_iter().flatten().flat_map(|x| x["options"].as_array().into_iter().flatten()) { v.push(item(&format!("Snooze {}", s(o, "label").to_lowercase()), "row-snooze", &s(o, "value"), false)); }
     if t["canChild"].as_bool().unwrap_or(true) { v.push(item("New subthread", "thread-child", &format!("{}|{}", raw(&qid), project), false)); }
     if t["depth"].as_u64().unwrap_or(0) > 0 { v.push(item("Move to top level", "row-detach", raw(&qid), false)); }
+    if t["depth"].is_u64() && !project.is_empty() { v.push(item("Move under\u{2026}", LOCAL_MOVE, &format!("{}|{}", raw(&qid), project), false)); }
     v.push(item("Rename", "row-rename", raw(&qid), false));
     v.push(item("Regenerate title", "row-retitle", raw(&qid), false));
-    v.push(item("Archive", "row-archive", &qid, false));
+    // an archived row's lead (the hub's Unarchive) is already above
+    let archived = t["lead"].as_array().map_or(false, |l| l.iter().any(|x| x["action"] == "row-unarchive"));
+    if !archived { v.push(item("Archive", "row-archive", &qid, false)); }
     v.push(item("Delete", "row-delete", &qid, true));
     v
+}
+/// The threads a thread may go under (Move under…): the project's rows as the sidebar shows them (live, then settled), not the thread itself,
+/// not a row of its own subtree (the rows after it that stand deeper) and not the parent it has now; `(title, row-reparent value)` each.
+/// The hub checks the move again (same project, no cycle).
+pub fn parent_choices(data: &Value, project: &str, tid: &str) -> Vec<Item> {
+    let Some(p) = data["projects"].as_array().into_iter().flatten().find(|p| raw(p["id"].as_str().unwrap_or("")) == project) else { return vec![] };
+    let rows: Vec<&Value> = ["threads", "settled"].iter().flat_map(|k| p[*k].as_array().into_iter().flatten()).collect();
+    let depth = |r: &Value| r["depth"].as_u64().unwrap_or(0);
+    let Some(at) = rows.iter().position(|r| raw(&s(r, "id")) == tid) else { return vec![] };
+    let d = depth(rows[at]);
+    let subtree_end = rows[at + 1..].iter().position(|r| depth(r) <= d).map_or(rows.len(), |n| at + 1 + n);
+    let parent = (d > 0).then(|| rows[..at].iter().rev().find(|r| depth(r) < d).map(|r| raw(&s(r, "id")).to_string())).flatten();
+    rows.iter().enumerate().filter(|(i, r)| (*i < at || *i >= subtree_end) && parent.as_deref() != Some(raw(&s(r, "id"))))
+        .map(|(_, r)| item(&s(r, "title"), "row-reparent", &format!("{tid}|{}", raw(&s(r, "id"))), false)).collect()
 }
 /// A thread's row in the sidebar's picture (top level, settled or a subthread under another), by its raw id.
 fn find_row<'a>(v: &'a Value, rid: &str) -> Option<&'a Value> {
@@ -78,6 +97,12 @@ impl Backplane {
             // the window's own items: the menu shuts as Esc shuts it (an armed Delete is disarmed), then the item opens its place
             Some((a, _)) if a == LOCAL_SEARCH => { self.ctx_close(cx); self.palette_open_in_thread(cx); return }
             Some((a, v)) if a == LOCAL_INTENT => { self.ctx_close(cx); self.open_project(v, cx); return }
+            // the second menu, where the first was: the threads this one may go under
+            Some((a, v)) if a == LOCAL_MOVE => {
+                let (tid, project) = v.split_once('|').unwrap_or((v.as_str(), ""));
+                let items = parent_choices(&self.data, project, tid);
+                let at = m.at; self.screens.ctx = (!items.is_empty()).then(|| Menu { at, items, armed: None }); cx.notify(); return
+            }
             _ => {}
         }
         let step = press(m, i, &self.data);
@@ -119,7 +144,7 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
         let armed = m.armed == Some(i);
         let label = if armed { armed_label(it) } else { it.label.clone() };
         let danger = it.confirm;
-        list = list.child(div().id(SharedString::from(format!("ctx-{i}"))).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
+        list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("ctx-{i}"))), { let l = it.label.clone(); move || format!("ctx:{l}") }).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
             .when(armed, |d| d.bg(c("raise")).font_weight(FontWeight::BOLD)).hover(|s| s.bg(c("raise"))).child(label)
             .on_click(cx.listener(move |this, _, _, cx| this.ctx_click(i, cx))));
     }
@@ -179,6 +204,19 @@ mod tests {
     }
     #[test] fn a_project_offers_new_thread_rename_badge_and_a_confirmed_remove() {
         let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", LOCAL_INTENT, "proj-rename", "look", "proj-remove"]); assert!(it[4].confirm && !it[2].confirm && it[2].value == "p1" && it[1].value == "p1");
+    }
+    #[test] fn an_archived_row_offers_unarchive_not_archive() {
+        let t = j(r#"{"id":"h|t7","lead":[{"label":"Unarchive","action":"row-unarchive","value":"h|t7"}]}"#);
+        let it = thread_items(&t, "p1"); let acts: Vec<&str> = it.iter().map(|i| i.action.as_str()).collect();
+        assert!(acts.contains(&"row-unarchive") && !acts.contains(&"row-archive"), "{acts:?}");
+    }
+    #[test] fn move_under_offers_every_row_but_itself_its_subtree_and_its_parent() {
+        let d = j(r#"{"projects":[{"id":"h|p1","threads":[{"id":"h|a","title":"A","depth":0},{"id":"h|b","title":"B","depth":1},{"id":"h|c","title":"C","depth":2},{"id":"h|d","title":"D","depth":0}],"settled":[{"id":"h|e","title":"E","depth":0}]},{"id":"h|p2","threads":[{"id":"h|x","title":"X","depth":0}]}]}"#);
+        let vals = |tid: &str| parent_choices(&d, "p1", tid).into_iter().map(|i| i.value).collect::<Vec<_>>();
+        assert_eq!(vals("b"), ["b|d", "b|e"], "not itself, not its child C, not its parent A, never another project's X");
+        assert_eq!(vals("a"), ["a|d", "a|e"]); assert_eq!(vals("d"), ["d|a", "d|b", "d|c", "d|e"]);
+        assert!(parent_choices(&d, "p1", "zz").is_empty() && parent_choices(&d, "p9", "a").is_empty());
+        let it = thread_items(&j(r#"{"id":"h|b","depth":1}"#), "p1"); let m = it.iter().find(|i| i.action == LOCAL_MOVE).unwrap(); assert_eq!(m.value, "b|p1");
     }
     #[test] fn only_a_subthread_offers_to_move_to_the_top_level() {
         let sub = j(r#"{"id":"http://h:1|t8","depth":1,"canChild":true}"#); let it = thread_items(&sub, "p1");

@@ -130,7 +130,8 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             if p.sent_q.last() == Some(&text) { return; }
             remember(&mut p.sent_q, &text); let _ = this.tx.try_send(search_cmd(&text));
         }).detach();
-        cx.subscribe(&input, |this, _, ev: &ComposerEvent, _| if matches!(ev, ComposerEvent::Submit) { let _ = this.tx.try_send(go_cmd()); }).detach();
+        // Enter: the hub opens what was found and clears its query; the box forgets what it sent, so that clear is taken (an older "" sent is no echo)
+        cx.subscribe(&input, |this, _, ev: &ComposerEvent, _| if matches!(ev, ComposerEvent::Submit) { this.screens.projects.sent_q.clear(); let _ = this.tx.try_send(go_cmd()); }).detach();
         this.screens.projects.search = Some(input);
     }
     let (q, h) = (query(&this.data), hint(&this.data));

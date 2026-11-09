@@ -1,6 +1,6 @@
 //! data/1 additions for the phones (features "actions", "search", "models", "mentions", "bots", "notify"): each is a thin map onto the hub's own RPCs and
 //! folds, so a phone does what the desktop does and the hub stays the one place that decides. Added requests (docs/PHONE-DATA.md):
-//! `thread.act {thread, action: pin|unpin|settle|unsettle|archive|unarchive|delete|detach|rename, title?}` → `{thread}` (delete: `{}`) · `project.act {project, action: rename|color|icon|remove, title?, value?}` → `{}` ·
+//! `thread.act {thread, action: pin|unpin|settle|unsettle|archive|unarchive|delete|detach|reparent|rename, title?, parent?}` → `{thread}` (delete: `{}`) · `project.act {project, action: rename|color|icon|remove, title?, value?}` → `{}` ·
 //! `search {q, archived?=false, limit?=30}` → `{threads, projects}` · `models.list` → `{models:{provider:[{value,label,ok,why}]}}` ·
 //! `thread.model {thread, provider, model?, effort?}` → `{thread}` · `mentions.list {q?, kind?, limit?}` → `{items:[{sigil,id,label,detail}]}` (`@` bots, `>` threads, `%` projects, `#` rooms, `&` models) ·
 //! `bots.list` → `{bots:[{id,name,thread,uber}], rooms:[{id,name,members}]}` · `bot.say {bot, text, clientId?}` → `{}` · `room.posts {room, limit?}` → `{posts}` · `room.post {room, text, clientId?}` → `{}`.
@@ -261,10 +261,14 @@ async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Va
     if act == "rename" {
         if s(p, "title").trim().is_empty() { return Err(err("title")) }
         rpc(hub, c, "thread.rename", json!({"thread":th,"title":s(p, "title")})).await?;
+    } else if act == "reparent" {
+        // under another thread of its project; the hub's own check refuses a cycle, another project or a dead parent
+        if s(p, "parent").is_empty() { return Err(err("parent")) }
+        rpc(hub, c, "thread.reparent", json!({"thread":th,"parent":s(p, "parent")})).await?;
     } else if THREAD_ACTS.contains(&act) {
         rpc(hub, c, &format!("thread.{act}"), json!({"thread":th})).await?;
         if act == "delete" { return Ok(json!({})) }
-    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach or rename")) }
+    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, reparent or rename")) }
     thread_now(hub, th).await.map(|t| json!({"thread":t}))
 }
 
