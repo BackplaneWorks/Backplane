@@ -887,9 +887,40 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
                 listOf("system" to Msg.native_settings_system, "light" to Msg.settings_theme_light, "dark" to Msg.settings_theme_dark).forEach { (m, l) -> DBtn(l, AppSettings.appearance == m, modifier = Modifier.testTag("settings.appearance.$m")) { AppSettings.putAppearance(m) } }
             }
             DLine()
+            ViewerBgSettings()
+            DLine()
             DBtn(Msg.android_unpair, false, modifier = Modifier.testTag("settings.unpair")) { DataClient.unpair(); back() }
         }
     }
+}
+
+// the 3D viewers' background (docs/VIEWER-BACKGROUND.md): Auto, Light, Dark or Custom, a swatch or a typed #rrggbb; kept on this device, live
+@Composable
+private fun ViewerBgSettings() {
+    DMono(Msg.android_viewerbg.uppercase(), dfaint)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("auto" to Msg.android_viewerbg_auto, "light" to Msg.android_viewerbg_light, "dark" to Msg.android_viewerbg_dark, "custom" to Msg.android_viewerbg_custom)
+            .forEach { (m, l) -> DBtn(l, AppSettings.viewerBg == m, modifier = Modifier.testTag("settings.viewerbg.$m")) { AppSettings.putViewerBg(m) } }
+    }
+    val custom = ViewerBg.parse(AppSettings.viewerBgCustom)
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        ViewerBg.SWATCHES.forEach { c ->
+            val on = AppSettings.viewerBg == "custom" && custom == c
+            Box(Modifier.size(30.dp).background(Color(0xFF000000.toInt() or c)).border(BorderStroke(if (on) 2.dp else 1.dp, if (on) dcs.primary else dcs.outlineVariant))
+                .clickable { AppSettings.putViewerBgCustom(ViewerBg.hex(c)) }.testTag("settings.viewerbg.swatch.${ViewerBg.hex(c).drop(1)}"))
+        }
+    }
+    var typed by remember { mutableStateOf(AppSettings.viewerBgCustom) }
+    LaunchedEffect(AppSettings.viewerBgCustom) { if (ViewerBg.parse(typed) != custom) typed = AppSettings.viewerBgCustom }
+    val (top, bottom) = viewerBackdrop()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // what the viewers draw now
+        Box(Modifier.size(56.dp, 30.dp).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF000000.toInt() or top), Color(0xFF000000.toInt() or bottom))))
+            .border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("settings.viewerbg.preview"))
+        DField(typed, { v -> typed = v.take(7); if (v.trim().removePrefix("#").length == 6 && ViewerBg.parse(v) != null) AppSettings.putViewerBgCustom(v) },
+            Msg.android_viewerbg_hex, Modifier.width(120.dp).testTag("settings.viewerbg.hex"))
+    }
+    DMono(Msg.android_viewerbg_note, dcs.onSurfaceVariant, 11, lines = 2)
 }
 
 // the hub's updates: the hub says what to show (update.status); this draws it

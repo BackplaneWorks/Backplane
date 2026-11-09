@@ -75,8 +75,15 @@ private val typography = Typography().let { t ->
 // This device's appearance: light, dark, or the system's. Both explicit
 // modes keep their contrast even when the system uses the other mode.
 @Composable
+fun appDark(theme: String = AppSettings.appearance) = when (theme) { "light" -> false; "dark" -> true; else -> isSystemInDarkTheme() }
+
+/** The 3D viewers' background now: the setting, and for auto the app's light or dark (both read as state, so a change redraws). */
+@Composable
+fun viewerBackdrop() = ViewerBg.resolve(AppSettings.viewerBg, AppSettings.viewerBgCustom, appDark())
+
+@Composable
 fun Theme(theme: String, content: @Composable () -> Unit) {
-    val dark = when (theme) { "light" -> false; "dark" -> true; else -> isSystemInDarkTheme() }
+    val dark = appDark(theme)
     val view = LocalView.current
     SideEffect {
         (view.context as? Activity)?.window?.let { window ->

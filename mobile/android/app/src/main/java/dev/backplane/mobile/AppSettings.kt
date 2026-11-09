@@ -26,6 +26,11 @@ object AppSettings {
         private set
     var haptics by mutableStateOf(true)
         private set
+    // the 3D viewers' background (Mech and 3D board): "auto", "light", "dark" or "custom", and the custom "#rrggbb" (ViewerBg)
+    var viewerBg by mutableStateOf("auto")
+        private set
+    var viewerBgCustom by mutableStateOf(ViewerBg.hex(ViewerBg.SWATCHES[0]))
+        private set
 
     fun init(c: Context) {
         if (ctx != null) return
@@ -35,6 +40,8 @@ object AppSettings {
         threadList = prefs.getString("app.threadList", "") ?: ""
         defaultTab = prefs.getString("app.defaultTab", "") ?: ""
         haptics = prefs.getBoolean("app.haptics", true)
+        viewerBg = (prefs.getString("app.viewer_bg", "auto") ?: "auto").takeIf { it in ViewerBg.MODES } ?: "auto"
+        viewerBgCustom = prefs.getString("app.viewer_bg_custom", null)?.let { ViewerBg.parse(it) }?.let { ViewerBg.hex(it) } ?: viewerBgCustom
     }
 
     fun putLang(v: String) { lang = v; prefs.edit().putString("app.lang", v).apply() }
@@ -44,5 +51,12 @@ object AppSettings {
     fun putThreadList(v: String) { threadList = v; prefs.edit().putString("app.threadList", v).apply() }
     fun putDefaultTab(v: String) { defaultTab = v; prefs.edit().putString("app.defaultTab", v).apply() }
     fun putHaptics(v: Boolean) { haptics = v; prefs.edit().putBoolean("app.haptics", v).apply() }
+    fun putViewerBg(v: String) { if (v !in ViewerBg.MODES) return; viewerBg = v; prefs.edit().putString("app.viewer_bg", v).apply() }
+    /** A custom colour ("#rrggbb"): kept, and the background becomes custom; anything else is ignored. */
+    fun putViewerBgCustom(v: String) {
+        val c = ViewerBg.parse(v) ?: return
+        viewerBgCustom = ViewerBg.hex(c); viewerBg = "custom"
+        prefs.edit().putString("app.viewer_bg_custom", viewerBgCustom).putString("app.viewer_bg", "custom").apply()
+    }
 
 }

@@ -138,10 +138,12 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     // debug builds: what is on show, by the hub's keys, to logcat (tag bpview; the switch test reads it: an interop view's semantics do not reach uiautomator)
     val onShow = listOfNotNull(frame?.key, mesh?.takeIf { it.mesh != null }?.key).joinToString(" + ").ifEmpty { "nothing" }
     if (BuildConfig.DEBUG) LaunchedEffect(onShow) { android.util.Log.i("bpview", "$kind: $onShow") }
+    val vbg = viewerBackdrop()   // the 3D background: the setting, or the theme's (redraws when either changes)
     Box(Modifier.fillMaxSize().background(dcs.background)) {
         AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize().testTag("viewer.surface"), update = { s ->
             s.bindSource(thread.id + "\u0000" + kind + "\u0000" + path)
             s.setThree(three)
+            s.backdrop(vbg)
             // what lies under the finger comes as candidates `[{"c": chunk, "p": piece, "a": area, "l": layer}]`; the smallest is what a tap means (a pad over its copper)
             s.onPick = { p ->
                 val c = runCatching { org.json.JSONArray(p) }.getOrNull()
@@ -249,9 +251,11 @@ private fun MechSolid(thread: DThread, path: String) {
     LaunchedEffect(thread.id, path) { error = ""; runCatching { DataClient.watch(thread.id, "3d", path) }.onFailure { error = it.message ?: "" } }
     val mesh = DataClient.plots.mesh?.takeIf { it.key.endsWith("/" + path) }   // the part asked for, not the board's model of the 3D tab
     val bgArgb = dcs.background.toArgb()
+    val vbg = viewerBackdrop()   // the 3D background: the setting, or the theme's (redraws when either changes)
     Box(Modifier.fillMaxSize().background(dcs.background)) {
         AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize().testTag("mech.surface"), update = { s ->
             s.bindSource(thread.id + "\u0000mech\u0000" + path); s.setThree(true)
+            s.backdrop(vbg)
             val c = bgArgb; s.renderer.bg = floatArrayOf(((c shr 16) and 255) / 255f, ((c shr 8) and 255) / 255f, (c and 255) / 255f)
             s.mesh(mesh)
         })
@@ -507,9 +511,11 @@ private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
 private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: MeshFrame?, three: Boolean, bg: Int, none: String, modifier: Modifier, pick: (@Composable (Modifier) -> Unit)? = null,
                       lit: List<String> = emptyList(), tap: (String, Int, Int) -> Unit = { _, _, _ -> }, untap: () -> Unit = {}) {
     val tapNow by rememberUpdatedState(tap); val untapNow by rememberUpdatedState(untap); val frameNow by rememberUpdatedState(frame)
+    val vbg = viewerBackdrop()   // the 3D background: the setting, or the theme's (redraws when either changes)
     Box(modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.background)) {
         AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize().testTag("split.$label"), update = { s ->
             s.bindSource(source); s.setThree(three)
+            s.backdrop(vbg)
             if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
             if (three) s.mesh(mesh)
             s.onPick = { p ->

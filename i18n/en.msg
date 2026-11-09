@@ -2664,6 +2664,13 @@ gpui.f.inactive = Inactive: no confirmed active work
 gpui.f.tool.runs.nover = {name}  runs from {path}.
 
 # ---- android: new entries go here ----
+android.viewerbg = 3D background
+android.viewerbg.auto = Auto
+android.viewerbg.light = Light
+android.viewerbg.dark = Dark
+android.viewerbg.custom = Custom
+android.viewerbg.hex = #rrggbb
+android.viewerbg.note = This device. The Mech and 3D viewers; Auto follows the appearance.
 android.state.working = working
 android.state.inactive = inactive
 android.state.finished = finished
