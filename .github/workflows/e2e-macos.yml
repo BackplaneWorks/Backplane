@@ -147,6 +147,39 @@ jobs:
         if: always()
         with: { name: browser, path: out }
 
+  browser-src:
+    # the same proof with the client built from this checkout (hub and browser helper from the archive_run's darwin archive): Chromium's log and the
+    # helper processes seen while it runs are kept
+    if: inputs.jobs == 'browser-src'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/gpui
+          shared-key: e2e-macos-cef
+      - name: build the client with cef, its framework and helper apps
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          command -v ninja >/dev/null || brew install ninja
+          (cd native/gpui && cargo build --release --features cef)
+          mkdir -p dist; cp native/gpui/target/release/backplane-gpui dist/
+          fw=$(find native/gpui/target/release/build -path '*cef-dll-sys*' -type d -name 'Chromium Embedded Framework.framework' -prune | head -1)
+          scripts/cef-runtime-files.sh "$(dirname "$fw")" dist macos
+          scripts/cef-mac-helpers.sh dist native/gpui/target/release/backplane-cef-helper
+          gh run download ${{ inputs.archive_run }} -n archive-darwin-arm64 -D arc && tar -xzf arc/*.tar.gz -C arc
+          cp arc/backplane-hub arc/backplane-browser dist/; cp -r assets dist/assets; ls -l dist
+      - name: the Browser tab and the agent's browser tools
+        run: |
+          set -o pipefail; mkdir -p out; B="$PWD/dist"
+          (for i in $(seq 1 30); do { date +%T; ps -axo pid,ppid,stat,command | grep -i -E 'backplane|helper' | grep -v grep; } >> out/ps.txt; sleep 4; done) & 
+          BACKPLANE_CEF_LOG="$PWD/out/cef.log" python3 test/cef/agent_proof.py "$B/backplane-gpui" "$B/backplane-hub" "$B/backplane-browser" "$B/assets" "$PWD/out/browser" 2>&1 | tee out/browser.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: browser-src, path: out }
+
   client-src:
     # the same client rows, from a build of this checkout (hub, client and the browser helper from source), for a tree newer than the last release archive
     if: inputs.jobs == 'client-src'

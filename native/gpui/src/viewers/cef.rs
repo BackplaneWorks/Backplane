@@ -184,7 +184,10 @@ fn pump_chan() -> &'static (async_channel::Sender<i64>, async_channel::Receiver<
 /// The delays CEF asked for (ms; 0 or less: now).
 pub fn pump_requests() -> async_channel::Receiver<i64> { pump_chan().1.clone() }
 /// One round of CEF's work on this (the main) thread.
-pub fn pump_work() { do_message_loop_work(); }
+pub fn pump_work() { PUMPED.fetch_add(1, Ordering::Relaxed); do_message_loop_work(); }
+static PUMPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// How many rounds `pump_work` ran (the e2e's report: a stalled pump shows as a page that never loads).
+pub fn pumped() -> u64 { PUMPED.load(Ordering::Relaxed) }
 /// Whether this platform pumps CEF from gpui's main thread.
 pub const EXTERNAL_PUMP: bool = cfg!(target_os = "macos");
 wrap_browser_process_handler! {
@@ -297,6 +300,7 @@ impl Engine {
             (mac::helper(&exe).ok_or_else(|| format!("no {}.app beside {} (scripts/cef-mac-helpers.sh)", mac::HELPER, exe.display()))?, fw.join("Resources"), fw.join("Resources")) };
         #[cfg(not(target_os = "macos"))]
         let (sub, res, loc) = (exe.clone(), dir.clone(), dir.join("locales"));
+        let log = std::env::var("BACKPLANE_CEF_LOG").ok().filter(|l| !l.is_empty());
         let settings = Settings {
             no_sandbox: true as _, multi_threaded_message_loop: (!EXTERNAL_PUMP) as _, external_message_pump: EXTERNAL_PUMP as _, windowless_rendering_enabled: true as _,
             browser_subprocess_path: CefString::from(sub.to_string_lossy().as_ref()),
@@ -306,7 +310,9 @@ impl Engine {
             locales_dir_path: CefString::from(loc.to_string_lossy().as_ref()),
             root_cache_path: CefString::from(profile.to_string_lossy().as_ref()), cache_path: CefString::from(profile.to_string_lossy().as_ref()),
             remote_debugging_port: port as _, persist_session_cookies: true as _,
-            log_severity: LogSeverity::WARNING, ..Default::default()
+            // BACKPLANE_CEF_LOG=<file>: Chromium's own log, with its info lines, for a platform's first runs (else warnings on stderr)
+            log_severity: if log.is_some() { LogSeverity::INFO } else { LogSeverity::WARNING },
+            log_file: CefString::from(log.as_deref().unwrap_or_default()), ..Default::default()
         };
         let args = cef::args::Args::new();
         let mut a = app();
