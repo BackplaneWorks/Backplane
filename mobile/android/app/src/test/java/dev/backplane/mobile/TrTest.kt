@@ -77,7 +77,8 @@ class TrTest {
         for (i in Msg.templates) for (v in Icu.variants(i, Icu.parse(Msg.en[i])).take(1)) {
             val names = Msg.argNames[i]!!; val a = names.associateWith<String, Any> { if (it in setOf("n", "count", "total", "num") || Msg.en[i].contains("{$it, plural") || Msg.en[i].contains("{$it, number")) 7L else "Xq$it" }
             val en = Tr.render(Icu.parse(Msg.en[i]), a, "en")
-            if (en.contains("Xq") || en.contains("7")) { assertTrue("$en reads back", Tr.t(en) != en || Tr.render(Icu.parse(Msg.ja[i]), a, "ja") == en); n++ }
+            // Tr.t leaves text over 600 characters as it came (a pasted log, not chrome)
+            if ((en.contains("Xq") || en.contains("7")) && en.length <= 600) { assertTrue("$en reads back", Tr.t(en) != en || Tr.render(Icu.parse(Msg.ja[i]), a, "ja") == en); n++ }
         }
         assertTrue(n > 100)
     }
@@ -103,6 +104,7 @@ class TrTest {
             "Restart hub", "Buy now", "Design change", "Layers")
         for (e in said) assertTrue("not translated: $e", Tr.t(e) != e)
         val fold = DataFold.label(listOf(DEntry("a", "tool", "x", 0, tool = DTool("Read", "x", "")), DEntry("b", "tool", "y", 0, tool = DTool("Bash", "y", "")), DEntry("c", "step", "", 0)), false)
-        assertTrue("fold: ${Tr.t(fold)}", Tr.t(fold).startsWith(Tr.t("2 tool calls")) && Tr.t("2 tool calls") != "2 tool calls")
+        // the whole line is one catalog template (the desktop's fold words), else its parts: either way no English is left but the tool names
+        assertTrue("fold: ${Tr.t(fold)}", Tr.t(fold) != fold && !Tr.t(fold).contains("tool call") && !Tr.t(fold).contains("design change") && Tr.t(fold).contains("Read, Bash"))
     }
 }
