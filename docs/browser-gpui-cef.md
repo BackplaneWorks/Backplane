@@ -59,6 +59,9 @@ app's tokens, light and dark.
 `test/cef/agent_proof.py CLIENT HUB HELPER ASSETS OUT` runs on any desktop (Linux X11 or Wayland, macOS, Windows; e2e-macos.yml job `browser`, test/windows/rig/sess.sh on
 Windows): a hub with the stand-in agent, the Browser tab, and the agent's `preview_navigate`, `preview_click`, `preview_evaluate` and `preview_snapshot` (with its screenshot)
 against a local page, checked from the client's own report of its embedded page; it saves the window and the agent's screenshot.
+`test/browser/browser_e2e.py` (workflow `browser-e2e.yml`, windows-latest, macos-latest and ubuntu-latest) drives both pages through the same `{"browser":{"op":…}}` steps:
+http, `file://` and https pages, typing, scrolling, a link, back and forward, tabs, the view closed and reopened, a clean exit and no process left; with CEF, without it,
+and with a cef client whose runtime was taken away (it must start and fall back). Status, risks and what is unverified: `docs/browser-cef-port.md`.
 `test/cef/cef_e2e.sh CLIENT HUB` (embedded page: input, agent, lease, file dialog, DevTools, teach, performance), `bar_e2e.sh` (the fallback's bar and tabs; `THEME=light|dark`,
 `NOHELPER=1` for the missing-helper message), `open_e2e.sh HUB`, `shots.sh` (screenshots, including a real https site). All need a private Xvfb (the scripts start one) and the
 shared `flock /tmp/bp-heavy.lock` rules.
