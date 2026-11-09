@@ -12,6 +12,8 @@ pub struct Item { pub label: String, pub action: String, pub value: String, pub 
 pub struct Menu { pub at: Point<Pixels>, pub items: Vec<Item>, /// the item whose confirming click is awaited
     pub armed: Option<usize> }
 
+/// The ▾ menu's "Search in thread": the window's own (the palette searching what was said in this thread), nothing sent to the hub.
+pub const LOCAL_SEARCH: &str = "local:search-thread";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm } }
@@ -48,7 +50,7 @@ pub fn title_items(data: &Value) -> Vec<Item> {
     if rid.is_empty() { return vec![] }
     let row = find_row(&data["projects"], &rid);
     let project = row.map(|_| crate::keys::project_of(data, &rid)).unwrap_or_default();
-    let mut v = vec![item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
+    let mut v = vec![item("Search in thread", LOCAL_SEARCH, &rid, false), item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
     if !project.is_empty() && row.map_or(false, |r| r["canChild"].as_bool().unwrap_or(true)) { v.push(item("New subthread", "thread-child", &format!("{rid}|{project}"), false)); }
     if row.map_or(false, |r| r["depth"].as_u64().unwrap_or(0) > 0) { v.push(item("Move to top level", "row-detach", &rid, false)); }
     v.extend(super::tools::context_items(thread));
@@ -70,6 +72,7 @@ impl Backplane {
     }
     fn ctx_click(&mut self, i: usize, cx: &mut Context<Self>) {
         let Some(m) = self.screens.ctx.as_mut() else { return };
+        if m.items.get(i).map_or(false, |it| it.action == LOCAL_SEARCH) { self.screens.ctx = None; self.palette_open_in_thread(cx); return }
         let step = press(m, i, &self.data);
         if let Some(c) = step.send { let _ = self.tx.try_send(c); }
         if step.close { self.screens.ctx = None; }
@@ -127,8 +130,8 @@ mod tests {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Snooze","action":"snooze","value":"","options":[{"label":"1 hour","value":"1h"}]},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},
             "projects":[{"id":"http://h:1|p1","threads":[{"id":"http://h:1|t7","title":"x","canChild":true,"depth":0}]}]}"#);
         let it = title_items(&d);
-        assert_eq!(it.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Rename", "Regenerate title", "New subthread", "Diff", "Snooze 1 hour", "Delete"]);
-        assert_eq!((it[0].action.as_str(), it[0].value.as_str()), ("row-rename", "t7")); assert_eq!(it[2].value, "t7|p1");
+        assert_eq!(it.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Search in thread", "Rename", "Regenerate title", "New subthread", "Diff", "Snooze 1 hour", "Delete"]);
+        assert_eq!(it[0].action, LOCAL_SEARCH); assert_eq!((it[1].action.as_str(), it[1].value.as_str()), ("row-rename", "t7")); assert_eq!(it[3].value, "t7|p1");
         assert!(title_items(&j(r#"{"thread":null}"#)).is_empty(), "no thread, no menu");
         let sub = j(r#"{"thread":{"id":"h|c1"},"projects":[{"id":"h|p1","threads":[{"id":"h|t1","title":"a","children":[{"id":"h|c1","title":"b","depth":1,"canChild":false}]}]}]}"#);
         let names: Vec<String> = title_items(&sub).into_iter().map(|i| i.label).collect(); assert!(names.contains(&"Move to top level".to_string()) && !names.contains(&"New subthread".to_string()), "{names:?}");

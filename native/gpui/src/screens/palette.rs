@@ -8,9 +8,9 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Do { Thread(String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, Hub(String) }
+pub enum Do { Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, Hub(String) }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do }
+pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
 /// The key that does what an item does, as the person reads it ("" for none).
 pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
     let id = match &it.what {
@@ -22,7 +22,40 @@ pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
 }
 
 #[derive(Default)]
-pub struct Palette { pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize }
+pub struct Palette { pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
+    /// "Search in thread": the thread (its raw id) the box searches, "" for the whole palette
+    pub scope: String,
+    /// what the hub found said (`thread.search`) for `hits_q`; the ask in flight is `asked` with its tag
+    pub hits: Vec<Item>, pub hits_q: String, asked: (u64, String), seq: u64 }
+
+/// Ask tags of the palette's searches (above the project page's).
+pub const TAG: u64 = 1 << 49;
+/// The search a text asks the hub for: the words of two characters or more (the hub's own rule), else none.
+pub fn search_of(q: &str) -> Option<String> { let t = q.trim(); (t.chars().count() >= 2).then(|| t.to_string()) }
+/// Where the text's first word is in a found line (bytes, case ignored), to mark it; none when lower-casing would move the bytes.
+pub fn mark(label: &str, q: &str) -> Option<std::ops::Range<usize>> {
+    let w = q.split_whitespace().next()?.to_lowercase(); let low = label.to_lowercase();
+    if low.len() != label.len() || w.is_empty() { return None }
+    low.find(&w).map(|a| a..a + w.len()).filter(|r| label.is_char_boundary(r.start) && label.is_char_boundary(r.end))
+}
+/// The hub's answer to `thread.search` as items: each message found, its line as the label, its thread's title and project as the place.
+pub fn hit_items(result: &Value, hub_of: &dyn Fn(&str) -> String) -> Vec<Item> {
+    result["hits"].as_array().into_iter().flatten().map(|h| {
+        let (th, title, project) = (string(h, "thread"), string(h, "title"), string(h, "project"));
+        let place = if project.is_empty() { title } else { format!("{title} · {project}") };
+        Item { label: string(h, "text"), place, kind: if h["role"] == "user" { "you said" } else { "agent said" }, what: Do::Message(hub_of(&th), string(h, "msg")), row: Value::Null }
+    }).collect()
+}
+/// The palette's answer (false: not the palette's tag).
+pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
+    if tag < TAG { return false }
+    let p = &mut this.screens.palette;
+    if tag != p.asked.0 || reply["ok"] != true { return true }
+    let data = this.data.clone();
+    let hub_of = move |raw: &str| super::tools::qualify(&data, raw);
+    p.hits = hit_items(&reply["result"], &hub_of); p.hits_q = p.asked.1.clone();
+    cx.notify(); true
+}
 
 /// 0: no match; a prefix 3, a word that starts with it 2, the letters in order 1 (an empty text matches everything a little).
 pub fn rank(label: &str, q: &str) -> u8 {
@@ -41,64 +74,103 @@ pub fn items(data: &Value) -> Vec<Item> {
         for t in thread["tools"].as_array().into_iter().flatten().chain(thread["menu"].as_array().into_iter().flatten()) {
             let (label, action, value) = (string(t, "label"), string(t, "action"), string(t, "value"));
             if label.is_empty() || action.is_empty() || action == "delete" || t["options"].as_array().map_or(false, |o| !o.is_empty()) { continue }
-            v.push(Item { label, place: String::new(), kind: "action", what: Do::Action(action, value) });
+            v.push(Item { label, place: String::new(), kind: "action", what: Do::Action(action, value), row: Value::Null });
         }
         for (l, k) in [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Split", "split"), ("Mech", "mech"), ("Files", "files"), ("Review", "review"), ("Browser", "browser")] {
-            v.push(Item { label: format!("Open {l}"), place: "viewer".into(), kind: "action", what: Do::Action("view-kind".into(), k.into()) });
+            v.push(Item { label: format!("Open {l}"), place: "viewer".into(), kind: "action", what: Do::Action("view-kind".into(), k.into()), row: Value::Null });
         }
     }
     if thread.is_object() {
-        v.push(Item { label: "Agent, model and effort".into(), place: String::new(), kind: "action", what: Do::Models });
-        v.push(Item { label: "Previous thread".into(), place: String::new(), kind: "action", what: Do::Prev });
-        v.push(Item { label: "Next thread".into(), place: String::new(), kind: "action", what: Do::Next });
+        v.push(Item { label: "Agent, model and effort".into(), place: String::new(), kind: "action", what: Do::Models, row: Value::Null });
+        v.push(Item { label: "Previous thread".into(), place: String::new(), kind: "action", what: Do::Prev, row: Value::Null });
+        v.push(Item { label: "Next thread".into(), place: String::new(), kind: "action", what: Do::Next, row: Value::Null });
     }
-    if data["bots"].as_array().map_or(false, |b| b.iter().any(|b| b["uber"] == true)) { v.push(Item { label: "Uberbot chat".into(), place: String::new(), kind: "action", what: Do::Uber }); }
-    v.push(Item { label: "Keyboard shortcuts".into(), place: String::new(), kind: "action", what: Do::Shortcuts });
-    v.push(Item { label: "Settings".into(), place: String::new(), kind: "action", what: Do::Settings });
-    v.push(Item { label: "Fold or unfold the sidebar".into(), place: String::new(), kind: "action", what: Do::Sidebar });
+    if data["bots"].as_array().map_or(false, |b| b.iter().any(|b| b["uber"] == true)) { v.push(Item { label: "Uberbot chat".into(), place: String::new(), kind: "action", what: Do::Uber, row: Value::Null }); }
+    v.push(Item { label: "Keyboard shortcuts".into(), place: String::new(), kind: "action", what: Do::Shortcuts, row: Value::Null });
+    v.push(Item { label: "Settings".into(), place: String::new(), kind: "action", what: Do::Settings, row: Value::Null });
+    v.push(Item { label: "Fold or unfold the sidebar".into(), place: String::new(), kind: "action", what: Do::Sidebar, row: Value::Null });
     // always here, whatever the hub sends or fails to send: these do not go through it (hubbar.rs)
-    for a in ["restart", "safe", "rollback"] { v.push(Item { label: super::hubbar::label_of(a).into(), place: String::new(), kind: "action", what: Do::Hub(a.into()) }); }
+    for a in ["restart", "safe", "rollback"] { v.push(Item { label: super::hubbar::label_of(a).into(), place: String::new(), kind: "action", what: Do::Hub(a.into()), row: Value::Null }); }
     for p in data["projects"].as_array().into_iter().flatten() {
         let (pid, ptitle) = (string(p, "id"), string(p, "title"));
         let raw = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
-        v.push(Item { label: format!("New thread in {ptitle}"), place: String::new(), kind: "action", what: Do::Action("new-thread".into(), raw) });
+        v.push(Item { label: format!("New thread in {ptitle}"), place: String::new(), kind: "action", what: Do::Action("new-thread".into(), raw), row: Value::Null });
         for t in p["threads"].as_array().into_iter().flatten().chain(p["settled"].as_array().into_iter().flatten()) {
-            v.push(Item { label: string(t, "title"), place: on_machine(&ptitle, t), kind: "thread", what: Do::Thread(string(t, "id")) });
+            v.push(Item { label: string(t, "title"), place: on_machine(&ptitle, t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
         }
     }
     for t in data["conversationHistory"]["jump"].as_array().into_iter().flatten().chain(data["legacy"].as_array().into_iter().flatten()) {
-        v.push(Item { label: string(t, "title"), place: "Conversation history".into(), kind: "thread", what: Do::Thread(string(t, "id")) });
+        v.push(Item { label: string(t, "title"), place: "Conversation history".into(), kind: "thread", what: Do::Thread(string(t, "id")), row: Value::Null });
     }
     for t in data["active"].as_array().into_iter().flatten().chain(data["activeSettled"]["rows"].as_array().into_iter().flatten()) {
-        v.push(Item { label: string(t, "title"), place: on_machine(&string(t, "project"), t), kind: "thread", what: Do::Thread(string(t, "id")) });
+        v.push(Item { label: string(t, "title"), place: on_machine(&string(t, "project"), t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
     }
     v
 }
 
-/// The items the text keeps, best first (threads before actions among equals), at most `n`.
+/// A thread row's dot and want, as the palette keeps it.
+fn row_of(t: &Value) -> Value { serde_json::json!({"status": t["status"], "state": t["state"], "want": t["want"]}) }
+/// How much a thread waits on the person (0.14's Urg.rank, its top: an approval, then a question, then a failed turn); 0 for anything else.
+pub fn urgency(it: &Item) -> u8 { match it.row["want"].as_str().unwrap_or("") { "approval" => 3, "question" => 2, "failed" => 1, _ => 0 } }
+
+/// The items the text keeps, best first (threads before actions among equals), at most `n`. Opened with nothing typed, the threads that
+/// wait on the person come first (r04: Ctrl+K, Enter goes to the one waiting).
 pub fn found(all: Vec<Item>, q: &str, n: usize) -> Vec<Item> {
+    let empty = q.trim().is_empty();
     let mut r: Vec<(u8, usize, Item)> = all.into_iter().enumerate().filter_map(|(i, it)| { let s = rank(&it.label, q).max(if it.place.is_empty() { 0 } else { rank(&it.place, q).min(1) }); (s > 0).then_some((s, i, it)) }).collect();
-    r.sort_by(|a, b| b.0.cmp(&a.0).then((a.2.kind != "thread").cmp(&(b.2.kind != "thread"))).then(a.1.cmp(&b.1)));
+    r.sort_by(|a, b| (if empty { urgency(&b.2).cmp(&urgency(&a.2)) } else { std::cmp::Ordering::Equal }).then(b.0.cmp(&a.0)).then((a.2.kind != "thread").cmp(&(b.2.kind != "thread"))).then(a.1.cmp(&b.1)));
     let mut seen = std::collections::HashSet::new();
     r.into_iter().map(|x| x.2).filter(|it| seen.insert((it.label.clone(), it.place.clone(), it.kind))).take(n).collect()
 }
 
+/// What the box lists for this text: in a thread's search only what was said there; else the jumps and commands, then what was said.
+pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
+    let hits: Vec<Item> = if search_of(&p.q).as_deref() == Some(p.hits_q.as_str()) { p.hits.clone() } else { vec![] };
+    if !p.scope.is_empty() { return hits }
+    let mut v = found(items(data), &p.q, 10);
+    let room = 14usize.saturating_sub(v.len());
+    v.extend(hits.into_iter().take(room)); v
+}
+
 impl Backplane {
+    /// The text changed: after a pause, the hub is asked what was said with it (the last answer that matches the text is shown).
+    fn palette_search(&mut self, cx: &mut Context<Self>) {
+        let Some(q) = search_of(&self.screens.palette.q) else { return };
+        if q == self.screens.palette.hits_q || q == self.screens.palette.asked.1 { return }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(220)).await;
+            let _ = this.update(cx, |this, _| {
+                let p = &mut this.screens.palette;
+                if search_of(&p.q).as_deref() != Some(q.as_str()) || !p.open { return }
+                p.seq += 1; let tag = TAG + p.seq; p.asked = (tag, q.clone());
+                let mut params = serde_json::json!({"q": q, "limit": if p.scope.is_empty() { 20 } else { 60 }});
+                if !p.scope.is_empty() { params["thread"] = serde_json::json!(p.scope); }
+                let _ = this.tx.try_send(Command::Ask("thread.search".into(), params, tag));
+            });
+        }).detach();
+    }
+    /// "Search in thread" (the thread's ▾ menu): the box searches only what was said in the thread on show.
+    pub(crate) fn palette_open_in_thread(&mut self, cx: &mut Context<Self>) {
+        let raw = self.selected.rsplit('|').next().unwrap_or("").to_string();
+        self.palette_open(cx);
+        self.screens.palette.scope = raw;
+        if let Some(i) = self.screens.palette.input.clone() { i.update(cx, |i, _| i.set_placeholder("Search this thread")); }
+    }
     pub(crate) fn palette_open(&mut self, cx: &mut Context<Self>) {
         if self.screens.palette.input.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
             input.update(cx, |i, _| { i.set_placeholder("Jump to a thread or run a command"); });
-            cx.observe(&input, |this, input, cx| { let q = input.read(cx).content.to_string(); if q != this.screens.palette.q { this.screens.palette.q = q; this.screens.palette.ix = 0; } cx.notify(); }).detach();
+            cx.observe(&input, |this, input, cx| { let q = input.read(cx).content.to_string(); if q != this.screens.palette.q { this.screens.palette.q = q; this.screens.palette.ix = 0; this.palette_search(cx); } cx.notify(); }).detach();
             cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| match ev {
                 ComposerEvent::Submit | ComposerEvent::PopupPick => this.palette_run(None, cx),
-                ComposerEvent::PopupMove(d) => { let n = found(items(&this.data), &this.screens.palette.q, 10).len().max(1); this.screens.palette.ix = (this.screens.palette.ix as i32 + d).rem_euclid(n as i32) as usize; cx.notify(); }
+                ComposerEvent::PopupMove(d) => { let n = listed(&this.data, &this.screens.palette).len().max(1); this.screens.palette.ix = (this.screens.palette.ix as i32 + d).rem_euclid(n as i32) as usize; cx.notify(); }
                 _ => {}
             }).detach();
             self.screens.palette.input = Some(input);
         }
         let input = self.screens.palette.input.clone().unwrap();
-        input.update(cx, |i, cx| { i.set(String::new(), cx); i.popup_open = true; });
-        self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.open = true;
+        input.update(cx, |i, cx| { i.set(String::new(), cx); i.popup_open = true; i.set_placeholder("Jump to a thread, run a command or find what was said"); });
+        self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.open = true; self.screens.palette.scope.clear();
         self.screens.palette.focus = true; cx.notify();
     }
     pub(crate) fn palette_close(&mut self, cx: &mut Context<Self>) -> bool {
@@ -107,11 +179,13 @@ impl Backplane {
     }
     /// Do the highlighted item (or the one at `i`) and shut the box.
     fn palette_run(&mut self, i: Option<usize>, cx: &mut Context<Self>) {
-        let list = found(items(&self.data), &self.screens.palette.q, 10);
+        let list = listed(&self.data, &self.screens.palette);
         let Some(it) = list.get(i.unwrap_or(self.screens.palette.ix)).cloned() else { return };
         self.screens.palette.open = false; self.want_focus = true;
         match it.what {
             Do::Thread(id) => { let _ = self.tx.try_send(Command::Action("select".into(), id)); }
+            // a message found: its thread, at the message when the thread on show holds it
+            Do::Message(id, msg) => { if id.rsplit('|').next() == self.selected.rsplit('|').next() { self.timeline_goto(&msg); } else { let _ = self.tx.try_send(Command::Action("select".into(), id)); } }
             Do::Action(a, v) => { if super::tools::makes_thread(&a) { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a, v)); }
             Do::Settings => self.open_settings(cx),
             Do::Sidebar => self.sidebar_toggle(cx),
@@ -128,16 +202,23 @@ impl Backplane {
 pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette, l: &crate::local::Local, sel: &str) -> Option<AnyElement> {
     if !p.open { return None }
     let c = |n: &str| theme::color(light, n);
-    let list = found(items(data), &p.q, 10);
+    let list = listed(data, p);
     let ix = p.ix.min(list.len().saturating_sub(1));
     let current = crate::keys::project_of(data, sel);
     let mut col = div().flex().flex_col().py_1();
-    if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child("Nothing matches")); }
+    if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child(if !p.scope.is_empty() && search_of(&p.q).is_none() { "Type a word said in this thread" } else { "Nothing matches" })); }
     for (i, it) in list.iter().enumerate() {
+        let want = it.row["want"].as_str().unwrap_or("").to_string();
         col = col.child(div().id(SharedString::from(format!("pal-{i}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().when(i == ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(it.label.clone()))
+            .children(it.row.is_object().then(|| super::siderow::dot(light, &it.row)))
+            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().when(matches!(it.what, Do::Message(..)), |d| d.text_color(c("dim")))
+                .child(match (&it.what, mark(&it.label, &p.q)) { // a message found: the word it was found by stands out (0.14 marked it)
+                    (Do::Message(..), Some(r)) => StyledText::new(it.label.clone()).with_highlights([(r, HighlightStyle { color: Some(c("text").into()), font_weight: Some(FontWeight::BOLD), ..Default::default() })]).into_any_element(),
+                    _ => it.label.clone().into_any_element(),
+                }))
+            .when(!want.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(want.clone())))
             .child(div().text_size(px(11.)).text_color(c("dim")).child(shortcut(it, &current, l)))
-            .child(div().text_size(px(11.)).text_color(c("faint")).child(if it.place.is_empty() { it.kind.to_string() } else { it.place.clone() }))
+            .child(div().flex_shrink_0().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c("faint")).child(if it.place.is_empty() { it.kind.to_string() } else { it.place.clone() }))
             .on_click(cx.listener(move |this, _, _, cx| this.palette_run(Some(i), cx))));
     }
     let input = p.input.clone().map(|s| div().px_3().py_2().border_b_1().border_color(c("line")).child(s));
@@ -168,6 +249,26 @@ mod tests {
         let r = found(all.clone(), "pow", 10); assert_eq!(r[0].label, "Power budget");
         assert!(found(all.clone(), "zzzz", 10).is_empty());
         let r = found(all, "new thr", 10); assert_eq!(r[0].what, Do::Action("new-thread".into(), "p1".into()), "the project's raw id");
+    }
+    #[test] fn opened_empty_the_threads_waiting_on_the_person_come_first() {
+        let d = json!({"projects": [{"id": "h|p1", "title": "Amp", "threads": [{"id": "h|t1", "title": "Quiet one", "status": "inactive", "want": ""},
+            {"id": "h|t2", "title": "Firmware pin map", "status": "failed", "want": "failed"}, {"id": "h|t3", "title": "Battery life", "status": "blocked", "want": "approval"},
+            {"id": "h|t4", "title": "Grounding plan", "status": "blocked", "want": "question"}]}]});
+        let r = found(items(&d), "", 10);
+        assert_eq!(r[..3].iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Battery life", "Grounding plan", "Firmware pin map"], "approval, question, failed (Urg.rank)");
+        assert_eq!(r[0].row["want"], "approval");
+        assert_eq!(found(items(&d), "quiet", 10)[0].label, "Quiet one", "a typed query ranks as before");
+    }
+    #[test] fn what_was_said_is_listed_after_the_jumps_and_alone_in_a_threads_search() {
+        let res = json!({"hits": [{"thread": "t2", "title": "Firmware pin map", "project": "Sensor", "msg": "m1", "role": "user", "text": "where does the pinecone go"}]});
+        let hits = hit_items(&res, &|raw| format!("h|{raw}"));
+        assert_eq!(hits[0].what, Do::Message("h|t2".into(), "m1".into())); assert_eq!(hits[0].place, "Firmware pin map · Sensor"); assert_eq!(hits[0].kind, "you said");
+        let mut p = Palette { q: "pinecone".into(), hits: hits.clone(), hits_q: "pinecone".into(), ..Default::default() };
+        let l = listed(&data(), &p); assert_eq!(l.last().unwrap().what, Do::Message("h|t2".into(), "m1".into()));
+        p.q = "pine".into(); assert!(listed(&data(), &p).iter().all(|i| !matches!(i.what, Do::Message(..))), "an answer for another text is not shown");
+        p.q = "pinecone".into(); p.scope = "t2".into(); assert_eq!(listed(&data(), &p).len(), 1, "a thread's search lists only what was said there");
+        assert!(search_of("p").is_none() && search_of(" pi ").as_deref() == Some("pi"));
+        assert_eq!(mark("…the Pinecone goes", "pinecone sits"), Some(7..15), "bytes: … is three"); assert_eq!(mark("nothing", "pine"), None);
     }
     #[test] fn the_list_is_bounded_and_each_thing_is_listed_once() {
         let mut d = data(); d["active"] = json!([{"id": "h|t1", "title": "Board layout review", "project": "Demo"}]);

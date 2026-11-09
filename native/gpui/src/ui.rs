@@ -179,7 +179,9 @@ impl Backplane {
                         // held Ctrl: this row's Ctrl+digit; held Alt, in the Active view: its project's Alt+digit; over the title's end, so nothing moves (screens/hints.rs)
                         .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).or_else(|| (!sub.is_empty()).then(|| crate::screens::hints::digit_of(&self.screens.hold_projects, pid)).flatten()).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element() })
                     .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id)) // (another machine's thread: its name, dim; none for this machine's)
-                    .child(div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") })).into_any_element()
+                    .child({ let want = string(t, "want"); // a red row says what it wants where its age goes (0.14 Side.want, r01)
+                        if want.is_empty() { div().text_size(px(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { string(t, "ago") }) }
+                        else { div().text_size(px(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(want) } }).into_any_element()
     }
 }
 
