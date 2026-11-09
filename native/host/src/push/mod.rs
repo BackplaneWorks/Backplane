@@ -11,6 +11,9 @@
 //! what the person let through. What is waiting is the book (`push.book`): the badge counts it with the open asks, and an item leaves it when its ask closes or, with no ask,
 //! when the person writes in its thread or any device opens it (`push.seen`); every device then gets a silent clear. Android has no push service here: it hears the same `PushSent`
 //! over its socket (data/1 `notify`), so it needs the app alive.
+//!
+//! One more way, 0.14's default (`away`): on a hub with no uberbot to decide, a thread that finished, failed or asks while the person is at no desk (no desk window focused
+//! and in use, or none connected: settings/alerts.rs says so) reaches the phones. Each is one order, through the same respect, book and collapsing as any other.
 pub mod apns;
 
 use crate::{bots::{rpc::Bots, world::{Device, Routine, World}}, hub::{now_ms, Hub}};
@@ -43,6 +46,8 @@ impl Source {
     pub fn reminder(w: &World, r: &Routine) -> Option<Source> { (r.kind == "remind" && (r.by.is_empty() || w.triage_owner(&r.by))).then(|| Source { how: "reminder", bot: r.by.clone() }) }
     /// The hub's own word that bringing a 0.14 home across is over (import014): one notice, to the phones that were away. Nothing else may use it.
     pub(crate) fn import_done() -> Source { Source { how: "import", bot: String::new() } }
+    /// The hub's own word that a thread finished, failed or asks while no desk is in use, on a hub with no uberbot (`away`). Nothing else may use it.
+    fn away() -> Source { Source { how: "away", bot: String::new() } }
     /// The one event a push starts from.
     pub fn order(&self, id: &str, reason: &str, thread: &str, ask: &str, text: &str, at: u64) -> Value {
         json!({"$":"PushOrdered","id":id,"how":self.how,"bot":self.bot,"reason":reason,"thread":thread,"ask":ask,"text":short(text, 500),"at":at})
@@ -51,7 +56,17 @@ impl Source {
 /// The worker's own check of an order: a known way, and the uberbot's name on a notify.
 pub fn admit(e: &Value, w: &World) -> bool {
     let (how, bot) = (e["how"].as_str().unwrap_or(""), e["bot"].as_str().unwrap_or(""));
-    match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), "import" => bot.is_empty() && e["reason"] == "import", _ => false }
+    match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), "import" => bot.is_empty() && e["reason"] == "import",
+        // no uberbot (with one, its mail decides), not a bot's own thread, and only a turn's end or an ask
+        "away" => { let th = e["thread"].as_str().unwrap_or(""); bot.is_empty() && w.uber_bot().is_empty() && matches!(e["reason"].as_str(), Some("done" | "needs_you")) && !th.is_empty() && !w.bots.values().any(|b| b.thread == th) }
+        _ => false }
+}
+/// A thread finished (`done`), failed (`fail`) or asks (`ask`, the open ask's id in `ask` when known) while the person is at no desk: the phones hear of it, unless the hub
+/// has an uberbot, which decides instead (settings/alerts.rs calls this; `body` is the line a desk would show). One order a record; the burst rule collapses a run.
+pub async fn away(hub: &Arc<Hub>, thread: &str, kind: &str, body: &str, ask: &str, at: u64) {
+    let reason = match kind { "ask" => "needs_you", "done" | "fail" => "done", _ => return };
+    if !hub.setting("uber.bot").await.unwrap_or_default().is_empty() { return }
+    let _ = hub.commit(&Source::away().order(&format!("away-{kind}-{thread}-{at}"), reason, thread, ask, body, at)).await;
 }
 /// What a client may not write (`setting.set`).
 pub fn reserved(key: &str) -> bool { key == BOOK || key.starts_with(SIGNIN) }

@@ -2,7 +2,8 @@
 //! the webhook (settings::webhook) is posted, and the desk used last gets `{"t":"notify"}` as a desktop notification, unless a focused desk in use
 //! is showing the thread and the kind is one a watching desk holds (ask, done, fail, merged: never a note or a reminder).
 //! A desk (the GPUI window, the web page) says where it is with `desk.look {thread, focused}` on connect, on a change and every `BEAT_S` seconds
-//! while in use. This record never reaches a phone: a phone hears only what the uberbot orders (push/mod.rs). Not ported here: the Live Activity, and the owner's other machines
+//! while in use. On a hub with no uberbot, a done, fail or ask record made while the person is at no desk (`away`) also reaches the phones (push/mod.rs `away`, 0.14's
+//! default); with an uberbot, a phone hears only what it orders (push/mod.rs). Not ported here: the Live Activity, and the owner's other machines
 //! (`Far.note.*`, the net lane). The body of a done/fail alert with no text of its own is "Finished"/"Failed".
 use crate::{api::{Caller, Fut, Observer, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
@@ -21,6 +22,8 @@ impl Look {
 }
 /// Desk.seen over every desk.
 pub fn seen(desks: &[(u64, Look)], thread: &str, now: u64) -> bool { desks.iter().any(|(_, l)| l.sees(thread, now)) }
+/// Away: no desk is in use and focused (heard from inside the window), or none is connected: the person is not at a desk.
+pub fn away(desks: &[(u64, Look)], now: u64) -> bool { !desks.iter().any(|(_, l)| l.focused && now < l.at + WINDOW_S) }
 /// Desk.lead: the desk used last.
 pub fn lead(desks: &[(u64, Look)]) -> Option<u64> { desks.iter().fold(None::<(u64, u64)>, |best, (c, l)| match best { Some((_, at)) if l.at <= at => best, _ => Some((*c, l.at)) }).map(|(c, _)| c) }
 /// Alert.holds: kinds a watching desk holds.
@@ -56,6 +59,8 @@ impl Needs {
         if self.open.values().any(|t| *t == thread) { return None }
         self.told.remove(&thread).map(|(c, k)| (thread, c, k))
     }
+    /// An open ask of the thread, if one is known (the phone's alert is cleared when it closes).
+    pub fn ask_of(&self, thread: &str) -> String { self.open.iter().filter(|(_, t)| *t == thread).map(|(id, _)| id.clone()).max().unwrap_or_default() }
 }
 impl Desks {
     pub fn new() -> Arc<Desks> { Arc::new(Desks::default()) }
@@ -104,6 +109,11 @@ impl Observer for Alerts {
                 let looks = desks.live(&hub);
                 let watched = holds(&kind) && seen(&looks, &thread, now);
                 if !watched { if let Some(c) = lead(&looks) { hub.push(c, frame(&thread, &title, &text_body, &kind, &key)); if kind == "ask" { desks.needs.lock().unwrap().told(&thread, c, &key); } } }
+                // at no desk: the phones hear of a finished, failed or asking thread (push/mod.rs `away`: only on a hub with no uberbot)
+                if matches!(kind.as_str(), "done" | "fail" | "ask") && away(&looks, now) {
+                    let ask = if kind == "ask" { desks.needs.lock().unwrap().ask_of(&thread) } else { String::new() };
+                    crate::push::away(&hub, &thread, &kind, &text_body, &ask, now).await;
+                }
                 let state = match kind.as_str() { "fail" => "failed", "done" => "completed", _ => "" };
                 let _ = crate::settings::webhook::deliver(&hub, &thread, &kind, state, "", "", &text_body, &title).await;
             });
@@ -133,6 +143,12 @@ mod tests {
     #[test] fn the_desk_used_last_leads() {
         assert_eq!(lead(&[(1, l("a", true, 10)), (2, l("b", false, 30)), (3, l("c", true, 20))]), Some(2));
         assert_eq!(lead(&[]), None);
+    }
+    #[test] fn the_person_is_away_when_no_desk_is_focused_in_use() {
+        assert!(away(&[], 100), "no desk connected");
+        assert!(away(&[(1, l("t1", false, 100))], 110), "a window open but not focused");
+        assert!(away(&[(1, l("t1", true, 100))], 100 + WINDOW_S), "focused, but not used for the window");
+        assert!(!away(&[(1, l("t9", true, 100)), (2, l("t1", false, 100))], 110), "a focused desk in use, on any thread");
     }
     #[test] fn only_ask_done_fail_merged_are_held() { for k in ["ask", "done", "fail", "merged"] { assert!(holds(k)) } for k in ["note", "reminder", ""] { assert!(!holds(k)) } }
     #[test] fn the_record_and_its_body() {

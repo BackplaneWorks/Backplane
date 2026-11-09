@@ -302,3 +302,31 @@ fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.int
     assert_eq!(s.fake.alerts().len(), 1, "no second alert");
     assert!(push::reserved("account.signin.alert.claude"), "no client may write it");
 }
+
+// 0.14's default on a hub with no uberbot (the person's): a thread that finishes, fails or asks while they are at no desk reaches the phones; at a focused desk in use it
+// does not (the desk shows it), and the uberbot's hubs keep their gate (every_other_path_is_refused above)
+#[tokio::test] async fn with_no_uberbot_a_thread_done_or_asking_away_from_the_desk_reaches_the_phone() {
+    let (hub, bots, _rec) = start("push-away", "").await;
+    set(&hub, push::QUIET, "off").await; set(&hub, push::BURST, "0").await; device(&hub, "tok1").await;
+    let fake = Arc::new(Fake::default()); let _p = push::start_with(&hub, bots.clone(), fake.clone());
+    let desks = crate::settings::alerts::start(&hub);
+    hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    // a focused desk in use: nothing for the phone
+    desks.say(0, "tw", true, now_s()); // client 0 is never attached: the live list drops it, so this desk is gone
+    set(&hub, "alert.tw", "done\tturn-tw\tm\t1.1\t").await;
+    let a = fake.wait(1).await; assert_eq!(a.len(), 1, "no desk connected: away {a:?}");
+    assert_eq!((a[0]["aps"]["alert"]["title"].as_str(), a[0]["aps"]["alert"]["body"].as_str(), a[0]["thread"].as_str()), (Some("Worker"), Some("Finished"), Some("tw")), "{a:?}");
+    until(&hub, |l| l.iter().any(|e| e["$"] == "PushSent" && e["kind"] == "done")).await;
+    let ordered = log(&hub).into_iter().find(|e| e["$"] == "PushOrdered").unwrap(); assert_eq!((ordered["how"].as_str(), ordered["bot"].as_str()), (Some("away"), Some("")));
+    // an ask: needs_you, with its ask so its answer clears it
+    hub.commit(&json!({"$":"AskOpened","id":"a7","thread":"tw","tool":"Bash","detail":"rm x","at":2})).await.unwrap();
+    set(&hub, "alert.tw", "ask\task-tw\tm\t1.2\tBash rm x").await;
+    let a = fake.wait(2).await; assert_eq!(a.len(), 2, "{a:?}"); assert_eq!((a[1]["aps"]["alert"]["body"].as_str(), a[1]["ask"].as_str()), (Some("Needs you: Bash rm x"), Some("a7")), "{a:?}");
+    // a note, a merge, a quiet record: never
+    for v in ["note\ttell-1\tm\t1.3\tsaid", "merged\tm-tw\tm\t1.4\tbranch", "\t\tm\t1.5\t"] { set(&hub, "alert.tw", v).await }
+    settle().await; assert_eq!(fake.alerts().len(), 2, "{:?}", fake.alerts());
+    // a forged order of this kind for a bot's own thread is refused
+    let ada = bot(&hub, "ada").await; let ada_th = bots.world().await.bot(&ada).unwrap().thread.clone();
+    hub.commit(&json!({"$":"PushOrdered","id":"xa","how":"away","bot":"","reason":"done","thread":ada_th,"ask":"","text":"forged","at":now_s()})).await.unwrap();
+    settle().await; assert_eq!(fake.alerts().len(), 2, "{:?}", fake.alerts());
+}

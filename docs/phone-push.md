@@ -1,6 +1,6 @@
 # Phone push
 
-A phone is alerted only by the uberbot. Code: `native/host/src/push/`; tests: `native/host/src/bots/tests/push.rs`; simulator check: `test/e2e/push/`.
+A phone is alerted by the uberbot, or, on a hub with no uberbot, when one of the person's threads finishes, fails or asks while they are at no desk (below). Code: `native/host/src/push/`; tests: `native/host/src/bots/tests/push.rs`; simulator check: `test/e2e/push/`.
 
 ## What may push
 
@@ -18,6 +18,11 @@ Nothing else holds one. A worker thread, another bot, a routine's turn, the mail
 | A worker's ask | triage mail (`act`): it stays open at its source |
 | A managed thread's end | triage mail (`fyi`) |
 | An unmanaged thread's end | triage mail (`fyi`), which starts no turn |
+
+**No uberbot (0.14's default).** On a hub with no uberbot, a thread's `done`, `fail` or `ask` record (`alert.<thread>`, the same record a desk is told by) made while no
+desk window is focused and in use (none heard from in `Desk.window`, or none connected: `settings/alerts.rs` `away`) orders a push of its own (`push::away`, how `away`):
+"Finished", "Failed" or "Needs you: …" with the thread's title, the ask's id on a needs_you so its answer clears it. A bot's own thread never does, nor a note, a merge or a
+reminder. The person's alert settings (`notify.settled`, `notify.needs`) and everything under Respect apply. With an uberbot, its mail decides, as above.
 
 The worker checks each order against the world again (`push::admit`), `setting.set` refuses `push.book`, and a test fails if any other file names the event or a source.
 
