@@ -40,6 +40,8 @@ pub struct Cx {
     pub allowance: String, pub default_account: bool,
     /// Sub.fg: the Agent/Task calls of this process that run in the foreground; their tool result is what the subagent answered
     pub fg_subs: std::collections::HashSet<String>,
+    /// Turn.live: this turn's model calls so far (message id, [input, cache read, cache write, output], model) and the `turn.live.<thread>` value last written
+    pub live: Vec<(String, [u64; 4], String)>, pub live_v: String,
 }
 
 /// How a line is judged by the command ledger (cmds.rs): the legacy rule (the result ends the turn), or the ledger's:
@@ -61,6 +63,16 @@ pub fn tool_summary(name: &str, input: &Value) -> String {
         let t = format!("{}{}", if id.is_empty() || id == "null" { String::new() } else { format!("#{id} ") }, st); if !t.trim().is_empty() { return t.trim().to_string() } }
     pick("command").or_else(|| pick("file_path")).or_else(|| pick("path")).or_else(|| pick("pattern")).or_else(|| pick("description")).or_else(|| pick("question"))
         .or_else(|| pick("query")).or_else(|| pick("url")).or_else(|| pick("subject")).or_else(|| pick("keyword")).or_else(|| pick("q")).unwrap_or_else(|| name.to_string())
+}
+
+/// Claude's prices keep one ratio between token kinds (input 1, cache read 0.1, cache write 1.25, output 5): [in, cread, cwrite, out] in input tokens' worth.
+fn weigh(q: &[u64; 4]) -> f64 { q[0] as f64 + q[1] as f64 * 0.1 + q[2] as f64 * 1.25 + q[3] as f64 * 5.0 }
+/// A model's cost per input token's worth in this session (`turn.models`: "name|in|out|cacheRead|cacheWrite|cost|..." lines), once a result priced it.
+fn rate(models: &str, model: &str) -> Option<f64> {
+    if model.is_empty() { return None }
+    models.split('\n').find_map(|l| { let p: Vec<&str> = l.split('|').collect(); let g = |i: usize| p.get(i).map_or(0, |x| num(x));
+        let w = weigh(&[g(1), g(3), g(4), g(2)]);
+        (p.first().map_or(false, |name| *name == model || name.starts_with(&format!("{model}["))) && w > 0. && g(5) > 0).then(|| g(5) as f64 / w) })
 }
 
 /// Claude.uid: a line's uuid adds its first 8 characters to a block's id.
@@ -103,6 +115,20 @@ impl Cx {
                 _ => {}
             }
         }
+    }
+
+    /// Turn.live: the running turn's tokens after each model call (each call once, by its message id), so the thread's numbers move before the
+    /// result; "in/cread/cwrite/out/cost", the cost (nano-dollars) by this session's own rate for each call's model, "" when no result priced it yet.
+    /// The result's TurnUsage then counts the turn and this goes back to "".
+    fn live_usage(&mut self, m: &Value, at: u64, out: &mut Vec<Value>) {
+        let (id, u) = (s(m, "id"), m.get("usage").unwrap_or(&Value::Null));
+        if !self.running || id.is_empty() || u.get("output_tokens").is_none() { return }
+        let p = [n(u, "input_tokens"), n(u, "cache_read_input_tokens"), n(u, "cache_creation_input_tokens"), n(u, "output_tokens")];
+        match self.live.iter_mut().find(|x| x.0 == id) { Some(x) => { x.1 = p; x.2 = s(m, "model").to_string() } None => self.live.push((id.to_string(), p, s(m, "model").to_string())) }
+        let (mut t, mut cost, mut priced) = ([0u64; 4], 0f64, true);
+        for (_, q, mo) in &self.live { for i in 0..4 { t[i] += q[i] } match rate(&self.models, mo) { Some(r) => cost += weigh(q) * r, None => priced = false } }
+        let v = format!("{}/{}/{}/{}/{}", t[0], t[1], t[2], t[3], if priced { (cost as u64).to_string() } else { String::new() });
+        if v != self.live_v { self.live_v = v.clone(); out.push(setting(format!("turn.live.{}", self.thread), v, at)) }
     }
 
     /// Usage.window / Usage.widest: the result's widest context window.
@@ -326,7 +352,7 @@ impl Cx {
                 self.blocks(m, s(o, "uuid"), at, &mut ev); self.todos_of(m, at, &mut ev);
                 let u = m.get("usage").unwrap_or(&Value::Null);
                 let used = n(u, "input_tokens") + n(u, "cache_creation_input_tokens") + n(u, "cache_read_input_tokens") + n(u, "output_tokens");
-                self.used_event(used, at, &mut ev);
+                self.used_event(used, at, &mut ev); self.live_usage(m, at, &mut ev);
                 if self.running && !s(o, "error").is_empty() { // Claude.api.err
                     let text = m.get("content").and_then(Value::as_array).and_then(|a| a.iter().find(|b| s(b, "type") == "text")).map(|b| s(b, "text")).unwrap_or("");
                     let text = if text.trim().is_empty() { s(o, "error") } else { text };
@@ -344,6 +370,7 @@ impl Cx {
                     self.running = false;
                 }
                 self.window(o, at, &mut ev); self.turn_usage(o, at, &mut ev);
+                self.live.clear(); if !self.live_v.is_empty() { self.live_v.clear(); ev.push(setting(format!("turn.live.{}", self.thread), String::new(), at)) }
                 fx.events = ev;
             }
             "user" => { let mut ev = vec![]; self.named(o, at, &mut ev); self.sub_replies(o, at, &mut ev); fx.events = ev }
@@ -465,6 +492,19 @@ mod tests {
     }
     #[test] fn claude_result_after_stop_quiet() { let mut c = Cx::new("t1"); assert!(run(&mut c, r#"{"type":"result","is_error":false}"#).events.is_empty()); }
     #[test] fn claude_delta_after_stop_quiet() { let mut c = Cx::new("t1"); assert!(run(&mut c, r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"late"}}}"#).deltas.is_empty()); }
+    #[test] fn a_running_turns_tokens_are_told_after_each_model_call_and_cleared_by_its_result() {
+        let mut c = Cx::new("t1"); c.running = true; c.models = "claude-fable-5-2|1000|100|10000|0|2000000000|0|1000000".into();
+        let live = |fx: &Fx| fx.events.iter().find(|e| e["key"] == "turn.live.t1").map(|e| e["value"].as_str().unwrap().to_string());
+        let a = run(&mut c, r#"{"type":"assistant","message":{"id":"m1","model":"claude-fable-5-2","content":[{"type":"thinking","thinking":""}],"usage":{"input_tokens":10,"cache_read_input_tokens":1000,"output_tokens":200}}}"#);
+        assert_eq!(live(&a).as_deref(), Some("10/1000/0/200/888000000"), "the session priced the model at 800,000 nano-dollars an input token's worth (2,500 worth for $2): this call is 1,110 worth");
+        let same = run(&mut c, r#"{"type":"assistant","message":{"id":"m1","model":"claude-fable-5-2","content":[{"type":"tool_use","id":"x","name":"Bash","input":{}}],"usage":{"input_tokens":10,"cache_read_input_tokens":1000,"output_tokens":200}}}"#);
+        assert_eq!(live(&same), None, "the same call's next block counts once");
+        let b = run(&mut c, r#"{"type":"assistant","message":{"id":"m2","model":"other","content":[],"usage":{"input_tokens":5,"output_tokens":1}}}"#);
+        assert_eq!(live(&b).as_deref(), Some("15/1000/0/201/"), "a model no result priced yet: no cost");
+        let r = run(&mut c, r#"{"type":"result","subtype":"success","is_error":false,"uuid":"u9","usage":{"input_tokens":15,"output_tokens":201}}"#);
+        assert_eq!(live(&r).as_deref(), Some(""), "the result counts the turn"); assert!(c.live.is_empty());
+        let mut idle = Cx::new("t1"); assert_eq!(live(&run(&mut idle, r#"{"type":"assistant","message":{"id":"m3","content":[],"usage":{"output_tokens":4}}}"#)), None, "no turn running: nothing");
+    }
     #[test] fn usage_same_nothing() { let mut c = Cx::new("t1"); c.used = 7; let a = run(&mut c, r#"{"type":"assistant","message":{"id":"m","content":[],"usage":{"output_tokens":7}}}"#); assert!(a.events.is_empty()); }
     #[test] fn result_completes_only_a_running_turn_and_failed_results_log_their_error() {
         let mut c = Cx::new("t1");

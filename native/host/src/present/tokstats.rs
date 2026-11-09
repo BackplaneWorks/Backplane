@@ -74,20 +74,40 @@ pub fn sections(provider: &str, usage: &str, last: &str, tv: &str, speed: &str, 
 }
 
 /// The composer's token button (0.14's Ts.chip): the thread's tokens, its cost and the context held, each only once known ("18k tok · $0.0123 · ctx 9%"), "" for none.
-/// `tv` and `usage` as in `sections`.
-pub fn chip(usage: &str, tv: &str) -> String {
+/// `tv` and `usage` as in `sections`; `live` the running turn's "in/cread/cwrite/out/cost" so far (agents/lines.rs, "" when none), counted in at once:
+/// its cost is an estimate ("~$0.0150"), or "+" after the counted cost while no result has priced the turn's model yet.
+pub fn chip(usage: &str, tv: &str, live: &str) -> String {
     let (used, window) = (part(usage, 0), part(usage, 1));
+    let lt = part(live, 0) + part(live, 1) + part(live, 2) + part(live, 3);
+    let lc = live.split('/').nth(4).filter(|c| !c.is_empty()).map(|_| part(live, 4));
     let mut v = vec![];
-    if part(tv, 0) > 0 { v.push(format!("{} tok", short(part(tv, 1) + part(tv, 2) + part(tv, 3) + part(tv, 4)))) }
-    if part(tv, 7) > 0 { v.push(usd(part(tv, 6))) }
+    if part(tv, 0) > 0 || lt > 0 { v.push(format!("{} tok", short(part(tv, 1) + part(tv, 2) + part(tv, 3) + part(tv, 4) + lt))) }
+    if part(tv, 7) > 0 || lc.is_some() { v.push(match (lt > 0, lc) { (true, Some(c)) => format!("~{}", usd(part(tv, 6) + c)), (true, None) => format!("{}+", usd(part(tv, 6))), _ => usd(part(tv, 6)) }) }
     if used > 0 { v.push(if window == 0 { format!("{} ctx", short(used)) } else { format!("ctx {}", pct(used, window)) }) }
     v.join(" · ")
 }
 
+/// The Context panel's "This turn so far" while a turn runs (`live` as in `chip`), None without one.
+pub fn live_section(live: &str) -> Option<Value> {
+    let t = [part(live, 0), part(live, 1), part(live, 2), part(live, 3)];
+    if t.iter().sum::<u64>() == 0 { return None }
+    let cost = match live.split('/').nth(4).filter(|c| !c.is_empty()) { Some(_) => format!("about {} (this session's rate for the model)", usd(part(live, 4))), None => "told when the turn ends".into() };
+    Some(sec("This turn so far", vec![r("Input", num(t[0])), r("Cache read", num(t[1])), r("Cache write", num(t[2])), r("Output", num(t[3])), r("Cost", cost)]))
+}
+
 #[cfg(test)] mod tests { use super::*;
     #[test] fn the_token_button_says_tokens_cost_and_context_once_known() {
-        assert_eq!(chip("45000/200000", "2/2000/14000/1000/1000/10/12300000/2/2"), "18k tok · $0.0123 · ctx 22%");
-        assert_eq!(chip("", ""), ""); assert_eq!(chip("1200/0", ""), "1.2k ctx"); assert_eq!(chip("", "1/10/0/0/5/0/0/0/1"), "15 tok", "no cost told: none shown");
+        assert_eq!(chip("45000/200000", "2/2000/14000/1000/1000/10/12300000/2/2", ""), "18k tok · $0.0123 · ctx 22%");
+        assert_eq!(chip("", "", ""), ""); assert_eq!(chip("1200/0", "", ""), "1.2k ctx"); assert_eq!(chip("", "1/10/0/0/5/0/0/0/1", ""), "15 tok", "no cost told: none shown");
+    }
+    #[test] fn a_running_turn_counts_in_at_once_its_cost_estimated_or_marked_open() {
+        let tv = "2/2000/14000/1000/1000/10/12300000/2/2";
+        assert_eq!(chip("45000/200000", tv, "10/20000/3000/2000/2700000"), "43k tok · ~$0.0150 · ctx 22%");
+        assert_eq!(chip("45000/200000", tv, "10/20000/3000/2000/"), "43k tok · $0.0123+ · ctx 22%", "no rate for the model yet: the counted cost and more to come");
+        assert_eq!(chip("", "", "10/0/0/5/"), "15 tok", "a first turn shows its tokens before its result");
+        assert!(live_section("").is_none() && live_section("0/0/0/0/").is_none());
+        let rows: Vec<String> = live_section("10/20000/3000/2000/2700000").unwrap()["rows"].as_array().unwrap().iter().map(|r| format!("{}={}", r["label"].as_str().unwrap(), r["value"].as_str().unwrap())).collect();
+        assert_eq!(rows, ["Input=10", "Cache read=20,000", "Cache write=3,000", "Output=2,000", "Cost=about $0.0027 (this session's rate for the model)"]);
     }
     fn flat(v: &[Value]) -> Vec<String> { v.iter().flat_map(|s| s["rows"].as_array().unwrap().iter().map(|r| format!("{}={}", r["label"].as_str().unwrap(), r["value"].as_str().unwrap()))).collect() }
     #[test] fn formats_as_panel_does() {

@@ -34,7 +34,7 @@ pub fn lean_keeps(k: &str) -> bool {
     if ["ui.theme", "sidebar.view", "mail.on", "uber.bot", "order.enabled", "order.estimates", "import.v014.ack"].contains(&k)
         || ["thread.tree.", "project.icon.", "project.color.", "buy.", "order.quote.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key
-    if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && (k.starts_with("tok.t.") || k.contains(".t."))) { return true }
+    if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models.", "turn.live."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && (k.starts_with("tok.t.") || k.contains(".t."))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control
     if ["settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "thread.env", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "viewer.board3d", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model"].contains(&k) || ["push.webhook.", "notify.", "tz.rule."].iter().any(|p| k.starts_with(p)) { return true }
     // Settings, Voice (voice/page.rs, drawn by present/settings.rs from this copy): the engine, the model and the microphone, and the dictionary's
@@ -255,7 +255,7 @@ mod tests {
         for k in ["allowance.claude", "allowance.codex", "accounts.inventory"] { assert!(lean_keeps(k), "{k}: the composer's limits chip reads it"); }
         for k in ["rule.r1", "board.b1"] { assert!(lean_keeps(k), "{k}: Settings, Rules and task board lists it"); }
         for k in ["voice.engine", "voice.model", "voice.device", "voice.e.kicad", "voice.l.jason"] { assert!(lean_keeps(k), "{k}: Settings, Voice shows it"); }
-        for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
+        for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "turn.live.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }
         for k in ["ride.t1", "tok.basis.t1", "uber.op.u.m.1", "todos.base.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
