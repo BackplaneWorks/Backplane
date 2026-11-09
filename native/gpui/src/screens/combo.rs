@@ -40,8 +40,8 @@ pub fn usage_rows(combo: &Value) -> (Vec<UsageRow>, Vec<String>) {
     (rows, notes)
 }
 
-/// The chip. `avail`: the px the row leaves it (0: not measured yet).
-pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32, keys: (&str, &str), this_chip: &Rc<Cell<Bounds<Pixels>>>) -> Stateful<Div> {
+/// The chip. `avail`: the px the row leaves it (0: not measured yet). `menu_open`: its menu is up, so its hover stays away (it would sit over the menu's Account row).
+pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32, keys: (&str, &str), this_chip: &Rc<Cell<Bounds<Pixels>>>, menu_open: bool) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
     let combo = &thread["combo"];
     let provider = super::picker::bare(thread["provider"].as_str().or(thread["picker"]["providers"].as_array().and_then(|p| p.iter().find(|x| x["on"] == true)).and_then(|x| x["value"].as_str())).unwrap_or("claude")).to_string();
@@ -54,7 +54,7 @@ pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32
         .text_size(px(12.)).font(crate::art::mono_font()).flex().items_center().gap_2()
         .child(canvas(move |b, _, _| at.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full()).child(crate::art::probe("modelchip"))
         .child(super::picker::logo(&provider)).child(div().min_w_0().overflow_hidden().text_color(c(tone(combo))).child(text))
-        .when(!tipped.is_empty(), |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tipped.clone(), light)).into()))
+        .when(!tipped.is_empty() && !menu_open, |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tipped.clone(), light)).into()))
         .on_click(cx.listener(|this, _, window, cx| this.combo_click(window, cx)))
 }
 /// A hover of several lines.
