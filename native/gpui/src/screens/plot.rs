@@ -219,18 +219,20 @@ fn distance(c: &Chunk, p: &Piece, x: f32, y: f32) -> f32 {
         _ => (pts.windows(4).step_by(2).map(|w| seg_dist(x, y, w[0], w[1], w[2], w[3])).fold(f32::MAX, f32::min) - c.r).max(0.),
     }
 }
-/// View.pick / Pick.best: of the pieces within `tol` micrometres of the tap on layers not hidden (`off` mask), the smallest wins (a pad over the zone it sits in), then the one drawn on top.
+/// View.pick / Pick.best: of the pieces within `tol` micrometres of the tap on layers not hidden (`off` mask), one the tap is on beats one it is only near
+/// (a trace clicked beside a part's outline or text is the trace), then the smallest wins (a pad over the zone it sits in), then the one drawn on top.
 pub fn hit(f: &Frame, x: f32, y: f32, tol: f32, off: u32) -> Option<Pick> {
-    let mut best: Option<Pick> = None;
+    let (mut best, mut best_on): (Option<Pick>, bool) = (None, false);
     for (ci, c) in f.chunks.iter().enumerate() {
         if c.layer < 32 && (off >> c.layer) & 1 == 1 { continue }
         for p in &c.pieces {
             let b = p.bbox;
             if x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol { continue }
-            if distance(c, p, x, y) > tol { continue }
-            let area = (((b[2] - b[0]).max(1.) * (b[3] - b[1]).max(1.)) / 100.).min(4e9) as u64;
-            let take = match &best { None => true, Some(o) => area < o.area || (area == o.area && c.layer >= o.layer) };
-            if take { best = Some(Pick { chunk: ci, info: p.info, layer: c.layer, area, kind: p.kind, pts: c.pts[p.at as usize..p.at as usize + p.n as usize * 2].to_vec(), r: c.r }) }
+            let d = distance(c, p, x, y);
+            if d > tol { continue }
+            let (area, on) = ((((b[2] - b[0]).max(1.) * (b[3] - b[1]).max(1.)) / 100.).min(4e9) as u64, d <= tol * 0.25);
+            let take = match &best { None => true, Some(o) => (on && !best_on) || (on == best_on && (area < o.area || (area == o.area && c.layer >= o.layer))) };
+            if take { best_on = on; best = Some(Pick { chunk: ci, info: p.info, layer: c.layer, area, kind: p.kind, pts: c.pts[p.at as usize..p.at as usize + p.n as usize * 2].to_vec(), r: c.r }) }
         }
     }
     best
@@ -272,13 +274,17 @@ pub fn sheet_rows(text: &str) -> Vec<Sheet> {
 
 /// An inspected piece's card (Insp.card): its kind, then key = value rows. `g=` (a schematic item's connected group) is cross-probing's business, no row.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Card { pub title: String, pub rows: Vec<(String, String)> }
+/// `g` and `src` are no rows: the item's group and the source it was picked on (set by the cross-probe and kept with the hub's probe as "g=<src>\u{1}<g>",
+/// so a page opened later lights it too; the phones read no `g=`).
+pub struct Card { pub title: String, pub rows: Vec<(String, String)>, pub g: String, pub src: String }
 pub fn card(info: &str) -> Option<Card> {
     if info.trim().is_empty() { return None }
     let mut parts = info.split(';');
     let title = parts.next().unwrap_or("").to_string();
-    let rows = parts.filter(|p| !p.starts_with("g=")).map(|p| match p.split_once('=') { Some((k, v)) => (k.to_string(), v.to_string()), None => (p.to_string(), String::new()) }).collect();
-    Some(Card { title, rows })
+    let (mut g, mut src) = (String::new(), String::new());
+    let rows = parts.filter(|p| if let Some(v) = p.strip_prefix("g=") { match v.split_once('\u{1}') { Some((a, b)) => { src = a.to_string(); g = b.to_string() } None => g = v.to_string() } false } else { true })
+        .map(|p| match p.split_once('=') { Some((k, v)) => (k.to_string(), v.to_string()), None => (p.to_string(), String::new()) }).collect();
+    Some(Card { title, rows, g, src })
 }
 
 /// The view: where the plot's centre sits and how many pixels a micrometre is.
@@ -471,10 +477,16 @@ mod tests {
         assert!(hit(&f, 20000., 20000., 100., 0).is_none());
         let line = mk(3, 1, &[0., 0., 1000., 0.], 7); let g = Frame { chunks: vec![Arc::new(line)], ..Default::default() };
         assert_eq!(hit(&g, 500., 120., 100., 0).map(|p| p.info), Some(7), "within the stroke's width and the finger's reach"); assert!(hit(&g, 500., 500., 100., 0).is_none());
+        // a long trace tapped on, beside a small text just within reach: the trace (the text's box is smaller, but the tap is not on it)
+        let (trace, text) = (mk(5, 1, &[0., 0., 10000., 0.], 8), mk(16, 1, &[5000., 140., 5300., 140.], 9));
+        let h = Frame { chunks: vec![Arc::new(trace), Arc::new(text)], ..Default::default() };
+        assert_eq!(hit(&h, 5100., 10., 100., 0).map(|p| p.info), Some(8)); assert_eq!(hit(&h, 5100., 130., 100., 0).map(|p| p.info), Some(9), "on the text: the text");
     }
     #[test] fn the_card_is_a_title_and_key_value_rows_without_the_group() {
         let c = card("Pad;ref=U1;pin=3;net=GND;g=7").unwrap();
         assert_eq!((c.title.as_str(), c.rows.len()), ("Pad", 3)); assert_eq!(c.rows[2], ("net".to_string(), "GND".to_string())); assert!(card("  ").is_none());
+        assert_eq!((c.g.as_str(), c.src.as_str()), ("7", ""));
+        let k = card("wire;g=1|/r|/r/a.kicad_sch\u{1}7").unwrap(); assert_eq!((k.rows.len(), k.g.as_str(), k.src.as_str()), (0, "7", "1|/r|/r/a.kicad_sch"), "a kept probe names where it was picked");
     }
 
     #[test] fn the_sheet_rows_are_hiers_lines() {

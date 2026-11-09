@@ -207,7 +207,25 @@ pub const FNV: u32 = 2166136261;
 
 /// Pcb2.form: the items one top-level form draws. Board.index answers 9 for gr_poly and for what it does not know alike, and form 9 draws
 /// nothing, so a top-level gr_poly draws nothing here either, as in (kept for parity; reported).
-pub fn form(out: &mut Vec<Item>, x: &Sx, i: usize, sig: u32) {
+pub fn form(out: &mut Vec<Item>, x: &Sx, i: usize, sig: u32) { form_named(out, x, i, sig, &Nets::new()) }
+/// The board's net table (`(net 12 "GND")` at the top): a track, via or zone of a KiCad 9 file names its net by number, a pad by name.
+pub type Nets = std::collections::HashMap<String, String>;
+/// The net table of a board's top-level forms (only the `(net ` ones are parsed).
+pub fn nets(fs: &[&[u8]]) -> Nets {
+    fs.iter().filter(|f| f.starts_with(b"(net ")).map(|f| super::sexpr::parse(f)).filter(|x| !x.arg(1).is_empty()).map(|x| (x.arg(0).to_string(), x.arg(1).to_string())).collect()
+}
+/// `form`, with every `net=<number>` its items carry named from `nets`: a track's net is then the same word as its pads' (the cross-probe lights the whole net).
+pub fn form_named(out: &mut Vec<Item>, x: &Sx, i: usize, sig: u32, nets: &Nets) {
+    let from = out.len();
+    form_raw(out, x, i, sig);
+    if nets.is_empty() { return }
+    for it in &mut out[from..] {
+        let named: Option<String> = it.info.split(';').find_map(|f| f.strip_prefix("net=")).filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())).and_then(|n| nets.get(n)).map(|name| {
+            it.info.split(';').map(|f| if f.starts_with("net=") { format!("net={name}") } else { f.to_string() }).collect::<Vec<_>>().join(";") });
+        if let Some(v) = named { it.info = Arc::from(v) }
+    }
+}
+fn form_raw(out: &mut Vec<Item>, x: &Sx, i: usize, sig: u32) {
     let k = key(x, || format!("n{i}"));
     let name = x.name();
     match name {
@@ -236,6 +254,13 @@ mod tests {
         let x = parse(b"(footprint \"F\" (at 10 20 90))"); let (p, q) = (fp_place(&x), Place::new(10.0, 20.0, rad(90.0)));
         assert_eq!((p.x, p.y, p.c, p.s), (q.x, q.y, q.c, q.s));
         let x = parse(b"(footprint \"F\" (at 1 2 3) (transform (translate 0 0) (rotate 0)))"); let p = fp_place(&x); assert_eq!((p.x, p.y, p.c, p.s), (0.0, 0.0, 1.0, 0.0));
+    }
+    #[test] fn a_track_names_its_net_as_its_pads_do() {
+        let fs: Vec<&[u8]> = vec![b"(net 0 \"\")", b"(net 12 \"GND\")", b"(segment (start 0 0) (end 1 0) (width 0.25) (layer \"B.Cu\") (net 12) (uuid \"s\"))", b"(via (at 1 1) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"B.Cu\") (net 12) (uuid \"v\"))", b"(segment (start 0 0) (end 1 0) (width 0.25) (layer \"B.Cu\") (net \"VCC\") (uuid \"t\"))"];
+        let ns = nets(&fs); assert_eq!(ns.get("12").map(String::as_str), Some("GND"));
+        let mut o = vec![]; for (i, f) in fs.iter().enumerate() { form_named(&mut o, &parse(f), i, 0, &ns) }
+        let infos: Vec<&str> = o.iter().map(|it| &*it.info).collect();
+        assert_eq!(infos, ["track;net=GND;layer=B.Cu;width=0.25", "via;net=GND;size=0.6;drill=0.3", "via;net=GND;size=0.6;drill=0.3", "track;net=VCC;layer=B.Cu;width=0.25"], "a KiCad 10 track names it already");
     }
     #[test] fn a_top_level_gr_poly_draws_nothing_as_in() {
         let mut o = vec![]; form(&mut o, &parse(b"(gr_poly (pts (xy 0 0) (xy 1 1) (xy 2 0)) (layer \"F.Cu\") (uuid \"p\"))"), 0, 0); assert!(o.is_empty());

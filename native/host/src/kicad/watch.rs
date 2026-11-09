@@ -475,12 +475,28 @@ impl Plots {
             hub.push(client, json!({"t":"sheets","root":root,"slot":slot,"gen":gen.to_string(),"rows":g("rows", text.trim_end()),"boxes":g("boxes",""),"ids":g("ids",""),"top":g("top",""),"refs":g("refs","")}));
         });
     }
-    /// kicad.probe: the pieces of the chunks this client holds for `key` whose info has `name=value` (a net, a part), as (chunk index, piece index): the cross-probe's light.
+    /// kicad.probe: the pieces of the chunks this client holds for `key` whose info has `name=value` (a net, a part with all its units, a schematic group),
+    /// as (chunk index, piece index): the cross-probe's light.
     pub async fn probe(&self, client: u64, key_: &str, name: &str, value: &str) -> Vec<(usize, usize)> {
         let sigs: Vec<u32> = { let st = self.st.lock().unwrap(); st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key == key_)).map(|s| s.held.iter().map(|c| c.sig).collect()).unwrap_or_default() };
         if sigs.is_empty() || name.is_empty() || value.is_empty() { return vec![] }
-        let (f, name, value) = (self.infos(key_), name.to_string(), value.to_string());
-        let hits = tokio::task::spawn_blocking(move || { let t = std::fs::read(f).unwrap_or_default(); plotgen::info_scan(&String::from_utf8_lossy(&t), &name, &value) }).await.unwrap_or_default();
+        // a connection from the other drawing comes as "<its key>\u{1}<group or net>": a schematic group lights the board nets of the pins it holds,
+        // a board net the schematic groups holding its pads' pins (each found through the other drawing's info file); on its own drawing, itself
+        let other = value.split_once('\u{1}').map(|(k, v)| (k.to_string(), v.to_string()));
+        let (f, of, name, value, key) = (self.infos(key_), other.as_ref().map(|o| self.infos(&o.0)), name.to_string(), value.to_string(), key_.to_string());
+        let hits = tokio::task::spawn_blocking(move || {
+            let read = |p: &std::path::Path| String::from_utf8_lossy(&std::fs::read(p).unwrap_or_default()).into_owned();
+            let t = read(&f);
+            match (other, of) {
+                (Some((src, v)), _) if src == key => plotgen::info_scan_any(&t, &name, &[v]),
+                (Some((_, v)), Some(of)) => match name.as_str() {
+                    "g" => plotgen::info_scan_any(&t, "net", &plotgen::nets_of_group(&read(&of), &t, &v)),
+                    "net" => plotgen::info_scan_any(&t, "g", &plotgen::groups_of_net(&read(&of), &t, &v)),
+                    _ => vec![],
+                },
+                _ => plotgen::info_scan_any(&t, &name, &[value]),
+            }
+        }).await.unwrap_or_default();
         let set: std::collections::HashMap<u32, Vec<usize>> = hits.into_iter().fold(Default::default(), |mut m, (s, i)| { m.entry(s).or_default().push(i); m });
         let mut out = vec![];
         for (at, sig) in sigs.iter().enumerate() { if let Some(ix) = set.get(sig) { for i in ix { out.push((at, *i)); if out.len() >= 20000 { return out } } } }
