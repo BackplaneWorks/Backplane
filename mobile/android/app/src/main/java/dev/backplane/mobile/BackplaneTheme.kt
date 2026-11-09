@@ -63,6 +63,14 @@ private val shapes = Shapes(square, square, square, square, square)
 // JetBrains Mono (SIL OFL 1.1, res/font) for code and mono labels, ligatures off; body text stays the system face.
 val BpMono = FontFamily(Font(R.font.jetbrains_mono_regular, FontWeight.Normal), Font(R.font.jetbrains_mono_bold, FontWeight.Bold))
 const val NO_LIGATURES = "calt 0"
+// The phone look (the person, 11-04: on a phone things may be rounder and more modern; the desktop keeps the square engineering look): the system face for
+// what is read (messages, titles, buttons), mono kept for code, paths, tool output and the small upper-case labels; pill buttons, rounded fields, cards and sheets.
+val BpUi: FontFamily = FontFamily.Default
+val PhPill = RoundedCornerShape(50)
+val PhField = RoundedCornerShape(12.dp)
+val PhCard = RoundedCornerShape(12.dp)
+val PhDialog = RoundedCornerShape(16.dp)
+val PhSheet = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
 private val typography = Typography().let { t ->
     fun mono(s: TextStyle) = s.copy(fontFamily = BpMono, fontFeatureSettings = NO_LIGATURES)
     t.copy(

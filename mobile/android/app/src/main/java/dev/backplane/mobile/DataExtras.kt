@@ -3,6 +3,7 @@ package dev.backplane.mobile
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.BorderStroke
@@ -34,11 +35,11 @@ import org.json.JSONObject
 @Composable
 fun ActionSheet(title: String, actions: List<Pair<String, () -> Unit>>, close: () -> Unit) {
     Dialog(onDismissRequest = close) {
-        Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("sheet")) {
+        Column(Modifier.fillMaxWidth().clip(PhDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), PhDialog).testTag("sheet")) {
             DMono(title.ifEmpty { "New thread" }, dcs.onSurfaceVariant, 11, Modifier.padding(12.dp))
             DLine()
             actions.forEach { (label, run) ->
-                Text(label, Modifier.fillMaxWidth().clickable { close(); run() }.padding(14.dp).testTag("sheet.$label"), color = if (label.startsWith("Delete") || label.startsWith("Remove")) dcs.error else dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
+                Text(label, Modifier.fillMaxWidth().clickable { close(); run() }.padding(horizontal = 18.dp, vertical = 14.dp).testTag("sheet.$label"), color = if (label.startsWith("Delete") || label.startsWith("Remove")) dcs.error else dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp)
                 DLine()
             }
         }
@@ -49,7 +50,7 @@ fun ActionSheet(title: String, actions: List<Pair<String, () -> Unit>>, close: (
 fun TextPrompt(title: String, initial: String, ok: String, close: () -> Unit, done: (String) -> Unit) {
     var t by remember { mutableStateOf(initial) }
     Dialog(onDismissRequest = close) {
-        Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxWidth().clip(PhDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), PhDialog).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DMono(title, dcs.onSurfaceVariant, 11)
             DField(t, { t = it }, "", Modifier.testTag("prompt.field"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { DBtn(ok, true, t.isNotBlank(), Modifier.testTag("prompt.ok")) { close(); done(t.trim()) }; DBtn("Cancel", false, onClick = close) }
@@ -148,7 +149,7 @@ fun PickerSheet(thread: String?, choice: DNewThreadChoice, choose: (DNewThreadCh
     var err by remember { mutableStateOf("") }
     suspend fun load(c: DNewThreadChoice) { try { picker = DataClient.picker(thread, c); err = "" } catch (e: Exception) { err = e.message ?: "" } }
     LaunchedEffect(Unit) { load(choice) }
-    ModalBottomSheet(onDismissRequest = close, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = close, shape = PhSheet, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
       // one height from the first frame: a sheet that opens empty and grows when the list arrives stays where it opened; short of the whole screen, it clears the status bar
       Column(Modifier.fillMaxWidth().fillMaxHeight(.85f)) {
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -240,7 +241,7 @@ fun FindInThread(tid: String, close: () -> Unit, go: (String) -> Unit) {
     var err by remember { mutableStateOf("") }
     LaunchedEffect(q) { if (q.isBlank()) { hits = null; return@LaunchedEffect }; kotlinx.coroutines.delay(250); try { hits = DataClient.searchIn(tid, q.trim()); err = "" } catch (e: Exception) { err = e.message ?: "" } }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    ModalBottomSheet(onDismissRequest = close, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = close, shape = PhSheet, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).testTag("find")) {
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 DMono("SEARCH IN THREAD", dcs.onSurfaceVariant, 11, Modifier.weight(1f))
@@ -283,8 +284,8 @@ fun QueueStrip(tid: String, rows: List<DataClient.QRow>, edit: (String) -> Unit)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
                 r.buttons.filter { it.action != "q-up" }.forEach { b ->
                     DMono(b.label, if (b.action == "q-steer") dcs.primary else if (b.action == "q-remove") dcs.error else dcs.onSurfaceVariant, 12,
-                        Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { scope.launch { try { val t = DataClient.queueAct(tid, b); if (b.action == "q-edit" && t.isNotEmpty()) edit(t); err = "" } catch (e: Exception) { err = e.message ?: "" } } }
-                            .padding(horizontal = 10.dp, vertical = 5.dp).testTag("queue.${b.action}"), bold = b.action == "q-steer")
+                        Modifier.clip(PhPill).border(BorderStroke(1.dp, dcs.outlineVariant), PhPill).clickable { scope.launch { try { val t = DataClient.queueAct(tid, b); if (b.action == "q-edit" && t.isNotEmpty()) edit(t); err = "" } catch (e: Exception) { err = e.message ?: "" } } }
+                            .padding(horizontal = 12.dp, vertical = 6.dp).testTag("queue.${b.action}"), bold = b.action == "q-steer")
                 }
             }
         }
