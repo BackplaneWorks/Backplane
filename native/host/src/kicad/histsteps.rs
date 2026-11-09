@@ -68,6 +68,14 @@ pub fn live_words(c: usize, all: usize) -> String {
     if c == 0 { "Live".into() } else if c < all { format!("Live · {c} of {all} changes") } else { format!("Live · {c} {}", if c == 1 { "change" } else { "changes" }) }
 }
 
+/// What the live title's numbers are (its tooltip): the ticks are every snapshot of the file, the changes leave out the design as it was before a turn.
+pub fn live_tip(n: usize, c: usize, total: usize) -> String {
+    if n == 0 { return String::new() }
+    let snaps = format!("{n} {} of this file", if n == 1 { "snapshot" } else { "snapshots" });
+    let changes = if c < total { format!("{c} of the thread's {total} design changes") } else { format!("{c} design {}", if c == 1 { "change" } else { "changes" }) };
+    let before = n - c;
+    if before == 0 { format!("{snaps}: {changes}") } else { format!("{snaps}: {changes}, and the design as it was before {before} {}", if before == 1 { "turn" } else { "turns" }) }
+}
 /// The bar for `file` (kind 0 a board, 1 a schematic) from the thread's entries, oldest first. `when` names a time as the person reads it.
 pub fn bar(es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Value { bar_of(es.iter().filter_map(step_of).collect(), es, kind, file, when) }
 /// The same from steps already read (and placed: `locate`).
@@ -94,7 +102,7 @@ pub fn bar_of(all: Vec<Step>, es: &[Src], kind: u8, file: &str, when: &dyn Fn(u6
             "detail": format!("Saved {at} · {}", source(&by, &s.entry)), "files": names(&s.files), "row": row(s)})
     }).collect();
     let (c, total) = (tr.iter().filter(|s| !s.base).count(), all.iter().filter(|s| !s.base).count());
-    json!({"steps": rows, "live": live_words(c, total),
+    json!({"steps": rows, "live": live_words(c, total), "liveTip": live_tip(n, c, total),
         "note": if n == 0 { "The live file. Compare it with any commit, branch or tag." } else { "The live file. Each tick is a saved snapshot; pick one or play the history." }})
 }
 
@@ -207,6 +215,8 @@ mod tests {
         assert_eq!(s[1]["entry"], "tu1"); assert_eq!(s[0]["base"], true);
         assert_eq!((s[0]["row"].as_str(), s[1]["row"].as_str(), s[2]["row"].as_str()), (Some("m1"), Some("fold:tu1"), Some("fold:step:c3")), "a message is its row; a tool call or a turn's end is in its folded run");
         assert_eq!(v["live"], "Live · 2 of 3 changes", "the design as it was before is no change; the schematic's change counts for the thread");
+        assert_eq!(v["liveTip"], "3 snapshots of this file: 2 of the thread's 3 design changes, and the design as it was before 1 turn");
+        assert_eq!(live_tip(26, 21, 27), "26 snapshots of this file: 21 of the thread's 27 design changes, and the design as it was before 5 turns"); assert_eq!(live_tip(2, 2, 2), "2 snapshots of this file: 2 design changes"); assert_eq!(live_tip(0, 0, 4), "");
         let sch = bar(&log(), 1, "", &|t| format!("T{t}"));
         let s = sch["steps"].as_array().unwrap();
         assert_eq!(s.len(), 2); assert_eq!(s[1]["detail"], "Saved T121 · After kicad_sch_edit", "a tool call whose summary is its name says only the name");
