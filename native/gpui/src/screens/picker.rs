@@ -165,7 +165,7 @@ pub fn cap(col: usize, here: usize) -> &'static str {
 
 /// What the menu keeps between frames: the search box, the scroll of the model list, the cursor once a key moved it (with its thread: a cursor moved on another thread is not this one's).
 #[derive(Default)]
-pub struct Pick { pub search: Option<Entity<Composer>>, pub q: String, pub scroll: ScrollHandle, pub cur: Option<(String, Cursor)> }
+pub struct Pick { pub search: Option<Entity<Composer>>, pub q: String, pub scroll: ScrollHandle, pub ascroll: ScrollHandle, pub cur: Option<(String, Cursor)> }
 
 /// The provider in force (the marked choice of the provider section), "" when the hub lists none.
 pub fn provider_of(sections: &[Section]) -> String {
@@ -173,8 +173,29 @@ pub fn provider_of(sections: &[Section]) -> String {
 }
 pub fn fav_key(provider: &str, value: &str) -> String { format!("{provider}/{value}") }
 
-/// The model list's height: the same for every agent, so the picker does not jump as the cursor goes from one to another.
-const LIST_H: f32 = 300.;
+/// How the menu lays out in the room it has: three columns when wide, the agents narrow beside the model list over the effort when less, one column at a time
+/// (agent, then model, then effort, a back control in each head) when narrower still. Everything scales with the person's text size, and nothing is taller
+/// than the window leaves: the lists shrink first, the menu scrolls inside last.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mode { Wide, Stack, Drill }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fit { pub mode: Mode, pub s: f32, pub w: f32, pub agent_w: f32, pub effort_w: f32, pub list_h: f32, pub menu_h: f32, pub side_row: bool }
+/// The menu's width: the composer's (0 until measured), kept to what the window shows of it.
+pub fn menu_width(bar_w: f32, shown_w: f32) -> f32 { let shown = shown_w.max(280.); if bar_w > 0. { bar_w.min(shown) } else { shown.min(898.) } }
+/// The menu's width (the composer's, 0 until measured), the window's height, the text size in percent.
+pub fn fit(menu_w: f32, win_h: f32, pct: u32) -> Fit {
+    let s = (pct as f32 / 100.).clamp(0.6, 2.);
+    let w = if menu_w > 0. { menu_w } else { 898. };
+    let mode = if w >= 700. * s { Mode::Wide } else if w >= 420. * s { Mode::Stack } else { Mode::Drill };
+    let agent_w = match mode { Mode::Wide => (220. * s).min(w * 0.3), Mode::Stack => (150. * s).min(w * 0.4), Mode::Drill => w };
+    // the whole menu may take what the window leaves over the composer and the thread's head
+    let menu_h = (win_h - 230. * s.max(1.)).max(190.);
+    let chrome = match mode { Mode::Wide => 64., Mode::Stack => 206., Mode::Drill => 64. } * s;
+    let side = 150. * s; // Account and Usage under the columns: it scrolls inside its own cap, so it never pushes the lists out
+    let list_h = (menu_h - chrome - side.min(menu_h * 0.35)).clamp(110. * s, 300. * s);
+    Fit { mode, s, w, agent_w, effort_w: 250. * s, list_h, menu_h, side_row: w >= 760. * s }
+}
+
 /// The model column shows at most this many rows (0.14's Models.cap): the search narrows the rest.
 pub const CAP: usize = 50;
 /// The model rows for a search text and the starred models of `provider`: a model stays when every word of the text is in its id or its label (any case); the starred
@@ -203,13 +224,6 @@ pub fn shown(thread: &Value, pick: &Pick, favs: &[String]) -> Option<Shown> {
     Some(Shown { own, cur, all, rows, hidden })
 }
 
-/// The chip under the composer: the hub's words for the thread's agent, model and effort ("codex / gpt-6.1-sol / high"), and the agent for its mark.
-pub fn chip_text(picker: &Value) -> (String, String) {
-    let provider = { let p = string(picker, "provider"); if p.is_empty() { bare(&provider_of(&parse(picker))).to_string() } else { p } };
-    let chip = string(picker, "chip");
-    (if chip.is_empty() { format!("{provider} / default") } else { chip }, provider)
-}
-
 /// A provider's colour and fallback initial: a square of its colour with its initial. (The hub sends no artwork; these stand in.)
 pub fn mark(provider: &str) -> (u32, &'static str) {
     match provider { "claude" => (0xd97757, "A"), "codex" => (0x10a37f, "O"), "grok" => (0x6b7280, "X"), "muse" => (0x8b5cf6, "M"), "opencode" => (0x2563eb, "C"),
@@ -233,28 +247,43 @@ pub fn meter_note(ss: &[Step], provider: &str, own: &Cursor) -> String {
     if ss.iter().all(|s| !s.on) { format!("{} takes no effort setting", bare(provider)) } else { format!("Now: {}", step_word(&own.effort)) }
 }
 
-pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool, pick: &Pick, favs: &[String]) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool, pick: &Pick, favs: &[String], f: &Fit) -> Option<AnyElement> {
     if !open { return None; }
     let c = |n: &str| theme::color(light, n);
+    let z = |v: f32| px(v * f.s);
     let Shown { cur, own, rows, hidden, .. } = shown(thread, pick, favs)?;
     let provider = cur.provider.clone();
-    let head = |col: usize, title: &str| div().px_3().pt_2().pb_1().flex().justify_between().text_size(px(11.)).text_color(if col == cur.col { c("accent") } else { c("faint") }).child(title.to_uppercase()).child(cap(col, cur.col));
+    let drill = f.mode == Mode::Drill;
+    // a column's head: its title (cut short, never over its keys), its keys; in a one-column menu a back control to the column before
+    let head = |col: usize, title: &str| {
+        let back = (drill && col > 0).then(|| div().id(SharedString::from(format!("pick-back-{col}"))).flex_shrink_0().pr_2().cursor_pointer().text_color(c("dim")).child("‹")
+            .on_click(cx.listener(move |this, _, _, cx| this.picker_go(col - 1, cx))));
+        div().px_3().pt_2().pb_1().flex().items_center().gap_1().text_size(z(11.)).text_color(if col == cur.col { c("accent") } else { c("faint") })
+            .children(back).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title.to_uppercase()))
+            .child(div().flex_shrink_0().whitespace_nowrap().child(cap(col, cur.col)))
+    };
+    let col_w = match f.mode { Mode::Wide => (f.w - f.agent_w - f.effort_w).max(120. * f.s), Mode::Stack => (f.w - f.agent_w).max(120. * f.s), Mode::Drill => f.w };
     // the agent column: each agent, what it is dim beside it; the cursor's row raised with the accent edge, the thread's own ticked
-    let mut agents = div().id("picker-agents").w(px(236.)).flex_shrink_0().flex().flex_col().border_r_1().border_color(c("line")).child(head(0, "Agent"));
+    let agents_h = f.list_h + 64. * f.s + if f.mode == Mode::Stack { 142. * f.s } else { 0. };
+    let mut agents = div().id("picker-agents").track_scroll(&pick.ascroll).w(px(f.agent_w)).flex_shrink_0().h(px(agents_h)).overflow_y_scroll().flex().flex_col().when(!drill, |d| d.border_r_1().border_color(c("line")));
+    agents = agents.child(head(0, "Agent"));
     for (ci, ch) in rows.iter().find(|s| s.action == "provider").map(|s| s.choices.clone()).unwrap_or_default().into_iter().enumerate() {
         let (here, value) = (ch.value == cur.provider, ch.value.clone());
+        let full = if ch.note.is_empty() { ch.label.clone() } else { format!("{}  {}", ch.label, ch.note) };
         agents = agents.child(div().id(SharedString::from(format!("pick-a-{ci}"))).flex().items_center().gap_2().px_3().py_1().cursor_pointer().hover(|st| st.bg(c("raise")))
             .when(here, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).when(!ch.ok, |d| d.opacity(0.55))
-            .child(div().w(px(10.)).text_color(c("accent")).child(if ch.value == own.provider { "✓" } else { "" }))
-            .child(logo(&ch.value)).child(div().when(here, |d| d.text_color(c("accent"))).child(ch.label.clone()))
-            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c("faint")).child(ch.note.clone()))
-            .on_click(cx.listener(move |this, _, _, cx| this.picker_press(0, &value, cx))));
+            .child(div().w(z(10.)).flex_shrink_0().text_color(c("accent")).child(if ch.value == own.provider { "✓" } else { "" }))
+            .child(logo(&ch.value))
+            .child(div().flex_shrink_0().when(here, |d| d.text_color(c("accent"))).child(ch.label.clone()))
+            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(ch.note.clone()))
+            .tooltip(tip_of(full, light))
+            .on_click(cx.listener(move |this, _, _, cx| { this.picker_press(0, &value, cx); if drill { this.picker_go(1, cx) } })));
     }
     // the model column: the search, then each model's name and what its CLI calls it
     let why = agent_why(&rows, &provider, &thread["pickerAgents"]);
     let models = rows.iter().find(|s| s.action == "model").map(|s| s.choices.clone()).unwrap_or_default();
-    let namew = models.iter().map(|m| m.label.chars().count()).max().unwrap_or(7).clamp(7, 34) as f32 * 7.3 + 8.;
-    let mut list = div().id("picker-list").track_scroll(&pick.scroll).h(px(LIST_H)).overflow_y_scroll().flex().flex_col().pb_1().pr(px(10.));
+    let namew = (models.iter().map(|m| m.label.chars().count()).max().unwrap_or(7).clamp(7, 34) as f32 * 7.3 * f.s + 8.).min((col_w - 70. * f.s).max(60. * f.s) * 0.6);
+    let mut list = div().id("picker-list").track_scroll(&pick.scroll).h(px(f.list_h)).overflow_y_scroll().flex().flex_col().pb_1().pr(px(10.));
     if models.is_empty() { list = list.child(div().px_3().py_1().text_color(c("faint")).child(if !why.is_empty() { why.clone() } else if pick.q.trim().is_empty() { "No models".to_string() } else { "Nothing matches".to_string() })); }
     let own_agent = cur.provider == own.provider;
     for (ci, ch) in models.iter().enumerate() {
@@ -262,43 +291,54 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
         let fav = fav_key(&provider, &ch.value);
         let starred = favs.iter().any(|f| *f == fav);
         let here = ch.value == cur.model;
+        let full = if ch.note.is_empty() { ch.label.clone() } else { format!("{}\n{}", ch.label, ch.note) };
         let mut row = div().flex().items_center().hover(|st| st.bg(c("raise"))).when(here, |d| d.bg(c("raise")))
             .child(div().id(SharedString::from(format!("pick-m-{ci}"))).flex_1().min_w_0().flex().items_center().gap_2().px_3().py_1().cursor_pointer()
                 .when(here && cur.col == 1, |d| d.border_l_2().border_color(c("accent")))
-                .child(div().w(px(10.)).flex_shrink_0().text_color(c("accent")).child(if own_agent && ch.value == own.model { "✓" } else { "" }))
-                .child(div().w(px(namew)).flex_shrink_0().overflow_hidden().whitespace_nowrap().when(here, |d| d.text_color(c("accent"))).child(ch.label.clone()))
-                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c("faint")).child(ch.note.clone()))
-                .on_click(cx.listener(move |this, _, _, cx| this.picker_press(1, &value, cx))));
+                .child(div().w(z(10.)).flex_shrink_0().text_color(c("accent")).child(if own_agent && ch.value == own.model { "✓" } else { "" }))
+                .child(div().w(px(namew)).flex_shrink_0().overflow_hidden().whitespace_nowrap().text_ellipsis().when(here, |d| d.text_color(c("accent"))).child(ch.label.clone()))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(ch.note.clone()))
+                .tooltip(tip_of(full, light))
+                .on_click(cx.listener(move |this, _, _, cx| { this.picker_press(1, &value, cx); if drill { this.picker_go(2, cx) } })));
         if !ch.value.is_empty() {
             let f2 = fav.clone();
-            row = row.child(div().id(SharedString::from(format!("fav-{ci}"))).px_2().py_1().cursor_pointer().text_color(if starred { c("accent") } else { c("faint") })
+            row = row.child(div().id(SharedString::from(format!("fav-{ci}"))).flex_shrink_0().px_2().py_1().cursor_pointer().text_color(if starred { c("accent") } else { c("faint") })
                 .child(if starred { "★" } else { "☆" })
                 .on_click(cx.listener(move |this, _, _, cx| { this.local_press("fav", &f2, cx); })));
         }
         list = list.child(row);
     }
-    if hidden > 0 { list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("faint")).child(format!("{hidden} more: search to find them"))); }
+    if hidden > 0 { list = list.child(div().px_3().py_1().text_size(z(11.)).text_color(c("faint")).child(format!("{hidden} more: search to find them"))); }
     let (view_h, max, y) = (f32::from(pick.scroll.bounds().size.height), f32::from(pick.scroll.max_offset().height), -f32::from(pick.scroll.offset().y));
     let bar = thumb(view_h, view_h, max, y).map(|(top, h)| div().absolute().top(px(top)).right(px(2.)).w(px(6.)).h(px(h)).bg(c("faint")).opacity(0.7));
-    let search = pick.search.clone().map(|s| div().mx_3().mb_1().px_2().py_1().border_1().border_color(c("line")).flex().items_center().gap_2().child(div().text_color(c("faint")).child("⌕")).child(div().flex_1().child(s)));
-    let model_col = div().flex_1().min_w_0().flex().flex_col().child(head(1, "Model")).children(search).child(div().relative().child(list).children(bar));
+    let search = pick.search.clone().map(|s| div().mx_3().mb_1().px_2().py_1().border_1().border_color(c("line")).flex().items_center().gap_2().child(div().flex_shrink_0().text_color(c("faint")).child("⌕")).child(div().flex_1().min_w_0().overflow_hidden().child(s)));
     // the effort column: a bar a step, higher to the right, the chosen one lit and those below it filled; a step the model does not take drawn disabled
     let ss = steps(&levels(&rows, &cur.model));
     let on_now = lit(&ss, &cur.effort);
     let below = |i: usize| on_now.as_ref().and_then(|l| ss.iter().position(|s| &s.level == l)).map_or(false, |at| i < at);
-    let mut meter = div().flex().items_end().gap(px(6.)).px_3().pt_2();
+    let mut meter = div().flex().items_end().gap(z(4.)).px_3().pt_2();
     for (i, s) in ss.iter().enumerate() {
         let (litd, fill, level, ok) = (on_now.as_deref() == Some(s.level.as_str()), below(i), s.level.clone(), s.on);
         let tone = if litd { c("accent") } else if fill { c("dim") } else { c("line") };
-        meter = meter.child(div().id(SharedString::from(format!("pick-e-{i}"))).flex().flex_col().items_center().gap_1().when(ok, |d| d.cursor_pointer()).when(!ok, |d| d.opacity(0.35))
-            .child(div().w(px(14.)).h(px(6. + 5. * i as f32)).bg(tone))
-            .child(div().text_size(px(10.)).text_color(if litd { c("accent") } else { c("faint") }).child(word(&s.level, &ss).to_string()))
+        meter = meter.child(div().id(SharedString::from(format!("pick-e-{i}"))).flex_1().min_w_0().flex().flex_col().items_center().gap_1().when(ok, |d| d.cursor_pointer()).when(!ok, |d| d.opacity(0.35))
+            .child(div().w(z(14.)).h(z(6. + 5. * i as f32)).bg(tone))
+            .child(div().max_w_full().overflow_hidden().whitespace_nowrap().text_size(z(10.)).text_color(if litd { c("accent") } else { c("faint") }).child(word(&s.level, &ss).to_string()))
             .when(ok, |d| d.on_click(cx.listener(move |this, _, _, cx| this.picker_press(2, &level, cx)))));
     }
-    let effort_col = div().w(px(250.)).flex_shrink_0().flex().flex_col().border_l_1().border_color(c("line")).child(head(2, "Effort")).child(meter)
-        .child(div().px_3().pt_2().text_size(px(11.)).text_color(c("faint")).child(meter_note(&ss, &cur.provider, &own)));
-    Some(div().id("picker").flex().items_start().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).child(agents).child(model_col).child(effort_col).into_any_element())
+    let effort_body = div().flex().flex_col().child(head(2, "Effort")).child(meter)
+        .child(div().px_3().pt_2().pb_2().text_size(z(11.)).text_color(c("faint")).child(meter_note(&ss, &cur.provider, &own)));
+    let model_col = div().flex_1().min_w_0().flex().flex_col().child(head(1, "Model")).children(search).child(div().relative().child(list).children(bar));
+    let body = match f.mode {
+        Mode::Wide => div().flex().items_start().child(agents).child(model_col)
+            .child(div().id("picker-effort").w(px(f.effort_w)).flex_shrink_0().h(px(agents_h)).overflow_y_scroll().border_l_1().border_color(c("line")).child(effort_body)),
+        Mode::Stack => div().flex().items_start().child(agents).child(div().flex_1().min_w_0().flex().flex_col().child(model_col).child(div().border_t_1().border_color(c("line")).child(effort_body))),
+        Mode::Drill => div().flex().flex_col().child(match cur.col { 0 => agents.into_any_element(), 2 => effort_body.into_any_element(), _ => model_col.into_any_element() }),
+    };
+    Some(body.id("picker").w_full().min_w_0().text_size(z(12.)).into_any_element())
 }
+
+/// A hover with the whole text of a row, for what the row had to cut short.
+fn tip_of(text: String, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static { move |_, cx| cx.new(|_| super::combo::Tip(text.clone(), light)).into() }
 
 impl Backplane {
     /// The model chip or its key: open or shut the menu; opening clears the search and puts the keyboard in it.
@@ -338,6 +378,7 @@ impl Backplane {
     fn picker_reveal(&mut self) {
         let Some(s) = self.picker_shown() else { return };
         if let Some(ix) = child_of(&s.rows, &s.cur) { self.screens.pick.scroll.scroll_to_item(ix); }
+        if let Some(ix) = s.rows.iter().find(|x| x.action == "provider").and_then(|x| x.choices.iter().position(|c| c.value == s.cur.provider)) { self.screens.pick.ascroll.scroll_to_item(ix + 1); }
         self.m("pick", serde_json::json!({"col": COLS[s.cur.col], "provider": s.cur.provider, "model": s.cur.model, "effort": s.cur.effort, "child": child_of(&s.rows, &s.cur), "y": -f32::from(self.screens.pick.scroll.offset().y),
             "models": s.rows.iter().find(|x| x.action == "model").map_or(0, |x| x.choices.len()), "hidden": s.hidden}));
     }
@@ -361,6 +402,11 @@ impl Backplane {
     pub(crate) fn picker_enter(&mut self, cx: &mut Context<Self>) {
         if let Some(s) = self.picker_shown() { if s.rows.iter().any(|x| x.action == "model" && !x.choices.is_empty()) { self.picker_apply(s.cur, &s.all, &s.own); } }
         self.picker_close(cx);
+    }
+    /// One column on its own (the one-column menu): the cursor keeps its agent, model and effort and the keys go to `col`.
+    fn picker_go(&mut self, col: usize, cx: &mut Context<Self>) {
+        if let Some(s) = self.picker_shown() { let mut c = s.cur.clone(); c.col = col.min(2); self.picker_store(c); }
+        cx.notify();
     }
     /// A row pressed (0 agent, 1 model, 2 effort): the cursor moves there and applies at once; the menu stays open (0.14's Mpk.click).
     fn picker_press(&mut self, col: usize, value: &str, cx: &mut Context<Self>) {
@@ -396,6 +442,32 @@ mod tests {
     fn acts(v: Vec<Command>) -> Vec<(String, String)> { v.into_iter().map(|c| match c { Command::Action(a, v) => (a, v), c => panic!("{c:?}") }).collect() }
     fn pair(a: &str, v: &str) -> (String, String) { (a.to_string(), v.to_string()) }
     fn lv(xs: &[&str]) -> Vec<String> { xs.iter().map(|x| x.to_string()).collect() }
+    #[test] fn the_menu_reflows_by_the_room_and_the_text_size() {
+        // the person's composer (898 wide, its cap) at 80%, 100%, 125%: three columns
+        for pct in [80, 100, 125] { let f = fit(898., 1200., pct); assert_eq!(f.mode, Mode::Wide, "{pct}%"); assert!(f.w - f.agent_w - f.effort_w >= 250. * f.s, "{pct}%: the model column keeps its room"); }
+        assert_eq!(fit(600., 900., 100).mode, Mode::Stack);
+        assert_eq!(fit(600., 900., 125).mode, Mode::Stack);
+        assert_eq!(fit(500., 900., 125).mode, Mode::Drill, "bigger text, less room: one column");
+        assert_eq!(fit(380., 900., 100).mode, Mode::Drill);
+        // never wider than the room, in any mode
+        for w in [300., 420., 560., 700., 760., 898.] { for pct in [80, 100, 125] { let f = fit(w, 700., pct); assert!(f.agent_w <= f.w * 0.41 || f.mode == Mode::Drill, "{w} {pct}"); assert!(f.mode == Mode::Drill || f.agent_w + f.effort_w * (f.mode == Mode::Wide) as i32 as f32 <= f.w, "{w} {pct}"); } }
+    }
+    #[test] fn the_menu_never_outgrows_the_window_and_the_list_keeps_a_minimum() {
+        for h in [480., 600., 640., 720., 900., 1238.] { for pct in [80, 100, 125] {
+            let f = fit(898., h, pct);
+            assert!(f.menu_h <= (h - 230. * f.s.max(1.)).max(190.) + 0.01, "{h} {pct}: the menu leaves the composer and the head their room");
+            assert!(f.list_h >= 110. * f.s - 0.01 && f.list_h <= 300. * f.s + 0.01, "{h} {pct}: {}", f.list_h);
+        } }
+        assert!(fit(898., 1238., 80).list_h > fit(898., 600., 80).list_h, "a taller window gives the list more");
+        assert_eq!(fit(0., 900., 100).w, 898., "before the composer is measured: the composer's own cap");
+    }
+    #[test] fn the_menu_keeps_to_what_the_window_shows_of_the_composer() {
+        assert_eq!(menu_width(898., 1000.), 898.);
+        assert_eq!(menu_width(898., 436.), 436., "an 800 px window: the composer runs past it, the menu does not");
+        assert_eq!(menu_width(0., 2000.), 898.);
+        assert_eq!(menu_width(898., 50.), 280., "never narrower than a column can be drawn");
+        assert!(fit(menu_width(898., 436.), 600., 80).w <= 436.);
+    }
     #[test] fn sections_in_tab_order_with_the_marked_choice_notes_and_empty_ones_dropped() {
         let p: Value = serde_json::from_str(r#"{"label":"x","models":[{"label":"Opus","value":"opus","on":true,"note":"Opus 5.5"},{"label":"Haiku","value":"haiku","on":false}],"efforts":[{"label":"auto","value":"","on":true}],"providers":[]}"#).unwrap();
         let s = parse(&p);
@@ -499,10 +571,6 @@ mod tests {
         let s = shown(&t, &pick, &[]).unwrap(); assert_eq!(s.cur, s.own);
         let pick = Pick { cur: Some(("h|t2".into(), far.clone())), ..Default::default() };
         let s = shown(&t, &pick, &[]).unwrap(); assert_eq!(s.cur, far); assert_eq!(s.rows[1].choices.len(), 2, "its agent's rows");
-    }
-    #[test] fn the_chip_reads_the_hubs_words_and_its_agent() {
-        let (p, _) = fixture(); assert_eq!(chip_text(&p), ("claude / opus / high".to_string(), "claude".to_string()));
-        let old = serde_json::json!({"providers": [{"label": "codex", "value": "@codex", "on": true}]}); assert_eq!(chip_text(&old), ("codex / default".to_string(), "codex".to_string()), "a hub that sends no chip");
     }
     #[test] fn a_provider_value_names_its_mark() { assert_eq!(mark(bare("@claude")), mark("claude")); assert_eq!(bare("codex"), "codex"); }
     #[test] fn the_thumb_follows_the_scroll_and_hides_without_overflow() {

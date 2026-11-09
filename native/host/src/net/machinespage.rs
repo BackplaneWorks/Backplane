@@ -30,6 +30,7 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
     }
     // machines the linked ones are linked to: one press asks for a code through them, the person approves on that machine
     for v in d["via"].as_array().into_iter().flatten() {
+        if linked.iter().any(|l| super::machines::hostport(s(l, "url")) == super::machines::hostport(s(v, "url"))) { continue }
         r.push(row(if s(v, "name").is_empty() { s(v, "url") } else { s(v, "name") }, &format!("{} · linked to {}, not to this machine yet. Pairing asks you to approve on that machine.", s(v, "url"), s(v, "via_name")),
             vec![btn("Pair", "machine-introduce", &format!("{}\u{1f}{}", s(v, "via"), s(v, "url")), true)]));
     }

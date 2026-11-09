@@ -1,6 +1,6 @@
 //! The composer's one chip: the provider's mark, the model, the effort, the account and what its binding limit has left, in the hub's words (`thread.combo`,
-//! host present/keys.rs `combo`), at the width there is. A click, the model key or the account key opens one menu with three parts: Model (the picker: search,
-//! stars, effort), Account (each login with what it has left, digits pick, Move all threads here) and Usage (the thread's account's windows with their resets and
+//! host present/keys.rs `combo`), at the width there is. A click, the model key or the account key opens one menu with three parts: Model (the picker: agent,
+//! model with search and stars, effort; the menu's whole width), Account (each login with what it has left, digits pick, Move all threads here) and Usage (the thread's account's windows with their resets and
 //! its extra usage). The model key puts the keyboard in the search, the account key on the accounts (their digits); the other key moves it, the same key shuts it.
 use super::accounts;
 use crate::{string, theme, Backplane};
@@ -54,7 +54,7 @@ pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32
         .on_click(cx.listener(|this, _, window, cx| this.combo_click(window, cx)))
 }
 /// A hover of several lines.
-struct Tip(String, bool);
+pub(crate) struct Tip(pub String, pub bool);
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let c = |n: &str| theme::color(self.1, n);
@@ -63,30 +63,39 @@ impl Render for Tip {
 }
 
 /// The menu: Model beside Account and Usage, or under them when the composer is narrow (`narrow`).
-pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Backplane, narrow: bool) -> Option<AnyElement> {
+pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Backplane, bar_w: f32, win: (f32, f32)) -> Option<AnyElement> {
     if !this.screens.picker_open { return None }
     let c = |n: &str| theme::color(light, n);
-    let model = super::picker::view(cx, light, thread, true, &this.screens.pick, &this.local.favs);
+    // the composer can be wider than what the window shows of it (the thread's own least width): the menu keeps to the window, less the sidebar, the rail and the margins
+    let shown_w = win.0 - if this.sidebar_open { this.local.sidebar_px as f32 } else { 0. } - 100.;
+    let f = super::picker::fit(super::picker::menu_width(bar_w, shown_w), win.1, this.local.text_pct);
+    let narrow = !f.side_row;
+    let z = |v: f32| px(v * f.s);
+    let model = super::picker::view(cx, light, thread, true, &this.screens.pick, &this.local.favs, &f);
     let st = &this.screens.acct;
     let accounts_on = matches!(thread["provider"].as_str().map(super::picker::bare), Some("claude" | "codex")) || thread["combo"]["account"].as_str().map_or(false, |a| !a.is_empty());
-    let head = |t: &str, hint: String, on: bool| div().px_3().pt_2().pb_1().flex().justify_between().text_size(px(11.)).text_color(c(if on { "accent" } else { "faint" })).child(t.to_uppercase()).child(hint);
+    let head = |t: &str, hint: String, on: bool| div().px_3().pt_2().pb_1().flex().justify_between().text_size(z(11.)).text_color(c(if on { "accent" } else { "faint" })).child(t.to_uppercase()).child(hint);
     let mut side = div().flex().flex_col().min_w_0();
     if accounts_on {
-        side = side.child(head("Account", if st.menu { "1–9".into() } else { this.key_hint("account") }, st.menu)).child(accounts::section(cx, light, st));
+        let acct = div().flex_1().min_w_0().flex().flex_col().child(head("Account", if st.menu { "1–9".into() } else { this.key_hint("account") }, st.menu)).child(accounts::section(cx, light, st, f.s));
         let (rows, notes) = usage_rows(&thread["combo"]);
-        let mut u = div().flex().flex_col().px_3().pb_2().gap(px(2.)).text_size(px(12.));
+        let mut u = div().flex().flex_col().px_3().pb_2().gap(px(2.)).text_size(z(12.));
         for r in rows {
             u = u.child(div().flex().items_center().gap_2().when(!r.applies, |d| d.opacity(0.6))
-                .child(div().w(px(96.)).flex_shrink_0().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(r.label)).child(div().w(px(66.)).flex_shrink_0().text_color(c(r.tone)).child(r.left))
-                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c("faint")).child(r.resets)));
+                .child(div().w(z(96.)).flex_shrink_0().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(r.label)).child(div().w(z(66.)).flex_shrink_0().text_color(c(r.tone)).child(r.left))
+                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(r.resets)));
         }
-        for n in notes { u = u.child(div().text_size(px(11.)).text_color(c("dim")).child(n)) }
-        side = side.child(div().mx_2().my_1().h(px(1.)).bg(c("line"))).child(head("Usage", String::new(), false)).child(u);
+        for n in notes { u = u.child(div().text_size(z(11.)).text_color(c("dim")).child(n)) }
+        let usage = div().flex_1().min_w_0().flex().flex_col().child(head("Usage", String::new(), false)).child(u);
+        // under the picker: Account beside Usage when the composer is wide, one over the other when it is narrow
+        side = if narrow { side.child(acct).child(div().mx_2().my_1().h(px(1.)).bg(c("line"))).child(usage) } else { side.flex_row().items_start().child(acct).child(usage.border_l_1().border_color(c("line"))) };
     }
-    let model_col = div().flex_1().min_w_0().flex().flex_col().child(head("Model", if st.menu { this.key_hint("models") } else { "↑↓ ←→ Tab".into() }, !st.menu)).children(model);
-    let body = if narrow { div().flex().flex_col().child(model_col).when(accounts_on, |d| d.child(div().h(px(1.)).bg(c("line"))).child(side)) }
-        else { div().flex().child(model_col).when(accounts_on, |d| d.child(div().w(px(1.)).bg(c("line"))).child(side.w(px(360.)).flex_shrink_0())) };
-    Some(div().id("combo-menu").border_1().border_color(c("line")).bg(c("panel")).child(body).into_any_element())
+    // the picker (screens/picker.rs: agent, model and effort, each column with its own head and keys) takes the menu's whole width, Account and Usage under it
+    // Account and Usage keep to their own room: they scroll inside it rather than push the picker's lists out of the window
+    let side = div().id("combo-side").max_h(px((f.menu_h * 0.35).max(120.))).overflow_y_scroll().child(side);
+    let model_col = div().w_full().min_w_0().flex().flex_col().children(model);
+    let body = div().flex().flex_col().child(model_col).when(accounts_on, |d| d.child(div().h(px(1.)).bg(c("line"))).child(side));
+    Some(div().id("combo-menu").w_full().max_w(px(f.w)).max_h(px(f.menu_h)).overflow_y_scroll().border_1().border_color(c("line")).bg(c("panel")).child(body).into_any_element())
 }
 
 impl Backplane {
