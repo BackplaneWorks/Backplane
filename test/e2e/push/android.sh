@@ -8,10 +8,10 @@ SERIAL=${1:?adb serial}; HUB=$(realpath "${2:?hub binary}"); APK=$(realpath "${3
 PKG=${PKG:-dev.backplane.mobile.gpui}; SCHEME=${SCHEME:-bpgpui}; [ "$PKG" = dev.backplane.mobile ] && { echo "never the person's own app (dev.backplane.mobile)"; exit 1; }; PORT=${PORT:-3870}; CTL=http://127.0.0.1:$((PORT+1)); QUIET=${QUIET:-10}
 mkdir -p "$HOME/.cache/respectful-push" "$OUT"; T=$(mktemp -d "$HOME/.cache/respectful-push/and.XXXXXX"); rm -f "$OUT"/*.png
 A() { adb -s "$SERIAL" "$@"; }
-pids=(); stop() { curl -s -m3 "$CTL/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; pkill -f -- "--home $T/home" 2>/dev/null; A reverse --remove tcp:$PORT >/dev/null 2>&1; rm -rf "$T"; }
+. "$ROOT/test/e2e/lib/own-group.sh"; pids=(); stop() { curl -s -m3 "$CTL/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; own_stop; A reverse --remove tcp:$PORT >/dev/null 2>&1; rm -rf "$T"; }
 trap stop EXIT; trap "exit 143" INT TERM HUP
 cd "$ROOT/test/e2e/push"
-MODE=sink PERF_REPO=$ROOT bun ctl.mjs "$T" "$HUB" "$PORT" > "$OUT/ctl.log" 2>&1 & pids+=($!)
+MODE=sink PERF_REPO=$ROOT own bun ctl.mjs "$T" "$HUB" "$PORT" > "$OUT/ctl.log" 2>&1; pids+=($!)
 for _ in $(seq 60); do grep -q '^ready' "$OUT/ctl.log" && break; sleep 1; done
 grep -q '^ready' "$OUT/ctl.log" || { echo "the hub did not start"; tail -5 "$OUT/ctl.log"; exit 1; }
 TOK=$(cat "$T/home/token")

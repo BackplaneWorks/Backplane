@@ -19,7 +19,7 @@ log_has() { grep -q "$1" "$SW/$2" 2>/dev/null; }
 place() { python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])); print(v["target"].get("id",""))' "$SW/home/gpui-place.json" 2>/dev/null; }
 token_turns() { printf 'Authorization: Bearer %s\n' "$(cat "$SW/home/token")" | curl -s -m3 -H @- "http://127.0.0.1:$PORT/dev/turns"; }
 shown() { [ "$(cat "$DEV/.shown" 2>/dev/null)" = "$1" ]; }
-cut_build() { "$HERE/scripts/dev-cut.sh" "$1" | awk '{print $2}'; }
+cut_build() { DEV_CUT_NO_GUARD=1 "$HERE/scripts/dev-cut.sh" "$1" | awk '{print $2}'; }   # (its own dev folder: builds of a hub and a window alone)
 variant() { local v=$T/$1; mkdir -p "$v"; cp "$B/backplane-hub" "$B/backplane-gpui" "$v/"; cp -r "$B/assets" "$v/"; printf '\n#%s' "$1" >> "$v/backplane-hub"; echo "$v"; }
 XP=; IP=; WP=
 finish() {
