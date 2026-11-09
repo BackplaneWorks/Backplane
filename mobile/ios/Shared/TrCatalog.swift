@@ -3,6 +3,11 @@
 
 extension Tr {
     static let catalog = #"""
+ios.viewerbg	3D viewer background	3Dビューアの背景
+ios.viewerbg.auto	Auto	自動
+ios.viewerbg.custom	Custom	カスタム
+ios.viewerbg.color	Colour	色
+ios.viewerbg.note	Behind Mech parts and the 3D board, on this phone. Auto follows the appearance.	Mechのパーツと3D基板の背景（このスマートフォン）。自動は外観に従います。
 ios.hub.use	Use {hub}	{hub}を使う
 ios.thread.loading	Loading the thread…	スレッドを読み込み中…
 ios.hub.connecting	Connecting to the hub…	ハブに接続中…
