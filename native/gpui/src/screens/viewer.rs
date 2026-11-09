@@ -535,9 +535,21 @@ pub fn width_for(window_w: f32, x: f32, rail: f32, sidebar: f32) -> u32 {
 struct ResizeDrag;
 struct Ghost;
 impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div() } }
+/// A width from the edge's drag: on screen at once; written to this device's file once the drag rests (300 ms), not on every move (a file write per
+/// pointer move made the drag stutter).
+static PANE_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn set_pane(this: &mut Backplane, w: u32, cx: &mut Context<Backplane>) {
-    PANE_W.store(w, std::sync::atomic::Ordering::Relaxed);
-    this.local.viewer_px = w; this.local.save(); this.ui_epoch += 1; cx.notify();
+    use std::sync::atomic::Ordering::Relaxed;
+    if PANE_W.load(Relaxed) == w && this.local.viewer_px == w { return }
+    PANE_W.store(w, Relaxed);
+    this.local.viewer_px = w; this.ui_epoch += 1; cx.notify();
+    if !PANE_SAVE.swap(true, Relaxed) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+            PANE_SAVE.store(false, Relaxed);
+            let _ = this.update(cx, |this, _| this.local.save());
+        }).detach();
+    }
 }
 /// The pane's left edge: drag to resize, double click for the default (the web's split).
 fn resize_handle(cx: &mut Context<Backplane>) -> AnyElement {
