@@ -76,16 +76,26 @@ def logged(f, needle, secs):
         time.sleep(0.3)
     return False
 def screen(path):
-    if WIN:
-        from PIL import ImageGrab; ImageGrab.grab(all_screens=True).save(path)
-    elif MAC: subprocess.run(['screencapture', '-x', path], check=False)
-    elif os.environ.get('WAYLAND_DISPLAY') and shutil.which('grim'): subprocess.run(['grim', path], check=False)   # a Wayland desktop (the client through XWayland)
-    elif os.environ.get('DISPLAY'): subprocess.run(['import', '-window', 'root', path], check=False)
-    else:   # Wayland without X: weston's screenshooter (weston started with --debug) writes wayland-screenshot-*.png in its folder
-        d = os.path.dirname(path); before = set(os.listdir(d))
-        subprocess.run(['weston-screenshooter'], cwd=d, check=False)
-        new = [f for f in os.listdir(d) if f not in before and f.endswith('.png')]
-        if new: os.replace(os.path.join(d, new[0]), path)
+    """The whole screen as a PNG at `path`, with what the OS has (Windows: PIL, else PowerShell's System.Drawing); nothing when there is no way."""
+    try:
+        if WIN:
+            try:
+                from PIL import ImageGrab; ImageGrab.grab(all_screens=True).save(path); return
+            except ImportError: pass
+            ps = ("Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; "
+                  "$m=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($m); $g.CopyFromScreen($b.Left,$b.Top,0,0,$m.Size); "
+                  "$m.Save('%s',[System.Drawing.Imaging.ImageFormat]::Png)" % path.replace("'", "''"))
+            subprocess.run(['powershell', '-NoProfile', '-Command', ps], check=False, timeout=30)
+        elif MAC: subprocess.run(['screencapture', '-x', path], check=False, timeout=30)
+        elif os.environ.get('WAYLAND_DISPLAY') and shutil.which('grim'): subprocess.run(['grim', path], check=False, timeout=30)
+        elif os.environ.get('DISPLAY') and shutil.which('import'): subprocess.run(['import', '-window', 'root', path], check=False, timeout=30)
+        else:
+            # Wayland without X: weston's screenshooter (weston started with --debug) writes wayland-screenshot-*.png in its folder
+            d = os.path.dirname(path); before = set(os.listdir(d))
+            subprocess.run(['weston-screenshooter'], cwd=d, check=False)
+            new = [f for f in os.listdir(d) if f not in before and f.endswith('.png')]
+            if new: os.replace(os.path.join(d, new[0]), path)
+    except Exception as e: print('note: no screenshot (%s)' % e)
 ok = fail = 0
 def check(what, good, ev=''):
     global ok, fail
@@ -111,7 +121,40 @@ for c in calls:
 check('preview_evaluate read the title the click set (clicked:1)', 'clicked:1' in callres.get('preview_evaluate', ''), callres.get('preview_evaluate', '')[:200])
 check('the embedded page the person sees is the agent\'s page (%s)' % r1.get('url'), r1.get('url') == PAGE, json.dumps(r1)[:300])
 check('the agent\'s click changed the embedded page (title %s)' % r1.get('title'), r1.get('title') == 'clicked:1', json.dumps(r1)[:300])
-check('the embedded page painted (non-white samples %s)' % r1.get('non_white_samples'), (r1.get('non_white_samples') or 0) > 20, json.dumps(r1)[:300])
+# windowed on Windows and macOS the client cannot read Chromium's pixels back (-1): the screen check below is the proof there
+if (r1.get('non_white_samples') or 0) >= 0 or not r1.get('windowed'):
+    check('the embedded page painted (non-white samples %s)' % r1.get('non_white_samples'), (r1.get('non_white_samples') or 0) > 20, json.dumps(r1)[:300])
+def png_pixels(path):
+    """(width, height, rows of RGB tuples) of an 8-bit PNG, with the standard library only (no PIL on every runner)."""
+    import zlib, struct
+    b = open(path, 'rb').read(); i = 8; idat = b''; plte = b''
+    while i < len(b):
+        n, t = struct.unpack('>I4s', b[i:i + 8]); d = b[i + 8:i + 8 + n]; i += 12 + n
+        if t == b'IHDR': w, h, depth, ct = struct.unpack('>IIBB', d[:10])
+        elif t == b'PLTE': plte = d
+        elif t == b'IDAT': idat += d
+    if depth != 8: return w, h, []
+    bpp = {2: 3, 6: 4, 3: 1, 0: 1, 4: 2}[ct]; raw = zlib.decompress(idat); stride = w * bpp; rows = []; prev = bytearray(stride); o = 0
+    for _ in range(h):
+        f = raw[o]; line = bytearray(raw[o + 1:o + 1 + stride]); o += 1 + stride
+        for x in range(stride):
+            a = line[x - bpp] if x >= bpp else 0; up = prev[x]; c = prev[x - bpp] if x >= bpp else 0
+            if f == 1: line[x] = (line[x] + a) & 255
+            elif f == 2: line[x] = (line[x] + up) & 255
+            elif f == 3: line[x] = (line[x] + (a + up) // 2) & 255
+            elif f == 4: pa, pb, pc = abs(up - c), abs(a - c), abs(a + up - 2 * c); line[x] = (line[x] + (a if pa <= pb and pa <= pc else up if pb <= pc else c)) & 255
+        prev = line
+        if ct == 3: rows.append([tuple(plte[3 * line[x]:3 * line[x] + 3]) for x in range(w)])
+        elif ct in (0, 4): rows.append([(line[x * bpp],) * 3 for x in range(w)])
+        else: rows.append([tuple(line[x * bpp:x * bpp + 3]) for x in range(w)])
+    return w, h, rows
+green = 0
+if os.path.exists(P('window.png')):
+    try:
+        _, _, rows = png_pixels(P('window.png'))
+        green = sum(1 for row in rows[::2] for (r, g, b) in row[::2] if abs(r - 0x22) < 14 and abs(g - 0xaa) < 14 and abs(b - 0x77) < 14)
+    except Exception as e: print('note: could not read window.png:', e)
+check('the page is on the screen in the client\'s window (its green button in the screenshot: %d px)' % green, green > 100, 'windowed %s' % r1.get('windowed'))
 check('the agent\'s screenshot arrived', os.path.exists(P('agent', '3-preview_snapshot.png')), os.listdir(P('agent')))
 check('the window was captured', os.path.exists(P('window.png')), 'no snapshot call' if not got_snap else 'screen capture failed')
 stop()

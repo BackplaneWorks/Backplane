@@ -138,7 +138,8 @@ def main():
         (f"the page is the {a.mode} page" if a.mode != "any" else "a page mode was reported", (a.mode == "any" and bool(modes)) or modes == [{"fallback": "frames"}.get(a.mode, a.mode)], f"modes={modes} banner={last('open').get('banner', '')!r}"),
         *([("the tab says why the embedded browser is not used", any_("open", lambda e: "embedded browser unavailable" in str(e.get("banner", ""))), f"banner={last('open').get('banner', '')!r}")] if a.mode == "fallback" else []),
         ("a local http page loaded (title bp-index)", any_("goto_http", lambda e: e.get("title") == "bp-index" and e.get("frame", [0])[0] > 0), json.dumps(last("goto_http"))[:300]),
-        ("the page's frame has content", any_("goto_http", lambda e: e.get("non_white_samples", 0) > 0), json.dumps(last("goto_http"))[:200]),
+        # (-1: a windowed page on Windows or macOS, whose pixels the client cannot read back; test/cef/agent_proof.py finds it on the screen there)
+        ("the page's frame has content (or is a windowed page shown at the pane's size)", any_("goto_http", lambda e: e.get("non_white_samples", 0) > 0 or (e.get("non_white_samples") == -1 and e.get("frame", [0])[0] > 100)), json.dumps(last("goto_http"))[:200]),
         ("typing reached the page's input (title typed:hi)", any_("type", lambda e: e.get("title") == "typed:hi"), json.dumps(last("type"))[:300]),
         ("scrolling reached the page (title scrolled:)", any_("scroll", lambda e: str(e.get("title", "")).startswith("scrolled:")), json.dumps(last("scroll"))[:300]),
         ("a click on the page's link navigated (bp-page2)", any_("click_link", lambda e: e.get("title") == "bp-page2"), json.dumps(last("click_link"))[:300]),

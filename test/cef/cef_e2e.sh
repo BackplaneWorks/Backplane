@@ -128,10 +128,12 @@ titles > "$OUT/targets-after-popup.txt"
 # the popup (a window.open target the host creates paused) loads, and its page sees window.opener: evaluated in the popup itself once it has run
 for i in 1 2 3 4 5 6 7 8 9 10; do bun "$HERE/cdp_eval.mjs" $CDP 'JSON.stringify([location.pathname, !!window.opener])' > "$OUT/popup-opener.txt" 2>&1 || true; grep -q 'popup.html' "$OUT/popup-opener.txt" && break; sleep 2; done
 check "window.open popup loaded and kept its opener ($(grep popup.html "$OUT/popup-opener.txt" | head -1 | cut -c1-120))" "$(grep -q 'popup.html.*true' "$OUT/popup-opener.txt" && echo 1 || echo 0)" "$(cat "$OUT/popup-opener.txt" | head -3)"
+# windowed Chromium presents its own frames (the client copies none): its frame rate is the page's own, requestAnimationFrame over one second, read over CDP
+RAF=$(bun "$HERE/cdp_eval.mjs" $CDP 'new Promise(r=>{let n=0;const t=performance.now();const f=()=>{n++;performance.now()-t<1000?requestAnimationFrame(f):r(n)};requestAnimationFrame(f)})' 2>/dev/null | cut -f2 | sort -n | tail -1)
 # a real layout change resizes the page: fold the sidebar (the chevron at the window's top left), measured from the change to the first painted frame of the new size
 python3 "$HERE/xinput.py" click 16 59; sleep 1
 wait $CP || true
-python3 - "$OUT/client.log" <<'PY' > "$OUT/bench.txt"
+python3 - "$OUT/client.log" "${RAF:-0}" <<'PY' > "$OUT/bench.txt"
 import json,sys,re
 reps=[]
 for l in open(sys.argv[1],errors='ignore'):
@@ -141,10 +143,12 @@ for l in open(sys.argv[1],errors='ignore'):
 resize=[r['resize_to_frame_ms'] for r in reps if r.get('resize_to_frame_ms',-1)>=0]
 a,b,c=reps[-3],reps[-2],reps[-1]
 fps=(b['paints']-a['paints'])/max(0.001,(b['epoch_ms']-a['epoch_ms'])/1000)
+if c.get('windowed'): fps=float(sys.argv[2] or 0)
 print(round(fps,1), round(c.get('click_to_pixel_ms',-1),1), round(resize[-1],1) if resize else -1)
 PY
 read FPS LAT RSZ < "$OUT/bench.txt"
-echo "measured: ${FPS} fps painted into the gpui image (animated page, software rendering), click to changed pixel ${LAT} ms, resize to painted frame ${RSZ} ms"
+if grep -q '"windowed":true' "$OUT/client.log"; then echo "measured (windowed: Chromium's own window): ${FPS} fps (the page's requestAnimationFrame), click to changed pixel ${LAT} ms, resize to Chromium's widget at the new size ${RSZ} ms"
+else echo "measured: ${FPS} fps painted into the gpui image (animated page, software rendering), click to changed pixel ${LAT} ms, resize to painted frame ${RSZ} ms"; fi
 check "the page animates at a usable frame rate (${FPS} fps, software GL)" "$(python3 -c "print(1 if float('${FPS:-0}')>=15 else 0)")" "$FPS"
 LATMAX=400; [ -z "${E2E_SLOW:-}" ] || LATMAX=1500   # E2E_SLOW: a small CI runner (software rendering on 4 cores)
 check "input to visible change is fast (click to changed pixel ${LAT} ms)" "$(python3 -c "print(1 if 0<=float('${LAT:--1}')<${LATMAX} else 0)")" "$LAT"

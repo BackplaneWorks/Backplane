@@ -176,6 +176,11 @@ jobs:
           set -o pipefail; mkdir -p out; B="$PWD/dist"
           (for i in $(seq 1 30); do { date +%T; ps -axo pid,ppid,stat,command | grep -i -E 'backplane|helper' | grep -v grep; } >> out/ps.txt; sleep 4; done) & 
           BACKPLANE_CEF_LOG="$PWD/out/cef.log" python3 test/cef/agent_proof.py "$B/backplane-gpui" "$B/backplane-hub" "$B/backplane-browser" "$B/assets" "$PWD/out/browser" 2>&1 | tee out/browser.txt
+      - name: the windowed Browser tab follows the pane, overlays, views and tabs (test/cef/windowed_proof.py)
+        if: always()
+        run: |
+          set -o pipefail; B="$PWD/dist"
+          python3 test/cef/windowed_proof.py "$B/backplane-gpui" "$B/backplane-hub" "$B/assets" "$PWD/out/windowed" 2>&1 | tee out/windowed.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: browser-src, path: out }

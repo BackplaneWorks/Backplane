@@ -1,4 +1,9 @@
-//! Embedded Chromium (CEF, windowless/OSR) for the Browser tab, behind the `cef` cargo feature (docs/browser-cef.md).
+//! Embedded Chromium (CEF) for the Browser tab, behind the `cef` cargo feature (docs/browser-cef.md).
+//!
+//! Two ways to show a page. Windowed (the default): Chromium draws into a native child window of the client's own window (X11 child window, child HWND,
+//! NSView subview; `cef_native.rs`), placed over the viewer pane and shown, hidden and given the keyboard by the page (cef_page.rs); nothing is copied.
+//! Off screen (OSR), the fallback when the client's window cannot be a parent (Wayland) or `BACKPLANE_CEF_OSR` is set: CEF paints BGRA frames
+//! (`on_paint`) that the page draws as an image and the page sends it the person's input.
 //!
 //! One process-wide engine (`Engine::get`) is started on the first Browser tab shown: `cef::initialize` with the multi-threaded message loop (CEF
 //! runs its own UI thread; the callbacks below arrive there and only touch `Tab`'s mutexes) and `remote_debugging_port` on a loopback port the agent
@@ -6,7 +11,7 @@
 //! A `Tab` is one browser: its newest frame (BGRA, copied out of `on_paint`), address, title, loading state, cursor and the popups it asked for,
 //! plus the input methods the gpui page calls (mouse, wheel, key, text, IME, focus, resize, navigation).
 use cef::{rc::Rc as _, *};
-pub use cef::{CefStringList, ImplFileDialogCallback};
+pub use cef::{CefStringList, ImplFileDialogCallback, KeyEvent};
 use super::downloads::{bring_to_downloads, safe_name, unique_path};
 use std::{path::{Path, PathBuf}, sync::{atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering}, Arc, Mutex, OnceLock}};
 
@@ -18,7 +23,7 @@ pub enum Cur { Default, Hand, IBeam, Cross, Wait, Help, Move, ResizeH, ResizeV, 
 
 pub struct Frame { pub w: u32, pub h: u32, pub bgra: Vec<u8> }
 #[derive(Default)]
-pub struct State { pub frame: Option<Frame>, pub fresh: bool, pub url: String, pub title: String, pub loading: bool, pub back: bool, pub forward: bool, pub popups: Vec<String>, pub popup_tabs: Vec<Arc<Tab>>, pub dialogs: Vec<Dialog>, pub download: String, pub closed: bool, pub load_error: String }
+pub struct State { pub frame: Option<Frame>, pub fresh: bool, pub got_focus: bool, pub person: bool, pub keys: Vec<(String, KeyEvent)>, pub took_focus: bool, pub url: String, pub title: String, pub loading: bool, pub back: bool, pub forward: bool, pub popups: Vec<String>, pub popup_tabs: Vec<Arc<Tab>>, pub dialogs: Vec<Dialog>, pub download: String, pub closed: bool, pub load_error: String }
 /// A file dialog CEF asked for (OSR has none of its own): the page shows gpui's picker and answers through `cb`.
 pub struct Dialog { pub save: bool, pub multiple: bool, pub folder: bool, pub title: String, pub cb: FileDialogCallback }
 unsafe impl Send for Dialog {}
@@ -38,8 +43,15 @@ pub struct Tab {
     /// how many frames CEF has painted (the e2e's frame rate)
     pub paints: std::sync::atomic::AtomicU64,
     /// a resize in flight (when, the physical width asked for) and how long the last one took to reach a painted frame (ms, -1 none)
-    resize_at: Mutex<Option<(std::time::Instant, u32)>>, resize_done: Mutex<f64>,
+    resize_at: Mutex<Option<(std::time::Instant, u32)>>, resize_done: Arc<Mutex<f64>>,
+    /// windowed: the client window it is a child of, and its own native window once CEF made it (0 before)
+    pub host: Option<native::Host>, native: std::sync::atomic::AtomicU64,
+    /// windowed on X11: the container window of ours Chromium's is a child of (cef_native::container), 0 elsewhere
+    frame: u64, placed_size: Mutex<(i32, i32)>,
+    /// windowed: key presses the page sends back to Chromium after the client did not want them (on_pre_key_event lets these through)
+    reinject: AtomicU32,
 }
+unsafe impl Send for State {}
 
 /// The platform's cursor handle as the `cef` crate's DisplayHandler takes it (unused: the page draws gpui's own cursor from the type).
 #[cfg(target_os = "macos")] type CursorHandle = *mut u8;
@@ -105,15 +117,24 @@ wrap_life_span_handler! {
             // a link that saves to disk is a download of this page, not a window
             if _disp == WindowOpenDisposition::SAVE_TO_DISK { if let (Some(b), Some(u)) = (_b, _url) { if let Some(h) = b.host() { h.start_download(Some(u)); } } return true as _ }
             let (Some(wi), Some(client)) = (wi, client) else { return true as _ };
-            let (w, h) = self.tab.size(); let scale = self.tab.scale_milli.load(Ordering::Relaxed) as f32 / 1000.0;
-            let tab = Tab::detached("", w, h, scale, self.tab.wake.clone());
-            *client = Some(client_for(&tab)); wi.windowless_rendering_enabled = true as _; wi.runtime_style = RuntimeStyle::ALLOY;
+            let (w, h_) = self.tab.size(); let h = h_; let scale = self.tab.scale_milli.load(Ordering::Relaxed) as f32 / 1000.0;
+            let tab = Tab::detached("", w, h, scale, self.tab.wake.clone(), self.tab.host);
+            *client = Some(client_for(&tab)); wi.runtime_style = RuntimeStyle::ALLOY;
+            match self.tab.host { Some(h) => { child_of(wi, tab.parent(h), native::R { x: 0, y: 0, w: w as i32, h: h_ as i32 }); } None => { wi.windowless_rendering_enabled = true as _; } }
             self.tab.st.lock().unwrap().popup_tabs.push(tab); let _ = self.tab.wake.try_send(());
             false as _
         }
-        fn on_after_created(&self, b: Option<&mut Browser>) { if let Some(b) = b { eprintln!("GPUI_LOG {{\"cef_created\":{}}}", b.identifier()); if let Some(h) = b.host() { h.was_hidden(false as _); h.was_resized(); h.invalidate(PaintElementType::default()); } self.tab.id.store(b.identifier(), Ordering::Relaxed); *self.tab.browser.lock().unwrap() = Some(B(b.clone())); let _ = self.tab.wake.try_send(()); } }
-        fn do_close(&self, _b: Option<&mut Browser>) -> ::std::os::raw::c_int { false as _ }
-        fn on_before_close(&self, _b: Option<&mut Browser>) { *self.tab.browser.lock().unwrap() = None; self.tab.st.lock().unwrap().closed = true; let _ = self.tab.wake.try_send(()); }
+        fn on_after_created(&self, b: Option<&mut Browser>) { if let Some(b) = b { eprintln!("GPUI_LOG {{\"cef_created\":{},\"windowed\":{}}}", b.identifier(), self.tab.host.is_some()); if let Some(h) = b.host() {
+                if self.tab.host.is_some() { let w = handle_u64(h.window_handle()); eprintln!("GPUI_LOG {{\"cef_native\":{w}}}"); self.tab.native.store(w, Ordering::Relaxed); } else { h.was_hidden(false as _); h.was_resized(); h.invalidate(PaintElementType::default()); } } self.tab.id.store(b.identifier(), Ordering::Relaxed); *self.tab.browser.lock().unwrap() = Some(B(b.clone())); let _ = self.tab.wake.try_send(()); } }
+        /// windowed: true, so only the browser's own window goes (false sends the OS close to its top-level window, which is the client's window)
+        /// (and it closes by its native window going: then CEF destroys the browser and calls on_before_close)
+        fn do_close(&self, _b: Option<&mut Browser>) -> ::std::os::raw::c_int {
+            // X11: CEF closes its own window (WM_DELETE_WINDOW to itself); Windows and macOS: CEF would close the top-level window (WM_CLOSE,
+            // performClose:), which is the client's, so the browser's own window or view goes instead (CEF then destroys the browser)
+            if self.tab.host.is_none() || cfg!(target_os = "linux") { return false as _ }
+            native::close(self.tab.native()); true as _
+        }
+        fn on_before_close(&self, _b: Option<&mut Browser>) { *self.tab.browser.lock().unwrap() = None; if self.tab.frame != 0 { native::destroy(self.tab.frame); }  self.tab.st.lock().unwrap().closed = true; let _ = self.tab.wake.try_send(()); }
     }
 }
 wrap_dialog_handler! {
@@ -121,6 +142,8 @@ wrap_dialog_handler! {
     impl DialogHandler {
         fn on_file_dialog(&self, _b: Option<&mut Browser>, mode: FileDialogMode, title: Option<&CefString>, _def: Option<&CefString>, _f: Option<&mut CefStringList>, _e: Option<&mut CefStringList>, _d: Option<&mut CefStringList>, cb: Option<&mut FileDialogCallback>) -> ::std::os::raw::c_int {
             let Some(cb) = cb else { return false as _ };
+            // windowed on Windows and macOS: Chromium's own native dialog (Linux has none in this build: gpui's portal picker answers)
+            if self.tab.host.is_some() && !cfg!(target_os = "linux") { return false as _ }
             self.tab.st.lock().unwrap().dialogs.push(Dialog { save: mode == FileDialogMode::SAVE, multiple: mode == FileDialogMode::OPEN_MULTIPLE, folder: mode == FileDialogMode::OPEN_FOLDER, title: s(title), cb: cb.clone() });
             let _ = self.tab.wake.try_send(()); true as _
         }
@@ -154,9 +177,44 @@ wrap_download_handler! {
         }
     }
 }
+wrap_focus_handler! {
+    struct FocusH { tab: Arc<Tab> }
+    impl FocusHandler {
+        /// windowed: the person clicked into the page (Chromium has the keyboard now); the page gives it gpui's focus too
+        fn on_got_focus(&self, _b: Option<&mut Browser>) { if self.tab.host.is_some() { self.tab.st.lock().unwrap().got_focus = true; let _ = self.tab.wake.try_send(()); } }
+        /// Tab past the page's last element: the keyboard goes back to the client
+        /// a click into the page (the system moving the keyboard there) is the person's, unlike our own SetFocus calls
+        fn on_set_focus(&self, _b: Option<&mut Browser>, source: FocusSource) -> ::std::os::raw::c_int {
+            // (with a mouse button down: a window manager that focuses what is under the pointer moves it there too, and that is nobody's click)
+            if self.tab.host.is_some() && source == FocusSource::SYSTEM && native::button_down() { self.tab.st.lock().unwrap().person = true; let _ = self.tab.wake.try_send(()); }
+            false as _
+        }
+        fn on_take_focus(&self, _b: Option<&mut Browser>, _next: ::std::os::raw::c_int) { if self.tab.host.is_some() { self.tab.st.lock().unwrap().took_focus = true; let _ = self.tab.wake.try_send(()); } }
+    }
+}
+#[cfg(target_os = "linux")] type OsKey<'a> = Option<&'a mut sys::XEvent>;
+#[cfg(windows)] type OsKey<'a> = Option<&'a mut sys::MSG>;
+#[cfg(target_os = "macos")] type OsKey<'a> = *mut u8;
+wrap_keyboard_handler! {
+    struct KeyH { tab: Arc<Tab> }
+    impl KeyboardHandler {
+        /// windowed: a key the client may want (its shortcuts: a modifier chord or an F key, not an editing chord) goes to the client first; the page
+        /// sends it back to Chromium when nothing there took it (`reinject`)
+        fn on_pre_key_event(&self, _b: Option<&mut Browser>, e: Option<&KeyEvent>, _os: OsKey<'_>, _sc: Option<&mut ::std::os::raw::c_int>) -> ::std::os::raw::c_int {
+            let (Some(e), true) = (e, self.tab.host.is_some()) else { return false as _ };
+            if e.type_ != KeyEventType::RAWKEYDOWN { return false as _ }
+            if self.tab.reinject.load(Ordering::Relaxed) > 0 { self.tab.reinject.fetch_sub(1, Ordering::Relaxed); return false as _ }
+            self.tab.st.lock().unwrap().person = true; let _ = self.tab.wake.try_send(()); // a key the person pressed in the page
+            let Some(ks) = client_key(e.windows_key_code, e.modifiers) else { return false as _ };
+            self.tab.st.lock().unwrap().keys.push((ks, e.clone())); let _ = self.tab.wake.try_send(()); true as _
+        }
+    }
+}
 wrap_client! {
-    struct ClientH { render: RenderHandler, display: DisplayHandler, load: LoadHandler, life: LifeSpanHandler, dialog: DialogHandler, download: DownloadHandler }
+    struct ClientH { render: RenderHandler, display: DisplayHandler, load: LoadHandler, life: LifeSpanHandler, dialog: DialogHandler, download: DownloadHandler, focus: FocusHandler, keyboard: KeyboardHandler }
     impl Client {
+        fn focus_handler(&self) -> Option<FocusHandler> { Some(self.focus.clone()) }
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> { Some(self.keyboard.clone()) }
         fn render_handler(&self) -> Option<RenderHandler> { Some(self.render.clone()) }
         fn display_handler(&self) -> Option<DisplayHandler> { Some(self.display.clone()) }
         fn load_handler(&self) -> Option<LoadHandler> { Some(self.load.clone()) }
@@ -166,7 +224,29 @@ wrap_client! {
     }
 }
 type Frame_ = cef::Frame;
-fn client_for(tab: &Arc<Tab>) -> Client { ClientH::new(RenderH::new(tab.clone()), DisplayH::new(tab.clone()), LoadH::new(tab.clone()), LifeH::new(tab.clone()), DialogH::new(tab.clone()), DownloadH::new(tab.clone())) }
+fn client_for(tab: &Arc<Tab>) -> Client { ClientH::new(RenderH::new(tab.clone()), DisplayH::new(tab.clone()), LoadH::new(tab.clone()), LifeH::new(tab.clone()), DialogH::new(tab.clone()), DownloadH::new(tab.clone()), FocusH::new(tab.clone()), KeyH::new(tab.clone())) }
+
+/// The gpui keystroke (`ctrl-shift-l`) for a key Chromium got, when the client is to see it first: a chord with Control, Alt or Command, or an F key,
+/// except the editing chords a page needs (copy, cut, paste, select all, undo, redo, and moving or deleting by word or line). None: the page's alone.
+pub fn client_key(vk: i32, mods: u32) -> Option<String> {
+    let (shift, ctrl, alt, cmd) = (mods & (1 << 1) != 0, mods & (1 << 2) != 0, mods & (1 << 3) != 0, mods & COMMAND != 0);
+    let fkey = (112..=135).contains(&vk);
+    if !(ctrl || alt || cmd || fkey) { return None }
+    let key = key_name(vk)?;
+    let edit = (ctrl || cmd) && !alt && (matches!(key.as_str(), "c" | "x" | "v" | "a" | "z" | "y" | "left" | "right" | "up" | "down" | "home" | "end" | "backspace" | "delete" | "insert"));
+    if edit { return None }
+    Some(format!("{}{}{}{}{}", if ctrl { "ctrl-" } else { "" }, if alt { "alt-" } else { "" }, if shift { "shift-" } else { "" }, if cmd { "cmd-" } else { "" }, key))
+}
+/// gpui's name for a Windows virtual-key code (the inverse of `vk`).
+fn key_name(vk: i32) -> Option<String> {
+    Some(match vk {
+        65..=90 => ((vk as u8) as char).to_ascii_lowercase().to_string(), 48..=57 => ((vk as u8) as char).to_string(),
+        112..=135 => format!("f{}", vk - 111), 13 => "enter".into(), 8 => "backspace".into(), 9 => "tab".into(), 27 => "escape".into(), 32 => "space".into(),
+        37 => "left".into(), 38 => "up".into(), 39 => "right".into(), 40 => "down".into(), 46 => "delete".into(), 36 => "home".into(), 35 => "end".into(), 33 => "pageup".into(), 34 => "pagedown".into(), 45 => "insert".into(),
+        186 => ";".into(), 187 => "=".into(), 188 => ",".into(), 189 => "-".into(), 190 => ".".into(), 191 => "/".into(), 192 => "`".into(), 219 => "[".into(), 220 => "\\".into(), 221 => "]".into(), 222 => "'".into(),
+        _ => return None,
+    })
+}
 
 fn cur_of(t: CursorType) -> Cur {
     if t == CursorType::HAND { Cur::Hand } else if t == CursorType::IBEAM || t == CursorType::VERTICALTEXT { Cur::IBeam } else if t == CursorType::CROSS { Cur::Cross }
@@ -350,18 +430,21 @@ impl Engine {
 
 impl Tab {
     /// Creates a browser at `url` with a view of `w`x`h` logical px at `scale`; `wake` gets a message whenever something changed.
-    pub fn open(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>) -> Arc<Tab> {
-        let tab = Tab::detached(url, w, h, scale, wake);
+    /// With `host` the browser is a native child of that window (windowed), else it renders off screen.
+    pub fn open(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>, host: Option<native::Host>) -> Arc<Tab> {
+        let tab = Tab::detached(url, w, h, scale, wake, host);
         let mut client = client_for(&tab);
-        let wi = WindowInfo { windowless_rendering_enabled: true as _, runtime_style: RuntimeStyle::ALLOY, ..Default::default() };
+        let mut wi = WindowInfo { runtime_style: RuntimeStyle::ALLOY, ..Default::default() };
+        // a windowed browser starts 1x1 in the corner; the page places and shows it after the next frame it draws
+        match host { Some(h) => child_of(&mut wi, tab.parent(h), native::R { x: 0, y: 0, w: 1, h: 1 }), None => wi.windowless_rendering_enabled = true as _ }
         let bs = BrowserSettings { windowless_frame_rate: 30, ..Default::default() };
         let r = browser_host_create_browser(Some(&wi), Some(&mut client), Some(&CefString::from(url)), Some(&bs), None, None);
         /* i18n-ok: drawn through trs (cef_page) */ if r != 1 { tab.st.lock().unwrap().load_error = "CEF refused to create the browser".into(); }
         tab
     }
     /// A tab whose browser CEF makes itself (a popup): the state and handlers only.
-    pub fn detached(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>) -> Arc<Tab> {
-        Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0), paints: Default::default(), resize_at: Mutex::new(None), resize_done: Mutex::new(-1.0) })
+    pub fn detached(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>, host: Option<native::Host>) -> Arc<Tab> {
+        Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0), paints: Default::default(), resize_at: Mutex::new(None), resize_done: Arc::new(Mutex::new(-1.0)), placed_size: Mutex::new((0, 0)), frame: host.and_then(native::container).map_or(0, |c| match c { native::Host::X11(id) => id as u64, _ => 0 }), host, native: Default::default(), reinject: AtomicU32::new(0) })
     }
     /// The browser, taken out of its lock before CEF is called: on macOS CEF runs callbacks on this thread inside the call (`on_before_close` takes
     /// the same lock), so holding it across the call deadlocked the window on closing a tab (test/browser/browser_e2e.py, macos-latest).
@@ -377,6 +460,14 @@ impl Tab {
         self.host(|h| { h.notify_screen_info_changed(); h.was_resized(); });
     }
     pub fn resize_ms(&self) -> f64 { *self.resize_done.lock().unwrap() }
+    fn resize_ms_cell(&self) -> Arc<Mutex<f64>> { self.resize_done.clone() }
+    /// windowed: click at (x, y) and time how long until that pixel of Chromium's window changes (written to `out`, ms; the e2e's latency probe)
+    pub fn probe_click(&self, x: i32, y: i32, out: Arc<Mutex<f64>>) {
+        let w = self.native(); let before = native::pixel(w, x, y); *out.lock().unwrap() = -1.0;
+        let t0 = std::time::Instant::now();
+        self.mouse_move(x, y, 0, false); self.mouse_click(x, y, 16, 0, false, 1); self.mouse_click(x, y, 0, 0, true, 1);
+        std::thread::spawn(move || { while t0.elapsed().as_secs() < 2 { if native::pixel(w, x, y) != before { *out.lock().unwrap() = t0.elapsed().as_secs_f64() * 1e3; return } std::thread::sleep(std::time::Duration::from_micros(500)); } });
+    }
     pub fn size(&self) -> (u32, u32) { (self.w.load(Ordering::Relaxed), self.h.load(Ordering::Relaxed)) }
     pub fn navigate(&self, url: &str) { let u = CefString::from(url); self.with(|b| if let Some(f) = b.main_frame() { f.load_url(Some(&u)); }); }
     pub fn back(&self) { self.with(|b| b.go_back()); }
@@ -405,6 +496,8 @@ impl Tab {
         let vk = char_code(kind, vk, ch, cfg!(windows));
         // macOS's OSR builds an NSEvent from the native code: it must be the Mac's virtual key code, not the Windows one
         #[cfg(target_os = "macos")] let native = mac::key_code(vk).unwrap_or(native);
+        // windowed on Linux CEF reads the native code as an X keycode (72, VK_H, is F6 there): none, and it goes by the key code
+        #[cfg(target_os = "linux")] let native = if self.host.is_some() { 0 } else { native };
         let e = KeyEvent { size: std::mem::size_of::<KeyEvent>(), type_: ty, modifiers: mods, windows_key_code: vk, native_key_code: native, is_system_key: 0, character: ch, unmodified_character: ch, focus_on_editable_field: 0 };
         self.host(|h| h.send_key_event(Some(&e)));
     }
@@ -415,9 +508,75 @@ impl Tab {
         self.host(|h| h.ime_set_composition(Some(&t), Some(&[ul]), None, Some(&Range { from: n, to: n })));
     }
     pub fn ime_cancel(&self) { self.host(|h| h.ime_cancel_composition()); }
+    /// windowed: Chromium's native window (0 until CEF made it)
+    pub fn native(&self) -> u64 { self.native.load(Ordering::Relaxed) }
+    pub fn windowed(&self) -> bool { self.host.is_some() }
+    /// windowed: over the pane at `r` (the parent's coordinates, cef_native.rs), or hidden
+    /// The window Chromium's is made a child of: our container (X11), else the client's own.
+    fn parent(&self, h: native::Host) -> native::Host { if self.frame != 0 { native::Host::X11(self.frame as u32) } else { h } }
+    /// The window placed over the pane: the container on X11, Chromium's own elsewhere.
+    pub fn outer(&self) -> u64 { if self.frame != 0 { self.frame } else { self.native() } }
+    pub fn place(&self, r: Option<native::R>) {
+        let w = self.native();
+        // a new size: how long until Chromium's own widget has it (the e2e's resize measure, windowed)
+        if let (Some(r), true) = (r, w != 0) { let mut last = self.placed_size.lock().unwrap();
+            if *last != (r.w, r.h) { let first = *last == (0, 0); *last = (r.w, r.h); if first { return self.place_now(w, Some(r)) }
+                let (t0, done, want) = (std::time::Instant::now(), self.resize_ms_cell(), (r.w, r.h));
+                std::thread::spawn(move || { while t0.elapsed().as_secs() < 2 { if native::inner_size(w) == Some(want) { *done.lock().unwrap() = t0.elapsed().as_secs_f64() * 1e3; return } std::thread::sleep(std::time::Duration::from_millis(1)); } }); } }
+        self.place_now(w, r)
+    }
+    fn place_now(&self, w: u64, r: Option<native::R>) {
+        if self.frame != 0 { native::place_in(self.frame, w, r); }
+        else { if w == 0 { return } match r { Some(r) => { native::place(w, r); native::show(w, true); } None => native::show(w, false) } }
+        self.hidden.store(r.is_none(), Ordering::Relaxed);
+    }
+    /// windowed: the keyboard to the page (`on`) or back to the client's window
+    pub fn give_keyboard(&self, on: bool) {
+        self.focus(on);
+        if on { native::focus_child(self.native()) } else if let Some(h) = self.host { native::focus_host(h) }
+    }
+    /// windowed: a key the client did not want goes to the page after all (on_pre_key_event lets it through this time)
+    pub fn reinject(&self, e: &KeyEvent) {
+        self.reinject.fetch_add(1, Ordering::Relaxed);
+        self.host(|h| { h.send_key_event(Some(e)); if e.character != 0 && e.modifiers & (1 << 2 | COMMAND) == 0 { let mut c = e.clone(); c.type_ = KeyEventType::CHAR; c.windows_key_code = char_code(2, e.windows_key_code, e.character, cfg!(windows)); h.send_key_event(Some(&c)); } });
+    }
     pub fn edit(&self, cmd: &str) { self.with(|b| if let Some(f) = b.focused_frame() { match cmd { "copy" => f.copy(), "cut" => f.cut(), "paste" => f.paste(), "all" => f.select_all(), "undo" => f.undo(), "redo" => f.redo(), _ => {} } }); }
 }
 impl Drop for Tab { fn drop(&mut self) { let b = self.browser.get_mut().ok().and_then(|b| b.take()); if let Some(b) = b { if let Some(h) = b.0.host() { h.close_browser(true as _); } } } }
+
+/// CDP `msgs` (each {"method", "params"}) to the engine's page whose address is `url`, in order, on a thread of its own: the e2e's scripted typing on a
+/// windowed page, which goes the way an agent's does (a windowed page takes a person's keys from its own native window, not from send_key_event).
+pub fn cdp(port: u16, url: String, msgs: Vec<serde_json::Value>) {
+    std::thread::spawn(move || {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
+        rt.block_on(async move {
+            use futures_util::{SinkExt, StreamExt};
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let Ok(mut c) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else { return };
+            let _ = c.write_all(format!("GET /json/list HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").as_bytes()).await; // i18n-ok: an HTTP request to the DevTools server
+            // (the DevTools server keeps the connection open: read to the body's Content-Length, for 3 s at most)
+            let mut buf = Vec::new(); let t0 = std::time::Instant::now(); let mut chunk = [0u8; 8192];
+            while t0.elapsed().as_secs() < 3 {
+                let Ok(Ok(n)) = tokio::time::timeout(std::time::Duration::from_millis(500), c.read(&mut chunk)).await else { continue };
+                if n == 0 { break } buf.extend_from_slice(&chunk[..n]);
+                let t = String::from_utf8_lossy(&buf);
+                if let Some((h, b)) = t.split_once("\r\n\r\n") { let len = h.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok())); if len.map_or(false, |l| b.len() >= l) { break } }
+            }
+            let body = String::from_utf8_lossy(&buf).into_owned();
+            let list: serde_json::Value = body.split_once("\r\n\r\n").and_then(|(_, b)| serde_json::from_str(b).ok()).unwrap_or_default();
+            if !list.is_array() { eprintln!("GPUI_LOG {{\"cef_cdp_list\":{}}}", serde_json::Value::String(body.chars().take(200).collect())); }
+            let Some(ws) = list.as_array().and_then(|l| l.iter().find(|t| t["type"] == "page" && t["url"] == url.as_str()).or_else(|| l.iter().find(|t| t["type"] == "page")))
+                .and_then(|t| t["webSocketDebuggerUrl"].as_str().map(String::from)) else { eprintln!("GPUI_LOG {{\"cef_cdp\":\"no page target\"}}"); return };
+            let (mut sock, _) = match tokio_tungstenite::connect_async(ws).await { Ok(s) => s, Err(e) => { eprintln!("GPUI_LOG {{\"cef_cdp\":{}}}", serde_json::Value::String(e.to_string())); return } };
+            for (i, m) in msgs.into_iter().enumerate() {
+                let mut m = m; m["id"] = (i + 1).into();
+                if sock.send(tokio_tungstenite::tungstenite::Message::Text(m.to_string().into())).await.is_err() { return }
+                while let Some(Ok(r)) = sock.next().await { if let Ok(v) = serde_json::from_str::<serde_json::Value>(r.to_text().unwrap_or("")) { if v["id"] == i + 1 { eprintln!("GPUI_LOG {{\"cef_cdp\":{}}}", v); break } } }
+            }
+            let _ = sock.close(None).await;
+        });
+    });
+}
 
 /// Windows virtual-key code for a gpui key name (what CEF's DOM key mapping starts from); None for a key with no code here.
 pub fn vk(key: &str) -> Option<i32> {
@@ -438,6 +597,19 @@ pub fn flags(shift: bool, ctrl: bool, alt: bool, left: bool, middle: bool, right
 #[cfg(target_os = "macos")]
 #[path = "cef_mac.rs"]
 pub mod mac;
+#[path = "cef_native.rs"]
+pub mod native;
+/// A native window handle as CEF gives it, as a number.
+#[cfg(windows)] fn handle_u64(h: sys::cef_window_handle_t) -> u64 { h.0 as usize as u64 }
+#[cfg(not(windows))] fn handle_u64(h: sys::cef_window_handle_t) -> u64 { h as usize as u64 }
+/// `wi` made a child of the client's window `h` at `r`.
+fn child_of(wi: &mut WindowInfo, h: native::Host, r: native::R) {
+    wi.windowless_rendering_enabled = false as _;
+    wi.bounds = Rect { x: r.x, y: r.y, width: r.w, height: r.h };
+    #[cfg(target_os = "linux")] { wi.parent_window = h.raw(); }
+    #[cfg(windows)] { wi.parent_window = sys::HWND(h.raw() as *mut _); wi.style = 0x4000_0000 | 0x0200_0000 | 0x0400_0000; } // WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+    #[cfg(target_os = "macos")] { wi.parent_view = h.raw(); }
+}
 
 #[cfg(test)]
 mod tests {
@@ -464,5 +636,13 @@ mod tests {
         assert!(a(&["gpui", "--type=renderer", "--lang=en"])); assert!(!a(&["gpui", "--url", "ws://x"])); assert!(!a(&["--type=gpu"]), "argv[0] is the program"); assert!(!a(&["gpui", "--typed"]));
     }
     #[test] fn key_codes() { assert_eq!(vk("a"), Some(65)); assert_eq!(vk("7"), Some(55)); assert_eq!(vk("enter"), Some(13)); assert_eq!(vk("f5"), Some(116)); assert_eq!(vk("é"), None); }
+    #[test] fn the_client_sees_its_chords_first_and_the_page_keeps_editing() {
+        let (shift, ctrl, alt) = (1 << 1, 1 << 2, 1 << 3);
+        assert_eq!(client_key(76, ctrl).as_deref(), Some("ctrl-l")); assert_eq!(client_key(74, ctrl).as_deref(), Some("ctrl-j"));
+        assert_eq!(client_key(75, ctrl | shift).as_deref(), Some("ctrl-shift-k")); assert_eq!(client_key(123, 0).as_deref(), Some("f12")); assert_eq!(client_key(37, alt).as_deref(), Some("alt-left"));
+        for vk in [67, 86, 88, 65, 90, 89, 37, 8, 46] { assert_eq!(client_key(vk, ctrl), None, "ctrl+{vk} edits the page"); }
+        assert_eq!(client_key(90, ctrl | shift), None, "redo"); assert_eq!(client_key(65, 0), None, "typing"); assert_eq!(client_key(13, shift), None);
+        assert_eq!(client_key(67, COMMAND), None, "cmd-c on a Mac"); assert_eq!(client_key(76, COMMAND).as_deref(), Some("cmd-l"));
+    }
     #[test] fn event_flags() { assert_eq!(flags(true, false, false, true, false, false), 2 | 16); assert_eq!(flags(false, true, true, false, false, true), 4 | 8 | 64); }
 }
