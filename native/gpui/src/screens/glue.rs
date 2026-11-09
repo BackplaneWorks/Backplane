@@ -214,7 +214,13 @@ impl Backplane {
     }
     /// A plot-lane frame arrived on the socket: a solid (3D) frame goes to the 3D page, anything else to the plot store.
     pub(crate) fn plot_received(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
-        if self.screens.solid.is_none() { self.screens.solid = Some(cx.new(crate::viewers::solid::SolidPage::new)); }
+        if self.screens.solid.is_none() {
+            let page = cx.new(crate::viewers::solid::SolidPage::new);
+            // the page's Retry: the same source asked for again (a failed source is read again when it is watched)
+            cx.subscribe(&page, |this, _, ev: &crate::viewers::solid::SolidEvent, _| { let crate::viewers::solid::SolidEvent::Retry(key) = ev;
+                if let Some(p) = crate::viewers::solid::retry_watch(key) { let _ = this.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "watch")); } }).detach();
+            self.screens.solid = Some(page);
+        }
         let solid = self.screens.solid.clone().unwrap();
         if let Some(k) = crate::viewers::solid::peek_key(&bytes) { eprintln!("GPUI_LOG {{\"plot_frame\":{{\"key\":{},\"bytes\":{}}}}}", serde_json::Value::String(k), bytes.len()); }
         let Some(bytes) = solid.update(cx, |p, _| p.accept(bytes)) else { cx.notify(); return };
