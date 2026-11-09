@@ -1,7 +1,7 @@
 //! A thread's own actions, as the hub lists them: the header's tools (`thread.tools`: pin, settle, archive, fork, stop...) and its menu
 //! (`thread.menu`: Diff, Terminal, Find file, Snooze with its choices, Delete...), plus the two questions the hub asks back, a rename
-//! (`renaming`: a title box) and a delete (`deleting`: confirm). Every press is the action the item names; Delete is only asked
-//! for, the hub then raises its own confirmation. Nothing here decides what a thread can do.
+//! (`renaming`: a title box, drawn in the sidebar row: siderow.rs) and a delete (`deleting`: armed by the menu's first click, confirmed by its
+//! second: ctxmenu.rs). Every press is the action the item names. Nothing here decides what a thread can do.
 use crate::script::Ctl;
 use super::settings::{Field, FieldSlot};
 use crate::{hub::Command, string, theme, Backplane};
@@ -63,7 +63,8 @@ pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, local: &c
 pub fn context_items(thread: &Value) -> Vec<super::ctxmenu::Item> {
     let mut v = Vec::new();
     for m in menu(thread) {
-        if m.options.is_empty() { v.push(super::ctxmenu::Item { label: m.label, action: m.action, value: m.value, confirm: false }); }
+        // a dangerous item (Delete) asks in the menu itself: the first click arms it, the second does it
+        if m.options.is_empty() { v.push(super::ctxmenu::Item { label: m.label, action: m.action, value: m.value, confirm: m.danger }); }
         else { for (l, val) in m.options { v.push(super::ctxmenu::Item { label: format!("{} {}", m.label, l.to_lowercase()), action: m.action.clone(), value: val, confirm: false }); } }
     }
     v
@@ -97,39 +98,10 @@ pub fn controls(data: &Value) -> Vec<(String, String, Ctl)> {
     out
 }
 
-fn modal(light: bool, id: &'static str) -> Stateful<Div> {
-    let c = |n: &str| theme::color(light, n);
-    div().id(id).absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().items_start().p_4().gap_3()
-}
-
-/// The hub's two questions over the main area: a rename (a title box, Save, Cancel) and a delete (what, Delete, Cancel).
-pub fn questions(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, data: &Value) -> Option<AnyElement> {
-    let c = |n: &str| theme::color(light, n);
-    let btn = |cx: &mut Context<Backplane>, id: &'static str, label: String, primary: bool, danger: bool, action: &'static str, value: String| -> AnyElement {
-        let d = div().id(id).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1();
-        let d = if primary { d.bg(c(if danger { "bad" } else { "accent" })).text_color(c("on-accent")).border_color(c(if danger { "bad" } else { "accent" })) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
-        d.child(label).on_click(cx.listener(move |this, _, _, cx| {
-            super::settings::flush_fields(this);
-            let v = if action == "rename-save" { // the box's own text, trimmed; nothing sent for a blank title
-                let text = this.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();
-                match rename_save(&value, &text) { Some(Command::Action(_, v)) => v, _ => return }
-            } else { value.clone() };
-            let _ = this.tx.try_send(Command::Action(action.into(), v)); cx.notify();
-        })).into_any_element()
-    };
-    let r = &data["renaming"]; let d = &data["deleting"];
-    if r.is_object() {
-        let id = string(r, "id");
-        return Some(modal(light, "rename-q").child(div().font_weight(FontWeight::BOLD).child(string(r, "title")))
-            .children(fields.get("title").map(|s| div().w_full().max_w(px(520.)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(s.input.clone())))
-            .child(div().flex().gap_2().child(btn(cx, "rename-no", string(r, "no"), false, false, "rename-no", String::new())).child(btn(cx, "rename-yes", string(r, "yes"), true, false, "rename-save", id))).into_any_element());
-    }
-    if d.is_object() {
-        let id = string(d, "id");
-        return Some(modal(light, "delete-q").child(div().font_weight(FontWeight::BOLD).child(string(d, "title"))).child(div().text_color(c("dim")).child(string(d, "body")))
-            .child(div().flex().gap_2().child(btn(cx, "delete-no", string(d, "no"), false, false, "delete-no", String::new())).child(btn(cx, "delete-yes", string(d, "yes"), true, true, "row-delete", id))).into_any_element());
-    }
-    None
+/// The hub's rename, when no sidebar row can show it: a small bar over the top of the main column (siderow::bar). The thread's Delete asks in
+/// its menu (ctxmenu), so nothing is drawn for `deleting`: neither question covers the window as a page.
+pub fn questions(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, data: &Value, sidebar_open: bool) -> Option<AnyElement> {
+    super::siderow::bar(cx, light, fields, data, sidebar_open)
 }
 
 #[cfg(test)]
