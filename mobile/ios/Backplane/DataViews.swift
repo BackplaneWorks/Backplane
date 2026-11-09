@@ -1117,7 +1117,7 @@ struct DataHandoffCard: View {
                     }.padding(.horizontal, 8).padding(.vertical, 6).dbox(fill: BackplaneDesign.panel)
                 }.buttonStyle(.plain).accessibilityIdentifier("handoff.ref.\(i)")
             }
-        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.raised).padding(.vertical, 4).accessibilityIdentifier("handoff.card")
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.raised).padding(.vertical, 4).accessibilityElement(children: .contain).accessibilityIdentifier("handoff.card")
     }
 }
 
