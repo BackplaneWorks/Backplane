@@ -22,6 +22,8 @@ pub struct Registry {
 pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
 pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: usize, pub links: Vec<(Range<usize>, Link)>, pub layout: Option<TextLayout> }
 pub type Reg = Rc<RefCell<Registry>>;
+/// The viewer page's code blocks' Copy places are numbered from here (`copy:1000`...), the thread's rows' from 0: each part may draw without the other.
+pub const VIEWER_COPIES: usize = 1000;
 
 impl Default for Registry {
     fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0 } }
@@ -30,11 +32,11 @@ impl Default for Registry {
 impl Registry {
     /// A new frame: forget the blocks, keep the selection (by identity).
     pub fn begin(&mut self) { self.blocks.clear(); self.copies.clear(); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
-    /// The root view's frame: forget the blocks drawn outside the thread's rows (the review page, no entry id); the rows' blocks stay, since
-    /// their part (part.rs) may reuse its last frame, and they are forgotten when it draws again (`begin_rows`).
-    pub fn begin_outside(&mut self) { self.blocks.retain(|b| !b.id.is_empty()); self.copies.clear(); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
-    /// The rows' part draws: forget the rows' blocks, keep the others.
-    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty()); self.idx = 0; self.entry = 0; self.entry_id.clear(); }
+    /// The viewer's page draws (or is gone): forget the blocks drawn outside the thread's rows (a review or file page, no entry id) and its
+    /// code blocks' Copy places (numbered from VIEWER_COPIES). The rows' stay: their part (part.rs) may reuse its last frame.
+    pub fn begin_outside(&mut self) { self.blocks.retain(|b| !b.id.is_empty()); self.copies.retain(|c| c.0 < VIEWER_COPIES); self.copy_seen = VIEWER_COPIES; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
+    /// The rows' part draws (or is gone): forget the rows' blocks and Copy places, keep the viewer's.
+    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty()); self.copies.retain(|c| c.0 >= VIEWER_COPIES); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
     /// The list draws only the rows on screen, in its own order, and may draw one twice in a frame: the last drawing's blocks stand.
     pub fn enter(&mut self, row: usize, id: &str) { self.blocks.retain(|b| b.id != id); self.entry = row; self.entry_id = id.to_string(); self.idx = 0; }
     fn next_idx(&mut self) -> usize { let i = self.idx; self.idx += 1; i }
