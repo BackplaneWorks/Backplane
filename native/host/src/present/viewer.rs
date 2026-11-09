@@ -73,6 +73,19 @@ pub struct ViewOut {
     pub boards_look: bool,
 }
 
+/// The board the person picked in the Boards menu (`@view.board:<thread>`, a path from the project's folder), kept across Board, Schematic, 3D and Split and
+/// across closing the viewer (0.14 kept the board picked, Bd.id): "" for the project's own. A path that leaves the folder is no choice.
+fn chosen_board(d: &Value, sel: &str) -> String {
+    let b = s(d, &format!("@view.board:{sel}"));
+    if b.is_empty() || b.contains("..") || b.starts_with('/') || !b.ends_with(".kicad_pcb") { String::new() } else { b.to_string() }
+}
+/// The file a page of `kind` shows for the board `rel` (its schematic beside it on the Schematic page); "" for none.
+fn board_file(kind: &str, root: &str, rel: &str) -> String {
+    if rel.is_empty() || root.is_empty() { return String::new() }
+    let abs = format!("{root}/{rel}");
+    match kind { "schematic" => abs.strip_suffix(".kicad_pcb").map(|b| format!("{b}.kicad_sch")).unwrap_or_default(), "board" | "3d" | "split" => abs, _ => String::new() }
+}
+
 /// The `view` action for a drawing kind, or "" to close (the phones' idempotent `view`).
 pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option<ViewOut> {
     // "mech\t<part>": an agent's viewer_show of a model opens Mech on that part (a path from the project's root, or absolute under it)
@@ -95,12 +108,17 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     // Mech opened from the rail (no part named) shows the part chosen last in this thread, as it was left
     let kept_part = s(d, &format!("@mech.part:{sel}")).to_string();
     let part = if kind == "mech" && part.is_empty() { kept_part.as_str() } else { part };
-    let (want, wkind, wpath) = if kind == "mech" { let part = part.strip_prefix(&format!("{root}/")).unwrap_or(part); let ps = parts_of(&root, sel, part); let (w, a) = mech_want(&root, &ps, part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a) } else { (key(kind, &root), kind.to_string(), String::new()) };
+    // (a board picked in the Boards menu stays the one shown on Board, Schematic, 3D and Split: its file is the source)
+    let picked = if matches!(kind, "board" | "schematic" | "3d" | "split") { board_file(kind, &root, &chosen_board(d, sel)) } else { String::new() };
+    let (want, wkind, wpath, board) = if kind == "mech" { let part = part.strip_prefix(&format!("{root}/")).unwrap_or(part); let ps = parts_of(&root, sel, part); let (w, a) = mech_want(&root, &ps, part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a, String::new()) }
+        else { let base = key(kind, &root); let want = if base.is_empty() { base } else { format!("{base}{picked}") };
+            // (Split watches its three sources from the board: the path stays its schematic's sheet, "" the root)
+            if kind == "split" { (want, kind.to_string(), String::new(), picked.clone()) } else { (want, kind.to_string(), picked.clone(), String::new()) } };
     let at = s(d, "@view.at");
     let mut rid = session["rid"].as_u64().unwrap_or(0);
     let mut before = Vec::new();
     let mut drafts = serde_json::Map::new();
-    drafts.insert(format!("@view.file:{sel}"), json!("")); drafts.insert(format!("@view:{sel}"), json!(kind));
+    drafts.insert(format!("@view.file:{sel}"), json!(if kind == "split" { "" } else { picked.as_str() })); drafts.insert(format!("@view:{sel}"), json!(kind));
     drafts.insert(format!("@view.sheet:{sel}"), json!(""));
     if kind == "mech" { drafts.insert(format!("@mech.part:{sel}"), json!(part.strip_prefix(&format!("{root}/")).unwrap_or(part))); } // another page leaves Mech's choice as it is
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
@@ -108,7 +126,8 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
         // View.ask: the kind, the root, the path ("" for the project's own file) and the board tree ("")
         // a thread of another machine (`<link>~<id>`, drawn from that machine's mirror: its root is a folder over there): the watch goes to it (`on`)
         let on = if sel.contains('~') { format!(",\"on\":{}", jstr(sel.split('~').next().unwrap_or(""))) } else { String::new() };
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"{on}}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
+        let bd = if board.is_empty() { String::new() } else { format!(",\"board\":{}", jstr(&board)) };
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"{bd}{on}}}", jstr(if want.is_empty() { "" } else { &wkind }), jstr(&root), jstr(&wpath));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -117,36 +136,48 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     Some(ViewOut { patch: out, before, boards_look: drawing(kind) && kind != "mech" && !drawing(prev) })
 }
 
-/// The project's boards as the Boards menu lists them (View.board.list): two or more, the one on show marked. None for one board or none.
+/// The project's boards as the Boards menu lists them (View.board.rows): two or more, the one on show marked, the project's own marked as the default. None for one board or none.
 fn boards_menu(session: &Value, sel: &str, root: &str) -> Option<Value> {
     let list: Vec<&str> = s(&session["info"], &format!("fab.boards:{sel}")).lines().filter(|l| !l.trim().is_empty()).collect();
     if list.len() < 2 { return None }
+    let own = s(&session["info"], &format!("fab.board:{sel}"));
+    let chosen = chosen_board(&session["drafts"], sel);
     let on_abs = s(&session["drafts"], &format!("@view.file:{sel}"));
-    let on = if on_abs.is_empty() { s(&session["info"], &format!("fab.board:{sel}")).to_string() } else { on_abs.strip_prefix(&format!("{root}/")).unwrap_or(on_abs).to_string() };
+    let on = if !chosen.is_empty() { chosen } else if !on_abs.is_empty() && on_abs.ends_with(".kicad_pcb") { on_abs.strip_prefix(&format!("{root}/")).unwrap_or(on_abs).to_string() } else { own.to_string() };
     let on = if on.is_empty() { list[0].to_string() } else { on };
-    Some(Value::Array(list.iter().map(|p| json!({"label": p.strip_suffix(".kicad_pcb").unwrap_or(p), "value": p, "on": **p == *on})).collect()))
+    Some(Value::Array(list.iter().map(|p| json!({"label": p.strip_suffix(".kicad_pcb").unwrap_or(p), "value": p, "on": **p == *on, "default": !own.is_empty() && *p == own})).collect()))
 }
-/// `view-board <path from the root>`: another of the project's boards on the Board, Schematic or 3D page (its schematic is the one beside it): watched as the Files tab watches a file.
+/// `view-board <path from the root>`: another of the project's boards on the Board, Schematic, 3D or Split page (its schematic is the one beside it), kept as the
+/// thread's board (`@view.board`) for the other pages and the next opening; watched as the Files tab watches a file.
 pub fn board_action(st: &State, hub: &str, session: &Value, rel: &str) -> Option<ViewOut> {
     let sel = s(session, "sel"); let d = &session["drafts"];
     if !simple(st, session, sel) { return None }
     let kind = s(d, &format!("@view:{sel}"));
-    if !matches!(kind, "board" | "schematic" | "3d") { return None }
+    if !matches!(kind, "board" | "schematic" | "3d" | "split") { return None }
     if !s(&session["info"], &format!("fab.boards:{sel}")).lines().any(|l| l == rel) { return None }
     let root = root_of(st, sel); if root.is_empty() { return None }
-    let abs = format!("{root}/{rel}");
-    let file = if kind == "schematic" { format!("{}.kicad_sch", abs.strip_suffix(".kicad_pcb")?) } else { abs };
-    let n = match kind { "board" => "0", "schematic" => "1", _ => "2" };
-    let want = format!("{n}|{root}|{file}");
+    // the project's own board is no choice: the pages follow the project again (its file may be renamed or moved)
+    let own = s(&session["info"], &format!("fab.board:{sel}")) == rel;
+    let file = board_file(kind, &root, rel); if file.is_empty() { return None }
+    let want = if kind == "split" { format!("split|{root}|{file}") } else { format!("{}{file}", key(kind, &root)) };
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
-    drafts.insert(format!("@view.file:{sel}"), json!(file)); drafts.insert(format!("@view.sheet:{sel}"), json!(""));
+    drafts.insert(format!("@view.board:{sel}"), json!(if own { "" } else { rel }));
+    drafts.insert(format!("@view.file:{sel}"), json!(if kind == "split" { "" } else { file.as_str() })); drafts.insert(format!("@view.sheet:{sel}"), json!(""));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != s(d, "@view.at") {
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(kind), jstr(&root), jstr(&file));
+        let p = if kind == "split" { format!("{{\"kind\":\"split\",\"root\":{},\"path\":\"\",\"tree\":\"\",\"board\":{}}}", jstr(&root), jstr(&file)) }
+            else { format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(kind), jstr(&root), jstr(&file)) };
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
     Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
+}
+/// `view-boards`: the Boards menu opened, so the project's boards are read again (0.14's data-on-open "board-list"): a board added or renamed since shows at once.
+pub fn boards_look(st: &State, hub: &str, session: &Value) -> Option<Vec<Value>> {
+    let sel = s(session, "sel");
+    if !simple(st, session, sel) || !matches!(s(&session["drafts"], &format!("@view:{sel}")), "board" | "schematic" | "3d" | "split") { return None }
+    let rid = session["rid"].as_u64().unwrap_or(0);
+    Some(vec![json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}", jstr(sel))})])
 }
 
 /// `mech-part <path from the root>`: another part on the Mech page, watched as a 3D model (Mpage.part.k). None off the Mech page; `refresh` ("mech-refresh") lists again and follows the listing.
@@ -485,7 +516,13 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         "split" => {
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("split")); o.insert("key".into(), json!(key("split", &root)));
-            o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| page(template, k, &root, &session["drafts"], "")).collect()));
+            // a board picked in the Boards menu: each pane's source is that board's file (its schematic beside it), as kicad.watch's split keys them
+            let picked = board_file("board", &root, &chosen_board(&session["drafts"], sel));
+            o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| { let mut p = page(template, k, &root, &session["drafts"], "");
+                if !picked.is_empty() { let f = if *k == "schematic" { board_file("schematic", &root, &chosen_board(&session["drafts"], sel)) } else { picked.clone() }; let kk = format!("{}{f}", key(k, &root));
+                    if *k != "3d" { p["layers"] = json!(kk); } else { p["layers"] = json!(""); } p["key"] = json!(kk); }
+                p }).collect()));
+            if let Some(b) = boards_menu(session, sel, &root) { o.insert("boards".into(), b); }
             v
         }
         // Files: the folder on show, or an image, a PDF or a note opened from it (Fm.tab: they belong to Files)
@@ -503,6 +540,8 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         }
         _ => { let mut v = page(template, kind, &root, &session["drafts"], sel); if matches!(kind, "board" | "schematic" | "3d") { if let Some(b) = boards_menu(session, sel, &root) { v["boards"] = b; } } v }
     };
+    // the folder the Boards menu's paths are from (0.14's "Folder: <root>")
+    if v["boards"].is_array() { v["boardsRoot"] = json!(root); }
     let tab = if matches!(kind, "image" | "pdf" | "text") { "files" } else { kind };
     let chips: Vec<Value> = [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Mech", "mech"), ("Files", "files"), ("Review", "review")].iter().map(|(l, val)| json!({"label": l, "value": val, "on": *val == tab})).collect();
     v.as_object_mut()?.insert("choices".into(), Value::Array(chips));
@@ -633,6 +672,33 @@ mod tests {
         let o = board_action(&st, "h", &s1, "a/a.kicad_pcb").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
         assert!(o.before[0]["text"].as_str().unwrap().contains(&format!("{root}/a/a.kicad_pcb")), "{:?}", o.before);
         assert_eq!(viewer_json(&st, &template, &s1).unwrap()["boards"][0]["on"], true);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    /// a command's request params (the JSON text it sends), so paths compare as values whatever the platform's separators
+    fn sent(c: &Value) -> Value { serde_json::from_str::<Value>(c["text"].as_str().unwrap_or("")).unwrap_or(Value::Null)["p"].clone() }
+    #[test] fn a_picked_board_stays_across_board_schematic_3d_split_and_reopening() {
+        let (st, th, d) = files_world("keep"); let root = d.to_string_lossy().into_owned();
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let mut s1 = sess(&th, json!({})); let o = view_action(&st, "h", &s1, "board").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        crate::session::patch::merge(&mut s1, &json!({"info": {format!("fab.boards:{th}"): "a/a.kicad_pcb\nb/b.kicad_pcb", format!("fab.board:{th}"): "b/b.kicad_pcb"}}));
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["boards"][1]["default"], true, "the project's own board is marked");
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["boardsRoot"], json!(root));
+        let o = board_action(&st, "h", &s1, "a/a.kicad_pcb").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        let o = view_action(&st, "h", &s1, "schematic").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(sent(&o.before[0])["path"], json!(format!("{root}/a/a.kicad_sch")), "{:?}", o.before);
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["boards"][0]["on"], true, "the schematic page names the board picked");
+        let o = view_action(&st, "h", &s1, "split").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(sent(&o.before[0])["board"], json!(format!("{root}/a/a.kicad_pcb")), "{:?}", o.before);
+        let v = viewer_json(&st, &template, &s1).unwrap();
+        assert_eq!(v["panes"][1]["key"], json!(format!("0|{root}|{root}/a/a.kicad_pcb"))); assert_eq!(v["panes"][0]["key"], json!(format!("1|{root}|{root}/a/a.kicad_sch")));
+        assert_eq!(v["boards"][0]["on"], true, "Split has the Boards menu too");
+        let o = view_action(&st, "h", &s1, "").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        let o = view_action(&st, "h", &s1, "3d").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(sent(&o.before[0])["path"], json!(format!("{root}/a/a.kicad_pcb")), "closed and opened again: still the board picked");
+        // the project's own board picked again: no choice kept, the pages follow the project
+        let o = board_action(&st, "h", &s1, "b/b.kicad_pcb").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(s1["drafts"][format!("@view.board:{th}")], json!(""));
+        assert!(boards_look(&st, "h", &s1).unwrap()[0]["text"].as_str().unwrap().contains("boards.list"));
         let _ = std::fs::remove_dir_all(&d);
     }
     fn sess(th: &str, drafts: Value) -> Value { json!({"sel": th, "rid": 1, "drafts": drafts, "open": {}, "adding": false, "panel": false, "info": {}}) }

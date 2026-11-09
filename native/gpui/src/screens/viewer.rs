@@ -146,9 +146,13 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
         .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
         .into_any_element()
 }
+/// The 3D page's corner: the Boards menu (a project with several boards) before the pane's own controls.
+fn with_boards(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &super::plotview::PlotView, actions: AnyElement) -> AnyElement {
+    match crate::viewers::boards::picker(cx, light, viewer, &pv.boards) { Some(b) => div().flex().items_center().gap_1().child(b).child(actions).into_any_element(), None => actions }
+}
 /// A page drawn to its edges with the pane's controls over its top right corner.
 fn in_corner(page: AnyElement, actions: AnyElement) -> AnyElement {
-    div().relative().size_full().child(page).child(div().absolute().top_1().right_2().flex().justify_end().max_w(px(CORNER_ROOM + 200.)).child(actions)).into_any_element()
+    div().relative().size_full().child(page).child(div().absolute().top_1().right_2().flex().justify_end().max_w(px(CORNER_ROOM + 440.)).child(actions)).into_any_element()
 }
 /// A page that has nothing to show yet: what it says, and the pane's controls on the same row.
 fn status_row(light: bool, say: &str, actions: Option<AnyElement>) -> AnyElement {
@@ -229,15 +233,6 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     if let Some(a) = actions.take() { col = col.child(div().flex().justify_end().px_3().py_1().child(a)); }
     let note = string(viewer, "note");
     if !note.is_empty() { col = col.child(div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(note)); }
-    // Boards: a project with several lists them as chips, the one on show marked; a press shows that board (and its schematic)
-    let boards = boards(viewer);
-    if boards.len() > 1 && matches!(open, "board" | "schematic" | "3d") {
-        col = col.child(div().id("boards-row").flex().flex_wrap().gap_1().px_3().py_1().children(boards.into_iter().enumerate().map(|(i, (label, value, on))| {
-            let d = div().id(SharedString::from(format!("board-{i}"))).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1();
-            let d = if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
-            d.child(label).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-board".into(), value.clone())); cx.notify(); })).into_any_element()
-        }).collect::<Vec<_>>()));
-    }
     // Layers: the menu lists the layers this plot has; the hub's masks decide what the canvas draws
     let mut present = std::collections::BTreeMap::new();
     for ch in &frame.chunks { present.entry(ch.layer).or_insert(ch.color); }
@@ -263,7 +258,9 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     if layers {
         let fit = div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().py_1().mt_1().ml_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child("Fit")
             .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.touched = false; pv.fit_wh = (0., 0.); cx.notify(); }));
-        col = col.child(div().flex().items_center().child(crate::viewers::layers::strip_el(cx, light, &strip, &pv.layers_key)).child(fit));
+        // the Boards menu leads the row (0.14 put it first in the viewer's bar), then Layers and Fit
+        let boards = if slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None };
+        col = col.child(div().flex().items_center().min_w_0().children(boards.map(|b| div().pl_3().py_1().min_w_0().child(b))).child(crate::viewers::layers::strip_el(cx, light, &strip, &pv.layers_key)).child(fit));
     }
     let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, slot, pv.focus.clone(), light, frame, view, crate::viewers::layers::masks(viewer)));
     if layers { if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(280.), &pv.layers_scroll) { area = area.child(p); } }
@@ -368,7 +365,7 @@ fn split_head(cx: &mut Context<Backplane>, light: bool, pane: &'static str, name
 }
 /// The bar's pane toggles (lit while shown) and the probed piece as a chip (0.14's combo-picks and probe-chip): a tap on a part or net in any pane names it here
 /// instead of a card over the drawing; × or Escape clears it in every pane.
-fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Option<&super::plot::Card>, actions: AnyElement) -> AnyElement {
+fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Option<&super::plot::Card>, boards: Option<AnyElement>, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut picks = div().flex().flex_none().gap_1();
     for (pane, name) in SPLIT_PANES.iter() {
@@ -381,7 +378,7 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
     }
     // the bar: (the Boards menu,) the pane toggles, the probe, then the pane's own controls
     // (as tall as the thread's head beside it, so their lines meet)
-    let mut row = div().id("split-bar").flex_none().h(px(super::bar::H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("line")).child(div().flex_1()).child(picks);
+    let mut row = div().id("split-bar").flex_none().h(px(super::bar::H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("line")).children(boards).child(div().flex_1()).child(picks);
     if let Some(card) = probed {
         let words = probe_words(card);
         let full = std::iter::once(card.title.clone()).chain(card.rows.iter().map(|(k, v)| format!("{k}: {v}"))).collect::<Vec<_>>().join("\n");
@@ -403,14 +400,14 @@ pub fn probe_words(card: &super::plot::Card) -> Vec<String> {
 /// Split (0.14's combined view): the schematic beside the board and its 3D model (stacked the other way on a pane taller than wide), each under a head that
 /// names it and puts it away, the bar's toggles bring each back, and the dividers between them resize them (kept on this device). Every pane is a page of
 /// `viewer.panes` (key, camera), all watched at once; a tap in the schematic or the board lights the part or net in both.
-fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &super::plot::Store, pvs: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, have: &str, actions: AnyElement) -> AnyElement {
+fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &super::plot::Store, pvs: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, have: &str, boards: Option<AnyElement>, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let panes: Vec<&Value> = viewer["panes"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
     if panes.len() < 3 { return status_row(light, "Opening…", Some(actions)) }
     let prefs = split_prefs();
     let (s_on, b_on, t_on) = (split_shows(&prefs.hide, "sch"), split_shows(&prefs.hide, "pcb"), split_shows(&prefs.hide, "3d"));
     let probed = pvs.iter().find_map(|p| p.card.clone());
-    let bar = split_bar(cx, light, &prefs.hide, probed.as_ref(), actions);
+    let bar = split_bar(cx, light, &prefs.hide, probed.as_ref(), boards, actions);
     // landscape (the pane wider than tall): the schematic on the left, the board over the 3D on the right; portrait: the schematic on top, the board beside the 3D
     let wide = split_box(0).map_or(true, |b| b.size.width >= b.size.height);
     let [sch_pv, brd_pv] = pvs;
@@ -488,7 +485,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { let a = acts(cx); super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target, a) }
         else if open == "review" && viewer["review"].is_object() { let a = acts(cx); review_page(cx, reg, light, &viewer["review"], a) }
         else if matches!(open, "board" | "schematic") { let a = acts(cx); plot_page(cx, light, open, viewer, plot, pv, a) }
-        else if open == "split" { let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default(); let a = acts(cx); split_page(cx, light, viewer, plot, split_pv, solid, &have, a) }
+        else if open == "split" { let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default(); let a = acts(cx); let b = crate::viewers::boards::picker(cx, light, viewer, &pv.boards); split_page(cx, light, viewer, plot, split_pv, solid, &have, b, a) }
         else if matches!(open, "3d" | "mech") {
             let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
@@ -498,10 +495,10 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default();
             let ready = matches!(solid, Some(s) if solid_ready(&want, &have));
             // the 3D page's own tools float top left over the model: they wrap short of the corner the pane's controls take
-            if let Some(s) = solid { let room = if open == "3d" && ready { CORNER_ROOM } else { 0. }; if s.read(cx).reserve != room { s.update(cx, |p, cx| { p.reserve = room; cx.notify(); }); } }
+            if let Some(s) = solid { let room = if open == "3d" && ready { CORNER_ROOM + if crate::viewers::boards::list(viewer).len() > 1 { 240. } else { 0. } } else { 0. }; if s.read(cx).reserve != room { s.update(cx, |p, cx| { p.reserve = room; cx.notify(); }); } }
             let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => status_row(light, "Loading the model…", None) } };
             if open == "mech" { let a = acts(cx); div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, key_empty, a)).child(model).into_any_element() }
-            else if ready { let a = acts(cx); in_corner(div().size_full().flex().flex_col().child(model).into_any_element(), a) }
+            else if ready { let a0 = acts(cx); let a = with_boards(cx, light, viewer, pv, a0); in_corner(div().size_full().flex().flex_col().child(model).into_any_element(), a) }
             else { let a = acts(cx); status_row(light, "Loading the model…", Some(a)) }
         }
         else if open == "browser" { let a = acts(cx); match browser { Some(b) => in_corner(div().size_full().child(b.clone()).into_any_element(), a), None => status_row(light, "The browser page needs a connected hub.", Some(a)) } }

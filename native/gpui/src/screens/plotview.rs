@@ -35,6 +35,8 @@ pub struct PlotView {
     /// The plot as last tessellated, and what it was made from: a paint with the same camera, canvas and chunks submits these again
     /// instead of tessellating every chunk (tens of ms on a real board) for a frame that only moved something else.
     pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
+    /// The Boards menu (viewers::boards), held on the Board/Schematic page's camera for every page that shows it.
+    pub boards: crate::viewers::boards::BoardsUi,
 }
 
 /// What a tessellated plot depends on: the frame's chunks (by identity), the order and fade they are drawn in, the camera and the canvas.
