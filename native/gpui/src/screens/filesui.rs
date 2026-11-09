@@ -298,7 +298,7 @@ fn upload(this: &mut Backplane, paths: Vec<PathBuf>, dir: &str, cx: &mut Context
 
 fn small_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static str, label: &str, d: Do) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    div().id(SharedString::from(id.to_string())).flex().items_center().gap_1().px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel")))
+    viewer::tall(div().id(SharedString::from(id.to_string()))).gap_1().px_2().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel")))
         .child(crate::art::icon(icon, 13., c("text"))).child(label.to_string())
         .on_click(cx.listener(move |this, _, w, cx| act(this, d.clone(), Some(w), cx))).into_any_element()
 }
@@ -320,7 +320,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
         if i + 1 < trail.len() { crumbs = crumbs.child(div().text_color(c("faint")).child("/")); }
     }
     let at_root = trail.len() <= 1;
-    let mut bar = div().flex().items_center().gap_2().px_3().py_2().border_b_1().border_color(c("line"))
+    let mut bar = viewer::bar_wrap(light)
         .child(div().id("fm-up").px_1().cursor_pointer().when(at_root, |d| d.opacity(0.35)).child(crate::art::icon("arrow-up", 14., c("text"))).on_click(cx.listener(|this, _, w, cx| act(this, Do::Up, Some(w), cx))))
         .child(crumbs);
     bar = bar.child(small_btn(cx, light, "fm-new", "folder-plus", "New", Do::NewFolder)).child(small_btn(cx, light, "fm-upload", "arrow-up", "Upload", Do::PickUpload)).child(small_btn(cx, light, "fm-zip", "download", "Zip", Do::DownloadDir)).child(actions);
@@ -391,7 +391,7 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
     let c = |n: &str| theme::color(light, n);
     let name = viewer["file"]["name"].as_str().unwrap_or("").to_string();
     let url = viewer["file"]["url"].as_str().unwrap_or("").to_string();
-    let mut bar = div().flex().items_center().gap_2().px_3().py_2().border_b_1().border_color(c("line"))
+    let mut bar = viewer::bar_wrap(light)
         .child(small_btn(cx, light, "fm-back", "chevron-left", "Files", Do::Back))
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(12.)).child(name.clone()));
     if open == "pdf" && ui.pdf.pages > 0 {

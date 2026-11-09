@@ -58,10 +58,10 @@ pub fn strip(viewer: &Value, present: &BTreeMap<u32, u32>) -> Strip {
 pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, key: &str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     if s.rows.is_empty() { return div().into_any_element(); }
-    let head = div().id("layers-btn").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c(if s.mode > 0 { "accent" } else { "line" })).bg(c("raise")).when(s.mode > 0, |d| d.text_color(c("accent"))).child(s.head.clone())
+    let head = crate::screens::viewer::tall(div().id("layers-btn").px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c(if s.mode > 0 { "accent" } else { "line" })).bg(c("raise")).when(s.mode > 0, |d| d.text_color(c("accent"))).child(s.head.clone())
         .tooltip(crate::keys::tip("Layers: others as they are, dimmed, hidden", key, light))
         .on_click(cx.listener(|this, _, _, cx| { let pv = &mut this.screens.plotview; pv.layers_open = !pv.layers_open; cx.notify(); }));
-    div().flex().px_3().py_1().child(head).into_any_element()
+    head.into_any_element()
 }
 
 /// The open Layers panel: absolute over the canvas (the button row keeps its height, so the canvas never jumps), its own scroll past `max_h`.
