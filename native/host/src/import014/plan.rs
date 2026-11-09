@@ -88,10 +88,12 @@ fn thread_key(t: &str) -> Option<&'static str> {
 fn run_thread(id: &str) -> bool { id.starts_with("run") || id.starts_with("mailcoord-") }
 
 /// Settings that still mean something in this version: a person's choices, and notes about the things that come across.
-fn keeps_setting(k: &str) -> bool {
+pub(super) fn keeps_setting(k: &str) -> bool {
     const EXACT: &[&str] = &["agent.provider", "agent.model", "agent.lang", "ui.theme", "sidebar.view", "voice.device", "notify.all", "followup", "restart.continue",
-        "text.provider", "text.model", "order.enabled", "kicad.ipc", "kicad.path", "freecad.path"];
-    const PREFIX: &[&str] = &["ui.", "sidebar.", "notify.", "project.icon.", "fab.", "thread.tree.", "bot.parent.", "room.seen.", "seen.", "summary.", "effort.", "turn.speed.", "run.model.", "board.", "rule.", "merged."];
+        "text.provider", "text.model", "order.enabled", "order.estimates", "order.server", "kicad.ipc", "kicad.path", "freecad.path"];
+    // buy.<thread> marks a buy thread (its tools, its Order card), buy.last.<thread> its design thread's newest, order.quote.<thread> the card's quote;
+    // order.wait is not kept: a quote still being made is waited on again from its record (files::copy_orders, order::resume)
+    const PREFIX: &[&str] = &["ui.", "sidebar.", "notify.", "project.icon.", "fab.", "buy.", "order.quote.", "thread.tree.", "bot.parent.", "room.seen.", "seen.", "summary.", "effort.", "turn.speed.", "run.model.", "board.", "rule.", "merged."];
     EXACT.contains(&k) || PREFIX.iter().any(|p| k.starts_with(p))
 }
 /// The ids a setting key names (`summary.at.t17-2`, `seen.t17-2.claude`): tokens that look like a thread, project, bot or room id.

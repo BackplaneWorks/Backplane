@@ -270,3 +270,15 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     assert_eq!(next_chunk(500, 10), 1000); assert_eq!(next_chunk(1500, 1), 2000, "never above the ceiling");
     assert_eq!(next_chunk(500, 100), 500, "on target: kept");
 }
+#[test] fn a_buy_threads_marks_and_its_orders_come_across() {
+    for k in ["buy.t1-2", "buy.last.t1-2", "order.quote.t1-2", "order.estimates", "order.server", "order.enabled"] { assert!(plan::keeps_setting(k), "{k}") }
+    assert!(!plan::keeps_setting("order.wait.t1-2"), "a quote being made is waited on again from its record, not from a stale mark");
+    let d = tmp("orders"); let (old, home) = (d.join("old"), d.join("home")); std::fs::create_dir_all(old.join("orders")).unwrap();
+    let rec = |id: &str, th: &str| serde_json::json!({"id":id,"token":"tok","thread":th,"server":"http://s","status":"paid"}).to_string();
+    for (f, t) in [("q_kept.json", rec("q_kept", "t1-2")), ("q_other.json", rec("q_other", "t9-9")), ("q_liar.json", rec("q_x", "t1-2")), ("none.json", "{}".into())] { std::fs::write(old.join("orders").join(f), t).unwrap() }
+    std::fs::create_dir_all(home.join("orders")).unwrap(); std::fs::write(home.join("orders/q_here.json"), "mine").unwrap(); std::fs::write(old.join("orders/q_here.json"), rec("q_here", "t1-2")).unwrap();
+    let ths: std::collections::HashSet<String> = ["t1-2".to_string()].into();
+    assert_eq!(files::copy_orders(&old, &home, &ths), 1, "only a record of a thread that came across, named as it says");
+    assert!(home.join("orders/q_kept.json").is_file()); assert_eq!(std::fs::read_to_string(home.join("orders/q_here.json")).unwrap(), "mine", "never over one that is here");
+    use crate::plat::fs::PermissionsExt; assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(home.join("orders/q_kept.json")).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
+}
