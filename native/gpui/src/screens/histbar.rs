@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 pub struct Step { pub c: String, pub p: String, pub t: u64, pub old: String, pub new: String, pub label: String, pub tip: String, pub title: String, pub detail: String, pub entry: String, pub id: String, /** the thread's row it points at (a message, or the folded run it is in) */ pub row: String }
 /// The track of the file on show and the bar's own words while the live file shows (`live`, `note`).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Steps { pub git: String, pub top: String, pub pcb: String, pub sch: String, pub file: String, pub kind: String, pub live: String, pub note: String, pub steps: Vec<Step> }
+pub struct Steps { pub git: String, pub top: String, pub pcb: String, pub sch: String, pub file: String, pub kind: String, pub live: String, /** what the live title's numbers count */ pub live_tip: String, pub note: String, pub steps: Vec<Step> }
 pub fn steps_of(v: &Value) -> Option<Steps> {
     // the hub refused (a far machine's hub that has no history.steps, a thread gone): the bar says so instead of loading for ever
     if v.is_null() { return Some(Steps { live: "Live".into(), note: "The design history could not be read here.".into(), ..Steps::default() }) }
@@ -33,7 +33,7 @@ pub fn steps_of(v: &Value) -> Option<Steps> {
             detail: w("detail"), entry: w("entry"), id: w("id"), row: w("row"), c, p, old, new, label })
     }).collect();
     let live = if g("live").is_empty() { if steps.is_empty() { "Live".to_string() } else { format!("Live · {} steps", steps.len()) } } else { g("live") };
-    Some(Steps { pcb: g("pcb"), sch: g("sch"), kind: g("kind"), note: g("note"), live, git, top, file, steps })
+    Some(Steps { pcb: g("pcb"), sch: g("sch"), kind: g("kind"), note: g("note"), live_tip: g("liveTip"), live, git, top, file, steps })
 }
 
 /// core/hist's version path of `file` in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>" ("" when the file is not under the top folder).
@@ -90,6 +90,10 @@ pub fn picture(app: &mut Backplane) {
         match e["kind"].as_str() { Some("step") => e["id"].as_str().hash(&mut h), Some("fold") => { e["id"].as_str().hash(&mut h); e["label"].as_str().hash(&mut h); } _ => {} }
     }
     let sig = h.finish();
+    let open = app.data["thread"]["viewer"]["open"].as_str().unwrap_or("");
+    if !matches!(open, "board" | "schematic") && (app.screens.plotview.compare.is_some() || app.screens.plotview.hist.at.is_some()) {
+        let pv = &mut app.screens.plotview; pv.compare = None; pv.menu = 0; pv.hist.at = None; pv.hist.playing = false; pv.hist.play += 1;
+    }
     let hist = &mut app.screens.plotview.hist;
     if hist.thread != th { *hist = Hist { thread: th, sig, play: hist.play + 1, ..Hist::default() }; return }
     if hist.sig == sig { return }
@@ -391,7 +395,9 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
             .child(icon_btn(cx, light, "hist-play", if hist.playing { "pause" } else { "play" }, if hist.playing { "Pause" } else { "Play the steps" }, "accent", n > 0, |app, cx| play(app, cx)))
             .child(icon_btn(cx, light, "hist-next", "chevron-right", "The step after", "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plotview.hist.at; select(app, fwd(a, n)) }))
             .child(icon_btn(cx, light, "hist-last", "skip-forward", "The last step", "dim", n > 0, move |app, _| { stop(app); let n = on(app); if n > 0 { select(app, Some(n - 1)) } }))
-            .child(div().id("hist-title").mx(px(8.)).min_w_0().flex_shrink().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("text")).child(title))
+            .child({ let tip = if step.is_none() { hist.steps.as_ref().map_or(String::new(), |h| h.live_tip.clone()) } else { String::new() };
+                let t = div().id("hist-title").mx(px(8.)).min_w_0().flex_shrink().child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("text")).child(title));
+                if tip.is_empty() { t } else { t.tooltip(crate::keys::tip(&tip, "", light)) } })
             .child(div().flex_1())
             .child(btn(cx, light, "hist-diff", "Highlight edits", hist.diff && at.is_some(), n > 0, "Compare a snapshot with the one before: red removed, yellow changed, green added. From Live, show the latest snapshot.", |app, _| { stop(app); highlight(app) }))
             .child(btn(cx, light, "compare-btn", "Compare", pv.menu == 1, true, "Compare two versions of the file", |app, cx| toggle_menu(app, 0, cx)))
