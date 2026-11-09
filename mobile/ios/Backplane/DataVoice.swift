@@ -48,12 +48,15 @@ struct DVoiceRow: Identifiable {
     var label = "", note = "", tone = ""
     var buttons: [(label: String, action: String, value: String, on: Bool)] = []
     var fields: [DVoiceField] = []
-    /// the hub's `rows` array (voice.page, machines.page)
+    /// a code to scan (devices.page): one string of "0"/"1" a module row, and the line under it
+    var qr: [String] = [], qrnote = ""
+    /// the hub's `rows` array (voice.page, machines.page, devices.page)
     static func parse(_ v: Any?) -> [DVoiceRow] {
         (v as? [[String: Any]] ?? []).enumerated().map { i, r in
             DVoiceRow(id: i, label: r["label"] as? String ?? "", note: r["note"] as? String ?? "", tone: r["tone"] as? String ?? "",
                       buttons: (r["buttons"] as? [[String: Any]] ?? []).map { ($0["label"] as? String ?? "", $0["action"] as? String ?? "", $0["value"] as? String ?? "", $0["on"] as? Bool ?? false) },
-                      fields: (r["fields"] as? [[String: Any]] ?? []).map(DVoiceField.init))
+                      fields: (r["fields"] as? [[String: Any]] ?? []).map(DVoiceField.init),
+                      qr: r["qr"] as? [String] ?? [], qrnote: r["qrnote"] as? String ?? "")
         }
     }
 }
@@ -329,6 +332,8 @@ struct DPageRows: View {
                     Text(r.label).dmono(13)
                     let note = errors[r.id] ?? r.note
                     if !note.isEmpty { Text(note).dmono(11).foregroundStyle(errors[r.id] != nil || r.tone == "bad" ? BackplaneDesign.bad : r.tone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim) }
+                    if !r.qr.isEmpty { DQRCode(rows: r.qr).accessibilityIdentifier(idPrefix + ".qr") }
+                    if !r.qrnote.isEmpty { Text(r.qrnote).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }
                     ForEach(r.fields, id: \.name) { f in
                         Group {
                             if f.secret { SecureField(f.hint, text: binding(f)) } else { TextField(f.hint, text: binding(f)) }
