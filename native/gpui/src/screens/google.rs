@@ -63,7 +63,7 @@ pub fn account_rows(v: &Value) -> Vec<AccountRow> {
     v["accounts"].as_array().into_iter().flatten().map(|a| {
         let bots = string(a, "bots");
         AccountRow { id: string(a, "id"), email: string(a, "email"), scopes: string(a, "scopes"), line: string(a, "line"), tone: if a["tone"] == "bad" { "bad".into() } else { "ok".into() },
-            bots: if bots.is_empty() { "Bots: none".into() } else { format!("Bots: {bots}") } }
+            /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ bots: if bots.is_empty() { "Bots: none".into() } else { format!("Bots: {bots}") } }
     }).collect()
 }
 /// Bots with a toggle per account: (account id, email, on). A bot with no accounts to choose from is left out.
@@ -80,13 +80,13 @@ pub fn wants_paste(v: &Value) -> bool { v["signin"]["paste"] == true }
 
 // ---- listener --------------------------------------------------------------------------------------------------------------------------------------
 
-const PAGE: &str = "<!doctype html><meta charset=utf-8><title>Signed in</title><body style=\"font:16px sans-serif;margin:3em\">Signed in. You can close this tab.</body>";
-fn answer(mut s: TcpStream, status: &str, body: &str) { let _ = write!(s, "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}", body.len()); }
+/* i18n-ok: notices and button labels are drawn through trs; HTTP text */ const PAGE: &str = "<!doctype html><meta charset=utf-8><title>Signed in</title><body style=\"font:16px sans-serif;margin:3em\">Signed in. You can close this tab.</body>";
+/* i18n-ok: notices and button labels are drawn through trs; HTTP text */ fn answer(mut s: TcpStream, status: &str, body: &str) { let _ = write!(s, "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}", body.len()); }
 fn serve_one(mut s: TcpStream, port: u16) -> Option<String> {
     let _ = s.set_nonblocking(false); let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
     let mut buf = Vec::new(); let mut chunk = [0u8; 1024];
     while buf.len() < 8192 && !buf.windows(4).any(|w| w == b"\r\n\r\n") { match s.read(&mut chunk) { Ok(0) | Err(_) => break, Ok(n) => buf.extend_from_slice(&chunk[..n]) } }
-    match classify(&String::from_utf8_lossy(&buf), port) { Some(url) => { answer(s, "200 OK", PAGE); Some(url) } None => { answer(s, "404 Not Found", "Not found"); None } }
+    /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ match classify(&String::from_utf8_lossy(&buf), port) { Some(url) => { answer(s, "200 OK", PAGE); Some(url) } None => { answer(s, "404 Not Found", "Not found"); None } }
 }
 /// Accepts until one good request, the stop flag, or the sign-in's 15 minutes; the caught address goes down the channel.
 fn listen(l: TcpListener, port: u16, stop: Arc<AtomicBool>, tx: async_channel::Sender<String>) {
@@ -103,7 +103,7 @@ fn listen(l: TcpListener, port: u16, stop: Arc<AtomicBool>, tx: async_channel::S
 // ---- requests --------------------------------------------------------------------------------------------------------------------------------------
 
 pub fn ask(this: &mut Backplane, params: Value) {
-    if this.tx.try_send(Command::Rpc("google".into(), Secret(params), "google")).is_err() { this.screens.acct.google.notice = "The hub is not reachable. Try again.".into(); }
+    /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ if this.tx.try_send(Command::Rpc("google".into(), Secret(params), "google")).is_err() { this.screens.acct.google.notice = "The hub is not reachable. Try again.".into(); }
 }
 pub fn view(this: &mut Backplane) { ask(this, json!({"op": "view"})) }
 fn stop_listener(g: &mut Google) { if let Some(s) = g.stop.take() { s.store(true, Ordering::Relaxed) } }
@@ -115,7 +115,7 @@ pub fn open_page(this: &mut Backplane) { this.screens.acct.google.armed.clear();
 fn start_signin(this: &mut Backplane, account: Option<String>, cx: &mut Context<Backplane>) {
     stop_listener(&mut this.screens.acct.google);
     let g = &mut this.screens.acct.google; g.notice.clear(); g.opened.clear(); g.want_open = true;
-    let listener = match TcpListener::bind(("127.0.0.1", 0)) { Ok(l) => l, Err(_) => { g.notice = "Could not open a local port for the sign-in. Paste the address instead.".into(); ask(this, json!({"op": "signin"})); return } };
+    /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ let listener = match TcpListener::bind(("127.0.0.1", 0)) { Ok(l) => l, Err(_) => { g.notice = "Could not open a local port for the sign-in. Paste the address instead.".into(); ask(this, json!({"op": "signin"})); return } };
     let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
     let stop = Arc::new(AtomicBool::new(false)); g.stop = Some(stop.clone());
     let (tx, rx) = async_channel::bounded::<String>(1);
@@ -133,7 +133,7 @@ fn send_code(this: &mut Backplane, code: &str) {
 fn paste(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(input) = this.screens.acct.google.paste.clone() else { return };
     let code = input.read(cx).content.to_string();
-    if code.trim().is_empty() { this.screens.acct.google.notice = "Paste the address the browser landed on.".into(); return }
+    /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ if code.trim().is_empty() { this.screens.acct.google.notice = "Paste the address the browser landed on.".into(); return }
     send_code(this, code.trim());
     input.update(cx, |i, cx| i.set(String::new(), cx));
 }
@@ -153,7 +153,7 @@ pub fn got(this: &mut Backplane, v: Value, cx: &mut Context<Backplane>) {
     if !busy(&v) { stop_listener(g); }
     if wants_paste(&v) && g.paste.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
-        input.update(cx, |i, _| { i.set_placeholder("Paste the address the browser landed on"); i.masked = true; });
+        input.update(cx, |i, _| { i.set_placeholder(&crate::i18n::trs("Paste the address the browser landed on")); i.masked = true; });
         cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { paste(this, cx) }).detach();
         this.screens.acct.google.paste = Some(input);
     }
@@ -164,7 +164,7 @@ pub fn got(this: &mut Backplane, v: Value, cx: &mut Context<Backplane>) {
 }
 /// The hub says an account changed: the View is asked again when the section has been shown.
 pub fn changed(this: &mut Backplane) { if this.screens.acct.google.view.is_object() { view(this) } }
-pub fn done(this: &mut Backplane, ok: bool, why: &str) { if !ok { this.screens.acct.google.notice = if why.is_empty() { "The hub refused that.".into() } else { why.to_string() } } }
+/* i18n-ok: notices and button labels are drawn through trs; HTTP text */ pub fn done(this: &mut Backplane, ok: bool, why: &str) { if !ok { this.screens.acct.google.notice = if why.is_empty() { "The hub refused that.".into() } else { why.to_string() } } }
 fn poll(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if !busy(&this.screens.acct.google.view) || this.screens.acct.google.polling { return }
     this.screens.acct.google.polling = true;
@@ -183,26 +183,26 @@ pub fn section(cx: &mut Context<Backplane>, light: bool, g: &Google) -> Vec<AnyE
     let c = |n: &str| theme::color(light, n);
     let v = &g.view;
     if !v.is_object() { return vec![] }
-    let mut out: Vec<AnyElement> = vec![div().pt_3().pb_2().text_size(px(14.)).font_weight(FontWeight::BOLD).child("Google").into_any_element()];
-    if !g.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("dim")).child(g.notice.clone()).into_any_element()); }
+    let mut out: Vec<AnyElement> = vec![div().pt_3().pb_2().text_size(px(14.)).font_weight(FontWeight::BOLD).child("Google" /* i18n-ok: the product name */).into_any_element()];
+    if !g.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::trs(&g.notice)).into_any_element()); }
     for (i, a) in account_rows(v).into_iter().enumerate() {
         let (id, armed) = (a.id.clone(), g.armed == a.id);
         let head = div().flex().items_center().gap_3()
             .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(140.))
                 .child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(a.email.clone()))
                 .child(div().text_size(px(12.)).text_color(c("dim")).child(a.scopes.clone()))
-                .child(div().text_size(px(12.)).text_color(c("dim")).child(a.bots.clone())))
+                .child(div().text_size(px(12.)).text_color(c("dim")).child(crate::i18n::trs(&a.bots))))
             .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(&a.tone))).child(div().text_size(px(12.)).text_color(c(&a.tone)).child(a.line.clone())));
         let mut row = div().flex().items_center().gap_2().mt_3().flex_wrap();
         let aid = id.clone();
-        row = row.child(button(cx, light, format!("g-again-{i}"), "Sign in again", false, false, move |this, cx| start_signin(this, Some(aid.clone()), cx)));
+        /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ row = row.child(button(cx, light, format!("g-again-{i}"), "Sign in again", false, false, move |this, cx| start_signin(this, Some(aid.clone()), cx)));
         if armed {
             let rid = id.clone();
-            row = row.child(button(cx, light, format!("g-remove-{i}"), "Confirm remove", false, true, move |this, _| { this.screens.acct.google.armed.clear(); ask(this, json!({"op": "remove", "account": rid})) }))
-                .child(button(cx, light, format!("g-keep-{i}"), "Keep", false, false, |this, _| this.screens.acct.google.armed.clear()));
+            /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ row = row.child(button(cx, light, format!("g-remove-{i}"), "Confirm remove", false, true, move |this, _| { this.screens.acct.google.armed.clear(); ask(this, json!({"op": "remove", "account": rid})) }))
+                /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ .child(button(cx, light, format!("g-keep-{i}"), "Keep", false, false, |this, _| this.screens.acct.google.armed.clear()));
         } else {
             let rid = id.clone();
-            row = row.child(button(cx, light, format!("g-delete-{i}"), "Remove", false, true, move |this, _| this.screens.acct.google.armed = rid.clone()));
+            /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ row = row.child(button(cx, light, format!("g-delete-{i}"), "Remove", false, true, move |this, _| this.screens.acct.google.armed = rid.clone()));
         }
         out.push(div().flex().flex_col().p_4().mb_3().border_1().border_color(c("line")).bg(c("view")).child(head).child(row).into_any_element());
     }
@@ -224,9 +224,9 @@ pub fn section(cx: &mut Context<Backplane>, light: bool, g: &Google) -> Vec<AnyE
         if let Some(input) = g.paste.as_ref().filter(|_| wants_paste(v)) {
             col = col.child(div().flex().items_center().gap_2()
                 .child(div().flex_1().h(px(28.)).px_2().flex().items_center().bg(c("raise")).child(input.clone()))
-                .child(button(cx, light, "g-paste".into(), "Submit", true, false, |this, cx| paste(this, cx))));
+                /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ .child(button(cx, light, "g-paste".into(), "Submit", true, false, |this, cx| paste(this, cx))));
         }
-        col = col.child(div().flex().child(button(cx, light, "g-cancel".into(), "Cancel", false, false, |this, _| cancel(this))));
+        /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ col = col.child(div().flex().child(button(cx, light, "g-cancel".into(), "Cancel", false, false, |this, _| cancel(this))));
         out.push(col.into_any_element());
     }
     if let Some(label) = add_label(v) { out.push(div().flex().child(button(cx, light, "g-add".into(), &label, true, false, |this, cx| start_signin(this, None, cx))).into_any_element()); }

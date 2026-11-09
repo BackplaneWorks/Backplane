@@ -1557,6 +1557,13 @@ gpui.filter.projects.and.threads = プロジェクトとスレッドを絞り込
 gpui.type.a.word.said.in2 = どのスレッドでも、発言した言葉を入力
 gpui.find.what.was.said.in = どのスレッドの発言も検索
 gpui.find.in.this.thread.enter = このスレッド内を検索: Enterで次、Shift+Enterで前、Escで閉じる
+gpui.google.bots = ボット: {bots}
+gpui.bots.none = ボット: なし
+gpui.could.not.open.a.local = サインイン用のローカルポートを開けませんでした。代わりにアドレスを貼り付けてください。
+gpui.paste.the.address.the.browser = ブラウザーが開いたアドレスを貼り付けてください。
+gpui.paste.the.address.the.browser2 = ブラウザーが開いたアドレスを貼り付け
+gpui.confirm.remove = 削除を確定
+gpui.submit = 送信
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = この下書きをこの端末に保存できませんでした。再試行してください。
