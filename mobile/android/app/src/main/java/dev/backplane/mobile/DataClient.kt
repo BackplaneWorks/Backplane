@@ -536,9 +536,23 @@ object DataClient {
             if (action == "remove") { projects = projects.filter { it.id != id }; threads = threads.filter { it.project != id } } else refresh()
         } catch (e: Exception) { failure = e.message ?: "" }
     }
-    suspend fun search(q: String): Pair<List<DThread>, List<DProject>> {
+    // `search`: threads and projects by title, and what was said (`messages`, newest first, at most 3 a thread; an older hub sends none)
+    data class MsgHit(val thread: String, val title: String, val project: String, val msg: String, val role: String, val text: String, val at: Long)
+    data class Found(val threads: List<DThread>, val projects: List<DProject>, val messages: List<MsgHit>)
+    suspend fun search(q: String): Found {
         val r = call("search", JSONObject().put("q", q))
-        return parseThreads(r.optJSONArray("threads")) to parseProjects(r.optJSONArray("projects"))
+        val a = r.optJSONArray("messages")
+        val msgs = if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { MsgHit(it.optString("thread"), it.optString("title"), it.optString("project"), it.optString("msg"), it.optString("role"), it.optString("text"), it.optLong("at")) }
+        return Found(parseThreads(r.optJSONArray("threads")), parseProjects(r.optJSONArray("projects")), msgs)
+    }
+    /** A message the thread screen goes to once it opens (a tapped message hit on the home search), marked there. */
+    var pendingMsg by mutableStateOf("")
+    // `find` (feature find): every message of one thread with every word of `q`, oldest first, for the find bar
+    data class FindRes(val q: String, val matches: List<Hit>, val total: Int, val more: Boolean)
+    suspend fun find(tid: String, q: String): FindRes {
+        val r = call("find", JSONObject().put("thread", tid).put("q", q)); val a = r.optJSONArray("matches")
+        val m = if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Hit(it.optString("msg"), it.optString("role"), it.optString("text"), it.optLong("at")) }
+        return FindRes(r.optString("q", q), m, r.optInt("total", m.size), r.optBoolean("more"))
     }
     // "Search in thread" (feature search): what was said in one thread with every word of `q`, newest first; `msg` is the entry it is in
     data class Hit(val msg: String, val role: String, val text: String, val at: Long)
