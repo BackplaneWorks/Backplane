@@ -320,6 +320,9 @@ impl Engine {
         // Windows: libcef.dll is delay-loaded from the executable's folder; a runtime elsewhere is put on the DLL search path first, for the helpers too
         #[cfg(windows)]
         if exe.parent().map_or(true, |d| d != dir) { win::use_dll_dir(Some(&dir)); unsafe { std::env::set_var("BACKPLANE_CEF_DLL_DIR", &dir); } }
+        // the API version, before any other call (subprocess() makes none in the browser process: argv decides first, and libcef may be absent)
+        #[cfg(not(target_os = "macos"))]
+        let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
         #[cfg(not(target_os = "macos"))]
         let (sub, res, loc) = (exe.clone(), dir.clone(), dir.join("locales"));
         let log = std::env::var("BACKPLANE_CEF_LOG").ok().filter(|l| !l.is_empty());
