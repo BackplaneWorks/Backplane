@@ -136,6 +136,28 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     Some(ViewOut { patch: out, before, boards_look: drawing(kind) && kind != "mech" && !drawing(prev) })
 }
 
+/// Settings opened: the viewer beside the thread shuts (0.14's Settings.viewer.shut), its watch stopped, Diff or Review put away; the board picked stays.
+/// The patch and the commands; an empty patch with nothing open.
+pub fn shut(hub: &str, session: &Value) -> (Value, Vec<Value>) {
+    let sel = s(session, "sel"); let d = &session["drafts"];
+    if sel.is_empty() { return (json!({}), vec![]) }
+    let mut out = json!({});
+    if !s(d, &format!("@view:{sel}")).is_empty() {
+        let mut drafts = serde_json::Map::new();
+        for k in ["@view", "@view.file", "@view.sheet"] { drafts.insert(format!("{k}:{sel}"), json!("")); }
+        for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
+        out = json!({"drafts": drafts});
+    }
+    let mut before = vec![];
+    if !s(d, "@view.at").is_empty() {
+        let rid = session["rid"].as_u64().unwrap_or(0);
+        before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{{\"kind\":\"\",\"root\":\"\",\"path\":\"\",\"tree\":\"\"}}}}")}));
+        patch::merge(&mut out, &json!({"rid": rid + 1, "drafts": {"@view.at": ""}}));
+    }
+    patch::merge(&mut out, &pages::leave(session, sel));
+    (out, before)
+}
+
 /// The project's boards as the Boards menu lists them (View.board.rows): two or more, the one on show marked, the project's own marked as the default. None for one board or none.
 fn boards_menu(session: &Value, sel: &str, root: &str) -> Option<Value> {
     let list: Vec<&str> = s(&session["info"], &format!("fab.boards:{sel}")).lines().filter(|l| !l.trim().is_empty()).collect();
@@ -699,6 +721,17 @@ mod tests {
         let o = board_action(&st, "h", &s1, "b/b.kicad_pcb").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
         assert_eq!(s1["drafts"][format!("@view.board:{th}")], json!(""));
         assert!(boards_look(&st, "h", &s1).unwrap()[0]["text"].as_str().unwrap().contains("boards.list"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn opening_settings_shuts_the_viewer_and_keeps_the_board_picked() {
+        let (st, th, d) = files_world("shut");
+        let mut s1 = sess(&th, json!({})); let o = view_action(&st, "h", &s1, "board").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        crate::session::patch::merge(&mut s1, &json!({"drafts": {format!("@view.board:{th}"): "a/a.kicad_pcb"}}));
+        let (p, c) = shut("h", &s1); crate::session::patch::merge(&mut s1, &p);
+        assert_eq!(s1["drafts"][format!("@view:{th}")], json!("")); assert_eq!(s1["drafts"]["@view.at"], json!(""));
+        assert!(c[0]["text"].as_str().unwrap().contains("\"kind\":\"\""), "the watch stops");
+        assert_eq!(s1["drafts"][format!("@view.board:{th}")], json!("a/a.kicad_pcb"));
+        assert!(shut("h", &s1).1.is_empty(), "nothing open: nothing sent");
         let _ = std::fs::remove_dir_all(&d);
     }
     fn sess(th: &str, drafts: Value) -> Value { json!({"sel": th, "rid": 1, "drafts": drafts, "open": {}, "adding": false, "panel": false, "info": {}}) }
