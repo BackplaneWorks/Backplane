@@ -141,7 +141,7 @@ pub fn due(st: &State, th: &str, t: &Thread, now: u64, ix: &Index) -> bool {
     let person = personal || audience == "person" || (!sum.found && audience.is_empty());
     let unread = (person || !w) && !output.is_empty() && output != st.get(&format!("autosettle.read.{th}"), "");
     let idle = seconds(st, "settle.idle.minutes", 15);
-    let window = if w { idle } else if !unread && st.get("settle.done", "off") == "on" { idle } else { seconds(st, "settle.personal.minutes", 240) };
+    let window = if w { idle } else if !unread && st.get("settle.done", "off") == "on" { idle } else { seconds(st, "settle.personal.minutes", 0) };
     let quiet = window > 0 && now >= sum.quiet.max(t.activity).max(num_setting(st, &format!("autosettle.quiet.{th}"), 0).max(snooze(st, th))).saturating_add(window);
     allow(t.turn, ix.owned.contains(th), t.pending > 0, unread, reported(st, th, sum, t.activity), quiet, shelf_of(t), t.override_)
 }
