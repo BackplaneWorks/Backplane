@@ -921,6 +921,8 @@ impl X11Client {
                 drop(state);
                 self.enable_ime();
             }
+            // Backplane patch: the keyboard going to a child window of ours (the Browser tab's Chromium) leaves this window the active one
+            Event::FocusOut(event) if event.detail == xproto::NotifyDetail::INFERIOR => {}
             Event::FocusOut(event) => {
                 let window = self.get_window(event.event)?;
                 window.set_active(false);

@@ -311,9 +311,13 @@ impl rwh::HasDisplayHandle for RawWindow {
     }
 }
 
+// Backplane patch: the window's own id (upstream left this unimplemented); the Browser tab parents Chromium's window to it
 impl rwh::HasWindowHandle for X11Window {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
-        unimplemented!()
+        let Some(non_zero) = NonZeroU32::new(self.0.x_window) else {
+            return Err(rwh::HandleError::Unavailable);
+        };
+        Ok(unsafe { rwh::WindowHandle::borrow_raw(rwh::XcbWindowHandle::new(non_zero).into()) })
     }
 }
 impl rwh::HasDisplayHandle for X11Window {

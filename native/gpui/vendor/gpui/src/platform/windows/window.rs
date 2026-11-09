@@ -406,7 +406,10 @@ impl WindowsWindow {
 
             (WS_EX_APPWINDOW, dwstyle)
         };
-        if !disable_direct_composition {
+        // Backplane patch: a redirection surface for every window but popups, so a child window that paints through GDI (the Browser tab's Chromium
+        // without GPU compositing: no GPU, a remote session, a blocklisted driver) shows; gpui's DirectComposition visual is drawn over that surface and
+        // under child windows (`CreateTargetForHwnd(hwnd, false)`)
+        if !disable_direct_composition && params.kind == WindowKind::PopUp {
             dwexstyle |= WS_EX_NOREDIRECTIONBITMAP;
         }
 
