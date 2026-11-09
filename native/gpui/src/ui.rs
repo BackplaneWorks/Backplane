@@ -444,7 +444,17 @@ impl Backplane {
                 let Some(this) = me.upgrade() else { return };
                 { let rows = &this.read(cx).data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
                 cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
-            } }, |_, _, _, _| {}).absolute().size_0()).into_any_element()
+            } }, |_, _, _, _| {}).absolute().size_0())
+            // far up a long thread: "Latest" goes back to the end (0.14 had the page's scrollbar); it shows and goes as the list is read
+            .child(canvas({ let me = cx.entity().downgrade(); move |_, _, cx| {
+                let Some(this) = me.upgrade() else { return };
+                if this.read(cx).note_far() { cx.defer(move |cx| this.update(cx, |_, cx| cx.notify())); }
+            } }, |_, _, _, _| {}).absolute().size_0())
+            .when(!no_rows && self.far_from_end(), |d| d.child(div().absolute().bottom_3().left_0().right_0().flex().justify_center()
+                .child(div().id("to-latest").flex().items_center().gap_1().px_3().py_1().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
+                    .text_size(px(12.)).text_color(c("text")).tooltip(crate::keys::tip("Go to the newest message", "", light)).child(ic(light, "chevron-down", 14., "dim")).child("Latest")
+                    .on_click(cx.listener(|this, _, _, cx| { this.timeline_to_end(); cx.notify(); })))))
+            .into_any_element()
     }
 }
 
