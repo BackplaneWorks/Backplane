@@ -21,13 +21,15 @@ fn cell_of(v: f32, o: f32, s: f32) -> u32 { fl::to_u32(((v - o) / s).floor()) }
 fn snap(v: f32, o: f32, s: f32) -> f32 { o + (((v - o) / s).floor() + 0.5) * s }
 /// Solid.thin: every corner moves across to the centre of its cell in a grid a thousandth of the model's size, a triangle two of whose
 /// corners land in one cell is dropped. y, the model's up, keeps its value, so a board's thin layers stay apart.
-pub fn thin(ts: Vec<Tri3>) -> Vec<Tri3> {
+pub fn thin(ts: Vec<Tri3>) -> Vec<Tri3> { thin_by(ts, 1000.0) }
+/// `thin` on a grid of `cells` a side of the model's size (fewer cells: fewer triangles, coarser).
+pub fn thin_by(ts: Vec<Tri3>, cells: f32) -> Vec<Tri3> {
     let big = 1000000000.0f32;
     let (mut lo, mut hi) = ([big; 3], [-big; 3]);
     for t in &ts { for v in [t.a, t.b, t.c] { for k in 0..3 { lo[k] = fl::min(lo[k], v[k]); hi[k] = fl::max(hi[k], v[k]) } } }
     let d = |k: usize| fl::max(hi[k] - lo[k], 0.0);
     let (dx, dy, dz) = (d(0), d(1), d(2));
-    let s = (dx * dx + (dy * dy + dz * dz)).sqrt() / 1000.0;
+    let s = (dx * dx + (dy * dy + dz * dz)).sqrt() / cells;
     if !(s > 0.0) { return ts }
     let same = |p: [f32; 3], q: [f32; 3]| (0..3).all(|k| cell_of(p[k], lo[k], s) == cell_of(q[k], lo[k], s));
     let moved = |v: [f32; 3]| [snap(v[0], lo[0], s), v[1], snap(v[2], lo[2], s)];
@@ -89,6 +91,12 @@ mod tests {
         let out = thin(vec![big, speck]);
         assert_eq!(out.len(), 1); assert_eq!(out[0].a[1], 0.0); assert_eq!(out[0].b[1], 0.25); assert_eq!(out[0].c[1], 0.5);
         assert_ne!(out[0].b[0], 1.0); // moved across, to a cell's centre
+    }
+    #[test] fn a_coarser_grid_keeps_fewer_triangles() {
+        // a fan of thin slivers around a 1 m disc: a coarse grid merges their outer corners
+        let ts: Vec<Tri3> = (0..400).map(|i| { let (a, b) = (i as f32 * 0.0157, (i + 1) as f32 * 0.0157); tri([0.0, 0.0, 0.0], [a.cos(), 0.0, a.sin()], [b.cos(), 0.0, b.sin()], 1) }).collect();
+        let (fine, coarse) = (thin_by(ts.clone(), 1000.0).len(), thin_by(ts, 15.0).len());
+        assert!(fine > 300 && coarse < fine / 4, "{fine} {coarse}");
     }
     #[test] fn a_model_of_no_extent_is_not_thinned() { let t = vec![tri([1.0; 3], [1.0; 3], [1.0; 3], 0)]; assert_eq!(thin(t.clone()), t); }
     #[test] fn upright_and_metres() {

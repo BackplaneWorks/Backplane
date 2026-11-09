@@ -277,7 +277,8 @@ impl Plots {
                 let plan = if kind == 3 { None } else {
                     let env = pcb3d::models::Env::system((!cli.is_empty()).then(|| std::path::Path::new(&cli)));
                     let dir = pcb3d::stream::board_dir(&abs);
-                    let p = pcb3d::stream::plan(&made.board, made.seat, &|raw: &str| pcb3d::models::resolve(raw, &dir, &env));
+                    let emb = pcb3d::models::embedded(&bytes, &pcb3d::models::Cache::standard().embedded_dir()); // KiCad 9's models inside the board
+                    let p = pcb3d::stream::plan(&made.board, made.seat, &|raw: &str| pcb3d::models::resolve_in(raw, &dir, &env, &emb));
                     plotgen::write_infos(&infos.to_string_lossy(), &pcb3d::stream::missing_note(&p));
                     Some(Arc::new((p, tris)))
                 };

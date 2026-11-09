@@ -125,6 +125,49 @@ pub fn resolve(raw: &str, board_dir: &Path, env: &Env) -> Option<PathBuf> {
     }
     None
 }
+/// `resolve`, and a model the board carries inside it (KiCad 9's `kicad-embed://NAME`) from `embedded` (the board's files, written out).
+pub fn resolve_in(raw: &str, board_dir: &Path, env: &Env, embedded: &HashMap<String, PathBuf>) -> Option<PathBuf> {
+    match raw.trim().strip_prefix("kicad-embed://") { Some(name) => embedded.get(name).cloned(), None => resolve(raw, board_dir, env) }
+}
+
+// ---------- models embedded in the board ----------
+fn find(h: &[u8], n: &[u8], from: usize) -> Option<usize> { h.get(from..)?.windows(n.len()).position(|w| w == n).map(|i| i + from) }
+fn rfind(h: &[u8], n: &[u8], to: usize) -> Option<usize> { h.get(..to)?.windows(n.len()).rposition(|w| w == n) }
+/// The files a board carries inside it (its `embedded_files`: each a name and its bytes as base64 of a zstd frame), written once into
+/// `dir` (named by their content, so a changed file is a new one) as name -> file. Nothing when no footprint names one (`kicad-embed://`).
+/// A file that does not decode is left out: its parts are boxes, as for a missing model.
+pub fn embedded(bytes: &[u8], dir: &Path) -> HashMap<String, PathBuf> {
+    use base64::Engine;
+    let mut out = HashMap::new();
+    if find(bytes, b"kicad-embed://", 0).is_none() { return out }
+    let mut at = 0;
+    while let Some(d) = find(bytes, b"(data |", at) {
+        let start = d + 7;
+        let Some(end) = find(bytes, b"|", start) else { break };
+        at = end + 1;
+        // the name is the file's own: the nearest `(name "...")` before its data, after the `(file` that holds both
+        let Some(f) = rfind(bytes, b"(file", d) else { continue };
+        let Some(n) = find(&bytes[..d], b"(name \"", f) else { continue };
+        let Some(q) = find(&bytes[..d], b"\"", n + 7) else { continue };
+        let Ok(name) = std::str::from_utf8(&bytes[n + 7..q]) else { continue };
+        if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') || out.contains_key(name) { continue }
+        let b64: Vec<u8> = bytes[start..end].iter().copied().filter(|c| !c.is_ascii_whitespace()).collect();
+        let file = dir.join(format!("embedded-v1-{:016x}-{name}", super::super::plot::mesh_id(&b64)));
+        if !file.is_file() {
+            let Ok(packed) = base64::engine::general_purpose::STANDARD.decode(&b64) else { continue };
+            let data = if packed.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
+                let mut v = Vec::new();
+                match ruzstd::decoding::StreamingDecoder::new(packed.as_slice()) { Ok(mut z) => if std::io::Read::read_to_end(&mut z, &mut v).is_err() { continue }, Err(_) => continue }
+                v
+            } else { packed };
+            let _ = std::fs::create_dir_all(dir);
+            let tmp = dir.join(format!(".{}.{}.part", file.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
+            if std::fs::write(&tmp, &data).is_err() || std::fs::rename(&tmp, &file).is_err() { let _ = std::fs::remove_file(&tmp); continue }
+        }
+        out.insert(name.to_string(), file);
+    }
+    out
+}
 fn is_wrl(p: &Path) -> bool { p.extension().map_or(false, |e| e.eq_ignore_ascii_case("wrl")) }
 
 // ---------- content key ----------
@@ -160,6 +203,8 @@ pub fn key(p: &Path) -> std::io::Result<String> {
 pub struct Cache { pub dir: PathBuf, pub fail_ttl: Duration }
 impl Cache {
     pub fn new(dir: impl Into<PathBuf>) -> Cache { Cache { dir: dir.into(), fail_ttl: FAIL_TTL } }
+    /// Where the models a board carries inside it are written out (`embedded`).
+    pub fn embedded_dir(&self) -> PathBuf { self.dir.join("embedded") }
     pub fn standard() -> Cache { Cache::new(format!("{}/parts", stepglb::cache_dir())) }
     pub fn glb(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v1-{key}.glb")) }
     pub fn fail_file(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v1-{key}.fail")) }
@@ -666,6 +711,24 @@ mod tests {
         use crate::plat::fs::PermissionsExt;
         let t = d.join("fake"); std::fs::write(&t, "#!/bin/sh\nms=$(cat \"$1\")\nif [ \"$ms\" = bad ]; then echo broken >&2; exit 1; fi\nsleep $(awk \"BEGIN{print $ms/1000}\")\nprintf glb > \"$2\"\n").unwrap();
         std::fs::set_permissions(&t, std::fs::Permissions::from_mode(0o755)).unwrap(); t.to_string_lossy().into_owned()
+    }
+    #[test] fn a_model_inside_the_board_is_written_out_once_and_resolved_by_name() {
+        use base64::Engine;
+        let d = std::env::temp_dir().join(format!("bp-embed-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        // a zstd frame of "ISO-10303-21;" (raw block), as KiCad 9 writes its embedded files
+        let step = b"ISO-10303-21;";
+        let mut z = vec![0x28, 0xb5, 0x2f, 0xfd, 0x20, step.len() as u8]; z.extend([(step.len() as u8) << 3 | 0x01, 0, 0]); z.extend(step);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&z);
+        let (a, b) = b64.split_at(8);
+        let board = format!("(kicad_pcb (footprint \"R\" (embedded_files (file (name \"r.step\") (checksum \"X\"))) (model \"kicad-embed://r.step\"))\n\t(embedded_files\n\t\t(file\n\t\t\t(name \"r.step\")\n\t\t\t(type other)\n\t\t\t(data |{a}\n\t\t\t\t{b}|)\n\t\t\t(checksum \"X\")\n\t\t)\n\t\t(file (name \"../evil\") (data |{b64}|))\n\t)\n)");
+        let m = embedded(board.as_bytes(), &d);
+        assert_eq!(m.len(), 1, "{m:?}: a name with a path in it is not written");
+        let f = &m["r.step"]; assert_eq!(std::fs::read(f).unwrap(), step); assert!(f.to_string_lossy().ends_with("-r.step"), "the extension says what it is");
+        assert_eq!(embedded(board.as_bytes(), &d)["r.step"], *f, "the same content, the same file");
+        assert_eq!(resolve_in("kicad-embed://r.step", &d, &Env::empty(), &m).as_ref(), Some(f));
+        assert_eq!(resolve_in("kicad-embed://gone.step", &d, &Env::empty(), &m), None);
+        assert!(embedded(b"(kicad_pcb (embedded_files (file (name \"x\") (data |AAAA|))))", &d).is_empty(), "no footprint names one: nothing is read");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn convert_streams_in_completion_order_and_caches() {
         TEST_WORKERS.store(2, Ordering::Relaxed); // never reset: more workers only make the other tests faster
