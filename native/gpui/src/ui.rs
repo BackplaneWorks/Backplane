@@ -205,7 +205,10 @@ impl Backplane {
                 let atts = crate::screens::timeline::attachments(cx, light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
                 let tools = msg_tools(cx, light, &id, &text);
                 let cards = ref_cards(cx, light, &id, &e["refs"]);
-                let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(tools).child(stamp);
+                // r05: a follow-up the agent has not read yet: its text a step dimmer, its time ("not read yet · 06:13") in the queued colour
+                let unread = e["unread"] == true;
+                let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(tools).child(div().when(unread, |d| d.text_color(c("queued"))).child(stamp));
+                let body = div().when(unread, |d| d.opacity(0.7)).child(body);
                 let reply_to = e["replyTo"].is_object().then(|| {
                     let (target, quote) = (string(&e["replyTo"], "id"), string(&e["replyTo"], "quote"));
                     div().id(SharedString::from(format!("rt-{id}"))).mb_1().max_w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
