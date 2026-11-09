@@ -207,21 +207,22 @@ pub fn boards(viewer: &Value) -> Vec<(String, String, bool)> {
 fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet], actions: Option<AnyElement>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let loading = |actions| status_row(light, if open == "board" { "Loading the board…" } else { "Loading the schematic…" }, actions);
-    let Some(frame) = frame else { return loading(actions) };
+    // the design history bar stays under a board or schematic while a version loads or cannot be shown (screens::histbar)
+    let hb = layers && matches!(open, "board" | "schematic"); let vkey = string(viewer, "key");
+    let Some(frame) = frame else { return super::histbar::under(cx, light, pv, &vkey, hb, loading(actions)) };
     // the frame must be the source this viewer asks for: another project's board stays off the screen until its own plot arrives
     let mut want = string(viewer, "key");
     // a comparison on show is its own source: `diff\n<old>\n<live>` after the key; another page puts it away
     if let Some(cmp) = pv.compare.clone() { if cmp.base == want { want = format!("{want}{}", super::histbar::shown(&cmp)); } else { pv.compare = None; } }
-    if !want.is_empty() && !frame.key.is_empty() && frame.key != want { return loading(actions) }
-    if !frame.none.is_empty() { return status_row(light, &frame.none, actions); }
+    if !want.is_empty() && !frame.key.is_empty() && frame.key != want { return super::histbar::under(cx, light, pv, &vkey, hb, loading(actions)) }
+    if !frame.none.is_empty() { return super::histbar::under(cx, light, pv, &vkey, hb, status_row(light, &super::histbar::none_words(&frame.none), actions)); }
     if pv.focus.is_none() { pv.focus = Some(cx.focus_handle()); }
     let (w, h) = pv.bounds.map_or((480., 600.), |b| (f32::from(b.size.width), f32::from(b.size.height)));
     let view = super::plotview::ensure_view(pv, frame, w, h);
     let mut col = div().size_full().flex().flex_col();
-    // the page's toolbar first: History and Compare, then the pane's controls at its end (screens::histbar)
+    // the page's toolbar first: the pane's controls at its end (the design history bar is under the canvas, screens::histbar)
     let mut actions = actions;
-    if layers && matches!(open, "board" | "schematic") { col = col.child(super::histbar::bar_el(cx, light, pv, actions.take())); }
-    else if let Some(a) = actions.take() { col = col.child(div().flex().justify_end().px_3().py_1().child(a)); }
+    if let Some(a) = actions.take() { col = col.child(div().flex().justify_end().px_3().py_1().child(a)); }
     let note = string(viewer, "note");
     if !note.is_empty() { col = col.child(div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(note)); }
     // Boards: a project with several lists them as chips, the one on show marked; a press shows that board (and its schematic)
@@ -271,7 +272,9 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         for (k, v) in card.rows.iter().take(14) { box_ = box_.child(div().flex().gap_2().child(div().w(px(70.)).text_color(c("dim")).child(k.clone())).child(div().flex_1().min_w_0().child(v.clone()))); }
         area = area.child(box_);
     }
-    col.child(area).into_any_element()
+    col = col.child(area);
+    if hb { col = col.child(super::histbar::bar_el(cx, light, pv, &vkey)); }
+    col.into_any_element()
 }
 
 /// Board or schematic: the plot the hub sent for this file.
