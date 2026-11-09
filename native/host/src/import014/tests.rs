@@ -190,6 +190,28 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     assert!(first.threads.contains("t1790175755-10") && !first.threads.contains("t1790175930-26") && !first.threads.iter().any(|t| t.starts_with("run")), "{:?}", first.threads);
 }
 
+/// A thread 0.14 delegated comes under its delegator (0.14 folded TaskDelegated into its parent; 0.15 reads ThreadParentSet), once: a re-run
+/// writes nothing again, and Import again on a home imported before this adds only the links.
+#[test] fn delegated_threads_come_under_their_delegator_once() {
+    let d = tmp("parents"); let old = old_home(&d); let log = old.join("events.jsonl");
+    let first = plan::plan(&log, &plan::Have::default(), plan::Opts { secrets: false, keep: true }).unwrap();
+    let links: Vec<&String> = first.lines.iter().filter(|l| l.contains("\"ThreadParentSet\"")).collect();
+    assert_eq!(links.len(), 1, "{links:?}");
+    let v: Value = serde_json::from_str(links[0]).unwrap();
+    assert_eq!((v["id"].as_str(), v["parent"].as_str(), v["at"].as_u64()), (Some("t1790175900-20"), Some("t1790175755-10"), Some(1790175901)));
+    let at = |p: &str| first.lines.iter().position(|l| l.contains(p)).unwrap();
+    assert!(at("\"ThreadParentSet\"") > at("\"ThreadCreated\",\"id\":\"t1790175900-20\""), "the link follows the child's creation");
+    let mut all = plan::Have::default(); for l in &first.lines { all.add(l) }
+    assert_eq!(plan::plan(&log, &all, plan::Opts { secrets: false, keep: true }).unwrap().counts.lines, 0, "a re-run writes nothing");
+    let mut before = plan::Have::default(); for l in first.lines.iter().filter(|l| !l.contains("\"ThreadParentSet\"")) { before.add(l) }
+    let again = plan::plan(&log, &before, plan::Opts { secrets: false, keep: true }).unwrap();
+    assert_eq!(again.lines, vec![links[0].clone()], "a home imported before gets only the links");
+    // a child the person moved (or detached) in 0.14 keeps that
+    let mut moved = std::fs::read_to_string(&log).unwrap(); if !moved.ends_with('\n') { moved.push('\n') } moved.push_str("{\"$\":\"SettingSet\",\"key\":\"thread.parent.t1790175900-20\",\"value\":\"\",\"at\":1790175999}\n");
+    std::fs::write(&log, moved).unwrap();
+    assert!(plan::plan(&log, &plan::Have::default(), plan::Opts { secrets: false, keep: true }).unwrap().lines.iter().all(|l| !l.contains("\"ThreadParentSet\"")));
+}
+
 /// A local check on a copy of a real 0.14 home, made read-only (never committed, never the home itself):
 /// BP_IMPORT_REAL=<copy> cargo test real_home -- --ignored --nocapture. It counts, imports into a test hub, imports again and checks the copy is as it was.
 #[tokio::test(flavor = "multi_thread")] #[ignore] async fn real_home() {
