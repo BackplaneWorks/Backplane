@@ -96,7 +96,7 @@ impl Backplane {
             if snap != self.last_layout { self.last_layout = snap.clone(); metric(started, "layout", json!({"rects": serde_json::from_str::<Value>(&snap).unwrap_or(Value::Null)})); }
             // G4: the controls on screen, on change
             let rects = crate::art::ctl_rects();
-            let ctl: Vec<Value> = self.controls.iter().map(|c| json!({"id": c.id, "label": c.label, "rect": rects.get(&c.id).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})), "enabled": !matches!(c.ctl, Ctl::None), "visible": true, "wired": !matches!(c.ctl, Ctl::None), "disabled_look": matches!(c.ctl, Ctl::None)})).collect();
+            let ctl: Vec<Value> = self.all_controls().map(|c| json!({"id": c.id, "label": c.label, "rect": rects.get(&c.id).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})), "enabled": !matches!(c.ctl, Ctl::None), "visible": true, "wired": !matches!(c.ctl, Ctl::None), "disabled_look": matches!(c.ctl, Ctl::None)})).collect();
             let text = serde_json::to_string(&ctl).unwrap_or_default();
             if text != self.ctl_last {
                 self.ctl_last = text; metric(started, "controls", json!({"controls": ctl}));
@@ -324,7 +324,8 @@ impl Backplane {
             Step::PairFill(link, addr, code) => { crate::screens::pair::fill(self, &link, &addr, &code, cx); self.pump(cx); }
             Step::Click(id) => {
                 let epoch = self.ui_epoch;
-                match self.controls.iter().find(|c| c.id == id).cloned() {
+                let found = self.all_controls().find(|c| c.id == id).cloned();
+                match found {
                     None => { self.m("click", json!({"id": id, "found": false, "changed": false, "action": Value::Null})); self.pump(cx); }
                     Some(entry) => {
                         self.begin(format!("click:{id}"), Goal::Changed(epoch), cx);
