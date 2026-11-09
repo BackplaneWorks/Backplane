@@ -56,7 +56,7 @@ fn target_valid(t: &Value) -> bool {
 
 /// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would
 /// be taken for the hub's (an unported native page for indexed rows), so every one is removed from the request's clone before the hub's go in.
-fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage"] { o.remove(k); } } }
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog"] { o.remove(k); } } }
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
@@ -126,6 +126,8 @@ impl Hub {
         let (window, page) = match self.window_for(&p, before, shown.as_deref()).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(shown.as_deref().unwrap_or(""), before, pg)); }
+        // the thread's subagent log, for the Subagents panel's rows and their drill-down (present/panels.rs `subs_at`)
+        if let (Some(th), true) = (shown.as_deref(), page.is_some()) { let log = self.sub_log_for(th).await; if let Some(o) = params.as_object_mut() { o.insert("subLog".into(), log); } }
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }
         { let reads = actor::take_reads(c.client, &view_id, &p["target"]); if let Some(o) = params.as_object_mut() { o.remove("reads"); if !reads.is_empty() { o.insert("reads".into(), Value::Array(reads)); } } }   // only the hub says what it read
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
@@ -175,6 +177,27 @@ impl Hub {
 
     /// The window object for a thread target (newest page); None for other targets or without program.
     /// `thread` is the conversation the target shows (V.Target.thread): a thread's own id, a bot's chat thread; none for the other targets.
+    /// A thread's subagent log (`@sub:<thread>`, its newest SUB_WINDOW entries) as present/panels.rs's `sub_log`, with this machine's name: `{host, calls}`, null when
+    /// the thread has none (a thread of another machine has none here). Read again only when the log grew, so a picture of a busy thread does not re-read it.
+    async fn sub_log_for(&self, thread: &str) -> Value {
+        static CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, (usize, Value)>>> = std::sync::Mutex::new(None);
+        static HOST: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+        let key = crate::agents::bg::log(thread);
+        let calls = {
+            let m = self.model.lock().await; let n = m.count(&key);
+            if n == 0 { return Value::Null }
+            let held = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(thread)).filter(|(k, _)| *k == n).map(|(_, v)| v.clone());
+            match held { Some(v) => v, None => {
+                let rows: Vec<(String, String, String, u64)> = m.tail(&self.store, &key, crate::present::panels::SUB_WINDOW).into_iter().map(|r| (r.role, r.akind, r.text, r.at)).collect();
+                drop(m);
+                let v = crate::present::panels::sub_log(&rows);
+                let mut c = CACHE.lock().unwrap(); let c = c.get_or_insert_with(Default::default); if c.len() > 64 { c.clear() } c.insert(thread.to_string(), (n, v.clone())); v
+            } }
+        };
+        let host = HOST.get_or_init(|| async { crate::net::botnet::name().await }).await;
+        json!({"host": host, "calls": calls})
+    }
+
     async fn window_for(&self, p: &Value, before: u64, thread: Option<&str>) -> Option<(Value, crate::model::Page)> {
         let t = p.get("target")?;
         let thread = thread?;
