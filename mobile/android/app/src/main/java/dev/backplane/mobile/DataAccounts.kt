@@ -59,7 +59,10 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
                     val accounts = pv.optJSONArray("accounts").objects()
                     if (accounts.isEmpty()) DMono("No accounts", dfaint, 12)
                     accounts.forEach { a -> AccountRow(a) { open(a.optString("id")) } }
-                    DBtn(pv.optString("add"), false, modifier = Modifier.testTag("accounts.add.${pv.optString("provider")}")) { name = ""; adding = pv }
+                    DBtn(pv.optString("add"), false, modifier = Modifier.testTag("accounts.add.${pv.optString("provider")}")) {
+                        // Google asks no name: the sign-in starts at once, its own listener first (GoogleLoop)
+                        if (pv.optString("provider") == "google") scope.launch { addAccount(pv, "", open) { failure = it } } else { name = ""; adding = pv }
+                    }
                     DLine()
                 }
                 if (p.optString("error").isNotEmpty()) DMono(p.optString("error"), dcs.error, 11, lines = 4)
@@ -73,13 +76,23 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
             text = { DField(name, { name = it }, "Name (Work, Personal)", Modifier.testTag("accounts.add.name")) },
             confirmButton = { TextButton(onClick = {
                 adding = null
-                scope.launch {
-                    try { val r = DataClient.call("account.act", JSONObject().put("action", "add").put("provider", pv.optString("provider")).put("label", name)); open(r.optJSONObject("account")?.optString("id") ?: return@launch) }
-                    catch (e: Exception) { failure = e.message ?: "" }
-                }
+                scope.launch { addAccount(pv, name, open) { failure = it } }
             }) { Text("Add and sign in", fontFamily = BpMono) } },
             dismissButton = { TextButton(onClick = { adding = null }) { Text("Cancel", fontFamily = BpMono) } })
     }
+}
+
+/** An account added: Google's with its loopback listener up first and its address sent as `redirect` (no listener: none sent, the paste path works as is). */
+private suspend fun addAccount(pv: JSONObject, label: String, open: (String) -> Unit, fail: (String) -> Unit) {
+    val google = pv.optString("provider") == "google"
+    val port = if (google) GoogleLoop.listen() else null
+    try {
+        val p = JSONObject().put("action", "add").put("provider", pv.optString("provider")).put("label", label)
+        if (port != null) p.put("redirect", GoogleLoop.redirect(port))
+        val id = DataClient.call("account.act", p).optJSONObject("account")?.optString("id") ?: run { GoogleLoop.stop(); return }
+        if (port != null) GoogleLoop.profile = id
+        open(id)
+    } catch (e: Exception) { GoogleLoop.stop(); fail(e.message ?: "") }
 }
 
 @Composable
@@ -101,7 +114,7 @@ private fun AccountRow(a: JSONObject, onClick: () -> Unit) {
 
 /** One account. `start`: an alert's tap opened it, so its sign-in starts at once (unless one is under way or it works again). */
 @Composable
-internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit) {
+internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit, moved: (String) -> Unit = {}) {
     var a by remember(id) { mutableStateOf<JSONObject?>(null) }
     var failure by remember(id) { mutableStateOf("") }
     var code by remember(id) { mutableStateOf("") }
@@ -112,11 +125,14 @@ internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit) {
     suspend fun load() { try { a = DataClient.call("account.view", JSONObject().put("profile", id)).optJSONObject("account"); failure = "" } catch (e: Exception) { failure = e.message ?: "" } }
     suspend fun act(action: String, extra: JSONObject.() -> Unit = {}) {
         val p = JSONObject().put("profile", id).put("action", action).apply(extra)
+        val port = if (action == "signin" && GoogleLoop.wants(id, a?.optBoolean("loopback") == true)) GoogleLoop.listen() else null
+        if (port != null) p.put("redirect", GoogleLoop.redirect(port))
         try {
             val r = DataClient.call("account.act", p)
-            if (action == "remove") { back(); return }
+            if (action == "remove") { GoogleLoop.stop(); back(); return }
             a = r.optJSONObject("account"); failure = ""; if (action == "code") code = ""
-        } catch (e: Exception) { failure = e.message ?: ""; load() }
+            if (port != null) GoogleLoop.profile = a?.optString("id")?.ifEmpty { id } ?: id
+        } catch (e: Exception) { if (port != null) GoogleLoop.stop(); failure = e.message ?: ""; load() }
     }
     fun copy(label: String, text: String) { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(label, text)); copied = label }
     LaunchedEffect(id, DataClient.conn) {
@@ -124,6 +140,11 @@ internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit) {
         val x = a
         if (start && !started && x != null && x.optJSONObject("signin")?.optBoolean("busy") != true && x.optString("state") != "connected") { started = true; act("signin") }
     }
+    // Google's sign-in comes back here: the browser opens once with the hub's link, and the caught address sent, the view is read again
+    val signinUrl = a?.optJSONObject("signin")?.optString("url") ?: ""
+    LaunchedEffect(signinUrl) { if (signinUrl.isNotEmpty()) GoogleLoop.open(ctx, signinUrl) }
+    // the new account is google:<id> once signed in: its own screen (bot toggles, Remove) replaces google:new
+    LaunchedEffect(GoogleLoop.tick) { if (GoogleLoop.tick > 0) { val l = GoogleLoop.landed; if (l.startsWith("google:") && l != id) moved(l) else load() } }
     // a sign-in under way: the hub is asked again until it is over (the only polling here, and only then)
     val busy = a?.optJSONObject("signin")?.optBoolean("busy") == true || a?.optString("state") == "connecting"
     LaunchedEffect(id, busy) { while (busy) { delay(1500); load(); if (a?.optJSONObject("signin")?.optBoolean("busy") != true && a?.optString("state") != "connecting") break } }

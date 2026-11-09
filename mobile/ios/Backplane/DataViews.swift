@@ -91,6 +91,7 @@ struct DataRoot: View {
         guard url.scheme == "backplane" || url.scheme == AppIdentity.scheme else { return }
         // (a thread link from outside: the hub says which thread it is, so `desktop~t9` and a link id both open the one on that machine)
         if url.host == "thread" { client.openLink(url, thread: "") }
+        else if url.host == "google" { return }   // the end of a Google sign-in (GoogleLoop): not a pairing link
         else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } } else { client.opened(url) }
     }
 }

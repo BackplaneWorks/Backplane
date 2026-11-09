@@ -204,6 +204,8 @@ impl Importer {
         let devices = files::adopt_devices(&hub.cfg.home, &old);
         let keys = if secrets { files::adopt_vault(&old) } else { files::Keys::default() };
         if let Some(n) = &keys.note { extra.push(n.clone()) }
+        // 0.14's Google sign-ins (secrets/google.json): its client and its accounts' refresh tokens into the vault; no bot is allowed one until the person says so
+        if secrets { let g = crate::google::store::adopt_014(&old); if g > 0 { extra.push(json!({"k":"google","n":g})) } }
         // the lines: each chunk joins the policies' state as it is written (the views keep answering, nothing is derived); a client's request waits for at most one chunk
         let total = p.lines.len(); let mut done = 0usize; let mut err = String::new();
         prog.step("writing", total as u64, "events", now());

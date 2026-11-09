@@ -108,8 +108,20 @@ async fn accounts(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Va
     let list = |r: Value| r["result"].clone();
     let id = s(p, "profile").to_string();
     let one = |snap: &Value, id: &str| ph::view(snap, id, &zone, now).map(|a| json!({"account":a})).ok_or_else(|| err("that account is gone"));
+    // Google (google/phone.rs): a third provider, `google:<id>` profiles
+    let g = crate::google::get();
+    if let Some(g) = &g { if crate::google::phone::is(&id) || (m == "account.act" && s(p, "provider") == "google" && s(p, "action") == "add") {
+        return match m {
+            "account.view" => g.phone_view(&id).await.map(|a| json!({"account":a})).ok_or_else(|| err("that account is gone")),
+            _ => match g.phone_act(p).await {
+                Ok(Some(a)) => Ok(json!({"account":a})),
+                Ok(None) => { let r = rpc(hub, c, "accounts", json!({"op":"list"})).await?; let mut page = ph::page(&list(r), &zone, now); if let Some(a) = page["providers"].as_array_mut() { a.push(g.phone_provider().await) } Ok(page) }
+                Err(e) => Err(err(&e)),
+            },
+        }
+    } }
     match m {
-        "accounts.page" => { let r = rpc(hub, c, "accounts", json!({"op":"list"})).await?; Ok(ph::page(&list(r), &zone, now)) }
+        "accounts.page" => { let r = rpc(hub, c, "accounts", json!({"op":"list"})).await?; let mut page = ph::page(&list(r), &zone, now); if let Some(g) = &g { if let Some(a) = page["providers"].as_array_mut() { a.push(g.phone_provider().await) } } Ok(page) }
         "account.view" => { let r = rpc(hub, c, "accounts", json!({"op":"list"})).await?; one(&list(r), &id) }
         _ => {
             let action = s(p, "action");
