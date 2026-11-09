@@ -250,3 +250,28 @@ impl RpcHandler for Viewer {
     let f = loop { match tokio::time::timeout(std::time::Duration::from_secs(5), ob.recv()).await { Ok(Some(crate::hub::Out::Value(f))) if f["t"] == "view" => break f, Ok(Some(_)) => {}, _ => panic!("nothing shown") } };
     assert_eq!((f["thread"].clone(), f["kind"].clone(), f["path"].clone()), (json!(format!("{l}~t9")), json!("board"), json!("/r/x.kicad_pcb")), "the thread is the owner's, named through the link");
 }
+
+/// A link that moved (or whose stored address was never reachable) says where it is, signed by the link's own secret; the other machine keeps the new address only
+/// when the link is approved and the address answers.
+#[tokio::test] async fn a_link_that_moved_says_so_signed_and_the_other_machine_keeps_the_new_address() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (a, _fa) = side("addr-a", false, false).await; let (b, _fb) = side("addr-b", false, false).await;
+    let id = link(&a, &b, true).await;
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let moved = format!("http://{}", l.local_addr().unwrap());
+    tokio::spawn(async move { loop { let Ok((mut c, _)) = l.accept().await else { return }; tokio::spawn(async move { let mut x = [0u8; 512]; let _ = c.read(&mut x).await; let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").await; }); } });
+    // b holds a wrong address for a
+    b.hub.commit(&json!({"$":"PeerSet","id":id,"name":"","url":"http://127.0.0.1:1","revoked":false,"at":4})).await.unwrap(); settle().await;
+    assert_eq!(b.p.table.with(|t| t.url(&id)), "http://127.0.0.1:1");
+    let say = |u: &str| { let body = nonced(&json!({"id":0,"m":"peer.address","p":{"url":u}}).to_string()); let (home, to, id) = (a.home.clone(), url(&b), id.clone()); async move { botnet::to_peer(&home, &to, &id, now(), "/far/rpc", true, &body).await } };
+    let r = say("http://127.0.0.1:2").await; assert_eq!(r.code, 409, "an address that does not answer is not kept: {}", r.body);
+    assert_eq!(b.p.table.with(|t| t.url(&id)), "http://127.0.0.1:1");
+    let r = say(&moved).await; assert_eq!(r.code, 200, "{}", r.body);
+    assert_eq!(b.p.table.with(|t| t.url(&id)), moved, "the new address is kept");
+    assert_eq!(say(&moved).await.code, 200, "the same again changes nothing");
+    assert_eq!(say("ftp://x").await.code, 400);
+    // a link nobody approved is not believed
+    for n in [&a, &b] { n.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{id}"),"value":"","at":9})).await.unwrap(); } settle().await;
+    let r = say("http://127.0.0.1:3").await; assert_eq!(r.code, 403, "{}", r.body);
+    // and the secret is the link's: another machine's request with no signature is not heard
+    let r = botnet::plain(&format!("{}/far/rpc", url(&b))).await; assert_eq!(r.code, 401);
+}

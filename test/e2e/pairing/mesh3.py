@@ -89,7 +89,7 @@ def main():
                 check("the check code is shown on both ends", bool(req.get("check")) and req["check"] == r.get("check"), f"{req.get('check')} vs {r.get('check')}")
                 rpc(C, "machines.approve", {"request": req["id"]})
         linked = until(lambda: len(rpc(A, "mesh.machines")["machines"]) == 2 and len(rpc(C, "mesh.machines")["machines"]) == 2, 40)
-        check("A and C are linked directly", bool(linked))
+        check("A and C are linked directly", bool(linked), json.dumps([[(r.get("label"), r.get("note")) for r in rpc(h, "machines.page").get("rows", [])] for h in (A, C)])[:600])
         for h, n in zip(H, NAMES):
             m = rpc(h, "mesh.machines", {"refresh": True})
             check(f"{n} lists the other two by name", sorted(x["name"] for x in m["machines"]) == sorted(set(NAMES) - {n}), json.dumps(m["machines"])[:200])
@@ -156,6 +156,27 @@ def main():
                 rpc(X, "bots.say", {"bot": bots[i], "text": "mcpcall:" + json.dumps({"name": "plane_read", "arguments": {"machine": NAMES[j]}})})
                 plane = until(lambda: sum(1 for e in log_of(hx) if e.get("$") == "MessagePosted" and e.get("thread") == tx and "MCPCALL plane_read" in e.get("text", "") and "Status plane" in e.get("text", "")) >= planes[i], 30)
                 check(f"plane_read {NAMES[i]} -> {NAMES[j]}", bool(plane))
+
+        # C moves: restarted on another port, it names its new address (BACKPLANE_URL, as a hub behind `tailscale serve` names its https one); A and B were
+        # paired with the old one and are told, signed, by C: no re-pairing
+        old = ports[2]; new = o.port + 10
+        procs[2].terminate(); procs[2].wait(15)
+        procs[2], _ = start(o.hub, root, 2, new, ports[:2] + [new], agents)
+        Cn = Hub(f"http://127.0.0.1:{new}", ""); Cn.wait_up(60)
+        def moved():
+            m = rpc(A, "mesh.machines")["machines"]
+            return any(x["name"] == "mc" and not x["away"] for x in m)
+        check("A reaches C at its new address without pairing again", bool(until(moved, 90)))
+        urls = lambda home: [e["url"] for e in log_of(home) if e.get("$") == "PeerSet" and e.get("name", "x") != "" and e.get("url")]
+        kept = lambda h: any(str(new) in e.get("url", "") for e in log_of(h) if e.get("$") == "PeerSet" and e.get("url"))
+        check("A and B keep C's new address (told by C, signed)", bool(until(lambda: kept(homes[0]) and kept(homes[1]), 60)))
+        # (A lists C again once its finder has looked at the new address: asked again at once, so within seconds)
+        got = None
+        for attempt in range(1, 5):
+            rpc(A, "bots.say", {"bot": bots[0], "text": "mcpcall:" + json.dumps({"name": "plane_read", "arguments": {"machine": "mc"}})})
+            got = until(lambda: sum(1 for e in log_of(homes[0]) if e.get("$") == "MessagePosted" and e.get("thread") == ths[0] and "MCPCALL plane_read" in e.get("text", "") and "Status plane" in e.get("text", "")) >= planes[0] + 1, 20)
+            if got: break
+        check("plane_read A -> C works at the new address", bool(got), f"after {attempt} tries")
     finally:
         for p in procs: p.terminate()
         for p in procs:
