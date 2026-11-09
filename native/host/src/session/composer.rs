@@ -211,6 +211,35 @@ pub fn fields(draft: &str, running: bool, attaching: bool, claude: bool, own_ski
 }
 
 /// What the model knows about the selected thread that a send needs: the presenter implements it over its metadata projection.
+/// How many queued rows show above the composer; the rest are counted (0.14's Qu.shown).
+pub const QUEUE_SHOWN: usize = 4;
+/// The thread's queue above the composer (0.14's Qu.*): the person's messages waiting for the agent (queued while a turn runs, held after a stop or a restart) and
+/// handed-over context (a fork's start, a provider switch: it goes with the next message and can only be removed). A row is `{msg, tag, text, buttons}`;
+/// a row's buttons are composer actions (`act`): q-steer (Steer into the running turn, else Send it alone), q-edit (back into the draft), q-up, q-remove, and on the
+/// first row of an idle thread q-resume (all of them, as one turn). `queue` is the hub's (State.queue), oldest first. Returns the thread's `queue` (the rows) and
+/// `queued` (the rows not shown, "2 more", else "").
+pub fn queue_json(queue: &[(String, String)], running: bool) -> (Value, Value) {
+    let first_line = |t: &str| t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().take(200).collect::<String>();
+    let b = |label: &str, action: &str, value: String| json!({"label": label, "action": action, "value": value});
+    let mut first_msg = true;
+    let rows: Vec<Value> = queue.iter().enumerate().take(QUEUE_SHOWN).map(|(i, (msg, text))| {
+        if msg.starts_with("handoff:") {
+            let t = text.get(12..).unwrap_or("");
+            return json!({"msg": msg, "tag": "Context", "text": format!("{} (goes with the next message)", first_line(t)), "buttons": [b("Remove", "q-remove", msg.clone())]});
+        }
+        let mut buttons = vec![];
+        if first_msg && !running { buttons.push(b("Resume", "q-resume", String::new())) }
+        first_msg = false;
+        buttons.push(b(if running { "Steer" } else { "Send" }, "q-steer", msg.clone()));
+        buttons.push(b("Edit", "q-edit", format!("{msg}\u{1f}{text}")));
+        if i > 0 { buttons.push(b("Up", "q-up", format!("{msg}\u{1f}{}", i - 1))) }
+        buttons.push(b("Remove", "q-remove", msg.clone()));
+        json!({"msg": msg, "tag": if running { "Queued" } else { "Held" }, "text": first_line(text), "buttons": buttons})
+    }).collect();
+    let more = queue.len().saturating_sub(QUEUE_SHOWN);
+    (Value::Array(rows), json!(if more > 0 { format!("{more} more") } else { String::new() }))
+}
+
 pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; /// the bot whose thread this is
     fn bot_of(&self, _thread: &str) -> Option<String> { None } fn account_params(&self, thread: &str) -> bool; /// the thread's named account binding, as its setting text (Accounts.owner); None when it has none (Accounts.named)
     fn account_binding(&self, _thread: &str) -> Option<String> { None }
@@ -223,6 +252,29 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
     let (session, hub) = (&params["session"], s(params, "hub"));
     match s(params, "action") {
         "draft" => draft(hub, session, s(params, "value")),
+        // a queued row's buttons (queue_json): each a queue request about the open thread; Edit also puts the message back in the draft, after what is there
+        "q-steer" | "q-remove" | "q-up" | "q-edit" | "q-resume" => {
+            let sel = s(session, "sel"); if !safe(sel) { return None }
+            let v = s(params, "value"); let (msg, rest) = v.split_once('\u{1f}').unwrap_or((v, ""));
+            if msg.is_empty() && s(params, "action") != "q-resume" { return None }
+            let (m, p) = match s(params, "action") {
+                "q-steer" => ("queue.steer", json!({"thread": sel, "msg": msg})),
+                "q-up" => ("queue.move", json!({"thread": sel, "msg": msg, "to": rest.parse::<u64>().ok()?})),
+                "q-resume" => ("queue.resume", json!({"thread": sel})),
+                _ => ("queue.remove", json!({"thread": sel, "msg": msg})),
+            };
+            let rid = session["rid"].as_u64().unwrap_or(0);
+            let mut patch = json!({"rid": rid + 1});
+            let mut cmds = vec![];
+            if s(params, "action") == "q-edit" {
+                let text = rest;
+                let d = draft_of(session, sel); let merged = if d.trim().is_empty() { text.to_string() } else { format!("{d}\n\n{text}") };
+                patch["drafts"] = json!({ sel: merged });
+                cmds.push(json!({"type": "keep", "thread": format!("{hub}|{sel}"), "text": merged})); cmds.push(json!({"type": "focus", "id": "composer"}));
+            }
+            cmds.push(json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": m, "p": p}).to_string()}));
+            Some(ActOut { session_patch: patch, cmds })
+        }
         // a popup row chosen (a reference, a `/command` or a `$skill`): the word being typed becomes the row's word
         "skill" => {
             let sel = s(session, "sel"); let word = s(params, "value");
@@ -288,6 +340,34 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_queue_shows_what_waits_with_its_buttons_and_counts_the_rest() {
+        let q: Vec<(String, String)> = [("handoff:1", "[handed over]\nforked from x"), ("m1", "first ask\nmore"), ("m2", "second"), ("m3", "3"), ("m4", "4"), ("m5", "5")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+        let (rows, more) = queue_json(&q, false);
+        let rows = rows.as_array().unwrap(); assert_eq!(rows.len(), QUEUE_SHOWN); assert_eq!(more, "2 more");
+        let acts = |r: &Value| r["buttons"].as_array().unwrap().iter().map(|b| b["action"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!((rows[0]["tag"].as_str(), acts(&rows[0])), (Some("Context"), vec!["q-remove".to_string()]), "handed-over context can only be removed");
+        assert!(rows[0]["text"].as_str().unwrap().ends_with("(goes with the next message)"));
+        assert_eq!((rows[1]["tag"].as_str(), rows[1]["text"].as_str()), (Some("Held"), Some("first ask")));
+        assert_eq!(acts(&rows[1]), ["q-resume", "q-steer", "q-edit", "q-up", "q-remove"], "the first message of an idle thread resumes them all"); assert_eq!(rows[1]["buttons"][1]["label"], "Send");
+        assert_eq!(acts(&rows[2]), ["q-steer", "q-edit", "q-up", "q-remove"]); assert_eq!(rows[2]["buttons"][2]["value"], "m2\u{1f}1", "up: one place earlier");
+        assert_eq!(rows[1]["buttons"][2]["value"], "m1\u{1f}first ask\nmore", "edit carries the whole text");
+        let (rows, more) = queue_json(&q[1..3], true); assert_eq!(more, ""); assert_eq!((rows[0]["tag"].as_str(), rows[0]["buttons"][0]["label"].as_str()), (Some("Queued"), Some("Steer")), "while the turn runs: Steer, no Resume");
+        assert_eq!(acts(&rows[0]), ["q-steer", "q-edit", "q-remove"], "the first has no Up");
+        assert_eq!(queue_json(&[], false), (json!([]), json!("")));
+    }
+    #[test] fn a_queued_rows_buttons_are_queue_requests_and_edit_fills_the_draft() {
+        struct Plain; impl Facts for Plain { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
+        let s = json!({"sel": "t1", "rid": 5, "drafts": {"t1": "mine"}, "info": {}});
+        let p = |a: &str, v: &str| json!({"session": s, "action": a, "value": v, "hub": "h"});
+        let req = |o: &ActOut| serde_json::from_str::<Value>(o.cmds.last().unwrap()["text"].as_str().unwrap()).unwrap();
+        let o = act(&p("q-steer", "m1"), &Plain).unwrap(); assert_eq!(req(&o), json!({"id": 5, "m": "queue.steer", "p": {"thread": "t1", "msg": "m1"}})); assert_eq!(o.session_patch["rid"], 6);
+        assert_eq!(req(&act(&p("q-remove", "m1"), &Plain).unwrap())["m"], "queue.remove");
+        assert_eq!(req(&act(&p("q-up", "m2\u{1f}0"), &Plain).unwrap())["p"], json!({"thread": "t1", "msg": "m2", "to": 0}));
+        assert_eq!(req(&act(&p("q-resume", ""), &Plain).unwrap()), json!({"id": 5, "m": "queue.resume", "p": {"thread": "t1"}}));
+        let o = act(&p("q-edit", "m1\u{1f}queued words"), &Plain).unwrap();
+        assert_eq!(req(&o)["m"], "queue.remove"); assert_eq!(o.session_patch["drafts"]["t1"], "mine\n\nqueued words", "after what is in the draft");
+        assert!(act(&p("q-steer", ""), &Plain).is_none()); assert!(act(&p("q-up", "m2\u{1f}x"), &Plain).is_none());
+    }
     #[test] fn a_reply_is_a_counted_block_the_clients_take_apart() {
         let b = reply_block("m1", "line one\nline two");
         let msg = format!("{b}\n\nmy answer");
