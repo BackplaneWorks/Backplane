@@ -522,6 +522,8 @@ struct DataThreadView: View {
     @State private var text = ""
     @State private var pending: [Data] = []
     @State private var picked: [PhotosPickerItem] = []
+    @State private var photoLibrary = false
+    @State private var camera = false
     @State private var drawing = false
     @State private var notice = ""
     // the masked box: a name ("" for a new one) while open; the value stays in the box until Save
@@ -651,6 +653,8 @@ struct DataThreadView: View {
         .sheet(isPresented: $modelSheet) { DataPickerSheet(client: client, thread: id, choice: $noChoice) }
         // full screen, not a sheet: a pen stroke downward must not swipe it away
         .fullScreenCover(isPresented: $drawing) { DataPadView { add([$0]) } }
+        .photosPicker(isPresented: $photoLibrary, selection: $picked, maxSelectionCount: max(1, 4 - pending.count), matching: .images)
+        .fullScreenCover(isPresented: $camera) { DCamera { d in camera = false; if let d { add([d]) } }.ignoresSafeArea() }
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -731,10 +735,14 @@ struct DataThreadView: View {
                         }
                         .buttonStyle(.plain).accessibilityLabel(on ? "Stop dictation" : "Dictate").accessibilityIdentifier("data.mic")
                     }
-                    PhotosPicker(selection: $picked, maxSelectionCount: max(0, 4 - pending.count), matching: .images) {
+                    // Attach: a photo from the library, or one taken now with the camera
+                    Menu {
+                        Button("Choose a photo", systemImage: "photo") { photoLibrary = true }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) { Button("Take a photo", systemImage: "camera") { camera = true } }
+                    } label: {
                         Image(systemName: "paperclip").font(.system(size: 15)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
                     }
-                    .disabled(!client.canSendImages)
+                    .disabled(!client.canSendImages || pending.count >= 4)
                     .accessibilityLabel(client.canSendImages ? "Attach pictures" : "Attach pictures (this hub does not take pictures yet)").accessibilityIdentifier("data.attach")
                     Button { if client.canSendImages { drawing = true } else { notice = "This hub does not take pictures yet: update it, then draw again." } } label: {
                         Image(systemName: "pencil.tip").font(.system(size: 15)).foregroundStyle(client.canSendImages ? BackplaneDesign.dim : BackplaneDesign.faint).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
