@@ -58,7 +58,14 @@ pub fn scan(lines: &[String], ws: &[String], keep: &dyn Fn(&str) -> bool, cap: O
 }
 
 /// The search over the hub's log: newest first, `limit` hits at most; `more` when it stopped at the limit.
-pub async fn search(hub: &Arc<Hub>, q: &str, thread: &str, limit: usize) -> Value {
+/// The latest search each connection asked for: an older one still reading the log stops there (typing asks again every pause).
+static LATEST: std::sync::Mutex<Option<HashMap<u64, u64>>> = std::sync::Mutex::new(None);
+static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn begin(client: u64) -> u64 { let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed); let mut m = LATEST.lock().unwrap(); let m = m.get_or_insert_with(HashMap::new); if m.len() > 256 { m.clear(); } m.insert(client, n); n }
+fn current(client: u64, n: u64) -> bool { LATEST.lock().unwrap().as_ref().and_then(|m| m.get(&client)).map_or(true, |x| *x == n) }
+
+/// `client`: the connection asking (u64::MAX: no one's, never superseded).
+pub async fn search_for(hub: &Arc<Hub>, q: &str, thread: &str, limit: usize, client: u64) -> Value {
     let ws = words(q);
     if ws.is_empty() { return json!({"hits": [], "more": false}) }
     // the live threads and their names (the model's metadata; no entry is read for this)
@@ -72,12 +79,14 @@ pub async fn search(hub: &Arc<Hub>, q: &str, thread: &str, limit: usize) -> Valu
     // a thread the sidebar never lists (a bot's private run) is not searched either
     let hidden: HashSet<String> = crate::statehost::policies().and_then(|x| x.with_state(|st| meta.keys().filter(|i| st.run_hidden(i)).cloned().collect::<HashSet<String>>())).unwrap_or_default();
     let keep_meta: HashSet<String> = meta.keys().filter(|i| !hidden.contains(*i)).cloned().collect();
+    let n = begin(client);
     let (hits, more) = tokio::task::spawn_blocking(move || {
         let keep = |t: &str| keep_meta.contains(t) && (one.is_empty() || t == one);
         let cap = if one.is_empty() { Some(PER_THREAD) } else { None };
         let (mut seen, mut per, mut out) = (HashSet::new(), HashMap::new(), vec![]);
         let mut end = store.len();
         while end > 0 && out.len() < limit {
+            if client != u64::MAX && !current(client, n) { break } // a newer search from this connection: this one's answer is not wanted
             let a = end.saturating_sub(BLOCK);
             let Ok(lines) = store.range(a, end) else { break };
             scan(&lines, &ws2, &keep, cap, &mut seen, &mut per, &mut out, limit);
@@ -97,12 +106,12 @@ pub async fn search(hub: &Arc<Hub>, q: &str, thread: &str, limit: usize) -> Valu
 pub struct Search;
 impl RpcHandler for Search {
     fn methods(&self) -> &'static [&'static str] { &["thread.search"] }
-    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, _method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let q = p["q"].as_str().unwrap_or("");
             if q.len() > 256 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"The search is too long."})] }
             let limit = p["limit"].as_u64().unwrap_or(40).clamp(1, 200) as usize;
-            let r = search(hub, q, p["thread"].as_str().unwrap_or(""), limit).await;
+            let r = search_for(hub, q, p["thread"].as_str().unwrap_or(""), limit, who.client).await;
             vec![json!({"t":"reply","id":id,"ok":true,"result":r})]
         })
     }
@@ -133,6 +142,10 @@ mod tests {
         let h = run(&l, "pinecone", &|_| true, None, 10);
         assert_eq!(h.len(), 4); assert!(h.iter().any(|x| x.text.starts_with("final")), "the newest text of a message posted twice");
         assert_eq!(run(&l, "pinecone", &|_| true, Some(PER_THREAD), 10).len(), PER_THREAD);
+    }
+    #[test] fn a_newer_search_from_the_same_connection_supersedes_the_older() {
+        let a = begin(7); assert!(current(7, a)); let b = begin(7); assert!(!current(7, a) && current(7, b));
+        let c = begin(8); assert!(current(8, c) && current(7, b), "another connection's search stands");
     }
     #[test] fn the_snippet_is_a_line_around_the_first_word() {
         assert_eq!(snippet("short\ntext with Word", "word"), "short text with Word");
