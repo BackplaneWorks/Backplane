@@ -169,8 +169,9 @@ fn images(entry: &str, text: &str) -> Vec<Value> {
 /// `now_ms`: the request's clock. None when any row needs what this cut does not do.
 /// `waiting`: the turn has ended but the thread still waits on work it started (subagents, background shells, watched jobs): its last reply says
 /// "Waiting since", never "Finished" before it is.
-pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> { entries_w(es, running, false, open, now_ms, zone, marks, end) }
-pub fn entries_w(es: &[Ent], running: bool, waiting: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> {
+pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> { entries_w(es, running, false, "", open, now_ms, zone, marks, end) }
+/// `unread`: the person's messages the agent has not read yet (the setting `wait.<thread>`, ids apart by spaces; agents/mod.rs Wait.line).
+pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> {
     if !es.iter().all(plain) { return None }
     // Hist.seen: the design as it was before is no row
     let seen: Vec<Ent> = es.iter().filter(|e| !step_base(e)).cloned().collect();
@@ -191,7 +192,8 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, open: &dyn Fn(&str) -
         let e = &vis[i];
         if tool(e) {
             let mut j = i; while j < vis.len() && tool(&vis[j]) { j += 1 }
-            let run = &vis[i..j]; let live = j == vis.len() && running; let id = &run[0].id;
+            // the turn's newest run is live while the turn runs, follow-ups the person sent after it notwithstanding
+            let run = &vis[i..j]; let live = running && vis[j..].iter().all(|e| e.msg && e.role == "user"); let id = &run[0].id;
             let o = open(id);
             out.push(json!({"id": format!("fold:{id}"), "kind": "fold", "text": label(run, live), "open": o, "live": live, "value": format!("{}{}", if o { "0" } else { "1" }, id)}));
             if o { for (k, r) in run.iter().enumerate() { let mut a = act(r, id); if live && k + 1 == run.len() && !is_step(r) { a["now"] = json!(true) } out.push(a) } }
@@ -206,7 +208,11 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, open: &dyn Fn(&str) -
             // Rto.of: a reply's quote block is the agent's; every client shows the body and an "In reply to" line naming the message
             let (reply, shown) = match crate::session::composer::reply_split(&e.text) { Some((id, q, b)) => (Some((id, q)), b), None => (None, e.text.clone()) };
             let (body, paths) = att_split(&shown);
-            let mut row = json!({"id": e.id, "kind": "user", "text": body, "attachments": paths.iter().map(|p| chip(p)).collect::<Vec<_>>(), "stamp": c.unwrap_or_default()});
+            // r05 (Stamp.unread): a message sent while the agent works that it has not read yet says so, until it does
+            let waits = running && !e.id.is_empty() && unread.split(' ').any(|w| w == e.id);
+            let stamp = c.unwrap_or_default(); let stamp = if waits { if stamp.is_empty() { "not read yet".to_string() } else { format!("not read yet · {stamp}") } } else { stamp };
+            let mut row = json!({"id": e.id, "kind": "user", "text": body, "attachments": paths.iter().map(|p| chip(p)).collect::<Vec<_>>(), "stamp": stamp});
+            if waits { row["unread"] = json!(true) }
             if let Some((rid, q)) = reply { row["replyTo"] = json!({"id": rid, "quote": q.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); }
             out.push(row);
         } else {
@@ -422,7 +428,8 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let subs = super::panels::subs_at(st, thread, &params["subLog"], now_ms / 1000);
     // Signal.out: the turn ended but the thread waits on work it started (a subagent, a background shell, a watched job, a delegated task)
     let waiting = subs["live"].as_u64().unwrap_or(0) > 0 || st.tasks.values().any(|(p, _, term, _)| p == thread && !*term);
-    let mut entries = entries_w(&es, running, waiting, &|id| super::window::fold_choice(params, id), now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
+    let unread = st.settings.get(&format!("wait.{thread}")).map(String::as_str).unwrap_or("");
+    let mut entries = entries_w(&es, running, waiting, unread, &|id| super::window::fold_choice(params, id), now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
     // Mob.pending: a thread that works shows the agent's "Working" row after its last entry
     if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
@@ -596,7 +603,7 @@ mod tests {
     fn m(id: &str, role: &str, text: &str, at: u64) -> Ent { Ent { id: id.into(), msg: true, role: role.into(), akind: String::new(), text: text.into(), at } }
     fn tl(id: &str, k: &str, x: &str, at: u64) -> Ent { Ent { id: id.into(), msg: false, role: "tool".into(), akind: k.into(), text: x.into(), at } }
     fn stamps(es: &[Ent], running: bool, waiting: bool) -> Vec<(String, String, String)> {
-        entries_w(es, running, waiting, &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap().iter().filter(|e| e["kind"] == "assistant" || e["kind"] == "user")
+        entries_w(es, running, waiting, "", &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap().iter().filter(|e| e["kind"] == "assistant" || e["kind"] == "user")
             .map(|e| (e["id"].as_str().unwrap().to_string(), e["stamp"].as_str().unwrap().to_string(), e["hover"].as_str().unwrap_or("").to_string())).collect()
     }
     // s04: a turn of several replies shows one time, its Finished stamp; the replies inside it keep theirs for hover; the person's message keeps its own
@@ -619,14 +626,25 @@ mod tests {
         let s = stamps(&es, false, false);
         assert_eq!(s[1].1, "Finished 21:57 · 20s"); assert_eq!((s[2].1.as_str(), s[2].2.as_str()), ("21:58", ""));
     }
+    // r05: a follow-up the agent has not read yet says so while the turn runs, and reads as any other once it has (or the turn ended)
+    #[test] fn a_follow_up_not_read_yet_says_so() {
+        let es = [m("u", "user", "go", 1699999000), m("a1", "assistant", "working on it", 1699999010), m("u2", "user", "also check the vias", 1699999020)];
+        let row = |running: bool, unread: &str| entries_w(&es, running, false, unread, &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap().into_iter().find(|e| e["id"] == "u2").unwrap();
+        let r = row(true, "u2"); assert_eq!((r["stamp"].as_str(), r["unread"].as_bool()), (Some("not read yet · 21:57"), Some(true)));
+        assert!(row(true, "").get("unread").is_none() && row(false, "u2").get("unread").is_none(), "read, or the turn over: as any other");
+        assert_eq!(row(true, "u")["stamp"], "21:57", "another id in the list is not this one");
+    }
     // s03: in an open fold of the running turn, the call that runs is marked
     #[test] fn the_running_call_in_an_open_fold_is_marked() {
         let es = [m("u", "user", "go", 1699999000), tl("t1", "Bash", "ls", 1699999001), tl("t2", "Read", "f", 1699999002)];
-        let out = entries_w(&es, true, false, &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        let out = entries_w(&es, true, false, "", &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
         let acts: Vec<&Value> = out.iter().filter(|e| e["kind"] == "act").collect();
         assert_eq!((acts[0].get("now"), acts[1]["now"].as_bool()), (None, Some(true)));
-        let out = entries_w(&es, false, false, &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        let out = entries_w(&es, false, false, "", &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
         assert!(out.iter().all(|e| e.get("now").is_none()), "a finished run marks none");
+        let mut es2 = es.to_vec(); es2.push(m("u2", "user", "also this", 1699999003));
+        let out = entries_w(&es2, true, false, "", &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        assert_eq!((out[1]["live"].as_bool(), out[3]["now"].as_bool()), (Some(true), Some(true)), "a follow-up sent while it runs leaves the run live");
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {

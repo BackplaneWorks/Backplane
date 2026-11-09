@@ -49,6 +49,8 @@ pub fn lean_keeps(k: &str) -> bool {
 /// the value the lean copy keeps for a setting: a told record keeps a placeholder (its key carries the time), unless it is not one of ours
 pub fn lean_value(k: &str, v: &str) -> String {
     if v.is_empty() { return String::new() } // an empty value removes the key, as for the full state
+    // wait.<t>: the person's messages the agent has not read yet, a few ids apart by spaces; the thread view says "not read yet" under them (r05)
+    if k.starts_with("wait.") && v.len() <= 2048 { return v.to_string() }
     if gate_presence(k) || k.starts_with("launch.input.") || k.starts_with("fallback.input.") { return "1".to_string() }
     match k.strip_prefix("told.") { Some(id) if turnend::told_stamp(id).is_some() => "1".to_string(), _ => v.to_string() }
 }
@@ -269,6 +271,8 @@ mod tests {
             assert!(core.st.apply(&json!({"$":"SettingSet","key":key,"value":"","at":3})));
             assert!(!core.st.settings.contains_key(key),"cleared gate key must disappear: {key}");
         }
+        assert!(core.st.apply(&json!({"$":"SettingSet","key":"wait.t1","value":"m1 m2","at":4})));
+        assert_eq!(core.st.settings.get("wait.t1").map(String::as_str),Some("m1 m2"),"the ids of the messages not read yet are kept: the thread view marks them");
         for key in ["stopped.m1","failed.m1"] {
             core.st.apply(&json!({"$":"SettingSet","key":key,"value":large,"at":4}));
             assert_eq!(core.st.settings.get(key).map(String::as_str),Some("1"),"per-message end marks keep presence only (the reply stamps read them): {key}");
