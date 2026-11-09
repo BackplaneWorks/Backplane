@@ -281,7 +281,7 @@ fn take_frames(rx: &Tap, key: &str, g: &mut u64, held: &mut u64, acc: &mut Vec<u
     let key = emb::key("t1", o["id"].as_str().unwrap());
     let mut watch = std::collections::HashSet::new();
     // a phone watches from nothing: a snapshot of the run, and where it stands
-    let r = crate::data::term::call(&hub, &mut watch, "term.watch", &json!({"key":key})).await.unwrap().unwrap();
+    let r = crate::data::term::call(&hub, 0, &mut watch, "term.watch", &json!({"key":key})).await.unwrap().unwrap();
     assert!(watch.contains(&key)); assert!(r["reset"].is_array() && r["g"].as_u64().unwrap() > 0, "{r}");
     let g0 = r["g"].as_u64().unwrap();
     // the live frames say where their bytes start: taken in order they are the whole stream, with no gap
@@ -291,30 +291,30 @@ fn take_frames(rx: &Tap, key: &str, g: &mut u64, held: &mut u64, acc: &mut Vec<u
     assert_eq!(gaps, 0); assert!(wait(5, || states.iter().any(|s| s == "done 0") || { take_frames(&rx, &key, &mut g, &mut held, &mut acc, &mut gaps, &mut states); false }).await, "the command's end is a state frame: {states:?}");
     // a phone that held up to line-2 resumes: only what came after, from its offset
     let all = String::from_utf8_lossy(&acc).into_owned(); let cut = all.find("line-3").unwrap() as u64;
-    let r = crate::data::term::call(&hub, &mut watch, "term.read", &json!({"key":key,"g":g0,"from":cut})).await.unwrap().unwrap();
+    let r = crate::data::term::call(&hub, 0, &mut watch, "term.read", &json!({"key":key,"g":g0,"from":cut})).await.unwrap().unwrap();
     assert!(r.get("reset").is_none(), "{r}"); assert_eq!(r["from"].as_u64(), Some(cut));
     use base64::Engine; let tail = base64::engine::general_purpose::STANDARD.decode(r["b"].as_str().unwrap()).unwrap();
     assert!(String::from_utf8_lossy(&tail).starts_with("line-3") && !String::from_utf8_lossy(&tail).contains("line-2"));
     assert_eq!(cut + tail.len() as u64, r["o"].as_u64().unwrap(), "from + what it got = where the stream stands");
     // another run (or an offset never reached) gets a snapshot instead
-    let r = crate::data::term::call(&hub, &mut watch, "term.read", &json!({"key":key,"g":g0 - 1,"from":cut})).await.unwrap().unwrap(); assert!(r["reset"].is_array());
-    let r = crate::data::term::call(&hub, &mut watch, "term.read", &json!({"key":key,"g":g0,"from":1u64 << 40})).await.unwrap().unwrap(); assert!(r["reset"].is_array());
+    let r = crate::data::term::call(&hub, 0, &mut watch, "term.read", &json!({"key":key,"g":g0 - 1,"from":cut})).await.unwrap().unwrap(); assert!(r["reset"].is_array());
+    let r = crate::data::term::call(&hub, 0, &mut watch, "term.read", &json!({"key":key,"g":g0,"from":1u64 << 40})).await.unwrap().unwrap(); assert!(r["reset"].is_array());
     // typed through the data API, echoed in the stream
-    let r = crate::data::term::call(&hub, &mut watch, "term.write", &json!({"key":key,"text":"echo typed-$((40+2))\r"})).await.unwrap().unwrap(); assert_eq!(r["sent"], 21);
+    let r = crate::data::term::call(&hub, 0, &mut watch, "term.write", &json!({"key":key,"text":"echo typed-$((40+2))\r"})).await.unwrap().unwrap(); assert_eq!(r["sent"], 21);
     assert!(wait(10, || { take_frames(&rx, &key, &mut g, &mut held, &mut acc, &mut gaps, &mut states); String::from_utf8_lossy(&acc).contains("typed-42") }).await);
     // the push a watching socket gets, and none for a key it does not watch
     let f = frame(&key, Some(1), b"ab", None); assert_eq!(crate::data::term::push_of(&watch, &f).unwrap()["b"], "YWI=");
     assert!(crate::data::term::push_of(&Default::default(), &f).is_none());
     // a list names it, by thread
-    let l = crate::data::term::call(&hub, &mut watch, "term.list", &json!({"thread":"t1"})).await.unwrap().unwrap();
+    let l = crate::data::term::call(&hub, 0, &mut watch, "term.list", &json!({"thread":"t1"})).await.unwrap().unwrap();
     assert!(l["terms"].as_array().unwrap().iter().any(|x| x["key"] == key.as_str() && x["kind"] == "chat" && x["running"] == true), "{l}");
     // stop: a state frame says stopped, and it stays stopped once the shell is gone
-    crate::data::term::call(&hub, &mut watch, "term.stop", &json!({"key":key})).await.unwrap().unwrap();
+    crate::data::term::call(&hub, 0, &mut watch, "term.stop", &json!({"key":key})).await.unwrap().unwrap();
     assert!(wait(10, || { take_frames(&rx, &key, &mut g, &mut held, &mut acc, &mut gaps, &mut states); states.iter().any(|s| s == "stopped") }).await, "{states:?}");
     assert!(wait(10, || t.inner.try_lock().map_or(false, |g| !g.shells.contains_key(&key))).await);
     assert_eq!(t.stream_read(&key, 0, None).await.unwrap()["state"], "stopped");
-    crate::data::term::call(&hub, &mut watch, "term.unwatch", &json!({"key":key})).await.unwrap().unwrap(); assert!(watch.is_empty());
-    let e = crate::data::term::call(&hub, &mut watch, "term.write", &json!({"key":"../x"})).await.unwrap().unwrap_err(); assert_eq!(e, "no such terminal");
+    crate::data::term::call(&hub, 0, &mut watch, "term.unwatch", &json!({"key":key})).await.unwrap().unwrap(); assert!(watch.is_empty());
+    let e = crate::data::term::call(&hub, 0, &mut watch, "term.write", &json!({"key":"../x"})).await.unwrap().unwrap_err(); assert_eq!(e, "no such terminal");
 }
 
 #[cfg(unix)]
@@ -322,23 +322,23 @@ fn take_frames(rx: &Tap, key: &str, g: &mut u64, held: &mut u64, acc: &mut Vec<u
     let (hub, _home, _work) = hub_in("resize").await; let rx = Tap::new(&hub, 1);
     let mut watch = std::collections::HashSet::new();
     // a phone's own shell in the project's folder
-    let r = crate::data::term::call(&hub, &mut watch, "term.new", &json!({"project":"p1","cols":70,"rows":12})).await.unwrap().unwrap();
+    let r = crate::data::term::call(&hub, 0, &mut watch, "term.new", &json!({"project":"p1","cols":70,"rows":12})).await.unwrap().unwrap();
     let key = r["key"].as_str().unwrap().to_string(); assert!(key.starts_with("s:p1:"), "{r}"); assert_eq!((r["cols"].as_u64(), r["rows"].as_u64()), (Some(70), Some(12)));
-    let l = crate::data::term::call(&hub, &mut watch, "term.list", &json!({"project":"p1"})).await.unwrap().unwrap();
+    let l = crate::data::term::call(&hub, 0, &mut watch, "term.list", &json!({"project":"p1"})).await.unwrap().unwrap();
     assert!(l["terms"].as_array().unwrap().iter().any(|x| x["key"] == key.as_str() && x["kind"] == "shell"), "{l}");
-    assert!(crate::data::term::call(&hub, &mut watch, "term.list", &json!({"project":"nope"})).await.unwrap().unwrap()["terms"].as_array().unwrap().is_empty());
+    assert!(crate::data::term::call(&hub, 0, &mut watch, "term.list", &json!({"project":"nope"})).await.unwrap().unwrap()["terms"].as_array().unwrap().is_empty());
     rx.take();
-    crate::data::term::call(&hub, &mut watch, "term.resize", &json!({"key":key,"cols":44,"rows":9})).await.unwrap().unwrap();
+    crate::data::term::call(&hub, 0, &mut watch, "term.resize", &json!({"key":key,"cols":44,"rows":9})).await.unwrap().unwrap();
     let (mut all, mut rs) = (vec![], vec![]);
     assert!(wait(5, || { drain(&rx, &key, &mut all, &mut rs); !rs.is_empty() }).await); assert_eq!(rs[0], json!([44, 9]), "a snapshot at the new size goes to every client");
-    crate::data::term::call(&hub, &mut watch, "term.write", &json!({"key":key,"b":"c3R0eSBzaXplCg=="})).await.unwrap().unwrap(); // "stty size\n"
+    crate::data::term::call(&hub, 0, &mut watch, "term.write", &json!({"key":key,"b":"c3R0eSBzaXplCg=="})).await.unwrap().unwrap(); // "stty size\n"
     assert!(wait(10, || { drain(&rx, &key, &mut all, &mut rs); String::from_utf8_lossy(&all).contains("9 44") }).await, "{}", String::from_utf8_lossy(&all));
     // the same size again is no news
-    rx.take(); crate::data::term::call(&hub, &mut watch, "term.resize", &json!({"key":key,"cols":44,"rows":9})).await.unwrap().unwrap();
+    rx.take(); crate::data::term::call(&hub, 0, &mut watch, "term.resize", &json!({"key":key,"cols":44,"rows":9})).await.unwrap().unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await; rs.clear(); drain(&rx, &key, &mut all, &mut rs); assert!(rs.is_empty());
-    crate::data::term::call(&hub, &mut watch, "term.write", &json!({"key":key,"text":"exit 4\n"})).await.unwrap().unwrap();
+    crate::data::term::call(&hub, 0, &mut watch, "term.write", &json!({"key":key,"text":"exit 4\n"})).await.unwrap().unwrap();
     assert!(wait(10, || { let t = get(&hub).unwrap(); t.inner.try_lock().map_or(false, |g| g.screens.get(&key).map_or(false, |s| s.state == "exited 4")) }).await);
-    assert!(crate::data::term::call(&hub, &mut watch, "term.new", &json!({"project":"nope"})).await.unwrap().is_err());
+    assert!(crate::data::term::call(&hub, 0, &mut watch, "term.new", &json!({"project":"nope"})).await.unwrap().is_err());
 }
 
 #[cfg(unix)]

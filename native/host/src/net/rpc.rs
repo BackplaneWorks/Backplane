@@ -74,6 +74,45 @@ fn term_here(mut j: Value, link: &str) -> Value {
     if j["t"] == "term" { if let Some(t) = j["thread"].as_str().filter(|t| !far::is(t)).map(|t| far::id(link, t)) { j["thread"] = Value::String(t); } }
     j
 }
+/// What a request to another machine needs besides the router's checks (cheap to clone into a task).
+struct Parts { sync: Arc<FarSync>, waiting: Arc<std::sync::Mutex<std::collections::HashMap<u64, usize>>>, watching: Watching, pulling: Arc<std::sync::Mutex<std::collections::HashSet<u64>>> }
+impl Router {
+    fn parts(&self) -> Parts { Parts { sync: self.sync.clone(), waiting: self.waiting.clone(), watching: self.watching.clone(), pulling: self.pulling.clone() } }
+    /// The machine a request goes to, or the error frames to answer at once; counts it as waiting (`Parts::run` gives it back).
+    fn plan(&self, client: u64, id: &Value, m: &str, p: &Value) -> Result<String, Vec<Value>> {
+        let viewer = super::farview::is_viewer(m);
+        let l = if viewer { self.viewer_link(client, m, p) } else { far::params_link(p) };
+        if self.copy { return Err(err(id, "a hub on a copied log does not reach other machines")) }
+        // (Far.rpc.pick: only the owner's own machines with sync on, and only what Fr.methods lets through; the viewers' reads are theirs)
+        if !self.sync.own(&l) || !(viewer || far::may(m)) { return Err(err(id, "that is done on its own machine")) }
+        { let mut w = self.waiting.lock().unwrap(); let n = w.entry(client).or_insert(0); if *n >= IN_FLIGHT { return Err(err(id, "too many requests to other machines are waiting")) } *n += 1; }
+        Ok(l)
+    }
+}
+impl Parts {
+    async fn run(&self, hub: &Arc<Hub>, client: u64, id: &Value, m: &str, p: &Value, l: &str) -> Value {
+        let (sync, waiting, watching, pulling) = (self.sync.clone(), self.waiting.clone(), self.watching.clone(), self.pulling.clone());
+        let viewer = super::farview::is_viewer(m);
+        let mut local = far::params_local(p, l); if let Some(o) = local.as_object_mut() { o.remove("on"); }
+        let body = if viewer { json!({"id": 0, "m": "viewer.call", "p": {"sub": client, "m": m, "p": local}}).to_string() } else { json!({"id": 0, "m": m, "p": local}).to_string() };
+        let (code, text) = post(&sync, hub, l, &body).await;
+        if viewer && code == 200 && (m == "kicad.watch" || m == "term.open") {
+            let ok = serde_json::from_str::<Value>(&text).map_or(false, |v| v["ok"] == true);
+            // a drawing watched there, or its terminal opened: what that machine pushes for this window is pulled and forwarded (a terminal keeps the
+            // drawing's root, so the reads about it still go there)
+            if ok && (m == "term.open" || !p["kind"].as_str().unwrap_or("").is_empty()) {
+                let root = if m == "kicad.watch" { p["root"].as_str().unwrap_or("").to_string() } else { watching.lock().unwrap().get(&client).filter(|(wl, _)| wl == l).map(|(_, r)| r.clone()).unwrap_or_default() };
+                watching.lock().unwrap().insert(client, (l.to_string(), root));
+                if pulling.lock().unwrap().insert(client) { pull_loop(sync.clone(), hub.clone(), watching.clone(), pulling.clone(), client, l.to_string()); }
+            } else if ok { watching.lock().unwrap().remove(&client); }
+        }
+        let frame = if code == 200 {
+            far::reply_on(serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"t":"reply","ok":false,"error":"invalid reply from that machine","id":0})), id, l)
+        } else if code == 0 { err(id, "that machine is away").remove(0) } else { err(id, &format!("that machine did not take it: {}", text.chars().take(120).collect::<String>())).remove(0) };
+        { let mut w = waiting.lock().unwrap(); if let Some(n) = w.get_mut(&client) { *n -= 1; if *n == 0 { w.remove(&client); } } }
+        frame
+    }
+}
 impl FarRouter for Router {
     fn wants(&self, _m: &str, p: &Value) -> bool { !far::params_link(p).is_empty() }
     fn wants_for(&self, client: u64, m: &str, p: &Value) -> bool {
@@ -94,37 +133,18 @@ impl FarRouter for Router {
     }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, client: u64, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
-            let viewer = super::farview::is_viewer(m);
-            let l = if viewer { self.viewer_link(client, m, p) } else { far::params_link(p) };
-            if self.copy { return err(id, "a hub on a copied log does not reach other machines") }
-            // (Far.rpc.pick: only the owner's own machines with sync on, and only what Fr.methods lets through; the viewers' reads are theirs)
-            if !self.sync.own(&l) || !(viewer || far::may(m)) { return err(id, "that is done on its own machine") }
-            { let mut w = self.waiting.lock().unwrap(); let n = w.entry(client).or_insert(0); if *n >= IN_FLIGHT { return err(id, "too many requests to other machines are waiting") } *n += 1; }
+            let l = match self.plan(client, id, m, p) { Ok(l) => l, Err(e) => return e };
             // (Far.rpc.job): the request is out on a task of its own and the answer is pushed when it comes; this connection goes on meanwhile
-            let (sync, hub, waiting, id, m, p) = (self.sync.clone(), hub.clone(), self.waiting.clone(), id.clone(), m.to_string(), p.clone());
-            let (watching, pulling) = (self.watching.clone(), self.pulling.clone());
-            tokio::spawn(async move {
-                let mut local = far::params_local(&p, &l); if let Some(o) = local.as_object_mut() { o.remove("on"); }
-                let body = if viewer { json!({"id": 0, "m": "viewer.call", "p": {"sub": client, "m": m, "p": local}}).to_string() } else { json!({"id": 0, "m": m, "p": local}).to_string() };
-                let (code, text) = post(&sync, &hub, &l, &body).await;
-                if viewer && code == 200 && (m == "kicad.watch" || m == "term.open") {
-                    let ok = serde_json::from_str::<Value>(&text).map_or(false, |v| v["ok"] == true);
-                    // a drawing watched there, or its terminal opened: what that machine pushes for this window is pulled and forwarded (a terminal keeps the
-                    // drawing's root, so the reads about it still go there)
-                    if ok && (m == "term.open" || !p["kind"].as_str().unwrap_or("").is_empty()) {
-                        let root = if m == "kicad.watch" { p["root"].as_str().unwrap_or("").to_string() } else { watching.lock().unwrap().get(&client).filter(|(wl, _)| *wl == l).map(|(_, r)| r.clone()).unwrap_or_default() };
-                        watching.lock().unwrap().insert(client, (l.clone(), root));
-                        if pulling.lock().unwrap().insert(client) { pull_loop(sync.clone(), hub.clone(), watching.clone(), pulling.clone(), client, l.clone()); }
-                    } else if ok { watching.lock().unwrap().remove(&client); }
-                }
-                let frame = if code == 200 {
-                    far::reply_on(serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"t":"reply","ok":false,"error":"invalid reply from that machine","id":0})), &id, &l)
-                } else if code == 0 { err(&id, "that machine is away").remove(0) } else { err(&id, &format!("that machine did not take it: {}", text.chars().take(120).collect::<String>())).remove(0) };
-                { let mut w = waiting.lock().unwrap(); if let Some(n) = w.get_mut(&client) { *n -= 1; if *n == 0 { w.remove(&client); } } }
-                hub.far_replied(client, &frame); // (a Diff's or a folder's answer is the view's read: its next request carries it)
-                hub.push(client, frame);
-            });
+            let (me, hub, id, m, p) = (self.parts(), hub.clone(), id.clone(), m.to_string(), p.clone());
+            tokio::spawn(async move { let frame = me.run(&hub, client, &id, &m, &p, &l).await; hub.far_replied(client, &frame); /* (a Diff's or a folder's answer is the view's read: its next request carries it) */ hub.push(client, frame); });
             vec![]
+        })
+    }
+    fn ask<'a>(&'a self, hub: &'a Arc<Hub>, client: u64, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Option<Value>> {
+        Box::pin(async move {
+            if !self.wants_for(client, m, p) { return None }
+            let l = match self.plan(client, id, m, p) { Ok(l) => l, Err(mut e) => return Some(e.remove(0)) };
+            Some(self.parts().run(hub, client, id, m, p, &l).await)
         })
     }
     fn mcp<'a>(&'a self, hub: &'a Arc<Hub>, link: &'a str, from: &'a str, tool: &'a str, args: &'a Value) -> Fut<'a, Result<(bool, Value), String>> {

@@ -153,6 +153,8 @@ pub trait FarRouter: Send + Sync {
     fn announce<'a>(&'a self, _hub: &'a Arc<Hub>, _method: &'a str, _params: &'a Value) -> Fut<'a, ()> { Box::pin(async {}) }
     /// Answers at once with the frames to send now (an error, or none when the answer comes later through `Hub::push(client, ..)`): the connection never waits on another machine.
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, client: u64, id: &'a Value, method: &'a str, params: &'a Value) -> Fut<'a, Vec<Value>>;
+    /// The same request, waited for: the owner's reply frame (the caller's id back), or None when nothing about it is on another machine. A phone's socket spawns it.
+    fn ask<'a>(&'a self, _hub: &'a Arc<Hub>, _client: u64, _id: &'a Value, _method: &'a str, _params: &'a Value) -> Fut<'a, Option<Value>> { Box::pin(async { None }) }
     /// An agent's (or a bot's) tool call about another machine: `tool` with `args` runs there for the thread `from` (its id here), as a signed `mcp.call`.
     /// Ok((ok, body)) is the tool's own answer; Err when the machine is not one of the owner's, away, or refused.
     fn mcp<'a>(&'a self, _hub: &'a Arc<Hub>, _link: &'a str, _from: &'a str, _tool: &'a str, _args: &'a Value) -> Fut<'a, Result<(bool, Value), String>> { Box::pin(async { Err("no machine is linked".to_string()) }) }

@@ -24,12 +24,23 @@ data class DEntry(
 )
 /** The `term` of a kind:"term" entry: the key its screen is read and watched under, and what it ran. */
 data class DTermRef(val key: String, val id: String, val title: String, val cols: Int, val rows: Int, val cmd: String)
-data class DProject(val id: String, val title: String, val root: String, val threadCount: Int, val updatedAt: Long, val waiting: Int, val icon: String = "folder", val css: String = "", val settledCount: Int? = null) // settledCount: the hub's count (feature `settled`), null from a hub before it
+/** Where a project or thread of another machine runs (docs/PHONE-DATA.md, Your machines): `short` on a row, `name` in the header, `label` "on desktop" after a project's name, `runs` "runs on desktop" over the composer; `away` draws it dimmer. */
+data class DMark(val name: String, val short: String, val away: Boolean, val label: String, val runs: String)
+/** A choice of where a new thread starts: `value` is the project id there (this machine's, or `<link>~<id>`). */
+data class DNewOn(val value: String, val label: String, val away: Boolean)
+/** A chip of the machine switcher over the lists: "" every machine, "@here" this one, else a linked machine's name. */
+data class DChip(val value: String, val label: String, val on: Boolean, val away: Boolean, val hint: String)
+fun parseMark(o: JSONObject?) = o?.takeIf { it.optString("name").isNotEmpty() }?.let { DMark(it.str("name"), it.str("short"), it.optBoolean("away"), it.str("label"), it.str("runs")) }
+fun parseChips(a: JSONArray?) = a.list { DChip(it.str("value"), it.str("label"), it.optBoolean("on"), it.optBoolean("away"), it.str("hint")) }
+fun markJson(m: DMark?): Any = if (m == null) JSONObject.NULL else JSONObject().put("name", m.name).put("short", m.short).put("away", m.away).put("label", m.label).put("runs", m.runs)
+data class DProject(val id: String, val title: String, val root: String, val threadCount: Int, val updatedAt: Long, val waiting: Int, val icon: String = "folder", val css: String = "", val settledCount: Int? = null,
+    val mark: DMark? = null, val also: String = "", val newOn: List<DNewOn> = emptyList()) // settledCount: the hub's count (feature `settled`), null from a hub before it
 data class DThread(
     val id: String, val project: String, val title: String, val state: String, val updatedAt: Long, val pinned: Boolean, val settled: Boolean,
     val archived: Boolean, val provider: String, val model: String, val preview: String, val waiting: Int,
     val parent: String = "", val effort: String = "", val runtime: String = "", val chip: String = "", val settledAt: Long = 0, // chip: the composer's "claude / opus / high", in the hub's words
     val history: Boolean = false, // an old Scratch chat (feature history): listed under Conversation history, never under a project
+    val mark: DMark? = null, // the machine it runs on when it is another one; null for this hub's own
     val status: String = "", // the sidebar dot's word (feature status): active, waiting, blocked, failed, stalled, finished (the desktop's green dot: done, not yet settled), settled, inactive; "" from an older hub
 )
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
@@ -54,10 +65,11 @@ fun parseEntry(o: JSONObject) = DEntry(
     label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
     term = o.optJSONObject("term")?.let { DTermRef(it.str("key"), it.str("id"), it.str("title"), it.optInt("cols", 80), it.optInt("rows", 24), it.str("cmd")) },
 )
-fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null)
+fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
+    parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) })
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), o.str("status"),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.str("status"),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)

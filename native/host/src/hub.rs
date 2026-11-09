@@ -394,6 +394,8 @@ impl Hub {
     /// The machines this hub may act on: (link id, name, address)
     /// A thing every other machine of the owner's should hear (see `FarRouter::announce`).
     pub async fn far_announce(self: &Arc<Self>, m: &str, p: &Value) { if let Some(r) = self.far_router.get().cloned() { r.announce(self, m, p).await } }
+    /// A request about a thing on a linked machine, waited for (a phone's socket spawns it): the owner's reply frame, None when it is about nothing there.
+    pub async fn far_ask(self: &Arc<Self>, client: u64, m: &str, p: &Value) -> Option<Value> { let r = self.far_router.get().cloned()?; r.ask(self, client, &Value::Null, m, p).await }
     pub fn far_machines(&self) -> Vec<(String, String, String)> { self.far_router.get().map(|r| r.machines()).unwrap_or_default() }
     /// The display-only states of the linked machines' mirrors (the sidebar); never the policy state.
     pub fn mirrors(&self) -> &crate::mirror::Mirrors { &self.mirrors }

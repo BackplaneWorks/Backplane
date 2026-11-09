@@ -6,6 +6,7 @@
 pub(crate) mod ext;
 mod link;
 pub mod term;
+pub mod machines;
 /// What a phone hears of a push on its socket (ext.rs `notify_of`).
 pub fn ext_notify(e: &Value) -> Value { ext::notify_of(e) }
 use crate::hub::{Conn, Hub, Out};
@@ -111,6 +112,31 @@ fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) 
     Some(json!({"id":id,"title":p.title,"root":p.root,"origin":crate::mirror::origin_of_root(&p.root),"threadCount":count,"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
         "icon":crate::present::badge::icon_of(&setting_of(&format!("project.icon.{id}"))),"css":crate::present::badge::css_of(&color),"color":color}))
 }
+
+/// The linked machines' projects and threads next to this hub's: `f(shown machines, unified marks and join map, the pick)` (docs/PHONE-DATA.md, Your machines).
+fn with_far<R>(hub: &Hub, want: &str, f: impl FnOnce(&machines::Far, &crate::present::screen::Unified, &str) -> R) -> R {
+    let m = hub.mirrors(); let here = m.here();
+    m.shown(|far| {
+        let pick = machines::pick_of(want, far);
+        let join = if pick.is_empty() { crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::screen::unified_of(st, far, &|id| m.origin(id)))).unwrap_or_default() } else { HashMap::new() };
+        let marks: HashMap<String, Value> = far.iter().map(|(n, _)| (n.clone(), m.mark(n))).collect();
+        f(far, &crate::present::screen::Unified { far: &join, marks: &marks, here: &here }, &pick)
+    })
+}
+/// A thread row of this hub or of a linked machine (`<link>~<id>`, built from its mirror: no log to read, so its preview is the mirror's last words).
+fn thread_row(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>, join: &HashMap<String, String>) -> Option<Value> {
+    if !id.contains('~') || m.threads.contains_key(id) { return thread_json(hub, m, id, asks) }
+    let far = hub.far();
+    let preview = far.as_ref().and_then(|f| f.page(id, 0, 8)).and_then(|pg| pg.rows.iter().filter(|r| r.thread == id).find(|r| r.kind == "msg" && !r.text.trim().is_empty()).map(|r| clip(&shown_text(&r.text), PREVIEW))).unwrap_or_default();
+    hub.mirrors().shown(|fars| { let (mname, st) = machines::holder(fars, id)?; let t = st.threads.get(id)?;
+        machines::thread_json(id, st, &machines::project_shown(&t.project, join), &hub.mirrors().mark(mname), &preview) })
+}
+/// A thread just made on a linked machine: from its mirror when that has it already, else what is known (the mirror catches up and the phone's list pushes it again).
+fn far_made(hub: &Hub, m: &crate::model::Model, id: &str, project: &str, title: &str) -> Value {
+    if let Some(t) = thread_row(hub, m, id, &HashMap::new(), &HashMap::new()) { return t }
+    let mark = hub.mirrors().shown(|far| far.iter().find(|(_, st)| st.projects.contains_key(project)).map(|(n, _)| hub.mirrors().mark(n))).unwrap_or_else(|| json!(null));
+    json!({"id":id,"project":project,"title":title,"state":"idle","updatedAt":now_ms(),"pinned":false,"settled":false,"settledAt":0,"archived":false,"provider":"","model":"","effort":"","runtime":"","chip":"","preview":"","waiting":0,"status":"","parent":"","history":false,"mark":mark})
+}
 /// A cursor is "<updatedAt>:<id>" over a list sorted newest first, ties by id.
 fn page_of(mut items: Vec<(u64, String, Value)>, limit: usize, before: &str) -> (Vec<Value>, Value) {
     items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
@@ -203,7 +229,10 @@ fn live_entry(thread: &str, text: &str) -> Value { json!({"id":format!("live:{th
 async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     let th = s(p, "thread");
     // a thread of a linked machine, as this hub mirrors it: its page from the mirror (no asks or live text here)
-    if th.contains('~') && !hub.model().await.threads.contains_key(th) { if let Some(f) = hub.far().filter(|f| f.has(th)) { return far_entries(&f, th, p) } }
+    if th.contains('~') && !hub.model().await.threads.contains_key(th) { if let Some(f) = hub.far().filter(|f| f.has(th)) {
+        let mut r = far_entries(&f, th, p)?; let g = hub.model().await; let join = with_far(hub, "", |_, un, _| un.far.clone());
+        if let Some(t) = thread_row(hub, &g, th, &HashMap::new(), &join) { r["thread"] = t } // (the mirror knows its title, project and machine)
+        return Ok(r) } }
     let m = hub.model().await;
     let asks = open_ask_counts(hub);
     let thread = thread_json(hub, &m, th, &asks).ok_or_else(|| err("unknown thread"))?;
@@ -247,8 +276,11 @@ fn dirs(p: &Value) -> Result<Value, Value> {
 
 // ---- writes: the hub's own RPCs, run as this connection ----
 async fn rpc(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: Value) -> Result<Value, Value> {
-    let out = hub.request_here(c, &json!({"id":0,"m":m,"p":p})).await;
-    let r = out.into_iter().find(|v| v["t"] == "reply").ok_or_else(|| err("no answer"))?;
+    // a thing on a linked machine (`<link>~<id>`, or `on`) goes there and its owner's answer comes back (net/rpc.rs `Router::ask`)
+    let r = match hub.far_ask(c.client, m, &p).await {
+        Some(r) => r,
+        None => hub.request_here(c, &json!({"id":0,"m":m,"p":p})).await.into_iter().find(|v| v["t"] == "reply").ok_or_else(|| err("no answer"))?,
+    };
     if r["ok"] == true { Ok(r) } else { Err(r["error"].clone().as_str().map(|e| json!(e)).unwrap_or(r["error"].clone())) }
 }
 fn safe_id(x: &str) -> bool { !x.is_empty() && x.len() <= 64 && x.chars().all(|c| c.is_ascii_alphanumeric() || "-_.:".contains(c)) }
@@ -288,7 +320,9 @@ async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, cl
     // a command of the composer is never a message: an app that does not know `composer.run` would post a side question to the thread, or a secret to the log
     if crate::session::composer::word_of(text).is_some() { return Err(err("This app is too old for /btw, /give, /secret, /intent and /settle. Update it. Nothing was sent.")) }
     if !client_id.is_empty() { if !safe_id(client_id) { return Err(err("clientId: letters, digits and - _ . : only, 64 at most")) } if let Some(e) = recalled(client_id) { return Ok(e) } }
-    if !hub.model().await.threads.get(thread).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
+    let far = machines::is_far(thread);
+    if far { if !hub.far().map_or(false, |f| f.has(thread)) { return Err(err("unknown thread")) } if has { return Err(err("Images go to threads on this machine only.")) } }
+    else if !hub.model().await.threads.get(thread).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
     let (meta, paths) = store_attachments(hub, thread, attachments)?;
     let agent_text = if paths.is_empty() { String::new() } else { format!("{}{}{}", text, if text.is_empty() { "" } else { "\n\n" }, paths.iter().map(|p| format!("[attachment: {p}]")).collect::<Vec<_>>().join("\n")) };
     let msg = if client_id.is_empty() { format!("m{}-{}", now_ms(), hub.fresh_client()) } else { client_id.to_string() };
@@ -317,23 +351,34 @@ fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
 async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
     match m {
         "projects.list" => { let g = hub.model().await; let asks = open_ask_counts(hub);
-            let items = g.projects.keys().filter_map(|i| project_json(&g, i, &asks).map(|v| (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v))).collect();
-            let (projects, next) = page_of(items, limit_of(p, 50, 200), s(p, "before")); Ok(json!({"projects":projects,"next":next})) }
+            let (items, chips) = with_far(hub, s(p, "machine"), |far, un, pick| {
+                let ps = machines::partners(far, pick, un.far);
+                let mut items: Vec<(u64, String, Value)> = if machines::here_on(pick) { g.projects.keys().filter_map(|i| project_json(&g, i, &asks).map(|mut v| { if let Some(x) = ps.get(i) { machines::join_project(&mut v, x, un) } (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v) })).collect() } else { vec![] };
+                items.extend(machines::project_rows(far, pick, un.far, un));
+                (items, machines::chips(far, un, pick))
+            });
+            let (projects, next) = page_of(items, limit_of(p, 50, 200), s(p, "before")); Ok(json!({"projects":projects,"next":next,"machines":chips})) }
         "threads.list" => { let g = hub.model().await; let asks = open_ask_counts(hub); let (proj, arch) = (s(p, "project"), p["archived"] == true);
             // `settled`: true is only the Settled shelf (newest settle first), false only the rest (newest activity first); left out, both, as before
             let want = p.get("settled").and_then(Value::as_bool);
-            let (mut items, lim) = (vec![], limit_of(p, 50, 200));
-            // only the page's threads are built in full (the preview reads the log)
-            let mut keyed: Vec<(u64, String)> = g.threads.iter().filter(|(_, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj) && t.project != crate::sidebar::SCRATCH).filter_map(|(i, t)| {
-                let (_, settled, at) = flags_of(i);
-                if want.map_or(false, |w| w != settled) { return None }
-                Some((if want == Some(true) { at } else { ms(t.activity.max(t.created)) }, i.clone())) }).collect();
+            let lim = limit_of(p, 50, 200);
+            // the linked machines' threads are listed with this hub's, newest first across machines (`machine`: "" every machine, "@here", or one machine's name)
+            let (mut keyed, join, chips) = with_far(hub, s(p, "machine"), |far, un, pick| {
+                let mut keyed: Vec<(u64, String)> = if machines::here_on(pick) { g.threads.iter().filter(|(_, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj) && t.project != crate::sidebar::SCRATCH).filter_map(|(i, t)| {
+                    let (_, settled, at) = flags_of(i);
+                    if want.map_or(false, |w| w != settled) { return None }
+                    Some((if want == Some(true) { at } else { ms(t.activity.max(t.created)) }, i.clone())) }).collect() } else { vec![] };
+                keyed.extend(machines::thread_keys(far, pick, un.far, proj, arch, want));
+                (keyed, un.far.clone(), machines::chips(far, un, pick))
+            });
             keyed.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             if let Some((a, i)) = s(p, "before").split_once(':') { if let Ok(a) = a.parse::<u64>() { keyed.retain(|x| x.0 < a || (x.0 == a && x.1.as_str() > i)) } }
             let more = keyed.len() > lim; keyed.truncate(lim);
-            for (at, i) in &keyed { if let Some(v) = thread_json(hub, &g, i, &asks) { items.push((*at, i.clone(), v)) } }
+            // only the page's threads are built in full (the preview reads the log)
+            let mut items = vec![];
+            for (at, i) in &keyed { if let Some(v) = thread_row(hub, &g, i, &asks, &join) { items.push((*at, i.clone(), v)) } }
             let next = if more { keyed.last().map(|x| json!(format!("{}:{}", x.0, x.1))).unwrap_or(Value::Null) } else { Value::Null };
-            Ok(json!({"threads":items.into_iter().map(|x| x.2).collect::<Vec<_>>(),"next":next})) }
+            Ok(json!({"threads":items.into_iter().map(|x| x.2).collect::<Vec<_>>(),"next":next,"machines":chips})) }
         "thread.entries" => entries(hub, p).await,
         "link.resolve" => link::resolve(hub, p).await,
         // a buy thread's Order card (present/thread.rs `order_json`, what the desktop draws), null for any other thread; the app asks again on each push for the thread
@@ -362,11 +407,14 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             for k in ["title", "provider", "model"] { if !s(p, k).is_empty() { q[k] = p[k].clone() } }
             let r = rpc(hub, c, "thread.create", q).await?;
             let id = r["thread"].as_str().unwrap_or("").to_string(); if id.is_empty() { return Err(err("no thread was made")) }
+            let far = machines::is_far(&id);
             let runtime = if !s(p, "runtime").is_empty() { s(p, "runtime") } else if s(p, "permission") == "auto" { "full-access" } else { "approval-required" };
             rpc(hub, c, "thread.modes", json!({"thread":id,"runtime":runtime})).await?;
             if !s(p, "effort").is_empty() { rpc(hub, c, "thread.effort", json!({"thread":id,"effort":s(p, "effort")})).await?; }
-            if !s(p, "text").is_empty() { send_message(hub, c, &id, s(p, "text"), "", &Value::Null).await?; }
+            // (a thread just made on a linked machine is not in the mirror yet: its first message goes straight there)
+            if !s(p, "text").is_empty() { if far { rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await?; } else { send_message(hub, c, &id, s(p, "text"), "", &Value::Null).await?; } }
             let g = hub.model().await; let asks = open_ask_counts(hub);
+            if far { return Ok(json!({"thread":far_made(hub, &g, &id, project, s(p, "title"))})) }
             thread_json(hub, &g, &id, &asks).map(|t| json!({"thread":t})).ok_or_else(|| err("no thread was made"))
         }
         "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId"), p.get("attachments").unwrap_or(&Value::Null)).await?})),
@@ -384,7 +432,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
 #[derive(Clone, PartialEq)]
 enum Topic { Lists, Thread(String) }
 #[derive(Default)]
-struct Subs { next: u64, subs: Vec<(u64, Topic)>, live: HashSet<String>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
+struct Subs { far_rows: HashMap<String, (HashSet<String>, String)>, far_seen: Option<HashMap<String, String>>, next: u64, subs: Vec<(u64, Topic)>, live: HashSet<String>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
 impl Subs {
     fn threads(&self, th: &str) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Thread(th.into())).map(|(i, _)| *i).collect() }
     fn lists(&self) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Lists).map(|(i, _)| *i).collect() }
@@ -456,6 +504,41 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     for (id, alive) in &projects { for sub in subs.lists() { match alive.then(|| project_json(&g, id, &asks)).flatten() { Some(p) => out.push(d(sub, "project", json!({"project":p}))), None => out.push(d(sub, "project.removed", json!({"id":id}))) } } }
     out
 }
+/// The pushes for the linked machines' threads, which no log line of this hub announces: their mirrors are read again every few seconds, and what moved is pushed
+/// (`thread` rows to a lists subscription, `thread.removed`, and for an open far thread its new `entry` rows and its `turn`). Nothing is pushed when nothing moved.
+async fn far_pushes(hub: &Hub, subs: &mut Subs) -> Vec<Value> {
+    let mut out = vec![];
+    let join = with_far(hub, "", |_, un, _| un.far.clone());
+    let g = hub.model().await; let asks = HashMap::new();
+    if !subs.lists().is_empty() {
+        let ids: Vec<String> = with_far(hub, "", |far, un, pick| machines::thread_keys(far, pick, un.far, "", false, None).into_iter().chain(machines::thread_keys(far, pick, un.far, "", true, None)).map(|x| x.1).collect());
+        let first = subs.far_seen.is_none(); let mut seen = subs.far_seen.take().unwrap_or_default(); let mut now = HashMap::new();
+        for id in &ids { if let Some(t) = thread_row(hub, &g, id, &asks, &join) {
+            let digest = format!("{}|{}|{}|{}|{}|{}|{}|{}", t["updatedAt"], t["state"], t["title"], t["settled"], t["archived"], t["pinned"], t["project"], t["mark"]["away"]);
+            if !first && seen.get(id) != Some(&digest) { for sub in subs.lists() { out.push(d(sub, "thread", json!({"thread":t}))) } }
+            now.insert(id.clone(), digest); } }
+        if !first { for id in seen.keys().filter(|i| !now.contains_key(*i)) { for sub in subs.lists() { out.push(d(sub, "thread.removed", json!({"id":id}))) } } }
+        subs.far_seen = Some(now); let _ = seen;
+    }
+    let open: Vec<String> = subs.subs.iter().filter_map(|(_, t)| match t { Topic::Thread(x) if machines::is_far(x) => Some(x.clone()), _ => None }).collect();
+    if let Some(f) = hub.far() { for th in open {
+        let Some(page) = f.page(&th, 0, 32) else { continue };
+        let mut rows: Vec<&crate::model::Row> = page.rows.iter().filter(|r| r.thread == th).collect(); rows.sort_by_key(|r| r.ord);
+        let turn = hub.mirrors().shown(|far| machines::holder(far, &th).map_or(String::new(), |(_, st)| st.threads.get(&th).map_or(String::new(), |t| turn_word(t.turn.word()).to_string())));
+        let targets = subs.threads(&th);
+        let known = subs.far_rows.entry(th.clone()).or_insert_with(|| (rows.iter().map(|r| r.id.clone()).collect(), turn.clone()));
+        for r in rows { if known.0.insert(r.id.clone()) { if let Some(en) = row_entry(r) { for sub in &targets { out.push(d(*sub, "entry", json!({"thread":th,"entry":en}))) } } } }
+        if known.1 != turn && !turn.is_empty() { known.1 = turn.clone(); for sub in &targets { out.push(d(*sub, "turn", json!({"thread":th,"state":turn}))) } }
+    } }
+    out
+}
+/// What an open far thread already shows when it is subscribed to: what the mirror adds after this is pushed (`far_pushes`).
+fn far_seed(hub: &Hub, subs: &mut Subs, th: &str) {
+    if !machines::is_far(th) || subs.far_rows.contains_key(th) { return }
+    let Some(page) = hub.far().and_then(|f| f.page(th, 0, 32)) else { return };
+    let turn = hub.mirrors().shown(|far| machines::holder(far, th).map_or(String::new(), |(_, st)| st.threads.get(th).map_or(String::new(), |t| turn_word(t.turn.word()).to_string())));
+    subs.far_rows.insert(th.to_string(), (page.rows.iter().filter(|r| r.thread == th).map(|r| r.id.clone()).collect(), turn));
+}
 /// Streamed text of a running turn.
 fn live_pushes(f: &Value, subs: &mut Subs) -> Vec<Value> {
     let th = s(f, "thread").to_string(); let mut out = vec![];
@@ -475,16 +558,24 @@ async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Val
     let res = match m {
         "subscribe" => match (s(&p, "topic"), s(&p, "thread")) {
             ("lists", _) => { subs.next += 1; subs.subs.push((subs.next, Topic::Lists)); Ok(json!({"sub":subs.next})) }
-            ("thread", th) if hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) => { subs.next += 1; subs.subs.push((subs.next, Topic::Thread(th.into()))); Ok(json!({"sub":subs.next})) }
+            ("thread", th) if hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) || hub.far().map_or(false, |f| f.has(th)) => { subs.next += 1; subs.subs.push((subs.next, Topic::Thread(th.into()))); far_seed(hub, subs, th); Ok(json!({"sub":subs.next})) }
             ("thread", _) => Err(err("unknown thread")),
             _ => Err(err("topic: lists or thread")),
         },
         "unsubscribe" => { let n = p["sub"].as_u64().unwrap_or(0); subs.subs.retain(|(i, _)| *i != n); Ok(json!({})) }
-        _ => match term::call(hub, &mut subs.terms, m, &p).await { Some(r) => r, None => call(hub, c, m, &p).await },
+        _ => match term::call(hub, c.client, &mut subs.terms, m, &p).await { Some(r) => r, None => call(hub, c, m, &p).await },
     };
     match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }
 }
 
+/// A request that waits on another machine (its thread or project is `<link>~<id>`, or a viewer read about a drawing watched there) is run off the socket's loop,
+/// so a machine that is slow or away holds up nothing else on this phone; its reply comes when it comes.
+fn waits_far(v: &Value) -> bool {
+    let (m, p) = (s(v, "m"), v.get("p").unwrap_or(&Value::Null));
+    if m.starts_with("term.") { return term::far_wait(m, p) }
+    if matches!(m, "subscribe" | "unsubscribe" | "thread.entries" | "link.resolve") { return false }
+    machines::is_far(s(p, "thread")) || machines::is_far(s(p, "project")) || matches!(m, "viewer.info" | "viewer.probe" | "viewer.watch")
+}
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String, host: String) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(40 << 20); cfg.max_frame_size = Some(40 << 20); // (images come as base64 in one JSON frame: 4 x 8 MB)
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
@@ -497,17 +588,29 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
     static NAME: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
     let name = NAME.get_or_init(crate::net::botnet::name).await.clone();
     tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home)),"migrating":crate::import014::phone_state(&hub).await}), json_mode)).await?;
+    let (late_tx, mut late_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
+    let mut far_beat = tokio::time::interval(Duration::from_millis(2000)); far_beat.tick().await;
     loop {
         tokio::select! {
             m = rx.next() => {
                 let Some(m) = m else { return Ok(()) }; let m = m?;
                 if matches!(m, Message::Close(_)) { return Ok(()) }
                 let v = match wire::decode(&m) { None => continue, Some(Err(r)) => { tx.send(pack(&r, json_mode)).await?; continue } Some(Ok(v)) => v };
+                if waits_far(&v) {
+                    let (hub, late, id, m, p) = (hub.clone(), late_tx.clone(), v["id"].clone(), v["m"].as_str().unwrap_or("").to_string(), v.get("p").cloned().unwrap_or(Value::Null));
+                    let mut c2 = Conn { sent: vec![], client: conn.client, gen: conn.gen.clone(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+                    tokio::spawn(async move {
+                        let res = match term::far_wait(&m, &p) { true => term::far_call(&hub, c2.client, &m, &p).await, false => call(&hub, &mut c2, &m, &p).await };
+                        let _ = late.send(match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) });
+                    });
+                    continue
+                }
                 let r = handle(&hub, &mut conn, &mut subs, &v).await; tx.send(pack(&r, json_mode)).await?;
             }
+            r = late_rx.recv() => { if let Some(r) = r { tx.send(pack(&r, json_mode)).await?; } }
             n = changes.recv() => {
                 if let Err(tokio::sync::broadcast::error::RecvError::Closed) = n { return Ok(()) }
                 let len = hub.store.len();
@@ -524,6 +627,7 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
                     Out::Value(v) => if ext::wants_value(&v) {
                         // a plot's "none" is binary like the plots (one decoder in the app); a browser frame's announcement is JSON
                         if v["t"] == "plot" { let mut b = Vec::new(); cbor_plain(&v, &mut b); tx.send(Message::Binary(b.into())).await?; } else { tx.send(pack(&v, json_mode)).await?; } } } }
+            _ = far_beat.tick() => { if !subs.subs.is_empty() { for f in far_pushes(&hub, &mut subs).await { tx.send(pack(&f, json_mode)).await?; } } }
             _ = beat.tick() => { tx.send(pack(&json!({"t":"hb"}), json_mode)).await?; }
         }
     }

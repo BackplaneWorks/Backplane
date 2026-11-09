@@ -377,8 +377,14 @@ final class DataClient {
     private func loadWork(_ id: String) async { guard has("work"), let r: DWorkReply = try? await call("thread.work", ["thread": id]) else { return }; work[id] = r.subs }
     // a row's button; what it changes comes back as a push
     func workAct(_ id: String, _ row: DWorkRow) { Task { _ = try? await call("work.act", ["thread": id, "act": row.act ?? "", "value": row.value ?? ""], as: DEmpty.self) } }
+    /// The machine switcher (docs/PHONE-DATA.md, Your machines): the chips the hub sends with the lists (none with no linked machine), and the one in force.
+    private(set) var chips: [DChip] = []
+    private(set) var machine = ""
+    func pickMachine(_ v: String) { guard v != machine else { return }; machine = v; Task { await refresh() } }
+    private func machineQ(_ q: [String: Any]) -> [String: Any] { var q = q; if !machine.isEmpty { q["machine"] = machine }; return q }
+    private func takeChips(_ c: [DChip]?) { guard let c else { return }; chips = c; if let on = c.first(where: \.on), on.value != machine { machine = on.value } }
     private func loadProjects(_ g: Int) async throws {
-        let r: DProjectsPage = try await call("projects.list", ["limit": 100]); guard g == gen else { return }
+        let r: DProjectsPage = try await call("projects.list", machineQ(["limit": 100])); guard g == gen else { return }; takeChips(r.machines)
         flushLists()   // the deltas that came before the page are older than it
         projects = r.projects.sorted { $0.updatedAt > $1.updatedAt }; listsLoaded = true; scheduleSave()
     }
@@ -386,7 +392,7 @@ final class DataClient {
         // a hub with `settled` sends the live threads alone, so settled ones never push them off the page; the settled ones come per project when its row opens
         let split = has("settled")
         var q: [String: Any] = ["limit": 200]; if split { q["settled"] = false }
-        let r: DThreadsPage = try await call("threads.list", q); guard g == gen else { return }
+        let r: DThreadsPage = try await call("threads.list", machineQ(q)); guard g == gen else { return }; takeChips(r.machines)
         flushLists()
         threads = r.threads.sorted { $0.updatedAt > $1.updatedAt } + (split ? threads.filter { old in old.settled && !r.threads.contains(where: { $0.id == old.id }) } : [])
         listNext = r.next; listsLoaded = true; scheduleSave()
@@ -415,7 +421,7 @@ final class DataClient {
         if more && settledMore[project] == nil { return }
         settledBusy.insert(project); defer { settledBusy.remove(project) }
         var q: [String: Any] = ["project": project, "settled": true, "limit": 50]; if more, let c = settledMore[project] { q["before"] = c }
-        guard let r: DThreadsPage = try? await call("threads.list", q), g == gen else { return }
+        guard let r: DThreadsPage = try? await call("threads.list", machineQ(q)), g == gen else { return }
         flushLists()
         for t in r.threads { if let i = threads.firstIndex(where: { $0.id == t.id }) { threads[i] = t } else { threads.append(t) } }
         settledMore[project] = r.next; scheduleSave()

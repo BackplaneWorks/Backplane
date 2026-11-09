@@ -243,14 +243,20 @@ object DataClient {
     private fun setWork(id: String, o: JSONObject?) { work = if (o == null) work - id else work + (id to parseWork(o)) }
     /** A row's button; what it changes comes back as a push. */
     fun workAct(id: String, r: DWorkRow) { scope.launch { runCatching { call("work.act", JSONObject().put("thread", id).put("act", r.act).put("value", r.value)) } } }
+    /** The machine switcher (docs/PHONE-DATA.md, Your machines): the chips the hub sends with the lists (none with no linked machine), and the one in force. */
+    var chips by mutableStateOf<List<DChip>>(emptyList()); private set
+    var machine by mutableStateOf(""); private set
+    fun pickMachine(v: String) { if (v == machine) return; machine = v; scope.launch { refresh() } }
+    private fun machineQ(q: JSONObject) = q.also { if (machine.isNotEmpty()) it.put("machine", machine) }
+    private fun chipsOf(r: JSONObject) { if (r.has("machines")) { chips = parseChips(r.optJSONArray("machines")); chips.firstOrNull { it.on }?.let { if (it.value != machine) machine = it.value } } }
     private suspend fun loadProjects(g: Int) {
-        val r = call("projects.list", JSONObject().put("limit", 100)); if (g != gen) return
+        val r = call("projects.list", machineQ(JSONObject().put("limit", 100))); if (g != gen) return; chipsOf(r)
         projects = parseProjects(r.optJSONArray("projects")).sortedByDescending { it.updatedAt }; listsLoaded = true; save()
     }
     private suspend fun loadThreads(g: Int) {
         // a hub with `settled` sends the live threads alone, so settled ones never push them off the page; the settled ones come per project when its row opens
         val split = has("settled")
-        val r = call("threads.list", JSONObject().put("limit", 200).also { if (split) it.put("settled", false) }); if (g != gen) return
+        val r = call("threads.list", machineQ(JSONObject().put("limit", 200).also { if (split) it.put("settled", false) })); if (g != gen) return; chipsOf(r)
         val live = parseThreads(r.optJSONArray("threads"))
         threads = live.sortedByDescending { it.updatedAt } + (if (split) threads.filter { old -> old.settled && live.none { it.id == old.id } } else emptyList())
         listsLoaded = true; save()
@@ -282,7 +288,7 @@ object DataClient {
         if (!has("settled") || !settledBusy.add(project)) return
         try {
             val cursor = settledMore[project]; if (more && cursor == null) return
-            val q = JSONObject().put("project", project).put("settled", true).put("limit", 50).also { if (more) it.put("before", cursor) }
+            val q = machineQ(JSONObject().put("project", project).put("settled", true).put("limit", 50).also { if (more) it.put("before", cursor) })
             val r = runCatching { call("threads.list", q) }.getOrNull() ?: return; if (g != gen) return
             val got = parseThreads(r.optJSONArray("threads"))
             threads = threads.filter { t -> got.none { it.id == t.id } } + got
@@ -726,8 +732,8 @@ object DataClient {
             val es = entries.filterKeys { it in recent }.mapValues { (_, v) -> v.filter { !it.sending && !it.failed }.takeLast(40) }
             withContext(Dispatchers.IO) {
                 val j = JSONObject().put("hub", hub)
-                    .put("projects", JSONArray(ps.map { JSONObject().put("id", it.id).put("title", it.title).put("root", it.root).put("threadCount", it.threadCount).apply { it.settledCount?.let { n -> put("settledCount", n) } }.put("updatedAt", it.updatedAt).put("waiting", it.waiting) }))
-                    .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting) }))
+                    .put("projects", JSONArray(ps.map { JSONObject().put("id", it.id).put("title", it.title).put("root", it.root).put("threadCount", it.threadCount).apply { it.settledCount?.let { n -> put("settledCount", n) } }.put("updatedAt", it.updatedAt).put("waiting", it.waiting).put("also", it.also).put("mark", markJson(it.mark)) }))
+                    .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting).put("mark", markJson(it.mark)) }))
                     .put("entries", JSONObject().also { o -> es.forEach { (k, v) -> o.put(k, JSONArray(v.map(::J))) } })
                 runCatching { cacheFile().writeText(j.toString()) }
             }
