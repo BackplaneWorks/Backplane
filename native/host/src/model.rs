@@ -207,6 +207,13 @@ impl Model {
         let ids = ords.into_iter().filter(|n| before == 0 || *n < before).take(cap).map(|n| n.to_string()).collect();
         Ok(Page { ids, below, above, rows })
     }
+    /// How many entries a thread (or a log such as `@sub:<thread>`) holds.
+    pub fn count(&self, thread: &str) -> usize { self.own.get(thread).map_or(0, Vec::len) }
+    /// A thread's (or a log's) newest `n` entries, newest first, their text whole.
+    pub fn tail(&self, store: &Store, thread: &str, n: usize) -> Vec<Row> {
+        let own = self.own.get(thread).map(Vec::as_slice).unwrap_or(&[]);
+        own.iter().rev().take(n).filter_map(|e| self.row(store, *e, thread, false).ok()).collect()
+    }
     /// The thread's newest entries, newest first, up to the latest human prompt and the latest assistant text.
     pub fn latest_context(&self, store: &Store, thread: &str) -> Result<Vec<Row>> {
         let (own, sent) = (self.own.get(thread).map(Vec::as_slice).unwrap_or(&[]), self.sent.get(thread).map(Vec::as_slice).unwrap_or(&[]));
