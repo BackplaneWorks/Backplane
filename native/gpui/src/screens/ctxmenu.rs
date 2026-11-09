@@ -1,5 +1,7 @@
 //! The right-click menu on the sidebar's rows: a thread or subthread (Pin, Settle, Snooze, New subthread, Rename, Archive, Delete) and a project (New thread, Remove). Each item is a
-//! hub action the hub already answers (commands/actions.rs); Delete and Remove ask twice, the second click does it. The menu opens where the mouse was pressed.
+//! hub action the hub already answers (commands/actions.rs); Delete and Remove ask in the menu itself, as 0.14 did (law menu_delete_asks): the first
+//! click turns the item into "Click again to delete", the second does it; nothing is drawn over the window. A thread's Delete arms the hub's own
+//! confirm with the first click (`@del`), and a menu shut with it armed disarms it (`delete-no`). The menu opens where the mouse was pressed.
 use crate::{hub::Command, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
@@ -56,22 +58,47 @@ pub fn title_items(data: &Value) -> Vec<Item> {
 pub fn project_items(pid_raw: &str) -> Vec<Item> { vec![item("New thread", "new-thread", pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
-    pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) { self.screens.ctx = Some(Menu { at, items, armed: None }); cx.notify(); }
+    pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {
+        if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
+        self.screens.ctx = Some(Menu { at, items, armed: None }); cx.notify();
+    }
     /// Esc or a click outside: true when there was a menu to close.
-    pub(crate) fn ctx_close(&mut self, cx: &mut Context<Self>) -> bool { let was = self.screens.ctx.take().is_some(); if was { cx.notify(); } was }
+    pub(crate) fn ctx_close(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(m) = self.screens.ctx.take() else { return false };
+        if let Some(c) = disarm(&m) { let _ = self.tx.try_send(c); }
+        cx.notify(); true
+    }
     fn ctx_click(&mut self, i: usize, cx: &mut Context<Self>) {
         let Some(m) = self.screens.ctx.as_mut() else { return };
-        let Some(it) = m.items.get(i).cloned() else { return };
-        if it.confirm && m.armed != Some(i) {
-            m.armed = Some(i);
-            // a thread's Delete arms the hub's own confirm with the first press, as the other clients do
-            if it.action == "row-delete" { let _ = self.tx.try_send(Command::Action(it.action, it.value)); }
-            cx.notify(); return;
-        }
-        self.screens.ctx = None;
-        let _ = self.tx.try_send(Command::Action(it.action, it.value));
+        let step = press(m, i, &self.data);
+        if let Some(c) = step.send { let _ = self.tx.try_send(c); }
+        if step.close { self.screens.ctx = None; }
         cx.notify();
     }
+}
+
+/// What a click on item `i` does: what it sends and whether the menu shuts. A confirming item's first click only arms it (a thread's Delete
+/// also arms the hub's, which keeps the thread's `deleting`); the second does it, and a Delete whose hub confirm went away (the sidebar paged
+/// in between) arms it again instead of shutting with nothing deleted.
+pub struct Step { pub send: Option<Command>, pub close: bool }
+pub fn press(m: &mut Menu, i: usize, data: &Value) -> Step {
+    let Some(it) = m.items.get(i).cloned() else { return Step { send: None, close: false } };
+    let send = Some(Command::Action(it.action.clone(), it.value.clone()));
+    if it.confirm && m.armed != Some(i) {
+        m.armed = Some(i);
+        return Step { send: if it.action == "row-delete" { send } else { None }, close: false };
+    }
+    if it.action == "row-delete" && raw(&s(&data["deleting"], "id")) != raw(&it.value) { return Step { send, close: false } }
+    Step { send, close: true }
+}
+/// A menu shut with a thread's Delete armed: the hub's confirm goes too, so a later Delete asks again.
+pub fn disarm(m: &Menu) -> Option<Command> {
+    let it = m.items.get(m.armed?)?;
+    (it.action == "row-delete").then(|| Command::Action("delete-no".into(), String::new()))
+}
+/// What an armed item says (0.14's words).
+pub fn armed_label(it: &Item) -> String {
+    match it.action.as_str() { "row-delete" => "Click again to delete".into(), "proj-remove" => "Click again to remove".into(), _ => format!("Click again to {}", it.label.to_lowercase()) }
 }
 
 /// The menu over everything, with a backdrop that closes it.
@@ -80,7 +107,7 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
     let mut list = div().absolute().left(m.at.x).top(m.at.y).min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).occlude();
     for (i, it) in m.items.iter().enumerate() {
         let armed = m.armed == Some(i);
-        let label = if armed { format!("Click again to {}", it.label.to_lowercase()) } else { it.label.clone() };
+        let label = if armed { armed_label(it) } else { it.label.clone() };
         let danger = it.confirm;
         list = list.child(div().id(SharedString::from(format!("ctx-{i}"))).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
             .when(armed, |d| d.bg(c("raise")).font_weight(FontWeight::BOLD)).hover(|s| s.bg(c("raise"))).child(label)
@@ -113,6 +140,32 @@ mod tests {
         assert_eq!(names, ["Pin", "Settle", "Snooze 1 hour", "New subthread", "Rename", "Regenerate title", "Archive", "Delete"]);
         assert_eq!(it[3].value, "t7|p1"); assert_eq!(it[4].value, "t7"); assert!(it.last().unwrap().confirm && !it[0].confirm);
         let pinned = j(r#"{"id":"t1","pinned":true}"#); assert_eq!(thread_items(&pinned, "p")[0].action, "row-unpin");
+    }
+    fn sent(c: &Option<Command>) -> Option<(String, String)> { match c { Some(Command::Action(a, v)) => Some((a.clone(), v.clone())), _ => None } }
+    #[test] fn delete_asks_in_the_menu_and_the_second_click_deletes() {
+        let t = j(r#"{"id":"http://h:1|t7","pinned":false}"#);
+        let mut m = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None };
+        let del = m.items.iter().position(|i| i.action == "row-delete").unwrap();
+        let s1 = press(&mut m, del, &Value::Null);
+        assert_eq!(sent(&s1.send), Some(("row-delete".into(), "http://h:1|t7".into())), "the first click arms the hub's confirm"); assert!(!s1.close && m.armed == Some(del));
+        assert_eq!(armed_label(&m.items[del]), "Click again to delete");
+        let armed = j(r#"{"deleting":{"id":"http://h:1|t7"}}"#);
+        let s2 = press(&mut m, del, &armed); assert_eq!(sent(&s2.send), Some(("row-delete".into(), "http://h:1|t7".into()))); assert!(s2.close, "the second click deletes and shuts the menu");
+        // the hub forgot the armed delete in between (a sidebar page): the click arms it again, the menu stays
+        let mut m2 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: Some(del) };
+        let s3 = press(&mut m2, del, &Value::Null); assert!(!s3.close && sent(&s3.send).is_some());
+        // shut with Delete armed: the hub's confirm goes too; shut with nothing armed sends nothing
+        assert_eq!(sent(&disarm(&m2)), Some(("delete-no".into(), String::new()))); m2.armed = None; assert!(disarm(&m2).is_none());
+        // a project's Remove asks in the menu, the hub hears only the second click
+        let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None };
+        let s = press(&mut p, 3, &Value::Null); assert!(s.send.is_none() && !s.close); assert_eq!(armed_label(&p.items[3]), "Click again to remove"); assert!(disarm(&p).is_none());
+        let s = press(&mut p, 3, &Value::Null); assert_eq!(sent(&s.send), Some(("proj-remove".into(), "p1".into()))); assert!(s.close);
+        // any other item does what it says at once
+        let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
+    }
+    #[test] fn the_thread_names_menu_asks_before_its_delete_too() {
+        let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},"projects":[]}"#);
+        let it = title_items(&d); assert!(it.iter().find(|i| i.label == "Delete").unwrap().confirm && !it.iter().find(|i| i.label == "Diff").unwrap().confirm);
     }
     #[test] fn a_project_offers_new_thread_rename_badge_and_a_confirmed_remove() {
         let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", "proj-rename", "look", "proj-remove"]); assert!(it[3].confirm && !it[1].confirm && it[1].value == "p1");
