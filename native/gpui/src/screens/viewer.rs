@@ -305,7 +305,8 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         let full = std::iter::once(card.title.clone()).chain(card.rows.iter().map(|(k, v)| format!("{k}: {v}"))).collect::<Vec<_>>().join("\n");
         let mut box_ = div().id(SharedString::from(format!("pick-card-{slot}"))).absolute().left_2().bottom_2().max_w(px(280.)).flex().flex_col().gap(px(2.)).px_2().py_1().text_size(px(11.)).border_1().border_color(c("accent")).bg(c("panel")).occlude()
             .tooltip(crate::keys::tip(&full, "", light))
-            .child(div().flex().items_center().gap_2().child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::BOLD).child(words.join(" · ")))
+            .child(div().flex().items_center().gap_2().child(div().id(SharedString::from(format!("pick-name-{slot}"))).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::BOLD).cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip("Bring it into view", "", light))
+                    .on_click(cx.listener(move |this, _, _, cx| { super::plotview::bring_into_view(this, slot); cx.notify(); })))
                 .child(div().id(SharedString::from(format!("pick-close-{slot}"))).flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("Clear", "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
                     .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.card = None; pv.picked = None; pv.lit.clear(); super::plotview::keep_probe(this, None); cx.notify(); }))));
         for (k, v) in card_rows(&card) { box_ = box_.child(div().flex().gap_2().child(div().w(px(58.)).flex_none().text_color(c("dim")).child(k)).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(v))); }
@@ -446,7 +447,8 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
         let full = std::iter::once(card.title.clone()).chain(card.rows.iter().map(|(k, v)| format!("{k}: {v}"))).collect::<Vec<_>>().join("\n");
         row = row.child(div().id("split-probe").min_w_0().max_w(px(240.)).flex_shrink().flex().items_center().gap_1().pl_2().pr(px(2.)).py_px().border_1().border_color(c("accent")).bg(c("raise")).text_size(px(12.))
             .tooltip(crate::keys::tip(&full, "", light))
-            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(words.join(" · ")))
+            .child(div().id("split-probe-name").min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip("Bring it into view", "", light))
+                .on_click(cx.listener(|this, _, _, cx| { for i in [1, 2] { super::plotview::bring_into_view(this, i); } cx.notify(); })))
             .child(div().id("split-probe-clear").flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip("Clear", "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
                 .on_click(cx.listener(|this, _, _, cx| { for i in 0..3 { let pv = this.screens.pv(i); pv.picked = None; pv.card = None; pv.lit.clear(); } super::plotview::keep_probe(this, None); super::plotview::report_state(this); cx.notify(); }))));
     }
