@@ -24,6 +24,12 @@ hub.register_http(Arc::new(Y))     // GET prefix match; the pairing token is che
 ```
 `call` returns the frames to send back (usually one `{"t":"reply","id":id,"ok":true,...}`); errors as `{"t":"reply","id":id,"ok":false,"error":"..."}`.
 
+## Search (what was said)
+`session/index.rs` indexes every message (`MessagePosted`, role user or assistant) by its tokens (runs of letters and digits, lower case). It is built from the log once on a thread of its own as the hub starts (a 150 MB log of 465k lines and 20k messages: 0.47 s; a query 1-3 ms) and then reads only the lines appended since, before each query and each checkpoint round; nothing is saved, so no checkpoint can go stale. A query word is looked up in every token that contains its tokens, and the candidates are read back from the log and checked against the whole text: a message is found when its newest text has every word of the query, anywhere, any case (0.14's Find). Queries shorter than two characters find nothing.
+- `thread.search {q, thread?, limit?=40}` → `{hits: [{thread, title, project, msg, role, text, at}], more, titles: [{thread, title, project}]}`: newest first, at most 3 a thread across threads (none with `thread`); `text` is a line around the first word; `at` unix s. Deleted threads and ones the sidebar never lists are left out.
+- `thread.find {thread, q}` → `{q, matches: [{msg, role, at, text}], total, more}`: find in one thread (Ctrl+F): every matching message, oldest first (the thread's order, for next and previous), at most 1000 (the newest 1000, `more` set, when there are more).
+- 0.14's `view.search`, `view.message` and `view.cancel` are retired: no client sends them, a newer query simply replaces an older one, and no message row is ever cut for `view.message` to continue. They answer INVALID_REQUEST like any method a view does not have.
+
 ## Unsolicited frames
 `hub.push(client, frame) -> bool` (one connection; `who.client` is the id of the caller), `hub.push_all(&frame)`. Frames go out in the connection's encoding (binary CBOR).
 

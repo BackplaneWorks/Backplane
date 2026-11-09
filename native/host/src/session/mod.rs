@@ -1,21 +1,15 @@
 //! Views: what a native client asks for with `view.open`, `view.update`, `view.action` and `view.page`, and how the
 //! reply is made (window from the Rust index, picture from the presenter, keyed delta, segmentation). Lane
-//! parity-session owns this directory. Methods the core does not answer itself (`view.search`, `view.message`,
-//! `view.cancel`) are registered here with `Hub::register_view`; `start` is called once from `main`.
-use crate::{api::Fut, hub::{error, now_ms, Conn, Hub}};
+//! parity-session owns this directory. 0.14's `view.search`, `view.message` and `view.cancel` are retired: no client sends them (search is
+//! `thread.search`/`thread.find` here and data/1 `search`/`find`, a newer query replacing an older one; no message row is ever cut), so they
+//! answer INVALID_REQUEST like any method a view does not have. `start` is called once from `main`.
+use crate::hub::{error, now_ms, Conn, Hub};
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
-/// One view method family beyond the core's open/update/action/page. `call` runs after the core has validated
-/// the request's identity (`version`, `generation`, `epoch`, `hub`, `requestRevision`, the target) and the view
-/// (`viewId`) for every method except `view.open`; it returns the frames to send back.
-pub trait ViewMethod: Send + Sync {
-    fn methods(&self) -> &'static [&'static str];
-    fn call<'a>(&'a self, hub: &'a Arc<Hub>, conn: &'a mut Conn, id: &'a Value, method: &'a str, params: &'a Value) -> Fut<'a, Vec<Value>>;
-}
-
 mod actor;
 pub mod search;
+pub mod index;
 #[allow(dead_code)] pub mod composer;
 #[allow(dead_code)] pub mod dispatch;
 #[allow(dead_code)] pub mod patch;
@@ -26,8 +20,8 @@ pub mod pages;
 pub mod event_type;
 pub use event_type::event_type;
 pub use actor::{forget, is_job, record_answer, record_read, record_read_bound, record_reply, record_reply_bound, record_reply_bound_m, replied, replied_late, take_reads};
-/// Registers this lane's handlers: `thread.search` (search.rs), what was said in every thread or in one.
-pub fn start(hub: &Arc<Hub>) { hub.register_rpc(Arc::new(search::Search)); }
+/// Registers this lane's handlers: `thread.search` and `thread.find` (search.rs), what was said in every thread or in one, and starts their index (index.rs).
+pub fn start(hub: &Arc<Hub>) { index::start(&hub.store); hub.register_rpc(Arc::new(search::Search)); }
 
 pub const REPLY_BYTES: usize = 262144;
 pub const CONTROL_CHARS: usize = 32768 / 6; // core Part.take(text, 32768): left / 6 characters a part
@@ -85,14 +79,9 @@ impl Hub {
         if !valid { return vec![error(&id, "STALE_CONNECTION")] }
         match m {
             "view.open" | "view.update" | "view.action" | "view.page" => {}
-            "view.search" | "view.message" | "view.cancel" => {}
             _ => return vec![error(&id, "INVALID_REQUEST")],
         }
         if m != "view.open" && p.get("viewId").and_then(Value::as_str) != Some(c.view_id.as_str()) { return vec![error(&id, "STALE_VIEW")] }
-        // the methods beyond open/update/action/page belong to the handlers registered with `Hub::register_view`
-        if matches!(m, "view.search" | "view.message" | "view.cancel") {
-            return match self.view_for(m) { Some(h) => { let me = self.arc(); h.call(&me, c, &id, m, &p).await } None => vec![error(&id, "UNSUPPORTED")] };
-        }
         let view_id = if m == "view.open" { format!("{}:{}", c.gen, rid) } else { c.view_id.clone() };
         let rev = self.revision().await;
         let mut params = p.clone();

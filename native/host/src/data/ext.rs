@@ -21,7 +21,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines", "history", "devices"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines", "history", "devices", "find"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -162,6 +162,12 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         "badge.list" => Ok(crate::present::badge::list()),
         "accounts.page" | "account.view" | "account.act" => accounts(hub, c, m, p).await,
         "search" => search(hub, p).await,
+        // find in a thread (Ctrl+F on the desktop): every message with every word, oldest first, for next and previous
+        "find" => { let th = s(p, "thread"); if !known_thread(&*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
+            if s(p, "q").len() > 256 { return Some(Err(err("The search is too long."))) }
+            let mut r = crate::session::search::find_for(hub, th, s(p, "q")).await;
+            if let Some(a) = r["matches"].as_array_mut() { for h in a { if let Some(t) = h["at"].as_u64() { h["at"] = json!(ms(t)) } } }
+            Ok(r) }
         "history.list" => history(hub, p).await,
         // setup on a phone (present/onboard.rs): the hub's own step list, `step` held by the app
         "onboard.view" | "onboard.act" => rpc(hub, c, m, p.clone()).await.map(|r| r["result"].clone()),
@@ -289,7 +295,7 @@ async fn search(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let projects: Vec<Value> = ps.iter().filter_map(|(_, i)| project_json(&g, i, &asks)).collect();
     drop(g);
     // what was said: the messages with every word (the desktop palette's `thread.search`); `thread` keeps one thread's ("Search in thread")
-    let messages = if p["messages"] == false { json!([]) } else { crate::session::search::search_for(hub, s(p, "q"), s(p, "thread"), limit_of(p, 20, 60), u64::MAX).await["hits"].clone() };
+    let messages = if p["messages"] == false { json!([]) } else { crate::session::search::search_for(hub, s(p, "q"), s(p, "thread"), limit_of(p, 20, 60)).await["hits"].clone() };
     // times are unix ms on this protocol (the palette's hits say seconds)
     let messages = match messages { Value::Array(a) => Value::Array(a.into_iter().map(|mut h| { if let Some(t) = h["at"].as_u64() { h["at"] = json!(ms(t)) } h }).collect()), v => v };
     Ok(json!({"threads":threads,"projects":projects,"messages":messages}))

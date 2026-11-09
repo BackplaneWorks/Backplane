@@ -61,10 +61,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -286,6 +286,13 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!((m[0]["thread"].as_str(), m[0]["msg"].as_str(), m[0]["role"].as_str(), m[0]["title"].as_str()), (Some("t1"), Some("m2"), Some("assistant"), Some("First")), "{r}");
     assert!(ask(&mut ws, 31, "search", json!({"q":"hello","thread":"t2"})).await["result"]["messages"].as_array().unwrap().is_empty(), "another thread's search");
     assert!(ask(&mut ws, 32, "search", json!({"q":"hello","messages":false})).await["result"]["messages"].as_array().unwrap().is_empty());
+    // find in a thread: every message with every word, oldest first, `at` in ms; a line appended since is found at once (the index reads only it)
+    let r = ask(&mut ws, 33, "find", json!({"thread":"t1","q":"HE"})).await; let m = &r["result"]["matches"];
+    assert_eq!((m[0]["msg"].as_str(), m[1]["msg"].as_str(), r["result"]["total"].as_u64()), (Some("m1"), Some("m2"), Some(2)), "{r}"); assert_eq!(m[0]["at"], 1700000011000u64);
+    _h.store.append(r#"{"$":"MessagePosted","thread":"t1","msg":"m9","role":"user","text":"and the pinecone?","at":1700000040}"#).unwrap();
+    let r = ask(&mut ws, 34, "find", json!({"thread":"t1","q":"pinecone"})).await; assert_eq!(r["result"]["matches"][0]["msg"], "m9", "{r}");
+    assert!(ask(&mut ws, 35, "find", json!({"thread":"t2","q":"pinecone"})).await["result"]["matches"].as_array().unwrap().is_empty(), "another thread's");
+    assert!(ask(&mut ws, 36, "find", json!({"thread":"nope","q":"pinecone"})).await["error"].is_string(), "an unknown thread");
     let r = ask(&mut ws, 4, "models.list", json!({})).await; assert!(r["result"]["models"]["claude"].as_array().map_or(false, |a| !a.is_empty()), "claude's models are built in");
     let r = ask(&mut ws, 5, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["label"], "First"); assert_eq!(r["result"]["items"][0]["sigil"], ">");
     let r = ask(&mut ws, 6, "mentions.list", json!({"q":"alp","kind":"%"})).await; assert_eq!(r["result"]["items"][0]["id"], "p1");
