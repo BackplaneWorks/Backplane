@@ -431,7 +431,12 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let unread = st.settings.get(&format!("wait.{thread}")).map(String::as_str).unwrap_or("");
     let mut entries = entries_w(&es, running, waiting, unread, &|id| super::window::fold_choice(params, id), now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
     // Mob.pending: a thread that works shows the agent's "Working" row after its last entry
-    if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
+    if running {
+        // the reply being streamed (the hub's live text), as it is written: a reply of its own above "Working", replaced by its message when that lands
+        let live = params["liveText"].as_str().unwrap_or("");
+        if !live.trim().is_empty() { entries.push(json!({"id": format!("@stream:{thread}"), "kind": "assistant", "text": live, "blocks": md_blocks(live), "images": [], "stamp": "", "streaming": true})) }
+        entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""}))
+    }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
     let why: String = es.iter().rev().take_while(|e| !(e.msg && e.role == "user")).find(|e| !e.msg && e.role == "error").map(|e| e.text.trim().chars().take(400).collect()).unwrap_or_default();
     let state_keys = super::keys::keys(st, thread, now_ms / 1000, &why, params["hubInfo"]["models"].as_str()).ok_or_else(||state_keys_refusal(st,thread))?;
@@ -650,6 +655,19 @@ mod tests {
         let mut es2 = es.to_vec(); es2.push(m("u2", "user", "also this", 1699999003));
         let out = entries_w(&es2, true, false, "", &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
         assert_eq!((out[1]["live"].as_bool(), out[3]["now"].as_bool()), (Some(true), Some(true)), "a follow-up sent while it runs leaves the run live");
+    }
+    // the reply the agent is streaming shows as it is written, above "Working"; none without live text, none once the turn is over
+    #[test] fn a_streaming_reply_shows_as_it_is_written() {
+        let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
+        let mut st = State::new();
+        for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
+        st.apply_line(&format!(r#"{{"$":"TurnChanged","thread":"{th}","state":"running","at":9}}"#));
+        let mut params = p["params"].clone(); params["liveText"] = json!("The **pour** goes");
+        let es = thread_object(&st, "h", th, &params, "").unwrap()["entries"].as_array().unwrap().clone();
+        let n = es.len(); assert_eq!((es[n - 2]["id"].as_str(), es[n - 2]["streaming"].as_bool(), es[n - 1]["id"].as_str()), (Some(format!("@stream:{th}").as_str()), Some(true), Some(format!("@working:{th}").as_str())));
+        assert_eq!(es[n - 2]["text"], "The **pour** goes");
+        params["liveText"] = json!(""); let es = thread_object(&st, "h", th, &params, "").unwrap()["entries"].as_array().unwrap().clone();
+        assert!(es.iter().all(|e| e["streaming"].is_null()), "no live text, no streaming row");
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
