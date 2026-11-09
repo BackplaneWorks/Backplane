@@ -560,6 +560,12 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
     col.into_any_element()
 }
 
+thread_local! { static BOARDS_ASKED: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(Default::default()); }
+/// `view-boards` for this thread, once in this window's life (a project with one board never has a menu, so it is not asked again).
+fn ask_boards_once(cx: &mut Context<Backplane>, thread: &str) {
+    if thread.is_empty() || !BOARDS_ASKED.with(|a| a.borrow_mut().insert(thread.to_string())) { return }
+    cx.spawn(async move |this, cx| { let _ = this.update(cx, |app, _| { let _ = app.tx.try_send(Command::Action("view-boards".into(), String::new())); }); }).detach();
+}
 /// The page the pane shows and whether it is a press the hub has not answered yet: a rail press shuts the pane, or opens it laid out as that page, at once;
 /// None while nothing is open.
 fn pane_page(thread: &Value) -> Option<(String, bool)> {
@@ -574,6 +580,8 @@ fn pane_page(thread: &Value) -> Option<(String, bool)> {
 pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> AnyElement {
     let Some((open, early)) = pane_page(thread) else { return Empty.into_any_element() };
     let open = open.as_str();
+    // a drawing page shown without the project's boards (the window reconnected, or the page was restored as it was left): read them once
+    if matches!(open, "board" | "schematic" | "3d" | "split") && !early && !thread["viewer"]["boards"].is_array() { ask_boards_once(cx, &string(thread, "id")); }
     let viewer = &thread["viewer"];
     let diff_on = thread["diff"].is_object();
     // no tab bar: the rail picks the page. The pane's own controls (where it comes from, Open in KiCad, Close) end the page's toolbar row,
