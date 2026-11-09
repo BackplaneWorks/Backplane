@@ -75,8 +75,9 @@ impl Backplane {
     fn ctx_click(&mut self, i: usize, cx: &mut Context<Self>) {
         let Some(m) = self.screens.ctx.as_mut() else { return };
         match m.items.get(i).map(|it| (it.action.clone(), it.value.clone())) {
-            Some((a, _)) if a == LOCAL_SEARCH => { self.screens.ctx = None; self.palette_open_in_thread(cx); return }
-            Some((a, v)) if a == LOCAL_INTENT => { self.screens.ctx = None; self.open_project(v, cx); return }
+            // the window's own items: the menu shuts as Esc shuts it (an armed Delete is disarmed), then the item opens its place
+            Some((a, _)) if a == LOCAL_SEARCH => { self.ctx_close(cx); self.palette_open_in_thread(cx); return }
+            Some((a, v)) if a == LOCAL_INTENT => { self.ctx_close(cx); self.open_project(v, cx); return }
             _ => {}
         }
         let step = press(m, i, &self.data);
