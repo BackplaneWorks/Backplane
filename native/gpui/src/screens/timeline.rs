@@ -344,12 +344,17 @@ pub fn attachments(cx: &mut Context<Backplane>, light: bool, list: &Value, key: 
 }
 
 /// Repaint a few times a second while an image is still arriving, then stop (no standing repaint loop).
-pub fn poll(cx: &mut Context<Backplane>) {
+pub fn poll(window: &mut Window, cx: &mut Context<Backplane>) {
     let mut seen = None;
-    cx.spawn(async move |weak, cx| loop {
+    cx.spawn_in(window, async move |weak, cx| loop {
         cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
-        // redraw (every part of the window) only when a fetch finished since the last look, not every 150 ms while one is slow
-        let Ok(more) = weak.update(cx, |this, cx| { let done = this.screens.images.done(); if seen != Some(done) { seen = Some(done); cx.notify(); } let more = this.screens.images.loading(); if !more { this.screens.img_poll = false; } more }) else { return };
+        // redraw (every part of the window) only when a fetch finished since the last look, not every 150 ms while one is slow;
+        // images the cache let go of leave GPUI's memory then too
+        let Ok(more) = weak.update_in(cx, |this, window, cx| {
+            let done = this.screens.images.done();
+            if seen != Some(done) { seen = Some(done); this.screens.images.release(window, cx); cx.notify(); }
+            let more = this.screens.images.loading(); if !more { this.screens.img_poll = false; } more
+        }) else { return };
         if !more { return; }
     }).detach();
 }
