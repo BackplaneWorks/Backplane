@@ -39,6 +39,7 @@ final class DataClient {
     let plots = PlotStore()
     let voice = VoiceModel()
     let machines = MachinesModel()
+    let devices = DevicesModel()
     let terms = TermStore()
     private(set) var shot = 0
     private(set) var shotBot = ""
@@ -107,6 +108,7 @@ final class DataClient {
         loadCache()
         voice.client = self
         machines.client = self
+        devices.client = self
         terms.client = self
         #if DEBUG
         // a simulator has no taps: what the form's Pair and the question's buttons call, from the environment

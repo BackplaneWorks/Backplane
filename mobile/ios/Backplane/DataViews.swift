@@ -1013,6 +1013,7 @@ struct DataSettingsView: View {
                 DataUpdateSection(client: client)
                 DLine()
                 if client.has("voice") { DataVoiceSection(client: client); DLine() }
+                if client.has("devices") { DataDevicesSection(client: client); DLine() }
                 if client.has("machines") { DataMachinesSection(client: client); DLine() }
                 NavigationLink(value: DPage(name: "improvements")) { Text("Improvements") }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
                 DLine()
