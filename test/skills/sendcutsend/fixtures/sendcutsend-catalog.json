@@ -1,0 +1,507 @@
+{
+ "_meta": {
+  "description": "SendCutSend ordering catalog: materials with SKUs, available services, and size limits. Plus hardware catalog and finish options. Use this file to select materials, check service availability, and configure orders.",
+  "schema_version": "1.0",
+  "source": "SendCutSend",
+  "generated_at": "2026-11-05T21:51:54.194741Z",
+  "source_data_generated_at": "2026-11-05T21:35:13.772657Z",
+  "material_count": 182,
+  "hardware_count": 167,
+  "finish_count": 23,
+  "material_categories": [
+   "ABS",
+   "ACM Panel",
+   "Acrylic",
+   "Aluminum",
+   "Baltic Birch Plywood",
+   "Brass",
+   "CHIPBOARD",
+   "Carbon fiber plate",
+   "Copper",
+   "Delrin (Acetal)",
+   "G-10 (FR-4 Grade)",
+   "Garlock Blue Gard 3200",
+   "HARDBOARD",
+   "HDPE (Marine Board)",
+   "Lexan Polycarbonate",
+   "MDF",
+   "Mylar",
+   "Neoprene Rubber",
+   "Neoprene Rubber Fabric-Reinforced",
+   "Nitrile (NBR) Rubber",
+   "Phenolic (Micarta)",
+   "Polyethylene",
+   "Polypropylene Sheet",
+   "Rubberized cork gasket",
+   "Stainless Steel",
+   "Steel",
+   "Titanium",
+   "UHMW",
+   "VHB Tape",
+   "Viton (FKM) Rubber"
+  ],
+  "hardware_categories": [
+   "Blind Standoff",
+   "Flush Nut",
+   "Nut",
+   "Standoff",
+   "Stud"
+  ],
+  "available_service_types": [
+   "anodizing",
+   "bending",
+   "countersinking",
+   "deburring",
+   "dimple_forming",
+   "engraving",
+   "hardware",
+   "machining_tapping",
+   "media_blasting",
+   "plating",
+   "powder",
+   "tapping",
+   "tumbling",
+   "welding"
+  ],
+  "companion_files": {
+   "llms.txt": "Ordering guide with step-by-step flow, design rules, and file format guidelines",
+   "sendcutsend-specs.json": "Engineering reference \u2014 bend parameters, tolerances, material properties"
+  },
+  "recorded_for_tests": "trimmed copy; the skill reads the live file"
+ },
+ "materials": [
+  {
+   "sku": "ACRYLICCL-118",
+   "name": "Acrylic-Clear",
+   "category": "Acrylic",
+   "group": "Plastics",
+   "form": "sheet",
+   "grade": "Acrylic-Clear",
+   "thickness": "0.118",
+   "cutting_process": "CO2 Laser",
+   "min_part_size": "0.375 x 0.187",
+   "max_instant_pricing_part_size": "44 x 30",
+   "max_custom_quote_part_size": "47 x 47"
+  },
+  {
+   "sku": "ALU-040",
+   "name": "5052 H32 Aluminum",
+   "category": "Aluminum",
+   "group": "Metals",
+   "form": "sheet",
+   "grade": "5052 H32 Aluminum",
+   "thickness": "0.040",
+   "cutting_process": "Fiber Laser",
+   "min_part_size": "0.373 x 0.248",
+   "max_instant_pricing_part_size": "68 x 44",
+   "max_custom_quote_part_size": "119 x 59",
+   "available_services": [
+    "bending",
+    "dimple_forming",
+    "hardware",
+    "tapping"
+   ]
+  },
+  {
+   "sku": "ALU-063",
+   "name": "5052 H32 Aluminum",
+   "category": "Aluminum",
+   "group": "Metals",
+   "form": "sheet",
+   "grade": "5052 H32 Aluminum",
+   "thickness": "0.063",
+   "cutting_process": "Fiber Laser",
+   "min_part_size": "0.373 x 0.248",
+   "max_instant_pricing_part_size": "68 x 44",
+   "max_custom_quote_part_size": "119 x 59",
+   "available_services": [
+    "anodizing",
+    "bending",
+    "deburring",
+    "dimple_forming",
+    "engraving",
+    "hardware",
+    "powder",
+    "tapping",
+    "welding"
+   ]
+  },
+  {
+   "sku": "ALU-125",
+   "name": "5052 H32 Aluminum",
+   "category": "Aluminum",
+   "group": "Metals",
+   "form": "sheet",
+   "grade": "5052 H32 Aluminum",
+   "thickness": "0.125",
+   "cutting_process": "Fiber Laser",
+   "min_part_size": "0.373 x 0.248",
+   "max_instant_pricing_part_size": "68 x 44",
+   "max_custom_quote_part_size": "119 x 59",
+   "available_services": [
+    "anodizing",
+    "bending",
+    "countersinking",
+    "deburring",
+    "dimple_forming",
+    "engraving",
+    "hardware",
+    "powder",
+    "tapping",
+    "tumbling",
+    "welding"
+   ]
+  },
+  {
+   "sku": "CRS-059",
+   "name": "A36/1008 Mild Steel",
+   "category": "Steel",
+   "subcategory": "CRS",
+   "group": "Metals",
+   "form": "sheet",
+   "grade": "A36/1008 Mild Steel",
+   "thickness": "0.059",
+   "cutting_process": "Fiber Laser",
+   "min_part_size": "0.373 x 0.248",
+   "max_instant_pricing_part_size": "68 x 44",
+   "max_custom_quote_part_size": "119 x 59",
+   "available_services": [
+    "bending",
+    "deburring",
+    "dimple_forming",
+    "engraving",
+    "hardware",
+    "powder",
+    "tapping"
+   ]
+  },
+  {
+   "sku": "MDF-125",
+   "name": "MDF",
+   "category": "MDF",
+   "group": "Wood and MDF",
+   "form": "sheet",
+   "grade": "MDF",
+   "thickness": "0.125",
+   "cutting_process": "CO2 Laser",
+   "min_part_size": "0.373 x 0.248",
+   "max_instant_pricing_part_size": "44 x 30",
+   "max_custom_quote_part_size": "47 x 47"
+  },
+  {
+   "sku": "MDF-250",
+   "name": "MDF",
+   "category": "MDF",
+   "group": "Wood and MDF",
+   "form": "sheet",
+   "grade": "MDF",
+   "thickness": "0.250",
+   "cutting_process": "CO2 Laser",
+   "min_part_size": "0.373 x 0.248",
+   "max_instant_pricing_part_size": "44 x 30",
+   "max_custom_quote_part_size": "47 x 47"
+  },
+  {
+   "sku": "SST-060",
+   "name": "Stainless Steel (304 series)",
+   "category": "Stainless Steel",
+   "group": "Metals",
+   "form": "sheet",
+   "grade": "Stainless Steel (304 series)",
+   "thickness": "0.060",
+   "cutting_process": "Fiber Laser",
+   "min_part_size": "0.373 x 0.248",
+   "max_instant_pricing_part_size": "68 x 44",
+   "max_custom_quote_part_size": "119 x 59",
+   "available_services": [
+    "bending",
+    "deburring",
+    "dimple_forming",
+    "engraving",
+    "hardware",
+    "powder",
+    "tapping",
+    "welding"
+   ]
+  }
+ ],
+ "hardware": [
+  {
+   "sku": "BSO-M3-6",
+   "title": "Blind Flush Standoff, M3 x 0.5, .236\"",
+   "category": "Blind Standoff",
+   "subcategory": "Zinc plus Clear Chromate",
+   "max_hw_diameter": "0.189",
+   "min_cl_to_edge_distance": "0.25",
+   "tooling_diameter": "0.51",
+   "hole_diameter": "0.171",
+   "specifications": {
+    "Thread Size": "M3 x 0.5",
+    "Thread Code": "M3",
+    "Fastener Material": "Carbon Steel",
+    "Standard Finish": "Zinc plated",
+    "Length Code": "6",
+    "Length": "0.236"
+   },
+   "manufacturing_specs": {
+    "install_pressure_aluminum": 1102.0,
+    "install_pressure_steel": 2203.0,
+    "material_ranges": {
+     "aluminum": "0.040\"-0.100\"",
+     "steel": "0.048\"-0.119\""
+    },
+    "min_sheet_thickness": 0.04,
+    "max_sheet_thickness": 0.119
+   }
+  },
+  {
+   "sku": "F-M3-1",
+   "title": "Flush Nut, M3x0.5,1",
+   "category": "Flush Nut",
+   "subcategory": "300 Series Stainless Steel Passivated",
+   "max_hw_diameter": "0.189",
+   "min_cl_to_edge_distance": "0.236",
+   "tooling_diameter": "0.51",
+   "hole_diameter": "0.172",
+   "specifications": {
+    "Thread Size": "M3 x 0.5",
+    "Thread Code": "M3",
+    "Fastener Material": "300 Series Stainless Steel",
+    "Standard Finish": "Passivated",
+    "Thickness (A)": "0.060",
+    "Base width (H)": "0.189",
+    "Shank Code": "1"
+   },
+   "manufacturing_specs": {
+    "install_pressure_aluminum": 2000.0,
+    "install_pressure_steel": 4600.0,
+    "material_ranges": {
+     "aluminum": "0.063\"-0.090\"",
+     "steel": "0.059\"-0.074\""
+    },
+    "min_sheet_thickness": 0.059,
+    "max_sheet_thickness": 0.09
+   }
+  },
+  {
+   "sku": "F-M3-2",
+   "title": "Flush Nut, M3x0.5,2",
+   "category": "Flush Nut",
+   "subcategory": "300 Series Stainless Steel Passivated",
+   "max_hw_diameter": "0.189",
+   "min_cl_to_edge_distance": "0.236",
+   "tooling_diameter": "0.51",
+   "hole_diameter": "0.173",
+   "specifications": {
+    "Thread Size": "M3 x 0.5",
+    "Thread Code": "M3",
+    "Fastener Material": "300 Series Stainless Steel",
+    "Standard Finish": "Passivated",
+    "Thickness (A)": "0.090",
+    "Base width (H)": "0.189",
+    "Shank": "2"
+   },
+   "manufacturing_specs": {
+    "install_pressure_aluminum": 2000.0,
+    "install_pressure_steel": 4000.0,
+    "material_ranges": {
+     "aluminum": "0.090\"-0.500\"",
+     "steel": "0.104\"-0.375\""
+    },
+    "min_sheet_thickness": 0.09,
+    "max_sheet_thickness": 0.5
+   }
+  },
+  {
+   "sku": "S-M3-0",
+   "title": "Nut, M3x0.5",
+   "category": "Nut",
+   "subcategory": "Zinc plus Clear Chromate",
+   "max_hw_diameter": "0.25",
+   "min_cl_to_edge_distance": "0.25",
+   "tooling_diameter": "0.51",
+   "hole_diameter": "0.171",
+   "specifications": {
+    "Thread Size": "M3 x 0.5",
+    "Thread Code": "M3",
+    "Fastener Material": "Carbon Steel",
+    "Standard Finish": "Zinc plus Clear Chromate",
+    "Thickness (T)": "0.059",
+    "Outside Dimension (E)": "0.250"
+   },
+   "manufacturing_specs": {
+    "install_pressure_aluminum": 1500.0,
+    "install_pressure_steel": 2500.0,
+    "material_ranges": {
+     "aluminum": "0.040\"-0.500\"",
+     "steel": "0.048\"-0.500\""
+    },
+    "min_sheet_thickness": 0.04,
+    "max_sheet_thickness": 0.5
+   }
+  }
+ ],
+ "finish_options": [
+  {
+   "value": "clear",
+   "finish_type": "anodizing",
+   "color": "Clear",
+   "color_group": "Clear",
+   "code": "Type II, Class II"
+  },
+  {
+   "value": "black",
+   "finish_type": "anodizing",
+   "color": "Black",
+   "color_group": "Black",
+   "code": "Type II, Class II"
+  },
+  {
+   "value": "red",
+   "finish_type": "anodizing",
+   "color": "Red",
+   "color_group": "Red",
+   "code": "Type II, Class II"
+  },
+  {
+   "value": "blue",
+   "finish_type": "anodizing",
+   "color": "Blue",
+   "color_group": "Blue",
+   "code": "Type II, Class II"
+  },
+  {
+   "value": "gold",
+   "finish_type": "anodizing",
+   "color": "Gold",
+   "color_group": "Gold",
+   "code": "Type II, Class II"
+  },
+  {
+   "value": "black_zinc",
+   "finish_type": "plating",
+   "color": "Black Zinc",
+   "color_group": "Black",
+   "code": "Chloride rack electroplating"
+  },
+  {
+   "value": "clear_zinc",
+   "finish_type": "plating",
+   "color": "Clear Zinc",
+   "color_group": "Clear",
+   "code": "Chloride rack electroplating"
+  },
+  {
+   "value": "yellow_zinc",
+   "finish_type": "plating",
+   "color": "Yellow Zinc",
+   "color_group": "Yellow",
+   "code": "Chloride rack electroplating"
+  },
+  {
+   "value": "gloss_black",
+   "finish_type": "powder",
+   "color": "Gloss Black",
+   "color_group": "Black",
+   "code": "Tiger Drylac Wet Black 049/80036 90%"
+  },
+  {
+   "value": "matte_black",
+   "finish_type": "powder",
+   "color": "Matte Black",
+   "color_group": "Black",
+   "code": "Tiger Drylac Solar Black Flat Matte 044/80060 0-9%"
+  },
+  {
+   "value": "wrinkle_black",
+   "finish_type": "powder",
+   "color": "Wrinkle Black",
+   "color_group": "Black",
+   "code": "Cardinal C081-BK176 Semi Gloss 10%"
+  },
+  {
+   "value": "gloss_white",
+   "finish_type": "powder",
+   "color": "Gloss White",
+   "color_group": "White",
+   "code": "Tiger Drylac Bengal White 49/11111 RAL 9003 90%"
+  },
+  {
+   "value": "gloss_red",
+   "finish_type": "powder",
+   "color": "Gloss Red",
+   "color_group": "Red",
+   "code": "Cardinal T009-RD03 RAL 3002 90%"
+  },
+  {
+   "value": "gloss_yellow",
+   "finish_type": "powder",
+   "color": "Gloss Yellow",
+   "color_group": "Yellow",
+   "code": "Cardinal T009-YL01 RAL 1018  90%"
+  },
+  {
+   "value": "gloss_green",
+   "finish_type": "powder",
+   "color": "Gloss Green",
+   "color_group": "Green",
+   "code": "Tiger Drylac 149/52900 RAL 6001 90%"
+  },
+  {
+   "value": "gloss_blue_pow",
+   "finish_type": "powder",
+   "color": "Gloss Blue",
+   "color_group": "Blue",
+   "code": "Tiger Drylac 149/42280 RAL 5010 90% "
+  },
+  {
+   "value": "grey_metallic_pow",
+   "finish_type": "powder",
+   "color": "Metallic Grey",
+   "color_group": "Grey",
+   "code": "Tiger Drylac 149/95726 RAL 9007 90%"
+  },
+  {
+   "value": "grey_pow",
+   "finish_type": "powder",
+   "color": "Gloss Grey",
+   "color_group": "Grey",
+   "code": "Tiger Drylac 138/70046 RAL 7040 90%"
+  },
+  {
+   "value": "texture_black_bk01_pow",
+   "finish_type": "powder",
+   "color": "Textured Black",
+   "color_group": "Black",
+   "code": "Tiger Drylac SD Black Super Tex 059/81073 50%"
+  },
+  {
+   "value": "matte_white_pow",
+   "finish_type": "powder",
+   "color": "Matte White",
+   "color_group": "White",
+   "code": "Cardinal T002-WH08 20% "
+  },
+  {
+   "value": "textured_gray_pow",
+   "finish_type": "powder",
+   "color": "Textured Grey",
+   "color_group": "Grey",
+   "code": "Tiger Drylac Tuscan Silver 138/90030 "
+  },
+  {
+   "value": "safety_orange_pow",
+   "finish_type": "powder",
+   "color": "Safety Orange",
+   "color_group": "Orange",
+   "code": "Tiger Drylac Safety Orange 139/20010 90%"
+  },
+  {
+   "value": "bronze_pow",
+   "finish_type": "powder",
+   "color": "Bronze",
+   "color_group": "Bronze",
+   "code": "Tiger Drylac Medium Bronze 061/68002 25%"
+  }
+ ]
+}

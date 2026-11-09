@@ -1,0 +1,607 @@
+{
+ "_meta": {
+  "description": "SendCutSend engineering specifications: bend parameters (k-factor, bend radius, bend deduction), cutting tolerances, material properties, countersinking/tapping/dimple specs. Use this for design validation and manufacturability checks, not for ordering.",
+  "schema_version": "1.0",
+  "source": "SendCutSend",
+  "generated_at": "2026-11-05T21:51:55.112063Z",
+  "source_data_generated_at": "2026-11-05T21:35:13.772657Z",
+  "material_count": 182,
+  "units_note": "All dimensions are in inches unless otherwise noted. Angles are in degrees. Volumes are in cubic inches. Sheet part sizes are long side x short side. Billet part sizes are largest dimension first.",
+  "companion_files": {
+   "llms.txt": "Ordering guide with step-by-step flow, design rules, and file format guidelines",
+   "sendcutsend-catalog.json": "Ordering catalog \u2014 material list, hardware, finishes, service availability"
+  },
+  "recorded_for_tests": "trimmed copy; the skill reads the live file"
+ },
+ "materials": [
+  {
+   "sku": "ACRYLICCL-118",
+   "name": "Acrylic-Clear",
+   "general_specs": {
+    "thickness": "0.118",
+    "gauge": "N/A",
+    "thickness_tolerance_positive": "0.018",
+    "thickness_tolerance_negative": "0.030",
+    "top_bottom_finish": "Colors double sided, mirrored single sided",
+    "sourced_from": "USA",
+    "learn_more_url": "https://sendcutsend.com/materials/acrylic/"
+   },
+   "material_properties": {
+    "material_composition": "Cast acrylic is a transparent thermoplastic that is made from methyl methacrylate (MMA) monomers.",
+    "density": "74.304 lb/ft^3",
+    "heat_treatment_process": "N/A",
+    "astm": "D4802",
+    "tensile_strength_ultimate": "10 ksi",
+    "tensile_strength_yield": "10 ksi",
+    "shear_strength": "7.5 ksi",
+    "shear_modulus": "300 ksi",
+    "fatigue_strength": "2 ksi",
+    "rockwell_hardness": "M93",
+    "elongation_at_break": "2%",
+    "elastic_modulus": "350 ksi",
+    "poissons_ratio": "0.35",
+    "thermal_conductivity": "0.15 BTU/h-ft \u00b0F",
+    "softening_temperature": "212 \u00b0F",
+    "maximum_service_temperature": "180 \u00b0F",
+    "magnetic": "No",
+    "does_rust": "No"
+   },
+   "cutting_specs": {
+    "cutting_process": "CO2 Laser",
+    "min_part_size": "0.375 x 0.187",
+    "max_instant_pricing_part_size": "44 x 30",
+    "max_custom_quote_part_size": "47 x 47",
+    "cut_tolerance": "0.009",
+    "flatness_tolerance": "+/-0.030 per foot",
+    "min_hole_size": "0.047",
+    "min_bridge_size": "0.053",
+    "min_hole_to_edge": "0.035",
+    "tab_slot_tolerance": "0.035"
+   }
+  },
+  {
+   "sku": "ALU-040",
+   "name": "5052 H32 Aluminum",
+   "general_specs": {
+    "thickness": "0.040",
+    "gauge": "18",
+    "thickness_tolerance_positive": "0.004",
+    "thickness_tolerance_negative": "0.004",
+    "mill_finish": "Cold Rolled",
+    "top_bottom_finish": "Identical both sides",
+    "sourced_from": "USA/Global",
+    "learn_more_url": "https://sendcutsend.com/materials/5052-aluminum/"
+   },
+   "material_properties": {
+    "material_composition": "Aluminum (Al): 95.8 \u2013 97.7 Magnesium (Mg): 2.2 \u2013 2.8 Chromium (Cr): 0.15 \u2013 0.35 Iron (Fe): 0 \u2013 0.4 Silicon (Si): 0 \u2013 0.25 Manganese (Mn): 0 \u2013 0.1 Zinc (Zn): 0 \u2013 0.1 Copper (Cu): 0 \u2013 0.1 Residuals: 0 \u2013 0.15",
+    "density": "169.344 lb/ft^3",
+    "heat_treatment_process": "N/A",
+    "astm": "B209-14",
+    "tensile_strength_ultimate": "34 ksi",
+    "tensile_strength_yield": "26 ksi",
+    "shear_strength": "20 ksi",
+    "shear_modulus": "3700 ksi",
+    "fatigue_strength": "17 ksi",
+    "brinell_hardness": "60",
+    "elongation_at_break": "12%",
+    "elastic_modulus": "9900 ksi",
+    "poissons_ratio": "0.33",
+    "thermal_conductivity": "138 BTU/h-ft \u00b0F",
+    "melting_point": "1120 \u00b0F",
+    "magnetic": "No",
+    "does_rust": "No"
+   },
+   "cutting_specs": {
+    "cutting_process": "Fiber Laser",
+    "min_part_size": "0.373 x 0.248",
+    "max_instant_pricing_part_size": "68 x 44",
+    "max_custom_quote_part_size": "119 x 59",
+    "cut_tolerance": "0.005",
+    "flatness_tolerance": "+/-0.030 per foot",
+    "min_hole_size": "0.015",
+    "min_bridge_size": "0.020",
+    "min_hole_to_edge": "0.020",
+    "tab_slot_tolerance": "0.010"
+   },
+   "bending_specs": {
+    "min_flat_part_size": "1.5 x 0.375",
+    "max_flat_part_size": "44 x 30",
+    "max_bend_length": "44",
+    "min_flange_length_before_bend": "0.254",
+    "min_flange_length_after_bend": "0.286",
+    "min_length_center_bend_line_acute": "0.332",
+    "die_width": "0.472",
+    "effective_bend_radius": "0.024",
+    "max_bend_angle": "130",
+    "bend_angle_tolerance_up_to_24": "+/- 1 degree",
+    "bend_angle_tolerance_over_24": "+/- 2 degrees",
+    "bend_deduction": "0.062",
+    "k_factor": "0.45",
+    "bend_relief_depth": "0.084",
+    "min_joggle": "0.363",
+    "max_joggle": "3.750",
+    "min_bend_angle": "5"
+   },
+   "dimple_forming_specs": {
+    "min_flat_part_size": "5.2 x 1.2",
+    "max_flat_part_size": "56 x 26",
+    "smallest_dimple": "0.500",
+    "largest_dimple": "3.000"
+   },
+   "hardware_insertion_specs": {
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "max_4_sided_box_flange_height": "3"
+   },
+   "tapping_specs": {
+    "largest_tap": "M2.5 x 0.45",
+    "smallest_tap": "1-64",
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "min_hole_to_edge": "0.020"
+   }
+  },
+  {
+   "sku": "ALU-063",
+   "name": "5052 H32 Aluminum",
+   "general_specs": {
+    "thickness": "0.063",
+    "gauge": "14",
+    "thickness_tolerance_positive": "0.004",
+    "thickness_tolerance_negative": "0.004",
+    "mill_finish": "Cold Rolled",
+    "top_bottom_finish": "Identical both sides",
+    "sourced_from": "USA/Global",
+    "learn_more_url": "https://sendcutsend.com/materials/5052-aluminum/"
+   },
+   "material_properties": {
+    "material_composition": "Aluminum (Al): 95.8 \u2013 97.7 Magnesium (Mg): 2.2 \u2013 2.8 Chromium (Cr): 0.15 \u2013 0.35 Iron (Fe): 0 \u2013 0.4 Silicon (Si): 0 \u2013 0.25 Manganese (Mn): 0 \u2013 0.1 Zinc (Zn): 0 \u2013 0.1 Copper (Cu): 0 \u2013 0.1 Residuals: 0 \u2013 0.15",
+    "density": "169.344 lb/ft^3",
+    "heat_treatment_process": "N/A",
+    "astm": "B209-14",
+    "tensile_strength_ultimate": "34 ksi",
+    "tensile_strength_yield": "26 ksi",
+    "shear_strength": "20 ksi",
+    "shear_modulus": "3700 ksi",
+    "fatigue_strength": "17 ksi",
+    "brinell_hardness": "60",
+    "elongation_at_break": "12%",
+    "elastic_modulus": "9900 ksi",
+    "poissons_ratio": "0.33",
+    "thermal_conductivity": "138 BTU/h-ft \u00b0F",
+    "melting_point": "1120 \u00b0F",
+    "magnetic": "No",
+    "does_rust": "No"
+   },
+   "cutting_specs": {
+    "cutting_process": "Fiber Laser",
+    "min_part_size": "0.373 x 0.248",
+    "max_instant_pricing_part_size": "68 x 44",
+    "max_custom_quote_part_size": "119 x 59",
+    "cut_tolerance": "0.005",
+    "flatness_tolerance": "+/-0.030 per foot",
+    "min_hole_size": "0.014",
+    "min_bridge_size": "0.024",
+    "min_hole_to_edge": "0.020",
+    "tab_slot_tolerance": "0.010"
+   },
+   "anodizing_specs": {
+    "min_flat_part_size": "3 x 1",
+    "max_flat_part_size": "23 x 23"
+   },
+   "bending_specs": {
+    "min_flat_part_size": "1.5 x 0.375",
+    "max_flat_part_size": "44 x 30",
+    "max_bend_length": "44",
+    "min_flange_length_before_bend": "0.254",
+    "min_flange_length_after_bend": "0.303",
+    "die_width": "0.472",
+    "effective_bend_radius": "0.035",
+    "max_bend_angle": "130",
+    "bend_angle_tolerance_up_to_24": "+/- 1 degree",
+    "bend_angle_tolerance_over_24": "+/- 2 degrees",
+    "bend_deduction": "0.096",
+    "k_factor": "0.42",
+    "bend_relief_depth": "0.118",
+    "min_joggle": "0.324",
+    "max_joggle": "3.750",
+    "min_bend_angle": "5"
+   },
+   "deburring_specs": {
+    "min_flat_part_size": "3 x 0.995",
+    "max_flat_part_size": "46 x 36"
+   },
+   "dimple_forming_specs": {
+    "min_flat_part_size": "5.2 x 1.2",
+    "max_flat_part_size": "56 x 26",
+    "smallest_dimple": "0.500",
+    "largest_dimple": "3.000"
+   },
+   "engraving_specs": {
+    "min_flat_part_size": "0.9 x 0.9",
+    "max_flat_part_size": "12.1 x 12.1"
+   },
+   "hardware_insertion_specs": {
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "max_4_sided_box_flange_height": "3"
+   },
+   "powder_coating_specs": {
+    "min_flat_part_size": "3 x 1",
+    "max_flat_part_size": "37 x 31"
+   },
+   "tapping_specs": {
+    "largest_tap": "10-32",
+    "smallest_tap": "1-72",
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "min_hole_to_edge": "0.020"
+   }
+  },
+  {
+   "sku": "ALU-125",
+   "name": "5052 H32 Aluminum",
+   "general_specs": {
+    "thickness": "0.125",
+    "gauge": "8",
+    "thickness_tolerance_positive": "0.006",
+    "thickness_tolerance_negative": "0.006",
+    "mill_finish": "Cold Rolled",
+    "top_bottom_finish": "Identical both sides",
+    "sourced_from": "USA/Global",
+    "learn_more_url": "https://sendcutsend.com/materials/5052-aluminum/"
+   },
+   "material_properties": {
+    "material_composition": "Aluminum (Al): 95.8 \u2013 97.7 Magnesium (Mg): 2.2 \u2013 2.8 Chromium (Cr): 0.15 \u2013 0.35 Iron (Fe): 0 \u2013 0.4 Silicon (Si): 0 \u2013 0.25 Manganese (Mn): 0 \u2013 0.1 Zinc (Zn): 0 \u2013 0.1 Copper (Cu): 0 \u2013 0.1 Residuals: 0 \u2013 0.15",
+    "density": "169.344 lb/ft^3",
+    "heat_treatment_process": "N/A",
+    "astm": "B209-14",
+    "tensile_strength_ultimate": "34 ksi",
+    "tensile_strength_yield": "26 ksi",
+    "shear_strength": "20 ksi",
+    "shear_modulus": "3700 ksi",
+    "fatigue_strength": "17 ksi",
+    "brinell_hardness": "60",
+    "elongation_at_break": "12%",
+    "elastic_modulus": "9900 ksi",
+    "poissons_ratio": "0.33",
+    "thermal_conductivity": "138 BTU/h-ft \u00b0F",
+    "melting_point": "1120 \u00b0F",
+    "magnetic": "No",
+    "does_rust": "No"
+   },
+   "cutting_specs": {
+    "cutting_process": "Fiber Laser",
+    "min_part_size": "0.373 x 0.248",
+    "max_instant_pricing_part_size": "68 x 44",
+    "max_custom_quote_part_size": "119 x 59",
+    "cut_tolerance": "0.005",
+    "flatness_tolerance": "+/-0.030 per foot",
+    "min_hole_size": "0.032",
+    "min_bridge_size": "0.048",
+    "min_hole_to_edge": "0.038",
+    "tab_slot_tolerance": "0.010"
+   },
+   "anodizing_specs": {
+    "min_flat_part_size": "3 x 1",
+    "max_flat_part_size": "23 x 23"
+   },
+   "bending_specs": {
+    "min_flat_part_size": "1.5 x 0.375",
+    "max_flat_part_size": "44 x 30",
+    "max_bend_length": "44",
+    "min_flange_length_before_bend": "0.367",
+    "min_flange_length_after_bend": "0.476",
+    "min_length_center_bend_line_acute": "0.478",
+    "die_width": "0.63",
+    "effective_bend_radius": "0.125",
+    "max_bend_angle": "130",
+    "bend_angle_tolerance_up_to_24": "+/- 1 degree",
+    "bend_angle_tolerance_over_24": "+/- 2 degrees",
+    "bend_deduction": "0.216",
+    "k_factor": "0.44",
+    "bend_relief_depth": "0.270",
+    "min_joggle": "0.506",
+    "max_joggle": "3.750",
+    "min_bend_angle": "5"
+   },
+   "countersinking_specs": {
+    "min_flat_part_size": "4 x 1",
+    "max_flat_part_size": "46 x 16",
+    "countersink_min_minor": "0.099",
+    "countersink_max_major": "0.472",
+    "min_hole_center_to_material_edge": "0.246"
+   },
+   "deburring_specs": {
+    "min_flat_part_size": "3 x 0.995",
+    "max_flat_part_size": "46 x 36"
+   },
+   "dimple_forming_specs": {
+    "min_flat_part_size": "5.2 x 2.45",
+    "max_flat_part_size": "56 x 26",
+    "smallest_dimple": "1.250",
+    "largest_dimple": "3.000"
+   },
+   "engraving_specs": {
+    "min_flat_part_size": "0.9 x 0.9",
+    "max_flat_part_size": "12.1 x 12.1"
+   },
+   "hardware_insertion_specs": {
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "max_4_sided_box_flange_height": "3"
+   },
+   "powder_coating_specs": {
+    "min_flat_part_size": "3 x 1",
+    "max_flat_part_size": "37 x 31"
+   },
+   "tapping_specs": {
+    "largest_tap": "M10 x 1.5",
+    "smallest_tap": "M2 x 0.4",
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "min_hole_to_edge": "0.038",
+    "min_distance_cl_hole_to_edge": "Tap hole size/2 +0.038\""
+   },
+   "tumbling_specs": {
+    "min_flat_part_size": "1.5 x 0.5",
+    "max_flat_part_size": "7 x 4"
+   }
+  },
+  {
+   "sku": "CRS-059",
+   "name": "A36/1008 Mild Steel",
+   "general_specs": {
+    "thickness": "0.059",
+    "gauge": "16",
+    "thickness_tolerance_positive": "0.006",
+    "thickness_tolerance_negative": "0.004",
+    "mill_finish": "Cold Rolled",
+    "top_bottom_finish": "Identical both sides",
+    "sourced_from": "USA/Global",
+    "learn_more_url": "https://sendcutsend.com/materials/mild-steel/"
+   },
+   "material_properties": {
+    "material_composition": "Iron (Fe): 99.31 \u2013 99.7 Manganese (Mn): 0.3 \u2013 0.5 Carbon (C): 0 \u2013 0.1 Sulfur (S): 0 \u2013 0.05 Phosphorus (P): 0 \u2013 0.04",
+    "density": "490 lb/ft^3",
+    "heat_treatment_process": "N/A",
+    "astm": "A1008-21A-CS-TYPE-B",
+    "tensile_strength_ultimate": "54 ksi",
+    "tensile_strength_yield": "45 ksi",
+    "shear_strength": "34 ksi",
+    "shear_modulus": "11000 ksi",
+    "fatigue_strength": "32 ksi",
+    "brinell_hardness": "100",
+    "elongation_at_break": "22%",
+    "elastic_modulus": "27000 ksi",
+    "poissons_ratio": "0.29",
+    "thermal_conductivity": "43 BTU/h-ft \u00b0F",
+    "melting_point": "2600 \u00b0F",
+    "magnetic": "Yes",
+    "does_rust": "Yes"
+   },
+   "cutting_specs": {
+    "cutting_process": "Fiber Laser",
+    "min_part_size": "0.373 x 0.248",
+    "max_instant_pricing_part_size": "68 x 44",
+    "max_custom_quote_part_size": "119 x 59",
+    "cut_tolerance": "0.005",
+    "flatness_tolerance": "+/-0.030 per foot",
+    "min_hole_size": "0.014",
+    "min_bridge_size": "0.030",
+    "min_hole_to_edge": "0.020",
+    "tab_slot_tolerance": "0.010"
+   },
+   "bending_specs": {
+    "min_flat_part_size": "1.5 x 0.375",
+    "max_flat_part_size": "44 x 30",
+    "max_bend_length": "44",
+    "min_flange_length_before_bend": "0.255",
+    "min_flange_length_after_bend": "0.309",
+    "min_length_center_bend_line_acute": "0.344",
+    "die_width": "0.472",
+    "effective_bend_radius": "0.063",
+    "max_bend_angle": "130",
+    "bend_angle_tolerance_up_to_24": "+/- 1 degree",
+    "bend_angle_tolerance_over_24": "+/- 2 degrees",
+    "bend_deduction": "0.108",
+    "k_factor": "0.4",
+    "bend_relief_depth": "0.142",
+    "min_joggle": "0.320",
+    "max_joggle": "3.750",
+    "min_bend_angle": "5"
+   },
+   "deburring_specs": {
+    "min_flat_part_size": "3 x 0.995",
+    "max_flat_part_size": "46 x 36"
+   },
+   "dimple_forming_specs": {
+    "min_flat_part_size": "5.2 x 1.2",
+    "max_flat_part_size": "56 x 26",
+    "smallest_dimple": "0.500",
+    "largest_dimple": "3.000"
+   },
+   "engraving_specs": {
+    "min_flat_part_size": "0.75 x 0.75",
+    "max_flat_part_size": "13 x 13"
+   },
+   "hardware_insertion_specs": {
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "max_4_sided_box_flange_height": "3"
+   },
+   "powder_coating_specs": {
+    "min_flat_part_size": "3 x 1",
+    "max_flat_part_size": "37 x 31"
+   },
+   "tapping_specs": {
+    "largest_tap": "M3 x 0.5",
+    "smallest_tap": "M2 x 0.4",
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "min_hole_to_edge": "0.020",
+    "min_distance_cl_hole_to_edge": "Tap hole size/2 +0.020\""
+   }
+  },
+  {
+   "sku": "MDF-125",
+   "name": "MDF",
+   "general_specs": {
+    "thickness": "0.125",
+    "gauge": "N/A",
+    "thickness_tolerance_positive": "0.015",
+    "thickness_tolerance_negative": "0.015",
+    "top_bottom_finish": "Identical both sides",
+    "sourced_from": "Global",
+    "learn_more_url": "https://sendcutsend.com/materials/mdf/"
+   },
+   "material_properties": {
+    "material_composition": "MDF (Medium-Density Fiberboard) is an engineered wood product made by breaking down hardwood or softwood residuals into wood fibers and combining them with wax and a resin binder.",
+    "density": "55.296 lb/ft^3",
+    "thermal_conductivity": "0.6 BTU/h-ft \u00b0F",
+    "magnetic": "No",
+    "does_rust": "No"
+   },
+   "cutting_specs": {
+    "cutting_process": "CO2 Laser",
+    "min_part_size": "0.373 x 0.248",
+    "max_instant_pricing_part_size": "44 x 30",
+    "max_custom_quote_part_size": "47 x 47",
+    "cut_tolerance": "0.005",
+    "flatness_tolerance": "+/-0.030 per foot",
+    "min_hole_size": "0.050",
+    "min_bridge_size": "0.063",
+    "min_hole_to_edge": "0.038",
+    "tab_slot_tolerance": "0.020"
+   }
+  },
+  {
+   "sku": "MDF-250",
+   "name": "MDF",
+   "general_specs": {
+    "thickness": "0.250",
+    "gauge": "N/A",
+    "thickness_tolerance_positive": "0.015",
+    "thickness_tolerance_negative": "0.015",
+    "top_bottom_finish": "Identical both sides",
+    "sourced_from": "Global",
+    "learn_more_url": "https://sendcutsend.com/materials/mdf/"
+   },
+   "material_properties": {
+    "material_composition": "MDF (Medium-Density Fiberboard) is an engineered wood product made by breaking down hardwood or softwood residuals into wood fibers and combining them with wax and a resin binder.",
+    "density": "55.296 lb/ft^3",
+    "heat_treatment_process": "N/A",
+    "thermal_conductivity": "0.6 BTU/h-ft \u00b0F",
+    "magnetic": "No",
+    "does_rust": "No"
+   },
+   "cutting_specs": {
+    "cutting_process": "CO2 Laser",
+    "min_part_size": "0.373 x 0.248",
+    "max_instant_pricing_part_size": "44 x 30",
+    "max_custom_quote_part_size": "47 x 47",
+    "cut_tolerance": "0.005",
+    "flatness_tolerance": "+/-0.030 per foot",
+    "min_hole_size": "0.100",
+    "min_bridge_size": "0.125",
+    "min_hole_to_edge": "0.075",
+    "tab_slot_tolerance": "0.020"
+   }
+  },
+  {
+   "sku": "SST-060",
+   "name": "Stainless Steel (304 series)",
+   "general_specs": {
+    "thickness": "0.060",
+    "gauge": "16",
+    "thickness_tolerance_positive": "0.003",
+    "thickness_tolerance_negative": "0.003",
+    "mill_finish": "2B",
+    "top_bottom_finish": "Identical both sides",
+    "sourced_from": "USA/Global",
+    "learn_more_url": "https://sendcutsend.com/materials/stainless-steel/"
+   },
+   "material_properties": {
+    "material_composition": "Iron (Fe): 65 \u2013 74 Chromium (Cr): 18 \u2013 20 Nickel (Ni): 8.0 \u2013 12 Manganese (Mn): 0 \u2013 2.0 Silicon (Si): 0 \u2013 0.75 Nitrogen (N): 0 \u2013 0.1 Phosphorus (P): 0 \u2013 0.045 Carbon (C): 0 \u2013 0.030 Sulfur (S): 0 \u2013 0.030",
+    "density": "494.208 lb/ft^3",
+    "heat_treatment_process": "N/A",
+    "astm": "A240M-20a/A480M-20a",
+    "tensile_strength_ultimate": "85 ksi",
+    "tensile_strength_yield": "35 ksi",
+    "shear_strength": "30 ksi",
+    "shear_modulus": "11.5 ksi",
+    "fatigue_strength": "30 ksi",
+    "brinell_hardness": "123",
+    "elongation_at_break": "50%",
+    "elastic_modulus": "29000 ksi",
+    "poissons_ratio": "0.29",
+    "thermal_conductivity": "9.4 BTU/h-ft \u00b0F",
+    "melting_point": "2550 \u00b0F",
+    "magnetic": "No",
+    "does_rust": "No"
+   },
+   "cutting_specs": {
+    "cutting_process": "Fiber Laser",
+    "min_part_size": "0.373 x 0.248",
+    "max_instant_pricing_part_size": "68 x 44",
+    "max_custom_quote_part_size": "119 x 59",
+    "cut_tolerance": "0.005",
+    "flatness_tolerance": "+/-0.030 per foot",
+    "min_hole_size": "0.014",
+    "min_bridge_size": "0.024",
+    "min_hole_to_edge": "0.020",
+    "tab_slot_tolerance": "0.010"
+   },
+   "bending_specs": {
+    "min_flat_part_size": "1.5 x 0.375",
+    "max_flat_part_size": "44 x 30",
+    "max_bend_length": "44",
+    "min_flange_length_before_bend": "0.255",
+    "min_flange_length_after_bend": "0.314",
+    "min_length_center_bend_line_acute": "0.332",
+    "die_width": "0.472",
+    "effective_bend_radius": "0.07",
+    "max_bend_angle": "130",
+    "bend_angle_tolerance_up_to_24": "+/- 1 degree",
+    "bend_angle_tolerance_over_24": "+/- 2 degrees",
+    "bend_deduction": "0.119",
+    "k_factor": "0.34",
+    "bend_relief_depth": "0.150",
+    "min_joggle": "0.321",
+    "max_joggle": "3.750",
+    "min_bend_angle": "5"
+   },
+   "deburring_specs": {
+    "min_flat_part_size": "3 x 0.995",
+    "max_flat_part_size": "46 x 36"
+   },
+   "dimple_forming_specs": {
+    "min_flat_part_size": "5.2 x 1.45",
+    "max_flat_part_size": "56 x 26",
+    "smallest_dimple": "0.750",
+    "largest_dimple": "3.000"
+   },
+   "engraving_specs": {
+    "min_flat_part_size": "0.9 x 0.9",
+    "max_flat_part_size": "12.1 x 12.1"
+   },
+   "hardware_insertion_specs": {
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "max_4_sided_box_flange_height": "3"
+   },
+   "powder_coating_specs": {
+    "min_flat_part_size": "3 x 1",
+    "max_flat_part_size": "37 x 31"
+   },
+   "tapping_specs": {
+    "largest_tap": "M6 x 1.0",
+    "smallest_tap": "M2 x 0.4",
+    "min_flat_part_size": "1.5 x 1",
+    "max_flat_part_size": "46 x 36",
+    "min_hole_to_edge": "0.020",
+    "min_distance_cl_hole_to_edge": "Tap hole size/2 +0.020\""
+   }
+  }
+ ]
+}

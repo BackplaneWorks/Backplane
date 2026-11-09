@@ -14,10 +14,12 @@ pub struct PromptEnv {
     pub fc: String, pub render: String, pub kicad: Kicad, pub kicad_ipc: bool, pub models: String, pub may_delegate: bool, pub orders_on: bool,
     pub root: String, pub pro: String, pub pcb: String, pub sch: String, pub all: String,
     pub keys: String, pub machines: String, pub buy: bool, pub lang: String,
+    /// Backplane's own skills (bundled.rs): (name, description, SKILL.md path)
+    pub skills: Vec<(String, String, String)>,
 }
 impl Default for PromptEnv {
     fn default() -> Self { PromptEnv { fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, kicad_ipc: true, models: String::new(), may_delegate: true, orders_on: true,
-        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new() } }
+        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![] } }
 }
 
 /// Prompt.runtime
@@ -102,9 +104,15 @@ pub fn api_keys(path: &str, names: &[String]) -> String {
 /// Prompt.lang
 pub fn lang_line(setting: &str) -> &'static str { match setting { "ja" => T::PROMPT_LANG_K[0], "en" => T::PROMPT_LANG_K[1], _ => "" } }
 
+/// The backplane_skills block: one line per bundled skill, its SKILL.md named, so any provider can read it.
+pub fn bundled_skills(ss: &[(String, String, String)]) -> String {
+    let (b, l) = (T::PROMPT_BUNDLED, T::PROMPT_SKILL_LINE);
+    format!("{}{}{}", b[0], ss.iter().map(|(n, d, p)| format!("{}{n}{}{d}{}{p}{}", l[0], l[1], l[2], l[3])).collect::<Vec<_>>().join("\n"), b[1])
+}
 /// Hub.prompt.base then Prompt.lang.add
 pub fn build(e: &PromptEnv) -> String {
     let mut s = [config_prompt(&e.fc, &e.render), kicad(&e.kicad, e.kicad_ipc), project(&e.root, &e.pro, &e.pcb, &e.sch, &e.all), orchestration(e.may_delegate, &e.models), background().to_string(), order_project(e.orders_on)].join("\n\n");
+    if !e.skills.is_empty() { s += "\n\n"; s += &bundled_skills(&e.skills) }
     if !e.keys.is_empty() { s += "\n\n"; s += &e.keys }
     if !e.machines.is_empty() { s += "\n\n"; s += &e.machines }
     if e.buy { s += "\n\n"; s += T::ORDER_PROMPT_BUY[0] }
@@ -137,6 +145,13 @@ pub(crate) mod tests {
         assert!(project("/r", "", "", "", "").contains("No KiCad project was found"));
     }
     #[test] fn a_delegated_task_at_the_depth_limit_may_not_delegate() { assert!(orchestration(false, "m").contains("depth limit") && !orchestration(false, "m").contains("Models available")); }
+    #[test] fn the_bundled_skills_are_named_with_their_files() {
+        let mut e = gold_env(); e.skills = vec![("sendcutsend".into(), "Design parts for SendCutSend.".into(), "/h/bundled/skills/sendcutsend/SKILL.md".into())];
+        let s = build(&e);
+        assert!(s.contains("<backplane_skills>Backplane's own skills, for every agent whatever its provider: before work one of them covers, read its SKILL.md completely and follow it.\n- sendcutsend: Design parts for SendCutSend. Read \"/h/bundled/skills/sendcutsend/SKILL.md\"</backplane_skills>"), "{s}");
+        assert!(!build(&gold_env()).contains("<backplane_skills>"));
+        assert!(order_project(true).contains("`sendcutsend` block") && !order_project(false).contains("sendcutsend"), "the review knows SendCutSend's check");
+    }
     #[test] fn language_and_buy_blocks_are_added_after() { let mut e = gold_env(); e.lang = "en".into(); e.buy = true; let s = build(&e); assert!(s.ends_with("Keep code, commands, paths and identifiers as they are.")); assert!(s.contains("<backplane_buy>")); }
     #[test] fn api_key_names_are_read_from_the_file_and_the_block_never_holds_a_value() {
         let names = key_names("# c\nOPENAI_API_KEY='sk-secret'\n\nbad name=1\n1X=2\nLONE\nGH_TOKEN='a=b'\n"); assert_eq!(names, ["OPENAI_API_KEY", "GH_TOKEN"]);
