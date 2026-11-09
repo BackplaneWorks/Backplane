@@ -107,8 +107,8 @@ impl Backplane {
     pub(crate) fn side_strip(&self, cx: &mut Context<Self>, light: bool) -> Vec<AnyElement> {
         let c = |n: &str| theme::color(light, n);
         let mut out = vec![
-            // the hub picker's row, empty: the unfold chevron lands on the fold chevron's height
-            div().border_b_1().border_color(c("line")).px_3().py_1().text_size(px(12.)).child("\u{a0}").into_any_element(),
+            // the hub picker's row, empty and as tall as it (hubpick.rs: its ROW_H - 1 row and the rule under it): the unfold chevron lands on the fold chevron's height
+            div().flex_shrink_0().h(px(super::head::ROW_H)).border_b_1().border_color(c("rule")).into_any_element(),
             div().h(px(FOLD_ROW)).px_2().flex().items_center().child(crate::ui::with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer()
                 .tooltip(crate::keys::tip("Unfold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(crate::ui::ic(light, "chevron-right", 16., "dim"))
                 .on_click(cx.listener(|this, _, _, cx| this.side_flip(cx)))).into_any_element(),
