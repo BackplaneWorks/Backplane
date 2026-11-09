@@ -576,7 +576,7 @@ impl Render for Backplane {
             let desc = match skill.get("note").and_then(Value::as_str) { Some(n) if !n.is_empty() => format!("[{n}] {desc}"), _ => desc };
             ctl.push(CtlEntry { id: format!("skill:{word}"), label: label.clone(), ctl: Ctl::Skill(word.clone()) });
             popup = popup.child(div().flex().flex_col().children(head).child(with_rect(div().id(("skill", index)), || format!("skill:{word}")).flex().gap_3().px_3().py_1().cursor_pointer().when(index == popup_ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-                .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
+                .child(div().font_weight(FontWeight::BOLD).flex_shrink_0().child(label)).child(div().flex_1().w_0().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(desc))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     let _ = this.tx.try_send(Command::Action("skill".into(), word.clone())); this.await_completion(cx);
                     this.input.focus_handle(cx).focus(window); cx.notify();
