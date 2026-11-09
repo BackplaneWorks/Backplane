@@ -27,12 +27,12 @@ pub fn editor(cx: &mut Context<Backplane>, light: bool, pid: &str, look: &Value)
     let mut colors = div().flex().flex_wrap().gap_1();
     for (label, value, on, css) in choices(look, "colors") {
         let fill = parse_css(&css).unwrap_or_else(|| c("dim"));
-        colors = colors.child(div().id(SharedString::from(format!("look-color-{pid}-{label}"))).size(px(18.)).bg(fill).cursor_pointer().border_2().border_color(if on { c("text") } else { fill })
+        colors = colors.child(crate::ui::with_rect(div().id(SharedString::from(format!("look-color-{pid}-{label}"))), { let v = value.clone(); move || format!("look:{v}") }).size(px(18.)).bg(fill).cursor_pointer().border_2().border_color(if on { c("text") } else { fill })
             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("look-set".into(), value.clone())); cx.notify(); })));
     }
     let mut icons = div().flex().flex_wrap().gap_1();
     for (label, value, on, _) in choices(look, "icons") {
-        icons = icons.child(div().id(SharedString::from(format!("look-icon-{pid}-{label}"))).size(px(24.)).flex().items_center().justify_center().cursor_pointer().border_1()
+        icons = icons.child(crate::ui::with_rect(div().id(SharedString::from(format!("look-icon-{pid}-{label}"))), { let v = value.clone(); move || format!("look:{v}") }).size(px(24.)).flex().items_center().justify_center().cursor_pointer().border_1()
             .border_color(if on { c("text") } else { c("line") }).hover(|s| s.bg(c("raise")))
             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("look-set".into(), value.clone())); cx.notify(); }))
             .child(art::icon(icon_name(&label), 14., c(if on { "text" } else { "dim" }))));

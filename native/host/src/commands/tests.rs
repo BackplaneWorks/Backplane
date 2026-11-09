@@ -252,8 +252,10 @@ fn tmp(name: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(for
     let pid = e[0]["id"].as_str().unwrap().to_string();
     let (e2, r) = ask(&h, "project.create", json!({"path": d.to_str().unwrap()})).await; assert!(e2.is_empty()); assert_eq!(r["ok"], false);
     let (_, r) = ask(&h, "project.create", json!({"path": d.to_str().unwrap()})).await; assert_eq!(r["error"], format!("already a project: {}", d.display()));
+    ask(&h, "project.rename", json!({"project":pid,"title":"Amp board"})).await;
     ask(&h, "project.remove", json!({"project":pid})).await;
     let (e, r) = ask(&h, "project.create", json!({"path": d.to_str().unwrap()})).await; assert_eq!(r, ok()); assert_eq!(e[0]["id"], pid); assert_eq!(e.iter().filter(|v| v["$"] == "ThreadCreated").count(), 0);
+    assert_eq!(e[0]["title"], "Amp board", "it comes back with the name it had, not its folder's");
     let (_, r) = ask(&h, "project.create", json!({"path": "  "})).await; assert_eq!(r["error"], "no folder given");
     let (_, r) = ask(&h, "project.new", json!({"path": d.join("fresh").to_str().unwrap()})).await; assert_eq!(r["ok"], true); assert!(d.join("fresh").is_dir());
     // a phone's (data/1) add: the project alone, its New thread screen makes the first thread

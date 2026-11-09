@@ -518,7 +518,11 @@ pub fn project_create(f: &Fold, at: u64, id: &Value, p: &Value, root: &str) -> P
     let n = f.n();
     let old = f.projects.iter().find(|(_, x)| x.removed && norm_root(&x.root) == root_n).map(|(i, _)| i.clone());
     let mut pl = match old {
-        Some(pid) => Plan { events: vec![json!({"$":"ProjectCreated","id":pid,"title":title,"root":root_n,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, act: None },
+        // the removed project comes back as it was: its own name (a rename before it went is kept), unless a title is given now
+        Some(pid) => {
+            let title = if p.get("title").and_then(Value::as_str).is_some() { title } else { f.projects[&pid].title.clone() };
+            Plan { events: vec![json!({"$":"ProjectCreated","id":pid,"title":title,"root":root_n,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, act: None }
+        }
         // `starter: false` (a phone, data/1): the project alone; the phone's own New thread screen makes its first thread, so none is left empty
         None if p.get("starter").and_then(Value::as_bool) == Some(false) => {
             let pid = hub_id("p", at, n);

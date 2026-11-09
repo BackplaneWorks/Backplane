@@ -181,7 +181,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
     for (i, it) in f.items.iter().enumerate() {
         let (a, v) = (it.action.clone(), it.value.clone()); let live = !a.is_empty();
         let icon = match it.kind.as_str() { "up" => "↰", "dir" => "▸", "add" => "+", _ => " " };
-        list = list.child(div().id(SharedString::from(format!("folder-{i}"))).flex().gap_2().px_2().py_1().text_size(px(12.)).text_color(c(if live { "text" } else { "faint" })).when(live, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
+        list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().gap_2().px_2().py_1().text_size(px(12.)).text_color(c(if live { "text" } else { "faint" })).when(live, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
             .child(div().w(px(14.)).text_color(c("dim")).child(icon)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(it.label.clone()))
             .on_click(cx.listener(move |this, _, _, cx| { if !a.is_empty() { if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); } cx.notify(); })));
     }
@@ -190,7 +190,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
         .children(p.folder.clone().map(|i| div().w_full().max_w(px(640.)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(i)))
         .when(!f.error.is_empty(), |d| d.child(div().text_size(px(12.)).text_color(c("bad")).child(f.error.clone())))
         .child(list)
-        .child(div().id("folders-cancel").px_3().py_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).child("Cancel").on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close_cmd()); cx.notify(); })))
+        .child(crate::ui::with_rect(div().id("folders-cancel"), || "folders-cancel".to_string()).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).child("Cancel").on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close_cmd()); cx.notify(); })))
         .into_any_element())
 }
 

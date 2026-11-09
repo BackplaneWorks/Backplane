@@ -385,7 +385,8 @@ impl Plan<'_> {
         if signal::stalled(self.st, id) { return 12 + pin }
         let n = self.ix.get(id).copied().unwrap_or(0);
         let word = signal::shown_k(signal::dot_name(signal::name(n), t.turn, t.pending), t.turn, t.pending);
-        let rank = match word { "blocked" => if t.pending > 0 { 8 } else { 7 }, "failed" => 6, "finished" => 5, "stopped" => 4, "active" | "waiting" => 2, _ => 0 };
+        // a waiting approval (a permission or an approval ask: Side.want's word) above a question
+        let rank = match word { "blocked" => if want(self.st, id, "blocked") == "approval" { 8 } else { 7 }, "failed" => 6, "finished" => 5, "stopped" => 4, "active" | "waiting" => 2, _ => 0 };
         rank * 2 + pin
     }
     /// The Active view: every thread on a live shelf of any project, what needs the person first, newest first within each;
@@ -555,6 +556,14 @@ mod tests {
         assert_eq!((p["threads"].as_array().unwrap().len(), p["settledCount"].as_u64(), p["archivedCount"].as_u64()), (1, Some(0), Some(0)));
         let o2 = Opts { query: "", ..o }; let plan = super::plan(&s, &o2); let p = plan.project("p1", &mut |_, ids| ((0..ids.len()).collect(), Value::Null)).unwrap();
         assert_eq!((p["settledCount"].as_u64(), p["archivedCount"].as_u64()), (Some(1), Some(1)), "no search: the whole shelves");
+    }
+    #[test] fn the_active_view_puts_an_approval_ask_above_a_newer_question() {
+        let ask = |id: &str, th: &str, kind: &str, at: u64| format!(r#"{{"$":"AskOpened","id":"{id}","thread":"{th}","kind":"{kind}","tool":"Bash","detail":"x","options":"","at":{at}}}"#);
+        let turn = |th: &str, state: &str| format!(r#"{{"$":"TurnChanged","thread":"{th}","state":"{state}","at":20}}"#);
+        let s = fold(&[PC, &tc("ap", 11), &tc("qu", 12), &tc("fa", 13), &turn("ap", "running"), &turn("qu", "running"), &turn("fa", "failed"), &ask("a1", "ap", "approval", 21), &ask("a2", "qu", "input", 22)]);
+        let open = HashSet::new(); let o = opts(&open, 100); let p = plan(&s, &o);
+        let (live, _) = p.active(&|_, _| true);
+        assert_eq!(live.iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), ["h|ap", "h|qu", "h|fa"]);
     }
     #[test] fn an_archived_row_says_so_and_offers_to_come_back() {
         let s = fold(&[PC, &tc("a", 11), &tc("b", 12), r#"{"$":"ThreadArchived","id":"a","archived":true,"at":13}"#]);
