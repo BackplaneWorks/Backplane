@@ -362,6 +362,17 @@ mod tests {
         let again = p.before_commit(10, vec![json!({"$":"TurnChanged","thread":"t1","state":"completed","_end":true,"at":200})]);
         assert!(!keys(&again).contains(&"alert.t1".to_string()));
     }
+    // E2 #14: the reply and the turn's end in one batch: the told mark quotes that reply, not the one before it
+    #[test] fn a_reply_that_lands_with_the_turns_end_is_the_one_told() {
+        let p = Policy::new(); let mut c = Core::new();
+        for l in [P, T, r#"{"$":"MessagePosted","thread":"t1","msg":"mu1","role":"user","text":"do it","at":5}"#,
+                  r#"{"$":"MessagePosted","thread":"t1","msg":"ma1","role":"assistant","text":"Old reply.","at":6}"#,
+                  r#"{"$":"MessagePosted","thread":"t1","msg":"mu2","role":"user","text":"again","at":7}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":8}"#] { c.fold_line(l); }
+        assert!(p.finish_boot(c, 6, 1000).iter().all(|e| e["key"] == "autosettle.version"));
+        let out = p.before_commit(7, vec![json!({"$":"MessagePosted","thread":"t1","msg":"ma2","role":"assistant","text":"one0 one1","at":100}), json!({"$":"TurnChanged","thread":"t1","state":"completed","_end":true,"at":100})]);
+        let told = out.iter().find(|e| e["key"].as_str().map_or(false, |k| k.starts_with("told."))).unwrap()["value"].as_str().unwrap().to_string();
+        assert!(told.contains("one0 one1") && !told.contains("Old reply"), "{told}");
+    }
     fn ended_world() -> Policy {
         let p = Policy::new(); let mut c = Core::new();
         for l in [P, T, r#"{"$":"MessagePosted","thread":"t1","msg":"mu1","role":"user","text":"do it","at":5}"#,

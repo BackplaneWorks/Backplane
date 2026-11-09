@@ -205,7 +205,9 @@ pub fn told_ctx(pre: &State, batch: &[Value], extra_threads: &[String]) -> ToldC
     let mut items = std::collections::HashMap::new();
     for th in ths {
         let title = pre.threads.get(&th).map_or(String::new(), |t| t.title.clone());
-        let reply = pre.ext.sum.get(&th).map_or(String::new(), |s| s.reply_line.clone());
+        // the reply this very batch posts, when the turn's end comes in the same batch (E2: the record quoted the reply before it); else the newest before it
+        let posted = batch.iter().rev().find(|c| gstr(c, "$", "") == "MessagePosted" && gstr(c, "thread", "") == th && gstr(c, "role", "") == "assistant").map(|c| told_first(gstr(c, "text", "")));
+        let reply = posted.unwrap_or_else(|| pre.ext.sum.get(&th).map_or(String::new(), |s| s.reply_line.clone()));
         let bot = pre.bot_threads.iter().find(|(_, t)| **t == th).map(|(b, _)| b.clone()).unwrap_or_default();
         items.insert(th, (title, reply, bot));
     }
