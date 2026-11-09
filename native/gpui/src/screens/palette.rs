@@ -171,6 +171,8 @@ impl Backplane {
         let input = self.screens.palette.input.clone().unwrap();
         input.update(cx, |i, cx| { i.set(String::new(), cx); i.popup_open = true; i.set_placeholder("Jump to a thread, run a command or find what was said"); });
         self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.open = true; self.screens.palette.scope.clear();
+        // what an earlier opening found is not this one's (a thread's search must never show another thread's hits)
+        self.screens.palette.hits.clear(); self.screens.palette.hits_q.clear(); self.screens.palette.asked = (0, String::new());
         self.screens.palette.focus = true; cx.notify();
     }
     pub(crate) fn palette_close(&mut self, cx: &mut Context<Self>) -> bool {
