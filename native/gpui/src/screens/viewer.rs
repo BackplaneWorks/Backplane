@@ -27,8 +27,23 @@ pub fn close() -> Command { view_kind("") }
 /// on the web's shown tab did; any other kind opens. Still the idempotent `view` action either way, decided from what is on the screen.
 pub fn rail_command(viewer: &Value, diff_on: bool, pending: Option<&str>, kind: &str) -> Command {
     let lit = !diff_on && (pending.is_some() || viewer["open"].as_str().map_or(false, |o| !o.is_empty())) && active_kind(viewer, pending) == kind;
-    if lit && !kind.is_empty() { close() } else { view_kind(kind) }
+    let cmd = if lit && !kind.is_empty() { close() } else { view_kind(kind) };
+    if let Command::Action(_, k) = &cmd { PRESSED.with(|p| *p.borrow_mut() = Some((k.clone(), std::time::Instant::now()))); }
+    cmd
 }
+/// The page a rail press just asked for ("" a close), until the hub's picture shows it (at most 2 s): the pane opens (or shuts) at the press, laid out
+/// as that page will be, instead of after the hub's round trip (11-05: a viewer opens at the moment of the press).
+/// (the window's own thread: presses and pictures are both handled there)
+thread_local! { static PRESSED: std::cell::RefCell<Option<(String, std::time::Instant)>> = const { std::cell::RefCell::new(None) }; }
+pub fn pressed(now_open: &str) -> Option<String> {
+    PRESSED.with(|p| { let mut g = p.borrow_mut();
+    let Some((k, at)) = g.clone() else { return None };
+    // answered (the hub shows that page, or shut it), or too old to be waiting still
+    if at.elapsed() > std::time::Duration::from_secs(2) || (!k.is_empty() && opened_as(now_open, &k)) || (k.is_empty() && now_open.is_empty()) { *g = None; return None }
+    Some(k) })
+}
+/// Whether the hub's page `open` is what a press on `kind` asked for (a Files press may land on a file it opened).
+fn opened_as(open: &str, kind: &str) -> bool { open == kind || (kind == "files" && matches!(open, "image" | "pdf" | "text")) }
 /// Open in KiCad: the hub starts KiCad on the thread's design (kicad/open.rs), offered while the viewer has a board or schematic.
 pub fn kicad_open() -> Command { Command::Action("kicad-open".into(), String::new()) }
 /// The button's words. KiCad opens where the design is, on the hub's own machine: with a hub on another machine the button says whose screen.
@@ -545,16 +560,32 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
     col.into_any_element()
 }
 
+/// The page the pane shows and whether it is a press the hub has not answered yet: a rail press shuts the pane, or opens it laid out as that page, at once;
+/// None while nothing is open.
+fn pane_page(thread: &Value) -> Option<(String, bool)> {
+    let viewer = &thread["viewer"]; let diff_on = thread["diff"].is_object();
+    let open = viewer["open"].as_str().unwrap_or("");
+    let press = pressed(if diff_on { "diff" } else { open });
+    if press.as_deref() == Some("") && !diff_on { return None }
+    if is_open(thread) { return Some((open.to_string(), false)) }
+    press.filter(|k| !k.is_empty()).map(|k| (k, true))
+}
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
 pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> AnyElement {
-    if !is_open(thread) { return Empty.into_any_element(); }
+    let Some((open, early)) = pane_page(thread) else { return Empty.into_any_element() };
+    let open = open.as_str();
     let viewer = &thread["viewer"];
-    let open = viewer["open"].as_str().unwrap_or("");
     let diff_on = thread["diff"].is_object();
     // no tab bar: the rail picks the page. The pane's own controls (where it comes from, Open in KiCad, Close) end the page's toolbar row,
     // or float in the top right corner of a page drawn to its edges (3D, Split, Browser)
     let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on);
-    let body: AnyElement = if diff_on { let a = acts(cx); diff_page(cx, light, &thread["diff"], a) }
+    let body: AnyElement = if early {
+        let k = open;
+        let a = acts(cx);
+        match k { "board" | "schematic" => plot_loading(cx, light, 0, &Value::Null, pv, true, Some(a), if k == "board" { "Loading the board…" } else { "Loading the schematic…" }),
+            "3d" | "mech" | "split" => in_corner(model_loading(light, "Loading…"), a), _ => status_row(light, "Opening…", Some(a)) }
+    }
+    else if diff_on { let a = acts(cx); diff_page(cx, light, &thread["diff"], a) }
         else if open == "files" && viewer["files"].is_object() { let a = acts(cx); super::filesui::files_page(cx, light, &viewer["files"], files_ui, a) }
         else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { let a = acts(cx); super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target, a) }
         else if open == "review" && viewer["review"].is_object() { let a = acts(cx); review_page(cx, reg, light, &viewer["review"], a) }
@@ -582,9 +613,9 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
 /// The pane around the page on show: its width, the left edge's drag and border; `page` (the page itself, `page()`, drawn as a part of the
 /// window by ui.rs) fills the rest, so the pane's frame is known without building the page.
 pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyElement) -> Option<AnyElement> {
-    if !is_open(thread) { return None; }
+    let (open, _) = pane_page(thread)?;
     let c = |n: &str| theme::color(light, n);
-    let open = thread["viewer"]["open"].as_str().unwrap_or("");
+    let open = open.as_str();
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
@@ -667,6 +698,16 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn a_press_shows_its_page_until_the_hub_has_answered() {
+        assert!(matches!(rail_command(&j(r#"{"open":""}"#), false, None, "board"), Command::Action(a, k) if a == "view" && k == "board"));
+        assert_eq!(pressed(""), Some("board".to_string()), "pressed, not answered: the pane opens as Board at once");
+        assert_eq!(pressed("board"), None, "the hub shows it: the press is done");
+        let _ = rail_command(&j(r#"{"open":"board","choices":[{"label":"Board","value":"board","on":true}]}"#), false, None, "board");
+        assert_eq!(pressed("board"), Some(String::new()), "a press on the lit kind shuts at once");
+        assert_eq!(pressed(""), None);
+        let _ = rail_command(&j(r#"{"open":""}"#), false, None, "files");
+        assert_eq!(pressed("image"), None, "a file opened from Files answers a Files press");
+    }
     #[test] fn split_panes_are_put_away_and_brought_back_one_at_a_time_and_the_last_one_stays() {
         assert!(split_shows("", "sch") && split_shows("", "pcb") && split_shows("", "3d"));
         assert_eq!(split_flip("", "pcb"), "pcb");
