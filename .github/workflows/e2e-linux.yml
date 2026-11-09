@@ -89,6 +89,7 @@ jobs:
             e2e.txt
             agy-*.txt
             ${{ runner.temp }}/e2e/agy/*.log
+            ${{ runner.temp }}/e2e/agyfull/*.log
             xprobe.txt
             xprobe-*.png
             ${{ runner.temp }}/e2e/summary.md
