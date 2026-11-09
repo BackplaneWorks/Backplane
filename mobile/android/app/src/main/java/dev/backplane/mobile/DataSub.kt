@@ -49,7 +49,7 @@ internal fun SubScreen(thread: String, key: String, back: () -> Unit) {
             if (v != null) listOf(v.meta, v.where).filter { it.isNotEmpty() }.forEach { DMono(Tr.t(it), dfaint, 11, lines = 2) }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("sub.list"), state = state, contentPadding = PaddingValues(vertical = 8.dp)) {
-            if (v == null) item("loading") { DMono(if (DataClient.subGone) Msg.android_sub_gone else Msg.viewer_loading, dcs.onSurfaceVariant, 13, Modifier.padding(14.dp)) }
+            if (v == null) item("loading") { DMono(if (DataClient.subGone) Msg.android_sub_gone else Msg.viewer_loading, dcs.onSurfaceVariant, 13, Modifier.padding(14.dp), lines = 3) }
             if (v != null && v.more > 0) item("more") { DMono(Msg.android_sub_more(v.more), dfaint, 11, Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
             if (v != null && v.entries.isEmpty()) item("none") { DMono(Msg.android_sub_none, dcs.onSurfaceVariant, 13, Modifier.padding(14.dp)) }
             items(v?.entries ?: emptyList(), key = { it.id }) { e -> SubEntry(thread, e) }
