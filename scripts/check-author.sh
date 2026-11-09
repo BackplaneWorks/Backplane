@@ -1,5 +1,6 @@
 #!/bin/sh
 # Who may author and commit to Backplane: build@amemb.com (name i2cjak, every machine's own commits) and jlcjak's GitHub account
+# i2cjak's own GitHub noreply (231940135+i2cjak@users.noreply.github.com) is allowed too: CI checks out the PR merge ref, whose author is the PR author.
 # (206324213+jlcjak@users.noreply.github.com, with GitHub, noreply@github.com, as committer of merges made on github.com). Nobody else.
 # Fails, naming the commits, when a commit in the given rev-list arguments has another author or committer.
 # usage: scripts/check-author.sh <rev-list args>   e.g. origin/main..HEAD   |   $new --not $old   (used by land.sh, the hooks and CI)
@@ -11,7 +12,7 @@ log() { if [ "$1" = --ident ]; then
   else git log --format='%h %ae %ce' "$@"; fi; }
 want=build@amemb.com
 bad=$(log "$@" | awk '
-  function ok_author(e) { return e == "build@amemb.com" || e == "206324213+jlcjak@users.noreply.github.com" }
+  function ok_author(e) { return e == "build@amemb.com" || e == "231940135+i2cjak@users.noreply.github.com" || e == "206324213+jlcjak@users.noreply.github.com" }
   function ok_committer(e) { return ok_author(e) || e == "noreply@github.com" }
   !ok_author($2) || !ok_committer($3) { print "  " $1 " author=" $2 " committer=" $3 }')
 [ -z "$bad" ] && exit 0
