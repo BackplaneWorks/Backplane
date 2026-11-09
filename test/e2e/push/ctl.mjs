@@ -49,6 +49,8 @@ Bun.serve({port:PORT+1,hostname:'127.0.0.1',idleTimeout:60,async fetch(r){
     case '/setting':await set(q.k,q.v??'');return J(state());
     case '/seen':return J({r:await call('push.seen',{thread:q.thread}),state:state()});
     case '/mute':{const t=events().filter(e=>e.$==='DeviceRegistered').at(-1)?.token;return J({r:await call('device.prefs',{token:t,mute:q.on==='1'}),state:state()})}
+    // what Settings > Notifications changed and what was pushed, from the n-th event on (no token in it): SettingSet notify.*, DevicePrefs, PushOrdered, PushSent
+    case '/ev':{const all=events(),from=Number(q.since||0);const ev=all.slice(from).filter(e=>(e.$==='SettingSet'&&String(e.key).startsWith('notify.'))||['DevicePrefs','PushOrdered','PushSent'].includes(e.$)).map(({token,...e})=>e);return J({n:all.length,ev,sink:readdirSync(ROOT+'/sink').length})}
     case '/stop':setTimeout(async()=>{try{c.ws.close()}catch{}stopHub(h);process.exit(0)},200);return J({stopping:true});
     default:return new Response('no',{status:404});
   }}});
