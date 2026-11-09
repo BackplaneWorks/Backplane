@@ -3,6 +3,7 @@ package dev.backplane.mobile
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -31,7 +32,7 @@ private fun JSONArray?.objs(): List<JSONObject> = if (this == null) emptyList() 
 /** The composer's mic chip: red while the hub has a session on. */
 @Composable
 internal fun MicChip(on: Boolean, press: () -> Unit) {
-    Box(Modifier.size(40.dp).background(if (on) dcs.error else dcs.surfaceVariant).border(BorderStroke(1.dp, if (on) dcs.error else dcs.outlineVariant)).clickable(onClick = press).testTag("thread.mic"), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(40.dp).clip(PhPill).background(if (on) dcs.error else dcs.surfaceVariant).border(BorderStroke(1.dp, if (on) dcs.error else dcs.outlineVariant), PhPill).clickable(onClick = press).testTag("thread.mic"), contentAlignment = Alignment.Center) {
         Icon(if (on) Icons.Default.Stop else Icons.Default.Mic, "Dictate", tint = if (on) dcs.onError else dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }
 }

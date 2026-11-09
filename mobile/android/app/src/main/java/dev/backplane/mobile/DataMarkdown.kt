@@ -261,13 +261,14 @@ private fun MdBlocks(blocks: List<MdBlock>, pal: MdPalette, tid: String?, modifi
         blocks.forEachIndexed { idx, b ->
             key(idx) {
                 when (b) {
-                    is MdBlock.P -> Text(mdInline(b.text, pal), color = dcs.onSurface, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = BpMono)
-                    is MdBlock.H -> Text(mdInline(b.text, pal), Modifier.padding(top = 4.dp), color = dcs.onSurface, fontSize = heading(b.level).sp, lineHeight = (heading(b.level) + 7).sp, fontWeight = FontWeight.Bold, fontFamily = BpMono)
+                    // prose in the system face (the phone look); code spans and blocks stay mono
+                    is MdBlock.P -> Text(mdInline(b.text, pal), color = dcs.onSurface, fontSize = 15.sp, lineHeight = 21.sp, fontFamily = BpUi)
+                    is MdBlock.H -> Text(mdInline(b.text, pal), Modifier.padding(top = 4.dp), color = dcs.onSurface, fontSize = (heading(b.level) + 2).sp, lineHeight = (heading(b.level) + 9).sp, fontWeight = FontWeight.Bold, fontFamily = BpUi)
                     is MdBlock.Li -> Row(Modifier.padding(start = (b.depth * 14).dp)) {
                         if (b.task >= 0) Box(Modifier.padding(top = 3.dp, end = 8.dp).size(13.dp).border(BorderStroke(1.dp, if (b.task == 1) dcs.primary else dcs.outline)).background(if (b.task == 1) dcs.primary else Color.Transparent), contentAlignment = Alignment.Center) {
                             if (b.task == 1) Text("✓", color = dcs.onPrimary, fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold)
-                        } else Text(b.marker, Modifier.widthIn(min = 18.dp).padding(end = 4.dp), color = dcs.onSurfaceVariant, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = BpMono)
-                        Text(mdInline(b.text, pal), color = if (b.task == 1) dcs.onSurfaceVariant else dcs.onSurface, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = BpMono,
+                        } else Text(b.marker, Modifier.widthIn(min = 18.dp).padding(end = 4.dp), color = dcs.onSurfaceVariant, fontSize = 15.sp, lineHeight = 21.sp, fontFamily = BpUi)
+                        Text(mdInline(b.text, pal), color = if (b.task == 1) dcs.onSurfaceVariant else dcs.onSurface, fontSize = 15.sp, lineHeight = 21.sp, fontFamily = BpUi,
                             textDecoration = if (b.task == 1) TextDecoration.LineThrough else null)
                     }
                     is MdBlock.Code -> CodeBlock(b)

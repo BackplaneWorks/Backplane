@@ -77,7 +77,7 @@ fun BoxScope.LinkNote() {
 
 /** Plain text with its links tappable (a user's message, a room post, a note): not Markdown, so `*` and `_` stay as typed. Selectable. */
 @Composable
-fun LinkText(text: String, thread: String, modifier: Modifier = Modifier, color: Color = dcs.onSurface, size: Int = 13, lineHeight: Int = 0) {
+fun LinkText(text: String, thread: String, modifier: Modifier = Modifier, color: Color = dcs.onSurface, size: Int = 13, lineHeight: Int = 0, font: androidx.compose.ui.text.font.FontFamily = BpMono) {
     val ctx = LocalContext.current
     SideEffect { MdLinks.ctx = ctx.applicationContext; if (thread.isNotEmpty()) MdLinks.thread = thread }
     val link = dcs.primary
@@ -89,5 +89,5 @@ fun LinkText(text: String, thread: String, modifier: Modifier = Modifier, color:
             }
         }
     }
-    SelectionContainer { Text(styled, modifier, color = color, fontSize = size.sp, lineHeight = if (lineHeight > 0) lineHeight.sp else androidx.compose.ui.unit.TextUnit.Unspecified, fontFamily = BpMono) }
+    SelectionContainer { Text(styled, modifier, color = color, fontSize = size.sp, lineHeight = if (lineHeight > 0) lineHeight.sp else androidx.compose.ui.unit.TextUnit.Unspecified, fontFamily = font) }
 }

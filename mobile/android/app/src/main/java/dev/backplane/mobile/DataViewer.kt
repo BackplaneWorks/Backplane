@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -186,7 +187,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
 
 @Composable
 private fun ViewChip(label: String, on: Boolean, tag: String, onClick: () -> Unit) {
-    DMono(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp).testTag(tag))
+    DMono(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.clip(PhPill).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant), PhPill).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp).testTag(tag))
 }
 
 /** KiCad's high contrast, as the hub lists it: how the others show (a board), a box per layer (show or hide it), its name (make it the active one, again: all back), a comparison's marks last, Reset layers. */
@@ -673,9 +674,9 @@ object Probe {
 @Composable
 private fun ProbeCard(info: String, lit: Int, modifier: Modifier, close: () -> Unit) {
     val (head, rest) = Probe.lines(info)
-    Row(modifier.fillMaxWidth().background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(8.dp).clip(PhCard).background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant), PhCard).padding(start = 14.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(head, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Text(head, color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             if (rest.isNotEmpty() || lit > 1) Text(listOf(rest, if (lit > 1) "$lit lit" else "").filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         Box(Modifier.size(44.dp).clickable(onClick = close).testTag("viewer.info.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, "Close", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }

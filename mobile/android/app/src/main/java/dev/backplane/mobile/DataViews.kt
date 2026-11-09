@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
@@ -142,12 +143,12 @@ internal fun DBar(title: String, back: (() -> Unit)?, titleMenu: (@Composable Co
     Column(Modifier.background(dcs.surfaceVariant)) {
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (back != null) IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = dcs.onSurfaceVariant) } else { Spacer(Modifier.width(10.dp)); BrandMark(DataClient.conn == DataClient.Conn.ONLINE); Spacer(Modifier.width(8.dp)) }
-            if (titleMenu == null) Text(title.ifEmpty { "New thread" }, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (titleMenu == null) Text(title.ifEmpty { "New thread" }, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             else {
                 var open by remember { mutableStateOf(false) }
                 Box(Modifier.weight(1f)) {
                     Row(Modifier.clickable { open = true }.padding(vertical = 12.dp).testTag("home.hub"), verticalAlignment = Alignment.CenterVertically) {
-                        Text(title, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        Text(title, color = dcs.onSurface, fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                         Spacer(Modifier.width(4.dp)); Icon(Icons.Default.ArrowDropDown, null, tint = dcs.onSurfaceVariant)
                     }
                     DropdownMenu(open, { open = false }) { titleMenu { open = false } }
@@ -248,17 +249,17 @@ private fun AskPair(link: String) {
 
 @Composable
 internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant) {
-    Box(modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, line)).padding(horizontal = 10.dp, vertical = 10.dp)) {
-        if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
+    Box(modifier.fillMaxWidth().clip(PhField).background(dview).border(BorderStroke(1.dp, line), PhField).padding(horizontal = 12.dp, vertical = 10.dp)) {
+        if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = BpUi, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
     }
 }
 
 @Composable
 internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant) {
-    Box(modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, line)).padding(horizontal = 10.dp, vertical = 10.dp)) {
-        if (v.text.isEmpty()) Text(hint, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
+    Box(modifier.fillMaxWidth().clip(PhField).background(dview).border(BorderStroke(1.dp, line), PhField).padding(horizontal = 12.dp, vertical = 10.dp)) {
+        if (v.text.isEmpty()) Text(hint, color = dfaint, fontFamily = BpUi, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -266,16 +267,16 @@ internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: Strin
 internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modifier: Modifier = Modifier, danger: Boolean = false, onClick: () -> Unit) {
     val bg = if (primary && enabled) dcs.primary else dcs.surfaceContainerHigh
     val fg = if (primary && enabled) dcs.onPrimary else if (!enabled) dfaint else if (danger) dcs.error else dcs.onSurface
-    Box(modifier.background(bg).border(BorderStroke(1.dp, if (primary && enabled) dcs.primary else dcs.outlineVariant)).clickable(enabled = enabled, onClick = onClick).heightIn(min = 40.dp).padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
-        Text(label, color = fg, fontFamily = BpMono, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    Box(modifier.clip(PhPill).background(bg).border(BorderStroke(1.dp, if (primary && enabled) dcs.primary else dcs.outlineVariant), PhPill).clickable(enabled = enabled, onClick = onClick).heightIn(min = 40.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+        Text(label, color = fg, fontFamily = BpUi, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
 /** The composer's model chip: the hub's "claude / opus / high" in a line box; a tap opens the picker. */
 @Composable
 internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(modifier.height(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable(onClick = onClick).padding(horizontal = 10.dp).testTag(tag), contentAlignment = Alignment.CenterStart) {
-        DMono(text, dcs.onSurface, 12)
+    Box(modifier.height(40.dp).clip(PhPill).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), PhPill).clickable(onClick = onClick).padding(horizontal = 14.dp).testTag(tag), contentAlignment = Alignment.CenterStart) {
+        Text(text, color = dcs.onSurface, fontFamily = BpUi, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -423,9 +424,9 @@ private fun ThreadRow(t: DThread, onClick: () -> Unit, depth: Int = 0, kids: Int
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (t.pinned) { Icon(Icons.Default.PushPin, "Pinned", tint = dcs.primary, modifier = Modifier.size(11.dp)); Spacer(Modifier.width(5.dp)) }
-                Text(t.title.ifEmpty { "New thread" }, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(t.title.ifEmpty { "New thread" }, color = dcs.onSurface, fontSize = 15.sp, fontFamily = BpUi, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (t.preview.isNotEmpty()) Text(t.preview.replace("**", "").replace("`", ""), color = dfaint, fontSize = 11.sp, fontFamily = BpMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (t.preview.isNotEmpty()) Text(t.preview.replace("**", "").replace("`", ""), color = dfaint, fontSize = 13.sp, fontFamily = BpUi, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(8.dp))
         Row(Modifier.padding(top = 9.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -603,7 +604,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
             DField(field, { DataClient.setField(id, it) }, "Ask anything: @bot, >thread, %project, #room, &model, \$skill, /btw", Modifier.testTag("thread.composer"), 6, dcs.primary)
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { "default" }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
-                Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) attachMenu = true else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(40.dp).clip(PhPill).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), PhPill).clickable { if (DataClient.canSendImages) attachMenu = true else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.AttachFile, "Attach", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     DropdownMenu(attachMenu, { attachMenu = false }) {
                         DropdownMenuItem({ Text("Choose a photo", fontFamily = BpMono) }, { attachMenu = false; pick.launch("image/*") }, Modifier.testTag("thread.attach.pick"), leadingIcon = { Icon(Icons.Default.Image, null) })
@@ -612,7 +613,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
                         }, Modifier.testTag("thread.attach.camera"), leadingIcon = { Icon(Icons.Default.PhotoCamera, null) })
                     }
                 }
-                Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) drawing = true else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, "Draw", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                Box(Modifier.size(40.dp).clip(PhPill).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), PhPill).clickable { if (DataClient.canSendImages) drawing = true else notice = "This hub does not take pictures yet (update it)." }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, "Draw", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
                 if (dictate) MicChip(DataVoice.on(id)) {
                     if (DataVoice.on(id) || androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id)
                     else micAsk.launch(android.Manifest.permission.RECORD_AUDIO)
@@ -697,7 +698,7 @@ private fun SecretBox(tid: String, name0: String, asked: DataClient.SecretAsk?, 
         if (name0.isEmpty()) DField(name, { name = it }, "Name", Modifier.testTag("thread.secret.name"))
         Box(Modifier.fillMaxWidth().background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp)) {
             if (value.isEmpty()) Text("Paste the value", color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
-            BasicTextField(value, { value = it }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = 1,
+            BasicTextField(value, { value = it }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp), cursorBrush = SolidColor(dcs.primary), maxLines = 1,
                 visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth().testTag("thread.secret.value"))
         }
         if (err.isNotEmpty()) DMono(err, dcs.error, 12)
@@ -715,7 +716,7 @@ private fun EntryRow(tid: String, e: DEntry) {
         "user" -> Column(Modifier.fillMaxWidth().padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
             e.localImages.forEach { Pic(it, 160); Spacer(Modifier.height(4.dp)) }
             e.attachments.filter { e.localImages.isEmpty() }.forEach { PicById(it.id, 160); Spacer(Modifier.height(4.dp)) }
-            if (e.text.isNotEmpty()) Box(Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) { LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19) }
+            if (e.text.isNotEmpty()) Box(Modifier.clip(RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant), RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) { LinkText(e.text, tid, color = dcs.onSurface, size = 15, lineHeight = 21, font = BpUi) }
             if (e.sending) DMono("sending…", dfaint, modifier = Modifier.padding(top = 3.dp))
             else if (e.failed) DMono("not sent · retry", dcs.error, modifier = Modifier.clickable { DataClient.retry(tid, e) }.padding(top = 3.dp))
             else DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 3.dp))
@@ -741,7 +742,7 @@ private fun EntryRow(tid: String, e: DEntry) {
 private fun AskCard(tid: String, e: DEntry) {
     val a = e.ask
     var answer by remember(e.id) { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (a?.open == true) dcs.error else dcs.outlineVariant)).padding(12.dp).testTag("ask.card")) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(PhCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (a?.open == true) dcs.error else dcs.outlineVariant), PhCard).padding(12.dp).testTag("ask.card")) {
         DMono(if (a?.open == true) "ASKS" else "ASKED", dfaint, 11)
         Text(a?.question ?: e.text, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, modifier = Modifier.padding(vertical = 6.dp))
         if (a != null && a.open) {
@@ -948,7 +949,7 @@ private fun ImproveScreen(back: () -> Unit) {
 @Composable
 private fun OrderCard(o: DataClient.Order) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.surfaceVariant).padding(10.dp).testTag("thread.order"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).clip(PhCard).border(BorderStroke(1.dp, dcs.outlineVariant), PhCard).background(dcs.surfaceVariant).padding(12.dp).testTag("thread.order"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         DMono(if (o.name.isEmpty()) "ORDER" else "ORDER · ${o.name}", dcs.onSurface, 12, bold = true)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             o.steps.forEachIndexed { i, s ->
