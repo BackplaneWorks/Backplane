@@ -99,7 +99,7 @@ impl Backplane {
             Event::Picture(r,timing)=>{
                 let t_apply=Instant::now();self.ui_epoch+=1;
                 if let Some(w)=self.wake_at.take(){self.reconnected=true;self.m("net",serde_json::json!({"event":"reconnected","ms":(w.elapsed().as_secs_f64()*1e6).round()/1e3}));}
-                let mut r=r;let prev=self.data["thread"].take();self.data=r["shown"].take();self.picture_applied(cx);
+                let mut r=r;let prev=self.data["thread"].take();self.data=r["shown"].take();self.picture_applied(cx);screens::histbar::picture(self);
                 self.timeline_picture(prev,&r["window"]);
                 if self.data["deleting"].is_object(){eprintln!("GPUI_LOG {{\"deleting\":{}}}",self.data["deleting"]["id"]);}let selected=string(&self.data["thread"],"id");
                 screens::accounts::thread_changed(self,&selected);if !selected.is_empty() {let selected=screens::attach::raw_id(&selected).to_string();self.picture_arrived(&selected,cx);self.selected=selected;}

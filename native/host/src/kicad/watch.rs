@@ -478,7 +478,7 @@ impl RpcHandler for KicadRpc {
                     Ok(what) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"started":what}})],
                     Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
                 },
-                "history.steps" => vec![json!({"t":"reply","id":id,"ok":true,"result": super::histsteps::steps(hub, &s("thread")).await})],
+                "history.steps" => vec![json!({"t":"reply","id":id,"ok":true,"result": super::histsteps::steps(hub, &s("thread"), &s("kind"), &s("file")).await})],
                 "viewer.state" => { // the client says what its viewer shows (the thread is the raw id)
                     viewer_report(&s("thread"), p.get("state").cloned().unwrap_or(Value::Null));
                     vec![json!({"t":"reply","id":id,"ok":true})]
