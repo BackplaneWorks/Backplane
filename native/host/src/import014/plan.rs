@@ -53,6 +53,8 @@ pub struct Counts {
     pub devices: usize, pub pushes: usize, pub lines: usize,
     /// left behind: the mailroom's run threads, deleted threads, removed projects, lines already here, ids in use here for something else
     pub runs: usize, pub deleted: usize, pub removed: usize, pub already: usize, pub clashes: usize,
+    /// delegated threads put under the thread that delegated them (ThreadParentSet from 0.14's TaskDelegated)
+    pub parents: usize,
 }
 
 pub struct Plan {
@@ -197,7 +199,7 @@ pub fn plan_with(log: &Path, have: &Have, o: Opts, read: &dyn Fn(u64, u64)) -> s
     let mut emit = |line: String, c: &mut Counts, what: Option<&str>| {
         if have.lines.contains(&line_hash(&line)) { c.already += 1; return }
         match what { Some("project") => c.projects += 1, Some("thread") => c.threads += 1, Some("msg") => c.messages += 1, Some("bot") => c.bots += 1, Some("memory") => c.memories += 1,
-            Some("room") => c.rooms += 1, Some("post") => c.posts += 1, Some("routine") => c.routines += 1, Some("push") => c.pushes += 1, Some("setting") => c.settings += 1, _ => {} }
+            Some("room") => c.rooms += 1, Some("post") => c.posts += 1, Some("routine") => c.routines += 1, Some("push") => c.pushes += 1, Some("setting") => c.settings += 1, Some("parent") => c.parents += 1, _ => {} }
         c.lines += 1;
         if o.keep { out.push(line) }
     };
@@ -213,7 +215,17 @@ pub fn plan_with(log: &Path, have: &Have, o: Opts, read: &dyn Fn(u64, u64)) -> s
         }
         match t {
             "ProjectCreated" | "ProjectOrdered" if pk.contains(fld(l, "id")) => emit(l.to_string(), &mut c, (t == "ProjectCreated").then_some("project")),
-            "TaskDelegated" | "TaskStateSet" | "TaskDelivered" if kk.contains(fld(l, "task")) => emit(l.to_string(), &mut c, None),
+            "TaskDelegated" | "TaskStateSet" | "TaskDelivered" if kk.contains(fld(l, "task")) => {
+                emit(l.to_string(), &mut c, None);
+                // 0.14 put a delegated thread under its delegator by folding TaskDelegated (model.bend State.task_parent): unless the delegator is a
+                // bot's thread or the child already has a parent setting (an empty one is a detach). 0.15 reads ThreadParentSet, so the link is written
+                // out, from the delegation's own line (the same text on every run: a re-import adds it once to a home imported before)
+                let (parent, child) = (fld(l, "parent"), fld(l, "child"));
+                if t == "TaskDelegated" && !bot_threads.contains_key(parent) && !settings.contains_key(&format!("thread.parent.{child}")) && !have.settings.contains(&format!("thread.parent.{child}")) {
+                    let at = serde_json::from_str::<serde_json::Value>(l).ok().and_then(|v| v["at"].as_u64()).unwrap_or(0);
+                    emit(serde_json::json!({"$":"ThreadParentSet","id":child,"parent":parent,"at":at}).to_string(), &mut c, Some("parent"))
+                }
+            }
             "BotSet" if bk.contains(fld(l, "id")) => { let first = seen_bot.insert(fld(l, "id").to_string()); emit(l.to_string(), &mut c, first.then_some("bot")) }
             "MemorySaved" | "MemoryForgot" | "SpaceSet" | "SpacePageSet" if bk.contains(fld(l, "bot")) => emit(l.to_string(), &mut c, (t == "MemorySaved").then_some("memory")),
             "HookSet" if hk.contains(fld(l, "id")) => emit(l.to_string(), &mut c, None),
