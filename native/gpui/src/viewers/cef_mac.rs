@@ -28,10 +28,16 @@ pub fn helper(exe: &Path) -> Option<PathBuf> {
     [d.to_path_buf(), d.join("../Frameworks")].into_iter().map(|d| d.join(format!("{HELPER}.app/Contents/MacOS/{HELPER}"))).find(|p| p.exists())
 }
 
-/// The bundle the client runs from (`X.app` for `X.app/Contents/MacOS/x`); empty (CEF's default) when it runs as a plain program.
-pub fn main_bundle(exe: &Path) -> PathBuf {
+/// The bundle Chromium takes as the application's (`main_bundle_path`): the one the client runs from (`X.app` for `X.app/Contents/MacOS/x`), else, for the
+/// plain program an install runs, the helper app beside it. Chromium names its helpers' rendezvous (a Mach service) after this bundle's identifier, and a
+/// helper finds it the same way: without a bundle the browser process and its helpers named different services and every helper quit at start.
+pub fn main_bundle(exe: &Path, helper: &Path) -> PathBuf {
     let b = exe.parent().and_then(Path::parent).and_then(Path::parent);
-    match b { Some(b) if b.extension().map_or(false, |e| e == "app") => b.to_path_buf(), _ => PathBuf::new() }
+    match b {
+        Some(b) if b.extension().map_or(false, |e| e == "app") => b.to_path_buf(),
+        // <dir>/Backplane Helper.app/Contents/MacOS/Backplane Helper -> <dir>/Backplane Helper.app
+        _ => helper.parent().and_then(Path::parent).and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default(),
+    }
 }
 
 #[link(name = "objc")]
@@ -72,8 +78,9 @@ pub fn key_code(vk: i32) -> Option<i32> {
 mod tests {
     use super::*;
     #[test] fn mac_key_codes() { assert_eq!(key_code(65), Some(0)); assert_eq!(key_code(13), Some(0x24)); assert_eq!(key_code(37), Some(0x7B)); assert_eq!(key_code(7), None); }
-    #[test] fn bundle_of_a_plain_program_is_none() {
-        assert_eq!(main_bundle(Path::new("/opt/bp/backplane-gpui")), PathBuf::new());
-        assert_eq!(main_bundle(Path::new("/A/X.app/Contents/MacOS/x")), PathBuf::from("/A/X.app"));
+    #[test] fn a_plain_program_takes_its_helper_app_as_the_bundle() {
+        let h = Path::new("/opt/bp/Backplane Helper.app/Contents/MacOS/Backplane Helper");
+        assert_eq!(main_bundle(Path::new("/opt/bp/backplane-gpui"), h), PathBuf::from("/opt/bp/Backplane Helper.app"));
+        assert_eq!(main_bundle(Path::new("/A/X.app/Contents/MacOS/x"), h), PathBuf::from("/A/X.app"));
     }
 }
