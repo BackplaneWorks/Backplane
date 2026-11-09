@@ -82,7 +82,7 @@ pub fn card_said(st: &str, pay: bool, tracking: &str) -> String {
         "expired" => "This quote expired. Ask here for a new one.".into(), "failed" => "The quote could not be worked out. Ask here to try again.".into(),
         "pilot" => "Test payment: nothing was charged or ordered.".into(), "refunded" => "Refunded: the money is on its way back to you.".into(),
         _ if card_at(st) >= 4 => status_note(st, tracking),
-        _ => if pay { "Quoted. Buy now to place the order.".into() } else { "The quote has something to fix first: see it below.".into() },
+        _ => if pay { "Quoted. Buy now to place the order.".into() } else { "The quote has something to fix first: see it above.".into() },
     }
 }
 /// Order.card with Mob.order.card: a buy thread's card from its open asks, the quote on its way and the quote the hub keeps. The hub decides it all; every client draws it.
