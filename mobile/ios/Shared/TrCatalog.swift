@@ -2218,7 +2218,7 @@ gpui.disconnected	Disconnected	切断
 gpui.hub.is.opening.its.log	Hub is opening its log…	ハブがログを開いています…
 gpui.hub.disconnected.draft.kept.reconnecting	Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.	ハブとの接続が切れました。下書きは残してあり、再接続しています。実験用ハブのログを確認してください。
 gpui.hub.refused.it	The hub refused it: {why}	ハブが拒否しました: {why}
-gpui.that.is.not.on.this	That is not on this hub (it was removed, or belongs to another hub).	このハブにはありません（削除されたか、別のハブのものです）。
+gpui.that.is.not.on.this	This thread, bot or room is not on this hub: it was deleted, or it is on another machine.	このスレッド、ボット、ルームはこのハブにありません。削除されたか、別のマシンにあります。
 gpui.hub.view.refused	View request refused: {code}	表示の要求が拒否されました: {code}
 gpui.no.reason.given	no reason given	理由なし
 gpui.this.invitation.names.only.its	This invitation names only its hub's own computer (127.0.0.1), so this device cannot reach it. Start the hub with Tailscale on, or on an address this device can reach, then make a new invitation.	この招待はハブ自身のコンピューター（127.0.0.1）しか指していないため、この端末からは接続できません。Tailscale をオンにするか、この端末から届くアドレスでハブを起動してから、新しい招待を作成してください。

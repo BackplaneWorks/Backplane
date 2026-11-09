@@ -225,6 +225,8 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         Refusal::Gone=>{v.restored=Restore::None;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                     }
                     if x["ok"]==true {if let Some(target)=v.saved.take(){v.drawn=true;v.session["sel"]=target["id"].clone();v.target=target;v.restored=Restore::AfterList;v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}}
+                    // an update for a view the hub no longer holds (it restarted, or opened another for this connection): opened again, nothing to tell
+                    if x["ok"]!=true&&x["error"]["code"]=="STALE_VIEW"&&method!="view.open" {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                     if x["ok"]!=true {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(refused_view_text(&x["error"]["code"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
@@ -341,8 +343,9 @@ pub fn view_refusal(x:&Value,method:&str,drawn:bool,restored:Restore)->Refusal {
     }
 }
 
-/// What a refused view request says. STALE_VIEW is a thing this hub does not have (a bot, room or thread of another hub, or one removed): said so.
-pub fn refused_view_text(code:&Value)->String { if code=="STALE_VIEW" {crate::i18n::trs("That is not on this hub (it was removed, or belongs to another hub).")} else {crate::i18n::tf("gpui.hub.view.refused", &[("code", code.to_string().into())])} }
+/// What a refused view request says. STALE_VIEW of an opening is a thing this hub does not have (a thread, bot or room of another machine, or one
+/// deleted): said so; of an update it is only an old view, opened again without a word.
+pub fn refused_view_text(code:&Value)->String { if code=="STALE_VIEW" {crate::i18n::trs("This thread, bot or room is not on this hub: it was deleted, or it is on another machine.")} else {crate::i18n::tf("gpui.hub.view.refused", &[("code", code.to_string().into())])} }
 /// The words for a failed product RPC's answer: the hub's error may be a plain string, an object with a message or a code, or something else.
 pub fn rpc_error(x:&Value)->String {
     let e=&x["error"];
