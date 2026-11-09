@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
 
 const READERS: usize = 2;
+/// The most Mech parts meshed ahead when one is shown.
+const WARM_MECH: usize = 24;
 const POLL_MS: u64 = 150;
 const KEPT: usize = 4; // sources no client watches are kept (plots included): Src.kept
 const VERSIONS_KEPT: usize = 8; // saved versions no view watches: Src.versions.kept
@@ -49,7 +51,8 @@ struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, ba
 #[derive(Default)]
 /// `prewarmed`: each board whose part models were queued for conversion, by the revision it was then (pcb3d::stream::prewarm)
 /// `took`: how long the last read of each 3D source's file took (ms), told as the estimate of the next one
-struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64> }
+/// `mech_warming`: the projects whose Mech parts are being meshed ahead (warm_mech)
+struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String> }
 
 pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, home: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
 
@@ -76,16 +79,20 @@ impl Plots {
         }
         let is_board = file.ends_with(".kicad_pcb"); // Pv.watch.go: only a board's model has a board beside it
         if !solid_kind(kind) { self.prewarm(hub, &if is_board { file.clone() } else { project::read(root).pcb }) } // a 3D view converts its parts itself, at full speed
+        if solid_kind(kind) && solidread::is_step(&file) && !is_version(&file) { self.warm_mech(root, &file) }
         let mut views = vec![(kind, key(kind, root, path), file)];
         if solid_kind(kind) && is_board { views.push((0, key(0, root, path), board(0))) }
         let keys: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
           let carry = st.subs.get(&client).and_then(|v| v.iter().find(|s| s.key.starts_with("0|") || s.key.starts_with("1|"))).map(|s| (s.held.clone(), s.base.clone())).unwrap_or_default();
-          st.subs.remove(&client);
+          // a model this client was already sent for the same source stays sent: a second watch of it (the Mech page's own beside the
+          // view's) does not send its frames again
+          let mut had: Vec<(String, Vec<u8>, usize)> = st.subs.remove(&client).unwrap_or_default().into_iter().filter(|s| !s.mesh.is_empty()).map(|s| (s.key, s.mesh, s.parts_at)).collect();
           for (i, (k, ky, f)) in views.into_iter().enumerate() {
               let carries = i == 0 && !solid_kind(k);
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh: vec![], fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at: 0 });
+              let (mesh, parts_at) = had.iter().position(|h| h.0 == ky).map(|i| { let h = had.swap_remove(i); (h.1, h.2) }).unwrap_or_default();
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: f.clone(), ..Default::default() });
               s.file = f;
               if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None } // Pv.fresh: a plot of an older file is not sent
@@ -265,6 +272,24 @@ impl Plots {
                 let r = std::panic::catch_unwind(|| pcb3d::stream::prewarm(&bytes, &pcb, &cli, &stepglb::machine(&home), &pcb3d::models::Cache::standard()));
                 match r { Ok(Ok((n, fresh, ms))) if fresh > 0 => eprintln!("pcb3d: prewarm {pcb}: {fresh} of {n} part models converted in {ms:.0} ms"), Ok(Err(e)) => eprintln!("pcb3d: prewarm {pcb}: {e}"), _ => {} }
             }).await;
+        });
+    }
+    /// A Mech part shown: the project's other STEP parts (its mech/ folder) meshed ahead, one at a time, at a low priority, so a press on
+    /// their chip shows them in a moment instead of after FreeCAD's seconds. A project at a time; parts already meshed are skipped, and at
+    /// most WARM_MECH of them (a big library folder is not meshed whole).
+    fn warm_mech(self: &Arc<Self>, root: &str, shown: &str) {
+        if root.is_empty() || !self.st.lock().unwrap().mech_warming.insert(root.to_string()) { return }
+        let (me, root, shown, home) = (self.clone(), root.to_string(), shown.to_string(), self.home.clone());
+        tokio::task::spawn_blocking(move || {
+            let tools = stepglb::machine(&home);
+            let (t, mut n) = (std::time::Instant::now(), 0);
+            for rel in crate::present::viewer::mech_parts(&root).into_iter().take(WARM_MECH) {
+                let abs = format!("{root}/{rel}");
+                if abs == shown || !solidread::is_step(&abs) { continue }
+                if solidread::warm(&abs, &tools) { n += 1 }
+            }
+            if n > 0 { eprintln!("mech: {root}: {n} parts meshed ahead in {:.0} ms", t.elapsed().as_secs_f64() * 1000.0) }
+            me.st.lock().unwrap().mech_warming.remove(&root);
         });
     }
     /// Whether a board's 3D model is made here (pcb3d) rather than by kicad-cli: the setting `viewer.board3d` (`native`, the default, or `kicad-cli`).

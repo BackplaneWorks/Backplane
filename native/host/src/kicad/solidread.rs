@@ -74,6 +74,14 @@ pub fn plot_of(bytes: &[u8], step: bool) -> Result<Plot, glb::TooBig> {
     let ts = solid::thin(ts);
     Ok(solid::plot(solid::of(&ts)))
 }
+/// A STEP part meshed into the models cache ahead of its showing (Mech's read-ahead): whether it was meshed now (false: already there,
+/// not a STEP, too big a file to mesh unasked, or it failed; a failure is meshed, and said, when the part is shown).
+pub fn warm(path: &str, tools: &[Mesher]) -> bool {
+    if !is_step(path) || std::fs::metadata(path).map_or(true, |m| m.len() > 48 << 20) { return false }
+    let out = glb_of(2, path);
+    if stepglb::have(&out) { return false }
+    export(true, false, false, path, &out, "", tools).code == 0
+}
 /// Pv.child.solid: what `--plot KIND FILE INFOS` does for a 3D model. The note (parts without a model) goes to `infos`, as the child left it.
 pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> Got {
     let (isglb, step) = (path.ends_with(".glb"), is_step(path));
@@ -100,6 +108,9 @@ mod tests {
     #[test] fn the_export_flags_are_the_childs() {
         assert_eq!(flags(false, false, "o", "b").join(" "), "pcb export glb --subst-models --include-pads --include-soldermask --include-silkscreen -f -o o b");
         assert_eq!(flags(true, true, "o", "b").join(" "), "pcb export glb --no-components --include-pads --include-soldermask --include-silkscreen --include-tracks --include-zones --cut-vias-in-body -f -o o b");
+    }
+    #[test] fn only_a_step_on_disk_is_meshed_ahead() {
+        assert!(!warm("/p/b.kicad_pcb", &[]) && !warm("/p/m.glb", &[]) && !warm("/no/such/part.step", &[]));
     }
     #[test] fn the_staged_export_is_named_for_the_board() {
         assert_eq!(stage_name("/p/GNSS/design/Tracker_nRF9251/Tracker_nRF9251.kicad_pcb"), "Tracker_nRF9251.glb");
