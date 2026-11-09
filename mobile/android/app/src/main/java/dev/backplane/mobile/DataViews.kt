@@ -194,7 +194,7 @@ private fun PairScreen() {
         Spacer(Modifier.height(8.dp))
         Text(if (DataClient.needsRepair) "Re-pair this device" else if (DataClient.adding) "Add a hub" else "Pair with a hub", color = dcs.onSurface, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
-        Text(if (DataClient.needsRepair) "This device was revoked. Make a new link in Settings → Devices on the hub." else "Paste the hub's pairing link or its address.", color = dcs.onSurfaceVariant, fontSize = 14.sp)
+        Text(if (DataClient.needsRepair) "This device was revoked. Make a new link in Settings → Devices on the hub." else "On the computer, open Settings → Devices → Add a device: scan its code, or paste its link or the address and short code here.", color = dcs.onSurfaceVariant, fontSize = 14.sp)
         Spacer(Modifier.height(20.dp))
         DField(text, { text = it }, "http://host:3787/pair#invite=…", Modifier.testTag("pair.field"))
         if (DataClient.pairingError.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(DataClient.pairingError, color = dcs.onSurfaceVariant, fontSize = 13.sp) }
