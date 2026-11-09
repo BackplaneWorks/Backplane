@@ -152,7 +152,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         "flag" | "side-older" | "side-settled" => {
             let raw=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
             let key=match action { "side-older"=>"old-projects", "side-settled"=>"active-settled", _=>raw };
-            let known=key=="old-projects" || key=="active-settled" || key=="conversation-history" || { let k=key.strip_prefix("arch:").unwrap_or(key); st.projects.contains_key(k) || far.iter().any(|(_,f)|f.projects.contains_key(k)) };
+            let known=key=="old-projects" || key=="active-settled" || key=="conversation-history" || { let k=key.strip_prefix("arch:").or_else(||key.strip_prefix("project-closed:")).unwrap_or(key); st.projects.contains_key(k) || far.iter().any(|(_,f)|f.projects.contains_key(k)) };
             if !known { return refused("action.sidebar-flag") }
             if !session["open"].is_object() { session["open"]=json!({}); }
             let was=flag(&session,key); session["open"][key]=json!(!was);
@@ -359,6 +359,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         let color=super::badge::color_of(setting(pst,&format!("project.color.{owner}")),owner);
         project["color"]=json!(color); project["css"]=json!(super::badge::css_of(color));
         project["machine"]=json!(machine);
+        // folded by its chevron (0.14's project-closed:<id>): the window draws its head alone
+        project["closed"]=json!(flag(&session,&format!("project-closed:{owner}")));
         if machine.is_empty() && text(&session["drafts"],"@look")==owner { project["look"]=super::badge::editor(owner,setting(st,&format!("project.color.{owner}")),icon); }
         // another machine's project: its marker after the name ("on desktop"); this machine's has none
         if !machine.is_empty() { let m=un.mark(machine); sidebar::label_rows(&mut project,&m); project["mark"]=m; }
@@ -378,7 +380,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         Some(project)
     }).collect();
     let ren=text(&session["drafts"],"@ren");
-    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"title":if text(&session["drafts"],"@ren.kind")=="project" {"Rename project"} else {"Rename thread"},"text":text(&session["drafts"],"@f.title"),"yes":"Rename","no":"Cancel"})};
+    let ren_kind=if text(&session["drafts"],"@ren.kind")=="project" {"project"} else {"thread"};
+    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"kind":ren_kind,"title":if ren_kind=="project" {"Rename project"} else {"Rename thread"},"text":text(&session["drafts"],"@f.title"),"yes":"Rename","no":"Cancel"})};
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
@@ -456,8 +459,8 @@ mod tests {
         let mut p=frames[3]["json"]["p"].clone();
         p["viewId"]=expected["viewId"].clone(); p["revision"]=json!(st.seq); p["now"]=json!(now*1000); p["nativeKey"]=json!("00112233445566778899aabbccddeeff");
         let mut actual=recent(&st,&p).expect("recorded recent request is ported");
-        // approved difference: a project carries its badge colour (`color`, `css`; present/badge.rs), which 0.14's recording does not have
-        for path in ["/shown/projects","/overlay/j/projects"] { for pr in actual.pointer_mut(path).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(o)=pr.as_object_mut() { o.remove("color"); o.remove("css"); } } }
+        // approved differences: a project carries its badge colour (`color`, `css`; present/badge.rs) and whether its chevron folded it (`closed`), which 0.14's recording does not have
+        for path in ["/shown/projects","/overlay/j/projects"] { for pr in actual.pointer_mut(path).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(o)=pr.as_object_mut() { o.remove("color"); o.remove("css"); o.remove("closed"); } } }
         let mut shown=expected["shown"].clone(); retain_root(&mut shown,OMITTED);
         assert_eq!(actual["shown"],shown,"retained GPUI shown fields differ (no value normalisations)");
         let mut overlay=expected["overlay"].clone(); retain_root(&mut overlay["j"],OVERLAY_OMITTED);
@@ -630,6 +633,19 @@ mod state_tests {
         let only=state(&[r#"{"$":"ProjectCreated","id":"scratch","title":"Scratch","root":"/s","at":1}"#,&a,settled]);
         let mut p=params(); p["target"]=json!({"kind":"thread","id":"s1"}); p["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderN":0});
         if let Some(v)=recent(&only,&p) { assert_eq!(v["shown"]["conversationHistory"]["count"],1,"the open chat keeps the group's row: {}",v["shown"]); assert_eq!(rows(&v),["zebra scratch chat"]); }
+    }
+    #[test] fn a_projects_chevron_folds_it_and_a_rename_says_its_kind() {
+        let st=two_projects();
+        let mut p=params(); p["action"]=json!("flag"); p["value"]=json!("h|project-closed:pa");
+        let v=recent(&st,&p).unwrap(); assert_eq!(v["session"]["open"]["project-closed:pa"],true);
+        let closed=|v:&Value,t:&str| v["shown"]["projects"].as_array().unwrap().iter().find(|x|x["title"]==t).unwrap()["closed"].clone();
+        assert_eq!(closed(&v,"Alpha board"),true); assert_eq!(closed(&v,"Beta"),false);
+        let mut again=params(); again["session"]=v["session"].clone(); again["action"]=json!("flag"); again["value"]=json!("project-closed:pa");
+        assert_eq!(recent(&st,&again).unwrap()["session"]["open"]["project-closed:pa"],false,"the same press unfolds it");
+        let mut bad=params(); bad["action"]=json!("flag"); bad["value"]=json!("project-closed:nope"); assert!(recent(&st,&bad).is_none(),"no such project");
+        let mut r=params(); r["session"]["drafts"]=json!({"@ren":"pb","@ren.kind":"project","@f.title":"Beta"});
+        let v=recent(&st,&r).unwrap(); assert_eq!((v["shown"]["renaming"]["kind"].as_str(),v["shown"]["renaming"]["title"].as_str()),(Some("project"),Some("Rename project")));
+        r["session"]["drafts"]=json!({"@ren":"ta","@ren.kind":"thread","@f.title":"A1"}); assert_eq!(recent(&st,&r).unwrap()["shown"]["renaming"]["kind"],"thread");
     }
     #[test] fn typing_in_the_search_sets_the_query_and_enter_opens_the_first_projects_top_thread() {
         let st=two_projects();

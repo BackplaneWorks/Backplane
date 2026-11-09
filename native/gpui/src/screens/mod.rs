@@ -40,6 +40,7 @@ pub mod plot;
 pub mod projects;
 pub mod plotview;
 pub mod select;
+pub mod siderow;
 pub mod sidebox;
 pub mod star;
 pub mod strip;
