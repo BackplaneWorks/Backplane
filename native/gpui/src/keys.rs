@@ -14,6 +14,8 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
+/// Where "/" puts the keyboard in the message box: as `FREE`, and from a viewer too (a web page's own "/" is kept: `focus_composer`).
+const SLASH: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
 const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput";
 /// Where Esc is the field's or the page's own: the viewer does not shut under it.
@@ -143,7 +145,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None), KeyBinding::new(&k("account"), AccountMenu, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
-        KeyBinding::new("/", FocusComposer, Some(FREE)),
+        KeyBinding::new("/", FocusComposer, Some(SLASH)),
         KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
     // Super+` (off a Mac: Cmd+` there goes from window to window) toggles the terminal too, from the shell as well, as in the old client
     if !mac() { v.push(KeyBinding::new("super-`", ToggleTerminal, None)); }
@@ -307,6 +309,8 @@ impl Backplane {
     /// does and the keyboard goes back to the message box; with nothing to put away the keyboard leaves the message box, so a bare key may press a rail button
     /// ("/" or Esc again brings it back), and from anywhere else it goes back to it. Never from a field, a shell or a web page, whose Esc it is. True when it acted.
     pub(crate) fn escape_rest(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // the token panel (the Context chip's) shuts first, as 0.14's did
+        if self.screens.ctx_open { self.screens.ctx_open = false; return true }
         if window.context_stack().iter().any(|k| ESC_OWNERS.iter().any(|o| k.contains(o))) { return false }
         let mut put = false;
         for slot in 0..3 { let pv = self.screens.pv(slot); if pv.picked.is_some() || pv.card.is_some() || !pv.lit.is_empty() { pv.picked = None; pv.card = None; pv.lit.clear(); put = true; } }
@@ -372,7 +376,11 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
         let id = this.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"].as_bool().unwrap_or(false)).map(|b| crate::string(b, "id"));
         if let Some(id) = id { let _ = this.tx.try_send(Command::Action("bot".into(), id)); cx.notify(); }
     });
-    let el = on!(el, FocusComposer, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { this.want_focus = true; cx.notify(); });
+    let el = on!(el, FocusComposer, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| {
+        // the Browser page (and its address bar, whose context the viewer's overrides) types its own "/"
+        if w.context_stack().iter().any(|k| k.contains("Viewer")) && crate::screens::viewer::active_kind(&this.data["thread"]["viewer"], None) == "browser" { cx.propagate(); return }
+        this.want_focus = true; cx.notify();
+    });
     let el = on!(el, ToggleTerminal, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| if this.screens.pad.is_none() { this.term_toggle(w, cx) });
     let el = on!(el, DismissTerminal, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.term_dismiss(w, cx));
     let el = on!(el, CycleLayers, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.key_layers(w, cx));
@@ -440,7 +448,9 @@ mod tests {
     }
     #[test] fn timeline_scope_bare_keys_act_only_outside_fields_and_viewers() {
         assert_eq!(d("/", &[]), "keys::FocusComposer"); assert_eq!(d("b", &[]), "keys::RailBoard"); assert_eq!(d("3", &[]), "keys::Rail3d"); assert_eq!(d("d", &[]), "keys::RailDiff");
-        for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage"] { for k in ["/", "b", "s", "3", "v", "m", "f", "d", "r", "w"] { assert_eq!(d(k, &[c]), "", "{k} in {c}"); } }
+        for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage"] { for k in ["/", "b", "s", "3", "v", "m", "f", "d", "r", "w"] { if k == "/" && c == "Viewer" { continue } assert_eq!(d(k, &[c]), "", "{k} in {c}"); } }
+        assert_eq!(d("/", &["Viewer"]), "keys::FocusComposer", "a key back to the message box from the board, schematic or 3D");
+        assert_eq!(d("/", &["Viewer", "FilesPage"]), "", "the Files page's filter"); assert_eq!(d("/", &["Viewer", "Terminal"]), "", "the shell's");
         assert_eq!(d("ctrl-shift-s", &[]), "keys::SettleThread");
     }
     #[test] fn the_pad_has_its_keys_and_they_never_reach_the_composer() {
