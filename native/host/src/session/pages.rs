@@ -185,19 +185,23 @@ fn page_title(page: &str) -> String {
     match page { "bom" => "BOM · Working copy".into(), "checks" => "Checks · Working copy".into(), _ => String::new() }
 }
 /// Rp.ask: the page a review request asks for, marked by its id (`@rp.req:<id>`: a request that fails has no report to end the page's reading)
-fn ask_page(b: &mut B, sel: &str, page: &str) {
+fn ask_page(b: &mut B, sel: &str, page: &str) { ask_page_ab(b, sel, page, "") }
+/// `ab`: for the BOM, the two versions it compares ("<old>\n<new>", a design-history comparison's sides; "" the BOM as it is)
+fn ask_page_ab(b: &mut B, sel: &str, page: &str, ab: &str) {
     let m = match page { "bom" => "review.bom", "checks" => "review.checks", _ => return };
     b.patch_d.insert(format!("@rp.busy:{sel}"), json!(page));
     b.patch_i.insert(format!("rp.title:{sel}:{page}"), json!(page_title(page)));
-    let p = if page == "bom" { json!({"thread": sel, "a": "", "b": ""}) } else { json!({"thread": sel, "commit": "", "trigger": "manual"}) };
+    let (va, vb) = ab.split_once('\n').unwrap_or(("", ""));
+    let p = if page == "bom" { json!({"thread": sel, "a": va, "b": vb}) } else { json!({"thread": sel, "commit": "", "trigger": "manual"}) };
     let id = b.rpc(m, p);
     b.patch_d.insert(format!("@rp.req:{id}"), json!(format!("{sel}:{page}")));
 }
 /// Rp.open: the Review tab on a page, and the page asked for
-pub fn open_review(session: &Value, hub: &str, sel: &str, page: &str) -> (Value, Vec<Value>) {
+pub fn open_review(session: &Value, hub: &str, sel: &str, page: &str) -> (Value, Vec<Value>) { open_review_ab(session, hub, sel, page, "") }
+pub fn open_review_ab(session: &Value, hub: &str, sel: &str, page: &str, ab: &str) -> (Value, Vec<Value>) {
     let mut b = B::new(hub, session);
     // the watch is stopped for the drawing's own root: kicad.watch names no root once the drawing is put away
-    b.view(session, sel, "review", page); ask_page(&mut b, sel, page);
+    b.view(session, sel, "review", page); ask_page_ab(&mut b, sel, page, ab);
     (b.patch(session), b.cmds)
 }
 /// The thread's viewer left for something else (a drawing, or closed): Diff and Review go
@@ -230,7 +234,9 @@ pub fn act(hub: &str, session: &Value, sel: &str, action: &str, value: &str) -> 
         "rv-page" | "rv-bom" => {
             let page = if action == "rv-bom" || value.is_empty() { "bom" } else { value };
             if !matches!(page, "bom" | "checks" | "comments" | "release") { return None }
-            let (p, cmds) = open_review(session, hub, sel, page);
+            // rv-bom "<old>\n<new>": the parts that changed between a comparison's two versions (0.14's compare bar BOM)
+            let ab = if action == "rv-bom" && value.contains('\n') { value } else { "" };
+            let (p, cmds) = open_review_ab(session, hub, sel, page, ab);
             return Some(Out { session_patch: p, cmds, look: true });
         }
         "rv-run" => {
@@ -458,6 +464,13 @@ mod tests {
         patch::merge(&mut s1, &o.session_patch); assert!(!reverting(&s1, T));
         let o = act("h", &s1, T, "revert", "ask").unwrap(); patch::merge(&mut s1, &o.session_patch);
         let o = act("h", &s1, T, "revert-no", "").unwrap(); patch::merge(&mut s1, &o.session_patch); assert!(!reverting(&s1, T));
+    }
+    #[test] fn a_comparisons_bom_asks_for_the_parts_between_its_two_versions() {
+        let s1 = sess();
+        let o = act("h", &s1, T, "rv-bom", "git\t/p/.git\tabc\t2\t/p/b.kicad_pcb\n/p/b.kicad_pcb").unwrap();
+        let t = o.cmds[0]["text"].as_str().unwrap();
+        assert!(t.contains("\"m\":\"review.bom\"") && t.contains("abc") && t.contains("\"b\":\"/p/b.kicad_pcb\""), "{t}");
+        let plain = act("h", &s1, T, "rv-bom", "").unwrap(); assert!(plain.cmds[0]["text"].as_str().unwrap().contains("\"a\":\"\""), "the BOM as it is");
     }
     #[test] fn the_review_tab_asks_for_the_bom_and_shows_the_report_when_it_comes() {
         let mut s1 = sess();

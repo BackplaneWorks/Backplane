@@ -375,6 +375,7 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
             .child(btn(cx, light, "cmp-side-a", &format!("Old: {}", cmp.label), pv.menu == 1 && hist.side == 0, true, "Pick the old version", |app, cx| toggle_menu(app, 0, cx)))
             .child(btn(cx, light, "cmp-side-b", &format!("New: {}", if cmp.to.is_empty() { "Working copy" } else { cmp.to.as_str() }), pv.menu == 1 && hist.side == 1, true, "Pick the new version", |app, cx| toggle_menu(app, 1, cx)))
             .child(div().flex_1())
+            .child({ let ab = format!("{}\n{}", cmp.old, cmp.new); btn(cx, light, "cmp-bom", "BOM", false, true, "The parts that changed between the two versions", move |app, _| { let _ = app.tx.try_send(Command::Action("rv-bom".into(), ab.clone())); }) })
             .child(btn(cx, light, "cmp-off", "Close", false, true, "Back to the file as it is now", |app, _| set(app, None)));
         let mut modes = div().flex().items_center().gap(px(4.)).min_w_0();
         modes = modes.child(if cmp.mode == 1 { legend(light) } else { div().into_any_element() }).child(div().flex_1());
