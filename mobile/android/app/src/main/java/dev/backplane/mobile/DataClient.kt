@@ -295,6 +295,26 @@ object DataClient {
         if (has("push")) scope.launch { runCatching { call("push.seen", JSONObject().put("thread", id)) }; syncPush() }
         scope.launch { launch { runCatching { subscribeThread(id, g) } }; refreshThread(id) }
     }
+    // cache-first, as the iOS app: a thread is read ahead when its row shows and again when a finger goes down on it, so opening it paints from memory
+    private val prefetched = HashMap<String, Long>()
+    private var prefetchBusy = 0
+    fun prefetch(id: String, touch: Boolean = false) {
+        if (conn != Conn.ONLINE || id == open || prefetchBusy >= 4) return
+        val now = System.currentTimeMillis(); val last = prefetched[id]
+        if (last != null && now - last < (if (touch) 10_000 else 60_000)) return
+        prefetched[id] = now; prefetchBusy++
+        val g = gen
+        scope.launch {
+            try {
+                val r = runCatching { call("thread.entries", JSONObject().put("thread", id).put("limit", 40)) }.getOrNull() ?: return@launch
+                if (g != gen || id == open) return@launch
+                val fresh = parseEntries(r.optJSONArray("entries"))
+                val pending = (entries[id] ?: emptyList()).filter { (it.sending || it.failed) && fresh.none { f -> f.clientId != null && f.clientId == it.clientId } }
+                entries = entries + (id to fresh + pending)
+                older = if (r.isNull("next")) older - id else older + (id to r.optString("next"))
+            } finally { prefetchBusy-- }
+        }
+    }
     fun closeThread(id: String) {
         if (open == id) open = null
         val s = threadSub; threadSub = 0
