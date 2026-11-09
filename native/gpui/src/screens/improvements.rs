@@ -6,7 +6,7 @@
 //! The report policy (body, link, template, prompt, diagnostics allowlist) is the hub's (`improvements.*`); this file keeps the person's draft,
 //! runs the steps in order (each step is retried from where it stopped: keys and attachments keep their identity), and draws the panel.
 use super::{capture, composer::{Composer, ComposerEvent}, improv_model::*};
-use crate::{art, hub::Command, script::{Ctl, CtlEntry}, string, theme, Backplane};
+use crate::{art, hub::Command, i18n::{tf, trs}, script::{Ctl, CtlEntry}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc, time::Duration};
@@ -79,12 +79,12 @@ impl Imp {
     pub fn take_recording(&mut self) -> Option<capture::Recording> { self.rec.take() }
     fn write_draft(&self) -> Result<(), String> {
         use std::io::Write;
-        if !self.ensure_dir() { return Err("Could not keep this draft on this device. Retry.".into()); }
+        /* i18n-ok: drawn through tr */ if !self.ensure_dir() { return Err("Could not keep this draft on this device. Retry.".into()); }
         let mut d = self.draft.clone(); d.scope = self.scope.clone();
-        let text = serde_json::to_string(&d.to_json()).map_err(|_| "Could not keep this draft on this device. Retry.".to_string())?;
+        /* i18n-ok: drawn through tr */ let text = serde_json::to_string(&d.to_json()).map_err(|_| "Could not keep this draft on this device. Retry.".to_string())?;
         let (tmp, dst) = (self.file("draft.tmp"), self.file("draft.json"));
         crate::plat::private_file(&tmp).and_then(|mut f| f.write_all(text.as_bytes())).and_then(|_| std::fs::rename(&tmp, &dst))
-            .map_err(|_| "Could not keep this draft on this device. Retry.".to_string())
+            /* i18n-ok: drawn through tr */ .map_err(|_| "Could not keep this draft on this device. Retry.".to_string())
     }
     fn read_draft(&self) -> Option<Draft> {
         if std::fs::metadata(self.file("draft.json")).map_or(true, |m| m.len() > 600_000) { return None }
@@ -101,8 +101,8 @@ impl Imp {
 
 fn inputs(this: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
     if this.screens.imp.inputs.is_some() { return true }
-    let make = |cx: &mut Context<Backplane>, hint: &str| { let e = cx.new(|cx| Composer::with_context(cx, "ImpInput")); e.update(cx, |i, _| i.set_placeholder(hint)); e };
-    let ins = Inputs { text: make(cx, "Describe the change…"), evidence: make(cx, "Describe the behavior in detail: what you did and what you saw."), details: make(cx, "Optional reproduction steps or other details…"), review: make(cx, "The public issue text") };
+    let make = |cx: &mut Context<Backplane>, hint: &str| { let e = cx.new(|cx| Composer::with_context(cx, "ImpInput")); e.update(cx, |i, _| i.set_placeholder(&trs(hint))); e };
+    /* i18n-ok: drawn through tr */ let ins = Inputs { text: make(cx, "Describe the change…"), evidence: make(cx, "Describe the behavior in detail: what you did and what you saw."), details: make(cx, "Optional reproduction steps or other details…"), review: make(cx, "The public issue text") };
     for (e, which) in [(&ins.text, 0u8), (&ins.evidence, 1), (&ins.details, 2), (&ins.review, 3)] {
         let which = which;
         cx.observe(e, move |this, e, cx| edited(this, which, e.read(cx).content.to_string(), cx)).detach();
@@ -172,7 +172,7 @@ fn open(this: &mut Backplane, cx: &mut Context<Backplane>) {
         if !imp.draft.recording.is_empty() && !(age.map_or(false, |a| a < Duration::from_secs(86_400)) && capture::is_webm(&rec)) { let _ = std::fs::remove_file(&rec); imp.draft.recording.clear(); imp.draft.inc_rec = false; imp.draft.rec_reviewed = false; }
         if !imp.draft.image.is_empty() { match std::fs::read(&imp.draft.image) { Ok(b) if !b.is_empty() => imp.shot = Some(Arc::new(Image::from_bytes(format_of(&imp.draft.image), b))), _ => { imp.draft.image.clear(); imp.draft.inc_shot = false; } } }
     }
-    imp.note = if imp.draft.opened { "This draft was already opened on GitHub. Check GitHub before explicitly allowing another copy.".into() } else if imp.draft.internal { "Send starts a new Backplane thread.".into() } else { "Review the issue before opening GitHub.".into() };
+    /* i18n-ok: drawn through tr */ imp.note = if imp.draft.opened { "This draft was already opened on GitHub. Check GitHub before explicitly allowing another copy.".into() } else if imp.draft.internal { "Send starts a new Backplane thread.".into() } else { "Review the issue before opening GitHub.".into() };
     imp.review_open = !imp.draft.issue_body.is_empty() && !imp.draft.internal;
     fill_boxes(this, cx);
     this.screens.imp.focus_pending = true;
@@ -191,7 +191,7 @@ fn format_of(path: &str) -> ImageFormat { match path.rsplit('.').next().unwrap_o
 fn ask(this: &mut Backplane, method: &str, params: Value, next: Next, cx: &mut Context<Backplane>) {
     let imp = &mut this.screens.imp; imp.seq += 1; let id = imp.seq;
     imp.next.insert(id, next); if imp.next.len() > 32 { imp.next.clear(); imp.next.insert(id, next); }
-    if this.tx.try_send(Command::Ask(method.to_string(), params, id)).is_err() { this.screens.imp.next.remove(&id); fail(this, "The hub is not reachable. Reconnect, then retry.".into(), cx); }
+    /* i18n-ok: drawn through tr */ if this.tx.try_send(Command::Ask(method.to_string(), params, id)).is_err() { this.screens.imp.next.remove(&id); fail(this, "The hub is not reachable. Reconnect, then retry.".into(), cx); }
 }
 fn fail(this: &mut Backplane, why: String, cx: &mut Context<Backplane>) { let imp = &mut this.screens.imp; imp.busy = false; imp.note = why; cx.notify(); }
 
@@ -200,7 +200,7 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
     let Some(next) = this.screens.imp.next.remove(&id) else { return };
     let r = result_of(&reply).clone();
     let ok = reply["ok"] != false && r["error"].is_null();
-    if !ok { if matches!(next, Next::Preview | Next::Ctx) { this.screens.imp.busy = false; } return fail(this, refusal(&reply, "The hub could not accept this request. Retry."), cx) }
+    /* i18n-ok: drawn through tr */ if !ok { if matches!(next, Next::Preview | Next::Ctx) { this.screens.imp.busy = false; } return fail(this, refusal(&reply, "The hub could not accept this request. Retry."), cx) }
     match next {
         Next::Ctx => {
             let imp = &mut this.screens.imp;
@@ -219,7 +219,7 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
         }
         Next::Diag(then) => {
             this.screens.imp.diag = r["report"].as_str().unwrap_or("").to_string();
-            if this.screens.imp.diag.is_empty() { return fail(this, "Diagnostics are unavailable. Uncheck diagnostics to continue.".into(), cx) }
+            /* i18n-ok: drawn through tr */ if this.screens.imp.diag.is_empty() { return fail(this, "Diagnostics are unavailable. Uncheck diagnostics to continue.".into(), cx) }
             match then { Then::Review => preview_step(this, cx), Then::Write => prompt_step(this, cx) }
         }
         Next::Preview => {
@@ -227,11 +227,11 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             let imp = &mut this.screens.imp;
             // an older answer for text the person has since edited is dropped
             if !imp.draft.report.is_empty() && imp.draft.report != body { return }
-            if body.is_empty() { return fail(this, "Could not prepare the exact issue text. Your draft is kept.".into(), cx) }
+            /* i18n-ok: drawn through tr */ if body.is_empty() { return fail(this, "Could not prepare the exact issue text. Your draft is kept.".into(), cx) }
             imp.url = url; imp.busy = false; imp.previewed = true;
             if imp.draft.issue_body != body { imp.draft.opened = false; }
             imp.draft.issue_body = body.clone(); imp.review_open = true;
-            imp.note = if imp.url.is_empty() { "This report is too long for a GitHub link. Copy or save the complete text, then paste it into GitHub. Nothing is truncated.".into() } else { "Review the exact public text below. Open GitHub draft sends this text to GitHub; sign in with your account and press Submit there. Backplane has not submitted an issue.".into() };
+            /* i18n-ok: drawn through tr */ imp.note = if imp.url.is_empty() { "This report is too long for a GitHub link. Copy or save the complete text, then paste it into GitHub. Nothing is truncated.".into() } else { "Review the exact public text below. Open GitHub draft sends this text to GitHub; sign in with your account and press Submit there. Backplane has not submitted an issue.".into() };
             if let Some(e) = imp.inputs.as_ref().map(|i| i.review.clone()) { let current = e.read(cx).content.to_string(); if current != body { set_box(this, &e, &body, cx); } }
             let _ = save_now(this);
         }
@@ -239,51 +239,51 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             let t = s(&r, "template");
             let imp = &mut this.screens.imp;
             imp.draft.forget_report(); imp.draft.report = t.clone(); imp.draft.issue_body = t.clone(); imp.previewed = false; imp.review_open = true; imp.evidence_ok = false; imp.busy = false;
-            imp.note = "Fill the unknown fields in this editable template, then press Review issue.".into();
+            /* i18n-ok: drawn through tr */ imp.note = "Fill the unknown fields in this editable template, then press Review issue.".into();
             if let Some(e) = imp.inputs.as_ref().map(|i| i.review.clone()) { set_box(this, &e, &t, cx); }
             let _ = save_now(this);
         }
         Next::Prompt => { let prompt = s(&r, "prompt"); writer_init(this, prompt, cx); }
         Next::WCreate => {
             let thread = this.screens.imp.draft.writer.as_ref().map(|w| w.thread()).unwrap_or_default();
-            if s(&r, "thread") != thread { return fail(this, "The hub did not confirm the report thread. Retry the same writer.".into(), cx) }
+            /* i18n-ok: drawn through tr */ if s(&r, "thread") != thread { return fail(this, "The hub did not confirm the report thread. Retry the same writer.".into(), cx) }
             if let Some(w) = this.screens.imp.draft.writer.as_mut() { w.created = true; }
             let _ = save_now(this); advance_writer(this, cx);
         }
         Next::WCtx => match r["accountBinding"].as_str() {
             Some(b) if r["thread"] == json!(this.screens.imp.draft.writer.as_ref().map(|w| w.thread()).unwrap_or_default()) => { if let Some(w) = this.screens.imp.draft.writer.as_mut() { w.binding = Some(b.to_string()); } let _ = save_now(this); advance_writer(this, cx); }
-            _ => return fail(this, "The hub did not confirm the report account. Retry.".into(), cx),
+            /* i18n-ok: drawn through tr */ _ => return fail(this, "The hub did not confirm the report account. Retry.".into(), cx),
         },
         Next::WTurn => {
             if let Some(w) = this.screens.imp.draft.writer.as_mut() { w.started = true; }
             let imp = &mut this.screens.imp; imp.busy = false;
-            imp.note = "Report agent started in the selected project. Load the report when it finishes, or open the thread to answer its questions.".into();
+            /* i18n-ok: drawn through tr */ imp.note = "Report agent started in the selected project. Load the report when it finishes, or open the thread to answer its questions.".into();
             let _ = save_now(this);
         }
         Next::Load => {
             let body = s(&r, "body");
-            if r["done"] != true { return fail(this, "The report agent is still working. Open its thread for questions, then load the report when it finishes.".into(), cx) }
-            if body.trim().is_empty() || body.len() > MAX_BODY { return fail(this, "No complete report is available. Open the report thread and check the agent response.".into(), cx) }
+            /* i18n-ok: drawn through tr */ if r["done"] != true { return fail(this, "The report agent is still working. Open its thread for questions, then load the report when it finishes.".into(), cx) }
+            /* i18n-ok: drawn through tr */ if body.trim().is_empty() || body.len() > MAX_BODY { return fail(this, "No complete report is available. Open the report thread and check the agent response.".into(), cx) }
             let imp = &mut this.screens.imp; imp.busy = false;
             imp.draft.report = body.clone(); imp.draft.issue_body.clear(); imp.draft.opened = false; imp.review_open = true; imp.previewed = false; imp.evidence_ok = false;
-            imp.note = "Agent report loaded. Edit it, remove private information, then press Review issue.".into();
+            /* i18n-ok: drawn through tr */ imp.note = "Agent report loaded. Edit it, remove private information, then press Review issue.".into();
             if let Some(e) = imp.inputs.as_ref().map(|i| i.review.clone()) { set_box(this, &e, &body, cx); }
             let _ = save_now(this);
         }
         Next::ICreate => {
-            if s(&r, "thread") != thread_for(&this.screens.imp.draft.key) { return fail(this, "The hub did not confirm this conversation. Retry Send.".into(), cx) }
+            /* i18n-ok: drawn through tr */ if s(&r, "thread") != thread_for(&this.screens.imp.draft.key) { return fail(this, "The hub did not confirm this conversation. Retry Send.".into(), cx) }
             this.screens.imp.draft.thread = thread_for(&this.screens.imp.draft.key); let _ = save_now(this); advance_internal(this, cx);
         }
         Next::ICtx => match r["accountBinding"].as_str() {
             Some(b) => { this.screens.imp.draft.binding = Some(b.to_string()); let _ = save_now(this); advance_internal(this, cx); }
-            None => return fail(this, "The hub did not confirm this conversation’s account. Retry Send.".into(), cx),
+            /* i18n-ok: drawn through tr */ None => return fail(this, "The hub did not confirm this conversation’s account. Retry Send.".into(), cx),
         },
         Next::IModes => { advance_internal(this, cx); }
         Next::ITurn => {
             let thread = this.screens.imp.draft.thread.clone();
             this.screens.imp.draft.accepted = true; let _ = save_now(this);
             let _ = this.tx.try_send(Command::Select(thread));
-            let imp = &mut this.screens.imp; imp.forget_files(); imp.draft = Draft::default(); imp.busy = false; imp.open = false; imp.note = "Request sent. Opening the new Backplane thread.".into();
+            /* i18n-ok: drawn through tr */ let imp = &mut this.screens.imp; imp.forget_files(); imp.draft = Draft::default(); imp.busy = false; imp.open = false; imp.note = "Request sent. Opening the new Backplane thread.".into();
             fill_boxes(this, cx);
         }
     }
@@ -295,7 +295,7 @@ fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 
 fn review(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if let Err(e) = this.screens.imp.draft.check_public() { return fail(this, e.into(), cx) }
-    this.screens.imp.busy = true; this.screens.imp.note = "Preparing the report…".into();
+    /* i18n-ok: drawn through tr */ this.screens.imp.busy = true; this.screens.imp.note = "Preparing the report…".into();
     if this.screens.imp.draft.inc_diag { ask(this, "improvements.diagnostics", json!({}), Next::Diag(Then::Review), cx) } else { this.screens.imp.diag.clear(); preview_step(this, cx) }
 }
 fn diag_text(imp: &Imp) -> String { if imp.draft.inc_diag { imp.diag.clone() } else { String::new() } }
@@ -308,18 +308,18 @@ fn preview_step(this: &mut Backplane, cx: &mut Context<Backplane>) {
 }
 fn write_report(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if let Err(e) = this.screens.imp.draft.check_writer() { return fail(this, e.into(), cx) }
-    this.screens.imp.busy = true; this.screens.imp.note = "Starting the report agent…".into();
+    /* i18n-ok: drawn through tr */ this.screens.imp.busy = true; this.screens.imp.note = "Starting the report agent…".into();
     if this.screens.imp.draft.writer.is_some() { return advance_writer(this, cx) }   // a retry of the same writer
     if this.screens.imp.draft.inc_diag { ask(this, "improvements.diagnostics", json!({}), Next::Diag(Then::Write), cx) } else { this.screens.imp.diag.clear(); prompt_step(this, cx) }
 }
 fn prompt_step(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let imp = &this.screens.imp; let d = &imp.draft;
-    let evidence = format!("{}{}", d.evidence_text(), if d.inc_details { format!("\nUser-elected details\n{}", d.details) } else { String::new() });
+    /* i18n-ok: evidence text sent to the report agent */ let evidence = format!("{}{}", d.evidence_text(), if d.inc_details { format!("\nUser-elected details\n{}", d.details) } else { String::new() });
     let p = json!({"description": d.text, "os": Imp::os(), "version": imp.version(), "evidence": evidence, "diagnostics": diag_text(imp)});
     ask(this, "improvements.prompt", p, Next::Prompt, cx)
 }
 fn writer_init(this: &mut Backplane, prompt: String, cx: &mut Context<Backplane>) {
-    if prompt.is_empty() || prompt.len() > MAX_TEXT { return fail(this, "The report description is too long for the agent. Shorten it or fill the template locally.".into(), cx) }
+    /* i18n-ok: drawn through tr */ if prompt.is_empty() || prompt.len() > MAX_TEXT { return fail(this, "The report description is too long for the agent. Shorten it or fill the template locally.".into(), cx) }
     let d = &mut this.screens.imp.draft;
     d.writer = Some(Writer { key: new_key(), project: d.writer_project.clone(), prompt, with_image: d.inc_shot && !d.image.is_empty(), with_video: d.inc_rec && d.rec_reviewed && !d.recording.is_empty(), ..Writer::default() });
     let _ = save_now(this); advance_writer(this, cx);
@@ -328,7 +328,7 @@ fn writer_init(this: &mut Backplane, prompt: String, cx: &mut Context<Backplane>
 fn advance_writer(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(w) = this.screens.imp.draft.writer.clone() else { return };
     let thread = w.thread();
-    if !w.created { return ask(this, "thread.create", json!({"project": w.project, "title": "Write an issue report", "creationKey": w.key}), Next::WCreate, cx) }
+    /* i18n-ok: a thread title sent to the hub */ if !w.created { return ask(this, "thread.create", json!({"project": w.project, "title": "Write an issue report", "creationKey": w.key}), Next::WCreate, cx) }
     if w.binding.is_none() { return ask(this, "improvements.context", json!({"sourceThread": thread}), Next::WCtx, cx) }
     if w.with_image && w.path.is_empty() { let (p, k) = (this.screens.imp.draft.image.clone(), w.key.clone()); return upload(this, Up::WImage, thread, k, p, cx) }
     if w.with_video && w.video_path.is_empty() {
@@ -342,7 +342,7 @@ fn advance_writer(this: &mut Backplane, cx: &mut Context<Backplane>) {
 }
 fn load_report(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(w) = this.screens.imp.draft.writer.clone() else { return };
-    this.screens.imp.busy = true; this.screens.imp.note = "Loading the agent report…".into();
+    /* i18n-ok: drawn through tr */ this.screens.imp.busy = true; this.screens.imp.note = "Loading the agent report…".into();
     ask(this, "improvements.report", json!({"thread": w.thread(), "accountBinding": w.binding}), Next::Load, cx)
 }
 
@@ -351,40 +351,40 @@ fn load_report(this: &mut Backplane, cx: &mut Context<Backplane>) {
 fn send_internal(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.imp.draft.accepted { let t = this.screens.imp.draft.thread.clone(); let _ = this.tx.try_send(Command::Select(t)); return close(this, cx) }
     if let Err(e) = this.screens.imp.draft.check_internal() { return fail(this, e.into(), cx) }
-    if let Some(t) = backplane_project(&this.screens.imp.projects) { if this.screens.imp.draft.project != t.id { return fail(this, "This saved request belongs to another project. Open its thread to finish it before starting a Backplane improvement.".into(), cx) } }
+    /* i18n-ok: drawn through tr */ if let Some(t) = backplane_project(&this.screens.imp.projects) { if this.screens.imp.draft.project != t.id { return fail(this, "This saved request belongs to another project. Open its thread to finish it before starting a Backplane improvement.".into(), cx) } }
     if this.screens.imp.draft.key.is_empty() { this.screens.imp.draft.key = new_key(); }
-    this.screens.imp.busy = true; this.screens.imp.note = "Sending…".into();
+    /* i18n-ok: drawn through tr */ this.screens.imp.busy = true; this.screens.imp.note = "Sending…".into();
     if let Err(e) = save_now(this) { return fail(this, e, cx) }
     advance_internal(this, cx)
 }
 fn advance_internal(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let d = this.screens.imp.draft.clone();
-    if d.thread.is_empty() { this.screens.imp.note = "Creating the Backplane thread…".into(); return ask(this, "thread.create", json!({"project": d.project, "title": "New thread", "creationKey": d.key, "base": "gpui", "branch": work_branch(&d.key)}), Next::ICreate, cx) }
+    /* i18n-ok: drawn through tr; the title is sent to the hub */ if d.thread.is_empty() { this.screens.imp.note = "Creating the Backplane thread…".into(); return ask(this, "thread.create", json!({"project": d.project, "title": "New thread", "creationKey": d.key, "base": "gpui", "branch": work_branch(&d.key)}), Next::ICreate, cx) }
     if d.binding.is_none() { return ask(this, "improvements.context", json!({"sourceThread": d.thread}), Next::ICtx, cx) }
     if let Some(rt) = this.screens.imp.runtime.clone() { if !this.screens.imp.modes_sent { this.screens.imp.modes_sent = true; return ask(this, "thread.modes", json!({"thread": d.thread, "runtime": rt}), Next::IModes, cx) } }
-    if !d.image.is_empty() && d.path.is_empty() { this.screens.imp.note = "Uploading the screenshot…".into(); return upload(this, Up::IImage, d.thread.clone(), d.key.clone(), d.image.clone(), cx) }
+    /* i18n-ok: drawn through tr */ if !d.image.is_empty() && d.path.is_empty() { this.screens.imp.note = "Uploading the screenshot…".into(); return upload(this, Up::IImage, d.thread.clone(), d.key.clone(), d.image.clone(), cx) }
     let with_video = d.inc_rec && d.rec_reviewed && !d.recording.is_empty();
     if with_video && d.video_path.is_empty() {
         let k = if d.video_key.is_empty() { let k = new_key(); this.screens.imp.draft.video_key = k.clone(); let _ = save_now(this); k } else { d.video_key.clone() };
-        this.screens.imp.note = "Uploading the selected recording…".into(); return upload(this, Up::IVideo, d.thread.clone(), k, d.recording.clone(), cx)
+        /* i18n-ok: drawn through tr */ this.screens.imp.note = "Uploading the selected recording…".into(); return upload(this, Up::IVideo, d.thread.clone(), k, d.recording.clone(), cx)
     }
     let message = if d.message.is_empty() {
         let imp = &this.screens.imp; let target = imp.projects.iter().find(|p| p.id == d.project);
         let (t, n) = imp.origin.clone();
-        let c = context(&t, &n, "Thread", &imp.ctx, target);
+        /* i18n-ok: a view name in the context data */ let c = context(&t, &n, "Thread", &imp.ctx, target);
         improvement_message_with(&d.text, &c, &handoff(&work_branch(&d.key)), &d.path, if with_video { &d.video_path } else { "" })
     } else { d.message.clone() };
-    if message.len() > MAX_MESSAGE { return fail(this, "This request is too long. Shorten it before sending.".into(), cx) }
+    /* i18n-ok: drawn through tr */ if message.len() > MAX_MESSAGE { return fail(this, "This request is too long. Shorten it before sending.".into(), cx) }
     this.screens.imp.draft.message = message.clone();
     if let Err(e) = save_now(this) { return fail(this, e, cx) }
-    this.screens.imp.note = "Starting the request…".into();
+    /* i18n-ok: drawn through tr */ this.screens.imp.note = "Starting the request…".into();
     ask(this, "turn.start", json!({"thread": d.thread, "text": message, "msg": format!("improvement-request-{}", d.key), "accountBinding": d.binding}), Next::ITurn, cx)
 }
 
 // ---- attachments (the hub's POST /attach, off the UI thread) ---------------------------------------------------------------------------------
 
 fn upload(this: &mut Backplane, kind: Up, thread: String, key: String, file: String, cx: &mut Context<Backplane>) {
-    let Some(t) = this.screens.imp.target.clone() else { return fail(this, "Attachments need a hub on plain http://; this one is not.".into(), cx) };
+    /* i18n-ok: drawn through tr */ let Some(t) = this.screens.imp.target.clone() else { return fail(this, "Attachments need a hub on plain http://; this one is not.".into(), cx) };
     let name = format!("{}{}", if matches!(kind, Up::WVideo | Up::IVideo) { "backplane-recording" } else { "backplane" }, match file.rsplit('.').next().unwrap_or("png") { "jpg" | "jpeg" => ".jpg", "webp" => ".webp", "webm" => ".webm", _ => ".png" });
     let th = thread.clone();
     cx.spawn(async move |weak, cx| {
@@ -395,16 +395,16 @@ fn upload(this: &mut Backplane, kind: Up, thread: String, key: String, file: Str
 /// POST /attach with the file as the body; the hub answers `{thread, attached}`.
 pub fn upload_file(t: &super::attach::Target, thread: &str, key: &str, name: &str, file: &Path) -> Result<String, String> {
     use std::io::{Read, Write};
-    let size = std::fs::metadata(file).map_err(|_| "The file is gone. Choose it again.".to_string())?.len();
-    if size == 0 || size > 64 * 1024 * 1024 { return Err("This file cannot be sent.".into()) }
-    let mut s = t.stream().map_err(|_| "The image did not arrive. Reconnect, then retry Send.".to_string())?;
+    /* i18n-ok: drawn through tr */ let size = std::fs::metadata(file).map_err(|_| "The file is gone. Choose it again.".to_string())?.len();
+    /* i18n-ok: drawn through tr */ if size == 0 || size > 64 * 1024 * 1024 { return Err("This file cannot be sent.".into()) }
+    /* i18n-ok: drawn through tr */ let mut s = t.stream().map_err(|_| "The image did not arrive. Reconnect, then retry Send.".to_string())?;
     let _ = s.set_timeouts(Duration::from_secs(60));
     s.write_all(super::attach::head(t, thread, key, name, size).as_bytes()).map_err(|e| e.to_string())?;
     let n = std::io::copy(&mut std::fs::File::open(file).map_err(|e| e.to_string())?.take(size), &mut s).map_err(|e| e.to_string())?;
-    if n != size { return Err("The file changed while sending. Retry.".into()) }
+    /* i18n-ok: drawn through tr */ if n != size { return Err("The file changed while sending. Retry.".into()) }
     let body = super::attach::body_of(&String::from_utf8_lossy(&super::attach::read_response(&mut s).map_err(|e| e.to_string())?));
-    let v: Value = serde_json::from_str(&body).map_err(|_| "The image did not arrive. Retry Send.".to_string())?;
-    match (v["thread"].as_str(), v["attached"].as_str()) { (Some(t2), Some(p)) if t2 == thread => Ok(p.to_string()), _ => Err(v["text"].as_str().unwrap_or("The image did not arrive. Retry Send.").to_string()) }
+    /* i18n-ok: drawn through tr */ let v: Value = serde_json::from_str(&body).map_err(|_| "The image did not arrive. Retry Send.".to_string())?;
+    /* i18n-ok: drawn through tr */ match (v["thread"].as_str(), v["attached"].as_str()) { (Some(t2), Some(p)) if t2 == thread => Ok(p.to_string()), _ => Err(v["text"].as_str().unwrap_or("The image did not arrive. Retry Send.").to_string()) }
 }
 fn uploaded(this: &mut Backplane, kind: Up, r: Result<String, String>, cx: &mut Context<Backplane>) {
     let path = match r { Ok(p) => p, Err(e) => return fail(this, e, cx) };
@@ -434,11 +434,11 @@ pub fn tick(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backplan
 
 fn take_shot(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.imp.locked() { return }
-    if let Some(why) = capture::unavailable() { return fail(this, format!("{why} Choose an image instead."), cx) }
-    let Some(xid) = window_id(this) else { return fail(this, "This window cannot be captured here. Choose an image instead.".into(), cx) };
-    if !this.screens.imp.ensure_dir() { return fail(this, "Could not keep this draft on this device. Retry.".into(), cx) }
+    /* i18n-ok: drawn through tr */ if let Some(why) = capture::unavailable() { return fail(this, format!("{why} Choose an image instead."), cx) }
+    /* i18n-ok: drawn through tr */ let Some(xid) = window_id(this) else { return fail(this, "This window cannot be captured here. Choose an image instead.".into(), cx) };
+    /* i18n-ok: drawn through tr */ if !this.screens.imp.ensure_dir() { return fail(this, "Could not keep this draft on this device. Retry.".into(), cx) }
     let out = this.screens.imp.file("shot.png");
-    this.screens.imp.hidden = true; this.screens.imp.note = "Capturing…".into(); cx.notify();
+    /* i18n-ok: drawn through tr */ this.screens.imp.hidden = true; this.screens.imp.note = "Capturing…".into(); cx.notify();
     cx.spawn(async move |weak, cx| {
         cx.background_executor().timer(Duration::from_millis(400)).await;   // the panel is gone from the next frames
         let result = cx.background_executor().spawn(async move { capture::shot(xid, &out).map(|b| (b, out)) }).await;
@@ -449,9 +449,9 @@ fn take_shot(this: &mut Backplane, cx: &mut Context<Backplane>) {
                     let auto = std::mem::take(&mut this.screens.imp.auto_shot);
                     set_image(this, path.to_string_lossy().into_owned(), bytes, cx);
                     if auto { if this.screens.imp.draft.internal { this.screens.imp.draft.inc_shot = true; } let _ = save_now(this); }
-                    this.screens.imp.note = if auto { "Screenshot captured on open.".into() } else { "Screenshot refreshed.".into() };
+                    /* i18n-ok: drawn through tr */ this.screens.imp.note = if auto { "Screenshot captured on open.".into() } else { "Screenshot refreshed.".into() };
                 }
-                Err(e) => { this.screens.imp.auto_shot = false; this.screens.imp.note = format!("{e} Your draft and previous image are kept."); }
+                /* i18n-ok: drawn through tr */ Err(e) => { this.screens.imp.auto_shot = false; this.screens.imp.note = format!("{e} Your draft and previous image are kept."); }
             }
             cx.notify();
         });
@@ -471,23 +471,23 @@ fn choose_image(this: &mut Backplane, cx: &mut Context<Backplane>) {
 /// A chosen image: PNG, JPEG or WebP up to 10 MB, copied into the draft folder (the draft owns its image).
 pub fn use_image_file(this: &mut Backplane, p: &Path, cx: &mut Context<Backplane>) {
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    let ext = match ext.as_str() { "png" => "png", "jpg" | "jpeg" => "jpg", "webp" => "webp", _ => return fail(this, "Choose a PNG, JPEG or WebP image.".into(), cx) };
+    /* i18n-ok: drawn through tr */ let ext = match ext.as_str() { "png" => "png", "jpg" | "jpeg" => "jpg", "webp" => "webp", _ => return fail(this, "Choose a PNG, JPEG or WebP image.".into(), cx) };
     let bytes = match std::fs::metadata(p) { Ok(m) if m.len() > 0 && m.len() <= 10 * 1024 * 1024 => std::fs::read(p).unwrap_or_default(), _ => Vec::new() };
-    if bytes.is_empty() { return fail(this, "Choose an image up to 10 MB.".into(), cx) }
-    if !this.screens.imp.ensure_dir() { return fail(this, "Could not keep this draft on this device. Retry.".into(), cx) }
+    /* i18n-ok: drawn through tr */ if bytes.is_empty() { return fail(this, "Choose an image up to 10 MB.".into(), cx) }
+    /* i18n-ok: drawn through tr */ if !this.screens.imp.ensure_dir() { return fail(this, "Could not keep this draft on this device. Retry.".into(), cx) }
     let dst = this.screens.imp.file(&format!("shot.{ext}"));
-    if std::fs::write(&dst, &bytes).is_err() { return fail(this, "Could not keep this image on this device. Retry.".into(), cx) }
-    set_image(this, dst.to_string_lossy().into_owned(), bytes, cx); this.screens.imp.note = "Image refreshed.".into();
+    /* i18n-ok: drawn through tr */ if std::fs::write(&dst, &bytes).is_err() { return fail(this, "Could not keep this image on this device. Retry.".into(), cx) }
+    /* i18n-ok: drawn through tr */ set_image(this, dst.to_string_lossy().into_owned(), bytes, cx); this.screens.imp.note = "Image refreshed.".into();
 }
 
 fn record_start(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let imp = &mut this.screens.imp;
     if imp.locked() || !imp.draft.key.is_empty() || imp.rec.is_some() { return }
     if let Some(why) = capture::unavailable() { return fail(this, why.into(), cx) }
-    let Some(xid) = window_id(this) else { return fail(this, "This window cannot be recorded here.".into(), cx) };
-    if !this.screens.imp.ensure_dir() { return fail(this, "Could not keep this draft on this device. Retry.".into(), cx) }
+    /* i18n-ok: drawn through tr */ let Some(xid) = window_id(this) else { return fail(this, "This window cannot be recorded here.".into(), cx) };
+    /* i18n-ok: drawn through tr */ if !this.screens.imp.ensure_dir() { return fail(this, "Could not keep this draft on this device. Retry.".into(), cx) }
     match capture::Recording::start(xid, &this.screens.imp.file("recording-new.webm")) {
-        Ok(r) => { let imp = &mut this.screens.imp; imp.rec = Some(r); imp.hidden = true; imp.rec_text = "● Recording screen · 0/120 s".into(); poll_recording(cx); }
+        Ok(r) => { let imp = &mut this.screens.imp; imp.rec = Some(r); imp.hidden = true; imp.rec_text = tf("gpui.imp.rec.start", &[("max", (capture::MAX_SECS as u64).into())]); poll_recording(cx); }
         Err(e) => this.screens.imp.note = e,
     }
     cx.notify();
@@ -501,7 +501,7 @@ fn poll_recording(cx: &mut Context<Backplane>) {
                 let imp = &mut this.screens.imp;
                 let Some(r) = imp.rec.as_mut() else { return false };
                 let (secs, bytes, running) = (r.elapsed().as_secs(), r.bytes(), r.running());
-                imp.rec_text = format!("● Recording screen · {secs}/{} s · {:.1}/9 MiB", capture::MAX_SECS, bytes as f64 / 1048576.0);
+                imp.rec_text = tf("gpui.imp.rec.progress", &[("secs", secs.into()), ("max", (capture::MAX_SECS as u64).into()), ("mib", format!("{:.1}", bytes as f64 / 1048576.0).into())]);
                 cx.notify();
                 if !running || secs >= capture::MAX_SECS as u64 { record_stop(this, cx); false } else { true }
             }) else { return };
@@ -511,15 +511,15 @@ fn poll_recording(cx: &mut Context<Backplane>) {
 }
 fn record_stop(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(r) = this.screens.imp.rec.take() else { return };
-    this.screens.imp.rec_text = "Finishing recording…".into();
+    this.screens.imp.rec_text = trs("Finishing recording…");
     let out = this.screens.imp.file("recording.webm"); let from = r.path.clone();
     cx.spawn(async move |weak, cx| {
-        let result = cx.background_executor().spawn(async move { r.stop().and_then(|ms| std::fs::rename(&from, &out).map(|_| (ms, out)).map_err(|_| "Could not keep the recording on this device.".to_string())) }).await;
+        /* i18n-ok: drawn through tr */ let result = cx.background_executor().spawn(async move { r.stop().and_then(|ms| std::fs::rename(&from, &out).map(|_| (ms, out)).map_err(|_| "Could not keep the recording on this device.".to_string())) }).await;
         let _ = weak.update(cx, |this, cx| {
             let imp = &mut this.screens.imp; imp.hidden = false; imp.rec_text.clear();
             match result {
                 Ok((ms, path)) => { imp.draft.recording = path.to_string_lossy().into_owned(); imp.draft.recording_ms = ms; imp.draft.inc_rec = false; imp.draft.rec_reviewed = false; imp.draft.forget_report(); imp.review_open = false;
-                    imp.note = "Recording saved locally. Play it, then select it to attach. Clips expire after 24 hours.".into(); let _ = save_now(this); }
+                    /* i18n-ok: drawn through tr */ imp.note = "Recording saved locally. Play it, then select it to attach. Clips expire after 24 hours.".into(); let _ = save_now(this); }
                 Err(e) => imp.note = e,
             }
             cx.notify();
@@ -528,7 +528,7 @@ fn record_stop(this: &mut Backplane, cx: &mut Context<Backplane>) {
 }
 fn record_cancel(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if let Some(r) = this.screens.imp.rec.take() { r.cancel(); }
-    let imp = &mut this.screens.imp; imp.hidden = false; imp.rec_text.clear(); imp.note = "Recording canceled. Your draft is kept.".into(); cx.notify();
+    /* i18n-ok: drawn through tr */ let imp = &mut this.screens.imp; imp.hidden = false; imp.rec_text.clear(); imp.note = "Recording canceled. Your draft is kept.".into(); cx.notify();
 }
 
 // ---- opening other programs and saving files --------------------------------------------------------------------------------------------------
@@ -536,17 +536,17 @@ fn record_cancel(this: &mut Backplane, cx: &mut Context<Backplane>) {
 /// The program that opens a link or a file: `BACKPLANE_GPUI_OPEN` (tests point it at a recorder), else xdg-open (open on a Mac).
 pub fn opener() -> String { std::env::var("BACKPLANE_GPUI_OPEN").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| if cfg!(target_os = "macos") { "open".into() } else { "xdg-open".into() }) }
 pub(crate) fn open_target(what: &str) -> Result<(), String> {
-    std::process::Command::new(opener()).arg(what).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(|_| ()).map_err(|_| "Could not open it. Copy the text and paste it into GitHub.".to_string())
+    /* i18n-ok: drawn through tr */ std::process::Command::new(opener()).arg(what).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map(|_| ()).map_err(|_| "Could not open it. Copy the text and paste it into GitHub.".to_string())
 }
 /// Where a saved file goes: `BACKPLANE_GPUI_SAVE_DIR`, else ~/Downloads (else the home folder). Never over an existing file.
 fn save_file(name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
-    let dir = std::env::var_os("BACKPLANE_GPUI_SAVE_DIR").map(PathBuf::from).or_else(|| crate::plat::user_home().map(|h| { let d = h.join("Downloads"); if d.is_dir() { d } else { h } })).ok_or("No folder to save in.")?;
+    /* i18n-ok: drawn through tr */ let dir = std::env::var_os("BACKPLANE_GPUI_SAVE_DIR").map(PathBuf::from).or_else(|| crate::plat::user_home().map(|h| { let d = h.join("Downloads"); if d.is_dir() { d } else { h } })).ok_or("No folder to save in.")?;
     let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
     for i in 0..1000 {
         let p = dir.join(if i == 0 { name.to_string() } else { format!("{stem}-{i}.{ext}") });
-        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).create_new(true).open(&p) { use std::io::Write; return f.write_all(bytes).map(|_| p).map_err(|_| "Could not save the file.".to_string()) }
+        /* i18n-ok: drawn through tr */ if let Ok(mut f) = std::fs::OpenOptions::new().write(true).create_new(true).open(&p) { use std::io::Write; return f.write_all(bytes).map(|_| p).map_err(|_| "Could not save the file.".to_string()) }
     }
-    Err("Could not save the file.".into())
+    /* i18n-ok: drawn through tr */ Err("Could not save the file.".into())
 }
 
 // ---- one place for every press ----------------------------------------------------------------------------------------------------------------
@@ -559,7 +559,7 @@ pub fn act(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
         "close" => return close(this, cx),
         "dest-issue" | "dest-internal" if !locked && this.screens.imp.draft.key.is_empty() => {
             let d = &mut this.screens.imp.draft; d.internal = id == "dest-internal"; d.inc_rec = false; d.forget_report(); this.screens.imp.review_open = false;
-            this.screens.imp.note = if id == "dest-internal" { "Send starts a new Backplane thread.".into() } else { "Review the issue before opening GitHub.".into() };
+            /* i18n-ok: drawn through tr */ this.screens.imp.note = if id == "dest-internal" { "Send starts a new Backplane thread.".into() } else { "Review the issue before opening GitHub.".into() };
         }
         "chk-shot" if !locked => { flip(this, |d| d.inc_shot = !d.inc_shot); this.screens.imp.draft.forget_report(); this.screens.imp.review_open = false; this.screens.imp.evidence_ok = false; }
         "chk-diag" if !locked => { flip(this, |d| d.inc_diag = !d.inc_diag); this.screens.imp.draft.forget_report(); this.screens.imp.review_open = false; this.screens.imp.evidence_ok = false; this.screens.imp.diag.clear(); }
@@ -573,21 +573,21 @@ pub fn act(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
         "rec-cancel" => return record_cancel(this, cx),
         "rec-play" => {
             let p = this.screens.imp.draft.recording.clone();
-            if !p.is_empty() { match open_target(&p) { Ok(()) => { this.screens.imp.draft.rec_reviewed = true; this.screens.imp.note = "Playing the recording. Select it when you have reviewed the whole clip.".into(); } Err(e) => this.screens.imp.note = e } }
+            /* i18n-ok: drawn through tr */ if !p.is_empty() { match open_target(&p) { Ok(()) => { this.screens.imp.draft.rec_reviewed = true; this.screens.imp.note = "Playing the recording. Select it when you have reviewed the whole clip.".into(); } Err(e) => this.screens.imp.note = e } }
         }
         "rec-discard" if !locked && this.screens.imp.draft.key.is_empty() => {
             let _ = std::fs::remove_file(this.screens.imp.file("recording.webm"));
             let d = &mut this.screens.imp.draft; d.recording.clear(); d.inc_rec = false; d.rec_reviewed = false; d.forget_report(); this.screens.imp.review_open = false;
         }
-        "save-image" => { let imp = &mut this.screens.imp; if let Ok(b) = std::fs::read(&imp.draft.image) { let ext = imp.draft.image.rsplit('.').next().unwrap_or("png").to_string(); imp.note = match save_file(&format!("backplane-screenshot.{ext}"), &b) { Ok(p) => format!("Saved {}", p.display()), Err(e) => e }; } }
+        /* i18n-ok: drawn through tr */ "save-image" => { let imp = &mut this.screens.imp; if let Ok(b) = std::fs::read(&imp.draft.image) { let ext = imp.draft.image.rsplit('.').next().unwrap_or("png").to_string(); imp.note = match save_file(&format!("backplane-screenshot.{ext}"), &b) { Ok(p) => format!("Saved {}", p.display()), Err(e) => e }; } }
         "primary" => { if this.screens.imp.busy { return } if this.screens.imp.draft.internal { send_internal(this, cx) } else { review(this, cx) } return }
         "write" if !locked => return write_report(this, cx),
         "load" if !locked => return load_report(this, cx),
         "open-writer" => { if let Some(w) = this.screens.imp.draft.writer.as_ref() { let t = w.thread(); let _ = this.tx.try_send(Command::Select(t)); close(this, cx); } return }
         "template" if !locked => { this.screens.imp.busy = true; ask(this, "improvements.template", json!({}), Next::Template, cx); return }
-        "copy" => { let body = this.screens.imp.draft.issue_body.clone(); if !body.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(body)); this.screens.imp.note = "Exact issue text copied.".into(); } }
-        "save" => { let imp = &mut this.screens.imp; if !imp.draft.issue_body.is_empty() { imp.note = match save_file("backplane-issue.txt", imp.draft.issue_body.as_bytes()) { Ok(p) => format!("Saved {}", p.display()), Err(e) => e }; } }
-        "allow-again" if this.screens.imp.draft.opened => { this.screens.imp.draft.opened = false; this.screens.imp.note = "Review the report and press Open GitHub draft when ready.".into(); }
+        /* i18n-ok: drawn through tr */ "copy" => { let body = this.screens.imp.draft.issue_body.clone(); if !body.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(body)); this.screens.imp.note = "Exact issue text copied.".into(); } }
+        /* i18n-ok: drawn through tr */ "save" => { let imp = &mut this.screens.imp; if !imp.draft.issue_body.is_empty() { imp.note = match save_file("backplane-issue.txt", imp.draft.issue_body.as_bytes()) { Ok(p) => format!("Saved {}", p.display()), Err(e) => e }; } }
+        /* i18n-ok: drawn through tr */ "allow-again" if this.screens.imp.draft.opened => { this.screens.imp.draft.opened = false; this.screens.imp.note = "Review the report and press Open GitHub draft when ready.".into(); }
         "open-github" => return open_github(this, cx),
         _ if id.starts_with("proj:") && !locked && this.screens.imp.draft.key.is_empty() => { this.screens.imp.draft.project = id[5..].to_string(); }
         _ if id.starts_with("wproj:") && !locked => { let d = &mut this.screens.imp.draft; d.writer_project = id[6..].to_string(); d.forget_report(); this.screens.imp.review_open = false; }
@@ -600,12 +600,12 @@ pub fn act(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
 fn open_github(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let imp = &mut this.screens.imp;
     if imp.busy || imp.draft.opened || imp.draft.issue_body.is_empty() { return }
-    if !imp.evidence_ok || !imp.draft.has_evidence() { imp.note = "Confirm that the report has a thorough description or attachable evidence image.".into(); cx.notify(); return }
+    /* i18n-ok: drawn through tr */ if !imp.evidence_ok || !imp.draft.has_evidence() { imp.note = "Confirm that the report has a thorough description or attachable evidence image.".into(); cx.notify(); return }
     let url = if imp.url.is_empty() { "https://github.com/BackplaneWorks/Backplane/issues/new".to_string() } else { imp.url.clone() };
     imp.draft.opened = true;
     if let Err(e) = save_now(this) { this.screens.imp.draft.opened = false; return fail(this, e, cx) }
     match open_target(&url) {
-        Ok(()) => this.screens.imp.note = "GitHub draft opened. Sign in with your GitHub account and press Submit there. Backplane has not submitted an issue.".into(),
+        /* i18n-ok: drawn through tr */ Ok(()) => this.screens.imp.note = "GitHub draft opened. Sign in with your GitHub account and press Submit there. Backplane has not submitted an issue.".into(),
         Err(e) => { this.screens.imp.draft.opened = false; let _ = save_now(this); this.screens.imp.note = e; }
     }
     cx.notify();
@@ -650,22 +650,22 @@ fn probe(e: Stateful<Div>, id: &str) -> Stateful<Div> { if art::rects_on() { e.r
 
 /// The controls the panel offers now, for the harness (`{"click": "imp:<id>"}`).
 pub fn controls(this: &Backplane, out: &mut Vec<CtlEntry>) {
-    out.push(CtlEntry { id: "ui:Improvements".into(), label: "Improvements".into(), ctl: Ctl::Imp("toggle".into()) });
+    /* i18n-ok: e2e control labels */ out.push(CtlEntry { id: "ui:Improvements".into(), label: "Improvements".into(), ctl: Ctl::Imp("toggle".into()) });
     let imp = &this.screens.imp;
-    if imp.rec.is_some() { for (id, l) in [("rec-stop", "Stop recording"), ("rec-cancel", "Cancel recording")] { out.push(CtlEntry { id: format!("imp:{id}"), label: l.into(), ctl: Ctl::Imp(id.into()) }); } }
+    /* i18n-ok: e2e control labels */ if imp.rec.is_some() { for (id, l) in [("rec-stop", "Stop recording"), ("rec-cancel", "Cancel recording")] { out.push(CtlEntry { id: format!("imp:{id}"), label: l.into(), ctl: Ctl::Imp(id.into()) }); } }
     if !imp.open || imp.hidden { return }
     for (id, l) in all_controls(imp) { out.push(CtlEntry { id: format!("imp:{id}"), label: l, ctl: Ctl::Imp(id) }); }
 }
 fn all_controls(imp: &Imp) -> Vec<(String, String)> {
     let d = &imp.draft;
-    let mut v: Vec<(&str, &str)> = vec![("close", "Close Improvements"), ("dest-issue", "Public GitHub issue"), ("dest-internal", "Internal implementation thread"), ("capture", "Capture again"), ("choose", "Choose image")];
-    if d.internal { v.push(("primary", "Send")); } else { v.extend([("chk-shot", "Select a screenshot"), ("chk-diag", "Include diagnostics"), ("chk-details", "Include details"), ("write", "Write report with agent"), ("load", "Load agent report"), ("template", "Use report template"),
-        ("primary", "Review issue"), ("copy", "Copy issue text"), ("save", "Save report"), ("chk-evidence", "Confirm evidence"), ("open-github", "Open GitHub draft")]); }
-    if d.writer.is_some() { v.push(("open-writer", "Open report-writing thread")); }
-    if capture::unavailable().is_none() { v.push(("record", "Record screen")); }
-    if !d.recording.is_empty() { v.extend([("rec-play", "Play recording"), ("chk-rec", "Attach recording"), ("rec-discard", "Discard recording")]); }
+    /* i18n-ok: e2e control labels */ let mut v: Vec<(&str, &str)> = vec![("close", "Close Improvements"), ("dest-issue", "Public GitHub issue"), ("dest-internal", "Internal implementation thread"), ("capture", "Capture again"), ("choose", "Choose image")];
+    /* i18n-ok: e2e control labels */ if d.internal { v.push(("primary", "Send")); } else { v.extend([("chk-shot", "Select a screenshot"), ("chk-diag", "Include diagnostics"), ("chk-details", "Include details"), ("write", "Write report with agent"), ("load", "Load agent report"), ("template", "Use report template"),
+        /* i18n-ok: e2e control labels */ ("primary", "Review issue"), ("copy", "Copy issue text"), ("save", "Save report"), ("chk-evidence", "Confirm evidence"), ("open-github", "Open GitHub draft")]); }
+    /* i18n-ok: e2e control labels */ if d.writer.is_some() { v.push(("open-writer", "Open report-writing thread")); }
+    /* i18n-ok: e2e control labels */ if capture::unavailable().is_none() { v.push(("record", "Record screen")); }
+    /* i18n-ok: e2e control labels */ if !d.recording.is_empty() { v.extend([("rec-play", "Play recording"), ("chk-rec", "Attach recording"), ("rec-discard", "Discard recording")]); }
     let mut out: Vec<(String, String)> = v.into_iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
-    out.extend(imp.projects.iter().map(|p| (format!("{}:{}", if d.internal { "proj" } else { "wproj" }, p.id), format!("Project {}", p.title))));
+    /* i18n-ok: e2e control labels */ out.extend(imp.projects.iter().map(|p| (format!("{}:{}", if d.internal { "proj" } else { "wproj" }, p.id), format!("Project {}", p.title))));
     out
 }
 
@@ -693,7 +693,7 @@ pub fn indicator(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<
     imp.rec.as_ref()?;
     let c = |n: &str| theme::color(light, n);
     Some(div().absolute().top_0().left_0().right_0().h(px(32.)).bg(c("bad")).text_color(c("on-accent")).flex().items_center().gap_3().px_3().child(div().flex_1().child(imp.rec_text.clone()))
-        .child(button(cx, light, "rec-stop", "Stop recording", true, false, false)).child(button(cx, light, "rec-cancel", "Cancel recording", true, false, false)).into_any_element())
+        .child(button(cx, light, "rec-stop", &trs("Stop recording"), true, false, false)).child(button(cx, light, "rec-cancel", &trs("Cancel recording"), true, false, false)).into_any_element())
 }
 
 pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyElement> {
@@ -702,61 +702,61 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
     let d = &imp.draft; let ins = imp.inputs.as_ref()?;
     let locked = imp.locked(); let public = !d.internal;
     let mut col = div().flex().flex_col().flex_shrink_0().gap_3().w_full().max_w(px(680.)).px_4().py_3();
-    col = col.child(div().flex().gap_2().child(button(cx, light, "dest-issue", "Public GitHub issue", !locked && d.key.is_empty(), false, public)).child(button(cx, light, "dest-internal", "Internal implementation thread", !locked && d.key.is_empty(), false, !public)));
-    col = col.child(field(light, "What would you like to improve?", &ins.text));
+    col = col.child(div().flex().gap_2().child(button(cx, light, "dest-issue", &trs("Public GitHub issue"), !locked && d.key.is_empty(), false, public)).child(button(cx, light, "dest-internal", &trs("Internal implementation thread"), !locked && d.key.is_empty(), false, !public)));
+    col = col.child(field(light, &trs("What would you like to improve?"), &ins.text));
     if !public {
         let unique = backplane_project(&imp.projects).map_or(false, |t| t.id == d.project);
-        if !unique { col = col.child(div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child("Backplane source project")).child(div().flex().flex_wrap().gap_2().children(imp.projects.iter().map(|p| button(cx, light, &format!("proj:{}", p.id), &p.title, !locked && d.key.is_empty(), false, p.id == d.project)).collect::<Vec<_>>()))); }
+        if !unique { col = col.child(div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(trs("Backplane source project"))).child(div().flex().flex_wrap().gap_2().children(imp.projects.iter().map(|p| button(cx, light, &format!("proj:{}", p.id), &p.title, !locked && d.key.is_empty(), false, p.id == d.project)).collect::<Vec<_>>()))); }
     } else {
-        col = col.child(para(light, "Public on BackplaneWorks/Backplane, attributed to your GitHub account. Sign in on GitHub and press Submit there. Review your text and images for private information."));
-        col = col.child(field(light, "Behavior evidence", &ins.evidence));
-        col = col.child(check(cx, light, "chk-shot", "Select a screenshot (manual attachment on GitHub)", d.inc_shot, !locked));
-        col = col.child(check(cx, light, "chk-diag", "Include sanitized diagnostics in the public issue", d.inc_diag, !locked));
-        col = col.child(check(cx, light, "chk-details", "Include additional details I enter", d.inc_details, !locked));
-        if d.inc_details { col = col.child(field(light, "Additional public details", &ins.details)); }
+        col = col.child(para(light, &trs("Public on BackplaneWorks/Backplane, attributed to your GitHub account. Sign in on GitHub and press Submit there. Review your text and images for private information.")));
+        col = col.child(field(light, &trs("Behavior evidence"), &ins.evidence));
+        col = col.child(check(cx, light, "chk-shot", &trs("Select a screenshot (manual attachment on GitHub)"), d.inc_shot, !locked));
+        col = col.child(check(cx, light, "chk-diag", &trs("Include sanitized diagnostics in the public issue"), d.inc_diag, !locked));
+        col = col.child(check(cx, light, "chk-details", &trs("Include additional details I enter"), d.inc_details, !locked));
+        if d.inc_details { col = col.child(field(light, &trs("Additional public details"), &ins.details)); }
         if d.inc_diag && !imp.diag.is_empty() { col = col.child(div().flex_shrink_0().h(px(120.)).overflow_hidden().p_2().border_1().border_color(c("line")).bg(c("view")).text_size(px(11.)).child(imp.diag.clone())); }
         let writers: Vec<&Project> = imp.projects.iter().filter(|p| p.id != "scratch" && !p.root.is_empty()).collect();
-        col = col.child(div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child("Report agent project")).child(div().flex().flex_wrap().gap_2().children(writers.iter().map(|p| button(cx, light, &format!("wproj:{}", p.id), &p.title, !locked, false, p.id == d.writer_project)).collect::<Vec<_>>())));
-        col = col.child(div().flex().flex_wrap().gap_2().child(button(cx, light, "write", "Write report with agent", !locked && !d.writer.as_ref().map_or(false, |w| w.started), false, false))
-            .children(d.writer.as_ref().map(|_| button(cx, light, "load", "Load agent report", !locked, false, false))).children(d.writer.as_ref().map(|_| button(cx, light, "open-writer", "Open report-writing thread", !locked, false, false)))
-            .child(button(cx, light, "template", "Use report template", !locked, false, false)));
+        col = col.child(div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(trs("Report agent project"))).child(div().flex().flex_wrap().gap_2().children(writers.iter().map(|p| button(cx, light, &format!("wproj:{}", p.id), &p.title, !locked, false, p.id == d.writer_project)).collect::<Vec<_>>())));
+        col = col.child(div().flex().flex_wrap().gap_2().child(button(cx, light, "write", &trs("Write report with agent"), !locked && !d.writer.as_ref().map_or(false, |w| w.started), false, false))
+            .children(d.writer.as_ref().map(|_| button(cx, light, "load", &trs("Load agent report"), !locked, false, false))).children(d.writer.as_ref().map(|_| button(cx, light, "open-writer", &trs("Open report-writing thread"), !locked, false, false)))
+            .child(button(cx, light, "template", &trs("Use report template"), !locked, false, false)));
         if imp.review_open {
-            col = col.child(field(light, "Editable public issue body", &ins.review));
+            col = col.child(field(light, &trs("Editable public issue body"), &ins.review));
         }
         if imp.review_open && imp.previewed {
-            col = col.child(div().flex().flex_wrap().gap_2().child(button(cx, light, "copy", "Copy issue text", true, false, false)).child(button(cx, light, "save", "Save report", true, false, false))
-                .children((d.inc_shot && !d.image.is_empty()).then(|| button(cx, light, "save-image", "Save selected image", true, false, false)))
-                .children(d.opened.then(|| button(cx, light, "allow-again", "Allow another GitHub draft", !imp.busy, false, false))));
-            col = col.child(check(cx, light, "chk-evidence", "My report has a thorough behavior description, or I will attach the selected image or recording on GitHub.", imp.evidence_ok, !imp.busy));
-            col = col.child(button(cx, light, "open-github", "Open GitHub draft", !imp.busy && !d.opened && imp.evidence_ok, true, false));
+            col = col.child(div().flex().flex_wrap().gap_2().child(button(cx, light, "copy", &trs("Copy issue text"), true, false, false)).child(button(cx, light, "save", &trs("Save report"), true, false, false))
+                .children((d.inc_shot && !d.image.is_empty()).then(|| button(cx, light, "save-image", &trs("Save selected image"), true, false, false)))
+                .children(d.opened.then(|| button(cx, light, "allow-again", &trs("Allow another GitHub draft"), !imp.busy, false, false))));
+            col = col.child(check(cx, light, "chk-evidence", &trs("My report has a thorough behavior description, or I will attach the selected image or recording on GitHub."), imp.evidence_ok, !imp.busy));
+            col = col.child(button(cx, light, "open-github", &trs("Open GitHub draft"), !imp.busy && !d.opened && imp.evidence_ok, true, false));
         }
     }
     // the screenshot
     if public && !d.inc_shot { /* no image area until one is selected */ } else {
-        col = col.child(div().flex().flex_col().gap_2().child(div().flex().gap_2().child(button(cx, light, "capture", "Capture again", !locked, false, false)).child(button(cx, light, "choose", "Choose image", !locked, false, false)))
+        col = col.child(div().flex().flex_col().gap_2().child(div().flex().gap_2().child(button(cx, light, "capture", &trs("Capture again"), !locked, false, false)).child(button(cx, light, "choose", &trs("Choose image"), !locked, false, false)))
             .children(imp.shot.clone().map(|i| div().max_w(px(480.)).max_h(px(300.)).border_1().border_color(c("line")).child(img(ImageSource::Image(i)).max_w(px(480.)).max_h(px(300.)).object_fit(ObjectFit::Contain)))));
     }
     // the recording
     match capture::unavailable() {
-        Some(why) => col = col.child(div().flex().flex_col().gap_1().child(button(cx, light, "record", "Record screen", false, false, false)).child(para(light, why))),
+        Some(why) => col = col.child(div().flex().flex_col().gap_1().child(button(cx, light, "record", &trs("Record screen"), false, false, false)).child(para(light, &trs(why)))),
         None => {
-            col = col.child(div().flex().flex_col().gap_2().child(button(cx, light, "record", "Record screen", !locked && d.key.is_empty(), false, false))
-                .child(para(light, "Video of this window only, no audio. Up to 2 minutes and 9 MiB. Private copies expire after 24 hours. A recording may show private messages, credentials or other private information; it cannot be redacted."))
-                .children((!d.recording.is_empty()).then(|| div().flex().flex_col().gap_2().child(div().text_size(px(12.)).child(format!("Recording saved: {} s", d.recording_ms / 1000)))
-                    .child(div().flex().gap_2().child(button(cx, light, "rec-play", "Play recording", true, false, false)).child(button(cx, light, "rec-discard", "Discard recording", !locked && d.key.is_empty(), false, false)))
-                    .child(check(cx, light, "chk-rec", if public { "Select this recording for the public report and agent. Play it first." } else { "Attach this recording to the local agent thread. Play it first." }, d.inc_rec, !locked && d.rec_reviewed)))));
+            col = col.child(div().flex().flex_col().gap_2().child(button(cx, light, "record", &trs("Record screen"), !locked && d.key.is_empty(), false, false))
+                .child(para(light, &trs("Video of this window only, no audio. Up to 2 minutes and 9 MiB. Private copies expire after 24 hours. A recording may show private messages, credentials or other private information; it cannot be redacted.")))
+                .children((!d.recording.is_empty()).then(|| div().flex().flex_col().gap_2().child(div().text_size(px(12.)).child(tf("gpui.imp.rec.saved", &[("secs", (d.recording_ms / 1000).into())])))
+                    .child(div().flex().gap_2().child(button(cx, light, "rec-play", &trs("Play recording"), true, false, false)).child(button(cx, light, "rec-discard", &trs("Discard recording"), !locked && d.key.is_empty(), false, false)))
+                    .child(check(cx, light, "chk-rec", &if public { trs("Select this recording for the public report and agent. Play it first.") } else { trs("Attach this recording to the local agent thread. Play it first.") }, d.inc_rec, !locked && d.rec_reviewed)))));
         }
     }
-    col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(if public { "OS family and app release are included. Images and recordings stay local until you send them to the agent or attach them yourself on GitHub. Ctrl+Enter reviews the issue." } else if d.image.is_empty() && !(d.inc_rec && !d.recording.is_empty()) { "Choose an image or preview and select a recording before sending." } else if d.project.is_empty() { "Choose the Backplane source project before sending." } else { "Changes will be made in Backplane. Ctrl+Enter sends this request." }));
+    col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(if public { trs("OS family and app release are included. Images and recordings stay local until you send them to the agent or attach them yourself on GitHub. Ctrl+Enter reviews the issue.") } else if d.image.is_empty() && !(d.inc_rec && !d.recording.is_empty()) { trs("Choose an image or preview and select a recording before sending.") } else if d.project.is_empty() { trs("Choose the Backplane source project before sending.") } else { trs("Changes will be made in Backplane. Ctrl+Enter sends this request.") }));
     // the note and the primary button stay pinned below the scrolling body, visible however small the window
     let foot = div().flex_shrink_0().px_4().py_2().border_t_1().border_color(c("line")).flex().items_center().gap_3()
-        .child(div().id("imp-note").flex_1().min_w_0().text_size(px(12.)).child(imp.note.clone()))
-        .child(div().flex_shrink_0().child(button(cx, light, "primary", d.send_label(imp.busy), !imp.busy, true, false)));
+        .child(div().id("imp-note").flex_1().min_w_0().text_size(px(12.)).child(note_text(&imp.note)))
+        .child(div().flex_shrink_0().child(button(cx, light, "primary", &trs(d.send_label(imp.busy)), !imp.busy, true, false)));
     // a floating window above the app: centred, bordered, shadowed, with the page dimmed behind it (a click on the dim leaves the panel as it is)
     Some(div().id("improvements-float").absolute().inset_0().occlude().bg(gpui::hsla(0., 0., 0., 0.35)).flex().items_center().justify_center().p_6()
       .child(div().id("improvements").w(px(760.)).max_w_full().max_h_full().h(px(760.)).overflow_hidden().bg(c("bg")).border_1().border_color(c("line")).shadow_lg().flex().flex_col()
-        .child(div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(c("line")).child(div().flex_1().font_weight(FontWeight::BOLD).child("Improvements")).child(div().text_color(c("faint")).text_size(px(11.)).child("Ctrl+Alt+I"))
-            .child(button(cx, light, "close", "Close", true, false, false)))
+        /* i18n-ok: a shortcut */ .child(div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(c("line")).child(div().flex_1().font_weight(FontWeight::BOLD).child(trs("Improvements"))).child(div().text_color(c("faint")).text_size(px(11.)).child("Ctrl+Alt+I"))
+            .child(button(cx, light, "close", &trs("Close"), true, false, false)))
         .child(div().id("improvements-body").flex_1().min_h_0().overflow_y_scroll().flex().justify_center().items_start().child(col))
         .child(foot)).into_any_element())
 }

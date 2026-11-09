@@ -73,7 +73,7 @@ mod win_acl {
         }
     }
     pub fn user_only(p: &std::path::Path) -> std::io::Result<()> {
-        let sddl = wide(&format!("D:P(A;;FA;;;{})(A;;FA;;;SY)(A;;FA;;;BA)", user_sid()?));
+        /* i18n-ok: Windows ACL and stderr before the window opens */ let sddl = wide(&format!("D:P(A;;FA;;;{})(A;;FA;;;SY)(A;;FA;;;BA)", user_sid()?));
         unsafe {
             let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
             if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, std::ptr::null_mut()) == 0 { return Err(std::io::Error::last_os_error()) }
@@ -96,8 +96,8 @@ mod win_acl {
             let out = std::process::Command::new("icacls").arg(&f).output().unwrap(); let t = String::from_utf8_lossy(&out.stdout).to_string();
             let user = std::env::var("USERNAME").unwrap();
             assert!(t.contains(&user) && t.contains("NT AUTHORITY\\SYSTEM") && t.contains("BUILTIN\\Administrators"), "{t}");
-            for wide in ["Users:", "Everyone", "Authenticated Users", "(I)"] { assert!(!t.contains(wide), "{wide} on a private file: {t}") }
-            assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret", "still the user's to read");
+            /* i18n-ok: Windows ACL and stderr before the window opens */ for wide in ["Users:", "Everyone", "Authenticated Users", "(I)"] { assert!(!t.contains(wide), "{wide} on a private file: {t}") }
+            /* i18n-ok: Windows ACL and stderr before the window opens */ assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret", "still the user's to read");
             let _ = std::fs::remove_dir_all(&d);
         }
     }
@@ -127,8 +127,8 @@ pub fn cache_base() -> Option<std::path::PathBuf> {
 pub fn display_problem(display: Option<&str>, wayland: Option<&str>) -> Option<String> {
     if !cfg!(target_os = "linux") || display.map_or(false, |d| !d.is_empty()) { return None }
     Some(match wayland.filter(|w| !w.is_empty()) {
-        Some(w) => format!("Backplane's window draws through X11 and this Wayland session ({w}) has no X server: DISPLAY is not set. Enable Xwayland (most compositors start it on demand; sway: `xwayland enable`) and start Backplane from the session, or set DISPLAY."),
-        None => "No display: neither DISPLAY nor WAYLAND_DISPLAY is set. Start Backplane from a desktop session (an X server or Xwayland).".into(),
+        /* i18n-ok: Windows ACL and stderr before the window opens */ Some(w) => format!("Backplane's window draws through X11 and this Wayland session ({w}) has no X server: DISPLAY is not set. Enable Xwayland (most compositors start it on demand; sway: `xwayland enable`) and start Backplane from the session, or set DISPLAY."),
+        /* i18n-ok: Windows ACL and stderr before the window opens */ None => "No display: neither DISPLAY nor WAYLAND_DISPLAY is set. Start Backplane from a desktop session (an X server or Xwayland).".into(),
     })
 }
 #[cfg(test)]

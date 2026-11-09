@@ -5,6 +5,9 @@
 mod art;
 mod delta;
 mod hub;
+mod i18n;
+#[cfg(test)]
+mod i18n_scan;
 mod input;
 mod keys;
 mod plat;
@@ -151,6 +154,7 @@ impl Backplane {
     pub fn local_press(&mut self,name:&str,value:&str,cx:&mut Context<Self>){
         if !self.local.set(name,value){return;}
         if name=="sidebar-open"{self.sidebar_open=self.local.sidebar_open;}
+        if name=="lang"{crate::i18n::set_choice(&self.local.lang);}
         if name.starts_with("shortcut"){let l=self.local.clone();cx.defer(move|cx|bind_all(cx,&l));}
         self.local.save();self.ui_epoch+=1;cx.notify();
     }

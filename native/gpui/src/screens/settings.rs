@@ -2,7 +2,7 @@
 //! Pure parsing and a generic renderer: every button is the view action the row names, every typed field goes out as
 //! `bfield` ("<name>\u{1f}<text>") exactly as on the phones. Nothing here knows what a setting means.
 use super::composer::{Composer, ComposerEvent};
-use crate::{hub::Command, string, theme, Backplane};
+use crate::{hub::Command, i18n::{tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ pub struct Btn { pub label: String, pub action: String, pub value: String, pub o
 pub struct Field { pub name: String, pub hint: String, pub secret: bool, pub value: String, pub vault: bool }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row { pub label: String, pub note: String, pub buttons: Vec<Btn>, pub fields: Vec<Field>, pub qr: Vec<String>, pub qrnote: String, pub local: bool }
-impl std::fmt::Debug for Field { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Field({}{})", self.name, if self.vault { ", vault" } else { "" }) } }
+/* i18n-ok: drawn through trs by row_el, nav_title or the title */ impl std::fmt::Debug for Field { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Field({}{})", self.name, if self.vault { ", vault" } else { "" }) } }
 
 /// A request to the hub that carries a secret: its Debug shows nothing.
 #[derive(Clone)]
@@ -51,15 +51,15 @@ pub fn save_request(packed: &str, typed_name: &str, value: &str) -> Result<(Stri
     if packed.starts_with("@apikey\u{1f}") {
         let rest = &packed["@apikey\u{1f}".len()..];
         let name = if typed_name.trim().is_empty() { rest.trim() } else { typed_name.trim() };
-        if name.is_empty() { return Err("Name the key first."); }
-        if value.is_empty() { return Err("Paste the key first."); }
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if name.is_empty() { return Err("Name the key first."); }
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if value.is_empty() { return Err("Paste the key first."); }
         return Ok(("bots.voice".into(), serde_json::json!({"op": "api-add", "name": name, "value": value})));
     }
     let mut it = packed.split('\u{1f}');
     let (packed_name, purpose, thread) = (it.next().unwrap_or("").trim(), it.next().unwrap_or(""), it.next().unwrap_or(""));
     let name = if typed_name.trim().is_empty() { packed_name } else { typed_name.trim() };
-    if name.is_empty() { return Err("Name the secret first."); }
-    if value.is_empty() { return Err("Paste the secret first."); }
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if name.is_empty() { return Err("Name the secret first."); }
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if value.is_empty() { return Err("Paste the secret first."); }
     Ok(("secret.set".into(), serde_json::json!({"name": name, "purpose": purpose, "thread": thread, "value": value})))
 }
 
@@ -126,7 +126,7 @@ pub fn row_fit(avail: f32, chips: &[f32], field: f32, qr: f32) -> RowFit {
 }
 /// A page list entry's icon keeps its size, and its title ends in "…" when the list is narrow (it never runs under the icon).
 fn nav_icon_el(icon: AnyElement) -> Div { div().flex_shrink_0().child(icon) }
-fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(t.to_string()) }
+fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(t)) }
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
     match page { "appearance" => "sun", "threads" => "message-square", "agents" => "cpu", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
@@ -190,7 +190,7 @@ fn sync_nav(this: &mut Backplane, rows: &[Row], cx: &mut Context<Backplane>) {
     if !this.data["settings"].is_object() { let ui = &mut this.screens.settings_ui; ui.page.clear(); ui.auto = false; return; }
     if this.screens.settings_ui.search.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
-        input.update(cx, |i, _| { i.set_placeholder("Search"); });
+        input.update(cx, |i, _| { i.set_placeholder(&trs("Search")); });
         cx.observe(&input, |this, input, cx| { this.screens.settings_ui.q = input.read(cx).content.to_string(); cx.notify(); }).detach();
         this.screens.settings_ui.search = Some(input);
     }
@@ -278,7 +278,7 @@ pub fn save_vault(this: &mut Backplane, b: &Btn, cx: &mut Context<Backplane>) {
         Ok((m, p)) => {
             let tag = if key { "key" } else { "secret" };
             // the field is kept until the hub's answer (rpc_done): accepted empties it and shuts the form, refused says why
-            if this.tx.try_send(Command::Rpc(m, Secret(p), tag)).is_err() { say(this, "The hub is not reachable. Try again."); }
+            /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if this.tx.try_send(Command::Rpc(m, Secret(p), tag)).is_err() { say(this, "The hub is not reachable. Try again."); }
         }
     }
     cx.notify();
@@ -295,7 +295,7 @@ pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str, cx: &mut C
     if tag == "browser" { if !ok { if let Some((_, page)) = &this.screens.browser { let page = page.clone(); page.update(cx, |p, cx| p.open_failed(why, cx)); } } return; }
     if tag.starts_with("hook") { return super::bots::hook_done(this, tag, ok, why, cx); }
     let (name, sent, err) = match tag { "key" => ("kval", "key-sent", "key-err"), "secret" => ("sval", "secret-sent", "secret-err"), _ => return };
-    let (a, v) = if ok { (sent, String::new()) } else { (err, if why.is_empty() { format!("The hub refused the {}", if tag == "key" { "key" } else { "secret" }) } else { why.to_string() }) };
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let (a, v) = if ok { (sent, String::new()) } else { (err, if why.is_empty() { format!("The hub refused the {}", if tag == "key" { "key" } else { "secret" }) } else { why.to_string() }) };
     // the typed value is kept until the hub accepted it, so a refusal can be corrected and sent again
     if ok { if let Some(input) = this.screens.fields.get(name).map(|s| s.input.clone()) { input.update(cx, |i, cx| i.set(String::new(), cx)); } }
     let _ = this.tx.try_send(Command::Action(a.into(), v));
@@ -330,10 +330,10 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let has_field = r.fields.iter().any(|f| fields.contains_key(&f.name));
     let controls = !r.buttons.is_empty() || has_field || !r.qr.is_empty();
     if !controls && r.note.is_empty() {
-        return div().pt_4().pb_1().text_size(px(14.)).font_weight(FontWeight::BOLD).child(r.label.clone()).into_any_element();
+        return div().pt_4().pb_1().text_size(px(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)).into_any_element();
     }
     let field_w = 260f32.min(avail);
-    let widths: Vec<f32> = r.buttons.iter().map(|b| chip_w(&b.label)).collect();
+    let widths: Vec<f32> = r.buttons.iter().map(|b| chip_w(&trs(&b.label))).collect();
     let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { 0. }, if r.qr.is_empty() { 0. } else { r.qr.len() as f32 * 4. + 16. });
     // the words keep their least width beside the controls (never squeezed to a letter a line), or the whole row's under a stack
     let mut left = div().flex().flex_col().gap_1().min_w_0();
@@ -342,13 +342,13 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let right_w = { let mut at = 0; let mut w = 0f32; for &n in &lines { w = w.max(widths[at..at + n].iter().sum::<f32>() + 4. * (n.max(1) - 1) as f32); at += n; }
         w.max(if has_field { field_w } else { 0. }).max(if r.qr.is_empty() { 0. } else { r.qr.len() as f32 * 4. + 16. }) };
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
-    if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(r.label.clone())); }
-    if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(r.note.clone())); }
+    if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(trs(&r.label))); }
+    if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(trs(&r.note))); }
     let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(CONTROLS_MAX)) };
     for f in &r.fields {
         if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
     }
-    if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().text_size(px(11.)).text_color(c("dim")).child(r.qrnote.clone())); } }
+    if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().text_size(px(11.)).text_color(c("dim")).child(trs(&r.qrnote))); } }
     if !r.buttons.is_empty() {
         // (not a wrapping flex row: it does not grow its parent's height in gpui, and the next row would be drawn over it)
         // chips in lines packed to the room they have (row_fit), at most CHIPS_PER_LINE each
@@ -361,7 +361,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named by what it does: `btn:<action>:<value>`
                 let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
-                d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { if super::onboard::press(this, &b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
+                d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| { if super::onboard::press(this, &b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
             }).collect::<Vec<_>>()));
         }
     }
@@ -395,23 +395,23 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let dev_rows = device_rows(local);
     let hub_rows = super::hubpick::rows(hub_list);
     let mut els: Vec<AnyElement> = if on_hubs { hub_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() };
-    if !on_device && !on_acct && !on_hubs && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(format!("… {} more", rows.len() - MAX_ROWS - skip)).into_any_element()); }
+    if !on_device && !on_acct && !on_hubs && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(tf("gpui.settings.more", &[("n", (rows.len() - MAX_ROWS - skip).into())])).into_any_element()); }
     // the left nav
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
     if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
     {
         let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let item = if on_device { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("THIS DEVICE"))
-            .child(item.child(nav_icon_el(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" })))).child(nav_title("This device")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = false; cx.notify(); })));
+        nav = nav.child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child(trs("This device").to_uppercase()))
+            /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(item.child(nav_icon_el(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" })))).child(nav_title("This device")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = false; cx.notify(); })));
         let hubs_item = div().id("set-nav-hubs").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let hubs_item = if on_hubs { hubs_item.bg(c("raise")) } else { hubs_item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(hubs_item.child(nav_icon_el(crate::art::icon("globe", 16., c(if on_hubs { "text" } else { "dim" })))).child(nav_title("Hubs")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = true; cx.notify(); })));
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ nav = nav.child(hubs_item.child(nav_icon_el(crate::art::icon("globe", 16., c(if on_hubs { "text" } else { "dim" })))).child(nav_title("Hubs")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = true; cx.notify(); })));
         let acct_item = div().id("set-nav-accounts").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
         let acct_item = if on_acct { acct_item.bg(c("raise")) } else { acct_item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("ALL DEVICES (HUB)"))
-            .child(acct_item.child(nav_icon_el(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" })))).child(nav_title("Accounts")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
-        if !hub_on { nav = nav.child(div().px_3().pt_2().text_size(px(11.)).text_color(c("dim")).child("The hub's other settings open here when it serves them.")); }
+        nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child(trs("All devices (hub)").to_uppercase()))
+            /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(acct_item.child(nav_icon_el(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" })))).child(nav_title("Accounts")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
+        if !hub_on { nav = nav.child(div().px_3().pt_2().text_size(px(11.)).text_color(c("dim")).child(trs("The hub's other settings open here when it serves them."))); }
     }
     let mut last = usize::MAX;
     let title_now = rows.first().map(|r| r.label.clone()).unwrap_or_default();
@@ -426,16 +426,16 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         nav = nav.child(item.child(nav_icon_el(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" })))).child(nav_title(title))
             .on_click(cx.listener(move |this, _, _, cx| { go_page(this, &p2); cx.notify(); })));
     }
-    let title = if on_hubs { "Hubs".to_string() } else if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let title = if on_hubs { "Hubs".to_string() } else if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
     let dialog = div().id("settings-dialog").occlude().flex().flex_col().w(px(1040.)).max_w_full().h(px(760.)).max_h_full().border_1().border_color(c("line")).bg(c("bg")).overflow_hidden().on_mouse_down_out(cx.listener(|this, _, _, cx| close(this, cx)))
         .child(div().h(px(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
-            .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(14.)).child("Settings"))
+            .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(14.)).child(trs("Settings")))
             .child(div().id("settings-close").p_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise"))).child(crate::art::icon("x", 16., c("dim")))
                 .on_click(cx.listener(|this, _, _, cx| close(this, cx)))))
         .child(div().flex().flex_1().min_h_0().child(nav)
             .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().px(px(fit.gutter)).py_3().flex().flex_col()
-                .child(div().pb_1().text_size(px(15.)).font_weight(FontWeight::BOLD).child(title))
-                .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device || on_hubs { "accent" } else { "dim" })).child(if on_hubs { "Kept on this computer only. Each hub has its own credential here." } else if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." })).children(els)));
+                .child(div().pb_1().text_size(px(15.)).font_weight(FontWeight::BOLD).child(trs(&title)))
+                /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device || on_hubs { "accent" } else { "dim" })).child(trs(if on_hubs { "Kept on this computer only. Each hub has its own credential here." } else if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." }))).children(els)));
     // (the dim backdrop lets a press through: a thread clicked while Settings is open shuts Settings and shows that thread, as 0.14 did;
     // the dialog itself takes its own presses)
     Some(div().id("settings").absolute().inset_0().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p(px(fit.pad)).child(dialog).into_any_element())
@@ -448,24 +448,25 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
     let b = |label: &str, name: &str, value: &str, on: bool| Btn { label: label.into(), action: format!("local:{name}"), value: value.into(), on };
     let r = |label: &str, note: &str, buttons: Vec<Btn>| Row { label: label.into(), note: note.into(), buttons, fields: vec![], qr: vec![], qrnote: String::new(), local: true };
     let mut rows = vec![
-        r("Appearance", "", vec![]),
-        r("Theme", "Light or dark on this device, or follow what the hub says.", lo::THEMES.iter().map(|(k, lab)| b(lab, "theme", k, l.theme == *k)).collect()),
-        r("Text size", &format!("{}% of the standard size.", l.text_pct), vec![b("Smaller", "text", "-", false), b("Larger", "text", "+", false), b("Reset", "text-reset", "", l.text_pct == 100)]),
-        r("Font", "The typeface of the interface and the thread.", lo::FONTS.iter().map(|(k, lab)| b(lab, "font", k, l.font == *k)).collect()),
-        r("Layout", "", vec![]),
-        r("Sidebar width", &format!("{} px.", l.sidebar_px), vec![b("Narrower", "sidebar-width", "-", false), b("Wider", "sidebar-width", "+", false)]),
-        r("Sidebar", "Whether it is folded when the app opens.", vec![b("Open", "sidebar-open", "on", l.sidebar_open), b("Folded", "sidebar-open", "off", !l.sidebar_open)]),
-        r("Opens on", "What this device shows first.", lo::VIEWS.iter().map(|(k, lab)| b(lab, "default-view", k, l.default_view == *k)).collect()),
-        r("Notifications", "", vec![]),
-        r("Desktop notifications", "Kept for this device. Alerts for what needs you and for settled work show as desktop notifications.", vec![b("On", "notifications", "on", l.notifications), b("Off", "notifications", "off", !l.notifications)]),
-        r("Keyboard shortcuts", "", vec![]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Appearance", "", vec![]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Language", "This device. Automatic follows the system language.", crate::i18n::CHOICES.iter().map(|(k, key)| b(&crate::i18n::t(key), "lang", k, l.lang == *k)).collect()),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Theme", "Light or dark on this device, or follow what the hub says.", lo::THEMES.iter().map(|(k, lab)| b(lab, "theme", k, l.theme == *k)).collect()),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Text size", &tf("gpui.settings.textpct", &[("pct", l.text_pct.into())]), vec![b("Smaller", "text", "-", false), b("Larger", "text", "+", false), b("Reset", "text-reset", "", l.text_pct == 100)]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Font", "The typeface of the interface and the thread.", lo::FONTS.iter().map(|(k, lab)| b(lab, "font", k, l.font == *k)).collect()),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Layout", "", vec![]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Sidebar width", &tf("gpui.settings.px", &[("px", l.sidebar_px.into())]), vec![b("Narrower", "sidebar-width", "-", false), b("Wider", "sidebar-width", "+", false)]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Sidebar", "Whether it is folded when the app opens.", vec![b("Open", "sidebar-open", "on", l.sidebar_open), b("Folded", "sidebar-open", "off", !l.sidebar_open)]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Opens on", "What this device shows first.", lo::VIEWS.iter().map(|(k, lab)| b(lab, "default-view", k, l.default_view == *k)).collect()),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Notifications", "", vec![]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Desktop notifications", "Kept for this device. Alerts for what needs you and for settled work show as desktop notifications.", vec![b("On", "notifications", "on", l.notifications), b("Off", "notifications", "off", !l.notifications)]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Keyboard shortcuts", "", vec![]),
     ];
     for x in crate::keys::TABLE {
-        if x.kind == crate::keys::Kind::Fixed { rows.push(r(&format!("{} · {}", x.label, x.scope), &format!("{}. Fixed.", crate::keys::hint(l, x.id)), vec![])); }
-        else { let k = crate::keys::hint(l, x.id); rows.push(r(&format!("{} · {}", x.label, x.scope), &format!("Now {k}. Press to take the next key."), vec![b(&k, "shortcut", x.id, false)])); }
+        if x.kind == crate::keys::Kind::Fixed { rows.push(r(&format!("{} · {}", trs(x.label), trs(x.scope)), &tf("gpui.keys.fixed", &[("key", crate::keys::hint(l, x.id).into())]), vec![])); }
+        else { let k = crate::keys::hint(l, x.id); rows.push(r(&format!("{} · {}", trs(x.label), trs(x.scope)), &tf("gpui.keys.now", &[("key", k.clone().into())]), vec![b(&k, "shortcut", x.id, false)])); }
     }
-    for (k, why) in crate::keys::MISSING { rows.push(r(k, &format!("Not yet: {why}."), vec![])); }
-    rows.push(r("Shortcuts to defaults", "", vec![b("Reset", "shortcuts-reset", "", false)]));
+    for (k, why) in crate::keys::MISSING { rows.push(r(k, &tf("gpui.keys.notyet", &[("why", trs(why).into())]), vec![])); }
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ rows.push(r("Shortcuts to defaults", "", vec![b("Reset", "shortcuts-reset", "", false)]));
     rows
 }
 

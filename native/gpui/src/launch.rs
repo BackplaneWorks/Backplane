@@ -27,7 +27,7 @@ pub fn user_home() -> Option<PathBuf> { crate::plat::user_home() }
 pub fn saved_path() -> Option<PathBuf> { config_dir().map(|d| d.join("launch.json")) }
 pub fn load() -> Saved { saved_path().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default() }
 pub fn save(s: &Saved) -> Result<()> {
-    let p = saved_path().context("no folder for this device's settings")?;
+    let p = saved_path().with_context(|| crate::i18n::trs("No folder for this device's settings."))?;
     if let Some(d) = p.parent() { std::fs::create_dir_all(d)?; }
     std::fs::write(p, serde_json::to_vec_pretty(s)?)?;
     Ok(())
@@ -37,7 +37,7 @@ pub fn forget() { if let Some(p) = saved_path() { let _ = std::fs::remove_file(p
 
 /// Where a home goes when the person takes the default, per system. Each system with a build has a line here.
 pub fn default_home(os: &str, user: &Path) -> PathBuf {
-    match os { "macos" => user.join("Library/Application Support/Backplane/hub"), "windows" => user.join("AppData").join("Roaming").join("Backplane").join("hub"), _ => user.join(".backplane/hub") }
+    /* i18n-ok: folder names */ match os { "macos" => user.join("Library/Application Support/Backplane/hub"), "windows" => user.join("AppData").join("Roaming").join("Backplane").join("hub"), _ => user.join(".backplane/hub") }
 }
 pub fn default_here() -> Option<PathBuf> { user_home().map(|u| default_home(std::env::consts::OS, &u)) }
 
@@ -47,9 +47,9 @@ pub fn old_home(user: &Path) -> Option<PathBuf> { let p = user.join(".backplane-
 /// Why a folder cannot be a home ("" when it can). Pure on what it is told.
 pub fn home_problem(path: &str, old: Option<&Path>) -> &'static str {
     let t = path.trim();
-    if t.is_empty() { return "Choose a folder." }
-    if !Path::new(t).is_absolute() { return "Give the full path, starting at the top of the disk." }
-    if old.map_or(false, |o| Path::new(t).starts_with(o)) { return "That folder belongs to Backplane 0.14. Choose a new one, and 0.14 keeps its data." }
+    /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ if t.is_empty() { return "Choose a folder." }
+    /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ if !Path::new(t).is_absolute() { return "Give the full path, starting at the top of the disk." }
+    /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ if old.map_or(false, |o| Path::new(t).starts_with(o)) { return "That folder belongs to Backplane 0.14. Choose a new one, and 0.14 keeps its data." }
     ""
 }
 /// Whether a folder already holds a hub's data.
@@ -73,8 +73,8 @@ fn free_port(first: u16, last: u16) -> Option<u16> { (first..=last).find(|p| std
 pub fn hub_bin() -> Result<PathBuf> {
     if let Some(p) = std::env::var_os("BACKPLANE_HUB_BIN").filter(|p| !p.is_empty()) { return Ok(p.into()) }
     let me = std::env::current_exe()?;
-    let p = me.parent().context("no folder for this program")?.join("backplane-hub");
-    if p.is_file() { Ok(p) } else { bail!("The hub program is missing from {}. Install Backplane again.", me.parent().unwrap().display()) }
+    let p = me.parent().with_context(|| crate::i18n::trs("No folder for this program."))?.join("backplane-hub");
+    if p.is_file() { Ok(p) } else { bail!("{}", crate::i18n::tf("gpui.launch.hub.missing", &[("dir", me.parent().unwrap().display().to_string().into())])) }
 }
 
 /// An install laid out for the guard (deploy/install.sh.in): this program in `<prefix>/builds/<tag>/`, `<prefix>/CURRENT`, the guard at `<prefix>/backplane`.
@@ -84,7 +84,7 @@ pub fn guarded_install(me: &Path) -> Option<(PathBuf, PathBuf)> {
     if builds.file_name()? != "builds" { return None }
     let prefix = builds.parent()?;
     let guard = prefix.join(if cfg!(windows) { "backplane.exe" } else { "backplane" });
-    (prefix.join("CURRENT").is_file() && guard.is_file()).then(|| (guard, prefix.to_path_buf()))
+    /* i18n-ok: folder names */ (prefix.join("CURRENT").is_file() && guard.is_file()).then(|| (guard, prefix.to_path_buf()))
 }
 
 fn detached(cmd: &mut std::process::Command) {
@@ -98,15 +98,15 @@ fn log_tail(log: &Path) -> String { let t = std::fs::read_to_string(log).unwrap_
 
 /// The hub for this home: the one running there, or a new one. Answers its address and token file once it answers. Blocks, so it runs off the window's thread.
 pub fn ensure_hub(home: &Path) -> Result<(String, PathBuf)> {
-    std::fs::create_dir_all(home).with_context(|| format!("Backplane could not make {}", home.display()))?;
+    std::fs::create_dir_all(home).with_context(|| crate::i18n::tf("gpui.launch.could.not.make", &[("path", home.display().to_string().into())]))?;
     let (lock, token) = (home.join("hub.lock"), home.join("token"));
     if let Some(port) = std::fs::read_to_string(&lock).ok().as_deref().and_then(lock_port) { if answering(port) && token.is_file() { return Ok((format!("http://127.0.0.1:{port}"), token)) } }
-    if let Some(other) = expected_elsewhere(home, &crate::hubs::load()) { bail!("Not starting a new hub in {}: this computer's hub is the one in {}. Start Backplane on that hub.", home.display(), other.display()) }
+    if let Some(other) = expected_elsewhere(home, &crate::hubs::load()) { bail!("{}", crate::i18n::tf("gpui.launch.elsewhere", &[("home", home.display().to_string().into()), ("other", other.display().to_string().into())])) }
     let me = std::env::current_exe()?;
     let guarded = guarded_install(&me).filter(|_| std::env::var_os("BACKPLANE_HUB_BIN").is_none());
     let bin = match &guarded { Some((g, _)) => g.clone(), None => hub_bin()? };
     let want = std::env::var("BACKPLANE_PORT").ok().and_then(|p| p.parse::<u16>().ok());
-    let port = want.or_else(|| free_port(PORT_FIRST, PORT_LAST)).context("No free port between 3800 and 3899.")?;
+    let port = want.or_else(|| free_port(PORT_FIRST, PORT_LAST)).with_context(|| crate::i18n::trs("No free port between 3800 and 3899."))?;
     let log_path = home.join("hub.log");
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
     let mut cmd = std::process::Command::new(&bin);
@@ -118,14 +118,14 @@ pub fn ensure_hub(home: &Path) -> Result<(String, PathBuf)> {
     cmd.stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log);
     if std::env::var_os("BACKPLANE_NO_TAILSCALE").is_some() { cmd.arg("--no-tailscale"); }
     detached(&mut cmd);
-    let mut child = cmd.spawn().with_context(|| format!("Backplane could not start {}", bin.display()))?;
+    let mut child = cmd.spawn().with_context(|| crate::i18n::tf("gpui.launch.could.not.start", &[("path", bin.display().to_string().into())]))?;
     let t0 = Instant::now();
     while t0.elapsed() < Duration::from_secs(60) {
         if answering(port) && token.is_file() { return Ok((format!("http://127.0.0.1:{port}"), token)) }
-        if let Ok(Some(code)) = child.try_wait() { bail!("The hub stopped with code {}. {}", code.code().unwrap_or(-1), log_tail(&log_path)) }
+        if let Ok(Some(code)) = child.try_wait() { bail!("{}", crate::i18n::tf("gpui.launch.stopped", &[("code", code.code().unwrap_or(-1).to_string().into()), ("log", log_tail(&log_path).into())])) }
         std::thread::sleep(Duration::from_millis(100));
     }
-    bail!("The hub did not answer within a minute. Its log is {}.", log_path.display())
+    bail!("{}", crate::i18n::tf("gpui.launch.no.answer", &[("log", log_path.display().to_string().into())]))
 }
 
 /// What a person pasted: an address alone, or a pairing link with its secret after `#invite=`.
@@ -138,25 +138,25 @@ pub fn parse_hub(text: &str) -> Option<(String, Option<String>)> {
 /// The words for an `/auth/enroll` refusal.
 pub fn enroll_error(code: &str) -> &'static str {
     match code {
-        "used_code" => "That code was used already. Make a new one on the other machine.",
-        "expired_code" => "That code expired after ten minutes. Make a new one on the other machine.",
-        "revoked_code" => "That code was revoked. Make a new one on the other machine.",
-        "rate_limited" => "Too many tries. Wait a minute and try again.",
-        "device_limit" => "That hub has too many devices. Revoke one in Settings, Devices.",
-        _ => "That code is wrong. Check it and try again.",
+        /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ "used_code" => "That code was used already. Make a new one on the other machine.",
+        /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ "expired_code" => "That code expired after ten minutes. Make a new one on the other machine.",
+        /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ "revoked_code" => "That code was revoked. Make a new one on the other machine.",
+        /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ "rate_limited" => "Too many tries. Wait a minute and try again.",
+        /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ "device_limit" => "That hub has too many devices. Revoke one in Settings, Devices.",
+        /* i18n-ok: English for the tests; drawn through trs by first.rs and pair() */ _ => "That code is wrong. Check it and try again.",
     }
 }
 /// Pair this device with a hub elsewhere: the code buys a token, kept in a private file. Blocks.
 pub fn pair(addr: &str, code: &str) -> Result<(String, PathBuf)> {
-    let name = std::env::var("HOSTNAME").ok().filter(|n| !n.is_empty()).unwrap_or_else(|| "Backplane desktop".into());
-    let r = ureq::post(&format!("{addr}/auth/enroll")).timeout(Duration::from_secs(10)).set("Authorization", &format!("Bearer {}", code.trim())).set("X-Backplane-Client", "native").set("X-Backplane-Name", &name).call();
+    /* i18n-ok: the device name and header sent to the hub */ let name = std::env::var("HOSTNAME").ok().filter(|n| !n.is_empty()).unwrap_or_else(|| "Backplane desktop".into());
+    /* i18n-ok: the device name and header sent to the hub */ let r = ureq::post(&format!("{addr}/auth/enroll")).timeout(Duration::from_secs(10)).set("Authorization", &format!("Bearer {}", code.trim())).set("X-Backplane-Client", "native").set("X-Backplane-Name", &name).call();
     let v: serde_json::Value = match r {
-        Ok(a) => serde_json::from_str(&a.into_string()?).context("That address did not answer like a hub.")?,
+        Ok(a) => serde_json::from_str(&a.into_string()?).with_context(|| crate::i18n::trs("That address did not answer like a hub."))?,
         Err(ureq::Error::Status(_, a)) => a.into_string().ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(serde_json::Value::Null),
-        Err(_) => bail!("Backplane could not reach {addr}. Check the address and that both machines share a network."),
+        Err(_) => bail!("{}", crate::i18n::tf("gpui.launch.unreachable", &[("addr", addr.into())])),
     };
-    let Some(token) = v["token"].as_str() else { bail!("{}", enroll_error(v["error"].as_str().unwrap_or(""))) };
-    let dir = config_dir().context("no folder for this device's settings")?; std::fs::create_dir_all(&dir)?;
+    let Some(token) = v["token"].as_str() else { bail!("{}", crate::i18n::trs(enroll_error(v["error"].as_str().unwrap_or("")))) };
+    let dir = config_dir().with_context(|| crate::i18n::trs("No folder for this device's settings."))?; std::fs::create_dir_all(&dir)?;
     let file = dir.join("hub-token");
     let mut o = std::fs::OpenOptions::new(); o.create(true).write(true).truncate(true);
     #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; o.mode(0o600); }

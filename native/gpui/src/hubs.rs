@@ -16,7 +16,7 @@ pub struct Hub {
     #[serde(default)]
     pub origin: String,
     /// This computer's own hub only: the token file of the hub the client was started on (`origin` is its address). Empty until the client is started with one.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    /* i18n-ok: a serde attribute */ #[serde(default, skip_serializing_if = "String::is_empty")]
     pub token_file: String,
 }
 impl Hub {
@@ -24,7 +24,7 @@ impl Hub {
     pub fn remote(origin: &str) -> Hub { Hub { key: crate::pairing::host_port(origin).0, origin: origin.trim_end_matches('/').to_string(), token_file: String::new() } }
     pub fn is_local(&self) -> bool { self.key == LOCAL }
     /// What the picker and the Hubs page call it.
-    pub fn label(&self) -> String { if self.is_local() { "This computer".into() } else { self.key.clone() } }
+    /* i18n-ok: the label is what drivers press; drawn through trs */ pub fn label(&self) -> String { if self.is_local() { "This computer".into() } else { self.key.clone() } }
     /// ws:// or wss:// address of a paired hub.
     pub fn ws(&self) -> String { crate::pairing::ws_of(&self.origin) }
 }

@@ -81,7 +81,7 @@ impl Win {
     pub fn voice_sent(&mut self, cx: &mut Context<Self>) { let v = self.screens.voice.views.get(&self.selected); if v.map_or(false, |v| !v["ask"].is_null() || v["fixes"].as_array().map_or(false, |a| !a.is_empty())) { self.voice_act("voice-clear", "", cx); } }
     fn voice_fix_open(&mut self, seed: String, cx: &mut Context<Self>) {
         if self.screens.voice.fix.is_some() { return }
-        let input = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); c.set_placeholder("The right spelling"); c.set(seed, cx); c });
+        /* i18n-ok: the hint, drawn through trs by the composer */ let input = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); c.set_placeholder("The right spelling"); c.set(seed, cx); c });
         cx.subscribe(&input, |this, i, e: &ComposerEvent, cx| if matches!(e, ComposerEvent::Submit) { let t = i.read(cx).content.to_string(); this.voice_act("voice-fixed", &t, cx); }).detach();
         self.screens.voice.fix = Some(input);
     }
@@ -90,7 +90,7 @@ impl Win {
 fn button(cx: &mut Context<Win>, light: bool, id: SharedString, label: String, primary: bool, tip: bool, f: impl Fn(&mut Win, &mut Context<Win>) + 'static) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n); let _ = tip;
     div().id(id).px_2().py_1().cursor_pointer().border_1().border_color(c(if primary { "accent" } else { "line" })).bg(c(if primary { "accent" } else { "panel" })).text_color(c(if primary { "on-accent" } else { "text" }))
-        .text_size(px(12.)).whitespace_nowrap().child(label).on_click(cx.listener(move |this, _, _, cx| f(this, cx)))
+        .text_size(px(12.)).whitespace_nowrap().child(crate::i18n::trs(&label)).on_click(cx.listener(move |this, _, _, cx| f(this, cx)))
 }
 /// What shows above the composer for this thread: a strip while on, a note when something is wrong, the fixes as chips that undo, the word to clarify.
 pub fn view(cx: &mut Context<Win>, light: bool, v: &Value, level: u32, fix: Option<&Entity<Composer>>) -> Option<AnyElement> {
@@ -99,11 +99,11 @@ pub fn view(cx: &mut Context<Win>, light: bool, v: &Value, level: u32, fix: Opti
     let c = |n: &str| theme::color(light, n);
     let mut col = div().id("voice").flex().flex_col().gap_1().text_size(px(12.));
     if !note.is_empty() {
-        col = col.child(div().flex().items_center().gap_2().child(div().flex_1().min_w_0().text_color(c(if v["bad"] == true { "bad" } else { "dim" })).child(note.to_string()))
-            .child(button(cx, light, "voice-err".into(), "Close".into(), false, false, |w, cx| w.voice_act("voice-err", "", cx))));
+        col = col.child(div().flex().items_center().gap_2().child(div().flex_1().min_w_0().text_color(c(if v["bad"] == true { "bad" } else { "dim" })).child(crate::i18n::trs(note)))
+            /* i18n-ok: drawn through trs in button */ .child(button(cx, light, "voice-err".into(), "Close".into(), false, false, |w, cx| w.voice_act("voice-err", "", cx))));
     }
     if on {
-        col = col.child(div().id("voice-strip").flex().items_center().gap_2().child(div().size(px(8.)).bg(c("bad"))).child(div().text_color(c("dim")).child(s(v, "status").to_string()))
+        col = col.child(div().id("voice-strip").flex().items_center().gap_2().child(div().size(px(8.)).bg(c("bad"))).child(div().text_color(c("dim")).child(crate::i18n::trs(s(v, "status"))))
             .child(div().w(px(72.)).h(px(4.)).bg(c("line")).child(div().h_full().w(px(0.72 * level.min(100) as f32)).bg(c("accent"))))
             .child(div().flex_1()).child(button(cx, light, "voice-stop".into(), s(v, "stop").to_string(), false, false, |w, cx| w.voice_press(cx))));
     }
@@ -113,7 +113,7 @@ pub fn view(cx: &mut Context<Win>, light: bool, v: &Value, level: u32, fix: Opti
         col = col.child(row);
     }
     if !ask.is_null() {
-        let mut row = div().flex().flex_wrap().items_center().gap_1().child(div().text_color(c("dim")).child(s(ask, "text").to_string()));
+        let mut row = div().flex().flex_wrap().items_center().gap_1().child(div().text_color(c("dim")).child(crate::i18n::trs(s(ask, "text"))));
         if let (true, Some(i)) = (ask["fixing"] == true, fix) { row = row.child(div().w(px(220.)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(i.clone())); }
         for (n, b) in ask["buttons"].as_array().cloned().unwrap_or_default().iter().enumerate() {
             let (a, val, input) = (s(b, "action").to_string(), s(b, "value").to_string(), fix.cloned());

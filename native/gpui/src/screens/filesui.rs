@@ -4,6 +4,7 @@
 //! through `/files/get` and `/files/zip`. Pure rules (filter, selection keys, names, paths) are first and tested; the element code only lays out.
 use super::{attach::Target, composer::{Composer, ComposerEvent}, images::Slot, settings::Secret, viewer::{self, FileRow}};
 use crate::{hub::Command, theme, Backplane};
+use crate::i18n::{t, tf, trs};
 use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf};
@@ -73,9 +74,9 @@ pub fn glyph(kind: &str) -> (&'static str, &'static str) {
 /// The context menu of a row: (id, label).
 pub fn menu_items(r: &FileRow) -> Vec<(&'static str, &'static str)> {
     let mut v = vec![];
-    if !r.action.is_empty() { v.push(("open", "Open")) }
-    if !r.down().is_empty() { v.push(("download", if r.kind == "folder" { "Download as zip" } else { "Download" })) }
-    v.push(("rename", "Rename")); v.push(("copy", "Copy path")); v.push(("delete", "Delete"));
+    /* i18n-ok: drawn through trs */ if !r.action.is_empty() { v.push(("open", "Open")) }
+    /* i18n-ok: drawn through trs */ if !r.down().is_empty() { v.push(("download", if r.kind == "folder" { "Download as zip" } else { "Download" })) }
+    /* i18n-ok: drawn through trs */ v.push(("rename", "Rename")); v.push(("copy", "Copy path")); v.push(("delete", "Delete"));
     v
 }
 /// The decoded `path` of a `/img?path=…` url (the open file's absolute path).
@@ -92,7 +93,7 @@ pub fn path_of_url(url: &str) -> String {
 pub fn unique(name: &str, taken: &dyn Fn(&str) -> bool) -> String {
     if !taken(name) { return name.to_string() }
     let (stem, ext) = match name.rfind('.') { Some(i) if i > 0 => (&name[..i], &name[i..]), _ => (name, "") };
-    (1..).map(|n| format!("{stem} ({n}){ext}")).find(|c| !taken(c)).unwrap()
+    /* i18n-ok: a file name */ (1..).map(|n| format!("{stem} ({n}){ext}")).find(|c| !taken(c)).unwrap()
 }
 /// A name the saver may write: no path parts.
 pub fn save_name(n: &str) -> String { let n = n.rsplit(['/', '\\']).next().unwrap_or(""); let n = n.trim_start_matches('.'); if n.is_empty() { "download".into() } else { n.replace(['\0', '\n', '\r'], "_") } }
@@ -110,7 +111,7 @@ fn filter_text(this: &Backplane, cx: &App) -> String { this.screens.files.filter
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.files.filter.is_none() {
         let f = cx.new(|cx| Composer::with_context(cx, "AskInput"));
-        f.update(cx, |i, _| i.set_placeholder("Filter this folder"));
+        f.update(cx, |i, _| i.set_placeholder(&trs("Filter this folder")));
         cx.observe(&f, |this, _, cx| { this.screens.files.sel = None; cx.notify(); }).detach();
         let n = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         cx.subscribe(&n, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { commit_name(this, cx); }).detach();
@@ -142,22 +143,22 @@ fn ask_pdf(this: &mut Backplane, page: u32) {
 }
 fn fetch_text(this: &mut Backplane, url: String, cx: &mut Context<Backplane>) {
     this.screens.files.texts.insert(url.clone(), Text::Loading);
-    let Some(t) = this.screens.attacher.target.clone() else { this.screens.files.texts.insert(url, Text::Failed("no hub address".into())); return };
+    /* i18n-ok: English kept, drawn through trs */ let Some(t) = this.screens.attacher.target.clone() else { this.screens.files.texts.insert(url, Text::Failed("no hub address".into())); return };
     cx.spawn(async move |weak, cx| {
         let u = url.clone();
         let r = cx.background_executor().spawn(async move { http_get(&t, &u, MAX_TEXT) }).await;
         let _ = weak.update(cx, |this, cx| { this.screens.files.texts.insert(url, match r { Ok(b) => Text::Ready(String::from_utf8_lossy(&b).into_owned()), Err(e) => Text::Failed(e) }); cx.notify(); });
     }).detach();
 }
-/// GET `url` on the hub with the token, at most `max` bytes.
+/// GET `url` on the hub with the token, at most `max` bytes. Its errors are English; where one is drawn it goes through the catalog.
 pub fn http_get(t: &Target, url: &str, max: usize) -> Result<Vec<u8>, String> {
-    if !super::images::safe_url(url) { return Err("not a hub path".into()) }
+    /* i18n-ok: English kept, drawn through trs */ if !super::images::safe_url(url) { return Err("not a hub path".into()) }
     use std::io::{Read, Write};
     let mut s = t.stream().map_err(|e| e.to_string())?; s.set_timeouts(std::time::Duration::from_secs(60)).map_err(|e| e.to_string())?;
     s.write_all(super::images::request(t, url).as_bytes()).map_err(|e| e.to_string())?;
     let mut b = Vec::new(); s.take(max as u64 + 65536).read_to_end(&mut b).map_err(|e| e.to_string())?;
-    let (status, body) = super::images::split(&b).ok_or("the hub gave no answer")?;
-    if status != 200 { return Err(format!("the hub answered {status}")) }
+    /* i18n-ok: English kept, drawn through trs */ let (status, body) = super::images::split(&b).ok_or("the hub gave no answer")?;
+    /* i18n-ok: English kept, drawn through trs */ if status != 200 { return Err(format!("the hub answered {status}")) }
     Ok(body[..body.len().min(max)].to_vec())
 }
 
@@ -173,14 +174,14 @@ pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str, cx: &mut C
     match tag {
         "files-op" => {
             if ok { let v: Value = serde_json::from_str(why).unwrap_or(Value::Null); let o = v["op"].as_str().unwrap_or("");
-                say(this, match o { "mkdir" => "Folder created", "rename" => "Renamed", "delete" => "Deleted", _ => "Uploaded" }, cx); refresh(this); }
-            else { say(this, if why.is_empty() { "The hub refused".to_string() } else { why.to_string() }, cx); }
+                say(this, match o { "mkdir" => trs("Folder created"), "rename" => trs("Renamed"), "delete" => trs("Deleted"), _ => trs("Uploaded") }, cx); refresh(this); }
+            else { say(this, if why.is_empty() { trs("The hub refused") } else { trs(why) }, cx); }
         }
         "files-pdf" => {
             let v: Value = serde_json::from_str(why).unwrap_or(Value::Null);
             let p = &mut this.screens.files.pdf;
             if ok && v["pdfPath"].as_str() == Some(p.path.as_str()) { p.png = v["pdfPng"].as_str().unwrap_or("").to_string(); p.pages = v["pdfPages"].as_u64().unwrap_or(0) as u32; p.err = v["pdfErr"].as_str().unwrap_or("").to_string(); }
-            else if !ok { p.err = why.to_string(); }
+            else if !ok { p.err = trs(why); }
             cx.notify();
         }
         _ => {}
@@ -192,8 +193,8 @@ fn commit_name(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let text = name.read(cx).content.trim().to_string();
     let dir = this.screens.files.dir.clone();
     match this.screens.files.mode.clone() {
-        Mode::NewFolder => { if !valid_name(&text) { return say(this, "A folder name is one plain name, not starting with a dot", cx) } op(this, json!({"op":"mkdir","path":join(&dir, &text)})); }
-        Mode::Rename(path) => { if !valid_name(&text) { return say(this, "A name is one plain name, not starting with a dot", cx) } op(this, json!({"op":"rename","path":path,"to":text})); }
+        Mode::NewFolder => { if !valid_name(&text) { return say(this, trs("A folder name is one plain name, not starting with a dot"), cx) } op(this, json!({"op":"mkdir","path":join(&dir, &text)})); }
+        Mode::Rename(path) => { if !valid_name(&text) { return say(this, trs("A name is one plain name, not starting with a dot"), cx) } op(this, json!({"op":"rename","path":path,"to":text})); }
         _ => return,
     }
     this.screens.files.mode = Mode::Browse; cx.notify();
@@ -222,7 +223,7 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
     this.screens.files.menu = None;
     match d {
         Do::Select(i) => { this.screens.files.sel = Some(i); if let Some(w) = window { if let Some(f) = &this.screens.files.focus { w.focus(f); } } }
-        Do::Open(i) => if let Some(r) = row(i) { if !r.action.is_empty() { let _ = this.tx.try_send(Command::Action(r.action.clone(), r.value.clone())); } else { say(this, format!("{} has no preview here", r.label), cx) } },
+        Do::Open(i) => if let Some(r) = row(i) { if !r.action.is_empty() { let _ = this.tx.try_send(Command::Action(r.action.clone(), r.value.clone())); } else { say(this, tf("gpui.b.files.no.preview", &[("name", r.label.into())]), cx) } },
         Do::Up => { let _ = this.tx.try_send(Command::Action("fm-up".into(), String::new())); }
         Do::Back => { let _ = this.tx.try_send(Command::Action("fm".into(), String::new())); }
         Do::Download(i) => if let Some(r) = row(i) { download(this, r.down(), r.label.clone(), r.kind == "folder", cx) },
@@ -231,7 +232,7 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
         Do::NewFolder => { this.screens.files.mode = Mode::NewFolder; if let Some(n) = this.screens.files.name.clone() { n.update(cx, |x, cx| x.set(String::new(), cx)); if let Some(w) = window { w.focus(&n.read(cx).focus_handle(cx)); } } }
         Do::Delete(i) => if let Some(r) = row(i) { this.screens.files.mode = Mode::Delete(r.value.clone()) },
         Do::ConfirmDelete => { if let Mode::Delete(p) = this.screens.files.mode.clone() { op(this, json!({"op":"delete","path":p})); } this.screens.files.mode = Mode::Browse; }
-        Do::Copy(i) => if let Some(r) = row(i) { cx.write_to_clipboard(ClipboardItem::new_string(r.value.clone())); say(this, format!("Copied {}", r.value), cx) },
+        Do::Copy(i) => if let Some(r) = row(i) { cx.write_to_clipboard(ClipboardItem::new_string(r.value.clone())); say(this, tf("gpui.b.files.copied", &[("path", r.value.into())]), cx) },
         Do::PickUpload => { let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
             cx.spawn(async move |weak, cx| { if let Ok(Ok(Some(paths))) = rx.await { let _ = weak.update(cx, |this, cx| act(this, Do::Upload(paths), None, cx)); } }).detach(); }
         Do::Upload(paths) => upload(this, paths, &dir, cx),
@@ -257,10 +258,10 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
 
 /// Save `url` (a hub path) as a file in the downloads folder (never over a file). The window says where it went.
 pub fn download(this: &mut Backplane, url: String, name: String, zip: bool, cx: &mut Context<Backplane>) {
-    let Some(t) = this.screens.attacher.target.clone() else { return say(this, "No hub address to download from", cx) };
-    if url.is_empty() { return say(this, "This entry cannot be downloaded", cx) }
+    let Some(t) = this.screens.attacher.target.clone() else { return say(this, trs("No hub address to download from"), cx) };
+    if url.is_empty() { return say(this, trs("This entry cannot be downloaded"), cx) }
     let mut file = save_name(&name); if zip && !file.to_lowercase().ends_with(".zip") { file.push_str(".zip") }
-    say(this, format!("Downloading {file}…"), cx);
+    say(this, tf("gpui.b.files.downloading", &[("file", (&file).into())]), cx);
     cx.spawn(async move |weak, cx| {
         let r = cx.background_executor().spawn(async move {
             let b = http_get(&t, &url, 260 << 20)?;
@@ -268,21 +269,23 @@ pub fn download(this: &mut Backplane, url: String, name: String, zip: bool, cx: 
             let name = unique(&file, &|n| dir.join(n).exists()); let p = dir.join(&name);
             std::fs::write(&p, &b).map_err(|e| e.to_string())?; Ok::<_, String>((p, b.len()))
         }).await;
-        let _ = weak.update(cx, |this, cx| { let (m, ok) = match &r { Ok((p, n)) => (format!("Saved {} ({} bytes)", p.display(), n), true), Err(e) => (format!("Download failed: {e}"), false) };
-            this.m("files_download", json!({"ok": ok, "message": m, "path": r.as_ref().ok().map(|(p, _)| p.display().to_string()), "bytes": r.as_ref().ok().map(|x| x.1)})); say(this, m, cx); });
+        // the metric keeps the English words (scripts read it); the window says them in the language in force
+        let _ = weak.update(cx, |this, cx| { /* i18n-ok: the metric's English */ let (m, ok) = match &r { Ok((p, n)) => (format!("Saved {} ({} bytes)", p.display(), n), true), Err(e) => (format!("Download failed: {e}"), false) };
+            let said = match &r { Ok((p, n)) => tf("gpui.b.files.saved", &[("path", p.display().to_string().into()), ("n", (*n).into())]), Err(e) => tf("gpui.b.files.download.failed", &[("why", trs(e).into())]) };
+            this.m("files_download", json!({"ok": ok, "message": m, "path": r.as_ref().ok().map(|(p, _)| p.display().to_string()), "bytes": r.as_ref().ok().map(|x| x.1)})); say(this, said, cx); });
     }).detach();
 }
 
 fn upload(this: &mut Backplane, paths: Vec<PathBuf>, dir: &str, cx: &mut Context<Backplane>) {
     let thread = thread_id(this); let dir = dir.to_string();
-    say(this, format!("Uploading {} file(s)…", paths.len()), cx);
+    say(this, tf("gpui.b.files.uploading", &[("n", paths.len().into())]), cx);
     cx.spawn(async move |weak, cx| {
         let read = cx.background_executor().spawn(async move {
             use base64::Engine;
             paths.into_iter().map(|p| { let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                if !valid_name(&name) { return Err(format!("\"{name}\" cannot be uploaded (hidden or odd name)")) }
-                let md = std::fs::metadata(&p).map_err(|e| e.to_string())?; if !md.is_file() { return Err(format!("{name} is not a file")) }
-                if md.len() > 24 << 20 { return Err(format!("{name} is over 24 MB")) }
+                if !valid_name(&name) { return Err(tf("gpui.b.files.odd.name", &[("name", (&name).into())])) }
+                let md = std::fs::metadata(&p).map_err(|e| e.to_string())?; if !md.is_file() { return Err(tf("gpui.b.files.not.a.file", &[("name", (&name).into())])) }
+                if md.len() > 24 << 20 { return Err(tf("gpui.b.files.too.big", &[("name", (&name).into())])) }
                 let b = std::fs::read(&p).map_err(|e| e.to_string())?; Ok((name, base64::engine::general_purpose::STANDARD.encode(b))) }).collect::<Vec<Result<(String, String), String>>>()
         }).await;
         let _ = weak.update(cx, |this, cx| {
@@ -299,7 +302,7 @@ fn upload(this: &mut Backplane, paths: Vec<PathBuf>, dir: &str, cx: &mut Context
 fn small_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static str, label: &str, d: Do) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     viewer::tall(div().id(SharedString::from(id.to_string()))).gap_1().px_2().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel")))
-        .child(crate::art::icon(icon, 13., c("text"))).child(label.to_string())
+        .child(crate::art::icon(icon, 13., c("text"))).child(label.to_string()) // (the label comes in the language in force)
         .on_click(cx.listener(move |this, _, w, cx| act(this, d.clone(), Some(w), cx))).into_any_element()
 }
 
@@ -315,7 +318,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     let mut crumbs = div().flex().flex_wrap().items_center().flex_1().min_w_0().text_size(px(12.));
     for (i, cr) in trail.iter().enumerate() {
         let (a, v) = (cr.action.clone(), cr.value.clone());
-        crumbs = crumbs.child(div().id(SharedString::from(format!("crumb-{i}"))).px_1().cursor_pointer().text_color(c(if i + 1 == trail.len() { "text" } else { "accent" })).hover(|s| s.bg(c("raise"))).child(cr.label.clone())
+        crumbs = crumbs.child(div().id(SharedString::from(format!("crumb-{i}"))).px_1().cursor_pointer().text_color(c(if i + 1 == trail.len() { "text" } else { "accent" })).hover(|s| s.bg(c("raise"))).child(cr.label.clone()) // (a folder's name)
             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })));
         if i + 1 < trail.len() { crumbs = crumbs.child(div().text_color(c("faint")).child("/")); }
     }
@@ -323,7 +326,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     let mut bar = viewer::bar_wrap(light)
         .child(div().id("fm-up").px_1().cursor_pointer().when(at_root, |d| d.opacity(0.35)).child(crate::art::icon("arrow-up", 14., c("text"))).on_click(cx.listener(|this, _, w, cx| act(this, Do::Up, Some(w), cx))))
         .child(crumbs);
-    bar = bar.child(small_btn(cx, light, "fm-new", "folder-plus", "New", Do::NewFolder)).child(small_btn(cx, light, "fm-upload", "arrow-up", "Upload", Do::PickUpload)).child(small_btn(cx, light, "fm-zip", "download", "Zip", Do::DownloadDir)).child(actions);
+    bar = bar.child(small_btn(cx, light, "fm-new", "folder-plus", &t("gpui.b.files.new"), Do::NewFolder)).child(small_btn(cx, light, "fm-upload", "arrow-up", &trs("Upload"), Do::PickUpload)).child(small_btn(cx, light, "fm-zip", "download", &trs("Zip"), Do::DownloadDir)).child(actions);
     let mut col = div().size_full().flex().flex_col().relative();
     if let Some(f) = focus.clone() { col = col.track_focus(&f); }
     col = col.key_context("FilesPage").on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| {
@@ -338,19 +341,19 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     // filter + status line
     let filt = div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).child(crate::art::icon("search", 13., c("dim")))
         .child(div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).children(ui.filter.clone()))
-        .child(div().text_size(px(11.)).text_color(c("dim")).child(if q.trim().is_empty() { format!("{} items", rows.len()) } else { format!("{} of {}", vis.len(), rows.len()) }));
+        .child(div().text_size(px(11.)).text_color(c("dim")).child(if q.trim().is_empty() { tf("gpui.b.files.items", &[("n", rows.len().into())]) } else { tf("gpui.b.files.of", &[("shown", vis.len().into()), ("n", rows.len().into())]) }));
     col = col.child(filt);
     match &ui.mode {
         Mode::Rename(_) | Mode::NewFolder => {
             col = col.child(div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).bg(c("raise")).text_size(px(12.))
-                .child(if ui.mode == Mode::NewFolder { "New folder" } else { "Rename to" })
+                .child(if ui.mode == Mode::NewFolder { trs("New folder") } else { trs("Rename to") })
                 .child(div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("accent")).bg(c("view")).children(ui.name.clone()))
-                .child(small_btn(cx, light, "fm-name-ok", "plus", "OK", Do::Key("name-ok".into())))
-                .child(small_btn(cx, light, "fm-name-cancel", "x", "Cancel", Do::Cancel)));
+                .child(small_btn(cx, light, "fm-name-ok", "plus", &trs("OK"), Do::Key("name-ok".into())))
+                .child(small_btn(cx, light, "fm-name-cancel", "x", &trs("Cancel"), Do::Cancel)));
         }
         Mode::Delete(p) => {
-            col = col.child(div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).child(div().flex_1().min_w_0().child(format!("Delete {p}? This cannot be undone.")))
-                .child(small_btn(cx, light, "fm-del-yes", "trash", "Delete", Do::ConfirmDelete)).child(small_btn(cx, light, "fm-del-no", "x", "Keep", Do::Cancel)));
+            col = col.child(div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).child(div().flex_1().min_w_0().child(tf("gpui.b.files.delete.ask", &[("path", p.into())])))
+                .child(small_btn(cx, light, "fm-del-yes", "trash", &trs("Delete"), Do::ConfirmDelete)).child(small_btn(cx, light, "fm-del-no", "x", &trs("Keep"), Do::Cancel)));
         }
         Mode::Browse => {}
     }
@@ -365,12 +368,12 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
         list = list.child(div().id(SharedString::from(format!("file-{n}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).when(on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
             .child(crate::art::icon(ic, 15., c(tok)))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(c(if has_open || r.kind == "folder" { "text" } else { "dim" })).child(r.label.clone()))
-            .child(div().text_size(px(11.)).text_color(c("dim")).child(r.detail.clone()))
+            .child(div().text_size(px(11.)).text_color(c("dim")).child(trs(&r.detail)))
             .on_click(cx.listener(move |this, e: &ClickEvent, w, cx| { if e.click_count() >= 2 || this.screens.files.sel == Some(a_open) { act(this, Do::Open(a_open), Some(w), cx) } else { act(this, Do::Select(a_open), Some(w), cx) } }))
             .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, w, cx| { this.screens.files.sel = Some(a_open); this.screens.files.menu = Some((a_open, e.position)); if let Some(f) = &this.screens.files.focus { w.focus(f); } cx.notify(); })));
     }
-    if rows.len() > MAX_ROWS { list = list.child(div().px_3().py_1().text_color(c("dim")).child(format!("… {} more; filter to find them", rows.len() - MAX_ROWS))); }
-    if vis.is_empty() { list = list.child(div().px_3().py_2().text_color(c("dim")).child(if files["ready"] == false { "Loading…".to_string() } else if !files["error"].as_str().unwrap_or("").is_empty() { files["error"].as_str().unwrap_or("").to_string() } else if rows.is_empty() { "Empty folder. Drop files here to upload.".to_string() } else { "Nothing matches".to_string() })); }
+    if rows.len() > MAX_ROWS { list = list.child(div().px_3().py_1().text_color(c("dim")).child(tf("gpui.b.files.more", &[("n", (rows.len() - MAX_ROWS).into())]))); }
+    if vis.is_empty() { list = list.child(div().px_3().py_2().text_color(c("dim")).child(if files["ready"] == false { trs("Loading…") } else if !files["error"].as_str().unwrap_or("").is_empty() { trs(files["error"].as_str().unwrap_or("")) } else if rows.is_empty() { trs("Empty folder. Drop files here to upload.") } else { trs("Nothing matches") })); }
     list = list.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| { this.m("files_drop", json!({"paths": paths.paths().iter().map(|p| p.display().to_string()).collect::<Vec<_>>()})); act(this, Do::Upload(paths.paths().to_vec()), None, cx) }));
     col = col.child(list);
     if let Some((i, pos)) = ui.menu {
@@ -378,7 +381,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
             let items = menu_items(r);
             let menu = div().id("fm-menu").occlude().min_w(px(150.)).py_1().border_1().border_color(c("line")).bg(c("view")).shadow_md().text_size(px(12.))
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.files.menu = None; cx.notify(); }))
-                .children(items.into_iter().map(|(id, label)| div().id(SharedString::from(format!("fm-menu-{id}"))).px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_color(c(if id == "delete" { "bad" } else { "text" })).child(label)
+                .children(items.into_iter().map(|(id, label)| div().id(SharedString::from(format!("fm-menu-{id}"))).px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_color(c(if id == "delete" { "bad" } else { "text" })).child(trs(label))
                     .on_click(cx.listener(move |this, _, w, cx| { let d = match id { "open" => Do::Open(i), "download" => Do::Download(i), "rename" => Do::Rename(i), "copy" => Do::Copy(i), _ => Do::Delete(i) }; act(this, d, Some(w), cx) }))));
             col = col.child(deferred(anchored().position(pos).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2));
         }
@@ -392,7 +395,7 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
     let name = viewer["file"]["name"].as_str().unwrap_or("").to_string();
     let url = viewer["file"]["url"].as_str().unwrap_or("").to_string();
     let mut bar = viewer::bar_wrap(light)
-        .child(small_btn(cx, light, "fm-back", "chevron-left", "Files", Do::Back))
+        .child(small_btn(cx, light, "fm-back", "chevron-left", &trs("Files"), Do::Back))
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(12.)).child(name.clone()));
     if open == "pdf" && ui.pdf.pages > 0 {
         let (p, n) = (ui.pdf.page, ui.pdf.pages);
@@ -404,14 +407,14 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
     let img_el = |url: &str| -> AnyElement {
         match images.get(target, url) {
             Slot::Ready(img) => { let (w, h) = super::images::dims(&img.bytes).map_or((480., 360.), |(w, h)| super::images::fit(w, h, 480., 4000.)); div().p_3().child(div().w(px(w)).h(px(h)).flex_none().child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain))).into_any_element() }
-            Slot::Loading => div().p_3().text_color(c("dim")).child("Loading…").into_any_element(),
-            Slot::Failed => div().p_3().text_color(c("bad")).child("Could not load the file").into_any_element(),
+            Slot::Loading => div().p_3().text_color(c("dim")).child(trs("Loading…")).into_any_element(),
+            Slot::Failed => div().p_3().text_color(c("bad")).child(trs("Could not load the file")).into_any_element(),
         }
     };
     let body: AnyElement = match open {
         "image" => img_el(&url),
         "pdf" => if !ui.pdf.err.is_empty() { div().p_3().text_color(c("bad")).child(ui.pdf.err.clone()).into_any_element() }
-            else if ui.pdf.png.is_empty() { div().p_3().text_color(c("dim")).child("Drawing the page…").into_any_element() }
+            else if ui.pdf.png.is_empty() { div().p_3().text_color(c("dim")).child(trs("Drawing the page…")).into_any_element() }
             else { img_el(&format!("/img?path={}", super::attach::enc(&ui.pdf.png))) },
         _ if viewer["file"]["blocks"].as_array().map_or(false, |b| !b.is_empty()) => {
             // a Markdown note: the hub sent its nodes, drawn as the chat draws a reply
@@ -421,8 +424,8 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
         }
         _ => match ui.texts.get(&url) {
             Some(Text::Ready(t)) => text_block(light, &name, t),
-            Some(Text::Failed(e)) => div().p_3().text_color(c("bad")).child(e.clone()).into_any_element(),
-            _ => div().p_3().text_color(c("dim")).child("Loading…").into_any_element(),
+            Some(Text::Failed(e)) => div().p_3().text_color(c("bad")).child(trs(e)).into_any_element(),
+            _ => div().p_3().text_color(c("dim")).child(trs("Loading…")).into_any_element(),
         },
     };
     div().size_full().flex().flex_col().child(bar).child(div().id("fm-preview").flex_1().min_h_0().overflow_y_scroll().child(body)).into_any_element()
@@ -447,15 +450,15 @@ pub fn script(this: &mut Backplane, spec: &str, cx: &mut Context<Backplane>) -> 
     let idx = |a: &str, this: &Backplane, cx: &App| -> Result<usize, String> {
         if let Ok(n) = a.parse::<usize>() { return Ok(n) }
         let (rows, _) = rows_now(this); let vis = visible(&rows, &filter_text(this, cx));
-        vis.iter().position(|&k| rows[k].label == a).ok_or_else(|| format!("no row named {a}"))
+        /* i18n-ok: a script step's error, for the e2e driver */ vis.iter().position(|&k| rows[k].label == a).ok_or_else(|| format!("no row named {a}"))
     };
     match cmd {
         "select" => { let i = idx(arg, this, cx)?; act(this, Do::Select(i), None, cx) }
         "open" => { let i = idx(arg, this, cx)?; act(this, Do::Open(i), None, cx) }
         "key" => act(this, Do::Key(arg.to_string()), None, cx),
-        "filter" => { let f = this.screens.files.filter.clone().ok_or("no filter field")?; f.update(cx, |i, cx| i.set(arg.to_string(), cx)); this.screens.files.sel = None; cx.notify() }
-        "new" => { act(this, Do::NewFolder, None, cx); let n = this.screens.files.name.clone().ok_or("no name field")?; n.update(cx, |i, cx| i.set(arg.to_string(), cx)); commit_name(this, cx) }
-        "rename" => { let (a, to) = arg.split_once(':').ok_or("rename:N:name")?; let i = idx(a, this, cx)?; act(this, Do::Rename(i), None, cx); let n = this.screens.files.name.clone().ok_or("no name field")?; n.update(cx, |x, cx| x.set(to.to_string(), cx)); commit_name(this, cx) }
+        /* i18n-ok: a script step's error */ "filter" => { let f = this.screens.files.filter.clone().ok_or("no filter field")?; f.update(cx, |i, cx| i.set(arg.to_string(), cx)); this.screens.files.sel = None; cx.notify() }
+        /* i18n-ok: a script step's error */ "new" => { act(this, Do::NewFolder, None, cx); let n = this.screens.files.name.clone().ok_or("no name field")?; n.update(cx, |i, cx| i.set(arg.to_string(), cx)); commit_name(this, cx) }
+        /* i18n-ok: a script step's error */ "rename" => { let (a, to) = arg.split_once(':').ok_or("rename:N:name")?; let i = idx(a, this, cx)?; act(this, Do::Rename(i), None, cx); let n = this.screens.files.name.clone().ok_or("no name field")?; n.update(cx, |x, cx| x.set(to.to_string(), cx)); commit_name(this, cx) }
         "delete" => { let i = idx(arg, this, cx)?; act(this, Do::Delete(i), None, cx) }
         "confirm_delete" => act(this, Do::ConfirmDelete, None, cx),
         "menu" => { let i = idx(arg, this, cx)?; this.screens.files.menu = Some((i, point(px(300.), px(200.)))); this.screens.files.sel = Some(i); cx.notify() }
@@ -463,11 +466,11 @@ pub fn script(this: &mut Backplane, spec: &str, cx: &mut Context<Backplane>) -> 
         "download" => { let i = idx(arg, this, cx)?; act(this, Do::Download(i), None, cx) }
         "zip" => act(this, Do::DownloadDir, None, cx),
         "copy" => { let i = idx(arg, this, cx)?; act(this, Do::Copy(i), None, cx) }
-        "shot" => { let out = std::process::Command::new("import").args(["-window", "root", arg]).status().map_err(|e| e.to_string())?; if !out.success() { return Err("import failed".into()) } }
+        /* i18n-ok: a script step's error */ "shot" => { let out = std::process::Command::new("import").args(["-window", "root", arg]).status().map_err(|e| e.to_string())?; if !out.success() { return Err("import failed".into()) } }
         "up" => act(this, Do::Up, None, cx),
         "back" => act(this, Do::Back, None, cx),
         "cancel" => act(this, Do::Cancel, None, cx),
-        _ => return Err(format!("unknown files step {cmd}")),
+        /* i18n-ok: a script step's error */ _ => return Err(format!("unknown files step {cmd}")),
     }
     Ok(())
 }

@@ -1,5 +1,5 @@
 //! Generated from the existing web theme, rather than a second palette.
-include!(concat!(env!("OUT_DIR"), "/theme.rs"));
+/* i18n-ok: css parsing and build checks */ include!(concat!(env!("OUT_DIR"), "/theme.rs"));
 pub fn color(light: bool, name:&str)->gpui::Rgba {
     let find=|palette:&[(&str,u32)]|palette.iter().find(|(k,_)|*k==name).map(|(_,v)|*v);
     // A token the light block does not redefine inherits :root, as in CSS.
@@ -25,13 +25,13 @@ pub fn tokens(light: bool) -> Vec<(&'static str, u32)> {
     }
     #[test] fn tokens_equal_the_css() {
         let css = include_str!("../../../assets/web/style.css");
-        for (selector, palette, light) in [(":root {", DARK, false), ("html.light, .app.light, .bub-move.light {", LIGHT, true)] {
+        /* i18n-ok: css parsing and build checks */ for (selector, palette, light) in [(":root {", DARK, false), ("html.light, .app.light, .bub-move.light {", LIGHT, true)] {
             let want = block(css, selector);
-            assert!(want.len() >= 17, "{selector}: parsed {} tokens", want.len());
-            for (k, v) in &want { assert_eq!(palette.iter().find(|(n, _)| n == k).map(|(_, v)| *v), Some(*v), "{selector} --{k}"); }
-            assert_eq!(palette.len(), want.len(), "{selector}: theme.rs has tokens the css lacks");
+            /* i18n-ok: css parsing and build checks */ assert!(want.len() >= 17, "{selector}: parsed {} tokens", want.len());
+            /* i18n-ok: css parsing and build checks */ for (k, v) in &want { assert_eq!(palette.iter().find(|(n, _)| n == k).map(|(_, v)| *v), Some(*v), "{selector} --{k}"); }
+            /* i18n-ok: css parsing and build checks */ assert_eq!(palette.len(), want.len(), "{selector}: theme.rs has tokens the css lacks");
             let t = tokens(light);
-            for (k, v) in &want { assert_eq!(t.iter().find(|(n, _)| n == k).unwrap().1, *v, "tokens({light}) --{k}"); }
+            /* i18n-ok: css parsing and build checks */ for (k, v) in &want { assert_eq!(t.iter().find(|(n, _)| n == k).unwrap().1, *v, "tokens({light}) --{k}"); }
         }
     }
 }

@@ -4,9 +4,9 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
 
-pub const THEMES: [(&str, &str); 3] = [("hub", "Follow the hub"), ("dark", "Dark"), ("light", "Light")];
-pub const FONTS: [(&str, &str); 3] = [("Noto Sans Mono CJK JP", "Noto Sans Mono"), ("JetBrains Mono", "JetBrains Mono"), (".SystemUIFont", "System UI")];
-pub const VIEWS: [(&str, &str); 2] = [("last", "Where I left off"), ("list", "The thread list")];
+/* i18n-ok: labels the settings page draws through tr; font names */ pub const THEMES: [(&str, &str); 3] = [("hub", "Follow the hub"), ("dark", "Dark"), ("light", "Light")];
+/* i18n-ok: labels the settings page draws through tr; font names */ pub const FONTS: [(&str, &str); 3] = [("Noto Sans Mono CJK JP", "Noto Sans Mono"), ("JetBrains Mono", "JetBrains Mono"), (".SystemUIFont", "System UI")];
+/* i18n-ok: labels the settings page draws through tr; font names */ pub const VIEWS: [(&str, &str); 2] = [("last", "Where I left off"), ("list", "The thread list")];
 pub const TEXT_PCT: (u32, u32, u32) = (80, 160, 10);   // min, max, step
 pub const SIDEBAR_PX: (u32, u32, u32) = (180, 420, 24);
 /// The viewer pane's width: 0 is the default (VIEWER_PX_DEFAULT); a drag on its left edge sets it, a double click puts it back.
@@ -18,6 +18,8 @@ pub const KEYS: [&str; 8] = ["enter", "ctrl-enter", "escape", "ctrl-b", "ctrl-k"
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Local {
+    /// The interface language: "auto" (the system's), "en" or "ja" (`i18n::CHOICES`).
+    pub lang: String,
     pub theme: String, pub text_pct: u32, pub font: String, pub sidebar_px: u32, pub viewer_px: u32, pub sidebar_open: bool,
     pub notifications: bool, pub default_view: String, pub shortcuts: BTreeMap<String, String>,
     /// Starred models ("provider/model"), listed first in the model menu; kept on this device.
@@ -27,7 +29,7 @@ pub struct Local {
     pub split_hide: String, pub split_main: f32, pub split_side: f32,
 }
 impl Default for Local {
-    fn default() -> Self { Local { theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0. } }
+    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0. } }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -45,6 +47,7 @@ impl Local {
         let mut l: Local = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         l.text_pct = l.text_pct.clamp(TEXT_PCT.0, TEXT_PCT.1); l.sidebar_px = l.sidebar_px.clamp(SIDEBAR_PX.0, SIDEBAR_PX.1);
         if l.viewer_px != 0 { l.viewer_px = l.viewer_px.clamp(VIEWER_PX.0, VIEWER_PX.1); }
+        if !crate::i18n::CHOICES.iter().any(|(k, _)| *k == l.lang) { l.lang = "auto".into() }
         if !THEMES.iter().any(|(k, _)| *k == l.theme) { l.theme = "hub".into() }
         if !VIEWS.iter().any(|(k, _)| *k == l.default_view) { l.default_view = "last".into() }
         if l.font.is_empty() { l.font = FONTS[0].0.into() }
@@ -52,7 +55,8 @@ impl Local {
         l.shortcuts.retain(|a, k| crate::keys::rebindable(a) && crate::keys::choices(a).contains(k));
         l
     }
-    pub fn load() -> Local { path().map(|p| Local::read(&p)).unwrap_or_default() }
+    /// What the app starts with; the language in force is set from it here, once.
+    pub fn load() -> Local { let l = path().map(|p| Local::read(&p)).unwrap_or_default(); crate::i18n::set_choice(&l.lang); l }
     /// Written beside and renamed; a failure is said once on stderr and changes nothing else.
     pub fn save(&self) { if let Some(p) = path() { self.save_to(&p) } }
     pub fn save_to(&self, p: &std::path::Path) {
@@ -67,6 +71,7 @@ impl Local {
     /// Apply a change by name (the dialog's buttons are `local:<name>` with a value). False for a name or value this layer does not know.
     pub fn set(&mut self, name: &str, value: &str) -> bool {
         match name {
+            "lang" if crate::i18n::CHOICES.iter().any(|(k, _)| *k == value) => self.lang = value.into(),
             "theme" if THEMES.iter().any(|(k, _)| *k == value) => self.theme = value.into(),
             "text" => self.text_pct = step(self.text_pct, if value == "-" { -1 } else { 1 }, TEXT_PCT),
             "text-reset" => self.text_pct = 100,
@@ -101,6 +106,12 @@ mod tests {
     #[test] fn defaults_are_a_working_client_and_a_damaged_file_is_the_defaults() {
         let p = tmp("dmg"); std::fs::write(&p, b"{ not json").unwrap(); assert_eq!(Local::read(&p), Local::default());
         assert_eq!(Local::read(&tmp("none")), Local::default());
+    }
+    #[test] fn the_language_is_a_choice_of_the_three_and_anything_else_is_automatic() {
+        let mut l = Local::default(); assert_eq!(l.lang, "auto");
+        assert!(l.set("lang", "ja") && l.lang == "ja"); assert!(l.set("lang", "en") && l.lang == "en"); assert!(!l.set("lang", "fr") && l.lang == "en", "a language the client has not is refused");
+        let p = tmp("lang"); std::fs::write(&p, br#"{"lang":"klingon"}"#).unwrap(); assert_eq!(Local::read(&p).lang, "auto");
+        std::fs::write(&p, br#"{"lang":"ja"}"#).unwrap(); assert_eq!(Local::read(&p).lang, "ja");
     }
     #[test] fn a_change_survives_a_save_and_a_read_and_values_out_of_range_are_brought_in() {
         let p = tmp("rt");

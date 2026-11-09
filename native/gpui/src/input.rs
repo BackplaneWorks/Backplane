@@ -446,7 +446,7 @@ impl Element for TextElement {
         let style = window.text_style();
 
         let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), rgb(0x5c6473).into())
+            (SharedString::from(crate::i18n::trs(&input.placeholder)), rgb(0x5c6473).into())
         } else {
             (content, style.color)
         };
@@ -609,7 +609,7 @@ impl Focusable for TextInput {
 
 impl TextInput {
     pub fn new(cx: &mut Context<Self>) -> Self { Self {
-        focus_handle: cx.focus_handle(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
+        /* i18n-ok: the hint, drawn through trs where it is painted */ focus_handle: cx.focus_handle(), content: "".into(), placeholder: "Ask anything: @bot, >thread, %project, #room, $skill, /btw".into(),
         selected_range: 0..0, selection_reversed: false, marked_range: None,
         last_layout: None, last_bounds: None, is_selecting: false,
     }}

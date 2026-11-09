@@ -6,7 +6,7 @@
 //! The screen is drawn by the hub's own emulator (host/src/term/vt.rs, shared by path): the hub sends every byte the shell prints as a `term`
 //! frame, and a snapshot (`term.snap`) when this client has no screen for it yet (a shell started before, or a reconnect).
 //! Bounded: at most MAX_SCREENS screens are kept (the oldest other one goes), each the emulator's grid and 2048-row scrollback.
-use crate::{hub::Command, screens::settings::Secret, theme, vt::{self, Vt}, Backplane};
+use crate::{hub::Command, i18n::{t, tf, trs}, screens::settings::Secret, theme, vt::{self, Vt}, Backplane};
 use gpui::{actions, prelude::*, *};
 use serde_json::json;
 use std::{cell::Cell, collections::HashMap, rc::Rc};
@@ -133,8 +133,8 @@ pub fn card_window(vt: &Vt, open: bool) -> (usize, usize) {
 /// What a card's header says of its state.
 pub fn state_word(state: &str) -> String {
     match state {
-        "" | "running" => "running".into(), "stopped" => "stopped".into(), "failed to start" => "failed to start".into(),
-        s => match (s.strip_prefix("done "), s.strip_prefix("exited ")) { (Some(c), _) => format!("done · exit {c}"), (_, Some(c)) => format!("exited {c}"), _ => s.into() },
+        "" | "running" => t("gpui.c.term.running"), "stopped" => t("gpui.c.term.stopped"), "failed to start" => t("gpui.c.term.failed"),
+        s => match (s.strip_prefix("done "), s.strip_prefix("exited ")) { (Some(c), _) => tf("gpui.c.term.done", &[("code", c.into())]), (_, Some(c)) => tf("gpui.c.term.exited", &[("code", c.into())]), _ => trs(s) },
     }
 }
 /// A terminal whose program still runs (a done command's shell still takes keys).
@@ -221,7 +221,7 @@ impl Backplane {
     /// Show the open thread's shell and give it the keyboard (the hub starts it, or only resizes one that runs).
     fn term_show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let key = crate::screens::attach::raw_id(&self.selected).to_string();
-        if key.is_empty() { self.error = "Open a thread first: the terminal works in its folder.".into(); cx.notify(); return }
+        if key.is_empty() { self.error = trs("Open a thread first: the terminal works in its folder."); cx.notify(); return }
         let t = &mut self.screens.term; t.open = true; t.key = key.clone(); t.sel = None; t.scroll = 0;
         let fresh = t.ensure(&key); let (c, r) = t.size;
         self.term_rpc("term.open", json!({"thread": key, "cols": c, "rows": r}));
@@ -386,10 +386,10 @@ impl Backplane {
         if key.is_empty() { return div().into_any_element() }
         let fresh = self.screens.term.ensure_card(&key, &title, cols, rows, || cx.focus_handle());
         if fresh { self.term_rpc("term.snap", json!({"key": key})); }
-        for (op, label) in [("focus", "Terminal"), ("expand", "Expand"), ("pop", "Pop out"), ("stop", "Stop")] {
-            self.controls.push(crate::script::CtlEntry { id: format!("term-{op}:{id}"), label: format!("{label} · {title}"), ctl: crate::script::Ctl::Term(op.into(), key.clone()) });
+        /* i18n-ok: the harness's control labels */ for (op, label) in [("focus", "Terminal"), ("expand", "Expand"), ("pop", "Pop out"), ("stop", "Stop")] {
+            /* i18n-ok: a control label */ self.controls.push(crate::script::CtlEntry { id: format!("term-{op}:{id}"), label: format!("{label} · {title}"), ctl: crate::script::Ctl::Term(op.into(), key.clone()) });
             // (the harness names a card by its title too: its id is the hub's, known only once it opened)
-            self.controls.push(crate::script::CtlEntry { id: format!("term-{op}:@{title}"), label: format!("{label} · {title}"), ctl: crate::script::Ctl::Term(op.into(), key.clone()) });
+            /* i18n-ok: a control label */ self.controls.push(crate::script::CtlEntry { id: format!("term-{op}:@{title}"), label: format!("{label} · {title}"), ctl: crate::script::Ctl::Term(op.into(), key.clone()) });
         }
         let focused = self.screens.term.card_focused.as_deref() == Some(key.as_str());
         let popped = self.screens.term.open && self.screens.term.key == key;
@@ -400,7 +400,7 @@ impl Backplane {
         let (state, open, focus) = (cv.state.to_string(), cv.open, cv.focus.cloned());
         let name = cv.vt.title().to_string();
         let running = live(&state);
-        let label = if name.is_empty() || name == title { title.clone() } else { format!("{title} · {name}") };
+        /* i18n-ok: names, no words */ let label = if name.is_empty() || name == title { title.clone() } else { format!("{title} · {name}") };
         let fg = |x: u32| rgb(x);
         let mut body = div().relative().font(crate::art::mono_font()).text_size(px(FONT_PX)).line_height(px(LINE_PX)).text_color(fg(vt::DEFAULT_FG)).whitespace_nowrap().overflow_hidden()
             .w(px(vcols as f32 * cw)).max_w_full().h(px(n as f32 * LINE_PX));
@@ -419,11 +419,11 @@ impl Backplane {
         let head = div().h(px(26.)).px_2().flex().items_center().gap_3().border_b_1().border_color(rgb(0x2a2f3a)).text_size(px(11.))
             .child(div().flex_shrink_0().child(crate::ui::ic(light, "terminal", 12., "dim")))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(rgb(vt::DEFAULT_FG)).child(label))
-            .when(focused, |d| d.child(div().whitespace_nowrap().text_color(rgb(0x8a90a0)).child("Shift+Esc back to the message")))
-            .child(div().whitespace_nowrap().text_color(state_color).child(if popped { format!("{} · in the panel", state_word(&state)) } else { state_word(&state) }))
-            .child(btn("tstop", if running { "Stop".into() } else { "Run again".into() }).on_click(cx.listener(move |this, _, _, cx| { this.card_stop(&k1, cx); cx.stop_propagation(); })))
-            .when(rows as usize > CARD_ROWS || open, |d| d.child(btn("texp", if open { "Collapse".into() } else { "Expand".into() }).on_click(cx.listener(move |this, _, _, cx| { this.card_expand(&k2, cx); cx.stop_propagation(); }))))
-            .child(btn("tpop", "Pop out".into()).on_click(cx.listener(move |this, _, window, cx| { this.card_pop(&k3, Some(window), cx); cx.stop_propagation(); })));
+            .when(focused, |d| d.child(div().whitespace_nowrap().text_color(rgb(0x8a90a0)).child(trs("Shift+Esc back to the message"))))
+            .child(div().whitespace_nowrap().text_color(state_color).child(if popped { tf("gpui.c.term.inpanel", &[("state", state_word(&state).into())]) } else { state_word(&state) }))
+            .child(btn("tstop", if running { trs("Stop") } else { trs("Run again") }).on_click(cx.listener(move |this, _, _, cx| { this.card_stop(&k1, cx); cx.stop_propagation(); })))
+            .when(rows as usize > CARD_ROWS || open, |d| d.child(btn("texp", if open { trs("Collapse") } else { trs("Expand") }).on_click(cx.listener(move |this, _, _, cx| { this.card_expand(&k2, cx); cx.stop_propagation(); }))))
+            .child(btn("tpop", trs("Pop out")).on_click(cx.listener(move |this, _, window, cx| { this.card_pop(&k3, Some(window), cx); cx.stop_propagation(); })));
         let (kk, kp, kf) = (key.clone(), key.clone(), key.clone());
         let mut card = div().id(SharedString::from(format!("term-card-{id}"))).flex().flex_col().max_w_full().bg(rgb(vt::DEFAULT_BG)).border_1()
             .border_color(if focused { c("accent") } else { c("line") }).child(head).child(div().p(px(6.)).child(body))
@@ -475,11 +475,11 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
         let cur = div().absolute().left(px(cursor.x as f32 * cw)).top(px(cursor.y as f32 * lh)).w(px(cw)).h(px(lh));
         body = body.child(if focused { cur.bg(rgba(0xd9dce4aa)) } else { cur.border_1().border_color(rgb(vt::DEFAULT_FG)) });
     }
-    let hint = format!("{} hides · Shift+Esc back to the message · {} copy · {} paste", crate::keys::hint(l, "term"), crate::keys::show("secondary-shift-c", crate::keys::mac()), crate::keys::show("secondary-shift-v", crate::keys::mac()));
+    let hint = tf("gpui.c.term.hint", &[("hide", crate::keys::hint(l, "term").into()), ("copy", crate::keys::show("secondary-shift-c", crate::keys::mac()).into()), ("paste", crate::keys::show("secondary-shift-v", crate::keys::mac()).into())]);
     // a card popped out says its own title, not its thread's
     let card = t.screens.get(&t.key).map(|s| s.title.clone()).filter(|x| !x.is_empty());
-    let label = if !name.is_empty() { name } else if let Some(ct) = card { format!("Terminal · {ct}") } else if title.is_empty() { "Terminal".to_string() } else { format!("Terminal · {title}") };
-    let label = if scroll > 0 { format!("{label} · {scroll} lines back") } else { label };
+    /* i18n-ok: names around a translated word */ let label = if !name.is_empty() { name } else if let Some(ct) = card { format!("{} · {ct}", trs("Terminal")) } else if title.is_empty() { trs("Terminal") } else { format!("{} · {title}", trs("Terminal")) };
+    /* i18n-ok: a translated count */ let label = if scroll > 0 { format!("{label} · {}", tf("gpui.c.term.back", &[("n", scroll.into())])) } else { label };
     Some(div().id("floating-terminal").absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).flex().flex_col()
         .bg(rgb(vt::DEFAULT_BG)).border_1().border_color(if focused { c("accent") } else { c("line") }).shadow_lg()
         .track_focus(&focus).key_context("Terminal")
@@ -510,6 +510,9 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn a_cards_state_reads_in_japanese() {
+        crate::i18n::with_lang("ja", || { assert_eq!(state_word("running"), "実行中"); assert_eq!(state_word("done 0"), "完了 · 終了コード 0"); assert_eq!(state_word("exited 3"), "終了 3"); assert_eq!(state_word("failed to start"), "起動に失敗"); });
+    }
 
     fn ks(s: &str) -> Keystroke { Keystroke::parse(s).unwrap() }
     /// A keystroke as the platform hands it over: the key, and the text it typed.

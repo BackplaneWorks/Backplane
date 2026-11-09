@@ -12,7 +12,7 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
 pub enum Ctl { /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String) }
@@ -198,7 +198,7 @@ impl Backplane {
                         self.begin(format!("select:{i}"), Goal::Thread(raw), cx);
                         self.select_id(id, cx);
                     }
-                    None => { self.m("input", json!({"step": format!("select:{i}"), "ok": false, "error": "no such thread"})); self.pump(cx); }
+                    /* i18n-ok: scripted e2e input and its metrics, not drawn */ None => { self.m("input", json!({"step": format!("select:{i}"), "ok": false, "error": "no such thread"})); self.pump(cx); }
                 }
             }
             Step::Home(i) => {
@@ -264,20 +264,20 @@ impl Backplane {
             Step::Cef(cmd) => { // {"cef":{"report":true|"goto":url|"back"|"forward":true|"click":[x,y]|"type":text|"handback":true}}: the embedded browser page, for the e2e (feature cef; else not implemented)
                 #[cfg(feature = "cef")]
                 { let page = self.screens.browser.as_ref().and_then(|(_, p)| p.read(cx).cef.clone());
-                  match page { Some(p) => { let r = p.update(cx, |c, cx| c.script(&cmd, cx)); self.m("cef", r); } None => { let v = self.data["thread"]["viewer"].clone(); self.m("cef", json!({"ok": false, "error": "no embedded page", "have_page": self.screens.browser.is_some(), "viewer_open": v["open"], "viewer_keys": v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>())})) } } }
+                  /* i18n-ok: scripted e2e input and its metrics, not drawn */ match page { Some(p) => { let r = p.update(cx, |c, cx| c.script(&cmd, cx)); self.m("cef", r); } None => { let v = self.data["thread"]["viewer"].clone(); self.m("cef", json!({"ok": false, "error": "no embedded page", "have_page": self.screens.browser.is_some(), "viewer_open": v["open"], "viewer_keys": v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>())})) } } }
                 #[cfg(not(feature = "cef"))]
-                { let _ = cmd; self.m("cef", json!({"ok": false, "error": "built without the cef feature"})); }
+                /* i18n-ok: scripted e2e input and its metrics, not drawn */ { let _ = cmd; self.m("cef", json!({"ok": false, "error": "built without the cef feature"})); }
                 self.pump(cx);
             }
             Step::Browser(cmd) => { // {"browser":{"op":...}}: the Browser tab's page, embedded or the hub's frames (viewers/browser.rs BrowserPage::script)
-                match self.screens.browser.as_ref().map(|(_, p)| p.clone()) { Some(p) => { let r = p.update(cx, |b, cx| b.script(&cmd, cx)); self.m("browser", r); } None => self.m("browser", json!({"ok": false, "error": "no Browser page", "op": cmd["op"]})) }
+                /* i18n-ok: scripted e2e input and its metrics, not drawn */ match self.screens.browser.as_ref().map(|(_, p)| p.clone()) { Some(p) => { let r = p.update(cx, |b, cx| b.script(&cmd, cx)); self.m("browser", r); } None => self.m("browser", json!({"ok": false, "error": "no Browser page", "op": cmd["op"]})) }
                 self.pump(cx);
             }
             Step::Mark(name) => { self.m("mark", json!({"name": name})); self.pump(cx); }
             Step::Fit => { self.screens.plotview.view = None; self.ui_epoch += 1; self.begin("fit".into(), Goal::Frame, cx); cx.notify(); }
             Step::Expect(what) => { // a run that cannot measure what it claims stops itself: "canvas" needs a plot canvas with real height
                 let h = self.screens.plotview.bounds.map_or(0.0, |b| f32::from(b.size.height));
-                if what == "canvas" && h < 200.0 { self.m("not_usable", json!({"why": "plot canvas has no height", "canvas_h": h})); eprintln!("expect canvas: height {h} px: stopping"); std::process::exit(4); }
+                /* i18n-ok: scripted e2e input and its metrics, not drawn */ if what == "canvas" && h < 200.0 { self.m("not_usable", json!({"why": "plot canvas has no height", "canvas_h": h})); eprintln!("expect canvas: height {h} px: stopping"); std::process::exit(4); }
                 self.m("expect", json!({"what": what, "canvas_h": h})); self.pump(cx);
             }
             Step::Layers(on, cap, scroll) => { let pv = &mut self.screens.plotview; pv.layers_cap = cap; pv.layers_scroll.set_offset(point(px(0.), px(-scroll)));
@@ -286,7 +286,7 @@ impl Backplane {
             Step::Compare(i) => { // the Compare menu's row i (null: put the comparison away); the versions are asked for first
                 match i { None => crate::screens::histbar::compare(self, None),
                     Some(i) => { if self.screens.plotview.hist.refs.is_none() { crate::screens::histbar::ask_refs(self); } let r = self.screens.plotview.hist.refs.clone().and_then(|r| r.rows.get(i).cloned());
-                        if let Some((_, name, commit)) = r { crate::screens::histbar::compare(self, Some((&commit, &name))); } else { self.m("compare", json!({"error": "no such version yet"})); } } }
+                        /* i18n-ok: scripted e2e input and its metrics, not drawn */ if let Some((_, name, commit)) = r { crate::screens::histbar::compare(self, Some((&commit, &name))); } else { self.m("compare", json!({"error": "no such version yet"})); } } }
                 self.ui_epoch += 1; self.begin("compare".into(), Goal::Frame, cx); cx.notify(); }
             Step::Hist(i) => { // the history bar's step i (0-based; null or negative: live); the steps are asked for first
                 if self.screens.plotview.hist.steps.is_none() { crate::screens::histbar::ask_steps(self); self.m("hist", json!({"asked": true})); }
@@ -398,11 +398,11 @@ impl Backplane {
         match ctl {
             Ctl::Hub(a) => { crate::screens::hubpick::act(self, a.clone(), cx); self.ui_epoch += 1; "hub".into() }
             Ctl::PairGo => { crate::screens::pair::go(self, cx); self.ui_epoch += 1; "pair".into() }
-            Ctl::PairYes => { crate::screens::pair::confirm(self, cx); self.ui_epoch += 1; "pair confirmed".into() }
-            Ctl::PairCancel => { crate::screens::pair::cancel(self, cx); self.ui_epoch += 1; "pair cancelled".into() }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::PairYes => { crate::screens::pair::confirm(self, cx); self.ui_epoch += 1; "pair confirmed".into() }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::PairCancel => { crate::screens::pair::cancel(self, cx); self.ui_epoch += 1; "pair cancelled".into() }
             Ctl::None => "none".into(),
-            Ctl::Pad => "pad (mouse only)".into(),
-            Ctl::Rail(kind) => { let cmd = self.rail_view(kind); let shut = matches!(&cmd, crate::hub::Command::Action(_, k) if k.is_empty()); let _ = self.tx.try_send(cmd); self.ui_epoch += 1; if shut { "view.action view close".into() } else { "view.action view".into() } }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Pad => "pad (mouse only)".into(),
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Rail(kind) => { let cmd = self.rail_view(kind); let shut = matches!(&cmd, crate::hub::Command::Action(_, k) if k.is_empty()); let _ = self.tx.try_send(cmd); self.ui_epoch += 1; if shut { "view.action view close".into() } else { "view.action view".into() } }
             Ctl::Dictate => { self.voice_press(cx); "dictate".into() }
             Ctl::ThreadMenu => { let items = crate::screens::ctxmenu::title_items(&self.data); let n = items.len(); if n > 0 { self.ctx_open(point(px(320.), px(40.)), items, cx); } self.ui_epoch += 1; format!("thread menu {n}") }
             Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
@@ -413,16 +413,16 @@ impl Backplane {
             Ctl::Fold(v) => { self.fold_click(v.clone()); "view.action fold".into() }
             Ctl::Sub(k) => { if k.is_empty() { self.sub_back(cx); "sub back".into() } else { self.sub_open(k.clone(), cx); "sub open".into() } }
             Ctl::Send => { self.do_send(cx); self.ui_epoch += 1; "send".into() }
-            Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.await_completion(cx); self.ui_epoch += 1; "view.action skill".into() }
-            Ctl::Page(v) => { let _ = self.tx.try_send(Command::Page(v.clone())); "view.action native-sidebar-page".into() }
-            Ctl::SettingsPage(p) => { crate::screens::settings::go_page(self, p); self.ui_epoch += 1; cx.notify(); format!("settings page {p}") }
-            Ctl::OpenPalette => { self.palette_open(cx); self.ui_epoch += 1; "open palette".into() }
-            Ctl::FocusSearch => { self.focus_search(cx); self.ui_epoch += 1; "focus search".into() }
-            Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
-            Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
-            Ctl::Term(op, key) => { match op.as_str() { "expand" => self.card_expand(key, cx), "pop" => self.card_pop(key, None, cx), "stop" => self.card_stop(key, cx), _ => self.card_take_keys(key, None, cx) } format!("term {op}") }
-            Ctl::Bot(k, v) => { crate::screens::bots::press(self, k, v, cx); self.ui_epoch += 1; format!("bots {k}") }
-            Ctl::Node(a, p) => { if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" || crate::screens::tools::makes_thread(&a) { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.await_completion(cx); self.ui_epoch += 1; "view.action skill".into() }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Page(v) => { let _ = self.tx.try_send(Command::Page(v.clone())); "view.action native-sidebar-page".into() }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::SettingsPage(p) => { crate::screens::settings::go_page(self, p); self.ui_epoch += 1; cx.notify(); format!("settings page {p}") }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::OpenPalette => { self.palette_open(cx); self.ui_epoch += 1; "open palette".into() }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::FocusSearch => { self.focus_search(cx); self.ui_epoch += 1; "focus search".into() }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::RenameSave(id) => { let text = self.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default(); if let Some(c) = crate::screens::tools::rename_save(id, &text) { let _ = self.tx.try_send(c); } "view.action rename-save".into() }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Term(op, key) => { match op.as_str() { "expand" => self.card_expand(key, cx), "pop" => self.card_pop(key, None, cx), "stop" => self.card_stop(key, cx), _ => self.card_take_keys(key, None, cx) } format!("term {op}") }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Bot(k, v) => { crate::screens::bots::press(self, k, v, cx); self.ui_epoch += 1; format!("bots {k}") }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Node(a, p) => { if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" || crate::screens::tools::makes_thread(&a) { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a.clone(), p.clone())); format!("view.action {a}") }
         }
     }
     /// The popup is always the hub's rows now (no client-side rows), so a popup step is never local.

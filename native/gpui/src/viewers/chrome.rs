@@ -14,7 +14,7 @@ pub struct In<'a> { pub light: bool, pub tabs: &'a [TabView], /** what the field
 pub fn tab_label(title: &str, url: &str) -> String {
     let t = title.trim(); if !t.is_empty() { return t.chars().take(24).collect() }
     let u = url.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/');
-    if u.is_empty() || u == "about:blank" { "New tab".into() } else { u.chars().take(24).collect() }
+    if u.is_empty() || u == "about:blank" { crate::i18n::trs("New tab") } else { u.chars().take(24).collect() }
 }
 
 fn icon_button(light: bool, id: &'static str, name: &'static str, on: bool) -> Stateful<Div> {
@@ -40,7 +40,7 @@ pub fn render<T: 'static>(i: In, cx: &mut Context<T>, on: fn(&mut T, Act, &mut W
     strip = strip.child(div().id("br-new").w(px(28.)).h(px(28.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).child(art::icon("plus", 14., c("text")))
         .on_click(cx.listener(move |this, _, w, cx| on(this, Act::NewTab, w, cx))));
     let border = if i.focused { c("accent") } else { c("line") };
-    let shown = if i.value.is_empty() { "Search or enter address".to_string() } else { i.value.clone() };
+    let shown = if i.value.is_empty() { crate::i18n::trs("Search or enter address") } else { i.value.clone() };
     let bar = div().h(px(40.)).flex().flex_row().items_center().gap_1().px_2().bg(c("bg")).border_b_1().border_color(c("line"))
         .child(icon_button(light, "br-back", "chevron-left", i.have && i.can_back).on_click(cx.listener(move |this, _, w, cx| on(this, Act::Back, w, cx))))
         .child(icon_button(light, "br-fwd", "chevron-right", i.have && i.can_forward).on_click(cx.listener(move |this, _, w, cx| on(this, Act::Forward, w, cx))))
@@ -51,7 +51,7 @@ pub fn render<T: 'static>(i: In, cx: &mut Context<T>, on: fn(&mut T, Act, &mut W
             .on_click(cx.listener(move |this, _, w, cx| on(this, Act::FocusBar, w, cx)))
             .child(art::icon("globe", 14., c("dim")))
             .child(div().flex_1().overflow_hidden().text_color(c(if i.value.is_empty() { "dim" } else { "text" })).child(format!("{}{}", shown, if i.focused { "▏" } else { "" }))))
-        .when(i.taken, |d| d.child(div().id("br-hand").h(px(28.)).px_3().flex().items_center().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(px(12.)).child("Hand back")
+        .when(i.taken, |d| d.child(div().id("br-hand").h(px(28.)).px_3().flex().items_center().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(px(12.)).child(crate::i18n::trs("Hand back"))
             .on_click(cx.listener(move |this, _, w, cx| on(this, Act::HandBack, w, cx)))));
     (strip.into_any_element(), bar.into_any_element())
 }

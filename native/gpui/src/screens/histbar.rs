@@ -7,6 +7,7 @@
 //! (`git\t...`, `diff\n...`) draws one. This module keeps what is on show (`Cmp`, `Hist`, in the canvas's PlotView) and draws the bar.
 use super::plotview::PlotView;
 use crate::{art, hub::Command, theme, Backplane};
+use crate::i18n::{tf, trs};
 use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 
@@ -19,7 +20,7 @@ pub struct Step { pub c: String, pub p: String, pub t: u64, pub old: String, pub
 pub struct Steps { pub git: String, pub top: String, pub pcb: String, pub sch: String, pub file: String, pub kind: String, pub live: String, /** what the live title's numbers count */ pub live_tip: String, pub note: String, pub steps: Vec<Step> }
 pub fn steps_of(v: &Value) -> Option<Steps> {
     // the hub refused (a far machine's hub that has no history.steps, a thread gone): the bar says so instead of loading for ever
-    if v.is_null() { return Some(Steps { live: "Live".into(), note: "The design history could not be read here.".into(), ..Steps::default() }) }
+    /* i18n-ok: kept as the hub words it, drawn through trs */ if v.is_null() { return Some(Steps { live: "Live".into(), note: "The design history could not be read here.".into(), ..Steps::default() }) }
     if !v.is_object() { return None }
     let g = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let (git, top, file) = (g("git"), g("top"), g("file"));
@@ -28,11 +29,11 @@ pub fn steps_of(v: &Value) -> Option<Steps> {
         let (c, p) = (s["c"].as_str()?.to_string(), w("p"));
         // a hub from before the words were its (a far machine on an older release): the paths from the project's git, a plain label
         let (old, new) = if s.get("new").is_some() { (w("old"), w("new")) } else { (version(&git, &top, &p, &file), version(&git, &top, &c, &file)) };
-        let label = if w("label").is_empty() { format!("Step {}", i + 1) } else { w("label") };
+        /* i18n-ok: kept as the hub words it, drawn through trs */ let label = if w("label").is_empty() { format!("Step {}", i + 1) } else { w("label") };
         Some(Step { t: s["t"].as_u64().unwrap_or(0), title: if w("title").is_empty() { label.clone() } else { w("title") }, tip: if w("tip").is_empty() { label.clone() } else { w("tip") },
             detail: w("detail"), entry: w("entry"), id: w("id"), row: w("row"), c, p, old, new, label })
     }).collect();
-    let live = if g("live").is_empty() { if steps.is_empty() { "Live".to_string() } else { format!("Live · {} steps", steps.len()) } } else { g("live") };
+    /* i18n-ok: kept as the hub words it, drawn through trs */ let live = if g("live").is_empty() { if steps.is_empty() { "Live".to_string() } else { format!("Live · {} steps", steps.len()) } } else { g("live") };
     Some(Steps { pcb: g("pcb"), sch: g("sch"), kind: g("kind"), note: g("note"), live_tip: g("liveTip"), live, git, top, file, steps })
 }
 
@@ -259,7 +260,7 @@ pub fn step_row(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyEleme
     let value = e["value"].as_str().filter(|v| !v.is_empty()).map_or(id.clone(), str::to_string);
     let can = !row_kinds(&text).is_empty();
     let d = div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim"))
-        .child(art::icon("history", 14., theme::color(light, "dim"))).child(div().min_w_0().child(text.clone()));
+        .child(art::icon("history", 14., theme::color(light, "dim"))).child(div().min_w_0().child(hub_words(&text)));
     if !can { return d.into_any_element() }
     d.cursor_pointer().hover(|s| s.text_color(c("text"))).tooltip(crate::keys::tip("Show this change in the viewer", "", light))
         .on_click(cx.listener(move |this, _, _, cx| { show_step(this, &value, &text); cx.notify(); })).into_any_element()
@@ -272,7 +273,7 @@ pub fn toggle_menu(app: &mut Backplane, side: u8, cx: &mut Context<Backplane>) {
     ask_refs(app); app.screens.plotview.hist.ref_err.clear();
     if app.screens.plotview.hist.ref_input.is_none() {
         let input = cx.new(|cx| super::composer::Composer::with_context(cx, "AskInput"));
-        input.update(cx, |i, _| i.set_placeholder("Commit, branch or tag"));
+        input.update(cx, |i, _| i.set_placeholder(&trs("Commit, branch or tag")));
         cx.subscribe(&input, |this, input, ev: &super::composer::ComposerEvent, cx| if matches!(ev, super::composer::ComposerEvent::Submit) {
             let text = input.read(cx).content.trim().to_string(); if text.is_empty() { return }
             let t = this.selected.clone(); if t.is_empty() { return }
@@ -289,7 +290,7 @@ pub fn resolved(app: &mut Backplane, r: &Value, cx: &mut Context<Backplane>) {
     let Some((_, file)) = live(app) else { return };
     let path = version(git, top, commit, &file);
     if commit.is_empty() || path.is_empty() {
-        let why = r["error"].as_str().filter(|w| !w.is_empty()).map_or_else(|| if commit.is_empty() { "No commit, branch or tag by that name here".to_string() } else { "That version has no copy of this file".to_string() }, |w| w.lines().next().unwrap_or(w).to_string());
+        let why = r["error"].as_str().filter(|w| !w.is_empty()).map_or_else(|| if commit.is_empty() { trs("No commit, branch or tag by that name here") } else { trs("That version has no copy of this file") }, |w| w.lines().next().unwrap_or(w).to_string());
         app.screens.plotview.hist.ref_err = why; cx.notify(); return }
     if let Some(i) = app.screens.plotview.hist.ref_input.clone() { i.update(cx, |i, cx| i.set(String::new(), cx)); }
     app.screens.plotview.hist.ref_err.clear();
@@ -308,18 +309,20 @@ pub fn escape(app: &mut Backplane) -> bool { if app.screens.plotview.menu == 0 {
 /// The menu's rows of versions: (label, what it is, what a press does).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Pick { Step(usize), Commit(String, String), /** the working copy */ Live }
-/// Hs.menu: the newest steps of the track (newest first; older ones are on the scrubber), then the project's versions.
+/// Hs.menu: the newest steps of the track (newest first; older ones are on the scrubber), then the project's versions. The rows' words are in
+/// the language in force (a name stays as it is); a commit keeps its English label, which the comparison's side draws through the catalog.
 pub fn menu_rows(h: Option<&Steps>, r: Option<&super::plot::Refs>) -> Vec<(String, String, Pick)> {
     let mut out = vec![];
-    if let Some(h) = h { for (i, s) in h.steps.iter().enumerate().rev().take(8) { out.push((s.label.clone(), s.detail.clone(), Pick::Step(i))); } }
+    if let Some(h) = h { for (i, s) in h.steps.iter().enumerate().rev().take(8) { out.push((hub_words(&s.label), hub_words(&s.detail), Pick::Step(i))); } }
     if let Some(r) = r {
         for (kind, name, commit) in &r.rows {
-            let (label, sub) = match kind.as_str() {
-                "turn" => { let n = name.rsplit('/').next().unwrap_or(name); (format!("Turn {n}"), if n == "0" { "this thread, before it began" } else { "this thread, at the end of a turn" }) }
-                "head" => (name.clone(), "the commit checked out"), "branch" => (name.clone(), "branch"), "tag" => (name.clone(), "tag"),
-                "base" => (format!("Branch point · {name}"), "where this branch left it"), _ => (name.clone(), "commit"),
+            let (label, shown, sub) = match kind.as_str() {
+                "turn" => { let n = name.rsplit('/').next().unwrap_or(name);
+                    /* i18n-ok: the label the comparison keeps (drawn through trs) */ (format!("Turn {n}"), tf("history.turn", &[("turn", n.into())]), trs(if n == "0" { "this thread, before it began" } else { "this thread, at the end of a turn" })) }
+                "head" => (name.clone(), name.clone(), trs("the commit checked out")), "branch" => (name.clone(), name.clone(), trs("branch")), "tag" => (name.clone(), name.clone(), trs("tag")),
+                /* i18n-ok: the label the comparison keeps (drawn through trs) */ "base" => (format!("Branch point · {name}"), tf("history.branchpoint", &[("branch", name.into())]), trs("where this branch left it")), _ => (name.clone(), name.clone(), trs("commit")),
             };
-            out.push((label.clone(), sub.to_string(), Pick::Commit(commit.clone(), label)));
+            out.push((shown, sub, Pick::Commit(commit.clone(), label)));
         }
     }
     out
@@ -329,23 +332,23 @@ fn btn(cx: &mut Context<Backplane>, light: bool, id: &str, label: &str, on: bool
     let c = |n: &str| theme::color(light, n);
     let d = div().id(SharedString::from(id.to_string())).px_2().py(px(3.)).text_size(px(12.)).border_1().flex_none()
         .border_color(if on { c("accent") } else { c("line") }).bg(c("raise")).text_color(if !enabled { c("faint") } else if on { c("accent") } else { c("text") }).child(label.to_string());
-    let d = if tip.is_empty() { d } else { d.tooltip(crate::keys::tip(tip, "", light)) };
+    let d = if tip.is_empty() { d } else { d.tooltip(crate::keys::tip_raw(tip, "", light)) };
     if !enabled { return d.into_any_element() }
     d.cursor_pointer().hover(|s| s.bg(c("panel"))).on_click(cx.listener(move |this, _, _, cx| { f(this, cx); cx.notify(); })).into_any_element()
 }
 fn icon_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static str, tip: &str, tone: &str, enabled: bool, f: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let d = div().id(SharedString::from(id.to_string())).size(px(26.)).flex().flex_none().items_center().justify_center()
-        .child(art::icon(icon, 16., theme::color(light, if enabled { tone } else { "faint" }))).tooltip(crate::keys::tip(tip, "", light));
+        .child(art::icon(icon, 16., theme::color(light, if enabled { tone } else { "faint" }))).tooltip(crate::keys::tip_raw(tip, "", light));
     if !enabled { return d.into_any_element() }
     d.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, _, cx| { f(this, cx); cx.notify(); })).into_any_element()
 }
 /// Removed / Changed / Added in the marks' colours (Look.mark.color).
 fn legend(light: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let keys: [(u32, &str); 3] = if light { [(0xCD2F31, "Removed"), (0xB86D00, "Changed"), (0x18794E, "Added")] } else { [(0xE5484D, "Removed"), (0xF5A524, "Changed"), (0x30A46C, "Added")] };
+    /* i18n-ok: drawn through trs */ let keys: [(u32, &str); 3] = if light { [(0xCD2F31, "Removed"), (0xB86D00, "Changed"), (0x18794E, "Added")] } else { [(0xE5484D, "Removed"), (0xF5A524, "Changed"), (0x30A46C, "Added")] };
     div().flex().flex_none().items_center().gap(px(14.)).text_size(px(12.)).text_color(c("dim"))
-        .children(keys.into_iter().map(|(col, l)| div().flex().items_center().gap(px(6.)).child(div().size(px(10.)).bg(rgb(col))).child(l))).into_any_element()
+        .children(keys.into_iter().map(|(col, l)| div().flex().items_center().gap(px(6.)).child(div().size(px(10.)).bg(rgb(col))).child(trs(l)))).into_any_element()
 }
 
 /// `el` (the page while its plot loads, or why it cannot show) with the bar under it when `on`, so a version that will not load can be left.
@@ -353,11 +356,14 @@ pub fn under(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str,
     if !on { return el }
     div().size_full().flex().flex_col().child(div().flex_1().min_h_0().child(el)).child(bar_el(cx, light, pv, key)).into_any_element()
 }
+/// The hub's words for a step, a track or a row ("Saved 14:08 · After Bash · ...") in the language in force: each part between " · " through the
+/// catalog on its own, so a part that is the agent's text or a name stays as it is while the words round it are translated.
+pub fn hub_words(s: &str) -> String { if s.contains(" · ") { s.split(" · ").map(|p| crate::i18n::Catalog::trp(p, "history.")).collect::<Vec<_>>().join(" · ") } else { trs(s) } }
 /// The hub's reasons a plot is not there, in words ("@bp.file-unread", "@bp.file-missing:<name>"); anything else as it came.
 pub fn none_words(why: &str) -> String {
-    if why == "@bp.file-unread" { return "This version of the file could not be read.".into() }
-    if let Some(n) = why.strip_prefix("@bp.file-missing:") { return format!("{n} is not there: it was moved or deleted.") }
-    why.to_string()
+    if why == "@bp.file-unread" { return trs("This version of the file could not be read.") }
+    if let Some(n) = why.strip_prefix("@bp.file-missing:") { return tf("gpui.b.hist.file.missing", &[("name", n.into())]) }
+    trs(why)
 }
 
 /// The bar under the board or schematic (`key`: the viewer's key, the file on show). With a comparison from Compare on show it is the
@@ -376,51 +382,51 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
     if let (true, Some(cmp)) = (comparing, cmp) {
         // the comparison: its sides (the old one opens the versions menu), Close; then the legend and Old / Diff / New
         let row = div().flex().items_center().gap(px(4.)).min_w_0()
-            .child(btn(cx, light, "cmp-side-a", &format!("Old: {}", cmp.label), pv.menu == 1 && hist.side == 0, true, "Pick the old version", |app, cx| toggle_menu(app, 0, cx)))
-            .child(btn(cx, light, "cmp-side-b", &format!("New: {}", if cmp.to.is_empty() { "Working copy" } else { cmp.to.as_str() }), pv.menu == 1 && hist.side == 1, true, "Pick the new version", |app, cx| toggle_menu(app, 1, cx)))
+            .child(btn(cx, light, "cmp-side-a", &tf("history.old.label", &[("label", hub_words(&cmp.label).into())]), pv.menu == 1 && hist.side == 0, true, &trs("Pick the old version"), |app, cx| toggle_menu(app, 0, cx)))
+            .child(btn(cx, light, "cmp-side-b", &tf("history.new.label", &[("label", if cmp.to.is_empty() { trs("Working copy") } else { trs(&cmp.to) }.into())]), pv.menu == 1 && hist.side == 1, true, &trs("Pick the new version"), |app, cx| toggle_menu(app, 1, cx)))
             .child(div().flex_1())
-            .child({ let ab = format!("{}\n{}", cmp.old, cmp.new); btn(cx, light, "cmp-bom", "BOM", false, true, "The parts that changed between the two versions", move |app, _| { let _ = app.tx.try_send(Command::Action("rv-bom".into(), ab.clone())); }) })
-            .child(btn(cx, light, "cmp-off", "Close", false, true, "Back to the file as it is now", |app, _| set(app, None)));
+            .child({ let ab = format!("{}\n{}", cmp.old, cmp.new); btn(cx, light, "cmp-bom", &trs("BOM"), false, true, &trs("The parts that changed between the two versions"), move |app, _| { let _ = app.tx.try_send(Command::Action("rv-bom".into(), ab.clone())); }) })
+            .child(btn(cx, light, "cmp-off", &trs("Close"), false, true, &trs("Back to the file as it is now"), |app, _| set(app, None)));
         let mut modes = div().flex().items_center().gap(px(4.)).min_w_0();
         modes = modes.child(if cmp.mode == 1 { legend(light) } else { div().into_any_element() }).child(div().flex_1());
-        for (i, l) in ["Old", "Diff", "New"].iter().enumerate() { let m = i as u8; modes = modes.child(btn(cx, light, &format!("cmp-mode-{i}"), l, cmp.mode == m, true, &format!("Show the {} version", l.to_lowercase()), move |app, _| mode(app, m))); }
+        for (i, (l, tip)) in [(trs("Old"), trs("Show the old version")), (trs("Diff"), trs("Show the diff version")), (trs("New"), trs("Show the new version"))].iter().enumerate() { let m = i as u8; modes = modes.child(btn(cx, light, &format!("cmp-mode-{i}"), l, cmp.mode == m, true, tip, move |app, _| mode(app, m))); }
         bar = bar.child(row).child(modes);
     } else {
         let loading = hist.steps.is_none();
-        let title = match (&step, &hist.steps) { (Some(s), _) => s.title.clone(), (None, Some(h)) => h.live.clone(), (None, None) => "Live".to_string() };
+        let title = match (&step, &hist.steps) { (Some(s), _) => hub_words(&s.title), (None, Some(h)) => hub_words(&h.live), (None, None) => trs("Live") };
         let on = |app: &Backplane| app.screens.plotview.hist.steps.as_ref().map_or(0, |h| h.steps.len());
         let row = div().flex().items_center().gap(px(4.)).min_w_0()
-            .child(icon_btn(cx, light, "hist-first", "skip-back", "The first step", "dim", n > 0, move |app, _| { stop(app); if on(app) > 0 { select(app, Some(0)) } }))
-            .child(icon_btn(cx, light, "hist-prev", "chevron-left", "The step before", "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plotview.hist.at; select(app, back(a, n)) }))
-            .child(icon_btn(cx, light, "hist-play", if hist.playing { "pause" } else { "play" }, if hist.playing { "Pause" } else { "Play the steps" }, "accent", n > 0, |app, cx| play(app, cx)))
-            .child(icon_btn(cx, light, "hist-next", "chevron-right", "The step after", "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plotview.hist.at; select(app, fwd(a, n)) }))
-            .child(icon_btn(cx, light, "hist-last", "skip-forward", "The last step", "dim", n > 0, move |app, _| { stop(app); let n = on(app); if n > 0 { select(app, Some(n - 1)) } }))
+            .child(icon_btn(cx, light, "hist-first", "skip-back", &trs("The first step"), "dim", n > 0, move |app, _| { stop(app); if on(app) > 0 { select(app, Some(0)) } }))
+            .child(icon_btn(cx, light, "hist-prev", "chevron-left", &trs("The step before"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plotview.hist.at; select(app, back(a, n)) }))
+            .child(icon_btn(cx, light, "hist-play", if hist.playing { "pause" } else { "play" }, &if hist.playing { trs("Pause") } else { trs("Play the steps") }, "accent", n > 0, |app, cx| play(app, cx)))
+            .child(icon_btn(cx, light, "hist-next", "chevron-right", &trs("The step after"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plotview.hist.at; select(app, fwd(a, n)) }))
+            .child(icon_btn(cx, light, "hist-last", "skip-forward", &trs("The last step"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); if n > 0 { select(app, Some(n - 1)) } }))
             .child({ let tip = if step.is_none() { hist.steps.as_ref().map_or(String::new(), |h| h.live_tip.clone()) } else { String::new() };
                 let t = div().id("hist-title").mx(px(8.)).min_w_0().flex_shrink().child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("text")).child(title));
-                if tip.is_empty() { t } else { t.tooltip(crate::keys::tip(&tip, "", light)) } })
+                if tip.is_empty() { t } else { t.tooltip(crate::keys::tip_raw(&hub_words(&tip), "", light)) } })
             .child(div().flex_1())
-            .child(btn(cx, light, "hist-diff", "Highlight edits", hist.diff && at.is_some(), n > 0, "Compare a snapshot with the one before: red removed, yellow changed, green added. From Live, show the latest snapshot.", |app, _| { stop(app); highlight(app) }))
-            .child(btn(cx, light, "compare-btn", "Compare", pv.menu == 1, true, "Compare two versions of the file", |app, cx| toggle_menu(app, 0, cx)))
-            .child(btn(cx, light, "step-live", "Live", at.is_none(), at.is_some(), "Back to the file as it is now", |app, _| { stop(app); select(app, None) }));
+            .child(btn(cx, light, "hist-diff", &trs("Highlight edits"), hist.diff && at.is_some(), n > 0, &trs("Compare a snapshot with the one before: red removed, yellow changed, green added. From Live, show the latest snapshot."), |app, _| { stop(app); highlight(app) }))
+            .child(btn(cx, light, "compare-btn", &trs("Compare"), pv.menu == 1, true, &trs("Compare two versions of the file"), |app, cx| toggle_menu(app, 0, cx)))
+            .child(btn(cx, light, "step-live", &trs("Live"), at.is_none(), at.is_some(), &trs("Back to the file as it is now"), |app, _| { stop(app); select(app, None) }));
         // the scrubber: a tick a step, the live file last, each where it falls in the track
         let span = n.max(1) as f32;
         let mut scrub = div().id("hist-scrub").relative().h(px(18.)).mx(px(8.)).child(div().absolute().left_0().right_0().top(px(8.)).h(px(2.)).bg(c("line")));
-        let tips: Vec<(String, bool)> = (0..=n).map(|i| if i == n { ("The live file".to_string(), at.is_none()) } else { (hist.steps.as_ref().map(|h| h.steps[i].tip.clone()).unwrap_or_default(), at == Some(i)) }).collect();
+        let tips: Vec<(String, bool)> = (0..=n).map(|i| if i == n { (trs("The live file"), at.is_none()) } else { (hist.steps.as_ref().map(|h| hub_words(&h.steps[i].tip)).unwrap_or_default(), at == Some(i)) }).collect();
         for (i, (tip, cur)) in tips.into_iter().enumerate() {
             let mark = if cur { div().w(px(4.)).h(px(16.)).mt(px(-2.)).bg(c("accent")) } else { div().w(px(2.)).h(px(12.)).bg(c("dim")) };
             scrub = scrub.child(div().id(SharedString::from(format!("step-{i}"))).absolute().left(relative(i as f32 / span)).top(px(3.)).ml(px(-5.)).w(px(10.)).h(px(12.)).flex().justify_center().cursor_pointer()
-                .child(mark).tooltip(crate::keys::tip(&tip, "", light))
+                .child(mark).tooltip(crate::keys::tip_raw(&tip, "", light))
                 .on_click(cx.listener(move |this, _, _, cx| { stop(this); select(this, if i == n { None } else { Some(i) }); cx.notify(); })));
         }
         // what the step followed (a press goes there in the thread), or the live file's note; the legend at its end while edits are highlighted
         let said = match (&step, &hist.steps) {
             (Some(s), _) => div().id("hist-said").flex().flex_1().min_w_0().items_center().gap(px(6.)).cursor_pointer().text_color(c("dim")).hover(|d| d.text_color(c("text")))
                 .child(art::icon("message-square", 14., theme::color(light, "dim")))
-                .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(s.detail.clone()))
-                .tooltip(crate::keys::tip(&format!("{}\nGo to this point of the thread", s.detail), "", light))
+                .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(hub_words(&s.detail)))
+                .tooltip(crate::keys::tip_raw(&format!("{}\n{}", hub_words(&s.detail), trs("Go to this point of the thread")), "", light))
                 .on_click(cx.listener(|this, _, _, cx| { jump(this); cx.notify(); })).into_any_element(),
             (None, h) => div().id("hist-said").flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("faint"))
-                .child(if loading { "Loading the history…".to_string() } else { h.as_ref().map_or(String::new(), |h| h.note.clone()) }).into_any_element(),
+                .child(if loading { trs("Loading the history…") } else { h.as_ref().map_or(String::new(), |h| hub_words(&h.note)) }).into_any_element(),
         };
         let mut said_row = div().flex().items_center().gap(px(12.)).min_w_0().h(px(16.)).child(said);
         if hist.diff && step.as_ref().is_some_and(|s| !s.old.is_empty()) { said_row = said_row.child(legend(light)); }
@@ -428,13 +434,13 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
     }
     if pv.menu == 1 {
         let mut rows = menu_rows(hist.steps.as_ref(), hist.refs.as_ref());
-        if hist.side == 1 { rows.insert(0, ("Working copy".into(), "the files as they are now".into(), Pick::Live)); }
+        if hist.side == 1 { rows.insert(0, (trs("Working copy"), trs("the files as they are now"), Pick::Live)); }
         let mut list = div().id("compare-list").absolute().left(px(12.)).bottom(relative(1.)).mb(px(4.)).w(px(460.)).max_h(px(360.)).overflow_y_scroll().flex().flex_col()
             .bg(c("raise")).border_1().border_color(c("line")).occlude()
-            .child(div().px_3().py(px(6.)).text_color(c("faint")).child(if hist.side == 1 { "Compare with (new)" } else { "Compare from (old)" }))
+            .child(div().px_3().py(px(6.)).text_color(c("faint")).child(if hist.side == 1 { trs("Compare with (new)") } else { trs("Compare from (old)") }))
             .children(hist.ref_input.clone().map(|i| div().mx_3().mb(px(6.)).px_2().py_1().border_1().border_color(c("line")).bg(c("bg")).child(i)))
             .children((!hist.ref_err.is_empty()).then(|| div().px_3().pb(px(6.)).text_color(c("bad")).child(hist.ref_err.clone())));
-        if rows.is_empty() { list = list.child(div().px_3().py(px(6.)).border_t_1().border_color(c("line")).text_color(c("dim")).child(if hist.refs.is_none() { "Loading versions…" } else { "No versions in this project's history yet" })); }
+        if rows.is_empty() { list = list.child(div().px_3().py(px(6.)).border_t_1().border_color(c("line")).text_color(c("dim")).child(if hist.refs.is_none() { trs("Loading versions…") } else { trs("No versions in this project's history yet") })); }
         for (i, (label, sub, pick)) in rows.into_iter().enumerate() {
             list = list.child(div().id(SharedString::from(format!("cmp-{i}"))).flex().items_baseline().gap(px(10.)).px_3().py(px(6.)).border_t_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("panel")))
                 .child(div().flex_none().max_w(px(220.)).overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("text")).child(label))
@@ -469,8 +475,26 @@ mod tests {
         assert_eq!((old.steps[1].label.as_str(), old.live.as_str()), ("Step 2", "Live · 2 steps"));
     }
     #[test] fn the_hubs_reasons_read_as_words() {
-        assert_eq!(none_words("@bp.file-unread"), "This version of the file could not be read."); assert_eq!(none_words("@bp.file-missing:a.kicad_pcb"), "a.kicad_pcb is not there: it was moved or deleted.");
-        assert_eq!(none_words("Invalid geometry"), "Invalid geometry");
+        crate::i18n::with_lang("en", || {
+            assert_eq!(none_words("@bp.file-unread"), "This version of the file could not be read."); assert_eq!(none_words("@bp.file-missing:a.kicad_pcb"), "a.kicad_pcb is not there: it was moved or deleted.");
+            assert_eq!(none_words("Invalid geometry"), "Invalid geometry");
+        });
+        crate::i18n::with_lang("ja", || {
+            assert_eq!(none_words("@bp.file-unread"), "この版のファイルを読み込めませんでした。");
+            assert!(none_words("@bp.file-missing:a.kicad_pcb").starts_with("a.kicad_pcb "), "the name stays as it is");
+            assert_eq!(none_words("Invalid geometry"), "Invalid geometry", "the hub's own reason stays");
+        });
+    }
+    /// The hub's words go through the catalog part by part: the words round the agent's text and the file names are translated, those stay.
+    #[test] fn the_hubs_step_words_read_in_japanese_part_by_part() {
+        crate::i18n::with_lang("ja", || {
+            assert_eq!(hub_words("Saved 14:08 · Turn started · add an LDO"), "保存 14:08 · ターン開始 · add an LDO");
+            assert_eq!(hub_words("Step 1 of 2 · before the agent's edits"), "変更1/2 · エージェントの編集前");
+            assert_eq!(hub_words("Live · 3 of 5 changes"), "現在 · 変更5件中3件"); assert_eq!(hub_words("Live · 1 change"), "現在 · 変更1件");
+            assert_eq!(hub_words("Design change · a.kicad_sch"), "設計変更 · a.kicad_sch"); assert_eq!(hub_words("Live"), "現在");
+            assert_eq!(hub_words("3 snapshots of this file: 2 design changes"), "このファイルのスナップショット3件：設計変更2件");
+        });
+        crate::i18n::with_lang("en", || assert_eq!(hub_words("Saved 14:08 · After Bash"), "Saved 14:08 · After Bash"));
     }
     #[test] fn a_step_row_opens_the_kinds_it_changed_board_first() {
         assert_eq!(row_kinds("Design change · heater.kicad_pcb"), ["board"]);
@@ -496,8 +520,12 @@ mod tests {
     #[test] fn the_compare_menu_lists_the_newest_steps_then_the_versions() {
         let h = Steps { steps: (0..10).map(|i| Step { label: format!("Step {}", i + 1), detail: format!("d{i}"), ..Step::default() }).collect(), ..Steps::default() };
         let r = super::super::plot::Refs { git: String::new(), top: String::new(), pcb: String::new(), sch: String::new(), rows: vec![("head".into(), "HEAD".into(), "c1".into()), ("turn".into(), "turn/0".into(), "c2".into()), ("turn".into(), "turn/3".into(), "c3".into())] };
-        let rows = menu_rows(Some(&h), Some(&r));
+        let rows = crate::i18n::with_lang("en", || menu_rows(Some(&h), Some(&r)));
         assert_eq!(rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["Step 10", "Step 9", "Step 8", "Step 7", "Step 6", "Step 5", "Step 4", "Step 3", "HEAD", "Turn 0", "Turn 3"]);
         assert_eq!(rows[0].2, Pick::Step(9)); assert_eq!(rows[9].1, "this thread, before it began"); assert_eq!(rows[10].2, Pick::Commit("c3".into(), "Turn 3".into()));
+        // in Japanese the words are, the names are not, and a commit keeps the English label its comparison draws through the catalog
+        let ja = crate::i18n::with_lang("ja", || menu_rows(Some(&h), Some(&r)));
+        assert_eq!((ja[0].0.as_str(), ja[8].0.as_str(), ja[10].0.as_str()), ("変更10", "HEAD", "ターン3"));
+        assert_eq!(ja[9].1, "このスレッドの開始前"); assert_eq!(ja[10].2, Pick::Commit("c3".into(), "Turn 3".into()));
     }
 }

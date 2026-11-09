@@ -5,7 +5,7 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 /// The words, exactly as agreed with the switch-over lane.
-pub const TEXT: &str = "This is a copy of your data. Agents you start here run in your real project folders: their file changes are real, and going back does not undo them. Nothing else runs by itself.";
+pub const TEXT: &str = /* i18n-ok: the English words; drawn through tr */ "This is a copy of your data. Agents you start here run in your real project folders: their file changes are real, and going back does not undo them. Nothing else runs by itself.";
 /// The strip's height in px.
 pub const H: f32 = 36.;
 
@@ -18,7 +18,7 @@ pub fn view(light: bool, data: &Value) -> Option<AnyElement> {
     if !side_by_side(data) { return None; }
     let c = |n: &str| theme::color(light, n);
     Some(div().id("side-by-side").h(px(H)).flex_shrink_0().w_full().flex().items_center().px_3().bg(c("raise")).border_b_1().border_color(c("line")).text_size(px(11.)).line_height(px(15.)).text_color(c("text")).overflow_hidden()
-        .child(TEXT).into_any_element())
+        .child(crate::i18n::trs(TEXT)).into_any_element())
 }
 
 #[cfg(test)]

@@ -151,7 +151,7 @@ pub const MAX_BLOCKS: usize = 400;
 pub fn parse(nodes: &[Value]) -> Vec<Block> {
     let mut o = Vec::new();
     for n in nodes.iter().take(MAX_BLOCKS) { blocks_into(n, &mut o, 0); }
-    if nodes.len() > MAX_BLOCKS { o.push(Block::Para(vec![Span { text: format!("… {} more blocks", nodes.len() - MAX_BLOCKS), style: Style { italic: true, ..Default::default() } }])); }
+    if nodes.len() > MAX_BLOCKS { o.push(Block::Para(vec![Span { text: crate::i18n::tf("gpui.c.md.more", &[("n", (nodes.len() - MAX_BLOCKS).into())]), style: Style { italic: true, ..Default::default() } }])); }
     o
 }
 
@@ -180,7 +180,7 @@ pub fn block_text(b: &Block) -> String {
 // ---- code highlighting (the chat has no language tag; a plain scan of what any language has)
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Tok { Plain, Keyword, Str, Comment, Number }
-const KEYWORDS: &[&str] = &["fn", "let", "mut", "pub", "use", "mod", "struct", "enum", "impl", "trait", "match", "if", "else", "for", "while", "loop", "return", "const", "static", "async", "await", "def", "class", "import", "from", "as", "in", "not", "and", "or", "None", "True", "False", "function", "var", "export", "new", "this", "self", "true", "false", "null", "nil", "int", "void", "type", "interface", "try", "catch", "throw", "except", "with", "yield", "lambda", "case", "switch", "break", "continue", "package", "func", "go", "defer", "select", "range", "char", "bool", "string"];
+/* i18n-ok: language keywords */ const KEYWORDS: &[&str] = &["fn", "let", "mut", "pub", "use", "mod", "struct", "enum", "impl", "trait", "match", "if", "else", "for", "while", "loop", "return", "const", "static", "async", "await", "def", "class", "import", "from", "as", "in", "not", "and", "or", "None", "True", "False", "function", "var", "export", "new", "this", "self", "true", "false", "null", "nil", "int", "void", "type", "interface", "try", "catch", "throw", "except", "with", "yield", "lambda", "case", "switch", "break", "continue", "package", "func", "go", "defer", "select", "range", "char", "bool", "string"];
 
 /// Token ranges (byte offsets) covering the text in order; consecutive same-kind runs are merged.
 pub fn highlight(text: &str) -> Vec<(Range<usize>, Tok)> {

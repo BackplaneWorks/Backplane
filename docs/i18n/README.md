@@ -36,8 +36,8 @@ Byte units use 1024 and truncate tenths below 10, integers from 10.
 I18n.day's offset is eastward seconds; convert signed TzOff wall time at callers.
 
 Native phone messages are selected by `i18n/native.keys`. The same generator
-emits typed, pure Swift/Kotlin functions in `mobile/ios/Shared/NativeMessages.swift`
-and Android `NativeMessages.kt`. Commit these outputs together with the catalogs;
+emits typed, pure Swift functions in `mobile/ios/Shared/NativeMessages.swift`
+(Android: see below). Commit these outputs together with the catalogs;
 `--check` rejects stale native output too. Counts are UInt64/ULong; strings,
 selects and plural branches compile directly, with English fallback grammar.
 No runtime ICU parser or separate translated native table is used.
@@ -129,3 +129,15 @@ for older clients. Web, Electron and phone projections translate held failures
 at display time, including after a locale switch; unknown server/OS text stays
 content. Attachment limits follow the current hub setting. The iOS producer
 already sends the stable network ID; Android and the browser use the same ID.
+
+## Android
+
+`python3 scripts/i18n-android.py` writes `mobile/android/.../Msg.kt` from en.msg and ja.msg (`--check` fails on stale
+output): every message as written, a typed accessor per key (`Msg.settings_lang`, `Msg.thread_count(n)`) and the reverse
+table. `Tr.kt` renders the ICU subset at run time and holds the language: Settings, Language (Automatic, English, 日本語,
+kept on the device; Automatic is Japanese when the system language is `ja`). Text the hub sends for display goes through
+`Tr.t(text)`: an exact English catalog message, or a templated one matched with its arguments, comes back in Japanese;
+anything else (names, paths, agent text) as it came. New Android keys go under `# ---- android: new entries go here ----`
+as `android.*` (the hub's own display strings as `android.hub.*`). `scripts/check-android-i18n.py` (run by every Gradle
+build and by CI) fails on a bare English literal handed to what draws text; technical literals sit in
+`mobile/android/i18n-allow.txt` with a reason.

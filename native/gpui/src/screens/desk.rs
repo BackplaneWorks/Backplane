@@ -26,7 +26,7 @@ pub fn tick(this: &mut Backplane, window: &mut Window, _cx: &mut Context<Backpla
 
 /// The notify frame's command line: program and arguments.
 pub fn command(f: &Value) -> (String, Vec<String>) {
-    let title = f["title"].as_str().unwrap_or("Backplane"); let body = f["body"].as_str().unwrap_or("");
+    let title = crate::i18n::trs(f["title"].as_str().unwrap_or("Backplane")); let body = crate::i18n::trs(f["body"].as_str().unwrap_or(""));
     let prog = std::env::var("BACKPLANE_GPUI_NOTIFY_CMD").unwrap_or_else(|_| "notify-send".into());
     (prog, vec!["--app-name=Backplane".into(), "--print-id".into(), "--".into(), title.chars().take(200).collect(), body.chars().take(400).collect()])
 }
@@ -66,15 +66,15 @@ pub fn clear(f: &Value) {
 #[cfg(test)] mod tests { use super::*;
     #[test] fn speaks_on_a_change_and_each_beat_only_while_focused() {
         let s = said("t1", true);
-        assert!(due("", 0, "t1", true, 10), "never spoke");
-        assert!(!due(&s, 10, "t1", true, 50)); assert!(due(&s, 10, "t1", true, 70), "a beat");
-        assert!(due(&s, 10, "t2", true, 11), "another thread"); assert!(due(&s, 10, "t1", false, 11), "lost the focus");
-        assert!(!due(&said("t1", false), 10, "t1", false, 500), "unfocused: no beat");
+        /* i18n-ok: a name */ assert!(due("", 0, "t1", true, 10), "never spoke");
+        /* i18n-ok: a name */ assert!(!due(&s, 10, "t1", true, 50)); assert!(due(&s, 10, "t1", true, 70), "a beat");
+        /* i18n-ok: a name */ assert!(due(&s, 10, "t2", true, 11), "another thread"); assert!(due(&s, 10, "t1", false, 11), "lost the focus");
+        /* i18n-ok: a name */ assert!(!due(&said("t1", false), 10, "t1", false, 500), "unfocused: no beat");
     }
-    #[test] fn the_command_carries_title_and_body() { let (_, a) = command(&json!({"title":"T","body":"B"})); assert_eq!(a[3..], ["T".to_string(), "B".to_string()]); assert!(a.contains(&"--print-id".to_string()), "the id, to close it later"); }
+    /* i18n-ok: a name */ #[test] fn the_command_carries_title_and_body() { let (_, a) = command(&json!({"title":"T","body":"B"})); assert_eq!(a[3..], ["T".to_string(), "B".to_string()]); assert!(a.contains(&"--print-id".to_string()), "the id, to close it later"); }
     #[test] fn an_answered_need_closes_its_notification_by_id() {
         if std::env::var("BACKPLANE_GPUI_NOTIFY_CMD").is_ok() { return }
         let (p, a) = close_command("ask-t1", "42").unwrap(); assert_eq!(p, "gdbus"); assert_eq!(a.last().unwrap(), "42"); assert!(a.contains(&"org.freedesktop.Notifications.CloseNotification".to_string()));
-        assert!(close_command("ask-t1", "").is_none(), "no id printed: nothing to close");
+        /* i18n-ok: a name */ assert!(close_command("ask-t1", "").is_none(), "no id printed: nothing to close");
     }
 }

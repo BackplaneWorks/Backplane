@@ -37,7 +37,7 @@ pub fn gallery(light: bool) -> impl IntoElement {
 }
 
 /// `--fonts`: fixed lines in the mono face for the font check (line i at y = 16 + 24 i, x = 16).
-pub const FONT_LINES: [&str; 5] = ["The quick brown fox 0123456789 {}[]()<>", "=> != -> == <= >= :: ... |> ++ www", "\u{250c}\u{2500}\u{252c}\u{2500}\u{2510}\u{2502} \u{251c}\u{2500}\u{253c}\u{2500}\u{2524} \u{2514}\u{2500}\u{2534}\u{2500}\u{2518} \u{2192} \u{2190} \u{2713} \u{2318}", "\u{65e5}\u{672c}\u{8a9e} \u{4e2d}\u{6587} fallback", "Bold: The quick brown fox"];
+/* i18n-ok: font check sample lines for test/visual */ pub const FONT_LINES: [&str; 5] = ["The quick brown fox 0123456789 {}[]()<>", "=> != -> == <= >= :: ... |> ++ www", "\u{250c}\u{2500}\u{252c}\u{2500}\u{2510}\u{2502} \u{251c}\u{2500}\u{253c}\u{2500}\u{2524} \u{2514}\u{2500}\u{2534}\u{2500}\u{2518} \u{2192} \u{2190} \u{2713} \u{2318}", "\u{65e5}\u{672c}\u{8a9e} \u{4e2d}\u{6587} fallback", "Bold: The quick brown fox"];
 pub fn fonts(light: bool) -> impl IntoElement {
     let c = theme::color(light, "text");
     div().size_full().bg(theme::color(light, "bg")).text_color(c).p(px(16.)).flex().flex_col()

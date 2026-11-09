@@ -12,14 +12,14 @@ pub const FPS: u32 = 15;
 
 /// The ffmpeg to run: `BACKPLANE_GPUI_FFMPEG` (a path, for tests), else the first on PATH.
 pub fn ffmpeg() -> Result<PathBuf, &'static str> {
-    if let Some(p) = std::env::var_os("BACKPLANE_GPUI_FFMPEG").map(PathBuf::from) { return if p.is_file() { Ok(p) } else { Err("Recording needs ffmpeg, and BACKPLANE_GPUI_FFMPEG does not name one.") }; }
+    /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ if let Some(p) = std::env::var_os("BACKPLANE_GPUI_FFMPEG").map(PathBuf::from) { return if p.is_file() { Ok(p) } else { Err("Recording needs ffmpeg, and BACKPLANE_GPUI_FFMPEG does not name one.") }; }
     std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).map(|d| d.join("ffmpeg")).find(|p| p.is_file())
-        .ok_or("Screen capture needs ffmpeg, which is not installed.")
+        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ .ok_or("Screen capture needs ffmpeg, which is not installed.")
 }
 /// The X display this app is drawn on.
 pub fn display() -> Result<String, &'static str> {
     std::env::var("DISPLAY").ok().filter(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '-' | '_')))
-        .ok_or("Screen capture needs an X11 display.")
+        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ .ok_or("Screen capture needs an X11 display.")
 }
 /// Whether the controls can work at all, as one sentence when they cannot.
 pub fn unavailable() -> Option<&'static str> { ffmpeg().err().or(display().err()) }
@@ -77,9 +77,9 @@ pub fn is_webm(path: &Path) -> bool {
 pub fn shot(xid: u32, out: &Path) -> Result<Vec<u8>, String> {
     let (bin, disp) = (ffmpeg()?, display()?);
     let _ = std::fs::remove_file(out);
-    let status = Command::new(bin).args(shot_args(xid, &disp, out)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_err(|_| "ffmpeg did not start.".to_string())?;
+    /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ let status = Command::new(bin).args(shot_args(xid, &disp, out)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_err(|_| "ffmpeg did not start.".to_string())?;
     let bytes = std::fs::read(out).unwrap_or_default();
-    if !status.success() || !is_png(&bytes) { let _ = std::fs::remove_file(out); return Err("The window could not be captured. Capture again or choose an image.".into()); }
+    /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ if !status.success() || !is_png(&bytes) { let _ = std::fs::remove_file(out); return Err("The window could not be captured. Capture again or choose an image.".into()); }
     Ok(bytes)
 }
 
@@ -89,7 +89,7 @@ impl Recording {
     pub fn start(xid: u32, out: &Path) -> Result<Self, String> {
         let (bin, disp) = (ffmpeg()?, display()?);
         let _ = std::fs::remove_file(out);
-        let child = Command::new(bin).args(record_args(xid, &disp, out)).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|_| "ffmpeg did not start.".to_string())?;
+        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ let child = Command::new(bin).args(record_args(xid, &disp, out)).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|_| "ffmpeg did not start.".to_string())?;
         Ok(Self { child, path: out.to_path_buf(), started: Instant::now() })
     }
     pub fn elapsed(&self) -> Duration { self.started.elapsed() }
@@ -104,7 +104,7 @@ impl Recording {
         while Instant::now() < end { if !matches!(self.child.try_wait(), Ok(None)) { break; } std::thread::sleep(Duration::from_millis(50)); }
         if matches!(self.child.try_wait(), Ok(None)) { let _ = self.child.kill(); let _ = self.child.wait(); }
         let ms = self.started.elapsed().as_millis() as u64;
-        if is_webm(&self.path) { Ok(ms.min(MAX_SECS as u64 * 1000)) } else { let _ = std::fs::remove_file(&self.path); Err("Recording failed or went over the size limit. Record a shorter clip.".into()) }
+        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ if is_webm(&self.path) { Ok(ms.min(MAX_SECS as u64 * 1000)) } else { let _ = std::fs::remove_file(&self.path); Err("Recording failed or went over the size limit. Record a shorter clip.".into()) }
     }
     /// Cancel: end ffmpeg and delete whatever it wrote.
     pub fn cancel(mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_file(&self.path); }

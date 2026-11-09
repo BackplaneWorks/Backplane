@@ -3,7 +3,7 @@
 //! kinds, Settings...). Opened from the bar at the top, the Commands item on the rail or Ctrl+Shift+P; Esc shuts it. The ranking is `rank`: what starts with the text,
 //! then a word that does, then the letters in order.
 use super::composer::{Composer, ComposerEvent};
-use crate::{hub::Command, string, theme, Backplane};
+use crate::{hub::Command, i18n::{tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
@@ -46,8 +46,8 @@ pub fn mark(label: &str, q: &str) -> Option<std::ops::Range<usize>> {
 pub fn hit_items(result: &Value, hub_of: &dyn Fn(&str) -> String) -> Vec<Item> {
     result["hits"].as_array().into_iter().flatten().map(|h| {
         let (th, title, project) = (string(h, "thread"), string(h, "title"), string(h, "project"));
-        let place = if project.is_empty() { title } else { format!("{title} · {project}") };
-        Item { label: string(h, "text"), place, kind: if h["role"] == "user" { "you said" } else { "agent said" }, what: Do::Message(hub_of(&th), string(h, "msg")), row: Value::Null }
+        /* i18n-ok: a title and project, not words */ let place = if project.is_empty() { title } else { format!("{title} · {project}") };
+        /* i18n-ok: kinds, compared; drawn through trs */ Item { label: string(h, "text"), place, kind: if h["role"] == "user" { "you said" } else { "agent said" }, what: Do::Message(hub_of(&th), string(h, "msg")), row: Value::Null }
     }).collect()
 }
 /// The hub's title hits (`thread.search`'s `titles`) as thread items, with their project as the place.
@@ -83,33 +83,33 @@ pub fn items(data: &Value) -> Vec<Item> {
         for t in thread["tools"].as_array().into_iter().flatten().chain(thread["menu"].as_array().into_iter().flatten()) {
             let (label, action, value) = (string(t, "label"), string(t, "action"), string(t, "value"));
             if label.is_empty() || action.is_empty() || action == "delete" || t["options"].as_array().map_or(false, |o| !o.is_empty()) { continue }
-            v.push(Item { label, place: String::new(), kind: "action", what: Do::Action(action, value), row: Value::Null });
+            v.push(Item { label: trs(&label), place: String::new(), kind: "action", what: Do::Action(action, value), row: Value::Null });
         }
-        for (l, k) in [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Split", "split"), ("Mech", "mech"), ("Files", "files"), ("Review", "review"), ("Browser", "browser")] {
-            v.push(Item { label: format!("Open {l}"), place: "viewer".into(), kind: "action", what: Do::Action("view-kind".into(), k.into()), row: Value::Null });
+        /* i18n-ok: viewer kinds, drawn through trs in the label */ for (l, k) in [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Split", "split"), ("Mech", "mech"), ("Files", "files"), ("Review", "review"), ("Browser", "browser")] {
+            v.push(Item { label: tf("gpui.palette.open", &[("kind", trs(l).into())]), place: trs("viewer"), kind: "action", what: Do::Action("view-kind".into(), k.into()), row: Value::Null });
         }
     }
     if thread.is_object() {
-        v.push(Item { label: "Agent, model and effort".into(), place: String::new(), kind: "action", what: Do::Models, row: Value::Null });
-        v.push(Item { label: "Previous thread".into(), place: String::new(), kind: "action", what: Do::Prev, row: Value::Null });
-        v.push(Item { label: "Next thread".into(), place: String::new(), kind: "action", what: Do::Next, row: Value::Null });
+        v.push(Item { label: trs("Agent, model and effort"), place: String::new(), kind: "action", what: Do::Models, row: Value::Null });
+        v.push(Item { label: trs("Previous thread"), place: String::new(), kind: "action", what: Do::Prev, row: Value::Null });
+        v.push(Item { label: trs("Next thread"), place: String::new(), kind: "action", what: Do::Next, row: Value::Null });
     }
-    if data["bots"].as_array().map_or(false, |b| b.iter().any(|b| b["uber"] == true)) { v.push(Item { label: "Uberbot chat".into(), place: String::new(), kind: "action", what: Do::Uber, row: Value::Null }); }
-    v.push(Item { label: "Keyboard shortcuts".into(), place: String::new(), kind: "action", what: Do::Shortcuts, row: Value::Null });
-    v.push(Item { label: "Settings".into(), place: String::new(), kind: "action", what: Do::Settings, row: Value::Null });
-    v.push(Item { label: "Fold or unfold the sidebar".into(), place: String::new(), kind: "action", what: Do::Sidebar, row: Value::Null });
+    if data["bots"].as_array().map_or(false, |b| b.iter().any(|b| b["uber"] == true)) { v.push(Item { label: trs("Uberbot chat"), place: String::new(), kind: "action", what: Do::Uber, row: Value::Null }); }
+    v.push(Item { label: trs("Keyboard shortcuts"), place: String::new(), kind: "action", what: Do::Shortcuts, row: Value::Null });
+    v.push(Item { label: trs("Settings"), place: String::new(), kind: "action", what: Do::Settings, row: Value::Null });
+    v.push(Item { label: trs("Fold or unfold the sidebar"), place: String::new(), kind: "action", what: Do::Sidebar, row: Value::Null });
     // always here, whatever the hub sends or fails to send: these do not go through it (hubbar.rs)
-    for a in ["restart", "safe", "rollback"] { v.push(Item { label: super::hubbar::label_of(a).into(), place: String::new(), kind: "action", what: Do::Hub(a.into()), row: Value::Null }); }
+    for a in ["restart", "safe", "rollback"] { v.push(Item { label: trs(super::hubbar::label_of(a)), place: String::new(), kind: "action", what: Do::Hub(a.into()), row: Value::Null }); }
     for p in data["projects"].as_array().into_iter().flatten() {
         let (pid, ptitle) = (string(p, "id"), string(p, "title"));
         let raw = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
-        v.push(Item { label: format!("New thread in {ptitle}"), place: String::new(), kind: "action", what: Do::Action("new-thread".into(), raw), row: Value::Null });
+        v.push(Item { label: tf("gpui.palette.new.thread.in", &[("project", ptitle.as_str().into())]), place: String::new(), kind: "action", what: Do::Action("new-thread".into(), raw), row: Value::Null });
         for t in p["threads"].as_array().into_iter().flatten().chain(p["settled"].as_array().into_iter().flatten()) {
             v.push(Item { label: string(t, "title"), place: on_machine(&ptitle, t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
         }
     }
     for t in data["conversationHistory"]["jump"].as_array().into_iter().flatten().chain(data["legacy"].as_array().into_iter().flatten()) {
-        v.push(Item { label: string(t, "title"), place: "Conversation history".into(), kind: "thread", what: Do::Thread(string(t, "id")), row: Value::Null });
+        v.push(Item { label: string(t, "title"), place: trs("Conversation history"), kind: "thread", what: Do::Thread(string(t, "id")), row: Value::Null });
     }
     for t in data["active"].as_array().into_iter().flatten().chain(data["activeSettled"]["rows"].as_array().into_iter().flatten()) {
         v.push(Item { label: string(t, "title"), place: on_machine(&string(t, "project"), t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
@@ -173,7 +173,7 @@ impl Backplane {
     pub(crate) fn palette_open(&mut self, cx: &mut Context<Self>) {
         if self.screens.palette.input.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
-            input.update(cx, |i, _| { i.set_placeholder("Jump to a thread or run a command"); });
+            /* i18n-ok: hints, drawn through trs by the composer */ input.update(cx, |i, _| { i.set_placeholder("Jump to a thread or run a command"); });
             cx.observe(&input, |this, input, cx| { let q = input.read(cx).content.to_string(); if q != this.screens.palette.q { this.screens.palette.q = q; this.screens.palette.ix = 0; this.palette_search(cx); } cx.notify(); }).detach();
             cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| match ev {
                 ComposerEvent::Submit | ComposerEvent::PopupPick => this.palette_run(None, cx),
@@ -232,9 +232,9 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette,
                     (Do::Message(..), Some(r)) => StyledText::new(it.label.clone()).with_highlights([(r, HighlightStyle { color: Some(c("text").into()), font_weight: Some(FontWeight::BOLD), ..Default::default() })]).into_any_element(),
                     _ => it.label.clone().into_any_element(),
                 }))
-            .when(!want.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(want.clone())))
+            .when(!want.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want))))
             .child(div().text_size(px(11.)).text_color(c("dim")).child(shortcut(it, &current, l)))
-            .child(div().flex_shrink_0().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c("faint")).child(if it.place.is_empty() { it.kind.to_string() } else { it.place.clone() }))
+            .child(div().flex_shrink_0().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c("faint")).child(if it.place.is_empty() { trs(it.kind) } else { it.place.clone() }))
             .on_click(cx.listener(move |this, _, _, cx| this.palette_run(Some(i), cx))));
     }
     let input = p.input.clone().map(|s| div().px_3().py_2().border_b_1().border_color(c("line")).child(s));

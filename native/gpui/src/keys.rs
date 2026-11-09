@@ -2,6 +2,7 @@
 //! One table (`TABLE`) feeds the key bindings, the palette's hints, the tooltips and the Settings list. `secondary` is Cmd on macOS and Ctrl elsewhere.
 //! Bare keys (`/`, the rail's letters) are bound only outside every text field and viewer (`FREE`), so typing is never taken.
 use crate::{hub::Command, local::Local, theme, Backplane};
+use crate::i18n::{tr, trs};
 use gpui::{actions, prelude::*, *};
 use serde_json::Value;
 
@@ -28,7 +29,7 @@ const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !FindInput && 
 const NOT_SHELL: &str = "!Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 const NOT_FIELD: &str = "!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 /// The open model menu has its keys wherever the keyboard is: the window says `Picker` while it is open, and these bind at the depth of each text field, after the field's own keys, so they come first.
-const PICK_SCOPES: [&str; 6] = ["Picker", "Picker > Composer", "Picker > PickInput", "Picker > TextInput", "Picker > AskInput", "Picker > ImpInput"];
+/* i18n-ok: key contexts */ const PICK_SCOPES: [&str; 6] = ["Picker", "Picker > Composer", "Picker > PickInput", "Picker > TextInput", "Picker > AskInput", "Picker > ImpInput"];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind { Legacy, Rebind, Fixed }
@@ -113,10 +114,10 @@ pub fn show(key: &str, mac: bool) -> String {
     for (i, p) in parts.iter().enumerate() {
         let last = i + 1 == parts.len();
         out.push(match (*p, mac) {
-            ("secondary", true) => "⌘".into(), ("secondary" | "ctrl", false) => "Ctrl".into(), ("ctrl", true) => "⌃".into(),
-            ("super", true) => "⌘".into(), ("super", false) => "Super".into(), ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(),
-            ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(), ("delete", _) => "Delete".into(), ("backspace", _) => "Backspace".into(), ("tab", _) => "Tab".into(),
-            ("up", _) => "Up".into(), ("down", _) => "Down".into(), ("left", _) => "Left".into(), ("right", _) => "Right".into(),
+            /* i18n-ok: key names stay as on the keyboard */ ("secondary", true) => "⌘".into(), ("secondary" | "ctrl", false) => "Ctrl".into(), ("ctrl", true) => "⌃".into(),
+            /* i18n-ok: key names stay as on the keyboard */ ("super", true) => "⌘".into(), ("super", false) => "Super".into(), ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(),
+            /* i18n-ok: key names stay as on the keyboard */ ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(), ("delete", _) => "Delete".into(), ("backspace", _) => "Backspace".into(), ("tab", _) => "Tab".into(),
+            /* i18n-ok: key names stay as on the keyboard */ ("up", _) => "Up".into(), ("down", _) => "Down".into(), ("left", _) => "Left".into(), ("right", _) => "Right".into(),
             (k, _) if last && k.chars().count() == 1 => k.to_uppercase(), (k, _) => k.to_string(),
         });
     }
@@ -198,7 +199,7 @@ fn pad_bindings(all: &[KeyBinding], close: &str) -> Vec<KeyBinding> {
     let own = ["composer::", "text_input::", "backplane::Send", "backplane::CopySelection", "keys::Pick"]; // the length box's editing keys, keys only a text field or the page has, and the picker's (bound only in its scopes)
     let shortcuts = all.iter().filter(|b| !own.iter().any(|o| b.action().name().starts_with(o)));
     for key in shortcuts.filter_map(|b| b.keystrokes().first().map(|k| k.unparse())).filter(|k| *k != close) {
-        v.extend(["DrawPad", "PadLength"].map(|ctx| KeyBinding::new(&key, NoAction, Some(ctx))));
+        /* i18n-ok: key contexts */ v.extend(["DrawPad", "PadLength"].map(|ctx| KeyBinding::new(&key, NoAction, Some(ctx))));
     }
     v
 }
@@ -265,9 +266,9 @@ pub fn caps_pair(a: &str, b: &str) -> Vec<String> {
     if x.len() == y.len() && x.len() > 1 && x[..x.len() - 1] == y[..y.len() - 1] { let mut v = x.clone(); v.push(y[y.len() - 1].clone()); v } else { x.into_iter().chain(y).collect() }
 }
 /// The legend at the sidebar's foot while the secondary key is held: (keycaps, words); the last row opens Commands, which lists every key.
-pub fn legend(l: &Local) -> Vec<(Vec<String>, &'static str)> {
-    vec![(caps_pair(&hint(l, "prev"), &hint(l, "next")), "prev / next thread"), (caps(&hint(l, "new")), "new thread here"), (caps(&hint(l, "threads")), "jump to a thread here"),
-        (caps(&hint(l, "focus")), "write a message"), (caps(&hint(l, "palette")), "all shortcuts")]
+pub fn legend(l: &Local) -> Vec<(Vec<String>, String)> {
+    vec![(caps_pair(&hint(l, "prev"), &hint(l, "next")), trs("prev / next thread")), (caps(&hint(l, "new")), trs("new thread here")), (caps(&hint(l, "threads")), trs("jump to a thread here")),
+        (caps(&hint(l, "focus")), trs("write a message")), (caps(&hint(l, "palette")), trs("all shortcuts"))]
 }
 fn has_tool(data: &Value, action: &str) -> bool { data["thread"]["tools"].as_array().into_iter().flatten().any(|t| t["action"] == action) }
 
@@ -278,11 +279,19 @@ impl Render for Tip {
         div().px_2().py_1().bg(c("panel")).border_1().border_color(c("line")).text_size(px(11.)).text_color(c("text")).child(self.0.clone())
     }
 }
-/// A tooltip builder for `.tooltip(...)`: `text`, then its key when it has one.
+/// A tooltip builder for `.tooltip(...)`: `text` through the catalog (English written in the code; a name or title the catalog does not know comes
+/// back as it is), then its key when it has one.
 pub fn tip(text: &str, key: &str, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
-    let t: SharedString = if key.is_empty() { text.to_string() } else { format!("{text} · {key}") }.into();
+    let t: SharedString = tip_text(&tr(text), key).into();
     move |_, cx| cx.new(|_| Tip(t.clone(), light)).into()
 }
+/// `tip` for a text already in the language in force (made with `tf`), so it is not looked up a second time.
+pub fn tip_raw(text: &str, key: &str, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    let t: SharedString = tip_text(text, key).into();
+    move |_, cx| cx.new(|_| Tip(t.clone(), light)).into()
+}
+/// A tooltip's words: the text, then its key when it has one.
+/* i18n-ok: the text and its key, no words */ pub fn tip_text(text: &str, key: &str) -> String { if key.is_empty() { text.to_string() } else { format!("{text} · {key}") } }
 
 impl Backplane {
     /// A rail button pressed, or its key: the viewer's kind (or Diff) is asked for; the kind already lit shuts the viewer.
@@ -352,7 +361,7 @@ impl Backplane {
 
 /// Registers every action on the root element.
 pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
-    let el = el.key_context(if picker { "Backplane Picker" } else { "Backplane" }).on_modifiers_changed(cx.listener(|this, _: &ModifiersChangedEvent, window, cx| this.hints_maybe(window, cx)));
+    /* i18n-ok: key contexts */ let el = el.key_context(if picker { "Backplane Picker" } else { "Backplane" }).on_modifiers_changed(cx.listener(|this, _: &ModifiersChangedEvent, window, cx| this.hints_maybe(window, cx)));
     macro_rules! on { ($el:expr, $a:ty, $f:expr) => { $el.on_action(cx.listener(|this, _: &$a, window, cx| { let _ = &window; ($f)(this, window, cx) })) } }
     let el = on!(el, NewThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
         let pid = new_target(&this.data, &this.selected, this.project_page.as_deref());
@@ -611,10 +620,20 @@ mod tests {
     }
     #[test] fn the_legend_reads_the_keys_this_device_uses() {
         if mac() { return }
-        let l = Local::default(); let g = legend(&l);
-        assert_eq!(g[0].0, vec!["Ctrl", "Shift", "[", "]"]); assert_eq!(g[1].0, vec!["Ctrl", "N"]); assert_eq!(g[2].0, vec!["Ctrl", "1…9"]); assert_eq!(g[3].0, vec!["/"]); assert_eq!(g[4], (vec!["Ctrl".to_string(), "K".to_string()], "all shortcuts"));
+        let l = Local::default();
+        let g = crate::i18n::with_lang("en", || legend(&l));
+        assert_eq!(g[0].0, vec!["Ctrl", "Shift", "[", "]"]); assert_eq!(g[1].0, vec!["Ctrl", "N"]); assert_eq!(g[2].0, vec!["Ctrl", "1…9"]); assert_eq!(g[3].0, vec!["/"]); assert_eq!(g[4], (vec!["Ctrl".to_string(), "K".to_string()], "all shortcuts".to_string()));
         let mut l = Local::default(); assert!(l.set("shortcut", "new\u{1f}ctrl-alt-n")); assert_eq!(legend(&l)[1].0, vec!["Ctrl", "Alt", "N"], "a rebound key reads as rebound");
         assert_eq!(caps("Ctrl++"), vec!["Ctrl", "+"]); assert_eq!(caps_pair("Ctrl+D", "Alt+E"), vec!["Ctrl", "D", "Alt", "E"]); assert_eq!(caps(""), Vec::<String>::new());
+    }
+    /// The legend's words and every shortcut's label and scope (drawn by Settings through `trs`) are in Japanese; the keys stay as they are.
+    #[test] fn the_shortcuts_read_in_japanese() {
+        crate::i18n::with_lang("ja", || {
+            let g = legend(&Local::default());
+            assert!(g.iter().all(|(_, w)| !w.chars().any(|c| c.is_ascii_alphabetic())), "{g:?}");
+            for x in TABLE { for w in [x.label, x.scope] { assert_ne!(trs(w), w, "{} has no Japanese", w); } }
+            assert_eq!(tip_text(&tr("New thread"), "Ctrl+N"), "新しいスレッド · Ctrl+N");
+        });
     }
     #[test] fn super_backtick_toggles_the_terminal_off_a_mac_even_from_the_shell() {
         if mac() { return }

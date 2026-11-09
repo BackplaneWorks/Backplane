@@ -138,7 +138,7 @@ wrap_download_handler! {
             let path = unique_path(&dir, &safe_name(&s(name)));
             eprintln!("GPUI_LOG {{\"cef_download\":{}}}", serde_json::Value::String(path.to_string_lossy().into_owned()));
             if let Some(cb) = cb { cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), false as _); }
-            self.tab.st.lock().unwrap().download = format!("Downloading {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()); let _ = self.tab.wake.try_send(()); true as _
+            /* i18n-ok: drawn through trs (cef_page) */ self.tab.st.lock().unwrap().download = format!("Downloading {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()); let _ = self.tab.wake.try_send(()); true as _
         }
         fn on_download_updated(&self, _b: Option<&mut Browser>, item: Option<&mut DownloadItem>, _cb: Option<&mut DownloadItemCallback>) {
             let Some(item) = item else { return };
@@ -149,7 +149,7 @@ wrap_download_handler! {
             if item.is_complete() == 1 && !full.exists() { return } // already brought to Downloads by an earlier callback
             let full = if item.is_complete() == 1 { bring_to_downloads(&full, &CefString::from(&item.suggested_file_name()).to_string()) } else { full };
             let name = full.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(name);
-            let msg = if item.is_complete() == 1 { format!("Downloaded {name} to {}", full.parent().map(|p| p.display().to_string()).unwrap_or_default()) } else if item.is_canceled() == 1 || item.is_interrupted() == 1 { format!("Download of {name} stopped") } else { format!("Downloading {name} {}%", item.percent_complete().max(0)) };
+            /* i18n-ok: drawn through trs (cef_page) */ let msg = if item.is_complete() == 1 { format!("Downloaded {name} to {}", full.parent().map(|p| p.display().to_string()).unwrap_or_default()) } else if item.is_canceled() == 1 || item.is_interrupted() == 1 { format!("Download of {name} stopped") } else { format!("Downloading {name} {}%", item.percent_complete().max(0)) };
             self.tab.st.lock().unwrap().download = msg; let _ = self.tab.wake.try_send(());
         }
     }
@@ -208,7 +208,7 @@ wrap_app! {
 }
 fn app() -> App { AppH::new(Arc::new(switches())) }
 fn switches() -> Vec<(String, String)> {
-    let mut v = vec![("use-mock-keychain".into(), String::new()), ("password-store".into(), "basic".into()), ("noerrdialogs".into(), String::new()), ("disable-features".into(), "Translate".into())];
+    /* i18n-ok: Chromium switches */ let mut v = vec![("use-mock-keychain".into(), String::new()), ("password-store".into(), "basic".into()), ("noerrdialogs".into(), String::new()), ("disable-features".into(), "Translate".into())];
     // Linux: the window is X11 (gpui's x11 backend; on a Wayland desktop it runs through XWayland), and so is Chromium: pinned, so a Wayland session's
     // WAYLAND_DISPLAY never makes it pick its own Wayland platform, which off-screen rendering does not need and which would not share our X display
     #[cfg(target_os = "linux")]
@@ -249,7 +249,7 @@ pub fn runtime_dir() -> Option<PathBuf> {
     if let Some(c) = cache { cands.push(c.join("backplane").join("cef-runtime").join(VERSION)); }
     if let Ok(me) = std::env::current_exe() { if let Some(d) = me.parent() { cands.push(d.to_path_buf()); if cfg!(target_os = "macos") { cands.push(d.join("../Frameworks")); } } }
     #[cfg(target_os = "macos")]
-    return cands.into_iter().find(|d| d.join(mac::FRAMEWORK).join("Resources").join("icudtl.dat").exists() && d.join(mac::FRAMEWORK).join(mac::LIB).exists());
+    /* i18n-ok: a folder name */ return cands.into_iter().find(|d| d.join(mac::FRAMEWORK).join("Resources").join("icudtl.dat").exists() && d.join(mac::FRAMEWORK).join(mac::LIB).exists());
     #[cfg(not(target_os = "macos"))]
     cands.into_iter().find(|d| d.join("icudtl.dat").exists() && d.join("resources.pak").exists() && d.join(LIB).exists() && (!cfg!(windows) || d.join("chrome_elf.dll").exists()))
 }
@@ -277,7 +277,7 @@ fn ensure_beside(dir: &Path, exe_dir: &Path) -> Result<(), String> {
         #[cfg(unix)] { let _ = std::os::unix::fs::symlink(&have, &want); }
     }
     let missing: Vec<&str> = RUNTIME_FILES.iter().copied().filter(|f| !exe_dir.join(f).exists()).collect();
-    if missing.is_empty() { Ok(()) } else { Err(format!("CEF's files are missing beside {} ({}) and could not be linked from {}", exe_dir.display(), missing.join(", "), dir.display())) }
+    /* i18n-ok: a technical reason, said inside the translated "embedded browser unavailable" */ if missing.is_empty() { Ok(()) } else { Err(format!("CEF's files are missing beside {} ({}) and could not be linked from {}", exe_dir.display(), missing.join(", "), dir.display())) }
 }
 
 #[cfg(windows)]
@@ -301,8 +301,8 @@ impl Engine {
     /// Starts CEF once for the process; Err (said in the page, which then falls back to the hub's frames) when the runtime is missing or CEF refuses.
     pub fn get() -> &'static Result<Engine, String> { ENGINE.get_or_init(Engine::start) }
     fn start() -> Result<Engine, String> {
-        if std::env::var_os("BACKPLANE_CEF_OFF").is_some() { return Err("BACKPLANE_CEF_OFF is set".into()) }
-        let dir = runtime_dir().ok_or_else(|| "no CEF runtime (set BACKPLANE_CEF to the runtime directory, or put it in ~/.cache/backplane/cef-runtime/".to_string() + VERSION + ")")?;
+        /* i18n-ok: a technical reason */ if std::env::var_os("BACKPLANE_CEF_OFF").is_some() { return Err("BACKPLANE_CEF_OFF is set".into()) }
+        /* i18n-ok: a technical reason */ let dir = runtime_dir().ok_or_else(|| "no CEF runtime (set BACKPLANE_CEF to the runtime directory, or put it in ~/.cache/backplane/cef-runtime/".to_string() + VERSION + ")")?;
         #[cfg(target_os = "linux")]
         if let Some(ed) = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(Path::to_path_buf)) { ensure_beside(&dir, &ed)?; }
         let port = std::env::var("BACKPLANE_CEF_CDP_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or_else(free_port);
@@ -311,12 +311,12 @@ impl Engine {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         // the helper processes: this executable again (Linux, Windows); on macOS the helper app beside it (`mac::helper`), whose program is backplane-cef-helper
         #[cfg(target_os = "macos")]
-        let (sub, res, loc) = { let fw = dir.join(mac::FRAMEWORK); if !mac::load(&fw) { return Err(format!("could not load {}", fw.display())) }
+        /* i18n-ok: a technical reason */ let (sub, res, loc) = { let fw = dir.join(mac::FRAMEWORK); if !mac::load(&fw) { return Err(format!("could not load {}", fw.display())) }
             let _ = api_hash(sys::CEF_API_VERSION_LAST, 0); // the API version, before any other call (subprocess() did not: the framework was not loaded then)
             mac::adopt_app_protocol();
             // the helpers find the same framework (set on the main thread before CEF starts any thread of its own)
             unsafe { std::env::set_var("BACKPLANE_CEF_FRAMEWORK", &fw); }
-            (mac::helper(&exe).ok_or_else(|| format!("no {}.app beside {} (scripts/cef-mac-helpers.sh)", mac::HELPER, exe.display()))?, fw.join("Resources"), fw.join("Resources")) };
+            /* i18n-ok: a technical reason and folder names */ (mac::helper(&exe).ok_or_else(|| format!("no {}.app beside {} (scripts/cef-mac-helpers.sh)", mac::HELPER, exe.display()))?, fw.join("Resources"), fw.join("Resources")) };
         // Windows: libcef.dll is delay-loaded from the executable's folder; a runtime elsewhere is put on the DLL search path first, for the helpers too
         #[cfg(windows)]
         if exe.parent().map_or(true, |d| d != dir) { win::use_dll_dir(Some(&dir)); unsafe { std::env::set_var("BACKPLANE_CEF_DLL_DIR", &dir); } }
@@ -342,7 +342,7 @@ impl Engine {
         let args = cef::args::Args::new();
         let mut a = app();
         let ok = initialize(Some(args.as_main_args()), Some(&settings), Some(&mut a), std::ptr::null_mut());
-        if ok != 1 { return Err(format!("CEF did not start (initialize answered {ok})")) }
+        /* i18n-ok: a technical reason */ if ok != 1 { return Err(format!("CEF did not start (initialize answered {ok})")) }
         Ok(Engine { cdp_port: port, dir })
     }
     pub fn shutdown() { if ENGINE.get().map_or(false, |e| e.is_ok()) { cef::shutdown(); } }
@@ -356,7 +356,7 @@ impl Tab {
         let wi = WindowInfo { windowless_rendering_enabled: true as _, runtime_style: RuntimeStyle::ALLOY, ..Default::default() };
         let bs = BrowserSettings { windowless_frame_rate: 30, ..Default::default() };
         let r = browser_host_create_browser(Some(&wi), Some(&mut client), Some(&CefString::from(url)), Some(&bs), None, None);
-        if r != 1 { tab.st.lock().unwrap().load_error = "CEF refused to create the browser".into(); }
+        /* i18n-ok: drawn through trs (cef_page) */ if r != 1 { tab.st.lock().unwrap().load_error = "CEF refused to create the browser".into(); }
         tab
     }
     /// A tab whose browser CEF makes itself (a popup): the state and handlers only.
@@ -386,7 +386,7 @@ impl Tab {
     /// F12: Chromium's DevTools for this page in a window of its own (a separate X window, not painted into ours).
     pub fn devtools(&self) {
         self.host(|h| { if h.has_dev_tools() == 1 { h.close_dev_tools(); return }
-            let wi = WindowInfo { bounds: Rect { x: 100, y: 100, width: 1100, height: 760 }, window_name: CefString::from("DevTools"), runtime_style: RuntimeStyle::ALLOY, ..Default::default() };
+            /* i18n-ok: a window name */ let wi = WindowInfo { bounds: Rect { x: 100, y: 100, width: 1100, height: 760 }, window_name: CefString::from("DevTools"), runtime_style: RuntimeStyle::ALLOY, ..Default::default() };
             h.show_dev_tools(Some(&wi), None, Some(&BrowserSettings::default()), None); });
     }
     pub fn close(&self) { self.host(|h| h.close_browser(true as _)); }

@@ -107,15 +107,17 @@ pub fn ext_of(f: ImageFormat) -> &'static str {
 }
 
 impl Composer {
-    pub fn new(cx: &mut Context<Self>) -> Self { Self::with_context(cx, "Composer") }
+    /* i18n-ok: key contexts */ pub fn new(cx: &mut Context<Self>) -> Self { Self::with_context(cx, "Composer") }
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
-        Self { blink: Default::default(), light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
+        /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
             rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), selecting: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
     pub fn dictate(&mut self, range: std::ops::Range<usize>, with: &str, caret: usize, cx: &mut Context<Self>) { self.ed.dictate(range, with, caret); self.sync(cx); }
     pub fn set_placeholder(&mut self, text: &str) { self.placeholder = text.to_string().into(); }
+    /// The hint as drawn: English in the code, in the language in force on screen (measured and painted the same).
+    fn shown_placeholder(&self) -> SharedString { crate::i18n::trs(&self.placeholder).into() }
     /// Move the caret one character: `dir` < 0 back, else forward.
     pub fn caret(&mut self, dir: i32, cx: &mut Context<Self>) { self.edit(cx, |e| if dir < 0 { e.left(false, false) } else { e.right(false, false) }); }
     pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); }
@@ -289,7 +291,7 @@ impl gpui::Element for Element_ {
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> { None }
     fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&gpui::InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
         let input = self.input.read(cx);
-        let text: SharedString = if input.content.is_empty() { input.placeholder.clone() } else if input.masked { mask(&input.content).into() } else { input.content.clone() };
+        let text: SharedString = if input.content.is_empty() { input.shown_placeholder() } else if input.masked { mask(&input.content).into() } else { input.content.clone() };
         let style = window.text_style();
         let (font_size, lh) = (style.font_size.to_pixels(window.rem_size()), window.line_height());
         let base = TextRun { len: text.len(), font: style.font(), color: style.color, background_color: None, underline: None, strikethrough: None };
@@ -307,7 +309,7 @@ impl gpui::Element for Element_ {
         let style = window.text_style();
         let (font_size, lh) = (style.font_size.to_pixels(window.rem_size()), window.line_height());
         let empty = input.content.is_empty();
-        let (text, color) = if empty { (input.placeholder.clone(), theme::color(light, "faint").into()) } else if input.masked { (mask(&input.content).into(), style.color) } else { (input.content.clone(), style.color) };
+        let (text, color) = if empty { (input.shown_placeholder(), theme::color(light, "faint").into()) } else if input.masked { (mask(&input.content).into(), style.color) } else { (input.content.clone(), style.color) };
         let base = TextRun { len: text.len(), font: style.font(), color, background_color: None, underline: None, strikethrough: None };
         let marked = if empty { None } else { input.ed.marked.clone() };
         let chips = if empty || input.masked { Chips::default() } else { let a = theme::color(light, "accent"); let mut bg: gpui::Hsla = a.into(); bg.a = 0.18; Chips { words: input.chips.clone(), fg: a.into(), bg } };

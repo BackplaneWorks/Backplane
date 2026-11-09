@@ -21,12 +21,12 @@ pub fn strip(cx: &mut Context<Backplane>, o: Option<&Offer>, light: bool) -> Opt
     let o = o?;
     let c = |n: &str| theme::color(light, n);
     let btn = |id: &'static str, label: String, strong: bool| div().id(id).px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(px(11.)).font_weight(FontWeight::BOLD)
-        .bg(if strong { c("accent") } else { c("raise") }).text_color(if strong { c("on-accent") } else { c("dim") }).child(label);
+        .bg(if strong { c("accent") } else { c("raise") }).text_color(if strong { c("on-accent") } else { c("dim") }).child(crate::i18n::trs(&label));
     let row = div().flex().items_center().gap_1()
-        .child(btn("star-open", if o.label.is_empty() { "Star on GitHub".into() } else { o.label.clone() }, true).on_click(cx.listener(|this, _, _, cx| this.star_decide("open", cx))))
-        .child(btn("star-dismiss", "Dismiss".into(), false).on_click(cx.listener(|this, _, _, cx| this.star_decide("dismiss", cx))));
+        /* i18n-ok: drawn through trs in btn */ .child(btn("star-open", if o.label.is_empty() { "Star on GitHub".into() } else { o.label.clone() }, true).on_click(cx.listener(|this, _, _, cx| this.star_decide("open", cx))))
+        /* i18n-ok: drawn through trs in btn */ .child(btn("star-dismiss", "Dismiss".into(), false).on_click(cx.listener(|this, _, _, cx| this.star_decide("dismiss", cx))));
     Some(div().id("star-nudge").h(px(22.)).flex_shrink_0().flex().items_center().justify_between().px_3().bg(c("raise")).border_t_1().border_color(c("accent"))
-        .child(div().text_size(px(11.)).text_color(c("text")).overflow_hidden().child(o.text.clone())).child(row).into_any_element())
+        .child(div().text_size(px(11.)).text_color(c("text")).overflow_hidden().child(crate::i18n::trs(&o.text))).child(row).into_any_element())
 }
 
 impl Backplane {

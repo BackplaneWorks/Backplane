@@ -81,7 +81,7 @@ pub fn answers_here(routes: &[String]) -> bool {
 /// Why a link cannot pair (None: it can). A link naming only its hub's own computer is refused unless that hub is on this computer: the
 /// phones refuse it outright (no phone is its hub's computer); this desktop client first tries it here. An address the person typed is their word.
 pub fn refusal(i: &Invitation) -> Option<&'static str> {
-    (i.from_link && only_local(&i.routes) && !answers_here(&i.routes)).then_some("This invitation names only its hub's own computer (127.0.0.1), so this device cannot reach it. Start the hub with Tailscale on, or on an address this device can reach, then make a new invitation.")
+    /* i18n-ok: English (logged); pair.rs draws it through trs */ (i.from_link && only_local(&i.routes) && !answers_here(&i.routes)).then_some("This invitation names only its hub's own computer (127.0.0.1), so this device cannot reach it. Start the hub with Tailscale on, or on an address this device can reach, then make a new invitation.")
 }
 /// A hub address and a short code, spaces, dashes and case forgiven.
 pub fn from_code(address: &str, code: &str) -> Option<Invitation> {
@@ -95,22 +95,22 @@ pub fn from_code(address: &str, code: &str) -> Option<Invitation> {
 /// What the form holds: the link if there is one, else the address and code. Err: what to say.
 pub fn submit(link: &str, address: &str, code: &str) -> Result<Invitation, &'static str> {
     if !link.trim().is_empty() {
-        let i = invitation(link).ok_or("That is not a pairing link. Copy it again from Settings → Devices.")?;
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ let i = invitation(link).ok_or("That is not a pairing link. Copy it again from Settings → Devices.")?;
         return match refusal(&i) { Some(why) => Err(why), None => Ok(i) };
     }
-    if address.trim().is_empty() || code.trim().is_empty() { return Err("Paste a pairing link, or enter the hub address and short code.") }
-    from_code(address, code).ok_or("Check the hub address and the eight-character code.")
+    /* i18n-ok: English (logged); pair.rs draws it through trs */ if address.trim().is_empty() || code.trim().is_empty() { return Err("Paste a pairing link, or enter the hub address and short code.") }
+    /* i18n-ok: English (logged); pair.rs draws it through trs */ from_code(address, code).ok_or("Check the hub address and the eight-character code.")
 }
 pub fn message(error: &str) -> &'static str {
     match error {
-        "wrong_code" => "That code is not correct. Check it and try again.",
-        "expired_code" => "This invitation expired. Create another in Settings → Devices.",
-        "used_code" => "This invitation has already been used. Create a new one.",
-        "revoked_code" => "This invitation was revoked. Create a new one in Settings → Devices.",
-        "rate_limited" => "Too many attempts. Wait a minute and try again.",
-        "device_limit" => "This hub has too many devices. Revoke one in Settings → Devices.",
-        "storage_unavailable" => "The hub could not save this pairing. Try again.",
-        _ => "The hub could not be reached. Check the address and that this machine has a route to it.",
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ "wrong_code" => "That code is not correct. Check it and try again.",
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ "expired_code" => "This invitation expired. Create another in Settings → Devices.",
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ "used_code" => "This invitation has already been used. Create a new one.",
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ "revoked_code" => "This invitation was revoked. Create a new one in Settings → Devices.",
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ "rate_limited" => "Too many attempts. Wait a minute and try again.",
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ "device_limit" => "This hub has too many devices. Revoke one in Settings → Devices.",
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ "storage_unavailable" => "The hub could not save this pairing. Try again.",
+        /* i18n-ok: English (logged); pair.rs draws it through trs */ _ => "The hub could not be reached. Check the address and that this machine has a route to it.",
     }
 }
 pub fn ws_of(origin: &str) -> String {
@@ -129,14 +129,14 @@ pub fn host_port(url: &str) -> (String, bool) {
 
 /// This device's name in Settings → Devices: printable ASCII, as a header must be.
 pub fn name() -> String {
-    let os = if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
+    /* i18n-ok: the device name sent to the hub */ let os = if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
     let host = std::env::var("HOSTNAME").ok().or_else(|| std::fs::read_to_string("/etc/hostname").ok()).unwrap_or_default();
     let host: String = host.trim().chars().filter(|c| (' '..='~').contains(c)).take(40).collect();
-    if host.is_empty() { format!("{os} desktop") } else { format!("{os} desktop - {host}") }
+    /* i18n-ok: the device name sent to the hub */ if host.is_empty() { format!("{os} desktop") } else { format!("{os} desktop - {host}") }
 }
 pub fn enroll_request(i: &Invitation, name: &str) -> String {
     let (addr, _) = host_port(&i.origin);
-    format!("POST /auth/enroll HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {}\r\nX-Backplane-Client: native\r\nX-Backplane-Name: {name}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", i.secret)
+    /* i18n-ok: an HTTP request */ format!("POST /auth/enroll HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {}\r\nX-Backplane-Client: native\r\nX-Backplane-Name: {name}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", i.secret)
 }
 /// The credential in the hub's answer, or what to say. Only a 200 counts: a redirect is never followed, so a link cannot send the secret on.
 pub fn enroll_answer(status: u16, body: &[u8]) -> Result<String, String> {
@@ -181,7 +181,7 @@ pub fn relaunch_args(args: &[String]) -> Vec<String> {
 pub fn relaunch() -> io::Error {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let exe = match std::env::current_exe() { Ok(e) => e, Err(e) => return e };
-    let mut c = std::process::Command::new(exe); c.args(crate::hubs::relaunch_with(&args, &crate::hubs::load())).env_remove("BACKPLANE_GPUI_SCRIPT");
+    /* i18n-ok: an env name */ let mut c = std::process::Command::new(exe); c.args(crate::hubs::relaunch_with(&args, &crate::hubs::load())).env_remove("BACKPLANE_GPUI_SCRIPT");
     #[cfg(unix)] { use std::os::unix::process::CommandExt; c.exec() }
     #[cfg(not(unix))] { match c.spawn() { Ok(_) => std::process::exit(0), Err(e) => e } }
 }

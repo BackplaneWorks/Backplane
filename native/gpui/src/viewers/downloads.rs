@@ -17,7 +17,7 @@ pub fn safe_name(n: &str) -> String { let n: String = n.chars().map(|c| if c == 
 pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name); if !first.exists() { return first }
     let (stem, ext) = match name.rsplit_once('.') { Some((a, b)) if !a.is_empty() => (a.to_string(), format!(".{b}")), _ => (name.to_string(), String::new()) };
-    (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
+    /* i18n-ok: a file name pattern */ (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
 }
 
 #[cfg(test)]

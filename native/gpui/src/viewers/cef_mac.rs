@@ -3,9 +3,9 @@
 //! client itself runs from a bundle), whose program is `backplane-cef-helper` (src/bin; scripts/cef-mac-helpers.sh makes the bundles).
 use std::{ffi::{c_char, c_void, CString}, path::{Path, PathBuf}};
 
-pub const FRAMEWORK: &str = "Chromium Embedded Framework.framework";
-pub const LIB: &str = "Chromium Embedded Framework";
-pub const HELPER: &str = "Backplane Helper";
+/* i18n-ok: file names */ pub const FRAMEWORK: &str = "Chromium Embedded Framework.framework";
+/* i18n-ok: file names */ pub const LIB: &str = "Chromium Embedded Framework";
+/* i18n-ok: file names */ pub const HELPER: &str = "Backplane Helper";
 
 /// Loads the framework at `fw` (once per process; CEF ignores a second load).
 pub fn load(fw: &Path) -> bool {
@@ -50,9 +50,9 @@ unsafe extern "C" {
 /// it conforms to Chromium's protocols, which Chromium checks before it trusts those answers.
 pub fn adopt_app_protocol() {
     unsafe {
-        let cls = objc_getClass(c"GPUIApplication".as_ptr());
+        /* i18n-ok: Objective-C names */ let cls = objc_getClass(c"GPUIApplication".as_ptr());
         if cls.is_null() { return }
-        for p in [c"CrAppProtocol", c"CrAppControlProtocol", c"CefAppProtocol"] {
+        /* i18n-ok: Objective-C names */ for p in [c"CrAppProtocol", c"CrAppControlProtocol", c"CefAppProtocol"] {
             let proto = objc_getProtocol(p.as_ptr());
             if !proto.is_null() { class_addProtocol(cls, proto); }
         }

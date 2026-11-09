@@ -271,7 +271,7 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
             let copy_ix = { let mut r = reg.borrow_mut(); let n = r.copy_seen; r.copy_seen += 1; n };
             div().w_full().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col()
                 .child(div().flex().justify_end().px_2().pt_1().child(div().id(SharedString::from(format!("copy-{key}"))).relative().px_2().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
-                    .child("Copy").child(copy_probe(reg, copy_ix)).on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); }))))
+                    .child(crate::i18n::trs("Copy")).child(copy_probe(reg, copy_ix)).on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); }))))
                 .child(div().id(SharedString::from(format!("code-{key}"))).overflow_x_scroll().px_2().pb_2().text_size(px(12.)).whitespace_nowrap().child({ let mut s = SelText::new(reg, plain_spans(t), Kind::Code, light); s.tokens = tokens.clone(); s.into_any_element() }))
                 .into_any_element()
         }
@@ -285,7 +285,7 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
             let mut t = div().id(SharedString::from(format!("tbl-{key}"))).overflow_x_scroll().border_1().border_color(c("line")).flex().flex_col().text_size(px(12.5));
             if !head.is_empty() { t = t.child(row(head, true).bg(c("raise"))); }
             for r in rows.iter().take(500) { t = t.child(row(r, false)); }
-            if rows.len() > 500 { t = t.child(div().px_2().py_1().text_color(c("dim")).child(format!("… {} more rows", rows.len() - 500))); }
+            if rows.len() > 500 { t = t.child(div().px_2().py_1().text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.more.rows", &[("n", (rows.len() - 500).into())]))); }
             t.into_any_element()
         }
     }
@@ -330,12 +330,12 @@ pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str,
                 // an explicit box of the picture's own aspect: layout and paint agree, so the picture never spills over the rows below
                 div().w(px(bw)).h(px(bh)).flex_none().overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { this.screens.lightbox = Some((shown.clone(), n.clone())); cx.notify(); }))
                     .child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
-            Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(format!("Loading {name}…")).into_any_element(),
-            Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(format!("Could not load {name}")).into_any_element(),
+            Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.loading", &[("name", name.as_str().into())])).into_any_element(),
+            Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(crate::i18n::tf("gpui.timeline.could.not.load", &[("name", name.as_str().into())])).into_any_element(),
         };
         row = row.child(div().id(SharedString::from(format!("img-{key}-{i}"))).child(el));
     }
-    if items.len() > MAX_IMAGES { row = row.child(div().px_2().py_1().text_size(px(12.)).text_color(c("dim")).child(format!("+{} more images", items.len() - MAX_IMAGES))); }
+    if items.len() > MAX_IMAGES { row = row.child(div().px_2().py_1().text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.more.images", &[("n", (items.len() - MAX_IMAGES).into())]))); }
     Some(row.into_any_element())
 }
 

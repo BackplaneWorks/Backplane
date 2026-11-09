@@ -30,7 +30,7 @@ fn step<'a>(node: &'a mut Value, key: &Value) -> Result<&'a mut Value> {
             let i = n.as_u64().context("delta index")? as usize;
             node.as_array_mut().and_then(|a| a.get_mut(i)).context("delta path")
         }
-        _ => bail!("delta key"),
+        /* i18n-ok: decoder errors, logged */ _ => bail!("delta key"),
     }
 }
 fn walk<'a>(node: &'a mut Value, path: &[Value]) -> Result<&'a mut Value> {
@@ -44,8 +44,8 @@ fn rebuild(slot: &mut Value, specs: &Value) -> Result<()> {
         let s = s.as_array().filter(|s| s.len() == 2).context("delta spec")?;
         match s[0].as_u64() {
             Some(1) => {}
-            Some(0) => { let i = s[1].as_u64().context("delta spec")? as usize; ensure!(i < old.len(), "delta spec"); uses[i] += 1; }
-            _ => bail!("delta spec"),
+            /* i18n-ok: decoder errors, logged */ Some(0) => { let i = s[1].as_u64().context("delta spec")? as usize; ensure!(i < old.len(), "delta spec"); uses[i] += 1; }
+            /* i18n-ok: decoder errors, logged */ _ => bail!("delta spec"),
         }
     }
     let mut items: Vec<Option<Value>> = std::mem::take(old).into_iter().map(Some).collect();
@@ -63,22 +63,22 @@ fn rebuild(slot: &mut Value, specs: &Value) -> Result<()> {
 /// Apply ops to a body (None: made from nothing). `draft` is the selected thread's draft the request carried.
 pub fn apply(base: Option<Value>, ops: &Value, draft: Option<&str>) -> Result<Value> {
     let ops = ops.as_array().context("delta ops")?;
-    ensure!(ops.len() <= MAX_OPS, "delta ops");
+    /* i18n-ok: decoder errors, logged */ ensure!(ops.len() <= MAX_OPS, "delta ops");
     let mut body = base;
     for op in ops {
         let op = op.as_array().context("delta op")?;
         let path = op.get(1).and_then(Value::as_array).context("delta op")?;
-        ensure!(path.len() <= MAX_DEPTH, "delta op");
+        /* i18n-ok: decoder errors, logged */ ensure!(path.len() <= MAX_DEPTH, "delta op");
         let kind = op.first().and_then(Value::as_str).unwrap_or("");
         let apply_at = |body: &mut Option<Value>, f: &mut dyn FnMut(&mut Value) -> Result<()>| -> Result<()> {
             if path.is_empty() && body.is_none() { *body = Some(Value::Null); }
             f(walk(body.as_mut().context("delta without base")?, path)?)
         };
         match kind {
-            "t" => { ensure!(op.len() == 2, "delta op"); let d = draft.filter(|d| !d.is_empty()).context("delta draft")?; apply_at(&mut body, &mut |n| { *n = Value::String(d.to_string()); Ok(()) })?; }
-            "s" => { ensure!(op.len() == 3, "delta op"); apply_at(&mut body, &mut |n| { *n = op[2].clone(); Ok(()) })?; }
-            "a" => { ensure!(op.len() == 3, "delta op"); apply_at(&mut body, &mut |n| rebuild(n, &op[2]))?; }
-            _ => bail!("delta op"),
+            /* i18n-ok: decoder errors, logged */ "t" => { ensure!(op.len() == 2, "delta op"); let d = draft.filter(|d| !d.is_empty()).context("delta draft")?; apply_at(&mut body, &mut |n| { *n = Value::String(d.to_string()); Ok(()) })?; }
+            /* i18n-ok: decoder errors, logged */ "s" => { ensure!(op.len() == 3, "delta op"); apply_at(&mut body, &mut |n| { *n = op[2].clone(); Ok(()) })?; }
+            /* i18n-ok: decoder errors, logged */ "a" => { ensure!(op.len() == 3, "delta op"); apply_at(&mut body, &mut |n| rebuild(n, &op[2]))?; }
+            /* i18n-ok: decoder errors, logged */ _ => bail!("delta op"),
         }
     }
     body.context("empty delta")
@@ -91,29 +91,29 @@ fn valid_token(v: &Value) -> Option<&str> {
 /// malformed or names a body this client does not hold; the caller then asks for the whole view.
 pub fn picture(mut r: Value, offered: &str, request_revision: u64, bases: &Bases, draft: Option<&str>) -> Result<(Value, String, Value)> {
     let d = r.as_object_mut().and_then(|o| o.remove("viewDelta")).context("no view delta")?;
-    ensure!(d.is_object() && d["version"] == 1, "invalid view delta");
+    /* i18n-ok: decoder errors, logged */ ensure!(d.is_object() && d["version"] == 1, "invalid view delta");
     let token = valid_token(&d["token"]).context("invalid token")?.to_string();
     let base = d["base"].as_str().context("invalid base")?;
-    ensure!(token == request_revision.to_string(), "token does not name the request");
+    /* i18n-ok: decoder errors, logged */ ensure!(token == request_revision.to_string(), "token does not name the request");
     let obj = r.as_object_mut().context("reply not an object")?;
     let body = if d.get("ops").is_none() {
-        ensure!(base.is_empty() && obj.contains_key("shown"), "invalid whole view");
+        /* i18n-ok: decoder errors, logged */ ensure!(base.is_empty() && obj.contains_key("shown"), "invalid whole view");
         let mut body = serde_json::Map::new();
         for k in FIELDS { if let Some(v) = obj.remove(k) { body.insert(k.to_string(), v); } }
         Value::Object(body)
     } else {
-        ensure!(FIELDS.iter().all(|k| !obj.contains_key(*k)), "unacknowledged view delta");
+        /* i18n-ok: decoder errors, logged */ ensure!(FIELDS.iter().all(|k| !obj.contains_key(*k)), "unacknowledged view delta");
         let ops = &d["ops"];
         let fresh = base.is_empty();
         if fresh {
             let first = ops.get(0).and_then(Value::as_array);
-            ensure!(first.map_or(false, |o| o.first().and_then(Value::as_str) == Some("s") && o.get(1).and_then(Value::as_array).map_or(false, |p| p.is_empty())), "unacknowledged view delta");
+            /* i18n-ok: decoder errors, logged */ ensure!(first.map_or(false, |o| o.first().and_then(Value::as_str) == Some("s") && o.get(1).and_then(Value::as_array).map_or(false, |p| p.is_empty())), "unacknowledged view delta");
         } else {
-            ensure!(base == offered, "unacknowledged view delta");
+            /* i18n-ok: decoder errors, logged */ ensure!(base == offered, "unacknowledged view delta");
         }
         let base_body = if fresh { None } else { Some(bases.get(base).context("unknown base")?.clone()) };
         let body = apply(base_body, ops, draft)?;
-        ensure!(body.is_object() && body.get("shown").is_some(), "invalid view delta body");
+        /* i18n-ok: decoder errors, logged */ ensure!(body.is_object() && body.get("shown").is_some(), "invalid view delta body");
         body
     };
     // The result the client reads: the reply's own fields with the body's.

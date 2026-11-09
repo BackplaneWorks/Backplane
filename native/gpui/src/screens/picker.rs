@@ -19,7 +19,7 @@ fn choices(v: &Value) -> Vec<Choice> {
         efforts: c["efforts"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()) }).collect()
 }
 pub fn parse(picker: &Value) -> Vec<Section> {
-    [("Agent", "provider", "providers"), ("Model", "model", "models"), ("Effort", "effort", "efforts")].into_iter()
+    /* i18n-ok: section titles, drawn through trs in head */ [("Agent", "provider", "providers"), ("Model", "model", "models"), ("Effort", "effort", "efforts")].into_iter()
         .map(|(title, action, key)| Section { title, action, choices: choices(&picker[key]) }).filter(|s| !s.choices.is_empty()).collect()
 }
 /// "@claude" (a provider row's value) as the hub names the agent.
@@ -32,7 +32,7 @@ pub fn for_provider(picker: &Value, agents: &Value, provider: &str) -> Vec<Secti
         // the thread's own lists; the effort column is the agent's (its default model's) when the hub sent it: the thread's own model's are on its row only when they differ
         let Some(es) = agents[bare(&provider_of(&own))]["efforts"].as_array().map(|_| unmarked(&agents[bare(&provider_of(&own))]["efforts"])) else { return own };
         let mut out: Vec<Section> = own.into_iter().filter(|s| s.action != "effort").collect();
-        if !es.is_empty() { out.push(Section { title: "Effort", action: "effort", choices: es }); }
+        /* i18n-ok: section titles, drawn through trs in head */ if !es.is_empty() { out.push(Section { title: "Effort", action: "effort", choices: es }); }
         return out
     }
     let a = &agents[bare(provider)];
@@ -40,9 +40,9 @@ pub fn for_provider(picker: &Value, agents: &Value, provider: &str) -> Vec<Secti
     let ok = a["ok"].as_bool().unwrap_or(true);
     if models.is_empty() && ok { models.push(Choice { label: "default".into(), value: String::new(), on: false, note: String::new(), ok: true, efforts: None }); }
     let mut out: Vec<Section> = own.into_iter().filter(|s| s.action == "provider").collect();
-    out.push(Section { title: "Model", action: "model", choices: models });
+    /* i18n-ok: section titles, drawn through trs in head */ out.push(Section { title: "Model", action: "model", choices: models });
     let efforts = unmarked(&a["efforts"]);
-    if !efforts.is_empty() { out.push(Section { title: "Effort", action: "effort", choices: efforts }); }
+    /* i18n-ok: section titles, drawn through trs in head */ if !efforts.is_empty() { out.push(Section { title: "Effort", action: "effort", choices: efforts }); }
     out
 }
 /// Why the cursor's agent cannot be used, or "" (the hub says: its CLI is not installed, or it lists no models).
@@ -160,7 +160,7 @@ pub fn plan(c: &Cursor, now: &Cursor) -> Vec<Command> {
 pub fn child_of(rows: &[Section], c: &Cursor) -> Option<usize> { rows.iter().find(|s| s.action == "model").and_then(|s| at(s, c)) }
 /// The keycap in a column's head, read from the column the keys are in.
 pub fn cap(col: usize, here: usize) -> &'static str {
-    if col == 2 { "←→" } else if col == here { "↑↓" } else if col == (here + 1) % COLS.len() { "Tab" } else { "⇧Tab" }
+    /* i18n-ok: a key name */ if col == 2 { "←→" } else if col == here { "↑↓" } else if col == (here + 1) % COLS.len() { "Tab" } else { "⇧Tab" }
 }
 
 /// What the menu keeps between frames: the search box, the scroll of the model list, the cursor once a key moved it (with its thread: a cursor moved on another thread is not this one's);
@@ -246,7 +246,7 @@ pub fn thumb(track: f32, view: f32, max: f32, y: f32) -> Option<(f32, f32)> {
 
 /// The note under the meter: what the thread's agent runs at, or that the cursor's model takes no effort.
 pub fn meter_note(ss: &[Step], provider: &str, own: &Cursor) -> String {
-    if ss.iter().all(|s| !s.on) { format!("{} takes no effort setting", bare(provider)) } else { format!("Now: {}", step_word(&own.effort)) }
+    if ss.iter().all(|s| !s.on) { crate::i18n::tf("gpui.picker.no.effort", &[("agent", bare(provider).into())]) } else { crate::i18n::tf("gpui.picker.now", &[("effort", step_word(&own.effort).into())]) }
 }
 
 pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool, pick: &Pick, favs: &[String], f: &Fit) -> Option<AnyElement> {
@@ -261,45 +261,45 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
         let back = (drill && col > 0).then(|| div().id(SharedString::from(format!("pick-back-{col}"))).flex_shrink_0().pr_2().cursor_pointer().text_color(c("dim")).child("‹")
             .on_click(cx.listener(move |this, _, _, cx| this.picker_go(col - 1, cx))));
         div().px_3().pt_2().pb_1().flex().items_center().gap_1().text_size(z(11.)).text_color(if col == cur.col { c("accent") } else { c("faint") })
-            .children(back).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title.to_uppercase()))
+            .children(back).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::i18n::trs(title).to_uppercase()))
             .child(div().flex_shrink_0().whitespace_nowrap().child(cap(col, cur.col)))
     };
     let col_w = match f.mode { Mode::Wide => (f.w - f.agent_w - f.effort_w).max(120. * f.s), Mode::Stack => (f.w - f.agent_w).max(120. * f.s), Mode::Drill => f.w };
     // the agent column: each agent, what it is dim beside it; the cursor's row raised with the accent edge, the thread's own ticked
     let agents_h = f.list_h + 64. * f.s + if f.mode == Mode::Stack { 142. * f.s } else { 0. };
     let mut agents = div().id("picker-agents").track_scroll(&pick.ascroll).w(px(f.agent_w)).flex_shrink_0().h(px(agents_h)).overflow_y_scroll().flex().flex_col().when(!drill, |d| d.border_r_1().border_color(c("line")));
-    agents = agents.child(head(0, "Agent"));
+    /* i18n-ok: section titles, drawn through trs in head */ agents = agents.child(head(0, "Agent"));
     for (ci, ch) in rows.iter().find(|s| s.action == "provider").map(|s| s.choices.clone()).unwrap_or_default().into_iter().enumerate() {
         let (here, value) = (ch.value == cur.provider, ch.value.clone());
-        let full = if ch.note.is_empty() { ch.label.clone() } else { format!("{}  {}", ch.label, ch.note) };
+        let full = if ch.note.is_empty() { ch.label.clone() } else { format!("{}  {}", ch.label, crate::i18n::trs(&ch.note)) };
         agents = agents.child(div().id(SharedString::from(format!("pick-a-{ci}"))).flex().items_center().gap_2().px_3().py_1().cursor_pointer().hover(|st| st.bg(c("raise")))
             .when(here, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).when(!ch.ok, |d| d.opacity(0.55))
             .child(div().w(z(10.)).flex_shrink_0().text_color(c("accent")).child(if ch.value == own.provider { "✓" } else { "" }))
             .child(logo(&ch.value))
             .child(div().flex_shrink_0().when(here, |d| d.text_color(c("accent"))).child(ch.label.clone()))
-            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(ch.note.clone()))
+            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(crate::i18n::trs(&ch.note)))
             .tooltip(tip_of(full, light))
             .on_click(cx.listener(move |this, _, _, cx| { this.picker_press(0, &value, cx); if drill { this.picker_go(1, cx) } })));
     }
     // the model column: the search, then each model's name and what its CLI calls it
     let why = agent_why(&rows, &provider, &thread["pickerAgents"]);
     let models = rows.iter().find(|s| s.action == "model").map(|s| s.choices.clone()).unwrap_or_default();
-    let namew = (models.iter().map(|m| m.label.chars().count()).max().unwrap_or(7).clamp(7, 34) as f32 * 7.3 * f.s + 8.).min((col_w - 70. * f.s).max(60. * f.s) * 0.6);
+    let namew = (models.iter().map(|m| crate::i18n::trs(&m.label).chars().map(|c| if (c as u32) >= 0x1100 { 2 } else { 1 }).sum::<usize>()).max().unwrap_or(7).clamp(7, 34) as f32 * 7.3 * f.s + 8.).min((col_w - 70. * f.s).max(60. * f.s) * 0.6);
     let mut list = div().id("picker-list").track_scroll(&pick.scroll).h(px(f.list_h)).overflow_y_scroll().flex().flex_col().pb_1().pr(px(10.));
-    if models.is_empty() { list = list.child(div().px_3().py_1().text_color(c("faint")).child(if !why.is_empty() { why.clone() } else if pick.q.trim().is_empty() { "No models".to_string() } else { "Nothing matches".to_string() })); }
+    /* i18n-ok: drawn through trs */ if models.is_empty() { list = list.child(div().px_3().py_1().text_color(c("faint")).child(crate::i18n::trs(if !why.is_empty() { &why } else if pick.q.trim().is_empty() { "No models" } else { "Nothing matches" }))); }
     let own_agent = cur.provider == own.provider;
     for (ci, ch) in models.iter().enumerate() {
         let value = ch.value.clone();
         let fav = fav_key(&provider, &ch.value);
         let starred = favs.iter().any(|f| *f == fav);
         let here = ch.value == cur.model;
-        let full = if ch.note.is_empty() { ch.label.clone() } else { format!("{}\n{}", ch.label, ch.note) };
+        let full = if ch.note.is_empty() { crate::i18n::trs(&ch.label) } else { format!("{}\n{}", crate::i18n::trs(&ch.label), crate::i18n::trs(&ch.note)) };
         let mut row = div().flex().items_center().hover(|st| st.bg(c("raise"))).when(here, |d| d.bg(c("raise")))
             .child(div().id(SharedString::from(format!("pick-m-{ci}"))).flex_1().min_w_0().flex().items_center().gap_2().px_3().py_1().cursor_pointer()
                 .when(here && cur.col == 1, |d| d.border_l_2().border_color(c("accent")))
                 .child(div().w(z(10.)).flex_shrink_0().text_color(c("accent")).child(if own_agent && ch.value == own.model { "✓" } else { "" }))
-                .child(div().w(px(namew)).flex_shrink_0().overflow_hidden().whitespace_nowrap().text_ellipsis().when(here, |d| d.text_color(c("accent"))).child(ch.label.clone()))
-                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(ch.note.clone()))
+                .child(div().w(px(namew)).flex_shrink_0().overflow_hidden().whitespace_nowrap().text_ellipsis().when(here, |d| d.text_color(c("accent"))).child(crate::i18n::trs(&ch.label)))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(crate::i18n::trs(&ch.note)))
                 .tooltip(tip_of(full, light))
                 .on_click(cx.listener(move |this, _, _, cx| { this.picker_press(1, &value, cx); if drill { this.picker_go(2, cx) } })));
         if !ch.value.is_empty() {
@@ -310,7 +310,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
         }
         list = list.child(row);
     }
-    if hidden > 0 { list = list.child(div().px_3().py_1().text_size(z(11.)).text_color(c("faint")).child(format!("{hidden} more: search to find them"))); }
+    if hidden > 0 { list = list.child(div().px_3().py_1().text_size(z(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.picker.more", &[("n", hidden.into())]))); }
     let (view_h, max, y) = (f32::from(pick.scroll.bounds().size.height), f32::from(pick.scroll.max_offset().height), -f32::from(pick.scroll.offset().y));
     let bar = thumb(view_h, view_h, max, y).map(|(top, h)| div().absolute().top(px(top)).right(px(2.)).w(px(6.)).h(px(h)).bg(c("faint")).opacity(0.7));
     let search = pick.search.clone().map(|s| div().mx_3().mb_1().px_2().py_1().border_1().border_color(c("line")).flex().items_center().gap_2().child(div().flex_shrink_0().text_color(c("faint")).child("⌕")).child(div().flex_1().min_w_0().overflow_hidden().child(s)));
@@ -327,9 +327,9 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
             .child(div().max_w_full().overflow_hidden().whitespace_nowrap().text_size(z(10.)).text_color(if litd { c("accent") } else { c("faint") }).child(word(&s.level, &ss).to_string()))
             .when(ok, |d| d.on_click(cx.listener(move |this, _, _, cx| this.picker_press(2, &level, cx)))));
     }
-    let effort_body = div().flex().flex_col().child(head(2, "Effort")).child(meter)
+    /* i18n-ok: section titles, drawn through trs in head */ let effort_body = div().flex().flex_col().child(head(2, "Effort")).child(meter)
         .child(div().px_3().pt_2().pb_2().text_size(z(11.)).text_color(c("faint")).child(meter_note(&ss, &cur.provider, &own)));
-    let model_col = div().flex_1().min_w_0().flex().flex_col().child(head(1, "Model")).children(search).child(div().relative().child(list).children(bar));
+    /* i18n-ok: section titles, drawn through trs in head */ let model_col = div().flex_1().min_w_0().flex().flex_col().child(head(1, "Model")).children(search).child(div().relative().child(list).children(bar));
     let body = match f.mode {
         Mode::Wide => div().flex().items_start().child(agents).child(model_col)
             .child(div().id("picker-effort").w(px(f.effort_w)).flex_shrink_0().h(px(agents_h)).overflow_y_scroll().border_l_1().border_color(c("line")).child(effort_body)),
@@ -354,7 +354,7 @@ impl Backplane {
         self.screens.picker_open = true; self.screens.pick.cur = None; self.screens.pick.held.set([0.; 3]);
         if self.screens.pick.search.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
-            input.update(cx, |i, _| i.set_placeholder("Search models"));
+            /* i18n-ok: the hint, drawn through trs by the composer */ input.update(cx, |i, _| i.set_placeholder("Search models"));
             cx.observe(&input, |this, input, cx| {
                 let q = input.read(cx).content.to_string();
                 if q != this.screens.pick.q { this.screens.pick.q = q; this.picker_searched(); }

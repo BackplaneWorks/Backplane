@@ -14,7 +14,7 @@ fn helper() -> Option<std::path::PathBuf> { std::env::var_os("BACKPLANE_VOICE_BI
 fn post(addr: &str, target: &str, token: &str, body: &[u8]) -> bool {
     let Ok(mut c) = std::net::TcpStream::connect(addr) else { return false };
     let _ = c.set_read_timeout(Some(Duration::from_secs(10)));
-    let head = format!("POST {target} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+    /* i18n-ok: an HTTP request */ let head = format!("POST {target} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
     if c.write_all(head.as_bytes()).and_then(|()| c.write_all(body)).is_err() { return false }
     let mut r = [0u8; 16]; c.read(&mut r).map_or(false, |n| n >= 12 && &r[9..12] == b"200")
 }

@@ -33,7 +33,7 @@ pub fn enc(s: &str) -> String {
 
 /// The request head of a POST /attach.
 pub fn head(t: &Target, thread: &str, key: &str, name: &str, len: u64) -> String {
-    format!("POST /attach?thread={}&key={}&name={}&token={} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+    /* i18n-ok: an HTTP request */ format!("POST /attach?thread={}&key={}&name={}&token={} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         enc(thread), enc(key), enc(name), t.token, t.addr, len)
 }
 
@@ -134,8 +134,8 @@ impl Attacher {
     pub fn show(&self, thread: &str) { if let Ok(mut c) = self.current.lock() { *c = raw_id(thread).to_string(); } }
     /// Whether something can be attached to `thread` now; Err is a sentence for the error line.
     pub fn ready(&self, thread: &str) -> Result<(), String> {
-        if self.target.is_none() { return Err("Attachments need a hub on plain http://; this one is not.".into()); }
-        if thread.is_empty() { return Err("Open a thread to attach a file.".into()); }
+        if self.target.is_none() { return Err(crate::i18n::trs("Attachments need a hub on plain http://; this one is not.")); }
+        if thread.is_empty() { return Err(crate::i18n::trs("Open a thread to attach a file.")); }
         Ok(())
     }
     /// Start the upload(s) for a composer event. Err is a sentence for the error line; the UI thread reads no file.
@@ -175,7 +175,7 @@ impl Attacher {
                     if m.len() <= PREVIEW_MAX && matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp") { if let Ok(b) = std::fs::read(&p) { previews.add(&name, &ext, &b); } }
                     upload_blocking(&tx, &t, &thread, &name, Body::File(p), cap, &current);
                 });
-                if skipped > 0 { Err(format!("Attached the first {MAX_FILES} files; {skipped} more were not.")) } else { Ok(()) }
+                if skipped > 0 { Err(crate::i18n::tf("gpui.attach.first", &[("max", MAX_FILES.into()), ("skipped", skipped.into())])) } else { Ok(()) }
             }
             ComposerEvent::Submit | ComposerEvent::SubmitBack | ComposerEvent::CopyTimeline | ComposerEvent::PopupMove(_) | ComposerEvent::PopupPick => Ok(()),
         }
@@ -194,14 +194,14 @@ pub fn chips(cx: &mut Context<Backplane>, light: bool, previews: &Previews, thre
         let thumb = previews.get(&label).filter(|_| it["image"].as_bool().unwrap_or(false));
         let mark = match thumb {
             Some(img) => div().size(px(64.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).child(gpui::img(ImageSource::Image(img)).size(px(64.)).object_fit(ObjectFit::Contain)).into_any_element(),
-            None => div().size(px(40.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).text_size(px(10.)).text_color(c("dim")).child(if it["image"].as_bool().unwrap_or(false) { "IMG" } else { "FILE" }).into_any_element(),
+            /* i18n-ok: drawn through trs */ None => div().size(px(40.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).text_size(px(10.)).text_color(c("dim")).child(crate::i18n::trs(if it["image"].as_bool().unwrap_or(false) { "IMG" } else { "FILE" })).into_any_element(),
         };
         row = row.child(div().id(("att", i)).flex().items_center().gap_2().pr_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.))
             .child(mark).child(div().max_w(px(180.)).overflow_hidden().whitespace_nowrap().child(label))
             .child(div().id(("att-x", i)).px_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("bad"))).child("×")
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("detach".into(), path.clone())); cx.notify(); }))));
     }
-    if !uploading.is_empty() { row = row.child(div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(format!("Uploading {uploading}…"))); }
+    if !uploading.is_empty() { row = row.child(div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.attach.uploading", &[("name", uploading.as_str().into())]))); }
     Some(row.into_any_element())
 }
 
