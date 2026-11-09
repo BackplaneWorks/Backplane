@@ -13,7 +13,8 @@ manufacturing runs the review as a task, which records it, and the gate passes -
 US state, typed -> the export -> the files' approval shows "Ships to US (GA)" -> Send -> the Order card waits for the quote -> the
 quote is posted with Manufacturing, Shipping, Duties & taxes and Sales tax (estimated) and the card has its total, customs line and
 Buy now -> Buy now opens the order server's page, which pays the double -> Paid -> the operator marks it placed, then shipped,
-and a restarted hub says so in the thread at once. With FAB_PAUSED, --paused checks Buy now opens the paused page instead.
+and a restarted hub says so in the thread at once -> the design thread reads Buy again, which opens "Buy: lamp · 2": the
+unchanged design's review still passes, the earlier country is a quick choice, and Not now sends nothing. With FAB_PAUSED, --paused checks Buy now opens the paused page instead.
 
 Env: XV (an Xvfb tree with usr/bin/Xvfb), TWM (a twm binary; else i3 if on PATH, else no window manager), BUN, VK_ICD_FILENAMES,
 BACKPLANE_GPUI_ASSETS. Run it with no GPU devices visible (software Vulkan): it stops if the window renders on a real GPU.
@@ -224,7 +225,10 @@ try:
         {"when": "^(GA|Georgia)", "shell": f"d=mfg/$(date +%Y%m%d-%H%M%S) && {sys.executable} {exporter} {pcb} $d --name 'Main board' --qty 5 --ship-to US --ship-region GA --title 'Lamp board' >&2 && echo $d",
          "calls": [{"name": "order_quote", "arguments": {"dir": "{{out}}"}}], "say": "Exported the board's gerbers and drill files; Backplane asks you before sending them."},
         {"when": "quote is posted", "say": "It covers the boards, shipping, US import duty and Georgia's sales tax."},
-        {"when": "^Buy it", "calls": [{"name": "order_review", "arguments": {"action": "gate"}}], "say": "Ordering Main board ×5 (4-layer)."},
+        {"when": "chose not to send", "say": "Nothing was sent. Tell me what should change first."},
+        # Buy it: the gate; when the review is current and passed (a second buy of an unchanged design), straight on to where it ships, the earlier order's country first
+        {"when": "^Buy it", "calls": [{"name": "order_review", "arguments": {"action": "gate"}},
+         {"name": "order_ask", "arguments": {"question": "Ship to which country?", "typed": True, "last": "United States"}, "if": "go on with the order"}], "say": "Ordering Main board ×5 (4-layer)."},
     ]
     bun = os.environ.get("BUN") or shutil.which("bun") or "bun"
     open(OUT + "/bin/claude", "w").write(f'#!/bin/sh\nexec {bun} {ROOT}/test/tools/claude_standin.ts "$@"\n'); os.chmod(OUT + "/bin/claude", 0o755)
@@ -350,6 +354,27 @@ try:
         wait("the window back on the hub", lambda: rect_of(f"thread:{buy}"), 60); time.sleep(3); shot("08-shipped")
         card = json.loads(setting(f"order.quote.{buy}") or "{}")
         check(card.get("state") == "shipped" and card.get("tracking") == "1Z999E2E", "the card follows the order to Shipped with its tracking", card)
+        # 10. the design thread again: Buy again opens "Buy: lamp · 2"; the unchanged design's review still passes, the earlier country is a quick choice; Not now sends nothing
+        press_rect(wait("the design thread", lambda: rect_of("thread:t1"), 20))
+        r = wait("Buy again in the header", lambda: controls().get("tool:fab-buy", {}).get("label") == "Buy again" and rect_of("tool:fab-buy"), 40); time.sleep(1); shot("09-buy-again")
+        check(True, "once ordered, the design thread's header reads Buy again")
+        known = {"t1", buy} | {e["id"] for e in events() if e.get("$") == "ThreadCreated"}
+        press_rect(r)
+        buy2 = wait("a second buy thread", lambda: next((e["id"] for e in events() if e.get("$") == "ThreadCreated" and e["id"] not in known), None), 20)
+        title2 = next(e.get("title", "") for e in events() if e.get("$") == "ThreadCreated" and e["id"] == buy2)
+        check(title2 == "Buy: lamp · 2", 'the next buy thread is "Buy: lamp · 2"', title2)
+        r = wait("the earlier country as a quick choice", lambda: labelled("ask:", "last time"), 40); lab = next(c["label"] for k, c in controls().items() if k.startswith("ask:") and "last time" in (c.get("label") or ""))
+        check(lab == "United States · last time", "the earlier order's country is offered first", lab)
+        check(not any(x.get("detail", "").startswith("This design hasn't been checked") for x in asks_open(buy2)), "the unchanged design's review still passes: no gate question")
+        shot("10-last-time"); press_rect(r)
+        wait("the quick choice posted", lambda: posted(buy2, lambda e: e.get("role") == "user" and e.get("text", "").strip() == "United States"), 20)
+        check(True, 'the quick choice is posted without its mark ("United States")')
+        answer_typed("the state again", "GA", 40)
+        r = wait("the second approval's Not now", lambda: labelled("ask:", "Not now"), 90); time.sleep(1); press_rect(r)
+        m = wait("the agent told nothing was sent", lambda: posted(buy2, lambda e: e.get("role") == "system" and "chose not to send" in e.get("text", "")), 30)
+        check(not setting(f"order.wait.{buy2}"), "Not now: nothing is sent and the thread does not wait on a quote")
+        ans = next((e for e in events() if e.get("$") == "ActivityLogged" and e.get("thread") == buy2 and e.get("kind") == "answer"), {})
+        check(ans.get("summary", "").startswith("Not sent: "), "the thread keeps one line: Not sent", ans.get("summary")); time.sleep(2); shot("11-not-now")
     real = [l for l in open(OUT + "/hub.log", errors="replace") if "api.anthropic" in l or "backplane.works" in l]
     check(not real, "no real model or order server was called", real[:1])
     print(f"{len(passes)} passed, {len(fails)} failed", flush=True)
