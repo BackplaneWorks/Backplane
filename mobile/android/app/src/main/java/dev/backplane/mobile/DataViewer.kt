@@ -106,13 +106,14 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     var error by remember { mutableStateOf("") }
     var info by remember { mutableStateOf("") }
     var picked by remember { mutableStateOf("") }
+    var lit by remember { mutableStateOf(emptyList<String>()) } // the tapped piece's part and net, lit (the cross-probe)
     var layers by remember { mutableStateOf<DataClient.Layers?>(null) }
     var refs by remember { mutableStateOf<List<DataClient.Ref>?>(null) }
     var comparing by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     LaunchedEffect(thread.id, kind, path, has, DataClient.conn == DataClient.Conn.ONLINE) {
         if (!has) return@LaunchedEffect
-        error = ""; layers = null; refs = null; comparing = ""; info = ""; picked = ""
+        error = ""; layers = null; refs = null; comparing = ""; info = ""; picked = ""; lit = emptyList()
         runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" }
     }
     val plots = DataClient.plots
@@ -143,12 +144,16 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             s.onPick = { p ->
                 val c = runCatching { org.json.JSONArray(p) }.getOrNull()
                 val best = c?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.minByOrNull { it.optLong("a") } }
-                if (best == null || frame == null) { info = ""; picked = ""; s.mark("") }
-                else { val at = best.optInt("c"); val idx = best.optInt("p"); picked = "$at,$idx"; s.mark(picked)
-                    scope.launch { info = runCatching { DataClient.info(frame.key, at, idx) }.getOrDefault("").ifEmpty { "piece $at,$idx" } } }
+                if (best == null || frame == null) { info = ""; picked = ""; lit = emptyList(); s.mark("") }
+                else { val at = best.optInt("c"); val idx = best.optInt("p"); picked = "$at,$idx"; lit = emptyList(); s.mark(picked)
+                    scope.launch {
+                        info = runCatching { DataClient.info(frame.key, at, idx) }.getOrDefault("").ifEmpty { "piece $at,$idx" }
+                        lit = Probe.light(info, listOf(frame.key))[frame.key].orEmpty()
+                    } }
             }
             if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
             s.mark(picked) // closing the card deselects
+            s.markAll(lit)
             if (three) { s.mesh(mesh); s.parts(parts) }
             if (s.renderer.off != off || s.renderer.dim != dim || s.renderer.lift != lift) { s.renderer.off = off; s.renderer.dim = dim; s.renderer.lift = lift; s.requestRender() }
         })
@@ -175,10 +180,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             if (menu) LayerMenu(l, layersPresent, act, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp))
             refs?.let { rows -> RefMenu(rows, { c -> refs = null; scope.launch { runCatching { DataClient.compare(thread.id, kind, c, l.bits, path); comparing = c }.onFailure { error = it.message ?: "" } } }, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp)) }
         }
-        if (info.isNotEmpty()) Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("viewer.info")) {
-            Row { DMono("PICKED", dcs.primary, 11, Modifier.weight(1f), bold = true); DMono("close", dcs.onSurfaceVariant, 11, Modifier.clickable { info = ""; picked = "" }.testTag("viewer.info.close")) }
-            Text(info.replace("\u0000", "  ").replace(";", "\n").trim(), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 8)
-        }
+        if (info.isNotEmpty()) ProbeCard(info, lit.size, Modifier.align(Alignment.BottomCenter)) { info = ""; picked = ""; lit = emptyList() }
     }
 }
 
@@ -477,25 +479,44 @@ private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
     val seen = plots.frame to plots.mesh   // the store changes on each frame: read it so the panes follow
     val sch = plots.cachedFrame("1|$root|"); val brd = plots.cachedFrame("0|$root|"); val mdl = plots.cachedMesh("2|$root|")
     val bg = dcs.background.toArgb() and 0xFFFFFF
+    // a tap in any pane: what it is, and its part lit on the schematic and the board, its net on the board (the desktop's cross-probe)
+    val scope = rememberCoroutineScope()
+    var info by remember(thread.id) { mutableStateOf("") }
+    var lit by remember(thread.id) { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    val tap: (String, Int, Int) -> Unit = { key, at, idx -> scope.launch {
+        info = runCatching { DataClient.info(key, at, idx) }.getOrDefault("").ifEmpty { "piece $at,$idx" }
+        lit = Probe.light(info, listOf("1|$root|", "0|$root|"))
+    } }
+    val clear = { info = ""; lit = emptyMap() }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("split")) {
         val panes: @Composable (Modifier) -> Unit = { m ->
-            SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || files?.sch.isNullOrEmpty()) "No schematic in this project yet" else "", m)
+            SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || files?.sch.isNullOrEmpty()) "No schematic in this project yet" else "", m, lit = lit["1|$root|"].orEmpty(), tap = tap, untap = clear)
             val pick: @Composable (Modifier) -> Unit = { a -> Row(a.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ViewChip("Board", !three, "split.pick.board") { splitThree[thread.id] = false }; ViewChip("3D", three, "split.pick.3d") { splitThree[thread.id] = true } } }
-            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m, pick)
-            else SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m, pick)
+            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
+            else SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
         }
         if (maxWidth > maxHeight) Row(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxHeight()) }
         else Column(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxWidth()) }
+        if (info.isNotEmpty()) ProbeCard(info, lit.values.sumOf { it.size }, Modifier.align(Alignment.BottomCenter), clear)
     }
 }
 @Composable
-private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: MeshFrame?, three: Boolean, bg: Int, none: String, modifier: Modifier, pick: (@Composable (Modifier) -> Unit)? = null) {
+private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: MeshFrame?, three: Boolean, bg: Int, none: String, modifier: Modifier, pick: (@Composable (Modifier) -> Unit)? = null,
+                      lit: List<String> = emptyList(), tap: (String, Int, Int) -> Unit = { _, _, _ -> }, untap: () -> Unit = {}) {
+    val tapNow by rememberUpdatedState(tap); val untapNow by rememberUpdatedState(untap); val frameNow by rememberUpdatedState(frame)
     Box(modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.background)) {
         AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize().testTag("split.$label"), update = { s ->
             s.bindSource(source); s.setThree(three)
             if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
             if (three) s.mesh(mesh)
+            s.onPick = { p ->
+                val c = runCatching { org.json.JSONArray(p) }.getOrNull()
+                val best = c?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.minByOrNull { it.optLong("a") } }
+                val f = frameNow
+                if (best == null || f == null) untapNow() else tapNow(f.key, best.optInt("c"), best.optInt("p"))
+            }
+            s.markAll(lit)
         })
         DMono(label.uppercase(), dcs.onSurfaceVariant, 10, Modifier.align(Alignment.TopStart).padding(6.dp))
         val say = if (none.isNotEmpty()) none else frame?.none.orEmpty()
@@ -621,4 +642,42 @@ internal fun pageUrl(t: String): String {
     val host = u.substringBefore('/')
     val local = host.startsWith("localhost") || Regex("^(127|10)\\.[0-9.]+(:[0-9]+)?$|^192\\.168\\.[0-9.]+(:[0-9]+)?$").matches(host) || Regex(":[0-9]+$").containsMatchIn(host)
     return (if (local) "http://" else "https://") + u
+}
+
+/** The cross-probe (the desktop's plotview.rs `cross_probe`): a tapped piece's part (`ref`) lit on every plot given, its net on the boards' (a schematic's info has no nets). */
+object Probe {
+    /** `name=value` of the piece's info (`kind;net=GND;ref=R1`): its first piece's, when the info holds several. */
+    fun field(info: String, name: String): String = info.substringBefore('\u0000').split(';').firstNotNullOfOrNull { f -> f.trim().takeIf { it.startsWith("$name=") }?.substringAfter('=') }.orEmpty()
+    suspend fun light(info: String, keys: List<String>): Map<String, List<String>> {
+        val ref = part(info); val net = field(info, "net")
+        return keys.filter { it.isNotEmpty() }.associateWith { k ->
+            buildList {
+                if (ref.isNotEmpty()) addAll(runCatching { DataClient.probe(k, "ref", ref) }.getOrDefault(emptyList()))
+                if (net.isNotEmpty() && k.startsWith("0|")) addAll(runCatching { DataClient.probe(k, "net", net) }.getOrDefault(emptyList()))
+            }.distinct()
+        }
+    }
+    /** The part a piece belongs to: its `ref`, or a schematic pin's `symbol`. */
+    fun part(info: String) = field(info, "ref").ifEmpty { field(info, "symbol") }
+    /** The card's two lines: what it is (and its part), then the rest of its fields (net, layer, width…); `g`, the hub's net group id, is not for reading. */
+    fun lines(info: String): Pair<String, String> {
+        val fs = info.substringBefore('\u0000').split(';').map { it.trim() }.filter { it.isNotEmpty() }
+        val kind = fs.firstOrNull { '=' !in it }.orEmpty(); val ref = part(info)
+        val head = listOf(kind, ref).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { fs.firstOrNull().orEmpty() }
+        val rest = fs.filter { '=' in it && !it.startsWith("ref=") && !it.startsWith("symbol=") && !it.startsWith("g=") }.joinToString(" · ") { it.substringBefore('=') + " " + it.substringAfter('=') }
+        return head to rest
+    }
+}
+
+/** What was tapped, small (the person: the cross-probe's popup took too much room, 11-04): two lines and how many pieces are lit; × closes it and the light. */
+@Composable
+private fun ProbeCard(info: String, lit: Int, modifier: Modifier, close: () -> Unit) {
+    val (head, rest) = Probe.lines(info)
+    Row(modifier.fillMaxWidth().background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(head, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            if (rest.isNotEmpty() || lit > 1) Text(listOf(rest, if (lit > 1) "$lit lit" else "").filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
+        Box(Modifier.size(44.dp).clickable(onClick = close).testTag("viewer.info.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, "Close", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+    }
 }
