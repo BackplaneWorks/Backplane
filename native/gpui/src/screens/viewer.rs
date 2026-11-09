@@ -154,6 +154,12 @@ fn with_boards(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &su
 fn in_corner(page: AnyElement, actions: AnyElement) -> AnyElement {
     div().relative().size_full().child(page).child(div().absolute().top_1().right_2().flex().justify_end().max_w(px(CORNER_ROOM + 440.)).child(actions)).into_any_element()
 }
+/// The 3D page before its first picture: the model's own ground (raster::BG, dark in either theme) with what it waits for in its middle, so the picture
+/// replaces it in place instead of a line of text on the panel's ground.
+fn model_loading(light: bool, say: &str) -> AnyElement {
+    let b = crate::viewers::raster::BG;
+    div().size_full().flex_1().min_h_0().bg(rgb(((b[2] as u32) << 16) | ((b[1] as u32) << 8) | b[0] as u32)).flex().items_center().justify_center().text_color(theme::color(light, "faint")).child(say.to_string()).into_any_element()
+}
 /// A page that has nothing to show yet: what it says, and the pane's controls on the same row.
 fn status_row(light: bool, say: &str, actions: Option<AnyElement>) -> AnyElement {
     div().flex().items_center().gap_2().px_3().py_2().child(div().flex_1().min_w_0().text_color(theme::color(light, "dim")).child(say.to_string())).children(actions).into_any_element()
@@ -483,7 +489,7 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
     let d3 = t_on.then(|| {
         let want3 = string(panes[2], "key");
         if let Some(s) = solid { if s.read(cx).reserve != 0. { s.update(cx, |p, cx| { p.reserve = 0.; cx.notify(); }); } }
-        let model: AnyElement = match solid { Some(s) if solid_ready(&want3, have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => status_row(light, "Loading the model…", None) };
+        let model: AnyElement = match solid { Some(s) if solid_ready(&want3, have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => model_loading(light, "Loading the model…") };
         let h = split_head(cx, light, "3d", "3D", None); pane(h, model)
     });
     // the side group: the board and the 3D, one beside (or over) the other with the divider between them
@@ -562,10 +568,10 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             let ready = matches!(solid, Some(s) if solid_ready(&want, &have));
             // the 3D page's own tools float top left over the model: they wrap short of the corner the pane's controls take
             if let Some(s) = solid { let room = if open == "3d" && ready { CORNER_ROOM + if crate::viewers::boards::list(viewer).len() > 1 { 240. } else { 0. } } else { 0. }; if s.read(cx).reserve != room { s.update(cx, |p, cx| { p.reserve = room; cx.notify(); }); } }
-            let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => status_row(light, "Loading the model…", None) } };
+            let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(light, "Loading the model…") } };
             if open == "mech" { let a = acts(cx); div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, key_empty, a)).child(model).into_any_element() }
             else if ready { let a0 = acts(cx); let a = with_boards(cx, light, viewer, pv, a0); in_corner(div().size_full().flex().flex_col().child(model).into_any_element(), a) }
-            else { let a = acts(cx); status_row(light, "Loading the model…", Some(a)) }
+            else { let a = acts(cx); in_corner(model_loading(light, "Loading the model…"), a) }
         }
         else if open == "browser" { let a = acts(cx); match browser { Some(b) => in_corner(div().size_full().child(b.clone()).into_any_element(), a), None => status_row(light, "The browser page needs a connected hub.", Some(a)) } }
         else { let a = acts(cx); status_row(light, "Opening…", Some(a)) };
