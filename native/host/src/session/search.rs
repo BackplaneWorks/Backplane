@@ -1,20 +1,16 @@
 //! Search by what was said: `thread.search {q, thread?, limit?}` finds the messages (the person's and the agents', `MessagePosted`) whose text
 //! has every word of `q`, newest first, across every live thread or in one (`thread`). 0.14's Find ("Type a word said in any thread") and the
-//! thread menu's "Search in thread". The log is read from its end in blocks, so a common word answers from the newest lines; titles are the
+//! thread menu's "Search in thread". The messages come from the index of what was said (index.rs), never a read of the whole log; titles are the
 //! sidebar's rows plus `titles`: every live thread whose title has every word (the sidebar holds only its first page). Answer:
 //! `{hits: [{thread, title, project, msg, role, text, at}], more, titles: [{thread, title, project}]}`; `text` is a line around the first word.
+//! `thread.find {thread, q}`: find in one thread (Ctrl+F): every message with every word, oldest first, for next and previous (`find_for`).
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-/// Lines read per block, from the end of the log.
-const BLOCK: usize = 4096;
 /// Hits per thread across all threads (one thread's own search has no such cap).
 const PER_THREAD: usize = 3;
-
-#[derive(Debug, PartialEq)]
-pub struct Hit { pub thread: String, pub msg: String, pub role: String, pub text: String, pub at: u64 }
 
 /// The words of a query, lower case; none for a query shorter than two characters.
 pub fn words(q: &str) -> Vec<String> {
@@ -34,30 +30,6 @@ pub fn snippet(text: &str, first: &str) -> String {
     format!("{}{}{}", if a > 0 { "…" } else { "" }, chars[a..b].iter().collect::<String>(), if b < chars.len() { "…" } else { "" })
 }
 
-/// The hits in a block of log lines, newest (last) first. `keep` says whether a thread is searched; `seen` holds the messages already
-/// answered (a message posted again counts once: its newest matching text). `per` counts each thread's hits.
-pub fn scan(lines: &[String], ws: &[String], keep: &dyn Fn(&str) -> bool, cap: Option<usize>, seen: &mut HashSet<(String, String)>, per: &mut HashMap<String, usize>, out: &mut Vec<Hit>, limit: usize) {
-    if ws.is_empty() { return }
-    for line in lines.iter().rev() {
-        if out.len() >= limit { return }
-        if !line.contains("\"MessagePosted\"") { continue }
-        let low = line.to_lowercase();
-        if !ws.iter().all(|w| low.contains(w.as_str())) { continue }
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-        if v["$"] != "MessagePosted" { continue }
-        let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
-        let (thread, msg, role, text) = (s("thread"), s("msg"), s("role"), s("text"));
-        if !matches!(role.as_str(), "user" | "assistant") || !keep(&thread) { continue }
-        if !seen.insert((thread.clone(), msg.clone())) { continue }
-        let tl = text.to_lowercase();
-        if !ws.iter().all(|w| tl.contains(w.as_str())) { continue }
-        let n = per.entry(thread.clone()).or_default();
-        if cap.map_or(false, |c| *n >= c) { continue }
-        *n += 1;
-        out.push(Hit { text: snippet(&text, &ws[0]), thread, msg, role, at: v["at"].as_u64().unwrap_or(0) });
-    }
-}
-
 /// Title hits per answer.
 const TITLES: usize = 12;
 /// The threads (id, title, last activity) whose title has every word, newest first, `n` at most.
@@ -68,67 +40,72 @@ pub fn titled<'a>(threads: impl Iterator<Item = (&'a str, &'a str, u64)>, ws: &[
     v.into_iter().take(n).map(|(_, i)| i.to_string()).collect()
 }
 
-/// The search over the hub's log: newest first, `limit` hits at most; `more` when it stopped at the limit.
-/// The latest search each connection asked for: an older one still reading the log stops there (typing asks again every pause).
-static LATEST: std::sync::Mutex<Option<HashMap<u64, u64>>> = std::sync::Mutex::new(None);
-static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-fn begin(client: u64) -> u64 { let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed); let mut m = LATEST.lock().unwrap(); let m = m.get_or_insert_with(HashMap::new); if m.len() > 256 { m.clear(); } m.insert(client, n); n }
-fn current(client: u64, n: u64) -> bool { LATEST.lock().unwrap().as_ref().and_then(|m| m.get(&client)).map_or(true, |x| *x == n) }
-
-/// `client`: the connection asking (u64::MAX: no one's, never superseded).
-pub async fn search_for(hub: &Arc<Hub>, q: &str, thread: &str, limit: usize, client: u64) -> Value {
-    let ws = words(q);
-    if ws.is_empty() { return json!({"hits": [], "more": false}) }
-    // the live threads and their names (the model's metadata; no entry is read for this)
+/// The live threads a search may show: (id → (title, project)), their last activity, and the ones the sidebar never lists (a bot's private run).
+async fn live(hub: &Arc<Hub>) -> (HashMap<String, (String, String)>, HashMap<String, String>, HashMap<String, u64>, HashSet<String>) {
     let (meta, projects, activity): (HashMap<String, (String, String)>, HashMap<String, String>, HashMap<String, u64>) = {
         let m = hub.model().await;
         (m.threads.iter().filter(|(_, t)| !t.deleted).map(|(i, t)| (i.clone(), (t.title.clone(), t.project.clone()))).collect(),
          m.projects.iter().map(|(i, p)| (i.clone(), p.title.clone())).collect(),
          m.threads.iter().filter(|(_, t)| !t.deleted).map(|(i, t)| (i.clone(), t.activity.max(t.created))).collect())
     };
+    let hidden: HashSet<String> = crate::statehost::policies().and_then(|x| x.with_state(|st| meta.keys().filter(|i| st.run_hidden(i)).cloned().collect::<HashSet<String>>())).unwrap_or_default();
+    (meta, projects, activity, hidden)
+}
+fn place(projects: &HashMap<String, String>, pid: &str) -> String { if pid == crate::sidebar::SCRATCH { "Conversation history".to_string() } else { projects.get(pid).cloned().unwrap_or_default() } }
+
+/// The search across every live thread (or one, `thread`), from the index (index.rs): newest first, `limit` hits at most, at most 3 a thread
+/// across threads; `more` when it stopped at the limit.
+pub async fn search_for(hub: &Arc<Hub>, q: &str, thread: &str, limit: usize) -> Value {
+    let ws = words(q);
+    if ws.is_empty() { return json!({"hits": [], "more": false, "titles": []}) }
+    let (meta, projects, activity, hidden) = live(hub).await;
     let store = hub.store.clone();
     let (one, ws2) = (thread.to_string(), ws.clone());
-    // a thread the sidebar never lists (a bot's private run) is not searched either
-    let hidden: HashSet<String> = crate::statehost::policies().and_then(|x| x.with_state(|st| meta.keys().filter(|i| st.run_hidden(i)).cloned().collect::<HashSet<String>>())).unwrap_or_default();
     let keep_meta: HashSet<String> = meta.keys().filter(|i| !hidden.contains(*i)).cloned().collect();
-    let n = begin(client);
     let (hits, more) = tokio::task::spawn_blocking(move || {
-        let keep = |t: &str| keep_meta.contains(t) && (one.is_empty() || t == one);
-        let cap = if one.is_empty() { Some(PER_THREAD) } else { None };
-        let (mut seen, mut per, mut out) = (HashSet::new(), HashMap::new(), vec![]);
-        let mut end = store.len();
-        while end > 0 && out.len() < limit {
-            if client != u64::MAX && !current(client, n) { break } // a newer search from this connection: this one's answer is not wanted
-            let a = end.saturating_sub(BLOCK);
-            let Ok(lines) = store.range(a, end) else { break };
-            scan(&lines, &ws2, &keep, cap, &mut seen, &mut per, &mut out, limit);
-            end = a;
-        }
-        let more = out.len() >= limit && end > 0;
-        (out, more)
+        let i = super::index::synced(&store); let i = i.lock().unwrap_or_else(|e| e.into_inner());
+        let keep = |t: &str| keep_meta.contains(t);
+        i.query(&store, &ws2, (!one.is_empty()).then_some(one.as_str()), &keep, if one.is_empty() { Some(PER_THREAD) } else { None }, limit, true)
     }).await.unwrap_or_default();
-    let place = |pid: &str| if pid == crate::sidebar::SCRATCH { "Conversation history".to_string() } else { projects.get(pid).cloned().unwrap_or_default() };
     let hits: Vec<Value> = hits.into_iter().map(|h| {
         let (title, pid) = meta.get(&h.thread).cloned().unwrap_or_default();
-        json!({"thread": h.thread, "title": title, "project": place(&pid), "msg": h.msg, "role": h.role, "text": h.text, "at": h.at})
+        json!({"thread": h.thread, "title": title, "project": place(&projects, &pid), "msg": h.msg, "role": h.role, "text": snippet(&h.text, &ws[0]), "at": h.at})
     }).collect();
     // every live thread whose title has every word, newest first: the sidebar only holds its first page, settled and older threads too are found by name
     let titles: Vec<Value> = if !thread.is_empty() { vec![] } else {
         titled(meta.iter().filter(|(i, _)| !hidden.contains(*i)).map(|(i, (t, _))| (i.as_str(), t.as_str(), activity.get(i).copied().unwrap_or(0))), &ws, TITLES)
-            .into_iter().map(|i| { let (title, pid) = meta.get(&i).cloned().unwrap_or_default(); json!({"thread": i, "title": title, "project": place(&pid)}) }).collect()
+            .into_iter().map(|i| { let (title, pid) = meta.get(&i).cloned().unwrap_or_default(); json!({"thread": i, "title": title, "project": place(&projects, &pid)}) }).collect()
     };
     json!({"hits": hits, "more": more, "titles": titles})
 }
 
+/// The most matches one thread's find answers.
+pub const FIND_MAX: usize = 1000;
+/// Find in a thread (Ctrl+F, the phones' find): every message of `thread` with every word of `q`, oldest first (the thread's order, for next and
+/// previous; past FIND_MAX the newest FIND_MAX), each `{msg, role, at, text}` with `text` a line around the first word, and `total` (more than FIND_MAX: `more`).
+pub async fn find_for(hub: &Arc<Hub>, thread: &str, q: &str) -> Value {
+    let ws = words(q);
+    if ws.is_empty() || thread.is_empty() { return json!({"q": q, "matches": [], "total": 0, "more": false}) }
+    let store = hub.store.clone();
+    let (one, ws2) = (thread.to_string(), ws.clone());
+    let (found, more) = tokio::task::spawn_blocking(move || {
+        let i = super::index::synced(&store); let i = i.lock().unwrap_or_else(|e| e.into_inner());
+        // the newest FIND_MAX when there are more (a find starts at the newest), put back in the thread's order
+        let (mut v, more) = i.query(&store, &ws2, Some(one.as_str()), &|_| true, None, FIND_MAX, true); v.reverse(); (v, more)
+    }).await.unwrap_or_default();
+    let matches: Vec<Value> = found.iter().map(|h| json!({"msg": h.msg, "role": h.role, "at": h.at, "text": snippet(&h.text, &ws[0])})).collect();
+    json!({"q": q, "matches": matches, "total": found.len(), "more": more})
+}
+
 pub struct Search;
 impl RpcHandler for Search {
-    fn methods(&self) -> &'static [&'static str] { &["thread.search"] }
-    fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, _method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+    fn methods(&self) -> &'static [&'static str] { &["thread.search", "thread.find"] }
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let q = p["q"].as_str().unwrap_or("");
             if q.len() > 256 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"The search is too long."})] }
-            let limit = p["limit"].as_u64().unwrap_or(40).clamp(1, 200) as usize;
-            let r = search_for(hub, q, p["thread"].as_str().unwrap_or(""), limit, who.client).await;
+            let thread = p["thread"].as_str().unwrap_or("");
+            let r = if method == "thread.find" { find_for(hub, thread, q).await } else { search_for(hub, q, thread, p["limit"].as_u64().unwrap_or(40).clamp(1, 200) as usize).await };
             vec![json!({"t":"reply","id":id,"ok":true,"result":r})]
         })
     }
@@ -137,11 +114,6 @@ impl RpcHandler for Search {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn line(th: &str, msg: &str, role: &str, text: &str, at: u64) -> String { json!({"$":"MessagePosted","thread":th,"msg":msg,"role":role,"text":text,"at":at}).to_string() }
-    fn run(lines: &[String], q: &str, keep: &dyn Fn(&str) -> bool, cap: Option<usize>, limit: usize) -> Vec<Hit> {
-        let (mut seen, mut per, mut out) = (HashSet::new(), HashMap::new(), vec![]);
-        scan(lines, &words(q), keep, cap, &mut seen, &mut per, &mut out, limit); out
-    }
     #[test] fn a_title_with_every_word_is_found_newest_first_wherever_the_thread_is() {
         let ts = [("t1", "cabinet design rev2", 50), ("t2", "Rev D cabinet: detailed part models", 90), ("t3", "Power budget", 99), ("t4", "Cabinet DESIGN notes", 10)];
         assert_eq!(titled(ts.iter().copied(), &words("cabinet design"), 12), vec!["t1", "t4"]);
@@ -149,28 +121,6 @@ mod tests {
         assert_eq!(titled(ts.iter().copied(), &words("cabinet design rev2"), 12), vec!["t1"]);
         assert_eq!(titled(ts.iter().copied(), &words("cabinet"), 1), vec!["t2"]);
         assert!(titled(ts.iter().copied(), &words("x"), 12).is_empty(), "a one-letter search finds nothing, as the messages' search");
-    }
-    #[test] fn every_word_is_found_in_what_was_said_newest_first() {
-        let l = vec![line("t1", "m1", "user", "Where does the Pinecone footprint go?", 10), line("t2", "m2", "assistant", "The pinecone sits by U3.", 11),
-            r#"{"$":"ThreadRenamed","id":"t1","title":"pinecone","at":12}"#.to_string(), line("t1", "m3", "system", "pinecone restarted", 13), line("t3", "m4", "user", "nothing here", 14)];
-        let all = |_: &str| true;
-        let h = run(&l, "PINECONE", &all, None, 10);
-        assert_eq!(h.iter().map(|x| (x.thread.as_str(), x.msg.as_str())).collect::<Vec<_>>(), [("t2", "m2"), ("t1", "m1")], "messages only, the person's and the agents', newest first");
-        assert_eq!(run(&l, "pinecone footprint", &all, None, 10).len(), 1, "every word");
-        assert!(run(&l, "p", &all, None, 10).is_empty(), "one letter finds nothing");
-        assert_eq!(run(&l, "pinecone", &|t| t == "t1", None, 10).len(), 1, "one thread's own search");
-        assert_eq!(run(&l, "pinecone", &all, None, 1).len(), 1, "the limit");
-    }
-    #[test] fn a_message_counts_once_and_a_thread_gives_at_most_its_cap() {
-        let l = vec![line("t1", "m1", "assistant", "draft about the pinecone", 1), line("t1", "m1", "assistant", "final: the pinecone moves", 2),
-            line("t1", "m2", "user", "pinecone again", 3), line("t1", "m3", "user", "pinecone thrice", 4), line("t1", "m4", "user", "pinecone four", 5)];
-        let h = run(&l, "pinecone", &|_| true, None, 10);
-        assert_eq!(h.len(), 4); assert!(h.iter().any(|x| x.text.starts_with("final")), "the newest text of a message posted twice");
-        assert_eq!(run(&l, "pinecone", &|_| true, Some(PER_THREAD), 10).len(), PER_THREAD);
-    }
-    #[test] fn a_newer_search_from_the_same_connection_supersedes_the_older() {
-        let a = begin(7); assert!(current(7, a)); let b = begin(7); assert!(!current(7, a) && current(7, b));
-        let c = begin(8); assert!(current(8, c) && current(7, b), "another connection's search stands");
     }
     #[test] fn the_snippet_is_a_line_around_the_first_word() {
         assert_eq!(snippet("short\ntext with Word", "word"), "short text with Word");
