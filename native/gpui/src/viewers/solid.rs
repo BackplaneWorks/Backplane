@@ -453,12 +453,22 @@ pub fn stage_line(text: &str, secs: u64, about_ms: u64) -> String {
     if about_ms >= 2000 { s.push_str(&format!(" (last time {} s)", (about_ms + 500) / 1000)); }
     s
 }
+/// What the page asks of the window: the model of this source made again (its Retry, after the hub could not make it).
+pub enum SolidEvent { Retry(String) }
+impl EventEmitter<SolidEvent> for SolidPage {}
+/// The watch that asks the hub for a 3D source again: kind "3d" with the key's root and path ("2|<root>|<path>").
+pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
+    let mut p = key.splitn(3, '|');
+    let (k, root, path) = (p.next()?, p.next()?, p.next()?);
+    is_solid_key(key).then(|| serde_json::json!({"kind": if k == "2" { "3d" } else if k == "3" { "3d-bare" } else { "3d-full" }, "root": root, "path": path, "tree": ""}))
+}
 pub struct SolidPage {
     mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
     /** what the hub said it is doing for a model (Stage), shown with its time running; whether a second's tick is running for it */ stage: Option<Stage>, ticking: bool,
+    /** the hub could not make this source's model (its Note): the page offers Retry */ failed: bool,
     pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
 }
 impl SolidPage {
@@ -469,7 +479,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, failed: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -505,6 +515,7 @@ impl SolidPage {
                 let now = std::time::Instant::now(); self.born.truncate(groups); while self.born.len() < groups { self.born.push(now); } // a part fades in from when it shows
                 self.parts = (done, of);
                 if self.stage.as_ref().is_some_and(|s| s.key == self.key && (board || s.text == BUILDING)) { self.stage = None; } // made, or decoded
+                self.failed = false;
                 let Some(mesh) = mesh else { cx.notify(); return };
                 if board || fresh { self.floor = self.latest + 1; } // pictures of the old board are stale; ones without the newest part are not
                 if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect)); }
@@ -519,10 +530,12 @@ impl SolidPage {
                     self.born.clear(); self.parts = (0, 0);
                 }
                 if self.stage.as_ref().is_some_and(|s| s.key == key) { self.stage = None; }
+                self.failed = !why.is_empty();
                 self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
             }
             Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; self.set_stage(None, cx); }
             Msg::Mesh(SolidFrame::Stage(key, text, ms, about)) => {
+                if key == self.key && !text.is_empty() { self.failed = false; }
                 let st = (!text.is_empty()).then(|| Stage { key, text, since: std::time::Instant::now().checked_sub(std::time::Duration::from_millis(ms)).unwrap_or_else(std::time::Instant::now), about });
                 if st.is_none() && self.stage.as_ref().is_some_and(|s| s.text == BUILDING) { return } // the model is still being decoded here
                 self.set_stage(st, cx);
@@ -594,6 +607,13 @@ impl SolidPage {
         }
         self.moved(cx); true
     }
+    /// Retry: the hub asked for this source's model again (its stages show as it is made).
+    fn retry_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div().id("solid-retry").px_2().py_1().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
+            .hover(|d| d.bg(rgba(0x2a3548ee))).child("Retry")
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, _, cx| { this.failed = false; this.note.clear(); let k = this.key.clone(); cx.emit(SolidEvent::Retry(k)); cx.notify(); }))
+    }
     /// Snap view: the picture on screen as a PNG in `dir` (never over a file); the path, or why not.
     pub fn snap(&mut self, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
         let img = self.image.clone().ok_or("no picture yet")?;
@@ -645,7 +665,8 @@ impl Render for SolidPage {
         let body = match &self.image {
             _ if making_other || (self.image.is_none() && !stage.is_empty()) => div().id("solid-stage").size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(stage.clone()).into_any_element(),
             Some(i) => img(i.clone()).size_full().object_fit(ObjectFit::Fill).into_any_element(),
-            None => div().size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(self.note.clone()).into_any_element(),
+            None => div().size_full().flex().flex_col().gap_2().items_center().justify_center().text_color(rgb(0x8a93a3)).child(self.note.clone())
+                .when(self.failed && !self.key.is_empty(), |d| d.child(self.retry_button(cx))).into_any_element(),
         };
         let tools = (self.mesh.is_some() && !making_other).then(|| {
             let mut bar = div().absolute().top_2().left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
@@ -665,7 +686,8 @@ impl Render for SolidPage {
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
-            .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())))
+            .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())
+                .when(self.failed && !self.key.is_empty(), |d| d.child(self.retry_button(cx)))))
             .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { self.parts_progress() } else { stage.clone() })))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
                 window.focus(&this.focus);
@@ -830,6 +852,11 @@ mod tests {
         let h = 600.0; let px = 1.0 / c.unit(h); let p = c.pivot; let s0 = screen(&c, p); c.pan(100.0, 0.0, h); let s1 = screen(&c, p);
         assert!(((s1.0 - s0.0) * px - 100.0).abs() < 1e-2, "{}", (s1.0 - s0.0) * px);
         let n = c.named("top"); assert_eq!((n.shift, n.target, n.dist), ([0.0, 0.0], c.pivot, c.fit), "a standard view centres the model again");
+    }
+    #[test] fn retry_asks_for_the_same_source_again() {
+        assert_eq!(super::retry_watch("2|/p|/p/mech/a.step").unwrap(), serde_json::json!({"kind": "3d", "root": "/p", "path": "/p/mech/a.step", "tree": ""}));
+        assert_eq!(super::retry_watch("2|/p|").unwrap()["path"], "", "a board's model: the project's board");
+        assert!(super::retry_watch("0|/p|").is_none() && super::retry_watch("").is_none(), "not a 3D source");
     }
     #[test] fn a_stage_reads_from_its_frame_and_shows_its_time() {
         let mut f = vec![0xa4]; cbor_text(&mut f, "key"); cbor_text(&mut f, "2|/p|"); cbor_text(&mut f, "stage"); cbor_text(&mut f, "Meshing a.step with FreeCAD…");
