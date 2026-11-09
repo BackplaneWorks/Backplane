@@ -13,6 +13,7 @@ run() { # name, args for the test, then the app sources
 }
 run hub-list HubListTests.swift "$ROOT/test/mobile/hubs_cases.json" HubList.swift
 run thread-groups ThreadGroupsTests.swift "" ThreadGroups.swift
+run thread-find ThreadFindTests.swift "" ThreadFind.swift
 run voice-edit VoiceEditTests.swift "$ROOT/test/fixtures/voice-edits.json" VoiceEdit.swift
 run plot-parts PlotPartsTests.swift "" Plot.swift PlotParts.swift
 run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift

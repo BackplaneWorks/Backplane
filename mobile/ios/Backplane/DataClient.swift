@@ -756,6 +756,7 @@ final class DataClient {
     func search(_ q: String) async -> DSearch? { try? await call("search", ["q": q]) }
     func buyOf(_ thread: String) async -> DBuy? { guard has("buy") else { return nil }; return (try? await call("thread.buy", ["thread": thread], as: DBuyReply.self))?.buy }
     func buy(_ thread: String) async throws -> String { try await call("order.buy", ["thread": thread], as: DThreadRef.self).thread }
+    func find(_ thread: String, _ q: String) async -> DFind? { try? await call("find", ["thread": thread, "q": q]) }
     func searchIn(_ thread: String, _ q: String) async -> [DHit] { (try? await call("search", ["q": q, "thread": thread, "limit": 60], as: DHits.self))?.messages ?? [] }
     func order(_ thread: String) async throws -> DOrder? { (try await call("thread.order", ["thread": thread]) as DOrderReply).order }
     func picker(thread: String?, _ choice: DNewThreadChoice = DNewThreadChoice()) async throws -> DPicker {

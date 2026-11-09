@@ -138,7 +138,7 @@ struct DataThreadsView: View {
             DLine()
             if !client.locks.isEmpty { DataLocksStrip(client: client, path: $path) }
             if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                DataSearchResults(client: client, query: query) { path.append($0) }
+                DataSearchResults(client: client, query: query, open: { path.append($0) }, openAt: { path.append($0) })
             } else { list }
         }
         .background(BackplaneDesign.panel)
@@ -167,6 +167,7 @@ struct DataThreadsView: View {
         }
         .navigationDestination(for: String.self) { DataThreadView(client: client, id: $0).environment(\.dataSubThread, client.has("subview") ? $0 : "") }
         .navigationDestination(for: DSubRoute.self) { DataSubView(client: client, route: $0) }
+        .navigationDestination(for: DThreadAt.self) { DataThreadView(client: client, id: $0.id, at: $0.msg).environment(\.dataSubThread, client.has("subview") ? $0.id : "") }
         .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
@@ -592,11 +593,22 @@ struct DataThreadView: View {
     @State private var buy: DBuy?          // Buy it, when the hub offers it for this thread
     @State private var buying = false
     @State private var finding = false     // Search in thread
-    @State private var findGo: String?     // the message Search in thread went to
+    @State private var findGo: String?     // the message to go to (Search in thread, the find bar, a search hit), read older pages until it is held
+    @State private var mark: String?       // the message marked there, until the find bar closes
+    @State private var findOpen = false    // the find bar (feature find)
+    @State private var findQ = ""
+    @State private var findRes: DFind?
+    @State private var findAt: Int?        // the current match in findRes.matches (ThreadFind)
+    @FocusState private var findFocus: Bool
+    private let at: String?                // opened at this message (a search hit)
     @State private var caret: (at: Int, rev: Int)?
     @Environment(\.dismiss) private var dismiss
 
-    init(client: DataClient, id: String) { self.client = client; self.id = id; client.touch(id) }
+    init(client: DataClient, id: String, at: String? = nil) { self.client = client; self.id = id; self.at = at; client.touch(id) }
+    /// the find bar's current match: marked, and gone to
+    private func findGoTo() { guard let i = findAt, let r = findRes, r.matches.indices.contains(i) else { return }; mark = r.matches[i].msg; findGo = r.matches[i].msg }
+    private func findStep(_ by: Int) { findAt = ThreadFind.step(findAt, count: findRes?.matches.count ?? 0, by: by); findGoTo() }
+    private func findClose() { findOpen = false; findFocus = false; findQ = ""; findRes = nil; findAt = nil; mark = nil }
 
     private var thread: DThread? { client.threads.first { $0.id == id } }
     /// Buy it: the hub makes the buy thread, which opens (as a link to it would)
@@ -617,6 +629,7 @@ struct DataThreadView: View {
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip
             if let m = thread?.mark { Text("on " + m.name + (m.away ? " · away" : "")).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 3).accessibilityIdentifier("data.thread.machine") }
+            if findOpen { findBar }
             if let w = client.work[id], !w.rows.isEmpty { DataWorkPanel(client: client, thread: id, work: w) }
             ScrollViewReader { proxy in
                 ScrollView {
@@ -631,7 +644,10 @@ struct DataThreadView: View {
                         }
                         ForEach(DataFold.rows(list, running: working)) { r in
                             switch r {
-                            case .entry(let e): DataEntryRow(client: client, thread: id, entry: e).id(e.id)
+                            case .entry(let e): DataEntryRow(client: client, thread: id, entry: e)
+                                // the message a find or a search hit went to
+                                .background { if mark == e.id { Rectangle().fill(BackplaneDesign.accent.opacity(0.12)).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }.padding(-4).accessibilityElement().accessibilityLabel("Marked message").accessibilityIdentifier("data.thread.marked") } }
+                                .id(e.id)
                             case .fold(let f): DataFoldRow(fold: f, open: Binding(get: { openRuns.contains(f.id) }, set: { if $0 { openRuns.insert(f.id) } else { openRuns.remove(f.id) } })).id("fold:" + f.id)
                             }
                         }
@@ -651,7 +667,7 @@ struct DataThreadView: View {
                 .task(id: findGo) {
                     guard let m = findGo else { return }
                     for _ in 0..<30 {
-                        if list.contains(where: { $0.id == m }) { atEnd = false; withAnimation { proxy.scrollTo(m, anchor: .center) }; break }
+                        if list.contains(where: { $0.id == m }) { atEnd = false; mark = m; withAnimation { proxy.scrollTo(m, anchor: .center) }; break }
                         if client.older[id] == nil { notice = "That message is no longer in this thread."; break }
                         client.loadOlder(id); try? await Task.sleep(for: .milliseconds(400))
                     }
@@ -692,7 +708,9 @@ struct DataThreadView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         if let b = buy { Button(b.label, systemImage: "cart") { startBuy() } }
-                        if client.has("search") { Button("Search in thread", systemImage: "magnifyingglass") { finding = true } }
+                        // the find bar when the hub has `find`; else the older sheet of hits
+                        if client.has("find") { Button("Find in thread", systemImage: "magnifyingglass") { findOpen = true; findFocus = true } }
+                        else if client.has("search") { Button("Search in thread", systemImage: "magnifyingglass") { finding = true } }
                         DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting)
                     } label: { Image(systemName: "ellipsis").foregroundStyle(BackplaneDesign.dim) }
                         .accessibilityLabel("Thread actions").accessibilityIdentifier("data.thread.more")
@@ -732,7 +750,32 @@ struct DataThreadView: View {
             #endif
         }
         .onDisappear { client.closeThread(id) }
+        .task(id: at) { if let at { try? await Task.sleep(for: .milliseconds(300)); findGo = at } }
+        // the find bar: the hub's `find` a moment after typing stops, the newest match first
+        .task(id: findOpen ? findQ : "") {
+            guard findOpen, ThreadFind.asks(findQ) else { findRes = nil; findAt = nil; return }
+            try? await Task.sleep(for: .milliseconds(250)); if Task.isCancelled { return }
+            let r = await client.find(id, findQ.trimmingCharacters(in: .whitespacesAndNewlines)); if Task.isCancelled { return }
+            findRes = r; findAt = ThreadFind.first(count: r?.matches.count ?? 0); if findAt == nil { mark = nil }; findGoTo()
+        }
         .task(id: id) { await client.refreshSecretAsks(id) }
+    }
+
+    // find in this thread: the words, "n of total", previous and next (older, newer), close (which clears the mark)
+    private var findBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                TextField("Find in thread", text: $findQ).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled().focused($findFocus).submitLabel(.search)
+                    .onSubmit { findStep(-1) }
+                    .padding(.horizontal, 8).frame(height: 32).dbox().accessibilityIdentifier("data.find.bar")
+                Text(ThreadFind.label(findAt, total: findRes?.total, more: findRes?.more ?? false)).dmono(11).foregroundStyle(BackplaneDesign.dim).fixedSize().accessibilityIdentifier("data.find.count")
+                let none = (findRes?.matches.isEmpty ?? true)
+                Button { findStep(-1) } label: { Image(systemName: "chevron.up").frame(width: 32, height: 32) }.disabled(none).accessibilityLabel("Previous match").accessibilityIdentifier("data.find.prev")
+                Button { findStep(1) } label: { Image(systemName: "chevron.down").frame(width: 32, height: 32) }.disabled(none).accessibilityLabel("Next match").accessibilityIdentifier("data.find.next")
+                Button { findClose() } label: { Image(systemName: "xmark").frame(width: 32, height: 32) }.accessibilityLabel("Close find").accessibilityIdentifier("data.find.close")
+            }.foregroundStyle(BackplaneDesign.dim).padding(.horizontal, 10).padding(.vertical, 4).background(BackplaneDesign.panel)
+            DLine()
+        }
     }
 
     // the desktop's strip under the bar: STATE, then the tools a thread always has
