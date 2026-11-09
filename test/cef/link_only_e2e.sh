@@ -13,7 +13,9 @@ ev=[{"$":"ProjectCreated","id":"p1","title":"c","root":R+"/proj","at":N},{"$":"T
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))
 PY
 ( cd "$O/proj" && BACKPLANE_AGENTS=$O/bin BACKPLANE_NO_UPDATE=1 HOME=$O/fh XDG_CACHE_HOME=$O/fh/.cache exec "$HUB" --home "$O/home" --port $HPORT --host 127.0.0.1 --no-tailscale --foreground > "$O/hub.log" 2>&1 ) & HP=$!
-XP=; if [ -z "${DISPLAY:-}" ]; then DISPLAY=:79; export DISPLAY; Xvfb :79 -screen 0 1280x800x24 -nolisten tcp > "$O/xvfb.log" 2>&1 & XP=$!; sleep 2; fi
+XP=; if [ -z "${DISPLAY:-}" ]; then DISPLAY=:79; export DISPLAY; Xvfb :79 -screen 0 1280x800x24 -nolisten tcp > "$O/xvfb.log" 2>&1 & XP=$!; sleep 2
+  # a window manager: on a bare Xvfb the window is mapped but never draws a first frame (CI: not_usable after 10 s)
+  if command -v i3 > /dev/null; then printf 'font pango:monospace 8\ndefault_border none\nipc-socket %s/i3.sock\n' "$O" > "$O/i3.conf"; mkdir -p -m 700 "$O/run"; XDG_RUNTIME_DIR=$O/run i3 -c "$O/i3.conf" > "$O/i3.log" 2>&1 & XP="$XP $!"; sleep 1; fi; fi
 trap 'kill $HP $XP 2>/dev/null || true; rm -rf "$O"' EXIT INT TERM
 n=0; until curl -s -m1 -o /dev/null http://127.0.0.1:$HPORT/hello; do sleep 0.2; n=$((n+1)); [ $n -gt 100 ] && { echo "FAIL hub did not start"; exit 1; }; done
 echo '[{"select":0},{"wait":1500},{"click":"rail:Browser"},{"wait":6000}]' > "$O/script.json"
