@@ -281,6 +281,11 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 1, "search", json!({"q":"SECOND"})).await; assert_eq!(r["result"]["threads"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["t2"], "case-insensitive, by title");
     let r = ask(&mut ws, 2, "search", json!({"q":"alpha"})).await; assert_eq!(r["result"]["projects"][0]["id"], "p1"); assert_eq!(r["result"]["threads"].as_array().unwrap().len(), 2, "a project's name finds its threads");
     assert!(ask(&mut ws, 3, "search", json!({"q":""})).await["result"]["threads"].as_array().unwrap().is_empty());
+    // what was said: a word of a message finds it, in any thread or in the one named; `messages: false` leaves them out
+    let r = ask(&mut ws, 30, "search", json!({"q":"HOW CAN"})).await; let m = &r["result"]["messages"];
+    assert_eq!((m[0]["thread"].as_str(), m[0]["msg"].as_str(), m[0]["role"].as_str(), m[0]["title"].as_str()), (Some("t1"), Some("m2"), Some("assistant"), Some("First")), "{r}");
+    assert!(ask(&mut ws, 31, "search", json!({"q":"hello","thread":"t2"})).await["result"]["messages"].as_array().unwrap().is_empty(), "another thread's search");
+    assert!(ask(&mut ws, 32, "search", json!({"q":"hello","messages":false})).await["result"]["messages"].as_array().unwrap().is_empty());
     let r = ask(&mut ws, 4, "models.list", json!({})).await; assert!(r["result"]["models"]["claude"].as_array().map_or(false, |a| !a.is_empty()), "claude's models are built in");
     let r = ask(&mut ws, 5, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["label"], "First"); assert_eq!(r["result"]["items"][0]["sigil"], ">");
     let r = ask(&mut ws, 6, "mentions.list", json!({"q":"alp","kind":"%"})).await; assert_eq!(r["result"]["items"][0]["id"], "p1");
