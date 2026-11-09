@@ -290,6 +290,7 @@ impl Engine {
         // the helper processes: this executable again (Linux, Windows); on macOS the helper app beside it (`mac::helper`), whose program is backplane-cef-helper
         #[cfg(target_os = "macos")]
         let (sub, res, loc) = { let fw = dir.join(mac::FRAMEWORK); if !mac::load(&fw) { return Err(format!("could not load {}", fw.display())) }
+            let _ = api_hash(sys::CEF_API_VERSION_LAST, 0); // the API version, before any other call (subprocess() did not: the framework was not loaded then)
             mac::adopt_app_protocol();
             // the helpers find the same framework (set on the main thread before CEF starts any thread of its own)
             unsafe { std::env::set_var("BACKPLANE_CEF_FRAMEWORK", &fw); }
