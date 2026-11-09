@@ -248,6 +248,11 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     let run = tokio::spawn(async move { imp.run(&h, false).await });
     let t0 = std::time::Instant::now(); let (mut last, mut last_at, mut gaps, mut seen_running, mut slow) = (String::new(), t0, vec![], 0, vec![]);
     let (mut health_ok, mut phases, mut frozen, mut samples) = (0, std::collections::BTreeSet::new(), 0, Vec::<(u128, u128, u128, u128)>::new());
+    // /healthz is read on a thread of its own every millisecond: a fold holds for a few ms per chunk, which the 50 ms loop below can miss every time on a loaded machine
+    let hz_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hz_seen = { let stop = hz_stop.clone(); std::thread::spawn(move || { let mut n = 0u32; while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+        let (_, hz) = crate::guard::health(); if hz["migrating"]["state"] == "running" && hz["folding"].as_u64().unwrap_or(0) > 0 { n += 1; }
+        std::thread::sleep(std::time::Duration::from_millis(1)); } n }) };
     while !run.is_finished() {
         let now = r.hub.info_now()[INFO].as_str().unwrap_or("").to_string();
         if now != last { let v: Value = serde_json::from_str(&now).unwrap_or(Value::Null);
@@ -261,12 +266,12 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
             let a = std::time::Instant::now(); let _ = tokio::task::spawn_blocking(|| ()).await; let pool = a.elapsed().as_millis();
             samples.push((w.as_millis(), rd.as_millis(), late, pool));
             if w.as_millis() > 1000 || rd.as_millis() > 1000 { slow.push((w.as_millis(), rd.as_millis(), n, late, pool)); }
-            let (_, hz) = crate::guard::health(); if hz["migrating"]["state"] == "running" && hz["folding"].as_u64().unwrap_or(0) > 0 { health_ok += 1; }
             if !crate::statehost::booted(&r.hub) { frozen += 1; } // the views read the policies' state: it must answer the whole time
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     let res = run.await.unwrap();
+    hz_stop.store(true, std::sync::atomic::Ordering::Relaxed); health_ok += hz_seen.join().unwrap();
     let took = t0.elapsed();
     let mx = |f: fn(&(u128, u128, u128, u128)) -> u128| samples.iter().map(f).max().unwrap_or(0);
     eprintln!("IMPORT-RESPONSIVE samples={} write_max={}ms read_max={}ms sleep_late_max={}ms pool_max={}ms holds={} slow={slow:?}", samples.len(), mx(|s| s.0), mx(|s| s.1), mx(|s| s.2), mx(|s| s.3), res["holds"]);
