@@ -84,6 +84,13 @@ pub fn search_cmd(text: &str) -> Command { Command::Action("proj-find-q".into(),
 pub fn go_cmd() -> Command { Command::Action("proj-go".into(), String::new()) }
 pub fn open_cmd() -> Command { Command::Action("picker-open".into(), String::new()) }
 pub fn type_cmd(text: &str) -> Command { Command::Action("picker-type".into(), text.to_string()) }
+/// Enter in the path field: the Add or Create row of the hub's rows, when they were made from the text the field holds (else none: a row for an
+/// older text would add the wrong folder).
+pub fn submit_cmd(data: &Value, typed: &str) -> Option<Command> {
+    let f = folders(data)?;
+    if f.text != typed { return None }
+    f.items.into_iter().find(|i| i.kind == "add" && !i.action.is_empty()).map(|i| Command::Action(i.action, i.value))
+}
 pub fn close_cmd() -> Command { Command::Action("proj-close".into(), String::new()) }
 /// Esc leaves the folder picker while it is open.
 pub fn close_on_escape(data: &Value) -> Option<Command> { data["folders"].is_object().then(close_cmd) }
@@ -128,6 +135,10 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
                     if p.echo_f.as_deref() == Some(text.as_str()) { p.echo_f = None; return; }
                     if p.sent_f.last() == Some(&text) { return; }
                     remember(&mut p.sent_f, &text); let _ = this.tx.try_send(type_cmd(&text));
+                }).detach();
+                // Enter: the picker's Add or Create row, as a click on it would (only once the hub's rows are for what the field holds)
+                cx.subscribe(&input, |this, input, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) {
+                    if let Some(c) = submit_cmd(&this.data, &input.read(cx).content.to_string()) { this.arm_new(); let _ = this.tx.try_send(c); cx.notify(); }
                 }).detach();
                 this.screens.projects.folder = Some(input);
             }
@@ -249,7 +260,9 @@ mod tests {
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
     #[test] fn the_hubs_folder_picker_parses_and_closes_on_escape() {
         let d = j(r#"{"folders":{"text":"~/Doc","hint":"Path","error":"","items":[{"label":"Documents","action":"proj-cd","value":"~/Documents/","kind":"dir"},{"label":"Add ~/Doc","action":"proj-add","value":"~/Doc","kind":"add"}]}}"#);
-        let f = folders(&d).unwrap(); assert_eq!(f.items.len(), 2); assert_eq!(f.items[1].action, "proj-add"); assert!(matches!(close_on_escape(&d), Some(Command::Action(a, _)) if a == "proj-close"));
+        let f = folders(&d).unwrap(); assert_eq!(f.items.len(), 2); assert_eq!(f.items[1].action, "proj-add");
+        assert!(matches!(submit_cmd(&d, "~/Doc"), Some(Command::Action(a, v)) if a == "proj-add" && v == "~/Doc"), "Enter adds what the rows were made for");
+        assert!(submit_cmd(&d, "~/Docs").is_none(), "rows for an older text: Enter waits"); assert!(matches!(close_on_escape(&d), Some(Command::Action(a, _)) if a == "proj-close"));
         assert!(folders(&Value::Null).is_none() && close_on_escape(&Value::Null).is_none());
         assert_eq!(controls(&d).iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["ui:Add project", "folder-0", "folder-1", "folders-cancel"]);
     }
