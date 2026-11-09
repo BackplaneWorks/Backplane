@@ -173,8 +173,8 @@ jobs:
           need="backplane-hub backplane-gpui backplane backplane-voice silero_vad.onnx backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs"
           need="$need licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt"
           case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";;
-            darwin-*) need="$need cef/Chromium_Embedded_Framework.framework cef/Backplane_Helper.app cef/Backplane_Helper_(GPU).app cef/Backplane_Helper_(Renderer).app cef/Backplane_Helper_(Plugin).app cef/Backplane_Helper_(Alerts).app cef/Backplane.app licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
-          for f in $need; do f=${f//_/ }; [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
+            darwin-*) need="$need cef/Chromium+Embedded+Framework.framework cef/Backplane+Helper.app cef/Backplane+Helper+(GPU).app cef/Backplane+Helper+(Renderer).app cef/Backplane+Helper+(Plugin).app cef/Backplane+Helper+(Alerts).app cef/Backplane.app licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
+          for f in $need; do f=${f//+/ }; [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
           ls -la $d
           name=backplane-$TAG-${{ matrix.target }}-native.tar.gz   # -native: 0.14's updater takes any asset ending in <platform>.tar.gz (rel::archive_name)
           tar -C $d -czf $name .

@@ -68,7 +68,7 @@ ubuntu-latest in three modes:
 
 ## Status
 
-(The results table is in the section below, updated with each CI run.)
+CEF works end to end on Windows x64 and macOS arm64 CI runners; see Results.
 
 ## Risks and open items
 
@@ -135,10 +135,39 @@ ubuntu-latest in three modes:
 
 ## Results
 
-Filled from CI (`browser-e2e`) and from real machines:
+[browser-e2e run 42540338925](https://github.com/BackplaneWorks/Backplane/actions/runs/42540338925), all six jobs green:
 
-| OS | frames | cef | fallback | Run |
+| OS | frames (CEF off) | cef (embedded) | fallback (cef client, runtime removed) | runtime size |
 |---|---|---|---|---|
-| windows-latest | pending | pending | pending | |
-| macos-latest | pending | pending | pending | |
-| ubuntu-latest | pending | pending | n/a | |
+| windows-latest (x64, no GPU, WARP) | 17/17 | 17/17 | 18/18 | 594 MB uncompressed |
+| macos-latest (arm64 VM, no GPU) | 17/17 | 17/17 | 18/18 | 568 MB uncompressed |
+| ubuntu-latest (x64, Xvfb, lavapipe) | 17/17 | 17/17 | n/a (the client links libcef.so) | |
+
+In frames mode the hub refuses a `file://` address from its page's toolbar
+(`native/host/src/term/driver.rs` `cef_url` lets only http(s) and loopback
+through). That is by design: the page runs on the hub's machine. The test
+checks for the refusal. The embedded page opens `file://`.
+
+Earlier runs found three bugs, all fixed:
+
+- The cursor handle type in `on_cursor_change` is different on each OS, and
+  the build failed on macOS and Windows.
+- macOS: closing a tab deadlocked the window. CEF runs `on_before_close` on
+  the main thread inside `close_browser`, and the tab's browser lock was held
+  across the call. `Tab::with` now takes the browser out of the lock first.
+- Windows: typed text never reached the page. CEF makes WM_CHAR from
+  `windows_key_code`, which carried 0 or the virtual key. It now carries the
+  character (`char_code`).
+
+Not run on real hardware:
+
+- No real Windows machine is reachable from here.
+- The Mac mini was not used: the repo keeps it for builds (`e2e-macos.yml`),
+  and a GUI run would draw in the person's logged-in session.
+- So GPU compositing, HiDPI, IME, and code signing beyond ad-hoc are
+  unverified on both OSes.
+
+The release dry run with CEF packed for darwin-arm64 and windows-x64 is
+[release run 42540391143](https://github.com/BackplaneWorks/Backplane/actions/runs/42540391143).
+Its linux-arm64 job failed because of a bug in the archive check (`silero_vad.onnx`
+renamed by the space substitution), since fixed; see the report for the rest.
