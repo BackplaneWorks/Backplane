@@ -10,10 +10,13 @@ use std::{collections::HashMap, sync::{Arc, OnceLock, RwLock}};
 pub type Names = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 
 #[derive(Default)]
-pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>> }
+pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>>, here: RwLock<String> }
 
 impl Mirrors {
     pub fn set_names(&self, n: Names) { let _ = self.names.set(n); }
+    /// This machine's name as the linked machines know it (`botnet::name`), for the sidebar's machine switcher.
+    pub fn set_here(&self, name: &str) { *self.here.write().unwrap() = name.to_string(); }
+    pub fn here(&self) -> String { self.here.read().unwrap().clone() }
     /// Fold renamed events of one link.
     pub fn fold(&self, link: &str, events: &[Value]) {
         let mut g = self.st.write().unwrap();
@@ -137,10 +140,26 @@ pub fn mark_of(machine: &str, away: bool) -> Value {
     serde_json::json!({"name": machine, "short": short, "away": away, "label": format!("on {short}"), "runs": format!("runs on {short}")})
 }
 
+/// The thread a link names (`backplane://thread/<id>`), as this hub opens it: one of this machine by its id; one of a linked machine as
+/// `<link>~<id>`, whether the link names that machine by its link id or by its name (`framework-1~t9`, the full or the short name), once
+/// this hub mirrors it; this machine's own name before `~` is this machine. `far` is the shown machines' (name, mirror), `here` this one's name.
+pub fn thread_ref(id: &str, here: &str, local: &dyn Fn(&str) -> bool, far: &[(String, &crate::state::State)]) -> Option<String> {
+    let live = |st: &crate::state::State, k: &str| st.threads.get(k).map_or(false, |t| !t.deleted);
+    let Some((m, t)) = id.split_once('~') else { return local(id).then(|| id.to_string()) };
+    if m.is_empty() || t.is_empty() { return None }
+    if far.iter().any(|(_, st)| live(st, id)) { return Some(id.to_string()) }
+    let named = |n: &str| !n.is_empty() && (n.eq_ignore_ascii_case(m) || short_name(n).eq_ignore_ascii_case(m));
+    if let Some((_, st)) = far.iter().find(|(n, _)| named(n)) {
+        return st.threads.keys().find(|k| k.split_once('~').map_or(false, |(_, x)| x == t) && live(st, k)).cloned()
+    }
+    (named(here) && local(t)).then(|| t.to_string())
+}
+
 /// Ask each linked machine for its projects' origins (machine_list) now and every minute, so the sidebar can show a repository
 /// that is on both machines as one project. Display only: nothing here is a decision.
 pub fn watch_origins(hub: Arc<crate::hub::Hub>) {
     tokio::spawn(async move {
+        hub.mirrors().set_here(&crate::net::botnet::name().await);
         loop {
             for (link, _, _) in hub.far_machines() {
                 let r = hub.far_call(&link, "machine_list", "machine_list", &serde_json::json!({})).await;
@@ -189,6 +208,18 @@ mod origin_tests {
         m.set_names(Arc::new(|| vec![("L".to_string(), "framework-1".to_string())]));
         assert_eq!(m.mark("framework-1"), serde_json::json!({"name":"framework-1","short":"framework-1","away":false,"label":"on framework-1","runs":"runs on framework-1"}));
         m.set_away("L", true); assert_eq!(m.mark("framework-1")["away"], true); m.set_away("L", false); assert_eq!(m.mark("framework-1")["away"], false);
+    }
+    #[test] fn a_thread_link_opens_by_link_id_or_machine_name_and_this_machines_own_name_is_here() {
+        let mut f = crate::state::State::new(); f.lean = true;
+        for e in [serde_json::json!({"$":"ProjectCreated","id":"L~p1","title":"P","root":"/r","at":1}), serde_json::json!({"$":"ThreadCreated","id":"L~t9","project":"L~p1","title":"T","at":2})] { f.apply(&e); }
+        let far = vec![("framework-1.tail.ts.net".to_string(), &f)];
+        let local = |i: &str| i == "t1";
+        let r = |id: &str| thread_ref(id, "desk", &local, &far);
+        assert_eq!(r("t1").as_deref(), Some("t1")); assert_eq!(r("t2"), None);
+        assert_eq!(r("L~t9").as_deref(), Some("L~t9"), "by its link id");
+        assert_eq!(r("framework-1~t9").as_deref(), Some("L~t9"), "by the machine's short name"); assert_eq!(r("framework-1.tail.ts.net~t9").as_deref(), Some("L~t9"));
+        assert_eq!(r("framework-1~t8"), None, "not mirrored (yet)"); assert_eq!(r("lab~t9"), None, "no such machine");
+        assert_eq!(r("desk~t1").as_deref(), Some("t1"), "this machine by its own name"); assert_eq!(r("~t1"), None);
     }
     #[test] fn a_marker_is_short_on_the_row_and_full_in_the_header_and_none_for_this_machine() {
         assert_eq!(mark_of("", false), Value::Null);

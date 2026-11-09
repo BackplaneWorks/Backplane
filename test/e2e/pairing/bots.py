@@ -51,7 +51,8 @@ def start(hub_bin, root, name, port, other_port, agents):
             f.write(json.dumps({"$": "ProjectCreated", "id": "p1", "title": "far-" + name, "root": proj, "at": 1}) + "\n")
     env = {"PATH": agents + ":/usr/bin:/bin", "HOME": os.path.join(root, name), "BACKPLANE_NO_UPDATE": "1", "BACKPLANE_AGENTS": agents,
            "BACKPLANE_ORDER_SERVER": "http://127.0.0.1:9", "BACKPLANE_KEYRING_LOCKED": "0", "BACKPLANE_PEERS": f"http://127.0.0.1:{other_port}",
-           "FAKE_LOG": os.path.join(root, name, "standin.log"), "BP_STANDIN_MODE": "stream", "BP_STREAM_N": "2", "BP_STREAM_MS": "50"}
+           "FAKE_LOG": os.path.join(root, name, "standin.log"), "BP_STANDIN_MODE": "stream", "BP_STREAM_N": "2", "BP_STREAM_MS": "50",
+           "BACKPLANE_NAME": os.environ.get("BP_NAME_" + name.upper(), ""), "BACKPLANE_FREECAD": os.environ.get("BACKPLANE_FREECAD", "")}  # (a rig's machines by name, as two real machines are: BP_NAME_A=desk BP_NAME_B=lap)
     p = subprocess.Popen([hub_bin, "--home", home, "--port", str(port), "--no-tailscale", "--foreground"], env=env,
                          stdout=open(os.path.join(root, name, "hub.log"), "w"), stderr=subprocess.STDOUT)
     return p, home

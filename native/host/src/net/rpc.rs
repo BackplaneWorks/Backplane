@@ -62,12 +62,17 @@ fn pull_loop(sync: Arc<FarSync>, hub: Arc<Hub>, watching: Watching, pulling: Arc
             if code != 200 { failed += 1; if failed > 4 || code == 403 || code == 404 { break } tokio::time::sleep(std::time::Duration::from_secs(2)).await; continue }
             failed = 0;
             let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-            for f in super::farview::frames_of(&v) { match f { crate::hub::Out::Value(j) => { hub.push(client, j); } crate::hub::Out::Raw(b) => { hub.push_raw(client, b); } crate::hub::Out::Close => {} } }
+            for f in super::farview::frames_of(&v) { match f { crate::hub::Out::Value(j) => { hub.push(client, term_here(j, &link)); } crate::hub::Out::Raw(b) => { hub.push_raw(client, b); } crate::hub::Out::Close => {} } }
             if v["gone"] == true { break }
         }
         pulling.lock().unwrap().remove(&client);
         let _ = post(&sync, &hub, &link, &json!({"id": 0, "m": "viewer.drop", "p": {"sub": client}}).to_string()).await;
     });
+}
+/// A terminal frame of the owning machine names its thread by that machine's id: here it is `<link>~<id>`, the thread the window shows.
+fn term_here(mut j: Value, link: &str) -> Value {
+    if j["t"] == "term" { if let Some(t) = j["thread"].as_str().filter(|t| !far::is(t)).map(|t| far::id(link, t)) { j["thread"] = Value::String(t); } }
+    j
 }
 impl FarRouter for Router {
     fn wants(&self, _m: &str, p: &Value) -> bool { !far::params_link(p).is_empty() }
@@ -102,10 +107,13 @@ impl FarRouter for Router {
                 let mut local = far::params_local(&p, &l); if let Some(o) = local.as_object_mut() { o.remove("on"); }
                 let body = if viewer { json!({"id": 0, "m": "viewer.call", "p": {"sub": client, "m": m, "p": local}}).to_string() } else { json!({"id": 0, "m": m, "p": local}).to_string() };
                 let (code, text) = post(&sync, &hub, &l, &body).await;
-                if viewer && code == 200 && m == "kicad.watch" {
+                if viewer && code == 200 && (m == "kicad.watch" || m == "term.open") {
                     let ok = serde_json::from_str::<Value>(&text).map_or(false, |v| v["ok"] == true);
-                    if ok && !p["kind"].as_str().unwrap_or("").is_empty() {
-                        watching.lock().unwrap().insert(client, (l.clone(), p["root"].as_str().unwrap_or("").to_string()));
+                    // a drawing watched there, or its terminal opened: what that machine pushes for this window is pulled and forwarded (a terminal keeps the
+                    // drawing's root, so the reads about it still go there)
+                    if ok && (m == "term.open" || !p["kind"].as_str().unwrap_or("").is_empty()) {
+                        let root = if m == "kicad.watch" { p["root"].as_str().unwrap_or("").to_string() } else { watching.lock().unwrap().get(&client).filter(|(wl, _)| *wl == l).map(|(_, r)| r.clone()).unwrap_or_default() };
+                        watching.lock().unwrap().insert(client, (l.clone(), root));
                         if pulling.lock().unwrap().insert(client) { pull_loop(sync.clone(), hub.clone(), watching.clone(), pulling.clone(), client, l.clone()); }
                     } else if ok { watching.lock().unwrap().remove(&client); }
                 }
@@ -113,6 +121,7 @@ impl FarRouter for Router {
                     far::reply_on(serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"t":"reply","ok":false,"error":"invalid reply from that machine","id":0})), &id, &l)
                 } else if code == 0 { err(&id, "that machine is away").remove(0) } else { err(&id, &format!("that machine did not take it: {}", text.chars().take(120).collect::<String>())).remove(0) };
                 { let mut w = waiting.lock().unwrap(); if let Some(n) = w.get_mut(&client) { *n -= 1; if *n == 0 { w.remove(&client); } } }
+                hub.far_replied(client, &frame); // (a Diff's or a folder's answer is the view's read: its next request carries it)
                 hub.push(client, frame);
             });
             vec![]

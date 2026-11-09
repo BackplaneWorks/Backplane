@@ -151,6 +151,7 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
     assert_eq!(far::params_link(&json!({"thread":"t","on":"m1~x"})), "");
     assert_eq!(far::params_link(&json!({"thread":"t"})), "");
     assert_eq!(far::reply_on(json!({"t":"reply","id":0,"ok":true,"thread":"n9"}), &json!(5), "m1"), json!({"t":"reply","id":5,"ok":true,"thread":"m1~n9"}));
+    assert_eq!(far::reply_on(json!({"t":"reply","id":0,"ok":true,"result":{"diff":"x","thread":"n9"}}), &json!(5), "m1")["result"]["thread"], "m1~n9", "a Diff of a thread there names it as this hub shows it");
     assert!(far::may("thread.rename") && !far::may("thread.delete") && !far::may("turn.stop"));
 }
 #[tokio::test] async fn far_a_hub_on_a_copy_reaches_no_other_machine() {

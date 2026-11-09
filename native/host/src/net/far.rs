@@ -53,7 +53,11 @@ use K::*;
 pub const METHODS: &[&str] = &["turn.start", "turn.interrupt", "ask.answer", "queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit",
     "thread.settle", "thread.unsettle", "thread.back", "thread.rename", "thread.btw", "thread.modes", "thread.provider", "thread.effort", "bots.space", "bots.routine_run",
     "thread.create", "thread.fork", "thread.archive", "thread.unarchive", "thread.pin", "thread.unpin",
-    "project.add", "project.new", "project.remove", "fs.list", "fs.mkdir", "fs.find", "thread.detach", "todos.edit", "kicad.open", "viewer.state", "boards.list"];
+    "project.add", "project.new", "project.remove", "fs.list", "fs.mkdir", "fs.find", "thread.detach", "todos.edit", "kicad.open", "viewer.state", "boards.list",
+    // the viewers of a thread whose project is there: its Diff and its Files (listing, and a file's bytes to show here)
+    "git.diff", "files.dir", "files.get",
+    // its Diff's Commit, PR and Revert act on that machine's repository
+    "git.act", "git.revert"];
 pub fn may(m: &str) -> bool { METHODS.contains(&m) }
 /// The params that name a thing (the ones renamed on the way)
 const KEYS: &[&str] = &["thread", "id", "bot", "routine", "task", "parent", "child", "project", "ask"];
@@ -78,6 +82,8 @@ pub fn reply_on(mut r: Value, id: &Value, l: &str) -> Value {
     if let Some(o) = r.as_object_mut() {
         if o.contains_key("id") { o.insert("id".into(), id.clone()); }
         if let Some(t) = o.get("thread").and_then(Value::as_str).map(str::to_string) { o.insert("thread".into(), Value::String(if is(&t) { t } else { opt(l, &t) })); }
+        // (a result naming its thread, as git.diff's does, names it as this hub shows it)
+        if let Some(t) = o.get("result").and_then(|r| r.get("thread")).and_then(Value::as_str).filter(|t| !t.is_empty() && !is(t)).map(|t| opt(l, t)) { o.get_mut("result").unwrap()["thread"] = Value::String(t); }
     }
     r
 }

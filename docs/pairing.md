@@ -182,3 +182,30 @@ expired codes, rate limiting, revoke, re-pair and restart.
 `test/e2e/pairing/settings_revoke.py` sends the action a Settings button sends and
 checks the device's socket closes. Both are protocol results, not client results;
 `docs/e2e/MATRIX.md` holds what has been run where.
+
+## Your machines: one list, threads anywhere
+
+Once two machines are paired, the window's sidebar is one list over both (`present/screen.rs` `recent_unified`; the phones' data/1 lists
+follow the same rules, `docs/PHONE-DATA.md`):
+
+- One repository on both machines is one project (`mirror::unify`, by the normalized origin remote); every other project of a linked machine
+  has its own row saying "on <machine>". Each thread of another machine carries its machine's mark (short on the row, the full name in
+  the header, dimmer with "away" when that machine did not answer the last minute's ask).
+- Order: each machine keeps its own order, and the machines' projects and Active rows stand together by recency (live first, then the
+  last move: `sidebar::merge_ordered`, `Plan::place`, `Plan::active_keyed`).
+- The switcher over the list (`shown.machines`): All, this machine by its name, each linked machine. A press is `side-machine` with
+  `""`, `"@here"` or the machine's name (`@machine` in the session); a machine no longer linked falls back to All. One machine's
+  projects are shown as that machine has them (not joined to this one's).
+- New thread on a chosen machine: a project that is also on linked machines has `newOn` (this machine first, then each linked one, an
+  away one saying so); the window's + and the project's menu offer them. A thread made there shows once that machine has pushed it.
+- A thread of another machine is opened, read, sent to, stopped, settled, archived, renamed and answered here; each request goes to its
+  machine over `/far/rpc` (`net/rpc.rs`, `far::METHODS`) and the mirror brings the result back. Its viewers are drawn there: Board,
+  Schematic, 3D, Split and Mech through `net/farview.rs` (frames forwarded), Files through `files.dir`/`files.get`
+  (`net/farfiles.rs`: the listing comes over, a file opened is shown from a copy under `<home>/far-files/`), Diff through `git.diff`,
+  and the terminal (`term.open/input/resize`) is a shell on that machine in the thread's folder, its output forwarded.
+- Links: `backplane://thread/<id>` opens a thread of this machine; `backplane://thread/<link>~<id>` or `<machine>~<id>` (the machine's
+  short or full name) opens one of a linked machine this hub mirrors; this machine's own name before `~` is this machine
+  (`mirror::thread_ref`). The window takes them from a message, from the system's link handler and on its command line (`link-open`);
+  the phones ask `link.resolve`.
+
+`test/e2e/pairing/unified.py --hold DIR` keeps two linked temp hubs up (`BP_NAME_A`/`BP_NAME_B` name them) for a window to drive.

@@ -17,12 +17,13 @@ fn is_model(path: &str) -> bool {
     [".step", ".stp", ".glb"].iter().any(|e| l.ends_with(e))
 }
 
-/// Mpage.sync (the page on show asks for its parts when the thread or view.n moved from "@mech.at"), Dv.sync (an open Diff follows the thread's changes) and Fv.sync (a thread
-/// elsewhere) have something to add for this session: the dispatcher cannot produce it.
+/// Mpage.sync (the page on show asks for its parts when the thread or view.n moved from "@mech.at") and Dv.sync (an open Diff follows the thread's changes) have something
+/// to add for this session: the dispatcher cannot produce it. A thread of another machine has none here: its requests go to that machine (net/rpc.rs), and its viewers
+/// are drawn there (net/farview.rs), so its composer, buttons and rows are answered like this machine's.
 pub fn syncs_pending(session: &Value) -> bool {
     let sel = s(session, "sel");
     if sel.is_empty() { return false }
-    if sel.contains('~') { return true }
+    if sel.contains('~') { return false }
     let kind = info(session, &format!("view.kind:{sel}"));
     let mech = kind == "mech" || (kind == "3d" && is_model(info(session, &format!("view.path:{sel}"))));
     if mech && format!("{sel}#{}", info(session, &format!("view.n:{sel}"))) != draft(session, "@mech.at") { return true }
@@ -322,7 +323,7 @@ mod tests {
         assert!(o.look); assert!(text(&o, 0).contains("\"m\":\"files.list\""));
         assert!(run("find-open", "x", sess()).is_none());
     }
-    #[test] fn syncs_are_pending_for_a_mech_page_not_yet_asked_a_diff_on_show_and_far_threads() {
+    #[test] fn syncs_are_pending_for_a_mech_page_not_yet_asked_and_a_diff_on_show_not_for_far_threads() {
         let mut s = sess();
         assert!(!syncs_pending(&s));
         s["info"][format!("view.kind:{T}")] = json!("mech"); s["info"][format!("view.n:{T}")] = json!("2");
@@ -331,6 +332,7 @@ mod tests {
         assert!(syncs_pending(&s));
         let mut d = sess(); d["panel"] = json!(true); d["info"][format!("view.kind:{T}")] = json!("diff");
         assert!(syncs_pending(&d)); d["panel"] = json!(false); assert!(!syncs_pending(&d));
-        let mut far = sess(); far["sel"] = json!("l~t1"); assert!(syncs_pending(&far));
+        let mut far = sess(); far["sel"] = json!("l~t1"); far["panel"] = json!(true); far["info"]["view.kind:l~t1"] = json!("diff");
+        assert!(!syncs_pending(&far), "a thread of another machine: its send, Stop, Settle and Archive are answered here and go there");
     }
 }

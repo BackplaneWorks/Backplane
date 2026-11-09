@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, sync::{Arc, Mutex, OnceLock}, time::{Duration, Instant}};
 
 /// The methods a window of another machine may run here for what it watches: only the viewers' reads.
-pub const METHODS: &[&str] = &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "history.steps"];
+/// The thread's terminal is one too: a shell there, in the thread's folder, its output forwarded like the drawings' frames (`pull_loop`).
+pub const METHODS: &[&str] = &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "history.steps", "term.open", "term.input", "term.resize"];
 pub fn is_viewer(m: &str) -> bool { METHODS.contains(&m) }
 /// The most a window may hold open here at once (a thread of its own per window), and how long one may sit unread.
 const MAX_SUBS: usize = 64;
@@ -35,6 +36,12 @@ fn sub_of(hub: &Arc<Hub>, link: &str, sub: u64, create: bool) -> Option<(u64, Ar
 pub async fn call(hub: &Arc<Hub>, link: &str, p: &Value) -> Value {
     let (sub, m) = (p["sub"].as_u64().unwrap_or(0), p["m"].as_str().unwrap_or(""));
     if !is_viewer(m) { return json!({"t":"reply","ok":false,"error":"not something this machine shows"}) }
+    // a terminal only of a thread of this machine (a shell in its folder), never one named by another machine's id
+    if m.starts_with("term.") {
+        let th = p["p"]["thread"].as_str().unwrap_or("");
+        let known = !th.is_empty() && !super::far::is(th) && hub.model().await.threads.get(th).map_or(false, |t| !t.deleted);
+        if !known { return json!({"t":"reply","ok":false,"error":"no such thread here"}) }
+    }
     let Some((client, _)) = sub_of(hub, link, sub, true) else { return json!({"t":"reply","ok":false,"error":"too many windows of other machines are open here"}) };
     let mut c = Conn { sent: vec![], client, gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     let out = hub.request_here(&mut c, &json!({"id": 0, "m": m, "p": p.get("p").cloned().unwrap_or(Value::Null)})).await;
@@ -80,7 +87,8 @@ mod tests {
     use super::*;
     #[test] fn only_the_viewers_reads_are_shown_to_another_machine() {
         for m in ["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "history.steps"] { assert!(is_viewer(m)); }
-        for m in ["kicad.open", "turn.start", "fs.list", "thread.delete"] { assert!(!is_viewer(m), "{m}"); }
+        for m in ["kicad.open", "turn.start", "fs.list", "thread.delete", "term.stop", "term.restart"] { assert!(!is_viewer(m), "{m}"); }
+        for m in ["term.open", "term.input", "term.resize"] { assert!(is_viewer(m), "{m}"); }
     }
     #[test] fn pulled_frames_come_out_as_they_went_in() {
         use base64::Engine;

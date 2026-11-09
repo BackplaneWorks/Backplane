@@ -28,7 +28,15 @@ def seed(root, name, origin, other):
     ev = [{"$": "SettingSet", "key": k, "value": v, "at": int(time.time()) - 90} for k, v in (("onboard.done", "1"), ("onboard.uber", "1"), ("restart.continue", "off"))]
     ev += [{"$": "ProjectCreated", "id": "p1", "title": "repo-" + name, "root": proj, "at": int(time.time()) - 60},
           {"$": "ThreadCreated", "id": "t-" + name, "project": "p1", "title": "thread on " + name, "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": int(time.time()) - 30}]
-    if other:
+    if other:  # B's repository holds a committed board and STEP model and one uncommitted change (its Board, 3D, Files and Diff from A)
+        here = os.path.dirname(os.path.abspath(__file__)); fx = os.path.join(here, "..", "..", "files", "fixtures")
+        shutil.copy(os.path.join(fx, "plot", "ecc83-pp.kicad_pcb"), os.path.join(proj, "ecc83.kicad_pcb"))
+        with open(os.path.join(proj, "ecc83.kicad_pro"), "w") as f: f.write("{}\n")
+        os.makedirs(os.path.join(proj, "mech"), exist_ok=True); shutil.copy(os.path.join(fx, "mesh", "bracket.step"), os.path.join(proj, "mech", "bracket.step"))
+        with open(os.path.join(proj, "NOTES.md"), "w") as f: f.write("# notes\n\nfirst line\n")
+        g = ["git", "-c", "user.email=rig@example.invalid", "-c", "user.name=rig"]
+        subprocess.run(["git", "add", "-A"], cwd=proj, check=True); subprocess.run(g + ["commit", "-qm", "board"], cwd=proj, check=True)
+        with open(os.path.join(proj, "NOTES.md"), "a") as f: f.write("a change on " + name + "\n")
         o = os.path.join(root, name, "other"); os.makedirs(o, exist_ok=True)
         subprocess.run(["git", "init", "-q"], cwd=o, check=True); subprocess.run(["git", "remote", "add", "origin", "git@github.com:o/elsewhere.git"], cwd=o, check=True)
         ev += [{"$": "ProjectCreated", "id": "p2", "title": "other-" + name, "root": o, "at": int(time.time()) - 50},

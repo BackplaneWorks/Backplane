@@ -213,7 +213,8 @@ pub fn leave(session: &Value, sel: &str) -> Value {
 /// Dv.sync (the post-hook): an open Diff follows its thread; asked again when the turn moved since it was asked
 pub fn dv_sync(f: &dyn select::Facts, hub: &str, session: &mut Value, cmds: &mut Vec<Value>) {
     let sel = s(session, "sel").to_string();
-    if !diff_on(session, &sel) || sel.contains('~') { return }
+    if !diff_on(session, &sel) { return }
+    // (a thread of another machine: git.diff goes to that machine, net/rpc.rs; its turn is not in this hub's facts, so it is asked once on show)
     let at = dv_at(f, &sel);
     if info(session, &format!("diff.at:{sel}")) == at { return }
     let mut b = B::new(hub, session);
@@ -223,7 +224,7 @@ pub fn dv_sync(f: &dyn select::Facts, hub: &str, session: &mut Value, cmds: &mut
 /// A Diff on show is answered by this module's post-hook, not by the helper
 pub fn diff_only(session: &Value) -> bool {
     let sel = s(session, "sel");
-    !sel.contains('~') && diff_on(session, sel) && !matches!(info(session, &format!("view.kind:{sel}")), "mech")
+    diff_on(session, sel) && !matches!(info(session, &format!("view.kind:{sel}")), "mech")
 }
 
 /// The actions this module owns: `rv-page`, `rv-run`, `rv-bom`, `rv-tick`, `revert`, `revert-no`

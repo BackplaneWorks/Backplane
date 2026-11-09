@@ -408,6 +408,8 @@ impl Backplane {
         if let Some(l) = link {
             if l.file { let _ = self.tx.try_send(Command::Action("file-open".into(), l.href)); }
             else if l.href.starts_with("https://") || l.href.starts_with("http://") { cx.open_url(&l.href); }
+            // a thread or project, of this machine or another one: the hub says what it opens (`link-open`)
+            else if crate::pairing::is_open_link(&l.href) { let _ = self.tx.try_send(Command::Action("link-open".into(), l.href)); }
         }
         // a finished selection is the X11 PRIMARY selection too (middle-click paste in other apps)
         #[cfg(target_os = "linux")]

@@ -12,6 +12,7 @@
 #[cfg(test)]
 mod copy_outs;
 pub mod botnet;
+pub mod farfiles;
 pub mod devices;
 pub mod devicespage;
 pub mod far;
@@ -70,6 +71,7 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         // /far/rpc: asking (a client's request about a thing elsewhere goes there) and answering; the bots lane's owner.mail transport
         hub.register_http(std::sync::Arc::new(rpc::RpcRoutes(sync.clone())));
         hub.set_far_router(std::sync::Arc::new(rpc::Router::new(sync.clone())));
+        farfiles::bind(&hub, sync.clone()); // (Files of a thread whose project is on another machine, both ways)
         crate::mirror::watch_origins(hub.clone()); // (each linked machine's projects' origins, for one sidebar project per repository)
         { // (the bots start on their own; the transport is handed over once they exist, looked for for ten minutes)
             let (hub, sync, peering_w) = (hub.clone(), sync.clone(), peering.clone());

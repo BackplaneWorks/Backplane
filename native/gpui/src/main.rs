@@ -65,10 +65,12 @@ impl Backplane {
         let input=cx.new(screens::composer::Composer::new);input.focus_handle(cx).focus(window);
         let local=local::Local::load();
         let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=screens::place::beside_credential(&config.token_file,"gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
-        eprintln!("GPUI_LOG {}",serde_json::json!({"hub_in_use":pairing::host_port(&config.hub).0}));let pair=screens::pair::start(config.unpaired,config.pair_link.as_deref(),cx);let paired=config.paired;let has_hub=!config.unpaired;
+        eprintln!("GPUI_LOG {}",serde_json::json!({"hub_in_use":pairing::host_port(&config.hub).0}));let open_link=config.pair_link.clone().filter(|l|pairing::is_open_link(l));let pair=screens::pair::start(config.unpaired,config.pair_link.as_deref().filter(|l|!pairing::is_open_link(l)),cx);let paired=config.paired;let has_hub=!config.unpaired;
         cx.spawn(async move |weak,cx|{while let Ok(link)=OPENED.1.recv().await {if weak.update(cx,|this,cx|screens::pair::incoming(this,&link,cx)).is_err(){break;}}}).detach();
         let(hub_at,token_file)=(screens::attach::Target::from(&config.hub,&config.token_file),config.token_file.clone());
         let elsewhere=hubs::elsewhere(&config.hub);let(tx,events)=hub::connect(config);
+        // started with a thread's link (the system's handler for backplane://): the hub opens it once the window is up
+        if let Some(l)=open_link {let _=tx.try_send(Command::Action("link-open".into(),l));}
         screens::place::watch(cx);screens::devbar::watch(cx);screens::hubbar::watch(cx,hub_at,&token_file);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
         // the keys held show their hints only in the window in use (keys::hint_mode): its focus coming or going draws them again
@@ -218,7 +220,8 @@ impl Backplane {
     pub fn arm_new(&mut self){self.arm_new=Some((Instant::now(),self.thread_ids().into_iter().collect()));}
     fn adopt_new(&mut self,cx:&mut Context<Self>){
         let Some((at,known))=self.arm_new.as_ref() else {return};
-        if at.elapsed()>Duration::from_secs(10){self.arm_new=None;return;}
+        // (a thread made on a linked machine shows once that machine has pushed it: a few seconds, more while it sets up a worktree)
+        if at.elapsed()>Duration::from_secs(30){self.arm_new=None;return;}
         let fresh=self.thread_ids().into_iter().find(|t|!known.contains(t));
         if let Some(id)=fresh{self.arm_new=None;self.select_id(id,cx);self.want_focus=true;}
     }

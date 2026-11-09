@@ -32,8 +32,20 @@ fn default_part(ps: &[String]) -> Option<&String> {
 pub fn mech_current(ps: &[String], chosen: &str) -> Option<String> { ps.iter().find(|p| p.as_str() == chosen).or_else(|| default_part(ps)).cloned() }
 fn abs_of(root: &str, rel: &str) -> String { if crate::plat::fs::is_abs(rel) { rel.to_string() } else { format!("{root}/{rel}") } }
 /// The source a Mech page asks the hub for: the part as a 3D model ("" with no part).
-/// A project's parts: listed from its folder here; a project on another machine is not on this disk, so only the part an agent showed is known.
-fn parts_of(root: &str, sel: &str, chosen: &str) -> Vec<String> { if sel.contains('~') { if chosen.is_empty() { vec![] } else { vec![chosen.to_string()] } } else { mech_parts(root) } }
+/// A project's parts: listed from its folder here; a project on another machine from that machine's listing of its `mech/` (net/farfiles.rs:
+/// the first draw has none yet, the next has them), with the part an agent showed kept even before then.
+fn parts_of(root: &str, sel: &str, chosen: &str) -> Vec<String> {
+    if !sel.contains('~') { return mech_parts(root) }
+    let mut ps = match crate::net::farfiles::listing(sel, "mech") { Some(Ok(t)) => parts_in_listing(&t), _ => vec![] };
+    if !chosen.is_empty() && !ps.iter().any(|p| p == chosen) { ps.insert(0, chosen.to_string()) }
+    ps
+}
+/// The models in a `files::dir::list` listing of `mech/` (its files, not its folders), as `mech/<name>`, in byte order.
+fn parts_in_listing(t: &str) -> Vec<String> {
+    let mut v: Vec<String> = t.lines().filter_map(|l| { let mut it = l.splitn(3, '\t'); let (k, _, n) = (it.next()?, it.next()?, it.next()?);
+        let low = n.to_ascii_lowercase(); (k != "d" && !n.starts_with('.') && [".step", ".stp", ".glb"].iter().any(|x| low.ends_with(x))).then(|| format!("mech/{n}")) }).collect();
+    v.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes())); v
+}
 fn mech_want(root: &str, ps: &[String], chosen: &str) -> (String, String) {
     match mech_current(ps, chosen) { Some(p) if !root.is_empty() => { let a = abs_of(root, &p); (format!("2|{root}|{a}"), a) }, _ => (String::new(), String::new()) }
 }
@@ -465,10 +477,14 @@ fn project_title(st: &State, sel: &str) -> String { st.threads.get(sel).and_then
 fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
     // the folder is watched on disk while this page shows it (files/watch_dir.rs): a change there makes the hub tell the views to draw it again
     // a project on another machine (`<link>~<id>`): its folder is listed there, not read from this disk
-    let listed = if sel.contains('~') { Err("This project is on another machine: its folder is shown there.".to_string()) } else if root.is_empty() { Err("This thread has no project folder.".to_string()) } else { crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| e.to_string()) };
-    if let Ok(t) = &listed { crate::files::watch_dir::touch(root, dir, crate::files::watch_dir::signature(t)); }
-    let (rows, err) = match listed { Ok(t) => (rows_of(&t, sel, dir), String::new()), Err(e) => (vec![], e) };
-    json!({"trail": files_trail(dir), "rows": rows, "ready": true, "error": err, "zip": down_url(sel, dir, true), "zipName": zip_name(&project_title(st, sel), dir)})
+    // a project on another machine (`<link>~<id>`): its folder is listed there and the listing comes over (net/farfiles.rs); downloads are that machine's
+    let far = sel.contains('~');
+    let listed = if far { match crate::net::farfiles::listing(sel, dir) { Some(r) => r, None => return json!({"trail": files_trail(dir), "rows": [], "ready": false, "error": "", "zip": "", "zipName": ""}) } }
+        else if root.is_empty() { Err("This thread has no project folder.".to_string()) } else { crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| e.to_string()) };
+    if let (false, Ok(t)) = (far, &listed) { crate::files::watch_dir::touch(root, dir, crate::files::watch_dir::signature(t)); }
+    let (mut rows, err) = match listed { Ok(t) => (rows_of(&t, sel, dir), String::new()), Err(e) => (vec![], e) };
+    if far { for r in rows.iter_mut() { r["down"] = json!(""); } }
+    json!({"trail": files_trail(dir), "rows": rows, "ready": true, "error": err, "zip": if far { String::new() } else { down_url(sel, dir, true) }, "zipName": zip_name(&project_title(st, sel), dir)})
 }
 /// File.json: an opened image, PDF or note: its name, its kind, where the hub serves it (`/img` takes an absolute path).
 fn file_page(kind: &str, abs: &str) -> Value {
@@ -500,11 +516,12 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
             if value.is_empty() || !fm::files_safe(value) { return None }
             let k = fm::preview(fm::last(value));
             if k.is_empty() { return Some(ViewOut { patch: json!({}), before: vec![], boards_look: false }) }
+            // a project on another machine: the file is there (its path there; a drawing is made there, an image or note is copied here to show)
+            if sel.contains('~') { (k.into(), fm::parent(value), format!("{}/{value}", root.trim_end_matches('/'))) } else {
             // the file must be a plain file inside the project, as the listing shows them
-            let parent = std::path::Path::new(&root).join(fm::parent(value));
             let abs = fm::contained(std::path::Path::new(&root), &fm::parent(value))?.join(fm::last(value));
-            let _ = parent; if !std::fs::symlink_metadata(&abs).map_or(false, |m| m.is_file()) { return None }
-            (k.into(), fm::parent(value), abs.to_string_lossy().into_owned())
+            if !std::fs::symlink_metadata(&abs).map_or(false, |m| m.is_file()) { return None }
+            (k.into(), fm::parent(value), abs.to_string_lossy().into_owned()) }
         }
     };
     let n = match kind.as_str() { "board" => "0", "schematic" => "1", "3d" => "2", _ => "" };
@@ -516,7 +533,8 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
     drafts.insert(format!("@view.sheet:{sel}"), json!("")); drafts.insert(format!("@mech.part:{sel}"), json!(""));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
-        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(wkind), jstr(&root), jstr(&file));
+        let on = if sel.contains('~') { format!(",\"on\":{}", jstr(sel.split('~').next().unwrap_or(""))) } else { String::new() };
+        let p = format!("{{\"kind\":{},\"root\":{},\"path\":{},\"tree\":\"\"{on}}}", jstr(wkind), jstr(&root), jstr(&file));
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -554,7 +572,7 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("mech")); o.insert("key".into(), json!(want));
             let chips: Vec<Value> = ps.iter().map(|p| json!({"label": stem(p), "value": p, "on": cur.as_deref() == Some(p.as_str())})).collect();
-            o.insert("mech".into(), json!({"say": if root.is_empty() { "Loading…" } else if sel.contains('~') && ps.is_empty() { "This project is on another machine: its parts are listed there. A part an agent shows opens here." } else if ps.is_empty() { "No parts yet. Ask an agent to model one: it designs it in FreeCAD, keeps it in mech/, and renders it here." } else { "" },
+            o.insert("mech".into(), json!({"say": if root.is_empty() { "Loading…" } else if sel.contains('~') && ps.is_empty() { "No parts in its mech/ folder on that machine yet." } else if ps.is_empty() { "No parts yet. Ask an agent to model one: it designs it in FreeCAD, keeps it in mech/, and renders it here." } else { "" },
                 "note": "", "parts": chips, "rel": cur.clone().unwrap_or_default(), "busy": false, "render": "Create renders", "err": "",
                 "name": cur.as_deref().map(stem).unwrap_or_default(), "path": cur.as_deref().map(|p| abs_of(&root, p)).unwrap_or_default(), "shots": [], "empty": ""}));
             v
@@ -585,7 +603,13 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         "image" | "pdf" | "text" => {
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(""));
-            o.insert("file".into(), file_page(kind, s(&session["drafts"], &format!("@view.file:{sel}"))));
+            let f = s(&session["drafts"], &format!("@view.file:{sel}"));
+            // a file of a project on another machine is shown from this machine's copy of it (net/farfiles.rs)
+            let page = if sel.contains('~') {
+                let rel = f.strip_prefix(&format!("{}/", root.trim_end_matches('/'))).unwrap_or("");
+                match crate::net::farfiles::copy(sel, rel) { Some(Ok(local)) => { let mut p = file_page(kind, &local); p["name"] = json!(crate::files::fm::last(rel)); p }, Some(Err(e)) => json!({"name": crate::files::fm::last(rel), "kind": kind, "url": "", "error": e}), None => json!({"name": crate::files::fm::last(rel), "kind": kind, "url": "", "loading": true}) }
+            } else { file_page(kind, f) };
+            o.insert("file".into(), page);
             v
         }
         _ => { let mut v = page(template, kind, &root, &session["drafts"], sel); if matches!(kind, "board" | "schematic" | "3d") { if let Some(b) = boards_menu(session, sel, &root) { v["boards"] = b; } } v }
@@ -650,6 +674,15 @@ mod tests {
         let o = view_action(&st, "h", &session, "mech\t/desk/board/mech/a.step").unwrap();
         let w: Value = serde_json::from_str(o.before[0]["text"].as_str().unwrap()).unwrap();
         assert_eq!((w["p"]["kind"].as_str(), w["p"]["path"].as_str(), w["p"]["on"].as_str()), (Some("3d"), Some("/desk/board/mech/a.step"), Some("L")));
+    }
+    #[test] fn another_machines_parts_and_files_come_from_its_listing() {
+        assert_eq!(parts_in_listing("d\t0\told\nf\t10\tb.STEP\nf\t3\tnotes.md\nf\t9\ta.glb\nf\t1\t.hidden.step\n"), ["mech/a.glb", "mech/b.STEP"]);
+        let mut st = State::new();
+        for l in [r#"{"$":"ProjectCreated","id":"L~p1","title":"Board","root":"/desk/board","at":1}"#, r#"{"$":"ThreadCreated","id":"L~t1","project":"L~p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}"#] { st.apply_line(l); }
+        // (no machine answers in a test: the page waits for the listing, and offers no download from this machine)
+        let f = files_page(&st, "/desk/board", "L~t1", "");
+        assert_eq!((f["ready"].as_bool(), f["zip"].as_str(), f["error"].as_str()), (Some(false), Some(""), Some("")));
+        assert_eq!(parts_of("/desk/board", "L~t1", "mech/x.step"), ["mech/x.step"], "a part an agent showed is kept before the listing comes");
     }
     #[test] fn a_panel_the_helper_opened_is_not_drawn_as_an_idle_viewer() {
         let (st, th) = state();
