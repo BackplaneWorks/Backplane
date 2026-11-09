@@ -850,6 +850,8 @@ pub struct Window {
     pub(crate) dirty_views: FxHashSet<EntityId>,
     focus_listeners: SubscriberSet<(), AnyWindowFocusListener>,
     pub(crate) focus_lost_listeners: SubscriberSet<(), AnyObserver>,
+    /// Backplane patch: called after every frame is drawn, with that frame as `rendered_frame` (native child windows follow the layout from here).
+    pub(crate) frame_drawn_listeners: Rc<RefCell<Vec<Box<dyn FnMut(&mut Window, &mut App) -> bool>>>>,
     default_prevented: bool,
     mouse_position: Point<Pixels>,
     mouse_hit_test: HitTest,
@@ -1233,6 +1235,7 @@ impl Window {
             dirty_views: FxHashSet::default(),
             focus_listeners: SubscriberSet::new(),
             focus_lost_listeners: SubscriberSet::new(),
+            frame_drawn_listeners: Rc::default(),
             default_prevented: true,
             mouse_position,
             mouse_hit_test: HitTest::default(),
@@ -1645,6 +1648,27 @@ impl Window {
         RefCell::borrow_mut(&self.next_frame_callbacks).push(Box::new(callback));
     }
 
+    /// Backplane patch: `listener` runs after every frame this window draws, for as long as it answers true. It sees the frame just drawn
+    /// ([`Window::hitbox_drawn_after`]); it must not draw.
+    pub fn on_frame_drawn(&self, listener: impl FnMut(&mut Window, &mut App) -> bool + 'static) {
+        self.frame_drawn_listeners.borrow_mut().push(Box::new(listener));
+    }
+
+    /// Backplane patch: in the frame last drawn, the visible bounds of the hitbox `id` (its bounds within its content mask) and the visible
+    /// bounds of every hitbox inserted after it that overlaps those (what was painted over it: a popover, a menu, a dialog). None when the
+    /// frame has no such hitbox (the element was not drawn).
+    pub fn hitbox_drawn_after(&self, id: HitboxId) -> Option<(Bounds<Pixels>, Vec<Bounds<Pixels>>)> {
+        let hb = &self.rendered_frame.hitboxes;
+        let i = hb.iter().position(|h| h.id == id)?;
+        let mine = hb[i].bounds.intersect(&hb[i].content_mask.bounds);
+        let over = hb[i + 1..]
+            .iter()
+            .map(|h| h.bounds.intersect(&h.content_mask.bounds).intersect(&mine))
+            .filter(|b| b.size.width > px(0.) && b.size.height > px(0.))
+            .collect();
+        Some((mine, over))
+    }
+
     /// Schedule a frame to be drawn on the next animation frame.
     ///
     /// This is useful for elements that need to animate continuously, such as a video player or an animated GIF.
@@ -1976,6 +2000,13 @@ impl Window {
         self.refreshing = false;
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
+
+        // Backplane patch: the frame-drawn listeners (a listener answering false is dropped; one added meanwhile is kept)
+        let mut listeners = mem::take(&mut *self.frame_drawn_listeners.borrow_mut());
+        listeners.retain_mut(|l| l(self, cx));
+        let added = mem::take(&mut *self.frame_drawn_listeners.borrow_mut());
+        listeners.extend(added);
+        *self.frame_drawn_listeners.borrow_mut() = listeners;
 
         ArenaClearNeeded
     }
