@@ -3,6 +3,11 @@ fn main() {
     // the cef feature links libcef.so dynamically; the cef crate copies it beside the binary, so find it there (docs/browser-cef.md)
     // (Linux only: Windows finds libcef.dll beside the .exe by itself; macOS loads the framework at run time, viewers/cef.rs)
     if env::var_os("CARGO_FEATURE_CEF").is_some() && env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") { println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN"); }
+    // Windows (MSVC): libcef.dll is delay-loaded, so a client whose runtime is missing still starts and its Browser tab says why and shows the hub's
+    // frames; viewers/cef.rs checks the runtime and argv before any CEF call (a gnullvm cross build, scripts/windows-check.sh, builds without cef)
+    if env::var_os("CARGO_FEATURE_CEF").is_some() && env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") && env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bin=backplane-gpui=/DELAYLOAD:libcef.dll");
+    }
     let css_path=PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../assets/web/style.css");
     println!("cargo:rerun-if-changed={}",css_path.display());
     let css=fs::read_to_string(css_path).unwrap();
