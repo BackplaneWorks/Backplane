@@ -9,7 +9,7 @@ pub fn route(href: &str, file: bool) -> Route {
     if h.starts_with("backplane://") || crate::pairing::is_open_link(h) { return Route::Hub(h.to_string()) }
     if h.starts_with("https://") || h.starts_with("http://") || h.starts_with("mailto:") { return Route::Web(h.to_string()) }
     if file && !h.is_empty() { return Route::File(h.to_string()) }
-    Route::Note("That link does not open here.")
+    /* i18n-ok: the note is drawn through trs */ Route::Note("That link does not open here.")
 }
 
 /// What hovering a link shows: its target, as the person would read it.
