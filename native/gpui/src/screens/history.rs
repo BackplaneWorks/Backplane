@@ -7,6 +7,8 @@ use std::{collections::{HashMap, HashSet}, ops::Range};
 
 /// The most rows held for one thread. The list draws only what is on screen, so this bounds memory, not frame time.
 pub const MAX_ROWS: usize = 8192;
+/// While the reader's top row is within this many rows of the first one held, a page that lands asks for the next at once (glue.rs `older_landed`).
+pub const RUNWAY_ROWS: usize = 40;
 /// Where a row read for history remembers its page, so a fold opened in it can be read again. Not the hub's: `changed` ignores it.
 pub const PAGE_KEY: &str = "historyPage";
 
