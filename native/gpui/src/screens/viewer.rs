@@ -183,7 +183,7 @@ fn status_row(light: bool, say: &str, actions: Option<AnyElement>) -> AnyElement
 fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().text_size(px(12.));
-    col = col.child(div().flex().gap_2().px_3().py_2().items_center().child(div().flex_1().text_color(c("dim")).child(string(diff, "summary")))
+    col = col.child(div().flex().flex_wrap().gap_2().px_3().py_2().items_center().child(div().flex_1().min_w(px(180.)).text_color(c("dim")).child(string(diff, "summary")))
         .children([("Commit", "commit_push"), ("PR", "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l.to_string(), false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>())
         .child(btn(cx, light, "revert-ask".into(), "Revert".into(), diff["reverting"] == true, Command::Action("revert".into(), "ask".into()))).child(actions));
     // Revert asks first (Ui.revert): the diff stays on show while the person decides what to discard
@@ -446,7 +446,7 @@ fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot:
 /// instead of a card over the drawing; × or Escape clears it in every pane.
 fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Option<&super::plot::Card>, boards: Option<AnyElement>, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let mut picks = div().flex().flex_none().gap_1();
+    let mut picks = div().flex().min_w_0().overflow_hidden().gap_1(); // (in a narrow pane the toggles clip, the pane's own controls and its × stay)
     for (pane, name) in SPLIT_PANES.iter() {
         let (pane, name, on) = (*pane, *name, split_shows(hide, pane));
         // (0.14's combo-pick: outlined in the accent while shown, dim while put away)
@@ -628,10 +628,37 @@ pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyE
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
-    Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(crate::local::VIEWER_PX.0 as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
+    Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
         .child(resize_handle(cx)).child(page).into_any_element())
 }
 
+/// The least the pane may shrink to on this frame (`fit`'s third answer, set by ui.rs before the window is drawn).
+static PANE_LEAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(crate::local::VIEWER_PX.0);
+pub fn set_least(px: f32) { PANE_LEAST.store(px.max(0.).round() as u32, std::sync::atomic::Ordering::Relaxed); }
+/// The rail's width, the folded sidebar's strip, and the least the thread column keeps in a narrow window.
+pub const RAIL_W: f32 = 72.0;
+pub const STRIP_W: f32 = 44.0;
+pub const THREAD_LEAST: f32 = 320.0;
+/// How a window `window_w` wide is shared, as 0.14's grid did (the thread `minmax(0, 1fr)`, a fixed rail), so the rail and the viewer's ×
+/// never leave the window: the thread gives way first (THREAD_MIN down to THREAD_LEAST), then the open viewer (its least down to 0), and
+/// when even that does not fit the open sidebar folds to its strip for as long as the window is that narrow (`force`: the person unfolded
+/// it anyway). Answers (the sidebar drawn open, the thread column's least, the viewer pane's least).
+pub fn fit(window_w: f32, side_w: f32, side_open: bool, force: bool, viewer: bool) -> (bool, f32, f32) {
+    let pane_want = if viewer { crate::local::VIEWER_PX.0 as f32 } else { 0. };
+    let shown = side_open && (force || window_w - side_w - RAIL_W >= THREAD_LEAST + pane_want);
+    let avail = (window_w - if shown { side_w } else { STRIP_W } - RAIL_W).max(0.);
+    let thread = (avail - pane_want).clamp(THREAD_LEAST, THREAD_MIN).min(avail);
+    (shown, thread, (avail - thread).clamp(0., pane_want))
+}
+impl Backplane {
+    /// Fold or unfold the sidebar as it is shown (Ctrl+B, the fold chevron, the strip's chevron): folding clears `side_force`, unfolding a
+    /// sidebar the window folded for want of room shows it anyway (until the window is wide enough again).
+    pub(crate) fn side_flip(&mut self, cx: &mut Context<Self>) {
+        if self.screens.side_shown { self.screens.side_force = false; if self.sidebar_open { self.sidebar_toggle(cx); } }
+        else if !self.sidebar_open { self.screens.side_force = false; self.sidebar_toggle(cx); }
+        else { self.screens.side_force = true; self.ui_epoch += 1; cx.notify(); }
+    }
+}
 /// The pane's width: this device's choice (the left edge's drag), else the default; read once from the local file, then kept here.
 static PANE_W: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 pub fn pane_width() -> u32 {
@@ -704,6 +731,23 @@ pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_narrow_window_keeps_the_rail_the_thread_gives_way_first_then_the_viewer_then_the_sidebar() {
+        let (side, rail) = (264., RAIL_W);
+        for w in [700., 800., 900., 1036., 1100., 1280., 1920.] { for viewer in [false, true] { for force in [false, true] {
+            let (shown, thread, pane) = fit(w, side, true, force, viewer);
+            let used = if shown { side } else { STRIP_W } + rail + thread + pane;
+            assert!(used <= w + 0.5 || (force && w < side + rail + THREAD_LEAST), "{w} viewer={viewer} force={force}: {used} > {w}");
+            if viewer && !force { assert!(pane > 0. && thread >= THREAD_LEAST.min(w), "{w}: thread {thread} pane {pane}"); }
+        } } }
+        assert_eq!(fit(1920., side, true, false, true), (true, THREAD_MIN, 380.), "wide: as before");
+        assert_eq!(fit(1100., side, true, false, true), (true, 384., 380.), "the thread shrinks first");
+        assert_eq!(fit(900., side, true, false, true), (false, 404., 380.), "then the sidebar folds to its strip");
+        assert_eq!(fit(700., side, true, false, true), (false, THREAD_LEAST, 264.), "then the viewer gives way");
+        assert_eq!(fit(900., side, true, true, true), (true, THREAD_LEAST, 244.), "unfolded anyway: the viewer gives way, the rail stays");
+        assert_eq!(fit(900., side, false, false, true).0, false, "folded stays folded");
+        assert_eq!(fit(1280., side, true, false, false), (true, THREAD_MIN, 0.), "no viewer, wide");
+    }
+
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
