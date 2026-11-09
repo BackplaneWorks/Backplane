@@ -275,6 +275,11 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             crate::session::patch::merge(&mut session,&o.patch);
             cmds=o.before;
         },
+        // the Boards menu opened: the project's boards read again (present/viewer.rs `boards_look`)
+        "view-boards" => {
+            let Some(c)=super::viewer::boards_look(st,hub,&session) else { return refused("action.board-unported") };
+            session["rid"]=json!(session["rid"].as_u64().unwrap_or(0)+1); cmds=c;
+        },
         // the Layers menu: hide/show a layer, the active layer, All/Dim/Only, Ctrl+H, Reset layers (present/viewer.rs `layer_action`)
         "view-layer" | "view-layer-pick" | "view-layer-mode" | "view-layer-cycle" | "view-layers-reset" => {
             let Some(patch)=super::viewer::layer_action(st,&session,action,value) else { return refused("action.layer-unported") };
