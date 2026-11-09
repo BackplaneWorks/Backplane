@@ -8,7 +8,7 @@
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd)
 fp() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])'; }
-CLIENT=$1; HUB=$2; OUT=${OUT:-${TMPDIR:-/tmp}/cef-life}; DISP=${DISP:-:81}; HPORT=${HPORT:-$(fp)}; PPORT=${PPORT:-$(fp)}; CDP=${CDP:-$(fp)}
+CLIENT=$(realpath "$1"); HUB=$(realpath "$2"); OUT=${OUT:-${TMPDIR:-/tmp}/cef-life}; DISP=${DISP:-:81}; HPORT=${HPORT:-$(fp)}; PPORT=${PPORT:-$(fp)}; CDP=${CDP:-$(fp)}
 RT=${BACKPLANE_CEF:-$HOME/.cache/backplane/cef-runtime/154.0.34}; HTTPS=${E2E_HTTPS_URL:-https://example.com/}
 ASSETS=${E2E_ASSETS:-$(dirname "$CLIENT")/assets}; [ -d "$ASSETS" ] || ASSETS=$ROOT/assets
 ICD=${E2E_VK_ICD:-$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)}
