@@ -65,6 +65,11 @@
 //                thread's agent would ("The quote is on the Order card…"), not echoed
 //   deploy       the first command calls the hub's deploy_restart (the MCP
 //                URL, BP_DEPLOY_ARGS, JSON, as its arguments), then ends
+//   buyflow      a buy thread's agent, scripted by what each command says: BP_BUY_SCRIPT (JSON: [{when, shell?, calls?, say?}]),
+//                the first entry whose `when` (a regex) matches the command's text runs: its `shell` (sh -c, in the thread's
+//                folder; its output logged), then each of its `calls` of the hub's MCP tools, then it says `say`; no match: a short
+//                answer ("{{out}}" in a call's arguments is the shell's last output line; a call with `if` runs only when the
+//                call before answered something that regex matches). Keyed by text, not by turn, so a respawned process goes on where the thread is (test/order/buy_e2e.py)
 // BP_STANDIN_IMAGES=<dir>: each image block received is written there (0, 1, ...), and
 // logged as "IMAGE <path> <media type> <source type>" and "TEXT <the message's text>".
 // BP_STANDIN_USAGE=1: results carry token usage and a cost (a counted turn).
@@ -312,6 +317,37 @@ async function run(c: Cmd, firstOne: boolean) {
     }
     say("ASKED");
     result("ASKED");
+    lc(c.uuid, "completed");
+    return;
+  }
+  if (mode === "buyflow") {
+    type Step = { when: string; shell?: string; calls?: { name: string; arguments: object; if?: string }[]; say?: string };
+    const step = (JSON.parse(process.env.BP_BUY_SCRIPT ?? "[]") as Step[]).find((s) => new RegExp(s.when).test(c.text));
+    log(`BUYFLOW ${step ? step.when : "-"} ${c.text.slice(0, 120).replace(/\n/g, " ")}`);
+    let last = ""; // the shell's last line of output: "{{out}}" in a call's arguments (the folder it exported, say)
+    if (step?.shell) {
+      const out = await new Promise<string>((res) => {
+        const p = spawn("sh", ["-c", step.shell!], { cwd: process.cwd() }); let o = "", e = "";
+        p.stdout.on("data", (d) => (o += d)); p.stderr.on("data", (d) => (e += d)); p.on("close", (code) => { last = o.trim().split("\n").pop() ?? ""; res(`exit ${code}: ${(o + e).slice(-600)}`); });
+      });
+      log(`SHELL ${out.replace(/\n/g, " | ")}`);
+    }
+    let prev = "";
+    for (const t of step?.calls ?? []) {
+      if (t.if && !new RegExp(t.if).test(prev)) { log(`MCPSKIP ${t.name}`); continue; } // only when the call before answered so (a gate that passed, say)
+      let got = "";
+      try {
+        const args = JSON.parse(JSON.stringify(t.arguments).replaceAll("{{out}}", last));
+        const r = await fetch(mcpUrl, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: t.name, arguments: args } }) });
+        got = await r.text();
+      } catch (e) { got = String(e); }
+      log(`MCPCALL ${t.name} ${got.slice(0, 400)}`);
+      prev = got;
+    }
+    const reply = step?.say ?? "Noted.";
+    say(reply);
+    result(reply);
     lc(c.uuid, "completed");
     return;
   }
