@@ -68,3 +68,17 @@ The agents' instructions are built in `native/host/src/agents/prompt.rs` (`order
 `order/` (Python): see `order/README.md` for the API, pricing, security and deployment.
 - The app's default server is `Order.server()`; the `order.server` setting replaces it. `BACKPLANE_ORDER_SERVER` in the hub's environment replaces only the default: every test hub (skills/backplane-e2e/hub.sh, test/tools and desktop/test harnesses, scripts/test.sh, the smoke scripts) sets it to a dead local address, so with Ordering on by default no test reaches the real server; hub.sh also starts with Ordering off, and a story that orders sets `order.server` to its own stand-in.
 - The fab's price models are a private pack (`FAB_VENDOR`), not in this repository.
+
+## Checking it end to end
+
+`test/order/buy_e2e.py` walks the whole flow in the GPUI window with real X input, as a person does, against `order/fabsrv` on loopback
+(`test/order/local_server.py`: the stand-in fab pack and a Stripe double) and a scripted stand-in agent (`claude_standin.ts` mode `buyflow`,
+which exports with kicad-cli as a buy thread's agent does, `test/order/export_kicad.py`): Buy it with its estimate → the review gate →
+Review for manufacturing as a task that records its verdict → the country and the US state typed in their boxes → the files' approval
+("Ships to US (GA)"), outliving a hub restart → Send → waiting for the quote → the quote's four lines (Manufacturing, Shipping, Duties &
+taxes, Sales tax (estimated)), the card's total, customs line and Buy now → the order server's page, which pays the double → Paid →
+placed and shipped by the operator, said by a restarted hub. `--paused` checks that Buy now shows the paused page instead.
+
+    XV=<Xvfb tree> TWM=<twm> BUN=<bun> VK_ICD_FILENAMES=<lavapipe icd> BACKPLANE_GPUI_ASSETS=assets \
+      python3 test/order/buy_e2e.py --client <backplane-gpui> --hub <backplane-hub> --python <venv with order/requirements.txt> \
+      [--project <a KiCad project folder, copied>] [--display :N] [--port N]
