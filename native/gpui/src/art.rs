@@ -259,6 +259,8 @@ fn icon_svg(name: &str) -> Option<String> {
         if l["fill"] == true { format!(r#"<path d="{d}" fill="black" fill-rule="evenodd" stroke="none"/>"#) } else { format!(r#"<path d="{d}"/>"#) } }).collect();
     Some(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"#))
 }
+/// The icon set's own name for `name` (a hub-sent name, say), if the set has it.
+pub fn icon_name(name: &str) -> Option<&'static str> { icons().get_key_value(name).map(|(k, _)| k.as_str()) }
 /// A Lucide icon, `size` px square, in `color` (a sprite GPUI keeps per size: `Assets`).
 pub fn icon(name: &'static str, size: f32, color: Rgba) -> AnyElement {
     if !icons().contains_key(name) {
