@@ -238,14 +238,13 @@ impl Backplane {
             }
             // the agent still working: a green square that breathes beside the word (the one animation on screen, only while this row is)
             "assistant" if id.starts_with("@live:") || id.starts_with("@working:") => {
-                let square = div().size(px(12.)).flex_shrink_0().flex().items_center().justify_center().child(
-                    div().size(px(8.)).bg(c("ok")).with_animation(SharedString::from(format!("working-{id}")),
-                        Animation::new(std::time::Duration::from_millis(1100)).repeat().with_easing(bounce(ease_in_out)),
-                        |el, d| el.size(px(5. + 7. * d)).opacity(0.45 + 0.55 * d)));
+                // drawn at crate::part::PULSE's rate, not every display frame: each step draws this part (the visible messages) and the root's shell again
+                let (d, dots) = crate::part::pulse(self.started.elapsed());
+                self.screens.parts.tick(Backplane::timeline_part, crate::part::PULSE, cx);
+                let square = div().size(px(12.)).flex_shrink_0().flex().items_center().justify_center().child(div().size(px(5. + 7. * d)).opacity(0.45 + 0.55 * d).bg(c("ok")));
                 div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().items_center().gap_2().text_color(c("dim")).child(square)
                     // the dots count up and start over: "Working." "Working.." "Working..." (a fixed width so the line does not jitter)
-                    .child(div().min_w(px(86.)).with_animation(SharedString::from(format!("working-text-{id}")), Animation::new(std::time::Duration::from_millis(1800)).repeat(),
-                        |el, d| el.child(format!("Working{}", ".".repeat(1 + ((d * 3.0) as usize).min(2)))))).into_any_element()
+                    .child(div().min_w(px(86.)).child(format!("Working{}", ".".repeat(dots)))).into_any_element()
             }
             "assistant" => {
                 let mut col = div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().flex_col().gap_2();
@@ -453,7 +452,6 @@ impl Render for Backplane {
         let dictating = self.screens.voice.views.get(&self.selected).map_or(false, |v| v["on"] == true);
         let has_thread = thread.is_object();
         let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
-        let no_rows = thread["entries"].as_array().map_or(true, |e| e.is_empty());
         // project home replaces the thread when the hub selected it
         let home = &self.data["projectHome"];
         let page = self.project_page.clone().filter(|p| crate::screens::projects::find(&self.data, p).is_some());
