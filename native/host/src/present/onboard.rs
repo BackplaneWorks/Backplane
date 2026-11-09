@@ -173,6 +173,8 @@ pub fn import_counted(c: &Value) -> String {
     if num(c, "routines") > 0 { parts.push(many(num(c, "routines"), "routine", "routines")) }
     if num(c, "settings") > 0 { parts.push(many(num(c, "settings"), "setting", "settings")) }
     if num(c, "devices") > 0 { parts.push(many(num(c, "devices"), "paired device", "paired devices")) }
+    // on its own (Import again on a home imported before 0.14's subagents came under their threads): said, so it is not "Nothing new"
+    if num(c, "threads") == 0 && num(c, "parents") > 0 { parts.push(format!("{} under the threads that started them", many(num(c, "parents"), "subagent thread", "subagent threads"))) }
     match parts.len() { 0 => "Nothing new.".into(), 1 => format!("{}.", parts[0]), n => format!("{} and {}.", parts[..n - 1].join(", "), parts[n - 1]) }
 }
 /// The label and words for one note on what stays behind or needs doing.
@@ -752,6 +754,11 @@ mod tests {
     fn sent(o: &Out, m: &str) -> Vec<Value> { o.cmds.iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).filter(|v| v["m"] == m).map(|v| v["p"].clone()).collect() }
 
     /// A hub on 127.0.0.1 with Tailscale off makes codes and links that name only this computer: the step says so beside them.
+    #[test] fn import_again_says_the_subagent_threads_it_put_under_their_threads() {
+        assert_eq!(import_counted(&json!({"lines": 86, "parents": 86})), "86 subagent threads under the threads that started them.");
+        assert_eq!(import_counted(&json!({"lines": 101, "parents": 86, "settings": 15})), "15 settings and 86 subagent threads under the threads that started them.");
+        assert_eq!(import_counted(&json!({"projects": 1, "threads": 3, "messages": 9, "parents": 1})), "1 project and 3 threads with 9 messages.", "a first import counts the threads alone");
+    }
     #[test] fn codes_and_links_that_name_only_this_computer_carry_a_warning() {
         let warned = |v: &Step| v.rows.iter().any(|r| r["label"] == "Only this computer" && r["tone"] == "warn");
         let code = |addr: &str| json!({"linked": [], "found": [], "requests": [], "outgoing": [], "code": {"code": "123456", "address": addr, "left": 590, "peer": "p"}});

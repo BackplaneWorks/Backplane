@@ -238,12 +238,12 @@ impl Backplane {
                         .child(div().flex_shrink_0().flex().items_center().child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")))
                         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))).into_any_element()
             }
-            // the agent still working: a green square that breathes beside the word (the one animation on screen, only while this row is)
+            // the agent still working: a blue square that breathes beside the word (the one animation on screen, only while this row is; blue as the sidebar's and the head's working dots, 0.14's --st-work)
             "assistant" if id.starts_with("@live:") || id.starts_with("@working:") => {
                 // drawn at crate::part::PULSE's rate, not every display frame: each step draws this part (the visible messages) and the root's shell again
                 let (d, dots) = crate::part::pulse(self.started.elapsed());
                 self.screens.parts.tick(Backplane::timeline_part, crate::part::PULSE, cx);
-                let square = div().size(px(12.)).flex_shrink_0().flex().items_center().justify_center().child(div().size(px(5. + 7. * d)).opacity(0.45 + 0.55 * d).bg(c("ok")));
+                let square = div().size(px(12.)).flex_shrink_0().flex().items_center().justify_center().child(div().size(px(5. + 7. * d)).opacity(0.45 + 0.55 * d).bg(c("accent")));
                 div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().flex().items_center().gap_2().text_color(c("dim")).child(square)
                     // the dots count up and start over: "Working." "Working.." "Working..." (a fixed width so the line does not jitter)
                     .child(div().min_w(px(86.)).child(format!("Working{}", ".".repeat(dots)))).into_any_element()
@@ -269,8 +269,16 @@ impl Backplane {
             "step" => crate::screens::histbar::step_row(cx, light, &e),
             // s03: the call that runs now, in an open fold of the running turn: its name in the accent with the live mark beside it
             _ if !text.is_empty() && e["now"] == true => div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("text"))
-                .child(div().size(px(6.)).flex_shrink_0().bg(c("accent"))).child(div().text_color(c("accent")).child(string(&e, "label"))).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text)).into_any_element(),
-            _ if !text.is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).child(text).into_any_element(),
+                .child(div().size(px(6.)).flex_shrink_0().bg(c("accent"))).child(div().text_color(c("accent")).child(string(&e, "label"))).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.lines().next().unwrap_or("").to_string())).into_any_element(),
+            // an activity: its kind faint, what it did on one line (a heredoc's first line, "…"), as 0.14's .act; an error or a restart says all of it
+            _ if !text.is_empty() => {
+                let tone = string(&e, "tone"); let whole = tone.contains("error") || tone.contains("restart");
+                let line = if whole { text.clone() } else { let mut l = text.lines().next().unwrap_or("").to_string(); if text.trim_end().contains('\n') { l.push_str(" …"); } l };
+                let body = div().flex_1().min_w_0().when(!whole, |d| d.overflow_hidden().whitespace_nowrap().text_ellipsis()).when(tone.contains("error") && !tone.contains("restart"), |d| d.text_color(c("bad"))).child(line);
+                div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(string(&e, "label"))).child(body).into_any_element()
+            }
+            // a call whose summary is only its name (WebSearch, TaskUpdate...): its name alone, so an open fold shows as many rows as it counts
+            _ if !string(&e, "label").is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).into_any_element(),
             _ => div().into_any_element(),
         };
         let inner = div().w_full().max_w(px(930.)).px_4().child(row);
@@ -448,7 +456,17 @@ impl Backplane {
                 let Some(this) = me.upgrade() else { return };
                 { let rows = &this.read(cx).data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
                 cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
-            } }, |_, _, _, _| {}).absolute().size_0()).into_any_element()
+            } }, |_, _, _, _| {}).absolute().size_0())
+            // far up a long thread: "Latest" goes back to the end (0.14 had the page's scrollbar); it shows and goes as the list is read
+            .child(canvas({ let me = cx.entity().downgrade(); move |_, _, cx| {
+                let Some(this) = me.upgrade() else { return };
+                if this.read(cx).note_far() { cx.defer(move |cx| this.update(cx, |_, cx| cx.notify())); }
+            } }, |_, _, _, _| {}).absolute().size_0())
+            .when(!no_rows && self.far_from_end(), |d| d.child(div().absolute().bottom_3().left_0().right_0().flex().justify_center()
+                .child(div().id("to-latest").flex().items_center().gap_1().px_3().py_1().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
+                    .text_size(px(12.)).text_color(c("text")).tooltip(crate::keys::tip("Go to the newest message", "", light)).child(ic(light, "chevron-down", 14., "dim")).child("Latest")
+                    .on_click(cx.listener(|this, _, _, cx| { this.timeline_to_end(); cx.notify(); })))))
+            .into_any_element()
     }
 }
 
@@ -486,6 +504,11 @@ impl Render for Backplane {
         let thread = &self.data["thread"];
         let dictating = self.screens.voice.views.get(&self.selected).map_or(false, |v| v["on"] == true);
         let has_thread = thread.is_object();
+        // how the window's width is shared: in a narrow window the thread gives way, then the viewer, then the sidebar folds (the rail stays)
+        let (win_w, viewer_open) = (f32::from(window.viewport_size().width), crate::screens::viewer::is_open(thread));
+        if crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, false, viewer_open).0 { self.screens.side_force = false; } // room again: "anyway" is over
+        let (side_shown, thread_least, pane_least, share) = crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, self.screens.side_force, viewer_open);
+        crate::screens::viewer::set_least(pane_least); crate::screens::viewer::set_share(share); self.screens.side_shown = side_shown;
         let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
         // project home replaces the thread when the hub selected it
         let home = &self.data["projectHome"];
@@ -540,7 +563,7 @@ impl Render for Backplane {
         let ctx = string(&thread["picker"], "label").split("ctx ").nth(1).map(|s| format!("ctx {}", s.split(' ').next().unwrap_or(""))).unwrap_or_default();
         // the one chip (screens/combo.rs): the row's width last frame, less its other controls, is what the chip may use
         let bar_w = self.screens.acct.bar_w.get();
-        let combo_avail = if bar_w > 0. { bar_w - crate::screens::combo::OTHERS } else { 0. };
+        let (combo_avail, tok_words) = crate::screens::combo::split(bar_w, &thread["combo"], &string(&self.data, "tokChip"), &ctx);
         // the thread's header (screens/head.rs): its state and tools beside the name in the top bar when it has the room, else a row of their own
         // a project's page over a thread: the header is the page's (its project's name), not the thread's
         let head_thread = has_thread && !has_home;
@@ -569,7 +592,7 @@ impl Render for Backplane {
             let act: Option<(&'static str, &'static str)> = match *l { "Board" => Some(("view-kind", "board")), "Schematic" => Some(("view-kind", "schematic")), "3D" => Some(("view-kind", "3d")), "Split" => Some(("view-kind", "split")), "Mech" => Some(("view-kind", "mech")), "Files" => Some(("view-kind", "files")), "Review" => Some(("view-kind", "review")), "Browser" => Some(("view-kind", "browser")), "Diff" => Some(("diff", "")), _ => None };
             match act {
                 Some((a, v)) => {
-                    let active = a == "view-kind" && v == active_kind;
+                    let active = (a == "view-kind" && v == active_kind) || (a == "diff" && thread["diff"].is_object()); // (Diff is lit while it is on show, as the others are)
                     ctl.push(CtlEntry { id: format!("rail:{l}"), label: l.to_string(), ctl: if a == "view-kind" { Ctl::Rail(v.into()) } else { Ctl::Node(a.into(), v.into()) } });
                     rail.push(with_rect(div().id(SharedString::from(format!("rail-{l}"))), || format!("rail:{l}")).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| this.rail_press(a, v, cx))).tooltip({ let letter = crate::keys::rail_letter(if a == "diff" { "diff" } else { v }).to_uppercase(); let chord = match (a, v) { ("diff", _) => crate::keys::hint(&self.local, "diff"), (_, "files") => crate::keys::hint(&self.local, "files"), _ => String::new() }; let key = [letter, chord].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" or "); crate::keys::tip(l, &key, light) })
                         .relative().flex().flex_col().items_center().h(px(48.)).justify_center().gap_1().text_size(px(10.)).when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).text_color(c(if active { "text" } else { "dim" })).hover(|s| s.text_color(c("text"))).child(ic(light, i, 18., if active { "accent" } else { "dim" })).child(*l)
@@ -620,18 +643,16 @@ impl Render for Backplane {
         ctl.push(CtlEntry { id: "ui:Fold sidebar".into(), label: "Fold sidebar".into(), ctl: Ctl::ToggleSidebar });
         ctl.push(CtlEntry { id: "ui:Attach".into(), label: "Attach".into(), ctl: Ctl::PickFiles });
         ctl.push(CtlEntry { id: "ui:Draw".into(), label: "Draw".into(), ctl: Ctl::Pad });
-        if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
+        if !side_shown { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
         let connected = self.status == "Connected";
         if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(window, cx); }
 
         let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")),self.picker_keys(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
-            .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus)).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.sidebar_toggle(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
+            .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus)).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.side_flip(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // the dev build strip, only while a build is being made or waits to relaunch
             .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
             .children({ let s = std::mem::take(&mut self.screens.hubbar); let e = crate::screens::hubbar::strip(cx, &s, light); self.screens.hubbar = s; e })
-            // the GitHub star suggestion, while the hub says it is out
-            .children(crate::screens::star::strip(cx, self.screens.star.clone().as_ref(), light))
             // a window on another computer's hub: a thin accent line along the top the whole time, and "on desktop" beside the name
             .when(self.screens.elsewhere.is_some(), |d| d.child(div().id("elsewhere-strip").h(px(2.)).flex_shrink_0().bg(c("accent"))))
             // top bar
@@ -656,8 +677,9 @@ impl Render for Backplane {
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(point(e.position.x - px(8.), e.position.y + px(14.)), items, cx); } }))
                             .child(ic(light, "chevron-down", 14., "dim")))))
                 .children(top_mid)
-                .child(div().relative().flex_shrink_0().flex().items_center().gap_3().child(crate::screens::head::measure(cx, self.screens.head.right.clone()))
-                    .child(with_rect(div().id("palette-bar").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Jump or run a command", &crate::keys::hint(&self.local, "palette"), light)), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command")
+                // the window's own controls: Jump gives up room first (down to 120 px) on a narrow window, so Settings is never cut off
+                .child(div().relative().min_w_0().flex().items_center().gap_3().child(crate::screens::head::measure(cx, self.screens.head.right.clone()))
+                    .child(with_rect(div().id("palette-bar").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Jump or run a command", &crate::keys::hint(&self.local, "palette"), light)), || "ui:Jump or run a command".to_string()).w(px(260.)).min_w(px(120.)).flex_shrink().overflow_hidden().px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command")
                         // held Ctrl: its key at the end of the bar (0.14's "Ctrl K"), in room the bar always has
                         .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(div().flex_1()).child(div().flex().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "palette")).iter().map(|k| crate::screens::hints::cap(light, k, false))))))
                     .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
@@ -666,16 +688,16 @@ impl Render for Backplane {
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
                 // folded: the 44 px strip, its unfold chevron where the fold chevron is (screens/siderow.rs)
-                .when(!self.sidebar_open, |d| d.child(div().id("side-strip").w(px(44.)).h_full().flex_shrink_0().overflow_hidden().bg(c("bg")).border_r_1().border_color(c("rule")).flex().flex_col().children(self.side_strip(cx, light))))
-                .child(div().w(px(if self.sidebar_open { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).children(crate::perf::mark("sidebar")).bg(c("bg")).when(self.sidebar_open, |d| d.border_r_1()).border_color(c("rule")).flex().flex_col()
+                .when(!side_shown, |d| d.child(div().id("side-strip").w(px(44.)).h_full().flex_shrink_0().overflow_hidden().bg(c("bg")).border_r_1().border_color(c("rule")).flex().flex_col().children(self.side_strip(cx, light))))
+                .child(div().w(px(if side_shown { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).children(crate::perf::mark("sidebar")).bg(c("bg")).when(side_shown, |d| d.border_r_1()).border_color(c("rule")).flex().flex_col()
                     .child(crate::screens::hubpick::picker(self, cx, light, &mut ctl))
-                    .child(div().flex().items_center().gap_2().h(px(crate::screens::siderow::FOLD_ROW)).px_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().tooltip(crate::keys::tip("Fold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if this.sidebar_open { this.sidebar_toggle(cx); } }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
+                    .child(div().flex().items_center().gap_2().h(px(crate::screens::siderow::FOLD_ROW)).px_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().tooltip(crate::keys::tip("Fold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| this.side_flip(cx)))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
                     .child(self.screens.parts.el(Backplane::sidebar_part, StyleRefinement::default().flex_1().min_h_0(), cx))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone()))
                     // held Ctrl: the short legend over the sidebar's foot (0.14's keys-legend)
                     .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(crate::screens::hints::legend(cx, light, &self.local))))
                 // main
-                .child(div().flex_1().min_w(px(crate::screens::viewer::THREAD_MIN)).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
+                .child(div().flex_1().min_w(px(thread_least)).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
                     .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
                     .children(head_row)
                     .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))
@@ -715,18 +737,18 @@ impl Render for Backplane {
                             } }, |_, _, _, _| {}).absolute().size_full())
                             // the chip's menu (screens/combo.rs): out of the row's flow, floating over the thread from the row; hidden while something covers the page
                             .children((!self.chip_menu_covered()).then(|| crate::screens::combo::menu(cx, light, &thread, self, bar_w, (f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)))).flatten())
-                            .child(crate::screens::bar::fit(with_rect(crate::screens::combo::chip(cx, light, thread, combo_avail, (&crate::keys::hint(&self.local, "models"), &crate::keys::hint(&self.local, "account")), &self.screens.pick.chip), || "ui:Model".to_string()))
+                            .child(crate::screens::bar::fit(with_rect(crate::screens::combo::chip(cx, light, thread, combo_avail, (&crate::keys::hint(&self.local, "models"), &crate::keys::hint(&self.local, "account")), &self.screens.pick.chip, self.screens.picker_open), || "ui:Model".to_string()))
                                 // held Ctrl: the menu's key over the chip's end (0.14's "Ctrl M"), so the chip keeps its width
                                 .when(self.screens.held == crate::keys::Held::Threads, |d| d.relative().child(div().absolute().right(px(4.)).top_0().bottom_0().flex().items_center().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "models")).iter().map(|k| crate::screens::hints::cap(light, k, false))))))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("draw"), || "ui:Draw".to_string())).flex_shrink_0().cursor_pointer().tooltip(crate::keys::tip("Draw a sketch and attach it as an image", "", light)).on_click(cx.listener(|this, _, window, cx| this.pad_open(window, cx))).child(ic(light, "square-pen", 16., "dim")))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).min_w_0().overflow_hidden().cursor_pointer().tooltip(crate::keys::tip("Tokens, cost and context: the thread's numbers", "", light)).on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).flex().items_center().gap_2().child(ic(light, "gauge", 14., "dim"))
                                 // the hub's words for the thread's tokens, cost and context (0.14's token button), else the context alone
-                                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(Some(string(&self.data, "tokChip")).filter(|t| !t.is_empty()).unwrap_or_else(|| ctx.clone()))))
+                                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(tok_words)))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string())).flex_shrink_0().cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("dictate"), || "ui:Dictate".to_string())).flex_shrink_0().cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.voice_press(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
                             .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c("accent")).text_color(c("on-accent")).cursor_pointer().child(crate::screens::sidebox::send_label(thread)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
                     .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b)))
-                    .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data, self.sidebar_open))
+                    .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data, side_shown))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette, &self.local, &self.selected))
@@ -736,6 +758,8 @@ impl Render for Backplane {
                 .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().children(rail)))
+            // the GitHub star suggestion, while the hub says it is out: its own row along the bottom (as 0.14's), so the top bar and what is under the pointer do not move when it comes
+            .children(crate::screens::star::strip(cx, self.screens.star.clone().as_ref(), light))
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
             .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs))

@@ -119,11 +119,12 @@ impl Backplane {
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Refs(r)=>{ if r.get("resolved").is_some() { screens::histbar::resolved(self,&r,cx); } else { self.screens.plotview.hist.refs=screens::plot::refs_of(&r); } cx.notify(); }
             Event::Steps(r)=>{ self.screens.plotview.hist.steps=screens::histbar::steps_of(&r); screens::histbar::arrived(self); cx.notify(); }
-            Event::Sheets(rows)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); cx.notify(); }
+            Event::Sheets(rows,refs)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); self.screens.plot.sheet_refs=screens::plot::sheet_refs(&refs); cx.notify(); }
             Event::BrowserDownload(owner,id,name,error)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.take_download(&id,&name,&error,cx));}}},
             Event::BrowserTabs(owner,text)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.set_tabs(&text,cx));}}},
             Event::ViewShow(thread,kind,path)=>self.view_show(&thread,&kind,&path,cx),
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
+            Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
             Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s}));}self.status=s;if self.status=="Connected"{self.error.clear();screens::hubbar::connected(&mut self.screens.hubbar);}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
@@ -190,6 +191,14 @@ impl Backplane {
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
     fn do_send(&mut self,cx:&mut Context<Self>) {if self.popup_pick(cx){return;}self.ui_epoch+=1;
         let text=self.input.read(cx).content.to_string();
+        // a project's page on show: Send starts a thread in that project with this first message (0.14's home composer), never the thread
+        // that was open before the page (it is not on screen)
+        if let Some(pid)=self.project_page.clone().filter(|p|screens::projects::find(&self.data,p).is_some()) {
+            if text.trim().is_empty()||self.status!="Connected"||self.screens.projects.first_send.is_some() {return;}
+            self.screens.projects.first_send=Some((self.selected.rsplit('|').next().unwrap_or("").to_string(),text,Instant::now()));
+            self.input.update(cx,|i,cx|i.set(String::new(),cx));
+            self.arm_new();let _=self.tx.try_send(Command::Action("new-thread".into(),pid));cx.notify();return;
+        }
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());
         if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {if !text.trim().is_empty()&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();self.note.clear();}cx.notify();
@@ -261,7 +270,7 @@ fn main()->anyhow::Result<()> {
                 let env=std::env::var_os("BACKPLANE_HOME").filter(|h|!h.is_empty()).map(std::path::PathBuf::from);
                 // this computer's hub is the one this client was started on, when it kept one; only a client never given one falls through to launch.json
                 if let (Some((url,tf)),true)=(hubs::local_target(&hubs::load()),env.is_none()) {c.hub=url.replacen("http://","ws://",1);c.token_file=tf;c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
-                else if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
+                else if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;c.paired=true;/* a hub the chooser paired with: its 401 means this device was revoked */cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
                 else {let auto=env.or_else(||(!saved.home.is_empty()).then(||saved.home.clone().into()));cx.open_window(opts,move|window,cx|cx.new(|cx|screens::first::First::new(window,cx,c,started,auto))).unwrap_or_else(window_failed);}
             } else {
             cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).unwrap_or_else(window_failed);

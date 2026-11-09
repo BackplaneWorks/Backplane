@@ -23,6 +23,8 @@ pub struct Sum {
     pub sent: HashMap<String, u64>,
     /// id of the newest message the person typed in it (Policy.person: a user message of its own that Policy.direct reads as theirs)
     pub person_id: String,
+    /// that message's whole text: what the thread's Retry sends again (Retry.last)
+    pub last_person: String,
     /// the first line (at most 200 characters) of its newest assistant message: what a "told" record says it was told (Told.first of Told.last)
     pub reply_line: String,
     /// the ids of its newest messages (at most 64): `Shelve.input.seen` asks whether a message was already posted to the thread
@@ -83,7 +85,7 @@ pub fn on_post(st: &mut State, th: &str, id: &str, at: u64, msg: Option<(&str, &
             own.found = true;
             own.last_user = text.chars().take(2000).collect();
             if own.person.len() < 2 && !own.person.iter().any(|x| x == id) && direct(id, text) { own.person.push(id.to_string()); }
-            if super::turnend::policy_direct(id, text) { own.person_id = id.to_string(); }
+            if super::turnend::policy_direct(id, text) { own.person_id = id.to_string(); own.last_person = text.to_string(); }
         } else if role == "assistant" { own.output = id.to_string(); own.output_at = own.output_at.max(at); own.reply_line = super::turnend::told_first(text); own.last_reply = text.chars().take(2000).collect(); }
     }
     if !from.is_empty() && from != th {

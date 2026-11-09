@@ -104,10 +104,12 @@ pub async fn start(hub: Arc<Hub>, ts: Arc<dyn Tailscale>, peering: Arc<Peering>,
     if ip.is_empty() { return State::Unavailable }
     let owner = tailnet::login(&ts.whois(ip.clone()).await);
     let base = format!("http://{ip}:{port}");
-    routes.address(&base);
     // a main listener that covers the address gets no owner trust: the authorities are set only once this listener is bound
-    if tailnet::covered(host, &ip) { return State::Reachable { link: String::new() } }
+    if tailnet::covered(host, &ip) { routes.address(&base); return State::Reachable { link: String::new() } }
+    // the address is offered to new devices (Settings → Devices) only once the hub answers there: a bind that failed (the address not up yet,
+    // the port taken there) would hand a phone a link that never connects, while Network says Tailscale is not connected
     let Ok(l) = TcpListener::bind((ip.as_str(), port)).await else { return State::Unavailable };
+    routes.address(&base);
     crate::guard::listening(&format!("{ip}:{port}")); // rescue answers here too, while the hub is down
     peering.set_own_hosts(&ip, &tailnet::dns_name(&ts.status().await));
     let gate = Arc::new(tokio::sync::Semaphore::new(32));
@@ -288,6 +290,20 @@ mod tests {
         let ts = Arc::new(Fake { ip: String::new(), whois: Default::default(), status: String::new() });
         assert_eq!(start(hub, ts, p.clone(), routes.clone(), "127.0.0.1", 1, "tok").await, State::Unavailable);
         assert!(routes.machines_value().get("x").is_none());
+        let _ = std::fs::remove_dir_all(h);
+    }
+    #[tokio::test] async fn tailnet_an_address_the_hub_could_not_bind_is_never_offered() {
+        // tailscaled names an address the hub cannot listen on (not up yet, or the port taken there): no Tailscale link for a new device
+        let (hub, p, _, h) = node("unbound").await;
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let port = held.local_addr().unwrap().port();
+        // a hub on loopback only, and no interfaces of this machine's (its real tailnet or network address would be listed)
+        let h2 = h.join("own"); std::fs::create_dir_all(&h2).unwrap(); std::fs::write(h2.join("token"), "tok\n").unwrap();
+        let (reg, _) = super::super::start::open(&h2, "127.0.0.1", port).unwrap();
+        let routes = Arc::new(AuthRoutes::new(reg, "127.0.0.1", port, |l| l.to_string()).with_ifaces(Vec::new));
+        let ts = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: String::new() });
+        assert_eq!(start(hub, ts, p.clone(), routes.clone(), "127.0.0.2", port, "tok").await, State::Unavailable);
+        assert!(routes.invite()["addresses"].as_array().unwrap().iter().all(|a| a["kind"] != "tailnet"), "{}", routes.invite());
+        drop(held);
         let _ = std::fs::remove_dir_all(h);
     }
     #[tokio::test] async fn tailnet_a_covering_main_listener_adds_no_second_one() {

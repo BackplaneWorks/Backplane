@@ -435,7 +435,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     }
     // a lock moving changes the rows of every thread with a place on it, so each open thread is sent its own again
     if locks_moved { for (_, t) in &subs.subs { if let Topic::Thread(th) = t { if !worked.contains(th) { worked.push(th.clone()) } } } }
-    for th in &worked { let subs_now = ext::work_now(th); for sub in subs.threads(th) { out.push(d(sub, "work", json!({"thread":th,"subs":subs_now}))) } }
+    for th in &worked { let subs_now = ext::work_now(hub, th).await; for sub in subs.threads(th) { out.push(d(sub, "work", json!({"thread":th,"subs":subs_now}))) } }
     if locks_moved { let l = ext::locks_now(hub).await; for sub in subs.lists() { out.push(d(sub, "locks", json!({"locks":l}))) } }
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
     let g = hub.model().await; let asks = open_ask_counts(hub);
