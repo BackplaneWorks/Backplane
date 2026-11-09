@@ -222,6 +222,8 @@ impl Model {
         Ok(out)
     }
     pub fn entries(&self) -> u32 { self.next_ord }
+    /// A thread's own entries (log line and ordinal), oldest first: for a caller that reads them off the model's lock (kicad/histsteps.rs).
+    pub fn own_ents(&self, thread: &str) -> Vec<Ent> { self.own.get(thread).cloned().unwrap_or_default() }
     /// The log line (1-based) of a setting's latest value, if it has one.
     pub fn setting_seq(&self, key: &str) -> Option<u32> { self.settings.get(key).copied() }
     /// Keys starting with `prefix`, in order, with the log line of their latest value.

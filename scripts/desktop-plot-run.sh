@@ -11,7 +11,7 @@ FIX=$ROOT/test/files/fixtures/plot; PORT=${GPUI_PORT:-3833}; DISP=${GPUI_DISP:-:
 mkdir -p $R $OUT $SH
 [ -x "$CLIENT" ] || { echo "no client binary"; exit 2; }
 [ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP is in use (set GPUI_DISP=:6N)"; exit 2; }
-rm -rf $R/home $R/proj $R/bin $R/fakehome; rm -f $R/*.pid; mkdir -p $R/home $R/proj $R/bin $R/fakehome/.cache
+rm -rf $R/home $R/proj $R/bin $R/fakehome; rm -f $R/*.pid $R/steps.json; mkdir -p $R/home $R/proj $R/bin $R/fakehome/.cache
 if [ -n "${GPUI_DEMO:-}" ]; then cp -r "$GPUI_DEMO"/. $R/proj/; else cp $FIX/ecc83-pp.kicad_pcb $FIX/ecc83-pp.kicad_sch $R/proj/; echo '{}' > $R/proj/ecc83-pp.kicad_pro; fi; mkdir -p $R/proj/mech; cp $ROOT/test/files/fixtures/mesh/bracket.step $R/proj/mech/
 # GPUI_GIT=1: the project is a git repository whose board has an uncommitted change (the first 30 tracks are gone), for the Compare menu
 if [ -n "${GPUI_GIT:-}" ]; then ( cd $R/proj && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && python3 - <<'PYG'
@@ -26,16 +26,18 @@ PYG
 if [ -n "${GPUI_STEPS:-}" ]; then ( cd $R/proj && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && python3 - <<'PYS'
 import re, os, subprocess
 f = 'ecc83-pp.kicad_pcb'; t = open(f).read()
-segs = list(re.finditer(r'\t\(segment\n(?:\t\t[^\n]*\n)+\t\)\n', t)); prev = ''
+segs = list(re.finditer(r'\t\(segment\n(?:\t\t[^\n]*\n)+\t\)\n', t)); prev = ''; steps = []
 env = dict(os.environ, GIT_INDEX_FILE='/tmp/bp-steps-idx-%d' % os.getpid(), GIT_AUTHOR_NAME='B', GIT_AUTHOR_EMAIL='b@b', GIT_COMMITTER_NAME='B', GIT_COMMITTER_EMAIL='b@b')
 g = lambda *a: subprocess.run(['git', *a], env=env, check=True, capture_output=True, text=True).stdout.strip()
 for k in (1, 2, 3):
     out = t
     for i in sorted(range(10 * k), reverse=True): out = out[:segs[i].start()] + out[segs[i].end():]
     open(f, 'w').write(out); g('add', '-f', '--', f); tree = g('write-tree')
-    prev = g('commit-tree', '-m', 'backplane step', *(['-p', prev] if prev else []), tree)
-    g('update-ref', 'refs/backplane/checkpoints/dDE/steps', prev)
+    par = prev; prev = g('commit-tree', '-m', 'backplane step', *(['-p', prev] if prev else []), tree)
+    g('update-ref', 'refs/backplane/checkpoints/dDE/steps', prev); steps.append((prev, par))
 open(f, 'w').write(t)
+# and each step's record in the thread, as agents/hist.rs logs it (the history bar reads these: kicad/histsteps.rs)
+import json; json.dump([{"c": c, "p": p, "g": os.path.abspath('.git'), "t": os.path.abspath('.'), "f": ["M\t" + f], "e": "", "w": ""} for c, p in steps], open('../steps.json', 'w'))
 try: os.remove(env['GIT_INDEX_FILE'])
 except OSError: pass
 PYS
@@ -51,6 +53,7 @@ if __import__("os").environ.get("GPUI_LONG"):
     long=" ".join("word%d" % i for i in range(220))+"\n\nsecond paragraph with a path /home/h/Documents/x.rs and https://example.com/a?b=1 here."
     ev+=[{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":long,"at":NOW},{"$":"MessagePosted","thread":"t1","msg":"m2","role":"assistant","text":"The reply right below the long message.","at":NOW+1},{"$":"MessagePosted","thread":"t1","msg":"m3","role":"user","text":"short follow up","at":NOW+2},{"$":"MessagePosted","thread":"t1","msg":"m4","role":"assistant","text":"Final reply.","at":NOW+3}]
 if __import__("os").environ.get("GPUI_THREADS") or __import__("os").environ.get("GPUI_PROJECTS"): ev+=[{"$":"ThreadCreated","id":t,"project":"p1","title":n,"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":NOW} for t,n in (("t2","beta"),("t3","gamma"))]
+if __import__("os").path.exists(R+"/steps.json"): ev+=[{"$":"ActivityLogged","thread":"t1","act":"step:"+r["c"],"tone":"step","kind":"kicad","summary":json.dumps(r,separators=(",",":")),"at":NOW+1+i} for i,r in enumerate(json.load(open(R+"/steps.json")))]
 open(R+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))   # compact, as the hub writes it: its agents world reads lines by pattern
 PY
 export LC_ALL=C

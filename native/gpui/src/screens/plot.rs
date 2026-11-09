@@ -242,7 +242,7 @@ pub struct Refs { pub git: String, pub top: String, pub pcb: String, pub sch: St
 pub fn refs_of(r: &serde_json::Value) -> Option<Refs> {
     let g = |k: &str| r[k].as_str().unwrap_or("").to_string();
     if !r.is_object() { return None }
-    let rows = g("refs").lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 3 || f[2].is_empty() || !matches!(f[0], "head" | "base" | "branch" | "tag" | "commit") { return None } Some((f[0].to_string(), f[1].to_string(), f[2].to_string())) }).take(60).collect();
+    let rows = g("refs").lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 3 || f[2].is_empty() || !matches!(f[0], "head" | "base" | "branch" | "tag" | "commit" | "turn") { return None } Some((f[0].to_string(), f[1].to_string(), f[2].to_string())) }).take(60).collect();
     Some(Refs { git: g("git"), top: g("top"), pcb: g("pcb"), sch: g("sch"), rows })
 }
 /// core/hist's version path of `file` in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>"; a comparison is "diff\n<old>\n<new live file>".
@@ -471,8 +471,8 @@ mod tests {
     }
 
     #[test] fn a_comparison_names_the_old_version_and_the_live_file() {
-        let r = refs_of(&serde_json::json!({"git": "/p/.git", "top": "/p", "pcb": "/p/b.kicad_pcb", "sch": "/p/s.kicad_sch", "refs": "head\tHEAD\tabc\nbranch\tmain\tdef\nturn\tx\tz\nbad"})).unwrap();
-        assert_eq!(r.rows.len(), 2, "head and branch; a turn checkpoint is not offered");
+        let r = refs_of(&serde_json::json!({"git": "/p/.git", "top": "/p", "pcb": "/p/b.kicad_pcb", "sch": "/p/s.kicad_sch", "refs": "head\tHEAD\tabc\nbranch\tmain\tdef\nturn\tx\tz\nodd\ty\tw\nbad"})).unwrap();
+        assert_eq!(r.rows.len(), 3, "head, branch and the thread's turn checkpoint (0.14's menu listed turns too); an unknown kind is not offered");
         assert_eq!(compare_path(&r, "abc", "/p/b.kicad_pcb").unwrap(), "diff\ngit\t/p/.git\tabc\t2\t/p/b.kicad_pcb\n/p/b.kicad_pcb");
         assert!(compare_path(&r, "abc", "/elsewhere/b.kicad_pcb").is_none());
     }
