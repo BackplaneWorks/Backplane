@@ -178,6 +178,18 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     assert_eq!(plan::whole_size(&old.join("events.jsonl")).unwrap() as usize, std::fs::read_to_string(old.join("events.jsonl")).unwrap().rfind('\n').unwrap() + 1);
 }
 
+/// Import again on a home an earlier import filled (one made before quotes and orders came across): the threads already here still name their
+/// records, so those come now; the deleted thread and the mail run never do.
+#[test] fn a_rerun_still_names_the_threads_already_here() {
+    let d = tmp("rerun"); let old = old_home(&d); let log = old.join("events.jsonl");
+    let first = plan::plan(&log, &plan::Have::default(), plan::Opts { secrets: false, keep: true }).unwrap();
+    let mut have = plan::Have::default(); for l in &first.lines { have.add(l) }
+    let again = plan::plan(&log, &have, plan::Opts { secrets: false, keep: true }).unwrap();
+    assert_eq!(again.counts.threads, 0, "nothing new to write");
+    assert_eq!(again.threads, first.threads, "the same threads, though all are here already");
+    assert!(first.threads.contains("t1790175755-10") && !first.threads.contains("t1790175930-26") && !first.threads.iter().any(|t| t.starts_with("run")), "{:?}", first.threads);
+}
+
 /// A local check on a copy of a real 0.14 home, made read-only (never committed, never the home itself):
 /// BP_IMPORT_REAL=<copy> cargo test real_home -- --ignored --nocapture. It counts, imports into a test hub, imports again and checks the copy is as it was.
 #[tokio::test(flavor = "multi_thread")] #[ignore] async fn real_home() {
