@@ -16,6 +16,9 @@ pub const MAX_PIXELS: usize = 2880 * 1800;
 const BUILDING_BYTES: usize = 512 << 10;
 /// the most pixels a draft covers: beyond it the draft is drawn smaller and stretched
 const DRAFT_PIXELS: usize = 1600 * 1000;
+/// A picture in motion should take about a display frame or two: a slower one (a machine drawing on its cores, a big model) makes the next
+/// smaller (stretched to the panel, sharp again at rest), a quick one lets it grow back, between 1/8 and all of DRAFT_PIXELS.
+pub fn draft_scale(scale: f32, ms: f64) -> f32 { (if ms > 30.0 { scale * 0.7 } else if ms < 12.0 { scale * 1.15 } else { scale }).clamp(0.125, 1.0) }
 /// Samples a pixel a side: 1 for a draft, then as many as the panel's size leaves cheap (3 x 3 up to ~0.5 MP, 2 x 2 up to ~3 MP, none beyond).
 pub fn samples(w: usize, h: usize, draft: bool) -> usize { if draft { 1 } else if w * h <= 520_000 { 3 } else if w * h <= 3_000_000 { 2 } else { 1 } }
 pub(super) const FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
@@ -345,7 +348,7 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 /// `Scene`: the model with the parts that have come (`mesh`), after one or more frames: `board` when the board itself is new (its
 /// pictures in flight are stale), `reset` when the parts started again, `groups` part frames held, `done` of `of` instances come.
 /// `Building`: a large model frame of this key is being decoded now.
-enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str } }
+enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str, draft: bool } }
 /// What to render: the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
 type Job = (Arc<Layers>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool);
 /// What the worker holds of the model on show: the board, the part frames come so far, the progress.
@@ -418,7 +421,7 @@ impl Worker {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
                 if let Some((px, by)) = drawer.draw(&mesh, &fades, &cam, w, h, ss, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
-                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris(), w, h, by }).is_err() { return } }
+                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris(), w, h, by, draft }).is_err() { return } }
                 }
             }
         } }).ok();
@@ -475,6 +478,7 @@ pub struct SolidPage {
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
     /** what the hub said it is doing for a model (Stage), shown with its time running; whether a second's tick is running for it */ stage: Option<Stage>, ticking: bool,
+    /** the share of DRAFT_PIXELS a picture in motion gets, from how long the last ones took (draft_scale) */ draft_scale: f32,
     /** the model shown before (Kept); the part frames of a model brought back, until the hub's stream of it has as many */ prev: Option<Kept>, restored: Option<usize>,
     /** the hub could not make this source's model (its Note): the page offers Retry */ failed: bool,
     pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
@@ -487,7 +491,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, prev: None, restored: None, failed: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -560,7 +564,8 @@ impl SolidPage {
                 self.set_stage(st, cx);
             }
             Msg::Building(key) => self.set_stage(Some(Stage { key, text: BUILDING.into(), since: std::time::Instant::now(), about: 0 }), cx),
-            Msg::Image { ticket, image, ms, tris, w, h, by } => {
+            Msg::Image { ticket, image, ms, tris, w, h, by, draft } => {
+                if draft { self.draft_scale = draft_scale(self.draft_scale, ms); }
                 if !shows(ticket, self.on_screen, self.floor) { return } // never painted, so never in the atlas: nothing to give back
                 self.on_screen = ticket;
                 if let Some(old) = self.image.replace(image) { self.retired.push((old, self.frames)); }
@@ -604,7 +609,8 @@ impl SolidPage {
         let (mut w, mut h) = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48));
         if w * h > MAX_PIXELS { let k = (MAX_PIXELS as f32 / (w * h) as f32).sqrt(); w = (w as f32 * k) as usize; h = (h as f32 * k) as usize; }
         // a draft while moving: one sample a pixel, and half size only on a very large panel; the rest at rest: smooth outlines
-        if draft && w * h > DRAFT_PIXELS { let k = (DRAFT_PIXELS as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
+        let most = (DRAFT_PIXELS as f32 * self.draft_scale) as usize;
+        if draft && w * h > most { let k = (most as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
         self.asked = (w, h);
         self.latest = self.worker.submit_render(mesh.clone(), Arc::new(fades), cam, w, h, samples(w, h, draft), draft);
     }
@@ -900,6 +906,11 @@ mod tests {
     #[test] fn a_picture_leaves_the_atlas_only_when_the_gpu_is_done_with_it() {
         assert!(!super::gone_from_gpu(7, 7) && !super::gone_from_gpu(7, 8), "the frame that drew it may still be on the GPU while the next is built");
         assert!(super::gone_from_gpu(7, 9));
+    }
+    #[test] fn a_slow_picture_in_motion_makes_the_next_smaller_and_a_quick_one_lets_it_grow_back() {
+        let mut s = 1.0; for _ in 0..20 { s = super::draft_scale(s, 120.0); } assert_eq!(s, 0.125, "never below an eighth");
+        let t = super::draft_scale(0.5, 20.0); assert_eq!(t, 0.5, "within budget: kept");
+        let mut s = 0.125; for _ in 0..40 { s = super::draft_scale(s, 5.0); } assert_eq!(s, 1.0, "a GPU's quick pictures: all of it");
     }
     #[test] fn retry_asks_for_the_same_source_again() {
         assert_eq!(super::retry_watch("2|/p|/p/mech/a.step").unwrap(), serde_json::json!({"kind": "3d", "root": "/p", "path": "/p/mech/a.step", "tree": ""}));
