@@ -30,6 +30,11 @@ impl Default for Registry {
 impl Registry {
     /// A new frame: forget the blocks, keep the selection (by identity).
     pub fn begin(&mut self) { self.blocks.clear(); self.copies.clear(); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
+    /// The root view's frame: forget the blocks drawn outside the thread's rows (the review page, no entry id); the rows' blocks stay, since
+    /// their part (part.rs) may reuse its last frame, and they are forgotten when it draws again (`begin_rows`).
+    pub fn begin_outside(&mut self) { self.blocks.retain(|b| !b.id.is_empty()); self.copies.clear(); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
+    /// The rows' part draws: forget the rows' blocks, keep the others.
+    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty()); self.idx = 0; self.entry = 0; self.entry_id.clear(); }
     /// The list draws only the rows on screen, in its own order, and may draw one twice in a frame: the last drawing's blocks stand.
     pub fn enter(&mut self, row: usize, id: &str) { self.blocks.retain(|b| b.id != id); self.entry = row; self.entry_id = id.to_string(); self.idx = 0; }
     fn next_idx(&mut self) -> usize { let i = self.idx; self.idx += 1; i }
@@ -441,6 +446,14 @@ mod tests {
         frame(&mut r, &[("e0", 0, "old one"), ("e1", 0, "old two"), ("e2", 0, "second"), ("e3", 0, "third message")]);
         assert_eq!(select::extract(&r.texts(), &r.sel), "cond\n\nthird", "same text after the shift");
         assert_eq!((r.sel.anchor.block, r.sel.head.block), (2, 3));
+    }
+    #[test] fn the_root_and_the_rows_part_forget_only_their_own_blocks() {
+        // the rows' part may reuse its last frame while the root draws again (part.rs): the root's frame keeps the rows' blocks, and the other way round
+        let outside = |t: &str| Info { text: t.into(), entry: 0, id: String::new(), idx: 0, links: vec![], layout: None };
+        let mut r = Registry::default(); r.begin();
+        r.blocks.push(outside("review")); r.blocks.push(info("e1", 0, "one")); r.blocks.push(info("e2", 0, "two"));
+        r.begin_outside(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["one", "two"]);
+        r.blocks.push(outside("review again")); r.begin_rows(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["review again"]);
     }
     #[test] fn a_row_drawn_twice_in_a_frame_stands_once() {
         let mut r = Registry::default(); r.begin();
