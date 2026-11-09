@@ -165,9 +165,9 @@ pub fn act<F: Facts>(f: &F, hub: &str, session: &Value, sel: &str, action: &str,
         }
         // Ui.fork.with: the next request makes a thread; the viewer on show is recorded for it (Viewer.record)
         // the thread's panel: a lock's Release and Cancel, a job's Stop
-        "lock-release" | "lock-cancel" | "work-cancel" => {
+        "lock-release" | "lock-cancel" | "work-cancel" | "task-stop" => {
             if sel.is_empty() || value.is_empty() { return None }
-            match action { "lock-release" => b.rpc("lock.release", json!({"thread": sel, "name": value})), "lock-cancel" => b.rpc("lock.cancel", json!({"thread": sel, "name": value})), _ => b.rpc("work.cancel", json!({"thread": sel, "id": value})) };
+            match action { "lock-release" => b.rpc("lock.release", json!({"thread": sel, "name": value})), "lock-cancel" => b.rpc("lock.cancel", json!({"thread": sel, "name": value})), "task-stop" => b.rpc("task.stop", json!({"thread": sel, "id": value})), _ => b.rpc("work.cancel", json!({"thread": sel, "id": value})) };
         }
         "fork" => {
             let th = if value.is_empty() { sel } else { value };

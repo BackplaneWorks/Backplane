@@ -205,7 +205,8 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             "lock-release" => rpc(hub, c, "lock.release", json!({"thread":th,"name":v})).await.map(|_| json!({})),
             "lock-cancel" => rpc(hub, c, "lock.cancel", json!({"thread":th,"name":v})).await.map(|_| json!({})),
             "work-cancel" => rpc(hub, c, "work.cancel", json!({"thread":th,"id":v})).await.map(|_| json!({})),
-            _ => Err(err("act: lock-release, lock-cancel or work-cancel")) } }
+            "task-stop" => rpc(hub, c, "task.stop", json!({"thread":th,"id":v})).await.map(|_| json!({})),
+            _ => Err(err("act: lock-release, lock-cancel, work-cancel or task-stop")) } }
         // feature "star": the GitHub star suggestion. `star.offer` → `{offer}` (null, or {token,text,url,label}) on (re)connect; a `{"t":"star","offer"}` frame shows it
         // (to this socket, at the fifth prompt) or hides it (every socket, once decided); `star.nudge {token, action: open|dismiss}` → `{}`
         "star.offer" => rpc(hub, c, "star.offer", json!({})).await.map(|r| r["result"].clone()),
