@@ -244,7 +244,10 @@ async fn search(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let threads: Vec<Value> = ts.iter().filter_map(|(_, i)| thread_json(hub, &g, i, &asks)).collect();
     let mut ps: Vec<(u64, String)> = g.projects.iter().filter(|(_, x)| !x.removed && (contains(&x.title, &q) || contains(&x.root, &q))).map(|(i, _)| (0, i.clone())).collect(); ps.truncate(lim);
     let projects: Vec<Value> = ps.iter().filter_map(|(_, i)| project_json(&g, i, &asks)).collect();
-    Ok(json!({"threads":threads,"projects":projects}))
+    drop(g);
+    // what was said: the messages with every word (the desktop palette's `thread.search`); `thread` keeps one thread's ("Search in thread")
+    let messages = if p["messages"] == false { json!([]) } else { crate::session::search::search_for(hub, s(p, "q"), s(p, "thread"), limit_of(p, 20, 60), u64::MAX).await["hits"].clone() };
+    Ok(json!({"threads":threads,"projects":projects,"messages":messages}))
 }
 
 /// `history.list {q?, limit?, before?}` → `{live, threads, next, count}`: Conversation history, the old Scratch chats (the sidebar's group, `sidebar::scratch_chats`).
