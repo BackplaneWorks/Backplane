@@ -1,4 +1,4 @@
-//! The GitHub star suggestion: a strip at the top of the window while the hub says its offer is out and undecided. The hub decides
+//! The GitHub star suggestion: a strip along the bottom of the window (0.14's own row: nothing above it moves when it comes) while the hub says its offer is out and undecided. The hub decides
 //! everything (state/star.rs): it sends `{"t":"star","offer"}` at the person's fifth prompt and `offer:null` once it is decided, and
 //! answers `star.offer` on every (re)connect. The link opens the URL and decides `open`; Dismiss decides `dismiss`.
 use crate::{hub::Command, screens::settings::Secret, theme, Backplane};
@@ -25,7 +25,7 @@ pub fn strip(cx: &mut Context<Backplane>, o: Option<&Offer>, light: bool) -> Opt
     let row = div().flex().items_center().gap_1()
         .child(btn("star-open", if o.label.is_empty() { "Star on GitHub".into() } else { o.label.clone() }, true).on_click(cx.listener(|this, _, _, cx| this.star_decide("open", cx))))
         .child(btn("star-dismiss", "Dismiss".into(), false).on_click(cx.listener(|this, _, _, cx| this.star_decide("dismiss", cx))));
-    Some(div().id("star-nudge").h(px(22.)).flex_shrink_0().flex().items_center().justify_between().px_3().bg(c("raise")).border_b_1().border_color(c("accent"))
+    Some(div().id("star-nudge").h(px(22.)).flex_shrink_0().flex().items_center().justify_between().px_3().bg(c("raise")).border_t_1().border_color(c("accent"))
         .child(div().text_size(px(11.)).text_color(c("text")).overflow_hidden().child(o.text.clone())).child(row).into_any_element())
 }
 

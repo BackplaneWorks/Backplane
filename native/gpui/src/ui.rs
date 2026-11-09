@@ -626,8 +626,6 @@ impl Render for Backplane {
             // the dev build strip, only while a build is being made or waits to relaunch
             .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
             .children({ let s = std::mem::take(&mut self.screens.hubbar); let e = crate::screens::hubbar::strip(cx, &s, light); self.screens.hubbar = s; e })
-            // the GitHub star suggestion, while the hub says it is out
-            .children(crate::screens::star::strip(cx, self.screens.star.clone().as_ref(), light))
             // a window on another computer's hub: a thin accent line along the top the whole time, and "on desktop" beside the name
             .when(self.screens.elsewhere.is_some(), |d| d.child(div().id("elsewhere-strip").h(px(2.)).flex_shrink_0().bg(c("accent"))))
             // top bar
@@ -652,8 +650,9 @@ impl Render for Backplane {
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(point(e.position.x - px(8.), e.position.y + px(14.)), items, cx); } }))
                             .child(ic(light, "chevron-down", 14., "dim")))))
                 .children(top_mid)
-                .child(div().relative().flex_shrink_0().flex().items_center().gap_3().child(crate::screens::head::measure(cx, self.screens.head.right.clone()))
-                    .child(with_rect(div().id("palette-bar").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Jump or run a command", &crate::keys::hint(&self.local, "palette"), light)), || "ui:Jump or run a command".to_string()).w(px(260.)).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command")
+                // the window's own controls: Jump gives up room first (down to 120 px) on a narrow window, so Settings is never cut off
+                .child(div().relative().min_w_0().flex().items_center().gap_3().child(crate::screens::head::measure(cx, self.screens.head.right.clone()))
+                    .child(with_rect(div().id("palette-bar").cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.palette_open(cx))).tooltip(crate::keys::tip("Jump or run a command", &crate::keys::hint(&self.local, "palette"), light)), || "ui:Jump or run a command".to_string()).w(px(260.)).min_w(px(120.)).flex_shrink().overflow_hidden().px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("faint")).child(ic(light, "chevron-right", 13., "faint")).child("Jump or run a command")
                         // held Ctrl: its key at the end of the bar (0.14's "Ctrl K"), in room the bar always has
                         .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(div().flex_1()).child(div().flex().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "palette")).iter().map(|k| crate::screens::hints::cap(light, k, false))))))
                     .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
@@ -732,6 +731,8 @@ impl Render for Backplane {
                 .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().children(rail)))
+            // the GitHub star suggestion, while the hub says it is out: its own row along the bottom (as 0.14's), so the top bar and what is under the pointer do not move when it comes
+            .children(crate::screens::star::strip(cx, self.screens.star.clone().as_ref(), light))
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
             .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs))
