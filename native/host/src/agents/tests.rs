@@ -73,12 +73,12 @@ fn norm(v: &Value) -> String {
     }
     Value::Object(o).to_string()
 }
-/// The agent-core events of a thread: not the time-driven policies (liveness, autosettle, alert, told, summary), which are M4's.
+/// The agent-core events of a thread: not the time-driven policies (liveness, autosettle, alert, told, summary), which are M4's, and not `turn.live.` (the running turn's tokens after each model call: the JS hub never had it, so its recorded streams do not).
 fn core(ev: &[Value], th: &str) -> Vec<Value> {
     ev.iter().filter(|e| {
         let s = e.to_string();
         let key = e["key"].as_str().unwrap_or("");
-        let policy = ["liveness.", "autosettle.", "alert.", "told.", "summary.at.", "star.nudge"].iter().any(|p| key.starts_with(p));
+        let policy = ["liveness.", "autosettle.", "alert.", "told.", "summary.at.", "star.nudge", "turn.live."].iter().any(|p| key.starts_with(p));
         !policy && (s.contains(th) || key.starts_with("stopped.") || key.starts_with("failed.") || key == "tok.epoch" || key == "tok.recount")
     }).cloned().collect()
 }
