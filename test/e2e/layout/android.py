@@ -82,6 +82,7 @@ def settle(fast=False):
 def to_home():
     """paired, on the thread list: back out of anything, relaunch when the app left"""
     for _ in range(5):
+        if 'mInputShown=true' in sh('dumpsys input_method | grep -m1 mInputShown'): sh('input keyevent KEYCODE_BACK'); time.sleep(0.6)   # a keyboard left up covers the list
         x, t = tree()
         if t and find(t, r'^Add project$') and find(t, r'^Settings$'): return t
         if not foreground(): launch(); continue
@@ -91,9 +92,11 @@ def to_home():
 def run_steps(steps):
     for st in steps:
         if 'tap' in st:
-            for _ in range(6):
+            for k in range(7):
                 x, t = tree(); n = find(t, st['tap'])
                 if n: tap_node(n); break
+                if k == 2: [swipe_down() or time.sleep(0.3) for _ in range(3)]   # a list left scrolled by the last screen: back to its top
+                elif k >= 4: swipe_up()   # a row below the fold
                 time.sleep(0.6)
             else: return 'control not found: ' + st['tap']
             time.sleep(0.3)
@@ -104,18 +107,25 @@ def run_steps(steps):
         elif 'scroll' in st: pass
     return None
 
+def swipe_down():
+    W, H = STATE['size']; sh('input swipe %d %d %d %d 300' % (W // 2, H * 0.55, W // 2, H * 0.95))   # inside the list: a drag that starts on the header does not scroll it
 def swipe_up():
-    W, H = STATE['size']; sh('input swipe %d %d %d %d 300' % (W // 2, H * 0.78, W // 2, H * 0.28))
+    W, H = STATE['size']; sh('input swipe %d %d %d %d 300' % (W // 2, H * 0.9, W // 2, H * 0.45))
 
 def run_combo(size, orient, font):
     tag = '%s-%s-f%g' % (size['name'], orient, font); d = os.path.join(OUT, tag); shutil.rmtree(d, ignore_errors=True)
     for x in ('shots', 'trees'): os.makedirs(os.path.join(d, x))
     pw, ph = round(size['w'] * size['density'] / 160), round(size['h'] * size['density'] / 160)
     sh('wm size %dx%d' % (pw, ph)); sh('wm density %d' % size['density'])
-    sh('settings put system accelerometer_rotation 0'); sh('settings put system user_rotation %d' % (1 if orient == 'landscape' else 0))
+    sh('cmd window user-rotation lock %d' % (1 if orient == 'landscape' else 0))   # `settings put system user_rotation` does nothing on a headless emulator
     sh('settings put system font_scale %g' % font)
     STATE['dpi'] = size['density']; STATE['size'] = (ph, pw) if orient == 'landscape' else (pw, ph)
     sh('am force-stop ' + A.pkg); time.sleep(1); launch()
+    for _ in range(6):
+        rot = re.search(r'hierarchy rotation="(\d)"', dump() or '')
+        if rot and (rot.group(1) in ('1', '3')) == (orient == 'landscape'): break
+        sh('cmd window user-rotation lock %d' % (1 if orient == 'landscape' else 0)); time.sleep(1.5)
+    if not rot or (rot.group(1) in ('1', '3')) != (orient == 'landscape'): sys.exit('the emulator did not rotate to %s (hierarchy rotation %s): its results would be wrong' % (orient, rot and rot.group(1)))
     findings, seen, paired = [], set(), False
     for sc in scen_all:
         t0 = time.time()
@@ -140,9 +150,12 @@ def run_combo(size, orient, font):
                 if not p2 or key(p2) == last: break
                 last = key(p2); pages.append(p2)
         for k, pg in enumerate(pages):
-            for f in ck.check(pg, dict(sc, name=sc['name'], text=sc.get('text', []) if k == 0 else [])):
+            for f in ck.check(pg, dict(sc, name=sc['name'], text=[])):
                 key = (f['rule'], f['scenario'], f['text'])
                 if key not in seen: seen.add(key); findings.append(f)
+        have = ' | '.join(n['text'].lower() for pg in pages for n in app_nodes(pg))   # a text may be on any page of a scrolling screen
+        for want in sc.get('text', []):
+            if want.lower() not in have: findings.append({'rule': 'missing', 'scenario': sc['name'], 'text': want, 'detail': 'text not in the view tree'})
         print('   %-22s %2d pages %4.1fs' % (sc['name'], len(pages), time.time() - t0), flush=True)
     new, old = ck.split_known(findings, KNOWN)
     json.dump({'size': size['name'], 'orient': orient, 'font': font, 'px': [pw, ph], 'dp': [size['w'], size['h']], 'new': new, 'known': old, 'screens': len(scen_all)}, open(os.path.join(d, 'findings.json'), 'w'), indent=1)
@@ -153,7 +166,7 @@ def run_combo(size, orient, font):
 FX = {}; procs = []
 def start_fixture():
     if A.fixture: FX.update(json.load(open(A.fixture))); A.port = int(FX['url'].rsplit(':', 1)[1]); return
-    if not A.hub: sys.exit('--hub or --fixture')
+    if not A.hub or not os.path.isfile(A.hub): sys.exit('--hub (an existing backplane-hub) or --fixture')
     root = tempfile.mkdtemp(prefix='andfx.', dir=os.path.expanduser('~/.cache/bp-tmp') if os.path.isdir(os.path.expanduser('~/.cache/bp-tmp')) else None)
     p = subprocess.Popen([shutil.which('bun') or os.path.expanduser('~/.bun/bin/bun'), os.path.join(HERE, 'android-fixture.mjs'), '--hub-bin', os.path.abspath(A.hub), '--root', root + '/fx', '--port', str(A.port), '--threads', '6'],
                          cwd=REPO, env=dict(os.environ, PERF_REPO=REPO), stdout=open(root + '/fx.log', 'w'), stderr=subprocess.STDOUT); procs.append((p, root))
@@ -161,6 +174,7 @@ def start_fixture():
         if os.path.exists(root + '/fx/fixture.json'): break
         if p.poll() is not None: sys.exit('fixture hub failed: ' + open(root + '/fx.log').read()[-500:])
         time.sleep(1)
+    else: sys.exit('fixture hub not ready in 180 s: ' + open(root + '/fx.log').read()[-500:])
     FX.update(json.load(open(root + '/fx/fixture.json')))
     A.port = int(FX['url'].rsplit(':', 1)[1])
 
@@ -174,7 +188,7 @@ try:
     for s, o, f in combos:
         report.append(run_combo(s, o, f))
 finally:
-    for c in ('wm size reset', 'wm density reset', 'settings put system font_scale 1.0', 'settings put system user_rotation 0'): sh(c)
+    for c in ('wm size reset', 'wm density reset', 'settings put system font_scale 1.0', 'cmd window user-rotation free'): sh(c)
     for p, root in procs:
         p.terminate()
         try: p.wait(15)

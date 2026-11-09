@@ -1,0 +1,16 @@
+{
+ "missing|Pair with code": "seen on android large landscape f1",
+ "missing|UPDATES": "seen on android small landscape f1",
+ "no-frame|composer-keyboard": "seen on android small landscape f1",
+ "no-frame|room": "seen on android small landscape f1",
+ "no-frame|settings-improvements": "seen on android small landscape f1",
+ "touch|3D": "first run (android emulator, tablet portrait f1)",
+ "touch|Diff": "first run (android emulator, regular portrait f1)",
+ "touch|Dismiss": "first run (android emulator, tablet portrait f1)",
+ "touch|Done": "first run (android emulator, tablet portrait f1)",
+ "touch|EditText": "first run (android emulator, regular portrait f1)",
+ "touch|Files": "seen on android small portrait f1",
+ "touch|Mech": "first run (android emulator, small portrait f1.3)",
+ "touch|Review": "first run (android emulator, large portrait f1)",
+ "touch|View": "first run (android emulator, tablet portrait f1)"
+}
