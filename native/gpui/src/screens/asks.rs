@@ -4,7 +4,7 @@
 //! (choices, a typed box sent as `pre + text`, Skip). Every press is the view action `answer` with the
 //! button's own value, as the phones send it.
 use super::composer::{Composer, ComposerEvent};
-use crate::{hub::Command, string, theme, Backplane};
+use crate::{hub::Command, i18n::trs, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
@@ -53,16 +53,16 @@ fn pill(cx: &mut Context<Backplane>, light: bool, key: String, rect: String, b: 
     let value = b.value.clone();
     let d = crate::ui::with_rect(div().id(SharedString::from(key)), || rect).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1();
     let d = if b.primary { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
-    d.child(b.label.clone()).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(answer(&value)); cx.notify(); }))
+    d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(answer(&value)); cx.notify(); }))
 }
 
 fn card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Composer>>, ask: &Ask, i: usize) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().gap_2().p_3().bg(c("panel")).border_1().border_color(if ask.needs { c("accent") } else { c("bad") });
-    let mut head = div().flex().items_center().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(13.)).text_color(if ask.needs { c("accent") } else { c("text") }).child(ask.head.clone()));
+    let mut head = div().flex().items_center().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(13.)).text_color(if ask.needs { c("accent") } else { c("text") }).child(trs(&ask.head)));
     if let Some(skip) = &ask.skip {
         let v = skip.value.clone();
-        head = head.child(div().id(SharedString::from(format!("ask-{i}-skip"))).text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text"))).child(skip.label.clone())
+        head = head.child(div().id(SharedString::from(format!("ask-{i}-skip"))).text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text"))).child(trs(&skip.label))
             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(answer(&v)); cx.notify(); })));
     }
     col = col.child(head);
@@ -77,7 +77,7 @@ fn card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Composer>
         let boxed = div().flex().gap_2().items_center()
             .child(crate::ui::with_rect(div(), || format!("ask:{i}:box")).flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(input))
             .child(crate::ui::with_rect(div().id(SharedString::from(format!("ask-{i}-go"))), || format!("ask:{i}:go")).px_3().py_1().cursor_pointer().text_size(px(12.))
-                .bg(if ask.typed { c("accent") } else { c("raise") }).text_color(if ask.typed { c("on-accent") } else { c("text") }).child(ask.go.clone())
+                .bg(if ask.typed { c("accent") } else { c("raise") }).text_color(if ask.typed { c("on-accent") } else { c("text") }).child(trs(&ask.go))
                 .on_click(cx.listener(move |this, _, _, cx| submit(this, &id, cx))));
         col = if ask.typed { col.child(boxed).child(chips) } else { col.child(chips).child(boxed) };
     } else {
@@ -103,7 +103,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
         if this.screens.ask_inputs.contains_key(&a.id) { continue; }
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         let placeholder = a.placeholder.clone();
-        input.update(cx, |i, _| i.set_placeholder(&placeholder));
+        input.update(cx, |i, _| i.set_placeholder(&trs(&placeholder)));
         let id = a.id.clone();
         cx.subscribe(&input, move |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { submit(this, &id, cx); }).detach();
         this.screens.ask_inputs.insert(a.id.clone(), input);
