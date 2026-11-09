@@ -21,7 +21,7 @@ pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, unsent: &
     Some(div().id("queue-strip").border_1().border_color(c("line")).bg(c("panel")).flex().flex_col().text_size(px(12.))
         .children(rs.into_iter().enumerate().map(|(i, r)| {
             div().id(("queue-row", i)).flex().items_center().gap_2().px_2().py(px(3.)).when(i > 0, |d| d.border_t_1().border_color(c("line")))
-                .child(div().flex_shrink_0().w(px(56.)).text_size(px(10.)).text_color(c("faint")).child(r.tag.to_uppercase()))
+                .child(div().flex_shrink_0().w(px(56.)).text_size(px(10.)).text_color(c("faint")).child(crate::i18n::trs(&r.tag).to_uppercase()))
                 // w_0: a long line must not size the composer's column by its unwrapped width (the draft box then stopped growing and its text ran under the chips)
                 .child(div().flex_1().w_0().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(r.text))
                 .children(r.buttons.into_iter().map(|(label, action, value)| {

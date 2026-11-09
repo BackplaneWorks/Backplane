@@ -397,7 +397,7 @@ impl Focusable for Composer { fn focus_handle(&self, _: &App) -> FocusHandle { s
 pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
 pub fn bindings() -> Vec<KeyBinding> {
     let mut v: Vec<KeyBinding> = Vec::new();
-    for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
+    /* i18n-ok: key contexts */ for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
     let c = Some(ctx);
     v.extend([
         KeyBinding::new("backspace", Backspace, c), KeyBinding::new("delete", Delete, c),

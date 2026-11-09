@@ -1540,6 +1540,23 @@ gpui.new.rule = 新しいルール
 gpui.task.board = タスクボード
 gpui.one.shared.list.agents.in = 共有リスト。すべてのスレッドのエージェントが読み書きします。
 gpui.new.item = 新しい項目
+gpui.handoff.from = {title}から引き継ぎ
+gpui.handoff.note = メモ: {note}
+gpui.subview.back = {title}に戻る
+gpui.subview.more = 以前の{more}ステップは表示されていません
+gpui.no.matches = 一致なし
+gpui.find.in.this.thread = このスレッド内を検索
+gpui.find.in.thread = スレッド内を検索
+gpui.previous.match = 前の一致
+gpui.next.match = 次の一致
+gpui.back.to.the.thread = スレッドに戻る
+gpui.no.steps.reported.yet = 報告されたステップはまだありません。
+gpui.unsent = 未送信
+gpui.refused = 拒否されました
+gpui.filter.projects.and.threads = プロジェクトとスレッドを絞り込む
+gpui.type.a.word.said.in2 = どのスレッドでも、発言した言葉を入力
+gpui.find.what.was.said.in = どのスレッドの発言も検索
+gpui.find.in.this.thread.enter = このスレッド内を検索: Enterで次、Shift+Enterで前、Escで閉じる
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = この下書きをこの端末に保存できませんでした。再試行してください。

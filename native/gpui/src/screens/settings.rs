@@ -258,7 +258,7 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
         // Enter in a settings field is its row's Save
         "whurl" | "whsec" | "tzname" => { flush_fields(this); let a = match name { "whurl" => "hook-url", "whsec" => "hook-secret", _ => "tz-set" }; let _ = this.tx.try_send(Command::Action(a.into(), String::new())); cx.notify(); }
         // Enter in the masked box (the name or the value) is its Save
-        "sname" | "sval" => if let Some(packed) = secret_enter(&this.data) { save_vault(this, &Btn { label: "Save".into(), action: "secret-save".into(), value: packed, on: true }, cx); },
+        /* i18n-ok: a button the row draws through trs */ "sname" | "sval" => if let Some(packed) = secret_enter(&this.data) { save_vault(this, &Btn { label: "Save".into(), action: "secret-save".into(), value: packed, on: true }, cx); },
         "todonew" => send_todo(this, cx),
         n if n.starts_with("todo.") => { flush_fields(this); let _ = this.tx.try_send(Command::Action("todo-text".into(), n[5..].to_string())); cx.notify(); }
         n => if let Some(a) = n.strip_prefix("sp.") { super::bots::send_space(this, a, cx) } }

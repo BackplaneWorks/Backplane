@@ -14,20 +14,20 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
-pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
 /// Where "/" puts the keyboard in the message box: as `FREE`, and from a viewer too (a web page's own "/" is kept: `focus_composer`).
-const SLASH: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !BrowserBar && !FilesPage";
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const SLASH: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
-const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput";
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput";
 /// Where Esc is the field's or the page's own: the viewer does not shut under it.
-const ESC_OWNERS: [&str; 10] = ["TextInput", "PickInput", "FindInput", "AskInput", "ImpInput", "Terminal", "BrowserBar", "BrowserView", "CefBar", "CefPage"];
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const ESC_OWNERS: [&str; 10] = ["TextInput", "PickInput", "FindInput", "AskInput", "ImpInput", "Terminal", "BrowserBar", "BrowserView", "CefBar", "CefPage"];
 /// Where a bare backtick shows the terminal: the message box, or nowhere that types (a shell, another field and a viewer keep their backticks).
-const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
 /// Where Ctrl+H is the viewer's: everywhere but the small fields, the terminal and web pages, whose own it stays (it deletes a character in many fields and in a shell, and opens a web page's history).
 /// The composer is included, as in the old client: the board beside it answers without a click on the canvas. With no plot on show the key goes on to the composer (`key_layers`).
 /// Ctrl+L to the message box: everywhere but the shell (its Ctrl+L clears the screen) and the Browser page (its address bar)
-const NOT_SHELL: &str = "!Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
-const NOT_FIELD: &str = "!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const NOT_SHELL: &str = "!Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const NOT_FIELD: &str = "!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 /// The open model menu has its keys wherever the keyboard is: the window says `Picker` while it is open, and these bind at the depth of each text field, after the field's own keys, so they come first.
 /* i18n-ok: key contexts */ const PICK_SCOPES: [&str; 6] = ["Picker", "Picker > Composer", "Picker > PickInput", "Picker > TextInput", "Picker > AskInput", "Picker > ImpInput"];
 
@@ -38,49 +38,49 @@ pub struct Entry { pub id: &'static str, pub label: &'static str, pub scope: &'s
 const fn e(id: &'static str, label: &'static str, scope: &'static str, key: &'static str, kind: Kind) -> Entry { Entry { id, label, scope, key, kind } }
 use Kind::*;
 pub const TABLE: &[Entry] = &[
-    e("send", "Send the message", "Composer", "enter", Legacy),
-    e("newline", "New line in the message", "Composer", "shift-enter", Fixed),
-    e("send-alt", "Send (also)", "Composer", "ctrl-enter", Fixed),
-    e("focus", "Put the keyboard in the message box", "Composer", "/", Fixed),
-    e("focus-key", "Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)", "Composer", "secondary-l", Rebind),
-    e("models", "Agent, model and effort", "Composer", "ctrl-m", Rebind),
-    e("account", "Account of this thread, with what each has left", "Composer", "secondary-shift-a", Rebind),
-    e("account-pick", "Pick account 1…9 in the account menu", "Composer", "1…9", Fixed),
-    e("menu-up", "Previous row: wraps round, and scrolls into view", "Model menu and popups", "up", Fixed),
-    e("menu-down", "Next row: wraps round, and scrolls into view", "Model menu and popups", "down", Fixed),
-    e("menu-left", "Less effort, or the caret while the search holds text", "Model menu", "left", Fixed),
-    e("menu-right", "More effort, or the caret while the search holds text", "Model menu", "right", Fixed),
-    e("menu-tab", "Next column: provider, model, effort. In a popup, take the row", "Model menu and popups", "tab", Fixed),
-    e("menu-back", "Previous column", "Model menu", "shift-tab", Fixed),
-    e("menu-enter", "Take the highlighted row", "Model menu and popups", "enter", Fixed),
-    e("close", "Close a popup, dialog or menu", "Dialogs", "escape", Legacy),
-    e("palette", "Commands: jump to a thread or run a command", "Palette", "secondary-k", Rebind),
-    e("palette-alt", "Commands (also)", "Palette", "secondary-shift-p", Fixed),
-    e("sidebar", "Fold or unfold the sidebar", "Sidebar", "secondary-b", Legacy),
-    e("search", "Find what was said in any thread", "Sidebar", "secondary-shift-f", Legacy),
-    e("find", "Find in this thread: Enter next, Shift+Enter previous, Esc closes", "Timeline", "secondary-f", Rebind),
-    e("projects", "Go to project 1…9", "Sidebar", "alt-1…9", Fixed),
-    e("threads", "Go to thread 1…9 of the project", "Sidebar", "secondary-1…9", Fixed),
-    e("prev", "Previous thread", "Sidebar", "secondary-shift-[", Rebind),
-    e("next", "Next thread", "Sidebar", "secondary-shift-]", Rebind),
-    e("uber", "Uberbot chat", "Sidebar", "secondary-shift-u", Rebind),
-    e("new", "New thread", "Timeline", "secondary-n", Rebind),
-    e("settle", "Settle or unsettle the thread", "Timeline", "secondary-shift-s", Rebind),
-    e("stop", "Stop the running turn", "Timeline", "ctrl-.", Rebind),
-    e("diff", "Diff", "Viewer", "secondary-d", Rebind),
-    e("files", "Files", "Viewer", "secondary-p", Rebind),
-    e("layers", "Layer focus: the other layers as they are, dimmed, hidden", "Viewer", "ctrl-h", Rebind),
-    e("pad-undo", "Undo the last stroke or change", "Drawing pad", "secondary-z", Fixed),
-    e("pad-delete", "Delete the selection, or clear the pad", "Drawing pad", "delete", Fixed),
-    e("pad-delete-alt", "Delete (also)", "Drawing pad", "backspace", Fixed),
-    e("term", "Show or hide the floating terminal", "Terminal", "secondary-j", Rebind),
-    e("term-alt", "Show the floating terminal (also)", "Terminal", "`", Fixed),
-    e("term-super", "Show or hide the floating terminal (also, not on a Mac)", "Terminal", "super-`", Fixed),
-    e("term-leave", "Leave the terminal: put it away, or take the keyboard back to it", "Terminal", "shift-escape", Fixed),
-    e("term-copy", "Copy the terminal's selection", "Terminal", "secondary-shift-c", Fixed),
-    e("term-paste", "Paste into the terminal", "Terminal", "secondary-shift-v", Fixed),
-    e("rail", "Rail views: B board, S schematic, 3 3D, V split, M mech, F files, D diff, R review, W browser", "Viewer", "b s 3 v m f d r w", Fixed),
-    e("perf", "Performance overlay: the last few seconds of the window's work", "Window", "ctrl-shift-h", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("send", "Send the message", "Composer", "enter", Legacy),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("newline", "New line in the message", "Composer", "shift-enter", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("send-alt", "Send (also)", "Composer", "ctrl-enter", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("focus", "Put the keyboard in the message box", "Composer", "/", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("focus-key", "Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)", "Composer", "secondary-l", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("models", "Agent, model and effort", "Composer", "ctrl-m", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("account", "Account of this thread, with what each has left", "Composer", "secondary-shift-a", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("account-pick", "Pick account 1…9 in the account menu", "Composer", "1…9", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("menu-up", "Previous row: wraps round, and scrolls into view", "Model menu and popups", "up", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("menu-down", "Next row: wraps round, and scrolls into view", "Model menu and popups", "down", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("menu-left", "Less effort, or the caret while the search holds text", "Model menu", "left", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("menu-right", "More effort, or the caret while the search holds text", "Model menu", "right", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("menu-tab", "Next column: provider, model, effort. In a popup, take the row", "Model menu and popups", "tab", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("menu-back", "Previous column", "Model menu", "shift-tab", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("menu-enter", "Take the highlighted row", "Model menu and popups", "enter", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("close", "Close a popup, dialog or menu", "Dialogs", "escape", Legacy),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("palette", "Commands: jump to a thread or run a command", "Palette", "secondary-k", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("palette-alt", "Commands (also)", "Palette", "secondary-shift-p", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("sidebar", "Fold or unfold the sidebar", "Sidebar", "secondary-b", Legacy),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("search", "Find what was said in any thread", "Sidebar", "secondary-shift-f", Legacy),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("find", "Find in this thread: Enter next, Shift+Enter previous, Esc closes", "Timeline", "secondary-f", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("projects", "Go to project 1…9", "Sidebar", "alt-1…9", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("threads", "Go to thread 1…9 of the project", "Sidebar", "secondary-1…9", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("prev", "Previous thread", "Sidebar", "secondary-shift-[", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("next", "Next thread", "Sidebar", "secondary-shift-]", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("uber", "Uberbot chat", "Sidebar", "secondary-shift-u", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("new", "New thread", "Timeline", "secondary-n", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("settle", "Settle or unsettle the thread", "Timeline", "secondary-shift-s", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("stop", "Stop the running turn", "Timeline", "ctrl-.", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("diff", "Diff", "Viewer", "secondary-d", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("files", "Files", "Viewer", "secondary-p", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("layers", "Layer focus: the other layers as they are, dimmed, hidden", "Viewer", "ctrl-h", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("pad-undo", "Undo the last stroke or change", "Drawing pad", "secondary-z", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("pad-delete", "Delete the selection, or clear the pad", "Drawing pad", "delete", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("pad-delete-alt", "Delete (also)", "Drawing pad", "backspace", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term", "Show or hide the floating terminal", "Terminal", "secondary-j", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-alt", "Show the floating terminal (also)", "Terminal", "`", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-super", "Show or hide the floating terminal (also, not on a Mac)", "Terminal", "super-`", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-leave", "Leave the terminal: put it away, or take the keyboard back to it", "Terminal", "shift-escape", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-copy", "Copy the terminal's selection", "Terminal", "secondary-shift-c", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-paste", "Paste into the terminal", "Terminal", "secondary-shift-v", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("rail", "Rail views: B board, S schematic, 3 3D, V split, M mech, F files, D diff, R review, W browser", "Viewer", "b s 3 v m f d r w", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("perf", "Performance overlay: the last few seconds of the window's work", "Window", "ctrl-shift-h", Rebind),
 ];
 /// Keys the old client had that this one cannot do yet (no equivalent): listed, not faked.
 pub const MISSING: &[(&str, &str)] = &[

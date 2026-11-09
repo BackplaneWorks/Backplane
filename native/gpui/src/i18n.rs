@@ -163,6 +163,9 @@ fn entries(src: &str) -> Vec<(String, String)> {
     src.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).filter_map(|l| l.split_once(" = ").map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))).collect()
 }
 fn fixed_len(nodes: &[Node]) -> usize { nodes.iter().map(|n| match n { Node::Text(t) => t.chars().count(), Node::Plural(_, bs) => bs.iter().map(|(_, b)| fixed_len(b)).min().unwrap_or(0), Node::Select(_, bs) => bs.iter().map(|(_, b)| fixed_len(b)).min().unwrap_or(0), _ => 0 }).sum() }
+fn has_free_text(nodes: &[Node]) -> bool { nodes.iter().any(|n| match n { Node::Arg(_, false) => true, Node::Plural(_, bs) => bs.iter().any(|(_, b)| has_free_text(b)), Node::Select(_, bs) => bs.iter().any(|(_, b)| has_free_text(b)), _ => false }) }
+/// The letters and digits of the fixed text (spaces and punctuation do not make a message specific).
+fn fixed_solid(nodes: &[Node]) -> usize { nodes.iter().map(|n| match n { Node::Text(t) => t.chars().filter(|c| c.is_alphanumeric()).count(), Node::Plural(_, bs) => bs.iter().map(|(_, b)| fixed_solid(b)).min().unwrap_or(0), Node::Select(_, bs) => bs.iter().map(|(_, b)| fixed_solid(b)).min().unwrap_or(0), _ => 0 }).sum() }
 fn plain(nodes: &[Node]) -> Option<String> { let mut s = String::new(); for n in nodes { match n { Node::Text(t) => s.push_str(t), _ => return None } } Some(s) }
 
 impl Catalog {
@@ -175,7 +178,11 @@ impl Catalog {
             match plain(&en[k]) {
                 // two keys with one English text (`common.delete` and a thread's Delete): the first key in order whose Japanese is not English wins
                 Some(t) => { if !t.is_empty() { exact.entry(t).or_insert_with(|| k.clone()); } }
-                None => { let n = fixed_len(&en[k]); if n >= 3 { templates.push((k.clone(), n)); } }
+                None => {
+                    // a template that can swallow any text (`Add {name}`, `{from} to {to}`) needs enough fixed words to be that message and not a stranger's sentence
+                    let n = fixed_len(&en[k]); let free = has_free_text(&en[k]); let solid = fixed_solid(&en[k]);
+                    if (!free && n >= 3) || (free && solid >= 8) { templates.push((k.clone(), n)); }
+                }
             }
         }
         templates.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));

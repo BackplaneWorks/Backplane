@@ -71,9 +71,9 @@ pub fn title_items(data: &Value) -> Vec<Item> {
     if rid.is_empty() { return vec![] }
     let row = find_row(&data["projects"], &rid);
     let project = row.map(|_| crate::keys::project_of(data, &rid)).unwrap_or_default();
-    let mut v = vec![item("Find in thread", LOCAL_SEARCH, &rid, false), item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
-    if !project.is_empty() && row.map_or(false, |r| r["canChild"].as_bool().unwrap_or(true)) { v.push(item("New subthread", "thread-child", &format!("{rid}|{project}"), false)); }
-    if row.map_or(false, |r| r["depth"].as_u64().unwrap_or(0) > 0) { v.push(item("Move to top level", "row-detach", &rid, false)); }
+    /* i18n-ok: menu labels, drawn through trs in render */ let mut v = vec![item("Find in thread", LOCAL_SEARCH, &rid, false), item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
+    /* i18n-ok: menu labels, drawn through trs in render */ if !project.is_empty() && row.map_or(false, |r| r["canChild"].as_bool().unwrap_or(true)) { v.push(item("New subthread", "thread-child", &format!("{rid}|{project}"), false)); }
+    /* i18n-ok: menu labels, drawn through trs in render */ if row.map_or(false, |r| r["depth"].as_u64().unwrap_or(0) > 0) { v.push(item("Move to top level", "row-detach", &rid, false)); }
     v.extend(super::tools::context_items(thread));
     v
 }
@@ -81,11 +81,11 @@ pub fn title_items(data: &Value) -> Vec<Item> {
 /// A project that is also on linked machines (the hub's `newOn`): one New thread per machine, this one first, each naming its machine.
 pub fn new_items(pid_raw: &str, new_on: &Value) -> Vec<Item> {
     let on: Vec<Item> = new_on.as_array().into_iter().flatten().map(|n| item(&s(n, "label"), "new-thread", &s(n, "value"), false)).filter(|i| !i.label.is_empty() && !i.value.is_empty()).collect();
-    if on.len() > 1 { on } else { vec![item("New thread", "new-thread", pid_raw, false)] }
+    /* i18n-ok: menu labels, drawn through trs in render */ if on.len() > 1 { on } else { vec![item("New thread", "new-thread", pid_raw, false)] }
 }
 pub fn project_items(pid_raw: &str) -> Vec<Item> { project_items_on(pid_raw, &Value::Null) }
 pub fn project_items_on(pid_raw: &str, new_on: &Value) -> Vec<Item> { let mut v = new_items(pid_raw, new_on); v.extend(project_rest(pid_raw)); v }
-fn project_rest(pid_raw: &str) -> Vec<Item> { vec![item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
+/* i18n-ok: menu labels, drawn through trs in render */ fn project_rest(pid_raw: &str) -> Vec<Item> { vec![item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {

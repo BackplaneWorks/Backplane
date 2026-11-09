@@ -44,9 +44,9 @@ impl Unsent {
     /// The strip's rows for a thread, in the hub's row shape (screens/queue.rs): tag Unsent (or Refused, with why), Edit and Remove of this window's own (`u-edit`, `u-remove`).
     pub fn rows(&self, thread: &str) -> Vec<Value> {
         let first = |t: &str| t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().take(200).collect::<String>();
-        self.items.iter().filter(|x| x.thread == thread).map(|x| json!({"msg": x.msg, "tag": if x.why.is_empty() { "Unsent" } else { "Refused" },
+        self.items.iter().filter(|x| x.thread == thread).map(|x| json!({"msg": x.msg, "tag": if x.why.is_empty() { "Unsent" /* i18n-ok: a tag value the unsent card translates */ } else { "Refused" },
             "text": if x.why.is_empty() { first(&x.text) } else { format!("{} ({})", first(&x.text), x.why) },
-            "buttons": [{"label": "Edit", "action": "u-edit", "value": x.msg}, {"label": "Remove", "action": "u-remove", "value": x.msg}]})).collect()
+            /* i18n-ok: button labels the strip draws through trs */ "buttons": [{"label": "Edit", "action": "u-edit", "value": x.msg}, {"label": "Remove", "action": "u-remove", "value": x.msg}]})).collect()
     }
     /// The request that sends one (as the composer's Send does: mode steer, into a running turn at once).
     /// (`thread` is the window's key, `<hub>|<id>`: the hub is asked about its own id.)
