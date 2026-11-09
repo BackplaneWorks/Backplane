@@ -180,12 +180,15 @@ fn network(st: &State, info: &Value) -> Vec<Value> {
     let version = VERSION.get().map(String::as_str).unwrap_or("");
     vec![
         row(&format!("Tailscale: {state}"), &note, vec![]),
-        row("Pairing link", if link.is_empty() { "Shown once Backplane listens on your tailnet." } else { link }, vec![]),
+        // no tailnet link: pairing still works on the local network or this computer, from Devices (where the links are made since 0.15)
+        if link.is_empty() { row("Pairing link", PAIR_ELSEWHERE, vec![btn("Devices", "settings-page", "devices", false)]) } else { row("Pairing link", link, vec![]) },
         row("Update channel", "Stable takes releases; beta also takes prereleases.", chips(&["stable", "beta"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
         update_row(version, &i("update.status")),
     ]
 }
 
+/// Network's pairing row when the hub has no tailnet link: where links are made now.
+pub const PAIR_ELSEWHERE: &str = "Devices, Add a device makes one: for your tailnet, the local network or this computer.";
 /// What a device invitation says when every address it names is this computer's own (`localOnly`): a phone that scans it opens 127.0.0.1 on itself.
 pub const LOCAL_DEVICE: &str = "This link names only this computer (127.0.0.1): a phone or another computer cannot reach it. Start the hub with Tailscale on, or on an address they can reach, then make a new link.";
 /// The same for a machine invite (`bp1:<url>:<peer>:<secret>`) whose address is this computer's own.
@@ -990,7 +993,7 @@ mod tests {
     #[test] fn network_says_what_the_hub_reports_about_tailscale() {
         let r = page_rows(&st(&[]), "network", json!({"tailscale": "off", "listen": "127.0.0.1:3787", "update": "package"}));
         assert_eq!(r[1]["label"], "Tailscale: off"); assert_eq!(r[1]["note"], "Listening on 127.0.0.1:3787 only: started with --no-tailscale.");
-        assert_eq!(r[2]["note"], "Shown once Backplane listens on your tailnet.");
+        assert_eq!(r[2]["note"], PAIR_ELSEWHERE); assert_eq!((r[2]["buttons"][0]["action"].as_str(), r[2]["buttons"][0]["value"].as_str()), (Some("settings-page"), Some("devices")), "it opens Devices");
         let r = page_rows(&st(&[("update.channel", "nightly")]), "network", json!({"tailscale": "reachable", "tailnet": "m.t.ts.net", "pair": "backplane://x"}));
         assert_eq!(r[1]["label"], "Tailscale: m.t.ts.net"); assert_eq!(r[2]["note"], "backplane://x"); assert_eq!(r[3]["buttons"][1]["on"], true);
     }
