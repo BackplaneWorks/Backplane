@@ -18,6 +18,15 @@ async fn run(kind: Kind, cmd: &Path, args: &[&str], limit: Duration) -> Option<(
     Some((out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()))
 }
 
+/// run, for FreeCAD: with no display and Qt offscreen (stepglb::headless)
+async fn run_headless(cmd: &Path, args: &[&str], limit: Duration) -> Option<(i32, String, String)> {
+    let mut c = proc::tokio_cmd(Kind::Local, cmd);
+    crate::files::kicad::stepglb::headless(c.as_std_mut());
+    c.args(args).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    let out = tokio::time::timeout(limit, c.output()).await.ok()?.ok()?;
+    Some((out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()))
+}
+
 /// The first line of a version's output, its version number if it has one, within reason.
 pub fn version_of(text: &str) -> String {
     let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
@@ -64,7 +73,9 @@ async fn freecad(hub: &Arc<Hub>, typed: &str) -> Value {
     let places: Vec<PathBuf> = if found.is_empty() { vec![] } else { vec![found.into()] };
     let Some(cmd) = first_of(typed, &set, "BACKPLANE_FREECAD", crate::present::onboard::platform(&hub.cfg.os).freecad_names, places) else { return json!({"path": "", "runs": false}) };
     let path = cmd.to_string_lossy().into_owned();
-    match run(Kind::Local, &cmd, &["--version"], SLOW).await {
+    // headless, and the AppImage's console program: a GUI asked for --version shows a box on the person's screen
+    let mut args: Vec<&str> = crate::files::kicad::stepglb::console_args(&path).to_vec(); args.push("--version");
+    match run_headless(&cmd, &args, SLOW).await {
         Some((0, out, _)) => json!({"path": path, "version": version_of(&out), "runs": true}),
         Some((code, _, err)) => json!({"path": path, "runs": false, "why": why(code, &err)}),
         None => json!({"path": path, "runs": false, "why": "it did not start or did not answer"}),

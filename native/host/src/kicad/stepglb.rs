@@ -152,14 +152,29 @@ pub fn soft_gl(c: &mut Command) {
     }
     #[cfg(not(all(unix, not(target_os = "macos"))))] { let _ = c; }
 }
+/// Every FreeCAD started here, GUI or console, a probe or a conversion: soft_gl's no-display, and Qt's offscreen platform. A FreeCAD that gets the
+/// session's DISPLAY can put a window on the person's screen: `freecadcmd --version` that turned out to be the GUI showed its "FreeCAD 1.1.0
+/// Revision…" box there, again at each check.
+pub fn headless(c: &mut Command) { soft_gl(c); c.env("QT_QPA_PLATFORM", "offscreen"); }
+/// FreeCAD's AppImage (the file, or `freecadcmd` linked to it) runs its GUI whatever name it is called by: its AppRun looks only at its first
+/// argument, which picks a program of its own (`freecadcmd`) when it names one. True when `cmd` is such a file: its type-2 AppImage mark, `AI\x02`
+/// at byte 8 of the ELF.
+pub fn is_appimage(cmd: &str) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(cmd) else { return false };
+    let mut b = [0u8; 11];
+    f.read_exact(&mut b).is_ok() && &b[..4] == b"\x7fELF" && &b[8..11] == b"AI\x02"
+}
+/// The arguments that come before a console run's own: `freecadcmd` when `cmd` is the AppImage, so its console program runs and not the GUI.
+pub fn console_args(cmd: &str) -> &'static [&'static str] { if is_appimage(cmd) { &["freecadcmd"] } else { &[] } }
 /// viaFreecadGui: the file meshed by FreeCAD's GUI, offscreen, with its colours: its triangle count, 0 when it failed
 fn via_gui(gui: &str, input: &str, out: &str, tol: &str, nice: bool) -> u64 {
     if gui.is_empty() { return 0 }
     let py = format!("{out}.gui.py");
     if std::fs::write(&py, FREECAD_GUI_PY).is_err() { return 0 }
     let mut c = command(nice, gui);
-    soft_gl(&mut c);
-    c.arg(&py).envs([("QT_QPA_PLATFORM", "offscreen"), ("BP_IN", input), ("BP_OUT", out), ("BP_TOL", tol)]).stdout(Stdio::null()).stderr(Stdio::null());
+    headless(&mut c);
+    c.arg(&py).envs([("BP_IN", input), ("BP_OUT", out), ("BP_TOL", tol)]).stdout(Stdio::null()).stderr(Stdio::null());
     wait(&mut c, FREECAD_SECS);
     let n = std::fs::read_to_string(format!("{out}.n")).unwrap_or_default().split(' ').next().and_then(|x| x.trim().parse::<u64>().ok()).unwrap_or(0);
     let _ = std::fs::remove_file(&py); let _ = std::fs::remove_file(format!("{out}.n"));
@@ -172,7 +187,8 @@ fn via_console(cmd: &str, input: &str, out: &str, tol: &str, nice: bool) -> u64 
     let Ok(file) = std::fs::File::create(&log) else { return 0 };
     if std::fs::write(&py, FREECAD_PY).is_err() { return 0 }
     let mut c = command(nice, cmd);
-    c.args(["-c", "import os; exec(open(os.environ['BP_PY']).read())"]).envs([("BP_PY", py.as_str()), ("BP_IN", input), ("BP_OUT", out), ("BP_TOL", tol)]).stdout(file).stderr(Stdio::null());
+    headless(&mut c);
+    c.args(console_args(cmd)).args(["-c", "import os; exec(open(os.environ['BP_PY']).read())"]).envs([("BP_PY", py.as_str()), ("BP_IN", input), ("BP_OUT", out), ("BP_TOL", tol)]).stdout(file).stderr(Stdio::null());
     let code = wait(&mut c, FREECAD_SECS);
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     let _ = std::fs::remove_file(&py); let _ = std::fs::remove_file(&log);
@@ -211,6 +227,19 @@ pub fn convert(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn an_appimage_freecadcmd_runs_its_console_program_headless() {
+        let d = std::env::temp_dir().join(format!("bp-fcai-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let (ai, elf, sh) = (d.join("FreeCAD.AppImage"), d.join("freecadcmd"), d.join("wrapper"));
+        std::fs::write(&ai, b"\x7fELF\x02\x01\x01\x00AI\x02rest").unwrap(); std::fs::write(&elf, b"\x7fELF\x02\x01\x01\x00\x00\x00\x00rest").unwrap(); std::fs::write(&sh, "#!/bin/sh\n").unwrap();
+        assert_eq!(console_args(&ai.to_string_lossy()), ["freecadcmd"]); assert!(console_args(&elf.to_string_lossy()).is_empty() && console_args(&sh.to_string_lossy()).is_empty());
+        assert!(console_args(&d.join("none").to_string_lossy()).is_empty());
+        #[cfg(unix)] { let l = d.join("link"); std::os::unix::fs::symlink(&ai, &l).unwrap(); assert_eq!(console_args(&l.to_string_lossy()), ["freecadcmd"], "a link to the AppImage is the AppImage"); }
+        let mut c = Command::new("true"); c.env("DISPLAY", ":0"); headless(&mut c);
+        let env: Vec<(String, Option<String>)> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into(), v.map(|v| v.to_string_lossy().into()))).collect();
+        assert!(env.contains(&("QT_QPA_PLATFORM".into(), Some("offscreen".into()))), "{env:?}");
+        #[cfg(all(unix, not(target_os = "macos")))] assert!(env.contains(&("DISPLAY".into(), None)), "no display: {env:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn the_freecad_path_setting_is_tried_first() {
         use crate::plat::fs::PermissionsExt;
         let d = std::env::temp_dir().join(format!("bp-fcset-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
