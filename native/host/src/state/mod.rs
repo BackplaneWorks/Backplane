@@ -113,7 +113,7 @@ fn n(e: &Value, k: &str) -> Option<u64> { Some(fam::json::gnat(e, k, 0)) }
 
 /// Setting.blank_gone: an empty value removes these keys
 fn blank_gone(k: &str) -> bool {
-    ["told.", "rule.", "board.", "launch.input.", "fallback.input.", "voice.e.", "voice.l."].iter().any(|p| k.starts_with(p))
+    ["told.", "rule.", "board.", "launch.input.", "fallback.input.", "voice.e.", "voice.l.", "turn.live."].iter().any(|p| k.starts_with(p))
 }
 
 impl State {
@@ -177,6 +177,7 @@ impl State {
             "TurnChanged" => {
                 let th = s(e, "thread")?; let st = Turn::parse(s(e, "state")?).unwrap_or(Turn::Idle); let at = n(e, "at")?;
                 self.todos_turn(st, th, at);
+                self.settings.remove(&format!("turn.live.{th}")); // a turn's running numbers are its own: one that began or ended has none yet
                 let t = self.thread_mut(th); t.activity = t.activity.max(at); t.turn = st;
             }
             "PendingChanged" => { let th = s(e, "thread")?; let c = n(e, "count")?; self.thread_mut(th).pending = c; }
@@ -367,6 +368,12 @@ mod tests {
     const PC: &str = r#"{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":10}"#;
     const TC: &str = r#"{"$":"ThreadCreated","id":"t1","project":"p1","title":"New thread","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":11}"#;
 
+    #[test] fn a_turns_running_numbers_go_when_a_turn_begins_or_ends() {
+        let live = r#"{"$":"SettingSet","key":"turn.live.t1","value":"1/2/3/4/","at":13}"#;
+        let s = fold(&[PC, TC, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":12}"#, live]); assert_eq!(s.settings.get("turn.live.t1").map(String::as_str), Some("1/2/3/4/"));
+        for st in ["running", "completed", "interrupted"] { let t = format!(r#"{{"$":"TurnChanged","thread":"t1","state":"{st}","at":14}}"#); assert!(fold(&[PC, TC, live, &t]).settings.get("turn.live.t1").is_none(), "{st}") }
+        assert!(fold(&[PC, TC, live, r#"{"$":"SettingSet","key":"turn.live.t1","value":"","at":14}"#]).settings.get("turn.live.t1").is_none(), "a blank one is gone");
+    }
     #[test] fn seq_counts_known_events_only() {
         let s = fold(&[PC, TC, r#"{"$":"Nope"}"#, "not json", r#"{"$":"SettingSet","key":"a","value":"b","at":1}"#]);
         assert_eq!(s.seq, 3);

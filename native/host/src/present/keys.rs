@@ -308,7 +308,15 @@ pub fn stats(st: &State, id: &str) -> Value {
     let Some(t) = st.threads.get(id) else { return Value::Null };
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
     let tok = { let ep = format!("{}{}", get("tok.epoch".into()), get("tok.recount".into())); if ep.is_empty() { "tok.".to_string() } else { format!("tok.{ep}.") } };
-    Value::Array(super::tokstats::sections(&t.provider, get(format!("usage.{id}")), get(format!("turn.last.{id}")), get(format!("{tok}t.{id}")), get(format!("turn.speed.{id}")), get(format!("turn.models.{id}"))))
+    let mut v = super::tokstats::sections(&t.provider, get(format!("usage.{id}")), get(format!("turn.last.{id}")), get(format!("{tok}t.{id}")), get(format!("turn.speed.{id}")), get(format!("turn.models.{id}")));
+    if let Some(s) = super::tokstats::live_section(&live(st, id)) { v.insert(1, s) }
+    Value::Array(v)
+}
+
+/// The running turn's numbers so far (`turn.live.<t>`, agents/lines.rs), "" unless the thread's turn is running.
+fn live(st: &State, id: &str) -> String {
+    if st.threads.get(id).map_or(true, |t| t.turn != crate::state::Turn::Running) { return String::new() }
+    st.settings.get(&format!("turn.live.{id}")).cloned().unwrap_or_default()
 }
 
 /// The composer's token button for a thread (present/tokstats.rs `chip`), from the same settings as its panel.
@@ -316,7 +324,7 @@ pub fn tok_chip(st: &State, id: &str) -> String {
     if !st.threads.contains_key(id) { return String::new() }
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
     let tok = { let ep = format!("{}{}", get("tok.epoch".into()), get("tok.recount".into())); if ep.is_empty() { "tok.".to_string() } else { format!("tok.{ep}.") } };
-    super::tokstats::chip(get(format!("usage.{id}")), get(format!("{tok}t.{id}")))
+    super::tokstats::chip(get(format!("usage.{id}")), get(format!("{tok}t.{id}")), &live(st, id))
 }
 
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
