@@ -111,7 +111,7 @@ impl Backplane {
             div().border_b_1().border_color(c("line")).px_3().py_1().text_size(px(12.)).child("\u{a0}").into_any_element(),
             div().h(px(FOLD_ROW)).px_2().flex().items_center().child(crate::ui::with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer()
                 .tooltip(crate::keys::tip("Unfold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(crate::ui::ic(light, "chevron-right", 16., "dim"))
-                .on_click(cx.listener(|this, _, _, cx| { if !this.sidebar_open { this.sidebar_toggle(cx); } }))).into_any_element(),
+                .on_click(cx.listener(|this, _, _, cx| this.side_flip(cx)))).into_any_element(),
         ];
         for (pid, title, p) in strip_projects(&self.data) {
             let on = self.project_page.as_deref() == Some(pid.as_str());
