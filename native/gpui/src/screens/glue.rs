@@ -177,7 +177,8 @@ impl Backplane {
         self.timeline_seek();
         // a page of a long thread is mostly tool calls folded into a few rows: while the reader is still within RUNWAY_ROWS of the top, ask for the next
         // page now rather than after the next frame, so scrolling up a thread of a thousand messages does not wait at the top for each page in turn
-        if self.timeline.logical_scroll_top().item_ix < history::RUNWAY_ROWS { self.history_want_now(); }
+        // the same while a kept place deep in the thread is being looked for (reopening a long thread where it was left): page after page at once
+        if self.timeline.logical_scroll_top().item_ix < history::RUNWAY_ROWS || self.screens.seeking.is_some() { self.history_want_now(); }
         cx.notify();
     }
     /// The next older page, now (none while one is on its way, at the start of the thread, or on a project's page).
