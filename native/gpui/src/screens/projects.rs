@@ -15,7 +15,12 @@ pub struct Projects {
     pub focus: Option<&'static str>, folder_open: bool,
     /// The project page's own reads: `project.home` (the folder's goal and notes, board and files) and `fab.look {project}` (the parts its fab files name).
     pub home: Home,
+    /// The page's Edit: (the thread it opened, the text for its composer), put there once that thread is on show.
+    pub intent_edit: Option<(String, String)>,
 }
+
+/// What Edit puts in the composer: `/intent` and the goal and notes (the hub's `intent_edit`; its Send saves them), the template for none.
+pub fn intent_draft(intent: &str) -> String { format!("/intent\n{}", if intent.trim().is_empty() { "# Goal\n\n# Parts\n\n# Notes\n" } else { intent }) }
 
 /// What the hub said of the project on show (asked when its page opens; an answer for another project is dropped).
 #[derive(Default)]
@@ -87,6 +92,15 @@ pub fn adopt(hub: &str, typed: &str, sent: &[String]) -> bool { hub != typed && 
 fn remember(v: &mut Vec<String>, t: &str) { v.push(t.to_string()); if v.len() > 16 { v.remove(0); } }
 
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    // the page's Edit opened its thread: once that thread is on show, the goal and notes go in its composer
+    if let Some((th, text)) = this.screens.projects.intent_edit.clone() {
+        let shown = string(&this.data["thread"], "id"); let shown = shown.rsplit('|').next().unwrap_or("").to_string();
+        if shown == th && this.selected.rsplit('|').next() == Some(th.as_str()) {
+            this.screens.projects.intent_edit = None;
+            this.input.update(cx, |i, cx| i.set(text.clone(), cx));
+            let _ = this.tx.try_send(Command::Draft(text));
+        }
+    }
     if this.screens.projects.search.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         cx.observe(&input, |this, input, cx| {
@@ -180,6 +194,13 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
             col = col.child(match k { "h" => div().pt_1().font_weight(FontWeight::BOLD).child(t), "li" => div().flex().gap_2().child(div().text_color(c("dim")).child("•")).child(div().flex_1().child(t)), _ => div().child(t) });
         }
         out.push(col.into_any_element());
+        // Edit: the project's top thread opens with the goal and notes in its composer as `/intent ...`; Send saves them (0.14 Intent's Edit)
+        if let Some(top) = threads.first().map(|t| string(t, "id")) {
+            let text = intent_draft(&intent);
+            ctl.push(crate::script::CtlEntry { id: "home-intent-edit".into(), label: "Edit goal & notes".into(), ctl: Ctl::Select(top.clone()) });
+            out.push(crate::ui::with_rect(div().id("home-intent-edit"), || "ui:Edit goal & notes".to_string()).px_3().py_1().w(px(160.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child("Edit goal & notes")
+                .on_click(cx.listener(move |this, _, window, cx| { let raw = top.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.intent_edit = Some((raw, text.clone())); this.select(top.clone(), window, cx); })).into_any_element());
+        }
         let parts: Vec<&Value> = card["parts"].as_array().into_iter().flatten().collect();
         if !parts.is_empty() {
             out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(format!("TO ORDER ({})", parts.len())).into_any_element());
@@ -248,6 +269,9 @@ mod tests {
 #[cfg(test)]
 mod home_tests {
     use super::*; use serde_json::json; use core::prelude::v1::test;
+    #[test] fn edit_puts_the_goal_and_notes_in_the_composer_as_intent() {
+        assert_eq!(intent_draft("# Goal\nlamp"), "/intent\n# Goal\nlamp"); assert!(intent_draft("  ").starts_with("/intent\n# Goal\n"));
+    }
     #[test] fn the_goal_and_notes_are_drawn_a_line_each() {
         assert_eq!(intent_lines("# Goal\n\nA lamp.\n\n# Parts\n\n- LED board\n* Shade\n## Notes"), vec![("h", "Goal".into()), ("p", "A lamp.".into()), ("h", "Parts".into()), ("li", "LED board".into()), ("li", "Shade".into()), ("h", "Notes".into())]);
     }
