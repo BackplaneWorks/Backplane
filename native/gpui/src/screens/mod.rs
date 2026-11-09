@@ -43,6 +43,7 @@ pub mod place;
 pub mod plot;
 pub mod projects;
 pub mod queue;
+pub mod unsent;
 pub mod plotview;
 pub mod select;
 pub mod siderow;
@@ -85,6 +86,8 @@ pub struct Screens {
     pub scroll_logged: Option<std::time::Instant>,
     pub popup_ix: usize, pub popup_key: String, pub popup_scroll: gpui::ScrollHandle,
     pub drafts: drafts::Writer,
+    /// messages sent while the window had no hub (unsent.rs): shown in the queue strip, sent in order once it is back
+    pub unsent: unsent::Unsent,
     /// The place a thread was left at, the row on top and the px scrolled into it, so a thread left scrolled up keeps it. One left at its end has none.
     pub offsets: HashMap<String, place::RowPlace>,
     /// A place not in the rows held yet, only the newest page being there after a relaunch: history is read until it comes.
@@ -168,6 +171,7 @@ impl Screens {
     pub fn pv(&mut self, slot: usize) -> &mut plotview::PlotView { match slot { 0 => &mut self.plotview, n => &mut self.split_pv[(n - 1).min(1)] } }
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
-        Self { parts: Default::default(), side_force: false, side_shown: true, hubbar: Default::default(), elsewhere: None, star: None, term: term::Term::new(_cx.focus_handle()), pad: None, voice: Default::default(), setup: Default::default(), setup_focus: _cx.focus_handle(), acct: Default::default(), ctx_open: false, split_pv: Default::default(), pick_slot: None, last_state: String::new(), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), offsets: HashMap::new(), seeking: None, streamed: String::new(), paging: None, reg: Default::default(), projects: Default::default(), files: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, pick: Default::default(), panels: Default::default(), head: Default::default(), palette: Default::default(), find: Default::default(), lightbox: None, known_refs: vec![], popup_off: None, popup_shut: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new(), popup_scroll: Default::default(), held: Default::default(), hold_threads: vec![], hold_projects: vec![], root_focus: _cx.focus_handle() }
+        let unsent = unsent::Unsent::open(drafts_path.with_file_name("gpui-unsent.json"));
+        Self { parts: Default::default(), side_force: false, side_shown: true, hubbar: Default::default(), elsewhere: None, star: None, term: term::Term::new(_cx.focus_handle()), pad: None, voice: Default::default(), setup: Default::default(), setup_focus: _cx.focus_handle(), acct: Default::default(), ctx_open: false, split_pv: Default::default(), pick_slot: None, last_state: String::new(), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), unsent, offsets: HashMap::new(), seeking: None, streamed: String::new(), paging: None, reg: Default::default(), projects: Default::default(), files: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, pick: Default::default(), panels: Default::default(), head: Default::default(), palette: Default::default(), find: Default::default(), lightbox: None, known_refs: vec![], popup_off: None, popup_shut: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new(), popup_scroll: Default::default(), held: Default::default(), hold_threads: vec![], hold_projects: vec![], root_focus: _cx.focus_handle() }
     }
 }
