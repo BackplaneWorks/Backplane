@@ -211,18 +211,32 @@ pub fn source(viewer: &Value, diff_on: bool) -> String {
 pub fn boards(viewer: &Value) -> Vec<(String, String, bool)> {
     viewer["boards"].as_array().into_iter().flatten().map(|b| (string(b, "label"), string(b, "value"), b["on"].as_bool().unwrap_or(false))).collect()
 }
+/// A page whose plot has not come yet, laid out as it will be (its toolbar, the Boards/Layers/Fit row, the drawing's background) with what it waits for in
+/// the middle: the plot then fills it in place, with no row arriving after it and nothing moving down.
+fn plot_loading(cx: &mut Context<Backplane>, light: bool, slot: usize, viewer: &Value, pv: &mut super::plotview::PlotView, layers: bool, actions: Option<AnyElement>, say: &str) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let mut col = div().size_full().flex().flex_col();
+    // (as plot_pane lays it out: the pane's controls, then Boards/Layers/Fit; the history bar goes under it, histbar::under)
+    if let Some(a) = actions { col = col.child(div().flex().justify_end().px_3().py_1().child(a)); }
+    if layers {
+        let ghost = |label: &str| div().px_2().py_1().text_size(px(12.)).border_1().border_color(c("line")).text_color(c("faint")).child(label.to_string());
+        let boards = if slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None };
+        col = col.child(div().flex().items_center().min_w_0().children(boards.map(|b| div().pl_3().py_1().min_w_0().child(b))).child(div().flex().px_3().py_1().child(ghost("Layers"))).child(div().mt_1().ml_1().child(ghost("Fit"))));
+    }
+    col.child(div().flex_1().min_h_0().bg(c("view")).flex().items_center().justify_center().text_color(c("faint")).child(say.to_string())).into_any_element()
+}
 fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet], actions: Option<AnyElement>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let loading = |actions| status_row(light, if open == "board" { "Loading the board…" } else { "Loading the schematic…" }, actions);
+    let say = if open == "board" { "Loading the board…" } else { "Loading the schematic…" };
     // the design history bar stays under a board or schematic while a version loads or cannot be shown (screens::histbar)
     let hb = layers && matches!(open, "board" | "schematic"); let vkey = string(viewer, "key");
-    let Some(frame) = frame else { return super::histbar::under(cx, light, pv, &vkey, hb, loading(actions)) };
+    let Some(frame) = frame else { let el = plot_loading(cx, light, slot, viewer, pv, layers, actions, say); return super::histbar::under(cx, light, pv, &vkey, hb, el) };
     // the frame must be the source this viewer asks for: another project's board stays off the screen until its own plot arrives
     let mut want = string(viewer, "key");
     // a comparison on show is its own source: `diff\n<old>\n<live>` after the key; another page puts it away
     if let Some(cmp) = pv.compare.clone() { if cmp.base == want { want = format!("{want}{}", super::histbar::shown(&cmp)); } else { pv.compare = None; } }
     // (another version of the same file keeps the last one on the canvas until it comes, as 0.14 did: stepping does not blink to "Loading")
-    if !want.is_empty() && !frame.key.is_empty() && frame.key != want && !super::histbar::same_file(&vkey, &frame.key, &want) { return super::histbar::under(cx, light, pv, &vkey, hb, loading(actions)) }
+    if !want.is_empty() && !frame.key.is_empty() && frame.key != want && !super::histbar::same_file(&vkey, &frame.key, &want) { let el = plot_loading(cx, light, slot, viewer, pv, layers, actions, say); return super::histbar::under(cx, light, pv, &vkey, hb, el) }
     if !frame.none.is_empty() { return super::histbar::under(cx, light, pv, &vkey, hb, status_row(light, &super::histbar::none_words(&frame.none), actions)); }
     if pv.focus.is_none() { pv.focus = Some(cx.focus_handle()); }
     let (w, h) = pv.bounds.map_or((480., 600.), |b| (f32::from(b.size.width), f32::from(b.size.height)));
