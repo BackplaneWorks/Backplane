@@ -543,6 +543,8 @@ struct DataThreadView: View {
     @State private var text = ""
     @State private var pending: [Data] = []
     @State private var picked: [PhotosPickerItem] = []
+    @State private var photoLibrary = false
+    @State private var camera = false
     @State private var drawing = false
     @State private var notice = ""
     // the masked box: a name ("" for a new one) while open; the value stays in the box until Save
@@ -554,12 +556,22 @@ struct DataThreadView: View {
     @State private var openRuns: Set<String> = []
     @State private var atEnd = true
     @State private var order: DOrder?
+    @State private var buy: DBuy?          // Buy it, when the hub offers it for this thread
+    @State private var buying = false
+    @State private var finding = false     // Search in thread
+    @State private var findGo: String?     // the message Search in thread went to
     @State private var caret: (at: Int, rev: Int)?
     @Environment(\.dismiss) private var dismiss
 
     init(client: DataClient, id: String) { self.client = client; self.id = id; client.touch(id) }
 
     private var thread: DThread? { client.threads.first { $0.id == id } }
+    /// Buy it: the hub makes the buy thread, which opens (as a link to it would)
+    private func startBuy() {
+        guard !buying else { return }
+        buying = true
+        Task { do { let t = try await client.buy(id); if !t.isEmpty { client.linkTarget = DLinkTarget(kind: .thread, id: t) } } catch { notice = error.localizedDescription }; buying = false }
+    }
     private var list: [DEntry] { client.entries[id] ?? [] }
     private var working: Bool { thread?.state == "working" || thread?.state == "asking" }
     private var chip: String { guard let t = thread else { return "" }; return t.chip.isEmpty ? "\(t.provider) / \(t.model.isEmpty ? "default" : t.model)" : t.chip }
@@ -601,6 +613,16 @@ struct DataThreadView: View {
                 .onChange(of: list.count) { _, _ in if client.pendingAsk.isEmpty, atEnd { proxy.scrollTo("end", anchor: .bottom) }; toAsk(proxy) }
                 .onAppear { toAsk(proxy) }
                 .onChange(of: list.last?.text.count) { _, _ in if atEnd { proxy.scrollTo("end", anchor: .bottom) } }
+                // Search in thread: to the message, loading earlier pages until it is here (a few at most)
+                .task(id: findGo) {
+                    guard let m = findGo else { return }
+                    for _ in 0..<30 {
+                        if list.contains(where: { $0.id == m }) { atEnd = false; withAnimation { proxy.scrollTo(m, anchor: .center) }; break }
+                        if client.older[id] == nil { notice = "That message is no longer in this thread."; break }
+                        client.loadOlder(id); try? await Task.sleep(for: .milliseconds(400))
+                    }
+                    findGo = nil
+                }
             }
             if let order { DataOrderCard(order: order) }
             DataMentionBar(client: client, text: text) { text = $0; client.setDraft(id, $0) }
@@ -621,25 +643,39 @@ struct DataThreadView: View {
             caret = (VoiceEdit.utf16(new, caret: c.at), rev)
         }
         .task(id: "\(list.count)|\(thread?.state ?? "")|\(client.conn == .online)") { if client.has("order"), let o = try? await client.order(id) { order = o } else if !client.has("order") { order = nil } }
+        .task(id: "\(thread?.state ?? "")|\(client.conn == .online)") { if client.conn == .online, thread?.state != "working" { buy = await client.buyOf(id) } }
         .background(BackplaneDesign.background)
         .dataBar(thread?.title.isEmpty == false ? thread!.title : "Thread")
+        // Buy it when there is something to buy, the thread's menu, the viewers in the corner (the person's order, 11-04)
         .toolbar {
+            if let b = buy {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { startBuy() } label: { Image(systemName: "cart").foregroundStyle(BackplaneDesign.accent) }.disabled(buying).accessibilityLabel(b.label).accessibilityIdentifier("data.thread.buy")
+                }.dflat()
+            }
+            if let t = thread, client.has("actions") {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if let b = buy { Button(b.label, systemImage: "cart") { startBuy() } }
+                        if client.has("search") { Button("Search in thread", systemImage: "magnifyingglass") { finding = true } }
+                        DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting)
+                    } label: { Image(systemName: "ellipsis").foregroundStyle(BackplaneDesign.dim) }
+                        .accessibilityLabel("Thread actions").accessibilityIdentifier("data.thread.more")
+                }.dflat()
+            }
             if client.has("viewers") {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: DViewerRoute(id: id)) { Image(systemName: "square.grid.2x2").foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel("Viewer").accessibilityIdentifier("data.thread.viewer")
                 }.dflat()
             }
-            if let t = thread, client.has("actions") {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu { DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting) } label: { Image(systemName: "ellipsis").foregroundStyle(BackplaneDesign.dim) }
-                        .accessibilityLabel("Thread actions").accessibilityIdentifier("data.thread.more")
-                }.dflat()
-            }
         }
+        .sheet(isPresented: $finding) { DataFindInThread(client: client, thread: id) { m in finding = false; findGo = m } }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting, deleted: { dismiss() }))
         .sheet(isPresented: $modelSheet) { DataPickerSheet(client: client, thread: id, choice: $noChoice) }
         // full screen, not a sheet: a pen stroke downward must not swipe it away
         .fullScreenCover(isPresented: $drawing) { DataPadView { add([$0]) } }
+        .photosPicker(isPresented: $photoLibrary, selection: $picked, maxSelectionCount: max(1, 4 - pending.count), matching: .images)
+        .fullScreenCover(isPresented: $camera) { DCamera { d in camera = false; if let d { add([d]) } }.ignoresSafeArea() }
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -720,10 +756,14 @@ struct DataThreadView: View {
                         }
                         .buttonStyle(.plain).accessibilityLabel(on ? "Stop dictation" : "Dictate").accessibilityIdentifier("data.mic")
                     }
-                    PhotosPicker(selection: $picked, maxSelectionCount: max(0, 4 - pending.count), matching: .images) {
+                    // Attach: a photo from the library, or one taken now with the camera
+                    Menu {
+                        Button("Choose a photo", systemImage: "photo") { photoLibrary = true }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) { Button("Take a photo", systemImage: "camera") { camera = true } }
+                    } label: {
                         Image(systemName: "paperclip").font(.system(size: 15)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
                     }
-                    .disabled(!client.canSendImages)
+                    .disabled(!client.canSendImages || pending.count >= 4)
                     .accessibilityLabel(client.canSendImages ? "Attach pictures" : "Attach pictures (this hub does not take pictures yet)").accessibilityIdentifier("data.attach")
                     Button { if client.canSendImages { drawing = true } else { notice = "This hub does not take pictures yet: update it, then draw again." } } label: {
                         Image(systemName: "pencil.tip").font(.system(size: 15)).foregroundStyle(client.canSendImages ? BackplaneDesign.dim : BackplaneDesign.faint).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)

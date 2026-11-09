@@ -222,6 +222,23 @@ struct DPicker: Decodable { var chip: String; var sections: [DPickerSection]
     enum CodingKeys: String, CodingKey { case chip, sections }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); chip = c.str(.chip); sections = (try? c.decode([DPickerSection].self, forKey: .sections)) ?? [] } }
 struct DPickerReply: Decodable { var picker: DPicker }
+/// Buy it (feature buy, `thread.buy`): the desktop header's button for a thread, in the hub's words; `order.buy` answers the buy thread made.
+struct DBuy: Decodable, Equatable { var label = ""; var tip = ""
+    enum K: String, CodingKey { case label, tip }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); label = c.str(.label); tip = c.str(.tip) } }
+struct DBuyReply: Decodable { var buy: DBuy?
+    enum K: String, CodingKey { case buy }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); buy = try? c.decode(DBuy.self, forKey: .buy) } }
+struct DThreadRef: Decodable { var thread: String
+    enum K: String, CodingKey { case thread }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); thread = c.str(.thread) } }
+/// "Search in thread" (feature search with `thread`): what was said, newest first; `msg` is the entry it is in. `at` in ms (an older hub said seconds).
+struct DHit: Decodable, Identifiable { var msg = "", role = "", text = ""; var at = 0; var id: String { msg + "|\(at)" }
+    enum K: String, CodingKey { case msg, role, text, at }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); msg = c.str(.msg); role = c.str(.role); text = c.str(.text); at = c.int(.at); if at > 0 && at < 100_000_000_000 { at *= 1000 } } }
+struct DHits: Decodable { var messages: [DHit]
+    enum K: String, CodingKey { case messages }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); messages = (try? c.decode([DHit].self, forKey: .messages)) ?? [] } }
 /// A buy thread's Order card (feature order, `thread.order`): the hub's, drawn as it says.
 struct DOrderStep: Decodable, Equatable { var label = ""; var mark = ""
     init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); label = (try? c.decode(String.self, forKey: .label)) ?? ""; mark = (try? c.decode(String.self, forKey: .mark)) ?? "" }
