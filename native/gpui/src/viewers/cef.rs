@@ -439,6 +439,8 @@ impl Tab {
     pub fn wheel(&self, x: i32, y: i32, mods: u32, dx: i32, dy: i32) { self.host(|h| h.send_mouse_wheel_event(Some(&MouseEvent { x, y, modifiers: mods }), dx, dy)); }
     pub fn key(&self, kind: u8, mods: u32, vk: i32, native: i32, ch: u16) {
         let ty = match kind { 0 => KeyEventType::RAWKEYDOWN, 1 => KeyEventType::KEYUP, _ => KeyEventType::CHAR };
+        // Windows: CEF makes a WM_CHAR from `windows_key_code` (the character) and ignores `character`; elsewhere `character` is the one read
+        let vk = char_code(kind, vk, ch, cfg!(windows));
         let e = KeyEvent { size: std::mem::size_of::<KeyEvent>(), type_: ty, modifiers: mods, windows_key_code: vk, native_key_code: native, is_system_key: 0, character: ch, unmodified_character: ch, focus_on_editable_field: 0 };
         self.host(|h| h.send_key_event(Some(&e)));
     }
@@ -460,6 +462,8 @@ pub fn vk(key: &str) -> Option<i32> {
     Some(match key { "enter" => 13, "backspace" => 8, "tab" => 9, "escape" => 27, "space" => 32, "left" => 37, "up" => 38, "right" => 39, "down" => 40, "delete" => 46, "home" => 36, "end" => 35, "pageup" => 33, "pagedown" => 34, "insert" => 45,
         k if k.starts_with('f') && k[1..].parse::<i32>().map_or(false, |n| (1..=12).contains(&n)) => 111 + k[1..].parse::<i32>().unwrap(), _ => return None })
 }
+/// The `windows_key_code` of a key event: for a character (`kind` 2) on Windows the UTF-16 unit typed, else the virtual-key code.
+pub fn char_code(kind: u8, vk: i32, ch: u16, windows: bool) -> i32 { if windows && kind >= 2 { ch as i32 } else { vk } }
 /// CEF event flags from gpui modifiers (shift, control, alt) and mouse buttons held.
 pub fn flags(shift: bool, ctrl: bool, alt: bool, left: bool, middle: bool, right: bool) -> u32 {
     (shift as u32) << 1 | (ctrl as u32) << 2 | (alt as u32) << 3 | (left as u32) << 4 | (middle as u32) << 5 | (right as u32) << 6
@@ -493,6 +497,10 @@ mod tests {
             for (i, f) in need.iter().enumerate() { let p = d.join(f); std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(&p, b"x").unwrap(); assert_eq!(missing(&d, need).len(), need.len() - i - 1, "{f}"); }
             let _ = std::fs::remove_dir_all(&d);
         }
+    }
+    #[test] fn a_character_on_windows_carries_itself_not_its_key() {
+        assert_eq!(char_code(2, 65, 'a' as u16, true), 'a' as i32, "WM_CHAR of 'a', not VK_A ('A')"); assert_eq!(char_code(2, 0, 'h' as u16, true), 'h' as i32);
+        assert_eq!(char_code(0, 65, 'a' as u16, true), 65); assert_eq!(char_code(2, 65, 'a' as u16, false), 65);
     }
     #[test] fn key_codes() { assert_eq!(vk("a"), Some(65)); assert_eq!(vk("7"), Some(55)); assert_eq!(vk("enter"), Some(13)); assert_eq!(vk("f5"), Some(116)); assert_eq!(vk("é"), None); }
     #[test] fn event_flags() { assert_eq!(flags(true, false, false, true, false, false), 2 | 16); assert_eq!(flags(false, true, true, false, false, true), 4 | 8 | 64); }
