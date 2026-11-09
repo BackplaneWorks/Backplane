@@ -359,7 +359,7 @@ fn split_set(this: &mut Backplane, f: impl FnOnce(&mut SplitPrefs), save: bool, 
     let mut p = split_prefs(); f(&mut p);
     this.local.split_hide = p.hide.clone(); this.local.split_main = p.main; this.local.split_side = p.side;
     *SPLIT.lock().unwrap() = Some(p);
-    if save { this.local.save(); }
+    if save { this.local.save(); } else { save_soon(cx); }
     this.ui_epoch += 1; cx.notify();
 }
 /// The panes Split shows on this device (for the cross-probe and the harness).
@@ -615,6 +615,11 @@ fn set_pane(this: &mut Backplane, w: u32, cx: &mut Context<Backplane>) {
     if PANE_W.load(Relaxed) == w && this.local.viewer_px == w { return }
     PANE_W.store(w, Relaxed);
     this.local.viewer_px = w; this.ui_epoch += 1; cx.notify();
+    save_soon(cx);
+}
+/// This device's file written once a drag rests (300 ms), wherever the pointer is let go.
+fn save_soon(cx: &mut Context<Backplane>) {
+    use std::sync::atomic::Ordering::Relaxed;
     if !PANE_SAVE.swap(true, Relaxed) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
