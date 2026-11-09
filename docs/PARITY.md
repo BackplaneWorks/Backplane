@@ -11,6 +11,7 @@ Status at 8d15bbb8ab, from the source: requests, tools, routes, settings pages a
 - **missing**: not on `main`.
 - **unchecked**: code exists, nobody has driven it end to end on the Rust hub. The audit lane moves these.
 - **dropped**: gone on purpose. The row says why.
+- **not planned**: a status the person chose: it is not built and not meant to be. The row says what they decided.
 - **needs a person or another machine**: built and tested in rigs; what is left is a check only a person (a real microphone, a real phone) or another machine can do. The row says which.
 
 Each lane updates its own rows in the commit that lands the work.
@@ -47,7 +48,7 @@ Each lane updates its own rows in the commit that lands the work.
 | Local engine on macOS and Windows: `local-install` and real-audio decode (`native/voice/tests/local_e2e.rs`; sherpa-onnx's C API symbols there are unchecked) | needs a person or another machine | voice |
 | Android pairing through the pairing screen with dictation after it (the rig paired by writing the app's link preference with `run-as`) | needs a person or another machine | voice |
 | **Commerce** | | |
-| Card and Ready to order data (`fab.look`, `fab.intent`) | partial | commerce |
+| Card and Ready to order data (`fab.look`, `fab.intent`): the answer matches 0.14's twelve keys and adds `lead_days`, `estimate_warnings` from the estimate; the bar itself is dropped (row below). Audit and fixes in `docs/COMMERCE-AUDIT.md`. Open: no client draws `lead_days`/`estimate_warnings` (a UI choice on three clients); the hub cannot see a paused server (needs a `paused` field from the order server); the deployed server's version and `DEFAULT_SERVER` need Bub | partial | commerce |
 | Buy it: `order.buy` starts a buy thread in the source's folder, "Buy: <project> · 2" naming, the person's Buy it as its first message; only for fab files or a KiCad project's own board. Driven live in the window (test/order/live_e2e.sh): Buy it in the header, the window goes to the buy thread | done | commerce |
 | Buy threads: `order_ask` (its answer is the person's message), `order_quote` (the upload waits behind its approval card; nothing leaves before the person's Send, and a copy sends nothing), `order_status`, `order.wait`; order tokens only in `<home>/orders/`. Tested on the hub with stand-ins, and once against the real `order/fabsrv` on loopback with a Stripe double (`test/order/local_server.py`), pilot and paid | done | commerce |
 | `order_review` check and record work for every agent (`settings/order.rs`; the design hash matches 0.14's, so a review it recorded stays current). The gate is in, tested through the agent's MCP path with stand-ins, but needs a buy thread to be reached: not driven on a client | partial | commerce |
@@ -175,7 +176,7 @@ Driven in one thread with the stand-in's `stream` mode (`tools:`, `todos:`, `age
 
 | # | Row | Status | What was driven |
 |---|---|---|---|
-| 98 | Project home (goal, intent, parts, boards) | partial | GPUI: clicking the project opens its home, which asks the hub `project.home {project}` and `fab.look {project}` (the card by project, with no estimate asked). Driven with `.backplane/intent.md` and `board.fab.json`: the home showed Goal & notes (goal, parts and notes as written), To order (LED board · pcb · board.fab.json), Boards (board.kicad_pcb), New thread and the threads. It has no Ready to order bar, Buy it or price, on purpose (row 56: Buy it is a thread's tool). Not ported from 0.14's web home: the embedded board viewer, the DRC/ERC chips, the README panel and the intent editor. Phones have no project home: a project row only folds its threads. |
+| 98 | Project home (goal, intent, parts, boards) | partial | GPUI: clicking the project opens its home, which asks the hub `project.home {project}` and `fab.look {project}` (the card by project, with no estimate asked). Driven with `.backplane/intent.md` and `board.fab.json`: the home showed Goal & notes (goal, parts and notes as written), To order (LED board · pcb · board.fab.json), Boards (board.kicad_pcb), New thread and the threads. It has no Ready to order bar, Buy it or price, on purpose (row 56: Buy it is a thread's tool). Not ported from 0.14's web home: the embedded board viewer, the DRC/ERC chips, the README panel and the intent editor. Phones have no project home: **not planned** (the person's decision); a project row only folds its threads. |
 | 99 | Ready to order bar | dropped | Dropped on purpose (see the Commerce section: Buy it is the first of the thread's tools instead). |
 | 100 | Order progress | done | The Order card and its steps, driven live in the window, on the Android emulator and the iOS simulator against the local order server and a Stripe double (6508e65764, 1c1fa2a9f6; `test/order/live_e2e.sh`, `live_android.sh`, `live_ios.sh`). |
 | 101 | Manufacturing review | partial | `order_review` check and record work for every agent and the gate is tested through the agent's MCP path; the live buy-thread runs (6508e65764, 1c1fa2a9f6) do not drive a review, so it is not driven on a client. |
@@ -203,7 +204,8 @@ Driven in one thread with the stand-in's `stream` mode (`tools:`, `todos:`, `age
 | `view.open`, `view.update` | done | answered by the hub's view path (`hub.rs`) |
 | `view.body`, `view.get`, `view.send`, `view.show`, `view.ver` | dropped | no hub or client on `main` names them |
 | `frontend.screen`, `frontend.history`, `mobile.screen`, `mobile.history` | dropped | screens for the old clients; the phones speak data/1 now |
-| Web client, Electron | dropped | no web client in this tree |
+| Web client | not planned | the person's decision: there is no web client in this tree and none is meant to come |
+| Electron | dropped | the desktop client is GPUI |
 
 ## Owned elsewhere
 

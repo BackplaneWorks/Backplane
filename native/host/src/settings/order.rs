@@ -351,7 +351,8 @@ async fn quoted(ag: &Arc<Agents>, r: Rec, q: Value) {
     if !md.trim().is_empty() { ag.commit_events(vec![json!({"$":"MessagePosted","thread":r.thread,"msg":format!("q:{}", r.id),"role":"assistant","text":md,"at":now_s()})]).await }
     let mut s = q.clone(); s["id"] = json!(r.id); card_set(ag, &r.thread, &sum(&s), &r.id, true).await;
     let _ = keep(&ag.hub.cfg.home, &r, "quoted");
-    wake(ag, &r.thread, &format!("The quote is posted in this thread. {}", said(&q))).await;
+    // a quote the server could not work out has nothing posted: the agent hears why, and the card says it (state "failed")
+    wake(ag, &r.thread, &if sv(&q, "status") == "failed" { format!("The quote could not be worked out. {}", said(&q)) } else { format!("The quote is posted in this thread. {}", said(&q)) }).await;
     tokio::spawn(watch(ag.clone(), r, "quoted".into()));
 }
 /// Od.poll then Od.quoted: until it is worked out. A moment the server cannot be reached does not end it; only the time does, and a quote that slow is still posted when it comes.
@@ -360,7 +361,7 @@ async fn poll(ag: Arc<Agents>, r: Rec) {
     for i in 0..600 {
         tokio::time::sleep(if i < 60 { TICK } else { TICK * 10 }).await;
         let q = get(&home, &r).await;
-        if pending(&q) || q["error"] == crate::settings::fab::UNREACHABLE { continue }
+        if pending(&q) || crate::settings::fab::transient(&q) { continue } // busy (429), restarting (5xx) or away: the quote is not lost
         return quoted(&ag, r, q).await
     }
     wake(&ag, &r.thread, "The quote could not be worked out: the order server did not finish it in time; ask order_status in a few minutes.").await
