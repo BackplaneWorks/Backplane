@@ -194,7 +194,7 @@ impl Backplane {
         String::new()
     }
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
-    fn do_send(&mut self,cx:&mut Context<Self>) {if self.popup_pick(cx){return;}self.ui_epoch+=1;
+    fn do_send(&mut self,cx:&mut Context<Self>) {if self.popup_enter(cx){return;}self.ui_epoch+=1;
         let text=self.input.read(cx).content.to_string();
         // a project's page on show: Send starts a thread in that project with this first message (0.14's home composer), never the thread
         // that was open before the page (it is not on screen)

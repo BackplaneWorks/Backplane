@@ -24,7 +24,7 @@ def key(name, shift=False):
     xt.XTestFakeKeyEvent(d, kc, 1, 0); x11.XSync(d, 0); time.sleep(0.03); xt.XTestFakeKeyEvent(d, kc, 0, 0)
     if shift: xt.XTestFakeKeyEvent(d, sk, 0, 0)
     x11.XSync(d, 0); time.sleep(0.04)
-NAMES = {' ': 'space', '.': 'period', ',': 'comma', '/': 'slash', ':': 'colon', '-': 'minus', '_': 'underscore', '@': 'at', '&': 'ampersand', '>': 'greater', '%': 'percent', '$': 'dollar'}
+NAMES = {' ': 'space', '.': 'period', ',': 'comma', '/': 'slash', ':': 'colon', '-': 'minus', '_': 'underscore', '@': 'at', '&': 'ampersand', '>': 'greater', '%': 'percent', '$': 'dollar', '#': 'numbersign', '~': 'asciitilde', '^': 'asciicircum'}
 def chord(names):
     held = [x11.XKeysymToKeycode(d, x11.XStringToKeysym({'ctrl': b'Control_L', 'shift': b'Shift_L', 'alt': b'Alt_L', 'super': b'Super_L'}[m])) for m in names[:-1]]
     for k in held: xt.XTestFakeKeyEvent(d, k, 1, 0)
@@ -36,7 +36,7 @@ if cmd == 'move': move(a[0], a[1])
 elif cmd == 'click': move(a[0], a[1]); click(int(a[2]) if len(a) > 2 else 1)
 elif cmd == 'type':
     for ch in a[0]:
-        name = NAMES.get(ch, ch); key(name, shift=ch.isupper() or ch in ':_@&>%$')
+        name = NAMES.get(ch, ch); key(name, shift=ch.isupper() or ch in ':_@&>%$#~^')
 elif cmd == 'key': key(a[0])
 elif cmd == 'chord': chord(a)
 elif cmd == 'focus':
