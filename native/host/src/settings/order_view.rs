@@ -50,7 +50,9 @@ pub fn status_note(st: &str, tracking: &str) -> String {
 }
 /// Order.said: what the agent hears back: never the token or the Buy now link.
 pub fn said(q: &Value) -> Value {
-    let note = if pending(q) { STATUS_SENT } else if payable(q) { "Backplane posted the quote with its Buy now link in this thread; do not repeat its table." }
+    let failed = sv(q, "status") == "failed";
+    let why = format!("The quote could not be worked out: {}. Nothing was posted with a Buy now link; say so in a line and offer to make a new quote.", sv(q, "error").trim_end_matches('.'));
+    let note = if failed { why.as_str() } else if sv(q, "status") == "expired" { "The quote has expired (the server keeps a quote for a few days). Make a new quote if the person still wants it." } else if pending(q) { STATUS_SENT } else if payable(q) { "Backplane posted the quote with its Buy now link in this thread; do not repeat its table." }
         else { "Backplane posted the quote in this thread with NO Buy now link: it cannot be paid until its problems are fixed. Do not say a link is there. Tell the person each problem in plain words and what fixes it (for a destination that cannot be priced, ask for another country), then make a new quote." };
     let or = |v: &Value, d: Value| if v.is_null() { d } else { v.clone() };
     json!({"status":sv(q, "status"),"total":q["quote"]["total"],"lead_days":q["quote"]["lead_days"],"problems":or(&q["quote"]["problems"], json!([])),"warnings":or(&q["quote"]["warnings"], json!([])),"order":q["order"],"note":note})

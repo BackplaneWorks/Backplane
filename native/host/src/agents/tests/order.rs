@@ -94,12 +94,14 @@ async fn cwd(ag: &Arc<Agents>) -> std::path::PathBuf { std::path::PathBuf::from(
 }
 
 // ---- quotes, against a stand-in order server ----
-#[derive(Default)] struct Fake { hits: Vec<String>, upload: String, polls: usize, ready_after: usize, order: Value, pilot: bool, refuse: bool }
+#[derive(Default)] struct Fake { hits: Vec<String>, upload: String, polls: usize, ready_after: usize, order: Value, pilot: bool, refuse: bool, flaky: usize, fails: bool }
 type Shared = Arc<StdMutex<Fake>>;
 const TOKEN: &str = "tok-0123456789abcdef-secret";
 fn answer_of(f: &mut Fake, line: &str) -> (u16, Value) {
     if line.starts_with("POST /v1/quotes") { return if f.refuse { (400, json!({"error":"unknown file type"})) } else { (202, json!({"id":"q_fake1","token":TOKEN,"status":"received"})) } }
     f.polls += 1;
+    if f.polls <= f.flaky { return (if f.polls == 1 { 503 } else { 429 }, json!({"error":"too many requests; try again in 1 min"})) }
+    if f.fails { return (200, json!({"id":"q_fake1","status":"failed","pilot":false,"error":"the quote could not be worked out; try again later"})) }
     if f.polls <= f.ready_after { return (200, json!({"id":"q_fake1","status":"analysing"})) }
     let mut q = json!({"id":"q_fake1","status":"ready","pilot":f.pilot,"quote":{"total":112.4,"lead_days":9,"pay_label":"Buy now · $112.40","markdown":"| Total | $112.40 |","problems":[],"warnings":[],"shipping":{"ddp":false}}});
     if !f.order.is_null() { q["order"] = f.order.clone() } (200, q)
@@ -207,6 +209,26 @@ fn posted(ev: &[Value], msg: &str) -> usize { ev.iter().filter(|e| is(e, "Messag
     let ev = until(&r.hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "system")).await;
     assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("The files were not taken: unknown file type"))), "{ev:?}");
     assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("order.wait.{T1}") && e["value"] == ""), "{ev:?}"); assert_eq!(r.ag.world().await.asks.len(), 0);
+    r.ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_busy_or_restarting_server_does_not_end_the_wait_for_a_quote() {
+    // the server answers 503 (nginx while it restarts) then 429 (the read budget) to the first polls: the quote is still on its way, not lost
+    let (r, f, _d) = buy_rig("or-flaky", 0).await; f.lock().unwrap().flaky = 2;
+    let from = len(&r.hub).await; call(&r.ag, "order_quote", json!({"dir":"mfg/1"})).await; let ask = ask_of(&r, from).await;
+    let from = len(&r.hub).await; rpc(&r.hub, "ask.answer", json!({"id":ask["id"],"answer":"accept"})).await;
+    let ev = until(&r.hub, from, 20, |ev| posted(ev, "q:q_fake1") == 1).await;
+    assert!(!ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("could not be worked out"))), "no false failure: {ev:?}");
+    assert!(f.lock().unwrap().polls >= 3, "it asked again"); r.ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_quote_the_server_could_not_work_out_says_why_and_posts_no_link() {
+    let (r, f, _d) = buy_rig("or-failed", 0).await; f.lock().unwrap().fails = true;
+    let from = len(&r.hub).await; call(&r.ag, "order_quote", json!({"dir":"mfg/1"})).await; let ask = ask_of(&r, from).await;
+    let from = len(&r.hub).await; rpc(&r.hub, "ask.answer", json!({"id":ask["id"],"answer":"accept"})).await;
+    let ev = until(&r.hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "system")).await;
+    let note = ev.iter().find(|e| is(e, "MessagePosted") && e["role"] == "system").unwrap()["text"].as_str().unwrap().to_string();
+    assert!(note.contains("could not be worked out") && note.contains("try again later") && !note.contains("is posted in this thread") && !note.contains("posted the quote"), "the agent hears why: {note}");
+    assert_eq!(posted(&ev, "q:q_fake1"), 0, "nothing to post");
+    let v: Value = serde_json::from_str(&r.ag.hub.setting(&format!("order.quote.{T1}")).await.unwrap()).unwrap(); assert_eq!((v["state"].clone(), v["payable"].clone()), (json!("failed"), json!(false)), "the card says it");
     r.ag.shutdown();
 }
 async fn quoted_rig(name: &str, pilot: bool) -> (super::lost::Rig, Shared) {

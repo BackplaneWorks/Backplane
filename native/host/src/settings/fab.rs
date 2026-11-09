@@ -1,5 +1,5 @@
 //! The project card:
-//! `fab.look {thread}` answers `{thread, intent, goal, parts, boards, label, estimate_problems, error, estimates, board_files, board_default, order}`
+//! `fab.look {thread}` answers `{thread, intent, goal, parts, boards, label, estimate_problems, error, estimates, board_files, board_default, order, lead_days, estimate_warnings}`
 //! for the thread's folder, and `fab.intent {thread, text}` writes `.backplane/intent.md` and answers the same card. The clients draw the goal,
 //! and the header's Buy it from it (the session's `fab.*` info keys are kept from this reply by the policy).
 //!
@@ -94,8 +94,23 @@ pub fn label(est_label: &str, note: &str) -> String { let l = if note.is_empty()
 pub fn card(thread: &str, intent: &str, ps: &[Value], boards: usize, est: &Value, on: bool, board_files: &[String], board_default: &str, order: &str) -> Value {
     let n = note(ps, est, on);
     let rows: Vec<Value> = ps.iter().map(|p| json!({"name":p["name"].as_str().unwrap_or(""),"kind":p["kind"].as_str().unwrap_or(""),"path":p["path"].as_str().unwrap_or("")})).collect();
+    let (lead, warns) = if on && est["error"].as_str().unwrap_or("").is_empty() { estimate_extras(&est["parts"]) } else { (0, String::new()) };
     json!({"thread":thread,"intent":intent,"goal":goal(intent),"parts":rows,"boards":boards,"label":label(est["label"].as_str().unwrap_or(""), &n),"estimate_problems":n,
-        "error":est["error"].as_str().unwrap_or(""),"estimates":on,"board_files":board_files,"board_default":board_default,"order":order})
+        "error":est["error"].as_str().unwrap_or(""),"estimates":on,"board_files":board_files,"board_default":board_default,"order":order,"lead_days":lead,"estimate_warnings":warns})
+}
+/// What `/v1/estimate` says per part beyond its price: the longest `lead_days` (0 when none) and the parts' `warnings`, each once, joined with "; ".
+fn estimate_extras(parts: &Value) -> (u64, String) {
+    let mut warns: Vec<String> = vec![]; let mut lead = 0;
+    for p in parts.as_array().into_iter().flatten() {
+        lead = lead.max(p["lead_days"].as_u64().unwrap_or(0));
+        for w in p["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::trim).filter(|w| !w.is_empty()) { if !warns.iter().any(|x| x == w) { warns.push(w.to_string()) } }
+    }
+    (lead, warns.join("; "))
+}
+/// `/v1/health`'s answer as the card's: a server whose price models are not loaded (`pricing: false`) cannot estimate, whatever else it says.
+fn health_got(code: &str, body: &str) -> Value {
+    let h = est_got(code, body);
+    if h["pricing"] == json!(false) { json!({"error":"pricing is not available right now", "http":"503"}) } else { h }
 }
 
 /// Od.ids: only a thread id's characters (letters, digits, dashes).
@@ -138,7 +153,12 @@ pub(crate) fn install_id(home: &Path) -> String {
 pub(crate) fn est_got(code: &str, body: &str) -> Value {
     if code.starts_with('2') { return serde_json::from_str(body).unwrap_or(Value::Null) }
     let said = serde_json::from_str::<Value>(body).ok().and_then(|v| v["error"].as_str().map(str::to_string));
-    json!({"error": if code == "000" { UNREACHABLE.to_string() } else { said.unwrap_or_else(|| format!("the order server said {code}")) }})
+    json!({"error": if code == "000" { UNREACHABLE.to_string() } else { said.unwrap_or_else(|| format!("the order server said {code}")) }, "http": code})
+}
+/// An answer that says only that the server is busy or away (unreachable, 429, 5xx behind nginx during a restart): the thing asked about is not lost, so ask again.
+pub(crate) fn transient(a: &Value) -> bool {
+    let c = a["http"].as_str().unwrap_or("");
+    c == "000" || c == "429" || c.starts_with('5')
 }
 /// One request through a curl config in the secrets folder (the URL, headers and body never on a command line). (status code, body)
 pub(crate) fn curl(home: &Path, url: &str, headers: &[String], body: Option<&str>) -> (String, String) {
@@ -208,7 +228,7 @@ pub fn look_in(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, serv
     let net = est_on && !crate::copy::on();
     let own = kicad::boards::own(&all); // only these are something to order; `boards` is what the viewer's picker offers
     let est = if ps.is_empty() {
-        if net && !own.is_empty() { let (c, b) = curl(home, &format!("{server}/v1/health"), &["Accept: application/json".into()], None); est_got(&c, &b) } else { Value::Null }
+        if net && !own.is_empty() { let (c, b) = curl(home, &format!("{server}/v1/health"), &["Accept: application/json".into()], None); health_got(&c, &b) } else { Value::Null }
     } else if net {
         let body = json!({"parts": ps.iter().map(|p| { let mut m = Map::new(); for k in ["name", "kind", "qty", "options", "features"] { m.insert(k.into(), p[k].clone()); } Value::Object(m) }).collect::<Vec<_>>()}).to_string();
         let (c, b) = curl(home, &format!("{server}/v1/estimate"), &["Content-Type: application/json".into(), format!("X-Backplane-Install: {}", install_id(home))], Some(&body)); est_got(&c, &b)
@@ -275,6 +295,42 @@ mod tests {
         assert_eq!(note(&ps, &prob, true), "No estimate for Main (a.fab.json): too big; odd");
         assert_eq!(note(&ps, &json!({"error":"x"}), true), "", "a failed estimate says its error, not a part problem"); assert_eq!(note(&ps, &Value::Null, false), "");
     }
+    #[test] fn the_estimates_lead_time_and_warnings_reach_the_card() {
+        let ps = parts(&[("a.fab.json".into(), r#"{"name":"Main","kind":"pcb","features":{}}"#.into()), ("b.fab.json".into(), r#"{"name":"Cover","kind":"3dp","features":{}}"#.into())]);
+        let est = json!({"label":"from $12","parts":[{"name":"Main","kind":"pcb","from":8,"lead_days":5,"warnings":["thin board","  "]},{"name":"Cover","kind":"3dp","from":4,"lead_days":9,"warnings":["thin board","fragile"]}]});
+        let c = card("t1", "", &ps, 0, &est, true, &[], "", ""); assert_eq!((c["lead_days"].clone(), c["estimate_warnings"].clone()), (json!(9), json!("thin board; fragile")));
+        let c = card("t1", "", &ps, 0, &json!({"error":"x","parts":[{"lead_days":3}]}), true, &[], "", ""); assert_eq!((c["lead_days"].clone(), c["estimate_warnings"].clone()), (json!(0), json!("")), "no estimate, no lead time");
+        assert_eq!(card("t1", "", &ps, 0, &est, false, &[], "", "")["lead_days"], 0, "estimates off");
+    }
+    /// The fab.json contract is the order server's catalog (`GET /v1/catalog`, order/fabsrv/catalog.py); the agents learn it from a hand-written list (`ORDER_PROMPT_FAB`).
+    /// Every kind, option, choice and feature the server knows must be named there, so a catalog change that forgets the prompt turns this red.
+    #[test] fn the_agents_fab_json_contract_names_everything_the_order_servers_catalog_has() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../order");
+        let py = "import importlib.util,json,sys\nsp=importlib.util.spec_from_file_location('catalog',sys.argv[1]+'/fabsrv/catalog.py');m=importlib.util.module_from_spec(sp);sp.loader.exec_module(m)\nprint(json.dumps({'schema':m.schema(),'min_assembled':m.MIN_ASSEMBLED}))";
+        let Ok(o) = std::process::Command::new("python3").args(["-I", "-c", py]).arg(&root).output() else { return }; // no python3 here: the order server's own tests cover the catalog
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        let cat: Value = serde_json::from_slice(&o.stdout).unwrap(); let prompt = crate::agents::prompt_text::ORDER_PROMPT_FAB.join("\n");
+        let word = |w: &str| prompt.match_indices(w).any(|(i, _)| { let b = prompt.as_bytes(); let ok = |c: u8| c.is_ascii_alphanumeric() || c == b'_'; (i == 0 || !ok(b[i - 1])) && (i + w.len() >= b.len() || !ok(b[i + w.len()])) });
+        let mut missing = vec![];
+        for (kind, k) in cat["schema"].as_object().unwrap() {
+            if !word(kind) { missing.push(format!("kind {kind}")) }
+            for f in k["options"].as_array().unwrap().iter().chain(k["features"].as_array().unwrap()) {
+                let key = f["key"].as_str().unwrap(); if !prompt.contains(key) { missing.push(format!("{kind}.{key}")) }
+                for c in f["choices"].as_array().into_iter().flatten() { let c = c.to_string(); let c = c.trim_matches('"'); if !prompt.contains(c) { missing.push(format!("{kind}.{key}={c}")) } }
+            }
+        }
+        assert!(missing.is_empty(), "the order server's catalog has what the agents' instructions do not name: {missing:?}");
+        let (n, asm) = (cat["schema"]["pcb"]["min_qty"].as_u64().unwrap(), cat["min_assembled"].as_u64().unwrap());
+        let buy = crate::agents::prompt_text::ORDER_PROMPT_BUY.join("\n");
+        assert!(buy.contains(&format!("at least {n} and assembly starts at {asm} boards")), "the buy instructions state the order minimums ({n} boards, assembly from {asm})");
+    }
+    #[test] fn a_server_without_its_price_models_is_not_a_healthy_one() {
+        assert_eq!(health_got("200", r#"{"ok":true,"version":"1","pricing":true}"#)["error"], Value::Null);
+        let h = health_got("200", r#"{"ok":true,"version":"1","pricing":false}"#); assert_eq!(h["error"], "pricing is not available right now"); assert!(transient(&h), "it may come back");
+        assert!(transient(&est_got("503", "<html>")) && transient(&est_got("429", r#"{"error":"too many requests"}"#)) && transient(&est_got("000", "")));
+        assert!(!transient(&est_got("404", r#"{"error":"no such quote"}"#)) && !transient(&est_got("400", "")) && !transient(&est_got("200", "{}")));
+        assert_eq!(est_got("404", r#"{"error":"no such quote"}"#)["error"], "no such quote");
+    }
     #[test] fn the_newest_paid_order_of_the_projects_buy_threads_is_its_state() {
         let o = tmp("orders"); put(o.join("q_1.json"), r#"{"id":"q_1","thread":"b1","status":"shipped"}"#);
         std::thread::sleep(std::time::Duration::from_millis(20)); put(o.join("q_2.json"), r#"{"id":"q_2","thread":"b1","status":"quoted"}"#); put(o.join("q_3.json"), r#"{"id":"q_3","thread":"other","status":"paid"}"#);
@@ -307,7 +363,7 @@ mod tests {
         assert_eq!((r["ok"].clone(), c["thread"].clone(), c["goal"].clone(), c["boards"].clone(), c["estimates"].clone(), c["order"].clone()), (json!(true), json!("t1"), json!(""), json!(0), json!(true), json!("")));
         assert_eq!(c["parts"], json!([{"name":"Amp","kind":"pcb","path":"amp.fab.json"}]));
         assert_eq!(c["error"], UNREACHABLE, "a test hub's order server is a dead local address"); assert_eq!(c["label"], ""); assert_eq!(c["board_files"], json!(["boards/amp/amp.kicad_pcb"]));
-        let keys: Vec<&str> = c.as_object().unwrap().keys().map(String::as_str).collect(); assert_eq!(keys, ["thread","intent","goal","parts","boards","label","estimate_problems","error","estimates","board_files","board_default","order"]);
+        let keys: Vec<&str> = c.as_object().unwrap().keys().map(String::as_str).collect(); assert_eq!(keys, ["thread","intent","goal","parts","boards","label","estimate_problems","error","estimates","board_files","board_default","order","lead_days","estimate_warnings"]);
         // the intent the person writes: the file, then the card
         let r = call("fab.intent", json!({"thread":"t1","text":"  # Goal\n\nAn amplifier for the desk.  "})).await; assert_eq!(r["result"]["goal"], "An amplifier for the desk.");
         assert_eq!(std::fs::read_to_string(work.join(".backplane/intent.md")).unwrap(), "# Goal\n\nAn amplifier for the desk.\n"); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(work.join(".backplane/intent.md")).unwrap().permissions().mode() & 0o777, 0o644), 0o644);
