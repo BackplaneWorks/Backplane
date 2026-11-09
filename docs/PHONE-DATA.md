@@ -85,7 +85,7 @@ The phones draw a thread as the desktop does; the words are the hub's.
 - `thread.create` also takes `effort` and `runtime` (`runtime` wins over `permission`). `thread.model` stays for older apps.
 
 ## Background work and locks (feature `work`; `native/host/src/data/ext.rs`)
-- `thread.work {thread}` → `{thread, subs}`: `subs` is the desktop panel's own data or null: `{word, live, rows:[{title, kind, state, doing, act?, value?, label?}]}`. A row with a `label` offers a button; `work.act {thread, act, value}` → `{}` sends it, `act` as the row names it: `lock-release`, `lock-cancel`, `work-cancel`.
+- `thread.work {thread}` → `{thread, subs}`: `subs` is the desktop panel's own data or null: `{word, live, rows:[{title, kind, state, doing, act?, value?, label?, key?, meta?, took?, last?, detail?}]}`. A subagent's row also says what it is (`meta`: "Claude Code · Explore · Opus 4.6 · 8 steps · 18.2k tokens"), how long (`took`), its newest step (`last`) and its drill-down (`detail`: `{where, model, ask, steps:[{kind, text}], outcome, more}`; `key` names it for an open/shut choice kept on the device). A row with a `label` offers a button; `work.act {thread, act, value}` → `{}` sends it, `act` as the row names it: `lock-release`, `lock-cancel`, `work-cancel`, `task-stop` (one subagent or background shell).
 - `locks.list` → `{locks:[{name, holder, thread, line, waiting}]}`: every lock with a holder or a queue; `line` is the hub's words, `thread` the holder's to open ("" for a shell helper).
 - Pushes: `k:"work"` `{thread, subs}` on a thread subscription, when its rows or any lock move; `k:"locks"` `{locks}` on a `lists` subscription.
 
