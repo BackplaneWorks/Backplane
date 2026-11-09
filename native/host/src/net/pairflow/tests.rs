@@ -196,5 +196,6 @@ fn clocked(n: &Node, host: &str, t: Arc<AtomicU64>) -> Peering {
     assert_eq!(normalize("box.ts.net:3787").as_deref(), Some("http://box.ts.net:3787"));
     assert_eq!(normalize(" http://100.1.2.3:3787/ ").as_deref(), Some("http://100.1.2.3:3787"));
     assert_eq!(normalize("https://b.ts.net").as_deref(), Some("https://b.ts.net"));
+    assert_eq!(normalize("box.t1.ts.net").as_deref(), Some("https://box.t1.ts.net"));
     assert!(normalize("").is_none() && normalize("http://x?y=1").is_none() && normalize("a b").is_none());
 }

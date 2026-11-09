@@ -56,11 +56,15 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
         r.push(x);
     }
     let mut p = row("Pair a machine", "Enter the other machine's address and the code it made. It then asks you there to approve.", vec![btn("Pair", "machine-pair", "", true)]);
-    p["fields"] = json!([field("maddr", "Address (http://box.example:3787)", &draft("maddr")), field("mcode", "Code", &draft("mcode"))]);
+    p["fields"] = json!([field("maddr", "Address (https://box.example.ts.net or http://box:3787)", &draft("maddr")), field("mcode", "Code", &draft("mcode"))]);
     r.push(p);
     let c = &d["code"];
     r.push(if c.is_object() {
-        row("Machine code", &format!("{} · enter it with {} on the other machine · works once, {}s left. You approve its request here.", s(c, "code"), s(c, "address"), c["left"].as_u64().unwrap_or(0)), vec![btn("Make another", "machine-code", "", false)])
+        {
+            let addrs: Vec<&str> = c["addresses"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            let at = if addrs.is_empty() { s(c, "address").to_string() } else { addrs.join(" or ") };
+            row("Machine code", &format!("{} · enter it with {} on the other machine · works once, {}s left. You approve its request here.", s(c, "code"), at, c["left"].as_u64().unwrap_or(0)), vec![btn("Make another", "machine-code", "", false)])
+        }
     } else { row("Make a code", "A code lets one machine ask to pair with this one. Nothing links until you approve its request here.", vec![btn("Make a code", "machine-code", "", false)]) });
     r
 }

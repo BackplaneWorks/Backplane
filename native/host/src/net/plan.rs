@@ -91,6 +91,22 @@ pub fn plan(routes: &[String], host: &str, port: u16, authority: &str, https: bo
     (default, choices)
 }
 
+/// Every address another machine can use to reach this hub, most reachable first: https ones (`tailscale serve`), the tailnet,
+/// each local network address the hub answers on, then any other. `first` (the hub's own word for its address) joins the
+/// pool. Loopback never; empty when there is none.
+pub fn reachable(first: &str, routes: &[String], host: &str, port: u16, ifaces: &[(String, String)], bound: &[String]) -> Vec<String> {
+    let (default, choices) = plan(routes, host, port, "", false, ifaces, bound);
+    let mut pool: Vec<String> = vec![];
+    push(&mut pool, first.to_string());
+    for r in routes { push(&mut pool, r.clone()) }
+    for c in choices.iter().filter(|c| c.kind != "local" && c.listening) { push(&mut pool, c.url.clone()) }
+    for d in default { push(&mut pool, d) }
+    pool.retain(|u| !loopback(u) && u.starts_with("http"));
+    let rank = |u: &String| if u.starts_with("https://") { 0 } else if tailnet_url(u) { 1 } else { 2 };
+    pool.sort_by_key(rank); // stable: the order above holds within a rank
+    pool
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +161,12 @@ mod tests {
         let (def, c) = plan(&[], "203.0.113.5", 3787, "", false, &ifs(&[("lo", "127.0.0.1")]), &[]);
         assert_eq!(kinds(&c), [("local", "http://127.0.0.1:3787", false)]);
         assert_eq!(def, ["http://203.0.113.5:3787"]);
+    }
+    #[test] fn reachable_ranks_https_then_tailnet_then_lan_and_drops_loopback() {
+        let routes = vec!["https://box.t.ts.net".to_string()];
+        let r = reachable("http://127.0.0.1:3797", &routes, "0.0.0.0", 3797, &ifs(HOME), &[]);
+        assert_eq!(r, ["https://box.t.ts.net", "http://100.101.102.103:3797", "http://192.168.77.2:3797", "http://10.0.0.5:3797"]);
+        assert!(reachable("http://127.0.0.1:3797", &[], "127.0.0.1", 3797, &[], &[]).is_empty());
+        assert_eq!(reachable("https://x.ts.net", &[], "127.0.0.1", 3797, &[], &[]), ["https://x.ts.net"]);
     }
 }

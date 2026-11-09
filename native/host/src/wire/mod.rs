@@ -86,6 +86,17 @@ pub async fn drain_refused(s: &mut TcpStream, declared: u64) {
         match tokio::time::timeout(left.min(std::time::Duration::from_secs(5)), s.read(&mut b)).await { Ok(Ok(k)) if k > 0 => n += k as u64, _ => break }
     }
 }
+fn esc(s: &str) -> String { s.chars().map(|c| match c { '&' => "&amp;".into(), '<' => "&lt;".into(), '>' => "&gt;".into(), '"' => "&quot;".into(), '\'' => "&#39;".into(), c => c.to_string() }).collect() }
+/// What a browser sees at the hub's address: whose it is, its version and how to connect. Public: nothing on it is a secret.
+pub fn landing_page(name: &str, version: &str) -> String {
+    let (n, v) = (esc(if name.is_empty() { "this machine" } else { name }), esc(version));
+    format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Backplane on {n}</title>\
+<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em;color:#222}}h1{{font-size:1.3em}}li{{margin:.5em 0}}small{{color:#666}}</style></head><body>\
+<h1>This is Backplane on {n}</h1><p><small>Version {v}</small></p><p>To connect, open the Backplane app:</p><ul>\
+<li>To link this machine's hub with yours: Settings &rarr; Machines.</li>\
+<li>To use this hub from the computer you are on: Settings &rarr; Hubs &rarr; Add a hub.</li>\
+<li>On a phone: scan the QR code from Settings &rarr; Devices.</li></ul></body></html>")
+}
 pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
     // health first: it asks nothing of the views, the presenter, the log or the credentials
     if req.route() == "/healthz" {
@@ -142,6 +153,11 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         "/client/capabilities" => if hub.auth.paired_request(&req) {
             response("200 OK", "application/json", "Cache-Control: no-store\r\n", serde_json::to_string(&hub::capabilities())?.as_bytes())
         } else { response("401 Unauthorized", "text/plain", "Cache-Control: no-store\r\n", b"paired authentication required") },
+        // the address typed into a browser, and a pairing link (`/pair#invite=...`, whose invite stays in the fragment, which never reaches the hub): a plain page, nothing secret, no credential
+        "/" | "/pair" if req.method == "GET" || req.method == "HEAD" => {
+            let body = landing_page(&crate::net::botnet::name().await, &hub.cfg.version);
+            response_for("200 OK", "text/html; charset=utf-8", "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\n", if req.method == "HEAD" { b"" } else { body.as_bytes() })
+        }
         other => match hub.http_for(other) {
             // DEFAULT-DENY: the credential is checked here for every route unless its handler says `own_auth`
             Some(h) if h.own_auth() || hub.auth.allowed(&req) => { let r = h.call_with(&hub.arc(), &req, hub.fresh_client()).await; response_for(r.status, &r.ctype, &r.extra, &r.body) }

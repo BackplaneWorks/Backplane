@@ -428,7 +428,7 @@ fn machine(f: &Facts, session: &Value, c: &Client) -> Step {
     if f.machines.is_object() {
         let draft_of = |k: &str| draft(session, &format!("@f.{k}")).to_string();
         rows.extend(crate::net::machinespage::rows(&f.machines, &draft_of));
-        if f.machines["code"]["address"].as_str().map_or(false, super::settings::loopback) { let mut w = row("Only this computer", LOCAL_CODE, vec![]); w["tone"] = json!("warn"); rows.push(w); }
+        if f.machines["code"]["address"].as_str().map_or(false, super::settings::loopback) && f.machines["code"]["addresses"].as_array().map_or(true, |a| a.is_empty()) { let mut w = row("Only this computer", LOCAL_CODE, vec![]); w["tone"] = json!("warn"); rows.push(w); }
     } else { rows.push(row("Linked machines", &if f.peers == 0 { "None yet.".to_string() } else { format!("{} linked.", f.peers) }, vec![])); }
     Step { id: "machine", group: "Devices", title: "Another machine".into(), body, rows, choices: vec![], panel: "", done, task: true }
 }
