@@ -30,6 +30,7 @@ data class DThread(
     val archived: Boolean, val provider: String, val model: String, val preview: String, val waiting: Int,
     val parent: String = "", val effort: String = "", val runtime: String = "", val chip: String = "", val settledAt: Long = 0, // chip: the composer's "claude / opus / high", in the hub's words
     val history: Boolean = false, // an old Scratch chat (feature history): listed under Conversation history, never under a project
+    val status: String = "", // the sidebar dot's word (feature status): active, waiting, blocked, failed, stalled, finished (the desktop's green dot: done, not yet settled), settled, inactive; "" from an older hub
 )
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
 data class DChoice(val label: String, val value: String, val on: Boolean, val ok: Boolean, val why: String)
@@ -56,7 +57,7 @@ fun parseEntry(o: JSONObject) = DEntry(
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null)
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), o.str("status"),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)
