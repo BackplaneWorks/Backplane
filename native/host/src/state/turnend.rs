@@ -173,6 +173,9 @@ fn alert_text(t: &str, max: usize) -> String { take(trim_ws(t), max).chars().map
 /// Alert.ask.say: what an ask's alert says: a paused browser task its one-line question, an order's question or approval its detail, any other its tool and detail
 pub fn ask_say(tool: &str, detail: &str) -> String {
     if tool == "task_pause" { return gstr(&parse_or_null(detail), "question", "").to_string() }
+    // the files' approval: its question and where it ships, not its list of files
+    if tool == "order_quote" { let mut l = detail.lines(); let q = l.next().unwrap_or("").trim(); let q = q.find('?').map_or(q, |i| &q[..=i]);
+        return l.next().map(str::trim).filter(|s| !s.is_empty()).map_or(q.to_string(), |to| format!("{q} {to}")) }
     let plain = tool.starts_with("order_ask") || tool == "order_quote" || tool == "checks_ok";
     if plain || tool.is_empty() { detail.to_string() } else { format!("{tool} {detail}") }
 }
@@ -321,6 +324,8 @@ mod tests {
         let rec = |c: Value| alert_asks(&st, 9, &[c])[0]["value"].as_str().unwrap().to_string();
         assert_eq!(rec(ask("Bash", "rm -rf x")), "ask\task-t1\tmem1\t50.9\tBash rm -rf x", "kind, key, the settle memory kept, stamp, tool and detail");
         assert_eq!(rec(ask("order_ask", "Ship to?")), "ask\task-t1\tmem1\t50.9\tShip to?", "an order's question is plain words");
+        assert_eq!(ask_say("order_quote", "Send 13 files from mfg/1 to Backplane's quote service? They are kept only to make what you order.\nShips to US (GA) · Main ×5\n\na.gbr\nb.gbr"),
+            "Send 13 files from mfg/1 to Backplane's quote service? Ships to US (GA) · Main ×5", "the files' approval: its question and where it ships, not the file list");
         assert_eq!(rec(ask("task_pause", r#"{"question":"Log in?"}"#)), "ask\task-t1\tmem1\t50.9\tLog in?");
         assert_eq!(rec(ask("settings_proposal", "x")), "ask\task-t1\tmem1\t50.9\tA settings proposal needs your review.");
         assert_eq!(rec(ask("Bash", "a\tb\nc")), "ask\task-t1\tmem1\t50.9\tBash a b c", "one line");
