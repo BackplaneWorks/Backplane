@@ -170,6 +170,7 @@ if [ -n "$FEATURES" ] && { [ -f "$GT/$PROFILE/libcef.so" ] || [ -f "$RT/libcef.s
 fi
 mark "browser helper"
 # the browser helper (tools/browser, bun): the hub looks for `backplane-browser` beside itself, and without one every Browser tab fails to open
+command -v bun >/dev/null 2>&1 || { [ -x "${BUN_INSTALL:-$HOME/.bun}/bin/bun" ] && PATH=${BUN_INSTALL:-$HOME/.bun}/bin:$PATH; }   # bun's installer puts it here, on PATH only in login shells (a builder a hook started has none)
 command -v bun >/dev/null 2>&1 && { . "$ROOT/scripts/bun-pin.sh"; bun_pin_check bun; }   # a release builds it with deploy/bun-version's Bun
 if command -v bun >/dev/null 2>&1 && ( cd "$ROOT/tools/browser" && bun install --frozen-lockfile >/dev/null 2>&1 && bun build.ts "$D/backplane-browser" >/dev/null 2>&1 ); then :
 else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-browser; [ -x "$prev" ] && cp "$prev" "$D/" || echo "warning: no browser helper built (bun missing or the build failed) and none to reuse" >&2; fi
