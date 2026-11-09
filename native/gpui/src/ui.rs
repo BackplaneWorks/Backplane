@@ -265,8 +265,16 @@ impl Backplane {
             "step" => crate::screens::histbar::step_row(cx, light, &e),
             // s03: the call that runs now, in an open fold of the running turn: its name in the accent with the live mark beside it
             _ if !text.is_empty() && e["now"] == true => div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("text"))
-                .child(div().size(px(6.)).flex_shrink_0().bg(c("accent"))).child(div().text_color(c("accent")).child(string(&e, "label"))).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text)).into_any_element(),
-            _ if !text.is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).child(text).into_any_element(),
+                .child(div().size(px(6.)).flex_shrink_0().bg(c("accent"))).child(div().text_color(c("accent")).child(string(&e, "label"))).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.lines().next().unwrap_or("").to_string())).into_any_element(),
+            // an activity: its kind faint, what it did on one line (a heredoc's first line, "…"), as 0.14's .act; an error or a restart says all of it
+            _ if !text.is_empty() => {
+                let tone = string(&e, "tone"); let whole = tone.contains("error") || tone.contains("restart");
+                let line = if whole { text.clone() } else { let mut l = text.lines().next().unwrap_or("").to_string(); if text.trim_end().contains('\n') { l.push_str(" …"); } l };
+                let body = div().flex_1().min_w_0().when(!whole, |d| d.overflow_hidden().whitespace_nowrap().text_ellipsis()).when(tone.contains("error") && !tone.contains("restart"), |d| d.text_color(c("bad"))).child(line);
+                div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(string(&e, "label"))).child(body).into_any_element()
+            }
+            // a call whose summary is only its name (WebSearch, TaskUpdate...): its name alone, so an open fold shows as many rows as it counts
+            _ if !string(&e, "label").is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).into_any_element(),
             _ => div().into_any_element(),
         };
         let inner = div().w_full().max_w(px(930.)).px_4().child(row);
