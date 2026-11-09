@@ -97,7 +97,10 @@ pub fn shown(kind: &str, path: &str) -> Option<(String, Option<String>)> {
 }
 
 /// Whether the panel is open: a viewer page is on, or the thread has a diff.
-pub fn is_open(thread: &Value) -> bool { thread["diff"].is_object() || thread["viewer"]["open"].as_str().map_or(false, |o| !o.is_empty()) }
+/// Whether the pane is up: a page the hub has open, or a rail press it has not answered yet (`pane_page`): the pane opens and shuts at the press.
+pub fn is_open(thread: &Value) -> bool { pane_page(thread).is_some() }
+/// Whether the hub's picture has a page open (Diff included).
+fn hub_open(thread: &Value) -> bool { thread["diff"].is_object() || thread["viewer"]["open"].as_str().map_or(false, |o| !o.is_empty()) }
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, cmd: Command) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
@@ -574,7 +577,7 @@ fn pane_page(thread: &Value) -> Option<(String, bool)> {
     let open = viewer["open"].as_str().unwrap_or("");
     let press = pressed(if diff_on { "diff" } else { open });
     if press.as_deref() == Some("") && !diff_on { return None }
-    if is_open(thread) { return Some((open.to_string(), false)) }
+    if hub_open(thread) { return Some((open.to_string(), false)) }
     press.filter(|k| !k.is_empty()).map(|k| (k, true))
 }
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
@@ -707,6 +710,16 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn the_pane_is_up_at_the_press_and_down_at_the_press_that_shuts_it() {
+        let shut = j(r#"{"viewer":{"open":""}}"#); let board = j(r#"{"viewer":{"open":"board","choices":[{"label":"Board","value":"board","on":true}]}}"#);
+        assert!(!is_open(&shut));
+        let _ = rail_command(&shut["viewer"], false, None, "board");
+        assert!(is_open(&shut), "pressed: up before the hub answers");
+        assert!(is_open(&board), "answered");
+        let _ = rail_command(&board["viewer"], false, None, "board");
+        assert!(!is_open(&board), "a press that shuts it: down before the hub answers");
+        assert!(!is_open(&shut));
+    }
     #[test] fn a_press_shows_its_page_until_the_hub_has_answered() {
         assert!(matches!(rail_command(&j(r#"{"open":""}"#), false, None, "board"), Command::Action(a, k) if a == "view" && k == "board"));
         assert_eq!(pressed(""), Some("board".to_string()), "pressed, not answered: the pane opens as Board at once");
