@@ -3,7 +3,7 @@
 //! Edit (back into the draft), Up, Remove, and Resume on the first row of a held queue.
 use crate::{hub::Command, string, theme, Backplane};
 use gpui::{prelude::*, *};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, PartialEq)]
 pub struct Row { pub msg: String, pub tag: String, pub text: String, pub buttons: Vec<(String, String, String)> }
@@ -12,8 +12,9 @@ pub fn rows(thread: &Value) -> Vec<Row> {
         buttons: r["buttons"].as_array().into_iter().flatten().map(|b| (string(b, "label"), string(b, "action"), string(b, "value"))).filter(|b| !b.1.is_empty()).collect() }).collect()
 }
 
-pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value) -> Option<AnyElement> {
-    let rs = rows(thread);
+pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, unsent: &[Value]) -> Option<AnyElement> {
+    // this window's own unsent messages (unsent.rs) first: they were written before anything the hub holds
+    let mut rs = rows(&json!({"queue": unsent})); rs.extend(rows(thread));
     if rs.is_empty() { return None }
     let c = |n: &str| theme::color(light, n);
     let more = string(thread, "queued");
@@ -26,6 +27,11 @@ pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value) -> Option
                     div().id(SharedString::from(format!("q-{i}-{action}"))).flex_shrink_0().px_2().border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).cursor_pointer()
                         .hover(|s| s.bg(c("raise")).text_color(c("text"))).child(label)
                         .on_click(cx.listener(move |this, _, _, cx| {
+                            // the window's own (unsent.rs): Edit puts the text back after the draft, Remove drops it; nothing goes to the hub
+                            if action == "u-edit" || action == "u-remove" {
+                                if let Some(text) = this.screens.unsent.remove(&value) { if action == "u-edit" { this.unsent_to_draft(&text, cx) } }
+                                cx.notify(); return;
+                            }
                             // Edit: the hub's reply carries the draft with the message in it; take it once, and the keyboard goes there
                             if action == "q-edit" { this.await_completion(cx); this.want_focus = true; }
                             let _ = this.tx.try_send(Command::Action(action.clone(), value.clone())); cx.notify();

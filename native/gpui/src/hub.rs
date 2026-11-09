@@ -187,7 +187,8 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 Command::Sub(key)=>{v.session["sub"]=json!(key);if v.view_id.is_empty(){continue;}v.request("view.update",json!({}))},
                 Command::Select(id)=>{let id=unqualify(&id);v.want_page=None;v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.session["sub"]=json!("");v.view_id.clear();v.request("view.open",json!({}))},
                 Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.draft_key();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
-                Command::Draft(text)=>{let id=v.draft_key();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"draft","value":text}))},
+                // typed while the view is not open (reconnecting): kept in the session the next view.open carries; a view.action now would name no view (STALE_VIEW)
+                Command::Draft(text)=>{let id=v.draft_key();v.session["drafts"][id]=json!(text);if v.view_id.is_empty(){continue;}v.request("view.action",json!({"action":"draft","value":text}))},
                 Command::History(cursor)=>{if v.view_id.is_empty()||!v.pending.is_empty()||v.paging.is_some(){v.want_page=Some(cursor);continue;}v.page(&cursor)},
                 Command::Page(value)=>{ensure!(!v.view_id.is_empty(),"view not ready");v.request("view.action",json!({"action":"native-sidebar-page","value":value}))},
                 Command::Action(action,value)=>{if action.starts_with("row-")||action.starts_with("delete")||action.starts_with("rename"){eprintln!("GPUI_LOG {{\"action\":{},\"value\":{}}}",Value::String(action.clone()),Value::String(value.chars().take(80).collect()));}v.request("view.action",json!({"action":action,"value":value}))},

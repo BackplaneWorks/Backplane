@@ -110,12 +110,13 @@ impl Backplane {
                 self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());self.adopt_new(cx);
             },
             Event::Plot(b)=>self.plot_received(b,cx),
+            Event::Answer(id,reply) if id==screens::unsent::TAG=>{let why=if reply["ok"]==true {String::new()} else {hub::rpc_error(&reply)};self.screens.unsent.answered_out(reply["ok"]==true,&why);self.send_unsent();cx.notify();},
             Event::Answer(id,reply)=>if !screens::projects::answered(self,id,&reply,cx) {screens::improvements::answered(self,id,reply,cx)},
             Event::Data(tag,v)=>if tag=="acct-moveall" {screens::accounts::moved(self,&v)} else {screens::accounts::got(self,v,cx)},
             Event::Voice(f)=>self.voice_frame(f,cx),
             Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
             Event::Term(key,pid,b,reset,state)=>self.term_frame(&key,pid,&b,reset,state,cx),
-            Event::Hello=>self.term_rejoin(),
+            Event::Hello=>{self.term_rejoin();self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
@@ -128,10 +129,10 @@ impl Backplane {
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
-            Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s}));}self.status=s;if self.status=="Connected"{self.error.clear();screens::hubbar::connected(&mut self.screens.hubbar);}},
+            Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s}));}self.status=s;if self.status=="Connected"{self.error.clear();screens::hubbar::connected(&mut self.screens.hubbar);self.send_unsent();}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
-            Event::Error(e)=>{self.error=e;},
+            Event::Error(e)=>{self.error=e;self.screens.unsent.lost();},
             Event::Unpaired=>screens::pair::revoked(self,cx),
             Event::Refused(e)=>{self.error=e;},
             Event::Note(n)=>{self.note=n;},
@@ -205,10 +206,20 @@ impl Backplane {
         }
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());
+        // no hub now: the message waits in the window's own outbox (screens/unsent.rs), in the strip over the box, and goes once the hub is back
+        let th=self.data["thread"]["id"].as_str().unwrap_or("").to_string();
+        if self.status!="Connected"&&!text.trim().is_empty()&&!has_att&&!th.is_empty()&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text) {
+            self.screens.unsent.push(&th,&text,std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0,|d|d.as_millis() as u64));
+            self.input.update(cx,|i,cx|i.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");cx.notify();return;
+        }
         if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {if !text.trim().is_empty()&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();self.note.clear();}cx.notify();
     }
     /// The message is drawn at the end of the open thread the moment it is sent; the hub's picture, which has the real entry, replaces it (history::merge
     /// keeps the rows up to the first one the hub also has, so an echo past it is dropped, not doubled).
+    /// Edit on an unsent message: its text after what is in the box, and the keyboard there.
+    pub fn unsent_to_draft(&mut self,text:&str,cx:&mut Context<Self>){let d=self.input.read(cx).content.to_string();let merged=if d.trim().is_empty(){text.to_string()}else{format!("{d}\n\n{text}")};self.input.update(cx,|i,cx|i.set(merged.clone(),cx));self.screens.drafts.set(&self.selected,&merged);self.drafts.insert(self.selected.clone(),merged);self.want_focus=true;}
+    /// The window's unsent messages go, one at a time, while it is connected (each answer sends the next).
+    fn send_unsent(&mut self){if !self.screens.unsent.live{return;}if let Some(i)=self.screens.unsent.next(){if self.tx.try_send(hub::Command::Ask("turn.start".into(),screens::unsent::Unsent::request(&i),screens::unsent::TAG)).is_err(){self.screens.unsent.lost();}}}
     fn echo_sent(&mut self,text:&str){
         if self.data["thread"]["id"].as_str().map_or(true,str::is_empty)||self.data["thread"]["loading"]==true{return;}
         let Some(rows)=self.data["thread"]["entries"].as_array_mut() else {return};
