@@ -212,6 +212,8 @@ fn act_entry(thread: &str, id: &str, role: &str, akind: &str, text: &str, at: u6
     use crate::present::thread as pt;
     let e = pt::Ent { id: id.into(), msg: false, role: role.into(), akind: akind.into(), text: text.into(), at };
     Some(match role {
+        // a `/give` handoff received: its card (docs/PHONE-DATA.md, "Handoffs")
+        h if h == crate::present::thread::HANDOFF_TONE && crate::present::thread::handoff_card(text).is_some() => { let c = crate::present::thread::handoff_card(text).unwrap_or_default(); json!({"id":id,"kind":"handoff","text":c["summary"],"handoff":c,"at":at}) }
         "tool" => { let mut v = json!({"id":id,"kind":"tool","text":text,"at":at,"tool":{"name":pt::shown_name(akind),"summary":if text == akind { String::new() } else { clip(text, 200) },"state":"done"}});
             // an Agent or Task call names the subagent it started: `thread.sub {thread, key: sub}` opens its view
             let sub = crate::present::panels::sub_key(akind, id); if !sub.is_empty() { v["tool"]["sub"] = json!(sub) } v }

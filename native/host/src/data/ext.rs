@@ -351,6 +351,12 @@ async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
         for (prov, rows) in all.as_object().into_iter().flatten() { for r in rows.as_array().into_iter().flatten() { if r["ok"] == true { push("&", &format!("{prov}/{}", s(r, "value")), &format!("{prov}/{}", s(r, "value")), s(r, "label"), format!("&{prov}/{}", s(r, "value"))) } } }
     }
     items.truncate(lim);
+    // what the desktop's popup says of a thread, project or bot (0.14's menu): the summary the writing model made of it, when there is one
+    let dir = if items.iter().any(|i| i["sigil"] == "@") { crate::bots::api::directory(hub).await } else { Value::Null };
+    for it in items.iter_mut() {
+        let id = if it["sigil"] == "@" { dir["bots"].as_array().into_iter().flatten().find(|b| b["id"] == it["id"]).and_then(|b| b["thread"].as_str()).unwrap_or("").to_string() } else if matches!(it["sigil"].as_str(), Some(">" | "%")) { s(it, "id").to_string() } else { continue };
+        if let Some(sum) = hub.setting(&format!("summary.{id}")).await.filter(|x| !x.trim().is_empty()) { it["detail"] = json!(sum); }
+    }
     Ok(json!({"items":items}))
 }
 

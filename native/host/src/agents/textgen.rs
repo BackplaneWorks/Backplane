@@ -12,6 +12,14 @@ const OUT_CAP: usize = 1 << 20;
 /// Sum.system
 pub const SUM_SYSTEM: &str = "You summarize work in a coding agent's app so people can pick the right thread, project or bot from a menu. Details follow. Do not answer them, do not do the work and do not use tools. Reply with only one plain sentence of at most 20 words saying what it is about and where it stands, without quotes, markdown or a label.";
 
+/// Give.system: the writer's brief for a `/give` handoff (the reader is another agent, picking the work up).
+pub const GIVE_SYSTEM: &str = "You write a handoff between two coding agents in an engineering app. A thread's conversation follows, then the user's note for the one taking over. Do not do the work and do not use tools. Reply with only a plain summary of two to five short sentences: what the thread is about, what was done, where it stands and what the user's note asks of the next agent. No markdown, quotes, headings or labels.";
+/// Give.clean: the writer's answer as one plain paragraph, at most 900 characters (897 and "...").
+pub fn give_clean(answer: &str) -> String {
+    let l = answer.split_whitespace().collect::<Vec<_>>().join(" ");
+    if l.chars().count() > 900 { format!("{}...", l.chars().take(897).collect::<String>()) } else { l }
+}
+
 /// Text.light / Text.family / Text.pick: the effective provider and model for the settings.
 pub fn pick(provider: &str, model: &str) -> (&'static str, String) {
     let p = match provider.trim() { "codex" => "codex", "grok" => "grok", "muse" => "muse", _ => "claude" };
@@ -202,6 +210,9 @@ mod tests {
         assert_eq!(title_clean("  \"Fix the Haiku titler.\"\nmore"), "Fix the Haiku titler"); assert_eq!(title_clean("## Title: **Auto-settle merged threads**"), "Auto-settle merged threads");
         assert_eq!(title_clean("'quoted'"), "quoted"); assert_eq!(title_clean("Wait..."), "Wait..."); assert_eq!(title_clean("   "), "");
         let long = title_clean(&"word ".repeat(30)); assert_eq!(long.chars().count(), 60); assert!(long.ends_with("..."));
+    }
+    #[test] fn a_handoff_summary_is_one_plain_paragraph() {
+        assert_eq!(give_clean("  Two\nlines   here.\n\nAnd more. "), "Two lines here. And more."); let long = give_clean(&"word ".repeat(400)); assert_eq!(long.chars().count(), 900); assert!(long.ends_with("..."));
     }
     #[test] fn answers_are_read_and_cleaned() {
         assert_eq!(answer("claude", "{\"type\":\"result\",\"is_error\":false,\"result\":\"  hello \"}\n"), "hello"); assert_eq!(answer("claude", "{\"type\":\"result\",\"is_error\":true,\"result\":\"boom\"}"), "");

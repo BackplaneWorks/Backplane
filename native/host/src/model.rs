@@ -183,7 +183,7 @@ impl Model {
             "ActivityLogged" => (s("act"), "act", s("tone"), s("kind"), s("summary")),
             _ => (format!("remind:{}:{}", s("id"), at), "act", "remind".into(), "reminder".into(), s("text")),
         };
-        let text = if cut && kind == "act" { text.chars().take(513).collect() } else { text };
+        let text = if cut && kind == "act" && role != "handoff" /* a handoff's card is its text, whole */ { text.chars().take(513).collect() } else { text };
         let _ = thread; let th = s("thread");
         let src = { let f = link_from(&id).to_string(); if !f.is_empty() && f != th { f } else { String::new() } };
         Ok(Row { seq: ent.seq as u64, ord: ent.ord as u64, id, thread: th, src, kind, role, akind, text, at })

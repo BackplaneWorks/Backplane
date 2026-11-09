@@ -43,7 +43,7 @@ pub(super) async fn resolve(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
                 // (a linked machine's thread by its link id or that machine's name; this machine's own name is this machine: mirror::thread_ref)
                 let m = hub.mirrors(); let here = m.here();
                 let named = m.shown(|far| crate::mirror::thread_ref(&id, &here, &|t| g.threads.get(t).map_or(false, |x| !x.deleted), far));
-                if let Some(t) = named { Ok(json!({"kind":"thread","thread":t})) }
+                if let Some(t) = named { Ok(json!({"kind":"thread","thread":t,"msg":r.frag})) }
                 else if id.contains('~') && hub.far().map_or(false, |f| f.has(&id)) { Ok(json!({"kind":"thread","thread":id})) }
                 else if id.contains('~') { none("That thread is on a machine this hub does not mirror (yet).") } else { none("That thread is not on this hub.") }
             }

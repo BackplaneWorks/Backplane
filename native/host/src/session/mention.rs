@@ -73,6 +73,9 @@ pub fn thread_skill_facts(st: &State, thread: &str) -> (String, String, bool) {
     (cwd, t.provider.clone(), bound)
 }
 
+/// What a popup row says about a thread, project or bot's thread: the one-sentence summary the writing model made of it (`summary.<id>`; 0.14's Sum.of), else `plain`.
+pub fn about(st: &State, id: &str, plain: String) -> String { st.settings.get(&format!("summary.{id}")).map(|s| s.trim()).filter(|s| !s.is_empty()).map_or(plain, str::to_string) }
+
 /// The popup rows for the draft in thread `here`: `{word, label, desc}` each; empty unless the last word is a sigil word with something to offer.
 pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
     if token(draft).starts_with('$') {
@@ -87,7 +90,7 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
     match sig {
         '@' => for b in st.bots_nav.values() {
             let s = slug(&b.name); let sc = score(&s, &b.name, &q);
-            if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("@{s}"), about: "bot".into(), score: sc, same: false, at: b.talked.max(b.created) }) }
+            if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("@{s}"), about: about(st, &b.thread, "bot".into()), score: sc, same: false, at: b.talked.max(b.created) }) }
         },
         '~' => for m in &ms {
             let s = slug(&m.name); let sc = score(&s, &m.name, &q);
@@ -110,7 +113,7 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
                 let sc = score(&s, &t.title, &q);
                 if seen.get(&s).copied().unwrap_or(0) > 1 { s = format!("{s}-{}", id.rsplit('-').next().unwrap_or("")) } // Refs.seq: the number the id ends with
                 let proj = st.projects.get(&t.project).map(|p| p.title.clone()).unwrap_or_default();
-                if sc > 0 { c.push(Cand { word: format!(">{s}"), about: if proj.is_empty() { "thread".into() } else { format!("thread · {proj}") }, score: sc, same: t.project == here_project, at: t.activity }) }
+                if sc > 0 { c.push(Cand { word: format!(">{s}"), about: about(st, id, if proj.is_empty() { "thread".into() } else { format!("thread · {proj}") }), score: sc, same: t.project == here_project, at: t.activity }) }
             }
         }
         '&' => {
@@ -124,9 +127,9 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
                 }
             }
         }
-        '%' => for (_, p) in st.projects.iter().filter(|(_, p)| !p.removed) {
+        '%' => for (_id, p) in st.projects.iter().filter(|(_, p)| !p.removed) {
             let s = slug(&p.title); let sc = score(&s, &p.title, &q);
-            if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("%{s}"), about: "project".into(), score: sc, same: false, at: p.created }) }
+            if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("%{s}"), about: about(st, _id, "project".into()), score: sc, same: false, at: p.created }) }
         },
         _ => for r in st.rooms_nav.values() {
             let s = slug(&r.name); let sc = score(&s, &r.name, &q);
@@ -226,6 +229,15 @@ mod tests {
         let got: Vec<(String, String, String)> = r.iter().map(|x| (x["word"].as_str().unwrap().into(), x["kind"].as_str().unwrap().into(), x["id"].as_str().unwrap().into())).collect();
         assert_eq!(got, [(">fix-perf-lag".into(), "thread".into(), "h|t1-1".into()), ("%rocket-lab".into(), "project".into(), "h|p1".into())]);
         assert!(refs_in(&st, "h", "no references here").is_empty());
+    }
+    #[test] fn a_row_says_what_the_writing_model_made_of_it_else_where_it_is() {
+        let mut st = State::new();
+        for l in [r#"{"$":"ProjectCreated","id":"p1","title":"Rocket Lab","root":"/r","at":10}"#, r#"{"$":"ThreadCreated","id":"t1-1","project":"p1","title":"Fix perf lag","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":11}"#,
+                  r#"{"$":"ThreadCreated","id":"t2-2","project":"p1","title":"Other","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":12}"#] { st.apply_line(l); }
+        let d = |st: &State, q: &str| rows(st, "t2-2", q)[0]["desc"].as_str().unwrap().to_string();
+        assert_eq!((d(&st, ">fix").as_str(), d(&st, "%roc").as_str()), ("thread · Rocket Lab", "project"));
+        st.apply_line(r#"{"$":"SettingSet","key":"summary.t1-1","value":"Profiling the render loop","at":13}"#); st.apply_line(r#"{"$":"SettingSet","key":"summary.p1","value":"Rockets and their boards","at":14}"#);
+        assert_eq!((d(&st, ">fix").as_str(), d(&st, "%roc").as_str()), ("Profiling the render loop", "Rockets and their boards"));
     }
     #[test] fn models_are_offered_from_the_hubs_rows() {
         fn rows_json() -> String { r#"{"claude":[{"value":"opus","label":"Opus 5.5","ok":true,"why":""},{"value":"sonnet","label":"Sonnet 5","ok":true,"why":""}],"codex":[{"value":"gpt","label":"GPT","ok":false,"why":"x"}]}"#.into() }

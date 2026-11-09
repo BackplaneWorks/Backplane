@@ -369,9 +369,23 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "lock.release", "lock.cancel", "work.cancel", "task.stop"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
+            // the hub's own requests (`/give`, from commands/give.rs): a connection (client 1 and up) could say anything there, so it is never heard
+            if matches!(method, "text.write" | "thread.hand") && who.client != 0 { return vec![err(id, "unknown method")] }
+            // text.write {system, input}: the writing model's answer ("" when it cannot be run), under the Writing setting, off to the side
+            if method == "text.write" {
+                let a = self.0.one_shot(p.get("system").and_then(Value::as_str).unwrap_or(""), p.get("input").and_then(Value::as_str).unwrap_or("")).await.unwrap_or_default();
+                return vec![json!({"t":"reply","id":id,"ok":true,"result":{"text":a}})]
+            }
+            // thread.hand {thread, msg, text, from, extra}: a handoff reaches the thread as a message from another thread: a running turn is steered at once, an idle thread starts one
+            if method == "thread.hand" {
+                let s_ = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                if !self.0.world().await.threads.contains_key(&s_("thread")) { return vec![err(id, "unknown thread")] }
+                let extra: Vec<Value> = p.get("extra").and_then(Value::as_array).cloned().unwrap_or_default();
+                return vec![match self.0.inbound("user", &s_("thread"), &s_("msg"), &s_("text"), (s_("from"), "thread".into(), String::new()), extra).await { Ok(()) => ok(id), Err(e) => err(id, &e) }]
+            }
             if method == "ask.answer" { return match self.0.answer(p.get("id").and_then(Value::as_str).unwrap_or(""), p.get("answer").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] } }
             let th = p.get("thread").and_then(Value::as_str).unwrap_or("");
             if th.is_empty() || !self.0.world().await.threads.contains_key(th) { eprintln!("agents: {method} refused: unknown thread {th:?}"); return vec![err(id, "unknown thread")] } // refused, and said so on the hub's log
