@@ -357,7 +357,7 @@ fn freecad(opts: Opts, cache: &Cache, gui: bool, program: &str, jobs: Vec<Job>, 
     let spawn = |n: usize| -> Vec<std::process::Child> {
         (0..n).filter_map(|_| {
             let mut c = nice_cmd(program, opts.nice);
-            if gui { c.arg(&py).env("QT_QPA_PLATFORM", "offscreen").env("BP_GUI", "1"); }
+            if gui { stepglb::soft_gl(&mut c); c.arg(&py).env("QT_QPA_PLATFORM", "offscreen").env("BP_GUI", "1"); }
             else { c.args(["-c", "import os; exec(open(os.environ['BP_PY']).read())"]).env("BP_PY", &py); }
             c.env("BP_JOBS", &list).env("BP_TOL", &tol).spawn().ok()
         }).collect()

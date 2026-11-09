@@ -140,12 +140,25 @@ fn wait(c: &mut Command, secs: u64) -> Option<i32> {
         std::thread::sleep(Duration::from_millis(50));
     }
 }
+/// FreeCAD's GUI, offscreen, only reads and meshes: it gets no display and no GPU. With the session's DISPLAY and Qt's gtk3 theme it opened
+/// the person's display and an OpenGL context on the GPU that draws their desktop, once a process (three convert at once); on 2026-11-09 an
+/// NVIDIA driver ran out of address space as they did and stalled the whole desktop. Without them it meshes the same (Qt says it has no GL and
+/// goes on). Unix only: the variables are X11's, Wayland's, Qt's, glvnd's and Mesa's; elsewhere nothing changes.
+pub fn soft_gl(c: &mut Command) {
+    #[cfg(all(unix, not(target_os = "macos")))] {
+        c.env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").env_remove("QT_QPA_PLATFORMTHEME");
+        c.env("LIBGL_ALWAYS_SOFTWARE", "1").env("__GLX_VENDOR_LIBRARY_NAME", "mesa").env("QT_QUICK_BACKEND", "software");
+        if let Some(f) = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json", "/etc/glvnd/egl_vendor.d/50_mesa.json"].into_iter().find(|f| Path::new(f).is_file()) { c.env("__EGL_VENDOR_LIBRARY_FILENAMES", f); }
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))] { let _ = c; }
+}
 /// viaFreecadGui: the file meshed by FreeCAD's GUI, offscreen, with its colours: its triangle count, 0 when it failed
 fn via_gui(gui: &str, input: &str, out: &str, tol: &str, nice: bool) -> u64 {
     if gui.is_empty() { return 0 }
     let py = format!("{out}.gui.py");
     if std::fs::write(&py, FREECAD_GUI_PY).is_err() { return 0 }
     let mut c = command(nice, gui);
+    soft_gl(&mut c);
     c.arg(&py).envs([("QT_QPA_PLATFORM", "offscreen"), ("BP_IN", input), ("BP_OUT", out), ("BP_TOL", tol)]).stdout(Stdio::null()).stderr(Stdio::null());
     wait(&mut c, FREECAD_SECS);
     let n = std::fs::read_to_string(format!("{out}.n")).unwrap_or_default().split(' ').next().and_then(|x| x.trim().parse::<u64>().ok()).unwrap_or(0);
@@ -242,6 +255,13 @@ mod tests {
         std::fs::write(&from, "x").unwrap(); assert_eq!(publish(Ran::default(), &from, &o), Ran::default()); assert!(have(&o) && !from.exists());
     }
     #[test] fn two_stages_of_one_model_are_two_folders() { let d = dir("st"); let o = d.join("o").to_string_lossy().into_owned(); assert_ne!(stage(&o, "export-").unwrap(), stage(&o, "export-").unwrap()); }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test] fn freecad_meshes_with_software_gl() {
+        let mut c = Command::new("true"); soft_gl(&mut c);
+        let env: std::collections::HashMap<_, _> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(env["LIBGL_ALWAYS_SOFTWARE"].as_deref(), Some("1")); assert_eq!(env["__GLX_VENDOR_LIBRARY_NAME"].as_deref(), Some("mesa"));
+        for k in ["DISPLAY", "WAYLAND_DISPLAY", "QT_QPA_PLATFORMTHEME"] { assert_eq!(env[k], None, "{k}: removed, no display"); }
+    }
     #[test] fn fnv_is_key_hash() { assert_eq!(fnv(""), 2166136261); assert_eq!(fnv("a"), 0xe40c292c); }
     #[test] fn mac_app_bundles_are_looked_for_system_wide_and_in_the_users_applications() {
         let v = mac_apps("FreeCAD.app/Contents/Resources/bin/freecadcmd"); assert_eq!(v[0], "/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd");
