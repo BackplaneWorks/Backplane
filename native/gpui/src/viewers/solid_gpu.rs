@@ -20,15 +20,16 @@ struct Vert { p: [f32; 3], nxy: u32, nz: u32, color: u32, group: u32 }
 #[derive(blade_macros::ShaderData)] struct BgData { params: Params }
 
 fn snorm(v: f32) -> u32 { ((v.clamp(-1.0, 1.0) * 32767.0).round() as i16 as u16) as u32 }
-/// The vertices to draw, every opaque triangle first, and how many of them are opaque.
-fn vertices(m: &Mesh) -> (Vec<Vert>, u32) {
+/// The vertices to draw, every opaque triangle first, and how many of them are opaque. `group`: the fade group of all of them (a layer of
+/// the model), else each triangle's own (Mesh::groups).
+fn vertices(m: &Mesh, group: Option<u32>) -> (Vec<Vert>, u32) {
     let mut out = Vec::with_capacity(m.tris.len() * 3);
     for clear in [false, true] {
         for (i, t) in m.tris.iter().enumerate() {
             if (m.colors[i] >> 24 != 0) != clear { continue }
             for k in 0..3 {
                 let n = &m.normals[i][3 * k..3 * k + 3];
-                out.push(Vert { p: [t[3 * k], t[3 * k + 1], t[3 * k + 2]], nxy: snorm(n[0]) | snorm(n[1]) << 16, nz: snorm(n[2]), color: m.colors[i], group: m.groups.get(i).copied().unwrap_or(0) });
+                out.push(Vert { p: [t[3 * k], t[3 * k + 1], t[3 * k + 2]], nxy: snorm(n[0]) | snorm(n[1]) << 16, nz: snorm(n[2]), color: m.colors[i], group: group.unwrap_or_else(|| m.groups.get(i).copied().unwrap_or(0)) });
             }
         }
     }
@@ -36,12 +37,14 @@ fn vertices(m: &Mesh) -> (Vec<Vert>, u32) {
     (out, opaque)
 }
 
+#[cfg(test)] pub fn bench_vertices(m: &Mesh) -> usize { vertices(m, None).0.len() }
 struct Target { size: (u32, u32), msaa: gpu::Texture, msaa_view: gpu::TextureView, depth: gpu::Texture, depth_view: gpu::TextureView, resolve: gpu::Texture, resolve_view: gpu::TextureView, read: gpu::Buffer }
-/// `mesh` names the model in the buffer: a Weak keeps its allocation, so no later mesh can take its address and be mistaken for it.
-struct Model { mesh: Weak<Mesh>, verts: gpu::Buffer, opaque: u32, total: u32 }
+/// A layer of the model in a buffer of its own (the board, a part frame): `mesh` names it (a Weak keeps its allocation, so no later mesh can
+/// take its address and be mistaken for it), `group` its fade group (None: each triangle's own).
+struct Model { mesh: Weak<Mesh>, group: Option<u32>, verts: gpu::Buffer, opaque: u32, total: u32 }
 struct Pipelines { bg: gpu::RenderPipeline, opaque: gpu::RenderPipeline, depth: gpu::RenderPipeline, blend: gpu::RenderPipeline, fade: gpu::RenderPipeline }
 /// `fades`: each group's fade (Mesh::groups), host memory rewritten for each picture, `cap` floats long
-pub struct Gpu { ctx: gpu::Context, encoder: gpu::CommandEncoder, pipes: Pipelines, targets: Vec<Target>, model: Option<Model>, fades: Option<(gpu::Buffer, usize)>, last: Option<gpu::SyncPoint>, pub device: String }
+pub struct Gpu { ctx: gpu::Context, encoder: gpu::CommandEncoder, pipes: Pipelines, targets: Vec<Target>, models: Vec<Model>, fades: Option<(gpu::Buffer, usize)>, last: Option<gpu::SyncPoint>, pub device: String }
 
 /// Copies `n` bytes out of the read buffer. It is host memory the CPU does not cache (blade offers none that is: `Upload` is write-combined system memory, and
 /// `Shared` can be the card's own memory across the bus, 75 to 150 ms for one 1600 x 1000 picture on an RTX 5080), where ordinary loads crawl and streaming
@@ -104,28 +107,37 @@ impl Gpu {
         if ctx.capabilities().sample_count_mask & SAMPLES == 0 || (info.is_software_emulated && want != "gpu") { return None }
         let encoder = ctx.create_command_encoder(gpu::CommandEncoderDesc { name: "solid", buffer_count: 2 });
         let pipes = pipelines(&ctx);
-        Some(Gpu { ctx, encoder, pipes, targets: Vec::new(), model: None, fades: None, last: None, device: info.device_name })
+        Some(Gpu { ctx, encoder, pipes, targets: Vec::new(), models: Vec::new(), fades: None, last: None, device: info.device_name })
     }
     fn wait(&mut self) -> bool { match self.last.take() { Some(s) => self.ctx.wait_for(&s, WAIT_MS), None => true } }
-    /// The mesh into a buffer of its own, once: it stays until another model comes.
-    fn upload(&mut self, mesh: &Arc<Mesh>) -> bool {
-        if self.model.as_ref().is_some_and(|m| Weak::as_ptr(&m.mesh) == Arc::as_ptr(mesh)) { return true }
+    /// The layers into buffers of their own, each once: a layer already there stays (a part that arrives uploads only itself), one no
+    /// longer in the model goes.
+    fn upload(&mut self, layers: &[(&Arc<Mesh>, Option<u32>)]) -> bool {
+        let same = |m: &Model, l: &(&Arc<Mesh>, Option<u32>)| Weak::as_ptr(&m.mesh) == Arc::as_ptr(l.0) && m.group == l.1;
+        if self.models.len() == layers.len() && self.models.iter().zip(layers).all(|(m, l)| same(m, l)) { return true }
         if !self.wait() { return false }
-        if let Some(old) = self.model.take() { self.ctx.destroy_buffer(old.verts); }
-        let (data, opaque) = vertices(mesh);
-        let bytes: &[u8] = bytemuck::cast_slice(&data);
-        let staging = self.ctx.create_buffer(gpu::BufferDesc { name: "solid-upload", size: bytes.len() as u64, memory: gpu::Memory::Upload });
-        let verts = self.ctx.create_buffer(gpu::BufferDesc { name: "solid-verts", size: bytes.len() as u64, memory: gpu::Memory::Device });
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), staging.data(), bytes.len()); }
-        self.ctx.sync_buffer(staging);
-        self.encoder.start();
-        self.encoder.transfer("solid-upload").copy_buffer_to_buffer(staging.into(), verts.into(), bytes.len() as u64);
-        let done = self.ctx.submit(&mut self.encoder);
-        let ok = self.ctx.wait_for(&done, WAIT_MS);
-        self.ctx.destroy_buffer(staging);
-        if !ok { self.ctx.destroy_buffer(verts); return false }
-        self.model = Some(Model { mesh: Arc::downgrade(mesh), verts, opaque, total: data.len() as u32 });
-        true
+        let mut old = std::mem::take(&mut self.models);
+        let mut ok = true;
+        for l in layers {
+            if let Some(i) = old.iter().position(|m| same(m, l)) { self.models.push(old.swap_remove(i)); continue }
+            if !ok { continue }
+            let (data, opaque) = vertices(l.0, l.1);
+            if data.is_empty() { continue }
+            let bytes: &[u8] = bytemuck::cast_slice(&data);
+            let staging = self.ctx.create_buffer(gpu::BufferDesc { name: "solid-upload", size: bytes.len() as u64, memory: gpu::Memory::Upload });
+            let verts = self.ctx.create_buffer(gpu::BufferDesc { name: "solid-verts", size: bytes.len() as u64, memory: gpu::Memory::Device });
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), staging.data(), bytes.len()); }
+            self.ctx.sync_buffer(staging);
+            self.encoder.start();
+            self.encoder.transfer("solid-upload").copy_buffer_to_buffer(staging.into(), verts.into(), bytes.len() as u64);
+            let done = self.ctx.submit(&mut self.encoder);
+            ok = self.ctx.wait_for(&done, WAIT_MS);
+            self.ctx.destroy_buffer(staging);
+            if !ok { self.ctx.destroy_buffer(verts); continue }
+            self.models.push(Model { mesh: Arc::downgrade(l.0), group: l.1, verts, opaque, total: data.len() as u32 });
+        }
+        for m in old { self.ctx.destroy_buffer(m.verts); } // in the model's order: kept or uploaded, as asked
+        ok
     }
     /// The targets for this size; the draft's and the picture at rest's both stay, they alternate through a drag.
     fn target(&mut self, size: (u32, u32)) -> usize {
@@ -149,6 +161,8 @@ impl Gpu {
     }
     /// One picture as BGRA bytes, None when the GPU failed it.
     pub fn render(&mut self, mesh: &Arc<Mesh>, cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> { self.render_faded(mesh, &[], cam, w, h) }
+    /// `render` with each group of triangles at its fade.
+    pub fn render_faded(&mut self, mesh: &Arc<Mesh>, fades: &[f32], cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> { self.render_layers(&[(mesh, None)], fades, cam, w, h) }
     /// The fades into their buffer (group 0, the board, is always 1); whether any group is between 0 and 1.
     fn put_fades(&mut self, fades: &[f32]) -> bool {
         let n = fades.len().max(1);
@@ -164,9 +178,9 @@ impl Gpu {
         self.ctx.sync_buffer(buf);
         any
     }
-    /// `render` with each group of triangles at its fade.
-    pub fn render_faded(&mut self, mesh: &Arc<Mesh>, fades: &[f32], cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> {
-        if !self.upload(mesh) { return None }
+    /// A picture of the model in layers (each a mesh and its fade group, None: each triangle's own), each group at its fade.
+    pub fn render_layers(&mut self, layers: &[(&Arc<Mesh>, Option<u32>)], fades: &[f32], cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> {
+        if !self.upload(layers) { return None }
         let size = (w as u32, h as u32);
         let at = self.target(size);
         if !self.wait() { return None }
@@ -174,8 +188,8 @@ impl Gpu {
         if !self.wait() { return None }
         let fading = self.put_fades(fades);
         let fbuf = self.fades?.0;
-        let (src, m) = (self.targets[at].resolve, self.model.as_ref()?);
-        let (verts, opaque, total) = (m.verts, m.opaque, m.total);
+        let src = self.targets[at].resolve;
+        let draws: Vec<(gpu::Buffer, u32, u32)> = self.models.iter().map(|m| (m.verts, m.opaque, m.total)).collect();
         let f = 1.0 / (FOV / 2.0).tan(); let v = |a: [f32; 3]| [a[0], a[1], a[2], 0.0]; let e = cam.eye();
         let params = Params { eye: v(e), right: v(cam.right), up: v(cam.up), fwd: v(cam.fwd), proj: [f * h as f32 / w as f32, f, (cam.dist * 0.02).max(1e-3), 0.0 /* the pass: 0 at rest, 1 fading parts only */],
             bg: [to_linear(BG[2]), to_linear(BG[1]), to_linear(BG[0]), 1.0] };
@@ -185,13 +199,14 @@ impl Gpu {
                 colors: &[gpu::RenderTarget { view: msaa, init_op: gpu::InitOp::Clear(gpu::TextureColor::OpaqueBlack), finish_op: gpu::FinishOp::ResolveTo(resolve) }],
                 depth_stencil: Some(gpu::RenderTarget { view: depth, init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack), finish_op: gpu::FinishOp::Discard }) });
             { let mut p = pass.with(&self.pipes.bg); p.bind(0, &BgData { params }); p.draw(0, 3, 0, 1); }
-            let data = ModelData { params, verts: verts.into(), fades: fbuf.into() };
-            if opaque > 0 { let mut p = pass.with(&self.pipes.opaque); p.bind(0, &data); p.draw(0, opaque, 0, 1); }
-            if total > opaque {
-                { let mut p = pass.with(&self.pipes.depth); p.bind(0, &data); p.draw(opaque, total - opaque, 0, 1); }
-                { let mut p = pass.with(&self.pipes.blend); p.bind(0, &data); p.draw(opaque, total - opaque, 0, 1); }
+            // every layer's opaque triangles, then the translucent ones' depth, then their colour, then the parts fading in, over all of it
+            let data = |verts: gpu::Buffer, params: Params| ModelData { params, verts: verts.into(), fades: fbuf.into() };
+            { let mut p = pass.with(&self.pipes.opaque); for &(v, opaque, _) in &draws { if opaque > 0 { p.bind(0, &data(v, params)); p.draw(0, opaque, 0, 1); } } }
+            if draws.iter().any(|d| d.2 > d.1) {
+                { let mut p = pass.with(&self.pipes.depth); for &(v, opaque, total) in &draws { if total > opaque { p.bind(0, &data(v, params)); p.draw(opaque, total - opaque, 0, 1); } } }
+                { let mut p = pass.with(&self.pipes.blend); for &(v, opaque, total) in &draws { if total > opaque { p.bind(0, &data(v, params)); p.draw(opaque, total - opaque, 0, 1); } } }
             }
-            if fading { let mut q = params; q.proj[3] = 1.0; let mut p = pass.with(&self.pipes.fade); p.bind(0, &ModelData { params: q, verts: verts.into(), fades: fbuf.into() }); p.draw(0, total, 0, 1); }
+            if fading { let mut q = params; q.proj[3] = 1.0; let mut p = pass.with(&self.pipes.fade); for &(v, _, total) in &draws { p.bind(0, &data(v, q)); p.draw(0, total, 0, 1); } }
         }
         self.encoder.transfer("solid-read").copy_texture_to_buffer(src.into(), read.into(), size.0 * 4, gpu::Extent { width: size.0, height: size.1, depth: 1 });
         let done = self.ctx.submit(&mut self.encoder);
@@ -204,13 +219,13 @@ impl Gpu {
 }
 impl Gpu {
     /// The model's buffer off the device (its page was put away); the next picture uploads it again.
-    pub fn forget(&mut self) { if self.wait() { if let Some(m) = self.model.take() { self.ctx.destroy_buffer(m.verts); } } }
+    pub fn forget(&mut self) { if self.wait() { for m in std::mem::take(&mut self.models) { self.ctx.destroy_buffer(m.verts); } } }
 }
 impl Drop for Gpu {
     fn drop(&mut self) {
         self.wait();
         for t in std::mem::take(&mut self.targets) { self.drop_target(t); }
-        if let Some(m) = self.model.take() { self.ctx.destroy_buffer(m.verts); }
+        for m in std::mem::take(&mut self.models) { self.ctx.destroy_buffer(m.verts); }
         if let Some((f, _)) = self.fades.take() { self.ctx.destroy_buffer(f); }
         for p in [&mut self.pipes.bg, &mut self.pipes.opaque, &mut self.pipes.depth, &mut self.pipes.blend, &mut self.pipes.fade] { self.ctx.destroy_render_pipeline(p); }
         self.ctx.destroy_command_encoder(&mut self.encoder);
