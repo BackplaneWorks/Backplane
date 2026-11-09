@@ -100,3 +100,7 @@ data class DHistory(val count: Int = 0, val live: List<DThread> = emptyList(), v
             (before?.rows ?: emptyList()) + parseThreads(o.optJSONArray("threads")), if (o.isNull("next") || !o.has("next")) null else o.optString("next"))
     }
 }
+
+/** A row of the queue strip over the composer (`thread.queue`, docs/PHONE-DATA.md), the hub's or this phone's own outbox's. */
+data class QButton(val label: String, val action: String, val value: String)
+data class QRow(val msg: String, val tag: String, val text: String, val buttons: List<QButton>)

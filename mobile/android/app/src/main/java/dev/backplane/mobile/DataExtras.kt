@@ -322,7 +322,7 @@ fun FindInThread(tid: String, close: () -> Unit, go: (String) -> Unit) {
 /** What waits for the agent (the desktop's queue strip over the composer): each message's first line and the buttons the hub gives it (Steer sends it into the running turn now,
  *  Edit takes it back into the draft, Remove drops it). */
 @Composable
-fun QueueStrip(tid: String, rows: List<DataClient.QRow>, edit: (String) -> Unit) {
+fun QueueStrip(tid: String, rows: List<QRow>, edit: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var err by remember { mutableStateOf("") }
     Column(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("thread.queue"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -333,8 +333,12 @@ fun QueueStrip(tid: String, rows: List<DataClient.QRow>, edit: (String) -> Unit)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
                 r.buttons.filter { it.action != "q-up" }.forEach { b ->
-                    DMono(b.label, if (b.action == "q-steer") dcs.primary else if (b.action == "q-remove") dcs.error else dcs.onSurfaceVariant, 12,
-                        Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { scope.launch { try { val t = DataClient.queueAct(tid, b); if (b.action == "q-edit" && t.isNotEmpty()) edit(t); err = "" } catch (e: Exception) { err = e.message ?: "" } } }
+                    // q-* the hub's queue, o-* its far outbox, u-* this phone's own outbox (Outbox.kt; never sent to the hub)
+                    DMono(b.label, if (b.action == "q-steer") dcs.primary else if (b.action.endsWith("-remove")) dcs.error else dcs.onSurfaceVariant, 12,
+                        Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { scope.launch { try {
+                            val t = if (Outbox.isOwn(b.action)) DataClient.outboxAct(b) else DataClient.queueAct(tid, b)
+                            if (b.action.endsWith("-edit") && t.isNotEmpty()) edit(t); err = ""
+                        } catch (e: Exception) { err = e.message ?: "" } } }
                             .padding(horizontal = 10.dp, vertical = 5.dp).testTag("queue.${b.action}"), bold = b.action == "q-steer")
                 }
             }

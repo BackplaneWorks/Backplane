@@ -72,6 +72,7 @@ object DataClient {
         settledOpen = prefs().getStringSet("settled.open", emptySet())!!.toSet(); historyOpen = prefs().getBoolean("history.open", false)
         System.getenv("BACKPLANE_LINK")?.let { links = it.split(' ').filter(String::isNotBlank) }
         loadCache()
+        outbox = Outbox.decode(runCatching { outboxFile().readText() }.getOrNull())
         if (link != null) connect()
         // while threads work the process stays (LiveService): their alerts reach this phone with the app off screen
         scope.launch { androidx.compose.runtime.snapshotFlow { threads.filter { it.state == "working" && !it.archived && !it.history }.map { it.title } to foreground }.collect { (w, front) -> LiveService.sync(app, w, front) } }
@@ -124,7 +125,7 @@ object DataClient {
     /** bumped by unpair(): the pairing screen starts again with empty fields */
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
-    fun unpair() { links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
+    fun unpair() { keepOutbox(Outbox()); links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
     private fun reset() { notice = HubNotice(); star = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
@@ -186,7 +187,7 @@ object DataClient {
             "reply" -> {
                 val d = calls.remove(o.optInt("id", -1)) ?: return
                 if (o.optBoolean("ok")) d.complete(o.optJSONObject("result") ?: JSONObject())
-                else { val e = o.opt("error"); d.completeExceptionally(Exception(if (e is JSONObject) e.optString("message", e.optString("code")) else e?.toString() ?: "The hub refused")) }
+                else { val e = o.opt("error"); d.completeExceptionally(Refused(if (e is JSONObject) e.optString("message", e.optString("code")) else e?.toString() ?: "The hub refused")) }
             }
             "d" -> push(o)
             "voice" -> DataVoice.frame(o)
@@ -197,6 +198,8 @@ object DataClient {
         }
     }
 
+    /** the hub answered ok:false: it said no (any other failure of a call is the socket's) */
+    class Refused(message: String) : Exception(message)
     suspend fun call(m: String, p: JSONObject = JSONObject()): JSONObject {
         val w = ws
         if (conn == Conn.OFFLINE || w == null) throw Exception("Offline")
@@ -215,6 +218,7 @@ object DataClient {
             syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
             subOpen?.let { (t, k) -> subSub = 0; runCatching { readSub(t, k, g) } }
+            flushOutbox(g)
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
     }
     suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks(); loadHistory() } } }
@@ -390,6 +394,7 @@ object DataClient {
             "entry" -> o.optJSONObject("entry")?.let { put(parseEntry(it), o.optString("thread")) }
             "work" -> setWork(o.optString("thread"), o.optJSONObject("subs"))
             "sub" -> if (subOpen == o.optString("thread") to o.optString("key")) o.optJSONObject("view")?.let { subView = parseSubView(it); subGone = false }
+            "queue" -> { val tid = o.optString("thread"); scope.launch { runCatching { loadQueue(tid) } } } // a far thread's held messages moved
             "term" -> Terms.push(o)
             "locks" -> locks = parseLocks(o.optJSONArray("locks"))
             "text" -> {
@@ -424,6 +429,14 @@ object DataClient {
     fun send(tid: String, text: String, images: List<ByteArray> = emptyList()) {
         val t = text.trim(); if (t.isEmpty() && images.isEmpty()) return
         val cid = UUID.randomUUID().toString()
+        sendError = sendError - tid
+        // no socket (or older ones still waiting): into the outbox, in order behind them; a turn running is no reason to wait (the hub takes it at once)
+        val hub = hubKey()
+        if (images.isEmpty() && hub != null && (conn != Conn.ONLINE || outbox.next(hub) != null)) {
+            keepOutbox(outbox.push(hub, tid, t, cid)); setDraft(tid, ""); fields[tid] = TextFieldValue("")
+            if (conn == Conn.ONLINE) { val g = gen; scope.launch { flushOutbox(g) } }
+            return
+        }
         val local = DEntry("local:$cid", "user", t, System.currentTimeMillis(), clientId = cid, sending = true, localImages = images)
         entries = entries + (tid to (entries[tid] ?: emptyList()) + local)
         setDraft(tid, ""); fields[tid] = TextFieldValue("")
@@ -444,10 +457,63 @@ object DataClient {
             // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
             e?.attachments?.forEachIndexed { i, a -> if (i < images.size) pictures.put(a.id, images[i]) }
             e?.let { put(it, tid) }
-            if (has("queue")) runCatching { loadQueue(tid) } // sent while a turn runs, it waits in the queue
+            if (has("queue")) runCatching { loadQueue(tid) } // a far thread's message may be held (Sending/Unsent)
+        } catch (e: Refused) {
+            // the hub said no: the words come back to the draft, with why
+            entries = entries + (tid to (entries[tid] ?: emptyList()).filter { it.clientId != cid || !it.sending })
+            refused(tid, text, e.message ?: "The hub refused")
         } catch (e: Exception) {
+            // the socket went: a text-only message waits in the outbox (sent again with the same clientId, so it posts once)
+            val hub = hubKey()
+            if (images.isEmpty() && hub != null) {
+                entries = entries + (tid to (entries[tid] ?: emptyList()).filter { it.clientId != cid || !it.sending })
+                keepOutbox(outbox.push(hub, tid, text, cid)); return
+            }
             entries = entries + (tid to (entries[tid] ?: emptyList()).map { if (it.clientId == cid && it.sending) it.copy(sending = false, failed = true) else it })
         }
+    }
+    // ---- the outbox (Outbox.kt): what was written with the socket down, on disk, sent in order once connected
+    var outbox by mutableStateOf(Outbox()); private set
+    /** the hub's refusal of a message, shown over the composer until the next send */
+    var sendError by mutableStateOf<Map<String, String>>(emptyMap()); private set
+    private var flushing = false
+    private fun hubKey() = link?.let { Pairing.key(it) }
+    private fun outboxFile() = java.io.File(app.filesDir, "outbox-v1.json")
+    private fun keepOutbox(o: Outbox) {
+        if (o == outbox) return
+        outbox = o
+        runCatching { val f = outboxFile(); val tmp = java.io.File(f.path + ".tmp"); tmp.writeText(o.encode()); tmp.renameTo(f) }
+    }
+    fun outboxRows(tid: String): List<QRow> = hubKey()?.let { outbox.rows(it, tid) } ?: emptyList()
+    /** Edit or Remove on an Unsent row of this phone's: out of the outbox; Edit answers the text for the draft. */
+    fun outboxAct(b: QButton): String {
+        val it = outbox.item(b.value) ?: return ""
+        keepOutbox(outbox.remove(b.value))
+        return if (b.action == Outbox.EDIT) it.text else ""
+    }
+    private fun refused(tid: String, text: String, why: String) {
+        sendError = sendError + (tid to why)
+        val d = field(tid).text
+        val t = if (d.isBlank()) text else d.trimEnd() + "\n\n" + text
+        setField(tid, TextFieldValue(t, androidx.compose.ui.text.TextRange(t.length)), typed = false)
+    }
+    private suspend fun flushOutbox(g: Int) {
+        if (flushing) return
+        flushing = true
+        try {
+            while (g == gen && conn == Conn.ONLINE) {
+                val hub = hubKey() ?: break
+                val it = outbox.next(hub) ?: break
+                try {
+                    val r = call("message.send", JSONObject().put("thread", it.thread).put("text", it.text).put("clientId", it.clientId))
+                    keepOutbox(outbox.sent(it.clientId))
+                    r.optJSONObject("entry")?.let(::parseEntry)?.let { e -> put(e, it.thread) }
+                    if (has("queue")) runCatching { loadQueue(it.thread) }
+                } catch (e: Refused) {
+                    keepOutbox(outbox.remove(it.clientId)); refused(it.thread, it.text, e.message ?: "The hub refused")
+                } catch (e: Exception) { break } // the socket went again: the rest waits for the next connect
+            }
+        } finally { flushing = false }
     }
     fun answer(tid: String, ask: String, option: String) = scope.launch {
         try {
@@ -569,8 +635,6 @@ object DataClient {
     }
     suspend fun buy(tid: String): String = call("order.buy", JSONObject().put("thread", tid)).optString("thread")
     // what waits for the agent (feature queue): the desktop's strip over the composer, rows and buttons as the hub has them; read again on the thread's pushes and after a send
-    data class QButton(val label: String, val action: String, val value: String)
-    data class QRow(val msg: String, val tag: String, val text: String, val buttons: List<QButton>)
     var queues by mutableStateOf<Map<String, List<QRow>>>(emptyMap()); private set
     suspend fun loadQueue(tid: String) {
         if (!has("queue")) return
@@ -580,7 +644,7 @@ object DataClient {
         }
         queues = if (rows.isEmpty()) queues - tid else queues + (tid to rows)
     }
-    /** A queue row's button; q-edit answers the message's text (it left the queue) for the draft. */
+    /** A queue row's button; q-edit and o-edit answer the message's text (it left the queue, or the far outbox) for the draft. */
     suspend fun queueAct(tid: String, b: QButton): String {
         val r = call("queue.act", JSONObject().put("thread", tid).put("action", b.action).put("value", b.value))
         runCatching { loadQueue(tid) }

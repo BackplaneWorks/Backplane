@@ -196,6 +196,15 @@ struct DAttachmentData: Decodable { var mime: String; var data: String
     enum CodingKeys: String, CodingKey { case mime, data }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); mime = c.str(.mime); data = c.str(.data) } }
 
+/// `thread.queue` → `{rows, more}`; `queue.act` → `{}`, or `{text}` from q-edit / o-edit (rows: Outbox.swift `DQueueRow`)
+struct DQueueReply: Decodable {
+    var rows: [DQueueRow]
+    var more: String
+    enum CodingKeys: String, CodingKey { case rows, more }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); rows = (try? c.decode([DQueueRow].self, forKey: .rows)) ?? []; more = c.str(.more) }
+}
+struct DQueueActReply: Decodable { var text: String? }
+
 struct DError: Error, LocalizedError {
     var code: String
     var message: String

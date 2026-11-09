@@ -519,8 +519,9 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
     val scope = rememberCoroutineScope()
     DisposableEffect(id) { DataClient.openThread(id); onDispose { DataClient.closeThread(id) } }
     val thread = DataClient.threads.firstOrNull { it.id == id }
-    // a message sent while a turn runs waits in the queue (its strip over the composer), not in the conversation, until the agent takes it
-    val queue = DataClient.queues[id] ?: emptyList()
+    // what cannot be delivered right away waits in the strip over the composer, not in the conversation: the hub's rows (a far thread's
+    // held messages, a queued one), then this phone's own outbox (written with the socket down). A turn running is no reason to wait.
+    val queue = (DataClient.queues[id] ?: emptyList()) + DataClient.outboxRows(id)
     val all = DataClient.entries[id] ?: emptyList()
     val list = remember(all, queue) { if (queue.isEmpty()) all else { val q = queue.map { it.msg }.toSet(); all.filter { it.id !in q && (it.clientId == null || it.clientId !in q) } } }
     val running = thread?.state == "working" || thread?.state == "asking"
@@ -630,6 +631,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (notice.isNotEmpty()) DMono(notice, dwarn, 12)
             thread?.mark?.let { m -> DMono(m.runs + if (m.away) " · away" else "", dfaint, 11, Modifier.testTag("thread.runs")) }
+            DataClient.sendError[id]?.let { DMono(it, dcs.error, 12, Modifier.testTag("thread.refused")) }
             if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) { Pic(b, 64) }; }
             }

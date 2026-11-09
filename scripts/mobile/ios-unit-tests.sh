@@ -16,9 +16,10 @@ run thread-groups ThreadGroupsTests.swift "" ThreadGroups.swift
 run thread-find ThreadFindTests.swift "" ThreadFind.swift
 run voice-edit VoiceEditTests.swift "$ROOT/test/fixtures/voice-edits.json" VoiceEdit.swift
 run plot-parts PlotPartsTests.swift "" Plot.swift PlotParts.swift
-run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift
+run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift Outbox.swift
 run term-stream TermStreamTests.swift "" TermStream.swift
 run vt VtTests.swift "" Vt.swift
 run term-card TermCardTests.swift "" Vt.swift TermCard.swift
 run migration MigrationTests.swift "" Migration.swift
 run browser-input BrowserInputTests.swift "$ROOT/test/mobile/browser_input_cases.json" BrowserInput.swift
+sh "$ROOT/scripts/mobile/ios-outbox-test.sh" && echo "ok outbox"
