@@ -2,7 +2,7 @@
 //!
 //! One rule, enforced here: a push starts only from a `PushOrdered` event, and a `PushOrdered` can only be built from a `Source`, whose fields are private. The two ways
 //! to get one are `Source::notify` (the uberbot's own notify_person) and `Source::reminder` (a reminder the person scheduled, or the uberbot's remind_person). Nothing else
-//! holds one: worker threads, other bots, routines' turns, the mailroom, webhooks and turn ends write the `alert.<thread>` record, which reaches a desk only (settings::alerts),
+//! holds one: worker threads, other bots, routines' turns, the mailroom, webhooks and turn ends write the `alert.<thread>` record, which reaches a desk (settings::alerts) and is a push of its own (`alert`, below),
 //! and their news goes to the uberbot as mail, which decides. No RPC commits a client's event, and `setting.set` refuses `push.book` (`reserved`). The worker checks the
 //! event again against the world when it arrives (`admit`), so a wrong commit in this hub is refused too.
 //!
@@ -11,6 +11,11 @@
 //! what the person let through. What is waiting is the book (`push.book`): the badge counts it with the open asks, and an item leaves it when its ask closes or, with no ask,
 //! when the person writes in its thread or any device opens it (`push.seen`); every device then gets a silent clear. Android has no push service here: it hears the same `PushSent`
 //! over its socket (data/1 `notify`), so it needs the app alive.
+//!
+//! One more way, 0.14's rule (src/server/push.bend: "an alert is a push of its own, raised when a thread's alert record is written, unless a desk in use is showing the
+//! thread"): a thread's `alert.<thread>` record with a kind (done, fail, ask, merged, a note, a reminder) reaches the phones too, unless a focused desk in use shows the
+//! thread (settings/alerts.rs decides that, as it does for the desk itself; `alert` below). Each is one order, through the same respect, book and collapsing as any other;
+//! the uberbot's own orders are unchanged.
 pub mod apns;
 
 use crate::{bots::{rpc::Bots, world::{Device, Routine, World}}, hub::{now_ms, Hub}};
@@ -43,6 +48,8 @@ impl Source {
     pub fn reminder(w: &World, r: &Routine) -> Option<Source> { (r.kind == "remind" && (r.by.is_empty() || w.triage_owner(&r.by))).then(|| Source { how: "reminder", bot: r.by.clone() }) }
     /// The hub's own word that bringing a 0.14 home across is over (import014): one notice, to the phones that were away. Nothing else may use it.
     pub(crate) fn import_done() -> Source { Source { how: "import", bot: String::new() } }
+    /// A thread's alert record that no desk in use is showing (`alert`). Nothing else may use it.
+    fn alert() -> Source { Source { how: "alert", bot: String::new() } }
     /// The one event a push starts from.
     pub fn order(&self, id: &str, reason: &str, thread: &str, ask: &str, text: &str, at: u64) -> Value {
         json!({"$":"PushOrdered","id":id,"how":self.how,"bot":self.bot,"reason":reason,"thread":thread,"ask":ask,"text":short(text, 500),"at":at})
@@ -51,7 +58,16 @@ impl Source {
 /// The worker's own check of an order: a known way, and the uberbot's name on a notify.
 pub fn admit(e: &Value, w: &World) -> bool {
     let (how, bot) = (e["how"].as_str().unwrap_or(""), e["bot"].as_str().unwrap_or(""));
-    match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), "import" => bot.is_empty() && e["reason"] == "import", _ => false }
+    match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), "import" => bot.is_empty() && e["reason"] == "import",
+        // a thread's alert record: the hub's own, about a thread
+        "alert" => bot.is_empty() && !e["thread"].as_str().unwrap_or("").is_empty() && matches!(e["reason"].as_str(), Some("done" | "needs_you" | "reminder")),
+        _ => false }
+}
+/// A thread's alert record (`kind`: done, fail, ask with the open ask's id in `ask` when known, merged, note, reminder; `key` its own) that no focused desk in use is
+/// showing: the phones hear of it (settings/alerts.rs calls this; `body` is what 0.14's phone said). One order a record; the burst rule collapses a run.
+pub async fn alert(hub: &Arc<Hub>, thread: &str, kind: &str, key: &str, body: &str, ask: &str, at: u64) {
+    let reason = match kind { "ask" => "needs_you", "reminder" => "reminder", "" => return, _ => "done" };
+    let _ = hub.commit(&Source::alert().order(&format!("alert-{key}-{at}"), reason, thread, ask, body, at)).await;
 }
 /// What a client may not write (`setting.set`).
 pub fn reserved(key: &str) -> bool { key == BOOK || key.starts_with(SIGNIN) }
