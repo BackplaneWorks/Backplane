@@ -75,8 +75,8 @@ fn card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Composer>
     if let (true, Some(input)) = (ask.needs && !ask.pre.is_empty(), input) {
         let id = ask.id.clone();
         let boxed = div().flex().gap_2().items_center()
-            .child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(input))
-            .child(div().id(SharedString::from(format!("ask-{i}-go"))).px_3().py_1().cursor_pointer().text_size(px(12.))
+            .child(crate::ui::with_rect(div(), || format!("ask:{i}:box")).flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(input))
+            .child(crate::ui::with_rect(div().id(SharedString::from(format!("ask-{i}-go"))), || format!("ask:{i}:go")).px_3().py_1().cursor_pointer().text_size(px(12.))
                 .bg(if ask.typed { c("accent") } else { c("raise") }).text_color(if ask.typed { c("on-accent") } else { c("text") }).child(ask.go.clone())
                 .on_click(cx.listener(move |this, _, _, cx| submit(this, &id, cx))));
         col = if ask.typed { col.child(boxed).child(chips) } else { col.child(chips).child(boxed) };
