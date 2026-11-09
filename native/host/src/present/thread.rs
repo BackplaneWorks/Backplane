@@ -107,6 +107,8 @@ pub const SAVED_NOTE: &str = " The person saved this secret in Backplane's vault
 pub fn agent_only(role: &str, text: &str) -> bool {
     (role == "user" && text.starts_with("{\"secret\":") && text.ends_with(SAVED_NOTE)) || role == "system" && ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."].iter().any(|h| text.starts_with(&format!("[Backplane] {h}")))
 }
+/// Hub.order.note: Backplane's own note of an order's progress in its buy thread (settings/order.rs `progress`, ids "o:<order>:<status>")
+fn hub_note(e: &Ent) -> bool { e.msg && e.role == "assistant" && e.id.starts_with("o:") }
 fn blank(e: &Ent) -> bool { e.msg && ((e.role == "assistant" && white(&e.text)) || agent_only(&e.role, &e.text)) }
 /// Fold.shown: blank messages left out, an error row an API error reply already says, and the restart row its continue message stands for
 fn fold_shown(es: &[Ent]) -> Vec<Ent> {
@@ -165,7 +167,10 @@ fn images(entry: &str, text: &str) -> Vec<Value> {
 
 /// `entries` of shown.thread for a plain page; `running`: the thread's turn runs; `open`: runs the person opened (the "fold:<id>" choices = "1");
 /// `now_ms`: the request's clock. None when any row needs what this cut does not do.
-pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> {
+/// `waiting`: the turn has ended but the thread still waits on work it started (subagents, background shells, watched jobs): its last reply says
+/// "Waiting since", never "Finished" before it is.
+pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> { entries_w(es, running, false, open, now_ms, zone, marks, end) }
+pub fn entries_w(es: &[Ent], running: bool, waiting: bool, open: &dyn Fn(&str) -> bool, now_ms: u64, zone: Option<&Rule>, marks: &dyn Fn(&str) -> u8, end: u8) -> Option<Vec<Value>> {
     if !es.iter().all(plain) { return None }
     // Hist.seen: the design as it was before is no row
     let seen: Vec<Ent> = es.iter().filter(|e| !step_base(e)).cloned().collect();
@@ -173,9 +178,12 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
     let vis: Vec<Ent> = fold_shown(es);
     let now = now_ms / 1000;
     // Stamp.ends over the page, oldest first in, walked newest first
-    let sx: Vec<stamp::E> = vis.iter().map(|e| if e.msg && e.role == "user" { stamp::E::User { id: e.id.clone(), at: e.at } } else if e.msg { stamp::E::Assistant { id: e.id.clone(), at: e.at } } else { stamp::E::Other }).collect();
+    // a note Backplane posts in a buy thread (its order's progress: Paid, Ordered, Shipped) is no reply of the agent's: it ends no turn and says only its time
+    let sx: Vec<stamp::E> = vis.iter().map(|e| if e.msg && e.role == "user" { stamp::E::User { id: e.id.clone(), at: e.at } } else if e.msg && !hub_note(e) { stamp::E::Assistant { id: e.id.clone(), at: e.at } } else { stamp::E::Other }).collect();
     let ends: HashMap<String, u64> = stamp::ends(&sx, running);
     let stops = stops(&vis, running, end, marks);
+    // Stamp.waits.last: the newest reply, when it ends the last turn and the thread waits on its work
+    let waits: Option<String> = if waiting && !running { vis.iter().rev().find(|e| e.msg && !hub_note(e)).filter(|e| e.role == "assistant" && stops.get(&e.id).copied().unwrap_or(0) == 0 && ends.contains_key(&e.id)).map(|e| e.id.clone()) } else { None };
     // Mob.imgs.seen: the images of the newest 30 replies are found
     let newest_replies: std::collections::HashSet<&str> = es.iter().rev().filter(|e| e.msg && e.role == "assistant").take(30).map(|e| e.id.as_str()).collect();
     let mut out = Vec::new(); let mut i = 0;
@@ -186,7 +194,7 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
             let run = &vis[i..j]; let live = j == vis.len() && running; let id = &run[0].id;
             let o = open(id);
             out.push(json!({"id": format!("fold:{id}"), "kind": "fold", "text": label(run, live), "open": o, "live": live, "value": format!("{}{}", if o { "0" } else { "1" }, id)}));
-            if o { for r in run { out.push(act(r, id)) } }
+            if o { for (k, r) in run.iter().enumerate() { let mut a = act(r, id); if live && k + 1 == run.len() && !is_step(r) { a["now"] = json!(true) } out.push(a) } }
             i = j; continue;
         }
         if !e.msg { out.push(plain_act(e)); i += 1; continue }
@@ -203,14 +211,19 @@ pub fn entries(es: &[Ent], running: bool, open: &dyn Fn(&str) -> bool, now_ms: u
             out.push(row);
         } else {
             let st = ends.get(&e.id).copied().unwrap_or(0);
+            // Stamp.mid: a reply inside a turn (not its last, not the newest of a running one) keeps its time for hover only (`hover`); the turn's own stamp always shows
+            let mid = !hub_note(e) && stamp::mid(&ends, &stamp::E::Assistant { id: e.id.clone(), at: e.at });
             // Stamp.reply.s / .f / reply: how the turn ended says the word; a stopped one says it whether or not the page holds its start
-            let s = match c { None => String::new(), Some(c) => {
+            let s = match c.clone() { None => String::new(), Some(c) => {
                 let took_s = |w: &str| if st > 1 { format!("{w} {c} · {}", took(e.at.saturating_sub(st))) } else { format!("{w} {c}") };
-                match stops.get(&e.id).copied().unwrap_or(0) { 1 => took_s("Stopped"), 3 => if st == 0 { c } else { took_s("Failed") }, _ => if st == 0 { c } else { took_s("Finished") } } } };
+                if waits.as_deref() == Some(e.id.as_str()) { took_s("Waiting since") } else {
+                match stops.get(&e.id).copied().unwrap_or(0) { 1 => took_s("Stopped"), 3 => if st == 0 { c } else { took_s("Failed") }, _ => if st == 0 { c } else { took_s("Finished") } } } } };
             // a synthetic "@live:" row is the agent still working; an API error reply reads as one sentence, its raw text kept for Copy
             let (text, blocks, s) = if e.id.starts_with("@live:") { ("Working".to_string(), md_blocks("Working"), String::new()) } else if api_err(&e.text) { (e.text.clone(), md_blocks(&api_say(&e.text)), s) } else { (e.text.clone(), md_blocks(&e.text), s) };
             let imgs = if newest_replies.contains(e.id.as_str()) { images(&e.id, &e.text) } else { vec![] };
-            out.push(json!({"id": e.id, "kind": "assistant", "text": text, "blocks": blocks, "images": imgs, "stamp": s}));
+            let mut row = json!({"id": e.id, "kind": "assistant", "text": text, "blocks": blocks, "images": imgs, "stamp": if mid { String::new() } else { s.clone() }});
+            if mid && !s.is_empty() { row["hover"] = json!(s) }
+            out.push(row);
         }
         i += 1;
     }
@@ -227,7 +240,7 @@ fn stops(es: &[Ent], running: bool, end: u8, marks: &dyn Fn(&str) -> u8) -> Hash
         else if e.role == "assistant" { let a = e.id.ends_with(":before"); if !a && open { held = e.id.clone(); } open = open && a; }
     }
     // Stamp.last.go: the newest message, when it is a reply
-    let last = es.iter().rev().find(|e| e.msg).filter(|e| e.role == "assistant").map(|e| e.id.clone());
+    let last = es.iter().rev().find(|e| e.msg && !hub_note(e)).filter(|e| e.role == "assistant").map(|e| e.id.clone());
     let kind = if running { 0 } else { end };
     if let (true, Some(id)) = (kind > 0, last) { m.insert(id, kind); }
     m
@@ -406,7 +419,10 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let mark = |msg: &str| -> u8 { if st.settings.get(&format!("stopped.{msg}")).map_or(false, |v| v == "1") { 1 } else if st.settings.get(&format!("failed.{msg}")).map_or(false, |v| v == "1") { 3 } else { 0 } };
     let turn = st.threads.get(thread).map(|t| t.turn);
     let end = match turn { Some(Turn::Interrupted) => 1, Some(Turn::Failed) => 3, _ => 0 };
-    let mut entries = entries(&es, running, &|id| super::window::fold_choice(params, id), now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
+    let subs = super::panels::subs_at(st, thread, &params["subLog"], now_ms / 1000);
+    // Signal.out: the turn ended but the thread waits on work it started (a subagent, a background shell, a watched job, a delegated task)
+    let waiting = subs["live"].as_u64().unwrap_or(0) > 0 || st.tasks.values().any(|(p, _, term, _)| p == thread && !*term);
+    let mut entries = entries_w(&es, running, waiting, &|id| super::window::fold_choice(params, id), now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
     // Mob.pending: a thread that works shows the agent's "Working" row after its last entry
     if running { entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""})) }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
@@ -433,7 +449,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("entries".into(), Value::Array(entries));
     // the agent's to-do list and its background work (null while there is none; the client opens and shuts them)
     o.insert("todos".into(), super::panels::todos(st, thread));
-    o.insert("subs".into(), super::panels::subs(st, thread));
+    o.insert("subs".into(), subs);
     // Render.native_screen: thread.earlier = window.remaining when the host sent a window, else the page's own hidden count (0 on the newest page)
     let earlier = if params["window"].is_object() { params["window"]["remaining"].as_u64().unwrap_or(0) } else { 0 };
     o.insert("earlier".into(), json!(earlier));
@@ -479,6 +495,13 @@ mod tests {
     }
 
     use super::*;
+    /// The recorded helper replies predate s04 (a reply inside a turn keeps its time for hover) and s03 (the running call marked): put those back as the helper drew them.
+    fn as_helper(v: &Value) -> Value {
+        let mut v = v.clone();
+        let fix = |e: &mut Value| { if let Some(h) = e.as_object_mut().and_then(|o| o.remove("hover")) { e["stamp"] = h } if let Some(o) = e.as_object_mut() { o.remove("now"); } };
+        match &mut v { Value::Array(a) => a.iter_mut().for_each(fix), Value::Object(o) => if let Some(Value::Array(a)) = o.get_mut("entries") { a.iter_mut().for_each(fix) }, _ => {} }
+        v
+    }
     fn fixture() -> Value { serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json")).unwrap()).unwrap() }
     #[test] fn the_entries_of_a_plain_page_are_the_helpers() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
@@ -486,7 +509,7 @@ mod tests {
         let got = entries(&es, false, &|_| false, p["params"]["now"].as_u64().unwrap(), Some(&Rule::utc()), &|_| 0, 0).unwrap();
         let want = p["out"]["shown"]["thread"]["entries"].as_array().unwrap();
         assert_eq!(got.len(), want.len());
-        for (g, w) in got.iter().zip(want) { assert_eq!(g, w); }
+        for (g, w) in got.iter().zip(want) { assert_eq!(&as_helper(&json!([g]))[0], w); }
     }
     #[test] fn a_plain_threads_whole_shown_thread_is_the_helpers() {
         let p = fixture(); let th = p["params"]["page"]["thread"].as_str().unwrap();
@@ -494,6 +517,7 @@ mod tests {
         for l in std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).unwrap().lines() { st.apply_line(l); }
         let got = thread_object(&st, "h", th, &p["params"], "").expect("a plain idle thread is drawn here");
         let want = &p["out"]["shown"]["thread"];
+        let got = as_helper(&got);
         for (k, w) in want.as_object().unwrap() { if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w); continue } assert_eq!(got.get(k), Some(w), "key {k}"); }
         // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`) and the picker's other agents (`pickerAgents`) are Backplane's own: the recorded helper reply has no such keys
         assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands")).count(), want.as_object().unwrap().len());
@@ -557,7 +581,7 @@ mod tests {
             let mut params = p["params"].clone();
             if x.get("page").map_or(false, |g| !g.is_null()) { params["page"] = x["page"].clone(); }
             if let Some(info) = x.get("info").filter(|i| i.is_object()) { params["session"]["info"] = info.clone(); }
-            let got = thread_object(&st, "h", th, &params, "").unwrap_or_else(|| panic!("{name} should be drawn"));
+            let got = as_helper(&thread_object(&st, "h", th, &params, "").unwrap_or_else(|| panic!("{name} should be drawn")));
             let (diff, tail) = (x["diff"].as_object().unwrap(), x["tail"].as_array().unwrap());
             // a browser task's ask has a card of its own: here it draws as an ordinary card (a stated degrade); a buy thread's is 0.14's, key for key
             for (k, w) in diff { if name == "askbrowser" && matches!(k.as_str(), "asks" | "order") { continue } if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w, "{name}: picker"); continue } assert_eq!(got.get(k), Some(w), "{name}: {k}"); }
@@ -568,6 +592,41 @@ mod tests {
             checked.push(name.clone());
         }
         for n in ["base", "running", "completed", "failed", "interrupted", "pinned", "archived", "snoozed", "settledhand", "codex", "opus", "queued", "askapproval", "askinput", "askplan", "asksend", "stepchange", "stepbase", "stepfirst", "stepopen", "apierror", "apierror2", "restartcarry", "blankreply", "thought", "thoughton", "tonethink", "imagereply", "attached", "effort", "waitset", "filesmax", "permdefault", "stalled", "askbrowser", "askbuy"] { assert!(checked.iter().any(|c| c == n), "{n} not checked: {checked:?}"); }
+    }
+    fn m(id: &str, role: &str, text: &str, at: u64) -> Ent { Ent { id: id.into(), msg: true, role: role.into(), akind: String::new(), text: text.into(), at } }
+    fn tl(id: &str, k: &str, x: &str, at: u64) -> Ent { Ent { id: id.into(), msg: false, role: "tool".into(), akind: k.into(), text: x.into(), at } }
+    fn stamps(es: &[Ent], running: bool, waiting: bool) -> Vec<(String, String, String)> {
+        entries_w(es, running, waiting, &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap().iter().filter(|e| e["kind"] == "assistant" || e["kind"] == "user")
+            .map(|e| (e["id"].as_str().unwrap().to_string(), e["stamp"].as_str().unwrap().to_string(), e["hover"].as_str().unwrap_or("").to_string())).collect()
+    }
+    // s04: a turn of several replies shows one time, its Finished stamp; the replies inside it keep theirs for hover; the person's message keeps its own
+    #[test] fn one_time_per_turn_the_replies_inside_it_on_hover() {
+        let es = [m("u", "user", "go", 1699999000), m("a1", "assistant", "looking", 1699999010), tl("t1", "Bash", "ls", 1699999011), m("a2", "assistant", "done", 1699999070)];
+        let s = stamps(&es, false, false);
+        assert_eq!(s[0].1, "21:56"); assert_eq!((s[1].1.as_str(), s[1].2.as_str()), ("", "21:56"));
+        assert_eq!((s[2].1.as_str(), s[2].2.as_str()), ("Finished 21:57 · 1m 10s", ""));
+        let s = stamps(&es[..2], true, false); assert_eq!(s[1].1, "21:56", "while the turn runs its newest reply keeps its time showing");
+    }
+    // the turn ended but its subagents still work: the last reply waits, it is not Finished
+    #[test] fn a_turn_whose_work_still_runs_says_waiting_not_finished() {
+        let es = [m("u", "user", "go", 1699999000), m("a1", "assistant", "started two subagents", 1699999030)];
+        assert_eq!(stamps(&es, false, true)[1].1, "Waiting since 21:57 · 30s");
+        assert_eq!(stamps(&es, false, false)[1].1, "Finished 21:57 · 30s");
+    }
+    // W6: a buy thread's order notes (Paid, Ordered, Shipped) are Backplane's, not a turn's end: their time only, and the agent's last reply keeps its Finished
+    #[test] fn an_order_note_carries_its_time_not_a_turn_footer() {
+        let es = [m("u", "user", "buy it", 1699999000), m("a1", "assistant", "quote posted", 1699999020), m("o:r1:paid", "assistant", "**Paid.** Thank you.", 1699999090)];
+        let s = stamps(&es, false, false);
+        assert_eq!(s[1].1, "Finished 21:57 · 20s"); assert_eq!((s[2].1.as_str(), s[2].2.as_str()), ("21:58", ""));
+    }
+    // s03: in an open fold of the running turn, the call that runs is marked
+    #[test] fn the_running_call_in_an_open_fold_is_marked() {
+        let es = [m("u", "user", "go", 1699999000), tl("t1", "Bash", "ls", 1699999001), tl("t2", "Read", "f", 1699999002)];
+        let out = entries_w(&es, true, false, &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        let acts: Vec<&Value> = out.iter().filter(|e| e["kind"] == "act").collect();
+        assert_eq!((acts[0].get("now"), acts[1]["now"].as_bool()), (None, Some(true)));
+        let out = entries_w(&es, false, false, &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        assert!(out.iter().all(|e| e.get("now").is_none()), "a finished run marks none");
     }
     #[test] fn civil_dates() { assert_eq!(civil(0), (1970, 1, 1)); assert_eq!(civil(19675), (2023, 11, 14)); assert_eq!(clock(1700002806, 0, &Rule::utc()), "Tue 14 Nov 23:00"); }
     #[test] fn labels_name_three_kinds_and_the_live_one_says_what_runs() {
