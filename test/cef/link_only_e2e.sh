@@ -2,7 +2,7 @@
 # link_only_e2e.sh CLIENT_BIN HUB_BIN : a window whose directory holds only a link to libcef.so (as dev builds are laid out) opens the Browser tab and survives.
 # Regression: CEF looked for icudtl.dat beside the link, failed a CHECK in cef_initialize and killed the whole app. Needs a display (DISPLAY) and the CEF runtime.
 set -eu
-CLIENT=$1; HUB=$2; RT=${BACKPLANE_CEF:-$HOME/.cache/backplane/cef-runtime/154.0.34}; HPORT=${HPORT:-3812}
+CLIENT=$(realpath "$1"); HUB=$(realpath "$2"); RT=${BACKPLANE_CEF:-$HOME/.cache/backplane/cef-runtime/154.0.34}; HPORT=${HPORT:-3812}
 O=$(mktemp -d "${TMPDIR:-/tmp}/bp-linkonly.XXXXXX"); mkdir -p "$O/home" "$O/proj" "$O/bin" "$O/fh/.cache" "$O/win"
 for n in claude codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$O/bin/$n"; chmod +x "$O/bin/$n"; done
 cp "$CLIENT" "$O/win/backplane-gpui"; ln -s "$RT/libcef.so" "$O/win/libcef.so"
