@@ -256,6 +256,10 @@ fn tmp(name: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(for
     let (e, r) = ask(&h, "project.create", json!({"path": d.to_str().unwrap()})).await; assert_eq!(r, ok()); assert_eq!(e[0]["id"], pid); assert_eq!(e.iter().filter(|v| v["$"] == "ThreadCreated").count(), 0);
     let (_, r) = ask(&h, "project.create", json!({"path": "  "})).await; assert_eq!(r["error"], "no folder given");
     let (_, r) = ask(&h, "project.new", json!({"path": d.join("fresh").to_str().unwrap()})).await; assert_eq!(r["ok"], true); assert!(d.join("fresh").is_dir());
+    // a phone's (data/1) add: the project alone, its New thread screen makes the first thread
+    let p = tmp("proj-phone");
+    let (e, r) = ask(&h, "project.create", json!({"path": p.to_str().unwrap(), "starter": false})).await; assert_eq!(r["ok"], true, "{r}");
+    assert_eq!((e.len(), e[0]["$"].as_str()), (1, Some("ProjectCreated")), "{e:?}");
 }
 
 fn git_repo(name: &str) -> std::path::PathBuf {
