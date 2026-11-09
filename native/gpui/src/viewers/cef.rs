@@ -217,6 +217,9 @@ fn switches() -> Vec<(String, String)> {
     v
 }
 
+/// Whether this process was started by CEF as one of its helpers: `--type=...` on its command line (argv alone, no CEF call).
+pub fn is_helper_argv<I: IntoIterator<Item = String>>(args: I) -> bool { args.into_iter().skip(1).any(|a| a.starts_with("--type=")) }
+
 /// First call of `main`. In a CEF helper process (renderer, gpu, ...) this runs it to its end and returns its exit code; in the browser process it does nothing.
 pub fn subprocess() -> Option<i32> {
     // macOS: the engine is a framework loaded at run time; a helper (`--type=...`) loads it before any CEF call, the browser process only when a Browser tab starts it
@@ -226,6 +229,10 @@ pub fn subprocess() -> Option<i32> {
         let fw = mac::helper_framework()?;
         if !mac::load(&fw) { eprintln!("backplane-gpui: could not load {}", fw.display()); return Some(1) }
     }
+    // every OS: nothing of CEF is called in a process that is not one of its helpers (Windows: libcef.dll is delay-loaded, build.rs, and a client
+    // whose runtime is missing must still start)
+    if !is_helper_argv(std::env::args_os().map(|a| a.to_string_lossy().into_owned())) { return None }
+    #[cfg(windows)] win::use_dll_dir(std::env::var_os("BACKPLANE_CEF_DLL_DIR").map(PathBuf::from).as_deref());
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
     let args = cef::args::Args::new();
     let cmd = args.as_cmd_line()?;
@@ -244,7 +251,7 @@ pub fn runtime_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     return cands.into_iter().find(|d| d.join(mac::FRAMEWORK).join("Resources").join("icudtl.dat").exists() && d.join(mac::FRAMEWORK).join(mac::LIB).exists());
     #[cfg(not(target_os = "macos"))]
-    cands.into_iter().find(|d| d.join("icudtl.dat").exists() && d.join("resources.pak").exists() && d.join(LIB).exists())
+    cands.into_iter().find(|d| d.join("icudtl.dat").exists() && d.join("resources.pak").exists() && d.join(LIB).exists() && (!cfg!(windows) || d.join("chrome_elf.dll").exists()))
 }
 /// The engine's library in a runtime directory.
 #[cfg(target_os = "windows")] pub const LIB: &str = "libcef.dll";
@@ -273,6 +280,18 @@ fn ensure_beside(dir: &Path, exe_dir: &Path) -> Result<(), String> {
     if missing.is_empty() { Ok(()) } else { Err(format!("CEF's files are missing beside {} ({}) and could not be linked from {}", exe_dir.display(), missing.join(", "), dir.display())) }
 }
 
+#[cfg(windows)]
+mod win {
+    #[link(name = "kernel32")] unsafe extern "system" { fn SetDllDirectoryW(path: *const u16) -> i32; }
+    /// Puts `dir` on the DLL search path (libcef.dll and chrome_elf.dll are found there at the first CEF call).
+    pub fn use_dll_dir(dir: Option<&std::path::Path>) {
+        let Some(d) = dir else { return };
+        use std::os::windows::ffi::OsStrExt;
+        let w: Vec<u16> = d.as_os_str().encode_wide().chain(Some(0)).collect();
+        unsafe { SetDllDirectoryW(w.as_ptr()); }
+    }
+}
+
 pub struct Engine { pub cdp_port: u16, pub dir: PathBuf }
 static ENGINE: OnceLock<Result<Engine, String>> = OnceLock::new();
 
@@ -298,6 +317,9 @@ impl Engine {
             // the helpers find the same framework (set on the main thread before CEF starts any thread of its own)
             unsafe { std::env::set_var("BACKPLANE_CEF_FRAMEWORK", &fw); }
             (mac::helper(&exe).ok_or_else(|| format!("no {}.app beside {} (scripts/cef-mac-helpers.sh)", mac::HELPER, exe.display()))?, fw.join("Resources"), fw.join("Resources")) };
+        // Windows: libcef.dll is delay-loaded from the executable's folder; a runtime elsewhere is put on the DLL search path first, for the helpers too
+        #[cfg(windows)]
+        if exe.parent().map_or(true, |d| d != dir) { win::use_dll_dir(Some(&dir)); unsafe { std::env::set_var("BACKPLANE_CEF_DLL_DIR", &dir); } }
         #[cfg(not(target_os = "macos"))]
         let (sub, res, loc) = (exe.clone(), dir.clone(), dir.join("locales"));
         let log = std::env::var("BACKPLANE_CEF_LOG").ok().filter(|l| !l.is_empty());
@@ -338,7 +360,9 @@ impl Tab {
     pub fn detached(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>) -> Arc<Tab> {
         Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0), paints: Default::default(), resize_at: Mutex::new(None), resize_done: Mutex::new(-1.0) })
     }
-    fn with<R>(&self, f: impl FnOnce(&Browser) -> R) -> Option<R> { self.browser.lock().unwrap().as_ref().map(|b| f(&b.0)) }
+    /// The browser, taken out of its lock before CEF is called: on macOS CEF runs callbacks on this thread inside the call (`on_before_close` takes
+    /// the same lock), so holding it across the call deadlocked the window on closing a tab (test/browser/browser_e2e.py, macos-latest).
+    fn with<R>(&self, f: impl FnOnce(&Browser) -> R) -> Option<R> { let b = self.browser.lock().unwrap().as_ref().map(|b| b.0.clone()); b.map(|b| f(&b)) }
     fn host<R>(&self, f: impl FnOnce(&BrowserHost) -> R) -> Option<R> { self.with(|b| b.host().map(|h| f(&h))).flatten() }
     pub fn ready(&self) -> bool { self.browser.lock().unwrap().is_some() }
     pub fn cursor(&self) -> Cur { *self.cursor.lock().unwrap() }
@@ -374,6 +398,8 @@ impl Tab {
     pub fn wheel(&self, x: i32, y: i32, mods: u32, dx: i32, dy: i32) { self.host(|h| h.send_mouse_wheel_event(Some(&MouseEvent { x, y, modifiers: mods }), dx, dy)); }
     pub fn key(&self, kind: u8, mods: u32, vk: i32, native: i32, ch: u16) {
         let ty = match kind { 0 => KeyEventType::RAWKEYDOWN, 1 => KeyEventType::KEYUP, _ => KeyEventType::CHAR };
+        // Windows: CEF makes a WM_CHAR from `windows_key_code` (the character) and ignores `character`; elsewhere `character` is the one read
+        let vk = char_code(kind, vk, ch, cfg!(windows));
         // macOS's OSR builds an NSEvent from the native code: it must be the Mac's virtual key code, not the Windows one
         #[cfg(target_os = "macos")] let native = mac::key_code(vk).unwrap_or(native);
         let e = KeyEvent { size: std::mem::size_of::<KeyEvent>(), type_: ty, modifiers: mods, windows_key_code: vk, native_key_code: native, is_system_key: 0, character: ch, unmodified_character: ch, focus_on_editable_field: 0 };
@@ -399,6 +425,8 @@ pub fn vk(key: &str) -> Option<i32> {
 }
 /// EVENTFLAG_COMMAND_DOWN: gpui's platform key (Command on macOS).
 pub const COMMAND: u32 = 1 << 7;
+/// The `windows_key_code` of a key event: for a character (`kind` 2) on Windows the UTF-16 unit typed, else the virtual-key code.
+pub fn char_code(kind: u8, vk: i32, ch: u16, windows: bool) -> i32 { if windows && kind >= 2 { ch as i32 } else { vk } }
 /// CEF event flags from gpui modifiers (shift, control, alt) and mouse buttons held.
 pub fn flags(shift: bool, ctrl: bool, alt: bool, left: bool, middle: bool, right: bool) -> u32 {
     (shift as u32) << 1 | (ctrl as u32) << 2 | (alt as u32) << 3 | (left as u32) << 4 | (middle as u32) << 5 | (right as u32) << 6
@@ -423,6 +451,14 @@ mod tests {
         for f in RUNTIME_FILES { if f != "locales" { std::fs::write(rt.join(f), b"x").unwrap(); } }
         assert!(ensure_beside(&rt, &ex).is_ok()); for f in RUNTIME_FILES { assert!(ex.join(f).exists(), "{f}"); }
         assert!(ensure_beside(&rt, &rt).is_ok()); let _ = std::fs::remove_dir_all(&b);
+    }
+    #[test] fn a_character_on_windows_carries_itself_not_its_key() {
+        assert_eq!(char_code(2, 65, 'a' as u16, true), 'a' as i32, "WM_CHAR of 'a', not VK_A ('A')"); assert_eq!(char_code(2, 0, 'h' as u16, true), 'h' as i32);
+        assert_eq!(char_code(0, 65, 'a' as u16, true), 65); assert_eq!(char_code(2, 65, 'a' as u16, false), 65);
+    }
+    #[test] fn only_a_type_switch_makes_a_helper() {
+        let a = |v: &[&str]| is_helper_argv(v.iter().map(|s| s.to_string()));
+        assert!(a(&["gpui", "--type=renderer", "--lang=en"])); assert!(!a(&["gpui", "--url", "ws://x"])); assert!(!a(&["--type=gpu"]), "argv[0] is the program"); assert!(!a(&["gpui", "--typed"]));
     }
     #[test] fn key_codes() { assert_eq!(vk("a"), Some(65)); assert_eq!(vk("7"), Some(55)); assert_eq!(vk("enter"), Some(13)); assert_eq!(vk("f5"), Some(116)); assert_eq!(vk("é"), None); }
     #[test] fn event_flags() { assert_eq!(flags(true, false, false, true, false, false), 2 | 16); assert_eq!(flags(false, true, true, false, false, true), 4 | 8 | 64); }

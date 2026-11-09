@@ -146,6 +146,33 @@ impl BrowserPage {
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         #[cfg(feature = "cef")]
         if let Some(c) = &self.cef { let v = visible; c.update(cx, |p, _| p.set_visible(v)); } self.visible.store(visible, Ordering::Relaxed); }
+    /// Scripted input for the e2e (`{"browser":{"op":...}}` steps), the same for both pages: what the toolbar, the page's mouse, wheel and keys send.
+    /// ops: report, goto {url}, back, forward, reload, type {text}, press {key}, scroll {dy}, click {x,y} (thousandths of the page), new_tab, close_tab {index}.
+    pub fn script(&mut self, v: &serde_json::Value, cx: &mut Context<Self>) -> serde_json::Value {
+        use serde_json::json;
+        #[cfg(feature = "cef")]
+        if let Some(c) = &self.cef { let mut r = c.update(cx, |p, cx| p.browser_op(v, cx)); r["mode"] = "cef".into(); return r }
+        let op = v["op"].as_str().unwrap_or("report");
+        let b = &mut self.bar;
+        let r = match op {
+            "goto" => { let u = v["url"].as_str().unwrap_or(""); b.toolbar("navigate", json!({"url": u})); json!({"ok": true}) }
+            "back" | "forward" | "reload" => { b.toolbar(op, json!({})); json!({"ok": true}) }
+            "type" => { b.input(json!({"op": "type", "text": v["text"].as_str().unwrap_or("")})); json!({"ok": true}) }
+            "press" => { b.input(json!({"op": "press", "key": v["key"].as_str().unwrap_or("Enter")})); json!({"ok": true}) }
+            "scroll" => { b.input(json!({"op": "scroll", "dx": 0, "dy": v["dy"].as_f64().unwrap_or(400.0)})); json!({"ok": true}) }
+            "click" => { b.input(json!({"op": "click", "x": v["x"].as_u64().unwrap_or(500), "y": v["y"].as_u64().unwrap_or(500)})); json!({"ok": true}) }
+            "new_tab" => { b.toolbar("tabs", json!({"new": true})); json!({"ok": true}) }
+            "close_tab" => { let i = v["index"].as_u64().unwrap_or(0) as usize; match b.tabs.get(i) { Some(t) => { let id = t.0.clone(); b.toolbar("tabs", json!({"closeId": id})); json!({"ok": true}) } None => json!({"ok": false, "error": "no such tab"}) } }
+            "report" => json!({"ok": true}),
+            o => json!({"ok": false, "error": format!("unknown op {o}")}),
+        };
+        let active = b.tabs.iter().find(|t| t.3).cloned().unwrap_or_default();
+        let (frame, lit) = self.image.as_ref().map(|i| { let s = i.size(0); (json!([s.width.0, s.height.0]), i.as_bytes(0).map_or(0, |px| px.chunks(4).step_by(97).filter(|p| p[0] < 240 || p[1] < 240 || p[2] < 240).count())) }).unwrap_or((json!([0, 0]), 0));
+        let mut r = r; r["mode"] = "frames".into(); r["op"] = op.into();
+        r["url"] = active.2.into(); r["title"] = active.1.into(); r["tabs"] = b.tabs.len().into(); r["frame"] = frame; r["non_white_samples"] = lit.into(); r["status"] = self.status.clone().into(); r["banner"] = self.banner.clone().into();
+        r["open_error"] = self.open_error.clone().unwrap_or_default().into();
+        r
+    }
     /// Give the images back to the atlas (call before dropping the page, with the window).
     pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).chain(self.image.take()) { let _ = window.drop_image(i); } }
 }

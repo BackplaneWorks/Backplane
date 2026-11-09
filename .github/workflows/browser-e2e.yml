@@ -1,0 +1,124 @@
+# The Browser tab end to end on each desktop OS (test/browser/browser_e2e.py): a hub on a temp home, the GPUI client on the runner's desktop, a local
+# http page, a file:// page and an https page; typing, scrolling, a click that navigates, back, forward, a tab opened and closed, the view closed and
+# reopened, the client exiting 0 by itself, and no process of the run left after quit.
+#   frames: the hub's JPEG frames from backplane-browser (Chrome on the runner), the page a client without CEF shows.
+#   cef:    embedded Chromium (feature cef) with its runtime laid out as a release lays it out (scripts/cef-runtime-files.sh, scripts/cef-mac-helpers.sh); a fallback to frames fails it.
+#   cef-missing: the cef client with no runtime beside it: it must start, say why in the Browser tab and show the hub's frames.
+name: browser-e2e
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'native/gpui/**'
+      - 'native/host/src/term/browser*/**'
+      - 'native/host/src/term/browser.rs'
+      - 'tools/browser/**'
+      - 'test/browser/**'
+      - 'scripts/cef-runtime-files.sh'
+      - 'scripts/cef-mac-helpers.sh'
+      - '.github/workflows/browser-e2e.yml'
+  push:
+    paths:
+      - 'native/gpui/**'
+      - 'native/host/src/term/browser*/**'
+      - 'native/host/src/term/browser.rs'
+      - 'tools/browser/**'
+      - 'test/browser/**'
+      - 'scripts/cef-runtime-files.sh'
+      - 'scripts/cef-mac-helpers.sh'
+      - '.github/workflows/browser-e2e.yml'
+concurrency:
+  group: browser-e2e-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: never
+  CARGO_NET_RETRY: 10
+  CARGO_PROFILE_DEV_DEBUG: 0
+  RUST_BACKTRACE: short
+permissions:
+  contents: read
+jobs:
+  e2e:
+    name: ${{ matrix.os }} ${{ matrix.mode }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        mode: [frames, cef]
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/host
+            native/gpui
+          shared-key: browser-e2e-${{ matrix.mode }}
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: 1.4.4 }
+      - uses: rui314/setup-mold@v1
+        if: runner.os == 'Linux'
+      # the cef crate builds CEF's small C++ wrapper with CMake and Ninja (as release.yml)
+      - name: ninja
+        if: matrix.mode == 'cef'
+        shell: bash
+        run: |
+          command -v ninja >/dev/null && exit 0
+          case "${{ runner.os }}" in macOS) brew install ninja;; Windows) choco install ninja -y --no-progress;; Linux) sudo apt-get install -y -qq ninja-build;; esac
+      - name: desktop (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev ninja-build xvfb i3 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2t64 libxkbcommon0 libxtst6 x11-utils > /dev/null
+      - name: build
+        shell: bash
+        run: |
+          set -e; mkdir -p dist
+          f=; [ ${{ matrix.mode }} = cef ] && f="--features cef"
+          (cd native/host && cargo build --locked --bin backplane-hub)
+          (cd native/gpui && cargo build --locked $f)
+          (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../dist/backplane-browser${{ runner.os == 'Windows' && '.exe' || '' }}")
+          e=${{ runner.os == 'Windows' && '.exe' || '' }}
+          cp native/host/target/debug/backplane-hub$e native/gpui/target/debug/backplane-gpui$e dist/
+          # the cef client's runtime where an install has it: beside the client: the DLLs and paks (Windows, Linux), the framework and the helper apps (macOS)
+          if [ ${{ matrix.mode }} = cef ]; then
+            # the cef crate's distribution in its OUT_DIR, laid out beside the client as release.yml lays it out
+            B=native/gpui/target/debug/build
+            case "${{ runner.os }}" in
+              Windows) scripts/cef-runtime-files.sh "$(dirname "$(find $B -path '*cef-dll-sys*' -name libcef.dll | head -1)")" dist windows ;;
+              macOS) fw=$(find $B -path '*cef-dll-sys*' -type d -name 'Chromium Embedded Framework.framework' -prune | head -1)
+                     scripts/cef-runtime-files.sh "$(dirname "$fw")" dist macos && scripts/cef-mac-helpers.sh dist native/gpui/target/debug/backplane-cef-helper ;;
+              Linux) scripts/cef-runtime-files.sh "$(dirname "$(find $B -path '*cef-dll-sys*' -name libcef.so | head -1)")" dist linux ;;
+            esac
+          fi
+          ls -la dist; du -sh dist
+      - name: browser e2e
+        shell: bash
+        run: |
+          set -u; e=${{ runner.os == 'Windows' && '.exe' || '' }}; mkdir -p out
+          PY=python3; command -v python3 > /dev/null && python3 -c 1 2>/dev/null || PY=python
+          run() { $PY test/browser/browser_e2e.py --client dist/backplane-gpui$e --hub dist/backplane-hub$e --helper dist/backplane-browser$e --out "$PWD/out/$1" --mode "$2" "${@:3}"; }
+          if [ "${{ runner.os }}" = Linux ]; then
+            Xvfb :91 -screen 0 1440x900x24 -nolisten tcp > out/xvfb.log 2>&1 & sleep 2
+            mkdir -p -m 700 /tmp/bp-run; printf 'new_window none\ndefault_border none\n' > /tmp/i3.conf; XDG_RUNTIME_DIR=/tmp/bp-run DISPLAY=:91 i3 -c /tmp/i3.conf > out/i3.log 2>&1 & sleep 1
+            export DISPLAY=:91 VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1) LP_NUM_THREADS=2
+          fi
+          [ ${{ matrix.mode }} = cef ] && [ "${{ runner.os }}" != Linux ] && export BACKPLANE_CEF_NO_GPU=1   # no GPU on the runner: software compositing
+          rc=0
+          run ${{ matrix.mode }} ${{ matrix.mode }} || rc=1
+          if [ ${{ matrix.mode }} = cef ] && [ "${{ runner.os }}" != Linux ]; then   # (Linux links libcef.so: no client starts without it, by design there)
+            # the fallback: the same client with its runtime taken away starts, says why and shows the hub's frames
+            mkdir -p bare; cp dist/backplane-gpui$e dist/backplane-hub$e dist/backplane-browser$e bare/
+            $PY test/browser/browser_e2e.py --client bare/backplane-gpui$e --hub bare/backplane-hub$e --helper bare/backplane-browser$e --out "$PWD/out/cef-missing" --mode fallback || rc=1
+          fi
+          exit $rc
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-e2e-${{ matrix.os }}-${{ matrix.mode }}
+          path: out
+          include-hidden-files: true
