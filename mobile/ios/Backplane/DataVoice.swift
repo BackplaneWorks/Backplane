@@ -345,7 +345,7 @@ struct DPageRows: View {
                     if !r.buttons.isEmpty {
                         FlowRow(spacing: 6) {
                             ForEach(Array(r.buttons.enumerated()), id: \.offset) { _, b in
-                                Button(b.label) { press(r, b) }.buttonStyle(DButton(primary: b.on)).accessibilityIdentifier(idPrefix + ".page." + b.action)
+                                Button(b.label) { press(r, b) }.buttonStyle(DButton(primary: b.on)).accessibilityAddTraits(b.on ? .isSelected : []).accessibilityIdentifier(idPrefix + ".page." + b.action)
                             }
                         }
                     }

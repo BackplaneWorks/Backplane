@@ -17,6 +17,10 @@ final class NotifyModel {
         guard let client else { return "" }
         do {
             _ = try await client.call("notify.page.act", ["action": action, "value": value, "fields": fields], as: DEmpty.self)
+            // this phone's own row is its Alerts switch too: keep the switch in step, or the next connect (registerPush -> pushMute) would undo the press
+            if action == "notify-mute", let eq = value.firstIndex(of: "="), !client.pushHandle.isEmpty, String(value[..<eq]) == client.pushHandle {
+                AppSettings.shared.alerts = value[value.index(after: eq)...] == "off"
+            }
             await load()
             return ""
         } catch { await load(); return error.localizedDescription }

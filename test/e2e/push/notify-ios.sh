@@ -7,11 +7,20 @@
 set -u
 HUB=$(realpath "${1:?hub binary}"); ROOT=$(cd "$(dirname "$0")/../../.." && pwd); . "$ROOT/scripts/lib-bptmp.sh"
 OUT=${2:-$BP_TMP/notify-ios-out}; SHOTS=${SHOTS:-$BP_TMP/notify-shots}
-T=$(mktemp -d "$BP_TMP/bp-notify-ios.XXXXXX"); PORT=${PORT:-3871}; MAC_DIR=${MAC_DIR:-bp-notify-ios}; SIM=${SIM:-bp-notify}; APP_ID=${APP_ID:-dev.backplane.gpui}
+T=$(mktemp -d "$BP_TMP/bp-notify-ios.XXXXXX"); PORT=${PORT:-$(python3 -c '
+import socket
+for p in range(3871,3999,2):   # a free pair: the hub and its control port (other lanes run hubs on 38xx too)
+    try:
+        for q in (p,p+1): s=socket.socket(); s.bind(("127.0.0.1",q)); s.close()
+        print(p); break
+    except OSError: pass')}; MAC_DIR=${MAC_DIR:-bp-notify-ios}; SIM=${SIM:-bp-notify}; APP_ID=${APP_ID:-dev.backplane.gpui}
 MAIN=$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)"); M=${MAC_SSH:-}
 for c in "$M" "$MAIN/build/gpui/mac-ssh" /home/h/Documents/i2cjak/backplane-gpui/build/gpui/mac-ssh; do [ -n "$c" ] && [ -x "$c" ] && { M=$c; break; }; done
-rm -rf "$OUT"; mkdir -p "$OUT" "$SHOTS"
-pids=(); stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; }
+rm -rf "$OUT"; mkdir -p "$OUT" "$SHOTS"; rm -f "$SHOTS"/ios-*.png   # no picture of an earlier run is read as this one's
+export PATH="$HOME/.bun/bin:$PATH"
+# simulator only: the sink takes every push, and the hub never finds the person's APNs credentials (no apns.env fallback)
+export BACKPLANE_APNS_ENV=/nonexistent/apns.env
+pids=(); stop() { [ -n "${pids[*]:-}" ] || return 0; curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; }
 trap stop EXIT; trap "exit 143" INT TERM HUP
 export RSYNC_RSH=$M
 # the app, built from this tree (simulator Debug, DATA_APP: the app the phones run), signed ad hoc so its aps-environment entitlement is kept and the simulator gives it a push token
@@ -68,4 +77,4 @@ r=json.load(open('$OUT/notify.json')); st=r['metrics']['steps']
 print('status',r.get('status'),'steps ok',sum(1 for s in st if s.get('ok')),'failed',sum(1 for s in st if not s.get('ok')))
 [print(' FAIL',s['do']) for s in st if not s.get('ok')]; [print(' note',n[:200]) for n in r.get('notes',[])]" 2>&1 | tee -a "$OUT/run.log"
 [ -f "$OUT/notify.json" ] || { echo "no notify.json: the test did not run"; [ "$rc" = 0 ] && rc=5; }
-rm -rf "$T"; echo "xcodebuild exit $rc"; exit "$rc"
+stop; pids=(); rm -rf "$T"; echo "xcodebuild exit $rc"; exit "$rc"

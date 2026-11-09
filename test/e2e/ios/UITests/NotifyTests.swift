@@ -21,7 +21,8 @@ final class Notify: XCTestCase {
     func since(_ n: Int) -> [[String: Any]] { ctl("/ev", ["since": String(n)])["ev"] as? [[String: Any]] ?? [] }
     func setting(_ n: Int, _ key: String) -> String? { since(n).last { $0["$"] as? String == "SettingSet" && $0["key"] as? String == key }?["value"] as? String }
     func prefs(_ n: Int) -> Bool? { since(n).last { $0["$"] as? String == "DevicePrefs" }?["mute"] as? Bool }
-    func sent(_ n: Int) -> [String: Any]? { since(n).last { $0["$"] as? String == "PushSent" } }
+    /// the hub's record of the uberbot's needs_you (the bot thread's own turn end also orders "done" alerts; they are not what is judged)
+    func sent(_ n: Int) -> [String: Any]? { since(n).last { $0["$"] as? String == "PushSent" && $0["kind"] as? String == "needs_you" } }
     func ordered(_ n: Int) -> Bool { since(n).contains { $0["$"] as? String == "PushOrdered" } }
     func banner(_ text: String) -> XCUIElement { sb.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", text)).firstMatch }
 
@@ -54,6 +55,17 @@ final class Notify: XCTestCase {
     func waitBanner(_ text: String, _ secs: TimeInterval) -> Bool { banner(text).waitForExistence(timeout: secs) }
     func noBanner(_ text: String, _ secs: TimeInterval) -> Bool { let end = Date().addingTimeInterval(secs); while Date() < end { if banner(text).exists { return false }; Thread.sleep(forTimeInterval: 0.2) }; return true }
     func home() { XCUIDevice.shared.press(.home); sleep(1) }
+    /// on this simulator: a banner with one of the texts within `secs`, else its entry in Notification Center (a banner shown while the app was in front, or one that
+    /// hid before it was looked for); leaves the home screen up
+    func delivered(_ texts: [String], _ secs: TimeInterval) -> Bool {
+        let end = Date().addingTimeInterval(secs)
+        var seen = false
+        while Date() < end && !seen { seen = texts.contains(where: { banner($0).exists }); if !seen { Thread.sleep(forTimeInterval: 0.1) } }
+        // a picture of it either way: a screenshot misses a banner's own window, Notification Center shows what was delivered
+        let top = sb.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.005)); top.press(forDuration: 0.1, thenDragTo: sb.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.7)))
+        sleep(2); seen = seen || texts.contains(where: { banner($0).exists })
+        d.shot("center-\(texts[0].prefix(12).replacingOccurrences(of: " ", with: "-"))"); home(); return seen
+    }
     /// quiet hours that cover now, in the person's zone (ctl.mjs sets America/New_York)
     func coverNow() -> (String, String) {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
@@ -93,7 +105,8 @@ final class Notify: XCTestCase {
         let err = d.label("not the same time twice")
         d.step("25:00 + Save shows the hub's error and keeps nothing", timeout: 10, act: { self.clearType(qfrom, "25:00"); self.tapIn(self.button("notify-quiet", "Save")) },
                expect: { err.exists && self.setting(m, "notify.quiet") == nil })
-        d.shot("quiet-bad")
+        // the keyboard down and the row's note in view for the picture
+        d.app.staticTexts["Urgent asks come through"].tap(); sleep(1); into(err); if err.frame.minY < 140 { d.app.swipeDown(velocity: .slow) }; d.shot("quiet-bad")
         sleep(2); d.step("…and still nothing after a wait", timeout: 1, act: {}, expect: { self.setting(m, "notify.quiet") == nil })
 
         let (a, b) = coverNow()
@@ -112,19 +125,22 @@ final class Notify: XCTestCase {
         d.shot("quiet-held")
         settings()
         m = mark()
-        d.step("Quiet hours off sends what was held", timeout: 45, act: { self.tapIn(self.button("notify-quiet", "off")); self.home() },
-               expect: { self.setting(m, "notify.quiet") == "off" && (self.sent(m)?["sent"] as? Int ?? 0) >= 1 && self.banner(held).exists })
+        // what was held goes as one: its banner is the held text, or "n of m need you" when other orders waited with it
+        var got = false
+        d.step("Quiet hours off sends what was held", timeout: 45, act: { self.tapIn(self.button("notify-quiet", "off")); self.home(); got = self.delivered([held, "need you"], 15) },
+               expect: { self.setting(m, "notify.quiet") == "off" && (self.sent(m)?["sent"] as? Int ?? 0) >= 1 && got })
+        d.note("released: \(String(describing: sent(m)))")
         d.shot("quiet-released")
         let goes = "Goes with quiet off"
         m = mark()
-        d.step("with quiet hours off a needs_you goes at once", timeout: 45, act: { _ = self.ctl("/uber", ["text": goes]) },
-               expect: { (self.sent(m)?["sent"] as? Int ?? 0) >= 1 && self.banner(goes).exists })
+        d.step("with quiet hours off a needs_you goes at once", timeout: 45, act: { _ = self.ctl("/uber", ["text": goes]); got = self.delivered([goes], 20) },
+               expect: { (self.sent(m)?["sent"] as? Int ?? 0) >= 1 && got })
         d.shot("quiet-off-goes")
 
         // mute: the app's Alerts switch, and the page's row for this phone
         settings()
-        let alertsOff = d.app.buttons.matching(NSPredicate(format: "identifier == 'settings.alerts' AND label == 'off'")).firstMatch
-        let alertsOn = d.app.buttons.matching(NSPredicate(format: "identifier == 'settings.alerts' AND label == 'on'")).firstMatch
+        // the switch is a DChoices: its id is on the row's scroll view, the buttons are inside it
+        let alertsOff = d.el("settings.alerts").buttons["off"], alertsOn = d.el("settings.alerts").buttons["on"]
         m = mark()
         d.step("Alerts on this phone off mutes it at the hub", act: { self.tapIn(alertsOff) }, expect: { self.prefs(m) == true })
         let muted = button("notify-mute", "muted")
@@ -133,7 +149,11 @@ final class Notify: XCTestCase {
         m = mark()
         d.step("the page's hears unmutes it", act: { self.tapIn(self.button("notify-mute", "hears")) }, expect: { self.prefs(m) == false && self.lit(self.button("notify-mute", "hears")) })
         m = mark()
+        d.step("the page's hears turns this phone's Alerts switch on", timeout: 5, act: {}, expect: { self.lit(alertsOn) })
+        m = mark()
         d.step("the page's muted mutes it again", act: { self.tapIn(self.button("notify-mute", "muted")) }, expect: { self.prefs(m) == true && self.lit(self.button("notify-mute", "muted")) })
+        d.step("…and turns this phone's Alerts switch off", timeout: 5, act: {}, expect: { self.lit(alertsOff) })
+        let m0 = mark()
 
         home()
         let quietOne = "Muted and not urgent"
@@ -144,14 +164,15 @@ final class Notify: XCTestCase {
         d.shot("muted-not-delivered")
 
         settings()
+        d.step("coming back to the app (it registers again) keeps the phone muted", timeout: 3, act: {}, expect: { self.prefs(m0) != false })
         m = mark()
         d.step("Urgent on", act: { self.tapIn(self.button("setting", "on", 4)) }, expect: { self.setting(m, "notify.quiet.urgent") == "on" && self.lit(self.button("setting", "on", 4)) })
         d.shot("urgent-on")
         home()
-        let urgent = "Muted but urgent"
+        let urgent = "Approve the staging deploy"   // unlike the last one: the hub refuses a near repeat
         m = mark()
-        d.step("muted, Urgent on: the needs_you comes through", timeout: 45, act: { _ = self.ctl("/uber", ["text": urgent]) },
-               expect: { (self.sent(m)?["sent"] as? Int ?? 0) >= 1 && (self.sent(m)?["through"] as? Bool) == true && self.banner(urgent).exists })
+        d.step("muted, Urgent on: the needs_you comes through", timeout: 45, act: { _ = self.ctl("/uber", ["text": urgent]); got = self.delivered([urgent], 20) },
+               expect: { (self.sent(m)?["sent"] as? Int ?? 0) >= 1 && (self.sent(m)?["through"] as? Bool) == true && got })
         d.note("muted, urgent on: \(String(describing: sent(m)))")
         d.shot("urgent-through")
 
