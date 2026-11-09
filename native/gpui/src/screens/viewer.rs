@@ -329,7 +329,8 @@ pub fn split_visible() -> Vec<&'static str> { let h = split_prefs().hide; SPLIT_
 fn split_box(i: usize) -> Option<Bounds<Pixels>> { SPLIT_BOX.lock().unwrap()[i] }
 /// An invisible layer that keeps a group's painted bounds.
 fn box_probe(i: usize) -> AnyElement {
-    canvas(move |b, _, _| { SPLIT_BOX.lock().unwrap()[i] = Some(b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full().into_any_element()
+    // (a new size draws the window again: the viewer is a cached part (part.rs), and the arrangement and the shares are read from these bounds)
+    canvas(move |b, window, _| { let mut g = SPLIT_BOX.lock().unwrap(); if g[i].map_or(true, |o| o.size != b.size) { g[i] = Some(b); window.refresh(); } else { g[i] = Some(b); } }, |_, _, _, _| {}).absolute().top_0().left_0().size_full().into_any_element()
 }
 struct SplitMain;
 struct SplitSide;
