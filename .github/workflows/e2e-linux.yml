@@ -12,6 +12,10 @@ on:
       target:
         description: "linux-arm64 (ubuntu-22.04-arm) or linux-x64 (ubuntu-22.04)"
         default: "linux-arm64"
+      agy_probe:
+        description: "F05-antigravity on its own in the container, on the PUBLISHED release's archive (archive_run is ignored)"
+        type: boolean
+        default: false
       image:
         description: "run the steps inside this container image (a newer X server), e.g. ubuntu:26.04; empty: on the runner"
         default: ""
@@ -32,7 +36,15 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      - name: published release archive
+        if: ${{ inputs.agy_probe }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir arch && gh release download v0.15.0 --repo ${{ github.repository }} -p "*${{ inputs.target }}-native.tar.gz" -D arch
+          ls -la arch
       - uses: actions/download-artifact@v4
+        if: ${{ !inputs.agy_probe }}
         with:
           name: archive-${{ inputs.target }}
           path: arch
@@ -65,7 +77,7 @@ jobs:
         if: ${{ inputs.image }}
         run: |
           mkdir -p "$RUNNER_TEMP/e2e"
-          docker run --rm --privileged -v "$PWD:/w" -v "$RUNNER_TEMP:$RUNNER_TEMP" -w /w ${{ inputs.image }} bash test/e2e/ci-container.sh ${{ inputs.probe_only && 'probe' || 'full' }} arch "$RUNNER_TEMP/e2e" 2>&1 | tee e2e.txt
+          docker run --rm --privileged -v "$PWD:/w" -v "$RUNNER_TEMP:$RUNNER_TEMP" -w /w ${{ inputs.image }} bash test/e2e/ci-container.sh ${{ inputs.agy_probe && 'agy' || inputs.probe_only && 'probe' || 'full' }} arch "$RUNNER_TEMP/e2e" 2>&1 | tee e2e.txt
       - name: own the files
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/e2e" . 2>/dev/null; sudo chmod -R u+rX "$RUNNER_TEMP/e2e" 2>/dev/null; true
@@ -75,6 +87,8 @@ jobs:
           name: e2e-${{ inputs.target }}
           path: |
             e2e.txt
+            agy-*.txt
+            ${{ runner.temp }}/e2e/agy/*.log
             xprobe.txt
             xprobe-*.png
             ${{ runner.temp }}/e2e/summary.md

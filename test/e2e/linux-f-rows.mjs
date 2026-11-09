@@ -30,7 +30,7 @@ const orderSeen=[]; const srv=http.createServer((q,s)=>{const b=[];q.on('data',d
   if(q.method==='GET'&&q.url.startsWith('/v1/quotes/q_e2e1'))return s.end(JSON.stringify({status:'quoted',currency:'USD',total:12.5,lines:[{name:'Board',qty:5,total:12.5}]}));
   s.statusCode=404;s.end('{"error":"no"}')})});
 await new Promise(r=>srv.listen(0,'127.0.0.1',r)); const ORDER=`http://127.0.0.1:${srv.address().port}`;
-let hub=null; const env0={...process.env,BACKPLANE_AGENTS:AG,PATH:`${AG}${process.platform==='win32'?';':':'}${process.env.PATH}`,BACKPLANE_NO_UPDATE:'1',...(process.platform==='win32'?{}:{SHELL:'/bin/sh'}),BACKPLANE_ORDER_SERVER:ORDER,FAKE_LOG:FAKE,FAKE_SECS:'600'};
+let hub=null; const env0={...process.env,BACKPLANE_AGENTS:AG,PATH:`${AG}${process.platform==='win32'?';':':'}${process.env.PATH}`,BACKPLANE_NO_UPDATE:'1',...(process.platform==='win32'?{}:{SHELL:'/bin/sh'}),BACKPLANE_ORDER_SERVER:ORDER,FAKE_LOG:FAKE,FAKE_SECS:'600',AGY_LOG:OUT+'/agy-standin.log'};
 async function start(){
   const out=openSync(OUT+'/hub.log','a');
   hub=spawn(BIN,['--home',HOME,'--port',String(PORT),'--no-tailscale','--foreground'],{env:env0,stdio:['ignore',out,out]});
@@ -62,7 +62,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
 {const T=await mk('prov');await c.rpc('turn.start',{thread:T,text:'zqecho one'});const ok=await finished(T);
  const says=events().filter(e=>e.$==='MessagePosted'&&e.thread===T&&e.role==='assistant').map(e=>e.text).join('|');
  log('F05-claude',ok&&/echo: .*zqecho one/.test(says),`claude stand-in turn ended, echoed ${JSON.stringify(says).slice(0,80)}`);
- const PROV=[['grok','hello grok','zqask go'],['opencode','hello opencode','zqask go'],['muse','hello muse','perm please'],['pi','hello pi','zqask go'],['omp','hello omp','zqask go'],['antigravity','zq hello','zq perm please']];
+ const PROV=[['grok','hello grok','zqask go'],['opencode','hello opencode','zqask go'],['muse','hello muse','perm please'],['pi','hello pi','zqask go'],['omp','hello omp','zqask go'],['antigravity','zq hello','zq perm please']].filter(x=>!process.env.E2E_ONLY_PROV||x[0]===process.env.E2E_ONLY_PROV);   // E2E_ONLY_PROV=name: only that provider, and the run ends after it (a stand-in looked at on its own)
  for(const [p,hello,ask] of PROV){
   const T1=await mk('prov-'+p,{provider:p});await c.rpc('turn.start',{thread:T1,text:hello});const done=await until(()=>turnStates(T1).some(s=>s==='completed'||s==='failed'),60000);
   const said=events().some(e=>e.$==='MessagePosted'&&e.thread===T1&&e.role==='assistant'&&(e.text||'').length>0);const st=turnStates(T1).at(-1);
@@ -70,6 +70,7 @@ const mk=async(title,extra={})=>(await c.rpc('thread.create',{project:P,title,en
   const asked=await until(()=>has(e=>e.$==='AskOpened'&&e.thread===T2),30000);const a=events().find(e=>e.$==='AskOpened'&&e.thread===T2);
   const an=a?await c.rpc('ask.answer',{id:a.id,answer:'accept'}):{ok:false};const fin=await until(()=>turnStates(T2).some(s=>s==='completed'||s==='failed'),60000);
   log('F05-'+p,done&&st==='completed'&&said&&asked&&an.ok&&fin&&turnStates(T2).at(-1)==='completed',`${p}: a plain turn ${st} with an assistant message=${said}; a permission turn opened an ask=${asked} (${(a?.detail||'').slice(0,30).replace(/\n/g,' ')}), accepted ok=${an.ok}, then ${turnStates(T2).at(-1)}`)}
+ if(process.env.E2E_ONLY_PROV){writeFileSync(OUT+'/rows.json',JSON.stringify({rows},null,1));try{process.kill(Number(/^(\d+)/.exec(readFileSync(HOME+'/hub.lock','utf8'))[1]),'SIGTERM')}catch{} srv.close(); await sleep(500); process.exit(0)}
  {const T1=await mk('prov-codex',{provider:'codex'});await c.rpc('thread.modes',{thread:T1,runtime:'approval-required'});await sleep(300);
   await c.rpc('turn.start',{thread:T1,text:'hello codex'});const d1=await until(()=>turnStates(T1).some(s=>s==='completed'||s==='failed'),60000);
   const said=events().some(e=>e.$==='MessagePosted'&&e.thread===T1&&e.role==='assistant'&&/^re: hello codex/.test(e.text||''));
