@@ -56,7 +56,7 @@ fn target_valid(t: &Value) -> bool {
 
 /// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would
 /// be taken for the hub's (an unported native page for indexed rows), so every one is removed from the request's clone before the hub's go in.
-fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog"] { o.remove(k); } } }
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "liveText"] { o.remove(k); } } }
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
@@ -126,6 +126,8 @@ impl Hub {
         let (window, page) = match self.window_for(&p, before, shown.as_deref()).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(shown.as_deref().unwrap_or(""), before, pg)); }
+        // the reply the agent is streaming now (Hub::live_delta), drawn in place of "Working" until its message lands
+        if let (Some(th), true) = (shown.as_deref(), page.is_some()) { let t = self.live_text(th); if !t.is_empty() { if let Some(o) = params.as_object_mut() { o.insert("liveText".into(), Value::String(t)); } } }
         // the thread's subagent log, for the Subagents panel's rows and their drill-down (present/panels.rs `subs_at`)
         if let (Some(th), true) = (shown.as_deref(), page.is_some()) { let log = self.sub_log_for(th).await; if let Some(o) = params.as_object_mut() { o.insert("subLog".into(), log); } }
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }

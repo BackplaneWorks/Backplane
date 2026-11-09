@@ -199,6 +199,8 @@ impl Backplane {
         let kind = e["kind"].as_str().unwrap_or("");
         let text = string(&e, "text");
         let stamp = string(&e, "stamp");
+        // a reply whose stream was on screen takes the streamed row's place as it is: no fade, no slide
+        let was_streamed = kind == "assistant" && !id.starts_with('@') && !self.screens.streamed.is_empty() && { let a: String = self.screens.streamed.trim().chars().take(60).collect(); text.trim_start().starts_with(&a) };
         let row: AnyElement = match kind {
             "user" => {
                 let wide = crate::screens::timeline::bubble_full_width(&text);
@@ -253,13 +255,15 @@ impl Backplane {
                     _ => { col = col.child(crate::screens::timeline::user_text(&reg, light, &text, &[])); }
                 }
                 if let Some(im) = crate::screens::timeline::images(cx, light, &e["images"], &id, self.screens.attacher.target.as_ref(), &self.screens.images) { col = col.child(im); }
-                let tools = msg_tools(cx, light, &id, &text);
+                // the reply being streamed: no Copy/Reply until its message lands
+                let streaming = e["streaming"] == true; if streaming { self.screens.streamed = text.clone(); }
+                let tools = if streaming { div() } else { msg_tools(cx, light, &id, &text) };
                 // s04: a reply inside a turn has no stamp of its own; its time (`hover`) shows while the pointer is on it
                 let hover = string(&e, "hover"); let group = SharedString::from(format!("msg-{id}"));
                 // (after Copy and Reply, so the hidden time leaves no gap in front of them)
                 let foot = div().flex().items_center().gap_3().text_size(px(11.)).text_color(c("faint"));
                 let foot = if stamp.is_empty() && !hover.is_empty() { foot.child(tools).child(div().invisible().group_hover(group.clone(), |s| s.visible()).child(hover)) } else { foot.child(stamp).child(tools) };
-                col.group(group).child(foot).into_any_element()
+                col.group(group).when(!streaming, |d| d.child(foot)).into_any_element()
             }
             "term" => self.term_card(&e, light, cx),
             "step" => crate::screens::histbar::step_row(cx, light, &e),
@@ -283,7 +287,7 @@ impl Backplane {
         let len = self.data["thread"]["entries"].as_array().map_or(0, |r| r.len());
         let settled = self.screens.shown_at.elapsed().as_millis() > 800;
         let first = *self.screens.born.entry(id.clone()).or_insert_with(std::time::Instant::now);
-        let fresh = settled && ei + 3 >= len && first.elapsed().as_millis() < 260;
+        let fresh = settled && ei + 3 >= len && first.elapsed().as_millis() < 260 && !was_streamed;
         let inner: AnyElement = if fresh {
             inner.with_animation(SharedString::from(format!("arrive-{id}")), Animation::new(std::time::Duration::from_millis(220)).with_easing(ease_out_quint()),
                 |el, d| el.opacity(d).mt(px(10. * (1. - d)))).into_any_element()
