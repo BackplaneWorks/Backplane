@@ -263,7 +263,8 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, slot, pv.focus.clone(), light, frame, view, crate::viewers::layers::masks(viewer)));
     if layers { if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(280.), &pv.layers_scroll) { area = area.child(p); } }
     // the card of the piece last tapped (Insp.card): what it is, then key = value rows; a tap on nothing, or Close, puts it away
-    if let Some(card) = pv.card.clone() {
+    // (Split's panes, slots 1 and 2, name it in their bar instead: a card there covered the drawing beside it)
+    if let Some(card) = pv.card.clone().filter(|_| slot == 0) {
         let mut box_ = div().id(SharedString::from(format!("pick-card-{slot}"))).absolute().left_2().bottom_2().max_w(px(300.)).flex().flex_col().gap_1().p_2().text_size(px(12.)).border_1().border_color(c("line")).bg(c("panel")).occlude()
             .child(div().flex().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).child(card.title.clone()))
                 .child(div().id(SharedString::from(format!("pick-close-{slot}"))).cursor_pointer().text_color(c("dim")).child("×").on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.card = None; pv.picked = None; cx.notify(); }))));
@@ -278,19 +279,165 @@ fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Valu
     plot_pane(cx, light, 0, open, viewer, plot.frame.as_ref(), pv, true, &plot.sheets, Some(actions))
 }
 
-/// Split: the schematic across the top, the board and its 3D model beneath it, each its own page of `viewer.panes` (key, camera), all watched at once.
-fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &super::plot::Store, pvs: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, have: &str) -> AnyElement {
+/// Split's panes by the words 0.14 kept (split.hide): "sch" the schematic, "pcb" the board, "3d" its 3D model.
+pub const SPLIT_PANES: [(&str, &str); 3] = [("sch", "Schematic"), ("pcb", "Board"), ("3d", "3D")];
+/// Whether pane `p` shows with the panes `hide` names put away.
+pub fn split_shows(hide: &str, p: &str) -> bool { !hide.split_whitespace().any(|w| w == p) }
+/// 0.14's Split.flip on a desktop: pane `p` put away or brought back, each on its own; the last pane shown stays (a press on it changes nothing).
+pub fn split_flip(hide: &str, p: &str) -> String {
+    if !SPLIT_PANES.iter().any(|(k, _)| *k == p) { return hide.to_string() }
+    let mut on: Vec<&str> = SPLIT_PANES.iter().map(|x| x.0).filter(|q| split_shows(hide, q)).collect();
+    if on.contains(&p) { if on.len() == 1 { return hide.to_string() } on.retain(|q| *q != p) } else { on.push(p) }
+    SPLIT_PANES.iter().map(|x| x.0).filter(|q| !on.contains(q)).collect::<Vec<_>>().join(" ")
+}
+/// A divider's share for its first pane: the saved one (0: the default, 0.14's 1.15 : 1 for the schematic, halves for the board and 3D), kept so each pane
+/// keeps 140 px for its head and some drawing (project-splitters.js `splitLimits`).
+pub fn split_share(saved: f32, main: bool, extent: f32) -> f32 {
+    let d = if main { 1.15 / 2.15 } else { 0.5 };
+    let r = if saved > 0. && saved < 1. { saved } else { d };
+    let min = if extent > 1. { (140. / extent).min(0.45) } else { 0.1 };
+    r.clamp(min, 1. - min)
+}
+/// The share a drag to `at` (window px along the divider's axis) makes of a group starting at `origin` and `extent` long.
+pub fn share_at(at: f32, origin: f32, extent: f32) -> f32 { if extent <= 1. { 0.5 } else { split_share(((at - origin) / extent).clamp(0.01, 0.99), true, extent) } }
+/// The thickness of a divider (px): the 2 px line and room to take it.
+const SPLIT_EDGE: f32 = 7.0;
+
+/// This device's Split choices (local.rs), read once and kept here as the pane width is; and the two groups' bounds last painted
+/// (0 the schematic beside the rest, 1 the board beside the 3D), for the dividers' drags and the panes' arrangement.
+#[derive(Clone, Default)]
+struct SplitPrefs { hide: String, main: f32, side: f32 }
+static SPLIT: std::sync::Mutex<Option<SplitPrefs>> = std::sync::Mutex::new(None);
+static SPLIT_BOX: std::sync::Mutex<[Option<Bounds<Pixels>>; 2]> = std::sync::Mutex::new([None, None]);
+fn split_prefs() -> SplitPrefs {
+    let mut g = SPLIT.lock().unwrap();
+    g.get_or_insert_with(|| { let l = crate::local::Local::load(); SplitPrefs { hide: l.split_hide, main: l.split_main, side: l.split_side } }).clone()
+}
+fn split_set(this: &mut Backplane, f: impl FnOnce(&mut SplitPrefs), save: bool, cx: &mut Context<Backplane>) {
+    let mut p = split_prefs(); f(&mut p);
+    this.local.split_hide = p.hide.clone(); this.local.split_main = p.main; this.local.split_side = p.side;
+    *SPLIT.lock().unwrap() = Some(p);
+    if save { this.local.save(); }
+    this.ui_epoch += 1; cx.notify();
+}
+/// The panes Split shows on this device (for the cross-probe and the harness).
+pub fn split_visible() -> Vec<&'static str> { let h = split_prefs().hide; SPLIT_PANES.iter().map(|x| x.0).filter(|p| split_shows(&h, p)).collect() }
+fn split_box(i: usize) -> Option<Bounds<Pixels>> { SPLIT_BOX.lock().unwrap()[i] }
+/// An invisible layer that keeps a group's painted bounds.
+fn box_probe(i: usize) -> AnyElement {
+    canvas(move |b, _, _| { SPLIT_BOX.lock().unwrap()[i] = Some(b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full().into_any_element()
+}
+struct SplitMain;
+struct SplitSide;
+/// A divider between two panes: drag to resize, double click for the default; `row` when the panes sit side by side (a vertical line).
+fn split_edge(cx: &mut Context<Backplane>, light: bool, main: bool, row: bool) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let (line, grip) = (c("line"), c("faint"));
+    let id = if main { "split-resize-main" } else { "split-resize-side" };
+    let mut d = div().id(id).flex_none().relative().bg(c("panel")).group(id);
+    d = if row { d.w(px(SPLIT_EDGE)).h_full().cursor_col_resize() } else { d.h(px(SPLIT_EDGE)).w_full().cursor_row_resize() };
+    let hl = theme::color(light, "accent");
+    let mark = |d: Div| if row { d.absolute().top_0().bottom_0().left(px(SPLIT_EDGE / 2. - 1.)).w(px(2.)) } else { d.absolute().left_0().right_0().top(px(SPLIT_EDGE / 2. - 1.)).h(px(2.)) };
+    let knob = |d: Div| if row { d.absolute().top(relative(0.5)).mt(px(-14.)).left(px(SPLIT_EDGE / 2. - 2.)).w(px(4.)).h(px(28.)) } else { d.absolute().left(relative(0.5)).ml(px(-14.)).top(px(SPLIT_EDGE / 2. - 2.)).h(px(4.)).w(px(28.)) };
+    d = d.child(mark(div()).bg(line).group_hover(id, move |s| s.bg(hl))).child(knob(div()).rounded(px(2.)).bg(grip).opacity(0.7).group_hover(id, move |s| s.bg(hl).opacity(1.)));
+    let reset = cx.listener(move |this, e: &ClickEvent, _, cx| { if e.click_count() >= 2 { split_set(this, |p| if main { p.main = 0. } else { p.side = 0. }, true, cx); } });
+    let moved = move |this: &mut Backplane, pos: Point<Pixels>, cx: &mut Context<Backplane>| {
+        let Some(b) = split_box(if main { 0 } else { 1 }) else { return };
+        let (at, o, e) = if row { (pos.x, b.origin.x, b.size.width) } else { (pos.y, b.origin.y, b.size.height) };
+        let r = share_at(f32::from(at), f32::from(o), f32::from(e));
+        split_set(this, |p| if main { p.main = r } else { p.side = r }, false, cx);
+    };
+    let d = if main { d.on_drag(SplitMain, |_, _, _, cx| cx.new(|_| Ghost)).on_drag_move(cx.listener(move |this, e: &DragMoveEvent<SplitMain>, _, cx| moved(this, e.event.position, cx))) }
+        else { d.on_drag(SplitSide, |_, _, _, cx| cx.new(|_| Ghost)).on_drag_move(cx.listener(move |this, e: &DragMoveEvent<SplitSide>, _, cx| moved(this, e.event.position, cx))) };
+    d.on_click(reset).into_any_element()
+}
+/// A pane's head (0.14's combo-head): its name, and × to put it away.
+fn split_head(cx: &mut Context<Backplane>, light: bool, pane: &'static str, name: &'static str) -> Div {
+    let c = |n: &str| theme::color(light, n);
+    div().flex_none().h(px(26.)).flex().items_center().gap_2().pl_2().pr_1().bg(c("panel")).border_b_1().border_color(c("line"))
+        .child(div().flex_1().min_w_0().text_size(px(10.)).text_color(c("dim")).child(name.to_uppercase()))
+        .child(div().id(SharedString::from(format!("split-hide-{pane}"))).p(px(3.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip(&format!("Hide the {name}"), "", light))
+            .child(crate::art::icon("x", 13., c("dim"))).on_click(cx.listener(move |this, _, _, cx| split_set(this, |p| p.hide = split_flip(&p.hide, pane), true, cx))))
+}
+/// The bar's pane toggles (lit while shown) and the probed piece as a chip (0.14's combo-picks and probe-chip): a tap on a part or net in any pane names it here
+/// instead of a card over the drawing; × or Escape clears it in every pane.
+fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Option<&super::plot::Card>, actions: AnyElement) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let mut picks = div().flex().flex_none().gap_1();
+    for (pane, name) in SPLIT_PANES.iter() {
+        let (pane, name, on) = (*pane, *name, split_shows(hide, pane));
+        // (0.14's combo-pick: outlined in the accent while shown, dim while put away)
+        let d = div().id(SharedString::from(format!("split-pick-{pane}"))).px_2().py(px(2.)).text_size(px(12.)).cursor_pointer().border_1().hover(|s| s.bg(c("raise")));
+        let d = if on { d.border_color(c("accent")).text_color(c("text")) } else { d.border_color(c("line")).text_color(c("dim")) };
+        picks = picks.child(d.tooltip(crate::keys::tip(&format!("{} the {name}", if on { "Hide" } else { "Show" }), "", light)).child(name)
+            .on_click(cx.listener(move |this, _, _, cx| split_set(this, |p| p.hide = split_flip(&p.hide, pane), true, cx))));
+    }
+    // the bar: (the Boards menu,) the pane toggles, the probe, then the pane's own controls
+    // (as tall as the thread's head beside it, so their lines meet)
+    let mut row = div().id("split-bar").flex_none().h(px(super::bar::H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("line")).child(div().flex_1()).child(picks);
+    if let Some(card) = probed {
+        let words = probe_words(card);
+        let full = std::iter::once(card.title.clone()).chain(card.rows.iter().map(|(k, v)| format!("{k}: {v}"))).collect::<Vec<_>>().join("\n");
+        row = row.child(div().id("split-probe").min_w_0().flex().items_center().gap_1().pl_2().pr(px(2.)).py_px().border_1().border_color(c("accent")).bg(c("raise")).text_size(px(12.))
+            .tooltip(crate::keys::tip(&full, "", light))
+            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(words.join(" · ")))
+            .child(div().id("split-probe-clear").flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip("Clear", "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
+                .on_click(cx.listener(|this, _, _, cx| { for i in 0..3 { let pv = this.screens.pv(i); pv.picked = None; pv.card = None; pv.lit.clear(); } super::plotview::report_state(this); cx.notify(); }))));
+    }
+    row.child(actions).into_any_element()
+}
+/// What the probe chip says: the part's reference (else what was tapped), its value and its net, as 0.14's Probe.label named a probe by its ref or net.
+pub fn probe_words(card: &super::plot::Card) -> Vec<String> {
+    let get = |k: &str| card.rows.iter().find(|r| r.0 == k).map(|r| r.1.trim().to_string()).filter(|v| !v.is_empty());
+    let mut words = vec![get("ref").unwrap_or_else(|| card.title.clone())];
+    for k in ["value", "net"] { if let Some(v) = get(k) { if !words.contains(&v) { words.push(v) } } }
+    words
+}
+/// Split (0.14's combined view): the schematic beside the board and its 3D model (stacked the other way on a pane taller than wide), each under a head that
+/// names it and puts it away, the bar's toggles bring each back, and the dividers between them resize them (kept on this device). Every pane is a page of
+/// `viewer.panes` (key, camera), all watched at once; a tap in the schematic or the board lights the part or net in both.
+fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &super::plot::Store, pvs: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, have: &str, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let panes: Vec<&Value> = viewer["panes"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
-    if panes.len() < 3 { return div().p_3().text_color(c("dim")).child("Opening…").into_any_element(); }
+    if panes.len() < 3 { return status_row(light, "Opening…", Some(actions)) }
+    let prefs = split_prefs();
+    let (s_on, b_on, t_on) = (split_shows(&prefs.hide, "sch"), split_shows(&prefs.hide, "pcb"), split_shows(&prefs.hide, "3d"));
+    let probed = pvs.iter().find_map(|p| p.card.clone());
+    let bar = split_bar(cx, light, &prefs.hide, probed.as_ref(), actions);
+    // landscape (the pane wider than tall): the schematic on the left, the board over the 3D on the right; portrait: the schematic on top, the board beside the 3D
+    let wide = split_box(0).map_or(true, |b| b.size.width >= b.size.height);
     let [sch_pv, brd_pv] = pvs;
-    let tag = |label: &str| div().absolute().top_1().left_2().px_1().text_size(px(10.)).text_color(c("dim")).child(label.to_string());
-    let sch = div().relative().w_full().h(relative(0.5)).border_b_1().border_color(c("line")).child(plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &[], None)).child(tag("Schematic"));
-    let brd = div().relative().flex_1().min_w_0().h_full().border_r_1().border_color(c("line")).child(plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], None)).child(tag("Board"));
-    let want3 = string(panes[2], "key");
-    let model: AnyElement = match solid { Some(s) if solid_ready(&want3, have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => div().p_3().text_color(c("dim")).child("Loading the model…").into_any_element() };
-    let d3 = div().relative().flex_1().min_w_0().h_full().child(model).child(tag("3D"));
-    div().size_full().flex().flex_col().child(sch).child(div().flex().flex_1().min_h_0().child(brd).child(d3)).into_any_element()
+    let pane = |head: Div, body: AnyElement| div().flex().flex_col().min_w_0().min_h_0().child(head).child(div().relative().flex_1().min_h_0().min_w_0().child(body));
+    let sch = s_on.then(|| { let h = split_head(cx, light, "sch", "Schematic"); let b = plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &[], None); pane(h, b) });
+    let brd = b_on.then(|| { let h = split_head(cx, light, "pcb", "Board"); let b = plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], None); pane(h, b) });
+    let d3 = t_on.then(|| {
+        let want3 = string(panes[2], "key");
+        if let Some(s) = solid { if s.read(cx).reserve != 0. { s.update(cx, |p, cx| { p.reserve = 0.; cx.notify(); }); } }
+        let model: AnyElement = match solid { Some(s) if solid_ready(&want3, have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => status_row(light, "Loading the model…", None) };
+        let h = split_head(cx, light, "3d", "3D"); pane(h, model)
+    });
+    // the side group: the board and the 3D, one beside (or over) the other with the divider between them
+    let side_row = !wide;
+    let sized = |d: Div, share: f32, row: bool| if row { d.flex_none().h_full().w(relative(share)) } else { d.flex_none().w_full().h(relative(share)) };
+    let fill = |d: Div, row: bool| if row { d.flex_1().h_full() } else { d.flex_1().w_full() };
+    let side_extent = split_box(1).map_or(0., |b| f32::from(if side_row { b.size.width } else { b.size.height }));
+    let side: Option<Div> = match (brd, d3) {
+        (Some(b), Some(t)) => { let e = split_edge(cx, light, false, side_row); Some(div().relative().flex().when(!side_row, |d| d.flex_col()).child(box_probe(1)).child(sized(b, split_share(prefs.side, false, side_extent), side_row)).child(e).child(fill(t, side_row))) }
+        (Some(x), None) | (None, Some(x)) => Some(div().relative().flex().flex_col().child(fill(x, false))),
+        (None, None) => None,
+    };
+    let main_row = wide;
+    let main_extent = split_box(0).map_or(0., |b| f32::from(if main_row { b.size.width } else { b.size.height }));
+    let body = div().id("split-panes").relative().flex_1().min_h_0().flex().when(!main_row, |d| d.flex_col()).bg(c("view")).child(box_probe(0));
+    let body = match (sch, side) {
+        (Some(s), Some(sd)) => { let e = split_edge(cx, light, true, main_row); body.child(sized(s, split_share(prefs.main, true, main_extent), main_row)).child(e).child(fill(sd, main_row).min_w_0().min_h_0()) }
+        (Some(x), None) => body.child(fill(x, main_row)),
+        (None, Some(x)) => body.child(fill(x, main_row).min_w_0().min_h_0()),
+        (None, None) => body,
+    };
+    // a divider's drag ends where the pointer is let go: the shares are written to this device's file then (not on every move)
+    let body = body.on_drop(cx.listener(|this, _: &SplitMain, _, cx| split_set(this, |_| {}, true, cx))).on_drop(cx.listener(|this, _: &SplitSide, _, cx| split_set(this, |_| {}, true, cx)));
+    div().size_full().flex().flex_col().child(bar).child(body).into_any_element()
 }
 
 fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Value, actions: AnyElement) -> AnyElement {
@@ -335,7 +482,7 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { let a = acts(cx); super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target, a) }
         else if open == "review" && viewer["review"].is_object() { let a = acts(cx); review_page(cx, reg, light, &viewer["review"], a) }
         else if matches!(open, "board" | "schematic") { let a = acts(cx); plot_page(cx, light, open, viewer, plot, pv, a) }
-        else if open == "split" { let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default(); let page = split_page(cx, light, viewer, plot, split_pv, solid, &have); let a = acts(cx); in_corner(page, a) }
+        else if open == "split" { let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default(); let a = acts(cx); split_page(cx, light, viewer, plot, split_pv, solid, &have, a) }
         else if matches!(open, "3d" | "mech") {
             let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
@@ -417,6 +564,30 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn split_panes_are_put_away_and_brought_back_one_at_a_time_and_the_last_one_stays() {
+        assert!(split_shows("", "sch") && split_shows("", "pcb") && split_shows("", "3d"));
+        assert_eq!(split_flip("", "pcb"), "pcb");
+        assert_eq!(split_flip("pcb", "3d"), "pcb 3d");
+        assert_eq!(split_flip("pcb 3d", "sch"), "pcb 3d", "the last pane shown stays");
+        assert_eq!(split_flip("pcb 3d", "pcb"), "3d");
+        assert_eq!(split_flip("3d", "3d"), "");
+        assert_eq!(split_flip("pcb", "nope"), "pcb");
+        assert!(!split_shows("sch 3d", "3d") && split_shows("sch 3d", "pcb"));
+    }
+    #[test] fn a_split_divider_keeps_each_pane_room_for_its_head() {
+        assert!((split_share(0., true, 1000.) - 1.15 / 2.15).abs() < 1e-6, "the schematic's default share is 0.14's");
+        assert_eq!(split_share(0., false, 1000.), 0.5);
+        assert_eq!(split_share(0.05, true, 1000.), 0.14, "140 px of 1000 at least");
+        assert_eq!(split_share(0.99, false, 1000.), 0.86);
+        assert_eq!(split_share(0.3, true, 200.), 0.45, "a small pane: never less than 45 percent each way");
+        assert!((share_at(600., 100., 1000.) - 0.5).abs() < 1e-6);
+    }
+    #[test] fn the_probe_chip_names_a_part_by_its_reference() {
+        let c = super::super::plot::card("fp_poly;ref=C5;value=47uF 100V;net=GND").unwrap();
+        assert_eq!(probe_words(&c), vec!["C5", "47uF 100V", "GND"]);
+        let n = super::super::plot::card("track;net=/NRST").unwrap();
+        assert_eq!(probe_words(&n), vec!["track", "/NRST"]);
+    }
     #[test] fn open_in_kicad_names_the_machine_when_the_hub_is_another() {
         assert_eq!(kicad_open_label(Some("127.0.0.1:3797"), None), "Open in KiCad"); assert_eq!(kicad_open_label(None, None), "Open in KiCad"); assert_eq!(kicad_open_label(Some("127.0.0.1:3797"), Some("desktop")), "Open in KiCad on desktop"); assert_eq!(kicad_open_label(None, Some("")), "Open in KiCad");
         assert_eq!(kicad_open_label(Some("desktop.tail9e0cf2.ts.net:8451"), None), "Open in KiCad on desktop");
