@@ -6,8 +6,9 @@ use gpui::{prelude::*, *};
 use std::{collections::{HashMap, VecDeque}, io::{Read, Write}, net::TcpStream, sync::{Arc, Condvar, Mutex}, time::Duration};
 
 pub const MAX_BYTES: usize = 24 << 20;
-/// What the cache may hold, and how many fetches run at once.
-pub const CACHE_BYTES: usize = 128 << 20;
+/// What the cache may hold, counted as drawn (width x height x 4: GPUI keeps each image decoded, and again in its texture atlas), and how
+/// many fetches run at once.
+pub const CACHE_BYTES: usize = 256 << 20;
 pub const WORKERS: usize = 4;
 
 #[derive(Clone)]
@@ -15,7 +16,7 @@ pub enum Slot { Loading, Ready(Arc<Image>), Failed }
 
 struct Entry { slot: Slot, used: u64, bytes: usize }
 #[derive(Default)]
-struct State { items: HashMap<String, Entry>, queue: VecDeque<(String, Target)>, workers: usize, tick: u64, done: u64 }
+struct State { items: HashMap<String, Entry>, queue: VecDeque<(String, Target)>, workers: usize, tick: u64, done: u64, retired: Vec<Arc<Image>> }
 
 /// Shared by the render and the fetch workers.
 #[derive(Clone, Default)]
@@ -44,6 +45,21 @@ pub fn split(resp: &[u8]) -> Option<(u16, &[u8])> {
     Some((status, &resp[at + 4..]))
 }
 
+/// The longest side an image is kept at. Messages show pictures a few hundred pixels wide (the lightbox at most the window), and GPUI keeps
+/// each one decoded at full size and again in its texture atlas: the person's 3,800 x 2,500 screenshots cost 37 MB each, twice.
+pub const MAX_SIDE: u32 = 2048;
+/// A picture larger than MAX_SIDE is scaled down to it here, on the fetch thread (PNG out, quickly compressed); others are kept as they came.
+pub fn shrink(img: Arc<Image>) -> Arc<Image> {
+    let Some((w, h)) = dims(&img.bytes) else { return img };
+    if w.max(h) <= MAX_SIDE || !matches!(img.format, ImageFormat::Png | ImageFormat::Jpeg) { return img }
+    let Ok(full) = image::load_from_memory(&img.bytes) else { return img };
+    let small = full.resize(MAX_SIDE, MAX_SIDE, image::imageops::FilterType::Triangle).into_rgba8();
+    let mut out = Vec::new();
+    let enc = image::codecs::png::PngEncoder::new_with_quality(&mut out, image::codecs::png::CompressionType::Fast, image::codecs::png::FilterType::Adaptive);
+    use image::ImageEncoder;
+    if enc.write_image(small.as_raw(), small.width(), small.height(), image::ExtendedColorType::Rgba8).is_err() { return img }
+    Arc::new(Image::from_bytes(ImageFormat::Png, out))
+}
 fn fetch(t: &Target, url: &str) -> Option<Arc<Image>> {
     let mut s = t.stream().ok()?; s.set_timeouts(Duration::from_secs(30)).ok()?;
     s.write_all(request(t, url).as_bytes()).ok()?;
@@ -107,6 +123,16 @@ impl Images {
     pub fn retry(&self) { if let Ok(mut st) = self.s.0.lock() { st.items.retain(|_, e| !matches!(e.slot, Slot::Failed)); } }
     /// How many fetches have finished (arrived or failed) so far: the window redraws when this moves, not on every poll.
     pub fn done(&self) -> u64 { self.s.0.lock().map_or(0, |st| st.done) }
+    /// The images the cache let go of leave GPUI too: its decoded copy (asset cache) and its texture, which otherwise stay for as long as the
+    /// window runs, however many images a long thread shows. True when one went (the parts are drawn again: one may still have been on screen).
+    pub fn release(&self, window: &mut Window, cx: &mut App) -> bool {
+        let gone = self.s.0.lock().map(|mut st| std::mem::take(&mut st.retired)).unwrap_or_default();
+        for img in &gone {
+            if let Some(r) = img.clone().get_render_image(window, cx) { cx.drop_image(r, Some(window)); }
+            img.clone().remove_asset(cx);
+        }
+        !gone.is_empty()
+    }
     pub fn loading(&self) -> bool { self.s.0.lock().map_or(false, |st| st.items.values().any(|e| matches!(e.slot, Slot::Loading))) }
     pub fn bytes(&self) -> usize { self.s.0.lock().map_or(0, |st| st.items.values().map(|e| e.bytes).sum()) }
     fn work(&self) {
@@ -115,16 +141,17 @@ impl Images {
                 let Ok(mut st) = self.s.0.lock() else { return };
                 loop { if let Some(j) = st.queue.pop_front() { break j; } st = match self.s.1.wait_timeout(st, Duration::from_secs(30)) { Ok((g, to)) => { if to.timed_out() && g.queue.is_empty() { let mut g = g; g.workers -= 1; return; } g } Err(_) => return }; }
             };
-            let img = fetch(&job.1, &job.0);
+            let img = fetch(&job.1, &job.0).map(shrink);
             let Ok(mut st) = self.s.0.lock() else { return };
-            let bytes = img.as_ref().map_or(0, |i| i.bytes.len());
+            // what it costs once drawn: GPUI's decoded copy (BGRA), whatever the file's own size
+            let bytes = img.as_ref().map_or(0, |i| dims(&i.bytes).map_or(i.bytes.len() * 4, |(w, h)| w as usize * h as usize * 4));
             if let Some(e) = st.items.get_mut(&job.0) { e.slot = img.map_or(Slot::Failed, Slot::Ready); e.bytes = bytes; }
             st.done += 1;
             // over the byte cap: drop the least recently drawn images that were not drawn in the current frame
             let tick = st.tick;
             while st.items.values().map(|e| e.bytes).sum::<usize>() > CACHE_BYTES {
                 let old = st.items.iter().filter(|(_, e)| e.used < tick && e.bytes > 0).min_by_key(|(_, e)| e.used).map(|(k, _)| k.clone());
-                match old { Some(k) => { st.items.remove(&k); } None => break }
+                match old { Some(k) => { if let Some(Entry { slot: Slot::Ready(i), .. }) = st.items.remove(&k) { st.retired.push(i); } } None => break }
             }
         }
     }
@@ -150,6 +177,12 @@ mod tests {
         assert_eq!(super::fit(100, 50, 480.0, 360.0), (100.0, 50.0));
     }
     use super::*;
+    #[test] fn a_picture_over_the_longest_side_is_kept_smaller_and_others_as_they_came() {
+        let png = |w: u32, h: u32| { let mut out = Vec::new(); image::codecs::png::PngEncoder::new(&mut out).write_image(&vec![200u8; (w * h * 4) as usize], w, h, image::ExtendedColorType::Rgba8).unwrap(); Arc::new(Image::from_bytes(ImageFormat::Png, out)) };
+        use image::ImageEncoder;
+        let big = shrink(png(3000, 1500)); assert_eq!(dims(&big.bytes), Some((MAX_SIDE, 1024)));
+        let small = png(800, 600); assert!(Arc::ptr_eq(&shrink(small.clone()), &small), "kept as it came");
+    }
     use core::prelude::v1::test;
     #[test] fn formats_by_magic_bytes() {
         assert!(matches!(sniff(&[0x89, b'P', b'N', b'G', 0, 0]), Some(ImageFormat::Png))); assert!(matches!(sniff(&[0xFF, 0xD8, 0xFF, 0xE0]), Some(ImageFormat::Jpeg)));
