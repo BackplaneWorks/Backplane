@@ -465,12 +465,17 @@ pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
     let (k, root, path) = (p.next()?, p.next()?, p.next()?);
     is_solid_key(key).then(|| serde_json::json!({"kind": if k == "2" { "3d" } else if k == "3" { "3d-bare" } else { "3d-full" }, "root": root, "path": path, "tree": ""}))
 }
+/// The model the page showed before the one on show (one: up to 60 MB of a big board's triangles), with its camera: going back to it
+/// (3D after a Mech part, a thread back) shows it at once while the hub sends it again. `groups`: its part frames.
+/// `image`: its last picture, as CPU bytes (out of the atlas; painted again when it comes back, while a new one is drawn).
+struct Kept { key: String, mesh: Arc<Layers>, cam: Camera, touched: bool, fit_aspect: f32, parts: (u32, u32), groups: usize, image: Option<Arc<RenderImage>> }
 pub struct SolidPage {
     mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
     /** what the hub said it is doing for a model (Stage), shown with its time running; whether a second's tick is running for it */ stage: Option<Stage>, ticking: bool,
+    /** the model shown before (Kept); the part frames of a model brought back, until the hub's stream of it has as many */ prev: Option<Kept>, restored: Option<usize>,
     /** the hub could not make this source's model (its Note): the page offers Retry */ failed: bool,
     pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
 }
@@ -482,7 +487,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, failed: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, prev: None, restored: None, failed: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -512,6 +517,15 @@ impl SolidPage {
     fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
         match msg {
             Msg::Scene { key, mesh, board, reset, groups, done, of } => {
+                if key != self.key { self.keep_current(); self.restored = None; }
+                // a model brought back stays until the hub's stream of it has caught up (no parts going and fading in again)
+                if key == self.key && let Some(g) = self.restored {
+                    if self.stage.as_ref().is_some_and(|s| s.key == self.key && s.text == BUILDING) { self.stage = None; cx.notify(); }
+                    if groups < g && !(of > 0 && done >= of) && mesh.is_some() { return }
+                    self.restored = None; let shown = std::time::Instant::now() - std::time::Duration::from_secs(1);
+                    self.born = vec![shown; groups]; self.parts = (done, of); self.floor = self.latest + 1;
+                    if let Some(m) = mesh { self.mesh = Some(m); self.ask_render(self.drag.is_some()); } cx.notify(); return
+                }
                 let fresh = key != self.key || self.cam.is_none();
                 self.key = key;
                 if reset { self.born.clear(); }
@@ -528,6 +542,7 @@ impl SolidPage {
             Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; the same source's previous model stays shown
                 if !note_keeps_model(&self.key, &key) {
                     // another source's model could not be made: the old source's model must not show under this key
+                    self.keep_current(); self.restored = None;
                     self.mesh = None; self.cam = None; if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
                     self.floor = self.latest + 1; // a render of the old model still in flight is stale
                     self.born.clear(); self.parts = (0, 0);
@@ -553,6 +568,24 @@ impl SolidPage {
                 if ticket == self.latest && self.drag.is_none() && self.fading { let still = self.fades().1; self.ask_render(still); }
             }
         }
+    }
+    /// The model on show becomes the one kept (Kept).
+    fn keep_current(&mut self) {
+        if let (Some(mesh), Some(cam)) = (self.mesh.clone(), self.cam) { self.prev = Some(Kept { key: self.key.clone(), mesh, cam, touched: self.touched, fit_aspect: self.fit_aspect, parts: self.parts, groups: self.born.len(), image: self.image.clone() }); }
+    }
+    /// The viewer asks for `key`: when it is the model kept, it comes back at once, with its camera (the hub sends it again meanwhile).
+    pub fn want(&mut self, key: &str, cx: &mut Context<Self>) {
+        if key.is_empty() || key == self.key || self.prev.as_ref().map_or(true, |p| p.key != key) { return }
+        let Some(k) = self.prev.take() else { return };
+        self.keep_current();
+        if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
+        // its last picture at once (the same camera), a new one drawn behind it
+        if let Some(i) = k.image { self.retired.retain(|(r, _)| !Arc::ptr_eq(r, &i)); self.image = Some(i); self.on_screen = self.latest; }
+        self.key = k.key; self.mesh = Some(k.mesh); self.cam = Some(k.cam); self.touched = k.touched; self.fit_aspect = k.fit_aspect; self.parts = k.parts;
+        let shown = std::time::Instant::now() - std::time::Duration::from_secs(1); self.born = vec![shown; k.groups]; self.restored = Some(k.groups);
+        if self.stage.as_ref().is_some_and(|s| s.key == self.key) { self.stage = None; }
+        self.note.clear(); self.failed = false; self.floor = self.latest + 1; self.asked = (0, 0); self.ask_render(false); cx.notify();
+        eprintln!("GPUI_METRIC {{\"event\":\"solid_restored\",\"triangles\":{}}}", self.mesh.as_ref().map_or(0, |m| m.tris()));
     }
     /// Each part group's fade now (index 0 the board), and whether any is still fading.
     fn fades(&self) -> (Vec<f32>, bool) {
