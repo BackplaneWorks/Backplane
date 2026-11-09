@@ -67,6 +67,14 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
 
 /// A thread's background work and locks, the rows the desktop's panel shows.
 pub fn work_now(thread: &str) -> Value { crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::subs(st, thread))).unwrap_or(Value::Null) }
+/// The thread's queue as the desktop's strip has it: `{rows, more}` (session/composer.rs `queue_json`).
+pub fn queue_now(thread: &str) -> Value {
+    crate::statehost::policies().and_then(|p| p.with_state(|st| {
+        let running = st.threads.get(thread).map_or(false, |t| t.turn == crate::state::Turn::Running);
+        let (rows, more) = crate::session::composer::queue_json(st.queue.get(thread).map(Vec::as_slice).unwrap_or(&[]), running);
+        json!({"rows":rows,"more":more})
+    })).unwrap_or_else(|| json!({"rows":[],"more":""}))
+}
 /// Who holds what: every lock with a holder or a queue.
 pub async fn locks_now(hub: &Hub) -> Value { let g = hub.model().await; let now = crate::agents::now_s(); json!(crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::locks(st, now, |t| g.threads.get(t).map_or_else(|| t.to_string(), |x| x.title.clone())))).unwrap_or_default()) }
 async fn thread_now(hub: &Arc<Hub>, id: &str) -> Result<Value, Value> {
@@ -195,6 +203,26 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         }
         "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
         "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(s(p, "thread"))})),
+        // feature "queue": what waits for the agent, the desktop's strip over the composer (session/composer.rs `queue_json`): `thread.queue {thread}` → `{rows, more}`;
+        // `queue.act {thread, action, value}` → `{}` presses a row's button as the row names it (q-steer, q-remove, q-up, q-resume); q-edit takes the message out of the queue
+        // and answers `{text}`, for the app to put back into the draft
+        "thread.queue" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) } Ok(queue_now(th)) }
+        "queue.act" => { let (th, v) = (s(p, "thread"), s(p, "value")); let (msg, rest) = v.split_once('\u{1f}').unwrap_or((v, "")); match s(p, "action") {
+            "q-steer" => rpc(hub, c, "queue.steer", json!({"thread":th,"msg":msg})).await.map(|_| json!({})),
+            "q-remove" => rpc(hub, c, "queue.remove", json!({"thread":th,"msg":msg})).await.map(|_| json!({})),
+            "q-edit" => rpc(hub, c, "queue.remove", json!({"thread":th,"msg":msg})).await.map(|_| json!({"text":rest})),
+            "q-up" => match rest.parse::<u64>() { Ok(to) => rpc(hub, c, "queue.move", json!({"thread":th,"msg":msg,"to":to})).await.map(|_| json!({})), Err(_) => Err(err("q-up: <msg>\u{1f}<place>")) },
+            "q-resume" => rpc(hub, c, "queue.resume", json!({"thread":th})).await.map(|_| json!({})),
+            _ => Err(err("action: q-steer, q-remove, q-edit, q-up or q-resume")) } }
+        // feature "buy": Buy it on the phones. `thread.buy {thread}` → `{buy}`: null, or the button the desktop's header shows (present/ready.rs `header`, from the hub's own
+        // `fab.look` card) as `{label, tip}`; `order.buy {thread}` → `{thread}`: the buy thread made (or the one just made by another press), for the app to open
+        "thread.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
+            let card = rpc(hub, c, "fab.look", json!({"thread":th})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
+            let sess = crate::present::ready::keep(&card).unwrap_or(json!({}));
+            let b = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::ready::header(st, th, &sess))).flatten();
+            Ok(json!({"buy": b.map_or(Value::Null, |b| json!({"label":b["label"],"tip":b["tip"]}))})) }
+        "order.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
+            rpc(hub, c, "order.buy", json!({"thread":th})).await.map(|r| json!({"thread":r["thread"]})) }
         "locks.list" => Ok(json!({"locks":locks_now(hub).await})),
         // a row's button, as the row names it (present/panels.rs)
         "work.act" => { let (th, v) = (s(p, "thread"), s(p, "value")); match s(p, "act") {
@@ -247,6 +275,8 @@ async fn search(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     drop(g);
     // what was said: the messages with every word (the desktop palette's `thread.search`); `thread` keeps one thread's ("Search in thread")
     let messages = if p["messages"] == false { json!([]) } else { crate::session::search::search_for(hub, s(p, "q"), s(p, "thread"), limit_of(p, 20, 60), u64::MAX).await["hits"].clone() };
+    // times are unix ms on this protocol (the palette's hits say seconds)
+    let messages = match messages { Value::Array(a) => Value::Array(a.into_iter().map(|mut h| { if let Some(t) = h["at"].as_u64() { h["at"] = json!(ms(t)) } h }).collect()), v => v };
     Ok(json!({"threads":threads,"projects":projects,"messages":messages}))
 }
 
