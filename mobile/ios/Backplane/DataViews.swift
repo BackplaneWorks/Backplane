@@ -1080,6 +1080,8 @@ struct DataEntryRow: View {
             DataAskCard(client: client, thread: thread, entry: entry)
         case "term" where client.has("terms") && entry.term != nil:
             DataTermCard(client: client, info: entry.term!)
+        case "handoff" where entry.handoff != nil:
+            DataHandoffCard(client: client, thread: thread, handoff: entry.handoff!)
         default:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if !entry.label.isEmpty { Text(entry.label).dmono(12, bold: true) }
@@ -1087,6 +1089,35 @@ struct DataEntryRow: View {
                 Spacer(minLength: 0)
             }.foregroundStyle(entry.tone == "error" ? BackplaneDesign.bad : BackplaneDesign.dim).padding(.vertical, 3)
         }
+    }
+}
+
+/// A `/give` received: the way back, the summary, the note, and what the work touched, each reference opening what it names (the hub's `link.resolve`).
+struct DataHandoffCard: View {
+    let client: DataClient
+    let thread: String
+    let handoff: DHandoff
+    private func open(_ r: DRef) {
+        let file = r.kind == "file" || r.kind == "board"
+        let text = file ? dPathScheme + ":" + (r.url.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? r.url) : r.url
+        if let u = URL(string: text) { client.openLink(u, thread: r.thread) }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { if let u = URL(string: "backplane://thread/\(handoff.from)") { client.openLink(u, thread: thread) } } label: { Text("‹ Handed over from \(handoff.title)").dmono(11).foregroundStyle(BackplaneDesign.accent).lineLimit(1) }
+                .accessibilityIdentifier("handoff.back")
+            Text(handoff.summary).dmono(13).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("handoff.summary")
+            if !handoff.note.isEmpty { Text("Note: \(handoff.note)").dmono(12).foregroundStyle(BackplaneDesign.dim) }
+            ForEach(Array(handoff.refs.enumerated()), id: \.offset) { i, r in
+                Button { open(r) } label: {
+                    HStack(spacing: 8) {
+                        Text(r.kind == "thread" ? "▸" : r.kind == "message" ? "“" : r.kind == "board" ? "▦" : "·").dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent)
+                        Text(r.label).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }.padding(.horizontal, 8).padding(.vertical, 6).dbox(fill: BackplaneDesign.panel)
+                }.buttonStyle(.plain).accessibilityIdentifier("handoff.ref.\(i)")
+            }
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.raised).padding(.vertical, 4).accessibilityIdentifier("handoff.card")
     }
 }
 

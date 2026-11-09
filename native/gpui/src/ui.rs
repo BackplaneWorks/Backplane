@@ -268,6 +268,7 @@ impl Backplane {
                 col.group(group).when(!streaming, |d| d.child(foot)).into_any_element()
             }
             "term" => self.term_card(&e, light, cx),
+            "handoff" => crate::screens::handoff::card(cx, light, &e),
             "step" => crate::screens::histbar::step_row(cx, light, &e),
             // an Agent or Task call: its subagent's own view opens from it (the hub names it `sub`)
             _ if !string(&e, "sub").is_empty() => {
@@ -829,3 +830,4 @@ impl Render for Backplane {
 /// What follows the pointer while dragging: the label in a small box.
 pub struct Ghost(pub String);
 impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div().px_3().py_1().bg(gpui::rgb(0x2a2f3a)).border_1().border_color(gpui::rgb(0x4a5060)).text_color(gpui::rgb(0xe6e8ee)).text_size(px(12.)).child(self.0.clone()) } }
+

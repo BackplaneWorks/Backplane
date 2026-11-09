@@ -173,7 +173,7 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
 #[tokio::test] async fn give_hands_the_work_over_and_refuses_what_names_nothing() {
     let h = hub("give").await;
     say(&h, "t1", "user", "hello", 1).await; say(&h, "t1", "assistant", "hi, done", 2).await;
-    let (e, r) = ask(&h, "bots.give", json!({"thread":"t1","text":"/give >two see this"})).await; assert_eq!(r, ok());
+    let (e, r) = ask(&h, "bots.give", json!({"thread":"t1","text":"/give >two see this"})).await; assert_eq!(r, json!({"t":"reply","id":7,"ok":true,"result":{"thread":"t1"}}));
     assert_eq!((e[0]["$"].as_str(), e[0]["thread"].as_str()), (Some("TurnQueued"), Some("t2"))); assert!(e[0]["msg"].as_str().unwrap().starts_with("handoff:give:t1:"));
     let hand = e[0]["text"].as_str().unwrap();
     assert!(hand.starts_with("[Backplane] The user hands you work from the thread \"One\" (t1).") && hand.contains("The user's note with it: see this") && !hand.contains(">two"), "{hand}");
@@ -185,7 +185,7 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
     { let mut fo = super::fold::Fold::default(); fo.sync(&h.store).unwrap(); assert!(!fo.waiting("t2"), "with no agents module it waits for the next message; it starts no turn"); }
     // before the %proj give below, which makes a second thread titled "One"
     for text in ["/give", "/give nobody here", "/give >one"] { let (e, r) = ask(&h, "bots.give", json!({"thread":"t1","text":text})).await; assert_eq!((r["ok"].as_bool(), r["error"].as_str()), (Some(false), Some(super::give::NOTHING_NAMED)), "{text}"); assert!(e.is_empty(), "{text}"); }
-    let (e, r) = ask(&h, "bots.give", json!({"thread":"t1","text":"/give %proj"})).await; assert_eq!(r, ok());
+    let (e, r) = ask(&h, "bots.give", json!({"thread":"t1","text":"/give %proj"})).await; assert_eq!(r["ok"], true);
     let made = e.iter().find(|v| v["$"] == "ThreadCreated").unwrap(); assert_eq!((made["project"].as_str(), made["title"].as_str()), (Some("p1"), Some("One")));
     assert_eq!(e.iter().find(|v| v["$"] == "TurnQueued").unwrap()["thread"], made["id"]); assert_eq!(e.iter().find(|v| v["tone"] == "handoff").unwrap()["thread"], made["id"]); assert_eq!(e.last().unwrap()["summary"], "Given to a new thread in proj");
     let (_, r) = ask(&h, "bots.give", json!({"thread":"ghost","text":"/give >two"})).await; assert_eq!(r["error"], "no such thread");

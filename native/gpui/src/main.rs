@@ -130,7 +130,7 @@ impl Backplane {
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
             Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s}));}self.status=s;if self.status=="Connected"{self.error.clear();screens::hubbar::connected(&mut self.screens.hubbar);self.send_unsent();}},
-            Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
+            Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));let _=self.tx.try_send(Command::Draft(String::new())); /* a /give keeps its text in the hub until it took it: the box is empty now, so is that copy */ self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
             Event::Error(e)=>{self.error=e;self.screens.unsent.lost();},
             Event::Unpaired=>screens::pair::revoked(self,cx),

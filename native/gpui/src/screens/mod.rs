@@ -2,6 +2,7 @@
 //! hub already sends the phones and answers with a view action; no decision lives here.
 pub mod asks;
 pub mod find;
+pub mod handoff;
 pub mod migrate;
 pub mod voice;
 pub mod voice_mic;

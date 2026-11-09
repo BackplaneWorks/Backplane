@@ -101,6 +101,15 @@ if (args[0] === "--version") {
   process.stdout.write("2.1.286 (Claude Code)\n");
   process.exit(0);
 }
+// BP_STANDIN_SUMMARY=1: a one-shot (the hub's writing model: a title, a `/give` summary, a side question; `--no-session-persistence`) reads its text on stdin and
+// answers one result, "Stand-in summary: " and the first request it read, so a handoff's summary can be told from the thread's own words
+if (process.env.BP_STANDIN_SUMMARY === "1" && args.includes("--no-session-persistence")) {
+  let input = "";
+  for await (const c of process.stdin) input += c;
+  const asked = /User: ([^\n]*)/.exec(input)?.[1] ?? "";
+  process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: `Stand-in summary: ${asked.slice(0, 100)}`, session_id: "one", uuid: crypto.randomUUID() }) + "\n");
+  process.exit(0);
+}
 const at = args.indexOf("--resume");
 const session = at >= 0 ? args[at + 1] : `sess-${process.pid}-${Date.now()}`;
 const logf = process.env.FAKE_LOG ?? "";

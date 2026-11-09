@@ -26,7 +26,6 @@ async fn write(hub: &Arc<Hub>, input: String) -> Option<String> {
 
 /// `modes`: the source thread's runtime and interaction modes (the log's fold keeps them); a new thread in a project takes them, like a fork.
 pub async fn give(hub: &Arc<Hub>, who: &Caller, id: &Value, p: &Value, modes: (String, String)) -> Vec<Value> {
-    let (runtime, interaction) = modes;
     let (src, text) = (p["thread"].as_str().unwrap_or(""), p["text"].as_str().unwrap_or(""));
     let dir = crate::bots::api::directory(hub).await;
     let bots: Vec<(String, String)> = dir["bots"].as_array().into_iter().flatten().map(|b| (b["id"].as_str().unwrap_or("").to_string(), b["name"].as_str().unwrap_or("").to_string())).collect();
@@ -40,6 +39,24 @@ pub async fn give(hub: &Arc<Hub>, who: &Caller, id: &Value, p: &Value, modes: (S
     let hits: Vec<_> = mention::give_hits(text, &threads, &projects, &bots).into_iter().filter(|h| !(h.0 == '>' && h.1 == src)).collect();
     if hits.is_empty() { return refuse(id, NOTHING_NAMED) }
     let note = handoff::note_of(text, |w| mention::give_hits(w, &threads, &projects, &bots).iter().any(|h| !(h.0 == '>' && h.1 == src)));
+    let job = Job { src: src.to_string(), title, provider, model, note, hits, modes };
+    // the writing model takes seconds: the person is answered once the targets are known, and the handoff goes when it is written. With none (a test hub) it goes before the answer.
+    if hub.rpc_for("text.write").is_some() {
+        let (hub, who) = (hub.clone(), Caller { gen: who.gen.clone(), client: who.client });
+        let here = src.to_string();
+        tokio::spawn(async move { if let Err(e) = run(&hub, &who, job).await { let at = super::now_s(); let _ = hub.commit_many(&[json!({"$":"ActivityLogged","thread":here,"act":format!("giveerr{at}-{}", hub.store.len()),"tone":"error","kind":"fork","summary":format!("Could not give: {e}"),"at":at})]).await; } });
+        return vec![json!({"t":"reply","id":id,"ok":true,"result":{"thread":src}})]
+    }
+    match run(hub, who, job).await { Ok(()) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"thread":src}})], Err(e) => refuse(id, &e) }
+}
+
+struct Job { src: String, title: String, provider: String, model: String, note: String, hits: Vec<(char, String, String)>, modes: (String, String) }
+
+/// What the handoff is made of and where it goes: the summary, the references, the card, then each target in turn.
+async fn run(hub: &Arc<Hub>, who: &Caller, job: Job) -> Result<(), String> {
+    let Job { src, title, provider, model, note, hits, modes } = job; let src = src.as_str();
+    let (runtime, interaction) = modes;
+    let dir = crate::bots::api::directory(hub).await;
     let es = entries_of(hub, src).await.entries;
     let root = crate::files::root_of(hub, src).await.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     let refs = handoff::references(&es, src, &title, &root);
@@ -79,5 +96,5 @@ pub async fn give(hub: &Arc<Hub>, who: &Caller, id: &Value, p: &Value, modes: (S
         };
         if let Err(e) = result { failed = e }
     }
-    if failed.is_empty() { vec![json!({"t":"reply","id":id,"ok":true})] } else { refuse(id, &failed) }
+    if failed.is_empty() { Ok(()) } else { Err(failed) }
 }
