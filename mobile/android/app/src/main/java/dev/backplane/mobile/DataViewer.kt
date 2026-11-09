@@ -545,7 +545,7 @@ private fun DiffTab(thread: DThread) {
         when {
             err.isNotEmpty() -> DMono(Tr.t(err), dcs.error, 12, Modifier.padding(16.dp))
             d == null -> CircularProgressIndicator(Modifier.padding(24.dp))
-            nogit.isNotEmpty() -> DMono(Msg.android_diff_nogit, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.nogit"))
+            nogit.isNotEmpty() -> DMono(Msg.android_diff_nogit, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.nogit"), lines = 4)
             d.isBlank() -> DMono(Msg.android_diff_none, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.none"))
             else -> {
                 val green = androidx.compose.ui.graphics.Color(0xFF4CAF7A); val lines = remember(d) { d.lines().take(4000) }
