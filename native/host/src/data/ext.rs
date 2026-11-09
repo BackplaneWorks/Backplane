@@ -66,7 +66,11 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
 }
 
 /// A thread's background work and locks, the rows the desktop's panel shows.
-pub fn work_now(thread: &str) -> Value { crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::subs(st, thread))).unwrap_or(Value::Null) }
+/// With what the thread's subagent log says (present/panels.rs `subs_at`): each subagent row's harness, model, steps, how long, and its drill-down.
+pub async fn work_now(hub: &Hub, thread: &str) -> Value {
+    let log = hub.sub_log_for(thread).await; let now = crate::agents::now_s();
+    crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::subs_at(st, thread, &log, now))).unwrap_or(Value::Null)
+}
 /// Who holds what: every lock with a holder or a queue.
 pub async fn locks_now(hub: &Hub) -> Value { let g = hub.model().await; let now = crate::agents::now_s(); json!(crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::locks(st, now, |t| g.threads.get(t).map_or_else(|| t.to_string(), |x| x.title.clone())))).unwrap_or_default()) }
 async fn thread_now(hub: &Arc<Hub>, id: &str) -> Result<Value, Value> {
@@ -194,7 +198,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             rpc(hub, c, m, p.clone()).await.map(|mut r| { if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } } r })
         }
         "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
-        "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(s(p, "thread"))})),
+        "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(hub, s(p, "thread")).await})),
         "locks.list" => Ok(json!({"locks":locks_now(hub).await})),
         // a row's button, as the row names it (present/panels.rs)
         "work.act" => { let (th, v) = (s(p, "thread"), s(p, "value")); match s(p, "act") {
