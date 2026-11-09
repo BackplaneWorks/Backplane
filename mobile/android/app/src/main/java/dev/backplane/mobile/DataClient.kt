@@ -621,6 +621,11 @@ object DataClient {
     suspend fun refs(tid: String): List<Ref> = call("viewer.refs", JSONObject().put("thread", tid)).optJSONArray("refs")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Ref(it.optString("kind"), it.optString("label"), it.optString("commit")) } }.orEmpty()
     suspend fun compare(tid: String, kind: String, commit: String, bits: Int, path: String) { call("viewer.compare", JSONObject().put("thread", tid).put("kind", kind).put("commit", commit).put("bits", bits).put("path", path)) }
     suspend fun info(key: String, at: Int, idx: Int): String = call("viewer.info", JSONObject().put("key", key).put("at", at).put("idx", idx)).optString("info")
+    /** The cross-probe's light: the pieces ("chunk,piece") of the plot held for `key` whose info has `name=value` (a part's `ref`, a `net`). */
+    suspend fun probe(key: String, name: String, value: String): List<String> {
+        val a = call("viewer.probe", JSONObject().put("key", key).put("name", name).put("value", value)).optJSONArray("matches") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONArray(it) }.map { "${it.optInt(0)},${it.optInt(1)}" }
+    }
     data class Entry(val dir: Boolean, val size: Long, val name: String)
     suspend fun entries(tid: String, path: String): List<Entry> = call("files.entries", JSONObject().put("thread", tid).put("path", path)).optJSONArray("entries")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Entry(it.optBoolean("dir"), it.optLong("size"), it.optString("name")) } } ?: emptyList()
     data class Mech(val parts: List<String>, val renders: List<String>)
