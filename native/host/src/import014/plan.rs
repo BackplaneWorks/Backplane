@@ -63,6 +63,8 @@ pub struct Plan {
     pub routines_on: usize, pub peers: usize,
     /// the size of the old log read (whole lines up to it)
     pub read: u64,
+    /// the old log's threads that belong in this home, those already here from an earlier import included (their quotes and orders follow them)
+    pub threads: HashSet<String>,
 }
 
 /// Opts: `secrets` (the person said keys may come: webhooks are kept only then), `keep` (false: count only, hold no lines).
@@ -237,5 +239,5 @@ pub fn plan_with(log: &Path, have: &Have, o: Opts, read: &dyn Fn(u64, u64)) -> s
     for (k, (v, at)) in keys { emit(serde_json::json!({"$":"SettingSet","key":k,"value":v,"at":at}).to_string(), &mut c, Some("setting")) }
     let mut bl: Vec<(String, String)> = bk.iter().map(|id| (id.clone(), bots[id].0.clone())).collect(); bl.sort();
     let mut hl: Vec<String> = hk.into_iter().collect(); hl.sort();
-    Ok(Plan { lines: out, counts: c, bots: bl, hooks: hl, routines_on: routines_on.len(), peers, read: upto })
+    Ok(Plan { lines: out, counts: c, bots: bl, hooks: hl, routines_on: routines_on.len(), peers, read: upto, threads: tk })
 }
