@@ -76,9 +76,9 @@ impl Backplane {
         cx.observe(&input,|this,_,cx|{
             let text=this.input.read(cx).content.to_string();
             let changed=this.draft_changed(&text);
-            // the composer is a child of this view, so its own repaints (the caret's blink, a caret move) re-render this view's shell anyway;
-            // only a changed text is news to the cached parts (part.rs), e.g. a thread's draft
-            if changed {this.send_draft(text,cx);cx.notify();}
+            // no notify: the composer is a child of this view, so its own repaints (a key typed, the caret's blink) re-render this view's shell
+            // anyway, and the cached parts (part.rs: sidebar, messages, viewer) show nothing of the draft, so typing does not redraw them
+            if changed {this.send_draft(text,cx);}
         }).detach();
         cx.subscribe(&input,|this,_,event:&screens::composer::ComposerEvent,cx|this.attach_event(event,cx)).detach();
         cx.on_app_quit(|this,_|{this.screens.drafts.flush();async{}}).detach();
