@@ -18,7 +18,7 @@ that touches a screen edge with no room (< 2 dp) while its parent is wider than 
 import re, sys, xml.etree.ElementTree as ET
 
 TOL = 2          # px
-MIN_DP = 48.0
+MIN_DP = 48.0   # Android's; iOS passes 44 (tree['min_dp'])
 SYSTEM = ('com.android.systemui', 'com.google.android.inputmethod', 'com.android.inputmethod', 'com.google.android.apps.nexuslauncher')
 
 def _b(s):
@@ -34,7 +34,7 @@ def parse(xml, pkg=None, dpi=160, size=None):
             b = _b(n.get('bounds'))
             if not b: continue
             node = {'cls': n.get('class', ''), 'pkg': n.get('package', ''), 'text': (n.get('text') or n.get('content-desc') or '').strip(), 'rid': n.get('resource-id', ''),
-                    'b': b, 'click': n.get('clickable') == 'true' or n.get('checkable') == 'true' or n.get('long-clickable') == 'true', 'scroll': n.get('scrollable') == 'true',
+                    'b': b, 'click': n.get('clickable') == 'true' or n.get('checkable') == 'true' or n.get('long-clickable') == 'true', 'scroll': n.get('scrollable') == 'true' or any(k in n.get('class', '') for k in ('ScrollView', 'RecyclerView', 'ListView')),
                     'enabled': n.get('enabled') != 'false', 'i': len(win['nodes']), 'parent': parent, 'kids': 0, 'edit': 'EditText' in n.get('class', '')}
             win['nodes'].append(node)
             if parent is not None: win['nodes'][parent]['kids'] += 1
@@ -79,6 +79,7 @@ def modal_drop(win):
     return drop
 
 def check(tree, scen):
+    MIN_DP = tree.get('min_dp', 48.0)
     out = []; W, H = tree['win']; dpi = tree['dpi'] or 160; dp = lambda px: px * 160.0 / dpi; pkg = tree.get('pkg')
     add = lambda rule, text, detail: rule not in scen.get('ignore', []) and out.append({'rule': rule, 'scenario': scen.get('name', ''), 'text': text, 'detail': detail})
     app = [w for w in tree['windows'] if (not pkg or w['pkg'] == pkg)]
@@ -88,7 +89,8 @@ def check(tree, scen):
     for w in app:
         nodes = w['nodes']; gone = modal_drop(w) if scen.get('modal') else set()
         # overlap: leaves with text (a node with text and children is a merged parent: its children are inside it by design)
-        leaves = [n for n in nodes if n['i'] not in gone and n['text'] and n['b'][2] > n['b'][0] and n['b'][3] > n['b'][1]]
+        big = lambda n: (n['b'][2] - n['b'][0]) * (n['b'][3] - n['b'][1]) > 0.3 * W * H   # a canvas with a description is a surface, not a label
+        leaves = [n for n in nodes if n['i'] not in gone and n['text'] and not big(n) and n['b'][2] > n['b'][0] and n['b'][3] > n['b'][1]]
         alltext += [n['text'] for n in leaves]
         for k, a in enumerate(leaves):
             for b in leaves[k + 1:]:

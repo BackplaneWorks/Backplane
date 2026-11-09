@@ -188,7 +188,8 @@
      "wait": 3500
     }
    ],
-   "scroll": false
+   "scroll": false,
+   "settle": true
   },
   {
    "name": "composer-keyboard",

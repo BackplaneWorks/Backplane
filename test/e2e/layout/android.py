@@ -17,7 +17,7 @@ ap.add_argument('--out', required=True); ap.add_argument('--serial', default=os.
 ap.add_argument('--hub', default=''); ap.add_argument('--fixture', default=''); ap.add_argument('--port', type=int, default=3883)
 ap.add_argument('--sizes', default=''); ap.add_argument('--orient', default=''); ap.add_argument('--font', default='0.85,1.0,1.3'); ap.add_argument('--only', default='')
 ap.add_argument('--quick', action='store_true', help='regular portrait 1.0 and small portrait 1.3'); ap.add_argument('--shard', default='')
-ap.add_argument('--allow-known', action='store_true'); ap.add_argument('--pkg', default='dev.backplane.mobile.gpui'); ap.add_argument('--scheme', default='bpgpui')
+ap.add_argument('--pages', type=int, default=4, help='most pages a scrolling screen is walked'); ap.add_argument('--allow-known', action='store_true'); ap.add_argument('--pkg', default='dev.backplane.mobile.gpui'); ap.add_argument('--scheme', default='bpgpui')
 ap.add_argument('--adb', default=os.environ.get('ADB') or shutil.which('adb') or os.path.expanduser('~/Android-sdk-writable/platform-tools/adb'))
 A = ap.parse_args()
 OUT = os.path.abspath(A.out); os.makedirs(OUT, exist_ok=True)
@@ -69,9 +69,10 @@ def open_link(kind, arg=None):
     u = '%s://%s' % (A.scheme, kind) + ('?url=' + urllib.parse.quote(arg, safe='') if arg else '')
     sh("am start -W -a android.intent.action.VIEW -d '%s' %s" % (u, A.pkg)); time.sleep(1.5)
 
-def settle(tag=None):
+def settle(fast=False):
     """wait until two dumps agree (an animation or a load has ended)"""
     prev = None
+    if not fast: return dump()
     for _ in range(6):
         x = dump(); k = re.sub(r'\s+', '', x)
         if k == prev: return x
@@ -82,7 +83,7 @@ def to_home():
     """paired, on the thread list: back out of anything, relaunch when the app left"""
     for _ in range(5):
         x, t = tree()
-        if t and find(t, r'^(Like Backplane|PROJ|New thread)') or t and find(t, r'^Backplane$') and not find(t, r'^Back$'): return t
+        if t and find(t, r'^Add project$') and find(t, r'^Settings$'): return t
         if not foreground(): launch(); continue
         sh('input keyevent KEYCODE_BACK'); time.sleep(0.8)
     launch(); return tree()[1]
@@ -125,18 +126,19 @@ def run_combo(size, orient, font):
                 open_link('pair', hub_link()); x, t = tree(); n = find(t, r'^Pair$'); n and tap_node(n); time.sleep(4); paired = True
             to_home()
         err = run_steps(sc['steps'])
-        x = settle()
+        x = settle(sc.get('settle', False))
         t = ck.parse(x, A.pkg, STATE['dpi'], STATE['size']) if x else None
         if err or not t:
             findings.append({'rule': 'no-frame', 'scenario': sc['name'], 'text': sc['name'], 'detail': err or 'no view tree'}); continue
         open(os.path.join(d, 'trees', sc['name'] + '.xml'), 'w').write(x); shot(os.path.join(d, 'shots', sc['name'] + '.png'))
         pages = [t]
         if sc.get('scroll'):
-            last = re.sub(r'\s+', '', x)
-            for _ in range(6):
-                swipe_up(); time.sleep(0.7); x2 = dump(); k = re.sub(r'\s+', '', x2)
-                if k == last: break
-                last = k; pages.append(ck.parse(x2, A.pkg, STATE['dpi'], STATE['size']))
+            key = lambda p: [(n['text'], n['b']) for n in app_nodes(p)]   # the app's own nodes: the status bar's clock changes
+            last = key(t)
+            for _ in range(A.pages - 1):
+                swipe_up(); time.sleep(0.7); x2 = dump(); p2 = ck.parse(x2, A.pkg, STATE['dpi'], STATE['size']) if x2 else None
+                if not p2 or key(p2) == last: break
+                last = key(p2); pages.append(p2)
         for k, pg in enumerate(pages):
             for f in ck.check(pg, dict(sc, name=sc['name'], text=sc.get('text', []) if k == 0 else [])):
                 key = (f['rule'], f['scenario'], f['text'])
@@ -153,7 +155,7 @@ def start_fixture():
     if A.fixture: FX.update(json.load(open(A.fixture))); A.port = int(FX['url'].rsplit(':', 1)[1]); return
     if not A.hub: sys.exit('--hub or --fixture')
     root = tempfile.mkdtemp(prefix='andfx.', dir=os.path.expanduser('~/.cache/bp-tmp') if os.path.isdir(os.path.expanduser('~/.cache/bp-tmp')) else None)
-    p = subprocess.Popen(['bun', os.path.join(HERE, 'android-fixture.mjs'), '--hub-bin', os.path.abspath(A.hub), '--root', root + '/fx', '--port', str(A.port), '--threads', '6'],
+    p = subprocess.Popen([shutil.which('bun') or os.path.expanduser('~/.bun/bin/bun'), os.path.join(HERE, 'android-fixture.mjs'), '--hub-bin', os.path.abspath(A.hub), '--root', root + '/fx', '--port', str(A.port), '--threads', '6'],
                          cwd=REPO, env=dict(os.environ, PERF_REPO=REPO), stdout=open(root + '/fx.log', 'w'), stderr=subprocess.STDOUT); procs.append((p, root))
     for _ in range(180):
         if os.path.exists(root + '/fx/fixture.json'): break

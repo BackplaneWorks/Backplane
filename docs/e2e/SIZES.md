@@ -46,3 +46,36 @@ Not seen by the checks: icons and boxes without text (an icon drawn over a label
 ## The seeded bug
 
 At 1280×720 and text 80 %, before 838cb1a7f the picker's header labels (EFFORT and ↑↓) overlapped, the ☆ buttons overlapped the model names and the model column was about 50 px wide: `overlap` and `min-width` on the `picker` screen. After the fix the screen is clean.
+
+## Phones
+
+The same rules, judged on the view tree (`test/e2e/layout/android_check.py`, pure, `python3 android_check.py` is its self-test; `ios_check.py` feeds the iOS accessibility tree through it with a 44 pt target instead of 48 dp). Findings have `check.py`'s shape (`rule`, `scenario`, `text`, `detail`).
+
+| Rule | Fails when |
+|---|---|
+| `overlap` | two labels of one window share visible area (a merged parent and its children are one thing; a surface bigger than 30 % of the screen is not a label) |
+| `clip-x` / `clip-y` | a node reaches past its parent's or the screen's edge outside a scroller / past the screen's top or bottom |
+| `touch` | an enabled clickable is under 48 dp (Android) or 44 pt (iOS) in width or height |
+| `hscroll` | a node wider than the screen |
+| `offscreen` | a popup or dialog window is not entirely on the screen |
+| `missing`, `no-frame` | text the screen must show is not in the tree; the control to reach the screen is not found, or the app has no window |
+
+A dialog Compose draws inside the activity's window leaves the page under it in the tree with cut bounds: a scenario with `"modal": true` judges only what follows the page. Not seen: icons and canvases without a description, text cut with an ellipsis (the tree holds the full string). The screenshots and the contact sheet are for those.
+
+### Android
+
+`test/e2e/layout/android.py` (driver), `android_scenarios.json` (the screens: pairing start, confirm and code, home, hub picker, new thread, thread, model picker, thread menu, delete dialog, viewer, a streaming turn, composer with the keyboard, bot, room, Settings and its pages, Accounts, Hub, Add a hub, Improvements; scrolling screens are walked 3 pages), `android-fixture.mjs` (a hub on a temp home with stand-in agents, `lib/hubfx.mjs`), `android-known.json` (the first run's findings; they do not fail, the list only shrinks).
+Sizes from `sizes.json` (`wm size` and `wm density`), portrait and landscape (`user_rotation`), font scale 0.85, 1.0 and 1.3 (`font_scale`); the emulator is put back as it was.
+
+```sh
+scripts/android-emu.sh start                              # an emulator (EMU_PORT=5586: its serial is emulator-5586)
+(cd mobile/android && ./gradlew assembleDebug)            # the app
+python3 test/e2e/layout/android.py --out OUT --serial emulator-5586 --hub target/debug/backplane-hub --apk mobile/android/app/build/outputs/apk/debug/app-debug.apk \
+    [--quick] [--sizes small,tablet] [--orient landscape] [--font 1.3] [--only thread,picker] [--shard i/n] [--pages 3]
+```
+
+Output: `OUT/<size>-<orient>-f<font>/{shots,trees,findings.json}`, `OUT/report.md`, `OUT/contact-<size>.png`. A run of one combination is 4 to 6 minutes (a dump takes about 2 s). The Pixel is not used. CI: `android-build` (hub and APK once) and `android` (one shard per size and orientation, fonts inside; the quick set is regular portrait 1.0 and small portrait 1.3).
+
+### iOS
+
+`test/e2e/ios/UITests/LayoutTests.swift` (`LayoutAudit.testLayout`: home, thread, composer with the keyboard, model picker, a streaming turn, viewer, Settings, hubs, Accounts, pairing; each screen's element frames from the accessibility snapshot and a screenshot), `test/e2e/ios/layout.sh` (per simulator, orientation and Dynamic Type size: `simctl ui content_size`, the launch argument `UIPreferredContentSizeCategoryName`, `XCUIDevice.orientation`) and `layout/ios_check.py` (the judge). On the Mac, under the `mac-heavy` lock: `HUB_HOST=.. HUB_PORT=.. HUB_TOKEN_FILE=.. test/e2e/ios/layout.sh [--sims ..] [--orient ..] [--text L,XXXL,AX3]`. CI: job `ios`, one shard per simulator.

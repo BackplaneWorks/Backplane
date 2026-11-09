@@ -94,3 +94,133 @@ jobs:
             ${{ runner.temp }}/sizes/*/shots/*.png
             ${{ runner.temp }}/sizes/*/client.log
           retention-days: 7
+
+  # The phone halves (docs/e2e/SIZES.md). Hub and debug APK are built once; each emulator shard is one size and one orientation (three font scales inside), kept short.
+  android-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/host
+          shared-key: sizes-hub-linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: (cd native/host && cargo build --locked --bin backplane-hub)
+      - run: (cd mobile/android && ./gradlew --no-daemon assembleDebug)
+      - run: |
+          mkdir sizes-build
+          cp native/host/target/debug/backplane-hub mobile/android/app/build/outputs/apk/debug/app-debug.apk sizes-build/
+      - uses: actions/upload-artifact@v4
+        with: { name: sizes-build, path: sizes-build, retention-days: 1 }
+
+  android:
+    needs: android-build
+    strategy:
+      fail-fast: false
+      matrix:
+        size: ${{ (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full)) && fromJSON('["quick"]') || fromJSON('["small","regular","large","tablet"]') }}
+        orient: ${{ (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full)) && fromJSON('["both"]') || fromJSON('["portrait","landscape"]') }}
+    name: sizes android ${{ matrix.size }} ${{ matrix.orient }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: sizes-build, path: sizes-build }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install pillow
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version-file: deploy/bun-version }
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules; sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: false
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -memory 3072 -cores 3
+          script: bash test/e2e/layout/android-ci.sh ${{ matrix.size }} ${{ matrix.orient }} ${{ runner.temp }}/sizes-android
+      - name: summary
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/sizes-android/report.md" ] && cat "$RUNNER_TEMP/sizes-android/report.md" >> "$GITHUB_STEP_SUMMARY"
+          true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sizes-android-${{ matrix.size }}-${{ matrix.orient }}
+          path: |
+            ${{ runner.temp }}/sizes-android/report.md
+            ${{ runner.temp }}/sizes-android/report.json
+            ${{ runner.temp }}/sizes-android/contact-*.png
+            ${{ runner.temp }}/sizes-android/*/findings.json
+            ${{ runner.temp }}/sizes-android/*/shots/*.png
+          retention-days: 7
+
+  # One shard per simulator (portrait and landscape, three Dynamic Type sizes inside). The quick set is the iPhone SE at the default size.
+  ios:
+    strategy:
+      fail-fast: false
+      matrix:
+        sim: ${{ (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full)) && fromJSON('["iPhone SE (3rd generation)"]') || fromJSON('["iPhone SE (3rd generation)","iPhone 16","iPhone 16 Pro Max","iPad (10th generation)"]') }}
+    name: sizes ios ${{ matrix.sim }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/host
+          shared-key: sizes-hub-mac
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version-file: deploy/bun-version }
+      - name: hub
+        run: (cd native/host && cargo build --locked --bin backplane-hub)
+      - name: app
+        working-directory: mobile/ios
+        run: |
+          xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG GPUI_NATIVE DATA_APP" build
+      - name: fixture hub
+        run: |
+          PERF_REPO=$PWD bun test/e2e/layout/android-fixture.mjs --hub-bin native/host/target/debug/backplane-hub --root "$RUNNER_TEMP/fx" --port 3883 --threads 6 > "$RUNNER_TEMP/fx.log" 2>&1 &
+          for i in $(seq 1 120); do [ -s "$RUNNER_TEMP/fx/fixture.json" ] && break; sleep 1; done
+          cat "$RUNNER_TEMP/fx.log"
+      - name: sizes
+        run: |
+          quick=; [ "${{ github.event_name }}" = pull_request ] && quick=1
+          [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.full }}" != true ] && quick=1
+          args=(--sims "${{ matrix.sim }}"); [ -n "$quick" ] && args+=(--orient portrait --text L)
+          HUB_HOST=127.0.0.1 HUB_PORT=3883 HUB_TOKEN_FILE="$RUNNER_TEMP/fx/home/token" OUT="$RUNNER_TEMP/sizes-ios" APP_ID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' mobile/ios/build/dd/Build/Products/Debug-iphonesimulator/Backplane.app/Info.plist) \
+          APP="$PWD/mobile/ios/build/dd/Build/Products/Debug-iphonesimulator/Backplane.app" test/e2e/ios/layout.sh "${args[@]}"
+      - name: summary
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/sizes-ios/report.md" ] && cat "$RUNNER_TEMP/sizes-ios/report.md" >> "$GITHUB_STEP_SUMMARY"
+          true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sizes-ios-${{ strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/sizes-ios/report.md
+            ${{ runner.temp }}/sizes-ios/findings.json
+            ${{ runner.temp }}/sizes-ios/*/*/layout-*.png
+            ${{ runner.temp }}/sizes-ios/*/*/layout-*.json
+          retention-days: 7
