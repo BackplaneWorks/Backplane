@@ -216,7 +216,7 @@ pub(super) fn button(cx: &mut Context<Backplane>, light: bool, id: String, label
     let c = |n: &str| theme::color(light, n);
     let d = div().id(SharedString::from(id)).h(px(28.)).px_3().flex().items_center().justify_center().text_size(px(12.)).cursor_pointer();
     let d = if primary { d.bg(c("accent")).text_color(c("on-accent")) } else if danger { d.bg(c("raise")).text_color(c("bad")).hover(|s| s.bg(c("line"))) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
-    d.child(label.to_string()).on_click(cx.listener(move |this, _, _, cx| { on(this, cx); cx.notify(); })).into_any_element()
+    d.child(crate::i18n::trs(label)).on_click(cx.listener(move |this, _, _, cx| { on(this, cx); cx.notify(); })).into_any_element()
 }
 
 fn attempt_panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, a: &Value, pid: &str) -> AnyElement {

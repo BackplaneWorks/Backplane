@@ -1534,6 +1534,13 @@ gpui.filter.projects.and.threads = Filter projects and threads
 gpui.type.a.word.said.in2 = Type a word said in any thread
 gpui.find.what.was.said.in = Find what was said in any thread
 gpui.find.in.this.thread.enter = Find in this thread: Enter next, Shift+Enter previous, Esc closes
+gpui.google.bots = Bots: {bots}
+gpui.bots.none = Bots: none
+gpui.could.not.open.a.local = Could not open a local port for the sign-in. Paste the address instead.
+gpui.paste.the.address.the.browser = Paste the address the browser landed on.
+gpui.paste.the.address.the.browser2 = Paste the address the browser landed on
+gpui.confirm.remove = Confirm remove
+gpui.submit = Submit
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = Could not keep this draft on this device. Retry.
