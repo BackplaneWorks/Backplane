@@ -1,15 +1,15 @@
 //! What the hub learned of this machine that an agent's prompt and arguments name: FreeCAD, the hub's own binary (the renderer),
-//! the KiCad runtime, the models line, KiStack's folder. Discovery proper belongs to the files/kicad and settings streams;
+//! the KiCad runtime, the models line, KiStack's folder, the bundled skills' folder. Discovery proper belongs to the files/kicad and settings streams;
 //! `probe` reads the environment and PATH as the JS hub's boot does, and tests give their own.
 use super::prompt::Kicad;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
-pub struct HostInfo { pub home: PathBuf, pub user_home: String, pub fc: String, pub render: String, pub kicad: Kicad, pub models: Value, pub kistack: Option<PathBuf> }
+pub struct HostInfo { pub home: PathBuf, pub user_home: String, pub fc: String, pub render: String, pub kicad: Kicad, pub models: Value, pub kistack: Option<PathBuf>, pub bundled: Option<PathBuf> }
 
 impl Default for HostInfo {
-    fn default() -> HostInfo { HostInfo { home: PathBuf::new(), user_home: "/nonexistent".into(), fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, models: json!({"claude":["fable","opus","sonnet","haiku"]}), kistack: None } }
+    fn default() -> HostInfo { HostInfo { home: PathBuf::new(), user_home: "/nonexistent".into(), fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, models: json!({"claude":["fable","opus","sonnet","haiku"]}), kistack: None, bundled: None } }
 }
 fn on_path(name: &str) -> Option<PathBuf> { std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(name)).find(|c| c.is_file())) }
 
@@ -30,6 +30,7 @@ impl HostInfo {
         }
         if let Some(m) = std::env::var("BACKPLANE_MODELS").ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) { h.models = m }
         h.kistack = std::env::var("BACKPLANE_KISTACK").ok().map(PathBuf::from).or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kistack")))).filter(|p| p.is_dir());
+        h.bundled = super::bundled::install(home); // Backplane's own skills, in this home (bundled.rs)
         super::skills::set_env(super::skills::env_from(&h.user_home, home, h.kistack.as_deref()));
         h
     }

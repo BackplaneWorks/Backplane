@@ -47,9 +47,33 @@ fn validation(path: &str, o: &Value) -> String {
     if o.get("kind").and_then(Value::as_str).unwrap_or("").trim().is_empty() { format!("{path}: missing kind") }
     else if o.get("features").map_or(true, Value::is_null) { format!("{path}: missing measured features") } else { String::new() }
 }
+/// A part made for SendCutSend (its `sendcutsend` block, written by the bundled sendcutsend skill): what Backplane's catalog has no equivalent for,
+/// and a part or flat pattern changed since the skill measured it (its features, and so the estimate, are of the older file). `root`: the project, to hash the files.
+fn scs_validation(path: &str, o: &Value, root: Option<&Path>) -> String {
+    let Some(s) = o.get("sendcutsend") else { return String::new() };
+    if s["sku"].as_str().map_or(true, |x| x.trim().is_empty()) { return format!("{path}: its sendcutsend block names no material (sku)") }
+    let mut v: Vec<String> = vec![];
+    let un: Vec<&str> = s["unmapped"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    if !un.is_empty() { v.push(format!("{path}: Backplane's catalog has no equivalent for SendCutSend's {}", un.join(", "))) }
+    if let Some(root) = root {
+        let dir = Path::new(path).parent().unwrap_or(Path::new(""));
+        for (key, file) in [("source_sha256", &o["source"]), ("flat_sha256", &s["flat"])] {
+            let (Some(want), Some(f)) = (s["dfm"][key].as_str(), file.as_str()) else { continue };
+            let rel = dir.join(f);
+            if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) { v.push(format!("{path}: {f} is outside the project")); continue }
+            match std::fs::read(root.join(&rel)) {
+                Ok(b) => { use sha2::Digest; if hex::encode(sha2::Sha256::digest(&b)) != want { v.push(format!("{path}: {f} changed since its SendCutSend check: run the sendcutsend skill's fab again")) } }
+                Err(_) => v.push(format!("{path}: {f} is missing")),
+            }
+        }
+    }
+    v.join("; ")
+}
 fn bad_part(path: &str, why: &str) -> Value { json!({"name":path,"kind":"","path":path,"validation":format!("{path}: {why}")}) }
 /// Order.parts: a fab file's part, none for one marked "order": false; a file that is not an object is a part with its problem.
-pub fn parts(files: &[(String, String)]) -> Vec<Value> {
+pub fn parts(files: &[(String, String)]) -> Vec<Value> { parts_in(files, None) }
+/// The same, with the project folder to check a SendCutSend part's files against its fab file.
+pub fn parts_in(files: &[(String, String)], root: Option<&Path>) -> Vec<Value> {
     let mut out = vec![];
     for (path, text) in files {
         match serde_json::from_str::<Value>(text) {
@@ -58,7 +82,7 @@ pub fn parts(files: &[(String, String)]) -> Vec<Value> {
             Ok(o) => {
                 if o.get("order").and_then(Value::as_bool) == Some(false) { continue }
                 out.push(json!({"name": o.get("name").and_then(Value::as_str).unwrap_or(path), "kind": o.get("kind").and_then(Value::as_str).unwrap_or(""), "qty": o.get("qty").cloned().unwrap_or(json!(1)),
-                    "options": o.get("options").cloned().unwrap_or(Value::Null), "features": o.get("features").cloned().unwrap_or(Value::Null), "path": path, "validation": validation(path, &o)}));
+                    "options": o.get("options").cloned().unwrap_or(Value::Null), "features": o.get("features").cloned().unwrap_or(Value::Null), "path": path, "validation": join(&validation(path, &o), &scs_validation(path, &o, root))}));
             }
         }
     }
@@ -218,7 +242,7 @@ pub fn look_in(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, serv
     let Some(cwd) = cwd else { return card(thread, "", &[], 0, &Value::Null, est_on, &[], "", "") };
     let intent = std::fs::read_to_string(cwd.join(".backplane/intent.md")).unwrap_or_default();
     let files: Vec<(String, String)> = find_fab(cwd).into_iter().map(|p| { let t = std::fs::read_to_string(cwd.join(&p)).unwrap_or_default(); (p, t) }).collect();
-    let ps = parts(&files);
+    let ps = parts_in(&files, Some(cwd));
     let all = kicad::boards::find(cwd);
     let kf = kicad::project::read(&cwd.to_string_lossy());
     let prefix = format!("{}/", cwd.to_string_lossy());
@@ -284,6 +308,20 @@ mod tests {
         let v: Vec<(&str, &str)> = ps.iter().map(|p| (p["path"].as_str().unwrap(), p["validation"].as_str().unwrap())).collect();
         assert_eq!(v, [("a.fab.json", ""), ("b.fab.json", "b.fab.json: missing measured features"), ("d.fab.json", "d.fab.json: could not read fab JSON"), ("e.fab.json", "e.fab.json: invalid fab JSON: expected an object"), ("f.fab.json", "f.fab.json: missing kind")]);
         assert_eq!((ps[0]["name"].clone(), ps[0]["qty"].clone(), ps[1]["name"].clone(), ps[1]["qty"].clone()), (json!("Main"), json!(5), json!("b.fab.json"), json!(1)));
+    }
+    #[test] fn a_sendcutsend_part_says_what_has_no_equivalent_and_when_its_check_is_older_than_its_file() {
+        use sha2::Digest;
+        let root = tmp("scs"); put(root.join("mech/bracket.step"), "ISO-10303-21; v1"); put(root.join("mech/bracket.flat.dxf"), "0\nEOF\n");
+        let h = |t: &str| hex::encode(sha2::Sha256::digest(t.as_bytes()));
+        let fab = |src: &str, flat: &str, un: &str| format!(r#"{{"name":"Bracket","kind":"sheetmetal","source":"bracket.step","features":{{"flat_x_mm":80}},"sendcutsend":{{"sku":"ALU-063","flat":"bracket.flat.dxf","unmapped":[{un}],"dfm":{{"source_sha256":"{src}","flat_sha256":"{flat}"}}}}}}"#);
+        let v = |t: String| parts_in(&[("mech/bracket.fab.json".into(), t)], Some(&root))[0]["validation"].as_str().unwrap().to_string();
+        assert_eq!(v(fab(&h("ISO-10303-21; v1"), &h("0\nEOF\n"), "")), "");
+        assert_eq!(v(fab(&h("ISO-10303-21; v0"), &h("0\nEOF\n"), "")), "mech/bracket.fab.json: bracket.step changed since its SendCutSend check: run the sendcutsend skill's fab again");
+        assert_eq!(v(fab(&h("ISO-10303-21; v1"), &h("0\nEOF\n"), r#""material MDF""#)), "mech/bracket.fab.json: Backplane's catalog has no equivalent for SendCutSend's material MDF");
+        assert_eq!(v(r#"{"kind":"cnc","features":{},"sendcutsend":{}}"#.into()), "mech/bracket.fab.json: its sendcutsend block names no material (sku)");
+        assert_eq!(v(r#"{"kind":"cnc","source":"../../etc/passwd","features":{},"sendcutsend":{"sku":"MDF-250","dfm":{"source_sha256":"x"}}}"#.into()), "mech/bracket.fab.json: ../../etc/passwd is outside the project");
+        assert_eq!(parts(&[("a.fab.json".into(), fab("x", "y", ""))])[0]["validation"], "", "without the folder only the block itself is read");
+        let _ = std::fs::remove_dir_all(&root);
     }
     #[test] fn an_estimate_must_price_every_part_or_the_label_says_incomplete() {
         let ps = parts(&[("a.fab.json".into(), r#"{"name":"Main","kind":"pcb","features":{}}"#.into()), ("b.fab.json".into(), r#"{"name":"Cover","kind":"3dp","features":{}}"#.into())]);

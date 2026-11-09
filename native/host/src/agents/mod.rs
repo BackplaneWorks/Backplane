@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -162,7 +162,7 @@ impl Agents {
             let f = inputs::read(&root); let keys_path = home.join("secrets/api.env");
             let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
             prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders,
-                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines, buy, lang })
+                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default() })
         }).await.unwrap_or_default()
     }
     /// PendingChanged: the number of open asks on a thread, written after an ask opens or closes (`extra` asks counted on top).
@@ -1067,8 +1067,9 @@ impl Actor {
         }
         let gen = format!("{now}-{}", self.ag.seq()); // Hub.gen: the process's generation, which its MCP URL names
         let prompt = self.ag.prompt_for(&th, cwd).await;
-        let mut dirs: Vec<String> = self.ag.host.kistack.iter().map(|k| k.to_string_lossy().into_owned()).collect(); dirs.push(self.ag.host.home.join("attachments").to_string_lossy().into_owned());
-        let plugins: Vec<String> = self.ag.host.kistack.iter().map(|k| k.to_string_lossy().into_owned()).collect();
+        let own: Vec<String> = self.ag.host.kistack.iter().chain(self.ag.host.bundled.iter()).map(|k| k.to_string_lossy().into_owned()).collect(); // KiStack's and Backplane's own skills
+        let mut dirs = own.clone(); dirs.push(self.ag.host.home.join("attachments").to_string_lossy().into_owned());
+        let plugins = own;
         let (effort, think) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think) };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url });

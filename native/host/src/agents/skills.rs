@@ -1,7 +1,7 @@
 //! Skills the person has installed, found where each provider keeps them, for the composer's `$` popup, the chips under a sent message and the turn's text.
 //! Claude: ~/.claude/skills, <project>/.claude/skills (the folder and its parents), the plugins `installed_plugins.json` lists (named `plugin:skill`; a plugin
 //! `settings.json` turns off is left out; a directory marketplace of a missing install is read in place). Codex: ~/.codex/skills (or $CODEX_HOME/skills),
-//! ~/.agents/skills, <project>/.agents/skills. Backplane's own: KiStack's skills and <hub home>/skills.
+//! ~/.agents/skills, <project>/.agents/skills. Backplane's own: KiStack's skills, <hub home>/skills and the bundled ones (<hub home>/bundled/skills, bundled.rs).
 //! A skill the thread's provider loads itself is "native": Claude gets `/name`, Codex its own `$name`. Any other is "read": the turn's text names the SKILL.md to read first.
 use crate::agents::inputs::{mention_name, mention_others, parse_skill, USkill};
 use serde_json::{json, Value};
@@ -58,7 +58,7 @@ fn roots(env: &Env, cwd: &str) -> Vec<Root> {
     add(codex.join("skills"), Kind::Codex, "Codex · yours", "");
     add(home.join(".agents/skills"), Kind::Codex, "Agents · yours", "");
     if let Some(k) = &env.kistack { add(k.join("skills"), Kind::Hub, "Backplane", "") }
-    add(env.hub_home.join("skills"), Kind::Hub, "Backplane", ""); add(env.hub_home.join("kistack/skills"), Kind::Hub, "Backplane", "");
+    add(env.hub_home.join("skills"), Kind::Hub, "Backplane", ""); add(env.hub_home.join("kistack/skills"), Kind::Hub, "Backplane", ""); add(env.hub_home.join("bundled/skills"), Kind::Hub, "Backplane", ""); // bundled.rs dir()
     v
 }
 
