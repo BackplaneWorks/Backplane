@@ -831,8 +831,8 @@ final class Journeys: XCTestCase {
         d.step("the summary and the note are there", timeout: 5, act: {}, expect: { d.label("Stand-in summary").exists && d.label("check the DRC").exists })
         d.step("a reference opens its source", timeout: 15, act: { d.tap(d.el("handoff.ref.1")) }, expect: { comp().exists && d.label("Given to \"Busy build\"").exists })
         d.shot("4-ref-opened")
-        d.step("/give to an idle thread", timeout: 20, act: { d.tap(comp()); d.type(comp(), "/give >review-notes please review"); d.tap(go()) }, expect: { d.label("Given to \"Review notes\"").exists })
-        d.step("/give to a bot", timeout: 20, act: { d.tap(comp()); d.type(comp(), "/give @ada keep watch"); d.tap(go()) }, expect: { d.label("Given to @Ada").exists })
+        d.step("/give to an idle thread", timeout: 20, act: { sleep(2); d.tap(comp()); sleep(1); comp().typeText("/give >review-notes please review"); d.tap(go()) }, expect: { d.label("Given to \"Review notes\"").exists })
+        d.step("/give to a bot", timeout: 20, act: { sleep(2); d.tap(comp()); sleep(1); comp().typeText("/give @ada keep watch"); d.tap(go()) }, expect: { d.label("Given to @Ada").exists })
         d.shot("5-source-three")
     }
 
