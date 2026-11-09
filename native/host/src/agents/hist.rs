@@ -24,10 +24,23 @@ pub fn record(out: &str, entry: &str, when: &str) -> String {
 pub async fn step(hub: std::sync::Arc<crate::hub::Hub>, thread: String, cwd: String, entry: String, home: String, when: &str) {
     if cwd.is_empty() || crate::copy::on() { return } // a copy runs no git that writes (Copy.git.reads): no hidden refs, no .backplane/history.git in a real folder
     let reg = format!("{home}/history.trusted");
+    if let Some(old) = crate::import014::source(std::path::Path::new(&home)) { adopt(&reg, &old.join("history.trusted")) }
     let out = fgit::step_capture(&cwd, &thread, &reg).await;
     let rec = record(&out, &entry, when); if rec.is_empty() { return }
     let commit = out.split('\n').next().unwrap_or("").trim().to_string();
     let _ = hub.commit(&json!({"$":"ActivityLogged","thread":thread,"act":format!("step:{commit}"),"tone":"step","kind":"kicad","summary":rec,"at":super::now_s()})).await;
+}
+/// The history folders 0.14 made are trusted here too: its registry's lines this one lacks are added (without them the next step in a
+/// project 0.14 worked on moved its history.git aside and the bar lost every step before).
+pub fn adopt(reg: &str, old: &std::path::Path) {
+    let Ok(theirs) = std::fs::read_to_string(old) else { return };
+    let mine = std::fs::read_to_string(reg).unwrap_or_default();
+    let have: std::collections::HashSet<&str> = mine.lines().collect();
+    let add: Vec<&str> = theirs.lines().filter(|l| { let mut f = l.splitn(2, ' '); f.next().is_some_and(|k| k.contains(':')) && f.next().is_some_and(|p| p.starts_with('/') || p.contains(":\\")) && !have.contains(l) }).collect();
+    if add.is_empty() { return }
+    let mut out = mine; if !out.is_empty() && !out.ends_with('\n') { out.push('\n') }
+    for l in add { out.push_str(l); out.push('\n') }
+    let _ = std::fs::write(reg, out);
 }
 /// GitJob checkpoint0: a new thread's first turn is checkpoint 0 (inside a git repository only).
 pub async fn checkpoint0(cwd: String, thread: String) { if cwd.is_empty() || crate::copy::on() || !fgit::is_repo(&cwd).await { return } if fgit::checkpoint_count(&cwd, &thread).await == 0 { let _ = fgit::checkpoint_capture(&cwd, &thread, 0).await; } }
@@ -37,6 +50,17 @@ pub async fn checkpoint(cwd: String, thread: String) { if cwd.is_empty() || crat
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_0_14_registry_is_adopted_once() {
+        let d = std::env::temp_dir().join(format!("bp-adopt-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let (reg, old) = (d.join("history.trusted"), d.join("old.trusted"));
+        std::fs::write(&reg, "57:1 /a/.backplane/history.git").unwrap();
+        std::fs::write(&old, "58:2 /b/.backplane/history.git\n57:1 /a/.backplane/history.git\nnonsense\n").unwrap();
+        let r = reg.to_string_lossy().into_owned();
+        adopt(&r, &old); adopt(&r, &old);
+        assert_eq!(std::fs::read_to_string(&reg).unwrap(), "57:1 /a/.backplane/history.git\n58:2 /b/.backplane/history.git\n");
+        adopt(&r, &d.join("none")); assert!(std::fs::read_to_string(&reg).unwrap().ends_with("history.git\n"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn a_step_record_has_the_commit_its_parent_the_places_and_the_files() {
         let out = "c1\np0\n/r/.git\n/r\nM\0a.kicad_pcb\0A\0b.kicad_sch\0";
         let v: Value = serde_json::from_str(&record(out, "tool1", "start")).unwrap();
