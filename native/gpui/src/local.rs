@@ -22,9 +22,12 @@ pub struct Local {
     pub notifications: bool, pub default_view: String, pub shortcuts: BTreeMap<String, String>,
     /// Starred models ("provider/model"), listed first in the model menu; kept on this device.
     pub favs: Vec<String>,
+    /// Split's panes put away on this device ("sch", "pcb", "3d" words, as 0.14's split.hide) and where its two dividers sit
+    /// (the schematic's share beside the board and 3D, the board's share beside the 3D; 0 is the default).
+    pub split_hide: String, pub split_main: f32, pub split_side: f32,
 }
 impl Default for Local {
-    fn default() -> Self { Local { theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new() } }
+    fn default() -> Self { Local { theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0. } }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -45,6 +48,7 @@ impl Local {
         if !THEMES.iter().any(|(k, _)| *k == l.theme) { l.theme = "hub".into() }
         if !VIEWS.iter().any(|(k, _)| *k == l.default_view) { l.default_view = "last".into() }
         if l.font.is_empty() { l.font = FONTS[0].0.into() }
+        for r in [&mut l.split_main, &mut l.split_side] { if !(r.is_finite() && *r > 0. && *r < 1.) { *r = 0. } }
         l.shortcuts.retain(|a, k| crate::keys::rebindable(a) && crate::keys::choices(a).contains(k));
         l
     }
