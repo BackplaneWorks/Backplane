@@ -516,3 +516,15 @@ impl RpcHandler for FakeStar {
     let r = ask(&mut ws, 7, "threads.list", json!({"project":"p1"})).await;
     assert!(r["result"]["threads"].as_array().unwrap().iter().all(|t| t["status"].is_string()), "every thread says its dot's word: {r}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_files_approval_of_a_buy_says_send_or_not_now_as_the_desktop() {
+    let (_hub, port) = up_with("quoteask", "{\"$\":\"AskOpened\",\"id\":\"q2\",\"thread\":\"t2\",\"kind\":\"approval\",\"tool\":\"order_quote\",\"detail\":\"Send 11 files from mfg/x to Backplane's quote service\",\"options\":\"\",\"at\":1700000041}\n").await;
+    let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t2"})).await;
+    let a = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "ask").cloned().unwrap_or_else(|| panic!("{r}"));
+    assert_eq!(a["ask"]["options"], json!([{"id":"accept","label":"Send"},{"id":"decline","label":"Not now"}]), "{a}");
+    assert!(a["ask"]["question"].as_str().unwrap().starts_with("Send these files for a quote?\n"), "{a}");
+    let r = ask(&mut ws, 2, "thread.entries", json!({"thread":"t1"})).await;
+    let a = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "ask").cloned().unwrap();
+    assert_eq!(a["ask"]["options"][0]["label"], "Allow", "any other approval keeps Allow: {a}");
+}
