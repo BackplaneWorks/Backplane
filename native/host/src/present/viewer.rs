@@ -305,18 +305,22 @@ pub fn layer_action(st: &State, session: &Value, action: &str, value: &str) -> O
     Some(json!({"drafts": dr}))
 }
 
-/// `view-sheet <file>`: the schematic page shows another sheet of the design (its file, absolute; "" the root sheet), watched like the root (`View.ask` with the sheet as the path).
+/// `view-sheet <file>`: the schematic page (or Split's schematic pane) shows another sheet of the design (its file, absolute; "" the root sheet), watched like
+/// the root (`View.ask` with the sheet as the path; Split watches its three sources again with that sheet).
 pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Option<ViewOut> {
     let sel = s(session, "sel"); let d = &session["drafts"];
-    if !simple(st, session, sel) || s(d, &format!("@view:{sel}")) != "schematic" { return None }
+    let kind = s(d, &format!("@view:{sel}"));
+    if !simple(st, session, sel) || !matches!(kind, "schematic" | "split") { return None }
     let root = root_of(st, sel);
     if !file.is_empty() && !(file.starts_with(&format!("{root}/")) && file.ends_with(".kicad_sch") && !file.contains("..")) { return None }
-    let want = format!("1|{root}|{file}");
+    let board = if kind == "split" { board_file("split", &root, &chosen_board(d, sel)) } else { String::new() };
+    let want = if kind == "split" { format!("split|{root}|{board}|{file}") } else { format!("1|{root}|{file}") };
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.sheet:{sel}"), json!(file));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != s(d, "@view.at") {
-        let p = format!("{{\"kind\":\"schematic\",\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(&root), jstr(file));
+        let p = if kind == "split" { let bd = if board.is_empty() { String::new() } else { format!(",\"board\":{}", jstr(&board)) }; format!("{{\"kind\":\"split\",\"root\":{},\"path\":{},\"tree\":\"\"{bd}}}", jstr(&root), jstr(file)) }
+            else { format!("{{\"kind\":\"schematic\",\"root\":{},\"path\":{},\"tree\":\"\"}}", jstr(&root), jstr(file)) };
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
@@ -561,9 +565,12 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
             o.insert("open".into(), json!("split")); o.insert("key".into(), json!(key("split", &root)));
             // a board picked in the Boards menu: each pane's source is that board's file (its schematic beside it), as kicad.watch's split keys them
             let picked = board_file("board", &root, &chosen_board(&session["drafts"], sel));
+            // a sheet opened in the schematic pane is its source (`view-sheet`)
+            let sheet = s(&session["drafts"], &format!("@view.sheet:{sel}")).to_string();
             o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| { let mut p = page(template, k, &root, &session["drafts"], "");
                 if !picked.is_empty() { let f = if *k == "schematic" { board_file("schematic", &root, &chosen_board(&session["drafts"], sel)) } else { picked.clone() }; let kk = format!("{}{f}", key(k, &root));
                     if *k != "3d" { p["layers"] = json!(kk); } else { p["layers"] = json!(""); } p["key"] = json!(kk); }
+                if *k == "schematic" && !sheet.is_empty() { let kk = format!("{}{sheet}", key("schematic", &root)); p["key"] = json!(kk); p["layers"] = json!(kk); }
                 p }).collect()));
             if let Some(b) = boards_menu(session, sel, &root) { o.insert("boards".into(), b); }
             v
@@ -777,6 +784,18 @@ mod tests {
         assert_eq!(viewer_json(&st, &template, &s1).unwrap()["probe"], "");
         assert!(probe_action(&st, "h", &s1, "two\nlines").is_none());
         assert!(crate::state::fam::policy::lean_keeps(&format!("probe:{root}|a/a.kicad_pcb")), "the presenter's lean copy keeps the probe");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn splits_schematic_pane_opens_another_sheet() {
+        let (st, th, d) = files_world("split-sheet"); let root = d.to_string_lossy().into_owned();
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let mut s1 = sess(&th, json!({})); let o = view_action(&st, "h", &s1, "split").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        let sub = format!("{root}/power.kicad_sch");
+        let o = sheet_action(&st, "h", &s1, &sub).unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        let p = sent(&o.before[0]); assert_eq!((p["kind"].as_str(), p["path"].as_str()), (Some("split"), Some(sub.as_str())), "{p}");
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["key"], json!(format!("1|{root}|{sub}")));
+        let o = sheet_action(&st, "h", &s1, "").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["key"], json!(format!("1|{root}|")), "back to the root sheet");
         let _ = std::fs::remove_dir_all(&d);
     }
     fn sess(th: &str, drafts: Value) -> Value { json!({"sel": th, "rid": 1, "drafts": drafts, "open": {}, "adding": false, "panel": false, "info": {}}) }
