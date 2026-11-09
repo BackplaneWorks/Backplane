@@ -11,6 +11,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -60,7 +63,7 @@ fun TextPrompt(title: String, initial: String, ok: String, close: () -> Unit, do
 /** The actions of a thread, as the desktop's header and row menu offer them. */
 fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit, search: (() -> Unit)? = null, buy: Pair<String, () -> Unit>? = null): List<Pair<String, () -> Unit>> = buildList {
     buy?.let { add(it) } // Buy it heads the thread's tools, as on the desktop
-    search?.let { add("Search in thread" to it) }
+    search?.let { add((if (DataClient.has("find")) "Find in thread" else "Search in thread") to it) }
     add((if (t.pinned) "Unpin" else "Pin") to { DataClient.threadAct(t.id, if (t.pinned) "unpin" else "pin"); Unit })
     add((if (t.settled) "Unsettle" else "Settle") to { DataClient.threadAct(t.id, if (t.settled) "unsettle" else "settle"); Unit })
     add((if (t.archived) "Unarchive" else "Archive") to { DataClient.threadAct(t.id, if (t.archived) "unarchive" else "archive"); Unit })
@@ -120,22 +123,35 @@ fun ProjectMenus(p: DProject, shown: Boolean, close: () -> Unit) {
     if (removing) ActionSheet("Remove “${p.title}” and its threads from the list?", listOf("Remove project" to { DataClient.projectAct(p.id, "remove") }, "Keep it" to {}), { removing = false })
 }
 
-/** Search over threads and projects (the hub's `search`). */
+/** Search over threads and projects (the hub's `search`), and under them what was said (its `messages`): a tap opens the thread at the message, marked. */
 @Composable
 fun SearchResults(q: String, open: (String) -> Unit) {
-    var res by remember { mutableStateOf<Pair<List<DThread>, List<DProject>>?>(null) }
+    var res by remember { mutableStateOf<DataClient.Found?>(null) }
     LaunchedEffect(q) { res = if (q.isBlank()) null else runCatching { DataClient.search(q) }.getOrNull() }
     val r = res
     if (r == null) { if (q.isNotBlank()) DMono("searching…", modifier = Modifier.padding(12.dp)); return }
-    if (r.first.isEmpty() && r.second.isEmpty()) { DMono("nothing matches “$q”", modifier = Modifier.padding(12.dp).testTag("search.none")); return }
+    if (r.threads.isEmpty() && r.projects.isEmpty() && r.messages.isEmpty()) { DMono("nothing matches “$q”", modifier = Modifier.padding(12.dp).testTag("search.none")); return }
     LazyColumn(Modifier.fillMaxSize().testTag("search.list")) {
-        items(r.second, key = { "sp:${it.id}" }) { p -> Column { DMono("project · ${p.title}", dcs.onSurface, 12, Modifier.fillMaxWidth().padding(12.dp)); DLine() } }
-        items(r.first.filter { !it.history }, key = { "st:${it.id}" }) { t -> ThreadRowPublic(t) { open(t.id) } }
+        items(r.projects, key = { "sp:${it.id}" }) { p -> Column { DMono("project · ${p.title}", dcs.onSurface, 12, Modifier.fillMaxWidth().padding(12.dp)); DLine() } }
+        items(r.threads.filter { !it.history }, key = { "st:${it.id}" }) { t -> ThreadRowPublic(t) { open(t.id) } }
         // the old Scratch chats the search found, under their group's name (feature history)
-        val old = r.first.filter { it.history }
+        val old = r.threads.filter { it.history }
         if (old.isNotEmpty()) item("sh") { DMono("CONVERSATION HISTORY", dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp).testTag("search.history")) }
         items(old, key = { "sh:${it.id}" }) { t -> ThreadRowPublic(t) { open(t.id) } }
+        if (r.messages.isNotEmpty()) item("sm") { DMono("MESSAGES", dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp).testTag("search.messages")) }
+        items(r.messages, key = { "sm:${it.thread}:${it.msg}" }) { m ->
+            Column(Modifier.fillMaxWidth().clickable { DataClient.pendingMsg = m.msg; open(m.thread) }.padding(horizontal = 12.dp, vertical = 10.dp).testTag("search.msg")) {
+                Text(marked(m.text, q, dcs.primary), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, maxLines = 3)
+                DMono(DataFind.who(m.role) + " · " + m.title + (if (m.project.isNotEmpty()) " · " + m.project else "") + " · " + dAgo(m.at), dfaint, 11)
+            }
+            DLine()
+        }
     }
+}
+
+/** A snippet with the words of `q` in bold (DataFind.marks). */
+internal fun marked(text: String, q: String, c: Color) = androidx.compose.ui.text.buildAnnotatedString {
+    append(text); DataFind.marks(text, q).forEach { addStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = c), it.first, it.last + 1) }
 }
 
 /** The picker the composer's chip opens: the hub's sections, the one in force marked. On a thread a press is the desktop's own request; before a thread exists it is
@@ -230,7 +246,42 @@ fun RoomScreen(room: DataClient.Room, back: () -> Unit) {
     }
 }
 
-/** "Search in thread" (the thread's menu): what was said here with every word typed, newest first (the hub's `search` with `thread`); a tap goes to the message. The box
+/** The find bar over a thread (feature `find`): the words typed (2 or more letters, after a short pause) are the hub's `find`; it lands on the newest match, the arrows
+ *  step older and newer through the hub's matches (DataFind.step) and `go` scrolls to each and marks it ("": none, the mark goes); X closes it and clears the mark. */
+@Composable
+fun FindBar(tid: String, close: () -> Unit, go: (String) -> Unit) {
+    var q by remember(tid) { mutableStateOf("") }
+    var res by remember(tid) { mutableStateOf<DataClient.FindRes?>(null) }
+    var cur by remember(tid) { mutableStateOf(-1) }
+    var err by remember(tid) { mutableStateOf("") }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(q) {
+        val w = q.trim(); if (w.length < 2) { if (res != null) go(""); res = null; cur = -1; return@LaunchedEffect }
+        kotlinx.coroutines.delay(250)
+        try {
+            val r = DataClient.find(tid, w); val ms = r.matches.map { it.msg }
+            val before = res?.takeIf { it.q == r.q }?.matches?.getOrNull(cur)?.msg
+            res = r; err = ""; cur = DataFind.pick(ms, before); go(ms.getOrNull(cur) ?: "")
+        } catch (e: Exception) { err = e.message ?: "" }
+    }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    fun move(dir: Int) { val r = res ?: return; cur = DataFind.step(cur, r.matches.size, dir); r.matches.getOrNull(cur)?.msg?.let(go) }
+    Column(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).testTag("find")) {
+        Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { DField(q, { q = it }, "Find in thread", Modifier.focusRequester(focus).testTag("find.field")) }
+            val r = res
+            DMono(when { err.isNotEmpty() -> "error"; r == null -> ""; else -> DataFind.count(cur, r.matches.size, r.total, r.more) }, if (err.isNotEmpty()) dcs.error else dfaint, 11, Modifier.padding(horizontal = 8.dp).testTag("find.count"))
+            val some = (r?.matches?.size ?: 0) > 0
+            androidx.compose.material3.IconButton(onClick = { move(-1) }, enabled = some, modifier = Modifier.size(40.dp).testTag("find.prev")) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowUp, "Previous", tint = if (some) dcs.onSurfaceVariant else dfaint) }
+            androidx.compose.material3.IconButton(onClick = { move(1) }, enabled = some, modifier = Modifier.size(40.dp).testTag("find.next")) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, "Next", tint = if (some) dcs.onSurfaceVariant else dfaint) }
+            androidx.compose.material3.IconButton(onClick = close, modifier = Modifier.size(40.dp).testTag("find.close")) { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.Close, "Close", tint = dcs.onSurfaceVariant) }
+        }
+        if (err.isNotEmpty()) DMono(err, dcs.error, 11, Modifier.padding(start = 12.dp, bottom = 4.dp))
+        DLine()
+    }
+}
+
+/** "Search in thread" on a hub without `find`: what was said here with every word typed, newest first (the hub's `search` with `thread`); a tap goes to the message. The box
  *  takes the keyboard at once: the person asked to search. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

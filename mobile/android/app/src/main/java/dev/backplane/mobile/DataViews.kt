@@ -553,7 +553,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
         if (uri != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, uri) }; if (b != null) pending.add(b) else notice = "That picture could not be read." }
     }
     var menu by remember { mutableStateOf(false) }; var models by remember { mutableStateOf(false) }; var finding by remember(id) { mutableStateOf(false) }
-    val rowsNow by rememberUpdatedState(rows); var found by remember(id) { mutableStateOf("") } // the row Search in thread went to, marked for a moment
+    val rowsNow by rememberUpdatedState(rows); var found by remember(id) { mutableStateOf("") } // the row find or a search hit went to, marked
     var order by remember(id) { mutableStateOf<DataClient.Order?>(null) }
     LaunchedEffect(id, list.size, thread?.state, DataClient.conn) { if (DataClient.has("order")) runCatching { DataClient.order(id) }.onSuccess { order = it } }
     LaunchedEffect(id, all.size, thread?.state, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.loadQueue(id) } }
@@ -581,18 +581,20 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
     if (drawing) DrawPadSheet({ drawing = false }) { pending.add(it); notice = "" }
     var openRuns by remember(id) { mutableStateOf(emptySet<String>()) }
     thread?.let { t -> ThreadMenus(t, menu, { menu = false }, { back() }, if (DataClient.has("search")) ({ finding = true }) else null, buy?.label?.let { it to startBuy }); if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
-    if (finding) FindInThread(id, { finding = false }) { msg ->
-        // the message's row, loading earlier pages until it is there (a few at most)
-        scope.launch {
-            var n = 0
-            while (n++ < 30) {
-                val now = rowsNow; val at = now.indexOfFirst { r -> r is DRow.Entry && (r.entry.id == msg) || r is DRow.Fold && r.fold.items.any { it.id == msg } }
-                if (at >= 0) { stick = false; state.scrollToItem(at + if (DataClient.older[id] != null) 1 else 0); found = now[at].id; kotlinx.coroutines.delay(2500); if (found == now[at].id) found = ""; break }
-                if (DataClient.older[id] == null) { notice = "That message is no longer in this thread."; break }
-                DataClient.loadOlder(id); kotlinx.coroutines.delay(400)
-            }
+    // go to a message (a find match, a home search hit): its row, loading earlier pages until it is there; marked until the next one or the find bar closes
+    var jumping by remember(id) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun jump(msg: String, fade: Boolean) { jumping?.cancel(); jumping = scope.launch {
+        var n = 0
+        while (n++ < 30) {
+            val now = rowsNow; val at = now.indexOfFirst { r -> r is DRow.Entry && (r.entry.id == msg) || r is DRow.Fold && r.fold.items.any { it.id == msg } }
+            if (at >= 0) { stick = false; state.scrollToItem(at + if (DataClient.older[id] != null) 1 else 0); found = now[at].id; if (fade) { kotlinx.coroutines.delay(2500); if (found == now[at].id) found = "" }; break }
+            if (DataClient.older[id] == null) { notice = "That message is no longer in this thread."; break }
+            DataClient.loadOlder(id); kotlinx.coroutines.delay(400)
         }
-    }
+    } }
+    // a message hit tapped on the home search: once the thread's first page is here
+    LaunchedEffect(id, DataClient.pendingMsg, all.isNotEmpty()) { val m = DataClient.pendingMsg; if (m.isNotEmpty() && all.isNotEmpty()) { DataClient.pendingMsg = ""; jump(m, false) } }
+    if (finding && !DataClient.has("find")) FindInThread(id, { finding = false }) { msg -> jump(msg, true) }
     Column(Modifier.fillMaxSize()) {
         DBar(thread?.title ?: "", back) {
             // Buy it when there is something to buy; the thread's menu; the viewers in the corner (the person's order, 11-04)
@@ -603,6 +605,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
         ConnBanner(hub)
         thread?.let { StateStrip(it) }
         thread?.mark?.let { m -> DMono("on ${m.name}" + if (m.away) " · away" else "", dfaint, 11, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).testTag("thread.machine")) }
+        if (finding && DataClient.has("find")) FindBar(id, { finding = false; jumping?.cancel(); found = "" }) { if (it.isEmpty()) { jumping?.cancel(); found = "" } else jump(it, false) }
         DataClient.work[id]?.takeIf { it.rows.isNotEmpty() }?.let { WorkPanel(id, it) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("thread.list"), state = state, contentPadding = PaddingValues(vertical = 8.dp)) {
             if (DataClient.older[id] != null) item("older") { Box(Modifier.fillMaxWidth().clickable { DataClient.loadOlder(id) }.padding(10.dp), contentAlignment = Alignment.Center) { DMono("load earlier", dfaint) } }
