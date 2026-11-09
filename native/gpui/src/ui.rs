@@ -444,7 +444,8 @@ impl Render for Backplane {
         if crate::perf::on() { crate::perf::frame_start(); cx.defer(|_| crate::perf::frame_end()); }
         crate::screens::improvements::tick(self, window, cx);
         // a 3D page not drawn this frame gives its pictures back to the GPU (they stayed in the atlas until the window closed)
-        if let Some(s) = self.screens.solid.clone() { if s.read(cx).atlas_images() > 0 && !crate::screens::viewer::shows_solid(&self.data["thread"]) { s.update(cx, |p, _| p.put_away(window)); } }
+        // and its old pictures leave the atlas once the GPU is done with them (SolidPage::collect)
+        if let Some(s) = self.screens.solid.clone() { if s.read(cx).atlas_images() > 0 { let away = !crate::screens::viewer::shows_solid(&self.data["thread"]); s.update(cx, |p, _| { if away { p.put_away() } p.collect(window) }); } }
         crate::screens::desk::tick(self, window, cx);
         self.term_layout(window, cx);
         self.term_script(window, cx);
