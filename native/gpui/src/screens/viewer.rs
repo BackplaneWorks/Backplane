@@ -492,6 +492,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
             // what the page HOLDS, not what was queued for it: a big model's decode, a frame that fails or is replaced in the worker's slot
+            // the model shown before comes back at once when it is the one asked for (the page keeps one)
+            if let Some(s) = solid { if !want.is_empty() && s.read(cx).shown_key() != want { s.update(cx, |p, cx| p.want(&want, cx)); } }
             let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default();
             let ready = matches!(solid, Some(s) if solid_ready(&want, &have));
             // the 3D page's own tools float top left over the model: they wrap short of the corner the pane's controls take
