@@ -12,6 +12,8 @@ use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Condvar, Mutex};
 
 pub const MAX_TRIANGLES: usize = (64 << 20) / 84;
 pub const MAX_PIXELS: usize = 2880 * 1800;
+/// A frame this big takes a moment to decode: the page says so meanwhile.
+const BUILDING_BYTES: usize = 512 << 10;
 /// the most pixels a draft covers: beyond it the draft is drawn smaller and stretched
 const DRAFT_PIXELS: usize = 1600 * 1000;
 /// Samples a pixel a side: 1 for a draft, then as many as the panel's size leaves cheap (3 x 3 up to ~0.5 MP, 2 x 2 up to ~3 MP, none beyond).
@@ -120,6 +122,8 @@ pub fn combine(board: Option<&Mesh>, parts: &[Arc<Mesh>]) -> Option<Mesh> {
 }
 /// How long a part takes to fade in.
 pub const FADE_MS: f32 = 300.0;
+/// The page's own stage while it decodes a large model (the hub has sent it by then).
+const BUILDING: &str = "Building the view…";
 /// A part group's opacity `ms` after it showed.
 pub fn fade_at(ms: f32) -> f32 { (ms / FADE_MS).clamp(0.0, 1.0) }
 /// The progress the page shows while parts stream ("" when there are none to wait for).
@@ -186,7 +190,9 @@ pub enum SolidFrame { Model(String, Mesh), /// why there is no model (the hub's 
     /// the parts of the model start again: `of` instances will come
     Parts(String, u32),
     /// one part model at its instances (placed), and how many instances have now come
-    Part(String, Mesh, u32) }
+    Part(String, Mesh, u32),
+    /// what the hub is doing to make the model (`text`, "" when done), for how long already and about how long it took the last time (ms, 0 unknown)
+    Stage(String, String, u64, u64) }
 fn is_solid_key(k: &str) -> bool { k.starts_with("2|") || k.starts_with("3|") || k.starts_with("4|") }
 /// `parts:{of, rev}`: the map is not an `Item` (read_frame skips maps), so it is read here: the frame's `parts` value's `of`.
 fn read_parts(b: &[u8]) -> Option<u32> {
@@ -211,6 +217,10 @@ pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
     let key = match get("key") { Some(Item::Text(k)) => k.clone(), _ => return None };
     if !is_solid_key(&key) { return None }
     if let Some(Item::Text(why)) = get("none") { return Some(SolidFrame::Note(key, why.clone())) }
+    if let Some(Item::Text(text)) = get("stage") {
+        let ms = |k: &str| match get(k) { Some(Item::Int(v)) if *v > 0 => *v as u64, _ => 0 };
+        return Some(SolidFrame::Stage(key, text.clone(), ms("ms"), ms("about")))
+    }
     if let Some(of) = read_parts(b) { return Some(SolidFrame::Parts(key, of)) }
     if let Some(Item::Text(_id)) = get("part") {
         let (Some(Item::Bytes(mesh)), Some(Item::Bytes(at))) = (get("mesh"), get("at")) else { return Some(SolidFrame::Bad("part without its model".into())) };
@@ -316,7 +326,8 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 // ---- the worker: latest request wins -------------------------------------------------------------------------------
 /// `Scene`: the model with the parts that have come (`mesh`), after one or more frames: `board` when the board itself is new (its
 /// pictures in flight are stale), `reset` when the parts started again, `groups` part frames held, `done` of `of` instances come.
-enum Msg { Mesh(SolidFrame), Scene { key: String, mesh: Option<Arc<Mesh>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str } }
+/// `Building`: a large model frame of this key is being decoded now.
+enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Mesh>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str } }
 /// What to render: the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
 type Job = (Arc<Mesh>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool);
 /// What the worker holds of the model on show: the board, the part frames come so far, the progress.
@@ -365,6 +376,7 @@ impl Worker {
                 if p.shutdown { return } (std::mem::take(&mut p.frames), p.render.take()) };
             let (mut changed, mut board, mut reset) = (false, false, false);
             for bytes in &frames {
+                if bytes.len() > BUILDING_BYTES { if let Some(k) = peek_key(bytes) { if tx.send_blocking(Msg::Building(k)).is_err() { return } } }
                 let Some(f) = parse_frame(bytes) else { continue };
                 match scene.take(f, &mut board, &mut reset) { Ok(c) => changed |= c, Err(f) => if tx.send_blocking(Msg::Mesh(f)).is_err() { return } }
             }
@@ -401,11 +413,21 @@ impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().
 pub fn aspect_changed(was: f32, now: f32) -> bool { was <= 0.0 || (now / was - 1.0).abs() > 0.03 }
 pub fn note_keeps_model(page_key: &str, note_key: &str) -> bool { page_key == note_key }
 
+/// A model being made: its key, what is happening, since when, about how long it took the last time (ms, 0 unknown).
+#[derive(Clone, Debug, PartialEq)] pub struct Stage { pub key: String, pub text: String, pub since: std::time::Instant, pub about: u64 }
+/// The stage as the page shows it: the hub's words, the seconds so far (from 1 s) and the last time's, when it took long enough to say.
+pub fn stage_line(text: &str, secs: u64, about_ms: u64) -> String {
+    let mut s = text.to_string();
+    if secs >= 1 { s.push_str(&format!(" {secs} s")); }
+    if about_ms >= 2000 { s.push_str(&format!(" (last time {} s)", (about_ms + 500) / 1000)); }
+    s
+}
 pub struct SolidPage {
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
+    /** what the hub said it is doing for a model (Stage), shown with its time running; whether a second's tick is running for it */ stage: Option<Stage>, ticking: bool,
     pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
 }
 impl SolidPage {
@@ -416,11 +438,28 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
     pub fn key(&self) -> &str { &self.key }
+    /// The source the page is showing: the one being made when the hub is making another than the model held (the page then shows its
+    /// progress), else `key`. The viewer shows the page when this is the source it asks for.
+    pub fn shown_key(&self) -> &str { match &self.stage { Some(s) if s.key != self.key => &s.key, _ => &self.key } }
+    /// The stage line for the page, "" when nothing is being made.
+    pub fn stage_text(&self) -> String { self.stage.as_ref().map_or(String::new(), |s| stage_line(&s.text, s.since.elapsed().as_secs(), s.about)) }
+    fn set_stage(&mut self, st: Option<Stage>, cx: &mut Context<Self>) {
+        self.stage = st;
+        if self.stage.is_some() && !self.ticking { // the time runs on the screen: one repaint a second while something is being made
+            self.ticking = true;
+            cx.spawn(async move |weak, cx| loop {
+                cx.background_executor().timer(std::time::Duration::from_secs(1)).await;
+                let go = weak.update(cx, |this, cx| { if this.stage.is_none() { this.ticking = false; return false } cx.notify(); true }).unwrap_or(false);
+                if !go { break }
+            }).detach();
+        }
+        cx.notify();
+    }
     /// A plot-lane binary frame (keys 2|, 3|, 4| are solids).
     /// None: taken (a solid frame, decoded on the worker; the bytes are moved, not copied). Some(bytes): not a solid frame, handed back unread.
     pub fn accept(&mut self, bytes: Vec<u8>) -> Option<Vec<u8>> {
@@ -434,6 +473,7 @@ impl SolidPage {
                 if reset { self.born.clear(); }
                 let now = std::time::Instant::now(); self.born.truncate(groups); while self.born.len() < groups { self.born.push(now); } // a part fades in from when it shows
                 self.parts = (done, of);
+                if self.stage.as_ref().is_some_and(|s| s.key == self.key && (board || s.text == BUILDING)) { self.stage = None; } // made, or decoded
                 let Some(mesh) = mesh else { cx.notify(); return };
                 if board || fresh { self.floor = self.latest + 1; } // pictures of the old board are stale; ones without the newest part are not
                 if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fitted_for(&mesh, self.fit_aspect)); }
@@ -447,9 +487,16 @@ impl SolidPage {
                     self.floor = self.latest + 1; // a render of the old model still in flight is stale
                     self.born.clear(); self.parts = (0, 0);
                 }
+                if self.stage.as_ref().is_some_and(|s| s.key == key) { self.stage = None; }
                 self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
             }
-            Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; cx.notify(); }
+            Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; self.set_stage(None, cx); }
+            Msg::Mesh(SolidFrame::Stage(key, text, ms, about)) => {
+                let st = (!text.is_empty()).then(|| Stage { key, text, since: std::time::Instant::now().checked_sub(std::time::Duration::from_millis(ms)).unwrap_or_else(std::time::Instant::now), about });
+                if st.is_none() && self.stage.as_ref().is_some_and(|s| s.text == BUILDING) { return } // the model is still being decoded here
+                self.set_stage(st, cx);
+            }
+            Msg::Building(key) => self.set_stage(Some(Stage { key, text: BUILDING.into(), since: std::time::Instant::now(), about: 0 }), cx),
             Msg::Image { ticket, image, ms, tris, w, h, by } => {
                 if !shows(ticket, self.on_screen, self.floor) { return } // never painted, so never in the atlas: nothing to give back
                 self.on_screen = ticket;
@@ -552,11 +599,14 @@ impl Render for SolidPage {
         // the model was fitted before the panel's size was known: an untouched camera is fitted again to the real shape
         if let Some(m) = self.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.touched && aspect_changed(self.fit_aspect, pw / ph) { self.fit_aspect = pw / ph; self.cam = Some(Camera::fitted_for(&m, self.fit_aspect)); self.ask_render(false); } }
         if self.mesh.is_some() && pw > 0.0 { let want = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48)); if self.drag.is_none() && want.0 * want.1 <= MAX_PIXELS && want != self.asked && self.asked.0 * 2 != want.0 { self.ask_render(false); } }
+        let stage = self.stage_text();
+        let making_other = self.stage.as_ref().is_some_and(|s| s.key != self.key);
         let body = match &self.image {
+            _ if making_other || (self.image.is_none() && !stage.is_empty()) => div().id("solid-stage").size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(stage.clone()).into_any_element(),
             Some(i) => img(i.clone()).size_full().object_fit(ObjectFit::Fill).into_any_element(),
             None => div().size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(self.note.clone()).into_any_element(),
         };
-        let tools = (self.mesh.is_some()).then(|| {
+        let tools = (self.mesh.is_some() && !making_other).then(|| {
             let mut bar = div().absolute().top_2().left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
             for (label, view) in [("Fit", "fit"), ("Iso", "iso"), ("Top", "top"), ("Bottom", "bottom"), ("Front", "front"), ("Right", "right"), ("Back", "back"), ("Left", "left"), ("Snap view", "snap")] {
                 bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().py_1().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
@@ -574,8 +624,8 @@ impl Render for SolidPage {
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
-            .when(self.image.is_some() && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())))
-            .when(self.image.is_some() && !self.parts_progress().is_empty(), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.parts_progress())))
+            .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())))
+            .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { self.parts_progress() } else { stage.clone() })))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
                 window.focus(&this.focus);
                 if e.click_count >= 2 { this.drag = None; this.set_view("fit"); cx.notify(); return } // a double click fits, as 0.14's did
@@ -740,6 +790,14 @@ mod tests {
         assert!(((s1.0 - s0.0) * px - 100.0).abs() < 1e-2, "{}", (s1.0 - s0.0) * px);
         let n = c.named("top"); assert_eq!((n.shift, n.target, n.dist), ([0.0, 0.0], c.pivot, c.fit), "a standard view centres the model again");
     }
+    #[test] fn a_stage_reads_from_its_frame_and_shows_its_time() {
+        let mut f = vec![0xa4]; cbor_text(&mut f, "key"); cbor_text(&mut f, "2|/p|"); cbor_text(&mut f, "stage"); cbor_text(&mut f, "Meshing a.step with FreeCAD…");
+        cbor_text(&mut f, "ms"); f.extend([0x19, 0x0b, 0xb8]); cbor_text(&mut f, "about"); f.push(0);
+        assert_eq!(parse_frame(&f), Some(SolidFrame::Stage("2|/p|".into(), "Meshing a.step with FreeCAD…".into(), 3000, 0)));
+        assert_eq!(super::stage_line("Reading the board…", 0, 0), "Reading the board…", "no time under a second");
+        assert_eq!(super::stage_line("Meshing a.step with FreeCAD…", 4, 11_400), "Meshing a.step with FreeCAD… 4 s (last time 11 s)");
+        assert_eq!(super::stage_line("x", 2, 900), "x 2 s", "a quick last time is not worth saying");
+    }
     #[test] fn a_triangle_behind_the_near_plane_is_clipped_not_dropped() {
         let m = mesh(); let mut c = Camera::fitted(&m); c.dist = c.fit / 60.0 * 2.0; // inside the cube: faces cross the near plane
         let px = render(&m, &c, 48, 48, 2, ALIVE).unwrap();
@@ -823,7 +881,7 @@ mod tests {
         assert_eq!(super::samples(1600, 1000, false), 2); assert_eq!(super::samples(2880, 1800, false), 1);
     }
     /// The one device-backed test: skipped where there is no Vulkan at all.
-    fn cbor_text(f: &mut Vec<u8>, s: &str) { f.push(0x60 | s.len() as u8); f.extend(s.as_bytes()) }
+    fn cbor_text(f: &mut Vec<u8>, s: &str) { if s.len() < 24 { f.push(0x60 | s.len() as u8) } else { f.extend([0x78, s.len() as u8]) } f.extend(s.as_bytes()) }
     fn cbor_bytes(f: &mut Vec<u8>, b: &[u8]) { f.push(0x5a); f.extend((b.len() as u32).to_be_bytes()); f.extend(b) }
     fn part_frame(key: &str, tris: &[([i32; 9], u32)], at: &[[f32; 12]], done: u8) -> Vec<u8> {
         let mut f = vec![0xa6]; cbor_text(&mut f, "key"); cbor_text(&mut f, key); cbor_text(&mut f, "part"); cbor_text(&mut f, "0123456789abcdef");
