@@ -130,6 +130,17 @@ fn header_mark(far: &[(String,&State)],tst: &State,un: &Unified) -> Option<Value
 /// `recent_far` with projects shared across machines shown once (`Unified`).
 pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value) -> Option<Value> {
     if text(p,"action")=="proj-go" { match find_go(st,p) { Some(c)=>return recent_unified(st,far,un,&c), None=>{ let mut c=p.clone(); c["action"]=json!("proj-find-q"); c["value"]=json!(""); return recent_unified(st,far,un,&c) } } }
+    // a link clicked in a message: what it opens is decided here (present/linkopen.rs); a thread on a linked machine moves the target itself
+    if text(p,"action")=="link-open" {
+        let c=super::linkopen::request(st,far,un.here,p);
+        if text(&c,"action")=="link-far" {
+            if !mine(p) { return refused("target.or-native-sidebar") }
+            let mut session=c["session"].clone(); let id=text(&c,"value").to_string();
+            session["sel"]=json!(id);
+            return Some(json!({"remoteReady":false,"nextTarget":{"kind":"thread","id":id},"session":session,"cmds":[],"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+        }
+        return recent_unified(st,far,un,&c);
+    }
     if !mine(p) { return refused("target.or-native-sidebar") }
     let mut session=p.get("session").filter(|s|s.is_object()).cloned().unwrap_or(json!({}));
     // Ui.blank + Target.bind(recent). The actor reshapes this adopted session after presentation.
@@ -174,16 +185,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         // the sidebar's search box: the query is kept in the session (`@f.pq`); "proj-find" (the phones' toggle) changes nothing here
         "proj-find-q" => { session["drafts"]["@f.pq"]=json!(value); },
         "proj-find" => {},
-        // a thread's link (`backplane://thread/<id>`, a message's or the system's): this machine's thread, or a linked machine's by its link id or name
-        "link-open" => {
-            let url=["bpgpui://","backplane-gpui://"].iter().find_map(|p|value.strip_prefix(p)).map_or(value.to_string(),|r|format!("backplane://{r}"));
-            let id=crate::md::refs::parse(&url).filter(|r|r.kind=="thread").and_then(|r|r.rest.first().cloned()).unwrap_or_default();
-            match crate::mirror::thread_ref(&id,un.here,&|t|st.threads.get(t).map_or(false,|x|!x.deleted),far) {
-                Some(t) => { if let Some(o)=session.as_object_mut() { o.remove("route"); }
-                    return Some(json!({"remoteReady":false,"nextTarget":{"kind":"thread","id":t},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))})) }
-                None => { session["note"]=json!(if id.contains('~') { "That thread is on a machine this one does not show (yet)." } else { "That thread is not on this machine." }); }
-            }
-        },
+        // what a clicked link could not open, said once (present/linkopen.rs)
+        "link-note" => cmds.push(json!({"type":"say","tone":"note","text":value})),
         // the machine switcher over the sidebar: "" every machine, "@here" this one, else a linked machine by name (not `machine-*`: those are the Machines page's)
         "side-machine" => { session["drafts"]["@machine"]=json!(value); },
         "flag" | "side-older" | "side-settled" => {
@@ -629,7 +632,7 @@ mod state_tests {
         let open=|u: &str| { let mut q=params(); q["action"]=json!("link-open"); q["value"]=json!(u); recent_unified(&st,&far,&un,&q).unwrap() };
         assert_eq!(open("backplane://thread/framework~t9")["nextTarget"],json!({"kind":"thread","id":"L~t9"}));
         assert_eq!(open("bpgpui://thread/L~t8")["nextTarget"]["id"],"L~t8"); assert_eq!(open("backplane://thread/desk~t1")["nextTarget"]["id"],"t1");
-        let none=open("backplane://thread/lab~t1"); assert!(none.get("nextTarget").is_none()); assert_eq!(none["session"]["note"],"That thread is on a machine this one does not show (yet).");
+        let none=open("backplane://thread/lab~t1"); assert!(none.get("nextTarget").is_none()); assert!(none["cmds"].as_array().unwrap().iter().any(|c|c["tone"]=="note"&&c["text"]=="That thread is on a machine this hub does not mirror (yet)."),"{none}");
         let _=std::fs::remove_dir_all(&d);
     }
     /// The window opens a thread with view.open (no select action): the card's look (Buy it in the header) is asked for then, once, and again only when the turn moves.

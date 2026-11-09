@@ -57,5 +57,14 @@ mod tests {
     fn j(s: &str) -> String { serde_json::to_string(&nodes_json(&render(s))).unwrap() }
     #[test] fn paragraph_and_emphasis() { assert_eq!(j("a **b** *c*"), r#"[{"tag":"p","kids":[{"text":"a "},{"tag":"strong","kids":[{"text":"b"}]},{"text":" "},{"tag":"em","kids":[{"text":"c"}]}]}]"#); }
     #[test] fn heading_and_list() { assert_eq!(j("# T\n- a\n- b"), r#"[{"tag":"h3","kids":[{"text":"T"}]},{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"a"}]},{"tag":"li","kids":[{"text":"b"}]}]}]"#); }
+    #[test] fn nested_lists_sit_inside_their_item() {
+        assert_eq!(j("- a\n  - b\n  - c\n- d"), r#"[{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"a"},{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"b"}]},{"tag":"li","kids":[{"text":"c"}]}]}]},{"tag":"li","kids":[{"text":"d"}]}]}]"#);
+        let o = j("1. a\n   - x\n     1. deep\n2. b");
+        assert!(o.contains(r#"{"text":"a"},{"tag":"ul""#), "{o}");
+        assert!(o.contains(r#""deep""#) && o.contains(r#""n":"2""#), "{o}");
+        // a kind change at one level is a second list inside the same item; a dedent below the first item starts a new list
+        assert_eq!(j("- a\n  - b\n  1. c"), r#"[{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"a"},{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"b"}]}]},{"tag":"ol","kids":[{"tag":"li","kids":[{"text":"c"}]}]}]}]}]"#.replace(r#"{"tag":"li","kids":[{"text":"c"}]}"#, r#"{"tag":"li","kids":[{"text":"c"}],"n":"1"}"#));
+        assert_eq!(j("  - a\n- b"), r#"[{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"a"}]}]},{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"b"}]}]}]"#);
+    }
     #[test] fn ordered_numbers_kept() { assert!(j("3. x\n4. y").contains(r#""n":"3""#)); }
 }

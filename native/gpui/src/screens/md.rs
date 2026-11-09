@@ -16,13 +16,17 @@ pub struct Span { pub text: String, pub style: Style }
 pub enum Block {
     Para(Vec<Span>),
     Heading(u8, Vec<Span>),
-    List { ordered: bool, start: u64, items: Vec<Vec<Span>> },
+    List { ordered: bool, start: u64, items: Vec<Item> },
     Quote(Vec<Span>),
     /// The code and its highlight tokens, computed once when the block is parsed.
     Code(String, Vec<(Range<usize>, Tok)>),
     Table { head: Vec<Vec<Span>>, rows: Vec<Vec<Vec<Span>>> },
     Rule,
 }
+
+/// A list item: its own text and the lists nested in it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Item { pub spans: Vec<Span>, pub sub: Vec<Block> }
 
 const MAX_DEPTH: usize = 16;
 
@@ -35,12 +39,12 @@ pub fn linkify(text: &str) -> Vec<Span> {
     while i < text.len() {
         let rest = &text[i..];
         let at_word = i == 0 || b[i - 1].is_ascii_whitespace() || matches!(b[i - 1], b'(' | b'[' | b'"' | b'\'' | b'`' | b'<');
-        let kind = if !at_word { 0 } else if rest.starts_with("http://") || rest.starts_with("https://") { 1 } else if (rest.starts_with('/') && rest.len() > 1 && !rest[1..].starts_with(|c: char| c.is_whitespace() || c == '/')) || rest.starts_with("~/") { 2 } else { 0 };
+        let kind = if !at_word { 0 } else if rest.starts_with("http://") || rest.starts_with("https://") || rest.starts_with("backplane://") { 1 } else if (rest.starts_with('/') && rest.len() > 1 && !rest[1..].starts_with(|c: char| c.is_whitespace() || c == '/')) || rest.starts_with("~/") { 2 } else { 0 };
         if kind == 0 { let ch = rest.chars().next().unwrap(); plain.push(ch); i += ch.len_utf8(); continue; }
         let end = rest.find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`' | '\'')).unwrap_or(rest.len());
         let mut word = &rest[..end];
         while word.ends_with(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']')) { word = &word[..word.len() - 1]; }
-        let min = if kind == 1 { 9 } else { 3 };
+        let min = if kind == 1 { if rest.starts_with("backplane://") { 13 } else { 9 } } else { 3 };
         if word.len() < min || (kind == 2 && !word[1..].contains(|c: char| c.is_alphanumeric())) { let ch = rest.chars().next().unwrap(); plain.push(ch); i += ch.len_utf8(); continue; }
         flush(&mut plain, &mut out);
         out.push(Span { text: word.to_string(), style: Style { link: Some(Link { href: word.to_string(), file: kind == 2 }), ..Style::default() } });
@@ -116,8 +120,16 @@ fn blocks_into(n: &Value, out: &mut Vec<Block>, depth: usize) {
         "p" => out.push(Block::Para(spans(kids(n)))),
         t if t.len() == 2 && t.starts_with('h') && t.as_bytes()[1].is_ascii_digit() => out.push(Block::Heading(t.as_bytes()[1] - b'0', spans(kids(n)))),
         "ul" | "ol" => {
-            let start = kids(n).first().and_then(|li| li["value"].as_u64()).unwrap_or(1);
-            out.push(Block::List { ordered: tag == "ol", start, items: kids(n).iter().map(|li| spans(kids(li))).collect() });
+            // the hub writes an ordered item's number as `n` (a string); `value` is read too
+            let start = kids(n).first().and_then(|li| li["n"].as_str().and_then(|x| x.parse().ok()).or_else(|| li["value"].as_u64())).unwrap_or(1);
+            let items = kids(n).iter().map(|li| {
+                let is_list = |k: &&Value| matches!(k["tag"].as_str(), Some("ul" | "ol"));
+                let text: Vec<Value> = kids(li).iter().filter(|k| !is_list(k)).cloned().collect();
+                let mut sub = Vec::new();
+                for k in kids(li).iter().filter(is_list) { blocks_into(k, &mut sub, depth + 1); }
+                Item { spans: spans(&text), sub }
+            }).collect();
+            out.push(Block::List { ordered: tag == "ol", start, items });
         }
         "blockquote" => out.push(Block::Quote(spans(kids(n)))),
         "pre" => { let mut t = String::new(); text_of(n, &mut t, 0); let t = t.trim_end_matches('\n').to_string(); let tokens = highlight(&t); out.push(Block::Code(t, tokens)); }
@@ -148,7 +160,11 @@ pub fn plain(spans: &[Span]) -> String { spans.iter().map(|s| s.text.as_str()).c
 pub fn block_text(b: &Block) -> String {
     match b {
         Block::Para(s) | Block::Heading(_, s) | Block::Quote(s) => plain(s),
-        Block::List { ordered, start, items } => items.iter().enumerate().map(|(i, it)| if *ordered { format!("{}. {}", start + i as u64, plain(it)) } else { format!("- {}", plain(it)) }).collect::<Vec<_>>().join("\n"),
+        Block::List { ordered, start, items } => items.iter().enumerate().map(|(i, it)| {
+            let mut t = if *ordered { format!("{}. {}", start + i as u64, plain(&it.spans)) } else { format!("- {}", plain(&it.spans)) };
+            for b in &it.sub { for l in block_text(b).lines() { t.push_str("\n  "); t.push_str(l); } }
+            t
+        }).collect::<Vec<_>>().join("\n"),
         Block::Code(t, _) => t.clone(),
         Block::Table { head, rows } => {
             let line = |r: &Vec<Vec<Span>>| r.iter().map(|c| plain(c)).collect::<Vec<_>>().join("\t");
@@ -214,6 +230,13 @@ mod tests {
         let b = parse(&j(r#"[{"tag":"ol","kids":[{"tag":"li","value":3,"kids":[{"text":"three"}]},{"tag":"li","kids":[{"text":"four"}]}]},{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"x"}]}]},{"tag":"blockquote","kids":[{"text":"q"}]},{"tag":"hr","kids":[]}]"#));
         assert_eq!(block_text(&b[0]), "3. three\n4. four"); assert_eq!(block_text(&b[1]), "- x"); assert_eq!(block_text(&b[2]), "q"); assert_eq!(b[3], Block::Rule);
     }
+    #[test] fn nested_lists_keep_their_level_and_copy_indented() {
+        let b = parse(&j(r#"[{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"a"},{"tag":"ol","kids":[{"tag":"li","n":"2","kids":[{"text":"b"},{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"c"}]}]}]}]}]},{"tag":"li","kids":[{"text":"d"}]}]}]"#));
+        let Block::List { items, .. } = &b[0] else { panic!() };
+        assert_eq!(items.len(), 2); assert_eq!(plain(&items[0].spans), "a");
+        let Block::List { ordered, start, items: inner } = &items[0].sub[0] else { panic!() }; assert!(*ordered); assert_eq!(*start, 2); assert_eq!(inner[0].sub.len(), 1);
+        assert_eq!(block_text(&b[0]), "- a\n  2. b\n    - c\n- d");
+    }
     #[test] fn a_fenced_block_is_its_code_without_the_copy_button_text() {
         let b = parse(&j(r#"[{"tag":"div","kids":[{"tag":"button","kids":[{"text":"Copy"}]},{"tag":"pre","kids":[{"tag":"code","kids":[{"text":"fn main() {}\n"}]}]}]}]"#));
         assert!(matches!(&b[..], [Block::Code(t, toks)] if t == "fn main() {}" && !toks.is_empty()));
@@ -252,6 +275,9 @@ mod link_tests {
     #[test] fn web_addresses_and_paths_become_links_without_trailing_punctuation() {
         assert_eq!(links("see https://example.com/a?b=1, then /home/h/x.rs:12. ok"), vec![("https://example.com/a?b=1".to_string(), false), ("/home/h/x.rs:12".to_string(), true)]);
         assert_eq!(links("(~/notes/a.md)"), vec![("~/notes/a.md".to_string(), true)]);
+    }
+    #[test] fn a_typed_backplane_link_is_a_link() {
+        assert_eq!(links("see backplane://thread/t1794241204-133."), vec![("backplane://thread/t1794241204-133".to_string(), false)]);
     }
     #[test] fn plain_words_slashes_and_mid_word_urls_are_not_links() {
         assert!(links("and/or a / b // c http://").is_empty()); assert!(links("xhttps://example.com").is_empty());
