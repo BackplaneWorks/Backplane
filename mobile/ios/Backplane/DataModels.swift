@@ -98,11 +98,11 @@ struct DEntry: Codable, Equatable, Identifiable {
 
 /// A `/give` received (docs/PHONE-DATA.md, Handoffs): where it came from, the person's note, the summary and what the work touched; a reference opens by `link.resolve {url, thread}`.
 struct DHandoff: Codable, Equatable {
-    var from: String; var title: String; var note: String; var summary: String; var refs: [DRef]
+    var from: String; var title: String; var note: String; var summary: String; var refs: [DHandoffRef]
     enum CodingKeys: String, CodingKey { case from, title, note, summary, refs }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); from = c.str(.from); title = c.str(.title); note = c.str(.note); summary = c.str(.summary); refs = (try? c.decode([DRef].self, forKey: .refs)) ?? [] }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); from = c.str(.from); title = c.str(.title); note = c.str(.note); summary = c.str(.summary); refs = (try? c.decode([DHandoffRef].self, forKey: .refs)) ?? [] }
 }
-struct DRef: Codable, Equatable {
+struct DHandoffRef: Codable, Equatable {
     var kind: String; var label: String; var url: String; var thread: String
     enum CodingKeys: String, CodingKey { case kind, label, url, thread }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); kind = c.str(.kind); label = c.str(.label); url = c.str(.url); thread = c.str(.thread) }
