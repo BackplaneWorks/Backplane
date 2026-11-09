@@ -141,6 +141,9 @@ impl Layers {
 }
 /// How long a part takes to fade in.
 pub const FADE_MS: f32 = 300.0;
+/// The 3D tools' height and top: a 22 px button centred in the 32 px header row beside the pane.
+const TOOL_H: f32 = 22.0;
+const TOOL_TOP: f32 = 5.0;
 /// The page's own stage while it decodes a large model (the hub has sent it by then).
 const BUILDING: &str = "Building the view…";
 /// A part group's opacity `ms` after it showed.
@@ -719,9 +722,10 @@ impl Render for SolidPage {
                 .when(self.failed && !self.key.is_empty(), |d| d.child(self.retry_button(cx))).into_any_element(),
         };
         let tools = (self.mesh.is_some() && !making_other).then(|| {
-            let mut bar = div().absolute().top_2().left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
+            // the first row of buttons centred on the thread's header row (32 px, ui.rs `thread-head`), so their line is the pane's line
+            let mut bar = div().absolute().top(px(TOOL_TOP)).left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
             for (label, view) in [("Fit", "fit"), ("Iso", "iso"), ("Top", "top"), ("Bottom", "bottom"), ("Front", "front"), ("Right", "right"), ("Back", "back"), ("Left", "left"), ("Snap view", "snap")] {
-                bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().py_1().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
+                bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().h(px(TOOL_H)).flex().items_center().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
                     .hover(|d| d.bg(rgba(0x2a3548ee))).child(label)
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, _, cx| {
