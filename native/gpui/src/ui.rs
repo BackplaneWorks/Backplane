@@ -503,8 +503,8 @@ impl Render for Backplane {
         // how the window's width is shared: in a narrow window the thread gives way, then the viewer, then the sidebar folds (the rail stays)
         let (win_w, viewer_open) = (f32::from(window.viewport_size().width), crate::screens::viewer::is_open(thread));
         if crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, false, viewer_open).0 { self.screens.side_force = false; } // room again: "anyway" is over
-        let (side_shown, thread_least, pane_least) = crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, self.screens.side_force, viewer_open);
-        crate::screens::viewer::set_least(pane_least); self.screens.side_shown = side_shown;
+        let (side_shown, thread_least, pane_least, share) = crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, self.screens.side_force, viewer_open);
+        crate::screens::viewer::set_least(pane_least); crate::screens::viewer::set_share(share); self.screens.side_shown = side_shown;
         let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
         // project home replaces the thread when the hub selected it
         let home = &self.data["projectHome"];
