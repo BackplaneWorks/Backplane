@@ -2687,6 +2687,13 @@ gpui.f.inactive = 非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover = {name}が{path}で動作します。
 
 # ---- android: new entries go here ----
+android.viewerbg = 3D の背景
+android.viewerbg.auto = 自動
+android.viewerbg.light = ライト
+android.viewerbg.dark = ダーク
+android.viewerbg.custom = カスタム
+android.viewerbg.hex = #rrggbb
+android.viewerbg.note = この端末のみ。メカと 3D ビューアーに使います。自動は外観に従います。
 android.state.working = 作業中
 android.state.inactive = 非アクティブ
 android.state.finished = 完了

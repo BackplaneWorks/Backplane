@@ -167,7 +167,7 @@ vec3 studio(vec3 R, float rough, float metal) {
   float power = mix(110.0, 3.0, rough * rough);
   float key = pow(max(dot(q, normalize(vec3(-0.55,0.75,0.65))),0.0),power);
   float fill = pow(max(dot(q, normalize(vec3(0.85,0.25,0.35))),0.0),power*0.65);
-  float sky=0.08+0.2*smoothstep(-0.4,0.25,q.y)+0.7*smoothstep(0.45,0.85,q.y);
+  float sky=0.12+0.2*smoothstep(-0.4,0.25,q.y)+0.7*smoothstep(0.45,0.85,q.y);
   return vec3(sky*mix(0.15,1.0,metal)) + vec3(1.5,1.48,1.42)*key + vec3(0.65,0.72,0.85)*fill;
 }
 vec3 srgb(vec3 x) {
@@ -182,9 +182,9 @@ void main() {
   vec3 base=max(vc,vec3(0.0)), f0=mix(vec3(0.04),base,metal);
   vec3 key=normalize(-right*0.55+up*0.75-forward*0.65);
   vec3 fill=normalize(right*0.85+up*0.25-forward*0.35);
-  vec3 rgb=base*(1.0-metal)*(mix(0.27,0.74,step(0.8,rough))+0.08*max(dot(N,up),0.0));
+  vec3 rgb=base*(1.0-metal)*(mix(0.34,0.80,step(0.8,rough))+0.10*max(dot(N,up),0.0));
   rgb+=light(N,V,key,base,f0,rough,metal)*1.5;
-  rgb+=light(N,V,fill,base,f0,rough,metal)*0.65;
+  rgb+=light(N,V,fill,base,f0,rough,metal)*0.85;
   rgb+=studio(reflect(-V,N),rough,metal)*fresnel(f0,nv)*(1.0-rough*0.35);
   rgb+=studio(reflect(-V,N),0.3,0.0)*fresnel(vec3(0.04),nv)*vm.z;
   // A display-only thermal overlay. No claim of per-part temperature/flow.
@@ -211,6 +211,18 @@ out vec4 o;
 void main() {
   float a = texelFetch(cov, ivec2(gl_FragCoord.xy), 0).r * color.a;
   o = vec4(color.rgb * a, a);
+}"""
+
+// the 3D viewers' background (docs/VIEWER-BACKGROUND.md): top to bottom, the two sRGB ends mixed in linear light
+private const val GRAD_F = """#version 300 es
+precision highp float;
+uniform vec3 top; uniform vec3 bottom; uniform float height;
+out vec4 o;
+vec3 lin(vec3 c) { return mix(c/12.92, pow((c+0.055)/1.055, vec3(2.4)), step(vec3(0.04045), c)); }
+vec3 srgb(vec3 x) { return mix(12.92*x, 1.055*pow(max(x,vec3(0.0)),vec3(1.0/2.4))-0.055, step(vec3(0.0031308),x)); }
+void main() {
+  float t = clamp(1.0 - gl_FragCoord.y / max(height, 1.0), 0.0, 1.0);
+  o = vec4(clamp(srgb(mix(lin(top), lin(bottom), t)), 0.0, 1.0), 1.0);
 }"""
 
 private const val COPY_F = """#version 300 es
@@ -336,6 +348,8 @@ class PlotRenderer : GLSurfaceView.Renderer {
     @Volatile var offY = 0f
     @Volatile var fade = 1f
     @Volatile var bg = floatArrayOf(0f, 0f, 0f)
+    // in 3D, the background's top and bottom (sRGB 0..1, ViewerBg.floats); null: the flat bg
+    @Volatile var grad: FloatArray? = null
     // each layer's colour on the viewer's light ground (empty: the chunks' own)
     @Volatile var look = IntArray(0)
     // the layers the user turned off, a bit each
@@ -358,6 +372,7 @@ class PlotRenderer : GLSurfaceView.Renderer {
     private lateinit var quad: Program
     private lateinit var copy: Program
     private lateinit var meshP: Program
+    private lateinit var gradP: Program
     // capsules, fill vertices, the model, the slab, the highlight's capsules and fills
     private val bufs = IntArray(6)
     private val vao = IntArray(1)
@@ -386,6 +401,7 @@ class PlotRenderer : GLSurfaceView.Renderer {
         quad = Program(QUAD_V, QUAD_F)
         copy = Program(QUAD_V, COPY_F)
         meshP = Program(MESH_V, MESH_F)
+        gradP = Program(QUAD_V, GRAD_F)
         glGenBuffers(6, bufs, 0)
         glGenVertexArrays(1, vao, 0)
         glGenFramebuffers(3, fbo, 0)
@@ -624,6 +640,19 @@ class PlotRenderer : GLSurfaceView.Renderer {
         glDrawArrays(GL_TRIANGLES, 0, 3)
     }
 
+    // the gradient over the bound target (the scene, or the multisampled one the scene is resolved from); no depth written
+    private fun backdrop() {
+        val g = grad ?: return
+        glDisable(GL_DEPTH_TEST)
+        glDisable(GL_BLEND)
+        glDisable(GL_STENCIL_TEST)
+        glUseProgram(gradP.id)
+        glUniform3f(gradP.at("top"), g[0], g[1], g[2])
+        glUniform3f(gradP.at("bottom"), g[3], g[4], g[5])
+        glUniform1f(gradP.at("height"), h.toFloat())
+        glDrawArrays(GL_TRIANGLES, 0, 3)
+    }
+
     private fun draw(l: Layer) =
         layer(if (dimmed(l.layer)) l.color.copyOf().also { it[3] *= 0.25f } else l.color,
             bufs[0], listOf(l.caps to 1f, l.freshCaps to fade), bufs[1], listOf(l.tris to 1f, l.freshTris to fade))
@@ -689,6 +718,7 @@ class PlotRenderer : GLSurfaceView.Renderer {
                 glBindFramebuffer(GL_FRAMEBUFFER, fbo[2])
                 glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
             }
+            backdrop()
             glEnable(GL_DEPTH_TEST)
             glDepthFunc(GL_LESS)
             glDisable(GL_BLEND)
@@ -868,6 +898,14 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         val b = shownMesh?.mesh?.box
         if (!fitted) { if (box.size < 4 && b != null && b.size == 6) fitSolid(b) else refit() }
         restorePose()
+    }
+
+    /** The 3D background (ViewerBg.resolve's top and bottom); a change redraws. */
+    fun backdrop(g: Pair<Int, Int>) {
+        val f = ViewerBg.floats(g)
+        if (renderer.grad?.contentEquals(f) == true) return
+        renderer.grad = f
+        requestRender()
     }
 
     fun setThree(on: Boolean) {
