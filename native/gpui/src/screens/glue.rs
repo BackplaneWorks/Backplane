@@ -131,8 +131,17 @@ impl Backplane {
             "y": -f32::from(self.timeline.scroll_px_offset_for_scrollbar().y), "max": f32::from(self.timeline.max_offset_for_scrollbar().height),
             "seeking": self.screens.seeking.is_some(), "paging": self.screens.paging.is_some(), "older": !crate::string(&self.data["thread"], "historyOlder").is_empty()}));
     }
+    /// Whether the reader is far from the end of the thread (more than about a screen of rows below): the "Latest" chip shows then. Kept here,
+    /// one window per process, so the timeline's part can show it without a field of its own.
+    pub(crate) fn far_from_end(&self) -> bool { LATEST_FAR.load(std::sync::atomic::Ordering::Relaxed) }
+    /// The newest reading of the list: true when what is below the screen is more than FAR px. Answers whether it changed.
+    pub(crate) fn note_far(&self) -> bool {
+        let (max, y) = (f32::from(self.timeline.max_offset_for_scrollbar().height), -f32::from(self.timeline.scroll_px_offset_for_scrollbar().y));
+        let far = far_from(max, y);
+        LATEST_FAR.swap(far, std::sync::atomic::Ordering::Relaxed) != far
+    }
     /// The end of the thread, and following it again. (Past the last row: the list takes it for its end.)
-    pub(crate) fn timeline_to_end(&self) { self.timeline.scroll_to(ListOffset { item_ix: self.timeline.item_count(), offset_in_item: px(0.) }); }
+    pub(crate) fn timeline_to_end(&self) { self.timeline.scroll_to(ListOffset { item_ix: self.timeline.item_count(), offset_in_item: px(0.) }); LATEST_FAR.store(false, std::sync::atomic::Ordering::Relaxed); }
     /// A picture was applied. `prev` is the thread that was on screen: this picture of the same thread is laid over the rows it held, so what was
     /// read of its history stays, and the list keeps the reader where they are (or at the end, if that is where they are).
     pub(crate) fn timeline_picture(&mut self, mut prev: Value, window: &Value) {
@@ -263,8 +272,19 @@ pub fn browser_owner(data: &serde_json::Value, selected: &str) -> String {
     selected.rsplit('|').next().unwrap_or(selected).to_string()
 }
 
+/// How far below the screen the thread may go on before "Latest" is offered (about a screen of rows).
+pub const FAR: f32 = 600.0;
+static LATEST_FAR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// `max` the list's scroll range, `y` how far down it is (both px): far when more than FAR is left below.
+pub fn far_from(max: f32, y: f32) -> bool { max - y > FAR }
+
 #[cfg(test)]
 mod tests {
+    #[core::prelude::v1::test] fn latest_is_offered_only_when_the_reader_is_well_above_the_end() {
+        assert!(!super::far_from(10_000., 10_000.), "at the end"); assert!(!super::far_from(10_000., 9_500.), "a little above it");
+        assert!(super::far_from(10_000., 2_000.), "far up a long thread"); assert!(!super::far_from(0., 0.), "a thread shorter than the screen");
+    }
+
     use super::*;
     use core::prelude::v1::test;
     #[test] fn the_popup_cursor_goes_round() {

@@ -54,6 +54,8 @@ pub struct Stats { pub hist_dropped: AtomicU64, pub jobs: AtomicU64, pub turns: 
 pub enum Cmd {
     User { person: bool, msg: String, text: String, role: String, origin: Option<(String, String, String)>, extra: Vec<Value>, reply: oneshot::Sender<Result<(), String>> },
     Interrupt { reply: oneshot::Sender<()> },
+    /// The thread panel's Stop on one subagent or background shell: Claude's stop_task for that task, the rest of the turn untouched.
+    StopTask { id: String, reply: oneshot::Sender<Result<(), String>> },
     /// The person answered an ask a driver's process made (providers::AskInfo).
     Answer { ask: String, answer: String },
     /// AgentStop: end the thread's agent process in any state, no events.
@@ -248,6 +250,12 @@ impl Agents {
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
         tx.try_send(Cmd::WakeRide { id: id.into(), text: text.into(), start, reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
     }
+    /// Stop one task the agent left running (a subagent, a background shell): its process is told stop_task; how it ended comes back on its own lines.
+    pub async fn stop_task(self: &Arc<Self>, thread: &str, id: &str) -> Result<(), String> {
+        let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
+        tx.try_send(Cmd::StopTask { id: id.into(), reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?;
+        rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
+    }
     pub async fn interrupt(self: &Arc<Self>, thread: &str) -> Result<(), String> {
         self.ends_of(thread).stop_waiting(); // a start waiting for the earlier turn's checkpoint gives up now: the Stop would otherwise queue behind it
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
@@ -361,7 +369,7 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "lock.release", "lock.cancel", "work.cancel"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "lock.release", "lock.cancel", "work.cancel", "task.stop"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             if method == "ask.answer" { return match self.0.answer(p.get("id").and_then(Value::as_str).unwrap_or(""), p.get("answer").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] } }
@@ -381,6 +389,9 @@ impl RpcHandler for Rpc {
             if method == "thread.retitle" { // the thread menu's Regenerate title: the person asked, so it replaces even a title they typed
                 let ag = self.0.clone(); let th = th.to_string(); let r = ag.retitle(&th, None, true).await;
                 return vec![match r { Ok(t) => json!({"t":"reply","id":id,"ok":true,"result":{"title":t}}), Err(e) => err(id, &e) }]
+            }
+            if method == "task.stop" { // the thread's panel: Stop on one subagent or background shell
+                return vec![match self.0.stop_task(th, p.get("id").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => json!({"t":"reply","id":id,"ok":true,"result":{}}), Err(e) => err(id, &e) }]
             }
             if matches!(method, "lock.release" | "lock.cancel" | "work.cancel") { // the thread's panel: what the agent's own tool would do, for the person
                 let (ok_, b) = match method { "lock.release" => self.0.tool_lock_release(th, p).await, "lock.cancel" => self.0.tool_lock_cancel(th, p).await, _ => self.0.tool_work_cancel(th, p).await };
@@ -541,6 +552,17 @@ impl Actor {
         match c {
             Cmd::User { person, msg, text, role, origin, extra, reply } => { self.early = Some(reply); let r = self.user(person, msg, text, role, origin, extra).await; if let Some(re) = self.early.take() { let _ = re.send(r); } }
             Cmd::Interrupt { reply } => { self.interrupt().await; let _ = reply.send(()); }
+            Cmd::StopTask { id, reply } => {
+                // only a task this thread lists as at work, and only through the process that runs it
+                let listed = self.cx.bg.iter().any(|l| bg::field(l, 0) == bg::clean(&id) && !bg::ended(l));
+                let r = match (&self.live_proc, listed) {
+                    (_, false) => Err("that task is not running".to_string()),
+                    (None, _) => Err("the agent's process is gone; its tasks went with it".to_string()),
+                    (Some(p), true) => { self.rid += 1; let line = json!({"type":"control_request","request_id":format!("st-{}-{}", now_s(), self.rid),"request":{"subtype":"stop_task","task_id":id}}).to_string();
+                        p.input.try_send(line).map_err(|_| "the agent's process is busy; try again".to_string()) }
+                };
+                let _ = reply.send(r);
+            }
             Cmd::Stop { reply } => { self.cx.running = false; if self.live_proc.is_some() { self.ag.stats.procs_exited.fetch_add(1, Relaxed); } self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.asked.clear(); self.live_proc = None; let _ = reply.send(()); }
             Cmd::StartQueued { text, taken, reply } => { self.early = Some(reply); let r = self.start_queued(text, taken).await; if let Some(re) = self.early.take() { let _ = re.send(r); } }
             Cmd::WakeRide { id, text, start, reply } => { self.early = Some(reply); let r = self.wake_ride(id, text, start).await; if let Some(re) = self.early.take() { let _ = re.send(r); } }

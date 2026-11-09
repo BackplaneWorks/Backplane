@@ -27,6 +27,13 @@ pub fn stamp(path: &str) -> Stamp {
 /// A saved version or a comparison: immutable, read once.
 pub fn is_version(path: &str) -> bool { path.starts_with("git\t") || path.starts_with("diff\n") }
 pub fn solid_kind(k: u32) -> bool { matches!(k, 2..=4) }
+/// How long a 3D source's first read should take (ms; 0: not worth saying): a STEP not meshed yet is FreeCAD's start (about 2.5 s) and
+/// about 0.35 s a megabyte (measured 2026-11-09: a 7.4 MB connector 3.3 s, a 10 MB assembly 5.5 s). After that, the last read's time.
+pub fn first_estimate(kind: u32, file: &str) -> u64 {
+    if !solidread::is_step(file) || solidread::known(kind, file) > 0 { return 0 }
+    let mb = std::fs::metadata(file).map_or(0, |m| m.len()) as f64 / 1048576.0;
+    (2500.0 + 350.0 * mb) as u64
+}
 /// What the hub is doing to make a 3D source's model, in the person's words: `native` a board made here (pcb3d), `cached` a converted model already kept.
 pub fn stage_text(kind: u32, file: &str, native: bool, cached: bool, tools: &[stepglb::Mesher]) -> String {
     let path = file.rsplit(['\t', '\n']).next().unwrap_or(file);
@@ -120,8 +127,10 @@ impl Plots {
         let keys: Vec<String> = views.iter().map(|v| v.1.clone()).collect();
         let mut todo = vec![];
         { let mut st = self.st.lock().unwrap();
-          st.subs.remove(&client);
+          // a pane whose source stays (another sheet in the schematic pane: the board and the 3D stay) keeps what this client holds of it: nothing is sent again
+          let mut old = st.subs.remove(&client).unwrap_or_default();
           for (k, ky, file) in views {
+              if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
               st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: file.clone(), ..Default::default() });
               s.file = file;
@@ -339,7 +348,7 @@ impl Plots {
         tokio::spawn(async move {
             let t0 = std::time::Instant::now();
             let solid3 = solid_kind(kind);
-            let about = if solid3 { me.st.lock().unwrap().took.get(&file).copied().unwrap_or(0) } else { 0 };
+            let about = if solid3 { me.st.lock().unwrap().took.get(&file).copied().unwrap_or_else(|| first_estimate(kind, &file)) } else { 0 };
             let say = |text: &str| if solid3 { me.stage(&hub, &ky, text, t0.elapsed().as_millis() as u64, about) };
             if solid3 && me.readers.available_permits() == 0 { say("Waiting for another drawing to finish…") }
             let _slot = me.readers.acquire().await.ok();
@@ -580,6 +589,13 @@ impl RpcHandler for KicadRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_step_not_meshed_yet_has_an_estimate_by_its_size() {
+        let d = std::env::temp_dir().join(format!("bp-est-{}", std::process::id())); let _ = std::fs::create_dir_all(&d);
+        let f = d.join("big-part.step"); std::fs::write(&f, vec![b'x'; 4 << 20]).unwrap();
+        assert_eq!(first_estimate(2, &f.to_string_lossy()), 3900, "2.5 s and 0.35 s a MB");
+        assert_eq!(first_estimate(2, "/p/b.kicad_pcb"), 0, "a board: no estimate");
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn a_3d_source_says_what_the_hub_does_for_it() {
         let fc = [stepglb::Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() }]; let occ = [stepglb::Mesher::Step2glb("/s".into())];
         assert_eq!(stage_text(2, "/p/b.kicad_pcb", true, false, &fc), "Making the board's 3D model from b.kicad_pcb…");

@@ -17,6 +17,9 @@ pub struct Projects {
     pub home: Home,
     /// The page's Edit: (the thread it opened, the text for its composer), put there once that thread is on show.
     pub intent_edit: Option<(String, String)>,
+    /// Send on a project's page (0.14's home composer): (the thread on show before, the message, when), sent once the new thread the page
+    /// asked for is the one on show; back in the box if none came.
+    pub first_send: Option<(String, String, std::time::Instant)>,
 }
 
 /// What Edit puts in the composer: `/intent` and the goal and notes (the hub's `intent_edit`; its Send saves them), the template for none.
@@ -99,6 +102,17 @@ pub fn adopt(hub: &str, typed: &str, sent: &[String]) -> bool { hub != typed && 
 fn remember(v: &mut Vec<String>, t: &str) { v.push(t.to_string()); if v.len() > 16 { v.remove(0); } }
 
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    // Send on the page asked for a new thread in the project: once it is on show, the message goes to it (or back in the box after 10 s)
+    if let Some((before, text, at)) = this.screens.projects.first_send.clone() {
+        let shown = string(&this.data["thread"], "id"); let shown = shown.rsplit('|').next().unwrap_or("").to_string();
+        if this.arm_new.is_none() && !shown.is_empty() && shown != before && this.selected.rsplit('|').next() == Some(shown.as_str()) && this.data["thread"]["loading"] != true {
+            this.screens.projects.first_send = None;
+            let _ = this.tx.try_send(Command::Send(text));
+        } else if at.elapsed() > std::time::Duration::from_secs(10) {
+            this.screens.projects.first_send = None;
+            this.input.update(cx, |i, cx| i.set(text, cx));
+        }
+    }
     // the page's Edit opened its thread: once that thread is on show, the goal and notes go in its composer
     if let Some((th, text)) = this.screens.projects.intent_edit.clone() {
         let shown = string(&this.data["thread"], "id"); let shown = shown.rsplit('|').next().unwrap_or("").to_string();
@@ -204,7 +218,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
         if intent.trim().is_empty() { out.push(div().text_color(c("dim")).child("No goal yet. Ask an agent to write what this project is for, or edit .backplane/intent.md.").into_any_element()); }
         let mut col = div().id("home-intent").flex().flex_col().gap_1().text_size(px(13.));
         for (k, t) in intent_lines(&intent) {
-            col = col.child(match k { "h" => div().pt_1().font_weight(FontWeight::BOLD).child(t), "li" => div().flex().gap_2().child(div().text_color(c("dim")).child("•")).child(div().flex_1().child(t)), _ => div().child(t) });
+            col = col.child(match k { "h" => div().pt_1().font_weight(FontWeight::BOLD).child(t), "li" => div().flex().gap_2().child(div().text_color(c("dim")).child("•")).child(div().flex_1().min_w_0().child(t)), _ => div().child(t) });
         }
         out.push(col.into_any_element());
         // Edit: the project's top thread opens with the goal and notes in its composer as `/intent ...`; Send saves them (0.14 Intent's Edit)

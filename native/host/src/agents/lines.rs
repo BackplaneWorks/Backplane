@@ -54,7 +54,11 @@ pub fn hub_id(prefix: &str, now: u64, seq: u64) -> String { format!("{prefix}{no
 /// Claude.tool_summary.any / TodoWrite is not ported (its summary reads the list).
 pub fn tool_summary(name: &str, input: &Value) -> String {
     let pick = |k: &str| input.get(k).and_then(Value::as_str).filter(|x| !x.is_empty()).map(str::to_string);
-    pick("command").or_else(|| pick("file_path")).or_else(|| pick("path")).or_else(|| pick("pattern")).or_else(|| pick("description")).or_else(|| pick("question")).unwrap_or_else(|| name.to_string())
+    // s02: a row says what the call did; a task's update says which and what became of it ("#3 completed")
+    if name == "TaskUpdate" { let id = input.get("taskId").map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).unwrap_or_default(); let st = pick("status").unwrap_or_default();
+        let t = format!("{}{}", if id.is_empty() || id == "null" { String::new() } else { format!("#{id} ") }, st); if !t.trim().is_empty() { return t.trim().to_string() } }
+    pick("command").or_else(|| pick("file_path")).or_else(|| pick("path")).or_else(|| pick("pattern")).or_else(|| pick("description")).or_else(|| pick("question"))
+        .or_else(|| pick("query")).or_else(|| pick("url")).or_else(|| pick("subject")).or_else(|| pick("keyword")).or_else(|| pick("q")).unwrap_or_else(|| name.to_string())
 }
 
 /// Claude.uid: a line's uuid adds its first 8 characters to a block's id.

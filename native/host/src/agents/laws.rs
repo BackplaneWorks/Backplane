@@ -122,6 +122,12 @@ fn merge(old: &str, used: u64, window: u64) -> String { let mut w = World::defau
 // ---- small rules of hub / prompt ----
 #[test] fn claude_kistack_plugin() { let a = super::rules::claude_args(&super::rules::ArgsIn { model: "", session: "", runtime: "full-access", interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &["/k/rev".to_string()], mcp_url: "u" }); let i = a.iter().position(|x| x == "--plugin-dir").unwrap(); assert_eq!(&a[i..i + 2], ["--plugin-dir", "/k/rev"]) }
 #[test] fn tool_summary_question() { assert_eq!(super::lines::tool_summary("mcp__backplane__order_ask", &json!({"question":"Ship where?"})), "Ship where?") }
+#[test] fn tool_summary_says_what_a_search_a_fetch_and_a_task_update_did() {
+    assert_eq!(super::lines::tool_summary("WebSearch", &json!({"query":"TPS54331 datasheet"})), "TPS54331 datasheet");
+    assert_eq!(super::lines::tool_summary("WebFetch", &json!({"url":"https://ti.com/x","prompt":"pinout"})), "https://ti.com/x");
+    assert_eq!(super::lines::tool_summary("TaskUpdate", &json!({"taskId":"3","status":"completed"})), "#3 completed");
+    assert_eq!(super::lines::tool_summary("TaskUpdate", &json!({})), "TaskUpdate");
+}
 #[test] fn tool_summary_todo() { assert_eq!(super::lines::todo_summary(&json!({"todos":[{"content":"Read","status":"completed"},{"content":"Edit","status":"in_progress"},{"content":"Test","status":"pending"}]})), "1 of 3 done · now: Edit") }
 #[test] fn todo_write_sets_list() { let mut c = Cx::new("t1"); let fx = c.line(&json!({"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"u","name":"TodoWrite","input":{"todos":[]}}]}}), 5); assert_eq!(fx.events.iter().filter(|e| e["$"] == "TodosChanged").count(), 1) }
 #[test] fn interrupt_claude_input() { let v: Value = serde_json::from_str(&super::rules::interrupt_line("r1")).unwrap(); assert_eq!(v, json!({"type":"control_request","request_id":"r1","request":{"subtype":"interrupt"}})) }

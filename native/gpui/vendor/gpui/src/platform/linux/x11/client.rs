@@ -591,6 +591,13 @@ impl X11Client {
                         break;
                     }
                     Err(err) => {
+                        // Backplane: the X server is gone (its socket closed): nothing can be drawn or read again, and the event source
+                        // stays readable, so this loop would log this line without end (23 GB in 15 min on a test display that was stopped).
+                        // Leave as an X client does when its display goes away.
+                        if matches!(err, x11rb::errors::ConnectionError::IoError(_)) {
+                            eprintln!("Backplane: the display's connection was lost ({err:?}); quitting");
+                            std::process::exit(1);
+                        }
                         let err = handle_connection_error(err);
                         log::warn!("error while polling for X11 events: {err:?}");
                         break;

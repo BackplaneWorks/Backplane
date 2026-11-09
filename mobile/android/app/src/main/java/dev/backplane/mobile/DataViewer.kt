@@ -463,9 +463,14 @@ private fun BrowserTab(thread: DThread) {
 }
 
 
-// ---- Split: the schematic, the board and its 3D model at once (stacked in portrait, side by side in landscape)
+/** Split's choice per thread, Board (false) or 3D (true): kept while the app runs, across tabs and threads. */
+private val splitThree = androidx.compose.runtime.snapshots.SnapshotStateMap<String, Boolean>()
+
+// ---- Split: the schematic, and the board or its 3D model (stacked in portrait, side by side in landscape). On a phone the board and 3D take
+// turns in one pane (the person, 2026-11-04/05: layout XOR 3D on phones, all three only on the desktop); Board/3D on that pane switches, per thread.
 @Composable
 private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
+    val three = splitThree[thread.id] == true
     val root = files?.root.orEmpty()
     LaunchedEffect(thread.id, root) { if (root.isNotEmpty()) runCatching { DataClient.watch(thread.id, "split") } }
     val plots = DataClient.plots
@@ -475,15 +480,17 @@ private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
     BoxWithConstraints(Modifier.fillMaxSize().testTag("split")) {
         val panes: @Composable (Modifier) -> Unit = { m ->
             SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || files?.sch.isNullOrEmpty()) "No schematic in this project yet" else "", m)
-            SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m)
-            SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m)
+            val pick: @Composable (Modifier) -> Unit = { a -> Row(a.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ViewChip("Board", !three, "split.pick.board") { splitThree[thread.id] = false }; ViewChip("3D", three, "split.pick.3d") { splitThree[thread.id] = true } } }
+            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m, pick)
+            else SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m, pick)
         }
         if (maxWidth > maxHeight) Row(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxHeight()) }
         else Column(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxWidth()) }
     }
 }
 @Composable
-private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: MeshFrame?, three: Boolean, bg: Int, none: String, modifier: Modifier) {
+private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: MeshFrame?, three: Boolean, bg: Int, none: String, modifier: Modifier, pick: (@Composable (Modifier) -> Unit)? = null) {
     Box(modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.background)) {
         AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize().testTag("split.$label"), update = { s ->
             s.bindSource(source); s.setThree(three)
@@ -494,6 +501,7 @@ private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: Me
         val say = if (none.isNotEmpty()) none else frame?.none.orEmpty()
         if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 11, Modifier.align(Alignment.Center).padding(12.dp))
         else if (frame == null && (!three || mesh == null)) CircularProgressIndicator(Modifier.align(Alignment.Center).size(24.dp))
+        pick?.invoke(Modifier.align(Alignment.TopEnd))
     }
 }
 

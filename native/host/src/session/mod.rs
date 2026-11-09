@@ -181,19 +181,19 @@ impl Hub {
     /// `thread` is the conversation the target shows (V.Target.thread): a thread's own id, a bot's chat thread; none for the other targets.
     /// A thread's subagent log (`@sub:<thread>`, its newest SUB_WINDOW entries) as present/panels.rs's `sub_log`, with this machine's name: `{host, calls}`, null when
     /// the thread has none (a thread of another machine has none here). Read again only when the log grew, so a picture of a busy thread does not re-read it.
-    async fn sub_log_for(&self, thread: &str) -> Value {
+    pub(crate) async fn sub_log_for(&self, thread: &str) -> Value {
         static CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, (usize, Value)>>> = std::sync::Mutex::new(None);
         static HOST: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
-        let key = crate::agents::bg::log(thread);
+        let key = crate::agents::bg::log(thread); let held_as = format!("{}|{thread}", self.store.path().display()); // (one cache for every hub in the process: tests run several)
         let calls = {
             let m = self.model.lock().await; let n = m.count(&key);
             if n == 0 { return Value::Null }
-            let held = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(thread)).filter(|(k, _)| *k == n).map(|(_, v)| v.clone());
+            let held = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(&held_as)).filter(|(k, _)| *k == n).map(|(_, v)| v.clone());
             match held { Some(v) => v, None => {
                 let rows: Vec<(String, String, String, u64)> = m.tail(&self.store, &key, crate::present::panels::SUB_WINDOW).into_iter().map(|r| (r.role, r.akind, r.text, r.at)).collect();
                 drop(m);
                 let v = crate::present::panels::sub_log(&rows);
-                let mut c = CACHE.lock().unwrap(); let c = c.get_or_insert_with(Default::default); if c.len() > 64 { c.clear() } c.insert(thread.to_string(), (n, v.clone())); v
+                let mut c = CACHE.lock().unwrap(); let c = c.get_or_insert_with(Default::default); if c.len() > 64 { c.clear() } c.insert(held_as, (n, v.clone())); v
             } }
         };
         let host = HOST.get_or_init(|| async { crate::net::botnet::name().await }).await;

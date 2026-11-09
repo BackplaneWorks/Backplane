@@ -457,11 +457,12 @@ pub fn gone_from_gpu(at: u64, now: u64) -> bool { at + 2 <= now }
 
 /// A model being made: its key, what is happening, since when, about how long it took the last time (ms, 0 unknown).
 #[derive(Clone, Debug, PartialEq)] pub struct Stage { pub key: String, pub text: String, pub since: std::time::Instant, pub about: u64 }
-/// The stage as the page shows it: the hub's words, the seconds so far (from 1 s) and the last time's, when it took long enough to say.
+/// The stage as the page shows it: the hub's words, the seconds so far (from 1 s) and the hub's estimate (the last time's, or one from the
+/// file's size), when long enough to say.
 pub fn stage_line(text: &str, secs: u64, about_ms: u64) -> String {
     let mut s = text.to_string();
     if secs >= 1 { s.push_str(&format!(" {secs} s")); }
-    if about_ms >= 2000 { s.push_str(&format!(" (last time {} s)", (about_ms + 500) / 1000)); }
+    if about_ms >= 2000 { s.push_str(&format!(" (about {} s)", (about_ms + 500) / 1000)); }
     s
 }
 /// What the page asks of the window: the model of this source made again (its Retry, after the hub could not make it).
@@ -929,8 +930,8 @@ mod tests {
         cbor_text(&mut f, "ms"); f.extend([0x19, 0x0b, 0xb8]); cbor_text(&mut f, "about"); f.push(0);
         assert_eq!(parse_frame(&f), Some(SolidFrame::Stage("2|/p|".into(), "Meshing a.step with FreeCAD…".into(), 3000, 0)));
         assert_eq!(super::stage_line("Reading the board…", 0, 0), "Reading the board…", "no time under a second");
-        assert_eq!(super::stage_line("Meshing a.step with FreeCAD…", 4, 11_400), "Meshing a.step with FreeCAD… 4 s (last time 11 s)");
-        assert_eq!(super::stage_line("x", 2, 900), "x 2 s", "a quick last time is not worth saying");
+        assert_eq!(super::stage_line("Meshing a.step with FreeCAD…", 4, 11_400), "Meshing a.step with FreeCAD… 4 s (about 11 s)");
+        assert_eq!(super::stage_line("x", 2, 900), "x 2 s", "a quick one is not worth saying");
     }
     #[test] fn a_triangle_behind_the_near_plane_is_clipped_not_dropped() {
         let m = mesh(); let mut c = Camera::fitted(&m); c.dist = c.fit / 60.0 * 2.0; // inside the cube: faces cross the near plane
