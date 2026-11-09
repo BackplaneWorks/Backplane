@@ -19,9 +19,9 @@ pub fn dot_of(status: &str, state: &str) -> Dot {
         "blocked" => d("bad", false, false),
         "failed" => d("bad", false, true),
         "stalled" => d("warn", false, false),
-        "active" => d("accent", true, false),
+        "active" | "working" => d("accent", true, false),
         // waiting on subagents or work it started: not finished, not idle
-        "waiting" => d("waiting", true, false),
+        "waiting" | "monitoring" => d("waiting", true, false),
         "finished" => d("ok", true, false),
         "inactive" | "settled" | "stopped" => d("faint", true, false),
         _ => match state { "run" => d("accent", true, false), "fail" => d("bad", false, true), _ => d("faint", true, false) },
@@ -93,6 +93,36 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fi
         }))).into_any_element())
 }
 
+/// The height of the sidebar's fold row (the fold chevron, the search box, Add project), and of the folded strip's unfold row, so the chevron
+/// sits on the same spot folded and unfolded (0.14 style.css .side-fold / .side-strip).
+pub const FOLD_ROW: f32 = 46.;
+/// The project badges the folded strip shows: (raw project id, title, the project) in the sidebar's order.
+pub fn strip_projects(data: &Value) -> Vec<(String, String, &Value)> {
+    data["projects"].as_array().into_iter().flatten().map(|p| { let id = string(p, "id"); (id.rsplit('|').next().unwrap_or("").to_string(), string(p, "title"), p) }).filter(|(id, _, _)| !id.is_empty()).collect()
+}
+
+impl Backplane {
+    /// The folded sidebar: a 44 px strip (0.14's View.strip) with the unfold chevron where the fold chevron was, over the projects' badges,
+    /// each in its colour; a badge opens its project's page.
+    pub(crate) fn side_strip(&self, cx: &mut Context<Self>, light: bool) -> Vec<AnyElement> {
+        let c = |n: &str| theme::color(light, n);
+        let mut out = vec![
+            // the hub picker's row, empty: the unfold chevron lands on the fold chevron's height
+            div().border_b_1().border_color(c("line")).px_3().py_1().text_size(px(12.)).child("\u{a0}").into_any_element(),
+            div().h(px(FOLD_ROW)).px_2().flex().items_center().child(crate::ui::with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer()
+                .tooltip(crate::keys::tip("Unfold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(crate::ui::ic(light, "chevron-right", 16., "dim"))
+                .on_click(cx.listener(|this, _, _, cx| { if !this.sidebar_open { this.sidebar_toggle(cx); } }))).into_any_element(),
+        ];
+        for (pid, title, p) in strip_projects(&self.data) {
+            let on = self.project_page.as_deref() == Some(pid.as_str());
+            out.push(div().id(SharedString::from(format!("strip-{pid}"))).w_full().h(px(30.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).when(on, |d| d.bg(c("raise")))
+                .tooltip(crate::keys::tip(&title, "", light)).child(super::badge::mark(light, p))
+                .on_click(cx.listener(move |this, _, _, cx| this.open_project(pid.clone(), cx))).into_any_element());
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*; use core::prelude::v1::test; use serde_json::json;
@@ -115,6 +145,7 @@ mod tests {
         let hidden = json!({"renaming": {"id": "h|t9", "kind": "thread"}, "projects": [{"id": "h|p1", "title": "P", "threads": []}]});
         assert!(!rename_in_sidebar(&hidden, true));
         assert!(!renaming(&Value::Null, "h|t1", "thread"));
+        assert_eq!(strip_projects(&d).iter().map(|x| (x.0.as_str(), x.1.as_str())).collect::<Vec<_>>(), [("p1", "P")], "the folded strip's badges: each project by its raw id");
         let mut folded = d.clone(); folded["projects"][0]["closed"] = json!(true); assert!(!rename_in_sidebar(&folded, true), "a folded project shows no row");
     }
 }
