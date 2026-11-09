@@ -5,6 +5,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -407,7 +410,11 @@ private fun ThreadRow(t: DThread, onClick: () -> Unit, depth: Int = 0, kids: Int
     var menu by remember { mutableStateOf(false) }
     ThreadMenus(t, menu, { menu = false })
     // a subagent or subthread sits one step in under its parent; a parent's chevron (left of its dot, where the project's is) shows or hides its children
-    Row(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(start = (8 + 16 * depth.coerceAtMost(4)).dp, end = 12.dp).alpha(if (t.settled) .55f else 1f).testTag("row.${t.id}"), verticalAlignment = Alignment.Top) {
+    LaunchedEffect(t.id) { DataClient.prefetch(t.id) } // read ahead while it shows (the iOS app's onAppear)
+    Row(Modifier.fillMaxWidth()
+        // the finger going down reads it again: by the tap's end the thread is usually here (the person: the phone must be fast, 09-26, 11-05)
+        .pointerInput(t.id) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false); DataClient.prefetch(t.id, touch = true) } }
+        .combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(start = (8 + 16 * depth.coerceAtMost(4)).dp, end = 12.dp).alpha(if (t.settled) .55f else 1f).testTag("row.${t.id}"), verticalAlignment = Alignment.Top) {
         Box(Modifier.width(22.dp).height(36.dp).then(if (kids > 0) Modifier.clickable(onClick = toggle).testTag("row.kids.${t.id}") else Modifier), contentAlignment = Alignment.Center) {
             if (kids > 0) Icon(if (open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, if (open) "Hide its $kids subthreads" else "Show its $kids subthreads", tint = dfaint, modifier = Modifier.size(16.dp))
         }
