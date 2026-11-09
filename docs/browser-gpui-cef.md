@@ -12,7 +12,7 @@ frame rate is CEF's 30 fps. The profile (cookies, storage) is `~/.cache/backplan
 | | Linux | Windows | macOS |
 |---|---|---|---|
 | engine | `libcef.so` beside the client (RUNPATH `$ORIGIN`) | `libcef.dll`, `chrome_elf.dll` beside the client | `Chromium Embedded Framework.framework` beside the client (or in `../Frameworks`), loaded at run time (`cef_mac.rs`) |
-| CEF's thread | its own UI thread (multi-threaded message loop) | the same | gpui's main thread: an external message pump, run only when CEF asks for work (`cef_page.rs` `drive_pump`, at most every 1/30 s while asked) |
+| CEF's thread | its own UI thread (multi-threaded message loop) | the same | gpui's main thread: an external message pump (`cef_page.rs` `drive_pump`), run when CEF asks and at least every 1/30 s, as CEF's cefclient does (it wakes the main thread; nothing is drawn unless CEF paints) |
 | helper processes | the client itself, run again with `--type=...` (`cef::subprocess()` first in `main`) | the same | `Backplane Helper.app` and its `(GPU)`, `(Renderer)`, `(Plugin)`, `(Alerts)` twins beside the client, each a copy of the small `backplane-cef-helper` (`scripts/cef-mac-helpers.sh`; copies, as an update refuses links) |
 | window system | X11, pinned (`--ozone-platform=x11`): on a Wayland desktop the client runs through XWayland and so does Chromium | none needed | gpui's `NSApplication` answers Chromium's `CrAppControlProtocol` (`vendor/gpui/PATCH.md`); keys carry Mac key codes (`cef_mac::key_code`) |
 
