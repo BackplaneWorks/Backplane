@@ -152,7 +152,11 @@ const DETAILS: [(f64, usize); 4] = [(geom::TOL, 8), (0.015, 6), (0.04, 6), (0.1,
 
 /// Every layer of the board, as fine as fits `MOST_TRIS` (the coarser ones run only for a board that needs them). Meshing takes turns
 /// (a lock): the detail is the process's while one board is meshed.
-pub fn layers(b: &Board) -> Vec<Layer> {
+pub fn layers(b: &Board) -> Vec<Layer> { layers_within(b, MOST_TRIS) }
+/// A board with many parts leaves them more room: its own model as fine as fits this many triangles (`stream::board_budget`).
+pub const MOST_TRIS_WITH_PARTS: usize = 380_000;
+/// `layers`, as fine as fits `most` triangles.
+pub fn layers_within(b: &Board, most: usize) -> Vec<Layer> {
     static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
     let mut best = vec![];
@@ -161,7 +165,7 @@ pub fn layers(b: &Board) -> Vec<Layer> {
         let ls = layers_now(b);
         let n: usize = ls.iter().map(Layer::tris).sum();
         best = ls;
-        if n <= MOST_TRIS { break }
+        if n <= most { break }
     }
     geom::set_detail(geom::TOL, 8);
     best

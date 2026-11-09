@@ -27,13 +27,19 @@ pub fn board_model(bytes: &[u8]) -> Result<Made, String> {
     let board = parse::board(bytes)?;
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
     let t = Instant::now();
-    let layers = mesh::layers(&board);
+    let layers = mesh::layers_within(&board, board_budget(&board));
     let mesh_ms = t.elapsed().as_secs_f64() * 1000.0;
     let tris = super::glbw::tris(&layers);
     let seat = seat_of(&layers, &board);
     Ok(Made { plot: solid::plot(solid::of(&tris)), board, seat, layers, ms: (parse_ms, mesh_ms) })
 }
 
+/// The most triangles the board's own model may take: all a board needs, unless it has so many parts with models that they need the room
+/// (a board's part models are drawn in the same budget, MOST_TRIS, and what does not fit is boxes).
+pub fn board_budget(b: &Board) -> usize {
+    let parts = b.footprints.iter().filter(|f| f.models.iter().any(|m| !m.hide && !m.path.trim().is_empty())).count();
+    if parts > 150 { mesh::MOST_TRIS_WITH_PARTS } else { mesh::MOST_TRIS }
+}
 /// The front seat is the highest point of the front copper (else the laminate's top), the back's the lowest of the back copper.
 fn seat_of(layers: &[super::Layer], b: &Board) -> (f64, f64) {
     let z = |name: &str, top: bool| layers.iter().filter(|l| l.name == name).flat_map(|l| l.pos.iter().map(|p| p[2] as f64)).fold(None, |a: Option<f64>, z| Some(match a { None => z, Some(a) => if top { a.max(z) } else { a.min(z) } }));
@@ -183,7 +189,8 @@ pub fn prewarm(bytes: &[u8], path: &str, kicad_cli: &str, tools: &[super::super:
     let b = parse::board(bytes)?;
     let env = super::models::Env::system((!kicad_cli.is_empty()).then(|| Path::new(kicad_cli)));
     let dir = board_dir(path);
-    let jobs = model_jobs(&b, &|raw: &str| super::models::resolve(raw, &dir, &env));
+    let emb = super::models::embedded(bytes, &cache.embedded_dir());
+    let jobs = model_jobs(&b, &|raw: &str| super::models::resolve_in(raw, &dir, &env, &emb));
     let (n, fresh) = (jobs.len(), jobs.iter().filter(|(k, _)| cache.lookup(k).is_none()).count());
     if fresh > 0 { super::models::convert_with(super::models::Opts::background(), cache, jobs, tools, &std::sync::atomic::AtomicBool::new(false), &|_: &str, _| {}) }
     Ok((n, fresh, t.elapsed().as_secs_f64() * 1000.0))
@@ -282,8 +289,17 @@ pub fn parts(key: &str, rev: &str, plan: &Plan, board_tris: u64, cache: &super::
         let id = part_id(k);
         for &i in ix {
             let u = &plan.uses[i];
-            let cost = n as u64 * u.at.len() as u64;
-            if budget.fetch_update(Relaxed, Relaxed, |b| b.checked_sub(cost)).is_err() { fall_back(u); continue } // too many triangles for a phone: its boxes
+            let k = u.at.len() as u64;
+            // as fine as fits: a part never takes more than a third of what is left, coarser copies before boxes (too many triangles for a phone)
+            let mut pick = None;
+            for (lod, cells) in [(0u32, 0.0f32), (1, 120.0), (2, 40.0), (3, 15.0)] {
+                let (n, mesh) = if lod == 0 { (n, mesh.clone()) } else { encode_model(&solid::thin_by(ts.clone(), cells)) };
+                let cost = n as u64 * k;
+                let fits = budget.fetch_update(Relaxed, Relaxed, |b| (cost <= b && (lod == 3 || cost * 3 <= b)).then(|| b - cost)).is_ok();
+                if fits && n > 0 { pick = Some((lod, n, mesh)); break }
+            }
+            let Some((lod, n, mesh)) = pick else { fall_back(u); continue };
+            let id = if lod == 0 { id.clone() } else { format!("{id}~{lod}") };
             let d = done.fetch_add(u.at.len() as u32, Relaxed) + u.at.len() as u32;
             emit(super::super::plot::part_frame(key, &id, n, &mesh, &u.at, &u.refs, d));
             models.fetch_add(1, Relaxed);
@@ -357,6 +373,12 @@ mod tests {
         parts("2|/r|", "", &p, 0, &cache, &[], &std::sync::atomic::AtomicBool::new(false), &|_f: Vec<u8>| {}, &|t: String| said.lock().unwrap().push(t));
         assert_eq!(said.into_inner().unwrap(), vec!["Placing parts: 1 of 1".to_string()], "a box is placed at once, nothing to convert");
     }
+    #[test] fn a_board_with_many_parts_leaves_them_room() {
+        let mut b = Board::default();
+        b.footprints = (0..151).map(|i| { let mut f = fp(i as f64, 0.0, 0.0, Side::Top); f.models = vec![mr("R.step")]; f }).collect();
+        assert_eq!(board_budget(&b), super::super::mesh::MOST_TRIS_WITH_PARTS);
+        b.footprints.truncate(150); assert_eq!(board_budget(&b), super::super::mesh::MOST_TRIS);
+    }
     #[test] fn a_model_encodes_as_the_boards_mesh_does() {
         let t = [Tri3 { a: [0.01, 0.02, 0.03], b: [1.0, 0.0, 0.0], c: [0.0, 1.0, 0.0], color: 0xff0000 }];
         let (n, d) = encode_model(&t); assert_eq!(n, 1);
@@ -411,7 +433,8 @@ mod tests {
             let env = super::super::models::Env::system(cli.as_deref().map(Path::new));
             let dir = board_dir(path);
             let tp = Instant::now();
-            let plan = plan(&made.board, made.seat, &|raw: &str| super::super::models::resolve(raw, &dir, &env));
+            let emb = super::super::models::embedded(&bytes, &super::super::models::Cache::standard().embedded_dir());
+            let plan = plan(&made.board, made.seat, &|raw: &str| super::super::models::resolve_in(raw, &dir, &env, &emb));
             eprintln!("  plan {:.1} ms: {} instances, {} files, {} boxes", tp.elapsed().as_secs_f64() * 1000.0, plan.of, plan.uses.len(), plan.boxes.len());
             let cold = super::super::models::Cache::new(home.join(format!("cold-{}", super::super::super::stepglb::fnv(path))));
             for (name, cache) in [("cold", &cold), ("warm", &cold)] {
@@ -448,7 +471,8 @@ mod tests {
             let made = board_model(&std::fs::read(path).unwrap()).unwrap();
             std::fs::write(out.join(format!("{stem}.native.glb")), super::super::glbw::glb(&made.layers, &stem)).unwrap();
             let dir = board_dir(path);
-            let plan = plan(&made.board, made.seat, &|raw: &str| super::super::models::resolve(raw, &dir, &env));
+            let emb = super::super::models::embedded(&std::fs::read(path).unwrap_or_default(), &super::super::models::Cache::standard().embedded_dir());
+            let plan = plan(&made.board, made.seat, &|raw: &str| super::super::models::resolve_in(raw, &dir, &env, &emb));
             let tools = super::super::super::stepglb::machine(&std::env::temp_dir());
             parts("2|/r|", "", &plan, 0, &cache, &tools, &std::sync::atomic::AtomicBool::new(false), &|_f: Vec<u8>| {}, &|_| {}); // the cache warm, every model converted
             let side: std::collections::HashMap<&str, &str> = made.board.footprints.iter().map(|f| (f.reference.as_str(), if f.side == Side::Bottom { "B" } else { "F" })).collect();
