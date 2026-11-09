@@ -815,23 +815,24 @@ final class Journeys: XCTestCase {
     func test_give() {
         d = Driver("give"); defer { d.finish() }
         let comp = { self.d.el("thread.composer") }
+        let go = { self.d.app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Send", "Give")).firstMatch }
         let back = { self.d.app.navigationBars.buttons.firstMatch }
         let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         d.app.terminate()
         d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_SELECT": "t3", "BACKPLANE_PERFORMANCE": "1"]
         d.app.launch(); d.skipTour(); if sb.buttons["Allow"].waitForExistence(timeout: 6) { sb.buttons["Allow"].tap() }
-        guard d.step("Busy build runs", timeout: 20, act: { d.tap(comp()); d.type(comp(), "start the long build"); comp().typeKey(.return, modifierFlags: []) }, expect: { d.label("start the long build").exists }) else { return }
+        guard d.step("Busy build runs", timeout: 20, act: { d.tap(comp()); d.type(comp(), "start the long build"); d.tap(go()) }, expect: { d.label("start the long build").exists }) else { return }
         sleep(3)
         d.step("back to the list, into Power rail", timeout: 15, act: { d.tap(back()); d.tap(d.label("Power rail")) }, expect: { comp().exists && d.label("Routed the 3V3 rail").exists })
-        d.step("/give into the running thread", timeout: 20, act: { d.tap(comp()); d.type(comp(), "/give >busy-build check the DRC"); d.shot("1-typed"); comp().typeKey(.return, modifierFlags: []) }, expect: { d.label("Given to \"Busy build\"").exists })
+        d.step("/give into the running thread", timeout: 20, act: { d.tap(comp()); d.type(comp(), "/give >busy-build check the DRC"); d.shot("1-typed"); d.tap(go()) }, expect: { d.label("Given to \"Busy build\"").exists })
         d.shot("2-source")
         d.step("the receiver shows the card", timeout: 20, act: { d.tap(back()); d.tap(d.label("Busy build")) }, expect: { d.el("handoff.card").exists })
         sleep(1); d.shot("3-card")
         d.step("the summary and the note are there", timeout: 5, act: {}, expect: { d.label("Stand-in summary").exists && d.label("check the DRC").exists })
         d.step("a reference opens its source", timeout: 15, act: { d.tap(d.el("handoff.ref.1")) }, expect: { comp().exists && d.label("Given to \"Busy build\"").exists })
         d.shot("4-ref-opened")
-        d.step("/give to an idle thread", timeout: 20, act: { d.tap(comp()); d.type(comp(), "/give >review-notes please review"); comp().typeKey(.return, modifierFlags: []) }, expect: { d.label("Given to \"Review notes\"").exists })
-        d.step("/give to a bot", timeout: 20, act: { d.tap(comp()); d.type(comp(), "/give @ada keep watch"); comp().typeKey(.return, modifierFlags: []) }, expect: { d.label("Given to @Ada").exists })
+        d.step("/give to an idle thread", timeout: 20, act: { d.tap(comp()); d.type(comp(), "/give >review-notes please review"); d.tap(go()) }, expect: { d.label("Given to \"Review notes\"").exists })
+        d.step("/give to a bot", timeout: 20, act: { d.tap(comp()); d.type(comp(), "/give @ada keep watch"); d.tap(go()) }, expect: { d.label("Given to @Ada").exists })
         d.shot("5-source-three")
     }
 
