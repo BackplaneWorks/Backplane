@@ -105,7 +105,7 @@ struct DataViewerView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(tabs, id: \.self) { t in
-                        Button { tab = t; target = nil } label: { Text(t).dmono(12, bold: t == tab).foregroundStyle(t == tab ? BackplaneDesign.onAccent : BackplaneDesign.text).padding(.horizontal, 14).padding(.vertical, 10).background(t == tab ? BackplaneDesign.accent : BackplaneDesign.panel) }
+                        Button { tab = t; target = nil } label: { Text(Tr.t(t)).dmono(12, bold: t == tab).foregroundStyle(t == tab ? BackplaneDesign.onAccent : BackplaneDesign.text).padding(.horizontal, 14).padding(.vertical, 10).background(t == tab ? BackplaneDesign.accent : BackplaneDesign.panel) }
                             .accessibilityIdentifier("data.vtab." + t)
                     }
                 }
@@ -127,7 +127,7 @@ struct DataViewerView: View {
             }
         }
         .background(BackplaneDesign.background)
-        .dataBar(thread.title.isEmpty ? "New thread" : thread.title)
+        .dataBar(thread.title.isEmpty ? Tr.t("New thread") : thread.title)
         .task(id: client.conn == .online) {
             guard files == nil else { return }
             files = await client.viewerFiles(thread.id); if !(files?.pcb ?? "").isEmpty && tab == "Files" && openFile.isEmpty { tab = "Board" }
@@ -194,23 +194,23 @@ struct DataPlotTab: View {
             let say = !has ? none : !error.isEmpty ? error : (frame?.none ?? "").isEmpty ? (mesh.map { $0.decoding ? "" : $0.none } ?? "") : frame!.none
             if let progress = parts?.progress, !progress.isEmpty {
                 // the parts still streaming in after the board
-                Text(progress).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).padding(8).background(BackplaneDesign.panel.opacity(0.85)).padding(8)
+                Text(Tr.t(progress)).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).padding(8).background(BackplaneDesign.panel.opacity(0.85)).padding(8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).allowsHitTesting(false).accessibilityIdentifier("data.viewer.parts")
             }
             if !say.isEmpty && three && mesh?.mesh != nil {
                 // a model on show stays; why it may be old is said above it
-                Text(say).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).padding(8).background(BackplaneDesign.panel.opacity(0.85)).padding(8).accessibilityIdentifier("data.viewer.note")
+                Text(Tr.t(say)).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).padding(8).background(BackplaneDesign.panel.opacity(0.85)).padding(8).accessibilityIdentifier("data.viewer.note")
             }
-            else if !say.isEmpty { Text(say).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity) }
-            else if three && (mesh?.mesh == nil || mesh?.decoding == true) { DLoading(text: "Loading 3D model…") }
+            else if !say.isEmpty { Text(Tr.t(say)).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if three && (mesh?.mesh == nil || mesh?.decoding == true) { DLoading(text: Tr.t("Loading 3D model…")) }
             else if frame == nil && !three { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             if !three && !present.isEmpty && client.features.contains("layers"), let l = layers {
                 HStack(spacing: 6) {
-                    chip(l.layerHead, id: "data.viewer.layers", on: l.layerMode > 0) { refs = nil; menu.toggle() }
+                    chip(Tr.t(l.layerHead), id: "data.viewer.layers", on: l.layerMode > 0) { refs = nil; menu.toggle() }
                     if comparing.isEmpty {
-                        chip("Compare", id: "data.viewer.compare", on: refs != nil) { menu = false; if refs != nil { refs = nil } else { Task { refs = await client.refs(thread.id) } } }
+                        chip(Tr.t("Compare"), id: "data.viewer.compare", on: refs != nil) { menu = false; if refs != nil { refs = nil } else { Task { refs = await client.refs(thread.id) } } }
                     } else {
-                        chip("Close compare", id: "data.viewer.compare.close", on: true) { close() }
+                        chip(Tr.t("Close compare"), id: "data.viewer.compare.close", on: true) { close() }
                     }
                 }.padding(8)
                 if menu { DataLayerMenu(layers: l, present: present) { a, v in act(a, v, bits) }.padding(.top, 44).padding(.leading, 8) }
@@ -219,10 +219,10 @@ struct DataPlotTab: View {
             if !info.isEmpty {
                 // a card over the viewer's foot: the viewer keeps its size and camera
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text("PICKED").font(.system(.caption, design: .monospaced).bold()).foregroundStyle(BackplaneDesign.accent); Spacer(); Button("close") { info = ""; picked = "" }.font(.caption).accessibilityIdentifier("data.viewer.info.close") }
+                    HStack { Text(Tr.t("PICKED")).font(.system(.caption, design: .monospaced).bold()).foregroundStyle(BackplaneDesign.accent); Spacer(); Button(Tr.t("close")) { info = ""; picked = "" }.font(.caption).accessibilityIdentifier("data.viewer.info.close") }
                     ForEach(Array(DPick.rows(info).enumerated()), id: \.offset) { _, r in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            if !r.0.isEmpty { Text(r.0).foregroundStyle(.secondary).frame(width: 84, alignment: .leading) }
+                            if !r.0.isEmpty { Text(Tr.t(r.0)).foregroundStyle(.secondary).frame(width: 84, alignment: .leading) }
                             Text(r.1).textSelection(.enabled).lineLimit(2)
                         }.font(.system(.footnote, design: .monospaced)).accessibilityElement(children: .combine).accessibilityIdentifier("data.viewer.info.row")
                     }
@@ -271,7 +271,7 @@ struct DataLayerMenu: View {
             VStack(alignment: .leading, spacing: 8) {
                 if layers.layerModes {
                     HStack(spacing: 4) {
-                        ForEach(Array(["All", "Dim", "Only"].enumerated()), id: \.offset) { i, label in
+                        ForEach(Array([Tr.k("viewer.layers.all"), Tr.k("viewer.layers.dim"), Tr.k("viewer.layers.only")].enumerated()), id: \.offset) { i, label in
                             Button { act("mode", String(i)) } label: { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(layers.layerMode == i ? BackplaneDesign.accent : .primary).padding(.horizontal, 8).padding(.vertical, 3).overlay(Rectangle().stroke(layers.layerMode == i ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
                                 .accessibilityIdentifier("data.layer.mode.\(i)")
                         }
@@ -286,7 +286,7 @@ struct DataLayerMenu: View {
                     }
                 }
                 if layers.layerReset {
-                    Button { act("reset", "") } label: { Text("Reset layers").font(.system(.footnote, design: .monospaced)).foregroundStyle(BackplaneDesign.accent) }
+                    Button { act("reset", "") } label: { Text(Tr.t("Reset layers")).font(.system(.footnote, design: .monospaced)).foregroundStyle(BackplaneDesign.accent) }
                         .accessibilityIdentifier("data.layer.reset")
                 }
             }.padding(8)
@@ -302,10 +302,10 @@ struct DataRefMenu: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                if rows.isEmpty { Text("No versions to compare with").font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary) }
+                if rows.isEmpty { Text(Tr.t("No versions to compare with")).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary) }
                 ForEach(rows, id: \.self) { r in
                     Button { pick(r.commit) } label: {
-                        HStack(spacing: 8) { Text(r.kind).foregroundStyle(.secondary); Text(r.label) }.font(.system(.footnote, design: .monospaced))
+                        HStack(spacing: 8) { Text(Tr.t(r.kind)).foregroundStyle(.secondary); Text(r.label) }.font(.system(.footnote, design: .monospaced))
                     }.accessibilityIdentifier("data.compare.\(r.commit)")
                 }
             }.padding(8)
@@ -324,7 +324,7 @@ struct DataMechTab: View {
     var body: some View {
         VStack(spacing: 0) {
             if let ps = parts {
-                if ps.isEmpty { Text("No models in mech/ yet").font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
+                if ps.isEmpty { Text(Tr.t("No models in mech/ yet")).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
                 else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) { ForEach(ps, id: \.self) { p in
@@ -352,8 +352,8 @@ struct DataMechSolid: View {
                     .accessibilityValue(mesh?.mesh == nil ? "" : mesh!.key) // what is drawn, by its key (the tests read it)
             }
             let say = !error.isEmpty ? error : (mesh.map { $0.decoding ? "" : $0.none } ?? "")
-            if !say.isEmpty { Text(say).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
-            else if mesh?.mesh == nil || mesh?.decoding == true { DLoading(text: "Loading 3D model…") }
+            if !say.isEmpty { Text(Tr.t(say)).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
+            else if mesh?.mesh == nil || mesh?.decoding == true { DLoading(text: Tr.t("Loading 3D model…")) }
         }
         .task(id: path) { error = ""; do { try await client.watch(thread.id, kind: "3d", path: path) } catch { self.error = error.localizedDescription } }
     }
@@ -395,7 +395,7 @@ struct DataFilesTab: View {
                     Text("/" + dir).font(.system(.footnote, design: .monospaced))
                     Spacer()
                 }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.panel)
-                if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(12) }
+                if !err.isEmpty { Text(Tr.t(err)).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(12) }
                 if let l = list {
                     List(l.sorted { ($0.dir ? 0 : 1, $0.name.lowercased()) < ($1.dir ? 0 : 1, $1.name.lowercased()) }) { e in
                         let full = dir.isEmpty ? e.name : dir + "/" + e.name
@@ -437,7 +437,7 @@ struct DataFilePreview: View {
             HStack { Button { close() } label: { Text("‹ " + (path.split(separator: "/").last.map(String.init) ?? path)).font(.system(.subheadline, design: .monospaced).bold()) }.accessibilityIdentifier("data.preview.back"); Spacer() }
                 .padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.panel)
             Divider()
-            if failed { Text("This file could not be read.").foregroundStyle(BackplaneDesign.bad).padding(16) }
+            if failed { Text(Tr.t("This file could not be read.")).foregroundStyle(BackplaneDesign.bad).padding(16) }
             else if let d = data {
                 if imageExt.contains(ext(path)), let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().padding(8).accessibilityIdentifier("data.preview.image") }
                 else if ext(path) == "pdf" { DataPDFView(data: d).accessibilityIdentifier("data.preview.pdf") }
@@ -445,7 +445,7 @@ struct DataFilePreview: View {
                     let t = String(decoding: d, as: UTF8.self)
                     if line > 0 { DataLinedText(text: t, line: line).accessibilityIdentifier("data.preview.text") }
                     else { ScrollView { (ext(path) == "md" ? Text(.init(t)) : Text(t)).font(.system(.footnote, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading).padding(12) }.accessibilityIdentifier("data.preview.text") }
-                } else { Text("No preview for this file (\(sizeText(d.count))).").foregroundStyle(.secondary).padding(16) }
+                } else { Text(Tr.ios_preview_none(size: sizeText(d.count))).foregroundStyle(.secondary).padding(16) }
             } else { ProgressView().padding(24) }
             Spacer(minLength: 0)
         }
@@ -496,13 +496,13 @@ struct DataBrowserTab: View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
-                    if !driving { Button("Take over") { driving = true; run("takeover") }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.browser.takeover") }
+                    if !driving { Button(Tr.t("Take over")) { driving = true; run("takeover") }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.browser.takeover") }
                     else {
                         Button("‹") { run("toolbar", ["command": "back"]) }.accessibilityIdentifier("data.browser.back")
                         Button("›") { run("toolbar", ["command": "forward"]) }.accessibilityIdentifier("data.browser.forward")
                         Button("↻") { run("toolbar", ["command": "reload"]) }.accessibilityIdentifier("data.browser.reload")
-                        TextField("Address", text: $url).dmono(13).padding(8).dbox().textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("data.browser.url")
-                        Button("Go") { run("navigate", ["url": pageUrl(url)]) }.disabled(url.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.browser.go")
+                        TextField(Tr.t("Address"), text: $url).dmono(13).padding(8).dbox().textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("data.browser.url")
+                        Button(Tr.t("Go")) { run("navigate", ["url": pageUrl(url)]) }.disabled(url.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.browser.go")
                     }
                     Spacer(minLength: 0)
                 }
@@ -510,7 +510,7 @@ struct DataBrowserTab: View {
                     HStack(spacing: 8) {
                         // the key field: what the keyboard types here goes to the page (Enter, Tab and the arrows of a hardware keyboard too)
                         ZStack(alignment: .leading) {
-                            if keys == BrowserInput.sentinel { Text("Keys").dmono(13).foregroundStyle(.secondary).padding(8).allowsHitTesting(false) }
+                            if keys == BrowserInput.sentinel { Text(Tr.t("Keys")).dmono(13).foregroundStyle(.secondary).padding(8).allowsHitTesting(false) }
                             TextField("", text: Binding(get: { keys }, set: keyed)).dmono(13).padding(8)
                                 .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.send).focused($keysFocused)
                                 .onSubmit { press("Enter"); keysFocused = true }
@@ -521,7 +521,7 @@ struct DataBrowserTab: View {
                                 }
                                 .accessibilityIdentifier("data.browser.keys")
                         }.dbox()
-                        Button("Hand back") { driving = false; keysFocused = false; run("handback") }.accessibilityIdentifier("data.browser.handback")
+                        Button(Tr.t("Hand back")) { driving = false; keysFocused = false; run("handback") }.accessibilityIdentifier("data.browser.handback")
                     }
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
@@ -533,7 +533,7 @@ struct DataBrowserTab: View {
                     }
                 }
             }.padding(8).background(BackplaneDesign.panel)
-            if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(.horizontal, 12) }
+            if !err.isEmpty { Text(Tr.t(err)).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(.horizontal, 12) }
             Divider()
             GeometryReader { geo in
                 if let f = frame {
@@ -556,10 +556,10 @@ struct DataBrowserTab: View {
                             let x = Int(max(0, min(1000, (g.location.x - x0) * 1000 / w))), y = Int(max(0, min(1000, g.location.y * 1000 / h)))
                             run("click", ["x": x, "y": y])
                         }).accessibilityIdentifier("data.browser.frame")
-                } else if none { Text("No browser page yet. An agent opens one when it needs the web.").font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
+                } else if none { Text(Tr.t("No browser page yet. An agent opens one when it needs the web.")).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
                 else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             }
-            if driving { Text("You have the page: a tap clicks, a drag scrolls, the key field types. Hand it back when you are done.").font(.caption2).foregroundStyle(.secondary).padding(8) }
+            if driving { Text(Tr.t("You have the page: a tap clicks, a drag scrolls, the key field types. Hand it back when you are done.")).font(.caption2).foregroundStyle(.secondary).padding(8) }
         }
         .task {
             while !Task.isCancelled { await load(); try? await Task.sleep(for: .seconds(2)) }
@@ -615,9 +615,9 @@ struct DataSplitTab: View {
             if let v = plainViewer(open: open, source: "split|" + id, picked: "", off: 0, dim: 0, lift: 255) {
                 PlotCanvasView(frame: (frame?.none.isEmpty ?? true) ? frame : nil, mesh: mesh, scope: thread.id + "|split", viewer: v, pick: { _ in }).accessibilityIdentifier("data.split." + id)
             }
-            Text(label.uppercased()).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).padding(6)
+            Text(Tr.t(label).uppercased()).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).padding(6)
             let say = !none.isEmpty ? none : (frame?.none ?? "")
-            if !say.isEmpty { Text(say).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(12).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if !say.isEmpty { Text(Tr.t(say)).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(12).frame(maxWidth: .infinity, maxHeight: .infinity) }
             else if frame == nil && (open != "3d" || mesh == nil) { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .overlay(Rectangle().stroke(.secondary.opacity(0.3)))
@@ -666,13 +666,13 @@ struct DataDiffTab: View {
     @State private var n = 0
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("CHANGES").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary); Spacer(); Button("Refresh") { n += 1 }.accessibilityIdentifier("data.diff.refresh") }
+            HStack { Text(Tr.t("CHANGES")).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary); Spacer(); Button(Tr.t("Refresh")) { n += 1 }.accessibilityIdentifier("data.diff.refresh") }
                 .padding(8).background(BackplaneDesign.panel)
             Divider()
-            if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(16) }
+            if !err.isEmpty { Text(Tr.t(err)).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(16) }
             else if let d = diff {
-                if !d.nogit.isEmpty { Text("This project is not a git repository, so there is nothing to compare.").foregroundStyle(.secondary).padding(16).accessibilityIdentifier("data.diff.nogit") }
-                else if d.diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text("No changes.").foregroundStyle(.secondary).padding(16) }
+                if !d.nogit.isEmpty { Text(Tr.t("This project is not a git repository, so there is nothing to compare.")).foregroundStyle(.secondary).padding(16).accessibilityIdentifier("data.diff.nogit") }
+                else if d.diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text(Tr.t("No changes.")).foregroundStyle(.secondary).padding(16) }
                 else {
                     ScrollView([.vertical, .horizontal]) {
                         LazyVStack(alignment: .leading, spacing: 0) {
@@ -711,7 +711,7 @@ struct DataReviewTab: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) { ForEach(["Checks", "BOM", "Comments"], id: \.self) { p in
-                Button(p) { page = p }.buttonStyle(.bordered).tint(p == page ? BackplaneDesign.accent : .secondary).accessibilityIdentifier("data.review.page." + p) } ; Spacer() }
+                Button(Tr.t(p)) { page = p }.buttonStyle(.bordered).tint(p == page ? BackplaneDesign.accent : .secondary).accessibilityIdentifier("data.review.page." + p) } ; Spacer() }
                 .padding(8).background(BackplaneDesign.panel)
             Divider()
             switch page {
@@ -734,12 +734,12 @@ struct DataReportPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                Button(ticks ? "Run checks" : "Refresh") { run += 1 }.buttonStyle(.bordered).accessibilityIdentifier("data.review.run")
-                if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote) }
+                Button(Tr.t(ticks ? "Run checks" : "Refresh")) { run += 1 }.buttonStyle(.bordered).accessibilityIdentifier("data.review.run")
+                if !err.isEmpty { Text(Tr.t(err)).foregroundStyle(BackplaneDesign.bad).font(.footnote) }
                 if let r = rep {
-                    if !r.line.isEmpty { Text(r.line).font(.system(.footnote, design: .monospaced).bold()).foregroundStyle(BackplaneDesign.accent) }
-                    if !r.gate.isEmpty { Text(r.gate).font(.caption).foregroundStyle(.secondary) }
-                    if !r.err.isEmpty { Text(r.err).font(.footnote).foregroundStyle(BackplaneDesign.bad) }
+                    if !r.line.isEmpty { Text(Tr.t(r.line)).font(.system(.footnote, design: .monospaced).bold()).foregroundStyle(BackplaneDesign.accent) }
+                    if !r.gate.isEmpty { Text(Tr.t(r.gate)).font(.caption).foregroundStyle(.secondary) }
+                    if !r.err.isEmpty { Text(Tr.t(r.err)).font(.footnote).foregroundStyle(BackplaneDesign.bad) }
                     if !r.md.isEmpty { ScrollView(.horizontal) { Text(.init(r.md)).font(.system(.caption, design: .monospaced)) } }
                     if ticks { ForEach(Array(tasks.enumerated()), id: \.offset) { i, t in
                         Button { Task { if let n = await client.tick(thread.id, i) { tasks = n } } } label: {
@@ -761,13 +761,13 @@ struct DataCommentsPage: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote) }
+                    if !err.isEmpty { Text(Tr.t(err)).foregroundStyle(BackplaneDesign.bad).font(.footnote) }
                     if let l = list {
-                        if l.isEmpty { Text("No comments yet. Add one below; the agent reads the open ones with its next message.").font(.footnote).foregroundStyle(.secondary) }
+                        if l.isEmpty { Text(Tr.t("No comments yet. Add one below; the agent reads the open ones with its next message.")).font(.footnote).foregroundStyle(.secondary) }
                         ForEach(l.filter { $0.parent.isEmpty }) { c in
                             VStack(alignment: .leading, spacing: 4) {
-                                HStack { Text((c.by.isEmpty ? "you" : c.by) + (c.resolved ? " · resolved" : "")).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary); Spacer()
-                                    Button(c.resolved ? "reopen" : "resolve") { Task { try? await client.comment(thread.id, c.resolved ? "reopen" : "resolve", ["id": c.id]); await load() } }.font(.caption).accessibilityIdentifier("data.review.resolve." + c.id) }
+                                HStack { Text((c.by.isEmpty ? Tr.t("you") : c.by) + (c.resolved ? " · " + Tr.t("resolved") : "")).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary); Spacer()
+                                    Button(Tr.t(c.resolved ? "reopen" : "resolve")) { Task { try? await client.comment(thread.id, c.resolved ? "reopen" : "resolve", ["id": c.id]); await load() } }.font(.caption).accessibilityIdentifier("data.review.resolve." + c.id) }
                                 Text(c.text).font(.system(.footnote, design: .monospaced))
                                 ForEach(l.filter { $0.parent == c.id }) { r in Text("↳ " + r.text).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary) }
                             }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().stroke(c.resolved ? Color.secondary.opacity(0.3) : BackplaneDesign.accent.opacity(0.6)))
@@ -777,8 +777,8 @@ struct DataCommentsPage: View {
             }.accessibilityIdentifier("data.review.comments")
             Divider()
             HStack {
-                TextField("A review comment", text: $draft, axis: .vertical).dmono(13).padding(8).dbox().accessibilityIdentifier("data.review.composer")
-                Button("Add") { let t = draft; draft = ""; Task { do { try await client.comment(thread.id, "add", ["text": t]) } catch { err = error.localizedDescription }; await load() } }
+                TextField(Tr.t("A review comment"), text: $draft, axis: .vertical).dmono(13).padding(8).dbox().accessibilityIdentifier("data.review.composer")
+                Button(Tr.t("Add")) { let t = draft; draft = ""; Task { do { try await client.comment(thread.id, "add", ["text": t]) } catch { err = error.localizedDescription }; await load() } }
                     .buttonStyle(DButton(primary: true)).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.review.add")
             }.padding(8).background(BackplaneDesign.panel)
         }

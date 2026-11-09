@@ -39,7 +39,7 @@ private struct DBar: ViewModifier {
             .toolbar {
                 if back {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button { dismiss() } label: { Image(systemName: "chevron.left").foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel("Back").accessibilityIdentifier("data.back")
+                        Button { dismiss() } label: { Image(systemName: "chevron.left").foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel(Tr.t("Back")).accessibilityIdentifier("data.back")
                     }.dflat()
                 }
                 ToolbarItem(placement: .principal) { Text(title).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1) }.dflat()
@@ -112,7 +112,7 @@ func dStateWord(_ state: String) -> String {
 }
 func dAgo(_ ms: Int) -> String {
     let s = max(0, Int(Date().timeIntervalSince1970) - ms / 1000)
-    if ms <= 0 { return "" }; if s < 60 { return "now" }; if s < 3600 { return "\(s / 60)m" }; if s < 86400 { return "\(s / 3600)h" }; return "\(s / 86400)d"
+    if ms <= 0 { return "" }; if s < 60 { return Tr.k("ios.ago.now") }; if s < 3600 { return Tr.ios_ago_m(n: String(s / 60)) }; if s < 86400 { return Tr.ios_ago_h(n: String(s / 3600)) }; return Tr.ios_ago_d(n: String(s / 86400))
 }
 
 /// The desktop's buttons: a solid accent one for the action of a screen, the rest a line on the raised colour.
@@ -158,7 +158,7 @@ struct DWorkingRow: View {
     var body: some View {
         HStack(spacing: 8) {
             ZStack { Rectangle().fill(BackplaneDesign.ok).frame(width: up ? 12 : 5, height: up ? 12 : 5).opacity(up ? 1 : 0.45) }.frame(width: 12, height: 12)
-            Text("Working…").dmono(13).foregroundStyle(BackplaneDesign.dim)
+            Text(Tr.t("Working…")).dmono(13).foregroundStyle(BackplaneDesign.dim)
         }
         .padding(.vertical, 6)
         .onAppear { withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) { up = true } }

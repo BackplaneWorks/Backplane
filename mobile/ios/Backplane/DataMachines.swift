@@ -25,7 +25,7 @@ final class MachinesModel {
 struct DataMachinesSection: View {
     @Bindable var client: DataClient
     var body: some View {
-        DPageRows(title: "Machines", idPrefix: "machines", rows: client.machines.rows, empty: "Not connected") { _, b, fields in
+        DPageRows(title: Tr.t("Machines"), idPrefix: "machines", rows: client.machines.rows, empty: Tr.t("Not connected")) { _, b, fields in
             await client.machines.act(action: b.action, value: b.value, fields: fields)
         }
         .task(id: client.conn) { if client.conn == .online { await client.machines.load() } }

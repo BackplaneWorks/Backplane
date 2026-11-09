@@ -53,10 +53,10 @@ struct DataDevicesSection: View {
     @Bindable var client: DataClient
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            DPageRows(title: "Devices", idPrefix: "devices", rows: client.devices.rows, empty: "Not connected") { _, b, _ in
+            DPageRows(title: Tr.t("Devices"), idPrefix: "devices", rows: client.devices.rows, empty: Tr.t("Not connected")) { _, b, _ in
                 await client.devices.act(action: b.action, value: b.value)
             }
-            if !client.devices.error.isEmpty { Text(client.devices.error).dmono(11).foregroundStyle(BackplaneDesign.bad) }
+            if !client.devices.error.isEmpty { Text(Tr.t(client.devices.error)).dmono(11).foregroundStyle(BackplaneDesign.bad) }
         }
         .task(id: "\(client.conn)|\(client.hubName)") { if client.conn == .online { await client.devices.load() } }
     }

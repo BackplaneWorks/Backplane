@@ -4,6 +4,8 @@ import WidgetKit
 
 @main
 struct IslandBundle: WidgetBundle {
+    // the widget runs apart from the app and cannot read its setting: it follows the system's language
+    init() { Tr.lang = Tr.resolve("auto") }
     var body: some Widget {
         IslandWidget()
     }
@@ -66,7 +68,7 @@ private struct Row: View {
                 Text(line.title).font(.caption.weight(.semibold)).lineLimit(1)
                     .frame(maxWidth: 150, alignment: .leading)
             }
-            Text(line.doing).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+            Text(Tr.t(line.doing)).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 4)
             if title { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
         }
@@ -81,7 +83,7 @@ private struct Foot: View {
     let stale: Bool
 
     var body: some View {
-        let words = (more > 0 ? ["+ \(more) more"] : []) + (stale ? ["Not updated lately: open Backplane"] : [])
+        let words = (more > 0 ? [Tr.ios_island_more(n: more)] : []) + (stale ? [Tr.t("Not updated lately: open Backplane")] : [])
         if !words.isEmpty {
             Text(words.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
         }
@@ -95,7 +97,7 @@ struct IslandWidget: Widget {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Mark(running: s.running)
-                    Text(s.headline).font(.headline).lineLimit(1)
+                    Text(Tr.t(s.headline)).font(.headline).lineLimit(1)
                     Spacer()
                     if s.running > 1 { Text("\(s.running)").font(.headline.monospacedDigit()) }
                 }
@@ -115,7 +117,7 @@ struct IslandWidget: Widget {
                     Text("\(s.running)").font(.title3.monospacedDigit().bold()).padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(s.headline).font(.headline).lineLimit(1)
+                    Text(Tr.t(s.headline)).font(.headline).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 4) {

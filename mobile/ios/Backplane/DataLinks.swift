@@ -69,7 +69,7 @@ struct DLinkNote: View {
         Text(client.lastLink).font(.system(size: 1)).frame(width: 2, height: 2).opacity(0.02).accessibilityIdentifier("link.last").allowsHitTesting(false)
         #endif
         if !client.linkNote.isEmpty {
-            Text(client.linkNote).dmono(12).foregroundStyle(BackplaneDesign.text).padding(.horizontal, 12).padding(.vertical, 9)
+            Text(Tr.t(client.linkNote)).dmono(12).foregroundStyle(BackplaneDesign.text).padding(.horizontal, 12).padding(.vertical, 9)
                 .background(BackplaneDesign.raised).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
                 .padding(.bottom, 70).padding(.horizontal, 16).transition(.opacity).accessibilityIdentifier("link.note")
         }

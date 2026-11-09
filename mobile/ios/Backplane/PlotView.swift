@@ -923,7 +923,7 @@ final class PlotCanvas: MTKView {
             box.layer.borderColor = UIColor.white.cgColor
             box.layer.borderWidth = 1.5
             n.text = p.count > 0 ? String(p.count) : ""
-            b.accessibilityLabel = NativeMessages.native_review_pin(lang, p.count > 0 ? "replies" : "none", String(p.count))
+            b.accessibilityLabel = Tr.native_review_pin(kind: p.count > 0 ? "replies" : "none", count: String(p.count))
         }
         layoutPins()
     }
@@ -1041,7 +1041,7 @@ struct PlotCanvasView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         guard let c = PlotCanvas(canvas: .zero) else {
             let l = UILabel()
-            l.text = NativeMessages.native_viewer_metal(lang)
+            l.text = Tr.k("native.viewer.metal")
             l.textAlignment = .center
             return l
         }
@@ -1050,7 +1050,7 @@ struct PlotCanvasView: UIViewRepresentable {
 
     func updateUIView(_ v: UIView, context: Context) {
         guard let c = v as? PlotCanvas else {
-            (v as? UILabel)?.text = NativeMessages.native_viewer_metal(lang)
+            (v as? UILabel)?.text = Tr.k("native.viewer.metal")
             return
         }
         let source = scope + "\0" + (viewer.key.isEmpty ? viewer.layers : viewer.key) + "\0" + viewer.open
@@ -1144,7 +1144,7 @@ extension Color {
 
 
 private func plotError(_ raw: String, _ lang: String) -> String {
-    if raw.hasPrefix("@bp.file-missing:") { return NativeMessages.viewer_file_missing(lang, String(raw.dropFirst(17))) }
-    if raw == "@bp.file-unread" { return NativeMessages.viewer_file_unread(lang) }
-    return raw
+    if raw.hasPrefix("@bp.file-missing:") { return Tr.viewer_file_missing(name: String(raw.dropFirst(17))) }
+    if raw == "@bp.file-unread" { return Tr.k("viewer.file.unread") }
+    return Tr.t(raw)
 }

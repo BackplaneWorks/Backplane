@@ -1,0 +1,10 @@
+# Technical literals the screen shows as they are, never translated: File.swift | the literal (or a part of it) | why
+HubRescue.swift | Restart hub | HubRescue is held to test/mobile/hub_cases.json in English; HubView translates its words on screen (Tr.t)
+DataViews.swift | Backplane | the product name, the hub's when it has none
+DataViews.swift | btw · | /btw is the command's own word, then the person's question
+PairView.swift | http://host:3787/pair#invite=… | the shape of a pairing link, an address
+Mono.swift | JetBrains Mono 2.304 | a font's name and version
+Mono.swift | Copyright 2020 The JetBrains Mono Project Authors | the font's licence notice, kept in the licence's own words
+PairView.swift | BACKPLANE | the product name as its wordmark
+Outbox.swift | Edit | the outbox rows take the hub's queue row shape (English, like the hub's own); the strip shows them through Tr.t
+Outbox.swift | Remove | the same: a queue row button in the hub's words, translated where the strip draws it

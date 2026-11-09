@@ -66,6 +66,10 @@ jobs:
             ios:
               - 'mobile/ios/**'
               - 'scripts/mobile/ios-unit-tests.sh'
+              - 'i18n/**'
+              - 'scripts/i18n-check.py'
+              - 'scripts/i18n-ios.py'
+              - 'scripts/check-ios-i18n.py'
               - 'test/mobile/**'
               - 'test/fixtures/voice-edits.json'
               - '.github/workflows/ci.yml'

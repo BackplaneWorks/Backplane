@@ -228,20 +228,20 @@ struct DVoiceStrip: View {
             VStack(alignment: .leading, spacing: 6) {
                 if !v.note.isEmpty {
                     HStack(spacing: 8) {
-                        Text(v.note).dmono(12).foregroundStyle(v.bad ? BackplaneDesign.bad : BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("voice.note")
-                        chip(DVoiceButton(label: "Close", action: "voice-err"))
+                        Text(Tr.t(v.note)).dmono(12).foregroundStyle(v.bad ? BackplaneDesign.bad : BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("voice.note")
+                        chip(DVoiceButton(label: Tr.t("Close"), action: "voice-err"))
                     }
                 }
                 if v.on {
                     HStack(spacing: 8) {
                         Rectangle().fill(BackplaneDesign.bad).frame(width: 8, height: 8)
-                        Text(v.status).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1).accessibilityIdentifier("voice.status")
+                        Text(Tr.t(v.status)).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1).accessibilityIdentifier("voice.status")
                         ZStack(alignment: .leading) {
                             Rectangle().fill(BackplaneDesign.line).frame(width: 72, height: 4)
                             Rectangle().fill(BackplaneDesign.accent).frame(width: 0.72 * CGFloat(client.voice.level), height: 4)
                         }.accessibilityIdentifier("voice.level").accessibilityValue("\(client.voice.level)")
                         Spacer(minLength: 0)
-                        Button(v.stop.isEmpty ? "Stop" : v.stop) { press() }.buttonStyle(DButton()).accessibilityIdentifier("voice.stop")
+                        Button(Tr.t(v.stop.isEmpty ? "Stop" : v.stop)) { press() }.buttonStyle(DButton()).accessibilityIdentifier("voice.stop")
                     }
                 }
                 if !v.fixes.isEmpty {
@@ -249,9 +249,9 @@ struct DVoiceStrip: View {
                 }
                 if let a = v.ask {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(a.text).dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("voice.ask")
+                        Text(Tr.t(a.text)).dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("voice.ask")
                         if a.fixing {
-                            TextField(a.field?.hint.isEmpty == false ? a.field!.hint : "The right spelling", text: $fixText)
+                            TextField(Tr.t(a.field?.hint.isEmpty == false ? a.field!.hint : "The right spelling"), text: $fixText)
                                 .dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
                                 .padding(.horizontal, 10).frame(minHeight: 40).dbox(BackplaneDesign.accent)
                                 .onSubmit { client.voice.act(thread, DVoiceButton(action: "voice-fixed"), value: fixText, draft: draft) }
@@ -280,7 +280,7 @@ struct DVoiceStrip: View {
         client.voice.press(thread, draft: draft, caret: at)
     }
     private func chip(_ b: DVoiceButton, primary: Bool = false, value: String? = nil) -> some View {
-        Button(b.label) { client.voice.act(thread, b, value: value, draft: draft) }
+        Button(Tr.t(b.label)) { client.voice.act(thread, b, value: value, draft: draft) }
             .buttonStyle(DButton(primary: primary))
             .accessibilityIdentifier("voice.chip")
     }
@@ -307,7 +307,7 @@ struct FlowRow: Layout {
 struct DataVoiceSection: View {
     @Bindable var client: DataClient
     var body: some View {
-        DPageRows(title: "Voice", idPrefix: "voice", rows: client.voice.rows, empty: "Not connected") { _, b, fields in
+        DPageRows(title: Tr.t("Voice"), idPrefix: "voice", rows: client.voice.rows, empty: Tr.t("Not connected")) { _, b, fields in
             await client.voice.pageAct(action: b.action, value: b.value, fields: fields)
         }
         .task(id: client.conn) { if client.conn == .online { await client.voice.loadPage() } }
@@ -329,14 +329,14 @@ struct DPageRows: View {
             DHeading(text: title)
             ForEach(rows) { r in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(r.label).dmono(13)
+                    Text(Tr.t(r.label)).dmono(13)
                     let note = errors[r.id] ?? r.note
-                    if !note.isEmpty { Text(note).dmono(11).foregroundStyle(errors[r.id] != nil || r.tone == "bad" ? BackplaneDesign.bad : r.tone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim) }
+                    if !note.isEmpty { Text(Tr.t(note)).dmono(11).foregroundStyle(errors[r.id] != nil || r.tone == "bad" ? BackplaneDesign.bad : r.tone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim) }
                     if !r.qr.isEmpty { DQRCode(rows: r.qr).accessibilityIdentifier(idPrefix + ".qr") }
-                    if !r.qrnote.isEmpty { Text(r.qrnote).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }
+                    if !r.qrnote.isEmpty { Text(Tr.t(r.qrnote)).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }
                     ForEach(r.fields, id: \.name) { f in
                         Group {
-                            if f.secret { SecureField(f.hint, text: binding(f)) } else { TextField(f.hint, text: binding(f)) }
+                            if f.secret { SecureField(Tr.t(f.hint), text: binding(f)) } else { TextField(Tr.t(f.hint), text: binding(f)) }
                         }
                         .dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(.horizontal, 10).frame(minHeight: 40).dbox()
@@ -345,7 +345,7 @@ struct DPageRows: View {
                     if !r.buttons.isEmpty {
                         FlowRow(spacing: 6) {
                             ForEach(Array(r.buttons.enumerated()), id: \.offset) { _, b in
-                                Button(b.label) { press(r, b) }.buttonStyle(DButton(primary: b.on)).accessibilityAddTraits(b.on ? .isSelected : []).accessibilityIdentifier(idPrefix + ".page." + b.action)
+                                Button(Tr.t(b.label)) { press(r, b) }.buttonStyle(DButton(primary: b.on)).accessibilityAddTraits(b.on ? .isSelected : []).accessibilityIdentifier(idPrefix + ".page." + b.action)
                             }
                         }
                     }

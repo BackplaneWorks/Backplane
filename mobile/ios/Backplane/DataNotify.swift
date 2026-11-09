@@ -30,7 +30,7 @@ final class NotifyModel {
 struct DataNotifySection: View {
     @Bindable var client: DataClient
     var body: some View {
-        DPageRows(title: "Notifications", idPrefix: "notify", rows: client.notify.rows, empty: "Not connected") { _, b, fields in
+        DPageRows(title: Tr.t("Notifications"), idPrefix: "notify", rows: client.notify.rows, empty: Tr.t("Not connected")) { _, b, fields in
             await client.notify.act(action: b.action, value: b.value, fields: fields)
         }
         .task(id: client.conn) { if client.conn == .online { await client.notify.load() } }

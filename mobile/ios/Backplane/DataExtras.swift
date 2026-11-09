@@ -12,12 +12,12 @@ struct DataThreadActions: View {
     @Binding var deleting: DThread?
     var body: some View {
         Group {
-            Button(thread.pinned ? "Unpin" : "Pin", systemImage: thread.pinned ? "pin.slash" : "pin") { Task { await client.threadAct(thread.id, thread.pinned ? "unpin" : "pin") } }
-            Button(thread.settled ? "Unsettle" : "Settle", systemImage: "checkmark.circle") { Task { await client.threadAct(thread.id, thread.settled ? "unsettle" : "settle") } }
-            Button(thread.archived ? "Unarchive" : "Archive", systemImage: "archivebox") { Task { await client.threadAct(thread.id, thread.archived ? "unarchive" : "archive") } }
-            if !thread.parent.isEmpty { Button("Move to top level", systemImage: "arrow.up.left") { Task { await client.threadAct(thread.id, "detach") } } }
-            Button("Rename", systemImage: "pencil") { renaming = thread }
-            Button("Delete…", systemImage: "trash", role: .destructive) { deleting = thread }
+            Button(Tr.t(thread.pinned ? "Unpin" : "Pin"), systemImage: thread.pinned ? "pin.slash" : "pin") { Task { await client.threadAct(thread.id, thread.pinned ? "unpin" : "pin") } }
+            Button(Tr.t(thread.settled ? "Unsettle" : "Settle"), systemImage: "checkmark.circle") { Task { await client.threadAct(thread.id, thread.settled ? "unsettle" : "settle") } }
+            Button(Tr.t(thread.archived ? "Unarchive" : "Archive"), systemImage: "archivebox") { Task { await client.threadAct(thread.id, thread.archived ? "unarchive" : "archive") } }
+            if !thread.parent.isEmpty { Button(Tr.t("Move to top level"), systemImage: "arrow.up.left") { Task { await client.threadAct(thread.id, "detach") } } }
+            Button(Tr.t("Rename"), systemImage: "pencil") { renaming = thread }
+            Button(Tr.t("Delete…"), systemImage: "trash", role: .destructive) { deleting = thread }
         }
     }
 }
@@ -31,15 +31,15 @@ struct DataThreadDialogs: ViewModifier {
     @State private var title = ""
     func body(content: Content) -> some View {
         content
-            .alert("Rename thread", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-                TextField("Title", text: $title)
-                Button("Rename") { if let t = renaming, !title.trimmingCharacters(in: .whitespaces).isEmpty { Task { await client.threadAct(t.id, "rename", title: title.trimmingCharacters(in: .whitespaces)) } } }
-                Button("Cancel", role: .cancel) {}
+            .alert(Tr.t("Rename thread"), isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField(Tr.t("Title"), text: $title)
+                Button(Tr.t("Rename")) { if let t = renaming, !title.trimmingCharacters(in: .whitespaces).isEmpty { Task { await client.threadAct(t.id, "rename", title: title.trimmingCharacters(in: .whitespaces)) } } }
+                Button(Tr.t("Cancel"), role: .cancel) {}
             }
             .onChange(of: renaming?.id) { _, _ in title = renaming?.title ?? "" }
-            .confirmationDialog("Delete “\(deleting?.title ?? "")”? This cannot be undone.", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
-                Button("Delete thread", role: .destructive) { if let t = deleting { Task { await client.threadAct(t.id, "delete"); deleted() } } }
-                Button("Keep it", role: .cancel) {}
+            .confirmationDialog(Tr.ios_thread_delete_ask(title: deleting?.title ?? ""), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+                Button(Tr.t("Delete thread"), role: .destructive) { if let t = deleting { Task { await client.threadAct(t.id, "delete"); deleted() } } }
+                Button(Tr.t("Keep it"), role: .cancel) {}
             }
     }
 }
@@ -81,14 +81,14 @@ struct DataSearchResults: View {
     var body: some View {
         List {
             if let r = result {
-                if r.threads.isEmpty && r.projects.isEmpty && r.messages.isEmpty { Text("Nothing matches “\(query)”").dmono(12).foregroundStyle(BackplaneDesign.dim).padding(12).dataRow() }
+                if r.threads.isEmpty && r.projects.isEmpty && r.messages.isEmpty { Text(Tr.ios_search_none(query: query)).dmono(12).foregroundStyle(BackplaneDesign.dim).padding(12).dataRow() }
                 ForEach(r.projects) { p in Label { Text(p.title).dmono(13) } icon: { Image(systemName: "folder").foregroundStyle(BackplaneDesign.ok) }.padding(.horizontal, 12).frame(minHeight: 40).dataRow().accessibilityIdentifier("data.search.project." + p.id) }
                 ForEach(r.threads.filter { !$0.history }) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
                 // the old Scratch chats the search found, under their group's name (feature history)
                 let old = r.threads.filter(\.history)
-                if !old.isEmpty { DHeading(text: "Conversation history").padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.history") }
+                if !old.isEmpty { DHeading(text: Tr.t("Conversation history")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.history") }
                 ForEach(old) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
-                if !r.messages.isEmpty { DHeading(text: "Messages").padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.messages") }
+                if !r.messages.isEmpty { DHeading(text: Tr.k("ios.search.messages")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.messages") }
                 ForEach(r.messages) { h in
                     Button { openAt(DThreadAt(id: h.thread, msg: h.msg)) } label: { DataMessageHit(hit: h, query: query) }
                         .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.message." + h.thread + "." + h.msg)
@@ -126,22 +126,22 @@ struct DataPickerSheet: View {
             HStack {
                 Text(picker?.chip ?? " ").dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).accessibilityIdentifier("data.picker.chip")
                 Spacer()
-                Button("Done") { dismiss() }.dmono(13, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("data.picker.done")
+                Button(Tr.t("Done")) { dismiss() }.dmono(13, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("data.picker.done")
             }.padding(.horizontal, 14).frame(height: 48)
             DLine()
-            if !error.isEmpty { Text(error).dmono(12).foregroundStyle(BackplaneDesign.bad).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).accessibilityIdentifier("data.picker.error") }
+            if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).accessibilityIdentifier("data.picker.error") }
             ScrollView {
                 // (a plain stack: Model's default and Effort's auto both have the value "", and a lazy stack draws the second blank)
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(picker?.sections ?? []) { s in
-                        DHeading(text: s.title).padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 4)
+                        DHeading(text: Tr.t(s.title)).padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 4)
                         ForEach(s.choices) { c in
                             Button { press(s, c) } label: {
                                 HStack(spacing: 8) {
                                     Text(c.on ? "✓" : "").dmono(13).foregroundStyle(BackplaneDesign.accent).frame(width: 16)
                                     VStack(alignment: .leading, spacing: 1) {
-                                        Text(c.label).dmono(13).foregroundStyle(c.ok ? BackplaneDesign.text : BackplaneDesign.faint)
-                                        if !c.ok, !c.why.isEmpty { Text(c.why).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                                        Text(Tr.t(c.label)).dmono(13).foregroundStyle(c.ok ? BackplaneDesign.text : BackplaneDesign.faint)
+                                        if !c.ok, !c.why.isEmpty { Text(Tr.t(c.why)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                                     }
                                     Spacer(minLength: 0)
                                 }.padding(.horizontal, 14).frame(minHeight: 44).background(c.on ? BackplaneDesign.raised : .clear).contentShape(Rectangle())
@@ -178,7 +178,7 @@ struct DataMentionBar: View {
                         Button {
                             let name = (m.sigil == "@" || m.sigil == "#" || m.sigil == "&") ? m.label : m.mid
                             pick(String(text[..<t.range.lowerBound]) + (m.word.isEmpty ? m.sigil + name : m.word) + " ")
-                        } label: { HStack { Text(m.sigil + m.label).dmono(12); Spacer(); Text(m.detail).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle()) }
+                        } label: { HStack { Text(m.sigil + m.label).dmono(12); Spacer(); Text(Tr.t(m.detail)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle()) }
                         .buttonStyle(.plain)
                         DLine()
                     }
@@ -205,7 +205,7 @@ struct DataRoomView: View {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(posts) { p in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(p.from.isEmpty ? "you" : p.from).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent)
+                            Text(p.from.isEmpty ? Tr.t("you") : p.from).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent)
                             DLinkText(text: p.text)
                         }
                     }
@@ -213,8 +213,8 @@ struct DataRoomView: View {
             }
             DLine()
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Post to #\(room.name)", text: $draft, axis: .vertical).dmono(13).padding(10).dbox(BackplaneDesign.accent).accessibilityIdentifier("data.room.composer")
-                Button("Post") { let t = draft; draft = ""; Task { try? await client.roomPost(room.id, t); posts = await client.roomPosts(room.id) } }
+                TextField(Tr.ios_room_post_to(room: room.name), text: $draft, axis: .vertical).dmono(13).padding(10).dbox(BackplaneDesign.accent).accessibilityIdentifier("data.room.composer")
+                Button(Tr.t("Post")) { let t = draft; draft = ""; Task { try? await client.roomPost(room.id, t); posts = await client.roomPosts(room.id) } }
                     .buttonStyle(DButton(primary: true)).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.room.post")
             }.padding(12)
         }
@@ -254,7 +254,7 @@ struct DataBadgeSheet: View {
         NavigationStack {
             Form {
                 if let l = list {
-                    Section("Colour") {
+                    Section(Tr.t("Colour")) {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 12) {
                             ForEach(l.colors, id: \.name) { t in
                                 Button { Task { await client.projectAct(project.id, "color", value: t.name) } } label: {
@@ -264,7 +264,7 @@ struct DataBadgeSheet: View {
                             }
                         }
                     }
-                    Section("Icon") {
+                    Section(Tr.t("Icon")) {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 12) {
                             ForEach(l.icons, id: \.self) { n in
                                 Button { Task { await client.projectAct(project.id, "icon", value: n) } } label: {
@@ -277,7 +277,7 @@ struct DataBadgeSheet: View {
                 } else { ProgressView() }
             }
             .navigationTitle(project.title).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(Tr.t("Done")) { dismiss() } } }
         }
         .task { list = await client.badgeList() }
     }
@@ -302,14 +302,14 @@ struct DataFindInThread: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
-                TextField("Words said in this thread", text: $q).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField(Tr.t("Words said in this thread"), text: $q).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .padding(.horizontal, 10).frame(height: 40).dbox().padding(12).accessibilityIdentifier("data.find.field")
                 if let h = hits {
-                    if h.isEmpty { Text("nothing said here matches “\(q.trimmingCharacters(in: .whitespaces))”").dmono(12).foregroundStyle(BackplaneDesign.dim).padding(14) }
+                    if h.isEmpty { Text(Tr.ios_find_none(query: q.trimmingCharacters(in: .whitespaces))).dmono(12).foregroundStyle(BackplaneDesign.dim).padding(14) }
                     List(h) { x in
                         Button { go(x.msg) } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text((x.role == "user" ? "you" : "agent") + " · " + dAgo(x.at)).dmono(11).foregroundStyle(BackplaneDesign.faint)
+                                Text(Tr.t(x.role == "user" ? "you" : "agent") + " · " + dAgo(x.at)).dmono(11).foregroundStyle(BackplaneDesign.faint)
                                 Text(x.text).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(3)
                             }
                         }.buttonStyle(.plain).accessibilityIdentifier("data.find.hit")
@@ -318,8 +318,8 @@ struct DataFindInThread: View {
                 Spacer(minLength: 0)
             }
             .background(BackplaneDesign.background)
-            .navigationTitle("Search in thread").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .navigationTitle(Tr.t("Search in thread")).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(Tr.t("Done")) { dismiss() } } }
             .task(id: q) {
                 let w = q.trimmingCharacters(in: .whitespaces)
                 if w.isEmpty { hits = nil; return }

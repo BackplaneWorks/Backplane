@@ -48,25 +48,25 @@ struct DataHubView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Text(client.hubName).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
-                Text(panel.text).dmono(14).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("hub.text")
+                Text(Tr.t(panel.text)).dmono(14).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("hub.text")
                 ForEach(panel.actions) { a in
-                    Button { asking = a } label: { Text(a.label).frame(maxWidth: .infinity, alignment: .leading) }
+                    Button { asking = a } label: { Text(Tr.t(a.label)).frame(maxWidth: .infinity, alignment: .leading) }
                         .buttonStyle(DButton()).disabled(busy).accessibilityIdentifier("hub.action." + a.id)
                 }
-                if !answer.isEmpty { Text(answer).dmono(13).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("hub.answer") }
-                if !progress.isEmpty { Text(progress).dmono(13).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("hub.progress") }
+                if !answer.isEmpty { Text(Tr.t(answer)).dmono(13).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("hub.answer") }
+                if !progress.isEmpty { Text(Tr.t(progress)).dmono(13).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("hub.progress") }
                 if fetch != .loading {
-                    Button("Refresh") { fetch = .loading; Task { await load() } }.buttonStyle(DButton()).disabled(busy).accessibilityIdentifier("hub.refresh")
+                    Button(Tr.t("Refresh")) { fetch = .loading; Task { await load() } }.buttonStyle(DButton()).disabled(busy).accessibilityIdentifier("hub.refresh")
                 }
                 ForEach(Array(panel.incidents.enumerated()), id: \.offset) { _, i in
                     DLine()
                     Text(dStamp(Int(i.atMs))).dmono(11).foregroundStyle(BackplaneDesign.faint)
-                    Text([i.what, i.why, i.did].filter { !$0.isEmpty }.joined(separator: " · ")).dmono(12).foregroundStyle(BackplaneDesign.dim)
+                    Text(Tr.t([i.what, i.why, i.did].filter { !$0.isEmpty }.joined(separator: " · "))).dmono(12).foregroundStyle(BackplaneDesign.dim)
                 }
             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(BackplaneDesign.background)
-        .dataBar("Hub")
+        .dataBar(Tr.t("Hub"))
         .task {
             http = client.hubHttp(); await load()
             #if DEBUG
@@ -77,10 +77,10 @@ struct DataHubView: View {
             #endif
         }
         .task(id: Wait(from: waitFrom, active: phase == .active)) { await poll() }
-        .alert((asking?.label ?? "") + "?", isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }), presenting: asking) { a in
-            Button(a.label) { send(a) }
-            Button("Cancel", role: .cancel) {}
-        } message: { a in if !a.text.isEmpty { Text(a.text) } }
+        .alert(Tr.t(asking?.label ?? "") + "?", isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } }), presenting: asking) { a in
+            Button(Tr.t(a.label)) { send(a) }
+            Button(Tr.t("Cancel"), role: .cancel) {}
+        } message: { a in if !a.text.isEmpty { Text(Tr.t(a.text)) } }
     }
 }
 
@@ -93,7 +93,7 @@ struct DataHubBanner: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 8) {
                         DDot(color: client.notice.warn ? BackplaneDesign.warn : BackplaneDesign.faint, size: 8)
-                        Text(client.notice.text).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                        Text(Tr.t(client.notice.text)).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1)
                         Spacer(minLength: 0)
                     }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.raised)
                     DLine()
@@ -111,11 +111,11 @@ struct DataStarBanner: View {
         if let s = client.star {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
-                    Text(s.text).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2)
+                    Text(Tr.t(s.text)).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2)
                     Spacer(minLength: 0)
-                    Button(s.label.isEmpty ? "Star on GitHub" : s.label) { if let u = URL(string: s.url) { openURL(u) }; client.starDecide("open") }
+                    Button(Tr.t(s.label.isEmpty ? "Star on GitHub" : s.label)) { if let u = URL(string: s.url) { openURL(u) }; client.starDecide("open") }
                         .buttonStyle(DButton(primary: true)).accessibilityIdentifier("star.open")
-                    Button("Dismiss") { client.starDecide("dismiss") }.dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("star.dismiss")
+                    Button(Tr.t("Dismiss")) { client.starDecide("dismiss") }.dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("star.dismiss")
                 }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.raised)
                 DLine()
             }
@@ -134,11 +134,11 @@ struct DataMigrationBanner: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             DDot(color: dMigColor(c), size: 8)
-                            Text(c.title).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                            Text(Tr.t(c.title)).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1)
                             Spacer(minLength: 0)
                         }
                         if let f = c.fill { DMigBar(fill: f) }
-                        ForEach(Array(c.short.enumerated()), id: \.offset) { _, l in Text(l).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }
+                        ForEach(Array(c.short.enumerated()), id: \.offset) { _, l in Text(Tr.t(l)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }
                     }.padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.raised)
                     DLine()
                 }
@@ -154,21 +154,21 @@ struct DataMigrationCard: View {
         ScrollView {
             if let c = client.migration.card {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(c.title).dmono(15, bold: true).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("migration.title")
-                    if !c.body.isEmpty { Text(c.body).dmono(13).foregroundStyle(BackplaneDesign.text).fixedSize(horizontal: false, vertical: true) }
+                    Text(Tr.t(c.title)).dmono(15, bold: true).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("migration.title")
+                    if !c.body.isEmpty { Text(Tr.t(c.body)).dmono(13).foregroundStyle(BackplaneDesign.text).fixedSize(horizontal: false, vertical: true) }
                     if let f = c.fill { DMigBar(fill: f, height: 6) }
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(Array(c.lines.enumerated()), id: \.offset) { _, l in Text(l).dmono(12).foregroundStyle(BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
+                        ForEach(Array(c.lines.enumerated()), id: \.offset) { _, l in Text(Tr.t(l)).dmono(12).foregroundStyle(BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
                     }
                     if !c.buttons.isEmpty {
                         HStack(spacing: 8) {
                             ForEach(Array(c.buttons.enumerated()), id: \.offset) { _, b in
-                                Button(b.label) { client.migrationAct(b) }.buttonStyle(DButton(primary: b.on)).disabled(client.migrationBusy)
+                                Button(Tr.t(b.label)) { client.migrationAct(b) }.buttonStyle(DButton(primary: b.on)).disabled(client.migrationBusy)
                                     .accessibilityIdentifier("migration.button.\(b.value)")
                             }
                         }
                     }
-                    if !client.migrationError.isEmpty { Text(client.migrationError).dmono(12).foregroundStyle(BackplaneDesign.warn) }
+                    if !client.migrationError.isEmpty { Text(Tr.t(client.migrationError)).dmono(12).foregroundStyle(BackplaneDesign.warn) }
                 }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             }
         }

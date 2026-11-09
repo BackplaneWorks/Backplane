@@ -122,7 +122,7 @@ final class TermInputSurface: TermSurface, UIKeyInput, UITextInputTraits, UIEdit
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isAccessibilityElement = true; accessibilityIdentifier = "term.screen"; accessibilityLabel = "Terminal"
+        isAccessibilityElement = true; accessibilityIdentifier = "term.screen"; accessibilityLabel = Tr.t("Terminal")
         accessory.press = { [weak self] in self?.accessoryKey($0) }
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
         addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))))
@@ -222,7 +222,7 @@ final class TermInputSurface: TermSurface, UIKeyInput, UITextInputTraits, UIEdit
         menu?.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: g.location(in: self)))
     }
     func editMenuInteraction(_ i: UIEditMenuInteraction, menuFor c: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
-        UIMenu(children: [UIAction(title: "Paste") { [weak self] _ in self?.paste(nil) }])
+        UIMenu(children: [UIAction(title: Tr.t("Paste")) { [weak self] _ in self?.paste(nil) }])
     }
     func pasteFromButton() { paste(nil) }
     func scrollToBottom() { scroll = 0 }

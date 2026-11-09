@@ -305,19 +305,19 @@ struct DataPadView: View {
 
     private var hint: String {
         switch pad.tool {
-        case .pen: return "Drag to draw"
-        case .boxes: return "Drag to draw a box · drag its middle to move it, a side to resize · tap a side to type its length"
-        case .eraser: return "Drag over what to erase"
+        case .pen: return Tr.t("Drag to draw")
+        case .boxes: return Tr.t("Drag to draw a box · drag its middle to move it, a side to resize · tap a side to type its length")
+        case .eraser: return Tr.t("Drag over what to erase")
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Draw").dmono(15, bold: true).foregroundStyle(BackplaneDesign.text)
+            Text(Tr.t("Draw")).dmono(15, bold: true).foregroundStyle(BackplaneDesign.text)
             Text(hint).dmono(11).foregroundStyle(BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("data.pad.hint")
             HStack(spacing: 6) {
                 ForEach([(PadTool.pen, "Pen"), (.boxes, "Box"), (.eraser, "Eraser")], id: \.1) { t, label in
-                    Button(label) { pad.setTool(t) }.buttonStyle(DButton(primary: pad.tool == t)).accessibilityIdentifier("data.pad." + label.lowercased())
+                    Button(Tr.t(label)) { pad.setTool(t) }.buttonStyle(DButton(primary: pad.tool == t)).accessibilityIdentifier("data.pad." + label.lowercased())
                         .accessibilityAddTraits(pad.tool == t ? .isSelected : [])
                 }
             }
@@ -325,7 +325,7 @@ struct DataPadView: View {
                 ForEach(padColors.indices, id: \.self) { i in
                     let on = pad.next % padColors.count == i
                     Button { pad.setColor(i) } label: { Rectangle().fill(Color(cgColor: cg(padColors[i]))).frame(width: 28, height: 28).padding(on ? 3 : 1).overlay(Rectangle().strokeBorder(on ? BackplaneDesign.text : BackplaneDesign.line, lineWidth: on ? 3 : 1)) }
-                        .buttonStyle(.plain).accessibilityLabel("Colour \(i + 1)").accessibilityAddTraits(on ? .isSelected : []).accessibilityIdentifier("data.pad.color.\(i)")
+                        .buttonStyle(.plain).accessibilityLabel(Tr.ios_pad_colour(n: String(i + 1))).accessibilityAddTraits(on ? .isSelected : []).accessibilityIdentifier("data.pad.color.\(i)")
                 }
             }
             GeometryReader { geo in
@@ -345,27 +345,27 @@ struct DataPadView: View {
                         pad.moved(v.location.x * k, v.location.y * k)
                     }
                     .onEnded { _ in if pad.up() { length = pad.lengthText(); asking = true } })
-                .accessibilityLabel("Drawing paper").accessibilityIdentifier("data.pad.paper")
+                .accessibilityLabel(Tr.t("Drawing paper")).accessibilityIdentifier("data.pad.paper")
             }
             .aspectRatio(padW / padH, contentMode: .fit)
             // a touch the system took away ends with no onEnded: what was being drawn is dropped (after onEnded has had its chance)
             .onChange(of: pressing) { _, on in if !on { DispatchQueue.main.async { if pad.dragging { pad.cancel() } } } }
             HStack(spacing: 6) {
-                Button("Undo") { pad.undo() }.buttonStyle(DButton()).disabled(!pad.canUndo).accessibilityIdentifier("data.pad.undo")
-                Button(pad.picked != nil ? "Delete" : "Clear") { pad.delete() }.buttonStyle(DButton()).disabled(pad.isEmpty).accessibilityIdentifier("data.pad.delete")
+                Button(Tr.t("Undo")) { pad.undo() }.buttonStyle(DButton()).disabled(!pad.canUndo).accessibilityIdentifier("data.pad.undo")
+                Button(Tr.t(pad.picked != nil ? "Delete" : "Clear")) { pad.delete() }.buttonStyle(DButton()).disabled(pad.isEmpty).accessibilityIdentifier("data.pad.delete")
                 Spacer(minLength: 0)
-                Button("Cancel") { dismiss() }.buttonStyle(DButton()).accessibilityIdentifier("data.pad.cancel")
-                Button("Attach") { if let d = padPicture(pad) { attach(d) }; dismiss() }.buttonStyle(DButton(primary: true)).disabled(pad.isEmpty).accessibilityIdentifier("data.pad.attach")
+                Button(Tr.t("Cancel")) { dismiss() }.buttonStyle(DButton()).accessibilityIdentifier("data.pad.cancel")
+                Button(Tr.t("Attach")) { if let d = padPicture(pad) { attach(d) }; dismiss() }.buttonStyle(DButton(primary: true)).disabled(pad.isEmpty).accessibilityIdentifier("data.pad.attach")
             }
             Spacer(minLength: 0)
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(BackplaneDesign.background)
-        .alert("Length, e.g. 40 mm", isPresented: $asking) {
-            TextField("40 mm", text: $length).accessibilityIdentifier("data.pad.length")
-            Button("Set") { pad.commitLength(length) }
-            Button("Cancel", role: .cancel) { pad.cancelLength() }
+        .alert(Tr.t("Length, e.g. 40 mm"), isPresented: $asking) {
+            TextField(Tr.t("40 mm"), text: $length).accessibilityIdentifier("data.pad.length")
+            Button(Tr.t("Set")) { pad.commitLength(length) }
+            Button(Tr.t("Cancel"), role: .cancel) { pad.cancelLength() }
         }
     }
 }
