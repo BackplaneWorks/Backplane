@@ -217,7 +217,8 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     let mut want = string(viewer, "key");
     // a comparison on show is its own source: `diff\n<old>\n<live>` after the key; another page puts it away
     if let Some(cmp) = pv.compare.clone() { if cmp.base == want { want = format!("{want}{}", super::histbar::shown(&cmp)); } else { pv.compare = None; } }
-    if !want.is_empty() && !frame.key.is_empty() && frame.key != want { return super::histbar::under(cx, light, pv, &vkey, hb, loading(actions)) }
+    // (another version of the same file keeps the last one on the canvas until it comes, as 0.14 did: stepping does not blink to "Loading")
+    if !want.is_empty() && !frame.key.is_empty() && frame.key != want && !super::histbar::same_file(&vkey, &frame.key, &want) { return super::histbar::under(cx, light, pv, &vkey, hb, loading(actions)) }
     if !frame.none.is_empty() { return super::histbar::under(cx, light, pv, &vkey, hb, status_row(light, &super::histbar::none_words(&frame.none), actions)); }
     if pv.focus.is_none() { pv.focus = Some(cx.focus_handle()); }
     let (w, h) = pv.bounds.map_or((480., 600.), |b| (f32::from(b.size.width), f32::from(b.size.height)));
