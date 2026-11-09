@@ -73,6 +73,14 @@ pub fn bar(es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Va
 /// The same from steps already read (and placed: `locate`).
 pub fn bar_of(all: Vec<Step>, es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Value {
     let by: HashMap<&str, &Src> = es.iter().map(|e| (e.id.as_str(), e)).collect();
+    // the thread's row a step points at: a message is its own row; a tool call or a step sits in a run the thread folds, "fold:<its first>"
+    let mut fold: HashMap<&str, String> = HashMap::new(); let mut first: Option<&str> = None;
+    for e in es {
+        let base = step_of(e).is_some_and(|s| s.base);
+        if !e.msg && (e.role == "tool" || e.role == "step") && !base { let f = *first.get_or_insert(e.id.as_str()); fold.insert(e.id.as_str(), format!("fold:{f}")); }
+        else if !base { first = None }
+    }
+    let row = |s: &Step| -> String { match by.get(s.entry.as_str()) { Some(e) if e.msg => e.id.clone(), _ => fold.get(s.entry.as_str()).or_else(|| fold.get(s.id.as_str())).cloned().unwrap_or_default() } };
     let tr = track(&all, kind, file);
     let n = tr.len();
     let rows: Vec<Value> = tr.iter().enumerate().map(|(i, s)| {
@@ -83,7 +91,7 @@ pub fn bar_of(all: Vec<Step>, es: &[Src], kind: u8, file: &str, when: &dyn Fn(u6
         json!({"c": s.c, "p": s.p, "t": s.at, "id": s.id, "entry": s.entry, "base": s.base,
             "old": if s.po { version(&s.g, &s.top, &s.p, &f) } else { String::new() }, "new": version(&s.g, &s.top, &s.c, &f),
             "label": format!("Step {}", i + 1), "tip": format!("Step {} · {at}", i + 1), "title": title,
-            "detail": format!("Saved {at} · {}", source(&by, &s.entry)), "files": names(&s.files)})
+            "detail": format!("Saved {at} · {}", source(&by, &s.entry)), "files": names(&s.files), "row": row(s)})
     }).collect();
     let (c, total) = (tr.iter().filter(|s| !s.base).count(), all.iter().filter(|s| !s.base).count());
     json!({"steps": rows, "live": live_words(c, total),
@@ -197,6 +205,7 @@ mod tests {
         assert_eq!(s[1]["old"], "git\t/p/.git\tc0\t2\t/p/b.kicad_pcb"); assert_eq!(s[1]["new"], "git\t/p/.git\tc1\t2\t/p/b.kicad_pcb");
         assert_eq!(s[0]["old"], "", "the first step has no version before it");
         assert_eq!(s[1]["entry"], "tu1"); assert_eq!(s[0]["base"], true);
+        assert_eq!((s[0]["row"].as_str(), s[1]["row"].as_str(), s[2]["row"].as_str()), (Some("m1"), Some("fold:tu1"), Some("fold:step:c3")), "a message is its row; a tool call or a turn's end is in its folded run");
         assert_eq!(v["live"], "Live · 2 of 3 changes", "the design as it was before is no change; the schematic's change counts for the thread");
         let sch = bar(&log(), 1, "", &|t| format!("T{t}"));
         let s = sch["steps"].as_array().unwrap();

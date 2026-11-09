@@ -13,10 +13,10 @@ use serde_json::{json, Value};
 /// A step of the file's track as the hub words it: its commits and time, the version paths showing it (`old` the step before, "" for a first;
 /// `new` the step), and its words for the scrubber's tick (`tip`), the bar's title and the line under it (`detail`), and the thread entry it followed.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Step { pub c: String, pub p: String, pub t: u64, pub old: String, pub new: String, pub label: String, pub tip: String, pub title: String, pub detail: String, pub entry: String, pub id: String }
+pub struct Step { pub c: String, pub p: String, pub t: u64, pub old: String, pub new: String, pub label: String, pub tip: String, pub title: String, pub detail: String, pub entry: String, pub id: String, /** the thread's row it points at (a message, or the folded run it is in) */ pub row: String }
 /// The track of the file on show and the bar's own words while the live file shows (`live`, `note`).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Steps { pub git: String, pub top: String, pub pcb: String, pub sch: String, pub file: String, pub live: String, pub note: String, pub steps: Vec<Step> }
+pub struct Steps { pub git: String, pub top: String, pub pcb: String, pub sch: String, pub file: String, pub kind: String, pub live: String, pub note: String, pub steps: Vec<Step> }
 pub fn steps_of(v: &Value) -> Option<Steps> {
     if !v.is_object() { return None }
     let g = |k: &str| v[k].as_str().unwrap_or("").to_string();
@@ -28,10 +28,10 @@ pub fn steps_of(v: &Value) -> Option<Steps> {
         let (old, new) = if s.get("new").is_some() { (w("old"), w("new")) } else { (version(&git, &top, &p, &file), version(&git, &top, &c, &file)) };
         let label = if w("label").is_empty() { format!("Step {}", i + 1) } else { w("label") };
         Some(Step { t: s["t"].as_u64().unwrap_or(0), title: if w("title").is_empty() { label.clone() } else { w("title") }, tip: if w("tip").is_empty() { label.clone() } else { w("tip") },
-            detail: w("detail"), entry: w("entry"), id: w("id"), c, p, old, new, label })
+            detail: w("detail"), entry: w("entry"), id: w("id"), row: w("row"), c, p, old, new, label })
     }).collect();
     let live = if g("live").is_empty() { if steps.is_empty() { "Live".to_string() } else { format!("Live · {} steps", steps.len()) } } else { g("live") };
-    Some(Steps { pcb: g("pcb"), sch: g("sch"), note: g("note"), live, git, top, file, steps })
+    Some(Steps { pcb: g("pcb"), sch: g("sch"), kind: g("kind"), note: g("note"), live, git, top, file, steps })
 }
 
 /// core/hist's version path of `file` in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>" ("" when the file is not under the top folder).
@@ -52,7 +52,8 @@ pub fn shown(c: &Cmp) -> String {
 /// edits on the step before, not as the file it left); `asked`: the thread and viewer key the track was asked for; `sig`: the thread's step rows
 /// last seen in a picture (a new one asks again).
 #[derive(Default, Clone)]
-pub struct Hist { pub steps: Option<Steps>, pub refs: Option<super::plot::Refs>, pub at: Option<usize>, pub play: u64, pub playing: bool, pub diff: bool, pub asked: String, pub thread: String, pub sig: u64 }
+pub struct Hist { pub steps: Option<Steps>, pub refs: Option<super::plot::Refs>, pub at: Option<usize>, pub play: u64, pub playing: bool, pub diff: bool, pub asked: String, pub thread: String, pub sig: u64,
+    /** a step row pressed in the thread: its act id and the kinds still to look in, shown once its track comes */ pub pending: Option<(String, Vec<String>)> }
 
 fn open_file(app: &Backplane) -> Option<(String, String, String, String)> { // (kind, key, root, the file shown)
     let v = &app.data["thread"]["viewer"];
@@ -161,7 +162,9 @@ fn stop(app: &mut Backplane) { app.screens.plotview.hist.playing = false; app.sc
 /// Go to the point of the thread the step on show followed (when the rows on screen have it).
 pub fn jump(app: &mut Backplane) {
     let Some(s) = app.screens.plotview.hist.at.and_then(|i| app.screens.plotview.hist.steps.as_ref().and_then(|h| h.steps.get(i).cloned())) else { return };
-    for id in [s.entry.as_str(), s.id.as_str()] { if !id.is_empty() { app.timeline_goto(id) } }
+    let held = |app: &Backplane, id: &str| !id.is_empty() && app.data["thread"]["entries"].as_array().is_some_and(|r| r.iter().any(|e| e["id"].as_str() == Some(id)));
+    // (only among the rows held: the timeline's paging lands a row read later in another place)
+    for id in [s.row.as_str(), s.entry.as_str()] { if held(app, id) { return app.timeline_goto(id) } }
 }
 
 /// Step playback: from the step after the one on show (the first from live) every 1.2 s to the newest, then back to live. A press while it plays stops it.
@@ -181,6 +184,46 @@ pub fn play(app: &mut Backplane, cx: &mut Context<Backplane>) {
         }).unwrap_or(false);
         if !go { break }
     }).detach();
+}
+
+/// The kinds of file a step row's words name, the board first ("Design change · heater.kicad_pcb, controller.kicad_sch (new)"); a removed file shows nothing.
+pub fn row_kinds(text: &str) -> Vec<String> {
+    let names: Vec<&str> = text.split(" · ").skip(1).flat_map(|f| f.split(", ")).filter(|f| !f.ends_with(" (removed)")).collect();
+    [("board", ".kicad_pcb"), ("schematic", ".kicad_sch")].iter().filter(|(_, ext)| names.iter().any(|n| n.trim_end_matches(" (new)").ends_with(ext))).map(|(k, _)| k.to_string()).collect()
+}
+/// A step row in the thread pressed (0.14's hist-show): the viewer opens on the board (or the schematic) the step changed, at that step.
+pub fn show_step(app: &mut Backplane, id: &str, text: &str) {
+    let mut kinds = row_kinds(text); if kinds.is_empty() { return }
+    let kind = kinds.remove(0);
+    app.screens.plotview.hist.pending = Some((id.to_string(), kinds));
+    let open = app.data["thread"]["viewer"]["open"].as_str().unwrap_or("").to_string();
+    if open == kind && app.screens.plotview.hist.steps.is_some() { return arrived(app) }
+    let _ = app.tx.try_send(super::viewer::view_kind(&kind));
+}
+/// A track came: a step row pressed is shown when it is on it; else the next kind it changed is opened, or nothing.
+pub fn arrived(app: &mut Backplane) {
+    let Some((id, mut rest)) = app.screens.plotview.hist.pending.clone() else { return };
+    // (an answer for the kind shown before the press is not the one to look in)
+    let open = app.data["thread"]["viewer"]["open"].as_str().unwrap_or("").to_string();
+    if app.screens.plotview.hist.steps.as_ref().is_some_and(|h| !h.kind.is_empty() && h.kind != open) { return }
+    let i = app.screens.plotview.hist.steps.as_ref().and_then(|h| h.steps.iter().position(|s| s.id == id));
+    match i {
+        Some(i) => { app.screens.plotview.hist.pending = None; stop(app); select(app, Some(i)) }
+        None if !rest.is_empty() => { let k = rest.remove(0); app.screens.plotview.hist.pending = Some((id, rest)); let _ = app.tx.try_send(super::viewer::view_kind(&k)); }
+        None => app.screens.plotview.hist.pending = None,
+    }
+}
+/// A design step's row in the thread: its words with the history mark; a press shows that change in the viewer.
+pub fn step_row(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let (id, text) = (e["id"].as_str().unwrap_or("").to_string(), e["text"].as_str().unwrap_or("").to_string());
+    let value = e["value"].as_str().filter(|v| !v.is_empty()).map_or(id.clone(), str::to_string);
+    let can = !row_kinds(&text).is_empty();
+    let d = div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim"))
+        .child(art::icon("history", 14., theme::color(light, "dim"))).child(div().min_w_0().child(text.clone()));
+    if !can { return d.into_any_element() }
+    d.cursor_pointer().hover(|s| s.text_color(c("text"))).tooltip(crate::keys::tip("Show this change in the viewer", "", light))
+        .on_click(cx.listener(move |this, _, _, cx| { show_step(this, &value, &text); cx.notify(); })).into_any_element()
 }
 
 /// The menu's rows of versions: (label, what it is, what a press does).
@@ -343,6 +386,12 @@ mod tests {
     #[test] fn the_hubs_reasons_read_as_words() {
         assert_eq!(none_words("@bp.file-unread"), "This version of the file could not be read."); assert_eq!(none_words("@bp.file-missing:a.kicad_pcb"), "a.kicad_pcb is not there: it was moved or deleted.");
         assert_eq!(none_words("Invalid geometry"), "Invalid geometry");
+    }
+    #[test] fn a_step_row_opens_the_kinds_it_changed_board_first() {
+        assert_eq!(row_kinds("Design change · heater.kicad_pcb"), ["board"]);
+        assert_eq!(row_kinds("Design change · a.kicad_sch (new), b.kicad_pcb"), ["board", "schematic"]);
+        assert_eq!(row_kinds("Design change · old.kicad_pcb (removed), s.kicad_sch"), ["schematic"], "a removed file shows nothing");
+        assert!(row_kinds("Design change").is_empty()); assert!(row_kinds("Design change · notes.md").is_empty());
     }
     #[test] fn the_arrows_go_as_0_14s_did() {
         assert_eq!(back(None, 3), Some(2), "from live, back is the newest step"); assert_eq!(back(Some(2), 3), Some(1)); assert_eq!(back(Some(0), 3), Some(0)); assert_eq!(back(None, 0), None);

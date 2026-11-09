@@ -250,6 +250,7 @@ impl Backplane {
                 col.child(div().flex().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(stamp).child(tools)).into_any_element()
             }
             "term" => self.term_card(&e, light, cx),
+            "step" => crate::screens::histbar::step_row(cx, light, &e),
             _ if !text.is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).child(text).into_any_element(),
             _ => div().into_any_element(),
         };
