@@ -92,6 +92,9 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let kind = if kind == "files" && files_kind(prev) { "" } else { kind };
     let root = root_of(st, sel);
     // what the hub is asked to watch: the kind and path View.ask sends (Mech's part is a 3D model; a split watches three sources)
+    // Mech opened from the rail (no part named) shows the part chosen last in this thread, as it was left
+    let kept_part = s(d, &format!("@mech.part:{sel}")).to_string();
+    let part = if kind == "mech" && part.is_empty() { kept_part.as_str() } else { part };
     let (want, wkind, wpath) = if kind == "mech" { let part = part.strip_prefix(&format!("{root}/")).unwrap_or(part); let ps = parts_of(&root, sel, part); let (w, a) = mech_want(&root, &ps, part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a) } else { (key(kind, &root), kind.to_string(), String::new()) };
     let at = s(d, "@view.at");
     let mut rid = session["rid"].as_u64().unwrap_or(0);
@@ -99,7 +102,7 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.file:{sel}"), json!("")); drafts.insert(format!("@view:{sel}"), json!(kind));
     drafts.insert(format!("@view.sheet:{sel}"), json!(""));
-    drafts.insert(format!("@mech.part:{sel}"), json!(if kind == "mech" { part.strip_prefix(&format!("{root}/")).unwrap_or(part) } else { "" }));
+    if kind == "mech" { drafts.insert(format!("@mech.part:{sel}"), json!(part.strip_prefix(&format!("{root}/")).unwrap_or(part))); } // another page leaves Mech's choice as it is
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
         // View.ask: the kind, the root, the path ("" for the project's own file) and the board tree ("")
@@ -823,6 +826,14 @@ mod tests {
         let o = view_action(&st, "h", &session, &format!("mech\t{root}/mech/b.step")).unwrap();
         assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "mech/b.step");
         let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"3d\"") && w.contains(&format!("{root}/mech/b.step")), "{w}");
+        // another page, then Mech again from the rail (no part named): the part chosen last, not the first
+        let session = json!({"sel": th, "rid": 2, "drafts": {format!("@view:{th}"): "mech", format!("@mech.part:{th}"): "mech/b.step"}, "open": {}, "adding": false, "panel": false, "info": {}});
+        let o = view_action(&st, "h", &session, "3d").unwrap();
+        assert!(o.patch["drafts"].get(format!("@mech.part:{th}")).is_none(), "3D leaves Mech's choice");
+        let session = json!({"sel": th, "rid": 3, "drafts": {format!("@view:{th}"): "3d", format!("@mech.part:{th}"): "mech/b.step"}, "open": {}, "adding": false, "panel": false, "info": {}});
+        let o = view_action(&st, "h", &session, "mech").unwrap();
+        assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "mech/b.step");
+        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains(&format!("{root}/mech/b.step")), "{w}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
