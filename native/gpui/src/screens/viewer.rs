@@ -482,12 +482,12 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { let a = acts(cx); super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target, a) }
         else if open == "review" && viewer["review"].is_object() { let a = acts(cx); review_page(cx, reg, light, &viewer["review"], a) }
         else if matches!(open, "board" | "schematic") { let a = acts(cx); plot_page(cx, light, open, viewer, plot, pv, a) }
-        else if open == "split" { let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default(); let a = acts(cx); split_page(cx, light, viewer, plot, split_pv, solid, &have, a) }
+        else if open == "split" { let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default(); let a = acts(cx); split_page(cx, light, viewer, plot, split_pv, solid, &have, a) }
         else if matches!(open, "3d" | "mech") {
             let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
             // what the page HOLDS, not what was queued for it: a big model's decode, a frame that fails or is replaced in the worker's slot
-            let have = solid.map(|s| s.read(cx).key().to_string()).unwrap_or_default();
+            let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default();
             let ready = matches!(solid, Some(s) if solid_ready(&want, &have));
             // the 3D page's own tools float top left over the model: they wrap short of the corner the pane's controls take
             if let Some(s) = solid { let room = if open == "3d" && ready { CORNER_ROOM } else { 0. }; if s.read(cx).reserve != room { s.update(cx, |p, cx| { p.reserve = room; cx.notify(); }); } }
