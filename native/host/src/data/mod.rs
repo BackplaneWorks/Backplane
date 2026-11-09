@@ -338,7 +338,8 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         "project.add" => {
             let path = s(p, "path"); if path.is_empty() { return Err(err("path")) }
             let want = crate::plat::fs::canonicalize(path).map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string());
-            rpc(hub, c, "project.add", json!({"path":path})).await?;
+            // the phone opens its New thread screen next and makes the first thread from it: no empty starter thread (desktop's + keeps one)
+            rpc(hub, c, "project.add", json!({"path":path, "starter": false})).await?;
             for _ in 0..40 {
                 { let g = hub.model().await; let asks = HashMap::new();
                   if let Some((id, _)) = g.projects.iter().find(|(_, x)| !x.removed && (x.root == want || x.root == path)) { if let Some(v) = project_json(&g, id, &asks) { return Ok(json!({"project":v})) } } }
