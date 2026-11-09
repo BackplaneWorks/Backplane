@@ -144,7 +144,7 @@ pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edg
 /// The chunks this client holds per source (a delta names its `base` source; a Split watches a schematic and a board at once), the newest frame
 /// (`frame`, the one Board and Schematic draw) and each source's own (`frames`, what a Split's panes draw).
 #[derive(Default)]
-pub struct Store { pub sheets: Vec<Sheet>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame> }
+pub struct Store { pub sheets: Vec<Sheet>, /** each sheet file's references (Hier.refs), for "C39 is on the sheet ..." */ pub sheet_refs: Vec<(String, Vec<String>)>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame> }
 
 const MAX_SOURCES: usize = 6;
 
@@ -254,6 +254,18 @@ pub fn compare_path(r: &Refs, commit: &str, file: &str) -> Option<String> {
 /// A sheet of the schematic's hierarchy (Hier.show's line: depth, leaf, name, file; the root is the first row).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sheet { pub depth: u32, pub leaf: bool, pub name: String, pub file: String }
+/// `file<TAB>ref<TAB>ref...` per line: the references placed on each sheet file.
+pub fn sheet_refs(text: &str) -> Vec<(String, Vec<String>)> {
+    text.lines().filter_map(|l| { let mut f = l.split('\t'); let file = f.next()?.to_string(); if file.is_empty() { return None } Some((file, f.map(str::to_string).collect())) }).collect()
+}
+/// The sheet a reference is placed on, when it is not the one on show (`key` the schematic's source): its row in `sheets` (0.14's Probe.note).
+pub fn sheet_of(sheets: &[Sheet], refs: &[(String, Vec<String>)], key: &str, r: &str) -> Option<usize> {
+    if r.is_empty() || sheets.len() < 2 { return None }
+    let (file, _) = refs.iter().find(|(_, rs)| rs.iter().any(|x| x == r))?;
+    let i = sheets.iter().position(|s| &s.file == file)?;
+    let shown = if i == 0 { key.ends_with('|') || key.ends_with(file.as_str()) } else { key.ends_with(file.as_str()) };
+    if shown { None } else { Some(i) }
+}
 pub fn sheet_rows(text: &str) -> Vec<Sheet> {
     text.lines().filter_map(|l| { let f: Vec<&str> = l.split('\t').collect(); if f.len() < 4 { return None } Some(Sheet { depth: f[0].parse().unwrap_or(0), leaf: f[1] == "1", name: f[2].to_string(), file: f[3].to_string() }) }).collect()
 }
