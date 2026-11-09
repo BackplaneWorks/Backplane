@@ -121,8 +121,12 @@ fn page_of(mut items: Vec<(u64, String, Value)>, limit: usize, before: &str) -> 
 }
 fn limit_of(p: &Value, dflt: usize, max: usize) -> usize { p.get("limit").and_then(Value::as_u64).map_or(dflt, |n| (n as usize).clamp(1, max)) }
 
-fn ask_options(kind: &str, options: &str) -> Value {
-    if kind == "approval" { return json!([{"id":"accept","label":"Allow"},{"id":"session","label":"Allow for this session"},{"id":"decline","label":"Decline"}]) }
+/// The buttons of an ask, in the desktop's words (present/thread.rs asks_json): the files' approval of a buy thread is Send or Not now, a settings proposal Approve or Reject.
+fn ask_options(kind: &str, tool: &str, options: &str) -> Value {
+    if kind == "approval" { return match tool {
+        "order_quote" => json!([{"id":"accept","label":"Send"},{"id":"decline","label":"Not now"}]),
+        "settings_proposal" => json!([{"id":"accept","label":"Approve"},{"id":"decline","label":"Reject"}]),
+        _ => json!([{"id":"accept","label":"Allow"},{"id":"session","label":"Allow for this session"},{"id":"decline","label":"Decline"}]) } }
     let labels: Vec<String> = match serde_json::from_str::<Value>(options) {
         Ok(Value::Array(xs)) => xs.iter().filter_map(|x| x.as_str().map(str::to_string).or_else(|| x["label"].as_str().map(str::to_string))).collect(),
         _ => options.split(|c| c == '\n' || c == '|').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
@@ -131,8 +135,9 @@ fn ask_options(kind: &str, options: &str) -> Value {
 }
 fn ask_entry(e: &Value, answered: Option<&str>) -> Value {
     let (kind, tool, detail) = (s(e, "kind"), s(e, "tool"), s(e, "detail"));
-    let q = if kind == "approval" { if detail.is_empty() { tool.to_string() } else { format!("{tool}: {detail}") } } else { detail.to_string() };
-    let mut ask = json!({"id":s(e,"id"),"state":if answered.is_some() {"answered"} else {"open"},"question":q,"options":ask_options(kind, s(e, "options"))});
+    let q = if kind == "approval" && tool == "order_quote" { format!("Send these files for a quote?\n{detail}") }
+        else if kind == "approval" { if detail.is_empty() { tool.to_string() } else { format!("{tool}: {detail}") } } else { detail.to_string() };
+    let mut ask = json!({"id":s(e,"id"),"state":if answered.is_some() {"answered"} else {"open"},"question":q,"options":ask_options(kind, tool, s(e, "options"))});
     if let Some(a) = answered { ask["answered"] = json!(a) }
     json!({"id":format!("ask:{}",s(e,"id")),"kind":"ask","text":q,"at":ms(e["at"].as_u64().unwrap_or(0)),"ask":ask})
 }
