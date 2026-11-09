@@ -191,6 +191,14 @@ impl Backplane {
     fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
     fn do_send(&mut self,cx:&mut Context<Self>) {if self.popup_pick(cx){return;}self.ui_epoch+=1;
         let text=self.input.read(cx).content.to_string();
+        // a project's page on show: Send starts a thread in that project with this first message (0.14's home composer), never the thread
+        // that was open before the page (it is not on screen)
+        if let Some(pid)=self.project_page.clone().filter(|p|screens::projects::find(&self.data,p).is_some()) {
+            if text.trim().is_empty()||self.status!="Connected"||self.screens.projects.first_send.is_some() {return;}
+            self.screens.projects.first_send=Some((self.selected.rsplit('|').next().unwrap_or("").to_string(),text,Instant::now()));
+            self.input.update(cx,|i,cx|i.set(String::new(),cx));
+            self.arm_new();let _=self.tx.try_send(Command::Action("new-thread".into(),pid));cx.notify();return;
+        }
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());
         if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {if !text.trim().is_empty()&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();self.note.clear();}cx.notify();
@@ -262,7 +270,7 @@ fn main()->anyhow::Result<()> {
                 let env=std::env::var_os("BACKPLANE_HOME").filter(|h|!h.is_empty()).map(std::path::PathBuf::from);
                 // this computer's hub is the one this client was started on, when it kept one; only a client never given one falls through to launch.json
                 if let (Some((url,tf)),true)=(hubs::local_target(&hubs::load()),env.is_none()) {c.hub=url.replacen("http://","ws://",1);c.token_file=tf;c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
-                else if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
+                else if !saved.url.is_empty()&&env.is_none() {c.hub=saved.url.replacen("http://","ws://",1);c.token_file=saved.token_file.into();c.pending=false;c.paired=true;/* a hub the chooser paired with: its 401 means this device was revoked */cx.open_window(opts,move|window,cx|cx.new(|cx|Backplane::new(window,cx,c,started))).unwrap_or_else(window_failed);}
                 else {let auto=env.or_else(||(!saved.home.is_empty()).then(||saved.home.clone().into()));cx.open_window(opts,move|window,cx|cx.new(|cx|screens::first::First::new(window,cx,c,started,auto))).unwrap_or_else(window_failed);}
             } else {
             cx.open_window(opts,move|window,cx|cx.new(|cx|{let mut b=Backplane::new(window,cx,config,started);b.screens.plotview.measure=measure;b})).unwrap_or_else(window_failed);
