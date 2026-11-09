@@ -158,6 +158,7 @@ let busy = false;
 let interrupted = false;
 let wake: { task: string; tool: string } | null = null;
 let wakeDue = false;
+const stoppedTasks = new Set<string>();
 let first = true;
 
 const waitOrInterrupt = async (ms: number) => {
@@ -386,6 +387,7 @@ async function run(c: Cmd, firstOne: boolean) {
     result("STARTED");
     lc(c.uuid, "completed");
     setTimeout(() => {
+      if (stoppedTasks.has(t.task)) return;
       wake = t;
       wakeDue = true;
       pump();
@@ -634,6 +636,15 @@ rl.on("line", (line) => {
     interrupted = true;
     for (const c of queue.splice(0)) lc(c.uuid, "cancelled");
     log("INT");
+    return;
+  }
+  // stop_task: one background task stops (its row says "stopped"), the rest and the turn go on
+  if (o.type === "control_request" && o.request?.subtype === "stop_task") {
+    const task = String(o.request.task_id ?? "");
+    emit({ type: "control_response", response: { subtype: "success", request_id: o.request_id, response: {} } });
+    emit({ type: "system", subtype: "task_updated", task_id: task, patch: { status: "stopped" }, session_id: session });
+    stoppedTasks.add(task); if (wake?.task === task) { wake = null; wakeDue = false; }
+    log(`STOPTASK ${task}`);
     return;
   }
   if (o.type === "control_request" && o.request?.subtype === "initialize" && process.env.BP_STANDIN_MODELS) {

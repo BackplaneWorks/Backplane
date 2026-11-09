@@ -132,6 +132,8 @@ pub fn subs_at(st: &State, thread: &str, log: &Value, now: u64) -> Value {
         let kind = { let k = bg::field(l, 4); if k.is_empty() { "subagent".to_string() } else { k } };
         let state = if !ended { "working".to_string() } else { doing.trim_start_matches(bg::ENDED).to_string() };
         let mut r = json!({"title": title, "kind": kind, "state": state, "doing": if ended || doing == title { String::new() } else { doing }});
+        // a task at work can be stopped alone (agents' stop_task), the turn and the other tasks untouched
+        if !ended { r["act"] = json!("task-stop"); r["value"] = json!(bg::field(l, 0)); r["label"] = json!("Stop"); }
         let call = bg::field(l, 2);
         if kind == "subagent" && log.is_object() {
             r["key"] = json!(if call.is_empty() { bg::field(l, 0) } else { call.clone() });
@@ -207,6 +209,7 @@ mod tests {
         assert_eq!((row["key"].as_str(), row["title"].as_str(), row["doing"].as_str()), (Some("c1"), Some("Survey the footprints"), Some("Reading footprint 3")));
         assert_eq!(row["meta"], "Claude Code · Explore · Opus 4.6 · 8 steps · 18.2k tokens");
         assert_eq!((row["took"].as_str(), row["last"].as_str()), (Some("5m"), Some("Said /p/f7.kicad_mod")));
+        assert_eq!((row["act"].as_str(), row["value"].as_str(), row["label"].as_str()), (Some("task-stop"), Some("a1"), Some("Stop")), "a subagent at work can be stopped alone");
         assert_eq!(row["detail"]["where"], "Claude Code subagent (Explore) inside this thread's agent, on desk, worktree bp/fix");
         assert_eq!((row["detail"]["ask"].as_str(), row["detail"]["more"].as_u64()), (Some("Find every footprint without a 3D model."), Some(2)));
         assert!(subs(&s, "t1")["rows"][0].get("detail").is_none(), "without its log a row is as before");
