@@ -269,6 +269,16 @@ impl Backplane {
             }
             "term" => self.term_card(&e, light, cx),
             "step" => crate::screens::histbar::step_row(cx, light, &e),
+            // an Agent or Task call: its subagent's own view opens from it (the hub names it `sub`)
+            _ if !string(&e, "sub").is_empty() => {
+                let key = string(&e, "sub");
+                self.screens.parts.rows_ctl.push(CtlEntry { id: format!("sub:{key}"), label: string(&e, "label"), ctl: Ctl::Sub(key.clone()) });
+                let rid = format!("sub:{key}");
+                with_rect(div().id(SharedString::from(format!("e-{id}"))), || rid).w_full().flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).cursor_pointer().hover(|s| s.bg(c("raise")))
+                    .on_click(cx.listener(move |this, _, _, cx| this.sub_open(key.clone(), cx)))
+                    .child(div().flex_shrink_0().text_color(c("faint")).child(string(&e, "label"))).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.lines().next().unwrap_or("").to_string()))
+                    .child(div().flex_shrink_0().text_color(c("accent")).child("Open")).child(ic(light, "chevron-right", 12., "accent")).into_any_element()
+            }
             // s03: the call that runs now, in an open fold of the running turn: its name in the accent with the live mark beside it
             _ if !text.is_empty() && e["now"] == true => div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("text"))
                 .child(div().size(px(6.)).flex_shrink_0().bg(c("accent"))).child(div().text_color(c("accent")).child(string(&e, "label"))).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.lines().next().unwrap_or("").to_string())).into_any_element(),
@@ -457,6 +467,7 @@ impl Backplane {
     }
     /// The thread's messages, a part of the window (part.rs): a list that draws only the rows on screen.
     pub(crate) fn timeline_part(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if crate::screens::subview::wanted(&self.screens.panels, &self.data["thread"]).is_some() { self.screens.parts.rows_ctl.clear(); return self.sub_page(cx) }
         let light = self.light();
         let c = |name: &str| theme::color(light, name);
         self.screens.reg.borrow_mut().begin_rows(); self.screens.parts.rows_ctl.clear();
@@ -638,6 +649,10 @@ impl Render for Backplane {
         if crate::screens::viewer::is_open(thread) && crate::screens::viewer::has_design(&thread["viewer"]) { ctl.push(CtlEntry { id: "ui:Open in KiCad".into(), label: "Open in KiCad".into(), ctl: Ctl::Node("kicad-open".into(), String::new()) }); }
         // the Diff page's Commit, PR and Revert (and the Revert question's two buttons), by the ids the page draws
         for (id, label, a, v) in crate::screens::viewer::diff_controls(&thread["diff"]) { ctl.push(CtlEntry { id: id.into(), label: label.into(), ctl: Ctl::Node(a.into(), v.into()) }); }
+        // a Subagents row opens its own view (sub:<key>); with one open, its Back and its Stop
+        for r in thread["subs"]["rows"].as_array().into_iter().flatten().filter(|r| r["detail"].is_object() && !string(r, "key").is_empty()) { ctl.push(CtlEntry { id: format!("subs:{}", string(r, "key")), label: string(r, "title"), ctl: Ctl::Sub(string(r, "key")) }); }
+        if crate::screens::subview::wanted(&self.screens.panels, thread).is_some() { ctl.push(CtlEntry { id: "ui:Back".into(), label: "Back to the thread".into(), ctl: Ctl::Sub(String::new()) });
+            let v = &thread["subView"]; if !string(v, "act").is_empty() { ctl.push(CtlEntry { id: "ui:Stop subagent".into(), label: string(v, "label"), ctl: Ctl::Node(string(v, "act"), string(v, "value")) }); } }
         for r in thread["subs"]["rows"].as_array().into_iter().flatten().filter(|r| !string(r, "act").is_empty()) { ctl.push(CtlEntry { id: format!("{}-{}", string(r, "act"), string(r, "value")), label: string(r, "label"), ctl: Ctl::Node(string(r, "act"), string(r, "value")) }); }
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
         for (id, label, c) in crate::screens::tools::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }

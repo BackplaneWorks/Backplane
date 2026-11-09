@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -212,7 +212,9 @@ fn act_entry(thread: &str, id: &str, role: &str, akind: &str, text: &str, at: u6
     use crate::present::thread as pt;
     let e = pt::Ent { id: id.into(), msg: false, role: role.into(), akind: akind.into(), text: text.into(), at };
     Some(match role {
-        "tool" => json!({"id":id,"kind":"tool","text":text,"at":at,"tool":{"name":pt::shown_name(akind),"summary":if text == akind { String::new() } else { clip(text, 200) },"state":"done"}}),
+        "tool" => { let mut v = json!({"id":id,"kind":"tool","text":text,"at":at,"tool":{"name":pt::shown_name(akind),"summary":if text == akind { String::new() } else { clip(text, 200) },"state":"done"}});
+            // an Agent or Task call names the subagent it started: `thread.sub {thread, key: sub}` opens its view
+            let sub = crate::present::panels::sub_key(akind, id); if !sub.is_empty() { v["tool"]["sub"] = json!(sub) } v }
         // a chat terminal: a card the phone draws and streams (data/term.rs)
         r if r == crate::term::emb::TONE && akind == crate::term::emb::KIND => term::entry(thread, id, text, at),
         "step" if pt::step_base(&e) => return None,
@@ -430,11 +432,13 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
 
 // ---- subscriptions ----
 #[derive(Clone, PartialEq)]
-enum Topic { Lists, Thread(String) }
+enum Topic { Lists, Thread(String), Sub(String, String) }
 #[derive(Default)]
 struct Subs { far_rows: HashMap<String, (HashSet<String>, String)>, far_seen: Option<HashMap<String, String>>, next: u64, subs: Vec<(u64, Topic)>, live: HashSet<String>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
 impl Subs {
     fn threads(&self, th: &str) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Thread(th.into())).map(|(i, _)| *i).collect() }
+    /// the subscriptions to one subagent's view, `(sub, key)` for thread `th`; `key` None: every one of the thread's
+    fn sub_views(&self, th: &str, key: Option<&str>) -> Vec<(u64, String)> { self.subs.iter().filter_map(|(i, t)| match t { Topic::Sub(x, k) if x == th && key.map_or(true, |w| w == k) => Some((*i, k.clone())), _ => None }).collect() }
     fn lists(&self) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Lists).map(|(i, _)| *i).collect() }
 }
 fn d(sub: u64, k: &str, mut body: Value) -> Value { body["t"] = json!("d"); body["sub"] = json!(sub); body["k"] = json!(k); body }
@@ -445,11 +449,15 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     if subs.subs.is_empty() { return vec![] }
     let mut out = vec![]; let (mut upsert, mut gone, mut projects): (Vec<String>, Vec<String>, Vec<(String, bool)>) = (vec![], vec![], vec![]);
     let (mut worked, mut locks_moved): (Vec<String>, bool) = (vec![], false);
+    let mut viewed: Vec<(u64, String, String)> = vec![];
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
         let opened = if s(&e, "$") == "AskClosed" { ask_opened(hub, s(&e, "id")) } else { None };
         let th = if matches!(s(&e, "$"), "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadMerged" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ProviderSet" | "ModesSet" | "ThreadDeleted") { s(&e, "id") } else if let Some(o) = &opened { s(o, "thread") } else { s(&e, "thread") }.to_string();
         let mut entry: Option<Value> = None;
+        // a subagent's view moves with its own log line, and with its thread's background rows and turn
+        if s(&e, "$") == "ActivityLogged" { if let Some(of) = th.strip_prefix("@sub:") { for (sub, k) in subs.sub_views(of, Some(s(&e, "tone"))) { if !viewed.contains(&(sub, of.to_string(), k.clone())) { viewed.push((sub, of.to_string(), k)) } } } }
+        if matches!(s(&e, "$"), "WorkSet" | "TurnChanged") { for (sub, k) in subs.sub_views(&th, None) { if !viewed.contains(&(sub, th.clone(), k.clone())) { viewed.push((sub, th.clone(), k)) } } }
         match s(&e, "$") {
             "ThreadDeleted" => gone.push(th.clone()),
             "WorkSet" => { let w = s(&e, "thread").to_string(); if !worked.contains(&w) { worked.push(w) } }
@@ -490,6 +498,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     }
     // a lock moving changes the rows of every thread with a place on it, so each open thread is sent its own again
     if locks_moved { for (_, t) in &subs.subs { if let Topic::Thread(th) = t { if !worked.contains(th) { worked.push(th.clone()) } } } }
+    for (sub, th, k) in &viewed { let v = hub.sub_view_for(th, k).await; out.push(d(*sub, "sub", json!({"thread":th,"key":k,"view":v}))) }
     for th in &worked { let subs_now = ext::work_now(hub, th).await; for sub in subs.threads(th) { out.push(d(sub, "work", json!({"thread":th,"subs":subs_now}))) } }
     if locks_moved { let l = ext::locks_now(hub).await; for sub in subs.lists() { out.push(d(sub, "locks", json!({"locks":l}))) } }
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
@@ -560,7 +569,10 @@ async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Val
             ("lists", _) => { subs.next += 1; subs.subs.push((subs.next, Topic::Lists)); Ok(json!({"sub":subs.next})) }
             ("thread", th) if hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) || hub.far().map_or(false, |f| f.has(th)) => { subs.next += 1; subs.subs.push((subs.next, Topic::Thread(th.into()))); far_seed(hub, subs, th); Ok(json!({"sub":subs.next})) }
             ("thread", _) => Err(err("unknown thread")),
-            _ => Err(err("topic: lists or thread")),
+            // feature "subview": one subagent's view, pushed whole (`k:"sub"` {thread, key, view}) when its log, its row or its turn moves
+            ("sub", th) if !s(&p, "key").is_empty() && hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) => { subs.next += 1; subs.subs.push((subs.next, Topic::Sub(th.into(), s(&p, "key").into()))); Ok(json!({"sub":subs.next})) }
+            ("sub", _) => Err(err("unknown thread or key")),
+            _ => Err(err("topic: lists, thread or sub")),
         },
         "unsubscribe" => { let n = p["sub"].as_u64().unwrap_or(0); subs.subs.retain(|(i, _)| *i != n); Ok(json!({})) }
         _ => match term::call(hub, c.client, &mut subs.terms, m, &p).await { Some(r) => r, None => call(hub, c, m, &p).await },

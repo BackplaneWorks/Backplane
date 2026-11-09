@@ -180,7 +180,7 @@ impl World {
             models: self.setting(&format!("turn.models.{th}")).into(), tok_epoch_set: !self.setting("tok.epoch").is_empty(), tok_recount_set: !self.setting("tok.recount").is_empty(),
             bg: super::bg::lines(self.setting(&format!("bg.{th}"))), bg_text: self.setting(&format!("bg.{th}")).to_string(),
             deadlines: self.deadlines.iter().filter(|k| k.starts_with(&format!("work.deadline.{th}."))).cloned().collect(), timeout_setting: self.setting("work.timeout.seconds").to_string(), allowance: self.setting("allowance.claude").to_string(), default_account: true,
-            limits: self.st.iter().filter(|(k, _)| k.starts_with("limit.claude.")).map(|(k, v)| (k.clone(), v.clone())).collect(), seq: 0 }
+            limits: self.st.iter().filter(|(k, _)| k.starts_with("limit.claude.")).map(|(k, v)| (k.clone(), v.clone())).collect(), seq: 0, fg_subs: Default::default() }
     }
 }
 

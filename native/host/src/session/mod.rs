@@ -56,7 +56,7 @@ fn target_valid(t: &Value) -> bool {
 
 /// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would
 /// be taken for the hub's (an unported native page for indexed rows), so every one is removed from the request's clone before the hub's go in.
-fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "liveText"] { o.remove(k); } } }
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "subView", "liveText"] { o.remove(k); } } }
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
@@ -130,6 +130,9 @@ impl Hub {
         if let (Some(th), true) = (shown.as_deref(), page.is_some()) { let t = self.live_text(th); if !t.is_empty() { if let Some(o) = params.as_object_mut() { o.insert("liveText".into(), Value::String(t)); } } }
         // the thread's subagent log, for the Subagents panel's rows and their drill-down (present/panels.rs `subs_at`)
         if let (Some(th), true) = (shown.as_deref(), page.is_some()) { let log = self.sub_log_for(th).await; if let Some(o) = params.as_object_mut() { o.insert("subLog".into(), log); } }
+        // the subagent this window has open over the thread (its session's `sub`: the call that started it), its own timeline in place of the thread's
+        if let (Some(th), true) = (shown.as_deref(), page.is_some()) { if let Some(k) = p["session"]["sub"].as_str().filter(|k| !k.is_empty() && k.len() <= 256) {
+            let v = self.sub_view_for(th, k).await; if let Some(o) = params.as_object_mut() { o.insert("subView".into(), v); } } }
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }
         { let reads = actor::take_reads(c.client, &view_id, &p["target"]); if let Some(o) = params.as_object_mut() { o.remove("reads"); if !reads.is_empty() { o.insert("reads".into(), Value::Array(reads)); } } }   // only the hub says what it read
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
@@ -198,6 +201,17 @@ impl Hub {
         };
         let host = HOST.get_or_init(|| async { crate::net::botnet::name().await }).await;
         json!({"host": host, "calls": calls})
+    }
+
+    /// One subagent's view (present/panels.rs `sub_view`): its head and its steps out of the thread's subagent log; null when the log has none of `key`.
+    pub(crate) async fn sub_view_for(&self, thread: &str, key: &str) -> Value {
+        if key.is_empty() { return Value::Null }
+        let log = self.sub_log_for(thread).await; if log.is_null() { return Value::Null }
+        let rows: Vec<(String, String, String, String, u64)> = { let m = self.model.lock().await;
+            m.tail(&self.store, &crate::agents::bg::log(thread), crate::present::panels::VIEW_WINDOW).into_iter().filter(|r| r.role == key).map(|r| (r.id, r.role, r.akind, r.text, r.at)).collect() };
+        let now = crate::agents::now_s();
+        let view = |st: &crate::state::State| crate::present::panels::sub_view(st, thread, key, &rows, &log, now);
+        crate::statehost::policies().and_then(|p| p.with_state(view)).unwrap_or_else(|| view(&Default::default())) // (no policy yet: its log alone)
     }
 
     async fn window_for(&self, p: &Value, before: u64, thread: Option<&str>) -> Option<(Value, crate::model::Page)> {

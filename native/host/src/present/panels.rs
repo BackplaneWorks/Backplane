@@ -57,13 +57,19 @@ pub fn sub_log(rows: &[(String, String, String, u64)]) -> Value {
     let mut m = serde_json::Map::new();
     for (call, kind, text, at) in rows {
         if call.is_empty() { continue }
-        let o = m.entry(call.clone()).or_insert_with(|| json!({"type": "", "model": "", "ask": "", "since": 0, "until": 0, "steps": 0, "tokens": 0, "outcome": "", "last": null, "shown": [], "title": "", "kind": "", "end": ""}));
+        let o = m.entry(call.clone()).or_insert_with(|| json!({"type": "", "model": "", "ask": "", "since": 0, "until": 0, "steps": 0, "tokens": 0, "outcome": "", "last": null, "shown": [], "title": "", "kind": "", "end": "", "about": false}));
         // newest first: the oldest start stays, with what it was called and its kind ("start:subagent")
         if kind.starts_with("start") { o["since"] = json!(at); o["title"] = json!(first_line(text, 160)); o["kind"] = json!(kind.strip_prefix("start:").unwrap_or("")); continue }
         match kind.as_str() {
             "end" => { if o["until"] == 0 { o["until"] = json!(at); o["end"] = json!(text.trim()) } }
             "about" => { if o["ask"] == "" { let a: Value = serde_json::from_str(text).unwrap_or(Value::Null);
-                o["type"] = json!(a["type"].as_str().unwrap_or("")); o["model"] = json!(a["model"].as_str().unwrap_or("")); o["ask"] = json!(a["prompt"].as_str().unwrap_or("").trim()); } }
+                o["type"] = json!(a["type"].as_str().unwrap_or("")); o["model"] = json!(a["model"].as_str().unwrap_or("")); o["ask"] = json!(a["prompt"].as_str().unwrap_or("").trim());
+                o["about"] = json!(true); if o["title"] == "" { o["title"] = json!(first_line(a["description"].as_str().unwrap_or(""), 160)) }
+                if o["since"] == 0 || o["since"].as_u64().unwrap_or(0) > *at { o["since"] = json!(at) } } }
+            // a tool's result is no step of its own; a foreground subagent's answer ends it (Sub.reply)
+            "result" => {}
+            "reply" => { if o["until"] == 0 { let a: Value = serde_json::from_str(text).unwrap_or(Value::Null); o["until"] = json!(at);
+                o["end"] = json!(if a["error"] == true { "failed" } else { "completed" }); if o["outcome"] == "" { o["outcome"] = json!(first_line(a["text"].as_str().unwrap_or(""), 600)) } } }
             "outcome" => { if o["outcome"] == "" { let a: Value = serde_json::from_str(text).unwrap_or(Value::Null);
                 o["outcome"] = json!(a["summary"].as_str().unwrap_or("").trim()); o["tokens"] = json!(a["usage"]["total_tokens"].as_u64().unwrap_or(0)); } }
             _ => {
@@ -124,7 +130,10 @@ pub fn subs_at(st: &State, thread: &str, log: &Value, now: u64) -> Value {
     let lines = bg::lines(text);
     let own: Vec<Value> = lock_rows(st, thread).into_iter().chain(watch_rows(st, thread)).collect();
     if lines.is_empty() && own.is_empty() && !log["calls"].as_object().map_or(false, |c| !c.is_empty()) { return Value::Null }
-    let live = bg::running(&lines) + own.iter().filter(|r| r["state"] != "ended").count();
+    // Sub.fg: a foreground subagent (an Agent call that is not backgrounded) is at work while its turn runs and it has not answered
+    let running = st.threads.get(thread).map_or(false, |t| t.turn == crate::state::Turn::Running);
+    let fg: Vec<(&String, &Value)> = if running { log["calls"].as_object().map(|c| c.iter().filter(|(_, i)| i["about"] == true && i["kind"] == "" && i["until"] == 0).collect()).unwrap_or_default() } else { vec![] };
+    let live = bg::running(&lines) + own.iter().filter(|r| r["state"] != "ended").count() + fg.len();
     let host = log["host"].as_str().unwrap_or("");
     let rows: Vec<Value> = lines.iter().map(|l| {
         let ended = bg::ended(l); let doing = bg::doing(l);
@@ -140,13 +149,17 @@ pub fn subs_at(st: &State, thread: &str, log: &Value, now: u64) -> Value {
             for (k, v) in sub_info(st, thread, !ended, l, &log["calls"][call.as_str()], host, now) { r[k] = v; }
         }
         r
-    }).chain(own).collect();
+    }).chain(fg.iter().map(|(call, i)| {
+        let mut r = json!({"title": i["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Subagent"), "kind": "subagent", "state": "working", "doing": "", "key": call});
+        for (k, v) in sub_info(st, thread, true, "", i, host, now) { r[k] = v; }
+        r
+    })).chain(own).collect();
     // Subs.done: a subagent of the agent's own that ended in the last day stays listed after its turn (Bg.settle took its line), folded under the head
     // with what it reported, so what the subagents did can still be read; one whose start the log window no longer holds is left out
     let mut rows = rows;
     if let Some(calls) = log["calls"].as_object() {
         let listed: Vec<String> = lines.iter().map(|l| bg::field(l, 2)).collect();
-        let mut done: Vec<(&String, &Value)> = calls.iter().filter(|(c, i)| !listed.contains(c) && i["kind"] == "subagent" && i["since"].as_u64().unwrap_or(0) > 0
+        let mut done: Vec<(&String, &Value)> = calls.iter().filter(|(c, i)| !listed.contains(c) && (i["kind"] == "subagent" || i["about"] == true) && i["since"].as_u64().unwrap_or(0) > 0
             && i["until"].as_u64().map_or(false, |u| u > 0 && now.saturating_sub(u) < 86400)).collect();
         done.sort_by_key(|(_, i)| std::cmp::Reverse(i["until"].as_u64().unwrap_or(0)));
         for (call, i) in done {
@@ -160,6 +173,61 @@ pub fn subs_at(st: &State, thread: &str, log: &Value, now: u64) -> Value {
     if rows.is_empty() { return Value::Null }
     let word = if live > 0 { format!("{live} at work") } else { format!("{} done", rows.len()) };
     json!({"busy": if live > 0 { format!("{live} at work") } else { String::new() }, "word": word, "live": live, "rows": rows})
+}
+/// Subs.view.window: how many entries of the subagent log one subagent's view reads (newest first); Subs.view.shown: the entries it sends, newest kept.
+pub const VIEW_WINDOW: usize = 4000;
+pub const VIEW_SHOWN: usize = 300;
+const VIEW_RESULT: usize = 1500;
+fn clip(t: &str, n: usize) -> String { let t = t.trim(); if t.chars().count() > n { format!("{}…", t.chars().take(n).collect::<String>()) } else { t.to_string() } }
+/// A fold's or a timeline's row that opens a subagent: the call that started it (an Agent or Task tool call's id), "" for any other tool.
+/// (agents/lines.rs `is_sub_tool` says the same: this file is also built without the agents, by screen-audit)
+pub fn sub_key<'a>(akind: &str, id: &'a str) -> &'a str { if akind == "Agent" || akind == "Task" { id } else { "" } }
+/// Subs.view: one subagent's own timeline, what a fold's Agent row or a Subagents panel row opens. `rows` are the thread's subagent log newest first,
+/// `(act, call, kind, text, at)` (lines.rs's Sub.about, Sub.blocks, Sub.results, Sub.reply, Bg.mark and Bg.outcome write them); `log` is `subs_at`'s.
+/// `{key, thread, title, state, live, meta, took, where, model, ask, outcome, more, entries}`: its head as its panel row says it, and its steps as data/1
+/// entries, oldest first: what it was asked (`user`), what it said (`assistant`), each tool call with its result (`tool`: `running` until the result
+/// lands while it is at work, `failed` for an error result, the result's text in `tool.result`), what it reported and how it ended (`note`). Times in ms.
+/// Null when the log has nothing of `key`.
+pub fn sub_view(st: &State, thread: &str, key: &str, rows: &[(String, String, String, String, u64)], log: &Value, now: u64) -> Value {
+    let mine: Vec<&(String, String, String, String, u64)> = rows.iter().rev().filter(|r| r.1 == key).collect();
+    if key.is_empty() || mine.is_empty() { return Value::Null }
+    let info = sub_log(&rows.iter().filter(|r| r.1 == key).map(|r| (r.1.clone(), r.2.clone(), r.3.clone(), r.4)).collect::<Vec<_>>())[key].clone();
+    // its row in the panel (at work, ended, or the turn's foreground one) says the head; one the panel no longer lists is told from its log alone
+    let panel = subs_at(st, thread, log, now); let row = panel["rows"].as_array().and_then(|a| a.iter().find(|r| r["key"] == key)).cloned();
+    let host = log["host"].as_str().unwrap_or("");
+    let head = match &row { Some(r) => r.clone(), None => { let end = info["end"].as_str().filter(|e| !e.is_empty()).unwrap_or("ended"); let mut r = json!({"title": info["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Subagent"), "state": end});
+        for (k, v) in sub_info(st, thread, false, "", &info, host, now) { r[k] = v; } r } };
+    let state = head["state"].as_str().unwrap_or("").to_string(); let live = state == "working";
+    let ms = |at: u64| at.saturating_mul(1000);
+    let mut out: Vec<Value> = vec![]; let mut said = String::new(); let mut ended: Option<Value> = None;
+    for (act, _, kind, text, at) in mine {
+        match kind.as_str() {
+            k if k.starts_with("start") => {}
+            "about" => { let a: Value = serde_json::from_str(text).unwrap_or(Value::Null); let p = a["prompt"].as_str().unwrap_or("").trim();
+                if !p.is_empty() { out.push(json!({"id": act, "kind": "user", "text": p, "at": ms(*at)})) } }
+            "say" => { said = text.trim().to_string(); out.push(json!({"id": act, "kind": "assistant", "text": text, "at": ms(*at)})) }
+            "result" => { let a: Value = serde_json::from_str(text).unwrap_or(Value::Null); let call = format!("{key}/{}", a["use"].as_str().unwrap_or(""));
+                if let Some(e) = out.iter_mut().rev().find(|e| e["id"] == call.as_str() && e["kind"] == "tool") {
+                    e["tool"]["state"] = json!(if a["error"] == true { "failed" } else { "done" }); e["tool"]["result"] = json!(clip(a["text"].as_str().unwrap_or(""), VIEW_RESULT)); } }
+            "reply" | "outcome" => { let a: Value = serde_json::from_str(text).unwrap_or(Value::Null); let t = if kind == "reply" { a["text"].as_str() } else { a["summary"].as_str() }.unwrap_or("").trim().to_string();
+                // the answer it gave as its last words is said once
+                if !t.is_empty() && t != said { out.push(json!({"id": act, "kind": "note", "label": "reported", "tone": "info", "text": t, "at": ms(*at)})) } }
+            "end" => { let w = text.trim(); ended = Some(json!({"id": act, "kind": "note", "label": "ended", "tone": if w == "completed" || w.is_empty() { "info" } else { "error" }, "text": if w.is_empty() { "completed" } else { w }, "at": ms(*at)})) }
+            k => { let name = super::thread::shown_name(k);
+                out.push(json!({"id": act, "kind": "tool", "text": text, "at": ms(*at), "tool": {"name": name, "summary": if text == k { String::new() } else { clip(text, 200) }, "state": if live { "running" } else { "done" }}})) }
+        }
+    }
+    // how it ended closes its timeline, after what it reported
+    out.extend(ended);
+    // a call still without its result once a later step came was answered (its result is outside what the log keeps): only the newest may run
+    let last_tool = out.iter().rposition(|e| e["kind"] == "tool");
+    for (i, e) in out.iter_mut().enumerate() { if e["kind"] == "tool" && e["tool"]["state"] == "running" && Some(i) != last_tool { e["tool"]["state"] = json!("done") } }
+    let more = out.len().saturating_sub(VIEW_SHOWN); let entries: Vec<Value> = out.into_iter().skip(more).collect();
+    let d = &head["detail"];
+    json!({"key": key, "thread": thread, "title": head["title"], "state": state, "live": live, "meta": head["meta"].as_str().unwrap_or(""), "took": head["took"].as_str().unwrap_or(""),
+        "where": d["where"].as_str().unwrap_or(""), "model": d["model"].as_str().unwrap_or(""), "ask": d["ask"].as_str().unwrap_or(""), "outcome": d["outcome"].as_str().unwrap_or(""),
+        "act": head.get("act").cloned().unwrap_or(Value::Null), "value": head.get("value").cloned().unwrap_or(Value::Null), "label": head.get("label").cloned().unwrap_or(Value::Null),
+        "more": more, "entries": entries})
 }
 /// Plane.lock.row for the clients: every lock with a holder or a queue, its holder's title, how long held, who waits. Clients draw these as they come.
 pub fn locks(st: &State, now: u64, title: impl Fn(&str) -> String) -> Vec<Value> {
@@ -220,6 +288,46 @@ mod tests {
         assert_eq!((v["word"].as_str(), v["live"].as_u64(), v["rows"][0]["state"].as_str(), v["rows"][0]["took"].as_str()), (Some("1 done"), Some(0), Some("completed"), Some("30s")));
         assert_eq!((v["rows"][0]["title"].as_str(), v["rows"][0]["detail"]["outcome"].as_str()), (Some("Survey"), Some("Two footprints lack models: TUBE, XFMR.")));
         assert!(subs_at(&s, "t1", &json!({"host": "desk", "calls": calls2}), 130 + 86400).is_null(), "a day later it is gone");
+    }
+    // lane 2: a subagent opened from its fold row or panel row shows its own steps, live while it works and whole after it ends
+    #[test] fn a_subagents_view_is_its_own_timeline_with_results_live_and_ended() {
+        let r = |a: &str, c: &str, k: &str, t: &str, at: u64| (a.to_string(), c.to_string(), k.to_string(), t.to_string(), at);
+        let mut log = vec![r("c1/about", "c1", "about", r#"{"type":"Explore","model":"haiku","prompt":"Find the footprints.","description":"Survey"}"#, 100), r("c1", "c1", "start:subagent", "Survey", 100),
+            r("c1/st1", "c1", "Bash", "ls boards", 101), r("c1/st1/result", "c1", "result", r#"{"use":"st1","text":"main.kicad_pcb","error":false}"#, 102),
+            r("c1/m1:0", "c1", "say", "One board.", 103), r("c1/st2", "c1", "Read", "main.kicad_pcb", 104),
+            r("c2/about", "c2", "about", r#"{"prompt":"Other."}"#, 100), r("c2/x", "c2", "Bash", "other", 101)];
+        log.reverse();
+        let mut s = st(&[("bg.t1", "a1\tReading main\tc1\tSurvey\tsubagent\t900")]);
+        { let t = s.threads.entry("t1".into()).or_insert_with(crate::state::Thread::blank); t.provider = "claude".into(); t.model = "claude-opus-4-6".into(); }
+        let calls = |l: &[(String, String, String, String, u64)]| sub_log(&l.iter().map(|r| (r.1.clone(), r.2.clone(), r.3.clone(), r.4)).collect::<Vec<_>>());
+        let v = sub_view(&s, "t1", "c1", &log, &json!({"host": "desk", "calls": calls(&log)}), 110);
+        assert_eq!((v["title"].as_str(), v["state"].as_str(), v["live"].as_bool(), v["ask"].as_str()), (Some("Survey"), Some("working"), Some(true), Some("Find the footprints.")));
+        assert_eq!((v["act"].as_str(), v["value"].as_str()), (Some("task-stop"), Some("a1")), "Stop, as its panel row has it");
+        let kinds: Vec<&str> = v["entries"].as_array().unwrap().iter().map(|e| e["kind"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["user", "tool", "assistant", "tool"], "only c1's steps, oldest first, the result folded into its call");
+        let e = &v["entries"];
+        assert_eq!((e[1]["tool"]["name"].as_str(), e[1]["tool"]["state"].as_str(), e[1]["tool"]["result"].as_str(), e[1]["at"].as_u64()), (Some("Bash"), Some("done"), Some("main.kicad_pcb"), Some(101000)));
+        assert_eq!(e[3]["tool"]["state"], "running", "its newest call runs while it works");
+        assert!(sub_view(&s, "t1", "nope", &log, &Value::Null, 110).is_null());
+        // ended: its line gone, an end and what it reported; nothing runs any more
+        let mut log2 = vec![r("c1/outcome", "c1", "outcome", r#"{"summary":"Two lack models.","usage":{"total_tokens":2000}}"#, 120), r("c1/end", "c1", "end", "completed", 120)]; log2.extend(log.clone());
+        s.settings.insert("bg.t1".into(), String::new());
+        let v = sub_view(&s, "t1", "c1", &log2, &json!({"host": "desk", "calls": calls(&log2)}), 130);
+        assert_eq!((v["state"].as_str(), v["live"].as_bool(), v["outcome"].as_str()), (Some("completed"), Some(false), Some("Two lack models.")));
+        let n = v["entries"].as_array().unwrap(); assert_eq!(n[3]["tool"]["state"], "done");
+        assert_eq!((n[4]["label"].as_str(), n[4]["text"].as_str(), n[5]["label"].as_str()), (Some("reported"), Some("Two lack models."), Some("ended")));
+    }
+    #[test] fn a_foreground_subagent_works_while_its_turn_runs_and_ends_with_its_answer() {
+        let r = |c: &str, k: &str, t: &str, at: u64| (c.to_string(), k.to_string(), t.to_string(), at);
+        let log = vec![r("f1", "Grep", "TODO", 101), r("f1", "about", r#"{"type":"Explore","model":"","prompt":"Look.","description":"Look around"}"#, 100)];
+        let mut s = st(&[]); { let t = s.threads.entry("t1".into()).or_insert_with(crate::state::Thread::blank); t.turn = crate::state::Turn::Running; }
+        let v = subs_at(&s, "t1", &json!({"host": "", "calls": sub_log(&log)}), 130);
+        assert_eq!((v["live"].as_u64(), v["rows"][0]["title"].as_str(), v["rows"][0]["state"].as_str(), v["rows"][0]["key"].as_str()), (Some(1), Some("Look around"), Some("working"), Some("f1")));
+        let mut log2 = vec![r("f1", "reply", r#"{"text":"Nothing left.","error":false}"#, 140)]; log2.extend(log);
+        s.threads.get_mut("t1").unwrap().turn = crate::state::Turn::Completed;
+        let v = subs_at(&s, "t1", &json!({"host": "", "calls": sub_log(&log2)}), 150);
+        assert_eq!((v["live"].as_u64(), v["rows"][0]["state"].as_str(), v["rows"][0]["detail"]["outcome"].as_str()), (Some(0), Some("completed"), Some("Nothing left.")));
+        assert_eq!((sub_key("Agent", "x1"), sub_key("Task", "x2"), sub_key("Bash", "x3")), ("x1", "x2", ""));
     }
     #[test] fn a_waiter_reads_who_holds_by_name() {
         let lock = |h: &str| format!(r#"{{"holder":{h},"waiters":[{{"id":"t2","kind":"thread","thread":"t2","note":"","since":1,"lease":0}}],"ready":true}}"#);

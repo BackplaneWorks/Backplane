@@ -7,7 +7,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Default)]
-pub struct Panels { pub todos_open: HashMap<String, bool>, pub subs_open: HashMap<String, bool>, pub sub_open: std::collections::HashSet<String> }
+pub struct Panels { pub todos_open: HashMap<String, bool>, pub subs_open: HashMap<String, bool>, pub sub_open: std::collections::HashSet<String>,
+    /** the subagent whose own view is open (subview.rs): the thread it opened over and its key */ pub sub_view: Option<(String, String)>,
+    /** that view's scroll, the steps it last drew, and the results opened whole */ pub sub_scroll: ScrollHandle, pub sub_seen: usize, pub sub_results: std::collections::HashSet<String> }
 
 /// A subagent row's drill-down is open: this device's choice, by thread and the call that started it (a click shows it at once: the rows carry it).
 pub fn sub_is_open(p: &Panels, thread: &Value, key: &str) -> bool { !key.is_empty() && p.sub_open.contains(&format!("{}\u{1f}{key}", string(thread, "id"))) }
@@ -86,20 +88,20 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
     }
     if su {
         col = col.child(div().mt_1().text_size(px(11.)).text_color(c("faint")).child(format!("SUBAGENTS · {}", string(&thread["subs"], "word").to_uppercase())));
-        let tid = string(thread, "id");
         for r in thread["subs"]["rows"].as_array().into_iter().flatten() {
             let working = string(r, "state") == "working"; let doing = string(r, "doing"); let key = string(r, "key");
             let detail = r["detail"].is_object(); let open = detail && sub_is_open(p, thread, &key);
             let state = { let t = string(r, "took"); if t.is_empty() { string(r, "state") } else { format!("{} · {t}", string(r, "state")) } };
             let mark_c = if working { c("accent") } else { c("faint") };
-            let mark: AnyElement = if detail { crate::art::icon(if open { "chevron-down" } else { "chevron-right" }, 12., mark_c) } else { div().child(if working { "▸" } else { "✓" }).into_any_element() };
-            let mut head = div().id(SharedString::from(format!("sub-{}", if key.is_empty() { string(r, "title") } else { key.clone() }))).flex().gap_2().py(px(1.)).items_center()
+            let mark: AnyElement = if detail { crate::art::icon("chevron-right", 12., mark_c) } else { div().child(if working { "▸" } else { "✓" }).into_any_element() };
+            let mut head = crate::ui::with_rect(div().id(SharedString::from(format!("sub-{}", if key.is_empty() { string(r, "title") } else { key.clone() }))), || format!("subs:{key}")).flex().gap_2().py(px(1.)).items_center()
                 .child(div().w(px(14.)).flex_shrink_0().flex().items_center().text_color(mark_c).child(mark))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("text")).child(string(r, "title")))
                 .child(div().flex_shrink_0().text_color(c("faint")).child(if detail { state.clone() } else if doing.is_empty() { format!("{} · {}", string(r, "kind"), state) } else { format!("{} · {}", string(r, "kind"), doing) }));
-            if detail {
-                let k = format!("{tid}\u{1f}{key}");
-                head = head.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, _, cx| { let o = &mut this.screens.panels.sub_open; if !o.remove(&k) { o.insert(k.clone()); } cx.notify(); }));
+            if detail && !key.is_empty() {
+                // its own view: what it was asked, said and did, live while it works (subview.rs)
+                let k = key.clone();
+                head = head.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, _, cx| this.sub_open(k.clone(), cx)));
             }
             let head = head.when(!string(r, "act").is_empty(), |d| { let (act, value) = (string(r, "act"), string(r, "value"));
                 d.child(div().id(SharedString::from(format!("{act}-{value}"))).flex_shrink_0().px_1().cursor_pointer().text_color(c("accent")).child(string(r, "label"))

@@ -781,6 +781,36 @@ final class Journeys: XCTestCase {
     // Terminals (feature `terms`; scripts/mobile/ios-term-rig.sh, rig-seed.ts): the chat terminal's card in a thread, open full screen, type with the soft keyboard,
     // rotate (the pty's size follows), lose the connection while the shell prints and get it back, stop it; then the project's Terminals screen and a new shell.
     // env: TERM_THREAD, TERM_PROJECT (rig-seed.ts), HUB_CTL (the relay's control port).
+    // lane 2: a subagent's own view (feature subview), opened from its Background work row while it works and from its fold's Agent row after it ended; Back returns.
+    // The rig's thread (TERM_THREAD) runs the stand-in's `agents:2 agentsteps:3 subwork:MS` turn, started by ios-sub-journey.sh.
+    func test_subagent() {
+        d = Driver("subagent"); defer { d.finish() }
+        let lbl = { (id: String) -> String in let e = self.d.el(id); return e.exists ? e.label : "" }
+        let pre = { (p: String) in self.d.app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", p)).firstMatch }
+        d.app.terminate()
+        d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_SELECT": d.env["TERM_THREAD"] ?? "", "BACKPLANE_PERFORMANCE": "1"]
+        d.app.launch(); d.skipTour()
+        let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard"); if sb.buttons["Allow"].waitForExistence(timeout: 6) { sb.buttons["Allow"].tap() }
+        guard d.step("a subagent at work in Background work", timeout: 40, act: {}, expect: { pre("data.work.sub.").exists }) else { return }
+        sleep(2); d.shot("1-panel")
+        guard d.step("its row opens its own view", timeout: 15, act: { d.tap(pre("data.work.sub.")) }, expect: { d.el("data.sub.list").exists && lbl("data.sub.state").contains("working") }) else { return }
+        let meta = { lbl("data.sub.meta") }; let m0 = meta()
+        d.shot("2-sub-live")
+        d.step("new steps arrive while it works", timeout: 20, act: {}, expect: { meta() != m0 && meta().contains("steps") })
+        d.shot("3-sub-live-later")
+        d.step("Back returns to the thread", timeout: 10, act: { d.tap(d.app.navigationBars.buttons.firstMatch) }, expect: { !d.el("data.sub.list").exists && pre("data.work.").exists })
+        d.shot("4-back")
+        guard d.step("the turn ends", timeout: 240, act: {}, expect: { d.label("2 tool calls · Agent").exists }) else { return }
+        // (the fold's container names every row inside it data.entry.tool: the Agent row is found by its words)
+        let agentRow = { self.d.app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Agent, ")).firstMatch }
+        d.step("its fold opens", timeout: 10, act: { d.tap(d.label("2 tool calls · Agent")) }, expect: { agentRow().exists })
+        d.shot("5-fold-open")
+        d.step("the fold's Agent row opens the ended subagent", timeout: 15, act: { d.tap(agentRow()) }, expect: { lbl("data.sub.state").contains("completed") })
+        sleep(1); d.shot("6-sub-ended")
+        d.step("Back again", timeout: 10, act: { d.tap(d.app.navigationBars.buttons.firstMatch) }, expect: { !d.el("data.sub.list").exists })
+        d.shot("7-back")
+    }
+
     func test_terminal() {
         d = Driver("terminal"); defer { d.finish() }
         let screen = { self.d.el("term.screen") }

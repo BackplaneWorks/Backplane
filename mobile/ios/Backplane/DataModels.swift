@@ -25,9 +25,11 @@ struct DTool: Codable, Equatable {
     var name: String
     var summary: String
     var state: String   // running | done | failed
-    enum CodingKeys: String, CodingKey { case name, summary, state }
+    var sub: String = ""    // an Agent call's subagent (feature subview): `thread.sub {thread, key: sub}` opens its view
+    var result: String = "" // a subagent's tool call: its result (in a subagent's view)
+    enum CodingKeys: String, CodingKey { case name, summary, state, sub, result }
     init(name: String, summary: String, state: String) { self.name = name; self.summary = summary; self.state = state }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); name = c.str(.name); summary = c.str(.summary); state = c.str(.state) }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); name = c.str(.name); summary = c.str(.summary); state = c.str(.state); sub = c.str(.sub); result = c.str(.result) }
 }
 
 struct DAsk: Codable, Equatable {
@@ -307,7 +309,30 @@ struct DMentions: Decodable { var items: [DMention]
 /// `update.status`: the hub decides the words; a phone only shows them.
 struct DUpdate: Decodable { let current: String; let channel: String; let line: String; let canCheck: Bool }
 // A thread's background work and locks (thread.work, the "work" push): the rows the hub decides, each with what its button sends.
-struct DWorkRow: Decodable, Hashable { let title, kind, state, doing: String; let act, value, label: String? }
+struct DWorkRow: Decodable, Hashable { let title, kind, state, doing: String; let act, value, label: String?; var key: String? = nil; var meta: String? = nil; var detail: DWorkDetail? = nil
+    /// a subagent's row names it (`key`, with its drill-down): a tap opens its view (feature subview)
+    var subKey: String { detail != nil ? key ?? "" : "" }
+}
+struct DWorkDetail: Decodable, Hashable {}
+/// One subagent's own view (feature subview: `thread.sub`, the `sub` push): its head as its panel row says it, and its steps as entries, oldest first.
+struct DSubView: Decodable, Equatable {
+    var key, thread, title, state, meta, took, place, ask, outcome: String
+    var live: Bool; var act, value, label: String?; var more: Int; var entries: [DEntry]
+    enum CodingKeys: String, CodingKey { case key, thread, title, state, meta, took, place = "where", ask, outcome, live, act, value, label, more, entries }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        key = c.str(.key); thread = c.str(.thread); title = c.str(.title); state = c.str(.state); meta = c.str(.meta); took = c.str(.took); place = c.str(.place); ask = c.str(.ask); outcome = c.str(.outcome)
+        live = (try? c.decode(Bool.self, forKey: .live)) ?? false; act = try? c.decode(String.self, forKey: .act); value = try? c.decode(String.self, forKey: .value); label = try? c.decode(String.self, forKey: .label)
+        more = (try? c.decode(Int.self, forKey: .more)) ?? 0; entries = (try? c.decode([DEntry].self, forKey: .entries)) ?? []
+    }
+}
+struct DSubViewReply: Decodable { let view: DSubView? }
+struct DSubRoute: Hashable { let thread: String; let key: String }
+/// A long result shows three lines until tapped (the desktop's subview.rs `result_lines`).
+func dSubResultLines(_ text: String, open: Bool) -> (String, Bool) {
+    let ls = text.components(separatedBy: "\n"); if open || ls.count <= 3 { return (text, false) }
+    return (ls.prefix(3).joined(separator: "\n"), true)
+}
 struct DWork: Decodable { let word: String; let live: Int; let rows: [DWorkRow] }
 struct DWorkReply: Decodable { let subs: DWork? }
 // Who holds a lock (locks.list, the "locks" push): `line` is the hub's words for it.

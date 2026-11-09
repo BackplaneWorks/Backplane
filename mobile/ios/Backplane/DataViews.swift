@@ -165,7 +165,8 @@ struct DataThreadsView: View {
                     .accessibilityLabel("Settings").accessibilityIdentifier("data.settings")
             }.dflat()
         }
-        .navigationDestination(for: String.self) { DataThreadView(client: client, id: $0) }
+        .navigationDestination(for: String.self) { DataThreadView(client: client, id: $0).environment(\.dataSubThread, client.has("subview") ? $0 : "") }
+        .navigationDestination(for: DSubRoute.self) { DataSubView(client: client, route: $0) }
         .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
@@ -877,11 +878,26 @@ struct DataWorkPanel: View {
             if open {
                 ForEach(work.rows, id: \.self) { r in
                     HStack(spacing: 8) {
+                        // a subagent's row opens its own view (feature subview)
+                        if !r.subKey.isEmpty && client.has("subview") {
+                            NavigationLink(value: DSubRoute(thread: thread, key: r.subKey)) {
+                                HStack(spacing: 6) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(r.title).dmono(12).lineLimit(1).foregroundStyle(BackplaneDesign.text)
+                                        if let m = r.meta, !m.isEmpty { Text(m).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1) }
+                                        Text(r.doing.isEmpty ? "\(r.kind) · \(r.state)" : r.doing).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.accent)
+                                }.contentShape(Rectangle())
+                            }.buttonStyle(.plain).accessibilityIdentifier("data.work.sub.\(r.subKey)")
+                        } else {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(r.title).dmono(12).lineLimit(1)
                             Text(r.doing.isEmpty ? "\(r.kind) · \(r.state)" : r.doing).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                         }
                         Spacer()
+                        }
                         if let label = r.label, !label.isEmpty {
                             Button { client.workAct(thread, r) } label: { Text(label).dmono(12) }.accessibilityIdentifier("data.work.\(r.act ?? "").\(r.value ?? "")")
                         }
@@ -914,14 +930,27 @@ struct DataFoldRow: View {
 struct DataToolRow: View {
     let entry: DEntry
     @State private var whole = false
+    @Environment(\.dataSubThread) private var subThread
     private var name: String { entry.kind == "step" ? "" : entry.tool?.name ?? "tool" }
     private var what: String { entry.kind == "step" ? (entry.label.isEmpty ? "Design change" : entry.label) : (entry.tool?.summary ?? "").isEmpty ? "" : entry.text }
     var body: some View {
+        // an Agent call opens its subagent's own view (feature subview)
+        if let sub = entry.tool?.sub, !sub.isEmpty, !subThread.isEmpty {
+            NavigationLink(value: DSubRoute(thread: subThread, key: sub)) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(name).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text)
+                    Text(what).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(2)
+                    Spacer(minLength: 0)
+                    Text("Open").dmono(12).foregroundStyle(BackplaneDesign.accent); Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.accent)
+                }.padding(.vertical, 3).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("data.tool.sub.\(sub)")
+        } else {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if !name.isEmpty { Text(name).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text) }
             Text(what).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(whole ? nil : 3).textSelection(.enabled)
             Spacer(minLength: 0)
         }.padding(.vertical, 3).contentShape(Rectangle()).onTapGesture { whole.toggle() }
+        }
     }
 }
 

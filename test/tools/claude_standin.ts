@@ -39,7 +39,12 @@
 //                "hold:MS" runs a last Bash call MS before its result;
 //                "agents:N" runs N background subagents (Agent calls)
 //                that finish once the text is posted;
-//                "agentsteps:N" gives each one N tool/text activity rows;
+//                "agentsteps:N" gives each one N tool/text activity rows
+//                (each tool call followed by its result);
+//                "subwork:MS" keeps them working MS more, a step each
+//                every BP_AGENT_STEP_MS (1500), then each reports;
+//                "fgagent:MS" runs a foreground subagent (the turn waits
+//                on its Agent call) for MS, stepping the same way;
 //                "ask:" asks a question (AskUserQuestion), "approve:" a
 //                Bash approval, both through permission_prompt, waiting;
 //                "edit:" moves the board's first footprint 2.54 mm;
@@ -566,17 +571,46 @@ async function run(c: Cmd, firstOne: boolean) {
       return { task, tool };
     });
     const agentSteps = Number(/agentsteps:(\d+)/.exec(c.text)?.[1] ?? 0);
+    // a subagent's own step, as Claude Code says it: its tool call (and its result, a "user" line under the same parent) or its text
+    const subStep = (parent: string, step: number, what: string) => {
+      const id = `toolu_${rnd()}`;
+      const content = step % 2
+        ? [{ type: "tool_use", id, name: "Bash", input: { command: `inspect ${what} step ${step}` } }]
+        : [{ type: "text", text: `Checked ${what} step ${step}` }];
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, content }, parent_tool_use_id: parent, session_id: session });
+      if (step % 2) emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `step ${step}: 3 footprints, 1 without a model`, is_error: step % 6 === 5 }] }, parent_tool_use_id: parent, session_id: session, uuid: rnd() });
+    };
+    // "fgagent:MS": a foreground subagent (an Agent call the turn waits on, no task_started) that works MS, a step every BP_AGENT_STEP_MS (1500), then answers
+    const fgHold = Number(/fgagent:(\d+)/.exec(c.text)?.[1] ?? 0);
+    if (fgHold > 0) {
+      const tool = `toolu_fg${rnd()}`, gap = Number(process.env.BP_AGENT_STEP_MS ?? 1500);
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id: tool, name: "Agent", input: { description: `Foreground look at ${tag}`, prompt: `Check ${tag} by hand and answer when done.`, subagent_type: "Explore" } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      const end = Date.now() + fgHold;
+      for (let step = 1; Date.now() < end; step++) { subStep(tool, step, `${tag} (fg)`); if (await waitOrInterrupt(gap)) break; }
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, content: [{ type: "text", text: `Foreground check of ${tag}: all footprints have models.` }] }, parent_tool_use_id: tool, session_id: session });
+      emit({ type: "user", message: { role: "user", content: [{ tool_use_id: tool, type: "tool_result", content: [{ type: "text", text: `Foreground check of ${tag}: all footprints have models.` }] }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "subwork:MS": the background subagents keep working MS after their agentsteps, a step each every BP_AGENT_STEP_MS (1500), then report
+    const subWork = Number(/subwork:(\d+)/.exec(c.text)?.[1] ?? 0);
     for (const a of agents) {
       for (let step = 1; step <= agentSteps; step++) {
-        const id = `toolu_${rnd()}`;
-        const content = step % 2
-          ? [{ type: "tool_use", id, name: "Bash", input: { command: `inspect ${tag} step ${step}` } }]
-          : [{ type: "text", text: `Checked ${tag} step ${step}` }];
-        emit({ type: "assistant", message: { id: `msg_${rnd()}`, content }, parent_tool_use_id: a.tool, session_id: session });
+        subStep(a.tool, step, tag);
         emit({ type: "system", subtype: "task_progress", task_id: a.task, tool_use_id: a.tool,
           description: `Checking ${tag} step ${step}`, usage: { total_tokens: 1200 * step, tool_uses: Math.ceil(step / 2), duration_ms: step * ms }, last_tool_name: step % 2 ? "Bash" : undefined, session_id: session });
         await sleep(ms);
       }
+    }
+    if (subWork > 0 && agents.length) {
+      const end = Date.now() + subWork, gap = Number(process.env.BP_AGENT_STEP_MS ?? 1500);
+      for (let step = agentSteps + 1; Date.now() < end; step++) {
+        for (const a of agents) {
+          subStep(a.tool, step, tag);
+          emit({ type: "system", subtype: "task_progress", task_id: a.task, tool_use_id: a.tool, description: `Checking ${tag} step ${step}`, usage: { total_tokens: 1200 * step, tool_uses: Math.ceil(step / 2), duration_ms: step * gap }, session_id: session });
+        }
+        if (await waitOrInterrupt(gap)) break;
+      }
+      for (const a of agents) emit({ type: "assistant", message: { id: `msg_${rnd()}`, content: [{ type: "text", text: `Report on ${tag}: one footprint lacks a 3D model.` }] }, parent_tool_use_id: a.tool, session_id: session });
     }
     let full = "";
     emit({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
