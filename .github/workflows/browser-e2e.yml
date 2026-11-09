@@ -74,6 +74,8 @@ jobs:
         shell: bash
         run: |
           set -e; mkdir -p dist
+          # Windows with MSVC's environment: Git's /usr/bin/link comes first on bash's PATH; cargo is given MSVC's link.exe by its full path
+          if [ "${{ runner.os }}" = Windows ] && [ ${{ matrix.mode }} = cef ]; then export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER="$(cygpath -w "$(which -a link.exe | grep -i msvc | head -1)")"; echo "linker: $CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER"; fi
           f=; [ ${{ matrix.mode }} = cef ] && f="--features cef"
           (cd native/host && cargo build --locked --bin backplane-hub)
           (cd native/gpui && cargo build --locked $f)
