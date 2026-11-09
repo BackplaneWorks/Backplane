@@ -1716,6 +1716,24 @@ gpui.kept.for.this.device.alerts	Kept for this device. Alerts for what needs you
 gpui.keyboard.shortcuts	Keyboard shortcuts	キーボードショートカット
 gpui.shortcuts.to.defaults	Shortcuts to defaults	ショートカットを初期値に戻す
 gpui.follow.the.hub	Follow the hub	ハブに従う
+gpui.viewerbg	3D viewer background	3Dビューアの背景
+gpui.viewerbg.note	Behind Mech parts and the 3D board: Auto follows the theme.	メカ部品と3D基板の背後: 自動はテーマに従います。
+gpui.viewerbg.auto	Auto	自動
+gpui.viewerbg.light	Light	ライト
+gpui.viewerbg.dark	Dark	ダーク
+gpui.viewerbg.custom	Custom	カスタム
+gpui.viewerbg.color	Custom background colour	背景のカスタム色
+gpui.viewerbg.color.note	Pick a colour, then a lighter or darker shade of it.	色を選び、そのあと明るさを調整します。
+gpui.viewerbg.lighter	Lighter	明るく
+gpui.viewerbg.darker	Darker	暗く
+gpui.viewerbg.slate	Slate	スレート
+gpui.viewerbg.graphite	Graphite	グラファイト
+gpui.viewerbg.sand	Sand	サンド
+gpui.viewerbg.sky	Sky	スカイ
+gpui.viewerbg.mint	Mint	ミント
+gpui.viewerbg.rose	Rose	ローズ
+gpui.viewerbg.plum	Plum	プラム
+gpui.viewerbg.navy	Navy	ネイビー
 gpui.where.i.left.off	Where I left off	前回の続き
 gpui.the.thread.list	The thread list	スレッド一覧
 gpui.system.ui	System UI	システムUI
@@ -2872,6 +2890,13 @@ gpui.f.quote.files	Send these files for a quote?	これらのファイルを送�
 gpui.f.dictate	Dictate with this device's microphone	このデバイスのマイクで音声入力
 gpui.f.inactive	Inactive: no confirmed active work	非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover	{name}  runs from {path}.	{name}が{path}で動作します。
+android.viewerbg	3D background	3D の背景
+android.viewerbg.auto	Auto	自動
+android.viewerbg.light	Light	ライト
+android.viewerbg.dark	Dark	ダーク
+android.viewerbg.custom	Custom	カスタム
+android.viewerbg.hex	#rrggbb	#rrggbb
+android.viewerbg.note	This device. The Mech and 3D viewers; Auto follows the appearance.	この端末のみ。メカと 3D ビューアーに使います。自動は外観に従います。
 android.state.working	working	作業中
 android.state.inactive	inactive	非アクティブ
 android.state.finished	finished	完了
