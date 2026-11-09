@@ -293,7 +293,9 @@ impl Backplane {
             _ if !string(&e, "label").is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim")).child(string(&e, "label")).into_any_element(),
             _ => div().into_any_element(),
         };
-        let inner = div().w_full().max_w(px(930.)).px_4().child(row);
+        // the message the find bar (or Find across threads) is on: a band in the accent beside it
+        let marked = !id.is_empty() && id == self.screens.find.mark;
+        let inner = div().w_full().max_w(px(930.)).px_4().when(marked, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).child(row);
         // A row that arrives while the thread is on screen (a sent message, the reply starting) fades and slides in over 220 ms instead of popping in.
         // Only the newest rows, only within a moment of their first draw, so scrolling back to a row or opening a thread never replays it.
         let len = self.data["thread"]["entries"].as_array().map_or(0, |r| r.len());
@@ -478,6 +480,7 @@ impl Backplane {
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| this.scroll_note(e)))
             .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx)))
+            .children(if has_thread && self.selected.rsplit('|').next() == Some(self.screens.find.thread.as_str()) { crate::screens::find::bar(cx, light, &self.screens.find) } else { None })
             .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }))))
             .when(!no_rows, |d| d.child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0()))
             .children(thread["live"].as_array().into_iter().flatten().map(|live| div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_2().child(string(live, "text")))))
@@ -519,6 +522,7 @@ impl Render for Backplane {
         if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); }
         if self.screens.setup.want_focus { self.screens.setup.want_focus = false; window.focus(&self.screens.setup_focus); }
         if self.screens.palette.focus { self.screens.palette.focus = false; if let Some(i) = self.screens.palette.input.clone() { window.focus(&i.focus_handle(cx)); } }
+        if self.screens.find.focus { self.screens.find.focus = false; if let Some(i) = self.screens.find.input.clone() { window.focus(&i.focus_handle(cx)); } }
         self.frame_marks(window, cx);
         self.hints_frame(window, cx);
         let light = self.light();
@@ -683,7 +687,7 @@ impl Render for Backplane {
 
         let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")),self.picker_keys(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
-            .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus)).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.side_flip(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| this.focus_search(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
+            .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus)).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.side_flip(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| if !this.palette_close(cx) { this.palette_open_find(cx) })).on_action(cx.listener(|this, _: &crate::FindInThreadKey, _, cx| this.find_open(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // the dev build strip, only while a build is being made or waits to relaunch
             .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
             .children({ let s = std::mem::take(&mut self.screens.hubbar); let e = crate::screens::hubbar::strip(cx, &s, light); self.screens.hubbar = s; e })
@@ -717,7 +721,7 @@ impl Render for Backplane {
                         // held Ctrl: its key at the end of the bar (0.14's "Ctrl K"), in room the bar always has
                         .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(div().flex_1()).child(div().flex().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "palette")).iter().map(|k| crate::screens::hints::cap(light, k, false))))))
                     .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child("Improvements"))
-                    .child(with_rect(div().id("search-btn"), || "ui:Search".to_string()).cursor_pointer().tooltip(crate::keys::tip("Search threads", &crate::keys::hint(&self.local, "search"), light)).on_click(cx.listener(|this, _, _, cx| this.focus_search(cx))).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.open_settings(cx); })).child(ic(light, "settings", 15., "dim")))))
+                    .child(with_rect(div().id("search-btn"), || "ui:Search".to_string()).cursor_pointer().tooltip(crate::keys::tip("Filter projects and threads", "", light)).on_click(cx.listener(|this, _, _, cx| this.focus_search(cx))).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.open_settings(cx); })).child(ic(light, "settings", 15., "dim")))))
             .children(crate::screens::strip::view(light, &self.data))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar

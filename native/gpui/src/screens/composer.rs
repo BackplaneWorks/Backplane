@@ -14,7 +14,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 actions!(composer, [Backspace, Delete, WordBackspace, WordDelete, Left, Right, WordLeft, WordRight, SelLeft, SelRight, SelWordLeft, SelWordRight,
-    Up, Down, SelUp, SelDown, Home, End, DocStart, DocEnd, SelHome, SelEnd, SelDocStart, SelDocEnd, SelectAll, Copy, Cut, Paste, Undo, Redo, Newline, CharPalette, Go, Tab]);
+    Up, Down, SelUp, SelDown, Home, End, DocStart, DocEnd, SelHome, SelEnd, SelDocStart, SelDocEnd, SelectAll, Copy, Cut, Paste, Undo, Redo, Newline, CharPalette, Go, GoBack, Tab]);
 
 pub const MAX_LINES: f32 = 12.0;
 
@@ -30,6 +30,8 @@ pub enum ComposerEvent {
     Files(Vec<PathBuf>),
     /// Enter in an ask's box (key context AskInput).
     Submit,
+    /// Shift+Enter in the find bar (key context FindInput): the previous match.
+    SubmitBack,
     /// Ctrl-C with nothing selected in the box: the window copies the timeline's selection.
     CopyTimeline,
     /// The suggestion popup is open and Up (-1) or Down (1) was pressed: the highlighted row moves instead of the caret.
@@ -147,6 +149,7 @@ impl Composer {
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.undo(); }); }
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.redo(); }); }
     fn go(&mut self, _: &Go, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::Submit); }
+    fn go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::SubmitBack); }
     fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.newline()); }
     fn palette(&mut self, _: &CharPalette, window: &mut Window, _: &mut Context<Self>) { window.show_character_palette(); }
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(-1)); } else { self.vertical(-1, false, cx); } }
@@ -379,7 +382,7 @@ impl Render for Composer {
             .on_action(cx.listener(Self::home)).on_action(cx.listener(Self::end)).on_action(cx.listener(Self::sel_home)).on_action(cx.listener(Self::sel_end))
             .on_action(cx.listener(Self::doc_start)).on_action(cx.listener(Self::doc_end)).on_action(cx.listener(Self::sel_doc_start)).on_action(cx.listener(Self::sel_doc_end))
             .on_action(cx.listener(Self::select_all)).on_action(cx.listener(Self::copy)).on_action(cx.listener(Self::cut)).on_action(cx.listener(Self::paste))
-            .on_action(cx.listener(Self::undo)).on_action(cx.listener(Self::redo)).on_action(cx.listener(Self::newline)).on_action(cx.listener(Self::go)).on_action(cx.listener(Self::palette))
+            .on_action(cx.listener(Self::undo)).on_action(cx.listener(Self::redo)).on_action(cx.listener(Self::newline)).on_action(cx.listener(Self::go)).on_action(cx.listener(Self::go_back)).on_action(cx.listener(Self::palette))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down)).on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up)).on_mouse_move(cx.listener(Self::mouse_move))
             .line_height(px(20.)).text_size(px(13.))
@@ -392,7 +395,7 @@ impl Focusable for Composer { fn focus_handle(&self, _: &App) -> FocusHandle { s
 pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
 pub fn bindings() -> Vec<KeyBinding> {
     let mut v: Vec<KeyBinding> = Vec::new();
-    for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "PadLength"] {
+    for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
     let c = Some(ctx);
     v.extend([
         KeyBinding::new("backspace", Backspace, c), KeyBinding::new("delete", Delete, c),
@@ -410,7 +413,9 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("shift-enter", Newline, c),
     ]);
     }
-    v.extend([KeyBinding::new("enter", Go, Some("AskInput")), KeyBinding::new("enter", Go, Some("PickInput")), KeyBinding::new("enter", Go, Some("PadLength"))]);
+    v.extend([KeyBinding::new("enter", Go, Some("AskInput")), KeyBinding::new("enter", Go, Some("PickInput")), KeyBinding::new("enter", Go, Some("PadLength")),
+        // the find bar: Enter the next match, Shift+Enter the previous (bound after the editing keys, so it is not a new line there)
+        KeyBinding::new("enter", Go, Some("FindInput")), KeyBinding::new("shift-enter", GoBack, Some("FindInput"))]);
     v
 }
 

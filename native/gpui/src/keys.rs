@@ -13,20 +13,20 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
-pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
+pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
 /// Where "/" puts the keyboard in the message box: as `FREE`, and from a viewer too (a web page's own "/" is kept: `focus_composer`).
-const SLASH: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !BrowserBar && !FilesPage";
+const SLASH: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
-const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput";
+const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput";
 /// Where Esc is the field's or the page's own: the viewer does not shut under it.
-const ESC_OWNERS: [&str; 9] = ["TextInput", "PickInput", "AskInput", "ImpInput", "Terminal", "BrowserBar", "BrowserView", "CefBar", "CefPage"];
+const ESC_OWNERS: [&str; 10] = ["TextInput", "PickInput", "FindInput", "AskInput", "ImpInput", "Terminal", "BrowserBar", "BrowserView", "CefBar", "CefPage"];
 /// Where a bare backtick shows the terminal: the message box, or nowhere that types (a shell, another field and a viewer keep their backticks).
-const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
+const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
 /// Where Ctrl+H is the viewer's: everywhere but the small fields, the terminal and web pages, whose own it stays (it deletes a character in many fields and in a shell, and opens a web page's history).
 /// The composer is included, as in the old client: the board beside it answers without a click on the canvas. With no plot on show the key goes on to the composer (`key_layers`).
 /// Ctrl+L to the message box: everywhere but the shell (its Ctrl+L clears the screen) and the Browser page (its address bar)
 const NOT_SHELL: &str = "!Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
-const NOT_FIELD: &str = "!TextInput && !PickInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
+const NOT_FIELD: &str = "!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 /// The open model menu has its keys wherever the keyboard is: the window says `Picker` while it is open, and these bind at the depth of each text field, after the field's own keys, so they come first.
 const PICK_SCOPES: [&str; 6] = ["Picker", "Picker > Composer", "Picker > PickInput", "Picker > TextInput", "Picker > AskInput", "Picker > ImpInput"];
 
@@ -56,7 +56,8 @@ pub const TABLE: &[Entry] = &[
     e("palette", "Commands: jump to a thread or run a command", "Palette", "secondary-k", Rebind),
     e("palette-alt", "Commands (also)", "Palette", "secondary-shift-p", Fixed),
     e("sidebar", "Fold or unfold the sidebar", "Sidebar", "secondary-b", Legacy),
-    e("search", "Search threads", "Sidebar", "secondary-shift-f", Legacy),
+    e("search", "Find what was said in any thread", "Sidebar", "secondary-shift-f", Legacy),
+    e("find", "Find in this thread: Enter next, Shift+Enter previous, Esc closes", "Timeline", "secondary-f", Rebind),
     e("projects", "Go to project 1…9", "Sidebar", "alt-1…9", Fixed),
     e("threads", "Go to thread 1…9 of the project", "Sidebar", "secondary-1…9", Fixed),
     e("prev", "Previous thread", "Sidebar", "secondary-shift-[", Rebind),
@@ -148,7 +149,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None), KeyBinding::new(&k("account"), AccountMenu, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
-        KeyBinding::new("/", FocusComposer, Some(SLASH)), KeyBinding::new(&k("focus-key"), FocusComposer, Some(NOT_SHELL)),
+        KeyBinding::new("/", FocusComposer, Some(SLASH)), KeyBinding::new(&k("focus-key"), FocusComposer, Some(NOT_SHELL)), KeyBinding::new(&k("find"), crate::FindInThreadKey, Some(NOT_SHELL)),
         KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
     // Super+` (off a Mac: Cmd+` there goes from window to window) toggles the terminal too, from the shell as well, as in the old client
     if !mac() { v.push(KeyBinding::new("super-`", ToggleTerminal, None)); }

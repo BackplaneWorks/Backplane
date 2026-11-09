@@ -91,6 +91,9 @@ impl Backplane {
         self.timeline.reset(self.data["thread"]["entries"].as_array().map_or(0, |r| r.len()));
         self.screens.born.clear(); self.screens.shown_at = std::time::Instant::now();
         self.screens.seeking = self.screens.offsets.get(raw).cloned();
+        // another thread on show: the find bar of the last one shuts with its mark (a find opening this one keeps its own)
+        if raw != self.screens.find.thread { let f = &mut self.screens.find; f.open = false; f.mark.clear(); f.going = None; }
+        self.find_landed();
         self.timeline_seek();
     }
     /// A place being looked for: taken as soon as its row is held, unless the reader has moved off the end in the meantime.
@@ -164,6 +167,7 @@ impl Backplane {
             _ => { self.data["thread"]["entries"] = Value::Array(fresh); self.data["thread"]["historyOlder"] = Value::String(older); self.timeline_show(&raw); return; }
         };
         self.data["thread"]["entries"] = Value::Array(rows); self.data["thread"]["historyOlder"] = Value::String(top);
+        self.find_landed();
         self.timeline_seek();
     }
     /// A history page landed: laid into the rows held, the reader staying where they are.
@@ -183,6 +187,7 @@ impl Backplane {
             self.data["thread"]["historyOlder"] = Value::String(next);
         }
         self.data["thread"]["entries"] = Value::Array(merged);
+        self.find_landed();
         self.timeline_seek();
         // a page of a long thread is mostly tool calls folded into a few rows: while the reader is still within RUNWAY_ROWS of the top, ask for the next
         // page now rather than after the next frame, so scrolling up a thread of a thousand messages does not wait at the top for each page in turn
