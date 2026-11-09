@@ -451,6 +451,9 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Appearance", "", vec![]),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Language", "This device. Automatic follows the system language.", crate::i18n::CHOICES.iter().map(|(k, key)| b(&crate::i18n::t(key), "lang", k, l.lang == *k)).collect()),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Theme", "Light or dark on this device, or follow what the hub says.", lo::THEMES.iter().map(|(k, lab)| b(lab, "theme", k, l.theme == *k)).collect()),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("3D viewer background", "Behind Mech parts and the 3D board: Auto follows the theme.", lo::VIEWER_BGS.iter().map(|(k, lab)| b(lab, "viewer-bg", k, l.viewer_bg == *k)).collect()),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Custom background colour", "Pick a colour, then a lighter or darker shade of it.", lo::VIEWER_BG_SWATCHES.iter().map(|(lab, c)| b(lab, "viewer-bg-color", &format!("{c:06x}"), l.viewer_bg == "custom" && l.viewer_bg_rgb == *c))
+            .chain([b("Lighter", "viewer-bg-shade", "+", false), b("Darker", "viewer-bg-shade", "-", false)]).collect()),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Text size", &tf("gpui.settings.textpct", &[("pct", l.text_pct.into())]), vec![b("Smaller", "text", "-", false), b("Larger", "text", "+", false), b("Reset", "text-reset", "", l.text_pct == 100)]),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Font", "The typeface of the interface and the thread.", lo::FONTS.iter().map(|(k, lab)| b(lab, "font", k, l.font == *k)).collect()),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Layout", "", vec![]),

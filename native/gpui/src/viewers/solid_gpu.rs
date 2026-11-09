@@ -1,7 +1,7 @@
 //! The 3D page on the GPU. The model goes into one device buffer when it arrives and stays there; a picture is then one small uniform block, three draws and a read back, on the
 //! worker thread, with a context of its own (gpui lends out neither its device nor a way to draw into its frame on Linux, so the picture reaches it as an image). None from `new`
 //! when the machine has no usable device, or only a software one, which draws slower than raster.rs: the page then uses that. BACKPLANE_SOLID_RENDERER=cpu or gpu forces the choice.
-use super::raster::{to_linear, BG};
+use super::raster::Backdrop;
 use super::solid::{Camera, Mesh, FOV};
 use blade_graphics as gpu;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -13,7 +13,7 @@ const DEPTH: gpu::TextureFormat = gpu::TextureFormat::Depth32Float;
 const WAIT_MS: u32 = 2000;
 
 #[repr(C)] #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Params { eye: [f32; 4], right: [f32; 4], up: [f32; 4], fwd: [f32; 4], proj: [f32; 4], bg: [f32; 4] }
+struct Params { eye: [f32; 4], right: [f32; 4], up: [f32; 4], fwd: [f32; 4], proj: [f32; 4], bg: [f32; 4], bg2: [f32; 4] }
 #[repr(C)] #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vert { p: [f32; 3], nxy: u32, nz: u32, color: u32, group: u32 }
 #[derive(blade_macros::ShaderData)] struct ModelData { params: Params, verts: gpu::BufferPiece, fades: gpu::BufferPiece }
@@ -162,7 +162,7 @@ impl Gpu {
     /// One picture as BGRA bytes, None when the GPU failed it.
     pub fn render(&mut self, mesh: &Arc<Mesh>, cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> { self.render_faded(mesh, &[], cam, w, h) }
     /// `render` with each group of triangles at its fade.
-    pub fn render_faded(&mut self, mesh: &Arc<Mesh>, fades: &[f32], cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> { self.render_layers(&[(mesh, None)], fades, cam, w, h) }
+    pub fn render_faded(&mut self, mesh: &Arc<Mesh>, fades: &[f32], cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> { self.render_layers(&[(mesh, None)], fades, cam, w, h, &Backdrop::DARK) }
     /// The fades into their buffer (group 0, the board, is always 1); whether any group is between 0 and 1.
     fn put_fades(&mut self, fades: &[f32]) -> bool {
         let n = fades.len().max(1);
@@ -179,7 +179,7 @@ impl Gpu {
         any
     }
     /// A picture of the model in layers (each a mesh and its fade group, None: each triangle's own), each group at its fade.
-    pub fn render_layers(&mut self, layers: &[(&Arc<Mesh>, Option<u32>)], fades: &[f32], cam: &Camera, w: usize, h: usize) -> Option<Vec<u8>> {
+    pub fn render_layers(&mut self, layers: &[(&Arc<Mesh>, Option<u32>)], fades: &[f32], cam: &Camera, w: usize, h: usize, back: &Backdrop) -> Option<Vec<u8>> {
         if !self.upload(layers) { return None }
         let size = (w as u32, h as u32);
         let at = self.target(size);
@@ -192,7 +192,7 @@ impl Gpu {
         let draws: Vec<(gpu::Buffer, u32, u32)> = self.models.iter().map(|m| (m.verts, m.opaque, m.total)).collect();
         let f = 1.0 / (FOV / 2.0).tan(); let v = |a: [f32; 3]| [a[0], a[1], a[2], 0.0]; let e = cam.eye();
         let params = Params { eye: v(e), right: v(cam.right), up: v(cam.up), fwd: v(cam.fwd), proj: [f * h as f32 / w as f32, f, (cam.dist * 0.02).max(1e-3), 0.0 /* the pass: 0 at rest, 1 fading parts only */],
-            bg: [to_linear(BG[2]), to_linear(BG[1]), to_linear(BG[0]), 1.0] };
+            bg: { let t = back.linear().0; [t[0], t[1], t[2], 1.0] }, bg2: { let b = back.linear().1; [b[0], b[1], b[2], h as f32] } };
         self.encoder.start();
         {
             let mut pass = self.encoder.render("solid", gpu::RenderTargetSet {

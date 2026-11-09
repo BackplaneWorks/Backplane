@@ -183,11 +183,11 @@ fn with_boards(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &su
 fn in_corner(page: AnyElement, actions: AnyElement) -> AnyElement {
     div().relative().size_full().child(page).child(div().absolute().top_1().right_2().flex().justify_end().max_w(px(CORNER_ROOM + 440.)).child(actions)).into_any_element()
 }
-/// The 3D page before its first picture: the model's own ground (raster::BG, dark in either theme) with what it waits for in its middle, so the picture
+/// The 3D page before its first picture: the model's own ground (the viewer background setting, raster::Backdrop) with what it waits for in its middle, so the picture
 /// replaces it in place instead of a line of text on the panel's ground.
 fn model_loading(light: bool, say: &str) -> AnyElement {
-    let b = crate::viewers::raster::BG;
-    div().size_full().flex_1().min_h_0().bg(rgb(((b[2] as u32) << 16) | ((b[1] as u32) << 8) | b[0] as u32)).flex().items_center().justify_center().text_color(theme::color(light, "faint")).child(say.to_string()).into_any_element()
+    let b = crate::viewers::raster::Backdrop::current(); let hex = |c: [u8; 3]| rgb(((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32);
+    div().size_full().flex_1().min_h_0().bg(gpui::linear_gradient(180., gpui::linear_color_stop(hex(b.top), 0.), gpui::linear_color_stop(hex(b.bottom), 1.))).flex().items_center().justify_center().text_color(theme::color(light, "faint")).child(say.to_string()).into_any_element()
 }
 /// A page that has nothing to show yet: what it says, and the pane's controls on the same row.
 fn status_row(light: bool, say: &str, actions: Option<AnyElement>) -> AnyElement {

@@ -11,7 +11,29 @@ use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-pub const BG: [u8; 4] = [18, 15, 13, 255]; // BGRA of the page background (#0d0f12)
+/// The page's background: a vertical gradient between two sRGB colours (docs/VIEWER-BACKGROUND.md), top to bottom.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Backdrop { pub top: [u8; 3], pub bottom: [u8; 3] }
+static CURRENT: Mutex<Backdrop> = Mutex::new(Backdrop::DARK);
+impl Backdrop {
+    /// The backdrop the window drew its last frame with, for what is shown before a picture exists (the loading card).
+    pub fn current() -> Backdrop { *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) }
+    pub fn make_current(self) { *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = self; }
+    pub const LIGHT: Backdrop = Backdrop { top: [0xf5, 0xf6, 0xf8], bottom: [0xe1, 0xe4, 0xe9] };
+    pub const DARK: Backdrop = Backdrop { top: [0x4d, 0x53, 0x5e], bottom: [0x35, 0x3a, 0x43] };
+    /// What a setting resolves to: `mode` auto (the theme), light, dark or custom (`rgb` 0xRRGGBB, its bottom 12% darker).
+    pub fn resolve(mode: &str, rgb: u32, light_theme: bool) -> Backdrop {
+        match mode {
+            "light" => Backdrop::LIGHT, "dark" => Backdrop::DARK,
+            "custom" => { let c = [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8]; Backdrop { top: c, bottom: c.map(|v| (v as f32 * 0.88).round() as u8) } }
+            _ => if light_theme { Backdrop::LIGHT } else { Backdrop::DARK },
+        }
+    }
+    /// Both ends in linear light (red, green, blue), the space the picture is mixed in.
+    pub fn linear(&self) -> ([f32; 3], [f32; 3]) { (self.top.map(to_linear), self.bottom.map(to_linear)) }
+    /// The colour (RGB, sRGB bytes) at `t` from the top (0) to the bottom (1), mixed in linear light as the renderers do.
+    pub fn at(&self, t: f32) -> [u8; 3] { let (a, b) = self.linear(); std::array::from_fn(|i| to_srgb(a[i] + (b[i] - a[i]) * t)) }
+}
 const TILE: i32 = 48; // divisible by 1, 2 and 3: a tile is a whole number of output pixels at any supersampling
 /// two faces smooth into one surface when their normals are within about 55 degrees (a hexagon's 60 stays sharp, a circle's 45 steps blend)
 const CREASE_COS: f32 = 0.574;
@@ -138,7 +160,8 @@ fn project(mesh: &Mesh, fades: &[f32], lo: usize, hi: usize, g: &Geo, out: &mut 
 
 // ---- lighting -----------------------------------------------------------------------------------------------------------
 /// The material model of solid.wgsl, in camera space (x right, y up, z forward): the test `gpu_and_cpu_agree` holds the two together.
-struct Light { key: V3, fill: V3, sky_key: V3, sky_fill: V3, bg: [f32; 3] }
+struct Light { key: V3, fill: V3, sky_key: V3, sky_fill: V3, top: [f32; 3], bottom: [f32; 3], rows: f32 }
+impl Light { fn bg(&self, y: f32) -> [f32; 3] { let t = y / self.rows; std::array::from_fn(|i| self.top[i] + (self.bottom[i] - self.top[i]) * t) } }
 /// An sRGB byte as linear light.
 pub fn to_linear(c: u8) -> f32 { let v = c as f32 / 255.0; if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) } }
 /// Linear light as an sRGB byte, through a table: this runs for every pixel.
@@ -178,7 +201,7 @@ fn studio(l: &Light, r: V3, rough: f32, metal: f32) -> [f32; 3] {
     let q = [r[0], r[1], -r[2]];
     let power = mix(110.0, 3.0, rough * rough);
     let (key, fill) = (dot(q, l.sky_key).max(0.0).powf(power), dot(q, l.sky_fill).max(0.0).powf(power * 0.65));
-    let sky = (0.08 + 0.2 * smoothstep(-0.4, 0.25, q[1]) + 0.7 * smoothstep(0.45, 0.85, q[1])) * mix(0.15, 1.0, metal);
+    let sky = (0.12 + 0.2 * smoothstep(-0.4, 0.25, q[1]) + 0.7 * smoothstep(0.45, 0.85, q[1])) * mix(0.15, 1.0, metal);
     [sky + 1.5 * key + 0.65 * fill, sky + 1.48 * key + 0.72 * fill, sky + 1.42 * key + 0.85 * fill]
 }
 /// The colour (linear) of a surface point: `n` camera-space unit normal, `ray` the unit direction from the eye to the point, `c` its wire colour.
@@ -192,13 +215,13 @@ fn light(l: &Light, n: V3, ray: V3, c: u32) -> [f32; 3] {
     let n = if dot(n, v) < 0.0 { [-n[0], -n[1], -n[2]] } else { n }; // two-sided: boards are thin, and a back face shows the same as a front
     let nv = dot(n, v).max(0.0);
     let f0: [f32; 3] = std::array::from_fn(|i| mix(0.04, base[i], metal));
-    let amb = (1.0 - metal) * (if rough >= 0.8 { 0.74 } else { 0.27 } + 0.08 * n[1].max(0.0));
+    let amb = (1.0 - metal) * (if rough >= 0.8 { 0.80 } else { 0.34 } + 0.10 * n[1].max(0.0));
     let (k, f) = (lit(n, v, l.key, base, f0, rough, metal), lit(n, v, l.fill, base, f0, rough, metal));
     let d = 2.0 * dot(n, v); let r = [n[0] * d - v[0], n[1] * d - v[1], n[2] * d - v[2]];
     let (env, fe) = (studio(l, r, rough, metal), fresnel(f0, nv));
     let (gloss, fc) = if coat > 0.0 { (studio(l, r, 0.3, 0.0), fresnel([0.04; 3], nv)) } else { ([0.0; 3], [0.0; 3]) };
     std::array::from_fn(|i| {
-        let rgb = base[i] * amb + k[i] * 1.5 + f[i] * 0.65 + env[i] * fe[i] * (1.0 - rough * 0.35) + gloss[i] * fc[i] * coat;
+        let rgb = base[i] * amb + k[i] * 1.5 + f[i] * 0.85 + env[i] * fe[i] * (1.0 - rough * 0.35) + gloss[i] * fc[i] * coat;
         rgb / (1.0 + (rgb - 0.8).max(0.0) * 0.28) // a soft shoulder for highlights
     })
 }
@@ -266,7 +289,7 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
             let ray = norm([(sxp - g.cx) / g.scale, -(syp - g.cy) / g.scale, 1.0]);
             light(l, norm(n), ray, s.color)
         };
-        let mut c = if idb[i] == u32::MAX { l.bg } else { surface(idb[i]) };
+        let mut c = if idb[i] == u32::MAX { l.bg((y0t + y) as f32 + 0.5) } else { surface(idb[i]) };
         let coat = |c: &mut [f32; 3]| if tid[i] != u32::MAX && tz[i] > zb[i] {
             let (t, a) = (surface(tid[i]), 1.0 - (set[tid[i] as usize].color >> 24) as f32 / 255.0);
             for k in 0..3 { c[k] += (t[k] - c[k]) * a; }
@@ -287,15 +310,15 @@ fn draw_tile(tx: i32, ty: i32, ids: &[u32], set: &[Setup], g: &Geo, ss: i32, l: 
 
 /// Render into BGRA (w x h x 4) with `ss` x `ss` samples a pixel (1 for a draft while the model is moving). `alive` is polled between pieces of
 /// work: a superseded render stops and returns None.
-pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> { render_faded(mesh, &[], cam, w, h, ss, alive) }
+pub fn render(mesh: &Mesh, cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> { render_faded(mesh, &[], cam, w, h, ss, &Backdrop::DARK, alive) }
 /// `render` with each group of triangles (`Mesh::groups`) at its fade in `fades` (0 not drawn, under 1 drawn see-through over the rest, 1 as the board).
-pub fn render_faded(mesh: &Mesh, fades: &[f32], cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> {
+pub fn render_faded(mesh: &Mesh, fades: &[f32], cam: &Camera, w: usize, h: usize, ss: usize, back: &Backdrop, alive: &(dyn Fn() -> bool + Sync)) -> Option<Vec<u8>> {
     let ss = ss.clamp(1, 3) as i32;
     let (iw, ih) = (w as i32 * ss, h as i32 * ss);
     let f = 1.0 / (FOV / 2.0).tan();
     let g = Geo { eye: cam.eye(), right: cam.right, up: cam.up, fwd: cam.fwd, near: (cam.dist * 0.02).max(1e-3), cx: iw as f32 / 2.0, cy: ih as f32 / 2.0, scale: ih as f32 / 2.0 * f, w: iw, h: ih };
     let l = Light { key: norm([-0.55, 0.75, -0.65]), fill: norm([0.85, 0.25, -0.35]), sky_key: norm([-0.55, 0.75, 0.65]), sky_fill: norm([0.85, 0.25, 0.35]),
-        bg: [to_linear(BG[2]), to_linear(BG[1]), to_linear(BG[0])] };
+        top: back.linear().0, bottom: back.linear().1, rows: ih as f32 };
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
     // 1: project, in chunks over the cores
     const CHUNK: usize = 16384;

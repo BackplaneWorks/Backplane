@@ -8,7 +8,6 @@
 use gpui::{prelude::*, *};
 use crate::i18n::{t, tf, trs};
 use super::raster::{self, render};
-#[cfg(test)] use super::raster::BG;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Condvar, Mutex};
 
 pub const MAX_TRIANGLES: usize = (64 << 20) / 84;
@@ -362,7 +361,7 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 /// `Building`: a large model frame of this key is being decoded now.
 enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str, draft: bool } }
 /// What to render: the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
-type Job = (Arc<Layers>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool);
+type Job = (Arc<Layers>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool, raster::Backdrop);
 /// What the worker holds of the model on show: the board, the part frames come so far, the progress.
 #[derive(Default)] struct Scene { key: String, board: Option<Arc<Mesh>>, parts: Vec<Arc<Mesh>>, done: u32, of: u32 }
 impl Scene {
@@ -388,16 +387,16 @@ pub fn shows(ticket: u64, shown: u64, floor: u64) -> bool { ticket >= floor && t
 /// `cpu`: the layers made one mesh for the CPU's drawing, and the layers it was made of (Weak: no later mesh can take their addresses).
 #[derive(Default)] struct Drawer { cpu: Option<(Vec<std::sync::Weak<Mesh>>, Arc<Mesh>)> }
 impl Drawer {
-    fn draw(&mut self, model: &Layers, fades: &[f32], cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<(Vec<u8>, &'static str)> {
+    fn draw(&mut self, model: &Layers, fades: &[f32], cam: &Camera, w: usize, h: usize, ss: usize, back: &raster::Backdrop, alive: &(dyn Fn() -> bool + Sync)) -> Option<(Vec<u8>, &'static str)> {
         #[cfg(target_os = "linux")] {
             let mut gpu = super::solid_gpu::shared().lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(g) = gpu.as_mut() { match g.render_layers(&model.list(), fades, cam, w, h) { Some(px) => return Some((px, "gpu")), None => { log::warn!("3D page: the GPU failed a picture, drawing on the CPU from now on"); std::mem::forget(gpu.take()); } } }
+            if let Some(g) = gpu.as_mut() { match g.render_layers(&model.list(), fades, cam, w, h, back) { Some(px) => return Some((px, "gpu")), None => { log::warn!("3D page: the GPU failed a picture, drawing on the CPU from now on"); std::mem::forget(gpu.take()); } } }
         }
         let list = model.list();
         let made = self.cpu.as_ref().is_some_and(|(of, _)| of.len() == list.len() && of.iter().zip(&list).all(|(w, l)| std::sync::Weak::as_ptr(w) == Arc::as_ptr(l.0)));
         if !made { self.cpu = model.combined().map(|m| (list.iter().map(|l| Arc::downgrade(l.0)).collect(), Arc::new(m))); }
         let mesh = self.cpu.as_ref()?.1.clone();
-        raster::render_faded(&mesh, fades, cam, w, h, ss, alive).map(|px| (px, "cpu"))
+        raster::render_faded(&mesh, fades, cam, w, h, ss, back, alive).map(|px| (px, "cpu"))
     }
     /// The model's buffer off the GPU (the page is put away).
     fn forget(&mut self) {
@@ -429,10 +428,10 @@ impl Worker {
                 let mesh = Layers::of(scene.board.clone(), scene.parts.clone()).map(Arc::new); // no copy: a new part is one more layer
                 if tx.send_blocking(Msg::Scene { key: scene.key.clone(), mesh, board, reset, groups: scene.parts.len(), done: scene.done, of: scene.of }).is_err() { return }
             }
-            if let Some((mesh, fades, cam, w, h, ss, my, draft)) = render {
+            if let Some((mesh, fades, cam, w, h, ss, my, draft, back)) = render {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
-                if let Some((px, by)) = drawer.draw(&mesh, &fades, &cam, w, h, ss, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
+                if let Some((px, by)) = drawer.draw(&mesh, &fades, &cam, w, h, ss, &back, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
                     if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris(), w, h, by, draft }).is_err() { return } }
                 }
             }
@@ -442,9 +441,9 @@ impl Worker {
     fn forget(&self) { let (m, cv) = &*self.slot; m.lock().unwrap().forget = true; cv.notify_one(); }
     fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frames.push(bytes); cv.notify_one(); }
     /// Ask for an image of `mesh`, replacing any request not yet begun.
-    fn submit_render(&self, mesh: Arc<Layers>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool) -> u64 {
+    fn submit_render(&self, mesh: Arc<Layers>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool, back: raster::Backdrop) -> u64 {
         let ticket = self.ticket.fetch_add(1, Ordering::Relaxed) + 1;
-        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, fades, cam, w, h, ss, ticket, draft)); cv.notify_one(); ticket
+        let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, fades, cam, w, h, ss, ticket, draft, back)); cv.notify_one(); ticket
     }
 }
 impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().unwrap().shutdown = true; self.ticket.fetch_add(1, Ordering::Relaxed); cv.notify_one(); } }
@@ -493,7 +492,7 @@ pub struct SolidPage {
     /** what the hub said it is doing for a model (Stage), shown with its time running; whether a second's tick is running for it */ stage: Option<Stage>, ticking: bool,
     /** the share of DRAFT_PIXELS a picture in motion gets, from how long the last ones took (draft_scale) */ draft_scale: f32,
     /** the model shown before (Kept); the part frames of a model brought back, until the hub's stream of it has as many */ prev: Option<Kept>, restored: Option<usize>,
-    /** the hub could not make this source's model (its Note): the page offers Retry */ failed: bool,
+    /** the hub could not make this source's model (its Note): the page offers Retry */ failed: bool, /** the background the pictures are drawn on (`set_backdrop`) */ back: raster::Backdrop,
     pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
 }
 impl SolidPage {
@@ -504,9 +503,11 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
+    /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
+    pub fn set_backdrop(&mut self, back: raster::Backdrop) { if self.back != back { self.back = back; self.ask_render(false); } }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
     pub fn key(&self) -> &str { &self.key }
     /// The source the page is showing: the one being made when the hub is making another than the model held (the page then shows its
@@ -625,7 +626,7 @@ impl SolidPage {
         let most = (DRAFT_PIXELS as f32 * self.draft_scale) as usize;
         if draft && w * h > most { let k = (most as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
         self.asked = (w, h);
-        self.latest = self.worker.submit_render(mesh.clone(), Arc::new(fades), cam, w, h, samples(w, h, draft), draft);
+        self.latest = self.worker.submit_render(mesh.clone(), Arc::new(fades), cam, w, h, samples(w, h, draft), draft, self.back);
     }
     /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
     pub fn set_view(&mut self, name: &str) {
@@ -803,7 +804,7 @@ mod tests {
         assert!(!super::note_keeps_model("", "2|/b|"));
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
-    use super::{decode_mesh, parse_frame, render, wheel_zoom, Camera, Layers, Mesh, SolidFrame, BG, add, mul, sub};
+    use super::{decode_mesh, parse_frame, render, wheel_zoom, Camera, Layers, Mesh, SolidFrame, add, mul, sub};
     use super::super::raster::smooth_normals;
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
     fn zig(v: i32) -> u32 { ((v << 1) ^ (v >> 31)) as u32 }
@@ -857,10 +858,13 @@ mod tests {
         let big = encode(&[([i32::MAX, 0, 0, 0, i32::MAX, 0, 0, 0, i32::MAX], 1), ([i32::MAX, i32::MAX, 0, i32::MAX, i32::MAX, i32::MAX, 5, 5, 5], 2)]);
         let _ = decode_mesh(2, &big); // overflowing deltas wrap (no debug-mode panic)
     }
+    /// The BGR of the default (dark) backdrop on output row `y` of `h`, as the renderers mix it: tests compare within a level (the CPU averages samples).
+    fn bg_at(y: usize, h: usize) -> [u8; 3] { let c = super::super::raster::Backdrop::DARK.at((y as f32 + 0.5) / h as f32); [c[2], c[1], c[0]] }
+    fn is_bg(p: &[u8], y: usize, h: usize) -> bool { let b = bg_at(y, h); (0..3).all(|k| (p[k] as i32 - b[k] as i32).abs() <= 1) }
     #[test] fn renders_the_model_in_the_middle_and_background_at_the_corners() {
         let m = mesh(); let (w, h) = (96, 64); let px = render(&m, &Camera::fitted(&m), w, h, 2, ALIVE).unwrap();
         let at = |x: usize, y: usize| { let i = (y * w + x) * 4; [px[i], px[i + 1], px[i + 2]] };
-        assert_eq!(at(1, 1), [BG[0], BG[1], BG[2]]); assert_ne!(at(w / 2, h / 2), [BG[0], BG[1], BG[2]]);
+        assert!(is_bg(&at(1, 1), 1, h), "{:?}", at(1, 1)); assert!(is_bg(&at(w - 2, h - 2), h - 2, h)); assert!(!is_bg(&at(w / 2, h / 2), h / 2, h)); assert!(at(1, 1)[0] > at(1, h - 2)[0], "a gradient, lighter at the top");
     }
     #[test] fn free_orbit_has_no_pole_and_keeps_an_orthonormal_basis_and_zoom_is_bounded() {
         let m = mesh(); let a = render(&m, &Camera::fitted(&m), 64, 64, 2, ALIVE).unwrap();
@@ -955,7 +959,7 @@ mod tests {
     #[test] fn a_triangle_behind_the_near_plane_is_clipped_not_dropped() {
         let m = mesh(); let mut c = Camera::fitted(&m); c.dist = c.fit / 60.0 * 2.0; // inside the cube: faces cross the near plane
         let px = render(&m, &c, 48, 48, 2, ALIVE).unwrap();
-        assert!(px.chunks_exact(4).any(|p| [p[0], p[1], p[2]] != [BG[0], BG[1], BG[2]]), "the near faces still cover the view");
+        assert!(px.chunks_exact(4).enumerate().any(|(i, p)| !is_bg(p, i / 48, 48)), "the near faces still cover the view");
     }
     #[test] fn a_superseded_render_is_abandoned() { let m = mesh(); assert!(render(&m, &Camera::fitted(&m), 32, 32, 1, &|| false).is_none()); }
     #[test] fn frame_parser_reads_model_note_and_ignores_other_frames() {
@@ -993,10 +997,9 @@ mod tests {
         let c = Camera::fitted(&m).named("top");
         for ss in [1, 2, 3] {
             let (w, h) = (120, 90); let px = render(&m, &c, w, h, ss, ALIVE).unwrap();
-            let bg = [BG[0], BG[1], BG[2]];
             for y in 0..h { for x in 0..w {
                 let (dx, dy) = (x as f32 + 0.5 - w as f32 / 2.0, y as f32 + 0.5 - h as f32 / 2.0);
-                let i = (y * w + x) * 4; let on = [px[i], px[i + 1], px[i + 2]] != bg;
+                let i = (y * w + x) * 4; let on = !is_bg(&px[i..i + 3], y, h);
                 if dx * dx + dy * dy < 12.0 * 12.0 { assert!(on, "ss {ss}: a hole at {x},{y}"); }
             } }
             assert_eq!(px, render(&m, &c, w, h, ss, ALIVE).unwrap(), "ss {ss}: same picture twice");
@@ -1085,12 +1088,12 @@ mod tests {
         let all = super::combine(Some(&board), &[std::sync::Arc::new(p)]).unwrap();
         let c = Camera::fitted(&board).named("top"); let (w, h) = (48, 48);
         let plain = render(&board, &c, w, h, 1, ALIVE).unwrap();
-        let at = |f: f32| super::super::raster::render_faded(&all, &[1.0, f], &c, w, h, 1, ALIVE).unwrap();
+        let at = |f: f32| super::super::raster::render_faded(&all, &[1.0, f], &c, w, h, 1, &super::super::raster::Backdrop::DARK, ALIVE).unwrap();
         assert_eq!(at(0.0), plain, "not there yet: the board alone");
         let (half, full) = (at(0.5), at(1.0));
         let mid = (h / 2 * w + w / 2) * 4; let red_of = |p: &[u8]| p[mid + 2] as i32 - p[mid + 1] as i32; // BGRA
         assert!(red_of(&plain) < red_of(&half) && red_of(&half) < red_of(&full), "{} {} {}", red_of(&plain), red_of(&half), red_of(&full));
-        assert_eq!(full, super::super::raster::render_faded(&all, &[], &c, w, h, 1, ALIVE).unwrap(), "faded in is the same as never faded");
+        assert_eq!(full, super::super::raster::render_faded(&all, &[], &c, w, h, 1, &super::super::raster::Backdrop::DARK, ALIVE).unwrap(), "faded in is the same as never faded");
         #[cfg(target_os = "linux")] {
             unsafe { std::env::set_var("BACKPLANE_SOLID_RENDERER", "gpu"); }
             if let Some(mut g) = super::super::solid_gpu::Gpu::new() {
@@ -1102,7 +1105,7 @@ mod tests {
                 let b = std::sync::Arc::new(board.clone());
                 let Some(SolidFrame::Part(_, part, _)) = parse_frame(&part_frame("2|b|", &red, &[ID], 1)) else { panic!() };
                 let l = Layers::of(Some(b), vec![std::sync::Arc::new(part)]).unwrap();
-                let mut gl = |f: f32| g.render_layers(&l.list(), &[1.0, f], &c, w, h).unwrap();
+                let mut gl = |f: f32| g.render_layers(&l.list(), &[1.0, f], &c, w, h, &super::super::raster::Backdrop::DARK).unwrap();
                 assert_eq!((gl(0.0), gl(0.5), gl(1.0)), (z, hf, fl), "layers draw as the combined mesh");
             } else { eprintln!("no GPU here: the GPU half skipped") }
         }
