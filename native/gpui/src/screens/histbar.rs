@@ -18,6 +18,8 @@ pub struct Step { pub c: String, pub p: String, pub t: u64, pub old: String, pub
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Steps { pub git: String, pub top: String, pub pcb: String, pub sch: String, pub file: String, pub kind: String, pub live: String, pub note: String, pub steps: Vec<Step> }
 pub fn steps_of(v: &Value) -> Option<Steps> {
+    // the hub refused (a far machine's hub that has no history.steps, a thread gone): the bar says so instead of loading for ever
+    if v.is_null() { return Some(Steps { live: "Live".into(), note: "The design history could not be read here.".into(), ..Steps::default() }) }
     if !v.is_object() { return None }
     let g = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let (git, top, file) = (g("git"), g("top"), g("file"));
@@ -289,6 +291,9 @@ pub fn resolved(app: &mut Backplane, r: &Value, cx: &mut Context<Backplane>) {
     pick(app, if v["side"] == "b" { 1 } else { 0 }, path, name.to_string());
 }
 
+/// Escape shuts the compare menu first (0.14's scrim took it).
+pub fn escape(app: &mut Backplane) -> bool { if app.screens.plotview.menu == 0 { return false } app.screens.plotview.menu = 0; true }
+
 /// The menu's rows of versions: (label, what it is, what a press does).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Pick { Step(usize), Commit(String, String), /** the working copy */ Live }
@@ -444,7 +449,7 @@ mod tests {
                       {"c": "b2", "p": "a1", "t": 9, "old": "OLD2", "new": "NEW2", "label": "Step 2", "tip": "Step 2 · 14:09", "title": "Step 2 of 2", "detail": "Saved 14:09 · After Edit", "entry": "tu1", "id": "step:b2"}]})).unwrap();
         assert_eq!((s.steps.len(), s.steps[1].old.as_str(), s.steps[1].new.as_str(), s.live.as_str()), (2, "OLD2", "NEW2", "Live · 1 of 2 changes"));
         assert_eq!(s.steps[0].title, "Step 1 of 2 · before the agent's edits"); assert_eq!(s.steps[1].entry, "tu1");
-        assert!(steps_of(&Value::Null).is_none());
+        assert_eq!(steps_of(&Value::Null).map(|s| (s.steps.len(), s.note)), Some((0, "The design history could not be read here.".to_string())), "a refusal is said, not loaded for ever"); assert!(steps_of(&json!("x")).is_none());
         let old = steps_of(&json!({"git": "/p/.git", "top": "/p", "pcb": "/p/b.kicad_pcb", "file": "/p/b.kicad_pcb", "steps": [{"c": "a1", "p": "", "t": 5}, {"c": "b2", "p": "a1", "t": 9}]})).unwrap();
         assert_eq!(old.steps[1].new, "git\t/p/.git\tb2\t2\t/p/b.kicad_pcb"); assert_eq!(old.steps[1].old, "git\t/p/.git\ta1\t2\t/p/b.kicad_pcb"); assert_eq!(old.steps[0].old, "");
         assert_eq!((old.steps[1].label.as_str(), old.live.as_str()), ("Step 2", "Live · 2 steps"));
