@@ -14,6 +14,8 @@ pub struct Menu { pub at: Point<Pixels>, pub items: Vec<Item>, /// the item whos
 
 /// The ▾ menu's "Search in thread": the window's own (the palette searching what was said in this thread), nothing sent to the hub.
 pub const LOCAL_SEARCH: &str = "local:search-thread";
+/// A project's "Intent…" (0.14): its page, which shows what the project is for and edits it. The window's own, nothing sent.
+pub const LOCAL_INTENT: &str = "local:intent";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm } }
@@ -57,7 +59,7 @@ pub fn title_items(data: &Value) -> Vec<Item> {
     v
 }
 /// The items for a project's header.
-pub fn project_items(pid_raw: &str) -> Vec<Item> { vec![item("New thread", "new-thread", pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
+pub fn project_items(pid_raw: &str) -> Vec<Item> { vec![item("New thread", "new-thread", pid_raw, false), item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {
@@ -72,7 +74,12 @@ impl Backplane {
     }
     fn ctx_click(&mut self, i: usize, cx: &mut Context<Self>) {
         let Some(m) = self.screens.ctx.as_mut() else { return };
-        if m.items.get(i).map_or(false, |it| it.action == LOCAL_SEARCH) { self.screens.ctx = None; self.palette_open_in_thread(cx); return }
+        match m.items.get(i).map(|it| (it.action.clone(), it.value.clone())) {
+            // the window's own items: the menu shuts as Esc shuts it (an armed Delete is disarmed), then the item opens its place
+            Some((a, _)) if a == LOCAL_SEARCH => { self.ctx_close(cx); self.palette_open_in_thread(cx); return }
+            Some((a, v)) if a == LOCAL_INTENT => { self.ctx_close(cx); self.open_project(v, cx); return }
+            _ => {}
+        }
         let step = press(m, i, &self.data);
         if let Some(c) = step.send { let _ = self.tx.try_send(c); }
         if step.close { self.screens.ctx = None; }
@@ -161,8 +168,8 @@ mod tests {
         assert_eq!(sent(&disarm(&m2)), Some(("delete-no".into(), String::new()))); m2.armed = None; assert!(disarm(&m2).is_none());
         // a project's Remove asks in the menu, the hub hears only the second click
         let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None };
-        let s = press(&mut p, 3, &Value::Null); assert!(s.send.is_none() && !s.close); assert_eq!(armed_label(&p.items[3]), "Click again to remove"); assert!(disarm(&p).is_none());
-        let s = press(&mut p, 3, &Value::Null); assert_eq!(sent(&s.send), Some(("proj-remove".into(), "p1".into()))); assert!(s.close);
+        let s = press(&mut p, 4, &Value::Null); assert!(s.send.is_none() && !s.close); assert_eq!(armed_label(&p.items[4]), "Click again to remove"); assert!(disarm(&p).is_none());
+        let s = press(&mut p, 4, &Value::Null); assert_eq!(sent(&s.send), Some(("proj-remove".into(), "p1".into()))); assert!(s.close);
         // any other item does what it says at once
         let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
     }
@@ -171,7 +178,7 @@ mod tests {
         let it = title_items(&d); assert!(it.iter().find(|i| i.label == "Delete").unwrap().confirm && !it.iter().find(|i| i.label == "Diff").unwrap().confirm);
     }
     #[test] fn a_project_offers_new_thread_rename_badge_and_a_confirmed_remove() {
-        let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", "proj-rename", "look", "proj-remove"]); assert!(it[3].confirm && !it[1].confirm && it[1].value == "p1");
+        let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", LOCAL_INTENT, "proj-rename", "look", "proj-remove"]); assert!(it[4].confirm && !it[2].confirm && it[2].value == "p1" && it[1].value == "p1");
     }
     #[test] fn only_a_subthread_offers_to_move_to_the_top_level() {
         let sub = j(r#"{"id":"http://h:1|t8","depth":1,"canChild":true}"#); let it = thread_items(&sub, "p1");
