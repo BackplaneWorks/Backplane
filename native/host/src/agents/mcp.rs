@@ -97,6 +97,9 @@ pub fn perm_verdict(tool: &str, input: &Value, answer: &str) -> Value {
 }
 /// Ans.line: what the person decided, kept in the thread.
 pub fn ans_line(kind: &str, tool: &str, q: &str, answer: &str) -> String {
+    // the files' approval: one line, what was sent (its long list stays in the card that asked)
+    if tool == "order_quote" { let first = q.lines().next().unwrap_or("").trim(); let what = first.strip_prefix("Send ").and_then(|r| r.split(" to Backplane").next()).unwrap_or(first);
+        return if matches!(answer, "accept" | "session") { format!("Sent for a quote: {what}") } else { format!("Not sent: {what}") } }
     if kind == "input" { let first = q.lines().next().unwrap_or(q).chars().take(200).collect::<String>(); format!("{} → {}", first.trim(), if answer.trim().is_empty() { "dismissed" } else { answer.trim() }) }
     else { format!("{}: {tool} {}", match answer { "accept" => "Allowed", "session" => "Allowed for this session", _ => "Denied" }, q.chars().take(160).collect::<String>()) }
 }
@@ -274,6 +277,8 @@ mod tests {
     #[test] fn approval_details_prefer_the_command() { assert_eq!(perm_detail(&json!({"file_path":"/a","command":"ls"})), "ls"); assert_eq!(perm_detail(&json!({"url":"u"})), "u"); assert_eq!(perm_detail(&json!({"x":1})), "{\"x\":1}"); }
     #[test] fn decisions_stay_in_the_thread() {
         assert_eq!(ans_line("approval", "Bash", "ls -la", "accept"), "Allowed: Bash ls -la"); assert_eq!(ans_line("approval", "Bash", "ls", "session"), "Allowed for this session: Bash ls"); assert_eq!(ans_line("approval", "Bash", "ls", "decline"), "Denied: Bash ls");
+        assert_eq!(ans_line("approval", "order_quote", "Send 13 files from mfg/1 to Backplane's quote service? They are kept only to make what you order.\nShips to US (GA) · Main ×5\n\na.gbr", "accept"), "Sent for a quote: 13 files from mfg/1");
+        assert_eq!(ans_line("approval", "order_quote", "Send 1 file from mfg/1 to Backplane's quote service?", "decline"), "Not sent: 1 file from mfg/1");
         assert_eq!(ans_line("input", "AskUserQuestion", "Which?\nUSB-C: x", " USB-C "), "Which? → USB-C"); assert_eq!(ans_line("input", "t", "Q", " "), "Q → dismissed");
     }
     #[test] fn the_tool_list_is_the_js_hubs_for_every_tool_we_serve() {
