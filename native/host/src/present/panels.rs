@@ -57,10 +57,11 @@ pub fn sub_log(rows: &[(String, String, String, u64)]) -> Value {
     let mut m = serde_json::Map::new();
     for (call, kind, text, at) in rows {
         if call.is_empty() { continue }
-        let o = m.entry(call.clone()).or_insert_with(|| json!({"type": "", "model": "", "ask": "", "since": 0, "until": 0, "steps": 0, "tokens": 0, "outcome": "", "last": null, "shown": []}));
-        if kind.starts_with("start") { o["since"] = json!(at); continue } // newest first: the oldest start stays
+        let o = m.entry(call.clone()).or_insert_with(|| json!({"type": "", "model": "", "ask": "", "since": 0, "until": 0, "steps": 0, "tokens": 0, "outcome": "", "last": null, "shown": [], "title": "", "kind": "", "end": ""}));
+        // newest first: the oldest start stays, with what it was called and its kind ("start:subagent")
+        if kind.starts_with("start") { o["since"] = json!(at); o["title"] = json!(first_line(text, 160)); o["kind"] = json!(kind.strip_prefix("start:").unwrap_or("")); continue }
         match kind.as_str() {
-            "end" => { if o["until"] == 0 { o["until"] = json!(at) } }
+            "end" => { if o["until"] == 0 { o["until"] = json!(at); o["end"] = json!(text.trim()) } }
             "about" => { if o["ask"] == "" { let a: Value = serde_json::from_str(text).unwrap_or(Value::Null);
                 o["type"] = json!(a["type"].as_str().unwrap_or("")); o["model"] = json!(a["model"].as_str().unwrap_or("")); o["ask"] = json!(a["prompt"].as_str().unwrap_or("").trim()); } }
             "outcome" => { if o["outcome"] == "" { let a: Value = serde_json::from_str(text).unwrap_or(Value::Null);
@@ -122,7 +123,7 @@ pub fn subs_at(st: &State, thread: &str, log: &Value, now: u64) -> Value {
     let text = set(st, format!("bg.{thread}"));
     let lines = bg::lines(text);
     let own: Vec<Value> = lock_rows(st, thread).into_iter().chain(watch_rows(st, thread)).collect();
-    if lines.is_empty() && own.is_empty() { return Value::Null }
+    if lines.is_empty() && own.is_empty() && !log["calls"].as_object().map_or(false, |c| !c.is_empty()) { return Value::Null }
     let live = bg::running(&lines) + own.iter().filter(|r| r["state"] != "ended").count();
     let host = log["host"].as_str().unwrap_or("");
     let rows: Vec<Value> = lines.iter().map(|l| {
@@ -138,6 +139,23 @@ pub fn subs_at(st: &State, thread: &str, log: &Value, now: u64) -> Value {
         }
         r
     }).chain(own).collect();
+    // Subs.done: a subagent of the agent's own that ended in the last day stays listed after its turn (Bg.settle took its line), folded under the head
+    // with what it reported, so what the subagents did can still be read; one whose start the log window no longer holds is left out
+    let mut rows = rows;
+    if let Some(calls) = log["calls"].as_object() {
+        let listed: Vec<String> = lines.iter().map(|l| bg::field(l, 2)).collect();
+        let mut done: Vec<(&String, &Value)> = calls.iter().filter(|(c, i)| !listed.contains(c) && i["kind"] == "subagent" && i["since"].as_u64().unwrap_or(0) > 0
+            && i["until"].as_u64().map_or(false, |u| u > 0 && now.saturating_sub(u) < 86400)).collect();
+        done.sort_by_key(|(_, i)| std::cmp::Reverse(i["until"].as_u64().unwrap_or(0)));
+        for (call, i) in done {
+            let end = i["end"].as_str().unwrap_or(""); let state = if end.is_empty() { "completed" } else { end };
+            let title = i["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Subagent");
+            let mut r = json!({"title": title, "kind": "subagent", "state": state, "doing": "", "key": call});
+            for (k, v) in sub_info(st, thread, false, "", i, host, now) { r[k] = v; }
+            rows.push(r);
+        }
+    }
+    if rows.is_empty() { return Value::Null }
     let word = if live > 0 { format!("{live} at work") } else { format!("{} done", rows.len()) };
     json!({"busy": if live > 0 { format!("{live} at work") } else { String::new() }, "word": word, "live": live, "rows": rows})
 }
@@ -192,6 +210,13 @@ mod tests {
         assert_eq!(row["detail"]["where"], "Claude Code subagent (Explore) inside this thread's agent, on desk, worktree bp/fix");
         assert_eq!((row["detail"]["ask"].as_str(), row["detail"]["more"].as_u64()), (Some("Find every footprint without a 3D model."), Some(2)));
         assert!(subs(&s, "t1")["rows"][0].get("detail").is_none(), "without its log a row is as before");
+        // its turn over, its line gone (Bg.settle): it stays listed for a day with how it ended and what it reported; then it is gone
+        let mut log2 = vec![r("c1", "outcome", r#"{"summary":"Two footprints lack models: TUBE, XFMR.","usage":{"total_tokens":20500}}"#, 130), r("c1", "end", "completed", 130)]; log2.extend(log.clone());
+        let calls2 = sub_log(&log2); s.settings.insert("bg.t1".into(), String::new());
+        let v = subs_at(&s, "t1", &json!({"host": "desk", "calls": calls2}), 400);
+        assert_eq!((v["word"].as_str(), v["live"].as_u64(), v["rows"][0]["state"].as_str(), v["rows"][0]["took"].as_str()), (Some("1 done"), Some(0), Some("completed"), Some("30s")));
+        assert_eq!((v["rows"][0]["title"].as_str(), v["rows"][0]["detail"]["outcome"].as_str()), (Some("Survey"), Some("Two footprints lack models: TUBE, XFMR.")));
+        assert!(subs_at(&s, "t1", &json!({"host": "desk", "calls": calls2}), 130 + 86400).is_null(), "a day later it is gone");
     }
     #[test] fn a_waiter_reads_who_holds_by_name() {
         let lock = |h: &str| format!(r#"{{"holder":{h},"waiters":[{{"id":"t2","kind":"thread","thread":"t2","note":"","since":1,"lease":0}}],"ready":true}}"#);
