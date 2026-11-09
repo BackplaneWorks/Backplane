@@ -301,7 +301,7 @@ impl Engine {
             no_sandbox: true as _, multi_threaded_message_loop: (!EXTERNAL_PUMP) as _, external_message_pump: EXTERNAL_PUMP as _, windowless_rendering_enabled: true as _,
             browser_subprocess_path: CefString::from(sub.to_string_lossy().as_ref()),
             #[cfg(target_os = "macos")] framework_dir_path: CefString::from(dir.join(mac::FRAMEWORK).to_string_lossy().as_ref()),
-            #[cfg(target_os = "macos")] main_bundle_path: CefString::from(mac::main_bundle(&exe).to_string_lossy().as_ref()),
+            #[cfg(target_os = "macos")] main_bundle_path: CefString::from(mac::main_bundle(&exe, &sub).to_string_lossy().as_ref()),
             resources_dir_path: CefString::from(res.to_string_lossy().as_ref()),
             locales_dir_path: CefString::from(loc.to_string_lossy().as_ref()),
             root_cache_path: CefString::from(profile.to_string_lossy().as_ref()), cache_path: CefString::from(profile.to_string_lossy().as_ref()),
