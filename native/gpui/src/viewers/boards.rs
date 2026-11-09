@@ -68,7 +68,7 @@ pub fn picker(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &Boa
     let cur = all.iter().find(|b| b.on).map(|b| b.value.clone()).unwrap_or_default();
     let (name, folder) = if cur.is_empty() { ("Select board".to_string(), String::new()) } else { (stem(&cur), parent(&cur)) };
     let btn = div().id("boards-btn").flex().items_center().gap_2().h(px(28.)).px_2().w(px(260.)).min_w(px(96.)).flex_shrink().border_1().border_color(c(if ui.open { "accent" } else { "line" })).bg(c("raise"))
-        .cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(if cur.is_empty() { "Select board" } else { &cur }, "", light))
+        .cursor_pointer().hover(|s| s.bg(c("panel"))).when(!ui.open, |d| d.tooltip(crate::keys::tip(if cur.is_empty() { "Select board" } else { &cur }, "", light)))
         .child(crate::art::icon("circuit-board", 14., c("dim")))
         .child(div().flex_1().min_w_0().flex().flex_col().justify_center().line_height(px(13.))
             .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).child(name))
