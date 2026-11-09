@@ -202,6 +202,10 @@ impl Gpu {
         Some(px)
     }
 }
+impl Gpu {
+    /// The model's buffer off the device (its page was put away); the next picture uploads it again.
+    pub fn forget(&mut self) { if self.wait() { if let Some(m) = self.model.take() { self.ctx.destroy_buffer(m.verts); } } }
+}
 impl Drop for Gpu {
     fn drop(&mut self) {
         self.wait();

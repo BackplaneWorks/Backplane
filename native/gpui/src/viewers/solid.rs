@@ -361,9 +361,14 @@ impl Drawer {
         }
         raster::render_faded(mesh, fades, cam, w, h, ss, alive).map(|px| (px, "cpu"))
     }
+    /// The model's buffer off the GPU (the page is put away).
+    fn forget(&mut self) {
+        #[cfg(target_os = "linux")] { if let Some(g) = super::solid_gpu::shared().lock().unwrap_or_else(|e| e.into_inner()).as_mut() { g.forget(); } }
+    }
 }
 /// Frames queue (every part frame counts; a burst is applied at once, then one model goes to the page); a render request is the latest only.
-#[derive(Default)] struct Pending { frames: Vec<Vec<u8>>, render: Option<Job>, shutdown: bool }
+/// `forget`: the page was put away: the model's GPU buffer goes (the next picture uploads it again).
+#[derive(Default)] struct Pending { frames: Vec<Vec<u8>>, render: Option<Job>, shutdown: bool, forget: bool }
 struct Worker { slot: Arc<(Mutex<Pending>, Condvar)>, ticket: Arc<AtomicU64> }
 impl Worker {
     fn spawn(tx: async_channel::Sender<Msg>) -> Worker {
@@ -372,8 +377,10 @@ impl Worker {
         let (s2, g2) = (slot.clone(), ticket.clone());
         std::thread::Builder::new().name("solid-render".into()).spawn(move || { let (mut drawer, mut scene) = (Drawer::default(), Scene::default()); loop {
             let (frames, render) = { let (m, cv) = &*s2; let mut p = m.lock().unwrap();
-                while p.frames.is_empty() && p.render.is_none() && !p.shutdown { p = cv.wait(p).unwrap(); }
-                if p.shutdown { return } (std::mem::take(&mut p.frames), p.render.take()) };
+                while p.frames.is_empty() && p.render.is_none() && !p.shutdown && !p.forget { p = cv.wait(p).unwrap(); }
+                if p.shutdown { return }
+                if std::mem::take(&mut p.forget) && p.render.is_none() { drawer.forget(); }
+                (std::mem::take(&mut p.frames), p.render.take()) };
             let (mut changed, mut board, mut reset) = (false, false, false);
             for bytes in &frames {
                 if bytes.len() > BUILDING_BYTES { if let Some(k) = peek_key(bytes) { if tx.send_blocking(Msg::Building(k)).is_err() { return } } }
@@ -394,6 +401,7 @@ impl Worker {
         } }).ok();
         Worker { slot, ticket }
     }
+    fn forget(&self) { let (m, cv) = &*self.slot; m.lock().unwrap().forget = true; cv.notify_one(); }
     fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frames.push(bytes); cv.notify_one(); }
     /// Ask for an image of `mesh`, replacing any request not yet begun.
     fn submit_render(&self, mesh: Arc<Mesh>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool) -> u64 {
@@ -582,6 +590,16 @@ impl SolidPage {
     pub fn settle(&mut self) { self.ask_render(false); }
     /// Give the images back to the atlas (call before dropping the page, with the window).
     pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).chain(self.image.take()) { let _ = window.drop_image(i); } }
+    /// The pictures that are (or may still be) in the window's sprite atlas, on the GPU.
+    pub fn atlas_images(&self) -> usize { self.retired.len() + self.image.is_some() as usize }
+    /// The page is put away (the viewer closed, another page or thread shown): its pictures leave the atlas and its model the GPU; the model
+    /// stays here, on the CPU, so showing the page again draws it again at once. The next paint asks for a new picture.
+    pub fn put_away(&mut self, window: &mut Window) {
+        let n = self.atlas_images();
+        if n == 0 { return }
+        self.release(window); self.asked = (0, 0); self.on_screen = self.latest; self.worker.forget();
+        eprintln!("GPUI_METRIC {{\"event\":\"solid_put_away\",\"images_dropped\":{n},\"atlas_images\":{}}}", self.atlas_images());
+    }
 }
 impl Render for SolidPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

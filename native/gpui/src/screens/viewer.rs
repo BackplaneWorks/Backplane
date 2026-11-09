@@ -68,6 +68,9 @@ pub fn mech_parts(viewer: &Value) -> Vec<Part> { arr(&viewer["mech"], "parts").m
 /// The 3D page may be shown only when the model it holds is the source the viewer asks for (`viewer.key`): one page serves every thread, so a
 /// switched thread or a new part waits for its own frame instead of showing the last model.
 pub fn solid_ready(want: &str, have: &str) -> bool { want.is_empty() || want == have }
+/// Whether `view` draws the 3D page for this thread (3D, Mech or Split, the pane open, no diff over it): when not, the page is put away
+/// (SolidPage::put_away: its pictures leave the GPU's atlas).
+pub fn shows_solid(thread: &Value) -> bool { is_open(thread) && !thread["diff"].is_object() && matches!(thread["viewer"]["open"].as_str(), Some("3d" | "mech" | "split")) }
 
 /// An agent's viewer_show (`kind`, `path`) as the page to open and, for a model, the part on it: Some((view kind, part)). A kind the viewer has no page for is ignored.
 pub fn shown(kind: &str, path: &str) -> Option<(String, Option<String>)> {
@@ -651,6 +654,13 @@ mod tests {
     #[test] fn opening_and_closing_are_the_idempotent_view_action() {
         for c in [view_kind("board"), view_kind("board"), view_kind("schematic")] { match c { Command::Action(a, v) => { assert_eq!(a, "view"); assert!(v == "board" || v == "schematic"); } c => panic!("{c:?}") } }
         match close() { Command::Action(a, v) => assert_eq!((a.as_str(), v.as_str()), ("view", "")), c => panic!("{c:?}") }
+    }
+    #[test] fn the_3d_page_is_put_away_when_no_page_draws_it() {
+        let t = |v: &str| j(v);
+        assert!(shows_solid(&t(r#"{"viewer":{"open":"3d"}}"#)) && shows_solid(&t(r#"{"viewer":{"open":"mech"}}"#)) && shows_solid(&t(r#"{"viewer":{"open":"split"}}"#)));
+        assert!(!shows_solid(&t(r#"{"viewer":{"open":"board"}}"#)), "another page");
+        assert!(!shows_solid(&t(r#"{"viewer":{"open":""}}"#)) && !shows_solid(&Value::Null), "the pane closed, or no thread");
+        assert!(!shows_solid(&t(r#"{"viewer":{"open":"3d"},"diff":{}}"#)), "a diff drawn over it");
     }
     #[test] fn the_3d_page_waits_for_its_own_frame() {
         assert!(solid_ready("2|/a|", "2|/a|")); assert!(!solid_ready("2|/b|", "2|/a|"), "another project's model stays off the screen");

@@ -436,6 +436,8 @@ impl Render for Backplane {
         let t_render = std::time::Instant::now();
         if crate::perf::on() { crate::perf::frame_start(); cx.defer(|_| crate::perf::frame_end()); }
         crate::screens::improvements::tick(self, window, cx);
+        // a 3D page not drawn this frame gives its pictures back to the GPU (they stayed in the atlas until the window closed)
+        if let Some(s) = self.screens.solid.clone() { if s.read(cx).atlas_images() > 0 && !crate::screens::viewer::shows_solid(&self.data["thread"]) { s.update(cx, |p, _| p.put_away(window)); } }
         crate::screens::desk::tick(self, window, cx);
         self.term_layout(window, cx);
         self.term_script(window, cx);
