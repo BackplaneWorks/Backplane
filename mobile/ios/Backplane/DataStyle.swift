@@ -74,6 +74,39 @@ struct DLine: View {
 func dStateColor(_ state: String) -> Color {
     switch state { case "working": BackplaneDesign.ok; case "asking", "failed": BackplaneDesign.bad; default: BackplaneDesign.faint }
 }
+/// A row's dot as the desktop's sidebar draws it (gpui siderow.rs `dot_of`) from the hub's word (`status`): finished is the green dot; an older hub sends none and the turn's state decides.
+struct DStatusDot: View {
+    let thread: DThread
+    var size: CGFloat = 7
+    /// colour, round, hollow
+    private var look: (Color, Bool, Bool) {
+        switch thread.status {
+        case "blocked": return (BackplaneDesign.bad, false, false)
+        case "failed": return (BackplaneDesign.bad, false, true)
+        case "stalled": return (BackplaneDesign.warn, false, false)
+        case "active", "working": return (BackplaneDesign.accent, true, false)
+        case "waiting", "monitoring": return (BackplaneDesign.accent.opacity(0.55), true, true)
+        case "finished": return (BackplaneDesign.ok, true, false)
+        case "":
+            switch thread.state {
+            case "working": return (BackplaneDesign.accent, true, false)
+            case "asking": return (BackplaneDesign.bad, false, false)
+            case "failed": return (BackplaneDesign.bad, false, true)
+            default: return (BackplaneDesign.faint, true, false)
+            }
+        default: return (BackplaneDesign.faint, true, false)
+        }
+    }
+    var body: some View {
+        let l = look
+        Group {
+            if l.1 { if l.2 { Circle().stroke(l.0, lineWidth: 1.5) } else { Circle().fill(l.0) } }
+            else { if l.2 { Rectangle().stroke(l.0, lineWidth: 1.5) } else { Rectangle().fill(l.0) } }
+        }.frame(width: size, height: size)
+    }
+}
+/// The STATE strip's word: the hub's when it sends one, else the turn's.
+func dStatusWord(_ t: DThread) -> String { switch t.status { case "": dStateWord(t.state); case "active": "working"; case "blocked": "needs you"; default: t.status } }
 func dStateWord(_ state: String) -> String {
     switch state { case "working": "working"; case "asking": "needs you"; case "failed": "failed"; default: "inactive" }
 }

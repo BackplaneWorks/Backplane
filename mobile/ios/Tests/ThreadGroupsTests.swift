@@ -35,4 +35,17 @@ check(ids(ThreadGroups.history(live: hl, rows: hr, open: false)) == ["live"], "h
 check(ids(ThreadGroups.history(live: hl, rows: hr, open: true)) == ["live", "old1", "old2"], "history open: live first, none twice", ids(ThreadGroups.history(live: hl, rows: hr, open: true)))
 check(ThreadGroups.historyTitle(3) == "Conversation history (3)", "history title", ThreadGroups.historyTitle(3))
 
+// subagents and subthreads nest under their parent, wherever it is; a lost parent or a loop makes roots (as ThreadGroupsTest.kt)
+struct N: NestedThread { var id: String; var project = "p"; var settled = false; var pinned = false; var archived = false; var updatedAt = 0; var settledAt = 0; var parent = "" }
+let nl = [N(id: "a", updatedAt: 9), N(id: "a1", updatedAt: 8, parent: "a"), N(id: "a2", updatedAt: 7, parent: "a"), N(id: "a11", updatedAt: 6, parent: "a1"), N(id: "b", updatedAt: 5),
+          N(id: "lost", updatedAt: 4, parent: "gone"), N(id: "c1", updatedAt: 3, parent: "c2"), N(id: "c2", updatedAt: 2, parent: "c1"),
+          N(id: "s", settled: true, updatedAt: 1, settledAt: 1), N(id: "s1", updatedAt: 10, parent: "s")]
+let ng = ThreadGroups.splitNested(nl, project: "p")
+check(ng.active.map(\.id) == ["a", "b", "lost", "c1", "c2"], "a child is in no group of its own", ng.active.map(\.id))
+check(ng.settled.map(\.id) == ["s"], "the settled parent", ng.settled.map(\.id))
+func nrows(_ roots: [N], _ open: Set<String>) -> [String] { ThreadGroups.tree(roots, all: ng.all, open: open).map { "\($0.t.id):\($0.depth):\($0.kids)" } }
+check(nrows(ng.active, []) == ["a:0:2", "b:0:0", "lost:0:0", "c1:0:0", "c2:0:0"], "shut parents hide their children", nrows(ng.active, []))
+check(nrows(ng.active, ["a", "a1"]) == ["a:0:2", "a1:1:1", "a11:2:0", "a2:1:0", "b:0:0", "lost:0:0", "c1:0:0", "c2:0:0"], "open parents show them, depth first", nrows(ng.active, ["a", "a1"]))
+check(nrows(ng.settled, ["s"]) == ["s:0:1", "s1:1:0"], "an active child of a settled parent is under it", nrows(ng.settled, ["s"]))
+
 print("thread groups: \(passed) passed, \(failed) failed"); exit(failed == 0 ? 0 : 1)
