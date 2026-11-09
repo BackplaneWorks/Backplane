@@ -33,11 +33,4 @@ class HubListTest {
         val two = listOf("http://a:1/#token=x", "http://b:2/#token=y")
         assertEquals(two, HubList.decode(HubList.encode(two), "http://old:3/#token=z"))
     }
-    @Test fun anUpdateFrom014BringsItsPairingsOnceAndNeverOverTheAppsOwn() {
-        val old = "[\"http://box:3787/#token=abc\",\"http://10.0.0.2:3787/#token=def\"]"
-        org.junit.Assert.assertEquals(listOf("http://box:3787/#token=abc", "http://10.0.0.2:3787/#token=def"), HubList.carried(emptyList(), old, false))
-        org.junit.Assert.assertEquals(listOf("mine"), HubList.carried(listOf("mine"), old, false))
-        org.junit.Assert.assertEquals(emptyList<String>(), HubList.carried(emptyList(), old, true))
-        org.junit.Assert.assertEquals(emptyList<String>(), HubList.carried(emptyList(), null, false))
-    }
 }

@@ -57,7 +57,4 @@ object HubList {
         return listOfNotNull(old)
     }
     fun encode(links: List<String>): String = JSONArray(links).toString()
-    /** The pairings an update from 0.14 brings along: 0.14's app (the same id, dev.backplane.mobile) kept its links in its "backplane" settings, and the 0.15 hub's
-     *  import adopts 0.14's paired devices, so they still open it. Taken once (`done`), and only when this app has none of its own. */
-    fun carried(mine: List<String>, old14: String?, done: Boolean): List<String> = if (done || mine.isNotEmpty()) mine else decode(old14, null).filter { it.isNotBlank() }
 }

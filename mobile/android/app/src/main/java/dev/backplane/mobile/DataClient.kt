@@ -69,12 +69,6 @@ object DataClient {
         app = ctx.applicationContext
         MeshDisk.dir = java.io.File(app.cacheDir, "models")
         links = HubList.decode(prefs().getString("links", null), prefs().getString("link", null))
-        // an update over the 0.14 app: its pairings come along, once (HubList.carried)
-        if (!prefs().getBoolean("carried14", false)) {
-            val old = HubList.carried(links, app.getSharedPreferences("backplane", Context.MODE_PRIVATE).getString("links", null), false)
-            if (old != links && old.isNotEmpty()) save(old)
-            prefs().edit().putBoolean("carried14", true).apply()
-        }
         settledOpen = prefs().getStringSet("settled.open", emptySet())!!.toSet(); historyOpen = prefs().getBoolean("history.open", false)
         System.getenv("BACKPLANE_LINK")?.let { links = it.split(' ').filter(String::isNotBlank) }
         loadCache()
