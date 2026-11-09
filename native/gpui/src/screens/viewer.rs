@@ -183,7 +183,7 @@ fn status_row(light: bool, say: &str, actions: Option<AnyElement>) -> AnyElement
 fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().text_size(px(12.));
-    col = col.child(div().flex().gap_2().px_3().py_2().items_center().child(div().flex_1().text_color(c("dim")).child(string(diff, "summary")))
+    col = col.child(div().flex().flex_wrap().gap_2().px_3().py_2().items_center().child(div().flex_1().min_w(px(180.)).text_color(c("dim")).child(string(diff, "summary")))
         .children([("Commit", "commit_push"), ("PR", "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l.to_string(), false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>())
         .child(btn(cx, light, "revert-ask".into(), "Revert".into(), diff["reverting"] == true, Command::Action("revert".into(), "ask".into()))).child(actions));
     // Revert asks first (Ui.revert): the diff stays on show while the person decides what to discard
@@ -446,7 +446,7 @@ fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot:
 /// instead of a card over the drawing; × or Escape clears it in every pane.
 fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Option<&super::plot::Card>, boards: Option<AnyElement>, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let mut picks = div().flex().flex_none().gap_1();
+    let mut picks = div().flex().min_w_0().overflow_hidden().gap_1(); // (in a narrow pane the toggles clip, the pane's own controls and its × stay)
     for (pane, name) in SPLIT_PANES.iter() {
         let (pane, name, on) = (*pane, *name, split_shows(hide, pane));
         // (0.14's combo-pick: outlined in the accent while shown, dim while put away)
@@ -628,22 +628,57 @@ pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyE
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
-    Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(crate::local::VIEWER_PX.0 as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
+    Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
         .child(resize_handle(cx)).child(page).into_any_element())
 }
 
+/// The least the pane may shrink to on this frame (`fit`'s third answer, set by ui.rs before the window is drawn).
+static PANE_LEAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(crate::local::VIEWER_PX.0);
+pub fn set_least(px: f32) { PANE_LEAST.store(px.max(0.).round() as u32, std::sync::atomic::Ordering::Relaxed); }
+/// The viewer's width when it was not dragged (`fit`'s fourth answer, set by ui.rs before the window is drawn).
+static PANE_SHARE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(crate::local::VIEWER_PX_DEFAULT);
+pub fn set_share(px: f32) { PANE_SHARE.store(px.max(0.).round() as u32, std::sync::atomic::Ordering::Relaxed); }
+/// The rail's width and the folded sidebar's strip; the thread's least, the viewer's least and a fair viewer (0.14's core/panes.bend:
+/// Panes.thread, Panes.least, Panes.fair).
+pub const RAIL_W: f32 = 72.0;
+pub const STRIP_W: f32 = 44.0;
+pub const THREAD_LEAST: f32 = 360.0;
+pub const VIEWER_LEAST: f32 = 320.0;
+pub const PANE_FAIR: f32 = 480.0;
+/// How a window `window_w` wide is shared, as 0.14 did (core/panes.bend), so the rail and the viewer's × never leave the window: the thread
+/// keeps THREAD_LEAST and the viewer takes its share of the rest (11/21 of the room beside the sidebar) or its dragged width; opening the
+/// viewer where the open sidebar would leave it less than a fair viewer folds the sidebar to its strip for as long as the window is that
+/// narrow (`force`: the person unfolded it anyway; then the viewer gives way, down to nothing). Answers (the sidebar drawn open, the thread
+/// column's least, the viewer pane's least, the viewer's undragged width).
+pub fn fit(window_w: f32, side_w: f32, side_open: bool, force: bool, viewer: bool) -> (bool, f32, f32, f32) {
+    let room = window_w - side_w - RAIL_W - THREAD_LEAST;
+    let shown = side_open && (force || if viewer { room >= PANE_FAIR } else { room >= 0. });
+    let side = if shown { side_w } else { STRIP_W };
+    let avail = (window_w - side - RAIL_W).max(0.);
+    let thread = THREAD_LEAST.min(avail);
+    let least = if viewer { (avail - thread).clamp(0., VIEWER_LEAST) } else { 0. };
+    (shown, thread, least, ((window_w - side).max(0.) * 11. / 21.).round())
+}
+impl Backplane {
+    /// Fold or unfold the sidebar as it is shown (Ctrl+B, the fold chevron, the strip's chevron): folding clears `side_force`, unfolding a
+    /// sidebar the window folded for want of room shows it anyway (until the window is wide enough again).
+    pub(crate) fn side_flip(&mut self, cx: &mut Context<Self>) {
+        if self.screens.side_shown { self.screens.side_force = false; if self.sidebar_open { self.sidebar_toggle(cx); } }
+        else if !self.sidebar_open { self.screens.side_force = false; self.sidebar_toggle(cx); }
+        else { self.screens.side_force = true; self.ui_epoch += 1; cx.notify(); }
+    }
+}
 /// The pane's width: this device's choice (the left edge's drag), else the default; read once from the local file, then kept here.
 static PANE_W: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 pub fn pane_width() -> u32 {
     use std::sync::atomic::Ordering::Relaxed;
     if PANE_W.load(Relaxed) == u32::MAX { PANE_W.store(crate::local::Local::load().viewer_px, Relaxed); }
-    match PANE_W.load(Relaxed) { 0 => crate::local::VIEWER_PX_DEFAULT, w => w }
+    match PANE_W.load(Relaxed) { 0 => PANE_SHARE.load(Relaxed), w => w }
 }
-/// The width a drag to window x `x` makes (the pane runs from there to the rail on the right), kept in range and leaving the thread at least THREAD_MIN wide
-/// (its composer row, Attach and Send included, measured at 1400 px: about 550) beside the sidebar.
-pub const THREAD_MIN: f32 = 560.0;
+/// The width a drag to window x `x` makes (the pane runs from there to the rail on the right), kept in range and leaving the thread at least
+/// THREAD_LEAST wide beside the sidebar (0.14: Panes.room).
 pub fn width_for(window_w: f32, x: f32, rail: f32, sidebar: f32) -> u32 {
-    let most = ((window_w - rail - sidebar - THREAD_MIN) as i64).max(crate::local::VIEWER_PX.0 as i64).min(crate::local::VIEWER_PX.1 as i64);
+    let most = ((window_w - rail - sidebar - THREAD_LEAST) as i64).max(crate::local::VIEWER_PX.0 as i64).min(crate::local::VIEWER_PX.1 as i64);
     ((window_w - rail - x).round() as i64).clamp(crate::local::VIEWER_PX.0 as i64, most) as u32
 }
 struct ResizeDrag;
@@ -704,6 +739,25 @@ pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_narrow_window_keeps_the_rail_as_0_14_shared_the_panes() {
+        let (side, rail) = (264., RAIL_W);
+        for w in [700., 800., 900., 1100., 1176., 1280., 1600., 1920.] { for viewer in [false, true] { for force in [false, true] {
+            let (shown, thread, pane, _) = fit(w, side, true, force, viewer);
+            let used = if shown { side } else { STRIP_W } + rail + thread + pane;
+            assert!(used <= w + 0.5, "{w} viewer={viewer} force={force}: {used} > {w}");
+            assert_eq!(thread, THREAD_LEAST, "{w}: the thread keeps its least");
+            if viewer && !force { assert!(pane > 0., "{w}: the viewer keeps some room"); }
+        } } }
+        assert_eq!(fit(1920., side, true, false, true), (true, THREAD_LEAST, VIEWER_LEAST, 867.), "wide: sidebar open, the viewer's share");
+        assert_eq!(fit(1280., side, true, false, true).0, true, "a fair viewer still fits beside the open sidebar");
+        assert_eq!(fit(1100., side, true, false, true), (false, THREAD_LEAST, VIEWER_LEAST, 553.), "less than a fair viewer: the sidebar folds to its strip");
+        assert_eq!(fit(1100., side, true, false, false).0, true, "no viewer: nothing folds");
+        assert_eq!(fit(700., side, true, false, true), (false, THREAD_LEAST, 224., 344.), "then the viewer gives way");
+        assert_eq!(fit(900., side, true, true, true), (true, THREAD_LEAST, 204., 333.), "unfolded anyway: the viewer gives way, the rail stays");
+        assert_eq!(fit(900., side, false, false, true).0, false, "folded stays folded");
+        assert_eq!(width_for(1600., 400., 72., 264.), 904, "a drag may leave the thread its least (0.14's room), no more");
+    }
+
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
@@ -841,7 +895,7 @@ mod tests {
     }
     #[test] fn a_drag_makes_the_pane_as_wide_as_the_room_right_of_the_pointer_within_its_range() {
         assert_eq!(width_for(1600.0, 900.0, 71.0, 264.0), 629); assert_eq!(width_for(1600.0, 1500.0, 71.0, 264.0), crate::local::VIEWER_PX.0);
-        assert_eq!(width_for(1600.0, 0.0, 71.0, 264.0), 705, "the thread keeps 560"); assert_eq!(width_for(1600.0, 0.0, 71.0, 0.0), 969);
+        assert_eq!(width_for(1600.0, 0.0, 71.0, 264.0), 905, "the thread keeps 360 (0.14)"); assert_eq!(width_for(1600.0, 0.0, 71.0, 0.0), 1169);
     }
     #[test] fn the_panel_is_open_for_a_page_or_a_diff_only() {
         assert!(is_open(&j(r#"{"viewer":{"open":"board"}}"#))); assert!(is_open(&j(r#"{"diff":{"summary":"","files":[]}}"#)));
