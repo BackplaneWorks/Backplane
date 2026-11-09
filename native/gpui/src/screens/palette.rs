@@ -25,6 +25,8 @@ pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
 pub struct Palette { pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
     /// "Search in thread": the thread (its raw id) the box searches, "" for the whole palette
     pub scope: String,
+    /// Find across threads (Ctrl+Shift+F): the box lists only what was said, and the threads named by the words
+    pub find_all: bool,
     /// what the hub found said (`thread.search`) for `hits_q`; the ask in flight is `asked` with its tag
     pub hits: Vec<Item>, pub hits_q: String, asked: (u64, String), seq: u64,
     /// the threads whose title has every word, from the hub (the sidebar's rows are only its first page), for `hits_q`
@@ -54,6 +56,7 @@ pub fn title_items(result: &Value, hub_of: &dyn Fn(&str) -> String) -> Vec<Item>
 }
 /// The palette's answer (false: not the palette's tag).
 pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
+    if tag >= super::find::TAG { return super::find::answered(this, tag, reply, cx) } // the find bar's
     if tag < TAG { return false }
     let p = &mut this.screens.palette;
     if tag != p.asked.0 || reply["ok"] != true { return true }
@@ -134,6 +137,8 @@ pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
     let answered = search_of(&p.q).as_deref() == Some(p.hits_q.as_str());
     let hits: Vec<Item> = if answered { p.hits.clone() } else { vec![] };
     if !p.scope.is_empty() { return hits }
+    // Find across threads: what was said, then the threads whose title has the words
+    if p.find_all { let mut v = hits; if answered { v.extend(p.titles.iter().take(6).cloned()); } return v }
     // the sidebar's rows, then the hub's title hits for threads it does not hold (settled, older pages)
     let mut all = items(data);
     if answered { let held: std::collections::HashSet<Do> = all.iter().map(|it| it.what.clone()).collect(); all.extend(p.titles.iter().filter(|t| !held.contains(&t.what)).cloned()); }
@@ -153,18 +158,17 @@ impl Backplane {
                 let p = &mut this.screens.palette;
                 if search_of(&p.q).as_deref() != Some(q.as_str()) || !p.open { return }
                 p.seq += 1; let tag = TAG + p.seq; p.asked = (tag, q.clone());
-                let mut params = serde_json::json!({"q": q, "limit": if p.scope.is_empty() { 20 } else { 60 }});
+                let mut params = serde_json::json!({"q": q, "limit": if p.find_all { 40 } else if p.scope.is_empty() { 20 } else { 60 }});
                 if !p.scope.is_empty() { params["thread"] = serde_json::json!(p.scope); }
                 let _ = this.tx.try_send(Command::Ask("thread.search".into(), params, tag));
             });
         }).detach();
     }
-    /// "Search in thread" (the thread's ▾ menu): the box searches only what was said in the thread on show.
-    pub(crate) fn palette_open_in_thread(&mut self, cx: &mut Context<Self>) {
-        let raw = self.selected.rsplit('|').next().unwrap_or("").to_string();
+    /// Find across threads (Ctrl+Shift+F, 0.14's Find): the box finds what was said in any thread; a pick opens its thread at the message.
+    pub(crate) fn palette_open_find(&mut self, cx: &mut Context<Self>) {
         self.palette_open(cx);
-        self.screens.palette.scope = raw;
-        if let Some(i) = self.screens.palette.input.clone() { i.update(cx, |i, _| i.set_placeholder("Search this thread")); }
+        self.screens.palette.find_all = true;
+        if let Some(i) = self.screens.palette.input.clone() { i.update(cx, |i, _| i.set_placeholder("Type a word said in any thread")); }
     }
     pub(crate) fn palette_open(&mut self, cx: &mut Context<Self>) {
         if self.screens.palette.input.is_none() {
@@ -180,7 +184,7 @@ impl Backplane {
         }
         let input = self.screens.palette.input.clone().unwrap();
         input.update(cx, |i, cx| { i.set(String::new(), cx); i.popup_open = true; i.set_placeholder("Jump to a thread, run a command or find what was said"); });
-        self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.open = true; self.screens.palette.scope.clear();
+        self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.open = true; self.screens.palette.scope.clear(); self.screens.palette.find_all = false;
         // what an earlier opening found is not this one's (a thread's search must never show another thread's hits)
         self.screens.palette.hits.clear(); self.screens.palette.titles.clear(); self.screens.palette.hits_q.clear(); self.screens.palette.asked = (0, String::new());
         self.screens.palette.focus = true; cx.notify();
@@ -196,8 +200,8 @@ impl Backplane {
         self.screens.palette.open = false; self.want_focus = true;
         match it.what {
             Do::Thread(id) => { let _ = self.tx.try_send(Command::Action("select".into(), id)); }
-            // a message found: its thread, at the message when the thread on show holds it
-            Do::Message(id, msg) => { if id.rsplit('|').next() == self.selected.rsplit('|').next() { self.timeline_goto(&msg); } else { let _ = self.tx.try_send(Command::Action("select".into(), id)); } }
+            // a message found: its thread at the message, marked, with the find bar holding the words for the next and previous ones there
+            Do::Message(id, msg) => { let q = self.screens.palette.q.trim().to_string(); self.find_open_at(&id, &msg, &q, cx); }
             Do::Action(a, v) => { if super::tools::makes_thread(&a) { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a, v)); }
             Do::Settings => self.open_settings(cx),
             Do::Sidebar => self.sidebar_toggle(cx),
@@ -218,7 +222,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette,
     let ix = p.ix.min(list.len().saturating_sub(1));
     let current = crate::keys::project_of(data, sel);
     let mut col = div().flex().flex_col().py_1();
-    if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child(if !p.scope.is_empty() && search_of(&p.q).is_none() { "Type a word said in this thread" } else { "Nothing matches" })); }
+    if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child(if (!p.scope.is_empty() || p.find_all) && search_of(&p.q).is_none() { if p.find_all { "Type a word said in any thread" } else { "Type a word said in this thread" } } else { "Nothing matches" })); }
     for (i, it) in list.iter().enumerate() {
         let want = it.row["want"].as_str().unwrap_or("").to_string();
         col = col.child(div().id(SharedString::from(format!("pal-{i}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().when(i == ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))

@@ -12,7 +12,7 @@ pub struct Item { pub label: String, pub action: String, pub value: String, pub 
 pub struct Menu { pub at: Point<Pixels>, pub items: Vec<Item>, /// the item whose confirming click is awaited
     pub armed: Option<usize> }
 
-/// The ▾ menu's "Search in thread": the window's own (the palette searching what was said in this thread), nothing sent to the hub.
+/// The ▾ menu's "Find in thread": the window's own (the find bar over that thread, find.rs).
 pub const LOCAL_SEARCH: &str = "local:search-thread";
 /// A project's "Intent…" (0.14): its page, which shows what the project is for and edits it. The window's own, nothing sent.
 pub const LOCAL_INTENT: &str = "local:intent";
@@ -71,7 +71,7 @@ pub fn title_items(data: &Value) -> Vec<Item> {
     if rid.is_empty() { return vec![] }
     let row = find_row(&data["projects"], &rid);
     let project = row.map(|_| crate::keys::project_of(data, &rid)).unwrap_or_default();
-    let mut v = vec![item("Search in thread", LOCAL_SEARCH, &rid, false), item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
+    let mut v = vec![item("Find in thread", LOCAL_SEARCH, &rid, false), item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
     if !project.is_empty() && row.map_or(false, |r| r["canChild"].as_bool().unwrap_or(true)) { v.push(item("New subthread", "thread-child", &format!("{rid}|{project}"), false)); }
     if row.map_or(false, |r| r["depth"].as_u64().unwrap_or(0) > 0) { v.push(item("Move to top level", "row-detach", &rid, false)); }
     v.extend(super::tools::context_items(thread));
@@ -102,7 +102,7 @@ impl Backplane {
         let Some(m) = self.screens.ctx.as_mut() else { return };
         match m.items.get(i).map(|it| (it.action.clone(), it.value.clone())) {
             // the window's own items: the menu shuts as Esc shuts it (an armed Delete is disarmed), then the item opens its place
-            Some((a, _)) if a == LOCAL_SEARCH => { self.ctx_close(cx); self.palette_open_in_thread(cx); return }
+            Some((a, v)) if a == LOCAL_SEARCH => { self.ctx_close(cx); self.find_open_for(&v, cx); return }
             Some((a, v)) if a == LOCAL_INTENT => { self.ctx_close(cx); self.open_project(v, cx); return }
             // the second menu, where the first was: the threads this one may go under
             Some((a, v)) if a == LOCAL_MOVE => {
@@ -171,7 +171,7 @@ mod tests {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Snooze","action":"snooze","value":"","options":[{"label":"1 hour","value":"1h"}]},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},
             "projects":[{"id":"http://h:1|p1","threads":[{"id":"http://h:1|t7","title":"x","canChild":true,"depth":0}]}]}"#);
         let it = title_items(&d);
-        assert_eq!(it.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Search in thread", "Rename", "Regenerate title", "New subthread", "Diff", "Snooze 1 hour", "Delete"]);
+        assert_eq!(it.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Find in thread", "Rename", "Regenerate title", "New subthread", "Diff", "Snooze 1 hour", "Delete"]);
         assert_eq!(it[0].action, LOCAL_SEARCH); assert_eq!((it[1].action.as_str(), it[1].value.as_str()), ("row-rename", "t7")); assert_eq!(it[3].value, "t7|p1");
         assert!(title_items(&j(r#"{"thread":null}"#)).is_empty(), "no thread, no menu");
         let sub = j(r#"{"thread":{"id":"h|c1"},"projects":[{"id":"h|p1","threads":[{"id":"h|t1","title":"a","children":[{"id":"h|c1","title":"b","depth":1,"canChild":false}]}]}]}"#);
