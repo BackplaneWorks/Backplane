@@ -330,7 +330,9 @@ impl Backplane {
             let (on_page, closed, qpid) = (self.project_page.as_deref() == Some(pid_new.as_str()), project["closed"].as_bool().unwrap_or(false), string(project, "id"));
             let fold_value = format!("project-closed:{pid}");
             ctl.push(CtlEntry { id: format!("fold:{pid}"), label: format!("{} {}", if closed { "Unfold" } else { "Fold" }, string(project, "title")), ctl: Ctl::Node("flag".into(), fold_value.clone()) });
-            rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).flex().items_center().gap_2().pl(px(6.)).pr_3().pt_3().pb_1().text_size(px(11.)).text_color(if on_page { c("text") } else { c("dim") }).border_l_2().border_color(if on_page { c("accent") } else { c("bg") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.text_color(c("text")))
+            // a quiet project (nothing on a live shelf: the hub's `quiet`, the Older ones too) is drawn faded, its head and its rows
+            let quiet = project["quiet"] == true;
+            rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).when(quiet, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().pt_3().pb_1().text_size(px(11.)).text_color(if on_page { c("text") } else { c("dim") }).border_l_2().border_color(if on_page { c("accent") } else { c("bg") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { this.open_project(pid.clone(), cx); }))
                 .on_drag(DragProj { id: pid_new.clone(), label: string(project, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
                 .drag_over::<DragProj>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) })
@@ -345,7 +347,7 @@ impl Backplane {
                 rows.push(crate::screens::badge::editor(cx, light, &pid_thr, &project["look"]));
             }
             if closed { continue } // folded: the head alone (0.14 project-closed:<id>)
-            for t in project["threads"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", false, &mut ctl)); }
+            for t in project["threads"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", quiet, &mut ctl)); }
             // a long list: the hub's page controls for the rest (at most 48 rows a picture)
             if let Some(row) = pager_row(cx, format!("pg-t-{pid_thr}"), &project["threadsPage"], light, &mut ctl) { rows.push(row); }
             // the Settled shelf: a drop-down at the foot of the project; the hub builds its rows only while it is open
