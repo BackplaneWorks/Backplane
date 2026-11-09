@@ -40,6 +40,8 @@ pub struct Demo { page: Entity<SolidPage> }
 impl Demo {
     pub fn new(cx: &mut Context<Self>, source: &str, steps: usize, started: Instant) -> Self {
         let page = cx.new(SolidPage::new);
+        // BACKPLANE_SOLID_BG=light|dark|#rrggbb: the background the demo draws on (the window's own comes from the setting and the theme)
+        if let Some(v) = std::env::var("BACKPLANE_SOLID_BG").ok().filter(|v| !v.is_empty()) { let (mode, rgb) = match v.as_str() { "light" | "dark" => (v.as_str(), 0), h => ("custom", u32::from_str_radix(h.trim_start_matches('#'), 16).unwrap_or(0)) }; page.update(cx, |p, _| p.set_backdrop(super::raster::Backdrop::resolve(mode, rgb, false))); }
         let (frame, n) = match source.parse() { Ok(tris) => sphere_frame(tris), Err(_) => { let f = std::fs::read(source).expect("a frame file"); let n = match super::solid::parse_frame(&f) { Some(super::solid::SolidFrame::Model(_, m)) => m.tris.len(), _ => 0 }; (f, n) } };
         let p2 = page.clone();
         cx.spawn(async move |_, cx| {

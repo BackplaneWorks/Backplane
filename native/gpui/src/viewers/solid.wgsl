@@ -1,7 +1,7 @@
 // The 3D page's GPU shader. Colours are linear light, as the wire's are: the target is sRGB, so the one transfer is the hardware's, once, after blending and the MSAA resolve.
 // The material model is the phones' and the old web viewer's (solid-materials.js, PlotShaders.swift): the wire has colours only, so roughness, metalness and coat are estimated
 // from the colour. raster.rs is the same model in Rust; the test `gpu_and_cpu_agree` holds them together.
-struct Params { eye: vec4<f32>, right: vec4<f32>, up: vec4<f32>, fwd: vec4<f32>, proj: vec4<f32>, bg: vec4<f32> }
+struct Params { eye: vec4<f32>, right: vec4<f32>, up: vec4<f32>, fwd: vec4<f32>, proj: vec4<f32>, bg: vec4<f32>, bg2: vec4<f32> }
 var<uniform> params: Params;
 struct Vert { px: f32, py: f32, pz: f32, nxy: u32, nz: u32, color: u32, group: u32 }
 var<storage, read> verts: array<Vert>;
@@ -34,7 +34,8 @@ struct Out {
 @vertex fn vs_bg(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
   return vec4<f32>(f32(i & 1u) * 4.0 - 1.0, f32(i >> 1u) * 4.0 - 1.0, 0.0, 1.0);
 }
-@fragment fn fs_bg() -> @location(0) vec4<f32> { return vec4<f32>(params.bg.xyz, 1.0); }
+// the background: a vertical gradient (top bg, bottom bg2.xyz) mixed in linear light over the target's height (bg2.w)
+@fragment fn fs_bg(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> { return vec4<f32>(mix(params.bg.xyz, params.bg2.xyz, clamp(at.y / params.bg2.w, 0.0, 1.0)), 1.0); }
 
 const PI = 3.14159265;
 fn estimate(c: vec3<f32>) -> vec3<f32> {
@@ -62,7 +63,7 @@ fn studio(R: vec3<f32>, rough: f32, metal: f32) -> vec3<f32> {
   let power = mix(110.0, 3.0, rough * rough);
   let key = pow(max(dot(q, normalize(vec3<f32>(-0.55, 0.75, 0.65))), 0.0), power);
   let fill = pow(max(dot(q, normalize(vec3<f32>(0.85, 0.25, 0.35))), 0.0), power * 0.65);
-  let sky = 0.08 + 0.2 * smoothstep(-0.4, 0.25, q.y) + 0.7 * smoothstep(0.45, 0.85, q.y);
+  let sky = 0.12 + 0.2 * smoothstep(-0.4, 0.25, q.y) + 0.7 * smoothstep(0.45, 0.85, q.y);
   return vec3<f32>(sky * mix(0.15, 1.0, metal)) + vec3<f32>(1.5, 1.48, 1.42) * key + vec3<f32>(0.65, 0.72, 0.85) * fill;
 }
 
@@ -82,9 +83,9 @@ fn studio(R: vec3<f32>, rough: f32, metal: f32) -> vec3<f32> {
   let f0 = mix(vec3<f32>(0.04), base, metal);
   let key = normalize(-right * 0.55 + up * 0.75 - fwd * 0.65);
   let fill = normalize(right * 0.85 + up * 0.25 - fwd * 0.35);
-  var rgb = base * (1.0 - metal) * (mix(0.27, 0.74, step(0.8, rough)) + 0.08 * max(dot(N, up), 0.0));
+  var rgb = base * (1.0 - metal) * (mix(0.34, 0.80, step(0.8, rough)) + 0.10 * max(dot(N, up), 0.0));
   rgb += lit(N, V, key, base, f0, rough, metal) * 1.5;
-  rgb += lit(N, V, fill, base, f0, rough, metal) * 0.65;
+  rgb += lit(N, V, fill, base, f0, rough, metal) * 0.85;
   let R = reflect(-V, N);
   rgb += studio(R, rough, metal) * fresnel(f0, nv) * (1.0 - rough * 0.35);
   rgb += studio(R, 0.3, 0.0) * fresnel(vec3<f32>(0.04), nv) * coat;

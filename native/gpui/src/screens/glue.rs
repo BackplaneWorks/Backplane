@@ -249,6 +249,7 @@ impl Backplane {
     pub(crate) fn plot_received(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
         if self.screens.solid.is_none() {
             let page = cx.new(crate::viewers::solid::SolidPage::new);
+            let back = self.local.viewer_backdrop(self.light()); page.update(cx, |p, _| p.set_backdrop(back));
             // the page's Retry: the same source asked for again (a failed source is read again when it is watched)
             cx.subscribe(&page, |this, _, ev: &crate::viewers::solid::SolidEvent, _| { let crate::viewers::solid::SolidEvent::Retry(key) = ev;
                 if let Some(p) = crate::viewers::solid::retry_watch(key) { let _ = this.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "watch")); } }).detach();

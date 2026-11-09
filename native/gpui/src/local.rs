@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
 
 /* i18n-ok: labels the settings page draws through tr; font names */ pub const THEMES: [(&str, &str); 3] = [("hub", "Follow the hub"), ("dark", "Dark"), ("light", "Light")];
+/// The 3D viewers' background (Mech and 3D board share it): follow the theme, or light, dark, or a colour of the person's own (docs/VIEWER-BACKGROUND.md).
+/* i18n-ok: labels the settings page draws through tr */ pub const VIEWER_BGS: [(&str, &str); 4] = [("auto", "Auto"), ("light", "Light"), ("dark", "Dark"), ("custom", "Custom")];
+/* i18n-ok: labels the settings page draws through tr; colour names */ pub const VIEWER_BG_SWATCHES: [(&str, u32); 8] = [("Slate", 0x8a94a6), ("Graphite", 0x5a5f66), ("Sand", 0xd9cfb8), ("Sky", 0xa9c7e8), ("Mint", 0xa8d8c0), ("Rose", 0xe2b4bd), ("Plum", 0x6b5b7b), ("Navy", 0x2f4468)];
 /* i18n-ok: labels the settings page draws through tr; font names */ pub const FONTS: [(&str, &str); 3] = [("Noto Sans Mono CJK JP", "Noto Sans Mono"), ("JetBrains Mono", "JetBrains Mono"), (".SystemUIFont", "System UI")];
 /* i18n-ok: labels the settings page draws through tr; font names */ pub const VIEWS: [(&str, &str); 2] = [("last", "Where I left off"), ("list", "The thread list")];
 pub const TEXT_PCT: (u32, u32, u32) = (80, 160, 10);   // min, max, step
@@ -20,7 +23,7 @@ pub const KEYS: [&str; 8] = ["enter", "ctrl-enter", "escape", "ctrl-b", "ctrl-k"
 pub struct Local {
     /// The interface language: "auto" (the system's), "en" or "ja" (`i18n::CHOICES`).
     pub lang: String,
-    pub theme: String, pub text_pct: u32, pub font: String, pub sidebar_px: u32, pub viewer_px: u32, pub sidebar_open: bool,
+    pub theme: String, pub viewer_bg: String, pub viewer_bg_rgb: u32, pub text_pct: u32, pub font: String, pub sidebar_px: u32, pub viewer_px: u32, pub sidebar_open: bool,
     pub notifications: bool, pub default_view: String, pub shortcuts: BTreeMap<String, String>,
     /// Starred models ("provider/model"), listed first in the model menu; kept on this device.
     pub favs: Vec<String>,
@@ -29,7 +32,7 @@ pub struct Local {
     pub split_hide: String, pub split_main: f32, pub split_side: f32,
 }
 impl Default for Local {
-    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0. } }
+    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0. } }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -49,6 +52,8 @@ impl Local {
         if l.viewer_px != 0 { l.viewer_px = l.viewer_px.clamp(VIEWER_PX.0, VIEWER_PX.1); }
         if !crate::i18n::CHOICES.iter().any(|(k, _)| *k == l.lang) { l.lang = "auto".into() }
         if !THEMES.iter().any(|(k, _)| *k == l.theme) { l.theme = "hub".into() }
+        if !VIEWER_BGS.iter().any(|(k, _)| *k == l.viewer_bg) { l.viewer_bg = "auto".into() }
+        l.viewer_bg_rgb &= 0xff_ffff;
         if !VIEWS.iter().any(|(k, _)| *k == l.default_view) { l.default_view = "last".into() }
         if l.font.is_empty() { l.font = FONTS[0].0.into() }
         for r in [&mut l.split_main, &mut l.split_side] { if !(r.is_finite() && *r > 0. && *r < 1.) { *r = 0. } }
@@ -73,6 +78,12 @@ impl Local {
         match name {
             "lang" if crate::i18n::CHOICES.iter().any(|(k, _)| *k == value) => self.lang = value.into(),
             "theme" if THEMES.iter().any(|(k, _)| *k == value) => self.theme = value.into(),
+            "viewer-bg" if VIEWER_BGS.iter().any(|(k, _)| *k == value) => self.viewer_bg = value.into(),
+            "viewer-bg-color" => { let Ok(c) = u32::from_str_radix(value.trim_start_matches('#'), 16) else { return false }; if value.trim_start_matches('#').len() != 6 { return false } self.viewer_bg_rgb = c; self.viewer_bg = "custom".into(); }
+            "viewer-bg-shade" => { // a step lighter ("+") or darker ("-") of the custom colour
+                let k = if value == "-" { 0.9 } else { 1.0 / 0.9 };
+                let c = self.viewer_bg_rgb; self.viewer_bg_rgb = [16, 8, 0].iter().fold(0u32, |a, sh| a | ((((c >> sh) & 255) as f32 * k).round().clamp(0.0, 255.0) as u32) << sh); self.viewer_bg = "custom".into();
+            }
             "text" => self.text_pct = step(self.text_pct, if value == "-" { -1 } else { 1 }, TEXT_PCT),
             "text-reset" => self.text_pct = 100,
             "font" if FONTS.iter().any(|(k, _)| *k == value) => self.font = value.into(),
@@ -92,6 +103,8 @@ impl Local {
         }
         true
     }
+    /// The 3D viewers' background for the theme now (`light`: the resolved theme).
+    pub fn viewer_backdrop(&self, light: bool) -> crate::viewers::raster::Backdrop { crate::viewers::raster::Backdrop::resolve(&self.viewer_bg, self.viewer_bg_rgb, light) }
     pub fn font_label(&self) -> &str { FONTS.iter().find(|(k, _)| *k == self.font).map_or("Noto Sans Mono", |(_, l)| l) }
     /// Whether the picture is light: this device's choice, else the hub's.
     pub fn light(&self, hub_light: bool) -> bool { match self.theme.as_str() { "light" => true, "dark" => false, _ => hub_light } }
@@ -123,6 +136,16 @@ mod tests {
     #[test] fn unknown_names_and_values_change_nothing() {
         let mut l = Local::default(); let before = l.clone();
         assert!(!l.set("theme", "neon") && !l.set("font", "Comic") && !l.set("shortcut", "send\u{1f}ctrl-q") && !l.set("shortcut", "nope") && !l.set("nope", "x")); assert_eq!(l, before);
+    }
+    #[test] fn the_viewer_background_follows_the_theme_or_the_choice() {
+        let mut l = Local::default(); use crate::viewers::raster::Backdrop as B;
+        assert_eq!((l.viewer_backdrop(true), l.viewer_backdrop(false)), (B::LIGHT, B::DARK), "auto follows the theme");
+        assert!(l.set("viewer-bg", "light")); assert_eq!(l.viewer_backdrop(false), B::LIGHT); assert!(l.set("viewer-bg", "dark")); assert_eq!(l.viewer_backdrop(true), B::DARK);
+        assert!(l.set("viewer-bg-color", "#c8a000")); assert_eq!(l.viewer_bg, "custom");
+        let b = l.viewer_backdrop(false); assert_eq!((b.top, b.bottom), ([0xc8, 0xa0, 0x00], [176, 141, 0]));
+        assert!(!l.set("viewer-bg-color", "zzzzzz") && !l.set("viewer-bg-color", "fff") && !l.set("viewer-bg", "neon"));
+        l.viewer_bg_rgb = 0x808080; assert!(l.set("viewer-bg-shade", "+")); assert!(l.viewer_bg_rgb & 255 > 0x80); assert!(l.set("viewer-bg-shade", "-")); assert!(l.set("viewer-bg-shade", "-")); assert!(l.viewer_bg_rgb & 255 < 0x80);
+        let p = tmp("vbg"); l.save_to(&p); assert_eq!(Local::read(&p), l); std::fs::write(&p, br#"{"viewer_bg":"neon","viewer_bg_rgb":4294967295}"#).unwrap(); let r = Local::read(&p); assert_eq!((r.viewer_bg.as_str(), r.viewer_bg_rgb), ("auto", 0xffffff)); let _ = std::fs::remove_file(&p);
     }
     #[test] fn steps_stop_at_the_ends_and_the_theme_and_font_cycle() {
         let mut l = Local::default(); for _ in 0..20 { l.set("text", "+"); } assert_eq!(l.text_pct, 160); for _ in 0..20 { l.set("text", "-"); } assert_eq!(l.text_pct, 80);
