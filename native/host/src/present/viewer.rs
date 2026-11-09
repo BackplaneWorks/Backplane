@@ -136,6 +136,27 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     Some(ViewOut { patch: out, before, boards_look: drawing(kind) && kind != "mech" && !drawing(prev) })
 }
 
+/// Where the hub keeps a board's probe (0.14's Probe.key "probe:<root>|<board>"): the board picked, else the project's own; the same for every page of it.
+fn probe_key(session: &Value, sel: &str, root: &str) -> String {
+    let b = chosen_board(&session["drafts"], sel);
+    let b = if b.is_empty() { s(&session["info"], &format!("fab.board:{sel}")).to_string() } else { b };
+    format!("probe:{root}|{b}")
+}
+/// The probe kept for the board on show ("" none): the tapped piece as kicad.info's text ("title;k=v;...").
+fn probe_of(st: &State, session: &Value, sel: &str, root: &str) -> String { st.settings.get(&probe_key(session, sel, root)).cloned().unwrap_or_default() }
+/// `view-probe <info>`: a piece tapped on any page (or "" for none): kept as the hub's setting for this board, so Board, Schematic, Split and every
+/// opening (and the phones) light it again. None off a drawing page; at most 2000 characters, one line.
+pub fn probe_action(st: &State, hub: &str, session: &Value, value: &str) -> Option<Vec<Value>> {
+    let sel = s(session, "sel");
+    if !simple(st, session, sel) || !matches!(s(&session["drafts"], &format!("@view:{sel}")), "board" | "schematic" | "3d" | "split") { return None }
+    if value.len() > 2000 || value.contains('\n') { return None }
+    let root = root_of(st, sel); if root.is_empty() { return None }
+    let key = probe_key(session, sel, &root);
+    if st.settings.get(&key).map(String::as_str).unwrap_or("") == value { return Some(vec![]) }
+    let rid = session["rid"].as_u64().unwrap_or(0);
+    Some(vec![json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "setting.set", "p": {"key": key, "value": value}}).to_string()})])
+}
+
 /// Settings opened: the viewer beside the thread shuts (0.14's Settings.viewer.shut), its watch stopped, Diff or Review put away; the board picked stays.
 /// The patch and the commands; an empty patch with nothing open.
 pub fn shut(hub: &str, session: &Value) -> (Value, Vec<Value>) {
@@ -564,6 +585,12 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     };
     // the folder the Boards menu's paths are from (0.14's "Folder: <root>")
     if v["boards"].is_array() { v["boardsRoot"] = json!(root); }
+    // the probe kept for this board, on the page and on each of Split's panes (each canvas lights it on its own source)
+    if matches!(kind, "board" | "schematic" | "3d" | "split") {
+        let pr = probe_of(st, session, sel, &root);
+        if let Some(ps) = v["panes"].as_array_mut() { for p in ps.iter_mut() { p["probe"] = json!(pr); } }
+        v["probe"] = json!(pr);
+    }
     let tab = if matches!(kind, "image" | "pdf" | "text") { "files" } else { kind };
     let chips: Vec<Value> = [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Mech", "mech"), ("Files", "files"), ("Review", "review")].iter().map(|(l, val)| json!({"label": l, "value": val, "on": *val == tab})).collect();
     v.as_object_mut()?.insert("choices".into(), Value::Array(chips));
@@ -732,6 +759,24 @@ mod tests {
         assert!(c[0]["text"].as_str().unwrap().contains("\"kind\":\"\""), "the watch stops");
         assert_eq!(s1["drafts"][format!("@view.board:{th}")], json!("a/a.kicad_pcb"));
         assert!(shut("h", &s1).1.is_empty(), "nothing open: nothing sent");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn a_probe_is_kept_per_board_and_shown_on_every_page_of_it() {
+        let (mut st, th, d) = files_world("probe"); let root = d.to_string_lossy().into_owned();
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let mut s1 = sess(&th, json!({})); let o = view_action(&st, "h", &s1, "board").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        let c = probe_action(&st, "h", &s1, "fp;ref=C5;value=1u").unwrap();
+        assert_eq!(sent(&c[0])["key"], json!(format!("probe:{root}|")), "{c:?}");
+        st.settings.insert(format!("probe:{root}|"), "fp;ref=C5;value=1u".into());
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["probe"], "fp;ref=C5;value=1u");
+        assert!(probe_action(&st, "h", &s1, "fp;ref=C5;value=1u").unwrap().is_empty(), "the same probe again sends nothing");
+        let o = view_action(&st, "h", &s1, "split").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["panes"][0]["probe"], "fp;ref=C5;value=1u", "Split's panes light it too");
+        // another board picked: its own probe (none yet)
+        crate::session::patch::merge(&mut s1, &json!({"drafts": {format!("@view.board:{th}"): "a/a.kicad_pcb"}}));
+        assert_eq!(viewer_json(&st, &template, &s1).unwrap()["probe"], "");
+        assert!(probe_action(&st, "h", &s1, "two\nlines").is_none());
+        assert!(crate::state::fam::policy::lean_keeps(&format!("probe:{root}|a/a.kicad_pcb")), "the presenter's lean copy keeps the probe");
         let _ = std::fs::remove_dir_all(&d);
     }
     fn sess(th: &str, drafts: Value) -> Value { json!({"sel": th, "rid": 1, "drafts": drafts, "open": {}, "adding": false, "panel": false, "info": {}}) }

@@ -37,6 +37,8 @@ pub struct PlotView {
     pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
     /// The Boards menu (viewers::boards), held on the Board/Schematic page's camera for every page that shows it.
     pub boards: crate::viewers::boards::BoardsUi,
+    /// The hub's probe this canvas last lit, with the source it was lit on ("<key>\u{1}<info>"): another source or another probe lights it again.
+    pub probe_at: String,
 }
 
 /// What a tessellated plot depends on: the frame's chunks (by identity), the order and fade they are drawn in, the camera and the canvas.
@@ -110,7 +112,7 @@ pub fn tap_at(app: &mut Backplane, slot: usize, key: &str, off: u32, at: (f32, f
     match found {
         Some(p) => { let req = serde_json::json!({"key": key, "at": p.chunk, "idx": p.info}); pv.picked = Some(p); app.screens.pick_slot = Some(slot);
             let _ = app.tx.try_send(Command::Rpc("kicad.info".into(), crate::screens::settings::Secret(req), "pick")); }
-        None => { pv.picked = None; }
+        None => { pv.picked = None; if app.data["thread"]["viewer"]["probe"].as_str().map_or(false, |p| !p.is_empty()) { keep_probe(app, None); } }
     }
 }
 
@@ -200,7 +202,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
                 "+" | "=" | "plus" => Some(v.zoom(1.25, w / 2., h / 2., w, h, pv.fitted)), "-" | "minus" => Some(v.zoom(0.8, w / 2., h / 2., w, h, pv.fitted)),
                 "0" | "home" => { pv.view = None; cx.notify(); return }
                 // (a Split's probe is lit in both its panes: Escape clears it in both)
-                "escape" => { let all: &[usize] = if slot == 0 { &[0] } else { &[1, 2] }; for &i in all { let p = this.screens.pv(i); p.picked = None; p.card = None; p.lit.clear(); } cx.notify(); return }
+                "escape" => { let all: &[usize] = if slot == 0 { &[0] } else { &[1, 2] }; for &i in all { let p = this.screens.pv(i); p.picked = None; p.card = None; p.lit.clear(); } keep_probe(this, None); cx.notify(); return }
                 _ => None,
             };
             if let Some(nv) = nv { pv.touched = true; pv.view = Some(nv); cx.notify(); }
@@ -249,23 +251,60 @@ pub fn ensure_view(pv: &mut PlotView, frame: &Frame, w: f32, h: f32) -> Option<V
     pv.view
 }
 
-/// A tapped piece's net and part, lit on every plot the page shows (the web's cross-probe): a part by its `ref` on the schematic and the board, a net by its name on the board
-/// (the schematic's info has no nets). The hub answers with the pieces of the chunks this client holds (`kicad.probe`); they arrive as `Event::Probe` per canvas.
-pub fn cross_probe(app: &mut Backplane, slot: usize, card: &super::plot::Card) {
+/// A card as the hub's info text again ("title;k=v;..."), what the hub keeps as the probe.
+pub fn card_text(card: &super::plot::Card) -> String {
+    std::iter::once(card.title.replace(';', ",")).chain(card.rows.iter().map(|(k, v)| if v.is_empty() { k.replace(';', ",") } else { format!("{}={}", k.replace(';', ","), v.replace(';', ",")) })).collect::<Vec<_>>().join(";")
+}
+/// The probe the person made or cleared, kept by the hub for this project's board (0.14's probe:<root>|<board> setting): every page and every opening shows it again.
+pub fn keep_probe(app: &mut Backplane, card: Option<&super::plot::Card>) {
+    let text = card.map(card_text).unwrap_or_default();
+    *PROBE_SENT.lock().unwrap() = Some((text.clone(), std::time::Instant::now()));
+    let _ = app.tx.try_send(Command::Action("view-probe".into(), text));
+}
+/// The probe this window just told the hub (and when): until the hub's copy says the same (or 3 s pass), the hub's older probe is not drawn over it.
+static PROBE_SENT: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+/// The pieces of the probed part or net on the plot `key` on canvas `slot`: a part by its `ref` on the schematic and the board, a net by its name on the board
+/// (the schematic's info has no nets). The hub answers with the pieces of the chunks this client holds (`kicad.probe`); they arrive as `Event::Probe`.
+pub fn probe_one(app: &mut Backplane, slot: usize, key: &str, card: &super::plot::Card) {
+    if key.is_empty() { return }
     let get = |k: &str| card.rows.iter().find(|r| r.0 == k).map(|r| r.1.clone()).filter(|v| !v.is_empty());
-    let (refd, net) = (get("ref"), get("net"));
+    let tag: &'static str = ["probe0", "probe1", "probe2"][slot.min(2)];
+    for (name, value) in [("ref", get("ref")), ("net", get("net"))] {
+        let Some(value) = value else { continue };
+        if name == "net" && !key.starts_with("0|") { continue }
+        let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": name, "value": value})), tag));
+    }
+}
+/// A tapped piece's net and part, lit on every plot the page shows (the web's cross-probe), and kept by the hub.
+pub fn cross_probe(app: &mut Backplane, slot: usize, card: &super::plot::Card) {
     let panes = app.data["thread"]["viewer"]["panes"].as_array().cloned().unwrap_or_default();
     let targets: Vec<(usize, String)> = if panes.len() >= 3 { vec![(1, panes[0]["key"].as_str().unwrap_or("").to_string()), (2, panes[1]["key"].as_str().unwrap_or("").to_string())] }
         else { vec![(slot, app.screens.plot.frame.as_ref().map(|f| f.key.clone()).unwrap_or_default())] };
-    for (s, key) in targets {
-        if key.is_empty() { continue }
-        let tag: &'static str = ["probe0", "probe1", "probe2"][s.min(2)];
-        for (name, value) in [("ref", refd.clone()), ("net", net.clone())] {
-            let Some(value) = value else { continue };
-            if name == "net" && !key.starts_with("0|") { continue }
-            let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": name, "value": value})), tag));
+    let text = card_text(card);
+    // (lit here at once: the hub's copy of this probe, when it comes back, finds it already lit)
+    for (s, key) in targets { app.screens.pv(s).probe_at = format!("{key}\u{1}{text}"); probe_one(app, s, &key, card); }
+    keep_probe(app, Some(card));
+}
+/// The hub's probe on a canvas showing source `key`: lit again (and its card set) when the source or the probe changed since it was last lit; cleared when the
+/// hub has none. Called while the page is drawn; the requests go out right after.
+pub fn probe_sync(cx: &mut Context<Backplane>, slot: usize, pv: &mut PlotView, key: &str, probe: &str) {
+    let tag = format!("{key}\u{1}{probe}");
+    if pv.probe_at == tag || key.is_empty() { return }
+    // a tap (or a clear) on its way to the hub: what this canvas shows is already that; the hub's older copy waits
+    if let Some((sent, at)) = PROBE_SENT.lock().unwrap().clone() {
+        if at.elapsed() < std::time::Duration::from_secs(3) {
+            if sent != probe { return }
+            if pv.probe_at.ends_with(&format!("\u{1}{sent}")) && pv.probe_at.starts_with(&format!("{key}\u{1}")) { pv.probe_at = tag; return }
         }
     }
+    let first = pv.probe_at.is_empty();
+    pv.probe_at = tag;
+    if probe.is_empty() { if !first { pv.card = None; pv.picked = None; pv.lit.clear(); } return }
+    let Some(card) = super::plot::card(probe) else { return };
+    // the same probe on the same source is already lit (the tap that made it); otherwise light it here
+    pv.card = Some(card.clone()); pv.lit.clear();
+    let key = key.to_string();
+    cx.spawn(async move |this, cx| { let _ = this.update(cx, |app, _| probe_one(app, slot, &key, &card)); }).detach();
 }
 
 /// What the viewer shows now, for the hub's `viewer.state` (an agent's viewer_show answers with it): the page, its source, the part (Mech), the sheet (schematic), the active layer and the tapped piece. Sent only on change.

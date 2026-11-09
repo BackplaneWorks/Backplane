@@ -42,6 +42,8 @@ pub fn lean_keeps(k: &str) -> bool {
     if ["voice.engine", "voice.model", "voice.device"].contains(&k) || k.starts_with("voice.e.") || k.starts_with("voice.l.") { return true }
     // Settings, Rules and task board: the person's standing rules and the task board's items (a few, each at most a few KB; a removed one is gone, `blank_gone`)
     if k.starts_with("rule.") || k.starts_with("board.") { return true }
+    // the viewer's probe, one per board (present/viewer.rs `probe_action`: the tapped piece's info line, at most 2000 characters)
+    if k.starts_with("probe:") { return true }
     // setup (present/onboard.rs): the step reached, the skipped and seen lists, done, and the last checks of this machine (a few KB, replaced each time)
     if k.starts_with("onboard.") || k == "freecad.path" { return true }
     k.starts_with("launch.input.") || k.starts_with("fallback.input.") || (!k.starts_with("ride.") && KEEP.iter().any(|p| k.starts_with(p)))
