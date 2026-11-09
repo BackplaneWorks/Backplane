@@ -397,6 +397,16 @@ impl Backplane {
         self.screens.parts.side_ctl = ctl;
         div().id("sidebar").size_full().overflow_y_scroll().children(rows).into_any_element()
     }
+    /// The viewer's page, a part of the window (part.rs): a board or schematic is drawn again only when the page itself changed, not for
+    /// a hover in the sidebar or the caret's blink.
+    pub(crate) fn viewer_part(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let light = self.light();
+        let reg = self.screens.reg.clone(); reg.borrow_mut().begin_outside();
+        let thread = &self.data["thread"];
+        let el = crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b));
+        { let rows = &self.data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
+        el
+    }
     /// The thread's messages, a part of the window (part.rs): a list that draws only the rows on screen.
     pub(crate) fn timeline_part(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let light = self.light();
@@ -445,8 +455,9 @@ impl Render for Backplane {
         if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
         if self.pair.is_some() { let (el, ctl) = crate::screens::pair::view(self, light, window, cx); self.controls = ctl; return el; }
         let c = |name: &str| theme::color(light, name);
-        self.screens.reg.borrow_mut().begin_outside(); self.screens.images.frame();
-        let reg = self.screens.reg.clone();
+        // the selectable text is the rows' part's and the viewer part's (part.rs); with the viewer shut, what its page drew is gone
+        if !crate::screens::viewer::is_open(&self.data["thread"]) { self.screens.reg.borrow_mut().begin_outside(); }
+        self.screens.images.frame();
         if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
         let thread = &self.data["thread"];
         let dictating = self.screens.voice.views.get(&self.selected).map_or(false, |v| v["on"] == true);
@@ -681,7 +692,7 @@ impl Render for Backplane {
                     .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref()))
                 )
                 .children(crate::perf::mark("viewer"))
-                .children(crate::screens::viewer::view(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b)))
+                .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("line")).flex().flex_col().py_2().children(rail)))
             .children(crate::perf::mark("over"))

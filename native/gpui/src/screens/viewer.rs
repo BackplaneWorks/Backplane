@@ -468,9 +468,8 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
 }
 
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> Option<AnyElement> {
-    if !is_open(thread) { return None; }
-    let c = |n: &str| theme::color(light, n);
+pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> AnyElement {
+    if !is_open(thread) { return Empty.into_any_element(); }
     let viewer = &thread["viewer"];
     let open = viewer["open"].as_str().unwrap_or("");
     let diff_on = thread["diff"].is_object();
@@ -498,12 +497,19 @@ pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         }
         else if open == "browser" { let a = acts(cx); match browser { Some(b) => in_corner(div().size_full().child(b.clone()).into_any_element(), a), None => status_row(light, "The browser page needs a connected hub.", Some(a)) } }
         else { let a = acts(cx); status_row(light, "Opening…", Some(a)) };
+    if matches!(open, "files" | "image" | "pdf" | "text") && !diff_on { div().id("viewer-body").size_full().child(body).into_any_element() } else { div().id("viewer-body").size_full().overflow_y_scroll().child(body).into_any_element() }
+}
+/// The pane around the page on show: its width, the left edge's drag and border; `page` (the page itself, `page()`, drawn as a part of the
+/// window by ui.rs) fills the rest, so the pane's frame is known without building the page.
+pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyElement) -> Option<AnyElement> {
+    if !is_open(thread) { return None; }
+    let c = |n: &str| theme::color(light, n);
+    let open = thread["viewer"]["open"].as_str().unwrap_or("");
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
     Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(crate::local::VIEWER_PX.0 as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("line")).flex().flex_col()
-        .child(resize_handle(cx))
-        .child(if matches!(open, "files" | "image" | "pdf" | "text") && !diff_on { div().id("viewer-body").flex_1().min_h_0().child(body) } else { div().id("viewer-body").flex_1().min_h_0().overflow_y_scroll().child(body) }).into_any_element())
+        .child(resize_handle(cx)).child(page).into_any_element())
 }
 
 /// The pane's width: this device's choice (the left edge's drag), else the default; read once from the local file, then kept here.
