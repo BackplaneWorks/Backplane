@@ -161,12 +161,14 @@ impl Backplane {
                 let selected = raw == self.selected && self.project_page.is_none(); // a project's page on show: its head is the one highlighted, no row
                 ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
                 let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
-                let toggle = (kids > 0).then(|| {
+                // only a project's tree unfolds: an Active-view or Conversation-history row with subthreads has no rows to show under it, so no chevron
+                let tree = sub.is_empty() && !pid.is_empty();
+                let toggle = (kids > 0 && tree).then(|| {
                     let tid = id.clone();
                     div().id(SharedString::from(format!("tree-{id}"))).flex_shrink_0().w(px(16.)).h_full().flex().items_center().cursor_pointer().child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
                         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
                 });
-                if kids > 0 { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
+                if kids > 0 && tree { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
                 with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(6. + depth * 14.)).pr_3().h(px(32.)).when(faded, |d| d.opacity(0.55))
                     .border_l_2().border_color(if selected { c("accent") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
@@ -319,6 +321,8 @@ impl Backplane {
             }
             if closed { continue } // folded: the head alone (0.14 project-closed:<id>)
             for t in project["threads"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", false, &mut ctl)); }
+            // a long list: the hub's page controls for the rest (at most 48 rows a picture)
+            if let Some(row) = pager_row(cx, format!("pg-t-{pid_thr}"), &project["threadsPage"], light, &mut ctl) { rows.push(row); }
             // the Settled shelf: a drop-down at the foot of the project; the hub builds its rows only while it is open
             let settled_n = project["settledCount"].as_u64().unwrap_or_else(|| project["settled"].as_array().map_or(0, |a| a.len() as u64));
             let settled_open = project["open"].as_bool().unwrap_or(false);
@@ -328,7 +332,7 @@ impl Backplane {
                 rows.push(with_rect(div().id(SharedString::from(format!("settled-{pid_set}"))), || format!("settled:{pid_set}")).flex().items_center().gap_1().pl(px(6.)).pr_3().h(px(26.)).text_size(px(11.)).text_color(c("faint")).cursor_pointer().hover(|s| s.bg(c("raise")))
                     .child(div().w(px(16.)).flex_shrink_0().child(ic(light, if settled_open { "chevron-down" } else { "chevron-right" }, 14., "dim"))).child(format!("Settled ({settled_n})"))
                     .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), value.clone())); cx.notify(); })).into_any_element());
-                if settled_open { for t in project["settled"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", true, &mut ctl)); } }
+                if settled_open { for t in project["settled"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", true, &mut ctl)); } if let Some(row) = pager_row(cx, format!("pg-s-{pid_thr}"), &project["settledPage"], light, &mut ctl) { rows.push(row); } }
             }
         }
         // the Active view: threads that need the person first, then the settled ones folded under "Settled N"
@@ -602,19 +606,18 @@ impl Render for Backplane {
             // top bar
             .child(div().h(px(36.)).flex_shrink_0().relative().child(art::probe("topbar")).children(crate::perf::mark("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("line")).bg(c("bg"))
                 .child(div().flex().items_center().gap_2()
-                    .when(!self.sidebar_open, |d| d.child(with_rect(div().id("unfold-sidebar"), || "ui:Unfold sidebar".to_string()).cursor_pointer().tooltip(crate::keys::tip("Unfold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(ic(light, "chevron-right", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if !this.sidebar_open { this.sidebar_toggle(cx); } }))))
                     .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
                     .children(self.screens.elsewhere.clone().map(|(short, full)| div().id("elsewhere").flex().items_center().gap(px(3.)).px_1().border_1().border_color(c("accent")).text_size(px(11.)).text_color(c("accent"))
                         .tooltip(crate::keys::tip(&format!("This window is on {full}, not this computer"), "", light)).child(ic(light, "link", 11., "accent")).child(format!("on {short}"))))
-                    .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(if has_thread { "Project".to_string() } else { "Projects".to_string() }))
+                    .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).child(match crate::screens::projects::page_title(&self.data, self.project_page.as_deref()) { Some(t) => t, None => if has_thread { "Project".to_string() } else { "Projects".to_string() } }))
                     // another machine's thread: "Project · on desktop" (this machine's looks as always)
-                    .when(has_thread, |d| d.children(crate::screens::badge::place(light, &thread["mark"], "", "crumb").map(|p| div().flex().items_center().gap_2().child(div().text_color(c("faint")).child("·")).child(p))))
+                    .when(has_thread && self.project_page.is_none(), |d| d.children(crate::screens::badge::place(light, &thread["mark"], "", "crumb").map(|p| div().flex().items_center().gap_2().child(div().text_color(c("faint")).child("·")).child(p))))
                     // a buy thread's title is marked an Order with the cart, as 0.14's was (the hub sends its Order card only for a buy thread)
-                    .when(has_thread && thread["order"].is_object(), |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("order-mark").flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("accent"))
+                    .when(has_thread && self.project_page.is_none() && thread["order"].is_object(), |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("order-mark").flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("accent"))
                         .tooltip(crate::keys::tip("This thread orders the project's parts", "", light)).child(ic(light, "shopping-cart", 12., "accent")).child("Order")))
-                    .when(has_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").font_weight(FontWeight::BOLD).child(string(thread, "title"))
+                    .when(has_thread && self.project_page.is_none(), |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").font_weight(FontWeight::BOLD).child(string(thread, "title"))
                         // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu
                         .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
                         .child(with_rect(div().id("thread-menu"), || "ui:Thread menu".to_string()).px_1().h_full().flex().items_center().cursor_pointer().hover(|s| s.bg(c("raise")))
@@ -630,9 +633,11 @@ impl Render for Backplane {
             .children(crate::screens::strip::view(light, &self.data))
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
-                .child(div().w(px(if self.sidebar_open { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).children(crate::perf::mark("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
+                // folded: the 44 px strip, its unfold chevron where the fold chevron is (screens/siderow.rs)
+                .when(!self.sidebar_open, |d| d.child(div().id("side-strip").w(px(44.)).h_full().flex_shrink_0().overflow_hidden().bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col().children(self.side_strip(cx, light))))
+                .child(div().w(px(if self.sidebar_open { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).children(crate::perf::mark("sidebar")).bg(c("bg")).when(self.sidebar_open, |d| d.border_r_1()).border_color(c("line")).flex().flex_col()
                     .child(crate::screens::hubpick::picker(self, cx, light, &mut ctl))
-                    .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().tooltip(crate::keys::tip("Fold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if this.sidebar_open { this.sidebar_toggle(cx); } }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
+                    .child(div().flex().items_center().gap_2().h(px(crate::screens::siderow::FOLD_ROW)).px_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().tooltip(crate::keys::tip("Fold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if this.sidebar_open { this.sidebar_toggle(cx); } }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
                     .child(self.screens.parts.el(Backplane::sidebar_part, StyleRefinement::default().flex_1().min_h_0(), cx))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone()))
                     // held Ctrl: the short legend over the sidebar's foot (0.14's keys-legend)
@@ -640,9 +645,11 @@ impl Render for Backplane {
                 // main
                 .child(div().flex_1().min_w(px(crate::screens::viewer::THREAD_MIN)).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
                     .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
-                    .when(has_thread, |d| d.child(div().id("thread-head").h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
+                    .when(has_thread && self.project_page.is_none(), |d| d.child(div().id("thread-head").h(px(32.)).flex_shrink_0().flex().items_center().border_b_1().border_color(c("line"))
                         .on_mouse_down(MouseButton::Right, { let items = crate::screens::tools::context_items(thread); cx.listener(move |this, e: &MouseDownEvent, _, cx| { if !items.is_empty() { this.ctx_open(e.position, items.clone(), cx); } }) })
-                        .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child(div().size(px(6.)).mt(px(7.)).bg(c("ok"))).child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
+                        .child(div().px_3().flex().gap_2().text_size(px(11.)).child(div().text_color(c("faint")).child("STATE")).child({ let word = string(thread, "phase").split(':').next().unwrap_or("").trim().to_lowercase(); // the thread's dot in the rows' 0.14 colours
+                            div().mt(px(7.)).child(crate::screens::siderow::dot(light, &serde_json::json!({"status": word, "state": thread["state"]}))) })
+                        .child(string(thread, "phase").split(':').next().unwrap_or("").to_lowercase()))
                         .children(crate::screens::panels::cells(cx, light, &self.screens.panels, thread))
                         .children(tools_strip)))
                     .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))
