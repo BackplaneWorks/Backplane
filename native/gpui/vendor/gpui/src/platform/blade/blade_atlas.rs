@@ -25,13 +25,22 @@ struct BladeAtlasState {
     tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
     initializations: Vec<AtlasTextureId>,
     uploads: Vec<PendingUpload>,
+    /// Textures no image uses any more, each with the frames it must still wait: the frame that last drew one may still be on the GPU
+    /// when it is removed (the renderer waits for a frame only at the end of the next one's draw), so it is destroyed two frames later.
+    graveyard: Vec<(BladeAtlasTexture, u8)>,
+    /// Textures out of the graveyard, kept for the next one of the same kind and size (a page streaming pictures frees one and needs one
+    /// every frame, the same size each time: a page of its own, or a whole atlas page): made once and reused. At most SPARES, the newest.
+    spares: Vec<BladeAtlasTexture>,
 }
+const SPARES: usize = 3;
 
 #[cfg(gles)]
 unsafe impl Send for BladeAtlasState {}
 
 impl BladeAtlasState {
     fn destroy(&mut self) {
+        for (mut texture, _) in self.graveyard.drain(..) { texture.destroy(&self.gpu); }
+        for mut texture in self.spares.drain(..) { texture.destroy(&self.gpu); }
         self.storage.destroy(&self.gpu);
         self.upload_belt.destroy(&self.gpu);
     }
@@ -54,6 +63,8 @@ impl BladeAtlas {
             tiles_by_key: Default::default(),
             initializations: Vec::new(),
             uploads: Vec::new(),
+            graveyard: Vec::new(),
+            spares: Vec::new(),
         }))
     }
 
@@ -63,6 +74,7 @@ impl BladeAtlas {
 
     pub fn before_frame(&self, gpu_encoder: &mut gpu::CommandEncoder) {
         let mut lock = self.0.lock();
+        lock.bury();
         lock.flush(gpu_encoder);
     }
 
@@ -118,7 +130,7 @@ impl PlatformAtlas for BladeAtlas {
                 lock.storage[id.kind]
                     .free_list
                     .push(texture.id.index as usize);
-                texture.destroy(&lock.gpu);
+                lock.graveyard.push((texture, 2));
             } else {
                 *texture_slot = Some(texture);
             }
@@ -155,6 +167,24 @@ impl BladeAtlasState {
         };
 
         let size = min_size.max(&DEFAULT_ATLAS_SIZE);
+        // a spare of this kind and size: the same texture again (its contents are written before it is drawn)
+        let want: etagere::Size = size.into();
+        let kind_format = match kind { AtlasTextureKind::Monochrome => gpu::TextureFormat::R8Unorm, AtlasTextureKind::Polychrome => gpu::TextureFormat::Bgra8Unorm };
+        if let Some(i) = self.spares.iter().position(|t| t.allocator.size() == want && t.format == kind_format) {
+            let mut texture = self.spares.remove(i);
+            let texture_list = &mut self.storage[kind];
+            let index = texture_list.free_list.pop();
+            texture.id = AtlasTextureId { index: index.unwrap_or(texture_list.textures.len()) as u32, kind };
+            texture.allocator = etagere::BucketedAtlasAllocator::new(want);
+            texture.live_atlas_keys = 0;
+            return if let Some(ix) = index {
+                texture_list.textures[ix] = Some(texture);
+                texture_list.textures.get_mut(ix).unwrap().as_mut().unwrap()
+            } else {
+                texture_list.textures.push(Some(texture));
+                texture_list.textures.last_mut().unwrap().as_mut().unwrap()
+            };
+        }
         let format;
         let usage;
         match kind {
@@ -222,6 +252,17 @@ impl BladeAtlasState {
     fn upload_texture(&mut self, id: AtlasTextureId, bounds: Bounds<DevicePixels>, bytes: &[u8]) {
         let data = self.upload_belt.alloc_bytes(bytes, &self.gpu);
         self.uploads.push(PendingUpload { id, bounds, data });
+    }
+
+    /// A frame begins: the textures removed two frames ago are no longer read by the GPU (`graveyard`).
+    /// The textures two frames out of use become spares; the oldest spares beyond SPARES are destroyed.
+    fn bury(&mut self) {
+        let mut done = vec![];
+        for (_, frames) in self.graveyard.iter_mut() { *frames -= 1; }
+        let mut i = 0;
+        while i < self.graveyard.len() { if self.graveyard[i].1 == 0 { done.push(self.graveyard.remove(i).0) } else { i += 1 } }
+        self.spares.extend(done);
+        while self.spares.len() > SPARES { let mut old = self.spares.remove(0); old.destroy(&self.gpu); }
     }
 
     fn flush_initializations(&mut self, encoder: &mut gpu::CommandEncoder) {
