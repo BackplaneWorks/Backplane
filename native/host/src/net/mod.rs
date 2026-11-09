@@ -17,6 +17,7 @@ pub mod devices;
 pub mod devicespage;
 pub mod far;
 pub mod feed;
+pub mod farsend;
 pub mod farsync;
 pub mod farview;
 pub mod farstore;
@@ -70,7 +71,11 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         hub.register_http(std::sync::Arc::new(farsync::FarRoutes(sync.clone())));
         // /far/rpc: asking (a client's request about a thing elsewhere goes there) and answering; the bots lane's owner.mail transport
         hub.register_http(std::sync::Arc::new(rpc::RpcRoutes(sync.clone())));
-        hub.set_far_router(std::sync::Arc::new(rpc::Router::new(sync.clone())));
+        { // the person's messages to threads elsewhere wait in <home>/far-sends.json until their machine takes them (net/farsend.rs)
+            let out = farsend::set_global(farsend::Outbox::open(Some(hub.cfg.home.join("far-sends.json"))));
+            hub.register_rpc(std::sync::Arc::new(farsend::Rpc(out.clone()))); let _ = crate::session::composer::UNSENT.set(farsend::rows_now);
+            let r = std::sync::Arc::new(rpc::Router::with_outbox(sync.clone(), crate::copy::on(), out)); r.work(&hub);
+            hub.set_far_router(r); }
         farfiles::bind(&hub, sync.clone()); // (Files of a thread whose project is on another machine, both ways)
         crate::mirror::watch_origins(hub.clone()); // (each linked machine's projects' origins, for one sidebar project per repository)
         { // (the bots start on their own; the transport is handed over once they exist, looked for for ten minutes)

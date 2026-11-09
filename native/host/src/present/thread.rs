@@ -16,7 +16,8 @@ pub fn ents(rows: &[Value], thread: &str) -> Option<Vec<Ent>> {
     let mut v: Vec<Ent> = Vec::new();
     for r in rows.iter().take(32) {
         let c: Vec<String> = (0..10).map(|i| match r.get(i) { Some(Value::String(s)) => s.clone(), Some(Value::Number(n)) => n.to_string(), _ => String::new() }).collect();
-        if c[3] != thread || !c[4].is_empty() { continue } // a row this thread sent into another thread: not shown here (a gap in a key, not a refused screen)
+        if c[3] != thread { continue } // a row this thread sent into another thread: not shown here (a gap in a key, not a refused screen); one another thread sent here is
+        // (its `src`): a subthread's, a bot's or the uberbot's message is a message of this thread, and it is what cut into the turn
         let msg = match c[5].as_str() { "msg" => true, "act" => false, _ => return None };
         v.push(Ent { id: c[2].clone(), msg, role: c[6].clone(), akind: c[7].clone(), text: if msg { crate::settings::order::pay_shown(&c[8]) } else { c[8].clone() }, at: c[9].parse().ok()? });
     }
@@ -496,7 +497,9 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("asks".into(), Value::Array(asks_json(st, thread, draft)?));
     o.insert("order".into(), order_json(st, thread, running));
     // the messages waiting for the agent, above the composer (session/composer.rs queue_json)
-    let (queue, queued) = crate::session::composer::queue_json(st.queue.get(thread).map(Vec::as_slice).unwrap_or(&[]), running);
+    let (mut queue, queued) = crate::session::composer::queue_json(st.queue.get(thread).map(Vec::as_slice).unwrap_or(&[]), running);
+    // and first, a thread elsewhere's messages that have not reached its machine (net/farsend.rs: Sending, Unsent, Refused)
+    if let Some(q) = queue.as_array_mut() { for (i, r) in crate::session::composer::unsent_rows(thread).into_iter().enumerate() { q.insert(i, r) } }
     o.insert("queue".into(), queue); o.insert("queued".into(), queued);
     // Buy it heads the thread's tools: in the window's header, and the first of the phones' overflow menu, which lists them
     if let Some(b) = super::ready::header(st, thread, &params["session"]) { if let Some(t) = o.get_mut("tools").and_then(Value::as_array_mut) { t.insert(0, b) } }
@@ -559,6 +562,10 @@ mod tests {
     #[test] fn rows_this_thread_sent_elsewhere_are_left_out_not_refused() {
         let rows = json!([["9", "9", "t:t:1", "u", "t", "msg", "user", "", "to u", "9"], ["8", "8", "m1", "t", "", "msg", "user", "", "hi", "8"]]);
         let es = ents(rows.as_array().unwrap(), "t").unwrap(); assert_eq!(es.len(), 1); assert_eq!(es[0].id, "m1");
+    }
+    #[test] fn a_message_another_thread_sent_here_is_shown() {
+        let rows = json!([["9", "9", "t:h:m1", "t", "h", "msg", "user", "", "from the helper", "9"]]);
+        let es = ents(rows.as_array().unwrap(), "t").unwrap(); assert_eq!(es.len(), 1); assert_eq!(es[0].text, "from the helper");
     }
     #[test] fn rows_may_carry_numbers_or_strings() {
         let a = json!([["5", "5", "m1", "t", "", "msg", "user", "", "hi", "9"]]); let b = json!([[5, 5, "m1", "t", "", "msg", "user", "", "hi", 9]]);

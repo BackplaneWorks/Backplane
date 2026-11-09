@@ -276,3 +276,72 @@ impl RpcHandler for Viewer {
     // and the secret is the link's: another machine's request with no signature is not heard
     let r = botnet::plain(&format!("{}/far/rpc", url(&b))).await; assert_eq!(r.code, 401);
 }
+
+/// A message to a thread elsewhere is held while its machine is down (an Unsent row in the strip with Edit and Remove), one removed never goes, and the rest go,
+/// oldest first, once the machine is back; the owner takes a message it took already (a lost answer posted again) once.
+#[tokio::test] async fn far_messages_wait_for_their_machine_and_go_when_it_is_back() {
+    let down = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let slot: Arc<Mutex<Option<Arc<FarSync>>>> = Arc::new(Mutex::new(None)); let (s2, d2) = (slot.clone(), down.clone());
+    let extra: Extra = Arc::new(move |hub, req| { let (s, down) = (s2.lock().unwrap().clone(), d2.load(std::sync::atomic::Ordering::SeqCst)); Box::pin(async move {
+        let s = s?; if req.route() != "/far/rpc" || req.method != "POST" { return None }
+        if down && !String::from_utf8_lossy(&req.body).contains("peer.") { return Some(HttpReply::text("503 Service Unavailable", "down")) }
+        Some(serve_with(false, &s, &hub, &req).await) }) });
+    let a = node_extra("rfo-a", false, false, Some(extra)).await;
+    a.hub.commit(&json!({"$":"ThreadCreated","id":"t","project":"","title":"T","env":"","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    let fa = FarSync::new(FarStore::open(&a.home).unwrap(), a.p.clone()); let feed = Feed::new(); feed.start(&a.hub).await; let _ = fa.feed.set(feed);
+    a.hub.set_far_router(Arc::new(Router::with_copy(fa.clone(), false))); *slot.lock().unwrap() = Some(fa);
+    let rec = Rec::new(ALL); a.hub.register_rpc(rec.clone());
+    let (b, fb) = side("rfo-b", false, false).await; let _ = fb;
+    let out = Outbox::open(None); b.hub.register_rpc(Arc::new(farsend::Rpc(out.clone())));
+    let rb = Arc::new(Router::with_outbox(fb.clone(), false, out.clone()));
+    let l = link(&a, &b, true).await;
+    // (side() installed a router already; this one with the outbox to look at takes b's requests through `call` directly)
+    let th = format!("{l}~t");
+    let call = |id: u64, text: &str, msg: &str| { let (rb, hub, th) = (rb.clone(), b.hub.clone(), th.clone()); let p = json!({"thread": th, "text": text, "msg": msg}); async move { rb.call(&hub, 1, &json!(id), "turn.start", &p).await } };
+    let r = call(1, "one", "m1").await; assert_eq!((r[0]["ok"].as_bool(), r[0]["result"]["held"].as_bool()), (Some(true), Some(true)), "answered at once: {r:?}");
+    call(2, "two", "m2").await;
+    // the phones' path (data/1 asks and waits): held the same way, answered at once
+    let r = rb.ask(&b.hub, 1, &json!(3), "turn.start", &json!({"thread": th, "text": "three", "msg": "m3"})).await.expect("a thread elsewhere is the router's");
+    assert_eq!(r["result"]["held"], true, "{r}");
+    let mut tag = String::new();
+    for _ in 0..100 { tag = out.rows(&th, farsend::now_ms()).first().map(|r| r["tag"].as_str().unwrap_or("").to_string()).unwrap_or_default(); if tag == "Unsent" { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
+    assert_eq!(tag, "Unsent", "its machine is down: the strip says so");
+    let rows = out.rows(&th, farsend::now_ms()); assert_eq!(rows.len(), 3); assert_eq!(rows[1]["buttons"][1], json!({"label":"Remove","action":"o-remove","value":"m2"}));
+    assert!(rec.seen().is_empty(), "nothing reached it");
+    // Remove on the second: hub-local (`of` is not renamed, so it is not sent on), and it answers the text (Edit puts it in the draft)
+    let r = ask(&b, 9, "outbox.remove", json!({"of": th, "msg": "m2"})).await; assert_eq!((r["ok"].as_bool(), r["result"]["text"].as_str()), (Some(true), Some("two")), "{r}");
+    down.store(false, std::sync::atomic::Ordering::SeqCst);
+    for _ in 0..200 { if out.items().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
+    assert!(out.items().is_empty(), "delivered once the machine is back: {:?}", out.items());
+    let seen: Vec<(String, String)> = rec.seen().into_iter().map(|(m, p)| (m, format!("{}/{}", p["thread"].as_str().unwrap_or(""), p["msg"].as_str().unwrap_or("")))).collect();
+    assert_eq!(seen, vec![("turn.start".to_string(), "t/m1".to_string()), ("turn.start".to_string(), "t/m3".to_string())], "oldest first, the removed one never");
+    // the same message posted again (its answer was lost): taken once
+    let again = signed(&b, &a, &l, json!({"id":0,"m":"turn.start","p":{"thread":"t","text":"one","msg":"m1"}})).await; assert_eq!(again.code, 200);
+    assert_eq!(rec.seen().len(), 2, "not run twice");
+}
+
+/// An agent's thread_send to a thread on a machine that is down waits here (an mcp.call in the far outbox) and goes the moment the machine is back.
+#[tokio::test] async fn an_agents_send_to_a_machine_that_is_down_goes_when_it_is_back() {
+    struct Mcp(Mutex<Vec<(String, String, Value)>>);
+    impl crate::api::FarMcp for Mcp { fn serve<'a>(&'a self, _l: &'a str, from: &'a str, tool: &'a str, args: &'a Value) -> Fut<'a, (bool, Value)> { Box::pin(async move { self.0.lock().unwrap().push((from.to_string(), tool.to_string(), args.clone())); (true, json!({"state":"sent"})) }) } }
+    let down = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let slot: Arc<Mutex<Option<Arc<FarSync>>>> = Arc::new(Mutex::new(None)); let (s2, d2) = (slot.clone(), down.clone());
+    let extra: Extra = Arc::new(move |hub, req| { let (s, down) = (s2.lock().unwrap().clone(), d2.load(std::sync::atomic::Ordering::SeqCst)); Box::pin(async move {
+        let s = s?; if req.route() != "/far/rpc" || req.method != "POST" { return None }
+        if down && !String::from_utf8_lossy(&req.body).contains("peer.") { return Some(HttpReply::text("503 Service Unavailable", "down")) }
+        Some(serve_with(false, &s, &hub, &req).await) }) });
+    let a = node_extra("rfm-a", false, false, Some(extra)).await;
+    let fa = FarSync::new(FarStore::open(&a.home).unwrap(), a.p.clone()); *slot.lock().unwrap() = Some(fa);
+    let mcp = Arc::new(Mcp(Default::default())); a.hub.set_far_mcp(mcp.clone());
+    let (b, fb) = side("rfm-b", false, false).await;
+    let out = Outbox::open(None); let rb = Arc::new(Router::with_outbox(fb.clone(), false, out.clone()));
+    let l = link(&a, &b, true).await; rb.work(&b.hub);
+    out.hold_m(&format!("{l}~t"), &l, "mcp.call", "fs1", json!({"tool":"thread_send","from":"t9","args":{"threadId":"t","text":"look again","_msg":"fs1"}}), farsend::now_ms());
+    for _ in 0..60 { if out.items().first().map_or(false, |h| h.state == "away") { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
+    assert_eq!(out.rows(&format!("{l}~t"), farsend::now_ms())[0]["tag"], "Unsent"); assert!(mcp.0.lock().unwrap().is_empty());
+    down.store(false, std::sync::atomic::Ordering::SeqCst); let back = std::time::Instant::now();
+    for _ in 0..200 { if out.items().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
+    assert!(out.items().is_empty(), "delivered: {:?}", out.items()); assert!(back.elapsed() < std::time::Duration::from_secs(7), "within a retry of the machine coming back");
+    let got = mcp.0.lock().unwrap().clone(); assert_eq!(got.len(), 1); assert!(got[0].0.ends_with("~t9"), "the sender, named as the owner names it: {}", got[0].0);
+    assert_eq!((got[0].1.as_str(), got[0].2["text"].as_str(), got[0].2["_msg"].as_str()), ("thread_send", Some("look again"), Some("fs1")));
+}

@@ -734,18 +734,20 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
     assert!(ev0.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "second while running"), "posted at once");
     assert!(!ev0.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("ride.{T1}") && !e["value"].as_str().unwrap_or("").is_empty()), "a person's message never waits as a ride");
     assert!(ev0.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "the running turn was steered");
+    let cut = ev0.iter().position(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"] == "par" && e["msg"].as_str().map_or(false, |m| m.ends_with(":before")));
+    let mine = ev0.iter().position(|e| is(e, "MessagePosted") && e["text"] == "second while running");
+    assert!(cut.is_some() && cut < mine, "what had streamed is kept, ahead of the message that cut it: {ev0:?}");
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().map_or(false, |t| t.contains("second while running")))).await;
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().unwrap().contains("second while running")), "the turn started again with the message");
     assert_eq!(ag.stats.procs_spawned.load(Relaxed), 2); ag.shutdown();
 }
-#[tokio::test(flavor = "multi_thread")] async fn the_ride_is_taken_by_the_running_turns_tool_result_once() {
-    let (hub, ag, _sd) = codex_start("cx4").await;
+#[tokio::test(flavor = "multi_thread")] async fn mail_into_a_running_codex_turn_steers_it_and_nothing_rides() { // was: the ride is taken by the running turn's tool result
+    let (hub, ag, _sd) = codex_start("cx4").await; let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang forever"})).await; tokio::time::sleep(Duration::from_millis(400)).await;
-    ag.deliver(T1, "mail-1", "for the tool result", None, vec![]).await.unwrap(); // mail from a bot or the hub (not a person's message) rides
-    let b = ag.ride_take(T1).await.expect("a ride waits"); assert!(b.contains("for the tool result") && b.starts_with("[Backplane] Incoming messages"));
-    assert!(ag.ride_take(T1).await.is_none(), "shown once");
-    assert!(log_from(&hub, 0).await.iter().any(|e| is(e, "ActivityLogged") && e["summary"] == "Delivered into the running turn: 1 waiting message(s)"));
-    rpc(&hub, "turn.interrupt", json!({"thread":T1})).await; ag.shutdown();
+    ag.deliver(T1, "mail-1", "for the running turn", None, vec![]).await.unwrap(); // mail from a bot or the hub cuts in like a person's message
+    assert!(ag.ride_take(T1).await.is_none(), "nothing waits for a tool result");
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().map_or(false, |t| t.contains("for the running turn")))).await;
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "steered at once"); ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn interrupting_a_codex_turn_ends_its_process_and_keeps_the_ride() {
     let (hub, ag, sd) = codex_start("cx5").await; let from = len(&hub).await;
@@ -762,13 +764,12 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "failed"))).await;
     assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "exit"), "{ev:?}"); ag.shutdown();
 }
-#[tokio::test(flavor = "multi_thread")] async fn ride_interrupted_starts() {
+#[tokio::test(flavor = "multi_thread")] async fn mail_into_a_hanging_turn_is_taken_at_once_not_after_a_stop() { // was: ride_interrupted_starts (the mail waited for the stop)
     let (hub, ag, _sd) = codex_start("cx7").await; let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang"})).await; tokio::time::sleep(Duration::from_millis(400)).await;
-    ag.deliver(T1, "mail-2", "mail for later", None, vec![]).await.unwrap();
-    rpc(&hub, "turn.interrupt", json!({"thread":T1})).await;
-    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
-    assert!(ev.iter().any(|e| turn_is(e, "interrupted")) && ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().map_or(false, |t| t.contains("mail for later") && e["role"] == "assistant")), "a stopped turn with mail waiting starts the next with it");
+    ag.deliver(T1, "mail-2", "mail for now", None, vec![]).await.unwrap();
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().map_or(false, |t| t.contains("mail for now")))).await;
+    assert!(!ev.iter().any(|e| turn_is(e, "interrupted")), "no stop was needed for it to be read: {ev:?}");
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn person_message_steers_restart() { // a person's message into a running Codex turn: posted at once, the process stops and the turn starts again with it
@@ -1094,18 +1095,21 @@ fn tree(d: &Path) -> Vec<(String, u64)> {
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user")).await; assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"] == "zqshort hi")); ag.shutdown();
 }
 
-#[tokio::test(flavor = "multi_thread")] async fn wake_ride_starts_an_idle_thread_with_the_note_and_rides_a_running_turn() {
+#[tokio::test(flavor = "multi_thread")] async fn wake_ride_starts_an_idle_thread_with_the_note_and_steers_a_running_turn() {
     let (hub, ag, _sd) = codex_start("wr1").await; let from = len(&hub).await;
     assert!(ag.wake_ride(T1, "w1", "wake note one").await.is_ok());
     let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "ride" && e["act"] == "ride:w1" && e["summary"] == "Delivered with a new turn: 1 waiting message(s)"), "{ev:?}");
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().unwrap().contains("wake note one")), "the idle thread ran with the note");
     assert!(!ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user"), "the note is not a person's message");
-    // a running turn keeps it in the ride, once per id
+    // a running turn is cut at once and starts again with it, once per id; nothing waits in the ride
+    let n = ag.stats.procs_spawned.load(Relaxed); let from2 = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang a while"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(ag.wake_ride(T1, "w2", "second note").await.is_ok()); assert!(ag.wake_ride(T1, "w2", "second note").await.is_ok());
-    let b = ag.ride_take(T1).await.expect("the ride waits for the running turn"); assert_eq!(b.matches("second note").count(), 1, "once per id");
-    rpc(&hub, "turn.interrupt", json!({"thread":T1})).await; ag.shutdown();
+    assert!(ag.ride_take(T1).await.is_none(), "nothing rides");
+    let ev = until(&hub, from2, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().map_or(false, |t| t.contains("second note")))).await;
+    assert_eq!(ev.iter().filter(|e| is(e, "ActivityLogged") && e["kind"] == "steer").count(), 1, "once per id");
+    assert_eq!(ag.stats.procs_spawned.load(Relaxed), n + 2, "the hanging turn and its steer"); ag.shutdown();
 }
 
 // ---- watched work ----
@@ -1667,4 +1671,45 @@ async fn tool_of(ag: &Arc<Agents>, name: &str) -> Arc<dyn mcp::ToolSet> { ag.too
     set("text.model", "sonnet").await; assert_eq!(ag.write_title(T1, "design a board").await.as_deref(), Some("Claude title")); assert!(argv().starts_with("claude") && argv().contains("--model sonnet"), "the chosen model: {}", argv());
     set("text.provider", "codex").await; set("text.model", "").await; assert_eq!(ag.write_title(T1, "design a board").await.as_deref(), Some("Codex title")); assert!(argv().starts_with("codex exec") && argv().contains("-m gpt-6-luna"), "the chosen provider, its light model: {}", argv());
     ag.shutdown();
+}
+
+// ---- every message cuts into a running turn (no queue behind a turn, from anyone) ----
+/// A stand-in `claude` that says init and then only records what it is sent, one line each, so the turn stays running.
+const RECORDS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"rec-1\"}'\nwhile read l; do echo \"$l\" >> \"$D/in.log\"; done\n";
+fn user_lines(sd: &Path) -> Vec<Value> { std::fs::read_to_string(sd.join("in.log")).unwrap_or_default().lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["type"] == "user").collect() }
+async fn lines_at_least(sd: &Path, n: usize) -> Vec<Value> { for _ in 0..100 { let l = user_lines(sd); if l.len() >= n { return l } tokio::time::sleep(Duration::from_millis(100)).await } user_lines(sd) }
+#[tokio::test(flavor = "multi_thread")] async fn every_message_into_a_running_claude_turn_cuts_in_at_once() {
+    let sd = dir("cut-bin"); script(&sd, "claude", RECORDS);
+    let (hub, ag, _h, _w) = start("cut", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"the person first"})).await; lines_at_least(&sd, 1).await;
+    assert!(ag.world().await.running(T1), "the first turn runs");
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"the person again"})).await;
+    let (ok, r) = ag.tool_send(T2, &json!({"threadId":T1,"text":"from a subthread"})).await; assert!(ok, "{r}"); // thread_send
+    ag.deliver_as("user", T1, "m-bot-1", "from a bot", Some(("bot:b1".into(), "bot".into(), String::new())), vec![]).await.unwrap(); // a bot's or the uberbot's message
+    ag.wake_ride(T1, "rep-1", "a launched thread reported").await.unwrap(); // a report, a wake, a task's result
+    let ls = lines_at_least(&sd, 5).await;
+    let text = |l: &Value| l["message"]["content"].as_array().map(|a| a.iter().filter_map(|b| b["text"].as_str()).collect::<String>()).unwrap_or_default();
+    assert_eq!(ls.len(), 5, "{ls:?}");
+    for l in &ls { assert_eq!(l["priority"], "now", "every line cuts in: {}", text(l)) }
+    for w in ["the person again", "from a subthread", "from a bot", "a launched thread reported"] { assert!(ls.iter().any(|l| text(l).contains(w)), "{w} reached the running turn") }
+    assert_eq!(ag.stats.procs_spawned.load(Relaxed), 1, "the same process, the same turn"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_bots_message_and_a_report_restart_a_running_codex_turn_at_once() {
+    let (hub, ag, sd) = codex_start("cxcut").await; let from = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow first"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
+    ag.deliver_as("user", T1, "m-bot-2", "a bot says stop", Some(("bot:b1".into(), "bot".into(), String::new())), vec![]).await.unwrap();
+    let ev = log_from(&hub, from).await;
+    assert!(!ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("ride.{T1}") && !e["value"].as_str().unwrap_or("").is_empty()), "nothing waits as a ride");
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "steered at once");
+    assert!(ev.iter().any(|e| is(e, "MessageFrom") && e["msg"] == "m-bot-2"), "who sent it is kept");
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["msg"].as_str().map_or(false, |m| m.ends_with(":before"))), "what had streamed is kept");
+    until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    let from2 = len(&hub).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow second"})).await; tokio::time::sleep(Duration::from_millis(500)).await;
+    ag.wake_ride(T1, "rep-2", "a launched thread reported").await.unwrap();
+    let ev = log_from(&hub, from2).await;
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "a report steers too: {ev:?}");
+    let mut argv = String::new(); for _ in 0..50 { argv = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default(); if argv.contains("a launched thread reported") { break } tokio::time::sleep(Duration::from_millis(100)).await }
+    assert!(argv.contains("a launched thread reported"), "the turn started again with it");
+    assert_eq!(ag.stats.procs_spawned.load(Relaxed), 4); ag.shutdown();
 }

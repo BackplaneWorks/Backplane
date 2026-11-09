@@ -599,14 +599,17 @@ impl Actor {
             t.runtime = person::runtime_for(&t.runtime).to_string(); t.session.clear();
         }
         self.person = sbs;
-        self.steer_now = person && role == "user" && origin.is_none() && (self.cx.running || t.turn == "running"); // a person's message into a running Claude turn: priority now
+        // every message cuts into a running turn at once: the person's, a bot's, the uberbot's, another thread's (thread_send), a report, mail. Claude: the line
+        // carries priority now (on an idle process it is just the next turn, and it is set always so a message sent as a turn is starting does not wait for it)
+        self.steer_now = true;
         let codex = t.provider != "claude";
-        if codex && (self.cx.running || t.turn == "running") {
-            if person && !sbs && role == "user" && origin.is_none() { // a person's message always steers: it is posted, and the running turn starts again with it (Steer.go)
-                let now = now_s(); let mut ev = vec![json!({"$":"MessagePosted","thread":self.th,"msg":msg,"role":role,"text":text,"at":now})]; ev.extend(extra);
-                self.commit(ev).await; self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
-                return self.steer(text).await }
-            return self.codex_ride(&msg, &text, &role, origin).await } // Hub.deliver.ride: a running turn takes it on its next Backplane tool result
+        if codex && (self.cx.running || t.turn == "running") { // any other provider: posted, and the running turn starts again with it (Steer.go), what it had streamed kept
+            let now = now_s(); let mut ev = self.cut_in(&msg, now).await;
+            ev.push(json!({"$":"MessagePosted","thread":self.th,"msg":msg,"role":role,"text":text,"at":now}));
+            if let Some((from, kind, r)) = &origin { ev.push(json!({"$":"MessageFrom","thread":self.th,"msg":msg,"from":from,"kind":kind,"ref":r,"at":now})) }
+            ev.extend(extra);
+            self.commit(ev).await; self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
+            return self.steer(text).await }
         self.codex = codex; self.prov = t.provider.clone(); self.model = t.model.clone();
         let was_running = self.cx.running || t.turn == "running"; // Ride.post: a turn that starts on an idle thread takes the mail waiting for it
         self.cx = cx; self.last_user = msg.clone(); self.cwd = cwd.clone();
@@ -691,6 +694,14 @@ impl Actor {
     }
 
     /// Steer.go: Claude takes the text on its input; any other provider's process stops and the turn starts again with it (and whatever waited in the ride).
+    /// A turn about to be cut: what it had streamed so far, whole, as a message ahead of what cuts it (`<msg>:before`), and the live text ended. The turn that
+    /// starts again does not say it again.
+    async fn cut_in(&mut self, msg: &str, now: u64) -> Vec<Value> {
+        let kept = self.live.trim_end().to_string();
+        if kept.trim().is_empty() { return vec![] }
+        self.live_end().await;
+        vec![json!({"$":"MessagePosted","thread":self.th,"msg":format!("{msg}:before"),"role":"assistant","text":kept,"at":now})]
+    }
     async fn steer(&mut self, text: String) -> Result<(), String> {
         if crate::copy::person_turn_allowed() { return Err("on a copy in side-by-side mode a turn starts only when the person sends a message".into()) }
         let (t, cwd, ride) = { let w = self.ag.world().await; let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) }; (t, w.cwd(&self.th), w.setting(&format!("ride.{}", self.th)).to_string()) };
@@ -701,7 +712,7 @@ impl Actor {
         if providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
         self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.live_proc = None; self.asked.clear();
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("s", now, self.ag.seq()),"tone":"info","kind":"steer","summary":"Steered: the turn starts again with this message","at":now})];
-        let run = if ride.is_empty() { text.clone() } else { ev.extend(codex::ride_done(&th, &ride, "with the steer", now)); format!("{}\n\n{}", codex::ride_input(&ride), text) };
+        let run = if ride.is_empty() { text.clone() } else { ev.extend(codex::ride_done(&th, &ride, "with the steer", now)); if text.trim().is_empty() { codex::ride_input(&ride) } else { format!("{}\n\n{}", codex::ride_input(&ride), text) } };
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         self.live_close().await; self.commit(ev).await; self.cwd = cwd.clone(); self.cx.running = true; self.codex = true; self.prov = t.provider.clone(); self.model = t.model.clone();
         self.codex_run(&t, &cwd, &run).await; Ok(())
@@ -783,10 +794,17 @@ impl Actor {
         if running && t.provider == "claude" && self.live_proc.is_some() { // Ride.note.k True: into the running turn at once, with whatever waited (a "running" turn with no process, after a restart, keeps the ride)
             let mut ev = codex::ride_done(&th, &v, "into the running turn", now); ev.push(set(format!("ridden.{th}"), now.to_string(), now)); self.commit(ev).await;
             self.cwd = cwd.clone(); let msg = hub_id("w", now, self.ag.seq()); let block = codex::ride_input(&v);
+            self.steer_now = true; // it cuts in, as every message does
             self.claude_send(&t, &cwd, &msg, &block, &block, now).await; return Ok(())
         }
+        if running && t.provider != "claude" { // any other provider's running turn: it starts again at once with the note (and whatever waited), what it had streamed kept
+            let key = format!("ride:{id}"); if self.recent.contains(&key) { return Ok(()) } // once per id, as the ride had it
+            self.recent.push_back(key); if self.recent.len() > RECENT { self.recent.pop_front(); }
+            let mut ev = self.cut_in(&hub_id("w", now, self.ag.seq()), now).await; ev.extend(codex::ride_done(&th, &v, "with the steer", now)); self.commit(ev).await;
+            return self.steer(codex::ride_input(&v)).await // (the ride is handed over here: what steer reads back may not have it yet)
+        }
         self.commit(vec![set(format!("ride.{th}"), v.clone(), now)]).await;
-        if running || !start { return Ok(()) } // carried by the next tool result (ride_take) or started at the turn's end; a note alone waits for the next turn
+        if running || !start { return Ok(()) } // a "running" Claude turn with no live process (after a restart) keeps the ride for its next start; a note alone waits for the next turn
         // Ride.start: an idle thread starts a turn with the waiting rides
         self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone();
         let mut ev = codex::ride_done(&th, &v, "with a new turn", now); ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));

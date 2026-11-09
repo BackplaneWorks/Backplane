@@ -77,7 +77,11 @@ pub fn queue_now(thread: &str) -> Value {
         let running = st.threads.get(thread).map_or(false, |t| t.turn == crate::state::Turn::Running);
         let (rows, more) = crate::session::composer::queue_json(st.queue.get(thread).map(Vec::as_slice).unwrap_or(&[]), running);
         json!({"rows":rows,"more":more})
-    })).unwrap_or_else(|| json!({"rows":[],"more":""}))
+    })).map(|mut q| { with_unsent(&mut q, thread); q }).unwrap_or_else(|| { let mut q = json!({"rows":[],"more":""}); with_unsent(&mut q, thread); q })
+}
+/// A thread elsewhere's messages that have not reached its machine go first (net/farsend.rs rows: Sending, Unsent, Refused; Edit and Remove are o-edit, o-remove).
+fn with_unsent(q: &mut Value, thread: &str) {
+    if let Some(rows) = q["rows"].as_array_mut() { for (i, r) in crate::session::composer::unsent_rows(thread).into_iter().enumerate() { rows.insert(i, r) } }
 }
 /// Who holds what: every lock with a holder or a queue.
 pub async fn locks_now(hub: &Hub) -> Value { let g = hub.model().await; let now = crate::agents::now_s(); json!(crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::locks(st, now, |t| g.threads.get(t).map_or_else(|| t.to_string(), |x| x.title.clone())))).unwrap_or_default()) }
@@ -229,7 +233,10 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             "q-edit" => rpc(hub, c, "queue.remove", json!({"thread":th,"msg":msg})).await.map(|_| json!({"text":rest})),
             "q-up" => match rest.parse::<u64>() { Ok(to) => rpc(hub, c, "queue.move", json!({"thread":th,"msg":msg,"to":to})).await.map(|_| json!({})), Err(_) => Err(err("q-up: <msg>\u{1f}<place>")) },
             "q-resume" => rpc(hub, c, "queue.resume", json!({"thread":th})).await.map(|_| json!({})),
-            _ => Err(err("action: q-steer, q-remove, q-edit, q-up or q-resume")) } }
+            // a message that has not reached the thread's machine: out of the hub's outbox (o-edit answers its text for the draft)
+            "o-remove" => rpc(hub, c, "outbox.remove", json!({"of":th,"msg":msg})).await.map(|_| json!({})),
+            "o-edit" => rpc(hub, c, "outbox.remove", json!({"of":th,"msg":msg})).await.map(|r| json!({"text":r["result"]["text"]})),
+            _ => Err(err("action: q-steer, q-remove, q-edit, q-up, q-resume, o-edit or o-remove")) } }
         // feature "buy": Buy it on the phones. `thread.buy {thread}` → `{buy}`: null, or the button the desktop's header shows (present/ready.rs `header`, from the hub's own
         // `fab.look` card) as `{label, tip}`; `order.buy {thread}` → `{thread}`: the buy thread made (or the one just made by another press), for the app to open
         "thread.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }

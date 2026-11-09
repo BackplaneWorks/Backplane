@@ -27,6 +27,8 @@ fn forbidden() -> HttpReply { HttpReply::text("403 Forbidden", "threads are shar
 
 impl FarSync {
     pub fn new(store: Arc<FarStore>, peering: Arc<Peering>) -> Arc<FarSync> { Arc::new(FarSync { store, peering, feed: Default::default(), catalogs: Mutex::new(HashMap::new()), pulling: Default::default() }) }
+    /// One of the owner's machines whether or not it answers now (verified, not revoked, sync not off): a message to it may wait for it (net/farsend.rs).
+    pub(super) fn mine(&self, link: &str) -> bool { self.peering.table.with(|p| p.peer(link).map_or(false, |r| !r.revoked && p.verified(link) && !p.sync_off(&r.name))) }
     pub(super) fn own(&self, link: &str) -> bool { let j = self.peering.routes.machines_value(); self.peering.table.with(|p| own_link(p, &j, link)) }
     pub fn catalog(&self, link: &str) -> Value { self.catalogs.lock().unwrap().get(link).cloned().unwrap_or(json!([])) }
 

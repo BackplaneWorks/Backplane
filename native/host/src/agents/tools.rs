@@ -67,7 +67,8 @@ impl Agents {
         if text.trim().is_empty() { return fail("thread_send needs a non-empty `text` (the message); nothing was sent") }
         let to_uber = match self.mailroom() { Some(m) => m.chat_is(target).await, None => false }; // Lr.may: any thread may write to the uberbot's own
         if !to_uber && !self.same_project(thread, target).await { return fail(NOT_HERE) }
-        let msg = format!("t:{thread}:{}", hub_id("m", now_s(), self.seq()));
+        // `_msg`: the id a linked machine gave a send it may post again (its answer lost): the same message, taken once (Hub.dup)
+        let given = sv(a, "_msg"); let msg = if !given.is_empty() && given.len() <= 64 && given.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) { format!("t:{thread}:{given}") } else { format!("t:{thread}:{}", hub_id("m", now_s(), self.seq())) };
         match self.inbound("user", target, &msg, text, (format!("thread:{thread}"), "thread".into(), String::new()), vec![]).await { Ok(()) => (true, json!({"threadId":target,"state":"sent"})), Err(e) => fail(&e) }
     }
     pub async fn tool_update(&self, thread: &str, a: &Value) -> (bool, Value) {

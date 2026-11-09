@@ -16,6 +16,8 @@
 //   stop         a command works until it is interrupted (20 s at most)
 //   pair         each command works BP_WORK_MS (1500), so a second sent
 //                at once waits queued (stop-steer.jsonl l.20-33)
+//   (any mode)   a user line with priority "now" while a command runs
+//                interrupts it and runs next, ahead of the queue
 //   noLC         an old CLI: no lifecycles, init says 2.0.0
 //   exit-held    a child holds stdout open (30 s), the process exits 3
 //   result-exit  a result, then exit with a child holding stdout
@@ -698,6 +700,14 @@ rl.on("line", (line) => {
   const uuid = o.uuid ?? rnd();
   log(`USER ${uuid} ${text.slice(0, 80)}`);
   lc(uuid, "queued");
+  // priority "now" (a person's message into a running turn): as Claude Code does, the running
+  // command is interrupted (its partial text kept, the turn ends cancelled) and this one runs next
+  if (o.priority === "now" && busy) {
+    log(`NOW ${uuid}`);
+    interrupted = true;
+    queue.unshift({ uuid, text });
+    return;
+  }
   queue.push({ uuid, text });
   pump();
 });

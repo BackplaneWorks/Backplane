@@ -88,9 +88,20 @@ The phones draw a thread as the desktop does; the words are the hub's.
   `{label, tip}` ("Buy it · from $5", "Ready to order · …"). `order.buy {thread}` → `{thread}`: the buy thread made, or the one another press just made; the app opens it.
   Ask `thread.buy` when the thread opens and again when its turn ends.
 - `thread.queue {thread}` → `{rows, more}` (feature `queue`): what waits for the agent, the desktop's strip over the composer (`session/composer.rs` `queue_json`): each row
-  `{msg, tag, text, buttons:[{label, action, value}]}`. A message sent while a turn runs waits here (its entry is the row's `msg`: show it in the strip, not the conversation).
+  `{msg, tag, text, buttons:[{label, action, value}]}`. What the hub keeps here is handed-over context (a fork's start, a provider switch, `/give`: it goes with the next message) and what a Stop or a restart left held (its entry is the row's `msg`: show it in the strip, not the conversation).
   `queue.act {thread, action, value}` → `{}` presses a button: `q-steer` (into the running turn now, or a turn of its own), `q-remove`, `q-up`, `q-resume`; `q-edit` takes the
   message out of the queue and answers `{text}` for the draft. Ask again after a send and on the thread's pushes.
+  No message ever waits behind a running turn: every send (the person's from any client, a bot's, the uberbot's, another thread's `thread_send`, a report) cuts
+  into the running turn at once (Claude takes it with priority now; another provider's turn stops, keeps what it had written, and starts again with it), on this
+  machine or on the one a thread lives on. A message waits only while it physically cannot be delivered, and then cuts in the moment it can:
+  - A thread on another machine (`<link>~<id>`) whose link is slow or down: the hub holds the message (`net/farsend.rs`; an agent's `thread_send` there and a launch
+    report too), answers `message.send` at once, and tries the machine again every few seconds (5 s at most). Its rows
+    come first, tagged `Sending` (on its way for over a second), `Unsent` (that machine is away; it goes, oldest first, when it is back) or `Refused` (that machine
+    said no; the text says why), each with `o-edit` (answers `{text}` for the draft) and `o-remove`. A `{k:"queue", thread}` push on the thread's subscription says
+    these rows changed: ask `thread.queue` again.
+  - The app's own socket is down: the app keeps the message in its own outbox (on disk), draws it in the same strip as an `Unsent` row with Edit and Remove of its
+    own, and sends each with its `clientId`, in order, once it is connected again (`message.send` with a `clientId` posts once, so a send cut off and repeated is one
+    message). The phone's outbox is a pure function with a test (`Outbox.kt`, `Outbox.swift`); the desktop's is `native/gpui/src/screens/unsent.rs`.
 - `thread.order {thread}` → `{order}` (feature `order`): a buy thread's Order card, null for any other thread: `{name, steps:[{label, mark: "done"|"on"|""}], line, waiting, total, customs, pay, label}`. `pay` is the Buy now link (an http(s) address to open in the browser), empty unless the quote can be paid; `label` is its button's text. The hub decides all of it; the app asks again when the thread's entries or turn change. An assistant entry's text carries Buy now links ready to open (never `order:<quote>`).
 - `thread.pick {thread, action: model|effort|provider|runtime|account, value}` → `{thread}`: the desktop's own request (`thread.modes`, `thread.effort`, `thread.provider`, `accounts.select` with `value` "<profile>\u001f<epoch>", "" the CLI's own login). A provider changes between turns only; the refusal comes back as the error, to show as it stands.
 - `thread.create` also takes `effort` and `runtime` (`runtime` wins over `permission`). `thread.model` stays for older apps.
