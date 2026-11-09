@@ -89,7 +89,8 @@ struct DataRoot: View {
     /// This app's links, its one handler: backplane://thread/<id> opens that thread, backplane://account/<id> that account's sign-in; any other (a pairing link) asks first (DataClient.opened).
     private func route(_ url: URL) {
         guard url.scheme == "backplane" || url.scheme == AppIdentity.scheme else { return }
-        if url.host == "thread" { if let id = url.pathComponents.dropFirst().first { path.append(id) } }
+        // (a thread link from outside: the hub says which thread it is, so `desktop~t9` and a link id both open the one on that machine)
+        if url.host == "thread" { client.openLink(url, thread: "") }
         else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } } else { client.opened(url) }
     }
 }
