@@ -245,6 +245,18 @@ object DataClient {
         threads = live.sortedByDescending { it.updatedAt } + (if (split) threads.filter { old -> old.settled && live.none { it.id == old.id } } else emptyList())
         listsLoaded = true; save()
         if (split) for (p in settledOpen) loadSettled(p, g = g)
+        parentsOf(g)
+    }
+    /** The parents of subagents and subthreads that are not in the list (a settled one the page left out): read one by one, so a child sits under its parent, as on the
+     *  desktop, and not on its own among the active threads. A few at most. */
+    private suspend fun parentsOf(g: Int) {
+        val have = threads.map { it.id }.toSet()
+        for (pid in threads.map { it.parent }.filter { it.isNotEmpty() && it !in have }.distinct().take(20)) {
+            val t = runCatching { call("thread.entries", JSONObject().put("thread", pid).put("limit", 1)).optJSONObject("thread") }.getOrNull() ?: continue
+            if (g != gen) return
+            val p = parseThread(t); if (threads.none { it.id == p.id }) threads = threads + p
+        }
+        save()
     }
     /** The projects whose "Settled (N)" row is open, kept on the device. */
     var settledOpen by mutableStateOf(emptySet<String>()); private set
@@ -374,6 +386,7 @@ object DataClient {
             // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
             e?.attachments?.forEachIndexed { i, a -> if (i < images.size) pictures.put(a.id, images[i]) }
             e?.let { put(it, tid) }
+            if (has("queue")) runCatching { loadQueue(tid) } // sent while a turn runs, it waits in the queue
         } catch (e: Exception) {
             entries = entries + (tid to (entries[tid] ?: emptyList()).map { if (it.clientId == cid && it.sending) it.copy(sending = false, failed = true) else it })
         }
@@ -468,6 +481,38 @@ object DataClient {
     suspend fun search(q: String): Pair<List<DThread>, List<DProject>> {
         val r = call("search", JSONObject().put("q", q))
         return parseThreads(r.optJSONArray("threads")) to parseProjects(r.optJSONArray("projects"))
+    }
+    // "Search in thread" (feature search): what was said in one thread with every word of `q`, newest first; `msg` is the entry it is in
+    data class Hit(val msg: String, val role: String, val text: String, val at: Long)
+    suspend fun searchIn(tid: String, q: String): List<Hit> {
+        val a = call("search", JSONObject().put("q", q).put("thread", tid).put("limit", 60)).optJSONArray("messages") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Hit(it.optString("msg"), it.optString("role"), it.optString("text"), it.optLong("at").let { t -> if (t in 1 until 100_000_000_000) t * 1000 else t }) } // an older hub said seconds
+    }
+    // Buy it (feature buy): the desktop header's button for this thread (the hub's words), null when there is nothing to buy; a press makes the buy thread, which the app opens
+    data class Buy(val label: String, val tip: String)
+    suspend fun buyOf(tid: String): Buy? {
+        if (!has("buy")) return null
+        val o = call("thread.buy", JSONObject().put("thread", tid)).optJSONObject("buy") ?: return null
+        return Buy(o.optString("label").ifEmpty { "Buy it" }, o.optString("tip"))
+    }
+    suspend fun buy(tid: String): String = call("order.buy", JSONObject().put("thread", tid)).optString("thread")
+    // what waits for the agent (feature queue): the desktop's strip over the composer, rows and buttons as the hub has them; read again on the thread's pushes and after a send
+    data class QButton(val label: String, val action: String, val value: String)
+    data class QRow(val msg: String, val tag: String, val text: String, val buttons: List<QButton>)
+    var queues by mutableStateOf<Map<String, List<QRow>>>(emptyMap()); private set
+    suspend fun loadQueue(tid: String) {
+        if (!has("queue")) return
+        val a = call("thread.queue", JSONObject().put("thread", tid)).optJSONArray("rows")
+        val rows = if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { r ->
+            val b = r.optJSONArray("buttons"); QRow(r.optString("msg"), r.optString("tag"), r.optString("text"), if (b == null) emptyList() else (0 until b.length()).mapNotNull { b.optJSONObject(it) }.map { QButton(it.optString("label"), it.optString("action"), it.optString("value")) })
+        }
+        queues = if (rows.isEmpty()) queues - tid else queues + (tid to rows)
+    }
+    /** A queue row's button; q-edit answers the message's text (it left the queue) for the draft. */
+    suspend fun queueAct(tid: String, b: QButton): String {
+        val r = call("queue.act", JSONObject().put("thread", tid).put("action", b.action).put("value", b.value))
+        runCatching { loadQueue(tid) }
+        return r.optString("text")
     }
     // a buy thread's Order card (feature order): the hub's, drawn as it says; null for any other thread
     data class OrderStep(val label: String, val mark: String)

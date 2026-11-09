@@ -36,4 +36,17 @@ class ThreadGroupsTest {
         assertEquals(40, ThreadGroups.count(40, 3)); assertEquals(3, ThreadGroups.count(null, 3)); assertEquals(2, ThreadGroups.count(0, 2))
         assertEquals("Settled (7)", ThreadGroups.title(7))
     }
+    @Test fun subagentsNestUnderTheirParentOnlyWhileItIsOpenWhereverTheParentIs() {
+        fun k(id: String, parent: String, u: Long, settled: Boolean = false) = t(id, updated = u, settled = settled, settledAt = u).copy(parent = parent)
+        val l = listOf(t("a", updated = 9), k("a1", "a", 8), k("a2", "a", 7), k("a11", "a1", 6), t("b", updated = 5), k("lost", "gone", 4), k("c1", "c2", 3), k("c2", "c1", 2),
+            t("s", settled = true, updated = 1, settledAt = 1), k("s1", "s", 10))
+        val g = ThreadGroups.split(l, "p")
+        assertEquals("a child is in no group of its own; a lost parent or a loop makes roots", listOf("a", "b", "lost", "c1", "c2"), ids(g.active))
+        assertEquals(listOf("s"), ids(g.settled))
+        fun rows(roots: List<DThread>, open: Set<String>) = ThreadGroups.tree(roots, g.all, open).map { "${it.t.id}:${it.depth}:${it.kids}" }
+        assertEquals(listOf("a:0:2", "b:0:0", "lost:0:0", "c1:0:0", "c2:0:0"), rows(g.active, emptySet()))
+        assertEquals(listOf("a:0:2", "a1:1:1", "a2:1:0", "b:0:0", "lost:0:0", "c1:0:0", "c2:0:0"), rows(g.active, setOf("a")))
+        assertEquals(listOf("a:0:2", "a1:1:1", "a11:2:0", "a2:1:0", "b:0:0", "lost:0:0", "c1:0:0", "c2:0:0"), rows(g.active, setOf("a", "a1")))
+        assertEquals("an active child of a settled parent is under it", listOf("s:0:1", "s1:1:0"), rows(g.settled, setOf("s")))
+    }
 }

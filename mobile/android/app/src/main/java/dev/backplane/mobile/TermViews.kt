@@ -181,7 +181,7 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
     val focus = remember { FocusRequester() }
     val kb = LocalSoftwareKeyboardController.current
     val clip = LocalClipboardManager.current
-    LaunchedEffect(key) { focus.requestFocus(); kb?.show() }
+    // the keyboard comes with a tap on the screen, not with opening it (the person: less trigger happy, 11-04)
     var tf by remember { mutableStateOf(TextFieldValue(SENT, TextRange(SENT.length))) }
     var last by remember { mutableStateOf(SENT) }
 
