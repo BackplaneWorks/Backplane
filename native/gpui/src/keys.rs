@@ -16,6 +16,8 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
 pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
 const NOT_MAC_COMPOSER: &str = "!Composer && !TextInput && !PickInput && !AskInput && !ImpInput";
+/// Where Esc is the field's or the page's own: the viewer does not shut under it.
+const ESC_OWNERS: [&str; 9] = ["TextInput", "PickInput", "AskInput", "ImpInput", "Terminal", "BrowserBar", "BrowserView", "CefBar", "CefPage"];
 /// Where a bare backtick shows the terminal: the message box, or nowhere that types (a shell, another field and a viewer keep their backticks).
 const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
 /// Where Ctrl+H is the viewer's: everywhere but the small fields, the terminal and web pages, whose own it stays (it deletes a character in many fields and in a shell, and opens a web page's history).
@@ -66,6 +68,7 @@ pub const TABLE: &[Entry] = &[
     e("pad-delete-alt", "Delete (also)", "Drawing pad", "backspace", Fixed),
     e("term", "Show or hide the floating terminal", "Terminal", "secondary-j", Rebind),
     e("term-alt", "Show the floating terminal (also)", "Terminal", "`", Fixed),
+    e("term-super", "Show or hide the floating terminal (also, not on a Mac)", "Terminal", "super-`", Fixed),
     e("term-leave", "Leave the terminal: put it away, or take the keyboard back to it", "Terminal", "shift-escape", Fixed),
     e("term-copy", "Copy the terminal's selection", "Terminal", "secondary-shift-c", Fixed),
     e("term-paste", "Paste into the terminal", "Terminal", "secondary-shift-v", Fixed),
@@ -87,6 +90,16 @@ pub fn choices(id: &str) -> Vec<String> {
     v.dedup(); let mut seen = std::collections::HashSet::new(); v.retain(|k| seen.insert(k.clone())); v
 }
 
+/// A chord's Shift+symbol as the keyboard reports it (US layout): "secondary-shift-]" is "secondary-}"; None for a chord without one.
+pub fn shifted(key: &str) -> Option<String> {
+    const US: [(char, char); 21] = [('[', '{'), (']', '}'), ('\\', '|'), (';', ':'), ('\'', '"'), (',', '<'), ('.', '>'), ('/', '?'), ('`', '~'), ('=', '+'),
+        ('1', '!'), ('2', '@'), ('3', '#'), ('4', '$'), ('5', '%'), ('6', '^'), ('7', '&'), ('8', '*'), ('9', '('), ('0', ')'), ('-', '_')];
+    let (mods, last) = match key.strip_suffix("--") { Some(m) => (m, "-"), None => key.rsplit_once('-')? };
+    let mut c = last.chars(); let (Some(ch), None) = (c.next(), c.next()) else { return None };
+    let up = US.iter().find(|(a, _)| *a == ch)?.1;
+    let rest: Vec<&str> = mods.split('-').filter(|m| *m != "shift").collect();
+    (rest.len() < mods.split('-').count()).then(|| if rest.is_empty() { up.to_string() } else { format!("{}-{up}", rest.join("-")) })
+}
 /// "secondary-shift-n" as the person reads it: "Ctrl+Shift+N", or "⌘⇧N" on a Mac.
 pub fn show(key: &str, mac: bool) -> String {
     let parts: Vec<&str> = if key.ends_with("--") { key[..key.len() - 2].split('-').chain(["-"]).collect() } else { key.split('-').collect() };
@@ -95,7 +108,7 @@ pub fn show(key: &str, mac: bool) -> String {
         let last = i + 1 == parts.len();
         out.push(match (*p, mac) {
             ("secondary", true) => "⌘".into(), ("secondary" | "ctrl", false) => "Ctrl".into(), ("ctrl", true) => "⌃".into(),
-            ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(),
+            ("super", true) => "⌘".into(), ("super", false) => "Super".into(), ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(),
             ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(), ("delete", _) => "Delete".into(), ("backspace", _) => "Backspace".into(), ("tab", _) => "Tab".into(),
             ("up", _) => "Up".into(), ("down", _) => "Down".into(), ("left", _) => "Left".into(), ("right", _) => "Right".into(),
             (k, _) if last && k.chars().count() == 1 => k.to_uppercase(), (k, _) => k.to_string(),
@@ -114,7 +127,7 @@ pub fn id_for(action: &str, value: &str, current: &str) -> &'static str {
     }
 }
 /// A rail view's bare key.
-pub fn rail_letter(kind: &str) -> &'static str { match kind { "board" => "b", "schematic" => "s", "3d" => "3", "split" => "v", "mech" => "m", "files" => "f", "review" => "r", "browser" => "w", _ => "" } }
+pub fn rail_letter(kind: &str) -> &'static str { match kind { "board" => "b", "schematic" => "s", "3d" => "3", "split" => "v", "mech" => "m", "files" => "f", "diff" => "d", "review" => "r", "browser" => "w", _ => "" } }
 
 /// Every binding of the client: the editing keys, then these shortcuts with this device's choices.
 pub fn bindings(l: &Local) -> Vec<KeyBinding> {
@@ -132,6 +145,12 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
         KeyBinding::new("/", FocusComposer, Some(FREE)),
         KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
+    // Super+` (off a Mac: Cmd+` there goes from window to window) toggles the terminal too, from the shell as well, as in the old client
+    if !mac() { v.push(KeyBinding::new("super-`", ToggleTerminal, None)); }
+    // Shift with a symbol arrives as the shifted symbol and no Shift (Ctrl+Shift+] is "ctrl-}" from Linux): the chords that hold one are bound that way too
+    for (key, a) in [(k("prev"), Box::new(PrevThread) as Box<dyn Action>), (k("next"), Box::new(NextThread)), (k("stop"), Box::new(StopTurn))] {
+        if let Some(alias) = shifted(&key) { v.push(KeyBinding::load(&alias, a, None, false, None, &DummyKeyboardMapper).expect("a valid keystroke")); }
+    }
     v.extend([KeyBinding::new("1", Account1, Some("AccountMenu")), KeyBinding::new("2", Account2, Some("AccountMenu")), KeyBinding::new("3", Account3, Some("AccountMenu")), KeyBinding::new("4", Account4, Some("AccountMenu")), KeyBinding::new("5", Account5, Some("AccountMenu")),
         KeyBinding::new("6", Account6, Some("AccountMenu")), KeyBinding::new("7", Account7, Some("AccountMenu")), KeyBinding::new("8", Account8, Some("AccountMenu")), KeyBinding::new("9", Account9, Some("AccountMenu"))]);
     let alt = if mac() { Some(NOT_MAC_COMPOSER) } else { None };
@@ -156,7 +175,7 @@ fn term_bindings(all: &[KeyBinding], toggle: &str) -> Vec<KeyBinding> {
     use crate::screens::term::{Copy, Paste};
     let mut v = vec![KeyBinding::new("secondary-shift-c", Copy, Some("Terminal")), KeyBinding::new("secondary-shift-v", Paste, Some("Terminal"))];
     if mac() { v.extend([KeyBinding::new("cmd-c", Copy, Some("Terminal")), KeyBinding::new("cmd-v", Paste, Some("Terminal"))]); }
-    let own: Vec<String> = [toggle, "shift-escape", "secondary-shift-c", "secondary-shift-v"].iter().chain(if mac() { &["cmd-c", "cmd-v"][..] } else { &[][..] })
+    let own: Vec<String> = [toggle, "shift-escape", "secondary-shift-c", "secondary-shift-v", "super-`"].iter().chain(if mac() { &["cmd-c", "cmd-v"][..] } else { &[][..] })
         .filter_map(|k| Keystroke::parse(k).ok()).map(|k| k.unparse()).collect();
     let mut seen = std::collections::HashSet::new();
     for key in all.iter().filter_map(|b| b.keystrokes().first().map(|k| k.unparse())) {
@@ -199,13 +218,51 @@ pub fn neighbour(data: &Value, sel: &str, forward: bool) -> Option<String> {
     let i = match (at, forward) { (Some(i), true) => i + 1, (Some(i), false) => i.checked_sub(1)?, (None, true) => 0, (None, false) => all.len() - 1 };
     all.get(i).cloned()
 }
-/// The `n`th (1-based) thread of the project holding `sel`, else of the project page open, else of the first project.
-pub fn nth_thread(data: &Value, sel: &str, page: Option<&str>, n: usize) -> Option<String> {
-    let mut pid = project_of(data, sel); if pid.is_empty() { pid = page.unwrap_or("").to_string(); }
-    let rows = sidebar(data); let row = rows.iter().find(|(p, _)| raw(p) == pid).or(rows.first())?;
-    row.1.get(n.checked_sub(1)?).cloned()
+/// The threads Ctrl+1…9 go to, in order: the open project page's, else the project holding `sel`'s, else the first project's (0.14's Side.here).
+pub fn here_threads(data: &Value, sel: &str, page: Option<&str>) -> Vec<String> {
+    let pid = new_target(data, sel, page);
+    let rows = sidebar(data);
+    rows.iter().find(|(p, _)| raw(p) == pid).or(rows.first()).map_or(vec![], |r| r.1.iter().take(9).cloned().collect())
 }
-pub fn nth_project(data: &Value, n: usize) -> Option<String> { sidebar(data).get(n.checked_sub(1)?).map(|x| raw(&x.0).to_string()) }
+/// The `n`th (1-based) of `here_threads`.
+pub fn nth_thread(data: &Value, sel: &str, page: Option<&str>, n: usize) -> Option<String> { here_threads(data, sel, page).get(n.checked_sub(1)?).cloned() }
+/// The projects Alt+1…9 go to, in order (raw ids).
+pub fn digit_projects(data: &Value) -> Vec<String> { sidebar(data).into_iter().take(9).map(|x| raw(&x.0).to_string()).collect() }
+/// The project Ctrl+N starts a thread in, and whose threads Ctrl+1…9 count: the project page on show (a thread selected shuts it), else the open thread's, else the first.
+pub fn new_target(data: &Value, sel: &str, page: Option<&str>) -> String {
+    if let Some(p) = page.filter(|p| sidebar(data).iter().any(|(id, _)| raw(id) == *p)) { return p.to_string() }
+    let pid = project_of(data, sel); if !pid.is_empty() { return pid }
+    nth_project(data, 1).unwrap_or_default()
+}
+pub fn nth_project(data: &Value, n: usize) -> Option<String> { digit_projects(data).get(n.checked_sub(1)?).cloned() }
+
+/// What a held modifier shows (0.14's workspace-hints.js): the secondary key (Ctrl, Cmd on a Mac) alone shows the keys on the window's face (the thread digits,
+/// the rail's letters, the palette's and the model chip's keys, the legend at the sidebar's foot); Alt alone the project digits. Any other mix shows nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Held { #[default] None, Threads, Projects }
+pub fn held(m: &Modifiers, mac: bool) -> Held {
+    let secondary = if mac { m.platform && !m.control } else { m.control && !m.platform };
+    if secondary && !m.alt && !m.shift && !m.function { Held::Threads }
+    else if m.alt && !m.control && !m.platform && !m.shift && !m.function { Held::Projects }
+    else { Held::None }
+}
+/// A hint's keycaps: "Ctrl+Shift+[" is Ctrl, Shift and [; a Mac's "⌘⇧[" is one cap.
+pub fn caps(hint: &str) -> Vec<String> {
+    if hint.is_empty() { return vec![] }
+    if mac() || hint.len() == 1 { return vec![hint.to_string()] }
+    let (body, plus) = match hint.strip_suffix("++") { Some(b) => (b, true), None => (hint, false) };
+    let mut v: Vec<String> = body.split('+').map(str::to_string).collect(); if plus { v.push("+".into()) } v
+}
+/// Two hints' keycaps side by side, their shared modifiers once (Ctrl Shift [ ], as the old legend).
+pub fn caps_pair(a: &str, b: &str) -> Vec<String> {
+    let (x, y) = (caps(a), caps(b));
+    if x.len() == y.len() && x.len() > 1 && x[..x.len() - 1] == y[..y.len() - 1] { let mut v = x.clone(); v.push(y[y.len() - 1].clone()); v } else { x.into_iter().chain(y).collect() }
+}
+/// The legend at the sidebar's foot while the secondary key is held: (keycaps, words); the last row opens Commands, which lists every key.
+pub fn legend(l: &Local) -> Vec<(Vec<String>, &'static str)> {
+    vec![(caps_pair(&hint(l, "prev"), &hint(l, "next")), "prev / next thread"), (caps(&hint(l, "new")), "new thread here"), (caps(&hint(l, "threads")), "jump to a thread here"),
+        (caps(&hint(l, "focus")), "write a message"), (caps(&hint(l, "palette")), "all shortcuts")]
+}
 fn has_tool(data: &Value, action: &str) -> bool { data["thread"]["tools"].as_array().into_iter().flatten().any(|t| t["action"] == action) }
 
 struct Tip(SharedString, bool);
@@ -238,6 +295,35 @@ impl Backplane {
     }
     /// A bare key does nothing while something covers the page.
     fn covered(&self) -> bool { self.screens.palette.open || self.screens.lightbox.is_some() || self.screens.picker_open || self.screens.acct.menu || crate::screens::settings::is_open(self) || self.data["tour"].is_object() || crate::screens::migrate::is_up(&self.data) }
+    /// The hints on show now: what is held, but none while the window is not the one in use, something covers it, the pad is open or the keyboard is in the shell
+    /// (every key is the shell's there); on a Mac Alt shows nothing from the message box, where Option+digit types a character.
+    pub(crate) fn hint_mode(&self, window: &Window, cx: &App) -> Held {
+        let h = held(&window.modifiers(), mac());
+        if h == Held::None || !window.is_window_active() || self.covered() || self.screens.pad.is_some() || self.screens.term.focus.as_ref().map_or(false, |f| f.contains_focused(window, cx)) { return Held::None }
+        if h == Held::Projects && mac() && self.input.focus_handle(cx).contains_focused(window, cx) { return Held::None }
+        h
+    }
+    /// Esc once nothing over the page took it (0.14's WS.esc.next, after the terminal): the plot's tapped piece goes, else the viewer shuts as its lit rail button
+    /// does and the keyboard goes back to the message box; with nothing to put away the keyboard leaves the message box, so a bare key may press a rail button
+    /// ("/" or Esc again brings it back), and from anywhere else it goes back to it. Never from a field, a shell or a web page, whose Esc it is. True when it acted.
+    pub(crate) fn escape_rest(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if window.context_stack().iter().any(|k| ESC_OWNERS.iter().any(|o| k.contains(o))) { return false }
+        let mut put = false;
+        for slot in 0..3 { let pv = self.screens.pv(slot); if pv.picked.is_some() || pv.card.is_some() || !pv.lit.is_empty() { pv.picked = None; pv.card = None; pv.lit.clear(); put = true; } }
+        if put { return true }
+        // a web page with the keyboard keeps its Esc (the old client gave the bot's page every key)
+        let in_viewer = window.context_stack().iter().any(|k| k.contains("Viewer"));
+        if in_viewer && crate::screens::viewer::active_kind(&self.data["thread"]["viewer"], None) == "browser" { return false }
+        if crate::screens::viewer::is_open(&self.data["thread"]) {
+            self.screens.rail_pending = Some(String::new()); self.screens.rail_at = Some(std::time::Instant::now());
+            let _ = self.tx.try_send(crate::screens::viewer::close()); self.want_focus = true; return true
+        }
+        // (not a blur: with nothing focused the window hears no keys at all; the window's own handle has only its shortcuts)
+        if self.input.focus_handle(cx).is_focused(window) { window.focus(&self.screens.root_focus); return true }
+        self.want_focus = true; true
+    }
+    /// A modifier went down or up: draw again only when what the hints show changes.
+    pub(crate) fn hints_maybe(&mut self, window: &Window, cx: &mut Context<Self>) { if self.hint_mode(window, cx) != self.screens.held { cx.notify(); } }
     fn key_rail(&mut self, a: &str, v: &str, cx: &mut Context<Self>) { if !self.covered() && self.data["thread"].is_object() { self.rail_press(a, v, cx); } }
     /// Ctrl+H: the plot on show cycles its focus; on Split, the pane with the keyboard (the board when neither has it, as from the composer). The hub is told which layers that plot has.
     /// With no plot to act on the key is not spent: it goes on to whatever has the keyboard.
@@ -258,10 +344,10 @@ impl Backplane {
 
 /// Registers every action on the root element.
 pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
-    let el = el.key_context(if picker { "Backplane Picker" } else { "Backplane" });
+    let el = el.key_context(if picker { "Backplane Picker" } else { "Backplane" }).on_modifiers_changed(cx.listener(|this, _: &ModifiersChangedEvent, window, cx| this.hints_maybe(window, cx)));
     macro_rules! on { ($el:expr, $a:ty, $f:expr) => { $el.on_action(cx.listener(|this, _: &$a, window, cx| { let _ = &window; ($f)(this, window, cx) })) } }
     let el = on!(el, NewThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
-        let mut pid = project_of(&this.data, &this.selected); if pid.is_empty() { pid = this.project_page.clone().or_else(|| nth_project(&this.data, 1)).unwrap_or_default(); }
+        let pid = new_target(&this.data, &this.selected, this.project_page.as_deref());
         if !pid.is_empty() { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid)); cx.notify(); }
     });
     let el = on!(el, OpenDiff, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail("diff", "", cx));
@@ -481,6 +567,42 @@ mod tests {
         for x in TABLE { if x.kind != Fixed { assert!(Keystroke::parse(x.key).is_ok(), "{}", x.id); assert_eq!(choices(x.id)[0], x.key); for k in choices(x.id) { assert!(Keystroke::parse(&k).is_ok(), "{k}"); } } }
         let mut seen = std::collections::HashMap::new();
         for x in TABLE.iter().filter(|x| x.kind != Fixed) { assert!(seen.insert(x.key, x.id).is_none(), "{} clashes", x.key); }
+    }
+    #[test] fn shift_with_a_symbol_also_binds_as_the_keyboard_reports_it() {
+        assert_eq!(shifted("secondary-shift-]").as_deref(), Some("secondary-}")); assert_eq!(shifted("secondary-shift-[").as_deref(), Some("secondary-{"));
+        assert_eq!(shifted("alt-shift-."), Some("alt->".into())); assert_eq!(shifted("ctrl-."), None); assert_eq!(shifted("secondary-shift-f"), None); assert_eq!(shifted("shift-escape"), None);
+        // Ctrl+Shift+] from a Linux keyboard is "ctrl-}" (gpui keeps Shift only on letters): both spellings go to the thread
+        assert_eq!(d("ctrl-}", &[]), "keys::NextThread"); assert_eq!(d("ctrl-{", &["Composer"]), "keys::PrevThread"); assert_eq!(d("ctrl-shift-]", &[]), "keys::NextThread");
+        assert_eq!(d("ctrl-}", &["Terminal"]), "", "the shell's"); assert_eq!(d("ctrl-{", &["DrawPad"]), "", "nothing behind the pad");
+        let mut l = Local::default(); assert!(l.set("shortcut", "next\u{1f}alt-shift-]")); assert_eq!(does(&l, "alt-}", &[]), "keys::NextThread"); assert_eq!(does(&l, "ctrl-}", &[]), "", "the old one goes");
+    }
+    #[test] fn held_ctrl_shows_the_thread_keys_and_alt_the_projects() {
+        let m = |control, alt, shift, platform| Modifiers { control, alt, shift, platform, function: false };
+        assert_eq!(held(&m(true, false, false, false), false), Held::Threads); assert_eq!(held(&m(false, true, false, false), false), Held::Projects);
+        assert_eq!(held(&m(true, false, true, false), false), Held::None, "Ctrl+Shift: a chord on its way, no hints"); assert_eq!(held(&m(true, true, false, false), false), Held::None);
+        assert_eq!(held(&m(false, false, false, true), false), Held::None, "Super is not the secondary key off a Mac"); assert_eq!(held(&Modifiers::default(), false), Held::None);
+        assert_eq!(held(&m(false, false, false, true), true), Held::Threads, "Cmd on a Mac"); assert_eq!(held(&m(true, false, false, false), true), Held::None, "Ctrl is not Cmd");
+    }
+    #[test] fn the_digits_on_show_are_where_the_keys_go() {
+        let data = json!({"projects": [{"id": "h|p1", "threads": [{"id": "h|a"}, {"id": "h|b"}]}, {"id": "h|p2", "threads": (0..12).map(|i| json!({"id": format!("h|c{i}")})).collect::<Vec<_>>()}]});
+        assert_eq!(here_threads(&data, "b", None), vec!["h|a", "h|b"]); assert_eq!(here_threads(&data, "c3", None).len(), 9, "nine at most");
+        for n in 1..=9 { assert_eq!(nth_thread(&data, "c3", None, n), here_threads(&data, "c3", None).get(n - 1).cloned()) }
+        assert_eq!(here_threads(&data, "a", Some("p2"))[0], "h|c0", "the project page on show counts first"); assert_eq!(here_threads(&data, "", Some("gone"))[0], "h|a", "a page that is gone does not");
+        assert_eq!(here_threads(&data, "", None)[0], "h|a"); assert_eq!(digit_projects(&data), vec!["p1", "p2"]); assert_eq!(nth_project(&data, 2).as_deref(), Some("p2"));
+        assert_eq!(new_target(&data, "a", Some("p2")), "p2"); assert_eq!(new_target(&data, "c1", None), "p2"); assert_eq!(new_target(&Value::Null, "", None), "");
+    }
+    #[test] fn the_legend_reads_the_keys_this_device_uses() {
+        if mac() { return }
+        let l = Local::default(); let g = legend(&l);
+        assert_eq!(g[0].0, vec!["Ctrl", "Shift", "[", "]"]); assert_eq!(g[1].0, vec!["Ctrl", "N"]); assert_eq!(g[2].0, vec!["Ctrl", "1…9"]); assert_eq!(g[3].0, vec!["/"]); assert_eq!(g[4], (vec!["Ctrl".to_string(), "K".to_string()], "all shortcuts"));
+        let mut l = Local::default(); assert!(l.set("shortcut", "new\u{1f}ctrl-alt-n")); assert_eq!(legend(&l)[1].0, vec!["Ctrl", "Alt", "N"], "a rebound key reads as rebound");
+        assert_eq!(caps("Ctrl++"), vec!["Ctrl", "+"]); assert_eq!(caps_pair("Ctrl+D", "Alt+E"), vec!["Ctrl", "D", "Alt", "E"]); assert_eq!(caps(""), Vec::<String>::new());
+    }
+    #[test] fn super_backtick_toggles_the_terminal_off_a_mac_even_from_the_shell() {
+        if mac() { return }
+        for ctx in [&[][..], &["Composer"][..], &["Terminal"][..], &["Viewer"][..]] { assert_eq!(d("super-`", ctx), "keys::ToggleTerminal", "{ctx:?}"); }
+        assert_eq!(d("super-`", &["DrawPad"]), ""); assert_eq!(hint(&Local::default(), "term-super"), "Super+`");
+        assert_eq!(rail_letter("diff"), "d", "Diff's bare key, as the rail's keycap and tooltip say");
     }
     #[test] fn hints_follow_the_hubs_actions() {
         assert_eq!(id_for("diff", "", ""), "diff"); assert_eq!(id_for("interrupt", "", ""), "stop"); assert_eq!(id_for("new-thread", "p1", "p1"), "new"); assert_eq!(id_for("new-thread", "p2", "p1"), "");
