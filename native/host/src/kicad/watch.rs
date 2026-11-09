@@ -255,7 +255,14 @@ impl Plots {
             if !Self::board3d_native(&hub).await { return }
             let cli = super::ipc::runtime(&hub).await.cli;
             let _ = tokio::task::spawn_blocking(move || {
-                let r = std::panic::catch_unwind(|| pcb3d::stream::prewarm(&std::fs::read(&pcb).unwrap_or_default(), &pcb, &cli, &stepglb::machine(&home), &pcb3d::models::Cache::standard()));
+                let bytes = std::fs::read(&pcb).unwrap_or_default();
+                // the board's own model too, kept by content, so its first 3D view reads it back instead of meshing it (Thunderscope: 1.5 s)
+                let rev = stamp(&pcb).rev;
+                let _ = std::panic::catch_unwind(|| if let Ok(made) = pcb3d::stream::board_model_kept(&bytes, &std::path::Path::new(&stepglb::cache_dir()).join("boards"), !stepglb::have(&pcb3d::stream::glb_path(&pcb, &rev).to_string_lossy())) {
+                    if !made.layers.is_empty() { let name = std::path::Path::new(&pcb).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(); pcb3d::stream::keep_glb(&made.layers, &name, &pcb, &rev) }
+                });
+                #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); } // the meshing's memory goes back
+                let r = std::panic::catch_unwind(|| pcb3d::stream::prewarm(&bytes, &pcb, &cli, &stepglb::machine(&home), &pcb3d::models::Cache::standard()));
                 match r { Ok(Ok((n, fresh, ms))) if fresh > 0 => eprintln!("pcb3d: prewarm {pcb}: {fresh} of {n} part models converted in {ms:.0} ms"), Ok(Err(e)) => eprintln!("pcb3d: prewarm {pcb}: {e}"), _ => {} }
             }).await;
         });
