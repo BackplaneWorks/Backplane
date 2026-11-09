@@ -83,8 +83,8 @@ run_client() {
       printf 'new_window none\nfor_window [class=".*"] border none\nipc-socket %s/i3.sock\n' "$r" > "$T/i3.conf"
       DISPLAY=:$d XDG_RUNTIME_DIR=$r i3 -c "$T/i3.conf" > "$T/i3.log" 2>&1 & local ip=$!; sleep 1
       DISPLAY=:$d XDG_RUNTIME_DIR=$r BACKPLANE_GPUI_SCRIPT="$T/script.json" "${c[@]}"; kill $ip $xp 2>/dev/null ;;
-    windows-x64) BACKPLANE_GPUI_SCRIPT="$(cygpath -w "$T/script.json")" "${c[@]}" ;;
-    *) BACKPLANE_GPUI_SCRIPT="$T/script.json" "${c[@]}" ;;
+    windows-x64) BACKPLANE_CEF_NO_GPU=${BACKPLANE_CEF_NO_GPU-1} BACKPLANE_GPUI_SCRIPT="$(cygpath -w "$T/script.json")" "${c[@]}" ;;
+    *) BACKPLANE_CEF_NO_GPU=${BACKPLANE_CEF_NO_GPU-1} BACKPLANE_GPUI_SCRIPT="$T/script.json" "${c[@]}" ;;
   esac
 }
 # (no `timeout` on macOS: the client is given --exit-after, and a watchdog ends it if it hangs)
@@ -93,15 +93,9 @@ if grep -q 'not in icons.json\|"asset_missing"' "$T/client.log"; then no assets 
 elif grep -q '"event":"usable"' "$T/client.log"; then ok assets "the client drew with every icon and cat it asked for"
 else no assets "the client never drew ($(tail -3 "$T/client.log" | tr '\n' ' ' | cut -c1-200))"; fi
 rep=$(grep -o '"event":"cef"[^}]*\|GPUI_METRIC {[^}]*"title":"[^"]*"[^}]*}' "$T/client.log" | tail -1)
-case $TGT in
-  linux-*)
-    if grep -q 'GPUI_METRIC.*"title":"cef-test-start"' "$T/client.log" && ! grep -q 'embedded browser unavailable' "$T/client.log"; then ok browser-tab "the embedded Chromium loaded and painted the local page: $(grep -o '"paints":[0-9]*' "$T/client.log" | tail -1)"
-    else no browser-tab "no painted page (embedded browser: $(grep -o 'embedded browser unavailable[^"]*\|"cef":"[^"]*' "$T/client.log" | head -1)); last report: ${rep:0:200}"; fi ;;
-  *)
-    # no CEF here (docs/install.md): the Browser tab opens on the hub's frame stream; its frames from backplane-browser are F18's, run by this platform's lane
-    if grep '"event":"cef"' "$T/client.log" | grep -q 'built without the cef feature' && grep -q '"event":"usable"' "$T/client.log" && ! grep -q -i 'panicked' "$T/client.log"; then ok browser-tab "the Browser tab opened in frame-stream mode (no CEF on $TGT, as documented); its frames are the F18 row's"
-    else no browser-tab "the Browser tab did not open: $(grep -o '"event":"cef"[^}]*' "$T/client.log" | tail -1 | cut -c1-160) $(grep -i panicked "$T/client.log" | head -1 | cut -c1-120)"; fi ;;
-esac
+# every desktop target ships embedded Chromium (docs/browser-cef-port.md): the installed runtime must load and paint the local page
+if grep -q 'GPUI_METRIC.*"title":"cef-test-start"' "$T/client.log" && ! grep -q 'embedded browser unavailable' "$T/client.log"; then ok browser-tab "the embedded Chromium loaded and painted the local page: $(grep -o '"paints":[0-9]*' "$T/client.log" | tail -1)"
+else no browser-tab "no painted page (embedded browser: $(grep -o 'embedded browser unavailable[^"]*\|"cef":"[^"]*' "$T/client.log" | head -1)); last report: ${rep:0:200} $(grep -i panicked "$T/client.log" | head -1 | cut -c1-120)"; fi
 "$G" hub stop --home "$H" > /dev/null 2>&1
 
 echo "rc-smoke $TGT $TAG: $PASS passed, ${#FAILS[@]} failed${FAILS:+: ${FAILS[*]}}"; [ ${#FAILS[@]} = 0 ]
