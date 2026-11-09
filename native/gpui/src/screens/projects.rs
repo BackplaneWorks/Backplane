@@ -34,6 +34,7 @@ pub fn ask_home(this: &mut Backplane, pid: &str) {
 }
 /// An answer to one of the page's reads (false: not the page's).
 pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
+    if tag >= super::palette::TAG { return super::palette::answered(this, tag, reply, cx) } // the palette's searches
     if tag < TAG { return false }
     let h = &mut this.screens.projects.home;
     let Some(i) = h.asks.iter().position(|a| a.0 == tag) else { return true };
