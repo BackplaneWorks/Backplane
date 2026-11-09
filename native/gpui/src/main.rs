@@ -158,7 +158,9 @@ impl Backplane {
         if ui.open_local||hub_open{ui.open_local=false;ui.device=false;ui.accounts=false;} else {ui.open_local=true;ui.device=true;self.screens.focus_settings=true;}
         let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));cx.notify();
     }
-    pub fn focus_search(&mut self,cx:&mut Context<Self>){if !self.sidebar_open{self.sidebar_toggle(cx);}self.ui_epoch+=1;self.screens.projects.focus=Some("search");cx.notify();}
+    /// Search threads (the top bar's button, Ctrl+Shift+F): the sidebar's box takes the keys; a sidebar folded to its strip, by hand or for want of room, unfolds first
+    /// (the box is not drawn there: `sidebar_open` alone missed the fold for room, and the press did nothing)
+    pub fn focus_search(&mut self,cx:&mut Context<Self>){if !self.sidebar_open{self.screens.side_force=false;self.sidebar_toggle(cx);}else if !self.screens.side_shown{self.screens.side_force=true;}self.ui_epoch+=1;self.screens.projects.focus=Some("search");cx.notify();}
     fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {self.select_id(id,cx);self.input.focus_handle(cx).focus(window);}
     /// A project's name was clicked: its page (its threads, a New thread button) opens in the main area, at once, from what the sidebar holds; the folder's goal and notes,
     /// parts and boards follow when the hub answers (screens::projects::ask_home).
