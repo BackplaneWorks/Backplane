@@ -168,7 +168,7 @@ impl Backplane {
     pub(crate) fn palette_open_find(&mut self, cx: &mut Context<Self>) {
         self.palette_open(cx);
         self.screens.palette.find_all = true;
-        if let Some(i) = self.screens.palette.input.clone() { i.update(cx, |i, _| i.set_placeholder("Type a word said in any thread")); }
+        /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ if let Some(i) = self.screens.palette.input.clone() { i.update(cx, |i, _| i.set_placeholder("Type a word said in any thread")); }
     }
     pub(crate) fn palette_open(&mut self, cx: &mut Context<Self>) {
         if self.screens.palette.input.is_none() {
@@ -183,7 +183,7 @@ impl Backplane {
             self.screens.palette.input = Some(input);
         }
         let input = self.screens.palette.input.clone().unwrap();
-        input.update(cx, |i, cx| { i.set(String::new(), cx); i.popup_open = true; i.set_placeholder("Jump to a thread, run a command or find what was said"); });
+        /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ input.update(cx, |i, cx| { i.set(String::new(), cx); i.popup_open = true; i.set_placeholder("Jump to a thread, run a command or find what was said"); });
         self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.open = true; self.screens.palette.scope.clear(); self.screens.palette.find_all = false;
         // what an earlier opening found is not this one's (a thread's search must never show another thread's hits)
         self.screens.palette.hits.clear(); self.screens.palette.titles.clear(); self.screens.palette.hits_q.clear(); self.screens.palette.asked = (0, String::new());
@@ -222,7 +222,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette,
     let ix = p.ix.min(list.len().saturating_sub(1));
     let current = crate::keys::project_of(data, sel);
     let mut col = div().flex().flex_col().py_1();
-    if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child(if (!p.scope.is_empty() || p.find_all) && search_of(&p.q).is_none() { if p.find_all { "Type a word said in any thread" } else { "Type a word said in this thread" } } else { "Nothing matches" })); }
+    /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child(crate::i18n::trs(if (!p.scope.is_empty() || p.find_all) && search_of(&p.q).is_none() { if p.find_all { "Type a word said in any thread" } else { "Type a word said in this thread" } } else { "Nothing matches" }))); }
     for (i, it) in list.iter().enumerate() {
         let want = it.row["want"].as_str().unwrap_or("").to_string();
         col = col.child(div().id(SharedString::from(format!("pal-{i}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().when(i == ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))

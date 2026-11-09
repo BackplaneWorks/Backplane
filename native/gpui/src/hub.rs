@@ -186,7 +186,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 Command::Ask(m,p,tag)=>{static ASK:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<31);let id=ASK.fetch_add(1,std::sync::atomic::Ordering::Relaxed);v.asks.insert(id,tag);if v.asks.len()>64 {v.asks.clear();}json!({"id":id,"m":m,"p":p})},
                 Command::Sub(key)=>{v.session["sub"]=json!(key);if v.view_id.is_empty(){continue;}v.request("view.update",json!({}))},
                 Command::Select(id)=>{let id=unqualify(&id);v.want_page=None;v.target=json!({"kind":"thread","id":id});v.session["sel"]=json!(id);v.session["sub"]=json!("");v.view_id.clear();v.request("view.open",json!({}))},
-                Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.draft_key();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
+                /* i18n-ok: connection error, logged */ Command::Send(text)=>{ensure!(!v.view_id.is_empty(),"view not ready");let id=v.draft_key();v.session["drafts"][id]=json!(text);v.request("view.action",json!({"action":"send","value":""}))},
                 // typed while the view is not open (reconnecting): kept in the session the next view.open carries; a view.action now would name no view (STALE_VIEW)
                 Command::Draft(text)=>{let id=v.draft_key();v.session["drafts"][id]=json!(text);if v.view_id.is_empty(){continue;}v.request("view.action",json!({"action":"draft","value":text}))},
                 Command::History(cursor)=>{if v.view_id.is_empty()||!v.pending.is_empty()||v.paging.is_some(){v.want_page=Some(cursor);continue;}v.page(&cursor)},

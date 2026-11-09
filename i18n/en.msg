@@ -1517,6 +1517,23 @@ gpui.new.rule = New rule
 gpui.task.board = Task board
 gpui.one.shared.list.agents.in = One shared list: agents in every thread read and update it.
 gpui.new.item = New item
+gpui.handoff.from = Handed over from {title}
+gpui.handoff.note = Note: {note}
+gpui.subview.back = Back to {title}
+gpui.subview.more = {more, plural, one {# earlier step not shown} other {# earlier steps not shown}}
+gpui.no.matches = No matches
+gpui.find.in.this.thread = Find in this thread
+gpui.find.in.thread = Find in thread
+gpui.previous.match = Previous match
+gpui.next.match = Next match
+gpui.back.to.the.thread = Back to the thread
+gpui.no.steps.reported.yet = No steps reported yet.
+gpui.unsent = Unsent
+gpui.refused = Refused
+gpui.filter.projects.and.threads = Filter projects and threads
+gpui.type.a.word.said.in2 = Type a word said in any thread
+gpui.find.what.was.said.in = Find what was said in any thread
+gpui.find.in.this.thread.enter = Find in this thread: Enter next, Shift+Enter previous, Esc closes
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = Could not keep this draft on this device. Retry.

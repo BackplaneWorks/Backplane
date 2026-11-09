@@ -21,7 +21,7 @@ pub fn card(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyElement {
     let id = string(e, "id");
     let (title, from, note, summary) = (string(e, "title"), string(e, "from"), string(e, "note"), string(e, "text"));
     let back = div().id(SharedString::from(format!("ho-back-{id}"))).flex().items_center().gap_2().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
-        .child(ic(light, "chevron-left", 12., "dim")).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(format!("Handed over from {title}")))
+        .child(ic(light, "chevron-left", 12., "dim")).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::i18n::tf("gpui.handoff.from", &[("title", title.clone().into())])))
         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("link-open".into(), format!("backplane://thread/{from}"))); cx.notify(); }));
     let mut refs = div().flex().flex_wrap().gap_2().mt_1();
     for (i, r) in e["refs"].as_array().into_iter().flatten().enumerate() {
@@ -42,7 +42,7 @@ pub fn card(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyElement {
     div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().child(
         div().w_full().max_w(px(640.)).px_3().py_2().border_1().border_color(c("line")).bg(c("raise")).flex().flex_col().gap_1().child(back)
             .child(div().text_size(px(13.)).child(summary))
-            .children((!note.is_empty()).then(|| div().text_size(px(12.)).text_color(c("dim")).child(format!("Note: {note}"))))
+            .children((!note.is_empty()).then(|| div().text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.handoff.note", &[("note", note.clone().into())]))))
             .child(refs)).into_any_element()
 }
 

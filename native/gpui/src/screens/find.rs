@@ -35,7 +35,7 @@ pub fn first(matches: &[String], want: &str) -> usize { matches.iter().position(
 /// What the bar says: "3 of 12" ("3 of 1000+" past the hub's cap), "No matches", or nothing before an answer.
 pub fn count(ix: usize, n: usize, more: bool, answered: bool) -> String {
     if !answered { return String::new() }
-    if n == 0 { return "No matches".into() }
+    /* i18n-ok: a control id */ if n == 0 { return crate::i18n::trs("No matches") }
     format!("{} of {}{}", ix + 1, n, if more { "+" } else { "" })
 }
 /// The matches of a `thread.find` answer.
@@ -62,7 +62,7 @@ impl Backplane {
     fn find_input(&mut self, cx: &mut Context<Self>) -> Entity<Composer> {
         if let Some(i) = self.screens.find.input.clone() { return i }
         let input = cx.new(|cx| Composer::with_context(cx, "FindInput"));
-        input.update(cx, |i, _| i.set_placeholder("Find in this thread"));
+        /* i18n-ok: a control id */ input.update(cx, |i, _| i.set_placeholder("Find in this thread"));
         cx.observe(&input, |this, input, cx| { let q = input.read(cx).content.to_string(); if q != this.screens.find.q { this.screens.find.q = q; this.find_ask(cx); } cx.notify(); }).detach();
         cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| match ev {
             ComposerEvent::Submit => this.find_step(true, cx),
@@ -163,9 +163,9 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, f: &Find) -> Option<AnyElem
         .child(crate::art::icon("search", 13., c("dim")))
         .child(div().flex_1().min_w_0().children(f.input.clone()))
         .child(div().flex_shrink_0().text_size(px(11.)).text_color(c(if answered && f.matches.is_empty() { "bad" } else { "faint" })).child(label))
-        .child(btn("find-prev", "↑", "Previous match").on_click(cx.listener(|this, _, _, cx| this.find_step(false, cx))))
-        .child(btn("find-next", "↓", "Next match").on_click(cx.listener(|this, _, _, cx| this.find_step(true, cx))))
-        .child(crate::ui::with_rect(div().id("find-close"), || "ui:Close find".to_string()).cursor_pointer().p_1().hover(|s| s.bg(c("raise"))).child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.find_close(cx); }))))
+        /* i18n-ok: a control id */ .child(btn("find-prev", "↑", "Previous match").on_click(cx.listener(|this, _, _, cx| this.find_step(false, cx))))
+        /* i18n-ok: a control id */ .child(btn("find-next", "↓", "Next match").on_click(cx.listener(|this, _, _, cx| this.find_step(true, cx))))
+        /* i18n-ok: a control id */ .child(crate::ui::with_rect(div().id("find-close"), || "ui:Close find".to_string()).cursor_pointer().p_1().hover(|s| s.bg(c("raise"))).child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.find_close(cx); }))))
         .into_any_element())
 }
 

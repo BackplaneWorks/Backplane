@@ -404,14 +404,14 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Pad => "pad (mouse only)".into(),
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Rail(kind) => { let cmd = self.rail_view(kind); let shut = matches!(&cmd, crate::hub::Command::Action(_, k) if k.is_empty()); let _ = self.tx.try_send(cmd); self.ui_epoch += 1; if shut { "view.action view close".into() } else { "view.action view".into() } }
             Ctl::Dictate => { self.voice_press(cx); "dictate".into() }
-            Ctl::ThreadMenu => { let items = crate::screens::ctxmenu::title_items(&self.data); let n = items.len(); if n > 0 { self.ctx_open(point(px(320.), px(40.)), items, cx); } self.ui_epoch += 1; format!("thread menu {n}") }
-            Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
-            Ctl::ToggleSidebar => { self.sidebar_toggle(cx); "toggle sidebar".into() }
-            Ctl::ToggleContext => { self.screens.ctx_open = !self.screens.ctx_open; self.ui_epoch += 1; cx.notify(); "context panel".into() }
-            Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
-            Ctl::Home(pid) => { self.open_project(pid.clone(), cx); "project page".into() }
-            Ctl::Fold(v) => { self.fold_click(v.clone()); "view.action fold".into() }
-            Ctl::Sub(k) => { if k.is_empty() { self.sub_back(cx); "sub back".into() } else { self.sub_open(k.clone(), cx); "sub open".into() } }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::ThreadMenu => { let items = crate::screens::ctxmenu::title_items(&self.data); let n = items.len(); if n > 0 { self.ctx_open(point(px(320.), px(40.)), items, cx); } self.ui_epoch += 1; format!("thread menu {n}") }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::ToggleSidebar => { self.sidebar_toggle(cx); "toggle sidebar".into() }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::ToggleContext => { self.screens.ctx_open = !self.screens.ctx_open; self.ui_epoch += 1; cx.notify(); "context panel".into() }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::Select(id) => { self.select_id(id.clone(), cx); "view.open thread".into() }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::Home(pid) => { self.open_project(pid.clone(), cx); "project page".into() }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::Fold(v) => { self.fold_click(v.clone()); "view.action fold".into() }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::Sub(k) => { if k.is_empty() { self.sub_back(cx); "sub back".into() } else { self.sub_open(k.clone(), cx); "sub open".into() } }
             Ctl::Send => { self.do_send(cx); self.ui_epoch += 1; "send".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Skill(w) => { let _ = self.tx.try_send(Command::Action("skill".into(), w.clone())); self.await_completion(cx); self.ui_epoch += 1; "view.action skill".into() }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Page(v) => { let _ = self.tx.try_send(Command::Page(v.clone())); "view.action native-sidebar-page".into() }
