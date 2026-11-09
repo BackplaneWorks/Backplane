@@ -20,6 +20,7 @@ pub const OFF: &str = "Ordering is off; the person can turn it on in Settings";
 pub const NOT_BUY: &str = "only a buy thread has this tool";
 const QUOTE_ASKED: &str = "The person is asked on their screen whether to send these files (Send or Not now). End your turn now. Once they send, the files go to the order server and the quote is made (usually 1-2 minutes); the thread shows the person it is on its way, Backplane posts the quote here and you get a message with its total. There is nothing more for them to press: never ask them to send or approve again.";
 const STATUS_UNSENT: &str = "The files are not sent yet: Backplane's question whether to send them (Send or Not now) is open on the person's screen. Say so in a line and end your turn; you get a message once they answer.";
+const LOST: &str = "The person pressed Send, but Backplane restarted since it asked and no longer has that list of files, so nothing was sent. Call order_quote again with the same folder; they will be asked once more.";
 const DECLINED: &str = "The person chose not to send the files (Not now). Ask whether anything should change first.";
 const COPY_SENDS_NOTHING: &str = "a hub on a copied log (BACKPLANE_COPY=1) sends nothing to the order server";
 const ASKED: &str = "Asked on the person's screen. End your turn now: their answer comes as their next message, however long they take.";
@@ -241,6 +242,22 @@ fn sendable(cwd: &Path, dir: &str) -> Option<(Value, Vec<String>, String)> {
 }
 /// What the person is deciding on: the folder, the files as listed, the manifest they saw.
 pub struct Asked { thread: String, cwd: PathBuf, dir: String, files: Vec<String>, manifest: String, server: String }
+/// Od.asked: the approval is kept on disk too (`<home>/orders/ask-<id>.json`, 0600), so a hub restarted (or updated) while the person looks at the files
+/// keeps the card and its Send still sends exactly what they saw. Nothing secret is in it: the folder, the file names, the manifest's hash, the server.
+fn asked_path(home: &Path, ask: &str) -> Option<PathBuf> { (ask.len() <= 80 && !ask.is_empty() && ask.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')).then(|| home.join("orders").join(format!("ask-{ask}.json"))) }
+fn asked_keep(home: &Path, ask: &str, q: &Asked) -> std::io::Result<()> {
+    let Some(f) = asked_path(home, ask) else { return Ok(()) }; let d = home.join("orders"); std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&d)?;
+    let j = json!({"thread":q.thread,"cwd":q.cwd.to_string_lossy(),"dir":q.dir,"files":q.files,"manifest":q.manifest,"server":q.server}).to_string();
+    let tmp = d.join(format!(".ask-{ask}.tmp")); let _ = std::fs::remove_file(&tmp);
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?.write_all(j.as_bytes())?; crate::plat::fs::rename(&tmp, &f)
+}
+fn asked_take(home: &Path, ask: &str) -> Option<Asked> {
+    let f = asked_path(home, ask)?; let j: Value = serde_json::from_str(&std::fs::read_to_string(&f).ok()?).ok()?; let _ = std::fs::remove_file(&f);
+    let files: Vec<String> = j["files"].as_array()?.iter().filter_map(Value::as_str).map(str::to_string).collect();
+    Some(Asked { thread: sv(&j, "thread").into(), cwd: PathBuf::from(sv(&j, "cwd")), dir: sv(&j, "dir").into(), files, manifest: sv(&j, "manifest").into(), server: sv(&j, "server").into() })
+}
+/// Rec.asks: an order's approval stays open across a restart, as its questions do (its Send is kept on disk).
+pub fn survives_restart(tool: &str) -> bool { tool.starts_with("order_ask") || tool == "order_quote" }
 /// Od.quote: reads the manifest, refuses what must not go, and asks. It never waits on the person (an MCP call held open dies), and nothing leaves here.
 async fn quote(ag: &Arc<Agents>, thread: &str, cwd: &str, a: &Value) -> (bool, Value) {
     if crate::copy::on() { return fail(COPY_SENDS_NOTHING) }
@@ -251,14 +268,20 @@ async fn quote(ag: &Arc<Agents>, thread: &str, cwd: &str, a: &Value) -> (bool, V
     let server = crate::settings::fab::server_of(&ag.hub.setting("order.server").await.unwrap_or_default());
     let now = now_s(); let ask = hub_id("q", now, ag.seq_n()); let detail = ask_detail(&dir, &m, &files);
     let open: Vec<String> = ag.world().await.asks.keys().cloned().collect();
-    { let mut q = ag.order_asks.lock().unwrap(); q.retain(|k, _| open.contains(k)); q.insert(ask.clone(), Asked { thread: thread.into(), cwd: root, dir, files, manifest, server }); }
+    let asked = Asked { thread: thread.into(), cwd: root, dir, files, manifest, server }; let _ = asked_keep(&ag.hub.cfg.home, &ask, &asked);
+    { let mut q = ag.order_asks.lock().unwrap(); q.retain(|k, _| open.contains(k)); q.insert(ask.clone(), asked); }
     let pend = ag.pending_ev(thread, 1, "", now).await;
     ag.commit_events(vec![json!({"$":"AskOpened","id":ask,"thread":thread,"kind":"approval","tool":"order_quote","detail":detail,"options":"","at":now}), pend]).await;
     (true, json!(QUOTE_ASKED))
 }
 /// Od.wait: the person answered the files' approval. Send uploads; Not now tells the agent; a retired ask has no answer, and tells no one.
-pub fn answered(ag: &Arc<Agents>, ask: &str, answer: &str) {
-    let Some(q) = ag.order_asks.lock().unwrap().remove(ask) else { return };
+pub fn answered(ag: &Arc<Agents>, ask: &str, thread: &str, answer: &str) {
+    let mem = ag.order_asks.lock().unwrap().remove(ask); let disk = asked_take(&ag.hub.cfg.home, ask);
+    let Some(q) = mem.or(disk) else {
+        // an approval from before a restart whose list was not kept (an older hub's): the person's Send is not lost on the agent
+        if matches!(answer, "accept" | "session") && !thread.is_empty() { let (ag, th) = (ag.clone(), thread.to_string()); tokio::spawn(async move { wake(&ag, &th, LOST).await }); }
+        return
+    };
     let ag = ag.clone(); let answer = answer.to_string();
     tokio::spawn(async move { match answer.as_str() { "accept" | "session" => go(&ag, q).await, "decline" | "deny" => wake(&ag, &q.thread, DECLINED).await, _ => {} } });
 }
@@ -376,8 +399,12 @@ pub fn resume(ag: Arc<Agents>) {
             PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token));
             if done(&st) { continue }
             if st == "quoting" { let now = now_s(); ag.commit_events(vec![json!({"$":"SettingSet","key":format!("order.wait.{}", r.thread),"value":now.to_string(),"at":now})]).await; tokio::spawn(poll(ag.clone(), r)); continue }
-            // its card is filled from a first look whatever its state (one missed stays on Details while its reply has Buy now)
-            let q = get(&home, &r).await; if !state(&q).is_empty() { card_set(&ag, &r.thread, &sum(&q), &r.id, false).await }
+            // its card is filled from a first look whatever its state (one missed stays on Details while its reply has Buy now), and a step it took
+            // while the hub was away is said now, not a watch's pause later (paid, placed or shipped could otherwise wait ten minutes for its message)
+            let q = get(&home, &r).await; let now = state(&q);
+            if !now.is_empty() { card_set(&ag, &r.thread, &sum(&q), &r.id, false).await }
+            let st = if now.is_empty() || now == st { st } else { progress(&ag, &r, &now, sv(&q["order"], "tracking")).await; let _ = keep(&home, &r, &now); now };
+            if done(&st) { continue }
             tokio::spawn(watch(ag.clone(), r, st));
         }
     });

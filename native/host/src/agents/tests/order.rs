@@ -161,6 +161,28 @@ fn posted(ev: &[Value], msg: &str) -> usize { ev.iter().filter(|e| is(e, "Messag
     assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.starts_with("[Backplane] The person chose not to send the files"))), "{ev:?}"); assert!(f.lock().unwrap().hits.is_empty());
     r.ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn the_files_approval_outlives_a_restart_and_its_send_still_sends() {
+    let (r, f, _d) = buy_rig("or-keepask", 0).await;
+    let from = len(&r.hub).await; call(&r.ag, "order_quote", json!({"dir":"mfg/1"})).await; let ask = ask_of(&r, from).await; let id = ask["id"].as_str().unwrap().to_string();
+    assert!(r.hub.cfg.home.join(format!("orders/ask-{id}.json")).is_file(), "kept on disk beside the quotes");
+    assert!(crate::settings::order::survives_restart("order_quote") && crate::settings::order::survives_restart("order_ask.typed") && !crate::settings::order::survives_restart("Bash"), "Rec.asks leaves it open");
+    r.ag.order_asks.lock().unwrap().clear(); // what a restart leaves of it: the card (still open) and the file
+    let from = len(&r.hub).await; rpc(&r.hub, "ask.answer", json!({"id":id,"answer":"accept"})).await;
+    let ev = until(&r.hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "system")).await;
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["msg"] == "q:q_fake1"), "the files went and the quote is posted: {ev:?}"); assert!(f.lock().unwrap().upload.contains("ZIPBYTES"));
+    assert!(!r.hub.cfg.home.join(format!("orders/ask-{id}.json")).exists(), "and its record is gone");
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"] == "Sent for a quote: 1 file from mfg/1"), "one line says what was sent: {ev:?}");
+    r.ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_send_whose_list_was_lost_tells_the_agent_to_ask_again() {
+    let (r, f, _d) = buy_rig("or-lostask", 0).await;
+    let from = len(&r.hub).await; call(&r.ag, "order_quote", json!({"dir":"mfg/1"})).await; let ask = ask_of(&r, from).await; let id = ask["id"].as_str().unwrap().to_string();
+    r.ag.order_asks.lock().unwrap().clear(); std::fs::remove_file(r.hub.cfg.home.join(format!("orders/ask-{id}.json"))).unwrap(); // an older hub's approval
+    let from = len(&r.hub).await; rpc(&r.hub, "ask.answer", json!({"id":id,"answer":"accept"})).await;
+    let ev = until(&r.hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "system")).await;
+    assert!(ev.iter().any(|e| e["text"].as_str().map_or(false, |t| t.contains("Call order_quote again"))), "{ev:?}"); assert!(f.lock().unwrap().hits.is_empty(), "nothing sent");
+    r.ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn the_approval_covers_only_what_the_person_saw() {
     let (r, f, d) = buy_rig("or-swap", 0).await;
     let from = len(&r.hub).await; call(&r.ag, "order_quote", json!({"dir":"mfg/1"})).await; let ask = ask_of(&r, from).await;
@@ -235,6 +257,17 @@ async fn quoted_rig(name: &str, pilot: bool) -> (super::lost::Rig, Shared) {
     let ev = until(&r.hub, from, 20, |ev| ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("order.quote.{T1}"))).await; assert!(!ev.is_empty());
     tokio::time::sleep(Duration::from_millis(250)).await; assert_eq!(posted(&log_from(&r.hub, from).await, "o:q_fake1:paid"), 0, "already said before the restart");
     f.lock().unwrap().order = json!({"status":"shipped"}); until(&r.hub, from, 20, |ev| posted(ev, "o:q_fake1:shipped") == 1).await;
+    r.ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_step_taken_while_the_hub_was_away_is_said_at_the_restart() {
+    let r = rig("or-away", "result", SESSION_OK).await; let (url, f) = fake_server(0); f.lock().unwrap().order = json!({"status":"shipped","tracking":"TRK9"});
+    set(&r.hub, &format!("buy.{T1}"), "t0").await; let o = r.hub.cfg.home.join("orders"); std::fs::create_dir_all(&o).unwrap();
+    std::fs::write(o.join("q_fake1.json"), json!({"id":"q_fake1","token":TOKEN,"thread":T1,"server":url,"status":"paid"}).to_string()).unwrap();
+    let from = len(&r.hub).await; crate::settings::order::resume(r.ag.clone());
+    // the watch would look again only after its pause (ten minutes once paid); the restart says it at once, once
+    let ev = until(&r.hub, from, 20, |ev| posted(ev, "o:q_fake1:shipped") == 1).await; assert!(ev.iter().any(|e| e["text"] == "**Shipped.** Tracking: TRK9"), "{ev:?}");
+    assert!(std::fs::read_to_string(o.join("q_fake1.json")).unwrap().contains("\"status\":\"shipped\""), "the record follows, so the next restart does not say it again");
+    tokio::time::sleep(Duration::from_millis(250)).await; assert_eq!(posted(&log_from(&r.hub, from).await, "o:q_fake1:shipped"), 1, "said once");
     r.ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn the_order_tools_are_refused_with_ordering_off_even_mid_order() {
