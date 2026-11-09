@@ -262,10 +262,10 @@ impl Agents {
         let (cut, carry, cut_threads): (Vec<Value>, Vec<String>, Vec<String>) = {
             let w = self.world().await; let now = now_s(); let zone = w.setting("tz.machine").to_string(); let mut ev = vec![]; let mut carry: Vec<(u64, String)> = vec![]; let mut cut_threads: Vec<String> = vec![]; let mut told = std::collections::HashSet::new();
             // Rec.asks: an open ask is closed unanswered and its thread told which one went unanswered (an order's question stays open)
-            let mut asks: Vec<(&String, &world::Ask)> = w.asks.iter().filter(|(_, a)| !a.tool.starts_with("order_ask")).collect(); asks.sort_by(|a, b| a.0.cmp(b.0));
+            let mut asks: Vec<(&String, &world::Ask)> = w.asks.iter().filter(|(_, a)| !crate::settings::order::survives_restart(&a.tool)).collect(); asks.sort_by(|a, b| a.0.cmp(b.0));
             for (id, a) in asks {
                 ev.push(json!({"$":"AskClosed","id":id,"answer":"","at":now}));
-                ev.push(json!({"$":"PendingChanged","thread":a.thread,"count":w.asks.values().filter(|x| x.thread == a.thread && x.tool.starts_with("order_ask")).count(),"at":now})); // Pend.*: what stays open (an order's question)
+                ev.push(json!({"$":"PendingChanged","thread":a.thread,"count":w.asks.values().filter(|x| x.thread == a.thread && crate::settings::order::survives_restart(&x.tool)).count(),"at":now})); // Pend.*: what stays open (an order's question)
                 if w.threads.contains_key(&a.thread) { told.insert(a.thread.clone());
                     ev.push(json!({"$":"ActivityLogged","thread":a.thread,"act":hub_id("r", now, self.seq()),"tone":"error","kind":"restart","summary":format!("{}{}", rules::restart_cut(&zone, now), rules::unanswered(&a.kind, &a.tool, &a.detail)),"at":now})) }
             }
