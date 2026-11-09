@@ -2,8 +2,9 @@
 //! three vertices as zigzag deltas of x y z in 10 micrometres, board axes, z up). Decoding and drawing run on a worker thread, on the GPU (solid_gpu.rs: the model is uploaded once)
 //! or else on the cores (raster.rs); the page only receives finished images, so input never waits for a model. The latest request wins, but a picture of a drag is never given up
 //! part-way: a mouse moves faster than a picture is drawn, and giving up on each one for the next leaves the screen still until the pointer stops. The camera is the
-//! product's free orbit (solid.js `Orbit`): the model follows the pointer in any direction, the wheel zooms at the pointer between 1/60 and 20 times
-//! the fitted distance, a right/middle or shift drag moves it. The image is as big as the panel in device pixels. Nothing repaints while idle.
+//! product's free orbit (0.14's solid.js `Orbit`): the model follows the pointer in any direction about its centre, the wheel zooms at the pointer (1.16 a notch)
+//! between 1/60 and 20 times the fitted distance, a right/middle or shift drag moves it 1:1, a double click fits, and its keys are 0.14's. The image is as big as
+//! the panel in device pixels (a draft while it moves). Nothing repaints while idle.
 use gpui::{prelude::*, *};
 use super::raster::{self, render};
 #[cfg(test)] use super::raster::BG;
@@ -223,8 +224,11 @@ pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
 }
 
 // ---- the camera: free orbit ------------------------------------------------------------------------------------
+/// 0.14's `Orbit` (src/web/solid.js): the view turns about the model's centre (`pivot`), and a pan or a zoom at the pointer moves it within
+/// the view's plane (`shift`, right and up from the pivot at its depth), so a turn keeps the model where the person put it on the screen.
+/// `target` is pivot + right·shift[0] + up·shift[1], kept up to date by every move (`place`).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Camera { pub right: [f32; 3], pub up: [f32; 3], pub fwd: [f32; 3], pub target: [f32; 3], pub dist: f32, pub fit: f32 }
+pub struct Camera { pub right: [f32; 3], pub up: [f32; 3], pub fwd: [f32; 3], pub target: [f32; 3], pub dist: f32, pub fit: f32, pub pivot: [f32; 3], pub shift: [f32; 2] }
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
 fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
 fn mul(a: [f32; 3], s: f32) -> [f32; 3] { [a[0] * s, a[1] * s, a[2] * s] }
@@ -234,6 +238,13 @@ fn norm(a: [f32; 3]) -> [f32; 3] { let l = dot(a, a).sqrt(); if l > 0.0 { mul(a,
 /// `v` turned by `angle` about the unit `axis` (Rodrigues).
 fn rotate(v: [f32; 3], axis: [f32; 3], angle: f32) -> [f32; 3] {
     let (s, c) = angle.sin_cos(); add(add(mul(v, c), mul(cross(axis, v), s)), mul(axis, dot(axis, v) * (1.0 - c)))
+}
+/// A wheel event as a zoom factor (over 1: closer). A mouse wheel comes in lines (gpui: 3 a notch, fractions from a high-resolution wheel) and
+/// turns 1.16 a notch, as 0.14's 100 px notch did (exp(100 · 0.0015)); a touchpad's pixels zoom smoothly, and with ctrl (a pinch, as browsers
+/// send one) faster, as 0.14's pinch did.
+pub fn wheel_zoom(lines: Option<f32>, pixels: f32, ctrl: bool) -> f32 {
+    let k = match lines { Some(l) => l * 0.05, None => pixels * if ctrl { 0.01 } else { 0.004 } };
+    k.clamp(-2.0, 2.0).exp()
 }
 impl Camera {
     /// Looking at the model from the front-right and above, fitted to its bounding sphere.
@@ -245,48 +256,55 @@ impl Camera {
         let (yaw, pitch) = (0.6f32, 0.7f32);
         let eye_dir = [pitch.cos() * yaw.sin(), -pitch.cos() * yaw.cos(), pitch.sin()];
         let fwd = mul(eye_dir, -1.0); let right = norm(cross(fwd, [0.0, 0.0, 1.0])); let up = cross(right, fwd);
-        Camera { right, up, fwd, target: mesh.center, dist: fit, fit }
+        Camera { right, up, fwd, target: mesh.center, dist: fit, fit, pivot: mesh.center, shift: [0.0, 0.0] }
     }
     /// A standard view of the same model at the same distance (the web's toolbar: Top, Bottom, Front, Right, Back, Left; anything else, Iso, is the fitted view).
-    /// Z is up and the part's front faces -Y, so Front looks along +Y from the -Y side.
+    /// Z is up and the part's front faces -Y, so Front looks along +Y from the -Y side. The model is centred again.
     pub fn named(&self, name: &str) -> Camera {
         let (fwd, up) = match name {
             "front" => ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]), "back" => ([0.0, -1.0, 0.0], [0.0, 0.0, 1.0]),
             "right" => ([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), "left" => ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
             "top" => ([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]), "bottom" => ([0.0, 0.0, 1.0], [0.0, -1.0, 0.0]),
-            _ => return Camera { target: self.target, dist: self.fit, ..*self },
+            _ => return Camera { target: self.pivot, dist: self.fit, shift: [0.0, 0.0], ..*self },
         };
-        let mut c = Camera { right: [1.0, 0.0, 0.0], up, fwd, target: self.target, dist: self.fit, fit: self.fit };
-        c.reortho(); c
+        let mut c = Camera { right: [1.0, 0.0, 0.0], up, fwd, target: self.pivot, dist: self.fit, fit: self.fit, pivot: self.pivot, shift: [0.0, 0.0] };
+        c.reortho(); c.place(); c
     }
     pub fn eye(&self) -> [f32; 3] { sub(self.target, mul(self.fwd, self.dist)) }
     fn reortho(&mut self) { self.fwd = norm(self.fwd); self.right = norm(cross(self.fwd, self.up)); self.up = cross(self.right, self.fwd); }
-    /// A drag of (dx, dy) pixels (y down): the model follows the pointer, about the target, in any direction (no pole, no clamp). The web's
+    /// The target from the pivot and the shift in the view's plane.
+    fn place(&mut self) { self.target = add(self.pivot, add(mul(self.right, self.shift[0]), mul(self.up, self.shift[1]))); }
+    /// A drag of (dx, dy) pixels (y down): the model follows the pointer, about its centre, in any direction (no pole, no clamp). The web's
     /// `Orbit.spin` exactly: the view turns by -|d|·k about the screen axis u·dx + r·dy, so a drag to the right brings the model's front to the
-    /// right (the camera goes round to the left) and a drag down brings its top toward the viewer.
+    /// right (the camera goes round to the left) and a drag down brings its top toward the viewer. Where the model is on the screen stays.
     pub fn orbit(&mut self, dx: f32, dy: f32) {
         let k = 0.008; // radians per pixel
         let l = (dx * dx + dy * dy).sqrt();
         if l < 1e-6 { return }
         let axis = norm(add(mul(self.up, dx / l), mul(self.right, dy / l)));
         for v in [&mut self.right, &mut self.fwd, &mut self.up] { *v = rotate(*v, axis, -l * k); }
-        self.reortho();
+        self.reortho(); self.place();
     }
     /// alt drag: roll about the view axis; a drag to the right turns the model clockwise on screen (the web's `Orbit.roll`).
-    pub fn roll(&mut self, dx: f32) { let (f, a) = (self.fwd, -dx * 0.008); self.right = rotate(self.right, f, a); self.up = rotate(self.up, f, a); self.reortho(); }
-    /// Move the view: a right/middle or shift drag of (dx, dy) pixels in a panel `h` pixels high.
+    pub fn roll(&mut self, dx: f32) { let (f, a) = (self.fwd, -dx * 0.008); self.right = rotate(self.right, f, a); self.up = rotate(self.up, f, a); self.reortho(); self.place(); }
+    /// World units a pixel at the pivot's depth, in a panel `h` pixels high.
+    pub fn unit(&self, h: f32) -> f32 { 2.0 * (FOV / 2.0).tan() * self.dist / h.max(1.0) }
+    /// Move the view: a right/middle or shift drag of (dx, dy) pixels in a panel `h` pixels high; the point under the pointer (at the pivot's depth) follows it.
     pub fn pan(&mut self, dx: f32, dy: f32, h: f32) {
-        let per_px = 2.0 * (FOV / 2.0).tan() * self.dist / h.max(1.0);
-        self.target = add(self.target, add(mul(self.right, -dx * per_px), mul(self.up, dy * per_px)));
+        let s = self.unit(h);
+        self.shift[0] -= dx * s; self.shift[1] += dy * s; self.place();
     }
-    /// Zoom by `steps` wheel notches at the pointer (nx, ny in -1..1, y up; aspect = width / height): the point under it stays under it.
-    pub fn zoom_at(&mut self, steps: f32, nx: f32, ny: f32, aspect: f32) {
+    /// Zoom by `steps` wheel notches of 1.1 at the pointer (nx, ny in -1..1, y up; aspect = width / height).
+    pub fn zoom_at(&mut self, steps: f32, nx: f32, ny: f32, aspect: f32) { self.zoom_by(1.1f32.powf(steps), nx, ny, aspect) }
+    /// `k` times closer (0.14's `Orbit.zoom`), between 1/60 and 20 times the fitted distance, at the pointer (nx, ny in -1..1, y up; aspect = width / height):
+    /// the point under it, at the pivot's depth, stays under it.
+    pub fn zoom_by(&mut self, k: f32, nx: f32, ny: f32, aspect: f32) {
+        if !k.is_finite() || k <= 0.0 { return }
         let t = (FOV / 2.0).tan();
-        let d2 = (self.dist / 1.1f32.powf(steps)).clamp(self.fit / 60.0, self.fit * 20.0);
-        let under = |cam: &Camera, d: f32| add(cam.target, add(mul(cam.right, nx * aspect * t * d), mul(cam.up, ny * t * d)));
-        let p = under(self, self.dist);
-        self.dist = d2;
-        self.target = sub(p, add(mul(self.right, nx * aspect * t * d2), mul(self.up, ny * t * d2)));
+        let d = (self.dist / k).clamp(self.fit / 60.0, self.fit * 20.0);
+        let q = d / self.dist;
+        let (x, y) = (nx * aspect * t * self.dist, ny * t * self.dist); // the pointer's offset from the view's centre, world units at the pivot's depth
+        self.shift[0] += x * (1.0 - q); self.shift[1] += y * (1.0 - q); self.dist = d; self.place();
     }
 }
 
@@ -387,6 +405,7 @@ pub struct SolidPage {
     mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
+    /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
     pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */, asked: (usize, usize), /** the newest ticket asked for, the one on screen, the first of the model shown */ latest: u64, on_screen: u64, floor: u64, counted: u64, pub stats: Stats,
 }
 impl SolidPage {
@@ -397,7 +416,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -469,6 +488,34 @@ impl SolidPage {
         else { self.cam = Some(fitted.named(name)); self.touched = true; }
         self.ask_render(false);
     }
+    /// A move of the camera by a key or the wheel: a draft now, the full picture once nothing has moved it for 150 ms.
+    fn moved(&mut self, cx: &mut Context<Self>) {
+        self.touched = true; self.ask_render(true); self.wheel += 1; let n = self.wheel;
+        cx.spawn(async move |weak, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
+            let _ = weak.update(cx, |this, _| if this.wheel == n && this.drag.is_none() { this.ask_render(false) });
+        }).detach();
+    }
+    /// The page's keys, as 0.14's 3D view had them; whether the key was one of them.
+    fn on_key(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        let m = &e.keystroke.modifiers;
+        if m.control || m.alt || m.platform || m.function { return false }
+        let k = e.keystroke.key.as_str();
+        let view = match k { "f" | "home" => Some("fit"), "0" => Some("iso"), "1" => Some("top"), "2" => Some("bottom"), "3" => Some("front"), "4" => Some("right"), "5" => Some("back"), "6" => Some("left"), _ => None };
+        if let Some(v) = view { self.set_view(v); cx.notify(); return true }
+        let Some(c) = &mut self.cam else { return false };
+        let h = self.size.lock().unwrap()[1];
+        match k {
+            "left" | "right" | "up" | "down" => {
+                let (dx, dy) = match k { "left" => (-16.0, 0.0), "right" => (16.0, 0.0), "up" => (0.0, -16.0), _ => (0.0, 16.0) };
+                if m.shift { c.pan(dx, dy, h) } else { c.orbit(dx, dy) }
+            }
+            "+" | "=" | "plus" => c.zoom_by(1.15, 0.0, 0.0, 1.0),
+            "-" | "_" | "minus" => c.zoom_by(1.0 / 1.15, 0.0, 0.0, 1.0),
+            _ => return false,
+        }
+        self.moved(cx); true
+    }
     /// Snap view: the picture on screen as a PNG in `dir` (never over a file); the path, or why not.
     pub fn snap(&mut self, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
         let img = self.image.clone().ok_or("no picture yet")?;
@@ -525,12 +572,16 @@ impl Render for SolidPage {
             }
             bar
         });
-        div().id("solid-page").size_full().overflow_hidden().relative().child(body).child(probe).children(tools)
+        div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
+            .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
             .when(self.image.is_some() && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())))
             .when(self.image.is_some() && !self.parts_progress().is_empty(), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.parts_progress())))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((if e.modifiers.alt { Drag::Roll } else if e.modifiers.shift || e.modifiers.control { Drag::Pan } else { Drag::Orbit }, e.position)); }))
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
-            .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, _, _| { this.drag = Some((Drag::Pan, e.position)); }))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                window.focus(&this.focus);
+                if e.click_count >= 2 { this.drag = None; this.set_view("fit"); cx.notify(); return } // a double click fits, as 0.14's did
+                this.drag = Some((if e.modifiers.alt { Drag::Roll } else if e.modifiers.shift || e.modifiers.control { Drag::Pan } else { Drag::Orbit }, e.position)); }))
+            .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, window, _| { window.focus(&this.focus); this.drag = Some((Drag::Pan, e.position)); }))
+            .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, window, _| { window.focus(&this.focus); this.drag = Some((Drag::Pan, e.position)); }))
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
                 let Some((kind, last)) = this.drag else { return };
                 if e.pressed_button.is_none() { this.drag = None; this.ask_render(false); cx.notify(); return } // the button went up where we could not see it
@@ -544,12 +595,12 @@ impl Render for SolidPage {
             .on_mouse_up(MouseButton::Right, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
             .on_mouse_up(MouseButton::Middle, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
-                let steps = match e.delta { ScrollDelta::Pixels(p) => f32::from(p.y) / 20.0, ScrollDelta::Lines(l) => l.y };
+                let k = match e.delta { ScrollDelta::Pixels(p) => wheel_zoom(None, f32::from(p.y), e.modifiers.control), ScrollDelta::Lines(l) => wheel_zoom(Some(l.y), 0.0, e.modifiers.control) };
                 let [pw, ph, _, ox, oy] = *this.size.lock().unwrap();
                 let _ = window; // the pointer in panel coordinates, -1..1 with y up
                 let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
-                this.touched = true; if let Some(c) = &mut this.cam { c.zoom_at(steps, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
-                this.ask_render(false); cx.notify();
+                if let Some(c) = &mut this.cam { c.zoom_by(k, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                cx.stop_propagation(); this.moved(cx); // drafts while the wheel turns, the full picture when it rests
             }))
     }
 }
@@ -562,7 +613,7 @@ mod tests {
         assert!(!super::note_keeps_model("", "2|/b|"));
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
-    use super::{decode_mesh, parse_frame, render, Camera, Mesh, SolidFrame, BG, add, mul, sub};
+    use super::{decode_mesh, parse_frame, render, wheel_zoom, Camera, Mesh, SolidFrame, BG, add, mul, sub};
     use super::super::raster::smooth_normals;
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
     fn zig(v: i32) -> u32 { ((v << 1) ^ (v >> 31)) as u32 }
@@ -670,6 +721,24 @@ mod tests {
         let point = |c: &Camera| { let p = [c.target[0] + c.right[0] * nx * aspect * t * c.dist + c.up[0] * ny * t * c.dist, c.target[1] + c.right[1] * nx * aspect * t * c.dist + c.up[1] * ny * t * c.dist, c.target[2] + c.right[2] * nx * aspect * t * c.dist + c.up[2] * ny * t * c.dist]; p };
         let before = point(&c); c.zoom_at(3.0, nx, ny, aspect); let after = point(&c);
         for a in 0..3 { assert!((before[a] - after[a]).abs() < 1e-3, "axis {a}: {before:?} vs {after:?}"); }
+    }
+    #[test] fn a_wheel_notch_zooms_as_0_14_did_and_a_touchpad_smoothly() {
+        let notch = wheel_zoom(Some(3.0), 0.0, false); assert!((notch - 1.1618).abs() < 1e-3, "{notch}");
+        assert!((wheel_zoom(Some(-3.0), 0.0, false) * notch - 1.0).abs() < 1e-5, "out undoes in");
+        let pad = wheel_zoom(None, 10.0, false); assert!(pad > 1.0 && pad < 1.05, "{pad}");
+        assert!(wheel_zoom(None, 10.0, true) > pad, "a pinch zooms faster");
+        assert!(wheel_zoom(Some(1e9), 0.0, false).is_finite());
+    }
+    #[test] fn a_turn_keeps_the_model_where_it_was_put_and_pans_follow_the_pointer() {
+        let m = mesh(); let mut c = Camera::fitted(&m);
+        c.pan(40.0, -25.0, 600.0); c.zoom_by(3.0, 0.4, -0.2, 1.5);
+        let at = |c: &Camera| { let d = super::sub(c.pivot, c.target); (super::dot(d, c.right), super::dot(d, c.up)) };
+        let before = at(&c); c.orbit(80.0, 30.0); c.roll(15.0); let after = at(&c);
+        assert!((before.0 - after.0).abs() < 1e-3 && (before.1 - after.1).abs() < 1e-3, "{before:?} {after:?}: the centre stays on the same spot of the screen");
+        // a pan of 100 px moves a point at the pivot's depth by exactly 100 px
+        let h = 600.0; let px = 1.0 / c.unit(h); let p = c.pivot; let s0 = screen(&c, p); c.pan(100.0, 0.0, h); let s1 = screen(&c, p);
+        assert!(((s1.0 - s0.0) * px - 100.0).abs() < 1e-2, "{}", (s1.0 - s0.0) * px);
+        let n = c.named("top"); assert_eq!((n.shift, n.target, n.dist), ([0.0, 0.0], c.pivot, c.fit), "a standard view centres the model again");
     }
     #[test] fn a_triangle_behind_the_near_plane_is_clipped_not_dropped() {
         let m = mesh(); let mut c = Camera::fitted(&m); c.dist = c.fit / 60.0 * 2.0; // inside the cube: faces cross the near plane
