@@ -30,7 +30,7 @@ pub fn choose(i: &Item, value: &str) -> Command { Command::Action(i.action.clone
 /// The rename box's field (`@f.title`, typed as `bfield title`), while the hub has a rename open.
 pub fn form_fields(data: &Value) -> Vec<Field> {
     let r = &data["renaming"];
-    if r.is_object() { vec![Field { name: "title".into(), hint: "Title".into(), secret: false, value: string(r, "text"), vault: false }] } else { Vec::new() }
+    /* i18n-ok: the hint, drawn through trs by the composer */ if r.is_object() { vec![Field { name: "title".into(), hint: "Title".into(), secret: false, value: string(r, "text"), vault: false }] } else { Vec::new() }
 }
 /// What a form or question asks the window to focus when it opens (see bots::focus_target).
 pub fn focus_target(data: &Value) -> &'static str { if data["renaming"].is_object() { "title" } else { "" } }
@@ -71,12 +71,12 @@ pub fn controls(data: &Value) -> Vec<(String, String, Ctl)> {
     let thread = &data["thread"];
     for (i, t) in tools(thread).into_iter().enumerate() { out.push((format!("tool-{i}"), t.label.clone(), Ctl::Node(t.action.clone(), t.value.clone()))); }
     if data["renaming"].is_object() {
-        out.push(("rename-yes".into(), "Save".into(), Ctl::RenameSave(string(&data["renaming"], "id"))));
-        out.push(("rename-no".into(), "Cancel".into(), Ctl::Node("rename-no".into(), String::new())));
+        /* i18n-ok: ctl labels are what drivers press */ out.push(("rename-yes".into(), "Save".into(), Ctl::RenameSave(string(&data["renaming"], "id"))));
+        /* i18n-ok: ctl labels are what drivers press */ out.push(("rename-no".into(), "Cancel".into(), Ctl::Node("rename-no".into(), String::new())));
     }
     if data["deleting"].is_object() {
-        out.push(("delete-yes".into(), "Delete".into(), Ctl::Node("row-delete".into(), string(&data["deleting"], "id"))));
-        out.push(("delete-no".into(), "Cancel".into(), Ctl::Node("delete-no".into(), String::new())));
+        /* i18n-ok: ctl labels are what drivers press */ out.push(("delete-yes".into(), "Delete".into(), Ctl::Node("row-delete".into(), string(&data["deleting"], "id"))));
+        /* i18n-ok: ctl labels are what drivers press */ out.push(("delete-no".into(), "Cancel".into(), Ctl::Node("delete-no".into(), String::new())));
     }
     out
 }

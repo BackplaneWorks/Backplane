@@ -14,7 +14,7 @@ const ILL: Duration = Duration::from_secs(3);
 pub const CONFIRM: Duration = Duration::from_secs(6);
 /// Unanswered asks before the strip says so: a hub restarting for a new build is gone for a moment.
 const PATIENCE: u32 = 3;
-const NO_ANSWER: &str = "The hub is not answering";
+/* i18n-ok: English, compared and tested; strip draws it through trs */ const NO_ANSWER: &str = "The hub is not answering";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Act { pub id: String, pub label: String }
@@ -24,7 +24,7 @@ pub struct Bar { pub text: String, pub tone: String, pub acts: Vec<Act> }
 #[derive(Default)]
 pub struct State { pub ever: bool, pub well: bool, pub bar: Option<Bar>, pub said: String, pub confirm: Option<(String, Instant)>, pub target: Option<Target>, pub guard: Option<PathBuf> }
 
-fn restart() -> Act { Act { id: "restart".into(), label: "Restart hub".into() } }
+/* i18n-ok: English, compared and tested; strip draws it through trs */ fn restart() -> Act { Act { id: "restart".into(), label: "Restart hub".into() } }
 fn acts(v: &Value) -> Vec<Act> { v.as_array().into_iter().flatten().filter_map(|a| Some(Act { id: a["id"].as_str()?.into(), label: a["label"].as_str()?.into() })).collect() }
 fn or_restart(a: Vec<Act>) -> Vec<Act> { if a.is_empty() { vec![restart()] } else { a } }
 
@@ -38,9 +38,9 @@ pub fn bar_of(health: Option<&Value>, status: Option<&Value>, misses: u32, sock:
     let Some(h) = health else { return (!sock.live && misses >= patience).then(|| Bar { text: NO_ANSWER.into(), tone: "bad".into(), acts: vec![restart()] }) };
     let guard = status.map_or(&Value::Null, |s| &s["guard"]);
     match h["status"].as_str().unwrap_or("") {
-        "starting" => Some(Bar { text: match h["phase"].as_str() { Some(p) if !p.is_empty() => format!("The hub is starting: {p}"), _ => "The hub is starting".into() }, tone: "info".into(), acts: vec![] }),
-        "down" => Some(Bar { text: guard["text"].as_str().filter(|t| !t.is_empty()).map_or_else(|| format!("The hub is down: {}", h["why"].as_str().unwrap_or("")), str::to_string), tone: "bad".into(), acts: or_restart(acts(&guard["actions"])) }),
-        "hung" => Some(Bar { text: format!("The hub is stuck in {}", h["hung"].as_array().map_or(String::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))), tone: "bad".into(), acts: or_restart(acts(&guard["actions"])) }),
+        /* i18n-ok: English, compared and tested; strip draws it through trs */ "starting" => Some(Bar { text: match h["phase"].as_str() { Some(p) if !p.is_empty() => format!("The hub is starting: {p}"), _ => "The hub is starting".into() }, tone: "info".into(), acts: vec![] }),
+        /* i18n-ok: English, compared and tested; strip draws it through trs */ "down" => Some(Bar { text: guard["text"].as_str().filter(|t| !t.is_empty()).map_or_else(|| format!("The hub is down: {}", h["why"].as_str().unwrap_or("")), str::to_string), tone: "bad".into(), acts: or_restart(acts(&guard["actions"])) }),
+        /* i18n-ok: English, compared and tested; strip draws it through trs */ "hung" => Some(Bar { text: format!("The hub is stuck in {}", h["hung"].as_array().map_or(String::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))), tone: "bad".into(), acts: or_restart(acts(&guard["actions"])) }),
         _ => {
             let n = status.map_or(&Value::Null, |s| &s["notice"]);
             let t = n["text"].as_str().unwrap_or("");
@@ -55,15 +55,15 @@ fn call(t: &Target, method: &str, path: &str, token: &str, body: &str) -> Option
     let a = addr.to_socket_addrs().ok()?.next()?; let d = Duration::from_secs(5);
     let tcp = TcpStream::connect_timeout(&a, d).ok()?; tcp.set_read_timeout(Some(d)).ok()?; tcp.set_write_timeout(Some(d)).ok()?;
     let mut s = crate::pairing::wrap(addr, tcp, t.tls).ok()?;
-    s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).ok()?;
+    /* i18n-ok: HTTP */ s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).ok()?;
     let mut out = Vec::new(); let _ = s.take(1 << 20).read_to_end(&mut out);
     let text = String::from_utf8_lossy(&out);
     Some((text.split_whitespace().nth(1)?.parse().ok()?, text.split_once("\r\n\r\n").map_or(String::new(), |x| x.1.to_string())))
 }
 fn ask(t: &Target) -> (Option<Value>, Option<Value>) {
     let parse = |r: Option<(u16, String)>| r.and_then(|(_, b)| serde_json::from_str::<Value>(&b).ok());
-    let h = parse(call(t, "GET", "/healthz", "", ""));
-    let s = if h.is_some() { call(t, "GET", "/hub/status", &t.token, "").filter(|r| r.0 == 200).and_then(|r| serde_json::from_str(&r.1).ok()) } else { None };
+    /* i18n-ok: HTTP */ let h = parse(call(t, "GET", "/healthz", "", ""));
+    /* i18n-ok: HTTP */ let s = if h.is_some() { call(t, "GET", "/hub/status", &t.token, "").filter(|r| r.0 == 200).and_then(|r| serde_json::from_str(&r.1).ok()) } else { None };
     (h, s)
 }
 /// The request a window on the hub's machine leaves the guard when nothing answers on the network: whole, and renamed into place.
@@ -76,12 +76,12 @@ pub fn leave_request(dir: &Path, action: &str) -> std::io::Result<()> {
 /// Do it, and say how it went.
 fn send(t: Option<&Target>, guard: Option<&Path>, action: &str) -> String {
     if let Some(t) = t {
-        if let Some((code, b)) = call(t, "POST", "/hub/control", &t.token, &json!({"action": action}).to_string()) {
+        /* i18n-ok: HTTP */ if let Some((code, b)) = call(t, "POST", "/hub/control", &t.token, &json!({"action": action}).to_string()) {
             let said = serde_json::from_str::<Value>(&b).ok().and_then(|v| v["text"].as_str().map(str::to_string)).unwrap_or_default();
-            return if said.is_empty() { format!("The hub said {code}") } else { said };
+            /* i18n-ok: English, compared and tested; strip draws it through trs */ return if said.is_empty() { format!("The hub said {code}") } else { said };
         }
     }
-    match guard.filter(|g| g.is_dir()).map(|g| leave_request(g, action)) { Some(Ok(())) => "Asked the guard on this machine".into(), _ => "The hub's machine cannot be reached".into() }
+    /* i18n-ok: English, compared and tested; strip draws it through trs */ match guard.filter(|g| g.is_dir()).map(|g| leave_request(g, action)) { Some(Ok(())) => "Asked the guard on this machine".into(), _ => "The hub's machine cannot be reached".into() }
 }
 
 /// Look now and then. The window is redrawn only when what it shows changes.
@@ -121,19 +121,19 @@ pub fn strip(cx: &mut Context<Backplane>, s: &State, light: bool) -> Option<AnyE
     let mut row = div().flex().items_center().gap_1();
     for a in acts {
         let sure = asked.as_deref() == Some(a.id.as_str());
-        let (id, label) = (a.id.clone(), if sure { format!("Click again: {}", a.label) } else { a.label.clone() });
+        let (id, label) = (a.id.clone(), if sure { crate::i18n::tf("gpui.hubbar.click.again", &[("label", crate::i18n::trs(&a.label).into())]) } else { crate::i18n::trs(&a.label) });
         row = row.child(div().id(SharedString::from(format!("hub-{id}"))).px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(px(11.)).font_weight(FontWeight::BOLD)
             .bg(if sure { c("bad") } else { c("raise") }).text_color(if sure { c("on-accent") } else { c("text") }).child(label)
             .on_click(cx.listener(move |this, _, _, cx| { this.hub_click(&id, cx); })));
     }
     Some(div().h(px(22.)).flex_shrink_0().flex().items_center().justify_between().px_3().bg(c("raise")).border_b_1().border_color(hue)
-        .child(div().text_size(px(11.)).text_color(c("text")).overflow_hidden().child(text)).child(row).into_any_element())
+        .child(div().text_size(px(11.)).text_color(c("text")).overflow_hidden().child(crate::i18n::trs(&text))).child(row).into_any_element())
 }
 
 /// The socket came up: the hub answers, so a strip that said it did not goes at once (the next ask decides anything else).
 pub fn connected(s: &mut State) -> bool { s.ever = true; if s.bar.as_ref().map_or(false, |b| b.text == NO_ANSWER) { s.bar = None; s.said.clear(); true } else { false } }
 
-pub fn label_of(action: &str) -> &'static str { match action { "safe" => "Restart in safe mode", "rollback" => "Roll back hub", _ => "Restart hub" } }
+/* i18n-ok: English, compared and tested; strip draws it through trs */ pub fn label_of(action: &str) -> &'static str { match action { "safe" => "Restart in safe mode", "rollback" => "Roll back hub", _ => "Restart hub" } }
 
 impl Backplane {
     /// The first click asks to be sure; the second, within CONFIRM, does it. The palette's commands come through here too.
@@ -142,7 +142,7 @@ impl Backplane {
         match b.confirm.take() {
             Some((a, t)) if a == action && t.elapsed() <= CONFIRM => {
                 let (t, g, a) = (b.target.clone(), b.guard.clone(), a.clone());
-                b.said = "Asking…".into();
+                /* i18n-ok: English, compared and tested; strip draws it through trs */ b.said = "Asking…".into();
                 cx.spawn(async move |weak, cx| {
                     let said = cx.background_executor().spawn(async move { send(t.as_ref(), g.as_deref(), &a) }).await;
                     let _ = weak.update(cx, |this, cx| { this.screens.hubbar.said = said; cx.notify(); });

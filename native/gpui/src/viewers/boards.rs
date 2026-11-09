@@ -2,7 +2,7 @@
 //! a button naming the board on show (its name over its folder, a chevron) opens a menu: "Find a board", the folder the paths are from, and a row per
 //! board (its name, its path, "Default board" on the project's own), the one on show lit. Each opening reads the project's boards again
 //! (`view-boards`, 0.14's data-on-open); a row shows that board (`view-board`), which the hub keeps for the thread's other pages.
-use crate::{hub::Command, screens::composer::{Composer, ComposerEvent}, theme, Backplane};
+use crate::{hub::Command, i18n::{tf, trs}, screens::composer::{Composer, ComposerEvent}, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
@@ -36,7 +36,7 @@ pub fn toggle(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backpl
     if !ui.open { cx.notify(); return }
     if ui.find.is_none() {
         let f = cx.new(|cx| Composer::with_context(cx, "AskInput"));
-        f.update(cx, |i, _| i.set_placeholder("Name or path"));
+        f.update(cx, |i, _| i.set_placeholder(&trs("Name or path")));
         cx.observe(&f, |_, _, cx| cx.notify()).detach();
         // Enter shows the first board the search keeps
         cx.subscribe(&f, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) {
@@ -66,9 +66,9 @@ pub fn picker(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &Boa
     if all.len() < 2 { return None }
     let c = |n: &str| theme::color(light, n);
     let cur = all.iter().find(|b| b.on).map(|b| b.value.clone()).unwrap_or_default();
-    let (name, folder) = if cur.is_empty() { ("Select board".to_string(), String::new()) } else { (stem(&cur), parent(&cur)) };
+    let (name, folder) = if cur.is_empty() { (trs("Select board"), String::new()) } else { (stem(&cur), parent(&cur)) };
     let btn = div().id("boards-btn").flex().items_center().gap_2().h(px(28.)).px_2().w(px(260.)).min_w(px(96.)).flex_shrink().border_1().border_color(c(if ui.open { "accent" } else { "line" })).bg(c("raise"))
-        .cursor_pointer().hover(|s| s.bg(c("panel"))).when(!ui.open, |d| d.tooltip(crate::keys::tip(if cur.is_empty() { "Select board" } else { &cur }, "", light)))
+        .cursor_pointer().hover(|s| s.bg(c("panel"))).when(!ui.open, |d| d.tooltip(crate::keys::tip(&if cur.is_empty() { trs("Select board") } else { cur.clone() }, "", light)))
         .child(crate::art::icon("circuit-board", 14., c("dim")))
         .child(div().flex_1().min_w_0().flex().flex_col().justify_center().line_height(px(13.))
             .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).child(name))
@@ -82,20 +82,20 @@ pub fn picker(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &Boa
         let mut menu = div().id("boards-menu").mt(px(4.)).w(px(420.)).max_h(px(480.)).overflow_y_scroll().flex().flex_col().gap(px(3.)).p(px(7.))
             .bg(c("panel")).border_1().border_color(c("line")).shadow_lg().text_size(px(12.)).occlude()
             .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plotview.boards.open = false; cx.notify(); }))
-            .child(div().px_1().text_size(px(11.)).text_color(c("dim")).child("Find a board"));
+            .child(div().px_1().text_size(px(11.)).text_color(c("dim")).child(trs("Find a board")));
         if let Some(f) = ui.find.clone() { menu = menu.child(div().id("boards-find").px_2().py_1().bg(c("bg")).border_1().border_color(c("line")).child(f)); }
         let root = viewer["boardsRoot"].as_str().unwrap_or("");
-        if !root.is_empty() { menu = menu.child(div().px_2().py_1().text_size(px(11.)).text_color(c("dim")).child(format!("Folder: {root}"))); }
+        if !root.is_empty() { menu = menu.child(div().px_2().py_1().text_size(px(11.)).text_color(c("dim")).child(tf("gpui.c.boards.folder", &[("folder", root.into())]))); }
         for (i, b) in rows.iter().enumerate() {
             let v = b.value.clone();
             menu = menu.child(div().id(SharedString::from(format!("board-opt-{i}"))).flex().flex_col().gap(px(2.)).px(px(10.)).py(px(6.)).cursor_pointer()
                 .when(b.on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
                 .child(div().text_color(c("text")).child(stem(&b.value)))
                 .child(div().text_size(px(11.)).text_color(c("dim")).child(b.value.clone()))
-                .when(b.default, |d| d.child(div().text_size(px(11.)).text_color(c("accent")).child("Default board")))
+                .when(b.default, |d| d.child(div().text_size(px(11.)).text_color(c("accent")).child(trs("Default board"))))
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, v.clone(), cx))));
         }
-        if rows.is_empty() { menu = menu.child(div().px_2().py_1().text_color(c("dim")).child("No matching boards")); }
+        if rows.is_empty() { menu = menu.child(div().px_2().py_1().text_color(c("dim")).child(trs("No matching boards"))); }
         wrap = wrap.child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(menu)).with_priority(3));
     }
     Some(wrap.into_any_element())

@@ -26,15 +26,15 @@ pub struct Images { s: Arc<(Mutex<State>, Condvar)> }
 pub fn sniff(b: &[u8]) -> Option<ImageFormat> {
     if b.starts_with(&[0x89, b'P', b'N', b'G']) { Some(ImageFormat::Png) }
     else if b.starts_with(&[0xFF, 0xD8, 0xFF]) { Some(ImageFormat::Jpeg) }
-    else if b.starts_with(b"GIF8") { Some(ImageFormat::Gif) }
-    else if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" { Some(ImageFormat::Webp) }
+    /* i18n-ok: file signatures and an HTTP request */ else if b.starts_with(b"GIF8") { Some(ImageFormat::Gif) }
+    /* i18n-ok: file signatures and an HTTP request */ else if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" { Some(ImageFormat::Webp) }
     else { None }
 }
 
 /// A GET request for a path on the hub, with the token appended to the query.
 pub fn request(t: &Target, url: &str) -> String {
     let sep = if url.contains('?') { '&' } else { '?' };
-    format!("GET {url}{sep}token={} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", t.token, t.addr)
+    /* i18n-ok: file signatures and an HTTP request */ format!("GET {url}{sep}token={} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", t.token, t.addr)
 }
 
 /// Split an HTTP response into (status, body); None when it is not a complete head.
@@ -74,7 +74,7 @@ pub fn dims(b: &[u8]) -> Option<(u32, u32)> {
     let be = |i: usize| b.get(i..i + 4).map(|x| u32::from_be_bytes([x[0], x[1], x[2], x[3]]));
     let le16 = |i: usize| b.get(i..i + 2).map(|x| u16::from_le_bytes([x[0], x[1]]) as u32);
     let r = if b.starts_with(&[0x89, b'P', b'N', b'G']) { (be(16)?, be(20)?) }
-    else if b.starts_with(b"GIF8") { (le16(6)?, le16(8)?) }
+    /* i18n-ok: file signatures and an HTTP request */ else if b.starts_with(b"GIF8") { (le16(6)?, le16(8)?) }
     else if b.starts_with(&[0xFF, 0xD8]) {
         let mut i = 2;
         loop {
@@ -86,7 +86,7 @@ pub fn dims(b: &[u8]) -> Option<(u32, u32)> {
             i += ((*b.get(i)? as usize) << 8) | *b.get(i + 1)? as usize;
         }
     }
-    else if b.starts_with(b"RIFF") && b.get(8..12) == Some(b"WEBP") {
+    /* i18n-ok: file signatures and an HTTP request */ else if b.starts_with(b"RIFF") && b.get(8..12) == Some(b"WEBP") {
         match b.get(12..16)? {
             b"VP8X" => { let g = |i: usize| -> Option<u32> { Some(*b.get(i)? as u32 | (*b.get(i + 1)? as u32) << 8 | (*b.get(i + 2)? as u32) << 16) }; (g(24)? + 1, g(27)? + 1) }
             b"VP8L" => { let v = u32::from_le_bytes(b.get(21..25)?.try_into().ok()?); ((v & 0x3FFF) + 1, ((v >> 14) & 0x3FFF) + 1) }
@@ -163,7 +163,7 @@ pub fn lightbox(cx: &mut Context<crate::Backplane>, shown: Option<&(Arc<gpui::Im
     Some(div().id("lightbox").absolute().inset_0().occlude().flex().flex_col().items_center().justify_center().gap_2().p_6().bg(gpui::hsla(0., 0., 0., 0.88)).cursor_pointer()
         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| { this.screens.lightbox = None; cx.notify(); }))
         .child(gpui::img(ImageSource::Image(img.clone())).flex_1().min_h_0().max_w_full().object_fit(ObjectFit::Contain))
-        .child(div().text_size(px(12.)).text_color(gpui::rgb(0xc8ccd4)).child(format!("{name} · click or Esc to close"))).into_any_element())
+        .child(div().text_size(px(12.)).text_color(gpui::rgb(0xc8ccd4)).child(crate::i18n::tf("gpui.c.image.close", &[("name", name.as_str().into())]))).into_any_element())
 }
 
 #[cfg(test)]

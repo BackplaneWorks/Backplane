@@ -23,7 +23,7 @@ pub struct Projects {
 }
 
 /// What Edit puts in the composer: `/intent` and the goal and notes (the hub's `intent_edit`; its Send saves them), the template for none.
-pub fn intent_draft(intent: &str) -> String { format!("/intent\n{}", if intent.trim().is_empty() { "# Goal\n\n# Parts\n\n# Notes\n" } else { intent }) }
+/* i18n-ok: the intent file's headings, sent to the hub */ pub fn intent_draft(intent: &str) -> String { format!("/intent\n{}", if intent.trim().is_empty() { "# Goal\n\n# Parts\n\n# Notes\n" } else { intent }) }
 
 /// What the hub said of the project on show (asked when its page opens; an answer for another project is dropped).
 #[derive(Default)]
@@ -81,7 +81,7 @@ pub fn folders(data: &Value) -> Option<Folders> {
     Some(Folders { text: s("text"), hint: s("hint"), error: s("error"), items })
 }
 pub fn query(data: &Value) -> String { string(&data["search"], "query") }
-pub fn hint(data: &Value) -> String { let h = string(&data["search"], "hint"); if h.is_empty() { "Search projects".into() } else { h } }
+/* i18n-ok: the hint, drawn through trs by the composer */ pub fn hint(data: &Value) -> String { let h = string(&data["search"], "hint"); if h.is_empty() { "Search projects".into() } else { h } }
 
 pub fn search_cmd(text: &str) -> Command { Command::Action("proj-find-q".into(), text.to_string()) }
 pub fn go_cmd() -> Command { Command::Action("proj-go".into(), String::new()) }
@@ -182,15 +182,15 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
         let (a, v) = (it.action.clone(), it.value.clone()); let live = !a.is_empty();
         let icon = match it.kind.as_str() { "up" => "↰", "dir" => "▸", "add" => "+", _ => " " };
         list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().gap_2().px_2().py_1().text_size(px(12.)).text_color(c(if live { "text" } else { "faint" })).when(live, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
-            .child(div().w(px(14.)).text_color(c("dim")).child(icon)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(it.label.clone()))
+            .child(div().w(px(14.)).text_color(c("dim")).child(icon)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(crate::i18n::trs(&it.label)))
             .on_click(cx.listener(move |this, _, _, cx| { if !a.is_empty() { if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); } cx.notify(); })));
     }
     Some(div().id("folders-q").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().items_start().p_4().gap_3()
-        .child(div().font_weight(FontWeight::BOLD).child("Add project"))
+        .child(div().font_weight(FontWeight::BOLD).child(crate::i18n::trs("Add project")))
         .children(p.folder.clone().map(|i| div().w_full().max_w(px(640.)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(i)))
-        .when(!f.error.is_empty(), |d| d.child(div().text_size(px(12.)).text_color(c("bad")).child(f.error.clone())))
+        .when(!f.error.is_empty(), |d| d.child(div().text_size(px(12.)).text_color(c("bad")).child(crate::i18n::trs(&f.error))))
         .child(list)
-        .child(crate::ui::with_rect(div().id("folders-cancel"), || "folders-cancel".to_string()).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).child("Cancel").on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close_cmd()); cx.notify(); })))
+        .child(crate::ui::with_rect(div().id("folders-cancel"), || "folders-cancel".to_string()).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).child(crate::i18n::trs("Cancel")).on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close_cmd()); cx.notify(); })))
         .into_any_element())
 }
 
@@ -215,8 +215,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
     if hp == pid {
         let root = string(&snap, "root"); let root = if root.is_empty() { string(p, "root") } else { root };
         let intent = { let i = string(&card, "intent"); if i.is_empty() && snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == "intent")) { string(&snap, "intent") } else { i } };
-        out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child("GOAL & NOTES").into_any_element());
-        if intent.trim().is_empty() { out.push(div().text_color(c("dim")).child("No goal yet. Ask an agent to write what this project is for, or edit .backplane/intent.md.").into_any_element()); }
+        out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::trs("GOAL & NOTES")).into_any_element());
+        if intent.trim().is_empty() { out.push(div().text_color(c("dim")).child(crate::i18n::trs("No goal yet. Ask an agent to write what this project is for, or edit .backplane/intent.md.")).into_any_element()); }
         let mut col = div().id("home-intent").flex().flex_col().gap_1().text_size(px(13.));
         for (k, t) in intent_lines(&intent) {
             col = col.child(match k { "h" => div().pt_1().font_weight(FontWeight::BOLD).child(t), "li" => div().flex().gap_2().child(div().text_color(c("dim")).child("•")).child(div().flex_1().min_w_0().child(t)), _ => div().child(t) });
@@ -225,13 +225,13 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
         // Edit: the project's top thread opens with the goal and notes in its composer as `/intent ...`; Send saves them (0.14 Intent's Edit)
         if let Some(top) = threads.first().map(|t| string(t, "id")) {
             let text = intent_draft(&intent);
-            ctl.push(crate::script::CtlEntry { id: "home-intent-edit".into(), label: "Edit goal & notes".into(), ctl: Ctl::Select(top.clone()) });
-            out.push(crate::ui::with_rect(div().id("home-intent-edit"), || "ui:Edit goal & notes".to_string()).px_3().py_1().w(px(160.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child("Edit goal & notes")
+            /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(crate::script::CtlEntry { id: "home-intent-edit".into(), label: "Edit goal & notes".into(), ctl: Ctl::Select(top.clone()) });
+            /* i18n-ok: ctl labels and ui: ids are what drivers press */ out.push(crate::ui::with_rect(div().id("home-intent-edit"), || "ui:Edit goal & notes".to_string()).px_3().py_1().w(px(160.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Edit goal & notes"))
                 .on_click(cx.listener(move |this, _, window, cx| { let raw = top.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.intent_edit = Some((raw, text.clone())); this.select(top.clone(), window, cx); })).into_any_element());
         }
         let parts: Vec<&Value> = card["parts"].as_array().into_iter().flatten().collect();
         if !parts.is_empty() {
-            out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(format!("TO ORDER ({})", parts.len())).into_any_element());
+            out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.projects.to.order", &[("n", parts.len().into())])).into_any_element());
             for (i, x) in parts.iter().enumerate() {
                 out.push(div().id(SharedString::from(format!("home-part-{i}"))).flex().gap_2().px_2().h(px(26.)).items_center().border_b_1().border_color(c("line")).text_size(px(12.))
                     .child(div().flex_1().child(string(x, "name"))).child(div().text_color(c("dim")).child(string(x, "kind"))).child(div().text_color(c("faint")).child(string(x, "path"))).into_any_element());
@@ -239,16 +239,16 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
         }
         let bs = boards(&snap, &card, &root);
         if !bs.is_empty() {
-            out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(format!("BOARDS ({})", bs.len())).into_any_element());
+            out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.projects.boards", &[("n", bs.len().into())])).into_any_element());
             for (i, b) in bs.iter().enumerate() { out.push(div().id(SharedString::from(format!("home-board-{i}"))).px_2().h(px(26.)).flex().items_center().border_b_1().border_color(c("line")).text_size(px(12.)).child(b.clone()).into_any_element()); }
         }
     }
     let pid2 = pid.to_string();
-    ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
-    out.push(div().id("page-new-thread").px_3().py_1().w(px(140.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child("New thread")
+    /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
+    out.push(div().id("page-new-thread").px_3().py_1().w(px(140.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("New thread"))
         .on_click(cx.listener(move |this, _, _, cx| { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid2.clone())); cx.notify(); })).into_any_element());
-    out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(format!("THREADS ({})", threads.len())).into_any_element());
-    if threads.is_empty() { out.push(div().text_color(c("dim")).child("No threads yet.").into_any_element()); }
+    out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.projects.threads", &[("n", threads.len().into())])).into_any_element());
+    if threads.is_empty() { out.push(div().text_color(c("dim")).child(crate::i18n::trs("No threads yet.")).into_any_element()); }
     for t in threads {
         let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or(&id).to_string();
         ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
@@ -261,10 +261,10 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
 
 /// The controls these draw, for the harness.
 pub fn controls(data: &Value) -> Vec<(String, String, Ctl)> {
-    let mut out = vec![("ui:Add project".to_string(), "Add project".to_string(), Ctl::Node("picker-open".into(), String::new()))];
+    /* i18n-ok: ctl labels and ui: ids are what drivers press */ let mut out = vec![("ui:Add project".to_string(), "Add project".to_string(), Ctl::Node("picker-open".into(), String::new()))];
     if let Some(f) = folders(data) {
         for (i, it) in f.items.iter().enumerate() { if !it.action.is_empty() { out.push((format!("folder-{i}"), it.label.clone(), Ctl::Node(it.action.clone(), it.value.clone()))); } }
-        out.push(("folders-cancel".into(), "Cancel".into(), Ctl::Node("proj-close".into(), String::new())));
+        /* i18n-ok: ctl labels and ui: ids are what drivers press */ out.push(("folders-cancel".into(), "Cancel".into(), Ctl::Node("proj-close".into(), String::new())));
     }
     out
 }

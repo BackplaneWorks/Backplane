@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 /// What an unpacked release has beside its client: the guard, the hub and the commit it was built from.
-pub const RELEASE_FILES: [&str; 3] = ["backplane.exe", "backplane-hub.exe", "COMMIT"];
+/* i18n-ok: file and env names */ pub const RELEASE_FILES: [&str; 3] = ["backplane.exe", "backplane-hub.exe", "COMMIT"];
 
 /// Whether to ask: a client started with no `--url` (`pending`), not already run by a guard, not pointed at a hub by `BACKPLANE_HUB_BIN`
 /// (a test or a dev run), from a folder that is an unpacked release (`has` says which files are beside it), and not already in `<prefix>/builds`.
@@ -19,7 +19,7 @@ pub fn install_arg(args: &[String]) -> Option<Option<PathBuf>> {
 }
 
 /// The tag of this build's folder: `v` and the version release.yml stamped into Cargo.toml (the updater names its builds the same way).
-pub fn tag() -> String { format!("v{}", env!("CARGO_PKG_VERSION")) }
+/* i18n-ok: file and env names */ pub fn tag() -> String { format!("v{}", env!("CARGO_PKG_VERSION")) }
 
 /// Lays the release in `src` out under `prefix` and answers the installed client. The build is copied beside `builds/<tag>` and renamed into
 /// place (whole or not at all); an existing `builds/<tag>` is kept. The guard is replaced by rename (Windows lets a running program be renamed,
@@ -40,7 +40,7 @@ pub fn install(src: &Path, prefix: &Path, tag: &str) -> std::io::Result<PathBuf>
     std::fs::copy(dest.join("backplane.exe"), &fresh)?;
     if guard.exists() { let old = prefix.join("backplane.exe.old"); let _ = std::fs::remove_file(&old); std::fs::rename(&guard, &old)?; }
     std::fs::rename(&fresh, &guard)?;
-    let current = prefix.join("CURRENT");
+    /* i18n-ok: file and env names */ let current = prefix.join("CURRENT");
     if !current.is_file() { let t = prefix.join(".CURRENT.tmp"); std::fs::write(&t, format!("{tag}\n"))?; std::fs::rename(&t, &current)?; }
     Ok(dest.join("backplane-gpui.exe"))
 }
@@ -84,7 +84,7 @@ pub fn maybe_install(pending: bool) -> bool {
     if !ask(&prefix) { return false }
     let app = match install(dir, &prefix, &tag()) {
         Ok(a) => a,
-        Err(e) => { say(&format!("Backplane could not install to {}: {e}. It runs from here this time.", prefix.display())); return false }
+        Err(e) => { say(&crate::i18n::tf("gpui.install.failed", &[("dir", prefix.display().to_string().into()), ("why", e.to_string().into())])); return false }
     };
     shortcut(&prefix);
     use std::os::windows::process::CommandExt;
@@ -98,8 +98,8 @@ fn wide(s: &str) -> Vec<u16> { s.encode_utf16().chain(Some(0)).collect() }
 #[cfg(windows)]
 fn ask(prefix: &Path) -> bool {
     use windows_sys::Win32::UI::Controls::{TaskDialogIndirect, TASKDIALOGCONFIG, TASKDIALOG_BUTTON};
-    let (title, main, body) = (wide("Backplane"), wide(&format!("Install Backplane to {}?", prefix.display())), wide("Needed for updates. Not now runs it from this folder and asks again next time."));
-    let (b1, b2) = (wide("Install"), wide("Not now"));
+    let (title, main, body) = (wide("Backplane"), wide(&crate::i18n::tf("gpui.install.ask", &[("dir", prefix.display().to_string().into())])), wide(&crate::i18n::trs("Needed for updates. Not now runs it from this folder and asks again next time.")));
+    let (b1, b2) = (wide(&crate::i18n::trs("Install")), wide(&crate::i18n::trs("Not now")));
     let buttons = [TASKDIALOG_BUTTON { nButtonID: 100, pszButtonText: b1.as_ptr() }, TASKDIALOG_BUTTON { nButtonID: 101, pszButtonText: b2.as_ptr() }];
     let mut c: TASKDIALOGCONFIG = unsafe { std::mem::zeroed() };
     c.cbSize = std::mem::size_of::<TASKDIALOGCONFIG>() as u32;
@@ -121,9 +121,9 @@ fn say(text: &str) {
 #[cfg(windows)]
 fn shortcut(prefix: &Path) {
     let Some(appdata) = std::env::var_os("APPDATA") else { return };
-    let lnk = PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs\Backplane.lnk");
+    /* i18n-ok: file and env names */ let lnk = PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs\Backplane.lnk");
     let q = |p: &Path| p.display().to_string().replace('\'', "''");
-    let ps = format!("$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath = '{}'; $s.WorkingDirectory = '{}'; $s.WindowStyle = 7; $s.IconLocation = '{}'; $s.Description = 'Backplane'; $s.Save()",
+    /* i18n-ok: a PowerShell command */ let ps = format!("$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{}'); $s.TargetPath = '{}'; $s.WorkingDirectory = '{}'; $s.WindowStyle = 7; $s.IconLocation = '{}'; $s.Description = 'Backplane'; $s.Save()",
         q(&lnk), q(&prefix.join("backplane.exe")), q(prefix), q(&prefix.join("builds").join(tag()).join("backplane-gpui.exe")));
     use std::os::windows::process::CommandExt;
     let _ = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &ps]).creation_flags(0x0800_0000).status();

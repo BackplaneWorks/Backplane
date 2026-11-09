@@ -2,7 +2,7 @@
 //! only when the paper changed. Its key context, DrawPad, has the keyboard while it is open, so Ctrl+Z and Delete are the pad's and never the composer's
 //! (keys.rs also mutes every other shortcut there). Attach hands the picture to the same upload as a pasted image; Esc, Cancel or a press outside drops it.
 use super::{composer::{Composer, ComposerEvent}, pad::{self, Part, Tool}};
-use crate::{keys, script::{Ctl, CtlEntry}, theme, ui::with_rect, Backplane};
+use crate::{i18n::{tf, trs}, keys, script::{Ctl, CtlEntry}, theme, ui::with_rect, Backplane};
 use gpui::{actions, prelude::*, *};
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
@@ -35,9 +35,9 @@ fn cursor_for(tool: Tool, over: Option<Part>) -> CursorStyle {
 /// The words under the title, for the tool in hand.
 fn hint(tool: Tool, undo: &str, delete: &str) -> String {
     match tool {
-        Tool::Pen => format!("Drag to draw · {delete} clears · {undo} undoes"),
-        Tool::Boxes => format!("Drag to draw a box · drag its middle to move it, a side to resize · click a side to type its length · {delete} removes · {undo} undoes"),
-        Tool::Eraser => format!("Drag over what to erase · {undo} undoes"),
+        Tool::Pen => tf("gpui.c.pad.hint.pen", &[("delete", delete.into()), ("undo", undo.into())]),
+        Tool::Boxes => tf("gpui.c.pad.hint.box", &[("delete", delete.into()), ("undo", undo.into())]),
+        Tool::Eraser => tf("gpui.c.pad.hint.eraser", &[("undo", undo.into())]),
     }
 }
 
@@ -46,7 +46,7 @@ impl Backplane {
     pub(crate) fn pad_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.screens.pad.is_some() { return; }
         if let Err(e) = self.screens.attacher.ready(&self.selected) { self.error = e; cx.notify(); return; }
-        let length = cx.new(|cx| { let mut c = Composer::with_context(cx, "PadLength"); c.set_placeholder("length, e.g. 40 mm"); c });
+        let length = cx.new(|cx| { let mut c = Composer::with_context(cx, "PadLength"); c.set_placeholder(&trs("length, e.g. 40 mm")); c });
         let submit = cx.subscribe_in(&length, window, |this, _, ev: &ComposerEvent, window, cx| if matches!(ev, ComposerEvent::Submit) { this.pad_commit_length(window, cx); });
         let focus = cx.focus_handle();
         focus.focus(window);
@@ -90,7 +90,7 @@ impl Backplane {
     }
 }
 
-fn tool_button(cx: &mut Context<Backplane>, light: bool, id: &'static str, rect: &'static str, label: &'static str, tool: Tool, on: bool) -> impl IntoElement {
+fn tool_button(cx: &mut Context<Backplane>, light: bool, id: &'static str, rect: &'static str, label: String, tool: Tool, on: bool) -> impl IntoElement {
     let c = |n: &str| theme::color(light, n);
     with_rect(div().id(id), || rect.to_string()).h(px(26.)).px_3().flex().items_center().border_1().text_size(px(12.)).cursor_pointer()
         .border_color(if on { c("accent") } else { c("line") }).bg(if on { c("accent") } else { c("panel") }).text_color(if on { c("on-accent") } else { c("text") }).child(label)
@@ -112,10 +112,10 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
     let view = window.viewport_size();
     let (pw, ph) = paper_size(f32::from(view.width), f32::from(view.height));
     let (tool, picked_color, empty) = (p.pad.tool, p.pad.next % pad::COLORS.len(), p.pad.is_empty());
-    for (id, label) in [("pad:paper", "Paper"), ("pad:pen", "Pen"), ("pad:box", "Box"), ("pad:eraser", "Eraser"), ("pad:cancel", "Cancel"), ("pad:attach", "Attach")] { ctl.push(CtlEntry { id: id.into(), label: label.into(), ctl: Ctl::Pad }); }
+    /* i18n-ok: the harness's control labels */ for (id, label) in [("pad:paper", "Paper"), ("pad:pen", "Pen"), ("pad:box", "Box"), ("pad:eraser", "Eraser"), ("pad:cancel", "Cancel"), ("pad:attach", "Attach")] { ctl.push(CtlEntry { id: id.into(), label: label.into(), ctl: Ctl::Pad }); }
     let mut swatches = div().flex().items_center().gap_1();
     for (i, color) in pad::COLORS.iter().enumerate() {
-        ctl.push(CtlEntry { id: format!("pad:color:{i}"), label: format!("Colour {}", i + 1), ctl: Ctl::Pad });
+        /* i18n-ok: a control label */ ctl.push(CtlEntry { id: format!("pad:color:{i}"), label: format!("Colour {}", i + 1), ctl: Ctl::Pad });
         swatches = swatches.child(with_rect(div().id(("pad-color", i)), || format!("pad:color:{i}")).size(px(22.)).border_2().border_color(if i == picked_color { c("text") } else { c("line") }).bg(rgb(*color)).cursor_pointer()
             .on_click(cx.listener(move |this, _, window, cx| { this.pad_commit_length(window, cx); this.pad_with(cx, |p| p.pad.set_color(i)); })));
     }
@@ -132,12 +132,12 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
         .children(p.image.clone().map(|i| img(i).size_full().object_fit(ObjectFit::Fill)));
     if let Some((x, y)) = p.pad.length_at() {
         let k = pw / pad::W as f32;
-        ctl.push(CtlEntry { id: "pad:length".into(), label: "Length".into(), ctl: Ctl::Pad });
+        /* i18n-ok: a control label */ ctl.push(CtlEntry { id: "pad:length".into(), label: "Length".into(), ctl: Ctl::Pad });
         paper = paper.child(with_rect(div().id("pad-length"), || "pad:length".to_string()).absolute().left(px((x * k - 70.).clamp(0., pw - 140.))).top(px((y * k - 14.).clamp(0., ph - 28.))).w(px(140.)).px_2().py_1().border_1().border_color(c("accent")).bg(c("view")).text_size(px(13.)).text_color(c("text"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(p.length.clone()));
     }
     let hint = hint(tool, &keys::hint(l, "pad-undo"), &keys::hint(l, "pad-delete"));
-    let foot_button = |id: &'static str, rect: &'static str, label: &'static str| with_rect(div().id(id), || rect.to_string()).h(px(26.)).px_3().flex().items_center().text_size(px(12.)).child(label);
+    let foot_button = |id: &'static str, rect: &'static str, label: String| with_rect(div().id(id), || rect.to_string()).h(px(26.)).px_3().flex().items_center().text_size(px(12.)).child(label);
     Some(div().id("pad-back").key_context("DrawPad").track_focus(&p.focus).absolute().inset_0().occlude().flex().items_center().justify_center().p_4().bg(hsla(0., 0., 0., 0.6))
         .on_action(cx.listener(|this, _: &Undo, _, cx| this.pad_with(cx, |p| p.pad.undo())))
         .on_action(cx.listener(|this, _: &Delete, _, cx| this.pad_with(cx, |p| p.pad.delete())))
@@ -155,16 +155,16 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
         .child(div().id("pad-box").w(px(pw + 26.)).flex_shrink_0().flex().flex_col().gap_2().p_3().bg(c("panel")).border_1().border_color(c("line")).text_color(c("text"))
             // a press anywhere on the box is not a press outside it, and ends a length being typed
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.pad_commit_length(window, cx); cx.stop_propagation(); }))
-            .child(div().flex().items_baseline().gap_3().child(div().font_weight(FontWeight::BOLD).child("Draw")).child(div().flex_1().min_w_0().text_size(px(12.)).text_color(c("dim")).child(hint)))
+            .child(div().flex().items_baseline().gap_3().child(div().font_weight(FontWeight::BOLD).child(trs("Draw"))).child(div().flex_1().min_w_0().text_size(px(12.)).text_color(c("dim")).child(hint)))
             .child(div().flex().items_center().gap_2()
-                .child(tool_button(cx, light, "pad-pen", "pad:pen", "Pen", Tool::Pen, tool == Tool::Pen))
-                .child(tool_button(cx, light, "pad-box-tool", "pad:box", "Box", Tool::Boxes, tool == Tool::Boxes))
-                .child(tool_button(cx, light, "pad-eraser", "pad:eraser", "Eraser", Tool::Eraser, tool == Tool::Eraser))
+                .child(tool_button(cx, light, "pad-pen", "pad:pen", trs("Pen"), Tool::Pen, tool == Tool::Pen))
+                .child(tool_button(cx, light, "pad-box-tool", "pad:box", trs("Box"), Tool::Boxes, tool == Tool::Boxes))
+                .child(tool_button(cx, light, "pad-eraser", "pad:eraser", trs("Eraser"), Tool::Eraser, tool == Tool::Eraser))
                 .child(div().flex_1()).child(swatches))
             .child(paper)
             .child(div().flex().items_center().justify_end().gap_2()
-                .child(foot_button("pad-cancel", "pad:cancel", "Cancel").border_1().border_color(c("line")).cursor_pointer().on_click(cx.listener(|this, _, window, cx| { this.pad_close(window, cx); })))
-                .child(foot_button("pad-attach", "pad:attach", "Attach").bg(c("accent")).text_color(c("on-accent")).when(empty, |d| d.opacity(0.45)).when(!empty, |d| d.cursor_pointer()).on_click(cx.listener(|this, _, window, cx| this.pad_attach(window, cx))))))
+                .child(foot_button("pad-cancel", "pad:cancel", trs("Cancel")).border_1().border_color(c("line")).cursor_pointer().on_click(cx.listener(|this, _, window, cx| { this.pad_close(window, cx); })))
+                .child(foot_button("pad-attach", "pad:attach", trs("Attach")).bg(c("accent")).text_color(c("on-accent")).when(empty, |d| d.opacity(0.45)).when(!empty, |d| d.cursor_pointer()).on_click(cx.listener(|this, _, window, cx| this.pad_attach(window, cx))))))
         .into_any_element())
 }
 

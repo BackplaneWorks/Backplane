@@ -1,0 +1,13 @@
+# Literals the i18n check (scripts/check-android-i18n.py) lets through: <literal><TAB># <reason>. Keep each reason honest and short.
+BACKPLANE	# the product name, a wordmark
+Backplane	# the product name
+Backplane ${s.optString("current")}	# the product name and its version number
+http://host:3787/pair#invite=…	# the shape of a pairing link, not words
+host:port	# the shape of an address, not words
+ABCD-2345	# the shape of a short code, not words
+working	# a Compose animation label (tooling only, never drawn)
+breath	# a Compose animation label (tooling only, never drawn)
+Ctrl	# the Ctrl key cap of the terminal keys, as on the keyboard
+devices	# the Devices page rows' test tag prefix (PageRows tag)
+machines	# the Machines page rows' test tag prefix (PageRows tag)
+voice	# the Voice page rows' test tag prefix (PageRows tag)

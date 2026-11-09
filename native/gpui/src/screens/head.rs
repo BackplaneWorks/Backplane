@@ -77,7 +77,8 @@ pub fn strip_width(items: &[Item], shape: &mut dyn FnMut(&str) -> f32) -> (f32, 
     for t in items {
         let g = group(&t.action); let sp = space(prev, g); prev = Some(g);
         let icon = if t.icon.is_empty() { 0. } else { ICON + ICON_GAP };
-        let w = if t.action == "fab-buy" { let (word, est) = split_buy(&t.label); 2. + PL + icon + shape(word) + if est.is_empty() { 0. } else { ICON_GAP + shape(est) } + PR } else { PL + icon + shape(&t.label) + PR };
+        let label = crate::i18n::trs(&t.label); // measured as drawn (button)
+        let w = if t.action == "fab-buy" { let (word, est) = split_buy(&label); 2. + PL + icon + shape(word) + if est.is_empty() { 0. } else { ICON_GAP + shape(est) } + PR } else { PL + icon + shape(&label) + PR };
         full += sp + w;
         icons += sp + if can_fold(t) { PL + ICON + PL } else { w };
     }
@@ -93,7 +94,7 @@ impl Head {
             f32::from(window.text_system().shape_line(SharedString::from(text.to_string()), px(size), &[run], None).width)
         };
         let now = { let mut s = self.shaped.borrow_mut(); if s.0 != title || (s.1 <= 0. && !title.is_empty()) { *s = (title.to_string(), shape(window, title, title_size, FontWeight::BOLD)); } s.1 };
-        let key = items.iter().map(|t| format!("{}\u{1f}{}\u{1f}{}", t.action, t.icon, t.label)).collect::<Vec<_>>().join("\u{1e}") + font;
+        let key = items.iter().map(|t| format!("{}\u{1f}{}\u{1f}{}", t.action, t.icon, t.label)).collect::<Vec<_>>().join("\u{1e}") + font + crate::i18n::tag();
         let (full, _) = { let mut s = self.strip.borrow_mut(); if s.0 != key { let w = strip_width(items, &mut |t| shape(window, t, TEXT, FontWeight::NORMAL)); *s = (key, w); } s.1 };
         let one = one_row(win_w, left_now(self.left.get(), self.title.get(), now), self.state.get(), full, self.right.get());
         Layout { one, icons: !one && icons_only(self.row.get(), self.state.get(), full) }
@@ -111,19 +112,25 @@ pub fn measure(cx: &mut Context<Backplane>, cell: Rc<Cell<f32>>) -> impl IntoEle
 
 /// The words a phase can show, the longest of which the state keeps room for, so a change of word moves nothing after it.
 const PHASES: [&str; 9] = ["active", "blocked", "failed", "finished", "inactive", "settled", "stalled", "stopped", "waiting"];
+/// `widest_phase` in the language in force: the widest of the words as drawn (a CJK character counts twice), so the room fits the word shown.
+pub fn shown_room(shown: &str) -> String {
+    let w = |s: &str| s.chars().map(|c| if (c as u32) >= 0x1100 { 2 } else { 1 }).sum::<usize>();
+    PHASES.iter().map(|p| crate::i18n::trs(p)).chain(std::iter::once(shown.to_string())).max_by_key(|s| w(s)).unwrap_or_default()
+}
 pub fn widest_phase(now: &str) -> &str { PHASES.iter().copied().chain(std::iter::once(now)).max_by_key(|w| w.chars().count()).unwrap_or(now) }
 
 /// The thread's state ("STATE ● waiting", its word's room kept) and its cells, measured.
 pub fn state(cx: &mut Context<Backplane>, light: bool, thread: &Value, cells: Vec<AnyElement>, cell: Rc<Cell<f32>>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let word = string(thread, "phase").split(':').next().unwrap_or("").trim().to_lowercase();
-    let room = widest_phase(&word).to_string();
+    let shown = crate::i18n::trs(&word);
+    let room = shown_room(&shown);
     div().id("thread-state").relative().flex_shrink_0().h_full().flex().items_center().child(measure(cx, cell))
-        .child(div().px_3().flex().items_center().gap_2().text_size(px(TEXT)).child(div().text_color(c("faint")).child("STATE"))
+        .child(div().px_3().flex().items_center().gap_2().text_size(px(TEXT)).child(div().text_color(c("faint")).child(crate::i18n::trs("STATE")))
             // the thread's dot in the sidebar rows' 0.14 colours
             .child(super::siderow::dot(light, &serde_json::json!({"status": word, "state": thread["state"]})))
             // two lines in one: the widest word sets the width (with no height), the word itself shows
-            .child(div().flex().flex_col().child(div().h(px(0.)).overflow_hidden().child(room)).child(div().whitespace_nowrap().child(word))))
+            .child(div().flex().flex_col().child(div().h(px(0.)).overflow_hidden().child(room)).child(div().whitespace_nowrap().child(shown))))
         .children(cells).into_any_element()
 }
 
@@ -132,7 +139,8 @@ fn button(cx: &mut Context<Backplane>, light: bool, i: usize, t: &Item, fold: bo
     let (a, v) = match press(t) { Command::Action(a, v) => (a, v), _ => (String::new(), String::new()) };
     let rect = format!("tool:{a}"); // a header tool reports its rectangle (tool:<action>), so a run can press Buy it as a person would
     let buy = t.action == "fab-buy";
-    let (word, est) = if buy { split_buy(&t.label) } else { (t.label.as_str(), "") };
+    let label = crate::i18n::trs(&t.label);
+    let (word, est) = if buy { split_buy(&label) } else { (label.as_str(), "") };
     let (fg, ic) = if t.danger { ("bad", "bad") } else if buy { ("accent", "accent") } else if t.on { ("text", "accent") } else { ("dim", "dim") };
     let d = crate::ui::with_rect(div().id(SharedString::from(format!("tool-{i}"))), move || rect).h(px(BTN_H)).flex().items_center().gap(px(ICON_GAP)).pl(px(PL)).pr(px(if fold { PL } else { PR }))
         .text_size(px(TEXT)).whitespace_nowrap().cursor_pointer().text_color(c(fg)).hover(|s| s.bg(c("raise")).text_color(c(if t.danger { "bad" } else if buy { "accent" } else { "text" })))
@@ -155,7 +163,8 @@ pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, local: &c
         let g = group(&t.action); let sp = space(prev, g); prev = Some(g);
         let fold = icons && can_fold(&t);
         // folded, the tooltip leads with the word the button no longer shows
-        let tip = if t.tip.is_empty() { t.label.clone() } else if fold { format!("{}: {}", t.label, t.tip) } else { t.tip.clone() };
+        let (label, tipw) = (crate::i18n::trs(&t.label), crate::i18n::trs(&t.tip));
+        /* i18n-ok: a label and its tip, both through trs */ let tip = if t.tip.is_empty() { label } else if fold { format!("{label}: {tipw}") } else { tipw };
         row = row.child(button(cx, light, i, &t, fold, (tip, k)).ml(px(sp)));
     }
     row.into_any_element()
@@ -187,6 +196,8 @@ mod tests {
         assert_eq!(left_now(400., 150., 260.), 510.); assert_eq!(left_now(0., 0., 260.), 0.);
     }
     #[test] fn the_state_keeps_room_for_its_widest_word() {
+        assert_eq!(shown_room("idle"), widest_phase("idle"), "in English the room is the widest phase");
+        crate::i18n::with_lang("ja", || { let r = shown_room(&crate::i18n::trs("waiting")); assert!(PHASES.iter().any(|p| crate::i18n::trs(p) == r), "{r}"); assert!(!r.is_ascii(), "{r}"); });
         assert_eq!(widest_phase("idle").chars().count(), 8); assert_eq!(widest_phase("a-much-longer-word"), "a-much-longer-word");
     }
     #[test] fn tools_fall_in_four_groups_and_buy_it_splits_at_its_first_dot() {

@@ -3,7 +3,7 @@
 //! the hub's rows; every press is the view action the row names. The board, schematic and 3D pages draw plot chunks
 //! (screens::plot, next). Pure parsing below, tested; the element code only lays the rows out.
 use super::{md, timeline::{self, Reg}};
-use crate::{hub::Command, string, theme, Backplane};
+use crate::{hub::Command, i18n::{tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
@@ -49,10 +49,10 @@ pub fn kicad_open() -> Command { Command::Action("kicad-open".into(), String::ne
 /// The button's words. KiCad opens where the design is, on the hub's own machine: with a hub on another machine the button says whose screen.
 pub fn kicad_open_label(hub_addr: Option<&str>, thread_machine: Option<&str>) -> String {
     // a thread of another machine (its mark names it) opens there, whichever hub the window is on
-    if let Some(m) = thread_machine.filter(|m| !m.is_empty()) { return format!("Open in KiCad on {m}") }
+    if let Some(m) = thread_machine.filter(|m| !m.is_empty()) { return tf("gpui.c.kicad.open.on", &[("machine", m.into())]) }
     match hub_addr.map(|a| a.rsplit_once(':').map_or(a, |(h, _)| h)) {
-        Some(h) if !h.is_empty() && !matches!(h, "127.0.0.1" | "localhost" | "[::1]") => format!("Open in KiCad on {}", h.split('.').next().unwrap_or(h)),
-        _ => "Open in KiCad".into(),
+        Some(h) if !h.is_empty() && !matches!(h, "127.0.0.1" | "localhost" | "[::1]") => tf("gpui.c.kicad.open.on", &[("machine", h.split('.').next().unwrap_or(h).into())]),
+        _ => trs("Open in KiCad"),
     }
 }
 pub fn has_design(viewer: &Value) -> bool { tabs(viewer).iter().any(|t| matches!(t.value.as_str(), "board" | "schematic")) }
@@ -133,10 +133,10 @@ fn mech_chrome(cx: &mut Context<Backplane>, light: bool, viewer: &Value, key_emp
     let mut row = div().flex().flex_wrap().items_center().gap_2();
     for (i, p) in parts.iter().enumerate() { row = row.child(btn(cx, light, format!("mech-part-{i}"), p.label.clone(), p.on, Command::Action("mech-part".into(), p.value.clone()))); }
     // (no Renders button: the renders page is not drawn here yet, and an offered button must lead somewhere)
-    row = row.child(btn(cx, light, "mech-refresh".into(), "Refresh".into(), false, Command::Action("mech-refresh".into(), String::new())));
+    row = row.child(btn(cx, light, "mech-refresh".into(), trs("Refresh"), false, Command::Action("mech-refresh".into(), String::new())));
     // the bar: the parts, the pane's controls at the end of its first line (the parts wrap under them); what the page says under the bar
     let bar = bar_wrap(light).flex_nowrap().items_start().child(div().flex_1().min_w_0().child(row)).child(actions);
-    div().flex().flex_col().child(bar).children(say.map(|s| div().px_3().py_2().text_size(px(12.)).text_color(c("dim")).child(s))).into_any_element()
+    div().flex().flex_col().child(bar).children(say.map(|s| div().px_3().py_2().text_size(px(12.)).text_color(c("dim")).child(trs(&s)))).into_any_element()
 }
 
 /// A row's icon by what it opens as.
@@ -147,13 +147,13 @@ pub fn file_icon(kind: &str) -> &'static str {
 pub fn file_listed_only(kind: &str) -> bool { !matches!(kind, "folder" | "board" | "schematic" | "3d" | "image" | "pdf" | "text") }
 
 /// diff.revert.confirm (i18n/en.msg)
-const REVERT_ASK: &str = "Put the files back as they were when this thread began? Every change shown below is undone, committed ones and new files too. Commits stay in git.";
+/* i18n-ok: drawn through trs */ const REVERT_ASK: &str = "Put the files back as they were when this thread began? Every change shown below is undone, committed ones and new files too. Commits stay in git.";
 
 /// The Diff page's buttons as the harness's controls: (id, label, action, value); none while Diff is not on show.
 pub fn diff_controls(diff: &Value) -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
     if !diff.is_object() { return vec![] }
-    let mut v = vec![("git-commit_push", "Commit", "git", "commit_push"), ("git-commit_push_pr", "PR", "git", "commit_push_pr"), ("revert-ask", "Revert", "revert", "ask")];
-    if diff["reverting"] == true { v.push(("revert-confirm", "Revert", "revert", "confirm")); v.push(("revert-cancel", "Cancel", "revert-no", "")); }
+    /* i18n-ok: the harness's control labels (ctl entries the e2e drivers press) */ let mut v = vec![("git-commit_push", "Commit", "git", "commit_push"), ("git-commit_push_pr", "PR", "git", "commit_push_pr"), ("revert-ask", "Revert", "revert", "ask")];
+    /* i18n-ok: ctl labels */ if diff["reverting"] == true { v.push(("revert-confirm", "Revert", "revert", "confirm")); v.push(("revert-cancel", "Cancel", "revert-no", "")); }
     v
 }
 
@@ -171,7 +171,7 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
             .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
     }
     if has_design(viewer) { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open())); }
-    row.child(div().id("viewer-close").size(px(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip("Close the viewer", "", light))
+    row.child(div().id("viewer-close").size(px(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
         .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
         .into_any_element()
 }
@@ -199,15 +199,15 @@ fn status_row(light: bool, say: &str, actions: Option<AnyElement>) -> AnyElement
 fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().text_size(px(12.));
-    col = col.child(bar_wrap(light).child(div().flex_1().min_w(px(180.)).text_color(c("dim")).child(string(diff, "summary")))
-        .children([("Commit", "commit_push"), ("PR", "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l.to_string(), false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>())
-        .child(btn(cx, light, "revert-ask".into(), "Revert".into(), diff["reverting"] == true, Command::Action("revert".into(), "ask".into()))).child(actions));
+    col = col.child(bar_wrap(light).child(div().flex_1().min_w(px(180.)).text_color(c("dim")).child(trs(&string(diff, "summary"))))
+        .children([(trs("Commit"), "commit_push"), ("PR".to_string(), "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l, false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>())
+        .child(btn(cx, light, "revert-ask".into(), trs("Revert"), diff["reverting"] == true, Command::Action("revert".into(), "ask".into()))).child(actions));
     // Revert asks first (Ui.revert): the diff stays on show while the person decides what to discard
     if diff["reverting"] == true {
         col = col.child(div().flex().flex_col().gap_2().px_3().py_2().bg(c("raise")).border_y_1().border_color(c("bad"))
-            .child(div().text_color(c("text")).child(REVERT_ASK))
-            .child(div().flex().gap_2().child(btn(cx, light, "revert-confirm".into(), "Revert".into(), true, Command::Action("revert".into(), "confirm".into())))
-                .child(btn(cx, light, "revert-cancel".into(), "Cancel".into(), false, Command::Action("revert-no".into(), String::new())))));
+            .child(div().text_color(c("text")).child(trs(REVERT_ASK)))
+            .child(div().flex().gap_2().child(btn(cx, light, "revert-confirm".into(), trs("Revert"), true, Command::Action("revert".into(), "confirm".into())))
+                .child(btn(cx, light, "revert-cancel".into(), trs("Cancel"), false, Command::Action("revert-no".into(), String::new())))));
     }
     let mut budget = MAX_ROWS;
     for f in diff_files(diff) {
@@ -222,7 +222,7 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: An
             col = col.child(row.child(div().w(px(34.)).text_color(c("faint")).child(if l.k == 2 { l.old.clone() } else { l.new.clone() })).child(div().w(px(10.)).child(diff_sign(l.k))).child(div().flex_1().whitespace_nowrap().child(l.t.clone())));
         }
     }
-    if budget == 0 { col = col.child(div().px_3().py_1().text_color(c("dim")).child("… the rest of the diff is not shown")); }
+    if budget == 0 { col = col.child(div().px_3().py_1().text_color(c("dim")).child(trs("… the rest of the diff is not shown"))); }
     col.into_any_element()
 }
 
@@ -231,7 +231,7 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: An
 /// What the pane shows, for its header beside the machine it comes from (`badge::from_machine`): the board on show, a file opened from Files,
 /// the folder in Files, the Mech part, else the page's name.
 pub fn source(viewer: &Value, diff_on: bool) -> String {
-    if diff_on { return "Diff".into() }
+    if diff_on { return trs("Diff") }
     let open = viewer["open"].as_str().unwrap_or("");
     let on = boards(viewer).into_iter().find(|b| b.2).map(|b| b.1);
     // a key is `<n>|<root>|<file>`: a file opened from Files is its path
@@ -243,7 +243,7 @@ pub fn source(viewer: &Value, diff_on: bool) -> String {
         "mech" => Some(string(&viewer["mech"], "rel")).filter(|n| !n.is_empty()),
         _ => None,
     };
-    named.unwrap_or_else(|| tabs(viewer).into_iter().find(|t| t.on).map_or_else(|| open.to_string(), |t| t.label))
+    named.unwrap_or_else(|| tabs(viewer).into_iter().find(|t| t.on).map_or_else(|| open.to_string(), |t| trs(&t.label)))
 }
 pub fn boards(viewer: &Value) -> Vec<(String, String, bool)> {
     viewer["boards"].as_array().into_iter().flatten().map(|b| (string(b, "label"), string(b, "value"), b["on"].as_bool().unwrap_or(false))).collect()
@@ -254,14 +254,14 @@ fn plot_loading(cx: &mut Context<Backplane>, light: bool, slot: usize, viewer: &
     let c = |n: &str| theme::color(light, n);
     let mut col = div().size_full().flex().flex_col();
     // (as plot_pane lays it out: one bar, Boards/Layers/Fit then the pane's controls; the history bar goes under it, histbar::under)
-    let ghost = |label: &str| tall(div().px_2().text_size(px(12.)).border_1().border_color(c("line")).text_color(c("faint")).child(label.to_string()));
+    let ghost = |label: &str| tall(div().px_2().text_size(px(12.)).border_1().border_color(c("line")).text_color(c("faint")).child(trs(label)));
     let boards = if layers && slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None };
     if let Some(a) = actions { col = col.child(bar(light).children(boards).when(layers, |d| d.child(ghost("Layers")).child(ghost("Fit"))).child(div().flex_1()).child(a)); }
     col.child(div().flex_1().min_h_0().bg(c("view")).flex().items_center().justify_center().text_color(c("faint")).child(say.to_string())).into_any_element()
 }
 fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet], refs: &[(String, Vec<String>)], actions: Option<AnyElement>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let say = if open == "board" { "Loading the board…" } else { "Loading the schematic…" };
+    let say = if open == "board" { trs("Loading the board…") } else { trs("Loading the schematic…") }; let say = say.as_str();
     // the design history bar stays under a board or schematic while a version loads or cannot be shown (screens::histbar)
     let hb = layers && matches!(open, "board" | "schematic"); let vkey = string(viewer, "key");
     let Some(frame) = frame else { let el = plot_loading(cx, light, slot, viewer, pv, layers, actions, say); return super::histbar::under(cx, light, pv, &vkey, hb, el) };
@@ -271,7 +271,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     if let Some(cmp) = pv.compare.clone() { if cmp.base == want { want = format!("{want}{}", super::histbar::shown(&cmp)); } else { pv.compare = None; } }
     // (another version of the same file keeps the last one on the canvas until it comes, as 0.14 did: stepping does not blink to "Loading")
     if !want.is_empty() && !frame.key.is_empty() && frame.key != want && !super::histbar::same_file(&vkey, &frame.key, &want) { let el = plot_loading(cx, light, slot, viewer, pv, layers, actions, say); return super::histbar::under(cx, light, pv, &vkey, hb, el) }
-    if !frame.none.is_empty() { return super::histbar::under(cx, light, pv, &vkey, hb, status_row(light, &super::histbar::none_words(&frame.none), actions)); }
+    if !frame.none.is_empty() { return super::histbar::under(cx, light, pv, &vkey, hb, status_row(light, &trs(&super::histbar::none_words(&frame.none)), actions)); }
     if pv.focus.is_none() { pv.focus = Some(cx.focus_handle()); }
     let (w, h) = pv.bounds.map_or((480., 600.), |b| (f32::from(b.size.width), f32::from(b.size.height)));
     let view = super::plotview::ensure_view(pv, frame, w, h);
@@ -282,7 +282,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     // (the design history bar is under the canvas, screens::histbar)
     let mut tools: Vec<AnyElement> = Vec::new();
     let note = string(viewer, "note");
-    let note = (!note.is_empty()).then(|| div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(note));
+    let note = (!note.is_empty()).then(|| div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(trs(&note)));
     let mut sheets_list = None;
     // Layers: the menu lists the layers this plot has; the hub's masks decide what the canvas draws
     let mut present = std::collections::BTreeMap::new();
@@ -292,7 +292,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     // Sheets: a schematic of several sheets lists them as a tree (indented by depth); a press shows that sheet, the root first
     if sheets.len() > 1 && open == "schematic" && layers {
         let on_key = frame.key.clone();
-        let head = tall(div().id("sheets-btn").px_2().text_size(px(12.)).cursor_pointer()).border_1().border_color(c("line")).bg(c("raise")).child(format!("Sheets ({})", sheets.len()))
+        let head = tall(div().id("sheets-btn").px_2().text_size(px(12.)).cursor_pointer()).border_1().border_color(c("line")).bg(c("raise")).child(tf("gpui.c.sheets.count", &[("n", sheets.len().into())]))
             .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(0); pv.sheets_open = !pv.sheets_open; cx.notify(); }));
         tools.push(head.into_any_element());
         if pv.sheets_open {
@@ -307,7 +307,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         }
     }
     if layers {
-        let fit = tall(div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child("Fit")
+        let fit = tall(div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child(trs("Fit"))
             .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.touched = false; pv.fit_wh = (0., 0.); cx.notify(); }));
         // the Boards menu leads the row (0.14 put it first in the viewer's bar), then Layers and Fit
         let boards = if slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None };
@@ -327,10 +327,10 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     if open == "schematic" {
         let r = viewer["probe"].as_str().and_then(super::plot::card).or_else(|| pv.card.clone()).and_then(|c| c.rows.iter().find(|x| x.0 == "ref" || x.0 == "symbol").map(|x| x.1.clone())).unwrap_or_default();
         if let Some(i) = super::plot::sheet_of(sheets, refs, &frame.key, &r) {
-            let (name, file) = (if i == 0 { "the top sheet".to_string() } else { format!("the sheet {}", sheets[i].name) }, if i == 0 { String::new() } else { sheets[i].file.clone() });
+            let (say, file) = (if i == 0 { tf("gpui.c.probe.on.top", &[("ref", r.as_str().into())]) } else { tf("gpui.c.probe.on.sheet", &[("ref", r.as_str().into()), ("sheet", sheets[i].name.as_str().into())]) }, if i == 0 { String::new() } else { sheets[i].file.clone() });
             area = area.child(div().id(SharedString::from(format!("probe-away-{slot}"))).absolute().top_2().left_2().flex().items_center().gap_2().px_2().py_1().text_size(px(12.)).bg(c("panel")).border_1().border_color(c("accent")).occlude()
-                .child(format!("{r} is on {name}"))
-                .child(div().id(SharedString::from(format!("probe-away-open-{slot}"))).px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).child("Open it")
+                .child(say)
+                .child(div().id(SharedString::from(format!("probe-away-open-{slot}"))).px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).child(trs("Open it"))
                     .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-sheet".into(), file.clone())); cx.notify(); }))));
         }
     }
@@ -338,14 +338,14 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     if let Some(card) = pv.card.clone().filter(|_| slot == 0) {
         // compact (0.14's probe chip spirit): the part or net in the head, then the few rows that say what it is; every row in the tooltip
         let words = probe_words(&card);
-        let full = std::iter::once(card.title.clone()).chain(card.rows.iter().map(|(k, v)| format!("{k}: {v}"))).collect::<Vec<_>>().join("\n");
+        let full = std::iter::once(trs(&card.title)).chain(card.rows.iter().map(|(k, v)| format!("{}: {v}", trs(k)))).collect::<Vec<_>>().join("\n");
         let mut box_ = div().id(SharedString::from(format!("pick-card-{slot}"))).absolute().left_2().bottom_2().max_w(px(280.)).flex().flex_col().gap(px(2.)).px_2().py_1().text_size(px(11.)).border_1().border_color(c("accent")).bg(c("panel")).occlude()
             .tooltip(crate::keys::tip(&full, "", light))
-            .child(div().flex().items_center().gap_2().child(div().id(SharedString::from(format!("pick-name-{slot}"))).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::BOLD).cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip("Bring it into view", "", light))
+            .child(div().flex().items_center().gap_2().child(div().id(SharedString::from(format!("pick-name-{slot}"))).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::BOLD).cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip(&trs("Bring it into view"), "", light))
                     .on_click(cx.listener(move |this, _, _, cx| { super::plotview::bring_into_view(this, slot); cx.notify(); })))
-                .child(div().id(SharedString::from(format!("pick-close-{slot}"))).flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("Clear", "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
+                /* i18n-ok: Esc is a key name */ .child(div().id(SharedString::from(format!("pick-close-{slot}"))).flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip(&trs("Clear"), "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
                     .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.card = None; pv.picked = None; pv.lit.clear(); super::plotview::keep_probe(this, None); cx.notify(); }))));
-        for (k, v) in card_rows(&card) { box_ = box_.child(div().flex().gap_2().child(div().w(px(58.)).flex_none().text_color(c("dim")).child(k)).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(v))); }
+        for (k, v) in card_rows(&card) { box_ = box_.child(div().flex().gap_2().child(div().w(px(58.)).flex_none().text_color(c("dim")).child(trs(&k))).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(v))); }
         area = area.child(box_);
     }
     col = col.child(area);
@@ -359,7 +359,7 @@ fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Valu
 }
 
 /// Split's panes by the words 0.14 kept (split.hide): "sch" the schematic, "pcb" the board, "3d" its 3D model.
-pub const SPLIT_PANES: [(&str, &str); 3] = [("sch", "Schematic"), ("pcb", "Board"), ("3d", "3D")];
+/* i18n-ok: drawn through trs (split_head, split_bar) */ pub const SPLIT_PANES: [(&str, &str); 3] = [("sch", "Schematic"), ("pcb", "Board"), ("3d", "3D")];
 /// Whether pane `p` shows with the panes `hide` names put away.
 pub fn split_shows(hide: &str, p: &str) -> bool { !hide.split_whitespace().any(|w| w == p) }
 /// 0.14's Split.flip on a desktop: pane `p` put away or brought back, each on its own; the last pane shown stays (a press on it changes nothing).
@@ -435,8 +435,8 @@ fn split_edge(cx: &mut Context<Backplane>, light: bool, main: bool, row: bool) -
 fn split_head(cx: &mut Context<Backplane>, light: bool, pane: &'static str, name: &'static str, more: Option<AnyElement>) -> Div {
     let c = |n: &str| theme::color(light, n);
     div().flex_none().h(px(26.)).flex().items_center().gap_2().pl_2().pr_1().bg(c("panel")).border_b_1().border_color(c("line"))
-        .child(div().flex_none().text_size(px(10.)).text_color(c("dim")).child(name.to_uppercase())).children(more).child(div().flex_1())
-        .child(div().id(SharedString::from(format!("split-hide-{pane}"))).p(px(3.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip(&format!("Hide the {name}"), "", light))
+        .child(div().flex_none().text_size(px(10.)).text_color(c("dim")).child(trs(name).to_uppercase())).children(more).child(div().flex_1())
+        .child(div().id(SharedString::from(format!("split-hide-{pane}"))).p(px(3.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip(&tf("gpui.c.split.hide", &[("name", trs(name).into())]), "", light))
             .child(crate::art::icon("x", 13., c("dim"))).on_click(cx.listener(move |this, _, _, cx| split_set(this, |p| p.hide = split_flip(&p.hide, pane), true, cx))))
 }
 /// The schematic pane's Sheets menu: the sheet on show, and the design's sheets (indented by depth) under it while open; a press shows that sheet in the pane.
@@ -444,7 +444,7 @@ fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot:
     if sheets.len() < 2 { return None }
     let c = |n: &str| theme::color(light, n);
     let here = |i: usize, sh: &super::plot::Sheet| if i == 0 { key.ends_with('|') || !sheets.iter().skip(1).any(|x| key.ends_with(&x.file)) } else { key.ends_with(&sh.file) };
-    let cur = sheets.iter().enumerate().find(|(i, sh)| here(*i, sh)).map(|(i, sh)| if i == 0 { "Top sheet".to_string() } else { sh.name.clone() }).unwrap_or_else(|| "Top sheet".into());
+    let cur = sheets.iter().enumerate().find(|(i, sh)| here(*i, sh)).map(|(i, sh)| if i == 0 { trs("Top sheet") } else { sh.name.clone() }).unwrap_or_else(|| trs("Top sheet"));
     let btn = div().id("split-sheets").flex().items_center().gap_1().px_1().text_size(px(11.)).cursor_pointer().border_1().border_color(c(if open { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
         .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(cur)).child(crate::art::icon("chevron-down", 11., c("dim")))
         .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(1); pv.sheets_open = !pv.sheets_open; cx.notify(); }));
@@ -456,7 +456,7 @@ fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot:
             let file = if i == 0 { String::new() } else { sh.file.clone() };
             let on = here(i, sh);
             list = list.child(div().id(SharedString::from(format!("split-sheet-{i}"))).pl(px(6. + 10. * sh.depth as f32)).pr_2().py(px(3.)).cursor_pointer().text_color(c(if on { "accent" } else { "text" })).hover(|s| s.bg(c("raise")))
-                .child(if i == 0 { "Top sheet".to_string() } else { sh.name.clone() })
+                .child(if i == 0 { trs("Top sheet") } else { sh.name.clone() })
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-sheet".into(), file.clone())); this.screens.pv(1).sheets_open = false; cx.notify(); })));
         }
         wrap = wrap.child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(list)).with_priority(3));
@@ -473,7 +473,7 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
         // (0.14's combo-pick: outlined in the accent while shown, dim while put away)
         let d = div().id(SharedString::from(format!("split-pick-{pane}"))).px_2().py(px(2.)).text_size(px(12.)).cursor_pointer().border_1().hover(|s| s.bg(c("raise")));
         let d = if on { d.border_color(c("accent")).text_color(c("text")) } else { d.border_color(c("line")).text_color(c("dim")) };
-        picks = picks.child(d.tooltip(crate::keys::tip(&format!("{} the {name}", if on { "Hide" } else { "Show" }), "", light)).child(name)
+        picks = picks.child(d.tooltip(crate::keys::tip(&tf(if on { "gpui.c.split.hide" } else { "gpui.c.split.show" }, &[("name", trs(name).into())]), "", light)).child(trs(name))
             .on_click(cx.listener(move |this, _, _, cx| split_set(this, |p| p.hide = split_flip(&p.hide, pane), true, cx))));
     }
     // the bar: (the Boards menu,) the pane toggles, the probe, then the pane's own controls
@@ -482,12 +482,12 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
     let mut row = div().id("split-bar").flex_none().h(px(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).children(boards).child(div().flex_1()).child(picks);
     if let Some(card) = probed {
         let words = probe_words(card);
-        let full = std::iter::once(card.title.clone()).chain(card.rows.iter().map(|(k, v)| format!("{k}: {v}"))).collect::<Vec<_>>().join("\n");
+        let full = std::iter::once(trs(&card.title)).chain(card.rows.iter().map(|(k, v)| format!("{}: {v}", trs(k)))).collect::<Vec<_>>().join("\n");
         row = row.child(div().id("split-probe").min_w_0().max_w(px(240.)).flex_shrink().flex().items_center().gap_1().pl_2().pr(px(2.)).py_px().border_1().border_color(c("accent")).bg(c("raise")).text_size(px(12.))
             .tooltip(crate::keys::tip(&full, "", light))
-            .child(div().id("split-probe-name").min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip("Bring it into view", "", light))
+            .child(div().id("split-probe-name").min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip(&trs("Bring it into view"), "", light))
                 .on_click(cx.listener(|this, _, _, cx| { for i in [1, 2] { super::plotview::bring_into_view(this, i); } cx.notify(); })))
-            .child(div().id("split-probe-clear").flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip("Clear", "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
+            /* i18n-ok: Esc is a key name */ .child(div().id("split-probe-clear").flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Clear"), "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
                 .on_click(cx.listener(|this, _, _, cx| { for i in 0..3 { let pv = this.screens.pv(i); pv.picked = None; pv.card = None; pv.lit.clear(); } super::plotview::keep_probe(this, None); super::plotview::report_state(this); cx.notify(); }))));
     }
     row.child(actions).into_any_element()
@@ -503,7 +503,7 @@ pub fn card_rows(card: &super::plot::Card) -> Vec<(String, String)> {
 /// What the probe chip says: the part's reference (else what was tapped), its value and its net, as 0.14's Probe.label named a probe by its ref or net.
 pub fn probe_words(card: &super::plot::Card) -> Vec<String> {
     let get = |k: &str| card.rows.iter().find(|r| r.0 == k).map(|r| r.1.trim().to_string()).filter(|v| !v.is_empty());
-    let mut words = vec![get("ref").or_else(|| get("symbol").map(|r| format!("{r} {}", card.title))).unwrap_or_else(|| card.title.clone())];
+    let mut words = vec![get("ref").or_else(|| get("symbol").map(|r| format!("{r} {}", trs(&card.title)))).unwrap_or_else(|| trs(&card.title))];
     for k in ["value", "net"] { if let Some(v) = get(k) { if !words.contains(&v) { words.push(v) } } }
     words
 }
@@ -513,7 +513,7 @@ pub fn probe_words(card: &super::plot::Card) -> Vec<String> {
 fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &super::plot::Store, pvs: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, have: &str, boards: Option<AnyElement>, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let panes: Vec<&Value> = viewer["panes"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
-    if panes.len() < 3 { return status_row(light, "Opening…", Some(actions)) }
+    if panes.len() < 3 { return status_row(light, &trs("Opening…"), Some(actions)) }
     let prefs = split_prefs();
     let (s_on, b_on, t_on) = (split_shows(&prefs.hide, "sch"), split_shows(&prefs.hide, "pcb"), split_shows(&prefs.hide, "3d"));
     let probed = pvs.iter().find_map(|p| p.card.clone());
@@ -524,12 +524,12 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
     let pane = |head: Div, body: AnyElement| div().flex().flex_col().min_w_0().min_h_0().child(head).child(div().relative().flex_1().min_h_0().min_w_0().child(body));
     // the schematic pane's sheets (0.14's combo-sheets): the sheet on show in its head, the hierarchy in a menu under it
     let sheets_el = split_sheets(cx, light, &plot.sheets, &string(panes[0], "key"), sch_pv.sheets_open);
-    let sch = s_on.then(|| { let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &plot.sheets, &plot.sheet_refs, None); pane(h, b) });
-    let brd = b_on.then(|| { let h = split_head(cx, light, "pcb", "Board", None); let b = plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], &[], None); pane(h, b) });
+    let sch = s_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &plot.sheets, &plot.sheet_refs, None); pane(h, b) });
+    let brd = b_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "pcb", "Board", None); let b = plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], &[], None); pane(h, b) });
     let d3 = t_on.then(|| {
         let want3 = string(panes[2], "key");
         if let Some(s) = solid { if s.read(cx).reserve != 0. { s.update(cx, |p, cx| { p.reserve = 0.; cx.notify(); }); } }
-        let model: AnyElement = match solid { Some(s) if solid_ready(&want3, have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => model_loading(light, "Loading the model…") };
+        let model: AnyElement = match solid { Some(s) if solid_ready(&want3, have) && !have.is_empty() => div().size_full().child(s.clone()).into_any_element(), _ => model_loading(light, &trs("Loading the model…")) };
         let h = split_head(cx, light, "3d", "3D", None); pane(h, model)
     });
     // the side group: the board and the 3D, one beside (or over) the other with the divider between them
@@ -559,18 +559,18 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
 fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Value, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().gap_2().p_3();
-    let pages = div().flex_1().min_w_0().flex().flex_wrap().gap_2().gap_y_1().children(arr(review, "tabs").enumerate().map(|(i, t)| btn(cx, light, format!("rv-{i}"), string(t, "label"), t["on"].as_bool().unwrap_or(false), Command::Action("rv-page".into(), string(t, "page")))).collect::<Vec<_>>());
+    let pages = div().flex_1().min_w_0().flex().flex_wrap().gap_2().gap_y_1().children(arr(review, "tabs").enumerate().map(|(i, t)| btn(cx, light, format!("rv-{i}"), trs(&string(t, "label")), t["on"].as_bool().unwrap_or(false), Command::Action("rv-page".into(), string(t, "page")))).collect::<Vec<_>>());
     // the tabs are the page's bar (the pane's controls at the end of its first line); the page under it
     let bar = bar_wrap(light).flex_nowrap().items_start().child(pages).child(actions);
     let title = string(review, "title");
     let page = arr(review, "tabs").find(|t| t["on"] == true).map(|t| string(t, "page")).unwrap_or_default();
-    if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(15.)).child(title))
-        .children(matches!(page.as_str(), "bom" | "checks").then(|| btn(cx, light, "rv-run".into(), "Refresh".into(), false, Command::Action("rv-run".into(), String::new()))))); }
+    if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(15.)).child(trs(&title)))
+        .children(matches!(page.as_str(), "bom" | "checks").then(|| btn(cx, light, "rv-run".into(), trs("Refresh"), false, Command::Action("rv-run".into(), String::new()))))); }
     // the Checks page: why the gate fails, and the checklist's boxes (a press ticks one: rv-tick <index>)
     if review["checks"].is_object() {
         let line = string(&review["checks"], "line"); let gate = string(&review["checks"], "gate");
-        if !line.is_empty() { col = col.child(div().text_color(c("dim")).child(line)); }
-        if !gate.is_empty() { col = col.child(div().text_color(c("bad")).child(gate)); }
+        if !line.is_empty() { col = col.child(div().text_color(c("dim")).child(trs(&line))); }
+        if !gate.is_empty() { col = col.child(div().text_color(c("bad")).child(trs(&gate))); }
         for t in arr(&review["checks"], "tasks") {
             let (done, idx) = (t["done"] == true, t["index"].as_u64().unwrap_or(0));
             col = col.child(div().id(SharedString::from(format!("rv-task-{idx}"))).flex().gap_2().items_center().cursor_pointer().hover(|s| s.bg(c("raise")))
@@ -579,7 +579,7 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
         }
     }
     let blocks: Vec<Value> = review["blocks"].as_array().cloned().unwrap_or_default();
-    if blocks.is_empty() { col = col.child(div().text_color(c("dim")).child(if review["busy"] == true { "Working…".to_string() } else { string(review, "note") })); }
+    if blocks.is_empty() { col = col.child(div().text_color(c("dim")).child(if review["busy"] == true { trs("Working…") } else { trs(&string(review, "note")) })); }
     else { let parsed = md::parse(&blocks); for el in timeline::blocks(cx, reg, light, &parsed, "review") { col = col.child(el); } }
     div().flex().flex_col().child(bar).child(col).into_any_element()
 }
@@ -614,8 +614,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let body: AnyElement = if early {
         let k = open;
         let a = acts(cx);
-        match k { "board" | "schematic" => plot_loading(cx, light, 0, &Value::Null, pv, true, Some(a), if k == "board" { "Loading the board…" } else { "Loading the schematic…" }),
-            "3d" | "mech" | "split" => in_corner(model_loading(light, "Loading…"), a), _ => status_row(light, "Opening…", Some(a)) }
+        match k { "board" | "schematic" => plot_loading(cx, light, 0, &Value::Null, pv, true, Some(a), &if k == "board" { trs("Loading the board…") } else { trs("Loading the schematic…") }),
+            "3d" | "mech" | "split" => in_corner(model_loading(light, &trs("Loading…")), a), _ => status_row(light, &trs("Opening…"), Some(a)) }
     }
     else if diff_on { let a = acts(cx); diff_page(cx, light, &thread["diff"], a) }
         else if open == "files" && viewer["files"].is_object() { let a = acts(cx); super::filesui::files_page(cx, light, &viewer["files"], files_ui, a) }
@@ -633,13 +633,13 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             let ready = matches!(solid, Some(s) if solid_ready(&want, &have));
             // the 3D page's own tools float top left over the model: they wrap short of the corner the pane's controls take
             if let Some(s) = solid { let room = if open == "3d" && ready { CORNER_ROOM + if crate::viewers::boards::list(viewer).len() > 1 { 240. } else { 0. } } else { 0. }; if s.read(cx).reserve != room { s.update(cx, |p, cx| { p.reserve = room; cx.notify(); }); } }
-            let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(light, "Loading the model…") } };
+            let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(light, &trs("Loading the model…")) } };
             if open == "mech" { let a = acts(cx); div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, key_empty, a)).child(model).into_any_element() }
             else if ready { let a0 = acts(cx); let a = with_boards(cx, light, viewer, pv, a0); in_corner(div().size_full().flex().flex_col().child(model).into_any_element(), a) }
-            else { let a = acts(cx); in_corner(model_loading(light, "Loading the model…"), a) }
+            else { let a = acts(cx); in_corner(model_loading(light, &trs("Loading the model…")), a) }
         }
-        else if open == "browser" { let a = acts(cx); match browser { Some(b) => in_corner(div().size_full().child(b.clone()).into_any_element(), a), None => status_row(light, "The browser page needs a connected hub.", Some(a)) } }
-        else { let a = acts(cx); status_row(light, "Opening…", Some(a)) };
+        else if open == "browser" { let a = acts(cx); match browser { Some(b) => in_corner(div().size_full().child(b.clone()).into_any_element(), a), None => status_row(light, &trs("The browser page needs a connected hub."), Some(a)) } }
+        else { let a = acts(cx); status_row(light, &trs("Opening…"), Some(a)) };
     if matches!(open, "files" | "image" | "pdf" | "text") && !diff_on { div().id("viewer-body").size_full().child(body).into_any_element() } else { div().id("viewer-body").size_full().overflow_y_scroll().child(body).into_any_element() }
 }
 /// The pane around the page on show: its width, the left edge's drag and border; `page` (the page itself, `page()`, drawn as a part of the
@@ -762,6 +762,15 @@ pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
 
 #[cfg(test)]
 mod tests {
+    /// The pane's words in Japanese: whose machine KiCad opens on, a Split pane's toggle, a probed part on another sheet.
+    #[test] fn the_panes_words_read_in_japanese() {
+        crate::i18n::with_lang("ja", || {
+            assert_eq!(kicad_open_label(Some("desktop.tail9e0cf2.ts.net:8451"), None), "desktopのKiCadで開く"); assert_eq!(kicad_open_label(None, None), "KiCadで開く");
+            assert_eq!(crate::i18n::tf("gpui.c.split.hide", &[("name", crate::i18n::trs("Schematic").into())]), "回路図を隠す");
+            assert_eq!(crate::i18n::tf("gpui.c.probe.on.sheet", &[("ref", "C39".into()), ("sheet", "power".into())]), "C39はシートpowerにあります");
+            assert_eq!(crate::i18n::trs(REVERT_ASK).chars().next(), Some('フ'));
+        });
+    }
     #[test] fn a_narrow_window_keeps_the_rail_as_0_14_shared_the_panes() {
         let (side, rail) = (264., RAIL_W);
         for w in [700., 800., 900., 1100., 1176., 1280., 1600., 1920.] { for viewer in [false, true] { for force in [false, true] {

@@ -144,7 +144,7 @@ pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edg
 /// The chunks this client holds per source (a delta names its `base` source; a Split watches a schematic and a board at once), the newest frame
 /// (`frame`, the one Board and Schematic draw) and each source's own (`frames`, what a Split's panes draw).
 #[derive(Default)]
-pub struct Store { pub sheets: Vec<Sheet>, /** each sheet file's references (Hier.refs), for "C39 is on the sheet ..." */ pub sheet_refs: Vec<(String, Vec<String>)>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame> }
+/* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ pub struct Store { pub sheets: Vec<Sheet>, /** each sheet file's references (Hier.refs), for "C39 is on the sheet ..." */ pub sheet_refs: Vec<(String, Vec<String>)>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame> }
 
 const MAX_SOURCES: usize = 6;
 
@@ -157,12 +157,12 @@ impl Store {
         self.frame = Some(f);
     }
     /// A frame the client will not take (over its size limit): said, not left on Loading.
-    pub fn too_big(&mut self, bytes: usize) { self.fail(String::new(), String::new(), &format!("This plot is {} MB, too large to show here.", bytes >> 20)); }
+    /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ pub fn too_big(&mut self, bytes: usize) { self.fail(String::new(), String::new(), &format!("This plot is {} MB, too large to show here.", bytes >> 20)); }
     /// The newest frame of the source named `key`.
     pub fn frame_for(&self, key: &str) -> Option<&Frame> { self.frames.get(key) }
     /// Apply one plot frame. Err names a frame that cannot be used; the store is then empty, as on the phones.
     pub fn receive(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
-        let Some(o) = decode(bytes) else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again."); return Err("undecodable plot frame") };
+        /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ let Some(o) = decode(bytes) else { self.fail(String::new(), String::new(), "The plot from the hub could not be read. Reopen the view to load it again."); return Err("undecodable plot frame") };
         let key = o.get("key").and_then(C::text).unwrap_or("").to_string();
         let fam = o.get("fam").and_then(C::text).filter(|s| !s.is_empty()).unwrap_or(&key).to_string();
         // a 3D model rides the same socket; the mesh viewer is separate
@@ -183,7 +183,7 @@ impl Store {
             match r {
                 C::U(k) if !stale_base && *k >= 0 && (*k as usize) < held.len() => cs.push(held[*k as usize].clone()),
                 C::Map(_) => cs.push(Arc::new(Chunk::decode(r))),
-                _ => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view."); return Err("invalid geometry reference"); }
+                /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ _ => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view."); return Err("invalid geometry reference"); }
             }
         }
         let four = |k: &str| -> [f32; 4] { match o.get(k) { Some(C::Arr(a)) if a.len() >= 4 => [0, 1, 2, 3].map(|i| a[i].int().unwrap_or(0) as f32), _ => [0.; 4] } };

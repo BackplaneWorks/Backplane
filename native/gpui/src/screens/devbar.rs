@@ -20,7 +20,7 @@ pub struct Bar { pub phase: String, pub text: String, pub frac: Option<f32>, ///
 fn paths() -> Vec<PathBuf> {
     if let Some(p) = std::env::var_os("BACKPLANE_DEV_STATUS") { return vec![PathBuf::from(p)] }
     let d = crate::plat::user_home().unwrap_or_default().join(".backplane-gpui-dev");
-    vec![d.join("STATUS"), d.join("BUILD")]
+    /* i18n-ok: file names */ vec![d.join("STATUS"), d.join("BUILD")]
 }
 fn path() -> PathBuf { paths().remove(0) }
 
@@ -54,7 +54,7 @@ pub fn watch(cx: &mut Context<Backplane>) {
 }
 
 /// Where a relaunch request goes: a file beside the status file, which the watcher takes (and removes) as a press of Enter.
-pub fn request_path() -> PathBuf { path().with_file_name("RESTART") }
+/* i18n-ok: file names */ pub fn request_path() -> PathBuf { path().with_file_name("RESTART") }
 pub fn request_restart() { let _ = std::fs::write(request_path(), b"restart\n"); }
 /// How long the confirming click stays asked for.
 pub const CONFIRM: Duration = Duration::from_secs(6);
@@ -69,7 +69,7 @@ pub fn strip(cx: &mut Context<Backplane>, bar: &Bar, light: bool, confirming: bo
         .child(div().absolute().top_0().left_0().bottom_0().w(relative(bar.frac.unwrap_or(1.0))).bg(hue).opacity(if ready || bar.phase == "failed" { 0.5 } else { 0.35 }))
         .child(div().absolute().inset_0().flex().items_center().px_3().text_size(px(11.)).text_color(c("text")).child(bar.text.clone()).when(!bar.haiku.is_empty(), |d| d.child(div().ml_3().opacity(0.75).italic().child(bar.haiku.clone()))));
     if ready {
-        let label = if confirming { format!("Click again: stops {} running turn{}", bar.turns, if bar.turns == 1 { "" } else { "s" }) } else { "Restart now".to_string() };
+        /* i18n-ok: the developer build bar, for dev builds only */ let label = if confirming { format!("Click again: stops {} running turn{}", bar.turns, if bar.turns == 1 { "" } else { "s" }) } else { "Restart now".to_string() };
         el = el.child(div().absolute().top_0().right_0().bottom_0().flex().items_center().pr_2().child(
             div().id("devbar-restart").px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(px(11.)).font_weight(FontWeight::BOLD)
                 .bg(c(if confirming { "bad" } else { "ok" })).text_color(c("on-accent")).child(label)

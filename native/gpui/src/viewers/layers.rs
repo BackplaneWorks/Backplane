@@ -1,7 +1,7 @@
 //! Board and schematic layers as the hub decides them (viewer.off / dim / lift bit masks, viewer.layerList rows): which chunks are drawn, which
 //! dimmed to a quarter, which one last. The phones and the web draw exactly this from the same fields (core/layers `Lyr.masks`, Plot.kt
 //! `shown`/`dimmed`/`lift`). The client never decides a mask: a row press or Ctrl+H is a view action and the hub's next picture carries the new masks.
-use crate::{hub::Command, theme, Backplane};
+use crate::{hub::Command, i18n::trs, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -24,7 +24,7 @@ pub fn cycles(thread: &Value) -> bool { !thread["diff"].is_object() && matches!(
 /// The layers a plot has, a bit each (a layer outside 0..31 has none): the hub starts the focus on the first of them with art.
 pub fn present_bits(layers: impl IntoIterator<Item = u32>) -> u32 { layers.into_iter().filter(|l| *l < 32).fold(0, |a, l| a | 1 << l) }
 /// Ctrl+H's value: the pane it is for ("schematic" on Split; empty otherwise), then the plot's layers.
-pub fn cycle_value(schematic: bool, present: u32) -> String { format!("{} {present}", if schematic { "schematic" } else { "" }) }
+/* i18n-ok: an action value */ pub fn cycle_value(schematic: bool, present: u32) -> String { format!("{} {present}", if schematic { "schematic" } else { "" }) }
 fn bit(mask: u32, layer: u32) -> bool { layer < 32 && (mask >> layer) & 1 == 1 }
 
 /// What to draw and in which order, for chunks whose layers are `layers` (paint order): (index, opacity factor). Hidden layers are left out
@@ -49,7 +49,7 @@ pub fn strip(viewer: &Value, present: &BTreeMap<u32, u32>) -> Strip {
         let layer = r["layer"].as_u64()? as u32;
         present.get(&layer).map(|color| Row { layer, name: r["name"].as_str().unwrap_or("").to_string(), on: r["on"].as_bool().unwrap_or(true), active: r["active"].as_bool().unwrap_or(false), color: *color })
     }).collect();
-    let head = viewer["layerHead"].as_str().filter(|h| !h.is_empty()).unwrap_or("Layers").to_string();
+    /* i18n-ok: drawn through trs (strip_el) */ let head = viewer["layerHead"].as_str().filter(|h| !h.is_empty()).unwrap_or("Layers").to_string();
     Strip { head, mode: viewer["layerMode"].as_u64().unwrap_or(0) as u32, modes: viewer["layerModes"].as_bool().unwrap_or(false), reset: viewer["layerReset"].as_bool().unwrap_or(false), present: present_bits(present.keys().copied()), rows }
 }
 
@@ -58,8 +58,8 @@ pub fn strip(viewer: &Value, present: &BTreeMap<u32, u32>) -> Strip {
 pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, key: &str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     if s.rows.is_empty() { return div().into_any_element(); }
-    let head = crate::screens::viewer::tall(div().id("layers-btn").px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c(if s.mode > 0 { "accent" } else { "line" })).bg(c("raise")).when(s.mode > 0, |d| d.text_color(c("accent"))).child(s.head.clone())
-        .tooltip(crate::keys::tip("Layers: others as they are, dimmed, hidden", key, light))
+    let head = crate::screens::viewer::tall(div().id("layers-btn").px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c(if s.mode > 0 { "accent" } else { "line" })).bg(c("raise")).when(s.mode > 0, |d| d.text_color(c("accent"))).child(trs(&s.head))
+        .tooltip(crate::keys::tip(&trs("Layers: others as they are, dimmed, hidden"), key, light))
         .on_click(cx.listener(|this, _, _, cx| { let pv = &mut this.screens.plotview; pv.layers_open = !pv.layers_open; cx.notify(); }));
     head.into_any_element()
 }
@@ -71,10 +71,10 @@ pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool,
     let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(px(cap)).overflow_y_scroll().track_scroll(scroll).flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude();
     if s.modes {
         let present = s.present;
-        panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {
+        /* i18n-ok: drawn through trs */ panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {
             let on = s.mode == i as u32; let d = div().id(SharedString::from(format!("layer-mode-{i}"))).px_2().text_size(px(12.)).cursor_pointer().border_1();
-            (if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.border_color(c("line")).hover(|s| s.bg(c("raise"))) }).child(*label)
-                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer-mode".into(), format!("{i} {present}"))); cx.notify(); }))
+            (if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.border_color(c("line")).hover(|s| s.bg(c("raise"))) }).child(trs(label))
+                /* i18n-ok: an action value */ .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer-mode".into(), format!("{i} {present}"))); cx.notify(); }))
         })));
     }
     for r in &s.rows {
@@ -87,7 +87,7 @@ pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool,
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer-pick".into(), l.to_string())); cx.notify(); }))));
     }
     if s.reset {
-        panel = panel.child(div().id("layers-reset").text_size(px(12.)).cursor_pointer().text_color(c("accent")).child("Reset layers")
+        panel = panel.child(div().id("layers-reset").text_size(px(12.)).cursor_pointer().text_color(c("accent")).child(trs("Reset layers"))
             .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layers-reset".into(), String::new())); cx.notify(); })));
     }
     Some(panel.into_any_element())

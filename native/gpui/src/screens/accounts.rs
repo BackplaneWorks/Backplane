@@ -4,7 +4,7 @@
 //! The sign-in code Claude shows is typed in a field here and goes straight to that attempt (`respond`); it is never a draft, a `bfield` or a log line.
 use super::composer::{Composer, ComposerEvent};
 use super::settings::Secret;
-use crate::{hub::Command, string, theme, Backplane};
+use crate::{hub::Command, i18n::{is_ja, t, tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -52,7 +52,7 @@ pub fn binding(snap: &Value) -> (String, u64) {
 }
 /// The words and the colour token of a state.
 pub fn badge(state: &str) -> (&'static str, &'static str) {
-    match state { "connected" => ("Connected", "ok"), "connecting" => ("Signing in", "accent"), "unchecked" => ("Not checked", "warn"), "expired" => ("Sign-in expired", "bad"), _ => ("Not connected", "faint") }
+    /* i18n-ok: drawn through tr */ match state { "connected" => ("Connected", "ok"), "connecting" => ("Signing in", "accent"), "unchecked" => ("Not checked", "warn"), "expired" => ("Sign-in expired", "bad"), _ => ("Not connected", "faint") }
 }
 /// Whether the hub is waiting for the person or the provider (so the page asks again every couple of seconds).
 pub fn wants_poll(snap: &Value) -> bool {
@@ -61,21 +61,21 @@ pub fn wants_poll(snap: &Value) -> bool {
 }
 /// The identity line of a profile: "Claude · a@b.com · max".
 pub fn identity(p: &Value) -> String {
-    let mut parts = vec![if p["provider"] == "codex" { "Codex".to_string() } else { "Claude".to_string() }];
+    /* i18n-ok: product names */ let mut parts = vec![if p["provider"] == "codex" { "Codex".to_string() } else { "Claude".to_string() }];
     for k in ["email", "plan"] { if let Some(s) = p["identity"][k].as_str().filter(|s| !s.is_empty()) { parts.push(s.to_string()) } }
     parts.join(" · ")
 }
 /// The most used window of a profile's allowance as "62% of 5-hour used", when the provider reported one.
 pub fn allowance(p: &Value) -> String {
     let w = p["allowance"]["windows"].as_array().into_iter().flatten().filter_map(|w| Some((w["used_percent"].as_f64()?, w["scope"].as_str().unwrap_or("").to_string()))).fold(None::<(f64, String)>, |a, b| match a { Some(x) if x.0 >= b.0 => Some(x), _ => Some(b) });
-    match w { Some((u, scope)) => format!("{:.0}% of {} used", u, scope.replace('_', "-").replace("five-hour", "5-hour").replace("seven-day", "7-day")), None => String::new() }
+    match w { Some((u, scope)) => tf("gpui.acct.used", &[("pct", format!("{u:.0}").into()), ("scope", trs(&scope.replace('_', "-").replace("five-hour", "5-hour").replace("seven-day", "7-day")).into())]), None => String::new() }
 }
 /// One line of the account menu: the key that picks it, what it is, what it has left, and where a press goes.
 #[derive(Debug, PartialEq, Clone)]
 pub struct MenuRow { pub key: Option<u8>, pub label: String, pub detail: String, pub left: String, pub out: bool, pub on: bool, pub usable: bool, pub profile: String, pub epoch: u64 }
 /// What one login has left, in a few words: the hub's word when it is out, else its fullest window, else nothing known.
 fn left_of(holds: &Value, id: &str, al: &Value, now: u64) -> (String, bool) {
-    if let Some(t) = holds[id]["text"].as_str() { return (t.to_string(), true) }
+    if let Some(t) = holds[id]["text"].as_str() { return (trs(t), true) }
     let fullest = al["windows"].as_array().into_iter().flatten().filter(|w| w["used_percent"].as_f64().or_else(|| w["used_permille"].as_f64().map(|p| p / 10.0)).is_some())
         .max_by(|a, b| { let u = |w: &Value| w["used_percent"].as_f64().or_else(|| w["used_permille"].as_f64().map(|p| p / 10.0)).unwrap_or(0.0); u(a).total_cmp(&u(b)) });
     (fullest.and_then(|w| window_line(w, now)).unwrap_or_default(), false)
@@ -86,11 +86,11 @@ pub fn menu_rows(snap: &Value, now: u64) -> Vec<MenuRow> {
     let provider = snap["thread"]["provider"].as_str().filter(|p| !p.is_empty()).unwrap_or("claude");
     let holds = &snap["holds"];
     let (left, out) = left_of(holds, "", if provider == "claude" { &snap["default_allowance"] } else { &Value::Null }, now);
-    let mut rows = vec![MenuRow { key: None, label: "Default account".into(), detail: "CLI login".into(), left, out, on: bound.is_empty(), usable: true, profile: String::new(), epoch: 0 }];
+    let mut rows = vec![MenuRow { key: None, label: trs("Default account"), detail: trs("CLI login"), left, out, on: bound.is_empty(), usable: true, profile: String::new(), epoch: 0 }];
     for p in profiles(snap).iter().filter(|p| p["provider"] == provider) {
         let (id, ok) = (string(p, "id"), p["state"] == "connected");
         let (left, out) = left_of(holds, &id, &p["allowance"], now);
-        let detail = if ok { p["identity"]["email"].as_str().unwrap_or("").to_string() } else { badge(p["state"].as_str().unwrap_or("")).0.to_string() };
+        let detail = if ok { p["identity"]["email"].as_str().unwrap_or("").to_string() } else { trs(badge(p["state"].as_str().unwrap_or("")).0) };
         rows.push(MenuRow { key: None, label: string(p, "label"), detail, left, out, on: id == bound, usable: ok, profile: id, epoch: p["epoch"].as_u64().unwrap_or(0) });
     }
     for (i, r) in rows.iter_mut().enumerate().take(9) { r.key = Some(i as u8 + 1) }
@@ -114,7 +114,7 @@ fn current_thread(this: &Backplane) -> String { super::attach::raw_id(&string(&t
 pub fn ask(this: &mut Backplane, mut params: Value) {
     let th = current_thread(this);
     if !th.is_empty() { params["thread"] = json!(th); }
-    if this.tx.try_send(Command::Rpc("accounts".into(), Secret(params), "acct")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); }
+    /* i18n-ok: drawn through tr */ if this.tx.try_send(Command::Rpc("accounts".into(), Secret(params), "acct")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); }
 }
 pub fn list(this: &mut Backplane) { ask(this, json!({"op": "list"})) }
 
@@ -133,7 +133,7 @@ pub fn got(this: &mut Backplane, v: Value, cx: &mut Context<Backplane>) {
         let id = a["id"].as_str().unwrap_or("").to_string();
         if id.is_empty() || this.screens.acct.codes.contains_key(&id) { continue }
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
-        input.update(cx, |i, _| { i.set_placeholder("Paste the code from Claude's page"); i.masked = true; });
+        input.update(cx, |i, _| { i.set_placeholder(&trs("Paste the code from Claude's page")); i.masked = true; });
         let aid = id.clone();
         cx.subscribe(&input, move |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { respond(this, &aid, cx) }).detach();
         this.screens.acct.codes.insert(id, input);
@@ -150,7 +150,7 @@ pub fn got(this: &mut Backplane, v: Value, cx: &mut Context<Backplane>) {
 pub fn done(this: &mut Backplane, tag: &str, ok: bool, why: &str, _cx: &mut Context<Backplane>) {
     if !ok {
         // a refusal of an `accounts` request carries its reason in the snapshot's `error` (kept by `got`); only a request that has none is given a plain sentence
-        if !why.is_empty() { this.screens.acct.notice = why.to_string() } else if this.screens.acct.notice.is_empty() { this.screens.acct.notice = "The hub refused that.".into() }
+        /* i18n-ok: drawn through tr */ if !why.is_empty() { this.screens.acct.notice = why.to_string() } else if this.screens.acct.notice.is_empty() { this.screens.acct.notice = "The hub refused that.".into() }
         return
     }
     if tag == "acct-moveall" { list(this); return }
@@ -163,11 +163,11 @@ pub fn moved(this: &mut Backplane, v: &Value) { this.screens.acct.info = moved_t
 pub fn moved_text(v: &Value) -> String {
     let n = |k: &str| v[k].as_u64().unwrap_or(0); let len = |k: &str| v[k].as_array().map_or(0, |a| a.len());
     let (moved, already, running, failed) = (n("moved"), n("already"), len("running"), len("failed"));
-    let threads = |k: u64| if k == 1 { "1 thread".to_string() } else { format!("{k} threads") };
-    let mut s = if moved == 0 && already > 0 { format!("All {} were already on this account.", threads(already)) } else { format!("Moved {} to this account.", threads(moved)) };
-    if running > 0 { s += &format!(" {} with a turn running {} not moved; press again when {} done.", threads(running as u64), if running == 1 { "was" } else { "were" }, if running == 1 { "it is" } else { "they are" }) }
-    if failed > 0 { s += &format!(" {} could not be moved.", threads(failed as u64)) }
-    s
+    let mut parts = vec![if moved == 0 && already > 0 { tf("gpui.acct.moved.already", &[("n", already.into())]) } else { tf("gpui.acct.moved", &[("n", moved.into())]) }];
+    if running > 0 { parts.push(tf("gpui.acct.moved.running", &[("n", running.into())])) }
+    if failed > 0 { parts.push(tf("gpui.acct.moved.failed", &[("n", failed.into())])) }
+    // Japanese sentences follow one another with no space
+    parts.join(if is_ja() { "" } else { " " })
 }
 fn poll(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if !wants_poll(&this.screens.acct.snap) || this.screens.acct.polling { return }
@@ -185,7 +185,7 @@ fn poll(this: &mut Backplane, cx: &mut Context<Backplane>) {
 pub fn open_page(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.acct.label.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
-        input.update(cx, |i, _| i.set_placeholder("Account label (e.g. Work)"));
+        input.update(cx, |i, _| i.set_placeholder(&trs("Account label (e.g. Work)")));
         cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { add(this, cx) }).detach();
         this.screens.acct.label = Some(input);
     }
@@ -196,7 +196,7 @@ pub fn open_page(this: &mut Backplane, cx: &mut Context<Backplane>) {
 fn add(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(input) = this.screens.acct.label.clone() else { return };
     let label = input.read(cx).content.to_string();
-    if label.trim().is_empty() { this.screens.acct.notice = "Name the account first, e.g. Work or Personal.".into(); return }
+    /* i18n-ok: drawn through tr */ if label.trim().is_empty() { this.screens.acct.notice = "Name the account first, e.g. Work or Personal.".into(); return }
     let provider = if this.screens.acct.add_provider == "codex" { "codex" } else { "claude" };
     ask(this, json!({"op": "add", "provider": provider, "label": label.trim()}));
     input.update(cx, |i, cx| i.set(String::new(), cx));
@@ -205,7 +205,7 @@ fn respond(this: &mut Backplane, attempt: &str, cx: &mut Context<Backplane>) {
     let Some(input) = this.screens.acct.codes.get(attempt).cloned() else { return };
     let profile = this.screens.acct.snap["attempts"].as_array().into_iter().flatten().find(|a| a["id"] == attempt).map(|a| string(a, "profile")).unwrap_or_default();
     let code = input.read(cx).content.to_string();
-    if code.trim().is_empty() { this.screens.acct.notice = "Paste the code Claude shows after you sign in.".into(); return }
+    /* i18n-ok: drawn through tr */ if code.trim().is_empty() { this.screens.acct.notice = "Paste the code Claude shows after you sign in.".into(); return }
     this.screens.acct.checking.insert(attempt.to_string()); this.screens.acct.notice.clear();
     ask(this, json!({"op": "respond", "profile": profile, "attempt": attempt, "code": code.trim()}));
 }
@@ -224,27 +224,27 @@ fn attempt_panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, a: &Va
     let (aid, url, code, msg) = (string(a, "id"), string(a, "url"), string(a, "userCode"), string(a, "message"));
     let mut col = div().flex().flex_col().gap_2().mt_3().p_3().bg(c("panel")).border_1().border_color(c("line"));
     let ready = !url.is_empty();
-    let help = if !ready { "Generating the sign-in link…" } else if code.is_empty() { "Open the link, sign in to Claude, then paste the code it shows." } else { "Open the link and enter this code." };
+    let help = if !ready { trs("Generating the sign-in link…") } else if code.is_empty() { trs("Open the link, sign in to Claude, then paste the code it shows.") } else { trs("Open the link and enter this code.") };
     col = col.child(div().text_size(px(12.)).text_color(c(if ready { "dim" } else { "accent" })).child(help));
     if !code.is_empty() { col = col.child(div().text_size(px(20.)).font_weight(FontWeight::BOLD).child(code.clone())); }
     if !url.is_empty() {
         let (u1, u2) = (url.clone(), url.clone());
         col = col.child(div().flex().items_center().gap_2()
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c("faint")).child(url))
-            .child(button(cx, light, format!("acct-open-{aid}"), "Open", true, false, move |_, cx| cx.open_url(&u1)))
-            .child(button(cx, light, format!("acct-copy-{aid}"), "Copy link", false, false, move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(u2.clone())))));
+            .child(button(cx, light, format!("acct-open-{aid}"), &trs("Open"), true, false, move |_, cx| cx.open_url(&u1)))
+            .child(button(cx, light, format!("acct-copy-{aid}"), &trs("Copy link"), false, false, move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(u2.clone())))));
     }
     if let Some(input) = st.codes.get(&aid).filter(|_| code.is_empty() && ready) {
         let (a1, a2, p2) = (aid.clone(), aid.clone(), pid.to_string());
         let _ = (&a2, &p2);
         col = col.child(div().flex().items_center().gap_2()
             .child(div().flex_1().h(px(28.)).px_2().flex().items_center().bg(c("raise")).child(input.clone()))
-            .child(button(cx, light, format!("acct-code-{aid}"), "Submit code", true, false, move |this, cx| respond(this, &a1, cx))));
+            .child(button(cx, light, format!("acct-code-{aid}"), &trs("Submit code"), true, false, move |this, cx| respond(this, &a1, cx))));
     }
-    if st.checking.contains(&aid) { col = col.child(div().text_size(px(12.)).text_color(c("accent")).child("Checking the code and your sign-in…")); }
-    if !msg.is_empty() { col = col.child(div().text_size(px(12.)).text_color(c("bad")).child(msg)); }
+    if st.checking.contains(&aid) { col = col.child(div().text_size(px(12.)).text_color(c("accent")).child(trs("Checking the code and your sign-in…"))); }
+    if !msg.is_empty() { col = col.child(div().text_size(px(12.)).text_color(c("bad")).child(trs(&msg))); }
     let (aid2, pid2) = (aid.clone(), pid.to_string());
-    col.child(div().flex().child(button(cx, light, format!("acct-cancel-{aid}"), "Cancel sign-in", false, false, move |this, _| ask(this, json!({"op": "cancel", "profile": pid2, "attempt": aid2}))))).into_any_element()
+    col.child(div().flex().child(button(cx, light, format!("acct-cancel-{aid}"), &trs("Cancel sign-in"), false, false, move |this, _| ask(this, json!({"op": "cancel", "profile": pid2, "attempt": aid2}))))).into_any_element()
 }
 
 /// `narrow`: the state goes under the name instead of beside it (a page under ADD_ROW_MIN wide).
@@ -259,9 +259,9 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     let head = if narrow { div().flex().flex_col().items_start() } else { div().flex().items_center() }.gap_3()
         .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(140.)).max_w_full()
             .child(div().flex().items_center().gap_2().child(super::picker::logo(if p["provider"] == "codex" { "codex" } else { "claude" })).child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(string(p, "label")))
-                .when(default, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(px(11.)).text_color(c("dim")).child("New threads"))))
+                .when(default, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(px(11.)).text_color(c("dim")).child(trs("New threads")))))
             .child(div().text_size(px(12.)).text_color(c("dim")).child(sub.join("  ·  "))))
-        .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(px(12.)).text_color(c(tok)).child(word)));
+        .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(px(12.)).text_color(c(tok)).child(trs(word))));
     let mut row = div().flex().items_center().gap_2().mt_3().flex_wrap();
     let armed = st.armed == id;
     let mut btn = |label: &str, key: &str, primary: bool, danger: bool, on: Box<dyn Fn(&mut Backplane, &mut Context<Backplane>)>| { row = std::mem::replace(&mut row, div()).child(button(cx, light, format!("acct-{key}-{i}"), label, primary, danger, on)); };
@@ -269,25 +269,25 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     let pid = id.clone();
     if !live {
         if state == "connected" {
-            btn("Refresh", "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) }));
-            if !default { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn("Use for new threads", "default", false, false, Box::new(move |this, _| { if this.tx.try_send(Command::Rpc("accounts.default".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch})), "acct-default")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
-            { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn("Move all threads here", "moveall", false, false, Box::new(move |this, _| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
-            btn("Sign out", "logout", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "disconnect", "profile": pid})) }));
+            btn(&trs("Refresh"), "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) }));
+            /* i18n-ok: drawn through tr */ if !default { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn(&trs("Use for new threads"), "default", false, false, Box::new(move |this, _| { if this.tx.try_send(Command::Rpc("accounts.default".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch})), "acct-default")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
+            /* i18n-ok: drawn through tr */ { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn(&trs("Move all threads here"), "moveall", false, false, Box::new(move |this, _| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
+            btn(&trs("Sign out"), "logout", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "disconnect", "profile": pid})) }));
         } else {
-            if state == "expired" { btn("Check now", "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) })); }
-            btn(if state == "unchecked" { "Check sign-in" } else if state == "expired" { "Sign in again" } else { "Connect" }, "login", state != "unchecked", false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": if state_of(&this.screens.acct.snap, &pid) == "unchecked" { "status" } else { "login" }, "profile": pid})) }));
+            if state == "expired" { btn(&trs("Check now"), "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) })); }
+            btn(&if state == "unchecked" { trs("Check sign-in") } else if state == "expired" { trs("Sign in again") } else { trs("Connect") }, "login", state != "unchecked", false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": if state_of(&this.screens.acct.snap, &pid) == "unchecked" { "status" } else { "login" }, "profile": pid})) }));
         }
     }
     // Delete is always there: it is the way out of a sign-in that is stuck (the hub ends the attempt first)
     if armed {
-        btn("Confirm delete", "remove", false, true, Box::new({ let pid = pid.clone(); move |this, _| { this.screens.acct.armed.clear(); ask(this, json!({"op": "remove", "profile": pid})) } }));
-        btn("Keep", "keep", false, false, Box::new(|this, _| this.screens.acct.armed.clear()));
+        btn(&trs("Confirm delete"), "remove", false, true, Box::new({ let pid = pid.clone(); move |this, _| { this.screens.acct.armed.clear(); ask(this, json!({"op": "remove", "profile": pid})) } }));
+        btn(&trs("Keep"), "keep", false, false, Box::new(|this, _| this.screens.acct.armed.clear()));
     } else {
-        btn("Delete", "delete", false, true, Box::new({ let pid = pid.clone(); move |this, _| this.screens.acct.armed = pid.clone() }));
+        btn(&trs("Delete"), "delete", false, true, Box::new({ let pid = pid.clone(); move |this, _| this.screens.acct.armed = pid.clone() }));
     }
     let mut card = div().flex().flex_col().p_4().mb_3().border_1().border_color(c("line")).bg(c("view")).child(head).child(row);
     for a in attempts_of(&st.snap, &id) { card = card.child(attempt_panel(cx, light, st, &a, &id)); }
-    let why = failure_of(&st.snap, &id); if !why.is_empty() && attempts_of(&st.snap, &id).is_empty() { card = card.child(div().mt_2().text_size(px(12.)).text_color(c("bad")).child(why)); }
+    let why = failure_of(&st.snap, &id); if !why.is_empty() && attempts_of(&st.snap, &id).is_empty() { card = card.child(div().mt_2().text_size(px(12.)).text_color(c("bad")).child(trs(&why))); }
     card.into_any_element()
 }
 fn state_of(snap: &Value, id: &str) -> String { profiles(snap).iter().find(|p| p["id"] == id).map(|p| string(p, "state")).unwrap_or_default() }
@@ -299,23 +299,23 @@ pub const ADD_ROW_MIN: f32 = 380.0;
 pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
-    out.push(div().pb_3().text_size(px(12.)).text_color(c("dim")).child("Each account is a separate Claude subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.").into_any_element());
-    if !st.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("bad")).child(st.notice.clone()).into_any_element()); }
+    out.push(div().pb_3().text_size(px(12.)).text_color(c("dim")).child(trs("Each account is a separate Claude subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
+    if !st.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
     if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
     // the CLI's own login is always there
     let def_default = !profiles(&st.snap).iter().any(|p| is_default(&st.snap, p));
     // narrow, the state goes under the words instead of squeezing them
     let card_row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start() } else { div().flex().items_center() };
     out.push(card_row.gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
-        .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(160.)).max_w_full().child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child("Default account")).child(div().text_size(px(12.)).text_color(c("dim")).child("The Claude CLI's own sign-in on this machine, as before.")))
-        .child(div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c("ok"))).child(div().text_size(px(12.)).text_color(c("ok")).child(if def_default { "Used for new threads" } else { "Available" }))).into_any_element());
+        .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(160.)).max_w_full().child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(trs("Default account"))).child(div().text_size(px(12.)).text_color(c("dim")).child(trs("The Claude CLI's own sign-in on this machine, as before."))))
+        .child(div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c("ok"))).child(div().text_size(px(12.)).text_color(c("ok")).child(if def_default { trs("Used for new threads") } else { trs("Available") }))).into_any_element());
     let ps = profiles(&st.snap);
     for (i, p) in ps.iter().enumerate() { out.push(card(cx, light, st, p, i, avail < ADD_ROW_MIN)); }
     if let Some(input) = &st.label {
         let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mt_2().child(div().w_full().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
             else { div().flex().items_center().gap_2().mt_2().child(div().flex_1().min_w_0().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
         out.push(row
-            .child(button(cx, light, "acct-add".into(), "Add Claude account", true, false, |this, cx| add(this, cx))).into_any_element());
+            .child(button(cx, light, "acct-add".into(), &trs("Add Claude account"), true, false, |this, cx| add(this, cx))).into_any_element());
     }
     out.extend(super::google::section(cx, light, &st.google));
     out
@@ -325,12 +325,12 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
 pub fn panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provider: &str) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
-    if !st.notice.is_empty() { out.push(div().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("bad")).child(st.notice.clone()).into_any_element()); }
+    if !st.notice.is_empty() { out.push(div().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
     for (i, p) in profiles(&st.snap).iter().enumerate().filter(|(_, p)| p["provider"] == provider) { out.push(card(cx, light, st, p, i, false)); }
     if let Some(input) = &st.label {
-        let word = if provider == "codex" { "Add Codex account" } else { "Add Claude account" };
+        let word = if provider == "codex" { trs("Add Codex account") } else { trs("Add Claude account") };
         out.push(div().flex().items_center().gap_2().child(div().flex_1().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone()))
-            .child(button(cx, light, "acct-add".into(), word, true, false, |this, cx| add(this, cx))).into_any_element());
+            .child(button(cx, light, "acct-add".into(), &word, true, false, |this, cx| add(this, cx))).into_any_element());
     }
     out
 }
@@ -344,7 +344,7 @@ fn press(this: &mut Backplane, row: &MenuRow, cx: &mut Context<Backplane>) {
     if row.usable {
         let thread = current_thread(this);
         let p = select_params(&thread, &row.profile, row.epoch, &this.screens.acct.snap);
-        if this.tx.try_send(Command::Rpc("accounts.select".into(), Secret(p), "acct-select")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); }
+        /* i18n-ok: drawn through tr */ if this.tx.try_send(Command::Rpc("accounts.select".into(), Secret(p), "acct-select")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); }
     } else { this.screens.acct.menu = false; this.screens.picker_open = false; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); }
     cx.notify();
 }
@@ -373,36 +373,36 @@ pub fn section(cx: &mut Context<Backplane>, light: bool, st: &Accounts, s: f32) 
             .child(text)
             .on_click(cx.listener(move |this, _, _, cx| press(this, &row, cx))));
     }
-    if !st.notice.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11. * s)).text_color(c("bad")).child(st.notice.clone())); }
+    if !st.notice.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11. * s)).text_color(c("bad")).child(trs(&st.notice))); }
     if !st.info.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11. * s)).text_color(c("text")).child(st.info.clone())); }
     // the bound account's "Move all threads here", as on its card in Settings
     let (bound, epoch) = binding(&st.snap);
     if let Some(p) = profiles(&st.snap).into_iter().find(|p| p["id"] == bound.as_str() && p["state"] == "connected") {
         let prov = string(&p, "provider");
         list = list.child(div().id("acct-m-moveall").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13. * s)).text_color(c("dim"))
-            .child("Move all threads here").on_click(cx.listener(move |this, _, _, cx| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": bound, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } cx.notify(); })));
+            /* i18n-ok: drawn through tr */ .child(trs("Move all threads here")).on_click(cx.listener(move |this, _, _, cx| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": bound, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } cx.notify(); })));
     }
     list.child(div().id("acct-m-manage").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13. * s)).text_color(c("dim"))
-        .child("Manage accounts in Settings").on_click(cx.listener(|this, _, _, cx| { this.screens.acct.menu = false; this.screens.picker_open = false; this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); cx.notify(); })))
+        .child(trs("Manage accounts in Settings")).on_click(cx.listener(|this, _, _, cx| { this.screens.acct.menu = false; this.screens.picker_open = false; this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); cx.notify(); })))
 }
 
 // ---- what an account has left ----------------------------------------------------------------------------------------------------------------
 
 fn window_name(w: &Value) -> String {
     if let Some(l) = w["label"].as_str().filter(|l| !l.is_empty()) { return l.to_string() }
-    match w["scope"].as_str().unwrap_or("") { "five_hour" => "5-hour".into(), "seven_day" => "Weekly".into(), "seven_day_opus" => "Weekly Opus".into(), "seven_day_sonnet" => "Weekly Sonnet".into(), o => o.replace('_', " ") }
+    match w["scope"].as_str().unwrap_or("") { "five_hour" => trs("5-hour"), "seven_day" => trs("Weekly"), "seven_day_opus" => trs("Weekly Opus"), "seven_day_sonnet" => trs("Weekly Sonnet"), o => o.replace('_', " ") }
 }
 /// "in 2d 3h" / "in 4h 5m" / "in 12m" / "now" for a reset time in epoch seconds.
 pub fn resets_in(at: u64, now: u64) -> String {
-    if at <= now { return "now".into() }
+    if at <= now { return t("gpui.acct.now") }
     let m = (at - now + 59) / 60;
-    if m >= 1440 { format!("in {}d {}h", m / 1440, (m % 1440) / 60) } else if m >= 60 { format!("in {}h {}m", m / 60, m % 60) } else { format!("in {m}m") }
+    if m >= 1440 { tf("gpui.acct.in.days", &[("d", (m / 1440).into()), ("h", ((m % 1440) / 60).into())]) } else if m >= 60 { tf("gpui.acct.in.hours", &[("h", (m / 60).into()), ("m", (m % 60).into())]) } else { tf("gpui.acct.in.minutes", &[("m", m.into())]) }
 }
 /// A window as "5-hour  72% left · resets in 3h 10m".
 pub fn window_line(w: &Value, now: u64) -> Option<String> {
     let used = w["used_percent"].as_f64().or_else(|| w["used_permille"].as_f64().map(|p| p / 10.0)).filter(|u| (0.0..=100.0).contains(u))?;
-    let mut s = format!("{}  {:.0}% left", window_name(w), 100.0 - used);
-    if let Some(r) = w["resets_at"].as_f64().filter(|r| *r > 0.0) { s.push_str(&format!(" · resets {}", resets_in(r as u64, now))) }
+    let mut s = tf("gpui.acct.left", &[("window", window_name(w).into()), ("pct", format!("{:.0}", 100.0 - used).into())]);
+    if let Some(r) = w["resets_at"].as_f64().filter(|r| *r > 0.0) { s.push_str(&if r as u64 <= now { t("gpui.acct.resets.now") } else { tf("gpui.acct.resets", &[("when", resets_in(r as u64, now).into())]) }) }
     Some(s)
 }
 /// Opening the menu asks the hub to re-read each signed-in (or unchecked) account; the hub reads a profile at most every 5 minutes.
@@ -456,6 +456,16 @@ mod tests {
     #[test] fn a_pick_carries_the_binding_the_menu_was_drawn_from() {
         let p = select_params("t1", "w", 3, &snap()); assert_eq!((p["thread"].clone(), p["profile"].clone(), p["epoch"].clone()), (json!("t1"), json!("w"), json!(3))); assert_eq!(p["expected"], "{\"id\":\"w\",\"epoch\":3}");
         assert_eq!(binding(&snap()), ("w".to_string(), 3));
+    }
+    #[test] fn the_move_summary_and_what_is_left_read_in_japanese() {
+        crate::i18n::with_lang("ja", || {
+            assert_eq!(moved_text(&json!({"moved":1,"already":0,"running":["t2"],"failed":[{"thread":"c"}]})), "1件のスレッドをこのアカウントに移しました。ターン実行中の1件のスレッドは移していません。終わったらもう一度押してください。1件のスレッドを移せませんでした。");
+            assert_eq!(moved_text(&json!({"moved":0,"already":2,"running":[],"failed":[]})), "2件のスレッドはすべて、すでにこのアカウントでした。");
+            assert_eq!(window_line(&json!({"scope":"seven_day","used_percent":86.0,"resets_at":10_000u64 + 2 * 86400}), 10_000).unwrap(), "週間  残り14% · 2日0時間後にリセット");
+            assert_eq!(window_line(&json!({"scope":"five_hour","used_percent":25.0,"resets_at":5}), 10).unwrap(), "5時間  残り75% · まもなくリセット");
+            assert_eq!(allowance(&profiles(&snap())[0]), "5時間の62%を使用");
+            assert_eq!(menu_rows(&snap(), 0)[2].detail, "未接続"); assert_eq!(menu_rows(&snap(), 0)[0].label, "既定のアカウント");
+        });
     }
     #[test] fn a_window_says_what_is_left_and_when_it_resets() {
         assert_eq!(window_line(&json!({"scope":"seven_day","used_percent":86.0,"resets_at":10_000u64 + 2 * 86400}), 10_000).unwrap(), "Weekly  14% left · resets in 2d 0h");

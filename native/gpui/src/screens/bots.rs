@@ -4,7 +4,7 @@
 //! `mem-forget`); typed fields are the form fields of screens::settings (`bfield`). Nothing here decides what a bot is or does.
 //! Status (the plane as text), Mail (the conversation headers), Space (the bot's blocks) and Settings (name, persona) are drawn; Browser and Tasks say they are not available here yet.
 use super::settings::{Field, FieldSlot};
-use crate::{hub::Command, string, theme, Backplane};
+use crate::{hub::Command, i18n::{t, tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -32,16 +32,16 @@ pub fn form_fields(data: &Value) -> Vec<Field> {
     let f = |name: &str, hint: &str, value: String| Field { name: name.into(), hint: hint.into(), secret: false, value, vault: false };
     let mut out = Vec::new();
     let nb = &data["newBot"];
-    if nb.is_object() { out.push(f("name", &string(nb, "hint"), string(nb, "name"))); out.push(f("persona", "Persona", string(nb, "persona"))); }
+    if nb.is_object() { out.push(f("name", &trs(&string(nb, "hint")), string(nb, "name"))); out.push(f("persona", &trs("Persona"), string(nb, "persona"))); }
     let nr = &data["newRoom"];
-    if nr.is_object() { out.push(f("rname", "Room name", string(nr, "name"))); }
+    if nr.is_object() { out.push(f("rname", &trs("Room name"), string(nr, "name"))); }
     let b = &data["bot"];
-    match b["kind"].as_str() { Some("room") => out.push(f("rpost", "Post to the room", String::new())), Some("remote") => out.push(f("rtext", "Message", String::new())), _ => {} }
+    match b["kind"].as_str() { Some("room") => out.push(f("rpost", &trs("Post to the room"), String::new())), Some("remote") => out.push(f("rtext", &trs("Message"), String::new())), _ => {} }
     // a space's inputs: the typed text stays here (a vault field sends nothing) until the input's Send, which carries it in the space action
-    if b["kind"] == "bot" && b["tab"] == "settings" { out.push(Field { name: persona_field(&string(b, "id")), hint: "Persona".into(), secret: false, value: string(b, "persona"), vault: true }); }
-    if b["kind"] == "bot" && b["tab"] == "routines" && b["routine"]["open"] == true { out.push(f("oname", "Name", string(&b["routine"], "name"))); out.push(f("ocron", "When", string(&b["routine"], "cron"))); out.push(f("oprompt", "What to do each time", string(&b["routine"], "prompt"))); }
-    if b["kind"] == "bot" && b["tab"] == "hooks" { out.push(Field { name: "hk.name".into(), hint: "Webhook name".into(), secret: false, value: String::new(), vault: true }); }
-    if b["kind"] == "bot" && b["tab"] == "tasks" { for t in arr(b, "tasks") { for p in arr(t, "params") { out.push(Field { name: task_field(&string(t, "slug"), &string(p, "name")), hint: { let e = string(p, "example"); if e.is_empty() { string(p, "label") } else { format!("{} (e.g. {e})", string(p, "label")) } }, secret: false, value: String::new(), vault: true }); } } }
+    if b["kind"] == "bot" && b["tab"] == "settings" { out.push(Field { name: persona_field(&string(b, "id")), hint: trs("Persona"), secret: false, value: string(b, "persona"), vault: true }); }
+    if b["kind"] == "bot" && b["tab"] == "routines" && b["routine"]["open"] == true { out.push(f("oname", &trs("Name"), string(&b["routine"], "name"))); out.push(f("ocron", &trs("When"), string(&b["routine"], "cron"))); out.push(f("oprompt", &trs("What to do each time"), string(&b["routine"], "prompt"))); }
+    if b["kind"] == "bot" && b["tab"] == "hooks" { out.push(Field { name: "hk.name".into(), hint: trs("Webhook name"), secret: false, value: String::new(), vault: true }); }
+    if b["kind"] == "bot" && b["tab"] == "tasks" { for t in arr(b, "tasks") { for p in arr(t, "params") { out.push(Field { name: task_field(&string(t, "slug"), &string(p, "name")), hint: { let e = string(p, "example"); if e.is_empty() { string(p, "label") } else { tf("gpui.bots.eg", &[("label", string(p, "label").into()), ("e", e.into())]) } }, secret: false, value: String::new(), vault: true }); } } }
     if b["kind"] == "bot" { let mut ins = Vec::new(); space_inputs(&b["space"]["blocks"], &mut ins); for (a, l) in ins { out.push(Field { name: format!("sp.{a}"), hint: l, secret: false, value: String::new(), vault: true }); } }
     out
 }
@@ -65,7 +65,7 @@ fn delete_task(this: &mut Backplane, slug: &str, cx: &mut Context<Backplane>) {
 fn tasks_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let items: Vec<&Value> = arr(bot, "tasks").collect();
-    if items.is_empty() { return div().p_3().text_color(c("dim")).child("No tasks yet. Teach this bot a browser task and it shows here.").into_any_element(); }
+    if items.is_empty() { return div().p_3().text_color(c("dim")).child(trs("No tasks yet. Teach this bot a browser task and it shows here.")).into_any_element(); }
     let asking = ASKING.lock().unwrap().clone();
     let mut col = div().flex().flex_col();
     for (i, t) in items.into_iter().enumerate() {
@@ -76,13 +76,13 @@ fn tasks_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String,
         for p in &names { if let Some(b) = field_box(light, fields, &task_field(&slug, p)) { card = card.child(b); } }
         let (s1, s2, n2) = (slug.clone(), slug.clone(), names.clone());
         card = card.child(div().flex().gap_2()
-            .child(div().id(SharedString::from(format!("task-run-{i}"))).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child("Run").on_click(cx.listener(move |this, _, _, cx| run_task(this, &s1, &n2, cx))))
-            .child(div().id(SharedString::from(format!("task-del-{i}"))).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))).child(if asking == slug { "Delete this task?" } else { "Delete" }).on_click(cx.listener(move |this, _, _, cx| delete_task(this, &s2, cx)))));
+            .child(div().id(SharedString::from(format!("task-run-{i}"))).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Run")).on_click(cx.listener(move |this, _, _, cx| run_task(this, &s1, &n2, cx))))
+            .child(div().id(SharedString::from(format!("task-del-{i}"))).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))).child(if asking == slug { trs("Delete this task?") } else { trs("Delete") }).on_click(cx.listener(move |this, _, _, cx| delete_task(this, &s2, cx)))));
         col = col.child(card);
     }
     let runs: Vec<&Value> = arr(bot, "taskRuns").collect();
     if !runs.is_empty() {
-        col = col.child(div().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).child("RECENT RUNS"));
+        col = col.child(div().px_3().pt_3().pb_1().text_size(px(11.)).text_color(c("dim")).child(trs("Recent runs").to_uppercase()));
         for r in runs { col = col.child(div().flex().gap_2().px_3().py_1().text_size(px(12.)).child(div().child(string(r, "run"))).child(div().text_color(c("dim")).child(string(r, "status")))); }
     }
     col.into_any_element()
@@ -179,19 +179,19 @@ pub fn forms(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
         for n in ["name", "persona"] { if let Some(b) = field_box(light, fields, n) { els.push(b); } }
         let provs = providers(nb);
         if !provs.is_empty() { els.push(div().flex().flex_wrap().gap_2().children(provs.iter().enumerate().map(|(i, p)| btn(cx, light, format!("prov-{i}"), p.label.clone(), p.on, provider_cmd, p.provider.clone())).collect::<Vec<_>>()).into_any_element()); }
-        (title, body, close, go, go_label, ok) = ("New bot", els, close_bot_form, create_bot, "Create", fields.get("name").map_or(false, |s| !s.input.read(cx).content.trim().is_empty()));
+        /* i18n-ok: drawn through tr */ (title, body, close, go, go_label, ok) = ("New bot", els, close_bot_form, create_bot, "Create", fields.get("name").map_or(false, |s| !s.input.read(cx).content.trim().is_empty()));
     } else if nr.is_object() {
         let mut els: Vec<AnyElement> = Vec::new();
         if let Some(b) = field_box(light, fields, "rname") { els.push(b); }
-        els.push(div().text_size(px(11.)).text_color(c("dim")).child("Members").into_any_element());
+        els.push(div().text_size(px(11.)).text_color(c("dim")).child(trs("Members")).into_any_element());
         els.push(div().flex().flex_wrap().gap_2().children(picks(nr).iter().enumerate().map(|(i, p)| btn(cx, light, format!("pick-{i}"), p.name.clone(), p.on, pick_cmd, p.id.clone())).collect::<Vec<_>>()).into_any_element());
-        (title, body, close, go, go_label, ok) = ("New room", els, close_room_form, save_room, "Save", picks(nr).iter().any(|p| p.on));
+        /* i18n-ok: drawn through tr */ (title, body, close, go, go_label, ok) = ("New room", els, close_room_form, save_room, "Save", picks(nr).iter().any(|p| p.on));
     } else { return None; }
     Some(div().id("bot-form").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().p_4().gap_3()
-        .child(div().font_weight(FontWeight::BOLD).text_size(px(15.)).child(title))
+        .child(div().font_weight(FontWeight::BOLD).text_size(px(15.)).child(trs(title)))
         .children(body)
-        .child(div().flex().gap_2().child(btn(cx, light, "form-cancel".into(), "Cancel".into(), false, close, String::new()))
-            .child(if ok { btn(cx, light, "form-go".into(), go_label.into(), true, go, String::new()) } else { inert(light, go_label) }))
+        .child(div().flex().gap_2().child(btn(cx, light, "form-cancel".into(), trs("Cancel"), false, close, String::new()))
+            .child(if ok { btn(cx, light, "form-go".into(), trs(go_label), true, go, String::new()) } else { inert(light, &trs(go_label)) }))
         .into_any_element())
 }
 
@@ -204,30 +204,30 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> Option<AnyE
     let c = |n: &str| theme::color(light, n);
     let on = bot["navTab"].as_str().or(bot["tab"].as_str()).unwrap_or("chat").to_string();
     let mut strip = div().flex().gap_1();
-    for (i, t) in tabs(bot, "tabs").into_iter().enumerate() { let is = t.id == on; strip = strip.child(btn(cx, light, format!("btab-{i}"), t.label, is, tab_cmd, t.id)); }
+    for (i, t) in tabs(bot, "tabs").into_iter().enumerate() { let is = t.id == on; strip = strip.child(btn(cx, light, format!("btab-{i}"), trs(&t.label), is, tab_cmd, t.id)); }
     let subs = tabs(bot, "subtabs");
     let mut col = div().h(px(bar_h(bot))).flex_shrink_0().px_3().py_1().flex().flex_col().gap_1().border_b_1().border_color(c("line")).bg(c("bg"))
         .child(div().flex().gap_2().items_center().child(div().font_weight(FontWeight::BOLD).child(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))))
-            .child(div().text_size(px(11.)).text_color(c("dim")).child(string(bot, "note")))).child(strip);
-    if !subs.is_empty() { let cur = string(bot, "tab"); col = col.child(div().flex().gap_1().children(subs.into_iter().enumerate().map(|(i, t)| { let is = t.id == cur; btn(cx, light, format!("bsub-{i}"), t.label, is, tab_cmd, t.id) }).collect::<Vec<_>>())); }
+            .child(div().text_size(px(11.)).text_color(c("dim")).child(trs(&string(bot, "note"))))).child(strip);
+    if !subs.is_empty() { let cur = string(bot, "tab"); col = col.child(div().flex().gap_1().children(subs.into_iter().enumerate().map(|(i, t)| { let is = t.id == cur; btn(cx, light, format!("bsub-{i}"), trs(&t.label), is, tab_cmd, t.id) }).collect::<Vec<_>>())); }
     Some(col.into_any_element())
 }
 
 fn memory_page(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let items: Vec<&Value> = arr(bot, "memory").collect();
-    if items.is_empty() { return div().p_3().text_color(c("dim")).child("Nothing remembered yet.").into_any_element(); }
+    if items.is_empty() { return div().p_3().text_color(c("dim")).child(trs("Nothing remembered yet.")).into_any_element(); }
     let more = bot["memoryMore"].as_u64().unwrap_or(0); let items_len = items.len();
     div().id(SharedString::from(format!("memory-list-{}", bot["memoryFrom"].as_u64().unwrap_or(0)))).size_full().overflow_y_scroll().flex().flex_col().children(items.into_iter().enumerate().map(|(i, m)| {
         div().flex().flex_col().gap_1().px_3().py_2().border_b_1().border_color(c("line"))
             .child(div().flex().gap_2().child(div().font_weight(FontWeight::BOLD).child(string(m, "key"))).child(div().text_size(px(11.)).text_color(c("dim")).child(string(m, "kind")))
-                .child(div().flex_1()).child(div().text_size(px(11.)).text_color(c("faint")).child(string(m, "updated"))).child(btn(cx, light, format!("forget-{i}"), "Forget".into(), false, forget_cmd, string(m, "key"))))
+                .child(div().flex_1()).child(div().text_size(px(11.)).text_color(c("faint")).child(string(m, "updated"))).child(btn(cx, light, format!("forget-{i}"), trs("Forget"), false, forget_cmd, string(m, "key"))))
             .child(div().child(string(m, "text"))).into_any_element()
     }).collect::<Vec<_>>()).child({
         let from = bot["memoryFrom"].as_u64().unwrap_or(0); let total = bot["memoryTotal"].as_u64().unwrap_or(0);
-        let mut bar = div().flex().gap_2().items_center().p_3().child(div().text_size(px(11.)).text_color(c("dim")).child(format!("{}–{} of {}", from + 1, from + items_len as u64, total)));
-        if let Some(p) = bot["memoryPrev"].as_u64() { bar = bar.child(btn(cx, light, "mem-newer".into(), "Newer".into(), false, memory_cmd, p.to_string())); }
-        if let Some(n) = bot["memoryNext"].as_u64() { bar = bar.child(btn(cx, light, "mem-older".into(), format!("Older ({more} more)"), false, memory_cmd, n.to_string())); }
+        let mut bar = div().flex().gap_2().items_center().p_3().child(div().text_size(px(11.)).text_color(c("dim")).child(tf("gpui.bots.mem.range", &[("from", (from + 1).into()), ("to", (from + items_len as u64).into()), ("total", total.into())])));
+        if let Some(p) = bot["memoryPrev"].as_u64() { bar = bar.child(btn(cx, light, "mem-newer".into(), trs("Newer"), false, memory_cmd, p.to_string())); }
+        if let Some(n) = bot["memoryNext"].as_u64() { bar = bar.child(btn(cx, light, "mem-older".into(), tf("gpui.bots.mem.older", &[("more", more.into())]), false, memory_cmd, n.to_string())); }
         bar
     }).into_any_element()
 }
@@ -242,26 +242,26 @@ fn routines_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
         let hint = string(form, "hint");
         let can = fields.get("ocron").map_or(false, |s| !s.input.read(cx).content.trim().is_empty());
         div().flex().flex_col().gap_2().px_3().py_2().border_b_1().border_color(c("line"))
-            .child(div().font_weight(FontWeight::BOLD).child(if string(form, "id").is_empty() { "New routine" } else { "Routine" }))
+            .child(div().font_weight(FontWeight::BOLD).child(if string(form, "id").is_empty() { trs("New routine") } else { trs("Routine") }))
             .children(field_box(light, fields, "oname")).children(field_box(light, fields, "ocron"))
-            .child(div().text_size(px(11.)).text_color(c("dim")).child(if hint.is_empty() { "When: every 15m, daily 09:30, weekdays 08:00, or a one-time time".to_string() } else { hint }))
+            .child(div().text_size(px(11.)).text_color(c("dim")).child(if hint.is_empty() { trs("When: every 15m, daily 09:30, weekdays 08:00, or a one-time time") } else { trs(&hint) }))
             .children(field_box_h(light, fields, "oprompt", 60.))
-            .children(routine_error(form).map(|e| div().id("rt-error").text_size(px(12.)).text_color(c("bad")).child(e)))
-            .child(div().flex().gap_2().child(btn(cx, light, "rt-cancel".into(), "Cancel".into(), false, close_routine_form, String::new())).child(if can { btn(cx, light, "rt-save".into(), "Save".into(), true, routine_save, String::new()) } else { div().px_2().py_1().text_size(px(12.)).text_color(c("faint")).child("Save").into_any_element() }))
+            .children(routine_error(form).map(|e| div().id("rt-error").text_size(px(12.)).text_color(c("bad")).child(trs(&e))))
+            .child(div().flex().gap_2().child(btn(cx, light, "rt-cancel".into(), trs("Cancel"), false, close_routine_form, String::new())).child(if can { btn(cx, light, "rt-save".into(), trs("Save"), true, routine_save, String::new()) } else { div().px_2().py_1().text_size(px(12.)).text_color(c("faint")).child(trs("Save")).into_any_element() }))
     } else {
-        div().flex().px_3().py_2().border_b_1().border_color(c("line")).child(btn(cx, light, "rt-new".into(), "New routine".into(), false, routine_edit, String::new()))
+        div().flex().px_3().py_2().border_b_1().border_color(c("line")).child(btn(cx, light, "rt-new".into(), trs("New routine"), false, routine_edit, String::new()))
     };
-    if items.is_empty() { return div().flex().flex_col().child(head).child(div().p_3().text_color(c("dim")).child("No routines.")).into_any_element(); }
+    if items.is_empty() { return div().flex().flex_col().child(head).child(div().p_3().text_color(c("dim")).child(trs("No routines."))).into_any_element(); }
     div().flex().flex_col().child(head).children(items.into_iter().enumerate().map(|(i, r)| {
         let id = string(r, "id");
         let when = [string(r, "label"), string(r, "next"), string(r, "rel")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
         div().flex().flex_col().gap_1().px_3().py_2().border_b_1().border_color(c("line"))
             .child(div().flex().gap_2().items_center().child(div().font_weight(FontWeight::BOLD).child(string(r, "name"))).child(div().text_size(px(11.)).text_color(c("dim")).child(if when.is_empty() { string(r, "cron") } else { when }))
                 .child(div().flex_1())
-                .child(btn(cx, light, format!("rt-on-{i}"), if r["on"] == true { "On".into() } else { "Off".into() }, r["on"] == true, routine_toggle, id.clone()))
-                .child(btn(cx, light, format!("rt-edit-{i}"), "Edit".into(), false, routine_edit, id.clone()))
-                .child(btn(cx, light, format!("rt-run-{i}"), "Run".into(), false, routine_run, id.clone()))
-                .child(btn(cx, light, format!("rt-del-{i}"), "Delete".into(), false, routine_delete, id)))
+                .child(btn(cx, light, format!("rt-on-{i}"), if r["on"] == true { trs("On") } else { trs("Off") }, r["on"] == true, routine_toggle, id.clone()))
+                .child(btn(cx, light, format!("rt-edit-{i}"), trs("Edit"), false, routine_edit, id.clone()))
+                .child(btn(cx, light, format!("rt-run-{i}"), trs("Run"), false, routine_run, id.clone()))
+                .child(btn(cx, light, format!("rt-del-{i}"), trs("Delete"), false, routine_delete, id)))
             .child(div().text_size(px(12.)).text_color(c("dim")).child(string(r, "prompt"))).into_any_element()
     }).collect::<Vec<_>>()).into_any_element()
 }
@@ -272,7 +272,7 @@ fn note(light: bool, t: &str) -> AnyElement { div().p_3().text_color(theme::colo
 fn status_page(light: bool, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let text = string(bot, "plane");
-    if text.trim().is_empty() { return note(light, "Nothing to report."); }
+    if text.trim().is_empty() { return note(light, &trs("Nothing to report.")); }
     div().flex().flex_col().p_3().gap_1().font_family("monospace").text_size(px(12.)).children(text.lines().map(|l| {
         let head = !l.starts_with(' ') && !l.is_empty();
         div().when(head, |d| d.font_weight(FontWeight::BOLD).pt_2()).when(!head, |d| d.text_color(c("dim"))).child(l.to_string())
@@ -282,7 +282,7 @@ fn status_page(light: bool, bot: &Value) -> AnyElement {
 fn mail_page(light: bool, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let items: Vec<&Value> = arr(bot, "mail").collect();
-    if items.is_empty() { return note(light, "No mail."); }
+    if items.is_empty() { return note(light, &trs("No mail.")); }
     let total = bot["mailTotal"].as_u64().unwrap_or(0);
     div().flex().flex_col().children(items.iter().map(|m| {
         let unread = m["unread"] == true;
@@ -290,7 +290,7 @@ fn mail_page(light: bool, bot: &Value) -> AnyElement {
             .child(div().flex().gap_2().child(div().when(unread, |d| d.font_weight(FontWeight::BOLD)).child(string(m, "subject")))
                 .child(div().flex_1()).child(div().text_size(px(11.)).text_color(c("faint")).child(format!("{} · {}", m["n"], string(m, "ago")))))
             .child(div().text_size(px(12.)).text_color(c("dim")).child(format!("{}: {}", string(m, "from"), string(m, "head")))).into_any_element()
-    }).collect::<Vec<_>>()).children((total as usize > items.len()).then(|| div().p_3().text_size(px(11.)).text_color(c("dim")).child(format!("{} older conversations not shown", total as usize - items.len())))).into_any_element()
+    }).collect::<Vec<_>>()).children((total as usize > items.len()).then(|| div().p_3().text_size(px(11.)).text_color(c("dim")).child(tf("gpui.bots.mail.older", &[("n", (total as usize - items.len()).into())])))).into_any_element()
 }
 
 fn space_block(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, b: &Value, key: String) -> AnyElement {
@@ -311,7 +311,7 @@ fn space_block(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String
         "input" => { let action = string(b, "action");
             div().flex().flex_col().gap_1().child(div().text_size(px(11.)).text_color(c("dim")).child(string(b, "label")))
                 .child(div().flex().gap_2().items_end().child(div().flex_1().children(field_box(light, fields, &format!("sp.{action}"))))
-                    .child(div().id(SharedString::from(format!("{key}-send"))).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child("Send")
+                    .child(div().id(SharedString::from(format!("{key}-send"))).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Send"))
                         .on_click(cx.listener(move |this, _, _, cx| send_space(this, &action, cx))))).into_any_element() }
         "divider" => div().h(px(1.)).w_full().bg(c("line")).into_any_element(),
         "row" => { let kids: Vec<AnyElement> = arr(b, "blocks").enumerate().map(|(i, k)| space_block(cx, light, fields, k, format!("{key}-{i}"))).collect(); div().flex().gap_3().children(kids).into_any_element() }
@@ -321,7 +321,7 @@ fn space_block(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String
 
 fn space_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
     let sp = &bot["space"];
-    if !sp.is_object() { return note(light, if bot["spacePage"] == true { "This space is a web page; it is shown in the phone apps." } else { "No space yet. The bot writes it with space_set." }); }
+    if !sp.is_object() { return note(light, &if bot["spacePage"] == true { trs("This space is a web page; it is shown in the phone apps.") } else { trs("No space yet. The bot writes it with space_set.") }); }
     let blocks: Vec<AnyElement> = arr(sp, "blocks").enumerate().map(|(i, b)| space_block(cx, light, fields, b, format!("sp-{i}"))).collect();
     div().flex().flex_col().gap_2().p_3().children((!string(sp, "title").is_empty()).then(|| div().font_weight(FontWeight::BOLD).text_size(px(18.)).child(string(sp, "title")))).children(blocks).into_any_element()
 }
@@ -330,11 +330,11 @@ fn settings_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
     let c = |n: &str| theme::color(light, n);
     let row = |k: &str, v: String| div().flex().flex_col().gap_1().child(div().text_size(px(11.)).text_color(c("dim")).child(k.to_string())).child(div().child(v));
     let (id, field) = (string(bot, "id"), persona_field(&string(bot, "id")));
-    div().flex().flex_col().gap_3().p_3().child(row("Name", string(bot, "name")))
-        .child(div().flex().flex_col().gap_1().child(div().text_size(px(11.)).text_color(c("dim")).child("Persona")).children(field_box_h(light, fields, &field, 96.)))
-        .child(div().flex().gap_2().child(div().id("bot-save").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child("Save")
+    div().flex().flex_col().gap_3().p_3().child(row(&trs("Name"), string(bot, "name")))
+        .child(div().flex().flex_col().gap_1().child(div().text_size(px(11.)).text_color(c("dim")).child(trs("Persona"))).children(field_box_h(light, fields, &field, 96.)))
+        .child(div().flex().gap_2().child(div().id("bot-save").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Save"))
             .on_click(cx.listener(move |this, _, _, cx| save_persona(this, &id, cx)))))
-        .child(row("Created", string(bot, "created"))).into_any_element()
+        .child(row(&trs("Created"), string(bot, "created"))).into_any_element()
 }
 /// The persona box of one bot: its name carries the bot, so another bot's page never shows this one's text.
 pub fn persona_field(bot: &str) -> String { format!("bp.{bot}") }
@@ -356,7 +356,7 @@ pub fn hook_answer(reply: &Value) -> Value {
 }
 /// The answer of `bots.hook` / `bots.hook_token` (the hub hands the whole reply on for these tags).
 pub fn hook_done(this: &mut Backplane, _tag: &str, ok: bool, why: &str, cx: &mut Context<Backplane>) {
-    *REVEAL.lock().unwrap() = if ok { serde_json::from_str(why).unwrap_or(Value::Null) } else { json!({"error": if why.is_empty() { "The hub refused it.".to_string() } else { why.to_string() }}) };
+    /* i18n-ok: drawn through tr */ *REVEAL.lock().unwrap() = if ok { serde_json::from_str(why).unwrap_or(Value::Null) } else { json!({"error": if why.is_empty() { "The hub refused it.".to_string() } else { why.to_string() }}) };
     if ok { if let Some(input) = this.screens.fields.get("hk.name").map(|s| s.input.clone()) { input.update(cx, |i, cx| i.set(String::new(), cx)); } }
     let _ = this.tx.try_send(act("hook-refresh", "")); cx.notify();
 }
@@ -381,18 +381,18 @@ pub fn controls(data: &Value) -> Vec<(String, String, crate::script::Ctl)> {
     let a = |a: &str, v: &str| Ctl::Bot("act".into(), format!("{a}{SEP}{v}"));
     let nb = &data["newBot"];
     if nb.is_object() {
-        for (i, p) in providers(nb).iter().enumerate() { out.push((format!("prov-{i}"), p.label.clone(), a("bfield", &format!("provider{SEP}{}", p.provider)))); }
-        out.push(("form-go".into(), "Create".into(), a("bot-create", ""))); out.push(("form-cancel".into(), "Cancel".into(), a("form-close", "@bnew")));
+        /* i18n-ok: e2e control labels */ for (i, p) in providers(nb).iter().enumerate() { out.push((format!("prov-{i}"), p.label.clone(), a("bfield", &format!("provider{SEP}{}", p.provider)))); }
+        /* i18n-ok: e2e control labels */ out.push(("form-go".into(), "Create".into(), a("bot-create", ""))); out.push(("form-cancel".into(), trs("Cancel"), a("form-close", "@bnew")));
     }
     let bot = &data["bot"];
     if bot["kind"] != "bot" { return out }
-    for (k, key) in [("btab", "tabs"), ("bsub", "subtabs")] { for (i, t) in tabs(bot, key).into_iter().enumerate() { out.push((format!("{k}-{i}"), t.label, a("bot-tab", &t.id))); } }
+    /* i18n-ok: e2e control labels */ for (k, key) in [("btab", "tabs"), ("bsub", "subtabs")] { for (i, t) in tabs(bot, key).into_iter().enumerate() { out.push((format!("{k}-{i}"), t.label, a("bot-tab", &t.id))); } }
     if bot["tab"] == "hooks" {
-        out.push(("hook-new".into(), "New webhook".into(), Ctl::Bot("hook-new".into(), string(bot, "id"))));
+        /* i18n-ok: e2e control labels */ out.push(("hook-new".into(), "New webhook".into(), Ctl::Bot("hook-new".into(), string(bot, "id"))));
         for (i, h) in arr(bot, "hooks").enumerate() {
             let id = string(h, "id");
-            for (c, label, op) in [("hook-tok", "Token", "show"), ("hook-new-tok", "New token", "new"), ("hook-no-tok", "No token", "off")] { out.push((format!("{c}-{i}"), label.into(), Ctl::Bot("hook-token".into(), format!("{op}{SEP}{id}")))); }
-            out.push((format!("hook-{i}"), "Revoke".into(), a("hook-revoke", &id)));
+            /* i18n-ok: e2e control labels */ for (c, label, op) in [("hook-tok", "Token", "show"), ("hook-new-tok", "New token", "new"), ("hook-no-tok", "No token", "off")] { out.push((format!("{c}-{i}"), label.into(), Ctl::Bot("hook-token".into(), format!("{op}{SEP}{id}")))); }
+            /* i18n-ok: e2e control labels */ out.push((format!("hook-{i}"), "Revoke".into(), a("hook-revoke", &id)));
         }
     }
     out
@@ -413,27 +413,27 @@ fn hooks_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String,
     let bot_id = string(bot, "id");
     let mut col = div().flex().flex_col();
     col = col.child(div().flex().gap_2().items_center().px_3().py_2().border_b_1().border_color(c("line"))
-        .children(field_box(light, fields, "hk.name")).child(chip(cx, light, "hook-new".into(), "New webhook", true, move |t, cx| new_hook(t, &bot_id, cx))));
+        .children(field_box(light, fields, "hk.name")).child(chip(cx, light, "hook-new".into(), &trs("New webhook"), true, move |t, cx| new_hook(t, &bot_id, cx))));
     let r = REVEAL.lock().unwrap().clone();
     if r.is_object() {
         let line = |k: &str, v: String| div().flex().gap_2().child(div().w(px(80.)).text_color(c("dim")).child(k.to_string())).child(div().child(v));
         let mut box_ = div().flex().flex_col().gap_1().px_3().py_2().border_b_1().border_color(c("line")).bg(c("raise")).text_size(px(12.));
-        if let Some(e) = r["error"].as_str() { box_ = box_.child(div().child(e.to_string())); }
-        if let Some(s) = r["secret"].as_str() { box_ = box_.child(div().font_weight(FontWeight::BOLD).child("Webhook made. Keep its secret: it is shown only now.")).child(line("Secret", s.into())).child(line("Path", string(&r, "path"))); }
-        if r["tokenHook"].is_string() { box_ = box_.child(line("Token", if string(&r, "token").is_empty() { "off".into() } else { string(&r, "token") })).child(line("Post to", string(&r, "tokenUrl"))); }
+        if let Some(e) = r["error"].as_str() { box_ = box_.child(div().child(trs(e))); }
+        if let Some(s) = r["secret"].as_str() { box_ = box_.child(div().font_weight(FontWeight::BOLD).child(trs("Webhook made. Keep its secret: it is shown only now."))).child(line(&trs("Secret"), s.into())).child(line(&trs("Path"), string(&r, "path"))); }
+        if r["tokenHook"].is_string() { box_ = box_.child(line(&trs("Token"), if string(&r, "token").is_empty() { t("gpui.bots.token.off") } else { string(&r, "token") })).child(line(&trs("Post to"), string(&r, "tokenUrl"))); }
         col = col.child(box_);
     }
     let items: Vec<&Value> = arr(bot, "hooks").collect();
-    if items.is_empty() { return col.child(div().p_3().text_color(c("dim")).child("No hooks.")).into_any_element(); }
+    if items.is_empty() { return col.child(div().p_3().text_color(c("dim")).child(trs("No hooks."))).into_any_element(); }
     col.children(items.into_iter().enumerate().map(|(i, h)| {
         let (a, b, d) = (string(h, "id"), string(h, "id"), string(h, "id"));
         div().flex().gap_2().items_center().px_3().py_2().border_b_1().border_color(c("line"))
             .child(div().font_weight(FontWeight::BOLD).child(string(h, "name"))).child(div().text_size(px(11.)).text_color(c("dim")).child(string(h, "path")))
-            .child(div().flex_1()).child(div().text_size(px(11.)).text_color(c("faint")).child(format!("{} calls", h["count"])))
-            .child(chip(cx, light, format!("hook-tok-{i}"), "Token", false, move |t, cx| hook_token(t, &a, "show", cx)))
-            .child(chip(cx, light, format!("hook-new-tok-{i}"), "New token", false, move |t, cx| hook_token(t, &b, "new", cx)))
-            .child(chip(cx, light, format!("hook-no-tok-{i}"), "No token", false, move |t, cx| hook_token(t, &d, "off", cx)))
-            .child(btn(cx, light, format!("hook-{i}"), "Revoke".into(), false, hook_revoke, string(h, "id"))).into_any_element()
+            .child(div().flex_1()).child(div().text_size(px(11.)).text_color(c("faint")).child(tf("gpui.bots.hook.calls", &[("n", h["count"].as_u64().unwrap_or(0).into())])))
+            .child(chip(cx, light, format!("hook-tok-{i}"), &trs("Token"), false, move |t, cx| hook_token(t, &a, "show", cx)))
+            .child(chip(cx, light, format!("hook-new-tok-{i}"), &trs("New token"), false, move |t, cx| hook_token(t, &b, "new", cx)))
+            .child(chip(cx, light, format!("hook-no-tok-{i}"), &trs("No token"), false, move |t, cx| hook_token(t, &d, "off", cx)))
+            .child(btn(cx, light, format!("hook-{i}"), trs("Revoke"), false, hook_revoke, string(h, "id"))).into_any_element()
     }).collect::<Vec<_>>()).into_any_element()
 }
 
@@ -441,15 +441,15 @@ fn talk_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
     let c = |n: &str| theme::color(light, n);
     let ps = posts(bot);
     let mut list = div().id("posts").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap_2().p_3();
-    if ps.is_empty() { list = list.child(div().text_color(c("dim")).child("No messages yet.")); }
+    if ps.is_empty() { list = list.child(div().text_color(c("dim")).child(trs("No messages yet."))); }
     for p in &ps {
-        let who = if p.mine { "You".to_string() } else { p.from.clone() };
+        let who = if p.mine { trs("You") } else { p.from.clone() };
         list = list.child(div().flex().flex_col().gap_1().child(div().flex().gap_2().child(div().font_weight(FontWeight::BOLD).child(who)).child(div().text_size(px(11.)).text_color(c("faint")).child(p.ago.clone()))).child(div().child(p.text.clone())));
     }
     div().size_full().flex().flex_col().child(list)
         .child(div().flex().gap_2().items_end().p_3().border_t_1().border_color(c("line"))
             .child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).children(fields.get(field).map(|s| s.input.clone())))
-            .child(div().id("talk-send").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child("Send").on_click(cx.listener(move |this, _, _, cx| send_post(this, field, action, cx))))).into_any_element()
+            .child(div().id("talk-send").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Send")).on_click(cx.listener(move |this, _, _, cx| send_post(this, field, action, cx))))).into_any_element()
 }
 
 /// The page under a bot's tab strip, or a room's or remote bot's whole page; None for a bot's chat (the thread view) and for no bot.
@@ -473,9 +473,9 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
                 "space" => space_page(cx, light, fields, bot),
                 "settings" => settings_page(cx, light, fields, bot),
                 // the bot's page as the hub last drew it (a picture, polled while shown); the person's clicks and keys into it, teach mode and the task runs are not here yet
-                "browser" => match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => note(light, "Connecting to the bot's browser page.") },
+                "browser" => match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => note(light, &trs("Connecting to the bot's browser page.")) },
                 "tasks" => tasks_page(cx, light, fields, bot),
-                other => div().p_3().text_color(c("dim")).child(format!("The {other} page is not drawn here yet.")).into_any_element(),
+                other => div().p_3().text_color(c("dim")).child(tf("gpui.bots.page.notyet", &[("page", other.into())])).into_any_element(),
             };
             Some(frame(inner, bar_h(bot), None))
         }

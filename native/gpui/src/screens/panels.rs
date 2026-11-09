@@ -1,7 +1,7 @@
 //! The thread's to-do list and subagents: two cells in the header bar ("To-do 1/4", "Subagents · 2 at work") that open their rows in a dock under it (client
 //! `Todos.*`, subs `Subs.*`). The rows come from the hub (`thread.todos`, `thread.subs`); whether a panel is open is this device's: to-do stays shut until opened,
 //! subagents are open while any is at work and fold to their head once all are done (a click on the head holds the choice).
-use crate::{hub::Command, string, theme, Backplane};
+use crate::{hub::Command, i18n::{tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ pub fn subs_is_open(p: &Panels, thread: &Value) -> bool {
 fn cell(light: bool, id: &'static str, label: String, detail: String, open: bool) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
     div().id(id).px_3().h_full().flex().items_center().gap_2().text_size(px(11.)).cursor_pointer().hover(|s| s.bg(c("raise"))).when(open, |d| d.bg(c("raise")))
-        .child(div().text_color(c("faint")).child(label)).child(detail).child(crate::art::icon(if open { "chevron-down" } else { "chevron-right" }, 12., c("faint")))
+        .child(div().text_color(c("faint")).child(trs(&label))).child(trs(&detail)).child(crate::art::icon(if open { "chevron-down" } else { "chevron-right" }, 12., c("faint")))
 }
 
 /// The two header cells (those the thread has).
@@ -31,13 +31,13 @@ pub fn cells(cx: &mut Context<Backplane>, light: bool, p: &Panels, thread: &Valu
     let mut out = vec![]; let tid = string(thread, "id");
     if thread["todos"].is_object() {
         let t = tid.clone(); let open = todos_is_open(p, thread);
-        out.push(cell(light, "todos-cell", "TO-DO".into(), string(&thread["todos"], "count"), open).on_click(cx.listener(move |this, _, _, cx| { let o = this.screens.panels.todos_open.entry(t.clone()).or_insert(false); *o = !*o; cx.notify(); })).into_any_element());
+        /* i18n-ok: drawn through trs in cell or label */ out.push(cell(light, "todos-cell", "TO-DO".into(), string(&thread["todos"], "count"), open).on_click(cx.listener(move |this, _, _, cx| { let o = this.screens.panels.todos_open.entry(t.clone()).or_insert(false); *o = !*o; cx.notify(); })).into_any_element());
     }
     if thread["subs"].is_object() {
         let t = tid.clone(); let open = subs_is_open(p, thread);
         let word = string(&thread["subs"], "word"); let live = thread["subs"]["live"].as_u64().unwrap_or(0) > 0;
         let (dc, ac) = (theme::color(light, "accent"), theme::color(light, "faint"));
-        out.push(cell(light, "subs-cell", "SUBAGENTS".into(), word, open).child(div().size(px(6.)).bg(if live { dc } else { ac }))
+        /* i18n-ok: drawn through trs in cell or label */ out.push(cell(light, "subs-cell", "SUBAGENTS".into(), word, open).child(div().size(px(6.)).bg(if live { dc } else { ac }))
             .on_click(cx.listener(move |this, _, _, cx| { let now = subs_is_open(&this.screens.panels, &this.data["thread"]); this.screens.panels.subs_open.insert(t.clone(), !now); cx.notify(); })).into_any_element());
     }
     out
@@ -49,8 +49,8 @@ pub fn form_fields(data: &Value) -> Vec<super::settings::Field> {
     let t = &data["thread"]["todos"];
     if !t.is_object() { return vec![] }
     let f = |name: String, hint: &str, value: String| super::settings::Field { name, hint: hint.into(), secret: false, value, vault: false };
-    let mut out = vec![f("todonew".into(), "Add an item", String::new())];
-    for r in t["rows"].as_array().into_iter().flatten() { out.push(f(format!("todo.{}", string(r, "id")), "To-do", string(r, "text"))); }
+    /* i18n-ok: hints, drawn through trs by the composer */ let mut out = vec![f("todonew".into(), "Add an item", String::new())];
+    /* i18n-ok: hints, drawn through trs by the composer */ for r in t["rows"].as_array().into_iter().flatten() { out.push(f(format!("todo.{}", string(r, "id")), "To-do", string(r, "text"))); }
     out
 }
 /// The dock under the bar: the open panels' rows.
@@ -60,7 +60,7 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
     if !to && !su { return None }
     let mut col = div().id("panels-dock").flex_shrink_0().max_h(px(300.)).overflow_y_scroll().flex().flex_col().border_b_1().border_color(c("line")).bg(c("panel")).px_3().py_1().text_size(px(12.));
     if to {
-        col = col.child(div().text_size(px(11.)).text_color(c("faint")).child(string(&thread["todos"], "head").to_uppercase()));
+        col = col.child(div().text_size(px(11.)).text_color(c("faint")).child(trs(&string(&thread["todos"], "head")).to_uppercase()));
         let to_rows: Vec<Value> = thread["todos"]["rows"].as_array().cloned().unwrap_or_default();
         for r in to_rows.iter() {
             let st = string(r, "status");
@@ -84,14 +84,14 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
                 .child(quiet(cx, format!("todo-del-{id}"), "\u{d7}", "todo-del", row_id)));
         }
         col = col.child(div().flex().gap_2().items_center().py(px(2.)).child(div().flex_1().min_w_0().children(fields.get("todonew").map(|s| s.input.clone())))
-            .child(div().id("todo-add").px_2().cursor_pointer().text_color(c("accent")).child("Add").on_click(cx.listener(|this, _, _, cx| crate::screens::settings::send_todo(this, cx)))));
+            .child(div().id("todo-add").px_2().cursor_pointer().text_color(c("accent")).child(trs("Add")).on_click(cx.listener(|this, _, _, cx| crate::screens::settings::send_todo(this, cx)))));
     }
     if su {
-        col = col.child(div().mt_1().text_size(px(11.)).text_color(c("faint")).child(format!("SUBAGENTS · {}", string(&thread["subs"], "word").to_uppercase())));
+        col = col.child(div().mt_1().text_size(px(11.)).text_color(c("faint")).child(tf("gpui.panels.subagents", &[("word", trs(&string(&thread["subs"], "word")).to_uppercase().into())])));
         for r in thread["subs"]["rows"].as_array().into_iter().flatten() {
             let working = string(r, "state") == "working"; let doing = string(r, "doing"); let key = string(r, "key");
             let detail = r["detail"].is_object(); let open = detail && sub_is_open(p, thread, &key);
-            let state = { let t = string(r, "took"); if t.is_empty() { string(r, "state") } else { format!("{} · {t}", string(r, "state")) } };
+            let state = { let t = string(r, "took"); if t.is_empty() { trs(&string(r, "state")) } else { format!("{} · {t}", trs(&string(r, "state"))) } };
             let mark_c = if working { c("accent") } else { c("faint") };
             let mark: AnyElement = if detail { crate::art::icon("chevron-right", 12., mark_c) } else { div().child(if working { "▸" } else { "✓" }).into_any_element() };
             let mut head = crate::ui::with_rect(div().id(SharedString::from(format!("sub-{}", if key.is_empty() { string(r, "title") } else { key.clone() }))), || format!("subs:{key}")).flex().gap_2().py(px(1.)).items_center()
@@ -104,7 +104,7 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
                 head = head.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, _, cx| this.sub_open(k.clone(), cx)));
             }
             let head = head.when(!string(r, "act").is_empty(), |d| { let (act, value) = (string(r, "act"), string(r, "value"));
-                d.child(div().id(SharedString::from(format!("{act}-{value}"))).flex_shrink_0().px_1().cursor_pointer().text_color(c("accent")).child(string(r, "label"))
+                d.child(div().id(SharedString::from(format!("{act}-{value}"))).flex_shrink_0().px_1().cursor_pointer().text_color(c("accent")).child(trs(&string(r, "label")))
                     .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); let _ = this.tx.try_send(Command::Action(act.clone(), value.clone())); cx.notify(); }))) });
             let line = |t: String, col_: Rgba| div().w_full().pl(px(22.)).flex().text_size(px(11.)).text_color(col_).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(t));
             let mut row = div().w_full().flex().flex_col().py(px(2.)).child(head);
@@ -114,18 +114,18 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
                 let now = if !doing.is_empty() { doing.clone() } else { string(r, "last") }; if !now.is_empty() && !open { row = row.child(line(now, c("dim"))); }
             }
             if open {
-                let d = &r["detail"]; let label = |l: &'static str, t: String| div().w_full().pl(px(22.)).flex().gap_2().text_size(px(11.)).child(div().flex_shrink_0().w(px(64.)).text_color(c("faint")).child(l)).child(div().flex_1().min_w_0().text_color(c("dim")).child(t));
-                row = row.child(label("Runs", string(d, "where")));
-                if !doing.is_empty() { row = row.child(label("Doing", doing.clone())); }
-                if !string(d, "ask").is_empty() { row = row.child(label("Asked", string(d, "ask"))); }
+                let d = &r["detail"]; let label = |l: &'static str, t: String| div().w_full().pl(px(22.)).flex().gap_2().text_size(px(11.)).child(div().flex_shrink_0().w(px(64.)).text_color(c("faint")).child(trs(l))).child(div().flex_1().min_w_0().text_color(c("dim")).child(t));
+                /* i18n-ok: drawn through trs in cell or label */ row = row.child(label("Runs", string(d, "where")));
+                /* i18n-ok: drawn through trs in cell or label */ if !doing.is_empty() { row = row.child(label("Doing", doing.clone())); }
+                /* i18n-ok: drawn through trs in cell or label */ if !string(d, "ask").is_empty() { row = row.child(label("Asked", string(d, "ask"))); }
                 let more = d["more"].as_u64().unwrap_or(0);
                 let steps: Vec<Value> = d["steps"].as_array().cloned().unwrap_or_default();
-                if steps.is_empty() { row = row.child(label("Steps", "none reported yet".into())); }
+                /* i18n-ok: drawn through trs in cell or label */ if steps.is_empty() { row = row.child(label("Steps", trs("none reported yet"))); }
                 for (n, st) in steps.iter().enumerate() {
                     let t = format!("{} {}", string(st, "kind"), string(st, "text"));
-                    row = row.child(label(if n == 0 { "Steps" } else { "" }, if n == 0 && more > 0 { format!("({more} earlier) {t}") } else { t }));
+                    /* i18n-ok: drawn through trs in cell or label */ row = row.child(label(if n == 0 { "Steps" } else { "" }, if n == 0 && more > 0 { tf("gpui.panels.earlier", &[("more", more.into()), ("step", t.into())]) } else { t }));
                 }
-                if !string(d, "outcome").is_empty() { row = row.child(label("Reported", string(d, "outcome"))); }
+                /* i18n-ok: drawn through trs in cell or label */ if !string(d, "outcome").is_empty() { row = row.child(label("Reported", string(d, "outcome"))); }
             }
             col = col.child(row);
         }

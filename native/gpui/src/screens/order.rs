@@ -1,7 +1,7 @@
 //! A buy thread's Order card: `thread.order` from the hub (settings/order.rs `card`), null for any other thread.
 //! The hub decides everything: the steps and which is on, the line, the total with its customs line, and Buy now's link
 //! (only while the quote can be paid). Buy now opens that link in the browser, as the phones do.
-use crate::{string, theme, Backplane};
+use crate::{i18n::{tf, trs}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 
@@ -27,22 +27,22 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, order: &Value) -> Option<A
     let c = |n: &str| theme::color(light, n);
     let steps = div().flex().flex_wrap().gap_1().items_center().children(card.steps.iter().enumerate().map(|(i, (label, mark))| {
         let (fg, bold) = match mark.as_str() { "done" => (c("dim"), false), "on" => (c("accent"), true), _ => (c("faint"), false) };
-        let t = if mark == "done" { format!("✓ {label}") } else { label.clone() };
+        /* i18n-ok: a mark and the hub's step, drawn through trs */ let t = if mark == "done" { format!("✓ {}", trs(label)) } else { trs(label) };
         div().flex().gap_1().items_center().text_size(px(11.)).text_color(fg).when(bold, |d| d.font_weight(FontWeight::BOLD))
             .when(i > 0, |d| d.child(div().text_color(c("faint")).child("›"))).child(t).into_any_element()
     }).collect::<Vec<_>>());
     let mut col = div().id("order-card").flex().flex_col().gap_2().p_3().bg(c("panel")).border_1().border_color(c("line"))
-        .child(div().flex().items_center().gap_2().child(div().font_weight(FontWeight::BOLD).text_size(px(13.)).child(if card.name.is_empty() { "Order".to_string() } else { format!("Order · {}", card.name) })))
+        .child(div().flex().items_center().gap_2().child(div().font_weight(FontWeight::BOLD).text_size(px(13.)).child(if card.name.is_empty() { trs("Order") } else { tf("gpui.order.named", &[("name", card.name.as_str().into())]) })))
         .child(steps)
-        .child(div().text_size(px(12.)).text_color(if card.waiting { c("dim") } else { c("text") }).child(card.line.clone()));
+        .child(div().text_size(px(12.)).text_color(if card.waiting { c("dim") } else { c("text") }).child(trs(&card.line)));
     if !card.total.is_empty() {
         col = col.child(div().flex().flex_col().gap_1().child(div().font_weight(FontWeight::BOLD).text_size(px(14.)).child(card.total.clone()))
-            .children((!card.customs.is_empty()).then(|| div().text_size(px(11.)).text_color(c("dim")).child(card.customs.clone()))));
+            .children((!card.customs.is_empty()).then(|| div().text_size(px(11.)).text_color(c("dim")).child(trs(&card.customs)))));
     }
     if payable(&card) {
         let link = card.pay.clone();
-        let label = if card.label.is_empty() { "Buy now".to_string() } else { card.label.clone() };
-        col = col.child(div().flex().child(crate::ui::with_rect(div().id("order-pay"), || "ui:Buy now".to_string()).px_3().py_1().text_size(px(12.)).cursor_pointer()
+        let label = if card.label.is_empty() { trs("Buy now") } else { trs(&card.label) };
+        /* i18n-ok: a ui: id is what drivers press */ col = col.child(div().flex().child(crate::ui::with_rect(div().id("order-pay"), || "ui:Buy now".to_string()).px_3().py_1().text_size(px(12.)).cursor_pointer()
             .bg(c("accent")).text_color(c("on-accent")).border_1().border_color(c("accent")).child(label)
             .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&link)))));
     }

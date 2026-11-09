@@ -6,6 +6,7 @@
 //! between 1/60 and 20 times the fitted distance, a right/middle or shift drag moves it 1:1, a double click fits, and its keys are 0.14's. The image is as big as
 //! the panel in device pixels (a draft while it moves). Nothing repaints while idle.
 use gpui::{prelude::*, *};
+use crate::i18n::{t, tf, trs};
 use super::raster::{self, render};
 #[cfg(test)] use super::raster::BG;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Condvar, Mutex};
@@ -46,7 +47,7 @@ impl<'a> Varints<'a> {
 
 /// Mesh from the frame's `n` and `mesh` bytes. Errors when the bytes are not exactly `n` triangles. Coordinates wrap like the encoder's U32 deltas.
 pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
-    if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized model".into()) }
+    /* i18n-ok: the note is drawn through note_words */ if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized model".into()) }
     let mut v = Varints::new(bytes);
     let (mut color, mut p) = (0u32, [0i32; 3]);
     let (mut tris, mut colors, mut keys) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n * 3));
@@ -60,10 +61,10 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
             for a in 0..3 { lo[a] = lo[a].min(t[3 * k + a]); hi[a] = hi[a].max(t[3 * k + a]); }
             keys.push(p);
         }
-        if !v.valid { return Err("Incomplete model".into()) }
+        /* i18n-ok: the note is drawn through note_words */ if !v.valid { return Err("Incomplete model".into()) }
         tris.push(t); colors.push(color);
     }
-    if v.more() || !v.valid { return Err("Unexpected model bytes".into()) }
+    /* i18n-ok: the note is drawn through note_words */ if v.more() || !v.valid { return Err("Unexpected model bytes".into()) }
     let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
     let radius = (0..3).map(|a| (hi[a] - lo[a]) * (hi[a] - lo[a])).sum::<f32>().sqrt() / 2.0;
     let normals = raster::smooth_normals(&tris, &keys);
@@ -74,10 +75,10 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
 /// little-endian f32 an instance: the row-major 3 x 4 affine from the model's integer coordinates to the board model's. Errors when the
 /// bytes are not exactly `n` triangles or `at` is not whole instances.
 pub fn decode_part(n: usize, bytes: &[u8], at: &[u8]) -> Result<Mesh, String> {
-    if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized part".into()) }
-    if at.is_empty() || at.len() % 48 != 0 { return Err("Invalid part placement".into()) }
+    /* i18n-ok: the note is drawn through note_words */ if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized part".into()) }
+    /* i18n-ok: the note is drawn through note_words */ if at.is_empty() || at.len() % 48 != 0 { return Err("Invalid part placement".into()) }
     let k = at.len() / 48;
-    if n.saturating_mul(k) > MAX_TRIANGLES { return Err("Too many part triangles".into()) }
+    /* i18n-ok: the note is drawn through note_words */ if n.saturating_mul(k) > MAX_TRIANGLES { return Err("Too many part triangles".into()) }
     let mut v = Varints::new(bytes);
     let (mut color, mut p) = (0u32, [0i32; 3]);
     let (mut raw, mut cols) = (Vec::with_capacity(n), Vec::with_capacity(n));
@@ -85,15 +86,15 @@ pub fn decode_part(n: usize, bytes: &[u8], at: &[u8]) -> Result<Mesh, String> {
         color ^= v.next();
         let mut t = [0i32; 9];
         for c in 0..3 { for a in 0..3 { p[a] = p[a].wrapping_add(v.signed()); t[3 * c + a] = p[a]; } }
-        if !v.valid { return Err("Incomplete part".into()) }
+        /* i18n-ok: the note is drawn through note_words */ if !v.valid { return Err("Incomplete part".into()) }
         raw.push(t); cols.push(color);
     }
-    if v.more() || !v.valid { return Err("Unexpected part bytes".into()) }
+    /* i18n-ok: the note is drawn through note_words */ if v.more() || !v.valid { return Err("Unexpected part bytes".into()) }
     let (mut tris, mut colors, mut keys) = (Vec::with_capacity(n * k), Vec::with_capacity(n * k), Vec::with_capacity(n * k * 3));
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
     for m in at.chunks_exact(48) {
         let a: [f32; 12] = std::array::from_fn(|i| f32::from_le_bytes([m[4 * i], m[4 * i + 1], m[4 * i + 2], m[4 * i + 3]]));
-        if a.iter().any(|x| !x.is_finite()) { return Err("Invalid part placement".into()) }
+        /* i18n-ok: the note is drawn through note_words */ if a.iter().any(|x| !x.is_finite()) { return Err("Invalid part placement".into()) }
         for (t, c) in raw.iter().zip(&cols) {
             let mut o = [0f32; 9];
             for c3 in 0..3 {
@@ -145,13 +146,19 @@ pub const FADE_MS: f32 = 300.0;
 const TOOL_H: f32 = 22.0;
 const TOOL_TOP: f32 = 5.0;
 /// What the page says while the first picture of a model it holds is drawn.
-const DRAWING: &str = "Drawing the view…";
+/* i18n-ok: drawn through trs */ const DRAWING: &str = "Drawing the view…";
 /// The page's own stage while it decodes a large model (the hub has sent it by then).
-const BUILDING: &str = "Building the view…";
+/* i18n-ok: compared with the stage; drawn through trs (stage_line) */ const BUILDING: &str = "Building the view…";
+/// What the note under a model says when the hub could not make a newer revision and the last one stays (kept in English: note_words draws it).
+/* i18n-ok: drawn through note_words */ const PREVIOUS_SHOWN: &str = " — previous saved revision shown";
+/// The page's note in the reader's language: the hub's words (or the page's own) through the catalog, with the "previous revision shown" tail said apart.
+pub fn note_words(note: &str) -> String {
+    match note.strip_suffix(PREVIOUS_SHOWN) { Some(why) => tf("gpui.c.solid.previous", &[("why", trs(why).into())]), None => trs(note) }
+}
 /// A part group's opacity `ms` after it showed.
 pub fn fade_at(ms: f32) -> f32 { (ms / FADE_MS).clamp(0.0, 1.0) }
 /// The progress the page shows while parts stream ("" when there are none to wait for).
-pub fn progress(done: u32, of: u32) -> String { if of == 0 || done >= of { String::new() } else { format!("parts {done}/{of}") } }
+/* i18n-ok: drawn through trs */ pub fn progress(done: u32, of: u32) -> String { if of == 0 || done >= of { String::new() } else { format!("parts {done}/{of}") } }
 
 // ---- the frame: a minimal CBOR map reader (text keys, or the wire dictionary's integer keys; byte strings) ------
 #[derive(Debug, Clone, PartialEq)]
@@ -247,13 +254,13 @@ pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
     }
     if let Some(of) = read_parts(b) { return Some(SolidFrame::Parts(key, of)) }
     if let Some(Item::Text(_id)) = get("part") {
-        let (Some(Item::Bytes(mesh)), Some(Item::Bytes(at))) = (get("mesh"), get("at")) else { return Some(SolidFrame::Bad("part without its model".into())) };
-        let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
+        /* i18n-ok: the note is drawn through note_words */ let (Some(Item::Bytes(mesh)), Some(Item::Bytes(at))) = (get("mesh"), get("at")) else { return Some(SolidFrame::Bad("part without its model".into())) };
+        /* i18n-ok: the note is drawn through note_words */ let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
         let done = match get("done") { Some(Item::Int(d)) if *d >= 0 => *d as u32, _ => 0 };
         return Some(match decode_part(n, mesh, at) { Ok(m) => SolidFrame::Part(key, m, done), Err(e) => SolidFrame::Bad(e) })
     }
     let Some(Item::Bytes(mesh)) = get("mesh") else { return None }; // a note about the parts is not a model
-    let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
+    /* i18n-ok: the note is drawn through note_words */ let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
     Some(match decode_mesh(n, mesh) { Ok(m) => SolidFrame::Model(key, m), Err(e) => SolidFrame::Bad(e) })
 }
 
@@ -460,9 +467,9 @@ pub fn gone_from_gpu(at: u64, now: u64) -> bool { at + 2 <= now }
 /// The stage as the page shows it: the hub's words, the seconds so far (from 1 s) and the hub's estimate (the last time's, or one from the
 /// file's size), when long enough to say.
 pub fn stage_line(text: &str, secs: u64, about_ms: u64) -> String {
-    let mut s = text.to_string();
-    if secs >= 1 { s.push_str(&format!(" {secs} s")); }
-    if about_ms >= 2000 { s.push_str(&format!(" (about {} s)", (about_ms + 500) / 1000)); }
+    let mut s = trs(text);
+    if secs >= 1 { s.push(' '); s.push_str(&tf("gpui.c.secs", &[("secs", secs.into())])); }
+    if about_ms >= 2000 { s.push(' '); s.push_str(&tf("gpui.c.about.secs", &[("secs", ((about_ms + 500) / 1000).into())])); }
     s
 }
 /// What the page asks of the window: the model of this source made again (its Retry, after the hub could not make it).
@@ -497,7 +504,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -559,7 +566,7 @@ impl SolidPage {
                 }
                 if self.stage.as_ref().is_some_and(|s| s.key == key) { self.stage = None; }
                 self.failed = !why.is_empty();
-                self.key = key; self.note = if self.mesh.is_some() { format!("{why} — previous saved revision shown") } else { why }; cx.notify();
+                self.key = key; self.note = if self.mesh.is_some() { format!("{why}{PREVIOUS_SHOWN}") } else { why }; cx.notify();
             }
             Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; self.set_stage(None, cx); }
             Msg::Mesh(SolidFrame::Stage(key, text, ms, about)) => {
@@ -659,21 +666,21 @@ impl SolidPage {
     /// Retry: the hub asked for this source's model again (its stages show as it is made).
     fn retry_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div().id("solid-retry").px_2().py_1().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
-            .hover(|d| d.bg(rgba(0x2a3548ee))).child("Retry")
+            .hover(|d| d.bg(rgba(0x2a3548ee))).child(trs("Retry"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, _, cx| { this.failed = false; this.note.clear(); let k = this.key.clone(); cx.emit(SolidEvent::Retry(k)); cx.notify(); }))
     }
     /// Snap view: the picture on screen as a PNG in `dir` (never over a file); the path, or why not.
     pub fn snap(&mut self, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
-        let img = self.image.clone().ok_or("no picture yet")?;
+        /* i18n-ok: a reason inside the translated "Snap view failed" */ let img = self.image.clone().ok_or("no picture yet")?;
         let (w, h) = { let s = img.size(0); (s.width.0 as u32, s.height.0 as u32) };
-        let mut px = img.as_bytes(0).ok_or("no picture yet")?.to_vec();
+        /* i18n-ok: as above */ let mut px = img.as_bytes(0).ok_or("no picture yet")?.to_vec();
         for p in px.chunks_exact_mut(4) { p.swap(0, 2); } // the container holds BGRA
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let mut path = dir.join(format!("backplane-3d-{stamp}.png")); let mut n = 1;
         while path.exists() { path = dir.join(format!("backplane-3d-{stamp}-{n}.png")); n += 1; }
-        image::RgbaImage::from_raw(w, h, px).ok_or("bad picture")?.save(&path).map_err(|e| e.to_string())?;
+        /* i18n-ok: as above */ image::RgbaImage::from_raw(w, h, px).ok_or("bad picture")?.save(&path).map_err(|e| e.to_string())?;
         Ok(path)
     }
     /// For the demo and tests: an orbit drag step as the mouse handler does it.
@@ -717,25 +724,25 @@ impl Render for SolidPage {
         if let Some(m) = self.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.touched && aspect_changed(self.fit_aspect, pw / ph) { self.fit_aspect = pw / ph; self.cam = Some(Camera::fit_to(m.center, m.radius, self.fit_aspect)); self.ask_render(false); } }
         if self.mesh.is_some() && pw > 0.0 { let want = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48)); if self.drag.is_none() && want.0 * want.1 <= MAX_PIXELS && want != self.asked && self.asked.0 * 2 != want.0 { self.ask_render(false); } }
         // the model is here and its first picture is being drawn (a big board on a machine without a usable GPU: a second or two): said, not blank
-        let stage = { let t = self.stage_text(); if t.is_empty() && self.image.is_none() && self.mesh.is_some() { DRAWING.to_string() } else { t } };
+        let stage = { let t = self.stage_text(); if t.is_empty() && self.image.is_none() && self.mesh.is_some() { trs(DRAWING) } else { t } };
         let making_other = self.stage.as_ref().is_some_and(|s| s.key != self.key);
         let body = match &self.image {
             _ if making_other || (self.image.is_none() && !stage.is_empty()) => div().id("solid-stage").size_full().flex().items_center().justify_center().text_color(rgb(0x8a93a3)).child(stage.clone()).into_any_element(),
             Some(i) => img(i.clone()).size_full().object_fit(ObjectFit::Fill).into_any_element(),
-            None => div().size_full().flex().flex_col().gap_2().items_center().justify_center().text_color(rgb(0x8a93a3)).child(self.note.clone())
+            None => div().size_full().flex().flex_col().gap_2().items_center().justify_center().text_color(rgb(0x8a93a3)).child(note_words(&self.note))
                 .when(self.failed && !self.key.is_empty(), |d| d.child(self.retry_button(cx))).into_any_element(),
         };
         let tools = (self.mesh.is_some() && !making_other).then(|| {
             // the first row of buttons centred on the thread's header row (32 px, ui.rs `thread-head`), so their line is the pane's line
             let mut bar = div().absolute().top(px(TOOL_TOP)).left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
-            for (label, view) in [("Fit", "fit"), ("Iso", "iso"), ("Top", "top"), ("Bottom", "bottom"), ("Front", "front"), ("Right", "right"), ("Back", "back"), ("Left", "left"), ("Snap view", "snap")] {
+            for (key, view) in [("viewer.fit", "fit"), ("viewer.c.view.iso", "iso"), ("viewer.c.view.top", "top"), ("viewer.c.view.bottom", "bottom"), ("viewer.c.view.front", "front"), ("viewer.c.view.right", "right"), ("viewer.c.view.back", "back"), ("viewer.c.view.left", "left"), ("viewer.c.view.snap", "snap")] {
                 bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().h(px(TOOL_H)).flex().items_center().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
-                    .hover(|d| d.bg(rgba(0x2a3548ee))).child(label)
+                    .hover(|d| d.bg(rgba(0x2a3548ee))).child(t(key))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if view == "snap" {
-                            let dir = std::env::var_os("BACKPLANE_GPUI_SNAP_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| crate::plat::user_home().map(|h| h.join("Pictures/Backplane")).unwrap_or_default());
-                            this.note = match this.snap(&dir) { Ok(p) => format!("Saved {}", p.display()), Err(e) => format!("Snap view failed: {e}") };
+                            /* i18n-ok: a folder name */ let dir = std::env::var_os("BACKPLANE_GPUI_SNAP_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| crate::plat::user_home().map(|h| h.join("Pictures/Backplane")).unwrap_or_default());
+                            /* i18n-ok: the note is drawn through note_words */ this.note = match this.snap(&dir) { Ok(p) => format!("Saved {}", p.display()), Err(e) => format!("Snap view failed: {e}") };
                         } else { this.set_view(view); }
                         cx.notify();
                     })));
@@ -744,9 +751,9 @@ impl Render for SolidPage {
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
-            .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(self.note.clone())
+            .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(note_words(&self.note))
                 .when(self.failed && !self.key.is_empty(), |d| d.child(self.retry_button(cx)))))
-            .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { self.parts_progress() } else { stage.clone() })))
+            .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { trs(&self.parts_progress()) } else { stage.clone() })))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
                 window.focus(&this.focus);
                 if e.click_count >= 2 { this.drag = None; this.set_view("fit"); cx.notify(); return } // a double click fits, as 0.14's did
@@ -778,6 +785,18 @@ impl Render for SolidPage {
 
 #[cfg(test)]
 mod tests {
+    /// The page's note, stage and progress read in Japanese, the hub's reason and the page's own tail each through the catalog; English stays as it was.
+    #[test] fn the_page_says_its_note_stage_and_progress_in_the_readers_language() {
+        let kept = "Invalid part placement — previous saved revision shown";
+        crate::i18n::with_lang("ja", || {
+            assert_eq!(super::note_words(kept), "部品の配置が不正です — 前回保存されたリビジョンを表示しています");
+            assert_eq!(super::note_words("Saved /home/a/Pictures/Backplane/x.png"), "/home/a/Pictures/Backplane/x.pngを保存しました");
+            assert_eq!(super::note_words("No 3D model yet"), "3Dモデルはまだありません");
+            assert_eq!(super::stage_line("Building the view…", 4, 11_400), "ビューを構築中… 4秒 （約11秒）");
+            assert_eq!(crate::i18n::trs(&super::progress(1, 3)), "部品 1/3");
+        });
+        assert_eq!(super::note_words(kept), kept); assert_eq!(super::stage_line("Building the view…", 4, 11_400), "Building the view… 4 s (about 11 s)");
+    }
     #[test] fn a_note_for_another_source_drops_the_old_model_and_the_same_sources_keeps_it() {
         assert!(super::note_keeps_model("2|/a|", "2|/a|"), "the same model: its previous revision stays with the note");
         assert!(!super::note_keeps_model("2|/a|", "2|/b|"), "thread B's model could not be made: A's must not show under B's key");

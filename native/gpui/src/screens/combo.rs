@@ -38,8 +38,8 @@ pub fn words(combo: &Value, avail: f32) -> String {
 pub fn tone(combo: &Value) -> &'static str { match combo["tone"].as_str() { Some("bad") => "bad", Some("warn") => "warn", _ => "text" } }
 /// The hover: the account's email and each window with its reset, as the hub words them, then the keys.
 pub fn tip(combo: &Value, model_key: &str, account_key: &str) -> String {
-    let mut t = string(combo, "tip");
-    let keys = [(model_key, "model"), (account_key, "account")].iter().filter(|(k, _)| !k.is_empty()).map(|(k, w)| format!("{k} {w}")).collect::<Vec<_>>().join(" · ");
+    let mut t = string(combo, "tip").lines().map(crate::i18n::trs).collect::<Vec<_>>().join("\n");
+    let keys = [(model_key, "gpui.combo.key.model"), (account_key, "gpui.combo.key.account")].iter().filter(|(k, _)| !k.is_empty()).map(|(k, w)| crate::i18n::tf(w, &[("key", (*k).into())])).collect::<Vec<_>>().join(" · ");
     if !keys.is_empty() { if !t.is_empty() { t.push('\n') } t.push_str(&keys) }
     t
 }
@@ -47,9 +47,9 @@ pub fn tip(combo: &Value, model_key: &str, account_key: &str) -> String {
 #[derive(Debug, PartialEq)]
 pub struct UsageRow { pub label: String, pub left: String, pub resets: String, pub tone: &'static str, pub applies: bool }
 pub fn usage_rows(combo: &Value) -> (Vec<UsageRow>, Vec<String>) {
-    let rows = combo["windows"].as_array().into_iter().flatten().map(|w| UsageRow { label: string(w, "label"), left: w["left"].as_u64().map(|l| format!("{l}% left")).unwrap_or_default(),
-        resets: Some(string(w, "resets")).filter(|r| !r.is_empty()).map(|r| format!("resets {r}")).unwrap_or_default(), tone: tone(w), applies: w["applies"].as_bool().unwrap_or(true) }).collect();
-    let notes = ["extra", "note"].iter().map(|k| string(combo, k)).filter(|s| !s.is_empty()).collect();
+    let rows = combo["windows"].as_array().into_iter().flatten().map(|w| UsageRow { label: crate::i18n::trs(&string(w, "label")), left: w["left"].as_u64().map(|l| crate::i18n::tf("gpui.combo.left", &[("pct", l.into())])).unwrap_or_default(),
+        resets: Some(string(w, "resets")).filter(|r| !r.is_empty()).map(|r| crate::i18n::tf("gpui.combo.resets", &[("when", r.into())])).unwrap_or_default(), tone: tone(w), applies: w["applies"].as_bool().unwrap_or(true) }).collect();
+    let notes = ["extra", "note"].iter().map(|k| crate::i18n::trs(&string(combo, k))).filter(|s| !s.is_empty()).collect();
     (rows, notes)
 }
 
@@ -116,10 +116,10 @@ pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Bac
     let model = super::picker::view(cx, light, thread, true, &this.screens.pick, &this.local.favs, &f);
     let st = &this.screens.acct;
     let accounts_on = matches!(thread["provider"].as_str().map(super::picker::bare), Some("claude" | "codex")) || thread["combo"]["account"].as_str().map_or(false, |a| !a.is_empty());
-    let head = |t: &str, hint: String, on: bool| div().px_3().pt_2().pb_1().flex().justify_between().text_size(z(11.)).text_color(c(if on { "accent" } else { "faint" })).child(t.to_uppercase()).child(hint);
+    let head = |t: &str, hint: String, on: bool| div().px_3().pt_2().pb_1().flex().justify_between().text_size(z(11.)).text_color(c(if on { "accent" } else { "faint" })).child(crate::i18n::trs(t).to_uppercase()).child(hint);
     let mut side = div().flex().flex_col().min_w_0();
     if accounts_on {
-        let acct = div().flex_1().min_w_0().flex().flex_col().child(head("Account", if st.menu { "1–9".into() } else { this.key_hint("account") }, st.menu)).child(accounts::section(cx, light, st, f.s));
+        /* i18n-ok: drawn through trs in head */ let acct = div().flex_1().min_w_0().flex().flex_col().child(head("Account", if st.menu { "1–9".into() } else { this.key_hint("account") }, st.menu)).child(accounts::section(cx, light, st, f.s));
         let (rows, notes) = usage_rows(&thread["combo"]);
         let mut u = div().flex().flex_col().px_3().pb_2().gap(px(2.)).text_size(z(12.));
         for r in rows {
@@ -128,7 +128,7 @@ pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Bac
                 .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(r.resets)));
         }
         for n in notes { u = u.child(div().text_size(z(11.)).text_color(c("dim")).child(n)) }
-        let usage = div().flex_1().min_w_0().flex().flex_col().child(head("Usage", String::new(), false)).child(u);
+        /* i18n-ok: drawn through trs in head */ let usage = div().flex_1().min_w_0().flex().flex_col().child(head("Usage", String::new(), false)).child(u);
         // under the picker: Account beside Usage when the composer is wide, one over the other when it is narrow
         side = if narrow { side.child(acct).child(div().mx_2().my_1().h(px(1.)).bg(c("line"))).child(usage) } else { side.flex_row().items_start().child(acct).child(usage.border_l_1().border_color(c("line"))) };
     }

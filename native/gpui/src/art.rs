@@ -217,7 +217,7 @@ pub fn assets_dir() -> PathBuf {
         if let Some(d) = std::env::var_os("BACKPLANE_GPUI_ASSETS") { c.push(PathBuf::from(d)); }
         if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("assets"))) { c.push(p); }
         #[cfg(debug_assertions)] // a debug build run from the repo; a release build never looks outside its own folder
-        c.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../build/gpui/linux/assets"));
+        /* i18n-ok: svg markup, env names and log lines */ c.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../build/gpui/linux/assets"));
         c.iter().find(|d| d.join("icons.json").is_file()).cloned().unwrap_or_else(|| c.into_iter().next().unwrap_or_default())
     }).clone()
 }
@@ -228,9 +228,9 @@ pub fn assets_missing() -> Option<String> {
     if !d.join("icons.json").is_file() { missing.push("icons.json"); }
     if !d.join("cat-rigs").is_dir() { missing.push("cat-rigs/"); }
     if missing.is_empty() { return None; }
-    let m = format!("assets missing in {}: {}", d.display(), missing.join(", "));
-    eprintln!("GPUI_LOG {{\"asset_missing\":{}}}", Value::String(m.clone()));
-    Some(m)
+    /* i18n-ok: the log line; the window gets the catalog's words */ let m = format!("assets missing in {}: {}", d.display(), missing.join(", "));
+    eprintln!("GPUI_LOG {{\"asset_missing\":{}}}", Value::String(m));
+    Some(crate::i18n::tf("gpui.assets.missing", &[("dir", d.display().to_string().into()), ("files", missing.join(", ").into())]))
 }
 fn log_once(what: String) {
     static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
@@ -256,15 +256,15 @@ fn icon_svg(name: &str) -> Option<String> {
     let layers = icons().get(name)?.as_array()?;
     let esc = |d: &str| d.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
     let body: String = layers.iter().map(|l| { let d = esc(l["d"].as_str().unwrap_or(""));
-        if l["fill"] == true { format!(r#"<path d="{d}" fill="black" fill-rule="evenodd" stroke="none"/>"#) } else { format!(r#"<path d="{d}"/>"#) } }).collect();
-    Some(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"#))
+        /* i18n-ok: svg markup, env names and log lines */ if l["fill"] == true { format!(r#"<path d="{d}" fill="black" fill-rule="evenodd" stroke="none"/>"#) } else { format!(r#"<path d="{d}"/>"#) } }).collect();
+    /* i18n-ok: svg markup, env names and log lines */ Some(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"#))
 }
 /// The icon set's own name for `name` (a hub-sent name, say), if the set has it.
 pub fn icon_name(name: &str) -> Option<&'static str> { icons().get_key_value(name).map(|(k, _)| k.as_str()) }
 /// A Lucide icon, `size` px square, in `color` (a sprite GPUI keeps per size: `Assets`).
 pub fn icon(name: &'static str, size: f32, color: Rgba) -> AnyElement {
     if !icons().contains_key(name) {
-        log_once(format!("icon {name} not in icons.json"));
+        /* i18n-ok: svg markup, env names and log lines */ log_once(format!("icon {name} not in icons.json"));
         return div().size(px(size)).into_any_element();
     };
     canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, cx| {
@@ -283,7 +283,7 @@ impl Cats {
         let moving = matches!(mood, "work" | "think" | "wait" | "talk");
         let dir = self.dir.clone();
         let r = self.cache.entry((look, mood.to_string())).or_insert_with(|| load_rig(&dir, look, mood, moving).map(Arc::new)).clone();
-        if r.is_none() { log_once(format!("cat rig {look}-{mood} missing in {}", dir.display())); }
+        /* i18n-ok: svg markup, env names and log lines */ if r.is_none() { log_once(format!("cat rig {look}-{mood} missing in {}", dir.display())); }
         r
     }
 }

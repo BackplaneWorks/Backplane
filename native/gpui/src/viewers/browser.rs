@@ -3,7 +3,7 @@
 //! (an unchanged frame) costs no repaint. Input to the page (bots.browser clicks/keys, teach mode) is not wired yet.
 use gpui::{prelude::*, *};
 use super::chrome;
-use crate::{art, theme};
+use crate::{art, i18n::trs, theme};
 use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, time::{Duration, Instant}};
 
 pub const POLL_MS: u64 = 700;
@@ -25,10 +25,10 @@ pub fn save_download(base: &str, token: &str, id: &str, name: &str, dir: &std::p
     match get_bytes(&url, token, Duration::from_secs(300), 2 << 30) {
         Ok((200, body)) => {
             let _ = std::fs::create_dir_all(dir); let to = super::downloads::unique_path(dir, &super::downloads::safe_name(name));
-            match std::fs::write(&to, &body) { Ok(()) => format!("Saved {} in {}", to.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(), dir.display()), Err(e) => format!("The download of {name} could not be saved: {e}") }
+            /* i18n-ok: English kept in the state (tests read it); drawn through trs as the banner */ match std::fs::write(&to, &body) { Ok(()) => format!("Saved {} in {}", to.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(), dir.display()), Err(e) => format!("The download of {name} could not be saved: {e}") }
         }
-        Ok((s, _)) => format!("The download of {name} failed: the hub answered {s}"),
-        Err(e) => format!("The download of {name} failed: {e}"),
+        /* i18n-ok: drawn through trs as the banner */ Ok((s, _)) => format!("The download of {name} failed: the hub answered {s}"),
+        /* i18n-ok: drawn through trs as the banner */ Err(e) => format!("The download of {name} failed: {e}"),
     }
 }
 /// One GET with a bearer token over the client's own stream (plain or TLS, as the hub's address says): (status, body), the body at most `max` bytes.
@@ -38,16 +38,16 @@ pub fn get_bytes(url: &str, token: &str, timeout: Duration, max: u64) -> Result<
     let (addr, tls) = crate::pairing::host_port(&format!("{}://{}", authority.0, authority.1));
     let path = url.split_once("://").map_or(url, |(_, r)| r).split_once('/').map_or("/".to_string(), |(_, p)| format!("/{p}"));
     let mut s = crate::pairing::open(&addr, tls).map_err(|e| e.to_string())?; s.set_timeouts(timeout).map_err(|e| e.to_string())?;
-    std::io::Write::write_all(&mut s, format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").as_bytes()).map_err(|e| e.to_string())?;
+    /* i18n-ok: an HTTP request */ std::io::Write::write_all(&mut s, format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").as_bytes()).map_err(|e| e.to_string())?;
     let mut raw = Vec::new();
     let _ = std::io::Read::read_to_end(&mut std::io::Read::take(&mut s, max + 8192), &mut raw); // (a TLS close without notice after the body is still a body)
     parse_response(&raw)
 }
 /// (status, body) of a whole HTTP/1.1 response, de-chunked when it says so.
 pub fn parse_response(raw: &[u8]) -> Result<(u16, Vec<u8>), String> {
-    let at = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("no answer")?;
+    /* i18n-ok: a protocol diagnostic */ let at = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("no answer")?;
     let head = String::from_utf8_lossy(&raw[..at]).to_string(); let body = &raw[at + 4..];
-    let code = head.split_whitespace().nth(1).and_then(|c| c.parse().ok()).ok_or("bad status line")?;
+    /* i18n-ok: a protocol diagnostic */ let code = head.split_whitespace().nth(1).and_then(|c| c.parse().ok()).ok_or("bad status line")?;
     if !head.to_ascii_lowercase().contains("transfer-encoding: chunked") { return Ok((code, body.to_vec())) }
     let (mut out, mut rest) = (Vec::new(), body);
     while let Some(i) = rest.windows(2).position(|w| w == b"\r\n") {
@@ -87,16 +87,16 @@ impl BrowserPage {
                 let out = match get_bytes(&url, &token, Duration::from_secs(3), MAX_JPEG) {
                     Ok((200, body)) => {
                         if fnv(&body) == last { if failing { failing = false; Some(Ok(None)) } else { None } } // the same frame: nothing to draw (but a recovery clears the status)
-                        else { last = fnv(&body); failing = false; Some(decode_jpeg(&body).map(Some).ok_or_else(|| "frame is not a JPEG".to_string())) }
+                        /* i18n-ok: the status is kept in English (the e2e report reads it) and drawn through trs */ else { last = fnv(&body); failing = false; Some(decode_jpeg(&body).map(Some).ok_or_else(|| "frame is not a JPEG".to_string())) }
                     }
                     Ok((404, _)) => {
                         // no page exists for this owner yet: ask the hub to open one (at most every 5 s), its first frame follows
                         if opened.map_or(true, |t| t.elapsed() > Duration::from_secs(5)) { opened = Some(std::time::Instant::now());
                             let _ = hub_open.try_send(crate::hub::Command::Rpc("bots.browser".into(), crate::screens::settings::Secret(serde_json::json!({"bot": owner, "op": "open"})), "browser")); }
-                        Some(Err("Opening the browser…".into()))
+                        /* i18n-ok: compared below, drawn through trs */ Some(Err("Opening the browser…".into()))
                     }
-                    Ok((c, _)) => Some(Err(format!("hub answered {c}"))),
-                    Err(e) => Some(Err(format!("hub unreachable: {e}"))),
+                    /* i18n-ok: drawn through trs */ Ok((c, _)) => Some(Err(format!("hub answered {c}"))),
+                    /* i18n-ok: drawn through trs */ Err(e) => Some(Err(format!("hub unreachable: {e}"))),
                 };
                 if matches!(out, Some(Err(_))) { failing = true; }
                 if let Some(msg) = out { if tx.try_send(msg).is_err() && tx.is_closed() { return } }
@@ -118,15 +118,15 @@ impl BrowserPage {
         // a build without CEF draws the hub's frames by design (0.15: macOS and Windows), not a fallback to warn about; Settings > About says which
         #[cfg(not(feature = "cef"))]
         let banner = String::new();
-        let status = if !cef_note2.is_empty() { cef_note2 } else if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
+        /* i18n-ok: the status is drawn through trs */ let status = if !cef_note2.is_empty() { cef_note2 } else if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
         BrowserPage { #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), banner, light: false, open_error: None, opening_since: Instant::now(), image: None, retired: Vec::new(), status, stop, visible, hub_at }
     }
     /// A download the person started on this page (the hub's `browser.download`): fetched from the hub and saved in Downloads under a name not taken
     /// (as the embedded browser saves its own); the note line says where, or why not.
     pub fn take_download(&mut self, id: &str, name: &str, error: &str, cx: &mut Context<Self>) {
-        if !error.is_empty() || id.is_empty() { self.banner = format!("The download of {name} failed: {}", if error.is_empty() { "no file" } else { error }); cx.notify(); return }
+        /* i18n-ok: the banner is drawn through trs */ if !error.is_empty() || id.is_empty() { self.banner = format!("The download of {name} failed: {}", if error.is_empty() { "no file" } else { error }); cx.notify(); return }
         let (base, token) = self.hub_at.clone(); let (id, name) = (id.to_string(), name.to_string());
-        self.banner = format!("Downloading {name}…"); cx.notify();
+        /* i18n-ok: the banner is drawn through trs */ self.banner = format!("Downloading {name}…"); cx.notify();
         cx.spawn(async move |this, cx| {
             let said = cx.background_executor().spawn(async move { save_download(&base, &token, &id, &name, &super::downloads::downloads_folder()) }).await;
             let _ = this.update(cx, |p, cx| { p.banner = said; cx.notify(); });
@@ -158,13 +158,13 @@ impl BrowserPage {
             "goto" => { let u = v["url"].as_str().unwrap_or(""); b.toolbar("navigate", json!({"url": u})); json!({"ok": true}) }
             "back" | "forward" | "reload" => { b.toolbar(op, json!({})); json!({"ok": true}) }
             "type" => { b.input(json!({"op": "type", "text": v["text"].as_str().unwrap_or("")})); json!({"ok": true}) }
-            "press" => { b.input(json!({"op": "press", "key": v["key"].as_str().unwrap_or("Enter")})); json!({"ok": true}) }
+            "press" => { b.input(json!({"op": "press", "key": v["key"].as_str().unwrap_or("Enter")})); json!({"ok": true}) } // i18n-ok: a key name
             "scroll" => { b.input(json!({"op": "scroll", "dx": 0, "dy": v["dy"].as_f64().unwrap_or(400.0)})); json!({"ok": true}) }
             "click" => { b.input(json!({"op": "click", "x": v["x"].as_u64().unwrap_or(500), "y": v["y"].as_u64().unwrap_or(500)})); json!({"ok": true}) }
             "new_tab" => { b.toolbar("tabs", json!({"new": true})); json!({"ok": true}) }
-            "close_tab" => { let i = v["index"].as_u64().unwrap_or(0) as usize; match b.tabs.get(i) { Some(t) => { let id = t.0.clone(); b.toolbar("tabs", json!({"closeId": id})); json!({"ok": true}) } None => json!({"ok": false, "error": "no such tab"}) } }
+            "close_tab" => { let i = v["index"].as_u64().unwrap_or(0) as usize; match b.tabs.get(i) { Some(t) => { let id = t.0.clone(); b.toolbar("tabs", json!({"closeId": id})); json!({"ok": true}) } None => json!({"ok": false, "error": "no such tab"}) } } // i18n-ok: an e2e answer
             "report" => json!({"ok": true}),
-            o => json!({"ok": false, "error": format!("unknown op {o}")}),
+            /* i18n-ok: an e2e answer */ o => json!({"ok": false, "error": format!("unknown op {o}")}),
         };
         let active = b.tabs.iter().find(|t| t.3).cloned().unwrap_or_default();
         let (frame, lit) = self.image.as_ref().map(|i| { let s = i.size(0); (json!([s.width.0, s.height.0]), i.as_bytes(0).map_or(0, |px| px.chunks(4).step_by(97).filter(|p| p[0] < 240 || p[1] < 240 || p[2] < 240).count())) }).unwrap_or((json!([0, 0]), 0));
@@ -180,12 +180,12 @@ impl Drop for BrowserPage { fn drop(&mut self) { self.stop.store(true, Ordering:
 /// What the empty tab says: what is wrong and what to do about it, never an endless "Opening…".
 fn open_message(error: &Option<String>, waited: Duration) -> Option<(String, String)> {
     if let Some(e) = error {
-        let hint = if e.contains("backplane-browser") { "The hub has no browser helper. Put backplane-browser next to backplane-hub (scripts/build-browser.sh builds it), install Backplane's helper, or set BACKPLANE_BROWSER=/path to it, then press Retry." }
-            else if e.to_lowercase().contains("chrom") || e.to_lowercase().contains("executable") { "The helper found no Chrome to run. Install Google Chrome (or set BACKPLANE_CHROME=/path), then press Retry." }
-            else { "Press Retry, or ask the agent to open a page." };
-        return Some((format!("The browser could not open: {}", e.chars().take(200).collect::<String>()), hint.to_string()));
+        /* i18n-ok: drawn through trs */ let hint = if e.contains("backplane-browser") { "The hub has no browser helper. Put backplane-browser next to backplane-hub (scripts/build-browser.sh builds it), install Backplane's helper, or set BACKPLANE_BROWSER=/path to it, then press Retry." }
+            /* i18n-ok: drawn through trs */ else if e.to_lowercase().contains("chrom") || e.to_lowercase().contains("executable") { "The helper found no Chrome to run. Install Google Chrome (or set BACKPLANE_CHROME=/path), then press Retry." }
+            /* i18n-ok: drawn through trs */ else { "Press Retry, or ask the agent to open a page." };
+        /* i18n-ok: drawn through trs */ return Some((format!("The browser could not open: {}", e.chars().take(200).collect::<String>()), hint.to_string()));
     }
-    (waited > Duration::from_secs(8)).then(|| ("The browser has not opened in 8 seconds.".to_string(), "The hub's browser helper may be missing or still starting (it downloads Chrome the first time). Press Retry; if it keeps failing, check that backplane-browser sits next to backplane-hub.".to_string()))
+    /* i18n-ok: drawn through trs */ (waited > Duration::from_secs(8)).then(|| ("The browser has not opened in 8 seconds.".to_string(), "The hub's browser helper may be missing or still starting (it downloads Chrome the first time). Press Retry; if it keeps failing, check that backplane-browser sits next to backplane-hub.".to_string()))
 }
 impl Render for BrowserPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -198,23 +198,23 @@ impl Render for BrowserPage {
         let content = match &self.image {
             // a dead hub must not look like a live, frozen page: the status shows over the last frame
             Some(i) => div().id("browser-view").size_full().relative().bg(c("bg")).child(img(i.clone()).size_full().object_fit(ObjectFit::Contain))
-                .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(px(12.)).bg(c("panel")).border_1().border_color(c("line")).text_color(c("bad")).child(status))).into_any_element(),
+                .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(px(12.)).bg(c("panel")).border_1().border_color(c("line")).text_color(c("bad")).child(trs(&status)))).into_any_element(),
             None => {
                 let said = open_message(&self.open_error, self.opening_since.elapsed());
                 let waiting = said.is_none() && status == "Opening the browser…";
                 let line = said.as_ref().map(|m| m.0.clone()).unwrap_or_else(|| status.clone());
                 div().id("browser-view").size_full().bg(c("bg")).flex().flex_col().items_center().justify_center().gap_3().px_6().text_size(px(13.)).text_color(c("dim"))
-                    .child(div().max_w(px(480.)).text_color(c(if said.is_some() { "text" } else { "dim" })).child(line))
-                    .children(said.as_ref().map(|m| div().max_w(px(480.)).text_size(px(12.)).child(m.1.clone())))
-                    .children(said.is_some().then(|| div().id("browser-retry").px_4().py_1().cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).text_color(c("text")).hover(|s| s.border_color(c("accent"))).child("Retry")
+                    .child(div().max_w(px(480.)).text_color(c(if said.is_some() { "text" } else { "dim" })).child(trs(&line)))
+                    .children(said.as_ref().map(|m| div().max_w(px(480.)).text_size(px(12.)).child(trs(&m.1))))
+                    .children(said.is_some().then(|| div().id("browser-retry").px_4().py_1().cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).text_color(c("text")).hover(|s| s.border_color(c("accent"))).child(trs("Retry"))
                         .on_click(cx.listener(|this, _, _, cx| this.retry(cx)))))
-                    .when(waiting, |d| d.child(div().text_size(px(11.)).text_color(c("faint")).child("starting the hub's browser…")))
+                    .when(waiting, |d| d.child(div().text_size(px(11.)).text_color(c("faint")).child(trs("starting the hub's browser…"))))
                     .into_any_element()
             }
         };
         let light = self.light;
         let bar = self.bar.render(light, size, content, window, cx);
-        let banner = (!self.banner.is_empty()).then(|| div().px_3().py_1().text_size(px(12.)).bg(c("panel")).border_b_1().border_color(c("line")).text_color(c("warn")).child(self.banner.clone()));
+        let banner = (!self.banner.is_empty()).then(|| div().px_3().py_1().text_size(px(12.)).bg(c("panel")).border_b_1().border_color(c("line")).text_color(c("warn")).child(trs(&self.banner)));
         div().id("browser-page").size_full().flex().flex_col().children(banner).child(div().flex_1().min_h_0().child(bar)).into_any_element()
     }
 }
@@ -226,7 +226,7 @@ pub fn page_input(key: &str, key_char: Option<&str>) -> Option<serde_json::Value
         Some(c) if !c.is_empty() && key != "enter" => Some(serde_json::json!({"op": "type", "text": c})),
         _ if key == "space" => Some(serde_json::json!({"op": "type", "text": " "})),
         _ => {
-            let k = match key { "enter" => "Enter", "backspace" => "Backspace", "tab" => "Tab", "escape" => "Escape", "left" => "ArrowLeft", "right" => "ArrowRight", "up" => "ArrowUp", "down" => "ArrowDown", "delete" => "Delete", "home" => "Home", "end" => "End", "pageup" => "PageUp", "pagedown" => "PageDown", _ => "" };
+            /* i18n-ok: the helper's key names */ let k = match key { "enter" => "Enter", "backspace" => "Backspace", "tab" => "Tab", "escape" => "Escape", "left" => "ArrowLeft", "right" => "ArrowRight", "up" => "ArrowUp", "down" => "ArrowDown", "delete" => "Delete", "home" => "Home", "end" => "End", "pageup" => "PageUp", "pagedown" => "PageDown", _ => "" };
             (!k.is_empty()).then(|| serde_json::json!({"op": "press", "key": k}))
         }
     }
@@ -321,6 +321,18 @@ impl Bar {
 
 #[cfg(test)]
 mod tests {
+    /// What the page keeps in English (the e2e report reads it) is drawn in Japanese through the catalog's templates, the technical reason left as it is.
+    #[test] fn the_pages_status_and_banner_read_in_japanese() {
+        crate::i18n::with_lang("ja", || {
+            let tr = crate::i18n::trs;
+            assert_eq!(tr("hub unreachable: Connection refused (os error 111)"), "ハブに接続できません: Connection refused (os error 111)");
+            assert_eq!(tr("The download of a.pdf failed: the hub answered 404"), "a.pdfのダウンロードに失敗しました: ハブの応答は404でした");
+            assert_eq!(tr("Embedded browser unavailable (no CEF runtime (set BACKPLANE_CEF)); showing the hub's frames."), "組み込みブラウザーを使えません（no CEF runtime (set BACKPLANE_CEF)）。ハブのフレームを表示しています。");
+            let (said, hint) = super::open_message(&None, std::time::Duration::from_secs(9)).unwrap();
+            assert_eq!(tr(&said), "8秒たってもブラウザーが開きません。"); assert!(tr(&hint).contains("再試行"));
+            assert_eq!(super::chrome::tab_label("", "about:blank"), "新しいタブ");
+        });
+    }
     /// A person's download fetched from the hub lands in the folder under its name, then under a name not taken; a refusal is said.
     #[test] fn a_download_from_the_hub_lands_under_a_name_not_taken() {
         use std::io::{Read, Write};

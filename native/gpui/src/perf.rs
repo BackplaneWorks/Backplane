@@ -17,8 +17,8 @@ const CAP: usize = 2048;
 /// An input with no frame within this long changed nothing on screen: it is not charged to a later frame.
 const INPUT_MS: f64 = 1000.0;
 /// The rows of the table: label, kind, name.
-const TABLE: &[(&str, &str, &str)] = &[("frame", "span", "frame"), (" build", "span", "build"), (" layout", "span", "layout"), (" prepaint", "span", "prepaint"), (" paint", "span", "paint"), (" present", "span", "present"),
-    ("input>px", "span", "input"), ("hub>px", "span", "hub"), ("hub rtt", "hub", "rtt"), (" decode", "hub", "decode"), (" merge", "hub", "merge"), (" apply", "hub", "apply")];
+/* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ const TABLE: &[(&str, &str, &str)] = &[("frame", "span", "frame"), (" build", "span", "build"), (" layout", "span", "layout"), (" prepaint", "span", "prepaint"), (" paint", "span", "paint"), (" present", "span", "present"),
+    /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ ("input>px", "span", "input"), ("hub>px", "span", "hub"), ("hub rtt", "hub", "rtt"), (" decode", "hub", "decode"), (" merge", "hub", "merge"), (" apply", "hub", "apply")];
 
 static ON: AtomicBool = AtomicBool::new(false);
 static WIRE_MSGS: AtomicU64 = AtomicU64::new(0);
@@ -93,7 +93,7 @@ impl Perf {
     }
     /// The heaviest rows of these kinds by total time, the overlay's own left out.
     fn slowest(&self, kinds: &[&str], k: usize) -> Vec<(String, Stats)> {
-        let mut v: Vec<(String, Stats)> = self.rows.iter().filter(|((kind, name), _)| kinds.contains(kind) && *name != "overlay").map(|((kind, name), s)| (format!("{kind} {name}"), s.stats())).collect();
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ let mut v: Vec<(String, Stats)> = self.rows.iter().filter(|((kind, name), _)| kinds.contains(kind) && *name != "overlay").map(|((kind, name), s)| (format!("{kind} {name}"), s.stats())).collect();
         v.sort_by(|a, b| b.1.sum.total_cmp(&a.1.sum)); v.truncate(k); v
     }
     /// Drops what left the window, takes a reading and works out the text.
@@ -106,27 +106,27 @@ impl Perf {
         self.next = t + REFRESH.as_secs_f64() * 1000.0;
     }
     fn text(&self, t: f64, s: Sample, key: &str) -> Vec<String> {
-        let mem = match s.rss_mb { Some(r) => format!("rss {r:.0} MB  peak {:.0} MB", s.peak_mb), None => format!("peak {:.0} MB", s.peak_mb) };
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ let mem = match s.rss_mb { Some(r) => format!("rss {r:.0} MB  peak {:.0} MB", s.peak_mb), None => format!("peak {:.0} MB", s.peak_mb) };
         let frames = self.stats("span", "frame");
-        if frames.n == 0 { return vec![format!("measuring ({key} hides this)"), mem] }
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ if frames.n == 0 { return vec![format!("measuring ({key} hides this)"), mem] }
         let span = t.clamp(1.0, SPAN_MS);
         let (a, b) = (self.readings.front().copied().unwrap_or_default(), self.readings.back().copied().unwrap_or_default());
         let secs = ((b.t - a.t) / 1000.0).max(0.001);
         let rate = |x: u64, y: u64| y.saturating_sub(x) as f64 / secs;
-        let mut l = vec![format!("{:<10}{:>5}{:>7}{:>7}{:>7}{:>7}", format!("last {:.1} s", span / 1000.0), "n", "mean", "p50", "p99", "max")];
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ let mut l = vec![format!("{:<10}{:>5}{:>7}{:>7}{:>7}{:>7}", format!("last {:.1} s", span / 1000.0), "n", "mean", "p50", "p99", "max")];
         for (label, kind, name) in TABLE {
             let x = self.stats(kind, name);
             l.push(if x.n == 0 { format!("{label:<10}{:>5}", 0) } else { format!("{label:<10}{:>5}{:>7}{:>7}{:>7}{:>7}", x.n, ms(x.mean), ms(x.p50), ms(x.p99), ms(x.max)) });
         }
-        l.push(format!("fps {:.0}  cpu {:.0}%  {mem}", frames.n as f64 * 1000.0 / span, (b.cpu_ms - a.cpu_ms) / (b.t - a.t).max(1.0) * 100.0));
-        l.push(format!("wire {:.0}/s {:.2} MB/s  events {:.0}/s", rate(a.wire_msgs, b.wire_msgs), rate(a.wire_bytes, b.wire_bytes) / 1048576.0, rate(a.events, b.events)));
-        l.push(format!("pictures {:.0}/s  deltas {:.0}/s", rate(a.pictures, b.pictures), rate(a.deltas, b.deltas)));
-        for (title, kinds, k) in [("slowest paints", &["prepaint", "paint"][..], 4), ("slowest events", &["event"][..], 3)] {
-            l.push(format!("{title:<22}{:>9}{:>6}", "ms total", "n"));
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ l.push(format!("fps {:.0}  cpu {:.0}%  {mem}", frames.n as f64 * 1000.0 / span, (b.cpu_ms - a.cpu_ms) / (b.t - a.t).max(1.0) * 100.0));
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ l.push(format!("wire {:.0}/s {:.2} MB/s  events {:.0}/s", rate(a.wire_msgs, b.wire_msgs), rate(a.wire_bytes, b.wire_bytes) / 1048576.0, rate(a.events, b.events)));
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ l.push(format!("pictures {:.0}/s  deltas {:.0}/s", rate(a.pictures, b.pictures), rate(a.deltas, b.deltas)));
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ for (title, kinds, k) in [("slowest paints", &["prepaint", "paint"][..], 4), ("slowest events", &["event"][..], 3)] {
+            /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ l.push(format!("{title:<22}{:>9}{:>6}", "ms total", "n"));
             for (name, x) in self.slowest(kinds, k) { l.push(format!("{name:<22}{:>9}{:>6}", ms(x.sum), x.n)); }
         }
         let own = self.stats("prepaint", "overlay").sum + self.stats("paint", "overlay").sum + self.stats("span", "refresh").sum;
-        l.push(format!("overlay {} ms/frame", ms(own / frames.n as f64)));
+        /* i18n-ok: developer perf overlay (Ctrl+Shift+H) */ l.push(format!("overlay {} ms/frame", ms(own / frames.n as f64)));
         l
     }
 }

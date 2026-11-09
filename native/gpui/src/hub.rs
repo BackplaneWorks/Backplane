@@ -10,12 +10,12 @@ use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 #[derive(Debug)] pub enum Event { /** the hub put this text in a thread's composer */ Compose(String,String), /** a line that is no error (Intent saved) */ Note(String), /** the hub refused this device's credential: it was revoked */ Unpaired, /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>,Option<String>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), /** a person's download in the Browser tab: owner, id, name, error */ BrowserDownload(String,String,String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line, and each sheet file's references (`file<TAB>ref<TAB>ref...` per line) */ Sheets(String,String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), /** the star suggestion the hub shows now (null: none) */ Star(Value), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
 impl Event {
     /// What the performance overlay calls it.
-    pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::Star(_)=>"star",Event::BrowserTabs(..)=>"browser tabs",Event::BrowserDownload(..)=>"browser download",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(..)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired",Event::Compose(..)=>"compose",Event::Note(_)=>"note"}}
+    /* i18n-ok: event names for the perf overlay */ pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::Star(_)=>"star",Event::BrowserTabs(..)=>"browser tabs",Event::BrowserDownload(..)=>"browser download",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(..)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired",Event::Compose(..)=>"compose",Event::Note(_)=>"note"}}
 }
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
 #[cfg(test)] mod status_tests{use super::*;use core::prelude::v1::test;
-    #[test] fn a_refused_view_or_command_leaves_the_connection_label_alone(){assert_eq!(status_for(&Event::Refused("View request refused: \"PRESENTER_UNAVAILABLE\"".into())),None);assert_eq!(status_for(&Event::Error("Hub disconnected".into())),Some("Disconnected"));assert_eq!(status_for(&Event::Accepted),None);}}
+    /* i18n-ok: test */ #[test] fn a_refused_view_or_command_leaves_the_connection_label_alone(){assert_eq!(status_for(&Event::Refused("View request refused: \"PRESENTER_UNAVAILABLE\"".into())),None);assert_eq!(status_for(&Event::Error("Hub disconnected".into())),Some("Disconnected"));assert_eq!(status_for(&Event::Accepted),None);}}
 /// Where a reply's time went before the UI saw it: send to frame received, decode, delta/merge, the body's size, and when its frame arrived.
 #[derive(Debug,Clone,Default)] pub struct Timing { pub rtt_ms:f64, pub decode_ms:f64, pub process_ms:f64, pub bytes:usize, pub delta:bool, pub at:Option<std::time::Instant> }
 #[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf>, pub swatches:bool, pub gallery:bool, pub fonts:bool, pub solid_demo:Option<String>, pub theme:Option<String>, /** a pairing credential is what connects: a 401 means this device was revoked */ pub paired:bool, /** no hub to connect to: the client starts at pairing */ pub unpaired:bool, /** a link from outside, to ask about */ pub pair_link:Option<String>, /** no --url, no pairing: the launcher (launch.rs) finds or starts this machine's hub, or the chooser asks */ pub pending:bool, /** this client started or found its own hub */ pub launched:bool }
@@ -36,7 +36,7 @@ impl Config {
             "--theme"=>config.theme=Some(args.next().context("--theme needs light|dark")?),
             "--script"=>config.script=Some(PathBuf::from(args.next().context("--script needs a file")?)),
             "--token-file"=>{config.token_file=PathBuf::from(args.next().context("--token-file needs a path")?);keyed=true;},
-            _=>anyhow::bail!("usage: backplane-gpui [LINK] [--pair LINK] [--url http://HOST:PORT] [--token-file FILE] [--exit-after SECONDS] [--script FILE] [--swatches] [--gallery] [--fonts] [--solid-demo TRIS[,STEPS]] [--theme light|dark]")
+            /* i18n-ok: command line usage and start errors on stderr */ _=>anyhow::bail!("usage: backplane-gpui [LINK] [--pair LINK] [--url http://HOST:PORT] [--token-file FILE] [--exit-after SECONDS] [--script FILE] [--swatches] [--gallery] [--fonts] [--solid-demo TRIS[,STEPS]] [--theme light|dark]")
         }}
         // no hub named: the one this client paired with, or (no hub's token here either) pairing
         let (saved,saved_token)=match crate::hubs::target_saved() {crate::hubs::Target::Remote{key,ws}=>(Some(ws),crate::hubs::credential_saved(&key)),crate::hubs::Target::Local=>(None,None)};
@@ -48,9 +48,9 @@ impl Config {
         }
         config.hub=config.hub.trim_end_matches('/').to_string();
         config.hub=crate::pairing::ws_of(&config.hub);
-        ensure!((config.hub.starts_with("ws://")||config.hub.starts_with("wss://")) && !config.hub.contains(['?','#','@']),"the hub must be an explicit ws:// or wss:// address"); // 3787 is allowed: a 0.14 install updated to 0.15 keeps its port, so paired devices find it
+        /* i18n-ok: command line usage and start errors on stderr */ ensure!((config.hub.starts_with("ws://")||config.hub.starts_with("wss://")) && !config.hub.contains(['?','#','@']),"the hub must be an explicit ws:// or wss:// address"); // 3787 is allowed: a 0.14 install updated to 0.15 keeps its port, so paired devices find it
         let token_path=std::fs::canonicalize(&config.token_file).context("experiment token file missing; start its hub first")?;
-        ensure!(!token_path.starts_with(PathBuf::from(home).join(".backplane-bend")),"live home refused");
+        /* i18n-ok: command line usage and start errors on stderr */ ensure!(!token_path.starts_with(PathBuf::from(home).join(".backplane-bend")),"live home refused");
         Ok(config)
     }
 }
@@ -63,16 +63,16 @@ fn unnamed(named:bool,keyed:bool,saved:Option<String>,token_here:bool)->Start {
 #[cfg(test)] mod start_tests { use super::*;
     #[test] fn a_start_names_its_hub_else_the_pairing_else_pairing_begins(){
         let s=||Some("wss://b.ts.net".to_string());
-        assert_eq!(unnamed(true,true,s(),true),Start::Named,"--url wins over a saved pairing");
-        assert_eq!(unnamed(false,true,None,false),Start::Named,"so does --token-file");
-        assert_eq!(unnamed(false,false,s(),true),Start::Paired("wss://b.ts.net".into()),"a pairing wins over a local hub's token");
-        assert_eq!(unnamed(false,false,None,true),Start::Named,"a machine with a hub's token keeps working");
+        /* i18n-ok: test */ assert_eq!(unnamed(true,true,s(),true),Start::Named,"--url wins over a saved pairing");
+        /* i18n-ok: test */ assert_eq!(unnamed(false,true,None,false),Start::Named,"so does --token-file");
+        /* i18n-ok: test */ assert_eq!(unnamed(false,false,s(),true),Start::Paired("wss://b.ts.net".into()),"a pairing wins over a local hub's token");
+        /* i18n-ok: test */ assert_eq!(unnamed(false,false,None,true),Start::Named,"a machine with a hub's token keeps working");
         assert_eq!(unnamed(false,false,None,false),Start::Unpaired);
     }
     #[test] fn only_a_paired_clients_401_means_revoked(){
         let e=|c:u16|anyhow::Error::from(tokio_tungstenite::tungstenite::Error::Http(tokio_tungstenite::tungstenite::http::Response::builder().status(c).body(None).unwrap().into()));
-        assert!(refused(true,&e(401)));assert!(!refused(false,&e(401)),"a hub token that fails is a wrong file, not a revoked device");
-        assert!(!refused(true,&e(500)));assert!(!refused(true,&anyhow::anyhow!("connection refused")));
+        /* i18n-ok: test */ assert!(refused(true,&e(401)));assert!(!refused(false,&e(401)),"a hub token that fails is a wrong file, not a revoked device");
+        /* i18n-ok: test */ assert!(!refused(true,&e(500)));assert!(!refused(true,&anyhow::anyhow!("connection refused")));
     }
 }
 /// The hub said no to this device's credential at the door, as it does once it is revoked (a restart or a lost route is only a reconnect).
@@ -135,7 +135,7 @@ impl View {
 /// the folder, and its Open folder button opens this one only, whatever the hub sends. None when this build has none beside it (a dev build).
 pub fn licenses_dir()->Option<PathBuf> {
     static DIR:std::sync::OnceLock<Option<PathBuf>>=std::sync::OnceLock::new();
-    DIR.get_or_init(||{let me=std::env::current_exe().ok()?;let me=std::fs::canonicalize(&me).unwrap_or(me);let d=me.parent()?.join("licenses");d.join("README.md").is_file().then_some(d)}).clone()
+    /* i18n-ok: a file name */ DIR.get_or_init(||{let me=std::env::current_exe().ok()?;let me=std::fs::canonicalize(&me).unwrap_or(me);let d=me.parent()?.join("licenses");d.join("README.md").is_file().then_some(d)}).clone()
 }
 fn rpc_id()->u64 {static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed)}
 pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) {
@@ -147,19 +147,19 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
             if config.unpaired {while commands.recv().await.is_some() {} return;} // nothing to connect to: pairing starts this client again
             let mut view=View::new(&config);let mut delay=1;
             loop {
-                let _=events.send(Event::Status("Connecting…".into())).await;
+                /* i18n-ok: connection status, compared with Connected; drawn through trs */ let _=events.send(Event::Status("Connecting…".into())).await;
                 match session(&config,&mut commands,&events,&mut view).await {
                     Ok(())=>break,
                     Err(error) if refused(config.paired,&error)=>{let _=events.send(Event::Unpaired).await;break;}
                     Err(error)=>{ // Never log the handshake URL or its credential.
                         if let Some(secs)=format!("{error:#}").strip_prefix("net_sleep:").and_then(|s|s.parse::<f64>().ok()) {
                             // the e2e harness's net_sleep: the socket is gone for `secs`, then the normal reconnect runs
-                            let _=events.send(Event::Status("Disconnected (net_sleep)".into())).await;
+                            /* i18n-ok: connection status, compared with Connected; drawn through trs */ let _=events.send(Event::Status("Disconnected (net_sleep)".into())).await;
                             view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;
                             tokio::time::sleep(Duration::from_secs_f64(secs)).await;let _=events.send(Event::NetWake).await;delay=1;continue;
                         }
                         let token=std::fs::read_to_string(&config.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
-                        let _=events.send(Event::Error("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.".into())).await;
+                        let _=events.send(Event::Error(crate::i18n::trs("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log."))).await;
                         view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;
                         tokio::time::sleep(Duration::from_secs(delay)).await;delay=(delay*2).min(10);
                     }
@@ -170,7 +170,7 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
 }
 async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&async_channel::Sender<Event>,v:&mut View)->Result<()> {
     let token=std::fs::read_to_string(&config.token_file)?;
-    ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
+    /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
     let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
     let limits=WebSocketConfig::default().max_message_size(Some(64<<20)).max_frame_size(Some(64<<20));
     let (socket,_)=tokio::time::timeout(Duration::from_secs(5),tokio_tungstenite::connect_async_with_config(url,Some(limits),true)).await??;
@@ -190,7 +190,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                 // typed while the view is not open (reconnecting): kept in the session the next view.open carries; a view.action now would name no view (STALE_VIEW)
                 Command::Draft(text)=>{let id=v.draft_key();v.session["drafts"][id]=json!(text);if v.view_id.is_empty(){continue;}v.request("view.action",json!({"action":"draft","value":text}))},
                 Command::History(cursor)=>{if v.view_id.is_empty()||!v.pending.is_empty()||v.paging.is_some(){v.want_page=Some(cursor);continue;}v.page(&cursor)},
-                Command::Page(value)=>{ensure!(!v.view_id.is_empty(),"view not ready");v.request("view.action",json!({"action":"native-sidebar-page","value":value}))},
+                /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ Command::Page(value)=>{ensure!(!v.view_id.is_empty(),"view not ready");v.request("view.action",json!({"action":"native-sidebar-page","value":value}))},
                 Command::Action(action,value)=>{if action.starts_with("row-")||action.starts_with("delete")||action.starts_with("rename"){eprintln!("GPUI_LOG {{\"action\":{},\"value\":{}}}",Value::String(action.clone()),Value::String(value.chars().take(80).collect()));}v.request("view.action",json!({"action":action,"value":value}))},
             };
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
@@ -213,14 +213,14 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         // every product RPC's answer is logged, so a refused send is never silent (the reply's error may be a plain string, a code or a message)
                         let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};
                         eprintln!("GPUI_LOG {}",json!({"rpc_reply":name,"ok":x["ok"]==true,"error":why.chars().take(160).collect::<String>()}));
-                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Refused(format!("The hub refused it: {why}"))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
+                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Refused(crate::i18n::tf("gpui.hub.refused.it", &[("why", crate::i18n::trs(&why).into())]))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     let paged=v.paging.take_if(|(page,_)|*page==id).map(|(_,cursor)|cursor);
                     // A hub still opening its log says "not yet", and says the same of a thread it cannot show, for as long as it likes. So: the list first, asked for
                     // until the first view of this connection, which proves the hub is up; then the saved place once. Refused then, it is gone.
                     match view_refusal(&x,&method,v.drawn,v.restored) {
                         Refusal::Show=>{}
-                        Refusal::Again=>{let _=events.send(Event::Status("Hub is opening its log…".into())).await;tokio::time::sleep(Duration::from_secs(1)).await;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
+                        /* i18n-ok: connection status, compared with Connected; drawn through trs */ Refusal::Again=>{let _=events.send(Event::Status("Hub is opening its log…".into())).await;tokio::time::sleep(Duration::from_secs(1)).await;let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                         Refusal::ListFirst=>{v.saved=Some(v.target.clone());v.restored=Restore::None;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                         Refusal::Gone=>{v.restored=Restore::None;v.target=json!({"kind":"recent","id":""});v.session["sel"]=json!("");v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
                     }
@@ -229,9 +229,9 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
                         let c=v.controls.remove(&control).filter(|c|c.done);
-                        let Some(c)=c else{anyhow::bail!("segmented reply incomplete")};
+                        /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ let Some(c)=c else{anyhow::bail!("segmented reply incomplete")};
                         let values:Value=serde_json::from_str(&c.parts.concat())?;
-                        ensure!(values.is_object()&&values.get("shown").is_none(),"invalid control values");
+                        /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(values.is_object()&&values.get("shown").is_none(),"invalid control values");
                         r.as_object_mut().unwrap().remove("controlId");
                         for(k,val)in values.as_object().unwrap(){if r.get(k).is_none(){r[k]=val.clone();}}
                     }
@@ -273,13 +273,13 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         }
                         continue;
                     }
-                    ensure!(r["version"]==1&&r["hub"]==v.hub&&r["generation"]==v.greeting["generation"]&&r["epoch"]==v.greeting["epoch"]&&r["requestRevision"]==revision&&r["target"]==target,"view identity mismatch");
+                    /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(r["version"]==1&&r["hub"]==v.hub&&r["generation"]==v.greeting["generation"]&&r["epoch"]==v.greeting["epoch"]&&r["requestRevision"]==revision&&r["target"]==target,"view identity mismatch");
                     v.view_id=r["viewId"].as_str().context("missing view id")?.to_string();
-                    ensure!(r["session"].is_object(),"missing session");v.session=r["session"].clone();v.restored=Restore::None;v.drawn=true;crate::screens::place::note_view(&v.target,&v.session);
+                    /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(r["session"].is_object(),"missing session");v.session=r["session"].clone();v.restored=Restore::None;v.drawn=true;crate::screens::place::note_view(&v.target,&v.session);
                     for command in r["cmds"].as_array().into_iter().flatten(){
                         if let Some(e)=client_cmd(command) {let _=events.send(e).await;continue;}
                         if command["type"]=="send" {
-                            ensure!(command["hub"].is_null()||command["hub"]==v.hub,"cross-hub command refused");
+                            /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(command["hub"].is_null()||command["hub"]==v.hub,"cross-hub command refused");
                             let request:Value=serde_json::from_str(command["text"].as_str().context("missing command text")?)?;
                             let rpc_id=request["id"].as_u64().context("missing RPC id")?;
                             let m=request["m"].as_str().unwrap_or("");ensure!(!m.starts_with("view.")&&rpc_id<(1<<47),"invalid product RPC");eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\",\"thread\":{}}}",request["p"]["thread"]);
@@ -294,7 +294,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         let _=events.send(Event::Older(cursor,Some(rv))).await;
                         let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;
                     }
-                    else if r["shown"].is_object(){let _=events.send(Event::Picture(rv,timing)).await;let _=events.send(Event::Status("Connected".into())).await;}
+                    /* i18n-ok: connection status, compared with Connected; drawn through trs */ else if r["shown"].is_object(){let _=events.send(Event::Picture(rv,timing)).await;let _=events.send(Event::Status("Connected".into())).await;}
                 },
                 "view.control"=>{
                     let id=x["id"].as_u64().unwrap_or(0);let part=x["part"].as_u64().unwrap_or(u64::MAX);let text=x["text"].as_str().unwrap_or("");
@@ -321,7 +321,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
             else if v.want_page.is_some()&&v.pending.is_empty()&&v.paging.is_none()&&!v.view_id.is_empty(){let cursor=v.want_page.take().unwrap_or_default();let request=v.page(&cursor);sink.send(Message::Binary(wire::encode(&request).into())).await?;}
         },
-        _=heartbeat.tick()=>{ensure!(last.elapsed()<Duration::from_secs(35),"hub heartbeat timeout");sink.send(Message::Ping(Vec::new().into())).await?;}
+        /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ _=heartbeat.tick()=>{ensure!(last.elapsed()<Duration::from_secs(35),"hub heartbeat timeout");sink.send(Message::Ping(Vec::new().into())).await?;}
     }}
 }
 
@@ -342,11 +342,11 @@ pub fn view_refusal(x:&Value,method:&str,drawn:bool,restored:Restore)->Refusal {
 }
 
 /// What a refused view request says. STALE_VIEW is a thing this hub does not have (a bot, room or thread of another hub, or one removed): said so.
-pub fn refused_view_text(code:&Value)->String { if code=="STALE_VIEW" {"That is not on this hub (it was removed, or belongs to another hub).".into()} else {format!("View request refused: {code}")} }
+pub fn refused_view_text(code:&Value)->String { if code=="STALE_VIEW" {crate::i18n::trs("That is not on this hub (it was removed, or belongs to another hub).")} else {crate::i18n::tf("gpui.hub.view.refused", &[("code", code.to_string().into())])} }
 /// The words for a failed product RPC's answer: the hub's error may be a plain string, an object with a message or a code, or something else.
 pub fn rpc_error(x:&Value)->String {
     let e=&x["error"];
-    e.as_str().map(String::from).or_else(||e["message"].as_str().map(String::from)).or_else(||e["code"].as_str().map(String::from)).unwrap_or_else(||if e.is_null(){"no reason given".into()}else{e.to_string()})
+    e.as_str().map(String::from).or_else(||e["message"].as_str().map(String::from)).or_else(||e["code"].as_str().map(String::from)).unwrap_or_else(||if e.is_null(){/* i18n-ok: logged; drawn through trs in the refusal */ "no reason given".into()}else{e.to_string()})
 }
 /// The product RPCs that post a message: their acceptance is the client's "sent" (chat.send comes through `view.action` by name too).
 /// The product RPCs whose ok answer is a message the hub took (the window then empties its box). A bot's chat sends `bots.say`, not `turn.start`.

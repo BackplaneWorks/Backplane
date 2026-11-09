@@ -26,18 +26,18 @@ fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { 
 pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     let qid = s(t, "id");
     let mut v = vec![];
-    v.push(if t["pinned"].as_bool().unwrap_or(false) { item("Unpin", "row-unpin", &qid, false) } else { item("Pin", "row-pin", &qid, false) });
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(if t["pinned"].as_bool().unwrap_or(false) { item("Unpin", "row-unpin", &qid, false) } else { item("Pin", "row-pin", &qid, false) });
     if let Some(l) = t["lead"].as_array().and_then(|l| l.first()) { v.push(item(&s(l, "label"), &s(l, "action"), &s(l, "value"), false)); }
-    for o in t["trail"].as_array().into_iter().flatten().flat_map(|x| x["options"].as_array().into_iter().flatten()) { v.push(item(&format!("Snooze {}", s(o, "label").to_lowercase()), "row-snooze", &s(o, "value"), false)); }
-    if t["canChild"].as_bool().unwrap_or(true) { v.push(item("New subthread", "thread-child", &format!("{}|{}", raw(&qid), project), false)); }
-    if t["depth"].as_u64().unwrap_or(0) > 0 { v.push(item("Move to top level", "row-detach", raw(&qid), false)); }
-    if t["depth"].is_u64() && !project.is_empty() { v.push(item("Move under\u{2026}", LOCAL_MOVE, &format!("{}|{}", raw(&qid), project), false)); }
-    v.push(item("Rename", "row-rename", raw(&qid), false));
-    v.push(item("Regenerate title", "row-retitle", raw(&qid), false));
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ for o in t["trail"].as_array().into_iter().flatten().flat_map(|x| x["options"].as_array().into_iter().flatten()) { v.push(item(&format!("Snooze {}", s(o, "label").to_lowercase()), "row-snooze", &s(o, "value"), false)); }
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["canChild"].as_bool().unwrap_or(true) { v.push(item("New subthread", "thread-child", &format!("{}|{}", raw(&qid), project), false)); }
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["depth"].as_u64().unwrap_or(0) > 0 { v.push(item("Move to top level", "row-detach", raw(&qid), false)); }
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["depth"].is_u64() && !project.is_empty() { v.push(item("Move under\u{2026}", LOCAL_MOVE, &format!("{}|{}", raw(&qid), project), false)); }
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(item("Rename", "row-rename", raw(&qid), false));
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(item("Regenerate title", "row-retitle", raw(&qid), false));
     // an archived row's lead (the hub's Unarchive) is already above
     let archived = t["lead"].as_array().map_or(false, |l| l.iter().any(|x| x["action"] == "row-unarchive"));
-    if !archived { v.push(item("Archive", "row-archive", &qid, false)); }
-    v.push(item("Delete", "row-delete", &qid, true));
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ if !archived { v.push(item("Archive", "row-archive", &qid, false)); }
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(item("Delete", "row-delete", &qid, true));
     v
 }
 /// The threads a thread may go under (Move under…): the project's rows as the sidebar shows them (live, then settled), not the thread itself,
@@ -142,7 +142,12 @@ pub fn disarm(m: &Menu) -> Option<Command> {
 }
 /// What an armed item says (0.14's words).
 pub fn armed_label(it: &Item) -> String {
-    match it.action.as_str() { "row-delete" => "Click again to delete".into(), "proj-remove" => "Click again to remove".into(), _ => format!("Click again to {}", it.label.to_lowercase()) }
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ match it.action.as_str() { "row-delete" => "Click again to delete".into(), "proj-remove" => "Click again to remove".into(), _ => format!("Click again to {}", it.label.to_lowercase()) }
+}
+
+/// `armed_label` as drawn: the catalog's words for it, the item's own label translated inside.
+pub fn shown_armed_label(it: &Item) -> String {
+    match it.action.as_str() { "row-delete" | "proj-remove" => crate::i18n::trs(&armed_label(it)), _ => crate::i18n::tf("gpui.ctx.click.again.to", &[("what", crate::i18n::trs(&it.label).to_lowercase().into())]) }
 }
 
 /// The menu over everything, with a backdrop that closes it.
@@ -151,7 +156,7 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
     let mut list = div().absolute().left(m.at.x).top(m.at.y).min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).occlude();
     for (i, it) in m.items.iter().enumerate() {
         let armed = m.armed == Some(i);
-        let label = if armed { armed_label(it) } else { it.label.clone() };
+        let label = if armed { shown_armed_label(it) } else { crate::i18n::trs(&it.label) };
         let danger = it.confirm;
         list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("ctx-{i}"))), { let l = it.label.clone(); move || format!("ctx:{l}") }).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
             .when(armed, |d| d.bg(c("raise")).font_weight(FontWeight::BOLD)).hover(|s| s.bg(c("raise"))).child(label)
@@ -229,6 +234,15 @@ mod tests {
         assert_eq!(vals("a"), ["a|d", "a|e"]); assert_eq!(vals("d"), ["d|a", "d|b", "d|c", "d|e"]);
         assert!(parent_choices(&d, "p1", "zz").is_empty() && parent_choices(&d, "p9", "a").is_empty());
         let it = thread_items(&j(r#"{"id":"h|b","depth":1}"#), "p1"); let m = it.iter().find(|i| i.action == LOCAL_MOVE).unwrap(); assert_eq!(m.value, "b|p1");
+    }
+    #[test] fn an_armed_item_reads_in_the_language_in_force() {
+        let t = j(r#"{"id":"h|t7"}"#); let items = thread_items(&t, "p1");
+        let del = items.iter().find(|i| i.action == "row-delete").unwrap(); let arch = Item { confirm: true, ..items.iter().find(|i| i.action == "row-archive").unwrap().clone() };
+        assert_eq!((shown_armed_label(del), shown_armed_label(&arch)), ("Click again to delete".to_string(), "Click again to archive".to_string()));
+        crate::i18n::with_lang("ja", || {
+            assert_eq!(shown_armed_label(del), crate::i18n::catalog().japanese("Click again to delete").unwrap());
+            assert!(!shown_armed_label(&arch).contains("Archive") && !shown_armed_label(&arch).contains("archive"), "{}", shown_armed_label(&arch));
+        });
     }
     #[test] fn only_a_subthread_offers_to_move_to_the_top_level() {
         let sub = j(r#"{"id":"http://h:1|t8","depth":1,"canChild":true}"#); let it = thread_items(&sub, "p1");

@@ -46,7 +46,7 @@ pub fn machine_text(mark: &Value, full: bool) -> Option<(String, f32, String)> {
     let name = mark["name"].as_str().filter(|n| !n.is_empty())?;
     let away = mark["away"].as_bool().unwrap_or(false);
     let t = if full { name } else { mark["short"].as_str().filter(|s| !s.is_empty()).unwrap_or(name) };
-    Some((if away && full { format!("{t} · away") } else { t.to_string() }, if away { 0.5 } else { 1.0 }, if away { format!("{name} · away") } else { name.to_string() }))
+    Some((if away && full { crate::i18n::tf("gpui.badge.away", &[("name", t.into())]) } else { t.to_string() }, if away { 0.5 } else { 1.0 }, if away { crate::i18n::tf("gpui.badge.away", &[("name", name.into())]) } else { name.to_string() }))
 }
 /// The marker drawn: dim text, small, quieter than the state dots; the full name on hover. `id` makes the hover's element unique.
 pub fn machine_mark(light: bool, mark: &Value, full: bool, id: &str) -> Option<AnyElement> {
@@ -57,10 +57,10 @@ pub fn machine_mark(light: bool, mark: &Value, full: bool, id: &str) -> Option<A
 /// Where a project or thread is when it is another machine's, as the hub words it (`mark.label` "on desktop"; a project of this machine that
 /// is also on others: its `also` "also on desktop"): the text, its opacity (dimmer when away) and the hover (the full name). None: this machine's, drawn as always.
 pub fn place_text(mark: &Value, also: &str) -> Option<(String, f32, String)> {
-    if mark["name"].as_str().map_or(true, str::is_empty) { return (!also.is_empty()).then(|| (also.to_string(), 1.0, also.to_string())) }
+    if mark["name"].as_str().map_or(true, str::is_empty) { return (!also.is_empty()).then(|| (crate::i18n::trs(also), 1.0, crate::i18n::trs(also))) }
     let (_, o, hover) = machine_text(mark, true)?;
-    let l = mark["label"].as_str().filter(|l| !l.is_empty()).map_or_else(|| format!("on {}", mark["short"].as_str().unwrap_or("")), str::to_string);
-    Some((if o < 1.0 { format!("{l} · away") } else { l }, o, hover))
+    let l = mark["label"].as_str().filter(|l| !l.is_empty()).map_or_else(|| crate::i18n::tf("gpui.badge.on", &[("name", mark["short"].as_str().unwrap_or("").into())]), crate::i18n::trs);
+    Some((if o < 1.0 { crate::i18n::tf("gpui.badge.away", &[("name", l.into())]) } else { l }, o, hover))
 }
 /// The one place mark: the link icon and the words, quiet (the `faint` text of either theme), the full name on hover. `id` keeps the hover unique.
 pub fn place(light: bool, mark: &Value, also: &str, id: &str) -> Option<AnyElement> {
@@ -73,11 +73,11 @@ pub fn place(light: bool, mark: &Value, also: &str, id: &str) -> Option<AnyEleme
 /// The note under the composer of another machine's thread: where an agent sent from here runs (`mark.runs` "runs on desktop"). None for this machine's.
 pub fn runs_text(mark: &Value) -> Option<String> {
     mark["name"].as_str().filter(|n| !n.is_empty())?;
-    Some(mark["runs"].as_str().filter(|r| !r.is_empty()).map_or_else(|| format!("runs on {}", mark["short"].as_str().unwrap_or("")), str::to_string))
+    Some(mark["runs"].as_str().filter(|r| !r.is_empty()).map_or_else(|| crate::i18n::tf("gpui.badge.runs.on", &[("name", mark["short"].as_str().unwrap_or("").into())]), crate::i18n::trs))
 }
 /// A page header's source on another machine: "desktop: boards/x.kicad_pcb"; this machine's is just what it shows.
 pub fn from_machine(mark: &Value, what: &str) -> String {
-    match mark["short"].as_str().filter(|s| !s.is_empty() && !mark["name"].as_str().unwrap_or("").is_empty()) { Some(m) if what.is_empty() => m.to_string(), Some(m) => format!("{m}: {what}"), None => what.to_string() }
+    /* i18n-ok: a machine and a path, not words */ match mark["short"].as_str().filter(|s| !s.is_empty() && !mark["name"].as_str().unwrap_or("").is_empty()) { Some(m) if what.is_empty() => m.to_string(), Some(m) => format!("{m}: {what}"), None => what.to_string() }
 }
 #[cfg(test)]
 mod tests {

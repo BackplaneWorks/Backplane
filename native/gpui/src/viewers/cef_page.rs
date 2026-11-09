@@ -179,8 +179,8 @@ impl Render for CefPage {
                     b
                 }, move |b, _, window, cx| { window.handle_input(&focus, ElementInputHandler::new(b, me), cx); }).absolute().size_full())
                 .children(self.image.clone().map(|i| img(i).absolute().size_full().object_fit(ObjectFit::Fill)))
-                .when(!err.is_empty(), |d| d.child(div().absolute().top_2().left_2().px_2().py_1().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xf06a6a)).child(err)))
-                .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xd7dbe3)).child(status.clone())))
+                .when(!err.is_empty(), |d| d.child(div().absolute().top_2().left_2().px_2().py_1().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xf06a6a)).child(crate::i18n::trs(&err))))
+                .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xd7dbe3)).child(crate::i18n::trs(&status))))
                 .when(self.image.is_none() && !title.is_empty(), |d| d.child(div().absolute().top_2().left_2().text_color(rgb(0x8a93a3)).child(title)))
                 .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, _| { let (x, y) = this.local(e.position); this.last_mouse = (x, y); if let Some(t) = this.tab() { t.mouse_move(x, y, Self::mods(&e.modifiers, this.buttons), false); } }))
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, w, cx| this.mouse(e, 0, w, cx)))
@@ -203,7 +203,7 @@ impl CefPage {
     /// Scripted input for the e2e (`{"cef":{...}}` steps): goto, click at view-local logical px, type, handback, report. Answers the JSON the metric carries.
     pub fn script(&mut self, v: &serde_json::Value, cx: &mut Context<Self>) -> serde_json::Value {
         use serde_json::json;
-        let Some(t) = self.tab().cloned() else { return json!({"ok": false, "error": "no tab"}) };
+        let Some(t) = self.tab().cloned() else { return json!({"ok": false, "error": "no tab"}) }; // i18n-ok: an e2e answer
         if let Some(i) = v["tab"].as_u64() { if (i as usize) < self.tabs.len() { self.active = i as usize; self.image = None; if let Some(t) = self.tab() { t.hidden(false); } } cx.notify(); return json!({"ok": true, "tab": i}) }
         if let Some(u) = v["goto"].as_str() { t.navigate(u); return json!({"ok": true, "goto": u}) }
         if v["back"].as_bool() == Some(true) { t.back(); return json!({"ok": true, "back": true}) }
@@ -225,19 +225,19 @@ impl CefPage {
         let op = v["op"].as_str().unwrap_or("report");
         let r = match (op, self.tab().cloned()) {
             ("new_tab", _) => { self.new_tab(v["url"].as_str().unwrap_or("about:blank"), cx); json!({"ok": true}) }
-            ("close_tab", _) => match self.tabs.get(v["index"].as_u64().unwrap_or(0) as usize) { Some(t) => { t.close(); json!({"ok": true}) } None => json!({"ok": false, "error": "no such tab"}) },
+            ("close_tab", _) => match self.tabs.get(v["index"].as_u64().unwrap_or(0) as usize) { Some(t) => { t.close(); json!({"ok": true}) } None => json!({"ok": false, "error": "no such tab"}) }, // i18n-ok: an e2e answer
             ("report", _) => json!({"ok": true}),
-            (_, None) => json!({"ok": false, "error": "no tab"}),
+            /* i18n-ok: an e2e answer */ (_, None) => json!({"ok": false, "error": "no tab"}),
             ("goto", Some(t)) => { self.take_over(); t.navigate(v["url"].as_str().unwrap_or("about:blank")); json!({"ok": true}) }
             ("back", Some(t)) => { t.back(); json!({"ok": true}) }
             ("forward", Some(t)) => { t.forward(); json!({"ok": true}) }
             ("reload", Some(t)) => { t.reload(); json!({"ok": true}) }
             ("type", Some(t)) => { self.take_over(); t.focus(true); for c in v["text"].as_str().unwrap_or("").chars() { if let Some(vk) = cef::vk(&c.to_string()) { t.key(0, 0, vk, vk, vk as u16); } let mut b = [0u16; 2]; for u in c.encode_utf16(&mut b) { t.key(2, 0, 0, 0, *u); } if let Some(vk) = cef::vk(&c.to_string()) { t.key(1, 0, vk, vk, vk as u16); } } json!({"ok": true}) }
-            ("press", Some(t)) => { self.take_over(); let k = match v["key"].as_str().unwrap_or("Enter") { "Enter" => "enter", "Backspace" => "backspace", "Tab" => "tab", "Escape" => "escape", k => k }; match cef::vk(k) { Some(vk) => { t.key(0, 0, vk, vk, vk as u16); if vk == 13 { t.key(2, 0, 13, 13, 13); } t.key(1, 0, vk, vk, vk as u16); json!({"ok": true}) } None => json!({"ok": false, "error": "no key code"}) } }
+            /* i18n-ok: key names and an e2e answer */ ("press", Some(t)) => { self.take_over(); let k = match v["key"].as_str().unwrap_or("Enter") { "Enter" => "enter", "Backspace" => "backspace", "Tab" => "tab", "Escape" => "escape", k => k }; match cef::vk(k) { Some(vk) => { t.key(0, 0, vk, vk, vk as u16); if vk == 13 { t.key(2, 0, 13, 13, 13); } t.key(1, 0, vk, vk, vk as u16); json!({"ok": true}) } None => json!({"ok": false, "error": "no key code"}) } }
             ("scroll", Some(t)) => { self.take_over(); let (w, h) = t.size(); t.mouse_move(w as i32 / 2, h as i32 / 2, 0, false); t.wheel(w as i32 / 2, h as i32 / 2, 0, 0, -(v["dy"].as_f64().unwrap_or(400.0) as i32)); json!({"ok": true}) }
             ("click", Some(t)) => { let (w, h) = t.size(); let (x, y) = ((v["x"].as_u64().unwrap_or(500) as u32 * w / 1000) as i32, (v["y"].as_u64().unwrap_or(500) as u32 * h / 1000) as i32);
                 self.take_over(); t.focus(true); t.mouse_move(x, y, 0, false); t.mouse_click(x, y, 16, 0, false, 1); t.mouse_click(x, y, 0, 0, true, 1); json!({"ok": true, "at": [x, y]}) }
-            (o, _) => json!({"ok": false, "error": format!("unknown op {o}")}),
+            /* i18n-ok: an e2e answer */ (o, _) => json!({"ok": false, "error": format!("unknown op {o}")}),
         };
         let mut r = r; r["op"] = op.into();
         let (w, h, lit) = self.stats;
