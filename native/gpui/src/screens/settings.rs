@@ -168,7 +168,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
         }
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         let (hint, secret, v) = (f.hint.clone(), f.secret, f.value.clone());
-        input.update(cx, |i, cx| { i.set_placeholder(&hint); i.masked = secret; i.set(v, cx); });
+        input.update(cx, |i, cx| { i.set_placeholder(&trs(&hint)); i.masked = secret; i.set(v, cx); });
         let field = f.clone();
         if !f.vault {
             cx.observe(&input, move |this, input, cx| {
