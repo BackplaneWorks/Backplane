@@ -1,54 +1,39 @@
-# Embedded Chromium on Windows x64 and macOS arm64
+# Embedded Chromium on Windows x64 and macOS arm64: status
 
-Status and design of the native CEF port of the Browser tab. Linux x64 has
-shipped embedded Chromium since 0.15 (`docs/browser-native.md`). Before this
-port, macOS and Windows showed only the hub's JPEG frames from
-`backplane-browser`. Those frames are still the fallback on every OS.
+How each platform runs CEF, the layout and the build are in
+`docs/browser-gpui-cef.md`. This file covers what is proven, what is not, the
+risks and the remaining effort.
 
-## What the client does per OS
+Before the port, the Browser tab on macOS and Windows was the hub's JPEG
+frame stream from `backplane-browser`. That stream is still the fallback
+everywhere. When the runtime is missing or incomplete, or CEF refuses to
+start, the client starts anyway, the tab's banner says
+`embedded browser unavailable: <why>`, and the frames are shown.
 
-| | Linux x64 | Windows x64 | macOS arm64 |
-|---|---|---|---|
-| CEF library | `libcef.so`, linked, RUNPATH `$ORIGIN` | `libcef.dll`, linked with `/DELAYLOAD:libcef.dll` (`native/gpui/build.rs`) | framework loaded by hand (`cef::load_library`), nothing linked |
-| Runtime found in | `$BACKPLANE_CEF`, `<cache>/backplane/cef-runtime/<ver>`, beside the exe | the same | `$BACKPLANE_CEF`, `cef/` beside the exe, `../Frameworks` in an app bundle |
-| Checked before the first CEF call | `NEED_LINUX` | `NEED_WINDOWS` (libcef.dll, chrome_elf.dll, paks, icudtl.dat, snapshot, locales/en-US.pak) | `NEED_MACOS` (framework binary, icudtl.dat, the five helper bundles) |
-| Helper processes | the client, re-run with `--type=` | the client, re-run with `--type=` (`BACKPLANE_CEF_DLL_DIR` passes a runtime directory that is not beside the exe) | `Backplane Helper{, (GPU), (Renderer), (Plugin), (Alerts)}.app`, whose executable is `backplane-cef-helper` (`src/bin/backplane-cef-helper.rs`) |
-| Message loop | CEF's own UI thread (`multi_threaded_message_loop`) | the same | `external_message_pump`: `do_message_loop_work` on gpui's main thread when CEF asks (`on_schedule_message_pump_work`), and at least every 33 ms while the engine is up (`viewers/cef.rs` `pump`) |
-| NSApp | n/a | n/a | `isHandlingSendEvent` / `setHandlingSendEvent:` and the Cr/Cef app protocols are added at run time to gpui's application class (`viewers/cef.rs` `mac::conform_app`) |
-| Sandbox | off (`no_sandbox`) | off | off |
-| Rendering | OSR, BGRA copied from `on_paint` into a gpui image | the same | the same |
+## How it is made safe to start without a runtime
 
-`subprocess()` decides from argv alone whether the process is a CEF helper
-(`is_helper_argv`). No CEF function runs before that check, and none runs
-before the runtime check. A missing or incomplete runtime is not a crash: the
-Browser tab says `embedded browser unavailable: …` in its banner and shows the
-hub's frames. On Windows a delay-loaded DLL that is missing would raise an
-exception at the first call, which is why the check happens first. On Linux a
-client without `libcef.so` cannot start at all, as before. Releases always
-ship it there.
+- No CEF function runs in a process that is not a CEF helper.
+  `cef::subprocess()` decides from argv alone (`is_helper_argv`). The browser
+  process declares the API version (`api_hash`) only in `Engine::start`, after
+  the runtime check.
+- Windows: `libcef.dll` is delay-loaded (`native/gpui/build.rs`, MSVC only).
+  The runtime check requires `libcef.dll`, `chrome_elf.dll`, `icudtl.dat` and
+  `resources.pak`. A runtime directory that is not beside the exe
+  (`BACKPLANE_CEF`, the cache) is put on the DLL search path with
+  `SetDllDirectoryW`. The helpers are the client run again, and they get it
+  through `BACKPLANE_CEF_DLL_DIR`.
+- macOS: the framework is loaded by hand (`cef_mac.rs`), so nothing is linked.
+- Linux: `libcef.so` is linked (RUNPATH `$ORIGIN`); releases always ship it.
 
-## Layout in the release archives
+## Proven on CI
 
-- Windows zip: `libcef.dll`, `chrome_elf.dll`, `d3dcompiler_47.dll`,
-  `dxcompiler.dll`, `dxil.dll`, `libEGL.dll`, `libGLESv2.dll`,
-  `vk_swiftshader.dll`, `vk_swiftshader_icd.json`, `vulkan-1.dll`, the paks,
-  `icudtl.dat`, `v8_context_snapshot.bin` and `locales/`, beside
-  `backplane-gpui.exe`.
-- macOS tarball: `cef/Chromium Embedded Framework.framework`,
-  `cef/Backplane Helper*.app` (five bundles) and `cef/Backplane.app` beside
-  `backplane-gpui`. `Backplane.app` is a stub bundle that holds only an
-  Info.plist: the client is not in a bundle, so CEF is given this one as
-  `main_bundle_path`. Everything is ad-hoc signed.
-- `scripts/cef-runtime-pack.sh windows|macos TARGET_DIR DEST` lays out either
-  one from cef-dll-sys's OUT_DIR, and fails when a file is missing.
-  `release.yml` and `browser-e2e.yml` both use it.
-
-## Tests
-
-`test/browser/browser_e2e.py` runs on one machine with a temp hub, the client,
-a loopback page server and `{"browser":{"op":…}}` script steps. Those steps
-make the same calls the toolbar, mouse, wheel and keys make, on whichever page
-is shown. It checks:
+`test/browser/browser_e2e.py` runs on one machine, in workflow
+`.github/workflows/browser-e2e.yml` on windows-latest, macos-latest and
+ubuntu-latest. It starts a hub on a temp home and the client on the runner's
+desktop, and serves a page on loopback. The client runs a script of
+`{"browser":{"op":…}}` steps. Each step makes the call the toolbar, mouse,
+wheel or keys would make, on whichever page is shown
+(`BrowserPage::script`, `CefPage::browser_op`). It checks:
 
 - a local http page, a `file://` page and an https page load
 - typing, scrolling, and a click that navigates
@@ -56,118 +41,83 @@ is shown. It checks:
 - a second tab opens and closes
 - the Browser view closes and reopens and still navigates
 - the client exits 0 by itself
-- no process whose command line names the run's folder, the helper or the client is left after quit
+- no process of the run is left after quit
 
-`.github/workflows/browser-e2e.yml` runs it on windows-latest, macos-latest and
-ubuntu-latest in three modes:
+It runs in three modes:
 
-- `frames`: CEF off
-- `cef`: the packed runtime; falling back to frames fails the job
-- fallback, part of the `cef` jobs on Windows and macOS: the cef client with
-  no runtime beside it must start, say why, and show frames
+- `frames`: CEF off. In this mode the hub refuses a `file://` address from
+  its toolbar by design (`term/driver.rs` `cef_url`), and the test checks
+  for that refusal.
+- `cef`: the runtime laid out by `scripts/cef-runtime-files.sh` and
+  `scripts/cef-mac-helpers.sh`. A fallback to frames fails the job.
+- fallback, run on Windows and macOS: the cef client with its runtime
+  removed must start, say why, and show frames.
 
-## Status
+Results: see the table at the end.
 
-CEF works end to end on Windows x64 and macOS arm64 CI runners; see Results.
+The e2e found these bugs, all fixed:
 
-## Risks and open items
+- **macOS deadlock:** closing a tab hung the window. CEF runs
+  `on_before_close` on the main thread inside `close_browser`, and
+  `Tab::with` held the tab's browser lock across the call. It now takes the
+  browser out of the lock first.
+- **Windows typing:** typed text never reached the page. CEF makes WM_CHAR
+  from `windows_key_code`, which carried 0 for scripted text and the virtual
+  key for real keys (`A` for `a`). It now carries the character
+  (`char_code`).
+- **Windows fallback:** a client without `libcef.dll` could not start at
+  all, because the DLL was linked at load time. Fixed by the delay-load.
 
-- **OSR per OS.** Rendering is the software OSR path (`on_paint` BGRA) on all
-  three OSes, with no shared textures: a copy per frame, at most 30 fps. The
-  accelerated path (`accelerated_osr`, D3D11 shared handles on Windows,
-  IOSurface on macOS) is not used. It would need the cef crate's feature and a
-  gpui surface import, about 3 to 5 days per OS.
-- **macOS message pump.** The 33 ms floor means 30 idle wakeups a second while
-  a CEF engine is up (it starts on the first Browser tab and stays up). That
-  is CEF's own recommendation for external pumps, and it is not a repaint.
-  Nested run loops (menus, modal dialogs inside the page) are untested.
-- **NSApp protocol.** The methods are added to gpui's class at run time rather
-  than by subclassing. `sendEvent:` is not wrapped, so `isHandlingSendEvent`
-  is always false. If Chromium ever needs it to be true (drag and drop,
-  nested event tracking), gpui's `sendEvent:` override in `vendor/gpui` would
-  need a wrapper.
-- **CEF and crate versions.** The `cef` crate is pinned at `=154.5.0`
-  (CEF 154.0.34). Its build script downloads the binary distribution for the
-  target (about 120 MB on Windows, 110 MB on macOS, bz2) and builds
-  `libcef_dll_wrapper` with CMake and Ninja. Windows needs MSVC and Ninja on
-  PATH; macOS needs Xcode's clang. A crate bump changes the API hash, and the
-  runtime shipped beside the client must be the same build. The packing
-  script takes it from the same build's OUT_DIR, so they cannot drift.
-- **Sandbox.** Off everywhere (`no_sandbox`).
-  - Windows needs `cef_sandbox.lib` linked statically into the exe plus the
-    `bootstrap.exe` model of recent CEF. The crate's `sandbox` feature exists
-    but is untested here.
-  - macOS needs the sandbox helper library and `cef::sandbox` in each helper.
-  - About 2 to 4 days per OS, mostly signing and verification.
-- **Signing and notarization (macOS).** Releases are ad-hoc signed today, both
-  the client and the CEF bundles. With a Developer ID,
-  `cef-runtime-pack.sh` signs with `CODESIGN_ID` and the hardened runtime,
-  and gives the helpers `allow-jit`, `allow-unsigned-executable-memory` and
-  `disable-library-validation`. Notarization would then need the whole
-  archive submitted with `notarytool` and stapled, which cannot be stapled to
-  a bare tarball, so it would need a `.app` or `.dmg`. Not done: there is no
-  identity in CI.
-- **Signing (Windows).** Nothing is Authenticode-signed today. CEF's DLLs come
-  from the Spotify CDN, unsigned by us. SmartScreen treats the exe as before.
-- **GPU on runners.** The CI runners have no GPU. The cef jobs set
-  `BACKPLANE_CEF_NO_GPU` (software compositing). Real-GPU behaviour is
-  verified only where noted in the table below.
-- **Size.** The CEF runtime adds roughly 250 to 300 MB uncompressed (about
-  110 to 130 MB compressed) to each of the Windows and macOS archives. Exact
-  figures are in the CI log line `CEF runtime size:`.
-- **Updater.** The guard replaces the install folder's files from the
-  archive, so the new `cef/` folder (macOS) and the DLLs (Windows) arrive with
-  the next update like any other file. An older client left beside a newer
-  runtime cannot happen through the updater: both come from one archive.
+## Not tried on real hardware
 
-## Effort
+- **Windows:** no real Windows machine is reachable from here. Only the
+  windows-latest runner was used: no GPU (WARP and SwiftShader), at 100%
+  scaling.
+- **macOS:** only the macos-latest runner was used, an arm64 VM with no GPU,
+  where CEF ran with `BACKPLANE_CEF_NO_GPU`. The Mac mini was not used for
+  this: the repo keeps it for builds (`e2e-macos.yml`), and a GUI run would
+  draw in the person's logged-in session.
+- **Unverified on both:** GPU compositing, HiDPI, IME, drag and drop,
+  DevTools windows, and signing beyond ad-hoc.
 
-| Piece | Days | State |
-|---|---|---|
-| Per-OS runtime discovery and checks, delay-load, the macOS loader and helper binary | 1 | done |
-| macOS main-thread pump and the NSApp protocol | 1 | done; CI result below |
-| Packing (`cef-runtime-pack.sh`), release.yml, archive checks | 1 | done |
-| e2e on three OSes (frames, cef, fallback) | 1 | done |
-| Fixes found by the runners | 1 to 3 | see the table |
-| Accelerated OSR per OS | 3 to 5 each | not started |
-| Sandbox per OS | 2 to 4 each | not started |
-| Developer ID signing and notarization (needs an identity, a .app or .dmg) | 2 to 3 | not started |
+## Risks
+
+- **OSR copy:** rendering is the software OSR path on all platforms:
+  `on_paint` BGRA is copied into a gpui image, at most 30 fps. The
+  accelerated path (`accelerated_osr`: D3D11 shared handles, IOSurface) is
+  not used.
+- **macOS pump:** the external pump wakes gpui's main thread at least 30
+  times a second while the engine is up, as cefclient does. Nested run loops
+  (menus or modal dialogs inside a page) are untested.
+- **Versions:** the `cef` crate is pinned (`=154.5.0`, CEF 154.0.34). A bump
+  changes the API hash. The runtime is packed from the same build's OUT_DIR,
+  so it cannot drift from the client.
+- **Sandbox:** off on every platform. Windows would need `cef_sandbox.lib`
+  and the bootstrap model; macOS would need sandboxed helpers.
+- **Signing:**
+  - macOS: everything is ad-hoc signed. Notarization would need a Developer
+    ID, the hardened runtime with `allow-jit` /
+    `allow-unsigned-executable-memory` on the helpers, and an `.app` or
+    `.dmg`, since a tarball cannot be stapled.
+  - Windows: no Authenticode signature.
+- **Size:** the runtime adds about 560–600 MB uncompressed to the macOS and
+  Windows installs, measured by `du` on the CI runners' dist folders.
+
+## Effort left
+
+| Piece | Days |
+|---|---|
+| Accelerated OSR, per OS | 3–5 |
+| Sandbox, per OS | 2–4 |
+| Developer ID signing and notarization (needs an identity, a .app or .dmg) | 2–3 |
+| Real-hardware pass (GPU, HiDPI, IME) on a Windows PC and a Mac | 1–2 |
 
 ## Results
 
-[browser-e2e run 42540338925](https://github.com/BackplaneWorks/Backplane/actions/runs/42540338925), all six jobs green:
+[browser-e2e run 42570253995](https://github.com/BackplaneWorks/Backplane/actions/runs/42570253995), all six jobs green:
 
-| OS | frames (CEF off) | cef (embedded) | fallback (cef client, runtime removed) | runtime size |
+| OS | frames | cef | fallback (cef client, runtime removed) | dist with runtime (debug build) |
 |---|---|---|---|---|
-| windows-latest (x64, no GPU, WARP) | 17/17 | 17/17 | 18/18 | 594 MB uncompressed |
-| macos-latest (arm64 VM, no GPU) | 17/17 | 17/17 | 18/18 | 568 MB uncompressed |
-| ubuntu-latest (x64, Xvfb, lavapipe) | 17/17 | 17/17 | n/a (the client links libcef.so) | |
-
-In frames mode the hub refuses a `file://` address from its page's toolbar
-(`native/host/src/term/driver.rs` `cef_url` lets only http(s) and loopback
-through). That is by design: the page runs on the hub's machine. The test
-checks for the refusal. The embedded page opens `file://`.
-
-Earlier runs found three bugs, all fixed:
-
-- The cursor handle type in `on_cursor_change` is different on each OS, and
-  the build failed on macOS and Windows.
-- macOS: closing a tab deadlocked the window. CEF runs `on_before_close` on
-  the main thread inside `close_browser`, and the tab's browser lock was held
-  across the call. `Tab::with` now takes the browser out of the lock first.
-- Windows: typed text never reached the page. CEF makes WM_CHAR from
-  `windows_key_code`, which carried 0 or the virtual key. It now carries the
-  character (`char_code`).
-
-Not run on real hardware:
-
-- No real Windows machine is reachable from here.
-- The Mac mini was not used: the repo keeps it for builds (`e2e-macos.yml`),
-  and a GUI run would draw in the person's logged-in session.
-- So GPU compositing, HiDPI, IME, and code signing beyond ad-hoc are
-  unverified on both OSes.
-
-The release dry run with CEF packed for darwin-arm64 and windows-x64 is
-[release run 42540391143](https://github.com/BackplaneWorks/Backplane/actions/runs/42540391143).
-Its linux-arm64 job failed because of a bug in the archive check (`silero_vad.onnx`
-renamed by the space substitution), since fixed; see the report for the rest.
+| windows-latest (x64, no GPU) | 17/17 | 17/17 | 18/18 | 596 MB |
+| macos-latest (arm64 VM, no GPU) | 17/17 | 17/17 | 18/18 | 573 MB |
+| ubuntu-latest (x64, Xvfb, lavapipe) | 17/17 | 17/17 | n/a (libcef.so is linked) | 700 MB |
