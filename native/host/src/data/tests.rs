@@ -61,10 +61,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -501,4 +501,30 @@ impl RpcHandler for FakeStar {
     let text = String::from_utf8_lossy(&out);
     assert!(read.is_ok(), "the answer was read, not reset ({sent} of {n} bytes sent): {read:?}");
     assert!(text.starts_with("HTTP/1.1 413"), "{text}"); assert!(text.contains("upload.cap"), "it says why: {text}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_queue_and_buy_it_answer_for_a_thread() {
+    let (_hub, port) = up("queuebuy").await;
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await;
+    for f in ["queue", "buy", "status"] { assert!(hello["features"].as_array().unwrap().iter().any(|x| x == f), "{f}") }
+    let r = ask(&mut ws, 1, "thread.queue", json!({"thread":"t1"})).await; assert_eq!(r["result"]["rows"], json!([]), "nothing waits: {r}");
+    let r = ask(&mut ws, 2, "thread.queue", json!({})).await; assert_eq!(r["ok"], false, "a thread is needed: {r}");
+    let r = ask(&mut ws, 3, "queue.act", json!({"thread":"t1","action":"q-fly","value":"m1"})).await; assert!(r["error"].as_str().unwrap_or("").starts_with("action:"), "{r}");
+    let r = ask(&mut ws, 4, "queue.act", json!({"thread":"t1","action":"q-up","value":"m1"})).await; assert_eq!(r["ok"], false, "q-up needs a place: {r}");
+    let r = ask(&mut ws, 5, "thread.buy", json!({"thread":"t1"})).await; assert_eq!(r["result"]["buy"], Value::Null, "no KiCad project, nothing to buy: {r}");
+    let r = ask(&mut ws, 6, "order.buy", json!({})).await; assert_eq!(r["ok"], false, "{r}");
+    let r = ask(&mut ws, 7, "threads.list", json!({"project":"p1"})).await;
+    assert!(r["result"]["threads"].as_array().unwrap().iter().all(|t| t["status"].is_string()), "every thread says its dot's word: {r}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_files_approval_of_a_buy_says_send_or_not_now_as_the_desktop() {
+    let (_hub, port) = up_with("quoteask", "{\"$\":\"AskOpened\",\"id\":\"q2\",\"thread\":\"t2\",\"kind\":\"approval\",\"tool\":\"order_quote\",\"detail\":\"Send 11 files from mfg/x to Backplane's quote service\",\"options\":\"\",\"at\":1700000041}\n").await;
+    let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t2"})).await;
+    let a = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "ask").cloned().unwrap_or_else(|| panic!("{r}"));
+    assert_eq!(a["ask"]["options"], json!([{"id":"accept","label":"Send"},{"id":"decline","label":"Not now"}]), "{a}");
+    assert!(a["ask"]["question"].as_str().unwrap().starts_with("Send these files for a quote?\n"), "{a}");
+    let r = ask(&mut ws, 2, "thread.entries", json!({"thread":"t1"})).await;
+    let a = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "ask").cloned().unwrap();
+    assert_eq!(a["ask"]["options"][0]["label"], "Allow", "any other approval keeps Allow: {a}");
 }
