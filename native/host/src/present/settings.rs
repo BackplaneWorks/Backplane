@@ -584,7 +584,9 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
     let mut rid = session["rid"].as_u64().unwrap_or(1);
     let mut cmds = vec![];
     let patch = match action {
-        "flag" if value == "settings" => json!({"open": {"settings": !is_open(session)}}),
+        // opening Settings shuts the viewer beside the thread (0.14's Settings.viewer.shut): Settings takes the room
+        "flag" if value == "settings" => { let opening = !is_open(session); let mut p = json!({"open": {"settings": opening}});
+            if opening { let (shut, c) = super::viewer::shut(hub, session); crate::session::patch::merge(&mut p, &shut); cmds.extend(c); if let Some(r) = p["rid"].as_u64() { rid = r; } } p }
         "settings-page" => {
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
