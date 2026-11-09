@@ -11,7 +11,7 @@ struct DAccRow: Decodable, Identifiable { var id: String; var provider: String; 
 struct DAccReply: Decodable { var account: DAccount }
 struct DAccount: Decodable {
     var id: String; var provider: String; var title: String; var label: String; var email: String; var plan: String; var state: String; var line: String; var tone: String
-    var message: String; var limits: [String]; var hold: String; var signin: DSignIn?; var actions: [DAccAction]; var remove: String
+    var message: String; var limits: [String]; var hold: String; var signin: DSignIn?; var actions: [DAccAction]; var remove: String; var loopback: Bool?
 }
 struct DSignIn: Decodable { var attempt: String; var state: String; var url: String; var code: String; var paste: Bool; var text: String; var error: String; var busy: Bool; var done: Bool }
 struct DAccAction: Decodable, Hashable { var label: String; var action: String; var danger: Bool }
@@ -42,7 +42,10 @@ struct DataAccountsView: View {
                         ForEach(pv.accounts) { a in
                             Button { opened = DAccountRoute(id: a.id) } label: { row(a) }.buttonStyle(.plain).accessibilityIdentifier("accounts.row." + a.id)
                         }
-                        Button(pv.add) { name = ""; adding = pv }.buttonStyle(DButton()).accessibilityIdentifier("accounts.add." + pv.provider)
+                        Button(pv.add) {
+                            // Google asks no name: the sign-in starts at once, its own listener first (GoogleLoop)
+                            if pv.provider == "google" { Task { await add(pv, "") } } else { name = ""; adding = pv }
+                        }.buttonStyle(DButton()).accessibilityIdentifier("accounts.add." + pv.provider)
                         DLine()
                     }
                     if !p.error.isEmpty { Text(p.error).dmono(11).foregroundStyle(BackplaneDesign.bad) }
@@ -55,20 +58,29 @@ struct DataAccountsView: View {
         .dataBar("Accounts")
         .refreshable { await load() }
         .task(id: client.conn) { await load() }
-        .navigationDestination(item: $opened) { r in DataAccountView(client: client, route: r) }
+        .navigationDestination(item: $opened) { r in DataAccountView(client: client, route: r, moved: { opened = DAccountRoute(id: $0) }).id(r.id) }
         .onChange(of: opened) { _, o in if o == nil { Task { await load() } } }
         .alert(adding.map { $0.add } ?? "", isPresented: Binding(get: { adding != nil }, set: { if !$0 { adding = nil } })) {
             TextField("Name (Work, Personal)", text: $name)
             Button("Add and sign in") {
                 guard let pv = adding else { return }
-                Task {
-                    do { let r: DAccReply = try await client.call("account.act", ["action": "add", "provider": pv.provider, "label": name]); opened = DAccountRoute(id: r.account.id) }
-                    catch { failure = error.localizedDescription }
-                    await load()
-                }
+                Task { await add(pv, name) }
             }
             Button("Cancel", role: .cancel) {}
         }
+    }
+    /// An account added: Google's with its loopback listener up first and its address sent as `redirect` (no listener: none sent, the paste path works as is).
+    private func add(_ pv: DAccProvider, _ label: String) async {
+        var p: [String: Any] = ["action": "add", "provider": pv.provider, "label": label]
+        let google = pv.provider == "google"
+        let port = google ? await GoogleLoop.shared.listen() : nil
+        if let port { p["redirect"] = GoogleLoopLogic.redirect(port) }
+        do {
+            let r: DAccReply = try await client.call("account.act", p)
+            if port != nil { GoogleLoop.shared.profile = r.account.id }
+            opened = DAccountRoute(id: r.account.id)
+        } catch { GoogleLoop.shared.stop(); failure = error.localizedDescription }
+        await load()
     }
     private func row(_ a: DAccRow) -> some View {
         HStack(alignment: .top, spacing: 10) {
@@ -87,6 +99,8 @@ struct DataAccountsView: View {
 struct DataAccountView: View {
     @Bindable var client: DataClient
     let route: DAccountRoute
+    /// A signed-in Google account is google:<id>: its own screen replaces google:new.
+    var moved: (String) -> Void = { _ in }
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @State private var a: DAccount?
@@ -102,10 +116,15 @@ struct DataAccountView: View {
     private func act(_ action: String, _ extra: [String: Any] = [:]) async {
         var p: [String: Any] = ["profile": route.id, "action": action]; for (k, v) in extra { p[k] = v }
         if action == "remove" {
-            do { let _: DAccountsPage = try await client.call("account.act", p); dismiss() } catch { failure = error.localizedDescription }
+            do { let _: DAccountsPage = try await client.call("account.act", p); GoogleLoop.shared.stop(); dismiss() } catch { failure = error.localizedDescription }
             return
         }
-        do { let r: DAccReply = try await client.call("account.act", p); a = r.account; failure = ""; if action == "code" { code = "" } } catch { failure = error.localizedDescription; await load() }
+        let port = action == "signin" && GoogleLoopLogic.wants(route.id, loopback: a?.loopback == true) ? await GoogleLoop.shared.listen() : nil
+        if let port { p["redirect"] = GoogleLoopLogic.redirect(port) }
+        do {
+            let r: DAccReply = try await client.call("account.act", p); a = r.account; failure = ""; if action == "code" { code = "" }
+            if port != nil { GoogleLoop.shared.profile = r.account.id.isEmpty ? route.id : r.account.id }
+        } catch { if port != nil { GoogleLoop.shared.stop() }; failure = error.localizedDescription; await load() }
     }
     var body: some View {
         ScrollView {
@@ -133,6 +152,16 @@ struct DataAccountView: View {
             await load()
             // opened from the alert: the sign-in starts at once, unless one is already under way or it works again
             if route.start, !started, let x = a, x.signin?.busy != true, x.state != "connected" { started = true; await act("signin") }
+        }
+        // Google's sign-in comes back here: the browser opens once with the hub's link; the caught address is sent and the view read again
+        .task(id: a?.signin?.url ?? "") { if let u = a?.signin?.url, !u.isEmpty { GoogleLoop.shared.open(u) } }
+        .onAppear {
+            GoogleLoop.shared.onCatch = { who, address in
+                Task {
+                    let r: DAccReply? = try? await client.call("account.act", ["profile": who, "provider": "google", "action": "code", "code": address])
+                    if let id = r?.account.id, id.hasPrefix("google:"), id != route.id { moved(id) } else { await load() }
+                }
+            }
         }
         // a sign-in under way: the hub is asked again until it is over (the only polling here, and only then)
         .task(id: a?.signin?.busy == true || a?.state == "connecting") {

@@ -28,6 +28,9 @@ fn with<T>(f: impl FnOnce(&mut Vault) -> T) -> T {
     f(v)
 }
 
+/// A name the hub keeps for itself (`hub.`: Google's refresh tokens, google/store.rs): never run, listed, asked for or set through the secret box,
+/// so no agent reaches it with secret_run; only the module that owns it reads it (`own_get`, `own_put`, `own_del`).
+pub fn reserved(n: &str) -> bool { n.starts_with("hub.") }
 /// A secret's name: `[a-z0-9._-]{1,64}`.
 pub fn valid_name(n: &str) -> bool { !n.is_empty() && n.len() <= 64 && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'_' || b == b'-') }
 
@@ -207,7 +210,12 @@ fn item_of(m: &Value) -> Item {
     Item { name: s("name"), purpose: s("purpose"), by: s("by"), at: s("at"), used_at: s("usedAt"), used_by: s("usedBy"), iv: s("iv"), ct: s("ct"), value: None }
 }
 
-fn publish_masks(v: &Vault) { super::mask::set_vault_values(v.items.iter().filter_map(|i| i.value.clone()).collect()); }
+/// Every value is masked in what agents read; a hub-owned item that is a JSON object (google/store.rs) has its secret field (`refresh`) masked on its own too.
+fn publish_masks(v: &Vault) {
+    let mut vals: Vec<String> = v.items.iter().filter_map(|i| i.value.clone()).collect();
+    for i in v.items.iter().filter(|i| reserved(&i.name)) { if let Some(r) = i.value.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|j| j["refresh"].as_str().map(str::to_string)) { vals.push(r) } }
+    super::mask::set_vault_values(vals);
+}
 
 fn status_of(v: &Vault) -> Value { json!({"key": if v.backend.is_empty() { offer() } else { v.backend.clone() }, "locked": v.locked, "why": v.why, "n": v.items.len(), "flush": v.flush}) }
 
@@ -258,13 +266,23 @@ pub fn read_other(home: &Path) -> Result<Vec<(String, String, String)>, String> 
 }
 pub fn status() -> Value { with(|v| status_of(v)) }
 /// VaultFx.list: the metadata, never a value.
-pub fn list() -> Value { with(|v| Value::Array(v.items.iter().map(meta).collect())) }
-pub fn names() -> Vec<String> { with(|v| v.items.iter().map(|i| i.name.clone()).collect()) }
+pub fn list() -> Value { with(|v| Value::Array(v.items.iter().filter(|i| !reserved(&i.name)).map(meta).collect())) }
+/// The names the secret box knows (never a reserved one).
+pub fn names() -> Vec<String> { with(|v| v.items.iter().filter(|i| !reserved(&i.name)).map(|i| i.name.clone()).collect()) }
+/// A hub-owned item's value (`reserved` names only); None when absent, unopened or the vault is locked.
+pub fn own_get(name: &str) -> Option<String> { if !reserved(name) { return None } with(|v| if v.locked { None } else { v.items.iter().find(|i| i.name == name).and_then(|i| i.value.clone()) }) }
+/// The reserved names held, with their prefix.
+pub fn own_names(prefix: &str) -> Vec<String> { with(|v| v.items.iter().filter(|i| reserved(&i.name) && i.name.starts_with(prefix)).map(|i| i.name.clone()).collect()) }
+/// A person-set secret's value, for the hub's own use (Google's OAuth client, google/store.rs). Never a reserved one.
+pub fn person_get(name: &str) -> Option<String> { if reserved(name) { return None } with(|v| if v.locked { None } else { v.items.iter().find(|i| i.name == name).and_then(|i| i.value.clone()) }) }
+pub fn own_put(name: &str, value: &str, purpose: &str) -> String { if !reserved(name) { return "fail not a hub name".into() } put_any(name, value, purpose, "hub") }
+pub fn own_del(name: &str) -> String { if !reserved(name) { return "fail not a hub name".into() } del_any(name) }
 
 fn errs(e: &str) -> String { e.replace(['\r', '\n'], " ").chars().take(200).collect() }
 
-/// VaultFx.put: "ok", "committed <why>" or "fail <why>". The caller has checked the name and the value (`secret::bad`).
-pub fn put(name: &str, value: &str, purpose: &str, by: &str) -> String {
+/// VaultFx.put: "ok", "committed <why>" or "fail <why>". The caller has checked the name and the value (`secret::bad`). A reserved name is refused.
+pub fn put(name: &str, value: &str, purpose: &str, by: &str) -> String { if reserved(name) { return "fail that name is Backplane's own".into() } put_any(name, value, purpose, by) }
+fn put_any(name: &str, value: &str, purpose: &str, by: &str) -> String {
     with(|v| {
         if v.locked { return format!("fail the vault is locked: {}", v.why) }
         if !valid_name(name) { return "fail not a secret's name".into() }
@@ -303,8 +321,9 @@ pub fn put(name: &str, value: &str, purpose: &str, by: &str) -> String {
     })
 }
 
-/// VaultFx.del: "ok", "committed <why>" or "fail <why>".
-pub fn del(name: &str) -> String {
+/// VaultFx.del: "ok", "committed <why>" or "fail <why>". A reserved name is refused (its owner removes it).
+pub fn del(name: &str) -> String { if reserved(name) { return format!("fail no secret named {name}") } del_any(name) }
+fn del_any(name: &str) -> String {
     with(|v| {
         if v.locked { return format!("fail the vault is locked: {}", v.why) }
         if !v.items.iter().any(|i| i.name == name) { return format!("fail no secret named {name}") }
@@ -367,7 +386,7 @@ pub async fn run(spec: Value) -> Value {
     let looked: Result<Vec<String>, String> = with(|v| {
         if v.locked { return Err(format!("the vault is locked: {}", v.why)) }
         let mut out = vec![];
-        for n in &use_names { match v.items.iter().find(|i| &i.name == n).and_then(|i| i.value.clone()) { Some(x) => out.push(x), None => return Err(format!("no secret named {} (ask for it with secret_request)", n.chars().take(64).collect::<String>())) } }
+        for n in &use_names { if reserved(n) { return Err(format!("no secret named {} (ask for it with secret_request)", n.chars().take(64).collect::<String>())) } match v.items.iter().find(|i| &i.name == n).and_then(|i| i.value.clone()) { Some(x) => out.push(x), None => return Err(format!("no secret named {} (ask for it with secret_request)", n.chars().take(64).collect::<String>())) } }
         Ok(out)
     });
     let injected = match looked { Ok(x) => x, Err(e) => return json!({"error":e}) };

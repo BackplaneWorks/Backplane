@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mirror; mod model; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
+mod agents; mod api; mod google; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mirror; mod model; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
 mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
 use anyhow::{Context, Result};
@@ -184,6 +184,7 @@ async fn run(a: Args) -> Result<()> {
     startup::mark("agents started");
     let bots = match &agents { Some(ag) => { let (h, ag) = (hub.clone(), ag.clone()); guard::step("bots", guard::step_budget(), async move { bots::start(h, ag).await }).await } None => None };
     startup::mark("bots started");
+    let _google = agents.as_ref().map(|ag| google::start(&hub, ag, bots.clone())); // Gmail and Calendar for bots: the sign-in, the tools, /oauth/google
     let _voice = voice::session::start(&hub); // bots.voice and /voice/in, before settings::start (which then leaves bots.voice alone)
     let _push = bots.as_ref().map(|b| push::start(&hub, b.clone())); // phone push: the uberbot's gate (none without bots)
     guard::step_now("settings-start", || settings::start(hub.clone(), agents));

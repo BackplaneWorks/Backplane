@@ -27,6 +27,8 @@ pub struct Accounts {
     pub label: Option<Entity<Composer>>,
     pub codes: HashMap<String, Entity<Composer>>,
     pub polling: bool,
+    /// The Google accounts section under the profiles (screens/google.rs).
+    pub google: super::google::Google,
     /// Attempts whose code was sent and not yet answered (the hub checks the sign-in before it says).
     pub checking: std::collections::HashSet<String>,
     /// Which provider the add box makes an account for ("" is Claude).
@@ -189,6 +191,7 @@ pub fn open_page(this: &mut Backplane, cx: &mut Context<Backplane>) {
     }
     this.screens.acct.armed.clear();
     list(this);
+    super::google::open_page(this);
 }
 fn add(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(input) = this.screens.acct.label.clone() else { return };
@@ -209,7 +212,7 @@ fn respond(this: &mut Backplane, attempt: &str, cx: &mut Context<Backplane>) {
 
 // ---- the page --------------------------------------------------------------------------------------------------------------------------------------
 
-fn button(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, primary: bool, danger: bool, on: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
+pub(super) fn button(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, primary: bool, danger: bool, on: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let d = div().id(SharedString::from(id)).h(px(28.)).px_3().flex().items_center().justify_center().text_size(px(12.)).cursor_pointer();
     let d = if primary { d.bg(c("accent")).text_color(c("on-accent")) } else if danger { d.bg(c("raise")).text_color(c("bad")).hover(|s| s.bg(c("line"))) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
@@ -314,6 +317,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
         out.push(row
             .child(button(cx, light, "acct-add".into(), "Add Claude account", true, false, |this, cx| add(this, cx))).into_any_element());
     }
+    out.extend(super::google::section(cx, light, &st.google));
     out
 }
 

@@ -19,7 +19,8 @@ pub fn bad_value(v: &str) -> String {
     else if v.chars().all(|c| ('!'..='~').contains(&c) && c != '"' && c != '\\') { String::new() }
     else { "Only letters, digits and punctuation: no spaces, quotes or backslashes".into() }
 }
-pub fn bad(name_raw: &str, value: &str) -> String { if name(name_raw).is_empty() { "Give the secret a name".into() } else { bad_value(value.trim()) } }
+pub fn bad(name_raw: &str, value: &str) -> String { if name(name_raw).is_empty() { "Give the secret a name".into() } else if vault::reserved(&name(name_raw)) { RESERVED.into() } else { bad_value(value.trim()) } }
+pub const RESERVED: &str = "Names starting hub. are Backplane's own: choose another name";
 
 /// Sec.handle: what an agent gets for a secret, its name and whether it is set, never more (law sec_handle_shape).
 pub fn handle(name: &str, set: bool) -> Value { json!({"secret": name, "set": set}) }
@@ -111,6 +112,7 @@ pub fn tool_list() -> (bool, Value) {
 pub async fn tool_request(hub: &Arc<Hub>, thread: &str, a: &Value) -> (bool, Value) {
     let nm = name(sv(a, "name"));
     if nm.is_empty() { return (false, json!({"error":"name is required"})) }
+    if vault::reserved(&nm) { return (false, json!({"error":RESERVED})) }
     if vault::names().contains(&nm) { return (true, handle(&nm, true)) }
     let at = now_ms() / 1000;
     let _ = hub.commit(&json!({"$":"SettingSet","key":ask_key(&nm),"value":ask_body(sv(a, "purpose"), thread, thread, at),"at":at})).await;

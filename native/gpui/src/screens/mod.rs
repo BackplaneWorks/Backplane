@@ -3,6 +3,7 @@
 pub mod asks;
 pub mod find;
 pub mod handoff;
+pub mod google;
 pub mod migrate;
 pub mod voice;
 pub mod voice_mic;

@@ -127,7 +127,7 @@ fun DataRoot() {
             is Page.Sub -> { BackHandler { page = Page.Thread(p.id) }; SubScreen(p.id, p.key) { page = Page.Thread(p.id) } }
             Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }, { page = Page.Hub(Page.Settings) }, { page = Page.Accounts }) { page = Page.Improve } }
             Page.Accounts -> { BackHandler { page = Page.Settings }; AccountsScreen({ page = Page.Settings }) { page = Page.Account(it, false) } }
-            is Page.Account -> { BackHandler { page = Page.Accounts }; key(p) { AccountScreen(p.id, p.start) { page = Page.Accounts } } } // each opening its own screen: an alert's tap reads the account afresh and starts the sign-in
+            is Page.Account -> { BackHandler { page = Page.Accounts }; key(p) { AccountScreen(p.id, p.start, { page = Page.Accounts }) { page = Page.Account(it, false) } } } // each opening its own screen: an alert's tap reads the account afresh and starts the sign-in
             is Page.Hub -> { BackHandler { page = p.from }; HubScreen { page = p.from } }
             Page.Improve -> { BackHandler { page = Page.Settings }; ImproveScreen { page = Page.Settings } }
             Page.Folders -> { BackHandler { page = Page.Home }; FolderScreen({ page = Page.Home }) { page = Page.New(it) } }
