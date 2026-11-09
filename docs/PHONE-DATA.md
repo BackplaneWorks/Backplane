@@ -13,7 +13,7 @@ natively with typed Codable structs, cache-first. Fresh-home screens only: proje
 
 ## Types
 ```
-Project = {id, title, root, origin, threadCount, updatedAt, waiting, icon, color, css}
+Project = {id, title, root, origin, threadCount, updatedAt, waiting, icon, color, css, mark?, also?, marks?, newOn?}
           origin = the folder's git origin remote, normalized (`github.com/o/r`; "" for none): the key that makes one repository on two machines one project
 Thread  = {id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, preview, waiting, status?, parent, mark?}
           status? = the sidebar dot's word (feature `status`; signal.rs, children's work included): active, waiting, blocked, failed, stalled, finished (a turn done and not
@@ -169,12 +169,22 @@ A window on another computer's hub (the desktop's hub picker, or `--url` off loo
 top, "on desktop" beside the name, the address in the picker (GPUI `hubs::elsewhere`). A phone is always away from its hub and names it already.
 GPUI: `screens/badge.rs` `place_text`/`place`/`runs_text`/`from_machine`, `screens/viewer.rs` `source`.
 
-data/1: `Project.origin`; `Thread.mark?` has the same shape and meaning (absent for this hub's threads). data/1's thread lists are still
-this hub's own threads, so the phones draw `mark` when present; listing, opening and sending to a linked machine's threads on the
-phones (and in the composer's `>thread` mentions, which read this hub's threads only) is not done yet. Left for the phones, in order:
-data/1 lists a linked machine's projects and threads (`Project.mark?`/`also?` as above, `Thread.mark?`), then each app decodes them
-(iOS `DProject`/`DThread`, Android `DProject`/`DThread`) and draws the place mark on the project header and thread row, the thread's
-header, and `runs` above the composer. Until data/1 lists them a phone never receives a mark, so there is nothing to draw yet.
+### Your machines on a phone (`native/host/src/data/machines.rs`; the decisions are the hub's, pure and tested, the apps draw)
+`projects.list` and `threads.list` hold the linked machines' projects and threads beside this hub's, from the display-only mirrors (`Hub::mirrors().shown`; they never feed a policy),
+newest first across machines. A linked project of the same repository (`present::screen::unified_of`) is not a row of its own: this hub's project holds its threads (counts, `waiting` and
+`updatedAt` too) and says `also` "also on desktop", `marks` (their markers) and `newOn`; a linked project of no shared repository is a row with `id` `<link>~<id>`, `mark`, `machine` and its own
+`newOn`. A linked thread is a `Thread` with `id` `<link>~<id>`, `mark` (`{name, short, away, label, runs}`, the desktop's), `project` this hub's id when the repository is one, `preview` from the mirror.
+- `machine` (on `projects.list`, `threads.list`): "" every machine, "@here" this one, or a linked machine's name (one no longer linked is every machine again; with a machine named a repository keeps its linked row).
+- `machines` in the reply (only with a linked machine): the switcher's chips `[{value, label, on, away, hint}]`, the desktop's `machine_switch`: All, this machine, each linked one.
+- `newOn: [{value, label, away}]`: where a New thread can start (`label` "New thread on desktop", an away machine says so); `thread.create {project: value}` makes it there.
+- On a `<link>~<id>` thread these answer from there: `thread.entries` (the mirror), `subscribe {topic:"thread"}` (new `entry` and `turn` pushes, from a 2 s look at the mirror), `message.send` (text only; images say so), `turn.interrupt`,
+  `thread.act` (pin, unpin, settle, unsettle, archive, unarchive, rename; delete is not shared), `thread.create` in a linked project, `viewer.files` (the pcb and schematic from that machine's `boards.list`), `viewer.watch`/`viewer.info`/`viewer.probe`
+  (plots arrive on the socket as for a local thread), `files.entries`, `viewer.diff`, and the terminal (`term.new {thread}` → key = the thread's id, then `term.watch`/`term.write`/`term.resize`; the owner's output arrives as `term` pushes).
+  `viewer.refs`, `viewer.compare` and `mech.list` say they are shown on that machine only for now. A request to a machine that is away is answered "that machine is away"; each goes off the socket's loop, so nothing else waits.
+- Requests inside the hub (`rpc`) go through the far router and wait for the owner's reply (`FarRouter::ask`, `Hub::far_ask`, net/rpc.rs): a thing named `<link>~<id>` (or `on`) goes there, never run here.
+- `link.resolve` (feature `links`) opens `backplane://thread/<machine>~<id>` (the link id, the machine's name or its short name) once this hub mirrors the thread; the apps send a thread link that comes from outside the app through it too.
+Draw: the short `mark` quiet before the age on a row (dimmer with "away"), `label`/`also` after a project's name, "on <machine>" under the thread header, `runs` above the composer, the chips over the list, `newOn` as the choice behind a project's + (shown only when it has more than one).
+iOS `DMark`/`DNewOn`/`DChip`, `DataMachineChips`; Android `DMark`/`DNewOn`/`DChip`, `MachineChips`. Protocol test: `test/e2e/pairing/phone_machines.py` (two linked temp hubs, `--hold DIR` keeps them for a phone).
 
 ## The composer's commands (feature `commands`; `native/host/src/data/ext.rs`, `session/composer.rs`)
 `/btw`, `/give`, `/secret` and `/intent` are never messages: `message.send` refuses them ("This app is too old ... Nothing was sent."), so an old app posts nothing.
