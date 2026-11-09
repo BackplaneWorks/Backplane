@@ -397,7 +397,10 @@ class PlotRenderer : GLSurfaceView.Renderer {
         w = 0
         h = 0
         msSize = 0L
+        onCreated()
     }
+    /** Called on the GL thread once the buffers exist (PlotSurface runs the uploads asked before that). */
+    var onCreated: () -> Unit = {}
 
     // the scene (colour) and coverage targets share one depth and stencil
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -794,7 +797,17 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         super.onDetachedFromWindow()
     }
 
+    // Uploads asked before the GL thread made its buffers (a pane composed with its frames already here, as Split's Board/3D switch does) would go
+    // to buffer 0 and be lost (emugl: "vertex attribute index out of boundary ... buf=0x0"): they wait here and run once the surface is created.
+    private val early = ArrayList<Runnable>()
+    private var glReady = false
+    override fun queueEvent(r: Runnable) {
+        synchronized(early) { if (!glReady) { early.add(r); return } }
+        super.queueEvent(r)
+    }
+
     init {
+        renderer.onCreated = { val xs = synchronized(early) { glReady = true; early.toList().also { early.clear() } }; xs.forEach { it.run() } }
         setEGLContextClientVersion(3)
         setEGLConfigChooser(8, 8, 8, 8, 0, 0)
         preserveEGLContextOnPause = true
