@@ -120,6 +120,22 @@ pub fn combine(board: Option<&Mesh>, parts: &[Arc<Mesh>]) -> Option<Mesh> {
     for (g, p) in parts.iter().enumerate() { m.tris.extend_from_slice(&p.tris); m.normals.extend_from_slice(&p.normals); m.colors.extend_from_slice(&p.colors); m.groups.resize(m.tris.len(), g as u32 + 1); }
     Some(m)
 }
+/// The model on show in layers: the board (fade group 0) and each part frame come so far (group k + 1), each its own allocation, so a
+/// part that arrives adds itself and moves nothing already made (the GPU keeps a buffer a layer; `combine` makes one mesh of them only for
+/// the CPU's drawing). Its centre and size are the board's (else the first part's), so arriving parts never move the camera.
+pub struct Layers { pub board: Option<Arc<Mesh>>, pub parts: Vec<Arc<Mesh>>, pub center: [f32; 3], pub radius: f32 }
+impl Layers {
+    pub fn of(board: Option<Arc<Mesh>>, parts: Vec<Arc<Mesh>>) -> Option<Layers> {
+        let first = board.as_ref().or(parts.first())?;
+        let (center, radius) = (first.center, first.radius);
+        Some(Layers { board, parts, center, radius })
+    }
+    pub fn tris(&self) -> usize { self.board.as_ref().map_or(0, |b| b.tris.len()) + self.parts.iter().map(|p| p.tris.len()).sum::<usize>() }
+    /// Each layer with its fade group.
+    pub fn list(&self) -> Vec<(&Arc<Mesh>, Option<u32>)> { self.board.iter().map(|b| (b, Some(0))).chain(self.parts.iter().enumerate().map(|(g, p)| (p, Some(g as u32 + 1)))).collect() }
+    /// One mesh of them all (`combine`).
+    pub fn combined(&self) -> Option<Mesh> { combine(self.board.as_deref(), &self.parts) }
+}
 /// How long a part takes to fade in.
 pub const FADE_MS: f32 = 300.0;
 /// The page's own stage while it decodes a large model (the hub has sent it by then).
@@ -260,13 +276,15 @@ impl Camera {
     /// Looking at the model from the front-right and above, fitted to its bounding sphere.
     pub fn fitted(mesh: &Mesh) -> Camera { Camera::fitted_for(mesh, 1.0) }
     /// The same, for a panel `aspect` (width / height) wide: the field of view is the vertical one, so a panel narrower than it is tall needs the model further away to fit across.
-    pub fn fitted_for(mesh: &Mesh, aspect: f32) -> Camera {
+    pub fn fitted_for(mesh: &Mesh, aspect: f32) -> Camera { Camera::fit_to(mesh.center, mesh.radius, aspect) }
+    /// The fitted view of a model of this centre and bounding radius.
+    pub fn fit_to(center: [f32; 3], radius: f32, aspect: f32) -> Camera {
         let aspect = if aspect.is_finite() && aspect > 0.05 { aspect } else { 1.0 };
-        let fit = mesh.radius / (FOV / 2.0).sin() * 1.05 / aspect.min(1.0);
+        let fit = radius / (FOV / 2.0).sin() * 1.05 / aspect.min(1.0);
         let (yaw, pitch) = (0.6f32, 0.7f32);
         let eye_dir = [pitch.cos() * yaw.sin(), -pitch.cos() * yaw.cos(), pitch.sin()];
         let fwd = mul(eye_dir, -1.0); let right = norm(cross(fwd, [0.0, 0.0, 1.0])); let up = cross(right, fwd);
-        Camera { right, up, fwd, target: mesh.center, dist: fit, fit, pivot: mesh.center, shift: [0.0, 0.0] }
+        Camera { right, up, fwd, target: center, dist: fit, fit, pivot: center, shift: [0.0, 0.0] }
     }
     /// A standard view of the same model at the same distance (the web's toolbar: Top, Bottom, Front, Right, Back, Left; anything else, Iso, is the fitted view).
     /// Z is up and the part's front faces -Y, so Front looks along +Y from the -Y side. The model is centred again.
@@ -327,9 +345,9 @@ pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
 /// `Scene`: the model with the parts that have come (`mesh`), after one or more frames: `board` when the board itself is new (its
 /// pictures in flight are stale), `reset` when the parts started again, `groups` part frames held, `done` of `of` instances come.
 /// `Building`: a large model frame of this key is being decoded now.
-enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Mesh>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str } }
+enum Msg { Mesh(SolidFrame), Building(String), Scene { key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32 }, Image { ticket: u64, image: Arc<RenderImage>, ms: f64, tris: usize, w: usize, h: usize, by: &'static str } }
 /// What to render: the model, the camera, the size, the samples a pixel a side, the ticket, whether it is a draft (the model is moving).
-type Job = (Arc<Mesh>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool);
+type Job = (Arc<Layers>, Arc<Vec<f32>>, Camera, usize, usize, usize, u64, bool);
 /// What the worker holds of the model on show: the board, the part frames come so far, the progress.
 #[derive(Default)] struct Scene { key: String, board: Option<Arc<Mesh>>, parts: Vec<Arc<Mesh>>, done: u32, of: u32 }
 impl Scene {
@@ -352,14 +370,19 @@ pub fn wanted(draft: bool, my: u64, newest: u64) -> bool { draft || my == newest
 /// Whether a finished picture goes on the screen: it is of this model (`floor`) and newer than the one there. Pictures of a drag finish behind the pointer: that is no reason to drop them.
 pub fn shows(ticket: u64, shown: u64, floor: u64) -> bool { ticket >= floor && ticket > shown }
 /// What draws: the process's GPU (solid_gpu::shared), or the cores when there is none or it fails.
-#[derive(Default)] struct Drawer;
+/// `cpu`: the layers made one mesh for the CPU's drawing, and the layers it was made of (Weak: no later mesh can take their addresses).
+#[derive(Default)] struct Drawer { cpu: Option<(Vec<std::sync::Weak<Mesh>>, Arc<Mesh>)> }
 impl Drawer {
-    fn draw(&mut self, mesh: &Arc<Mesh>, fades: &[f32], cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<(Vec<u8>, &'static str)> {
+    fn draw(&mut self, model: &Layers, fades: &[f32], cam: &Camera, w: usize, h: usize, ss: usize, alive: &(dyn Fn() -> bool + Sync)) -> Option<(Vec<u8>, &'static str)> {
         #[cfg(target_os = "linux")] {
             let mut gpu = super::solid_gpu::shared().lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(g) = gpu.as_mut() { match g.render_faded(mesh, fades, cam, w, h) { Some(px) => return Some((px, "gpu")), None => { log::warn!("3D page: the GPU failed a picture, drawing on the CPU from now on"); std::mem::forget(gpu.take()); } } }
+            if let Some(g) = gpu.as_mut() { match g.render_layers(&model.list(), fades, cam, w, h) { Some(px) => return Some((px, "gpu")), None => { log::warn!("3D page: the GPU failed a picture, drawing on the CPU from now on"); std::mem::forget(gpu.take()); } } }
         }
-        raster::render_faded(mesh, fades, cam, w, h, ss, alive).map(|px| (px, "cpu"))
+        let list = model.list();
+        let made = self.cpu.as_ref().is_some_and(|(of, _)| of.len() == list.len() && of.iter().zip(&list).all(|(w, l)| std::sync::Weak::as_ptr(w) == Arc::as_ptr(l.0)));
+        if !made { self.cpu = model.combined().map(|m| (list.iter().map(|l| Arc::downgrade(l.0)).collect(), Arc::new(m))); }
+        let mesh = self.cpu.as_ref()?.1.clone();
+        raster::render_faded(&mesh, fades, cam, w, h, ss, alive).map(|px| (px, "cpu"))
     }
     /// The model's buffer off the GPU (the page is put away).
     fn forget(&mut self) {
@@ -388,14 +411,14 @@ impl Worker {
                 match scene.take(f, &mut board, &mut reset) { Ok(c) => changed |= c, Err(f) => if tx.send_blocking(Msg::Mesh(f)).is_err() { return } }
             }
             if changed {
-                let mesh = combine(scene.board.as_deref(), &scene.parts).map(Arc::new);
+                let mesh = Layers::of(scene.board.clone(), scene.parts.clone()).map(Arc::new); // no copy: a new part is one more layer
                 if tx.send_blocking(Msg::Scene { key: scene.key.clone(), mesh, board, reset, groups: scene.parts.len(), done: scene.done, of: scene.of }).is_err() { return }
             }
             if let Some((mesh, fades, cam, w, h, ss, my, draft)) = render {
                 let t0 = std::time::Instant::now();
                 let g = g2.clone();
                 if let Some((px, by)) = drawer.draw(&mesh, &fades, &cam, w, h, ss, &move || wanted(draft, my, g.load(Ordering::Relaxed))) {
-                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris.len(), w, h, by }).is_err() { return } }
+                    if let Some(image) = to_image(px, w, h) { if tx.send_blocking(Msg::Image { ticket: my, image, ms: t0.elapsed().as_secs_f64() * 1000.0, tris: mesh.tris(), w, h, by }).is_err() { return } }
                 }
             }
         } }).ok();
@@ -404,7 +427,7 @@ impl Worker {
     fn forget(&self) { let (m, cv) = &*self.slot; m.lock().unwrap().forget = true; cv.notify_one(); }
     fn submit_frame(&self, bytes: Vec<u8>) { let (m, cv) = &*self.slot; m.lock().unwrap().frames.push(bytes); cv.notify_one(); }
     /// Ask for an image of `mesh`, replacing any request not yet begun.
-    fn submit_render(&self, mesh: Arc<Mesh>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool) -> u64 {
+    fn submit_render(&self, mesh: Arc<Layers>, fades: Arc<Vec<f32>>, cam: Camera, w: usize, h: usize, ss: usize, draft: bool) -> u64 {
         let ticket = self.ticket.fetch_add(1, Ordering::Relaxed) + 1;
         let (m, cv) = &*self.slot; m.lock().unwrap().render = Some((mesh, fades, cam, w, h, ss, ticket, draft)); cv.notify_one(); ticket
     }
@@ -431,7 +454,7 @@ pub fn stage_line(text: &str, secs: u64, about_ms: u64) -> String {
     s
 }
 pub struct SolidPage {
-    mesh: Option<Arc<Mesh>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
+    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
@@ -484,7 +507,7 @@ impl SolidPage {
                 if self.stage.as_ref().is_some_and(|s| s.key == self.key && (board || s.text == BUILDING)) { self.stage = None; } // made, or decoded
                 let Some(mesh) = mesh else { cx.notify(); return };
                 if board || fresh { self.floor = self.latest + 1; } // pictures of the old board are stale; ones without the newest part are not
-                if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fitted_for(&mesh, self.fit_aspect)); }
+                if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect)); }
                 self.mesh = Some(mesh); self.note.clear(); self.ask_render(self.drag.is_some()); cx.notify();
             }
             Msg::Mesh(SolidFrame::Model(..) | SolidFrame::Parts(..) | SolidFrame::Part(..)) => {} // the worker makes these a Scene
@@ -538,7 +561,7 @@ impl SolidPage {
     /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
     pub fn set_view(&mut self, name: &str) {
         let Some(m) = self.mesh.clone() else { return };
-        let fitted = Camera::fitted_for(&m, self.fit_aspect.max(0.05));
+        let fitted = Camera::fit_to(m.center, m.radius, self.fit_aspect.max(0.05));
         if name == "fit" { self.cam = Some(fitted); self.touched = false; }
         else { self.cam = Some(fitted.named(name)); self.touched = true; }
         self.ask_render(false);
@@ -615,7 +638,7 @@ impl Render for SolidPage {
         // a panel whose size differs from the last request re-renders at the right size
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
         // the model was fitted before the panel's size was known: an untouched camera is fitted again to the real shape
-        if let Some(m) = self.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.touched && aspect_changed(self.fit_aspect, pw / ph) { self.fit_aspect = pw / ph; self.cam = Some(Camera::fitted_for(&m, self.fit_aspect)); self.ask_render(false); } }
+        if let Some(m) = self.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.touched && aspect_changed(self.fit_aspect, pw / ph) { self.fit_aspect = pw / ph; self.cam = Some(Camera::fit_to(m.center, m.radius, self.fit_aspect)); self.ask_render(false); } }
         if self.mesh.is_some() && pw > 0.0 { let want = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48)); if self.drag.is_none() && want.0 * want.1 <= MAX_PIXELS && want != self.asked && self.asked.0 * 2 != want.0 { self.ask_render(false); } }
         let stage = self.stage_text();
         let making_other = self.stage.as_ref().is_some_and(|s| s.key != self.key);
@@ -681,7 +704,7 @@ mod tests {
         assert!(!super::note_keeps_model("", "2|/b|"));
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
-    use super::{decode_mesh, parse_frame, render, wheel_zoom, Camera, Mesh, SolidFrame, BG, add, mul, sub};
+    use super::{decode_mesh, parse_frame, render, wheel_zoom, Camera, Layers, Mesh, SolidFrame, BG, add, mul, sub};
     use super::super::raster::smooth_normals;
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
     fn zig(v: i32) -> u32 { ((v << 1) ^ (v >> 31)) as u32 }
@@ -962,7 +985,13 @@ mod tests {
                 let mut gp = |f: f32| g.render_faded(&a, &[1.0, f], &c, w, h).unwrap();
                 let (z, hf, fl) = (gp(0.0), gp(0.5), gp(1.0));
                 assert!(red_of(&z) < red_of(&hf) && red_of(&hf) < red_of(&fl), "gpu {} {} {}", red_of(&z), red_of(&hf), red_of(&fl));
-            }
+                // the same model in layers (a buffer for the board, one for the part): the same pictures as the one combined mesh
+                let b = std::sync::Arc::new(board.clone());
+                let Some(SolidFrame::Part(_, part, _)) = parse_frame(&part_frame("2|b|", &red, &[ID], 1)) else { panic!() };
+                let l = Layers::of(Some(b), vec![std::sync::Arc::new(part)]).unwrap();
+                let mut gl = |f: f32| g.render_layers(&l.list(), &[1.0, f], &c, w, h).unwrap();
+                assert_eq!((gl(0.0), gl(0.5), gl(1.0)), (z, hf, fl), "layers draw as the combined mesh");
+            } else { eprintln!("no GPU here: the GPU half skipped") }
         }
     }
     #[cfg(target_os = "linux")] #[test] fn gpu_and_cpu_agree() {
@@ -979,6 +1008,29 @@ mod tests {
             for k in 0..3 { worst = worst.max((a[i + k] as i32 - b[i + k] as i32).abs()); }
         } }
         assert!(seen > 1000 && worst <= 4, "{seen} flat pixels, worst difference {worst}");
+    }
+    #[cfg(target_os = "linux")] #[test] #[ignore] fn bench_parts_stream() {
+        // what each arriving part frame costs the worker: the combined model rebuilt, and its GPU vertices rebuilt
+        for n in [283_000, 590_000] { let (f, _) = super::super::demo::sphere_frame(n); let t = std::time::Instant::now(); let m = parse_frame(&f); eprintln!("decode {n} triangles ({} KB): {:.0} ms", f.len() >> 10, t.elapsed().as_secs_f64() * 1000.0); drop(m); }
+        let (f, _) = super::super::demo::sphere_frame(283_000);
+        let Some(SolidFrame::Model(_, board)) = parse_frame(&f) else { panic!() };
+        let (pf, _) = super::super::demo::sphere_frame(12_000);
+        let Some(SolidFrame::Model(_, part)) = parse_frame(&pf) else { panic!() };
+        let mut parts = vec![]; let (mut comb, mut vert) = (0.0, 0.0);
+        for _ in 0..40 {
+            parts.push(std::sync::Arc::new(part.clone()));
+            let t = std::time::Instant::now(); let all = super::combine(Some(&board), &parts).unwrap(); comb += t.elapsed().as_secs_f64() * 1000.0;
+            let t = std::time::Instant::now(); let v = super::super::solid_gpu::bench_vertices(&all); vert += t.elapsed().as_secs_f64() * 1000.0; assert!(v > 0);
+        }
+        eprintln!("40 part frames over a 283k board (+12k each, 763k at the end): combine {comb:.0} ms, GPU vertices {vert:.0} ms, {:.0} ms a part", (comb + vert) / 40.0);
+        // in layers (the shipping path on a GPU): a part frame is one more layer, only its own vertices are made
+        let (b, mut ps, mut lay) = (std::sync::Arc::new(board.clone()), vec![], 0.0);
+        let t = std::time::Instant::now(); let _ = super::super::solid_gpu::bench_vertices(&b); let first = t.elapsed().as_secs_f64() * 1000.0;
+        for _ in 0..40 {
+            let p = std::sync::Arc::new(part.clone()); ps.push(p.clone());
+            let t = std::time::Instant::now(); let l = Layers::of(Some(b.clone()), ps.clone()).unwrap(); let v = super::super::solid_gpu::bench_vertices(&p); lay += t.elapsed().as_secs_f64() * 1000.0; assert!(v > 0 && l.tris() > 0);
+        }
+        eprintln!("in layers: the board's vertices once {first:.0} ms, then {:.2} ms a part", lay / 40.0);
     }
     #[test] #[ignore] fn bench_png() {
         let (frame, n) = super::super::demo::sphere_frame(std::env::var("TRIS").ok().and_then(|t| t.parse().ok()).unwrap_or(200_000));
