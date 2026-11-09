@@ -15,7 +15,7 @@ pub enum Slot { Loading, Ready(Arc<Image>), Failed }
 
 struct Entry { slot: Slot, used: u64, bytes: usize }
 #[derive(Default)]
-struct State { items: HashMap<String, Entry>, queue: VecDeque<(String, Target)>, workers: usize, tick: u64 }
+struct State { items: HashMap<String, Entry>, queue: VecDeque<(String, Target)>, workers: usize, tick: u64, done: u64 }
 
 /// Shared by the render and the fetch workers.
 #[derive(Clone, Default)]
@@ -105,6 +105,8 @@ impl Images {
     }
     /// A thread was opened again: failed images may be asked for once more.
     pub fn retry(&self) { if let Ok(mut st) = self.s.0.lock() { st.items.retain(|_, e| !matches!(e.slot, Slot::Failed)); } }
+    /// How many fetches have finished (arrived or failed) so far: the window redraws when this moves, not on every poll.
+    pub fn done(&self) -> u64 { self.s.0.lock().map_or(0, |st| st.done) }
     pub fn loading(&self) -> bool { self.s.0.lock().map_or(false, |st| st.items.values().any(|e| matches!(e.slot, Slot::Loading))) }
     pub fn bytes(&self) -> usize { self.s.0.lock().map_or(0, |st| st.items.values().map(|e| e.bytes).sum()) }
     fn work(&self) {
@@ -117,6 +119,7 @@ impl Images {
             let Ok(mut st) = self.s.0.lock() else { return };
             let bytes = img.as_ref().map_or(0, |i| i.bytes.len());
             if let Some(e) = st.items.get_mut(&job.0) { e.slot = img.map_or(Slot::Failed, Slot::Ready); e.bytes = bytes; }
+            st.done += 1;
             // over the byte cap: drop the least recently drawn images that were not drawn in the current frame
             let tick = st.tick;
             while st.items.values().map(|e| e.bytes).sum::<usize>() > CACHE_BYTES {
