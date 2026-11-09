@@ -73,7 +73,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev ninja-build xvfb i3 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2t64 libxkbcommon0 libxtst6 x11-utils > /dev/null
+          sudo apt-get install -y -qq --no-install-recommends imagemagick libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev ninja-build xvfb i3 mesa-vulkan-drivers libvulkan1 libnss3 libatk-bridge2.0-0 libgbm1 libxkbcommon-x11-0 libasound2t64 libxkbcommon0 libxtst6 x11-utils > /dev/null
       - name: build
         shell: bash
         run: |
@@ -110,6 +110,11 @@ jobs:
           [ ${{ matrix.mode }} = cef ] && [ "${{ runner.os }}" != Linux ] && export BACKPLANE_CEF_NO_GPU=1   # no GPU on the runner: software compositing
           rc=0
           run ${{ matrix.mode }} ${{ matrix.mode }} || rc=1
+          if [ ${{ matrix.mode }} = cef ]; then
+            # the windowed Browser: Chromium's own window in the client's (test/cef/windowed_proof.py), and the agent's browser tools on that page (agent_proof.py)
+            $PY test/cef/windowed_proof.py dist/backplane-gpui$e dist/backplane-hub$e "$PWD/assets" "$PWD/out/windowed" 2>&1 | tee out/windowed.txt || rc=1
+            $PY test/cef/agent_proof.py dist/backplane-gpui$e dist/backplane-hub$e dist/backplane-browser$e "$PWD/assets" "$PWD/out/agent" 2>&1 | tee out/agent.txt || rc=1
+          fi
           if [ ${{ matrix.mode }} = cef ] && [ "${{ runner.os }}" != Linux ]; then   # (Linux links libcef.so: no client starts without it, by design there)
             # the fallback: the same client with its runtime taken away starts, says why and shows the hub's frames
             mkdir -p bare; cp dist/backplane-gpui$e dist/backplane-hub$e dist/backplane-browser$e bare/

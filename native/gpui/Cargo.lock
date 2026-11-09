@@ -535,6 +535,7 @@ dependencies = [
  "libc",
  "log",
  "lyon",
+ "raw-window-handle",
  "rustls",
  "rustls-native-certs",
  "serde",
