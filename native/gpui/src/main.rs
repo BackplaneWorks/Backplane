@@ -119,7 +119,7 @@ impl Backplane {
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Refs(r)=>{ if r.get("resolved").is_some() { screens::histbar::resolved(self,&r,cx); } else { self.screens.plotview.hist.refs=screens::plot::refs_of(&r); } cx.notify(); }
             Event::Steps(r)=>{ self.screens.plotview.hist.steps=screens::histbar::steps_of(&r); screens::histbar::arrived(self); cx.notify(); }
-            Event::Sheets(rows)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); cx.notify(); }
+            Event::Sheets(rows,refs)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); self.screens.plot.sheet_refs=screens::plot::sheet_refs(&refs); cx.notify(); }
             Event::BrowserDownload(owner,id,name,error)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.take_download(&id,&name,&error,cx));}}},
             Event::BrowserTabs(owner,text)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.set_tabs(&text,cx));}}},
             Event::ViewShow(thread,kind,path)=>self.view_show(&thread,&kind,&path,cx),

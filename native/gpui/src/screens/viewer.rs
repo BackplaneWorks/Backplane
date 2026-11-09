@@ -225,7 +225,7 @@ fn plot_loading(cx: &mut Context<Backplane>, light: bool, slot: usize, viewer: &
     }
     col.child(div().flex_1().min_h_0().bg(c("view")).flex().items_center().justify_center().text_color(c("faint")).child(say.to_string())).into_any_element()
 }
-fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet], actions: Option<AnyElement>) -> AnyElement {
+fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet], refs: &[(String, Vec<String>)], actions: Option<AnyElement>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let say = if open == "board" { "Loading the board…" } else { "Loading the schematic…" };
     // the design history bar stays under a board or schematic while a version loads or cannot be shown (screens::histbar)
@@ -281,6 +281,17 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, slot, pv.focus.clone(), light, frame, view, crate::viewers::layers::masks(viewer)));
     if layers { if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(280.), &pv.layers_scroll) { area = area.child(p); } }
     // the card of the piece last tapped (Insp.card): what it is, then key = value rows; a tap on nothing, or Close, puts it away
+    // a probed part placed on another sheet of the design: where it is, and a press to open that sheet (0.14's probe-away)
+    if open == "schematic" {
+        let r = viewer["probe"].as_str().and_then(super::plot::card).or_else(|| pv.card.clone()).and_then(|c| c.rows.iter().find(|x| x.0 == "ref" || x.0 == "symbol").map(|x| x.1.clone())).unwrap_or_default();
+        if let Some(i) = super::plot::sheet_of(sheets, refs, &frame.key, &r) {
+            let (name, file) = (if i == 0 { "the top sheet".to_string() } else { format!("the sheet {}", sheets[i].name) }, if i == 0 { String::new() } else { sheets[i].file.clone() });
+            area = area.child(div().id(SharedString::from(format!("probe-away-{slot}"))).absolute().top_2().left_2().flex().items_center().gap_2().px_2().py_1().text_size(px(12.)).bg(c("panel")).border_1().border_color(c("accent")).occlude()
+                .child(format!("{r} is on {name}"))
+                .child(div().id(SharedString::from(format!("probe-away-open-{slot}"))).px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).child("Open it")
+                    .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-sheet".into(), file.clone())); cx.notify(); }))));
+        }
+    }
     // (Split's panes, slots 1 and 2, name it in their bar instead: a card there covered the drawing beside it)
     if let Some(card) = pv.card.clone().filter(|_| slot == 0) {
         // compact (0.14's probe chip spirit): the part or net in the head, then the few rows that say what it is; every row in the tooltip
@@ -301,7 +312,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
 
 /// Board or schematic: the plot the hub sent for this file.
 fn plot_page(cx: &mut Context<Backplane>, light: bool, open: &str, viewer: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, actions: AnyElement) -> AnyElement {
-    plot_pane(cx, light, 0, open, viewer, plot.frame.as_ref(), pv, true, &plot.sheets, Some(actions))
+    plot_pane(cx, light, 0, open, viewer, plot.frame.as_ref(), pv, true, &plot.sheets, &plot.sheet_refs, Some(actions))
 }
 
 /// Split's panes by the words 0.14 kept (split.hide): "sch" the schematic, "pcb" the board, "3d" its 3D model.
@@ -427,7 +438,7 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
     if let Some(card) = probed {
         let words = probe_words(card);
         let full = std::iter::once(card.title.clone()).chain(card.rows.iter().map(|(k, v)| format!("{k}: {v}"))).collect::<Vec<_>>().join("\n");
-        row = row.child(div().id("split-probe").min_w_0().flex().items_center().gap_1().pl_2().pr(px(2.)).py_px().border_1().border_color(c("accent")).bg(c("raise")).text_size(px(12.))
+        row = row.child(div().id("split-probe").min_w_0().max_w(px(240.)).flex_shrink().flex().items_center().gap_1().pl_2().pr(px(2.)).py_px().border_1().border_color(c("accent")).bg(c("raise")).text_size(px(12.))
             .tooltip(crate::keys::tip(&full, "", light))
             .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(words.join(" · ")))
             .child(div().id("split-probe-clear").flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip("Clear", "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
@@ -446,7 +457,7 @@ pub fn card_rows(card: &super::plot::Card) -> Vec<(String, String)> {
 /// What the probe chip says: the part's reference (else what was tapped), its value and its net, as 0.14's Probe.label named a probe by its ref or net.
 pub fn probe_words(card: &super::plot::Card) -> Vec<String> {
     let get = |k: &str| card.rows.iter().find(|r| r.0 == k).map(|r| r.1.trim().to_string()).filter(|v| !v.is_empty());
-    let mut words = vec![get("ref").unwrap_or_else(|| card.title.clone())];
+    let mut words = vec![get("ref").or_else(|| get("symbol").map(|r| format!("{r} {}", card.title))).unwrap_or_else(|| card.title.clone())];
     for k in ["value", "net"] { if let Some(v) = get(k) { if !words.contains(&v) { words.push(v) } } }
     words
 }
@@ -467,8 +478,8 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
     let pane = |head: Div, body: AnyElement| div().flex().flex_col().min_w_0().min_h_0().child(head).child(div().relative().flex_1().min_h_0().min_w_0().child(body));
     // the schematic pane's sheets (0.14's combo-sheets): the sheet on show in its head, the hierarchy in a menu under it
     let sheets_el = split_sheets(cx, light, &plot.sheets, &string(panes[0], "key"), sch_pv.sheets_open);
-    let sch = s_on.then(|| { let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &[], None); pane(h, b) });
-    let brd = b_on.then(|| { let h = split_head(cx, light, "pcb", "Board", None); let b = plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], None); pane(h, b) });
+    let sch = s_on.then(|| { let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &plot.sheets, &plot.sheet_refs, None); pane(h, b) });
+    let brd = b_on.then(|| { let h = split_head(cx, light, "pcb", "Board", None); let b = plot_pane(cx, light, 2, "board", panes[1], plot.frame_for(&string(panes[1], "key")), brd_pv, false, &[], &[], None); pane(h, b) });
     let d3 = t_on.then(|| {
         let want3 = string(panes[2], "key");
         if let Some(s) = solid { if s.read(cx).reserve != 0. { s.update(cx, |p, cx| { p.reserve = 0.; cx.notify(); }); } }
@@ -661,6 +672,15 @@ mod tests {
         assert_eq!(split_share(0.3, true, 200.), 0.45, "a small pane: never less than 45 percent each way");
         assert!((share_at(600., 100., 1000.) - 0.5).abs() < 1e-6);
     }
+    #[test] fn a_part_on_another_sheet_is_found_by_its_reference() {
+        let sheets = super::super::plot::sheet_rows("0\t0\tRoot\t/p/top.kicad_sch\n1\t1\tPower\t/p/power.kicad_sch");
+        let refs = super::super::plot::sheet_refs("/p/top.kicad_sch\tJ1\n/p/power.kicad_sch\tC39\tU2");
+        assert_eq!(super::super::plot::sheet_of(&sheets, &refs, "1|/p|", "C39"), Some(1));
+        assert_eq!(super::super::plot::sheet_of(&sheets, &refs, "1|/p|/p/power.kicad_sch", "C39"), None, "on show: nothing to say");
+        assert_eq!(super::super::plot::sheet_of(&sheets, &refs, "1|/p|/p/power.kicad_sch", "J1"), Some(0));
+        assert_eq!(super::super::plot::sheet_of(&sheets, &refs, "1|/p|", "J1"), None);
+        assert_eq!(super::super::plot::sheet_of(&sheets, &refs, "1|/p|", "Q9"), None);
+    }
     #[test] fn the_probe_card_is_a_head_and_at_most_four_rows() {
         let c = super::super::plot::card("pad 1;net=GND;type=smd;shape=custom;ref=H9;value=M2 standoff;footprint=SMTSO;layer=F.Cu").unwrap();
         let r = card_rows(&c);
@@ -669,6 +689,8 @@ mod tests {
     #[test] fn the_probe_chip_names_a_part_by_its_reference() {
         let c = super::super::plot::card("fp_poly;ref=C5;value=47uF 100V;net=GND").unwrap();
         assert_eq!(probe_words(&c), vec!["C5", "47uF 100V", "GND"]);
+        let p = super::super::plot::card("pin 3;name=EN;type=input;symbol=U2;net=/EN").unwrap();
+        assert_eq!(probe_words(&p), vec!["U2 pin 3", "/EN"], "a pin names its part");
         let n = super::super::plot::card("track;net=/NRST").unwrap();
         assert_eq!(probe_words(&n), vec!["track", "/NRST"]);
     }
