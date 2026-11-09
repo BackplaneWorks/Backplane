@@ -142,6 +142,17 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
     // the model's multisampling (4x where the GPU has it)
     private let samples: Int
     var bg = SIMD4<Float>(0, 0, 0, 1)
+    // the 3D viewers' gradient, sRGB 0 to 1 (Settings > Appearance; the 2D plot keeps the hub's bg)
+    var ground = (top: SIMD4<Float>(0, 0, 0, 1), bottom: SIMD4<Float>(0, 0, 0, 1))
+    private struct Ground { var top: SIMD4<Float>; var bottom: SIMD4<Float>; var size: SIMD2<Float> }
+    // the gradient under the model, first in a pass that clears (no depth test, no depth write)
+    private func drawGround(_ e: MTLRenderCommandEncoder, _ w: Int, _ h: Int, samples n: Int) {
+        var g = Ground(top: ground.top, bottom: ground.bottom, size: SIMD2(Float(w), Float(h)))
+        e.setRenderPipelineState(pipe("quad_v", "ground_f", cov: false, three: true, samples: n))
+        e.setDepthStencilState(plain)
+        e.setFragmentBytes(&g, length: MemoryLayout<Ground>.stride, index: 0)
+        e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+    }
     // each layer's colour on the viewer's light ground (empty: the chunks' own)
     var look: [UInt32] = []
     // the layers the user turned off, a bit each
@@ -523,6 +534,7 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
                 pass.depthAttachment.storeAction = .dontCare
                 let ms = pipe("mesh_v", "mesh_f", cov: false, three: true, samples: samples)
                 if let e = cb.makeRenderCommandEncoder(descriptor: pass) {
+                    drawGround(e, w, h, samples: samples)
                     model(e, ms)
                     e.endEncoding()
                 }
@@ -530,7 +542,7 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
                 frame(cb, t, clear: false, depth: true) { e in model(e, dp) }
             } else {
                 let mp = pipe("mesh_v", "mesh_f", cov: false, three: true)
-                frame(cb, t, clear: true, depth: true) { e in model(e, mp) }
+                frame(cb, t, clear: true, depth: true) { e in drawGround(e, w, h, samples: 1); model(e, mp) }
             }
             // the board's layers lie on a plain slab until its model comes,
             // which has its own mask, silk and pads (a picked piece still shows)
@@ -765,6 +777,15 @@ final class PlotCanvas: MTKView {
         super.layoutSubviews()
         if !fitted { if box.count < 4, solid.count == 6 { fitSolid(solid) } else { refit() } }
         if pendingPose != nil { restorePose(); setNeedsDisplay() }
+    }
+
+    /// the 3D viewers' background; redraws only when it changed
+    func setGround(_ b: ViewerBackdrop) {
+        func v(_ c: UInt32) -> SIMD4<Float> { let (r, g, b) = ViewerBackdrop.unit(c); return SIMD4(r, g, b, 1) }
+        let n = (top: v(b.top), bottom: v(b.bottom))
+        guard n.top != renderer.ground.top || n.bottom != renderer.ground.bottom else { return }
+        renderer.ground = n
+        setNeedsDisplay()
     }
 
     func show(_ f: PlotFrame, bg: UInt32, slab: UInt32, look: [UInt32]) {
@@ -1026,6 +1047,7 @@ extension PlotCanvas: UIGestureRecognizerDelegate {
 
 struct PlotCanvasView: UIViewRepresentable {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.colorScheme) private var scheme
     let frame: PlotFrame?
     let mesh: MeshFrame?
     /// the parts of this model streaming in after the bare board (nil for a model that has them in it)
@@ -1058,6 +1080,8 @@ struct PlotCanvasView: UIViewRepresentable {
             context.coordinator.source = source; context.coordinator.shown = nil; context.coordinator.mesh = nil; context.coordinator.partsEpoch = -2; context.coordinator.partsCount = -1; context.coordinator.picked = ""
             c.bindSource(source)
         }
+        // the setting and the theme both redraw it at once (AppSettings is observed here)
+        c.setGround(AppSettings.shared.viewerBackdrop(dark: scheme == .dark))
         if c.renderer.thermal != thermal { c.renderer.thermal = thermal; c.setNeedsDisplay() }
         c.margin = viewer.margin
         c.zmin = viewer.zmin

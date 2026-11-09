@@ -158,11 +158,22 @@ float3 studio(float3 R, float rough, float metal, float3 right, float3 up, float
   float power = mix(110.0, 3.0, rough * rough);
   float key = pow(max(dot(q, normalize(float3(-0.55,0.75,0.65))),0.0),power);
   float fill = pow(max(dot(q, normalize(float3(0.85,0.25,0.35))),0.0),power*0.65);
-  float sky=0.08+0.2*smoothstep(-0.4,0.25,q.y)+0.7*smoothstep(0.45,0.85,q.y);
+  float sky=0.12+0.2*smoothstep(-0.4,0.25,q.y)+0.7*smoothstep(0.45,0.85,q.y);
   return float3(sky*mix(0.15,1.0,metal)) + float3(1.5,1.48,1.42)*key + float3(0.65,0.72,0.85)*fill;
 }
 float3 srgb(float3 x) {
   return mix(12.92*x, 1.055*pow(max(x,float3(0.0)),float3(1.0/2.4))-0.055, step(float3(0.0031308),x));
+}
+
+// the 3D viewers' background: top to bottom, mixed in linear light by the
+// pixel's y over the view's height (docs/VIEWER-BACKGROUND.md)
+struct G { float4 top; float4 bottom; float2 size; };
+static float3 unsrgb(float3 c) {
+  return mix(c/12.92, pow((max(c,float3(0.0))+0.055)/1.055, float3(2.4)), step(float3(0.04045), c));
+}
+fragment float4 ground_f(QOut i [[stage_in]], constant G &g [[buffer(0)]]) {
+  float t = clamp(i.pos.y / max(g.size.y, 1.0), 0.0, 1.0);
+  return float4(clamp(srgb(mix(unsrgb(g.top.rgb), unsrgb(g.bottom.rgb), t)), 0.0, 1.0), 1.0);
 }
 
 vertex MOut mesh_v(uint vid [[vertex_id]], const device MV *vs [[buffer(0)]], const device uint *cs [[buffer(2)]], constant U &u [[buffer(1)]]) {
@@ -185,9 +196,9 @@ static float3 shade(MOut i, constant U &u) {
   float3 base=max(vc,float3(0.0)), f0=mix(float3(0.04),base,metal);
   float3 key=normalize(-right*0.55+up*0.75-forward*0.65);
   float3 fill=normalize(right*0.85+up*0.25-forward*0.35);
-  float3 rgb=base*(1.0-metal)*(mix(0.27,0.74,step(0.8,rough))+0.08*max(dot(N,up),0.0));
+  float3 rgb=base*(1.0-metal)*(mix(0.34,0.80,step(0.8,rough))+0.10*max(dot(N,up),0.0));
   rgb+=light(N,V,key,base,f0,rough,metal)*1.5;
-  rgb+=light(N,V,fill,base,f0,rough,metal)*0.65;
+  rgb+=light(N,V,fill,base,f0,rough,metal)*0.85;
   rgb+=studio(reflect(-V,N),rough,metal,right,up,forward)*fresnel(f0,nv)*(1.0-rough*0.35);
   rgb+=studio(reflect(-V,N),0.3,0.0,right,up,forward)*fresnel(float3(0.04),nv)*vm.z;
   // A display-only thermal overlay. No claim of per-part temperature/flow.

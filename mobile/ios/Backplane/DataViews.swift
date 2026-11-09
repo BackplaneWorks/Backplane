@@ -1224,6 +1224,7 @@ struct DataSettingsView: View {
                 Text(Tr.k("settings.lang.note")).dmono(11).foregroundStyle(BackplaneDesign.dim)
                 DHeading(text: Tr.t("Appearance"))
                 DChoices(options: [(label: Tr.t("system"), value: "system"), (label: Tr.t("light"), value: "light"), (label: Tr.t("dark"), value: "dark")], value: $settings.appearance)
+                DataViewerBackgroundSection(settings: settings)
                 DHeading(text: Tr.t("Text size"))
                 DChoices(options: [(label: Tr.t("system"), value: "system")] + AppSettings.textSteps.map { (label: $0.tag, value: $0.tag) }, value: $settings.textSize).accessibilityIdentifier("settings.textsize")
                 onOff(Tr.t("Alerts on this phone"), $settings.alerts, id: "settings.alerts")
@@ -1273,6 +1274,34 @@ struct DataSettingsView: View {
         .confirmationDialog(Tr.ios_hub_forget_ask(hub: forgetKey ?? Tr.t("this hub")), isPresented: Binding(get: { forgetKey != nil }, set: { if !$0 { forgetKey = nil } }), titleVisibility: .visible) {
             Button(Tr.t("Forget"), role: .destructive) { if let k = forgetKey { client.forgetHub(k) }; forgetKey = nil }
         } message: { Text(Tr.t("This phone's saved copy of its threads is removed. Pair again to come back.")) }
+    }
+}
+
+// the 3D viewers' background (Mech and the 3D board share it), on this phone: auto, light, dark, or a colour of one's own
+struct DataViewerBackgroundSection: View {
+    @Bindable var settings: AppSettings
+    private var colour: Binding<Color> {
+        Binding(get: {
+            let (r, g, b) = ViewerBackdrop.unit(ViewerBackdrop.parse(settings.viewerBgCustom) ?? ViewerBackdrop.defaultCustom)
+            return Color(.sRGB, red: Double(r), green: Double(g), blue: Double(b))
+        }, set: { c in
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            guard UIColor(c).getRed(&r, green: &g, blue: &b, alpha: &a) else { return }
+            func byte(_ x: CGFloat) -> UInt32 { UInt32((min(max(x, 0), 1) * 255).rounded()) }
+            settings.viewerBgCustom = ViewerBackdrop.hex(byte(r) << 16 | byte(g) << 8 | byte(b))
+            settings.viewerBg = "custom"
+        })
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DHeading(text: Tr.k("ios.viewerbg"))
+            DChoices(options: [(label: Tr.k("ios.viewerbg.auto"), value: "auto"), (label: Tr.k("settings.theme.light"), value: "light"),
+                               (label: Tr.k("settings.theme.dark"), value: "dark"), (label: Tr.k("ios.viewerbg.custom"), value: "custom")],
+                     value: $settings.viewerBg).accessibilityIdentifier("settings.viewerbg")
+            ColorPicker(Tr.k("ios.viewerbg.color"), selection: colour, supportsOpacity: false)
+                .dmono(13).accessibilityIdentifier("settings.viewerbg.color")
+            Text(Tr.k("ios.viewerbg.note")).dmono(11).foregroundStyle(BackplaneDesign.dim)
+        }
     }
 }
 

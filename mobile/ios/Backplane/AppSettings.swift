@@ -15,6 +15,10 @@ final class AppSettings {
     var appearance: String { didSet { d.set(appearance, forKey: "app.appearance") } }
     // "auto" (the system's language), "en" or "ja": what the app shows (Tr.lang), changed at once
     var lang: String { didSet { d.set(lang, forKey: "app.lang"); Tr.lang = Tr.resolve(lang) } }
+    // the 3D viewers' background, Mech and 3D board alike (docs/VIEWER-BACKGROUND.md): auto, light, dark or custom,
+    // and the custom colour "#rrggbb"; this device only
+    var viewerBg: String { didSet { d.set(viewerBg, forKey: "app.viewer_bg") } }
+    var viewerBgCustom: String { didSet { d.set(viewerBgCustom, forKey: "app.viewer_bg_custom") } }
     @ObservationIgnored let langPreview: Bool
     // "projects" or "active"; empty until the hub's choice was carried over
     var threadList: String { didSet { d.set(threadList, forKey: "app.threadList") } }
@@ -39,6 +43,9 @@ final class AppSettings {
         langPreview = forced == "ja" || forced == "en"
         lang = langPreview ? forced! : (d.string(forKey: "app.lang") ?? "auto")
         appearance = d.string(forKey: "app.appearance") ?? "system"
+        let vb = d.string(forKey: "app.viewer_bg") ?? "auto"
+        viewerBg = ViewerBackdrop.modes.contains(vb) ? vb : "auto"
+        viewerBgCustom = d.string(forKey: "app.viewer_bg_custom").flatMap(ViewerBackdrop.parse).map(ViewerBackdrop.hex) ?? ViewerBackdrop.hex(ViewerBackdrop.defaultCustom)
         threadList = d.string(forKey: "app.threadList") ?? ""
         defaultTab = d.string(forKey: "app.defaultTab") ?? ""
         haptics = d.object(forKey: "app.haptics") as? Bool ?? true
@@ -51,6 +58,11 @@ final class AppSettings {
 
     static let textSteps: [(tag: String, size: DynamicTypeSize)] = [("xs", .xSmall), ("s", .small), ("m", .medium), ("l", .large), ("xl", .xLarge), ("xxl", .xxLarge), ("xxxl", .xxxLarge)]
     var dynamicType: DynamicTypeSize? { Self.textSteps.first { $0.tag == textSize }?.size }
+
+    /// the viewers' background now, for the app's resolved theme
+    func viewerBackdrop(dark: Bool) -> ViewerBackdrop {
+        ViewerBackdrop.resolve(viewerBg, custom: ViewerBackdrop.parse(viewerBgCustom) ?? ViewerBackdrop.defaultCustom, dark: dark)
+    }
 
     var colorScheme: ColorScheme? {
         appearance == "light" ? .light : appearance == "dark" ? .dark : nil

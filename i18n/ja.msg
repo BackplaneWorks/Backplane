@@ -3462,6 +3462,11 @@ android.mark.newon = {machine} で新しいスレッド
 android.google.signedin = サインインしました。
 android.google.back = Backplane に戻る
 # ---- ios: new entries go here ----
+ios.viewerbg = 3Dビューアの背景
+ios.viewerbg.auto = 自動
+ios.viewerbg.custom = カスタム
+ios.viewerbg.color = 色
+ios.viewerbg.note = Mechのパーツと3D基板の背景（このスマートフォン）。自動は外観に従います。
 ios.hub.use = {hub}を使う
 ios.thread.loading = スレッドを読み込み中…
 ios.hub.connecting = ハブに接続中…

@@ -3439,6 +3439,11 @@ android.mark.newon = New thread on {machine}
 android.google.signedin = Signed in.
 android.google.back = Back to Backplane
 # ---- ios: new entries go here ----
+ios.viewerbg = 3D viewer background
+ios.viewerbg.auto = Auto
+ios.viewerbg.custom = Custom
+ios.viewerbg.color = Colour
+ios.viewerbg.note = Behind Mech parts and the 3D board, on this phone. Auto follows the appearance.
 ios.hub.use = Use {hub}
 ios.thread.loading = Loading the thread…
 ios.hub.connecting = Connecting to the hub…
