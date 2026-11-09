@@ -6,6 +6,7 @@ use super::accounts;
 use crate::{string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
+use std::{cell::Cell, rc::Rc};
 
 /// The width of one character of the chip's words (12 px mono) and what the chip spends besides its words (padding, border, the mark and its gap).
 const CH: f32 = 7.3;
@@ -40,15 +41,18 @@ pub fn usage_rows(combo: &Value) -> (Vec<UsageRow>, Vec<String>) {
 }
 
 /// The chip. `avail`: the px the row leaves it (0: not measured yet).
-pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32, keys: (&str, &str)) -> Stateful<Div> {
+pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32, keys: (&str, &str), this_chip: &Rc<Cell<Bounds<Pixels>>>) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
     let combo = &thread["combo"];
     let provider = super::picker::bare(thread["provider"].as_str().or(thread["picker"]["providers"].as_array().and_then(|p| p.iter().find(|x| x["on"] == true)).and_then(|x| x["value"].as_str())).unwrap_or("claude")).to_string();
     let text = words(combo, avail);
     let text = if text.is_empty() { "…".to_string() } else { text };
     let tipped = tip(combo, keys.0, keys.1);
-    div().id("model-chip").cursor_pointer().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).hover(|s| s.bg(c("raise")))
+    // where it was drawn: a press on it is the chip's own (it shuts the menu), not a press outside the menu
+    let at = this_chip.clone();
+    div().id("model-chip").relative().cursor_pointer().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).hover(|s| s.bg(c("raise")))
         .text_size(px(12.)).font(crate::art::mono_font()).flex().items_center().gap_2()
+        .child(canvas(move |b, _, _| at.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full()).child(crate::art::probe("modelchip"))
         .child(super::picker::logo(&provider)).child(div().min_w_0().overflow_hidden().text_color(c(tone(combo))).child(text))
         .when(!tipped.is_empty(), |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tipped.clone(), light)).into()))
         .on_click(cx.listener(|this, _, window, cx| this.combo_click(window, cx)))
@@ -62,13 +66,38 @@ impl Render for Tip {
     }
 }
 
-/// The menu: Model beside Account and Usage, or under them when the composer is narrow (`narrow`).
+/// The gap between the chip's row and the menu, and the least the menu keeps from the window's edges.
+pub const GAP: f32 = 6.;
+pub const MARGIN: f32 = 8.;
+/// Where the menu floats: over the chip's row (as 0.14's popover) when the menu fits there or there is more room there than under it, else under it;
+/// and the height it may take on that side. `row` is the row's top and bottom as last drawn (equal before it was drawn), `want` the menu's usual height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spot { pub above: bool, pub room: f32 }
+pub fn spot(row: (f32, f32), win_h: f32, want: f32) -> Spot {
+    if row.1 <= row.0 { return Spot { above: true, room: (win_h * 0.6).max(160.) } }
+    let (up, down) = (row.0 - GAP - MARGIN, win_h - row.1 - GAP - MARGIN);
+    let above = up >= want || up >= down;
+    Spot { above, room: if above { up } else { down }.max(160.) }
+}
+/// The height the open menu holds: [width, room, height]. A list that shrinks (a search that narrows it, another agent with fewer models, the usage
+/// read again) leaves the menu as tall as it was, so its edge away from the chip stays put; it only grows, and starts again at another width or room.
+pub fn hold(prev: [f32; 3], w: f32, room: f32, natural: f32) -> [f32; 3] {
+    if prev[0] != w || prev[1] != room { [w, room, natural] } else { [w, room, prev[2].max(natural)] }
+}
+/// The least height the menu is drawn at this frame: what it held at this width and room, never more than the room.
+pub fn held_h(held: [f32; 3], w: f32, room: f32) -> f32 { if held[0] == w && held[1] == room { held[2].min(room) } else { 0. } }
+
+/// The menu: the picker over Account and Usage. It floats over the thread (a deferred overlay anchored to the chip's row), so opening it, moving in
+/// it or shutting it never moves or resizes the composer or anything else in the window. `None` while shut: the caller puts it in the chip's row.
 pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Backplane, bar_w: f32, win: (f32, f32)) -> Option<AnyElement> {
-    if !this.screens.picker_open { return None }
+    if !this.screens.picker_open { crate::art::forget("chipmenu"); return None }
     let c = |n: &str| theme::color(light, n);
     // the composer can be wider than what the window shows of it (the thread's own least width): the menu keeps to the window, less the sidebar, the rail and the margins
     let shown_w = win.0 - if this.sidebar_open { this.local.sidebar_px as f32 } else { 0. } - 100.;
-    let f = super::picker::fit(super::picker::menu_width(bar_w, shown_w), win.1, this.local.text_pct);
+    let s = (this.local.text_pct as f32 / 100.).clamp(0.6, 2.);
+    let row = this.screens.pick.row.get();
+    let at = spot((f32::from(row.top()), f32::from(row.bottom())), win.1, 420. * s);
+    let f = super::picker::fit(super::picker::menu_width(bar_w, shown_w), at.room, this.local.text_pct);
     let narrow = !f.side_row;
     let z = |v: f32| px(v * f.s);
     let model = super::picker::view(cx, light, thread, true, &this.screens.pick, &this.local.favs, &f);
@@ -95,7 +124,21 @@ pub fn menu(cx: &mut Context<Backplane>, light: bool, thread: &Value, this: &Bac
     let side = div().id("combo-side").max_h(px((f.menu_h * 0.35).max(120.))).overflow_y_scroll().child(side);
     let model_col = div().w_full().min_w_0().flex().flex_col().children(model);
     let body = div().flex().flex_col().child(model_col).when(accounts_on, |d| d.child(div().h(px(1.)).bg(c("line"))).child(side));
-    Some(div().id("combo-menu").w_full().max_w(px(f.w)).max_h(px(f.menu_h)).overflow_y_scroll().border_1().border_color(c("line")).bg(c("panel")).child(body).into_any_element())
+    // its height while open: never less than it has been (hold), so neither edge moves as its lists change
+    let held = this.screens.pick.held.clone();
+    let floor = held_h(held.get(), f.w, f.menu_h);
+    let (w, room) = (f.w, f.menu_h);
+    // (the canvas fills the inside of the menu's 1 px border: the menu's own height is 2 px more)
+    let measure = canvas(move |b, _, _| held.set(hold(held.get(), w, room, f32::from(b.size.height) + 2.)), |_, _, _, _| {}).absolute().top_0().left_0().size_full();
+    let chip = this.screens.pick.chip.clone();
+    let card = div().id("combo-menu").occlude().relative().w(px(f.w)).min_h(px(floor)).max_h(px(f.menu_h)).overflow_y_scroll().border_1().border_color(c("line")).bg(c("panel")).shadow_md()
+        .child(crate::art::probe("chipmenu")).child(measure).child(body)
+        // a press anywhere else shuts it (the chip's own press toggles it)
+        .on_mouse_down_out(cx.listener(move |this, e: &MouseDownEvent, window, cx| { if !chip.get().contains(&e.position) { this.picker_dismiss(window, cx) } }));
+    // anchored to the chip's row: its bottom edge just over the row (or its top just under it), its left edge on the row's, kept inside the window
+    let pin = div().absolute().left_0().size_0().map(|d| if at.above { d.top(px(-GAP)) } else { d.bottom(px(-GAP)) })
+        .child(deferred(anchored().anchor(if at.above { Corner::BottomLeft } else { Corner::TopLeft }).snap_to_window_with_margin(px(MARGIN)).child(card)).with_priority(1));
+    Some(pin.into_any_element())
 }
 
 impl Backplane {
@@ -110,6 +153,15 @@ impl Backplane {
         self.screens.acct.menu = false;
         self.picker_show(window, cx);
         accounts::list(self); accounts::refresh_usage(self);
+    }
+    /// Something drawn over the page (the palette, a picture, Settings, the tour, a 0.14 home coming across): the menu stays open but is not drawn over it.
+    pub(crate) fn chip_menu_covered(&self) -> bool { self.screens.palette.open || self.screens.lightbox.is_some() || super::settings::is_open(self) || self.data["tour"].is_object() || super::migrate::is_up(&self.data) }
+    /// A press outside the menu: it shuts. The keyboard goes back to the composer if it was in the menu; what was pressed may then take it (a field, the sidebar's search).
+    pub(crate) fn picker_dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let inside = self.screens.pick.search.as_ref().map_or(false, |s| s.focus_handle(cx).contains_focused(window, cx)) || self.screens.acct.focus.as_ref().map_or(false, |f| f.contains_focused(window, cx));
+        self.screens.picker_open = false; self.screens.acct.menu = false; self.screens.pick.cur = None;
+        if inside { self.input.focus_handle(cx).focus(window); }
+        cx.notify();
     }
     /// The account key: the menu with the keyboard on the accounts (their digits pick); pressed with the keyboard already there, it shuts.
     pub(crate) fn combo_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -138,6 +190,29 @@ mod tests {
         assert_eq!(words(&c, 40.), "Opus 5.5 · 36%", "the shortest when nothing fits");
         assert_eq!(words(&json!({"full":"grok-4 · low","mid":"grok-4","short":"grok-4"}), 120.), "grok-4");
         assert_eq!(words(&Value::Null, 300.), "");
+    }
+    #[test] fn the_menu_floats_over_the_row_when_it_fits_there_else_under_it() {
+        // the composer at the window's foot (a 900 px window, the row at 856..888): over it, with the room up to the window's top margin
+        assert_eq!(spot((856., 888.), 900., 420.), Spot { above: true, room: 856. - GAP - MARGIN });
+        // a short window: still over the row, the room what there is (the lists shrink to it, screens/picker.rs fit)
+        assert_eq!(spot((606., 638.), 650., 420.), Spot { above: true, room: 606. - GAP - MARGIN });
+        // the row near the top: under it
+        assert_eq!(spot((60., 92.), 900., 420.), Spot { above: false, room: 900. - 92. - GAP - MARGIN });
+        // neither side fits the usual height: the side with more room
+        let s = spot((200., 232.), 500., 420.); assert!(!s.above && s.room == 500. - 232. - GAP - MARGIN, "{s:?}");
+        assert!(spot((300., 332.), 500., 420.).above);
+        // not drawn yet: over it, a usable room; never less than the least the menu needs
+        assert!(spot((0., 0.), 900., 420.).above && spot((0., 0.), 900., 420.).room >= 160.);
+        assert_eq!(spot((20., 52.), 60., 420.).room, 160.);
+    }
+    #[test] fn the_open_menu_holds_its_height_as_its_lists_change() {
+        let h = hold([0.; 3], 898., 842., 470.); assert_eq!(h, [898., 842., 470.]);
+        let h = hold(h, 898., 842., 300.); assert_eq!(h[2], 470., "a search with fewer rows, another agent with fewer models: as tall as it was");
+        let h = hold(h, 898., 842., 520.); assert_eq!(h[2], 520., "more (the usage read in): it grows");
+        assert_eq!(held_h(h, 898., 842.), 520.);
+        assert_eq!(held_h(h, 898., 400.), 0., "another room (the window resized): drawn afresh");
+        assert_eq!(hold(h, 560., 842., 380.), [560., 842., 380.], "another width: held afresh");
+        assert_eq!(held_h([898., 842., 900.], 898., 842.), 842., "never more than the room");
     }
     #[test] fn low_and_out_read_in_their_colours_and_the_hover_says_everything() {
         assert_eq!((tone(&combo()), tone(&json!({"tone":"warn"})), tone(&json!({"tone":"bad"}))), ("text", "warn", "bad"));

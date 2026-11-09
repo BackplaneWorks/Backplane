@@ -310,6 +310,8 @@ pub fn probe(name: &'static str) -> AnyElement {
         LAYOUT.lock().unwrap().get_or_insert_with(Default::default).insert(name.to_string(), [f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s]);
     }).absolute().size_full().into_any_element()
 }
+/// A probe's region is gone (an overlay shut): its rectangle leaves the snapshot.
+pub fn forget(name: &str) { if rects_on() { if let Some(m) = LAYOUT.lock().unwrap().as_mut() { m.remove(name); } } }
 /// The recorded rectangles as a JSON object {name:{x,y,w,h}}.
 pub fn layout_snapshot() -> String {
     let g = LAYOUT.lock().unwrap();
