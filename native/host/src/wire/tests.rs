@@ -165,3 +165,10 @@ fn sbs_wire_child(mode: &str, copy: Option<&str>, flag: Option<&str>) -> String 
     assert_eq!(shown_marked(json!({"a":1}), false), json!({"a":1}));
     assert_eq!(shown_marked(Value::Null, true), Value::Null);
 }
+#[test] fn the_landing_page_names_the_machine_and_the_ways_in_and_escapes() {
+    let p = landing_page("desk<b>", "1.2.3");
+    assert!(p.contains("This is Backplane on desk&lt;b&gt;") && p.contains("1.2.3"), "{p}");
+    for w in ["Settings &rarr; Machines", "Settings &rarr; Hubs &rarr; Add a hub", "Settings &rarr; Devices"] { assert!(p.contains(w), "{w}") }
+    assert!(!p.contains("token"), "no secret words on the page");
+    assert!(landing_page("", "1").contains("this machine"));
+}

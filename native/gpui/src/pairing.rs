@@ -84,7 +84,9 @@ pub fn refusal(i: &Invitation) -> Option<&'static str> {
 pub fn from_code(address: &str, code: &str) -> Option<Invitation> {
     let code: String = code.chars().filter(|c| *c != ' ' && *c != '-').collect::<String>().to_uppercase();
     let address = address.trim();
-    let origin = origin_of(&if address.contains("://") { address.to_string() } else { format!("http://{address}") })?;
+    // a bare MagicDNS name (no port) is what `tailscale serve` answers on https; anything else bare is plain http
+    let bare_https = !address.contains("://") && { let h = address.split(['/', '?', '#']).next().unwrap_or(""); h.to_ascii_lowercase().ends_with(".ts.net") };
+    let origin = origin_of(&if address.contains("://") { address.to_string() } else { format!("{}://{address}", if bare_https { "https" } else { "http" }) })?;
     (code.len() == 8 && good_secret(&code)).then(|| Invitation { routes: vec![origin.clone()], origin, secret: code, from_link: false })
 }
 /// What the form holds: the link if there is one, else the address and code. Err: what to say.
@@ -248,6 +250,9 @@ mod tests {
     #[test] fn a_short_code_forgives_spaces_dashes_and_case() {
         assert_eq!(from_code("100.1.2.3:3801", "abcd-2345"), code("http://100.1.2.3:3801", "ABCD2345"));
         assert_eq!(from_code(" https://box.ts.net:8461/ ", "ABCD 2345"), code("https://box.ts.net:8461", "ABCD2345"));
+        assert_eq!(from_code("box.tail1.ts.net", "ABCD2345"), code("https://box.tail1.ts.net", "ABCD2345"));
+        assert_eq!(from_code("box.tail1.ts.net:3800", "ABCD2345"), code("http://box.tail1.ts.net:3800", "ABCD2345"));
+        let long = format!("https://{}.tail1.ts.net", "a".repeat(60)); assert_eq!(from_code(&long, "ABCD2345"), code(&long, "ABCD2345"));
         assert_eq!(from_code("h:1", "ABCD234"), None); assert_eq!(from_code("h:1", "ABCD1234"), None, "1 is not in the alphabet"); assert_eq!(from_code("", "ABCD2345"), None);
     }
     #[test] fn the_form_prefers_the_link_and_says_what_is_missing() {

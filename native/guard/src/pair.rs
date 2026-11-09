@@ -110,7 +110,18 @@ pub fn run(a: &[String]) -> i32 {
             Err(e) => fail(e),
         },
         Mode::Machine => match ask(&home, port, json!({"op": "machine"})) {
-            Ok(j) => { println!("Code: {}\nAddress: {}\nOn the other machine: backplane pair --join {} {}\nThen approve its request here: backplane pair --requests", j["code"].as_str().unwrap_or(""), j["address"].as_str().unwrap_or(""), j["address"].as_str().unwrap_or(""), j["code"].as_str().unwrap_or("")); 0 }
+            Ok(j) => {
+                let code = j["code"].as_str().unwrap_or("");
+                let list: Vec<&str> = j["addresses"].as_array().into_iter().flatten().filter_map(|a| a.as_str()).collect();
+                let list = if list.is_empty() { vec![j["address"].as_str().unwrap_or("")] } else { list };
+                println!("Code: {code}");
+                println!("{}", if list.len() > 1 { "Addresses another machine can use, best first:" } else { "Address:" });
+                for a in &list { println!("  {a}") }
+                println!("On the other machine: backplane pair --join {} {code}", list[0]);
+                println!("Then approve its request here: backplane pair --requests");
+                if list.iter().all(|a| a.contains("//127.") || a.contains("//localhost") || a.contains("//[::1]")) { println!("Only this computer can reach that address: turn Tailscale on, or start the hub on a network address.") }
+                0
+            }
             Err(e) => fail(e),
         },
         Mode::Join(addr, code) => match ask(&home, port, json!({"op": "join", "address": addr, "code": code})) {

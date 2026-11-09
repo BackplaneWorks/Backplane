@@ -69,6 +69,12 @@ impl AuthRoutes {
         let (default, choices) = super::plan::plan(&routes, &self.host, self.port, authority, https, &(self.ifaces)(), &bound);
         self.reg.create_with(&default, &choices)
     }
+    /// Every address another machine can reach this hub on, most reachable first (`plan::reachable`); `first` is the hub's own word for it.
+    pub fn addresses(&self, first: &str) -> Vec<String> {
+        let routes = self.state.lock().unwrap().routes.clone();
+        let bound = self.lan().map(|l| l.bound()).unwrap_or_default();
+        super::plan::reachable(first, &routes, &self.host, self.port, &(self.ifaces)(), &bound)
+    }
     /// The QR code of the default link and of each address's own link.
     fn with_qrs(&self, mut j: Value) -> Value {
         let link = j["link"].as_str().unwrap_or("").to_string();

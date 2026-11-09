@@ -28,7 +28,7 @@ enum Out { Waiting, Linked(String), Refused(String) }
 #[derive(Clone, Debug)]
 struct Outgoing { id: String, address: String, check: String, at: u64, state: Out }
 #[derive(Clone, Debug)]
-struct Made { code: String, peer: String, address: String, expires_ms: u64 }
+struct Made { code: String, peer: String, address: String, addresses: Vec<String>, expires_ms: u64 }
 #[derive(Default)]
 struct Inner { incoming: Vec<Incoming>, outgoing: Vec<Outgoing>, made: Option<Made> }
 #[derive(Default)]
@@ -39,7 +39,10 @@ fn is_check(s: &str) -> bool { s.len() == 6 && s.bytes().all(|b| b.is_ascii_digi
 /// An address as a person types it: `host:port` gets `http://`; a trailing slash goes. None when it is no http address.
 pub fn normalize(a: &str) -> Option<String> {
     let a = a.trim().trim_end_matches('/');
-    let full = if a.starts_with("http://") || a.starts_with("https://") { a.to_string() } else { format!("http://{a}") };
+    // a bare MagicDNS name (no port) is what `tailscale serve` answers on https
+    let bare = a.split(['/', '?', '#']).next().unwrap_or("").to_ascii_lowercase();
+    let scheme = if bare.ends_with(".ts.net") { "https" } else { "http" };
+    let full = if a.starts_with("http://") || a.starts_with("https://") { a.to_string() } else { format!("{scheme}://{a}") };
     (botnet::url_ok(&full) && !full.contains(['?', '#']) && full.len() > 8).then_some(full)
 }
 /// What a refused claim says.
@@ -80,8 +83,9 @@ impl Peering {
         let address = botnet::url_here(self.tailnet, &self.host, self.port).await;
         let code = r["code"].as_str().unwrap_or("").to_string();
         let expires = r["expiresAt"].as_u64().unwrap_or(0);
-        self.flow.inner.lock().unwrap().made = Some(Made { code: code.clone(), peer, address: address.clone(), expires_ms: expires });
-        Ok(json!({"code": code, "address": address, "expiresAt": expires}))
+        let addresses = self.routes.addresses(&address);
+        self.flow.inner.lock().unwrap().made = Some(Made { code: code.clone(), peer, address: address.clone(), addresses: addresses.clone(), expires_ms: expires });
+        Ok(json!({"code": code, "address": address, "addresses": addresses, "expiresAt": expires}))
     }
 
     /// `POST /bots/pair/request`: a machine asks to pair with a code. It waits; nothing is linked.
@@ -237,7 +241,7 @@ impl Peering {
             "requests": reqs.iter().filter(|r| r.state == In::Pending).map(|r| json!({"id": r.id, "name": r.name, "url": r.url, "check": r.check, "left": (r.at + WAIT_S).saturating_sub(now)})).collect::<Vec<_>>(),
             "outgoing": outs.iter().map(|o| { let mut v = json!({"id": o.id, "address": o.address, "check": o.check}); v["status"] = self_state(&o.state); v }).collect::<Vec<_>>(),
             "via": self.via.lock().unwrap().clone(),
-            "code": made.map(|m| json!({"code": m.code, "address": m.address, "left": (m.expires_ms / 1000).saturating_sub(now), "peer": m.peer})),
+            "code": made.map(|m| json!({"code": m.code, "address": m.address, "addresses": m.addresses, "left": (m.expires_ms / 1000).saturating_sub(now), "peer": m.peer})),
         })
     }
 
