@@ -895,4 +895,136 @@ final class Journeys: XCTestCase {
         d.step("close clears the mark", act: { d.tap(d.el("data.find.close")) }, expect: { !bar.exists && !marked.exists })
         d.shot("6-find-closed")
     }
+
+    // Messages interrupt by default (docs/PHONE-DATA.md `thread.queue`): a message sent while a stand-in turn runs is taken at once (no queue row), and with
+    // the hub cut off the phone keeps what is written in its outbox (Unsent rows, Edit and Remove, kept across a relaunch) and sends the rest when it is back.
+    // Rig: scripts/mobile/ios-interrupt-journey.sh (a hub behind a relay that HUB_CTL /cut and /heal cut; INTERRUPT_THREAD a thread with no messages yet).
+    func test_interrupt_outbox() {
+        d = Driver("interrupt-outbox"); defer { d.finish() }
+        let env = ["BACKPLANE_LINK": d.link, "BACKPLANE_SELECT": d.env["INTERRUPT_THREAD"] ?? "", "BACKPLANE_PERFORMANCE": "1"]
+        func start() { d.app.terminate(); d.app.launchEnvironment = env; d.app.launch(); d.skipTour()
+            let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]; if allow.waitForExistence(timeout: 5) { allow.tap() } }
+        start()
+        let comp = d.el("thread.composer")
+        let unsent = d.app.buttons.matching(identifier: "queue.u-edit")   // one Edit per Unsent row
+        let texts = d.app.staticTexts.matching(identifier: "queue.text"), removes = d.app.buttons.matching(identifier: "queue.u-remove")
+        func say(_ t: String) { d.tap(comp); d.type(comp, t); d.tap(d.el("thread.send")) }
+        func user(_ t: String) -> XCUIElement { d.app.descendants(matching: .any).matching(identifier: "data.entry.user").containing(NSPredicate(format: "label CONTAINS %@", t)).firstMatch }
+        guard d.step("the thread is open", timeout: 30, act: {}, expect: { comp.exists }) else { return }
+        // (a) a turn that runs until it is stopped, then a message into it
+        guard d.step("a turn runs", timeout: 30, act: { say("mode:stop hold") }, expect: { d.el("data.thread.state").label.contains("working") }) else { return }
+        d.step("a message sent while it runs is taken at once: in the conversation, no queue row", timeout: 15, act: { say("into the running turn") },
+               expect: { user("into the running turn").exists && !d.el("thread.queue").exists })
+        sleep(2)
+        d.step("still no queue row two seconds on", act: {}, expect: { !d.el("thread.queue").exists && user("into the running turn").exists })
+        d.shot("a-taken-at-once")
+        d.tap(d.el("thread.send"))   // Stop: the composer is empty while the turn runs
+        d.step("the turn is stopped", timeout: 30, act: {}, expect: { !d.el("data.thread.state").label.contains("working") })
+        // (b) the hub cut off: three messages wait as Unsent
+        d.step("the hub is cut off", timeout: 30, act: { _ = d.ctl("/cut") }, expect: { d.label("Offline").exists || d.label("Connecting to").exists })
+        say("unsent one"); say("unsent two"); say("unsent three")
+        d.step("three Unsent rows in the strip, none in the conversation", timeout: 10, act: {},
+               expect: { unsent.count == 3 && d.label("UNSENT").exists && !user("unsent one").exists })
+        d.shot("b1-three-unsent")
+        d.step("Edit puts the first back in the draft and out of the strip", act: { d.tap(unsent.element(boundBy: 0)) },
+               expect: { unsent.count == 2 && ((comp.value as? String) ?? "").contains("unsent one") })
+        d.shot("b2-edited")
+        d.step("Remove drops the second", act: { d.tap(removes.element(boundBy: 0)) }, expect: { unsent.count == 1 })
+        d.tap(comp); d.type(comp, ", edited"); d.tap(d.el("thread.send"))
+        d.step("the edited one waits again, after the third", act: {}, expect: { unsent.count == 2 && texts.count == 2 && texts.element(boundBy: 1).label.contains("edited") })
+        d.shot("b3-removed-and-resent")
+        start()
+        d.step("the outbox is kept across a relaunch (on disk)", timeout: 20, act: {}, expect: { comp.exists && unsent.count == 2 })
+        d.shot("b4-after-relaunch")
+        d.step("the hub is back: the rest delivers, in order, and the strip empties", timeout: 60, act: { _ = d.ctl("/heal") },
+               expect: { unsent.count == 0 && user("unsent three").exists && user("unsent one, edited").exists })
+        d.step("the removed one never went", act: {}, expect: { !user("unsent two").exists })
+        let three = user("unsent three").exists ? user("unsent three").frame.minY : -1, one = user("unsent one, edited").exists ? user("unsent one, edited").frame.minY : -1
+        d.metrics["order_ok"] = three >= 0 && three < one
+        if !(three >= 0 && three < one) { d.failed = true; d.note("order: three at \(three), edited one at \(one)") }
+        d.shot("b5-delivered")
+    }
+
+    // Every send cuts into the running turn (the two-hub rig, scripts/mobile/ios-interrupt-two.sh): HUB_CTL is the rig's ctl.py
+    // (/cutA /healA: the link between the hubs; /cutB /healB: this app's link to its hub; /send, /helper: a message by data/1 or the Helper's thread_send;
+    // /now?w=A|B&s=TEXT: 200 once that hub's stand-in took the message holding TEXT as an interrupt (a NOW line)). LOCAL_THREAD, FAR_THREAD.
+    func test_interrupt_everywhere() {
+        d = Driver("interrupt-everywhere"); defer { d.finish() }
+        let local = d.env["LOCAL_THREAD"] ?? "tb", far = d.env["FAR_THREAD"] ?? ""
+        func start(_ sel: String) { d.app.terminate(); d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_SELECT": sel, "BACKPLANE_PERFORMANCE": "1"]; d.app.launch(); d.skipTour()
+            let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]; if allow.waitForExistence(timeout: 3) { allow.tap() } }
+        let comp = d.el("thread.composer")
+        let unsent = d.app.buttons.matching(identifier: "queue.u-edit")
+        let tags = d.app.staticTexts.matching(identifier: "queue.tag")
+        func say(_ t: String) { d.tap(comp); d.type(comp, t); d.tap(d.el("thread.send")) }
+        func user(_ t: String) -> XCUIElement { d.app.descendants(matching: .any).matching(identifier: "data.entry.user").containing(NSPredicate(format: "label CONTAINS %@", t)).firstMatch }
+        func working() -> Bool { d.el("data.thread.state").exists && d.el("data.thread.state").label.contains("working") }
+        func q(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? s }
+        func now(_ w: String, _ t: String) -> Bool { d.ctl("/now?w=\(w)&s=\(q(t))") }
+        func timed(_ key: String, _ name: String, timeout: TimeInterval = 10, act: () -> Void, expect: () -> Bool) {
+            let t0 = CFAbsoluteTimeGetCurrent(); let ok = d.step(name, timeout: timeout, act: act, expect: expect); d.metrics[key + "_ms"] = ok ? d.ms(t0) : -1 }
+
+        // 1. Local work, a turn held running: a send from the app cuts in at once
+        start(local)
+        guard d.step("Local work is open", timeout: 30, act: {}, expect: { comp.exists }) else { return }
+        guard d.step("1: a turn runs in Local work", timeout: 30, act: { say("s1 start local") }, expect: { working() }) else { return }
+        sleep(3)
+        timed("s1_shown", "1: the send shows in the conversation, no queue row", act: { say("s1 cut in fresh") }, expect: { user("s1 cut in fresh").exists && !d.el("thread.queue").exists })
+        timed("s1_now", "1: the stand-in took it as an interrupt (NOW)", act: {}, expect: { now("B", "s1 cut in fresh") })
+        // the new reply's live text keeps its first words: it starts at word 0 ("fresh0 fresh1 ...")
+        let fresh = d.app.descendants(matching: .any).matching(identifier: "data.entry.assistant").containing(NSPredicate(format: "label CONTAINS 'fresh'")).firstMatch
+        timed("s1_word0", "1: the new reply's live text starts at word 0", timeout: 15, act: {}, expect: { fresh.exists && fresh.label.contains("fresh0 fresh1") })
+        if fresh.exists { d.note("1: new reply live text starts: \(String(fresh.label.prefix(60)))") }
+        d.shot("1-local-interrupt")
+
+        // 4. the Helper's thread_send into Local work's running turn: shown at once, as an interrupt
+        d.step("4: the Helper's turn runs (its MCP url is known)", timeout: 30, act: { _ = d.ctl("/send?thread=th&text=\(q("s4 helper start"))") }, expect: { d.ctl("/mcp?t=th") })
+        d.step("4: Local work is still running", timeout: 20, act: {}, expect: { working() })
+        timed("s4_shown", "4: the Helper's message shows in Local work at once", act: { _ = d.ctl("/helper?text=\(q("s4 from the helper"))") },
+              expect: { d.label("s4 from the helper").exists && !d.el("thread.queue").exists })
+        timed("s4_now", "4: the stand-in took it as an interrupt (NOW)", act: {}, expect: { now("B", "s4 from the helper") })
+        d.shot("4-helper-steered")
+
+        // 5. the app cut off from its hub while the turn runs: Unsent; back: delivered as an interrupt
+        d.step("5: Local work is still running", timeout: 20, act: {}, expect: { working() })
+        d.step("5: the app's link to its hub is cut", timeout: 40, act: { _ = d.ctl("/cutB") }, expect: { d.label("Offline").exists || d.label("Connecting to").exists })
+        say("s5 sent offline")
+        d.step("5: it shows Unsent, not in the conversation", timeout: 10, act: {}, expect: { unsent.count == 1 && d.label("UNSENT").exists && !user("s5 sent offline").exists })
+        d.shot("5a-offline-unsent")
+        sleep(3)
+        d.step("5: still nothing delivered while offline", act: {}, expect: { !now("B", "s5 sent offline") && unsent.count == 1 })
+        timed("s5_delivered", "5: the link is back: it delivers and the strip empties", timeout: 60, act: { _ = d.ctl("/healB") }, expect: { unsent.count == 0 && user("s5 sent offline").exists })
+        timed("s5_now", "5: the stand-in took it as an interrupt (NOW)", act: {}, expect: { now("B", "s5 sent offline") })
+        d.shot("5b-reconnected-delivered")
+        _ = d.ctl("/send?thread=th&text=stop") // (nothing: the turns run out by themselves)
+
+        // 2. Far work (on hub A), opened by its id: a turn, then a send that cuts in
+        guard !far.isEmpty else { d.block("no FAR_THREAD"); return }
+        start(far)
+        guard d.step("Far work is open", timeout: 30, act: {}, expect: { comp.exists }) else { return }
+        d.shot("2a-far-open")
+        let refused = d.app.staticTexts.matching(identifier: "queue.error").firstMatch
+        let ran = d.step("2: a turn runs in Far work", timeout: 30, act: { say("s2 start alpha") }, expect: { d.ctl("/log?w=A&s=s2%20start%20alpha") || refused.exists })
+        if refused.exists { d.note("2: the hub refused the send to the far thread: \(refused.label)"); d.metrics["far_refused"] = refused.label; d.shot("2b-far-refused"); d.failed = true; return }
+        guard ran else { return }
+        sleep(4)
+        timed("s2_now", "2: hub A's stand-in took the cut-in as an interrupt (NOW)", act: { say("s2 cut in bravo") }, expect: { now("A", "s2 cut in bravo") || refused.exists })
+        if refused.exists { d.note("2: refused: \(refused.label)"); d.shot("2b-far-refused"); d.failed = true; return }
+        d.metrics["s2_shown_live"] = user("s2 cut in bravo").exists ? 1 : 0 // a mirrored thread gets no live pushes on the phone (a known gap)
+        start(far) // re-open to see the new entries
+        d.step("2: re-opened, the cut-in shows in Far work", timeout: 30, act: {}, expect: { user("s2 cut in bravo").exists })
+        d.shot("2b-far-interrupt")
+
+        // 3. the link to the far machine down, its turn still running: Unsent; link back: delivered as an interrupt at once
+        d.step("3: hub A's bravo turn is still running", act: {}, expect: { !d.ctl("/log?w=A&s=STREAMED%20bravo") })
+        _ = d.ctl("/cutA"); sleep(8)
+        say("s3 while link down")
+        d.step("3: it shows Unsent (the hub holds it)", timeout: 30, act: {}, expect: { (0..<tags.count).contains { tags.element(boundBy: $0).label.uppercased().contains("UNSENT") } })
+        d.shot("3a-far-link-down-unsent")
+        sleep(4)
+        d.step("3: nothing reached hub A while the link is down", act: {}, expect: { !d.ctl("/log?w=A&s=\(q("s3 while link down"))") && !d.ctl("/log?w=A&s=STREAMED%20bravo") })
+        timed("s3_now", "3: the link is back: hub A's stand-in takes it as an interrupt", timeout: 30, act: { _ = d.ctl("/healA") }, expect: { now("A", "s3 while link down") })
+        d.step("3: the Unsent row is gone", timeout: 15, act: {}, expect: { !(0..<tags.count).contains { tags.element(boundBy: $0).label.uppercased().contains("UNSENT") } })
+        d.shot("3b-far-link-back-delivered")
+    }
 }

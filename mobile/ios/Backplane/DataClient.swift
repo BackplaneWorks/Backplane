@@ -76,6 +76,15 @@ final class DataClient {
     var pairingBusy = false
     private(set) var links: [String] = PairingStore.load()
     var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "data.drafts") as? [String: String]) ?? [:]
+    // the strip over the composer (feature queue, docs/PHONE-DATA.md `thread.queue`): the hub's rows per thread, and this phone's own outbox (Outbox.swift):
+    // what was written while the socket was down, kept on disk and sent in order with its clientId once connected
+    private(set) var queues: [String: [DQueueRow]] = [:]
+    private(set) var outbox = Outbox()
+    /// a thread's last refusal or failed press in the strip, in the hub's words
+    private(set) var queueError: [String: String] = [:]
+    /// text put back into a thread's draft from outside the composer (Edit, a refusal): the open composer reads `drafts` again when `rev` moves
+    struct DraftBack: Equatable { var thread = ""; var rev = 0 }
+    private(set) var draftBack = DraftBack()
 
     // a tapped notification: the thread to open and the approval to land on. The views follow these
     var pushThread = ""
@@ -111,6 +120,7 @@ final class DataClient {
         if let l = ProcessInfo.processInfo.environment["BACKPLANE_LINK"] { links = l.split(separator: " ").map(String.init) }
         #endif
         loadCache()
+        loadOutbox()
         voice.client = self
         machines.client = self
         devices.client = self
@@ -166,26 +176,28 @@ final class DataClient {
         guard Pairing.key(link ?? "") != key else { return }
         let next = HubList.use(links, key, key: Pairing.key)
         guard next != links else { return }
-        close(); links = next; PairingStore.save(links); reset()
+        close(); links = next; PairingStore.save(links); reset(); loadOutbox()
         needsRepair = false; pairingError = ""; failure = ""
         connect()
     }
     /// Forget one hub; when it was the one in use, the next paired hub is used (none left: the pairing screen).
     func forgetHub(_ key: String) {
         let current = Pairing.key(link ?? "") == key
+        try? FileManager.default.removeItem(at: Self.outboxURL(key))
         links = HubList.forget(links, key, key: Pairing.key); PairingStore.save(links)
         guard current else { return }
-        close(); reset(); needsRepair = false; pairingError = ""
+        close(); reset(); loadOutbox(); needsRepair = false; pairingError = ""
         if link != nil { connect() } else { conn = .offline }
     }
     /// Forget every hub.
     func unpair() {
-        links = []; adding = false; PairingStore.save(links); reset(); close(); conn = .offline
+        for l in links { if let k = Pairing.key(l) { try? FileManager.default.removeItem(at: Self.outboxURL(k)) } }
+        links = []; adding = false; PairingStore.save(links); reset(); close(); conn = .offline; outbox = Outbox()
     }
     private func reset() {
         notice = HubNotice(); star = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
-        projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil
+        projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
         try? FileManager.default.removeItem(at: cacheURL)
     }
 
@@ -319,6 +331,7 @@ final class DataClient {
     private func synchronise(_ g: Int) async {
         do {
             let s: DSubReply = try await call("subscribe", ["topic": "lists"]); guard g == gen else { return }; listSub = s.sub
+            Task { await self.flushOutbox(g) }
             async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
             _ = try await (p, t, h)
             await loadBots()
@@ -512,6 +525,7 @@ final class DataClient {
         loadedThreads.insert(id)
         if let t = r.thread { upsert(t) }
         scheduleSave()
+        await loadQueue(id)
         await loadWork(id)
     }
     func loadOlder(_ id: String) {
@@ -545,11 +559,14 @@ final class DataClient {
         case "project.removed":
             if let id = o["id"] as? String { projects.removeAll { $0.id == id }; scheduleSave() }
         case "entry":
-            if let tid = o["thread"] as? String, let e = decode("entry", DEntry.self) { put(e, in: tid) }
+            if let tid = o["thread"] as? String, let e = decode("entry", DEntry.self) { put(e, in: tid); if e.kind == "user", queues[tid] != nil { Task { await self.loadQueue(tid) } } }
         case "work":
             if let tid = o["thread"] as? String { work[tid] = decode("subs", DWork.self) }
         case "sub":
             if let tid = o["thread"] as? String, let key = o["key"] as? String, subOpen == DSubRoute(thread: tid, key: key), let v = decode("view", DSubView.self) { subView = v; subGone = false }
+        case "queue":
+            // the strip's rows changed with no line in the log (a message on its way to another machine): ask again
+            if let tid = o["thread"] as? String { Task { await self.loadQueue(tid) } }
         case "locks":
             locks = decode("locks", [DLock].self) ?? []
         case "text":
@@ -564,6 +581,7 @@ final class DataClient {
         case "turn":
             if let tid = o["thread"] as? String, let s = o["state"] as? String, let i = threads.firstIndex(where: { $0.id == tid }) {
                 threads[i].state = s
+                if tid == open { Task { await self.loadQueue(tid) } }
             }
         default: break
         }
@@ -620,10 +638,19 @@ final class DataClient {
     }
 
     // MARK: actions
+    /// A message: message.send at once, whatever the thread is doing (the hub puts it into a running turn). With the socket down, or while older
+    /// unsent ones wait, it goes to the outbox instead (a message with pictures is not kept there: it stays in the conversation with Retry).
     func send(_ tid: String, _ text: String, images: [Data] = []) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !images.isEmpty else { return }
         let cid = UUID().uuidString
+        queueError[tid] = nil
+        if images.isEmpty && (conn != .online || !outbox.isEmpty) {
+            outbox.push(thread: tid, text: text, clientId: cid); saveOutbox()
+            setDraft(tid, "")
+            if conn == .online { let g = gen; Task { await flushOutbox(g) } }
+            return
+        }
         var local = DEntry(id: "local:" + cid, kind: "user", text: text, at: Int(Date().timeIntervalSince1970 * 1000), clientId: cid)
         local.sending = true; local.localImages = images
         entries[tid, default: []].append(local)
@@ -645,9 +672,82 @@ final class DataClient {
             // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
             for (i, a) in r.entry.attachments.enumerated() where i < images.count { Self.attachmentCache.setObject(images[i] as NSData, forKey: a.id as NSString) }
             put(r.entry, in: tid)
+            await loadQueue(tid)
         } catch {
+            if images.isEmpty, var l = entries[tid], let i = l.firstIndex(where: { $0.clientId == cid }) {
+                l.remove(at: i); entries[tid] = l
+                // the socket went: into the outbox, sent again (same clientId, posted once) when connected
+                if Self.socketGone(error) { outbox.push(thread: tid, text: text, clientId: cid); saveOutbox() }
+                // the hub said no: its words, and the text back into the draft
+                else { refused(tid, text, error) }
+                return
+            }
             if var l = entries[tid], let i = l.firstIndex(where: { $0.clientId == cid }) { l[i].sending = false; l[i].failed = true; entries[tid] = l }
         }
+    }
+    /// The call never got the hub's answer (no socket, cut, or no reply): not a refusal, so the message is kept and sent again.
+    nonisolated static func socketGone(_ e: Error) -> Bool { guard let d = e as? DError else { return true }; return d.code == "OFFLINE" || d.code == "TIMEOUT" }
+    private func refused(_ tid: String, _ text: String, _ error: Error) {
+        queueError[tid] = (error as? DError)?.message ?? error.localizedDescription
+        backToDraft(tid, text)
+    }
+    private func backToDraft(_ tid: String, _ text: String) {
+        setDraft(tid, Outbox.draft(drafts[tid] ?? "", adding: text))
+        draftBack = DraftBack(thread: tid, rev: draftBack.rev + 1)
+    }
+
+    // MARK: the strip over the composer (feature queue) and this phone's outbox
+    /// What the strip shows: the hub's rows while connected (they are stale otherwise), then this phone's unsent ones.
+    func queueRows(_ tid: String) -> [DQueueRow] { (conn == .online ? queues[tid] ?? [] : []) + outbox.rows(tid) }
+    func loadQueue(_ tid: String) async {
+        guard has("queue"), let r: DQueueReply = try? await call("thread.queue", ["thread": tid]) else { return }
+        queues[tid] = r.rows.isEmpty ? nil : r.rows
+    }
+    /// A row's button. The outbox's own (u-edit, u-remove) stay on the phone; the hub's (q-*, o-*) go to queue.act, and q-edit / o-edit answer the text for the draft.
+    func queueAct(_ tid: String, _ b: DQueueButton) async {
+        queueError[tid] = nil
+        switch b.action {
+        case Outbox.edit: if let it = outbox.remove(b.value) { saveOutbox(); backToDraft(tid, it.text) }
+        case Outbox.remove: outbox.remove(b.value); saveOutbox()
+        default:
+            do {
+                let r: DQueueActReply = try await call("queue.act", ["thread": tid, "action": b.action, "value": b.value])
+                if (b.action == "q-edit" || b.action == "o-edit"), let t = r.text, !t.isEmpty { backToDraft(tid, t) }
+            } catch { queueError[tid] = (error as? DError)?.message ?? error.localizedDescription }
+            await loadQueue(tid)
+        }
+    }
+    @ObservationIgnored private var flushing = false
+    /// Connected again: each unsent message, oldest first, with its clientId; each leaves the outbox when the hub answers. A cut stops it (the next connect goes on).
+    private func flushOutbox(_ g: Int) async {
+        guard !flushing else { return }
+        flushing = true; defer { flushing = false }
+        while g == gen, conn == .online, let it = outbox.next {
+            do {
+                let r: DEntryReply = try await call("message.send", ["thread": it.thread, "text": it.text, "clientId": it.clientId])
+                outbox.sent(it.clientId); saveOutbox()
+                put(r.entry, in: it.thread)
+                await loadQueue(it.thread)
+            } catch {
+                if Self.socketGone(error) { return }
+                outbox.sent(it.clientId); saveOutbox()
+                refused(it.thread, it.text, error)
+            }
+        }
+    }
+    nonisolated static func outboxURL(_ hub: String) -> URL {
+        let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        let safe = String(hub.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "." ? $0 : "_" })
+        return d.appendingPathComponent("outbox-" + safe + ".json")
+    }
+    private func loadOutbox() {
+        guard let hub = link.flatMap({ Pairing.key($0) }) else { outbox = Outbox(); return }
+        outbox = Outbox.decoded(try? Data(contentsOf: Self.outboxURL(hub)))
+    }
+    private func saveOutbox() {
+        guard let hub = link.flatMap({ Pairing.key($0) }) else { return }
+        try? outbox.encoded().write(to: Self.outboxURL(hub), options: .atomic)
     }
 
     // MARK: pictures

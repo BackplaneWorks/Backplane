@@ -617,7 +617,12 @@ struct DataThreadView: View {
         buying = true
         Task { do { let t = try await client.buy(id); if !t.isEmpty { client.linkTarget = DLinkTarget(kind: .thread, id: t) } } catch { notice = error.localizedDescription }; buying = false }
     }
-    private var list: [DEntry] { client.entries[id] ?? [] }
+    // a message the hub holds in the queue shows in the strip over the composer, not in the conversation (the row's msg is its entry)
+    private var list: [DEntry] {
+        let all = client.entries[id] ?? []; let q = client.queues[id] ?? []
+        guard !q.isEmpty else { return all }
+        let held = Set(q.map(\.msg)); return all.filter { !held.contains($0.id) && !($0.clientId.map(held.contains) ?? false) }
+    }
     private var working: Bool { thread?.state == "working" || thread?.state == "asking" }
     private var chip: String { guard let t = thread else { return "" }; return t.chip.isEmpty ? "\(t.provider) / \(t.model.isEmpty ? "default" : t.model)" : t.chip }
 
@@ -683,8 +688,13 @@ struct DataThreadView: View {
             if box != nil || asked != nil {
                 DataSecretBox(client: client, thread: id, name0: box ?? asked?.name ?? "", asked: (box == nil || asked?.name == box) ? asked : nil) { box = nil }.id((box ?? "") + (asked?.name ?? ""))
             }
+            let queued = client.queueRows(id)
+            if !queued.isEmpty || client.queueError[id] != nil { DataQueueStrip(client: client, thread: id, rows: queued) }
             composer
         }
+        // Edit in the strip, or a refusal: the text is back in the draft
+        // (the caret goes to its end; negative revs, so they never meet dictation's)
+        .onChange(of: client.draftBack) { _, b in if b.thread == id { text = client.drafts[id] ?? ""; caret = (text.utf16.count, -b.rev) } }
         .onChange(of: client.voice.caret.rev) { _, rev in
             // the hub's dictation wrote this thread's draft: show it and put the caret where it said
             let c = client.voice.caret
@@ -908,6 +918,35 @@ struct DataThreadView: View {
 
 /// A run of tool calls as one line (the desktop's fold row): a tap opens it, each call a line of its own.
 // The thread's background work: a head that folds, its rows, and the Release, Cancel or Stop a row offers. Open while any is at work.
+/// What waits (the desktop's queue strip over the composer, docs/PHONE-DATA.md `thread.queue`): each row's tag and first line, and the buttons it has.
+/// The hub's rows (Queued/Held with Steer, Edit, Remove; a thread elsewhere's Sending, Unsent, Refused with Edit and Remove) and this phone's own
+/// Unsent ones (Outbox.swift) look the same; DataClient.queueAct sends each press where it belongs.
+struct DataQueueStrip: View {
+    @Bindable var client: DataClient
+    let thread: String
+    let rows: [DQueueRow]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(rows) { r in
+                HStack(spacing: 8) {
+                    Text(r.tag.uppercased()).dmono(10).foregroundStyle(r.tag == "Refused" ? BackplaneDesign.bad : BackplaneDesign.faint).accessibilityIdentifier("queue.tag")
+                    Text(r.text).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("queue.text")
+                    ForEach(r.buttons.filter { $0.action != "q-up" }, id: \.self) { b in
+                        Button { Task { await client.queueAct(thread, b) } } label: {
+                            Text(b.label).dmono(12).foregroundStyle(b.action == "q-steer" ? BackplaneDesign.accent : b.action.hasSuffix("-remove") ? BackplaneDesign.bad : BackplaneDesign.dim)
+                                .padding(.horizontal, 10).frame(minHeight: 30).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityIdentifier("queue.\(b.action)")
+                    }
+                }.accessibilityElement(children: .contain).accessibilityIdentifier("queue.row")
+            }
+            if let e = client.queueError[thread] { Text(e).dmono(11).foregroundStyle(BackplaneDesign.bad).accessibilityIdentifier("queue.error") }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel)
+        .overlay(alignment: .top) { DLine() }
+        .accessibilityElement(children: .contain).accessibilityIdentifier("thread.queue")
+    }
+}
+
 struct DataWorkPanel: View {
     @Bindable var client: DataClient
     let thread: String
