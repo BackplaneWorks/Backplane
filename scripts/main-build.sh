@@ -50,7 +50,8 @@ while :; do
   git -C "$WT" checkout -q --detach "$t" && git -C "$WT" clean -qfd -e Cargo.lock || { say "cannot check out $t"; sleep "$POLL"; continue; }
   # this loop runs the tip's own main-build.sh: one started from a checkout that is behind (the main checkout's working tree) re-runs itself from the tip it just
   # checked out, so an old copy never keeps building main (an old one published builds without the embedded browser, the guard, voice and the browser helper)
-  if [ -x "$WT/scripts/main-build.sh" ] && [ "$(sha256sum < "$WT/scripts/main-build.sh")" != "$SELF" ]; then say "main-build.sh changed at $(printf %s "$t" | cut -c1-10): restarting from it"; trap - INT TERM EXIT; exec "$WT/scripts/main-build.sh" "$@"; fi
+  # (only into a copy that does this too: an older one takes its own pid for another builder and leaves)
+  if [ -x "$WT/scripts/main-build.sh" ] && [ "$(sha256sum < "$WT/scripts/main-build.sh")" != "$SELF" ] && grep -q '^SELF=' "$WT/scripts/main-build.sh"; then say "main-build.sh changed at $(printf %s "$t" | cut -c1-10): restarting from it"; trap - INT TERM EXIT; exec "$WT/scripts/main-build.sh" "$@"; fi
   # the build script of the commit being built, not this one's: a gate main adds (the guard, the smoke start) takes effect with the next build, not when this loop is restarted
   DB=$WT/scripts/dev-build.sh; [ -x "$DB" ] || DB=$HERE/dev-build.sh
   ( exec setsid env BQ_MAIN=1 MAIN_PREV="$b" BUILD_ROOT="$WT" HOST_TARGET="$TG/host" GPUI_TARGET="$TG/gpui" VOICE_TARGET="$TG/voice" "$DB" --gate ) &
