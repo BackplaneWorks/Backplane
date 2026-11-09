@@ -59,6 +59,7 @@ dependencies = [
  "prost",
  "prost-reflect",
  "rayon",
+ "ruzstd",
  "serde",
  "serde_json",
  "sha2",
@@ -566,6 +567,12 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "ruzstd"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7c1c839d570d835527c9a5e4db7cb2198683a988cb9d7293fc8674e6bd58fc8"
 
 [[package]]
 name = "serde"
