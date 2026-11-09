@@ -1,7 +1,7 @@
 //! What a turn's end writes: the thread's
 //! summary clock `summary.at.<t>` when a summary is due, the alert record `alert.<t>` (done, fail, or the quiet record that moves the settle
 //! memory), and one `told.<id>` mark for every alert record that has a kind. Pure over the state BEFORE the batch.
-//! Deliberate or open (docs/PARITY.md): `Triage.managed` reads false until mail lands; `notify.all` (the older `Notice.of` rule) reads off;
+//! Deliberate or open (docs/PARITY.md): `Triage.managed` reads false until mail lands; `notify.all` (the older `Notice.of` rule) reads off and, on, alerts every completed or failed turn end (room exchanges stay quiet);
 //! the ask alert records of `Alerts.asks`; `Run.settle` (mail runs); the summary text itself (`Sum.out`, a seam of the agents lane).
 use super::json::*;
 use crate::state::{State, Thread, Turn};
@@ -160,10 +160,15 @@ pub fn policy_end(post: &State, seq: u64, now: u64, thread: &str, state: &str) -
     // the quiet record: the settle memory moves to the person's message
     let quiet = |mem: &str, old: &str| if mem == old { vec![] } else { vec![alert_set(seq, now, thread, "", "", mem, "")] };
     let settle = |on: bool, kind: &str| if on { vec![alert_set(seq, now, thread, kind, &format!("turn-{}", fr_local(thread)), pid, "")] } else { quiet(pid, &mem) };
+    // notify.all (Notice.of, 0.14's older rule): every other end of a turn that completed or failed is an alert too, the settle memory untouched
+    let all = notify_on(post, "all");
+    let every = |kind: &str| vec![alert_set(seq, now, thread, kind, &format!("turn-{}", fr_local(thread)), &mem, "")];
     match n {
-        0 => vec![], // notify.all (Notice.of) reads off: with mem == old the quiet record writes nothing
-        1 => settle(notify_on(post, "settled"), "done"),
-        2 => settle(notify_on(post, "settled"), "fail"),
+        0 if all && state == "completed" => every("done"),
+        0 if all && state == "failed" => every("fail"),
+        0 => vec![], // with mem == old the quiet record writes nothing
+        1 => settle(notify_on(post, "settled") || all, "done"),
+        2 => settle(notify_on(post, "settled") || all, "fail"),
         _ => quiet(pid, &mem),
     }
 }
@@ -333,5 +338,24 @@ mod tests {
         assert_eq!(rec(ask("Bash", "a\tb\nc")), "ask\task-t1\tmem1\t50.9\tBash a b c", "one line");
         st.apply_line(r#"{"$":"SettingSet","key":"notify.needs","value":"off","at":2}"#);
         assert_eq!(alert_asks(&st, 9, &[ask("Bash", "x")])[0]["value"], "\t\tmem1\t50.9\t", "needs alerts off: the quiet record that keeps the memory");
+    }
+
+    /// Each Notify me for switch changes what a turn's end writes: Settled the record of the person's own work, Everything the record of any other end.
+    #[test] fn the_notify_switches_change_what_an_end_records() {
+        let mut st = State::new();
+        st.apply_line(r#"{"$":"ThreadCreated","id":"t1","project":"","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}"#);
+        st.apply_line(r#"{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"do it","at":2}"#);
+        let kind = |st: &State, state: &str| policy_end(st, 1, 9, "t1", state).first().map(|e| e["value"].as_str().unwrap().split('\t').next().unwrap().to_string()).unwrap_or_default();
+        assert_eq!((kind(&st, "completed"), kind(&st, "failed")), ("done".into(), "fail".into()), "the person's work settles: on by default");
+        st.apply_line(r#"{"$":"SettingSet","key":"notify.settled","value":"off","at":3}"#);
+        assert_eq!((kind(&st, "completed"), kind(&st, "failed")), (String::new(), String::new()), "Settled off: the quiet record, no kind");
+        st.apply_line(r#"{"$":"SettingSet","key":"notify.settled","value":"on","at":4}"#);
+        // an end nobody asked for (the person's message was already settled): quiet until Everything is on
+        st.apply_line(r#"{"$":"SettingSet","key":"alert.t1","value":"\t\tm1\t1.1\t","at":5}"#);
+        assert_eq!((kind(&st, "completed"), kind(&st, "failed"), kind(&st, "stopped")), (String::new(), String::new(), String::new()));
+        st.apply_line(r#"{"$":"SettingSet","key":"notify.all","value":"on","at":6}"#);
+        assert_eq!((kind(&st, "completed"), kind(&st, "failed"), kind(&st, "stopped")), ("done".into(), "fail".into(), String::new()), "Everything: every completed or failed end, never a stop");
+        let rec = policy_end(&st, 1, 9, "t1", "completed")[0]["value"].as_str().unwrap().to_string();
+        assert_eq!(rec, "done\tturn-t1\tm1\t9.1\t", "the settle memory stays where it was");
     }
 }

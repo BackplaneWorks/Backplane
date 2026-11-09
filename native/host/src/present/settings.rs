@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("notifications", "Notifications"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -95,13 +95,53 @@ fn threads(st: &State, session: &Value) -> Vec<Value> {
         row("Webhook", "Posts when Notify me for would. A settle or a failure, an ask, a merge, a reminder or a note.", vec![]),
         row_f("Address", if bad { "The address must be http or https." } else { "An http or https address. Empty turns the webhook off." }, vec![field("whurl", "https://example.com/hook", url)], vec![btn("Save", "hook-url", "", false)]),
         row_f("Secret file", "A path to the file that holds the secret. Empty uses the hub's default file. The secret itself is never shown.", vec![field("whsec", "Path to the secret file", sec)], vec![btn("Save", "hook-secret", "", false)]),
-        row("Notify me for", "Phone and desktop alerts. The rest stays in the app as unread.", vec![]),
+        row("Notify me for", "Which alerts reach you, quiet hours and phones are under Notifications.", vec![btn("Notifications ›", "settings-page", "notifications", false)]),
     ];
+    v
+}
+
+/// The quiet window's two ends as `(from, to)`: the setting's own, else the default; None when quiet hours are off.
+pub fn quiet_ends(st: &State) -> Option<(String, String)> {
+    let raw = set(st, crate::push::QUIET, "").trim();
+    let spec = if raw.is_empty() { crate::push::QUIET_DEFAULT } else { raw };
+    let (a, b) = spec.split_once('-')?; crate::push::window(spec)?; Some((a.trim().to_string(), b.trim().to_string()))
+}
+/// What `notify.quiet` may become from two typed times: `HH:MM-HH:MM` the push gate reads, else None (the page says so).
+pub fn quiet_spec(from: &str, to: &str) -> Option<String> {
+    let ok = |t: &str| t.len() == 5 && t.as_bytes()[2] == b':';
+    let (from, to) = (from.trim(), to.trim());
+    (ok(from) && ok(to)).then(|| format!("{from}-{to}")).filter(|s| crate::push::window(s).is_some())
+}
+
+/// Settings > Notifications: which alerts reach the person (the hub decides each one: `state/turnend.rs`), and what the phones' push may do: quiet hours, whether an
+/// urgent ask passes them, and each phone's mute. `info["push.devices"]` is the hub's list of phones that hear a push (`push::devices_info`): `[{h, name, mute}]`, `h` a
+/// handle that is not the token. Every client draws these rows (the desktop through the presenter, the phones through `notify.page`).
+pub fn notifications(st: &State, session: &Value, info: &Value) -> Vec<Value> {
+    let mut v = vec![row("Notify me for", "Phone and desktop alerts. The rest stays in the app as unread.", vec![])];
     for (kind, name, note) in [("needs", "Needs me", "Approvals, questions and anything an agent is blocked on until you act."),
         ("settled", "Settled", "Work you gave a thread is finished, failed, or its branch merged. Once per piece of work."),
-        ("reminders", "Reminders", "Reminders and digests you scheduled."), ("all", "Everything", "Also every turn end and room exchange, as before.")] {
+        ("reminders", "Reminders", "Reminders and digests you scheduled."), ("all", "Everything", "Also every other turn that completes or fails, not only the work you gave a thread.")] {
         let on = match set(st, &format!("notify.{kind}"), "") { "on" => true, "off" => false, _ => kind != "all" };
         v.push(row(name, note, chips(&["on", "off"], onoff(on), &format!("notify.{kind}"))));
+    }
+    v.push(row("Phones", "Only your uberbot pushes to a phone, and a phone window open on the thread is not pushed to.", vec![]));
+    let ends = quiet_ends(st);
+    v.push(row("Quiet hours", "A push waits until the end of quiet hours, in your time zone, and goes then as one.",
+        vec![btn("on", "notify-quiet", "on", ends.is_some()), btn("off", "notify-quiet", "off", ends.is_none())]));
+    if let Some((from, to)) = ends {
+        let f = if session["drafts"]["@f.qfrom"].is_string() { draft(session, "@f.qfrom").to_string() } else { from };
+        let t = if session["drafts"]["@f.qto"].is_string() { draft(session, "@f.qto").to_string() } else { to };
+        let bad = draft(session, "@quiet.err") == "bad";
+        v.push(row_f("Quiet from and until", if bad { "Times are HH:MM, 24 hours, and not the same." } else { "HH:MM, 24 hours." }, vec![field("qfrom", "22:00", &f), field("qto", "07:00", &t)], vec![btn("Save", "notify-quiet", "save", false)]));
+    }
+    let urgent = set(st, crate::push::QUIET_URGENT, "") == "on";
+    v.push(row("Urgent asks come through", "An approval or a question that blocks an agent is pushed in quiet hours, and to a muted phone.", chips(&["on", "off"], onoff(urgent), crate::push::QUIET_URGENT)));
+    let devices = info["push.devices"].as_str().and_then(|d| serde_json::from_str::<Vec<Value>>(d).ok()).unwrap_or_default();
+    if devices.is_empty() { v.push(row("iPhones that hear a push", "None yet. An iPhone registers when its app opens with alerts allowed. An Android phone hears alerts while its app is connected, and follows the switches above.", vec![])) }
+    for d in &devices {
+        let (h, mute) = (s(d, "h"), d["mute"] == true);
+        v.push(row(s(d, "name"), if mute { "Muted: hears only what urgent asks let through." } else { "Hears alerts." },
+            vec![btn("hears", "notify-mute", &format!("{h}=off"), !mute), btn("muted", "notify-mute", &format!("{h}=on"), mute)]));
     }
     v
 }
@@ -572,7 +612,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string()), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string()), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -597,7 +637,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
             if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
-            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@kinstall": "", "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
+            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.qfrom": Value::Null, "@f.qto": Value::Null, "@quiet.err": "", "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@kinstall": "", "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
         "dev-star" => { send(session, hub, "star.replay", json!({}), &mut cmds, &mut rid); json!({"open": {"settings": false}}) }
         "update-check" => { send(session, hub, "update.check", json!({}), &mut cmds, &mut rid); json!({}) }
@@ -648,11 +688,18 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             send(session, hub, "machines.page.act", json!({"action": a, "value": value, "fields": fields}), &mut cmds, &mut rid);
             if a == "machine-pair" { json!({"drafts": {"@f.maddr": "", "@f.mcode": "", "@f.fcode": ""}}) } else if a == "machine-rename" { json!({"drafts": {"@f.rfrom": "", "@f.rname": ""}}) } else { json!({}) }
         }
+        // Notifications: every press goes to the hub as notify.page.act, with the times as typed (the phones send the same)
+        a if a.starts_with("notify-") => {
+            let fields = json!({"qfrom": draft(session, "@f.qfrom"), "qto": draft(session, "@f.qto")});
+            send(session, hub, "notify.page.act", json!({"action": a, "value": value, "fields": fields}), &mut cmds, &mut rid);
+            if a == "notify-quiet" && value != "save" { json!({"drafts": {"@f.qfrom": Value::Null, "@f.qto": Value::Null, "@quiet.err": ""}}) } else if a == "notify-quiet" {
+                if quiet_spec(draft(session, "@f.qfrom"), draft(session, "@f.qto")).is_some() { json!({"drafts": {"@quiet.err": ""}}) } else { json!({"drafts": {"@quiet.err": "bad"}}) } } else { json!({}) }
+        }
         "key-sent" => json!({"drafts": {"@f.kname": "", "@key.err": "", "@keys.rm": ""}}),
         "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname" | "qfrom" | "qto") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }
@@ -717,7 +764,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Notifications", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn about_says_what_this_windows_browser_tab_is() {

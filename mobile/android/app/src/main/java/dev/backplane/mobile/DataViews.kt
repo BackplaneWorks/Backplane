@@ -852,11 +852,13 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             if (DataVoice.available) VoiceSettings()
             if (DataDevices.available) { DevicesSettings(); DLine() }
             if (DataMachines.available) { MachinesSettings(); DLine() }
+            if (DataNotify.available) { NotifySettings(); DLine() }
             DMono(Msg.android_alerts_head, dfaint)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(true to "on", false to "off").forEach { (v, l) -> DBtn(if (v) Msg.option_on else Msg.option_off, alerts == v, modifier = Modifier.testTag("settings.alerts.$l")) { alerts = v; AppSettings.putAlerts(v) } } }
             DMono(Msg.android_alerts_note, dcs.onSurfaceVariant, 11, lines = 3)
-            if (DataClient.has("push")) {
+            // an older hub has no Notifications page: its quiet hours and urgent switch are drawn here
+            if (DataClient.has("push") && !DataNotify.available) {
                 val quietOn = DataClient.quiet.isNotEmpty() && DataClient.quiet != "off"
                 DMono(Msg.android_quiet_head)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

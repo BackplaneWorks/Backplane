@@ -104,9 +104,12 @@ internal fun PageRows(title: String, tag: String, rows: List<org.json.JSONObject
     val scope = rememberCoroutineScope()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val typed = remember { mutableStateMapOf<String, String>() }
+    // the row last pressed: a refusal is drawn under it, where the person is looking, not at the top of a long page
+    var pressed by remember { mutableStateOf("") }
+    val atRow = error.isNotEmpty() && rows.any { it.optString("label") == pressed }
     Column(Modifier.fillMaxWidth().testTag("settings.$tag"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         DMono(title, dfaint)
-        if (error.isNotEmpty()) DMono(Tr.t(error), dcs.error, 12)
+        if (error.isNotEmpty() && !atRow) DMono(Tr.t(error), dcs.error, 12)
         rows.forEach { r ->
             val label = r.optString("label"); val tone = r.optString("tone")
             Column(Modifier.fillMaxWidth().testTag("$tag.row.$label"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -129,11 +132,12 @@ internal fun PageRows(title: String, tag: String, rows: List<org.json.JSONObject
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     r.optJSONArray("buttons").objs().forEachIndexed { i, b ->
                         DBtn(Tr.t(b.optString("label")), b.optBoolean("on"), modifier = Modifier.testTag("$tag.btn.$label.$i")) {
-                            val action = b.optString("action"); val value = b.optString("value"); val sent = typed.toMap()
+                            val action = b.optString("action"); val value = b.optString("value"); val sent = typed.toMap(); pressed = label
                             if (!pageLocal(ctx, action, value)) scope.launch { act(action, value, sent)?.let { typed.remove(it) } }
                         }
                     }
                 }
+                if (atRow && label == pressed) Text(Tr.t(error), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("$tag.error.$label"))
             }
             DLine()
         }
