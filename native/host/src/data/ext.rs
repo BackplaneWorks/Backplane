@@ -82,11 +82,14 @@ pub fn queue_now(thread: &str) -> Value {
 /// Who holds what: every lock with a holder or a queue.
 pub async fn locks_now(hub: &Hub) -> Value { let g = hub.model().await; let now = crate::agents::now_s(); json!(crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::panels::locks(st, now, |t| g.threads.get(t).map_or_else(|| t.to_string(), |x| x.title.clone())))).unwrap_or_default()) }
 async fn thread_now(hub: &Arc<Hub>, id: &str) -> Result<Value, Value> {
+    if machines::is_far(id) { let g = hub.model().await; return thread_row(hub, &g, id, &HashMap::new(), &HashMap::new()).ok_or_else(|| err("unknown thread")) }
     // the planner's events are committed before its reply; read the model again for the thread as it is now
     let g = hub.model().await; let asks = open_ask_counts(hub);
     thread_json(hub, &g, id, &asks).ok_or_else(|| err("unknown thread"))
 }
 fn known_thread(m: &crate::model::Model, id: &str) -> bool { m.threads.get(id).map_or(false, |t| !t.deleted) }
+/// A thread of this hub, or one of a linked machine this hub mirrors.
+fn known_any(hub: &Hub, m: &crate::model::Model, id: &str) -> bool { known_thread(m, id) || (machines::is_far(id) && hub.far().map_or(false, |f| f.has(id))) }
 
 fn contains(hay: &str, needle: &str) -> bool { hay.to_lowercase().contains(needle) }
 
@@ -257,7 +260,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
 
 async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Value> {
     let (th, act) = (s(p, "thread"), s(p, "action"));
-    if !known_thread(&*hub.model().await, th) { return Err(err("unknown thread")) }
+    if !known_any(hub, &*hub.model().await, th) { return Err(err("unknown thread")) }
     if act == "rename" {
         if s(p, "title").trim().is_empty() { return Err(err("title")) }
         rpc(hub, c, "thread.rename", json!({"thread":th,"title":s(p, "title")})).await?;
@@ -341,6 +344,8 @@ pub fn notify_of(e: &Value) -> Value { json!({"kind":e["kind"],"thread":e["threa
 
 // ---- viewers, files, browser (each the hub's own request, for the folder of the thread) ----
 async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {
+    // a thread of a linked machine: the folder over there (its mirror holds the project's root and the thread's worktree)
+    if let Some((_, root)) = machines::far_root(hub, thread) { return Ok(root) }
     crate::files::root_of(hub, thread).await.map(|p| p.to_string_lossy().into_owned()).ok_or_else(|| err("that thread has no folder"))
 }
 /// A reply's `result`, or its error.
@@ -354,12 +359,15 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
     let th = s(p, "thread");
     Some(async {
         match m {
+            "viewer.files" if machines::is_far(th) => { let (_, root) = machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
+                let r = result(rpc(hub, c, "boards.list", json!({"thread":th})).await?); Ok(machines::board_files(&root, s(&r, "board_default"))) }
+            "viewer.refs" | "viewer.compare" | "mech.list" if machines::is_far(th) => Err(err("That is shown on its own machine only for now.")),
             "viewer.files" => { let root = root_of(hub, th).await?; let f = crate::files::kicad::project::read(&root); Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch})) }
             "viewer.watch" => {
                 let root = root_of(hub, th).await?; let kind = s(p, "kind"); let path = s(p, "path");
                 if path.split('/').any(|x| x == "..") || path.contains('\0') { return Err(err("that path is not in this project")) }
                 let path = if path.is_empty() || crate::plat::fs::is_abs(path) { path.to_string() } else { format!("{root}/{path}") };
-                let mut q = json!({"kind":kind,"root":root,"path":path});
+                let mut q = machines::on_link(json!({"kind":kind,"root":root,"path":path}), th);
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() } // the model the phone has cached (plot::mesh_id, hex): not sent again
                 let r = result(rpc(hub, c, "kicad.watch", q).await?);
@@ -388,8 +396,8 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
             "viewer.probe" => rpc(hub, c, "kicad.probe", json!({"key":s(p, "key"),"name":s(p, "name"),"value":s(p, "value")})).await.map(result),
             "viewer.info" => rpc(hub, c, "kicad.info", json!({"key":s(p, "key"),"at":p["at"],"idx":p["idx"]})).await.map(result),
             "files.entries" => {
-                let r = rpc(hub, c, "files.dir", json!({"thread":th,"path":s(p, "path")})).await?; let res = result(r);
-                Ok(json!({"dir":s(p, "path"),"entries":entries_of(s(&res, "fmEntries"))}))
+                let r = rpc(hub, c, "files.dir", json!({"thread":th,"path":s(p, "path"),"dir":s(p, "path")})).await?; let res = result(r);
+                Ok(json!({"dir":s(p, "path"),"entries":entries_of(machines::listing_of(&res))}))
             }
             "mech.list" => {
                 // the hub's listing is `cksum` lines (`<crc> <size> <path>`): models (step, stp, glb) and pictures, as paths
@@ -459,7 +467,7 @@ async fn voice(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value
 async fn review(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Result<Value, Value>> {
     let th = s(p, "thread");
     Some(async {
-        if !known_thread(&*hub.model().await, th) { return Err(err("unknown thread")) }
+        if !known_any(hub, &*hub.model().await, th) { return Err(err("unknown thread")) }
         match m {
             "viewer.diff" => {
                 let mut q = json!({"thread":th}); for k in ["from", "to"] { if p.get(k).is_some() { q[k] = p[k].clone() } }

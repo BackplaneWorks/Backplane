@@ -92,6 +92,27 @@ struct DEntry: Codable, Equatable, Identifiable {
     }
 }
 
+/// Where a project or thread of another machine runs (docs/PHONE-DATA.md, Your machines): `short` on a row, `name` in the header, `label` "on desktop" after a project's name,
+/// `runs` "runs on desktop" over the composer; `away` draws it dimmer.
+struct DMark: Codable, Equatable {
+    var name: String; var short: String; var away: Bool; var label: String; var runs: String
+    enum CodingKeys: String, CodingKey { case name, short, away, label, runs }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); name = c.str(.name); short = c.str(.short); away = c.bool(.away); label = c.str(.label); runs = c.str(.runs) }
+}
+/// Where a new thread may start: `value` is the project's id there (this machine's, or `<link>~<id>`).
+struct DNewOn: Codable, Equatable, Hashable {
+    var value: String; var label: String; var away: Bool
+    enum CodingKeys: String, CodingKey { case value, label, away }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); value = c.str(.value); label = c.str(.label); away = c.bool(.away) }
+}
+/// A chip of the machine switcher over the lists: "" every machine, "@here" this one, else a linked machine's name.
+struct DChip: Codable, Equatable, Identifiable {
+    var value: String; var label: String; var on: Bool; var away: Bool; var hint: String
+    var id: String { value }
+    enum CodingKeys: String, CodingKey { case value, label, on, away, hint }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); value = c.str(.value); label = c.str(.label); on = c.bool(.on); away = c.bool(.away); hint = c.str(.hint) }
+}
+
 struct DProject: Codable, Equatable, Identifiable {
     var id: String
     var title: String
@@ -102,11 +123,15 @@ struct DProject: Codable, Equatable, Identifiable {
     var waiting: Int
     var icon: String   // the badge the hub names: an icon and its colour as "#rrggbb"
     var css: String
-    enum CodingKeys: String, CodingKey { case id, title, root, threadCount, settledCount, updatedAt, waiting, icon, css }
+    var mark: DMark?         // another machine's project: where it is
+    var also: String         // this machine's project that is also on a linked machine: "also on desktop"
+    var newOn: [DNewOn]      // where a new thread can start, when more than one machine has this project
+    enum CodingKeys: String, CodingKey { case id, title, root, threadCount, settledCount, updatedAt, waiting, icon, css, mark, also, newOn }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); root = c.str(.root); threadCount = c.int(.threadCount); settledCount = try? c.decode(Int.self, forKey: .settledCount); updatedAt = c.int(.updatedAt); waiting = c.int(.waiting)
         icon = c.str(.icon); css = c.str(.css)
+        mark = try? c.decode(DMark.self, forKey: .mark); also = c.str(.also); newOn = (try? c.decode([DNewOn].self, forKey: .newOn)) ?? []
     }
 }
 
@@ -130,22 +155,23 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var parent: String   // the thread it is a subthread of; "" at the top level
     var history: Bool    // an old Scratch chat (feature history): listed under Conversation history, never under a project
     var status: String   // the sidebar dot's word (feature status): finished is the desktop's green dot (a turn done, not yet settled); "" from an older hub
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status }
+    var mark: DMark?     // the machine it runs on when it is another one; nil for this hub's own
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); settled = c.bool(.settled); settledAt = c.int(.settledAt); archived = c.bool(.archived)
-        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status)
+        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status); mark = try? c.decode(DMark.self, forKey: .mark)
     }
 }
 
 // replies
-struct DProjectsPage: Decodable { var projects: [DProject]; var next: String?
-    enum CodingKeys: String, CodingKey { case projects, next }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); projects = (try? c.decode([DProject].self, forKey: .projects)) ?? []; next = try? c.decode(String.self, forKey: .next) } }
-struct DThreadsPage: Decodable { var threads: [DThread]; var next: String?
-    enum CodingKeys: String, CodingKey { case threads, next }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; next = try? c.decode(String.self, forKey: .next) } }
+struct DProjectsPage: Decodable { var projects: [DProject]; var next: String?; var machines: [DChip]?
+    enum CodingKeys: String, CodingKey { case projects, next, machines }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); projects = (try? c.decode([DProject].self, forKey: .projects)) ?? []; next = try? c.decode(String.self, forKey: .next); machines = try? c.decode([DChip].self, forKey: .machines) } }
+struct DThreadsPage: Decodable { var threads: [DThread]; var next: String?; var machines: [DChip]?
+    enum CodingKeys: String, CodingKey { case threads, next, machines }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; next = try? c.decode(String.self, forKey: .next); machines = try? c.decode([DChip].self, forKey: .machines) } }
 struct DEntriesPage: Decodable { var thread: DThread?; var entries: [DEntry]; var next: String?
     enum CodingKeys: String, CodingKey { case thread, entries, next }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); thread = try? c.decode(DThread.self, forKey: .thread); entries = (try? c.decode([DEntry].self, forKey: .entries)) ?? []; next = try? c.decode(String.self, forKey: .next) } }

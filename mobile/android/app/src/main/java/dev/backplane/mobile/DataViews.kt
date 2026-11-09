@@ -285,6 +285,7 @@ internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier,
 private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var projMenu by remember { mutableStateOf<DProject?>(null) }
+    var pickNew by remember { mutableStateOf<DProject?>(null) }   // a project on more than one machine: where the new thread starts
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
@@ -315,6 +316,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             if (DataClient.has("search")) Box(Modifier.weight(1f)) { DField(q, { q = it }, "Search projects and threads", Modifier.testTag("home.searchfield")) } else Spacer(Modifier.weight(1f))
             IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, "Add project", tint = dcs.onSurfaceVariant) }
         }
+        MachineChips()
         DLine()
         if (DataClient.locks.isNotEmpty()) LocksStrip(open)
         if (q.isNotBlank() && DataClient.has("search")) { SearchResults(q, open); return@Column }
@@ -343,9 +345,13 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                         Icon(Icons.Default.FolderOpen, null, tint = dok, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(8.dp))
                         Box(Modifier.size(8.dp).background(runCatching { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(p.css)) }.getOrDefault(dcs.onSurfaceVariant)).testTag("proj.badge.${p.id}"))
                         Spacer(Modifier.width(6.dp))
-                        DMono(p.title.uppercase(), dcs.onSurfaceVariant, 12, Modifier.weight(1f))
+                        DMono(p.title.uppercase(), dcs.onSurfaceVariant, 12)
+                        // another machine's project says where it is ("on desktop"); one that is also on a linked machine says so ("also on desktop")
+                        val where = p.mark?.let { it.label + if (it.away) " · away" else "" } ?: p.also
+                        if (where.isNotEmpty()) { Spacer(Modifier.width(8.dp)); DMono(where, dfaint, 11, Modifier.testTag("proj.where.${p.id}")) }
+                        Spacer(Modifier.weight(1f))
                         if (p.waiting > 0) { DMono("${p.waiting}", dcs.error, 11, bold = true); Spacer(Modifier.width(6.dp)) }
-                        IconButton(onClick = { newThread(p.id) }, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Add, "New thread in ${p.title}", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                        IconButton(onClick = { if (p.newOn.size > 1) pickNew = p else newThread(p.id) }, modifier = Modifier.size(40.dp).testTag("proj.new.${p.id}")) { Icon(Icons.Default.Add, "New thread in ${p.title}", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
                     }
                 }
                 if (!closed) {
@@ -393,8 +399,25 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, "room") { openRoom(r) } } }
         }
         projMenu?.let { ProjectMenus(it, true) { projMenu = null } }
+        pickNew?.let { p -> ActionSheet(p.title, p.newOn.map { n -> (n.label + if (n.away) " · away" else "") to { pickNew = null; newThread(n.value) } }) { pickNew = null } }
     }
 }
+
+/** The machine switcher over the lists: one chip each for every machine, this one and each linked one, in the hub's words (none with no linked machine). */
+@Composable
+private fun MachineChips() {
+    val chips = DataClient.chips; if (chips.isEmpty()) return
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 10.dp, end = 10.dp, bottom = 8.dp).testTag("home.machines"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        chips.forEach { c ->
+            Box(Modifier.border(BorderStroke(1.dp, if (c.on) dcs.primary else dcs.outlineVariant)).clickable { DataClient.pickMachine(c.value) }.padding(horizontal = 10.dp, vertical = 5.dp).alpha(if (c.away && !c.on) .55f else 1f).testTag("home.machine.${c.value.ifEmpty { "all" }}")) {
+                DMono(c.label + if (c.away) " · away" else "", if (c.on) dcs.primary else dcs.onSurfaceVariant, 11)
+            }
+        }
+    }
+}
+/** The machine mark of a row: its short name, quiet; dimmer with "away" when that machine did not answer. */
+@Composable
+private fun MarkText(m: DMark?, tag: String = "") { if (m != null) { DMono(m.short + if (m.away) " · away" else "", dfaint, 11, Modifier.testTag(tag)); Spacer(Modifier.width(6.dp)) } }
 
 @Composable
 internal fun ThreadRowPublic(t: DThread, onClick: () -> Unit) = ThreadRow(t, onClick)
@@ -414,7 +437,7 @@ private fun ThreadRow(t: DThread, onClick: () -> Unit, depth: Int = 0, kids: Int
     Row(Modifier.fillMaxWidth()
         // the finger going down reads it again: by the tap's end the thread is usually here (the person: the phone must be fast, 09-26, 11-05)
         .pointerInput(t.id) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false); DataClient.prefetch(t.id, touch = true) } }
-        .combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(start = (8 + 16 * depth.coerceAtMost(4)).dp, end = 12.dp).alpha(if (t.settled) .55f else 1f).testTag("row.${t.id}"), verticalAlignment = Alignment.Top) {
+        .combinedClickable(onClick = onClick, onLongClick = { menu = true }).padding(start = (8 + 16 * depth.coerceAtMost(4)).dp, end = 12.dp).alpha(if (t.mark?.away == true) .5f else if (t.settled) .55f else 1f).testTag("row.${t.id}"), verticalAlignment = Alignment.Top) {
         Box(Modifier.width(22.dp).height(36.dp).then(if (kids > 0) Modifier.clickable(onClick = toggle).testTag("row.kids.${t.id}") else Modifier), contentAlignment = Alignment.Center) {
             if (kids > 0) Icon(if (open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, if (open) "Hide its $kids subthreads" else "Show its $kids subthreads", tint = dfaint, modifier = Modifier.size(16.dp))
         }
@@ -431,6 +454,7 @@ private fun ThreadRow(t: DThread, onClick: () -> Unit, depth: Int = 0, kids: Int
         Row(Modifier.padding(top = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             if (kids > 0 && !open) { DMono("$kids", dfaint, 11, Modifier.testTag("row.kidcount.${t.id}")); Spacer(Modifier.width(6.dp)) }
             if (t.waiting > 0) { DMono("${t.waiting}", dcs.error, 11, bold = true); Spacer(Modifier.width(6.dp)) }
+            MarkText(t.mark, "row.mark.${t.id}")
             DMono(dAgo(t.updatedAt), dfaint)
         }
     }
@@ -573,6 +597,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
         }
         ConnBanner(hub)
         thread?.let { StateStrip(it) }
+        thread?.mark?.let { m -> DMono("on ${m.name}" + if (m.away) " · away" else "", dfaint, 11, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).testTag("thread.machine")) }
         DataClient.work[id]?.takeIf { it.rows.isNotEmpty() }?.let { WorkPanel(id, it) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("thread.list"), state = state, contentPadding = PaddingValues(vertical = 8.dp)) {
             if (DataClient.older[id] != null) item("older") { Box(Modifier.fillMaxWidth().clickable { DataClient.loadOlder(id) }.padding(10.dp), contentAlignment = Alignment.Center) { DMono("load earlier", dfaint) } }
@@ -596,6 +621,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
         if (box != null || asked != null) SecretBox(id, box ?: asked?.name ?: "", asked?.takeIf { box == null || it.name == box }, { box = null })
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (notice.isNotEmpty()) DMono(notice, dwarn, 12)
+            thread?.mark?.let { m -> DMono(m.runs + if (m.away) " · away" else "", dfaint, 11, Modifier.testTag("thread.runs")) }
             if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) { Pic(b, 64) }; }
             }
@@ -877,12 +903,15 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
     var choice by remember { mutableStateOf(DNewThreadChoice()) }
     var chip by remember { mutableStateOf("") }
     var picking by remember { mutableStateOf(false) }
-    val title = DataClient.projects.firstOrNull { it.id == project }?.title ?: ""
+    val owner = DataClient.projects.firstOrNull { it.id == project || it.newOn.any { n -> n.value == project } }
+    val title = owner?.title ?: ""
+    val where = owner?.newOn?.firstOrNull { it.value == project }?.takeIf { owner.newOn.size > 1 || owner.mark != null }?.label ?: ""   // "New thread on desktop"
     LaunchedEffect(choice) { if (DataClient.has("picker")) runCatching { DataClient.picker(null, choice) }.onSuccess { chip = it.chip } }
     if (picking) PickerSheet(null, choice, { choice = it }) { picking = false }
     Column(Modifier.fillMaxSize()) {
         DBar("New thread · $title", back)
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (where.isNotEmpty()) DMono(where, dfaint, 11, Modifier.testTag("new.where"))
             DField(text, { text = it }, "What should it do?", Modifier.heightIn(min = 120.dp).testTag("new.text"), 8, dcs.primary)
             if (err.isNotEmpty()) Text(err, color = dcs.error, fontFamily = BpMono, fontSize = 12.sp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {

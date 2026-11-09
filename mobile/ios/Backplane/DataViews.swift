@@ -101,6 +101,7 @@ struct DataThreadsView: View {
     @Binding var path: NavigationPath
     @State private var addingProject = false
     @State private var newThread: String?       // a project id
+    @State private var pickNew: DProject?       // a project on more than one machine: where the new thread starts
     @State private var query = ""
     @State private var renaming: DThread?
     @State private var deleting: DThread?
@@ -132,6 +133,7 @@ struct DataThreadsView: View {
                 Button { addingProject = true } label: { Image(systemName: "plus").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }
                     .accessibilityLabel("Add project").accessibilityIdentifier("data.project.add")
             }.padding(.horizontal, 10).padding(.vertical, 8)
+            DataMachineChips(client: client)
             DLine()
             if !client.locks.isEmpty { DataLocksStrip(client: client, path: $path) }
             if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -180,6 +182,9 @@ struct DataThreadsView: View {
         .confirmationDialog("Remove “\(projectMenu?.title ?? "")” and its threads from the list?", isPresented: Binding(get: { projectMenu != nil }, set: { if !$0 { projectMenu = nil } }), titleVisibility: .visible) {
             Button("Remove project", role: .destructive) { if let p = projectMenu { Task { await client.projectAct(p.id, "remove") } } }
             Button("Keep it", role: .cancel) {}
+        }
+        .confirmationDialog(pickNew?.title ?? "", isPresented: Binding(get: { pickNew != nil }, set: { if !$0 { pickNew = nil } }), titleVisibility: .visible) {
+            ForEach(pickNew?.newOn ?? [], id: \.value) { n in Button(n.label + (n.away ? " · away" : "")) { newThread = n.value; pickNew = nil }.accessibilityIdentifier("data.thread.new.on." + n.value) }
         }
         .sheet(isPresented: $addingProject) { DataNewProjectSheet(client: client) }
         .sheet(item: $badgeProject) { DataBadgeSheet(client: client, project: $0) }
@@ -276,6 +281,9 @@ struct DataThreadsView: View {
                     Image(systemName: shut.contains(p.id) ? "chevron.right" : "chevron.down").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
                     Image(systemName: dataBadgeSymbol(p.icon)).font(.system(size: 13)).foregroundStyle(Color(css: p.css) ?? BackplaneDesign.ok)
                     Text(p.title.uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                    // another machine's project says where it is ("on desktop"); one that is also on a linked machine says so ("also on desktop")
+                    let where_ = p.mark.map { $0.label + ($0.away ? " · away" : "") } ?? p.also
+                    if !where_.isEmpty { Text(where_).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1).accessibilityIdentifier("data.project.where." + p.id) }
                     if p.waiting > 0 { Text("\(p.waiting)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad) }
                     Spacer(minLength: 0)
                 }.frame(height: 40).contentShape(Rectangle())
@@ -284,7 +292,7 @@ struct DataThreadsView: View {
                 Button { path.append(DTermsRoute(project: p.id)) } label: { Image(systemName: "terminal").font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim).frame(width: 36, height: 40).contentShape(Rectangle()) }
                     .buttonStyle(.plain).accessibilityLabel("Terminals in \(p.title)").accessibilityIdentifier("data.terms." + p.id)
             }
-            Button { newThread = p.id } label: { Image(systemName: "plus").font(.system(size: 14)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).contentShape(Rectangle()) }
+            Button { if p.newOn.count > 1 { pickNew = p } else { newThread = p.id } } label: { Image(systemName: "plus").font(.system(size: 14)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).contentShape(Rectangle()) }
                 .buttonStyle(.plain).accessibilityLabel("New thread in \(p.title)").accessibilityIdentifier("data.thread.new." + p.id)
         }
         .padding(.leading, 10).padding(.trailing, 2).background(flash == p.id ? BackplaneDesign.accent.opacity(0.18) : Color.clear).id("project." + p.id).dataRow()
@@ -348,6 +356,25 @@ struct DataConnectionBanner: View {
     }
 }
 
+/// The machine switcher over the lists: a chip each for every machine, this one and each linked one, in the hub's words (nothing with no linked machine).
+struct DataMachineChips: View {
+    let client: DataClient
+    var body: some View {
+        if !client.chips.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(client.chips) { c in
+                        Button { client.pickMachine(c.value) } label: {
+                            Text(c.label + (c.away ? " · away" : "")).dmono(11).foregroundStyle(c.on ? BackplaneDesign.accent : BackplaneDesign.dim).padding(.horizontal, 10).frame(height: 28)
+                                .overlay(Rectangle().stroke(c.on ? BackplaneDesign.accent : BackplaneDesign.faint.opacity(0.5), lineWidth: 1)).opacity(c.away && !c.on ? 0.55 : 1)
+                        }.buttonStyle(.plain).accessibilityLabel(c.hint.isEmpty ? c.label : c.hint).accessibilityIdentifier("data.machine." + (c.value.isEmpty ? "all" : c.value))
+                    }
+                }.padding(.horizontal, 10).padding(.bottom, 8)
+            }.accessibilityIdentifier("data.machines")
+        }
+    }
+}
+
 struct DataThreadRow: View {
     let thread: DThread
     var depth = 0, kids = 0, open = false
@@ -375,9 +402,11 @@ struct DataThreadRow: View {
             Spacer(minLength: 0)
             if kids > 0 && !open { Text("\(kids)").dmono(11).foregroundStyle(BackplaneDesign.faint) }
             if thread.waiting > 0 { Text("\(thread.waiting)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad) }
+            // another machine's thread: its machine's short name before the age, quiet; dimmer with "away" when that machine did not answer
+            if let m = thread.mark { Text(m.short + (m.away ? " · away" : "")).dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.thread.mark." + thread.id) }
             Text(dAgo(thread.updatedAt)).dmono(11).foregroundStyle(BackplaneDesign.faint)
         }
-        .padding(.leading, 4 + 16 * CGFloat(min(depth, 4))).padding(.trailing, 12).padding(.vertical, 8).opacity(thread.settled ? 0.55 : 1).contentShape(Rectangle())
+        .padding(.leading, 4 + 16 * CGFloat(min(depth, 4))).padding(.trailing, 12).padding(.vertical, 8).opacity(thread.mark?.away == true ? 0.5 : thread.settled ? 0.55 : 1).contentShape(Rectangle())
     }
 }
 
@@ -442,13 +471,15 @@ struct DataNewThreadSheet: View {
     @State private var choice = DNewThreadChoice()
     @State private var chip = ""
     @State private var picking = false
+    private var owner: DProject? { client.projects.first { $0.id == project || $0.newOn.contains { $0.value == project } } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(client.projects.first { $0.id == project }?.title ?? "New thread").dmono(14, bold: true).lineLimit(1); Spacer()
+                Text(owner?.title ?? "New thread").dmono(14, bold: true).lineLimit(1); Spacer()
                 Button("Cancel") { dismiss() }.dmono(13).foregroundStyle(BackplaneDesign.dim)
             }
+            if let w = owner?.newOn.first(where: { $0.value == project }), (owner?.newOn.count ?? 0) > 1 || owner?.mark != nil { Text(w.label).dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.thread.new.where") }
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text).dmono(13).scrollContentBackground(.hidden).padding(6).accessibilityIdentifier("data.thread.new.text")
                 if text.isEmpty { Text("What should it do?").dmono(13).foregroundStyle(BackplaneDesign.faint).padding(.horizontal, 11).padding(.vertical, 14).allowsHitTesting(false) }
@@ -583,6 +614,7 @@ struct DataThreadView: View {
             DataStarBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip
+            if let m = thread?.mark { Text("on " + m.name + (m.away ? " · away" : "")).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 3).accessibilityIdentifier("data.thread.machine") }
             if let w = client.work[id], !w.rows.isEmpty { DataWorkPanel(client: client, thread: id, work: w) }
             ScrollViewReader { proxy in
                 ScrollView {
@@ -625,6 +657,7 @@ struct DataThreadView: View {
                 }
             }
             if let order { DataOrderCard(order: order) }
+            if let m = thread?.mark { Text(m.runs + (m.away ? " · away" : "")).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.top, 4).accessibilityIdentifier("data.thread.runs") }
             DataMentionBar(client: client, text: text) { text = $0; client.setDraft(id, $0) }
             DVoiceStrip(client: client, thread: id, draft: text)
             if let b = client.btw[id] { DataBtwCard(btw: b) { client.closeBtw(id) } }

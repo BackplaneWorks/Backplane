@@ -16,7 +16,31 @@ fn size(p: &Value, k: &str, d: u64) -> u16 { p.get(k).and_then(Value::as_u64).un
 fn b64(b: &[u8]) -> String { use base64::Engine; base64::engine::general_purpose::STANDARD.encode(b) }
 fn unb64(t: &str) -> Option<Vec<u8>> { use base64::Engine; base64::engine::general_purpose::STANDARD.decode(t).ok() }
 /// A key a phone may name: a chat terminal's, a shell's, or a thread's own (its id).
-fn key_ok(k: &str) -> bool { !k.is_empty() && k.len() <= 256 && k.bytes().all(|b| b.is_ascii_alphanumeric() || b":._-|".contains(&b)) }
+fn key_ok(k: &str) -> bool { !k.is_empty() && k.len() <= 256 && k.bytes().all(|b| b.is_ascii_alphanumeric() || b":._-|~".contains(&b)) }
+/// A thread's own terminal on a linked machine: its key is the thread's id there (`<link>~<id>`); the shell runs in that thread's folder over there.
+fn far_key(k: &str) -> bool { crate::net::far::is(k) && !k.contains(':') }
+/// Requests about such a terminal that wait on the other machine (a phone's socket runs them off its loop; the rest answer from what the socket already holds).
+pub fn far_wait(m: &str, p: &Value) -> bool { matches!(m, "term.new" | "term.write" | "term.resize") && (far_key(s(p, "key")) || far_key(s(p, "thread"))) }
+/// What a phone is told when it opens or watches a far terminal: nothing yet. The owner's screen arrives as pushes (net/rpc.rs pull loop) and the first one resets it.
+fn far_open(key: &str, p: &Value) -> Value { let (c, r) = (size(p, "cols", 80), size(p, "rows", 24)); json!({"key":key,"g":0,"o":0,"state":"running","cols":c,"rows":r,"title":"shell","running":true,"reset":[c, r],"b":""}) }
+/// The requests of a far terminal that go to the owner: `term.open`, `term.input` (bytes as numbers) and `term.resize` of its viewer methods (net/farview.rs).
+pub async fn far_call(hub: &Arc<Hub>, client: u64, m: &str, p: &Value) -> Result<Value, Value> {
+    let key = if far_key(s(p, "key")) { s(p, "key") } else { s(p, "thread") };
+    let (q, method) = match m {
+        "term.new" => (json!({"thread":key,"cols":size(p, "cols", 80),"rows":size(p, "rows", 24)}), "term.open"),
+        "term.resize" => (json!({"thread":key,"cols":size(p, "cols", 80),"rows":size(p, "rows", 24)}), "term.resize"),
+        _ => {
+            let bs = match p.get("b").and_then(Value::as_str) { Some(b) => unb64(b).ok_or_else(|| err("b is not base64"))?, None => s(p, "text").as_bytes().to_vec() };
+            if bs.len() > term::MAX_INPUT { return Err(err("too much at once")) }
+            if bs.is_empty() { return Ok(json!({"sent":0})) }
+            (json!({"thread":key,"b":bs}), "term.input")
+        }
+    };
+    let n = q["b"].as_array().map_or(0, Vec::len);
+    let r = hub.far_ask(client, method, &q).await.ok_or_else(|| err("no such terminal"))?;
+    if r["ok"] != true { return Err(r["error"].as_str().map(err).unwrap_or(json!("the other machine did not take it"))) }
+    Ok(match m { "term.new" => far_open(key, p), "term.resize" => json!({}), _ => json!({"sent":n}) })
+}
 
 /// The thread of a project's terminals: those of its threads and its own shells.
 async fn in_project(hub: &Hub, project: &str, t: &Value) -> bool {
@@ -26,8 +50,17 @@ async fn in_project(hub: &Hub, project: &str, t: &Value) -> bool {
 }
 
 /// The requests; None: not one of these. `watch` is the socket's set of watched keys.
-pub async fn call(hub: &Arc<Hub>, watch: &mut HashSet<String>, m: &str, p: &Value) -> Option<Result<Value, Value>> {
+pub async fn call(hub: &Arc<Hub>, client: u64, watch: &mut HashSet<String>, m: &str, p: &Value) -> Option<Result<Value, Value>> {
     if !matches!(m, "term.list" | "term.read" | "term.watch" | "term.unwatch" | "term.write" | "term.resize" | "term.new" | "term.stop") { return None }
+    // a far thread's terminal: what the phone holds of it is only what the owner pushed, so a read or watch answers with a reset and the pushes fill it
+    if far_key(s(p, "key")) && matches!(m, "term.read" | "term.watch" | "term.unwatch") && key_ok(s(p, "key")) {
+        let key = s(p, "key");
+        if m == "term.unwatch" { watch.remove(key); return Some(Ok(json!({}))) }
+        if m == "term.watch" { if !watch.contains(key) && watch.len() >= MAX_WATCH { return Some(Err(err("watching too many terminals"))) } watch.insert(key.to_string()); }
+        return Some(Ok(far_open(key, p)))
+    }
+    if far_wait(m, p) { return Some(far_call(hub, client, m, p).await) }
+    if m == "term.list" && crate::net::far::is(s(p, "thread")) { return Some(Ok(json!({"terms":[]}))) }
     let Some(t) = term::get(hub) else { return Some(Err(err("terminals are not available"))) };
     let key = s(p, "key");
     if !matches!(m, "term.list" | "term.new") && !key_ok(key) { return Some(Err(err("no such terminal"))) }
