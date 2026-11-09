@@ -175,6 +175,8 @@ if command -v bun >/dev/null 2>&1 && ( cd "$ROOT/tools/browser" && bun install -
 else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-browser; [ -x "$prev" ] && cp "$prev" "$D/" || echo "warning: no browser helper built (bun missing or the build failed) and none to reuse" >&2; fi
 mark "assets"
 A=${ASSETS:-$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/assets}; [ -d "$A" ] && cp -r "$A" "$D/assets"
+mark "kistack"
+sh "$ROOT/scripts/build-kistack.sh" "$D/kistack" >/dev/null || { echo "dev-build: KiStack missing or not the pinned commit (deploy/kistack.lock)" >&2; exit 1; }
 git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
 [ -z "$HKP" ] || wait "$HKP" 2>/dev/null; [ -s "$HK" ] && cp "$HK" "$D/HAIKU"
 # the last gate: this hub, under this guard, starts and restarts on a real-shaped home, and the build now current can still read what it wrote. Nothing is published otherwise.

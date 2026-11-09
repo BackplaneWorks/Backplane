@@ -156,12 +156,13 @@ jobs:
             cp -r $R/locales $d/locales; strip --strip-unneeded $d/libcef.so ;;
           esac
           cp -r assets $d/assets
+          scripts/build-kistack.sh $d/kistack   # KiStack's skills beside the hub (deploy/kistack.lock; agents/host.rs looks in <exe dir>/kistack)
           # the client's generated assets (assets/GENERATED.md): without them it draws no icons and no cats
           [ -s $d/assets/icons.json ] && [ "$(ls $d/assets/cat-rigs | wc -l)" -ge 576 ] || { echo "::error::assets/icons.json or assets/cat-rigs missing from the archive"; exit 1; }
           git rev-parse HEAD > $d/COMMIT
           scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
           # everything a dev cut has (scripts/dev-build.sh), or the job fails: a release must not lose a feature a dev cut showed working
-          need="backplane-hub backplane-gpui backplane backplane-voice silero_vad.onnx backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs"
+          need="backplane-hub backplane-gpui backplane backplane-voice silero_vad.onnx backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs kistack/REVISION"
           need="$need licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt"
           case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
           for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
@@ -183,10 +184,11 @@ jobs:
           (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser.exe")
           (cd tools/step2glb && bun install --frozen-lockfile && bun build --compile step2glb.ts --outfile "$PWD/../../$d/backplane-step2glb.exe")
           cp -r assets $d/assets
+          scripts/build-kistack.sh $d/kistack
           [ -s $d/assets/icons.json ] && [ "$(ls $d/assets/cat-rigs | wc -l)" -ge 576 ] || { echo "::error::assets/icons.json or assets/cat-rigs missing from the archive"; exit 1; }
           git rev-parse HEAD > $d/COMMIT
           scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
-          for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe silero_vad.onnx backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs \
+          for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe silero_vad.onnx backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs kistack/REVISION \
                    licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt; do
             [ -e "$d/$f" ] || { echo "::error::$f missing from the windows-x64 archive"; exit 1; }; done
           ls -la $d
