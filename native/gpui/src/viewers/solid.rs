@@ -554,6 +554,7 @@ impl SolidPage {
             Msg::Mesh(SolidFrame::Bad(e)) => { self.note = e; self.set_stage(None, cx); }
             Msg::Mesh(SolidFrame::Stage(key, text, ms, about)) => {
                 if key == self.key && !text.is_empty() { self.failed = false; }
+                if text.is_empty() && self.stage.as_ref().is_some_and(|s| s.key != key) { return } // another source's end: not this one's stage
                 let st = (!text.is_empty()).then(|| Stage { key, text, since: std::time::Instant::now().checked_sub(std::time::Duration::from_millis(ms)).unwrap_or_else(std::time::Instant::now), about });
                 if st.is_none() && self.stage.as_ref().is_some_and(|s| s.text == BUILDING) { return } // the model is still being decoded here
                 self.set_stage(st, cx);
