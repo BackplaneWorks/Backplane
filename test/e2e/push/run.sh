@@ -7,10 +7,10 @@ set -u
 MODE=${1:?sink or apns}; HUB=${2:?hub binary}; ROOT=$(cd "$(dirname "$0")/../../.." && pwd); OUT=${3:-$ROOT/build/push-e2e/$MODE}
 mkdir -p "$HOME/.cache/respectful-push"; T=$(mktemp -d "$HOME/.cache/respectful-push/e2e.XXXXXX"); PORT=${PORT:-3860}; MAC_DIR=${MAC_DIR:-backplane-ios-push}; SIM=${SIM:-bp-push}; APP_ID=${APP_ID:-dev.backplane.works}
 M=${MAC_SSH:-$HOME/.cache/respectful-push/mac-ssh}; rm -rf "$OUT"; mkdir -p "$OUT"   # no result of an earlier run is ever read as this one's
-pids=(); stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; pkill -f -- "--home $T/home" 2>/dev/null; }
+. "$ROOT/test/e2e/lib/own-group.sh"; pids=(); stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; own_stop; }
 trap stop EXIT; trap "exit 143" INT TERM HUP
 cd "$ROOT/test/e2e/push"
-MODE=$MODE PERF_REPO=$ROOT bun ctl.mjs "$T" "$HUB" "$PORT" > "$OUT/ctl.log" 2>&1 & pids+=($!)
+MODE=$MODE PERF_REPO=$ROOT own bun ctl.mjs "$T" "$HUB" "$PORT" > "$OUT/ctl.log" 2>&1; pids+=($!)
 for _ in $(seq 60); do grep -q '^ready' "$OUT/ctl.log" && break; sleep 1; done
 grep -q '^ready' "$OUT/ctl.log" || { echo "the hub did not start"; tail -5 "$OUT/ctl.log"; exit 1; }
 $M -N -o ExitOnForwardFailure=yes -R $PORT:127.0.0.1:$PORT -R $((PORT+1)):127.0.0.1:$((PORT+1)) hs-mac-mini & pids+=($!)

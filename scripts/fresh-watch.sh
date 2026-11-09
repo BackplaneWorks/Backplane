@@ -24,7 +24,13 @@ cur() { head -1 "$DEV/CURRENT" 2>/dev/null || true; }
 is_bad() { [ "$1" = "$(cat "$DEV/.fresh-bad" 2>/dev/null)" ] || cut -f1 "$DEV/BAD" 2>/dev/null | grep -qxF -- "$1"; }
 mark_bad() { printf '%s\n' "$1" > "$DEV/.fresh-bad"; cut -f1 "$DEV/BAD" 2>/dev/null | grep -qxF -- "$1" || printf '%s\t%s\n' "$1" "$2" >> "$DEV/BAD"; }
 # which build the guard ended up on: it may have gone back by itself
-guard_build() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("build",""))' "$H/guard/status.json" 2>/dev/null || true; }
+# (only a guard that is running: a dead one's status.json stays behind, and a build without a guard read it as "did not hold, the guard is back on" its old build, 2026-11-09 10:54)
+guard_build() { python3 -I -c 'import json,os,sys
+s=json.load(open(sys.argv[1])); p=int(s.get("guardPid") or 0)
+if p <= 0: sys.exit()
+try: os.kill(p, 0)
+except OSError: sys.exit()
+print(s.get("build",""))' "$H/guard/status.json" 2>/dev/null || true; }
 SHOWN=$DEV/.fresh-shown   # the build the app was last relaunched on (the hub can stay on an older one when only the window changed)
 shown() { cat "$SHOWN" 2>/dev/null || true; }
 running_dir() { local p; p=$(pid hub); alive "$p" && dirname "$(readlink "/proc/$p/exe" 2>/dev/null)" || true; }
@@ -67,7 +73,7 @@ while :; do
   fi
   waiting=; prev=$(running_dir); say "relaunching on $c ($what)"; status relaunching "Relaunching on build ${c##*-}"
   if go "$DEV/builds/$c" "$what"; then printf '%s\n' "$c" > "$SHOWN"; clear_status; g=$(guard_build)
-    if [ "$what" = both ] && [ -n "$g" ] && [ "$g" != "$c" ]; then tell "Build $c did not hold; the guard is back on $g"; else tell "Now running $c"; fi
+    if [ "$what" = both ] && [ -n "$g" ] && [ "$g" != "$c" ]; then tell "Build $c did not hold; the guard is back on $g"; elif [ ! -x "$DEV/builds/$c/backplane" ]; then tell "Now running $c without the guard: a crash is not restarted"; else tell "Now running $c"; fi
   else
     clear_status; mark_bad "$c" "did not come up"; tell "Build $c did not come up; going back. See $D/hub.log"
     [ -n "$prev" ] && [ -x "$prev/backplane-hub" ] && go "$prev" both && { printf '%s\n' "$(basename "$prev")" > "$SHOWN"; say "back on $(basename "$prev")"; } || tell "Going back failed: the app is down. Logs are in $D"

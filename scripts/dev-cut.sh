@@ -25,6 +25,9 @@ for f in backplane-hub backplane-gpui; do
   [ -x "$src/$f" ] || die "no $f in $src"
   [ "$(head -c4 "$src/$f" | od -An -c | tr -d ' ')" = '177ELF' ] || die "$src/$f is not a program for this machine"
 done
+# a build without the guard runs its hub bare: no crash restart, no rollback, and fresh-watch.sh reads a dead guard's status (2026-11-09 10:54: a stale builder copy published
+# two such builds, and the watcher said the first "did not hold" while it ran unguarded). DEV_CUT_NO_GUARD=1: a test's own dev folder, never the person's.
+[ -x "$src/backplane" ] || [ -n "${DEV_CUT_NO_GUARD:-}" ] || die "no guard (backplane) in $src: a build without it runs the hub unguarded (build with scripts/dev-build.sh)"
 name=$(head -1 "$src/COMMIT" 2>/dev/null || true)
 [ -n "$name" ] || name=$(cat "$src/backplane-hub" "$src/backplane-gpui" | sha256sum | cut -c1-10)
 id=$(date +%Y%m%d-%H%M%S)-$(printf '%s' "$name" | tr -c 'A-Za-z0-9._+-' '_')

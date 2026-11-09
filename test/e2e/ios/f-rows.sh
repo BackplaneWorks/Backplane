@@ -8,13 +8,13 @@ set -u
 HUB=$(realpath "${1:?hub binary}"); ROOT=$(cd "$(dirname "$0")/../../.." && pwd); OUT=${2:-$ROOT/build/e2e-ios-f}; OUT=$(mkdir -p "$OUT" && cd "$OUT" && pwd)
 PORT=${PORT:-$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));p=s.getsockname()[1];s.close();print(p)')}
 MAC_DIR=${MAC_DIR:-backplane-ios-push}; SIM=${SIM:-bp-f-rows}; APP_ID=${APP_ID:-dev.backplane.gpui}; M=${MAC_SSH:-ssh}
-rm -rf "$OUT"/*; pids=()
-stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; pkill -f -- "--home $OUT/hub/home" 2>/dev/null; }
+. "$ROOT/test/e2e/lib/own-group.sh"; rm -rf "$OUT"/*; pids=()
+stop() { curl -s -m3 "http://127.0.0.1:$((PORT+1))/stop" >/dev/null 2>&1; sleep 1; for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done; own_stop; }
 trap stop EXIT; trap "exit 143" INT TERM HUP
-bun "$ROOT/test/e2e/pixel-hub.mjs" "$HUB" "$OUT/hub" "$PORT" > "$OUT/hub.out" 2>&1 & pids+=($!)
+own bun "$ROOT/test/e2e/pixel-hub.mjs" "$HUB" "$OUT/hub" "$PORT" > "$OUT/hub.out" 2>&1; pids+=($!)
 for _ in $(seq 60); do [ -f "$OUT/hub/state.json" ] && break; sleep 1; done
 [ -f "$OUT/hub/state.json" ] || { echo "the hub did not start"; tail -5 "$OUT/hub.out"; exit 1; }
-bun "$ROOT/test/e2e/ios/f-ctl.mjs" "$HUB" "$OUT" "$PORT" > "$OUT/ctl.log" 2>&1 & pids+=($!)
+own bun "$ROOT/test/e2e/ios/f-ctl.mjs" "$HUB" "$OUT" "$PORT" > "$OUT/ctl.log" 2>&1; pids+=($!)
 for _ in $(seq 20); do grep -q '^ready' "$OUT/ctl.log" && break; sleep 0.5; done
 $M -N -o ExitOnForwardFailure=yes -R $PORT:127.0.0.1:$PORT -R $((PORT+1)):127.0.0.1:$((PORT+1)) hs-mac-mini & pids+=($!)
 sleep 3; kill -0 "${pids[-1]}" 2>/dev/null || { echo "the tunnel did not start"; exit 1; }

@@ -4,7 +4,8 @@
 #     (a background adb loop and a hub-like sleeper) and not one adb call is logged after the lock is free
 #  2. the input guard (lib/pixel-adb.sh): with the phone showing Google Play, `inp` makes no `input` call at all; with the gpui app on top it does
 #  3. pixel-f-rows.sh makes no adb call except through A()/inp(), and takes the lock itself (no caller's flock)
-set -u; HERE=$(cd "$(dirname "$0")" && pwd); T=$(mktemp -d "${TMPDIR:-/tmp}/pixel-lock-test.XXXXXX"); trap 'pkill -f -- "$T/" 2>/dev/null; rm -rf "$T"' EXIT
+set -u; HERE=$(cd "$(dirname "$0")" && pwd); T=$(mktemp -d "${TMPDIR:-/tmp}/pixel-lock-test.XXXXXX"); [ -d "$T" ] || exit 2
+trap 'for f in "$T"/*.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; done; rm -rf "$T"' EXIT   # the children by their pidfiles, never by a pattern (lib/own-group.sh says why)
 fails=0; ok() { echo "PASS $1"; }; no() { echo "FAIL $1"; fails=$((fails+1)); }
 LOG=$T/adb.log; FAKE=$T/fake-adb; export FAKE_LOG=$LOG PIXEL_LOCK=$T/test.lock
 cat > $FAKE <<'EOF'
@@ -18,7 +19,7 @@ cat > $T/child.sh <<EOF
 #!/bin/bash
 . "$HERE/lib/pixel-lock.sh"; pixel_locked_run "\$0" "\$@"
 (while :; do "$FAKE" -s X shell input tap 1 1; sleep 0.1; done) &          # an adb loop that outlives the script
-(exec -a "$T/hub-like" sleep 300) &                                          # a hub-like child
+(echo \$BASHPID > "$T/hub-like.pid"; exec -a "$T/hub-like" sleep 300) &      # a hub-like child, its pid in a file
 "$FAKE" -s X shell input tap 2 2
 case "\${1:-}" in term) sleep 2; kill -TERM \$\$;; kill) sleep 2; kill -KILL \$\$;; esac
 sleep 3
@@ -31,7 +32,8 @@ for mode in exit term kill; do
   if flock -n -x "$PIXEL_LOCK" true; then ok "$mode: the lock is free once the run ends"; else no "$mode: the lock is still held after the run"; fi
   n1=$(wc -l < $LOG); sleep 1; n2=$(wc -l < $LOG)
   [ "$n1" = "$n2" ] && ok "$mode: no adb call after the lock was released ($n1 calls, none later)" || no "$mode: $((n2-n1)) adb call(s) after the lock was released"
-  pgrep -f -- "$T/hub-like" > /dev/null && no "$mode: a child survived the run" || ok "$mode: nothing the run started survives it"
+  [ -s "$T/hub-like.pid" ] || no "$mode: the hub-like child wrote no pidfile"
+  kill -0 "$(cat "$T/hub-like.pid" 2>/dev/null)" 2>/dev/null && no "$mode: a child survived the run" || ok "$mode: nothing the run started survives it"
 done
 # --- 2 ---
 . "$HERE/lib/pixel-adb.sh"
