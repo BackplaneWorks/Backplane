@@ -253,7 +253,8 @@ pub fn ensure_view(pv: &mut PlotView, frame: &Frame, w: f32, h: f32) -> Option<V
 
 /// A card as the hub's info text again ("title;k=v;..."), what the hub keeps as the probe.
 pub fn card_text(card: &super::plot::Card) -> String {
-    std::iter::once(card.title.replace(';', ",")).chain(card.rows.iter().map(|(k, v)| if v.is_empty() { k.replace(';', ",") } else { format!("{}={}", k.replace(';', ","), v.replace(';', ",")) })).collect::<Vec<_>>().join(";")
+    std::iter::once(card.title.replace(';', ",")).chain(card.rows.iter().map(|(k, v)| if v.is_empty() { k.replace(';', ",") } else { format!("{}={}", k.replace(';', ","), v.replace(';', ",")) }))
+        .chain((!card.src.is_empty()).then(|| format!("g={}\u{1}{}", card.src.replace(';', ","), card.g))).collect::<Vec<_>>().join(";")
 }
 /// The probe the person made or cleared, kept by the hub for this project's board (0.14's probe:<root>|<board> setting): every page and every opening shows it again.
 pub fn keep_probe(app: &mut Backplane, card: Option<&super::plot::Card>) {
@@ -263,16 +264,21 @@ pub fn keep_probe(app: &mut Backplane, card: Option<&super::plot::Card>) {
 }
 /// The probe this window just told the hub (and when): until the hub's copy says the same (or 3 s pass), the hub's older probe is not drawn over it.
 static PROBE_SENT: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
-/// The pieces of the probed part or net on the plot `key` on canvas `slot`: a part by its `ref` on the schematic and the board, a net by its name on the board
-/// (the schematic's info has no nets). The hub answers with the pieces of the chunks this client holds (`kicad.probe`); they arrive as `Event::Probe`.
+/// The pieces of the probed part or connection on the plot `key` on canvas `slot`: a part by its `ref` on the schematic and the board (every unit of it);
+/// a board net by its name on the board, and on a schematic the groups its pads' pins are in; a schematic wire, label or junction by its group on its own
+/// sheet, and on the board the nets of the pins in it (the hub finds those through the other drawing, `card.src`). The hub answers with the pieces of the
+/// chunks this client holds (`kicad.probe`); they arrive as `Event::Probe`.
 pub fn probe_one(app: &mut Backplane, slot: usize, key: &str, card: &super::plot::Card) {
     if key.is_empty() { return }
     let get = |k: &str| card.rows.iter().find(|r| r.0 == k).map(|r| r.1.clone()).filter(|v| !v.is_empty());
     let tag: &'static str = ["probe0", "probe1", "probe2"][slot.min(2)];
+    let board = |k: &str| k.starts_with("0|");
     // (a schematic pin names its part as `symbol`: the part is probed)
-    for (name, value) in [("ref", get("ref").or_else(|| get("symbol"))), ("net", get("net"))] {
+    let net = get("net").and_then(|n| if board(key) { Some(n) } else if board(&card.src) { Some(format!("{}\u{1}{n}", card.src)) } else { None });
+    // (a pin or a symbol is its part; a wire, label or junction is its connection)
+    let group = (!card.g.is_empty() && !card.src.is_empty() && !card.title.starts_with("pin") && !card.title.starts_with("symbol")).then(|| format!("{}\u{1}{}", card.src, card.g));
+    for (name, value) in [("ref", get("ref").or_else(|| get("symbol"))), ("net", net), ("g", group)] {
         let Some(value) = value else { continue };
-        if name == "net" && !key.starts_with("0|") { continue }
         let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": name, "value": value})), tag));
     }
 }
@@ -281,7 +287,10 @@ pub fn cross_probe(app: &mut Backplane, slot: usize, card: &super::plot::Card) {
     let panes = app.data["thread"]["viewer"]["panes"].as_array().cloned().unwrap_or_default();
     let targets: Vec<(usize, String)> = if panes.len() >= 3 { vec![(1, panes[0]["key"].as_str().unwrap_or("").to_string()), (2, panes[1]["key"].as_str().unwrap_or("").to_string())] }
         else { vec![(slot, app.screens.plot.frame.as_ref().map(|f| f.key.clone()).unwrap_or_default())] };
-    let text = card_text(card);
+    // the source it was picked on goes with it: a connection is found on the other drawing through it
+    let mut card = card.clone();
+    if card.src.is_empty() { card.src = if slot == 0 { app.screens.plot.frame.as_ref().map(|f| f.key.clone()) } else { panes.get(slot - 1).and_then(|p| p["key"].as_str()).map(str::to_string) }.unwrap_or_default(); }
+    let (card, text) = (&card, card_text(&card));
     // (lit here at once: the hub's copy of this probe, when it comes back, finds it already lit)
     for (s, key) in targets { app.screens.pv(s).probe_at = format!("{key}\u{1}{text}"); probe_one(app, s, &key, card); }
     keep_probe(app, Some(card));

@@ -188,17 +188,17 @@ impl Shown {
     }
 }
 /// a board's items, form by form, in any thread (Pcb2.one)
-fn board_form<'b>(f: &'b [u8], i: usize, sig: bool) -> Vec<Item> {
+fn board_form<'b>(f: &'b [u8], i: usize, sig: bool, nets: &board::Nets) -> Vec<Item> {
     let mut o = vec![];
     let x = sexpr::parse(f);
-    board::form(&mut o, &x, i, if sig { board::hash(f, board::FNV) } else { 0 });
+    board::form_named(&mut o, &x, i, if sig { board::hash(f, board::FNV) } else { 0 }, nets);
     o
 }
 fn board_plot(fs: &[&[u8]]) -> (Plot, String) {
-    let sh = Shown::new(0);
+    let (sh, nets) = (Shown::new(0), board::nets(fs));
     let per: Vec<(Vec<Option<Piece>>, Bx)> = par_map(fs.len(), &|i| {
         let mut e = Bx::empty();
-        let v: Vec<Option<Piece>> = board_form(fs[i], i, false).into_iter().map(|it| sh.take(it, &mut e)).collect();
+        let v: Vec<Option<Piece>> = board_form(fs[i], i, false, &nets).into_iter().map(|it| sh.take(it, &mut e)).collect();
         (v, e)
     });
     let (mut edge, total) = (Bx::empty(), per.iter().map(|p| p.0.len()).sum::<usize>());
@@ -209,7 +209,8 @@ fn board_plot(fs: &[&[u8]]) -> (Plot, String) {
 }
 /// Pcb2.items.text
 pub fn board_items(fs: &[&[u8]]) -> Vec<Item> {
-    let mut per = par_map(fs.len(), &|i| board_form(fs[i], i, true));
+    let nets = board::nets(fs);
+    let mut per = par_map(fs.len(), &|i| board_form(fs[i], i, true, &nets));
     let mut o = vec![];
     for i in form_order(fs.len()) { o.append(&mut per[i as usize]) }
     o
@@ -284,6 +285,48 @@ pub fn info_find(t: &str, sig: u32, idx: usize) -> String {
 }
 
 /// Every piece an info file holds with the field `name=value` (a `;`-separated entry of its text), as (chunk sig, piece index): what a cross-probe lights.
+/// Every piece's info in an info file, as (chunk sig, piece index, info).
+fn info_all(t: &str) -> Vec<(u32, usize, &str)> {
+    let (mut by_sig, mut rest): (std::collections::HashMap<u32, &str>, &str) = (Default::default(), t);
+    while !rest.is_empty() {
+        let Some((s, r)) = rest.split_once(' ') else { break };
+        let Some((n, r)) = r.split_once(' ') else { break };
+        let n: usize = n.parse().unwrap_or(0);
+        let end = r.char_indices().nth(n).map(|(i, _)| i).unwrap_or(r.len());
+        if n > 0 { if let Ok(sg) = s.parse::<u32>() { by_sig.insert(sg, &r[..end]); } }
+        rest = r[end..].strip_prefix('\n').unwrap_or(&r[end..]);
+    }
+    by_sig.into_iter().flat_map(|(sig, text)| text.split('\0').enumerate().map(move |(i, p)| (sig, i, p))).collect()
+}
+fn field<'a>(info: &'a str, k: &str) -> Option<&'a str> { info.split(';').skip(1).find_map(|f| f.strip_prefix(k).and_then(|r| r.strip_prefix('='))) }
+/// A reference without a schematic unit's letters ("U1A" is unit A of U1, as the board names it); "R12" and "TP" stay.
+pub fn ref_base(r: &str) -> &str { let t = r.trim_end_matches(|c: char| c.is_ascii_uppercase()); if t.len() < r.len() && t.ends_with(|c: char| c.is_ascii_digit()) { t } else { r } }
+/// A pin or pad's (part, number): a schematic pin ("pin 3;...;symbol=U1A") by its part's board reference, a board pad ("pad 3;...;ref=U1").
+fn pin_of(info: &str) -> Option<(String, String)> {
+    let head = info.split(';').next().unwrap_or("");
+    if let Some(n) = head.strip_prefix("pin ") { return field(info, "symbol").map(|r| (ref_base(r).to_string(), n.to_string())) }
+    head.strip_prefix("pad ").and_then(|n| field(info, "ref").map(|r| (r.to_string(), n.to_string())))
+}
+/// Cross-probing a connection between a schematic and its board, through the pins it touches: the board nets of the pins in schematic group `g`
+/// (`sch` the schematic's info file, `pcb` the board's), or, the other way, the schematic groups holding the pins of board net `net`.
+pub fn nets_of_group(sch: &str, pcb: &str, g: &str) -> Vec<String> {
+    let pins: std::collections::HashSet<(String, String)> = info_all(sch).into_iter().filter(|p| field(p.2, "g") == Some(g)).filter_map(|p| pin_of(p.2)).collect();
+    let mut out: Vec<String> = info_all(pcb).into_iter().filter(|p| pin_of(p.2).map_or(false, |k| pins.contains(&k))).filter_map(|p| field(p.2, "net").map(str::to_string)).filter(|n| !n.is_empty()).collect();
+    out.sort(); out.dedup(); out
+}
+pub fn groups_of_net(pcb: &str, sch: &str, net: &str) -> Vec<String> {
+    let pins: std::collections::HashSet<(String, String)> = info_all(pcb).into_iter().filter(|p| field(p.2, "net") == Some(net)).filter_map(|p| pin_of(p.2)).collect();
+    let mut out: Vec<String> = info_all(sch).into_iter().filter(|p| pin_of(p.2).map_or(false, |k| pins.contains(&k))).filter_map(|p| field(p.2, "g").map(str::to_string)).filter(|g| !g.is_empty()).collect();
+    out.sort(); out.dedup(); out
+}
+/// `info_scan` for any of `values`; a part (`name` "ref") is also its units or its whole: U1 lights U1A, U1B and U1C on a schematic, U1C lights U1 on a
+/// board (and only U1C on the schematic).
+pub fn info_scan_any(t: &str, name: &str, values: &[String]) -> Vec<(u32, usize)> {
+    let want: std::collections::HashSet<&str> = values.iter().map(String::as_str).collect();
+    let hit = |v: &str| want.contains(v) || (name == "ref" && (want.contains(ref_base(v)) || values.iter().any(|w| ref_base(w) == v)));
+    info_all(t).into_iter().filter(|p| field(p.2, name).map_or(false, hit)).map(|p| (p.0, p.1)).collect()
+}
+
 /// The last line of a sig wins, as `info_find` does.
 pub fn info_scan(t: &str, name: &str, value: &str) -> Vec<(u32, usize)> {
     let want = format!("{name}={value}");
@@ -316,6 +359,19 @@ mod tests {
         let mut o = form_order(1000); o.sort(); assert_eq!(o, (0..1000).collect::<Vec<u32>>());
     }
     #[test] fn thickness() { assert_eq!(thick(b"(kicad_pcb (general (thickness 1.2) (x 1)))"), 1200); assert_eq!(thick(b"(kicad_pcb)"), 1600); }
+    #[test] fn a_connection_crosses_between_schematic_and_board_through_its_pins() {
+        let line = |sig: u32, t: &str| format!("{sig} {} {t}\n", t.chars().count());
+        let sch = &line(5, "wire;g=7\0pin 3;name=K;symbol=U1A;g=7\0pin 1;symbol=R1;g=7\0pin 2;symbol=R1;g=9");
+        let pcb = &line(8, "pad 3;net=Net-(U1A-K);ref=U1\0pad 1;net=Net-(U1A-K);ref=R1\0pad 2;net=GND;ref=R1\0track;net=GND");
+        assert_eq!(nets_of_group(sch, pcb, "7"), ["Net-(U1A-K)"]); assert_eq!(nets_of_group(sch, pcb, "9"), ["GND"]);
+        assert_eq!(groups_of_net(pcb, sch, "GND"), ["9"]); assert_eq!(groups_of_net(pcb, sch, "Net-(U1A-K)"), ["7"]);
+        let mut lit = info_scan_any(sch, "g", &["7".into()]); lit.sort(); assert_eq!(lit, [(5, 0), (5, 1), (5, 2)], "the wire and both pins of the group");
+        let parts = &line(1, "symbol;ref=U1A\0symbol;ref=U1B\0symbol;ref=U12\0symbol;ref=TP");
+        let mut u = info_scan_any(parts, "ref", &["U1".into()]); u.sort(); assert_eq!(u, [(1, 0), (1, 1)], "every unit of U1, not U12");
+        assert_eq!(info_scan_any(&line(2, "pad 1;ref=U1"), "ref", &["U1C".into()]), [(2, 0)]);
+        assert_eq!(info_scan_any(parts, "ref", &["U1B".into()]), [(1, 1)], "a unit tapped on the schematic is that unit there");
+        assert_eq!((ref_base("U1A"), ref_base("R12"), ref_base("TP"), ref_base("SW1AB")), ("U1", "R12", "TP", "SW1"));
+    }
     #[test] fn info_lookup() {
         let t = "7 6 a\0日\0x\0\n9 0 \n11 2 b\0\n7 2 c\0\n";
         assert_eq!(info_find(t, 7, 0), "c"); assert_eq!(info_find(t, 11, 0), "b"); assert_eq!(info_find(t, 11, 5), ""); assert_eq!(info_find(t, 9, 0), ""); assert_eq!(info_find(t, 1, 0), "");
