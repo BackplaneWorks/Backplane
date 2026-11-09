@@ -219,6 +219,32 @@ impl CefPage {
         let s = t.st.lock().unwrap();
         json!({"ok": true, "url": s.url, "title": s.title, "loading": s.loading, "frame": [w, h], "non_white_samples": lit, "taken": self.taken, "paints": t.paints.load(std::sync::atomic::Ordering::Relaxed), "click_to_pixel_ms": self.lat_ms, "resize_to_frame_ms": t.resize_ms(), "view_x": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.x)), "view_y": self.bounds.lock().unwrap().map_or(0., |b| f32::from(b.origin.y)), "tabs": self.tabs.len(), "cdp_port": self.port, "pumped": cef::pumped()})
     }
+    /// The `{"browser":{"op":...}}` step on embedded Chromium (BrowserPage::script names the ops); answers the same report as the frame page.
+    pub fn browser_op(&mut self, v: &serde_json::Value, cx: &mut Context<Self>) -> serde_json::Value {
+        use serde_json::json;
+        let op = v["op"].as_str().unwrap_or("report");
+        let r = match (op, self.tab().cloned()) {
+            ("new_tab", _) => { self.new_tab(v["url"].as_str().unwrap_or("about:blank"), cx); json!({"ok": true}) }
+            ("close_tab", _) => match self.tabs.get(v["index"].as_u64().unwrap_or(0) as usize) { Some(t) => { t.close(); json!({"ok": true}) } None => json!({"ok": false, "error": "no such tab"}) },
+            ("report", _) => json!({"ok": true}),
+            (_, None) => json!({"ok": false, "error": "no tab"}),
+            ("goto", Some(t)) => { self.take_over(); t.navigate(v["url"].as_str().unwrap_or("about:blank")); json!({"ok": true}) }
+            ("back", Some(t)) => { t.back(); json!({"ok": true}) }
+            ("forward", Some(t)) => { t.forward(); json!({"ok": true}) }
+            ("reload", Some(t)) => { t.reload(); json!({"ok": true}) }
+            ("type", Some(t)) => { self.take_over(); t.focus(true); for c in v["text"].as_str().unwrap_or("").chars() { if let Some(vk) = cef::vk(&c.to_string()) { t.key(0, 0, vk, vk, vk as u16); } let mut b = [0u16; 2]; for u in c.encode_utf16(&mut b) { t.key(2, 0, 0, 0, *u); } if let Some(vk) = cef::vk(&c.to_string()) { t.key(1, 0, vk, vk, vk as u16); } } json!({"ok": true}) }
+            ("press", Some(t)) => { self.take_over(); let k = match v["key"].as_str().unwrap_or("Enter") { "Enter" => "enter", "Backspace" => "backspace", "Tab" => "tab", "Escape" => "escape", k => k }; match cef::vk(k) { Some(vk) => { t.key(0, 0, vk, vk, vk as u16); if vk == 13 { t.key(2, 0, 13, 13, 13); } t.key(1, 0, vk, vk, vk as u16); json!({"ok": true}) } None => json!({"ok": false, "error": "no key code"}) } }
+            ("scroll", Some(t)) => { self.take_over(); let (w, h) = t.size(); t.mouse_move(w as i32 / 2, h as i32 / 2, 0, false); t.wheel(w as i32 / 2, h as i32 / 2, 0, 0, -(v["dy"].as_f64().unwrap_or(400.0) as i32)); json!({"ok": true}) }
+            ("click", Some(t)) => { let (w, h) = t.size(); let (x, y) = ((v["x"].as_u64().unwrap_or(500) as u32 * w / 1000) as i32, (v["y"].as_u64().unwrap_or(500) as u32 * h / 1000) as i32);
+                self.take_over(); t.focus(true); t.mouse_move(x, y, 0, false); t.mouse_click(x, y, 16, 0, false, 1); t.mouse_click(x, y, 0, 0, true, 1); json!({"ok": true, "at": [x, y]}) }
+            (o, _) => json!({"ok": false, "error": format!("unknown op {o}")}),
+        };
+        let mut r = r; r["op"] = op.into();
+        let (w, h, lit) = self.stats;
+        if let Some(t) = self.tab() { let s = t.st.lock().unwrap(); r["url"] = s.url.clone().into(); r["title"] = s.title.clone().into(); r["loading"] = s.loading.into(); r["load_error"] = s.load_error.clone().into(); }
+        r["tabs"] = self.tabs.len().into(); r["frame"] = json!([w, h]); r["non_white_samples"] = lit.into(); r["status"] = self.status.clone().into();
+        r
+    }
     fn mouse(&mut self, e: &MouseDownEvent, b: u8, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus); self.bar_edit = false; self.take_over();
         self.buttons |= 1 << (4 + b); let (x, y) = self.local(e.position);
