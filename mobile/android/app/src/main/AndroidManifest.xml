@@ -45,6 +45,11 @@
                 <data android:scheme="${urlScheme}" />
             </intent-filter>
         </activity>
+        <!-- while threads work: keeps the socket, so a thread's alert reaches the phone (LiveService.kt) -->
+        <service
+            android:name=".LiveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <!-- the camera's photo for a page's file field -->
         <provider
             android:name="androidx.core.content.FileProvider"
