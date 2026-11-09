@@ -227,7 +227,7 @@ impl Backplane {
             }
             "fold" => {
                 let value = string(&e, "value");
-                self.controls.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
+                self.screens.parts.rows_ctl.push(CtlEntry { id: format!("fold:{id}"), label: text.clone(), ctl: Ctl::Fold(value.clone()) });
                 // the label is one clipped line beside the chevron, never wider than the row; the chevron is centred on it
                 div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().child(
                     with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).w_full().min_w_0().overflow_hidden().flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).cursor_pointer()
@@ -274,35 +274,10 @@ impl Backplane {
         } else { inner.into_any_element() };
         div().w_full().flex().justify_center().child(inner).into_any_element()
     }
-}
-
-impl Render for Backplane {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.screens.plotview.layers_key = crate::keys::hint(&self.local, "layers");
-        let t_render = std::time::Instant::now();
-        if crate::perf::on() { crate::perf::frame_start(); cx.defer(|_| crate::perf::frame_end()); }
-        crate::screens::improvements::tick(self, window, cx);
-        crate::screens::desk::tick(self, window, cx);
-        self.term_layout(window, cx);
-        self.term_script(window, cx);
-        if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
-        if self.models_pending { self.models_pending = false; self.picker_toggle(window, cx); }
-        if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); } }
-        if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
-        if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); }
-        if self.screens.setup.want_focus { self.screens.setup.want_focus = false; window.focus(&self.screens.setup_focus); }
-        if self.screens.palette.focus { self.screens.palette.focus = false; if let Some(i) = self.screens.palette.input.clone() { window.focus(&i.focus_handle(cx)); } }
-        self.frame_marks(window, cx);
-        self.hints_frame(window, cx);
+    /// The sidebar's rows, a part of the window (part.rs): the uberbot, projects and their threads, the Active view, pagers, conversation history, Older, BOTS and ROOMS.
+    pub(crate) fn sidebar_part(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let light = self.light();
-        if self.swatches { return crate::swatch::view(light).into_any_element(); }
-        if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
-        if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
-        if self.pair.is_some() { let (el, ctl) = crate::screens::pair::view(self, light, window, cx); self.controls = ctl; return el; }
         let c = |name: &str| theme::color(light, name);
-        self.screens.reg.borrow_mut().begin(); self.screens.images.frame();
-        let reg = self.screens.reg.clone();
-        if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
         // bots: (name, mood, note, look seed) copied out so the cat cache can be filled
         // the uberbot (flagged by the hub) is drawn in its own spot above the projects, so it is kept apart from the BOTS list
         let uber_data: Vec<(String, String, String, u64, String, bool)> = self.data["bots"].as_array().into_iter().flatten().filter(|b| b["uber"].as_bool().unwrap_or(false))
@@ -312,13 +287,9 @@ impl Render for Backplane {
             .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0), string(b, "id"), b["sel"].as_bool().unwrap_or(false))).collect();
         let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
         let started = self.started;
-        let thread = &self.data["thread"];
-        let dictating = self.screens.voice.views.get(&self.selected).map_or(false, |v| v["on"] == true);
-        let has_thread = thread.is_object();
-        // sidebar rows
         let mut rows: Vec<AnyElement> = Vec::new();
         if let Some(r) = crate::screens::onboard::resume_row(cx, light, &self.data) { rows.push(r); }
-        let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
+        let mut ctl: Vec<CtlEntry> = Vec::new();
         for ((bname, mood, note, _, bid, bsel), rig) in uber_data.iter().zip(uber_rigs.iter()) {
             let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
             ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
@@ -424,11 +395,71 @@ impl Render for Backplane {
                 }
             }
         }
+        self.screens.parts.side_ctl = ctl;
+        div().id("sidebar").size_full().overflow_y_scroll().children(rows).into_any_element()
+    }
+    /// The thread's messages, a part of the window (part.rs): a list that draws only the rows on screen.
+    pub(crate) fn timeline_part(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let light = self.light();
+        let c = |name: &str| theme::color(light, name);
+        self.screens.reg.borrow_mut().begin_rows(); self.screens.parts.rows_ctl.clear();
+        let thread = &self.data["thread"];
+        let has_thread = thread.is_object();
+        let no_rows = thread["entries"].as_array().map_or(true, |e| e.is_empty());
+        div().id("timeline").size_full().relative().flex().flex_col()
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
+            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| this.scroll_note(e)))
+            .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx)))
+            .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }))))
+            .when(!no_rows, |d| d.child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0()))
+            .children(thread["live"].as_array().into_iter().flatten().map(|live| div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_2().child(string(live, "text")))))
+            // after the list has drawn its rows: put them in reading order, and see whether history is wanted
+            .child(canvas({ let (me, reg) = (cx.entity().downgrade(), self.screens.reg.clone()); move |_, _, cx| {
+                let Some(this) = me.upgrade() else { return };
+                { let rows = &this.read(cx).data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
+                cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
+            } }, |_, _, _, _| {}).absolute().size_0()).into_any_element()
+    }
+}
+
+impl Render for Backplane {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.screens.plotview.layers_key = crate::keys::hint(&self.local, "layers");
+        let t_render = std::time::Instant::now();
+        if crate::perf::on() { crate::perf::frame_start(); cx.defer(|_| crate::perf::frame_end()); }
+        crate::screens::improvements::tick(self, window, cx);
+        crate::screens::desk::tick(self, window, cx);
+        self.term_layout(window, cx);
+        self.term_script(window, cx);
+        if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
+        if self.models_pending { self.models_pending = false; self.picker_toggle(window, cx); }
+        if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); } }
+        if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
+        if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); }
+        if self.screens.setup.want_focus { self.screens.setup.want_focus = false; window.focus(&self.screens.setup_focus); }
+        if self.screens.palette.focus { self.screens.palette.focus = false; if let Some(i) = self.screens.palette.input.clone() { window.focus(&i.focus_handle(cx)); } }
+        self.frame_marks(window, cx);
+        self.hints_frame(window, cx);
+        let light = self.light();
+        if self.swatches { return crate::swatch::view(light).into_any_element(); }
+        if self.gallery { return crate::swatch::gallery(light).into_any_element(); }
+        if self.fonts { return crate::swatch::fonts(light).into_any_element(); }
+        if self.pair.is_some() { let (el, ctl) = crate::screens::pair::view(self, light, window, cx); self.controls = ctl; return el; }
+        let c = |name: &str| theme::color(light, name);
+        self.screens.reg.borrow_mut().begin_outside(); self.screens.images.frame();
+        let reg = self.screens.reg.clone();
+        if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
+        let thread = &self.data["thread"];
+        let dictating = self.screens.voice.views.get(&self.selected).map_or(false, |v| v["on"] == true);
+        let has_thread = thread.is_object();
+        let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
         let no_rows = thread["entries"].as_array().map_or(true, |e| e.is_empty());
         // project home replaces the thread when the hub selected it
         let home = &self.data["projectHome"];
         let page = self.project_page.clone().filter(|p| crate::screens::projects::find(&self.data, p).is_some());
         let has_home = home.is_object() || page.is_some();
+        // the project home replaces the rows' part: what it drew last is not on screen (its controls, its text for selection)
+        if has_home { self.screens.parts.rows_ctl.clear(); self.screens.reg.borrow_mut().begin_rows(); }
         let home_els: Vec<AnyElement> = if let (false, Some(p)) = (home.is_object(), page.as_ref()) { crate::screens::projects::page(cx, light, &self.data, &self.screens.projects.home, p, &mut ctl) } else if has_home {
             home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"), &mut ctl)).collect()
         } else { Vec::new() };
@@ -584,7 +615,7 @@ impl Render for Backplane {
                 .child(div().w(px(if self.sidebar_open { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).children(crate::perf::mark("sidebar")).bg(c("bg")).border_r_1().border_color(c("line")).flex().flex_col()
                     .child(crate::screens::hubpick::picker(self, cx, light, &mut ctl))
                     .child(div().flex().items_center().gap_2().p_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().tooltip(crate::keys::tip("Fold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| { if this.sidebar_open { this.sidebar_toggle(cx); } }))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
-                    .child(div().id("sidebar").overflow_y_scroll().flex_1().children(rows))
+                    .child(self.screens.parts.el(Backplane::sidebar_part, StyleRefinement::default().flex_1().min_h_0(), cx))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(self.status.clone()))
                     // held Ctrl: the short legend over the sidebar's foot (0.14's keys-legend)
                     .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(crate::screens::hints::legend(cx, light, &self.local))))
@@ -599,19 +630,7 @@ impl Render for Backplane {
                     .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))
                     .when(has_home, |d| d.child(div().id("home").overflow_y_scroll().flex_1().flex().justify_center().child(div().w_full().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
-                    .when(!has_home, |d| d.child(div().id("timeline").relative().flex_1().min_h_0().flex().flex_col()
-                        .on_mouse_down(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_down(e, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, _, cx| this.timeline_down(e, cx)))
-                        .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| this.scroll_note(e)))
-                        .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, _, cx| this.timeline_up(e, cx)))
-                        .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { "Loading…" } else if has_thread { "Start a conversation." } else { "Pick a thread, or start one with + next to a project." }))))
-                        .when(!no_rows, |d| d.child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0()))
-                        .children(thread["live"].as_array().into_iter().flatten().map(|live| div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_2().child(string(live, "text")))))
-                        // after the list has drawn its rows: put them in reading order, and see whether history is wanted
-                        .child(canvas({ let (me, reg) = (cx.entity().downgrade(), self.screens.reg.clone()); move |_, _, cx| {
-                            let Some(this) = me.upgrade() else { return };
-                            { let rows = &this.read(cx).data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
-                            cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
-                        } }, |_, _, _, _| {}).absolute().size_0())))
+                    .when(!has_home, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(self.error.clone())))
                     .when(!self.note.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("dim")).child(self.note.clone())))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("line")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
@@ -677,6 +696,8 @@ impl Render for Backplane {
             .children(crate::perf::on().then(|| crate::perf::overlay(light, &crate::keys::hint(&self.local, "perf"))))
             .into_any_element();
         self.controls = ctl;
+        // the selection's ends as ordinals of the blocks known now (the rows' part does the same when it draws)
+        { let rows = &self.data["thread"]["entries"]; self.screens.reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
         if crate::perf::on() { crate::perf::built(); }
         self.render_us = t_render.elapsed().as_micros() as u64;
         el
