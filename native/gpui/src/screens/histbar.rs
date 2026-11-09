@@ -41,7 +41,7 @@ pub fn version(git: &str, top: &str, commit: &str, file: &str) -> String {
 
 /// What a comparison shows: `old` and `new` are sources (a version path, or the live file's), `mode` 0 Old, 1 Diff, 2 New, `bits` the layers its marks keep to (0 every layer).
 #[derive(Clone, Debug, PartialEq)]
-pub struct Cmp { pub base: String, pub label: String, pub old: String, pub new: String, pub mode: u8, pub bits: u32 }
+pub struct Cmp { pub base: String, pub label: String, pub old: String, pub new: String, pub mode: u8, pub bits: u32, /** the new side's name ("" the working copy) */ pub to: String }
 /// The source watched for the comparison on show. Where there is no old version (a first step), what there is shows as it is.
 pub fn shown(c: &Cmp) -> String {
     if c.old.is_empty() { return c.new.clone() }
@@ -54,7 +54,7 @@ pub fn shown(c: &Cmp) -> String {
 #[derive(Default, Clone)]
 pub struct Hist { pub steps: Option<Steps>, pub refs: Option<super::plot::Refs>, pub at: Option<usize>, pub play: u64, pub playing: bool, pub diff: bool, pub asked: String, pub thread: String, pub sig: u64,
     /** a step row pressed in the thread: its act id and the kinds still to look in, shown once its track comes */ pub pending: Option<(String, Vec<String>)>,
-    /** the compare menu's field for a commit, branch or tag, and what the hub said of the last one typed */ pub ref_input: Option<Entity<super::composer::Composer>>, pub ref_err: String }
+    /** the compare menu's field for a commit, branch or tag, and what the hub said of the last one typed */ pub ref_input: Option<Entity<super::composer::Composer>>, pub ref_err: String, /** the side the menu picks: 0 old, 1 new */ pub side: u8 }
 
 fn open_file(app: &Backplane) -> Option<(String, String, String, String)> { // (kind, key, root, the file shown)
     let v = &app.data["thread"]["viewer"];
@@ -120,22 +120,38 @@ pub fn follow_focus(app: &mut Backplane) {
 }
 /// Compare the open file with `commit`: Diff first (old = the commit's file, new = the live one).
 pub fn compare(app: &mut Backplane, commit: Option<(&str, &str)>) {
-    let Some((kind, key, _, own)) = open_file(app) else { return };
+    let Some((kind, _, _, own)) = open_file(app) else { return };
     let Some((commit, label)) = commit else { return set(app, None) };
     let Some(r) = app.screens.plotview.hist.refs.clone() else { return };
     let file = file_of(&kind, &own, &r.pcb, &r.sch);
-    let old = version(&r.git, &r.top, commit, &file); if old.is_empty() { return }
-    app.screens.plotview.hist.at = None; app.screens.plotview.hist.playing = false;
-    set(app, Some(Cmp { base: key, label: label.to_string(), old, new: file, mode: 1, bits: 0 }));
+    let v = version(&r.git, &r.top, commit, &file); if v.is_empty() { return }
+    let side = app.screens.plotview.hist.side; pick(app, side, v, label.to_string());
 }
-/// Compare the file as step `i` left it with the live file (the compare menu's step rows).
+/// The file as step `i` left it, on the menu's side (the compare menu's step rows).
 pub fn compare_step(app: &mut Backplane, i: usize) {
-    let Some((kind, key, _, own)) = open_file(app) else { return };
-    let Some(h) = app.screens.plotview.hist.steps.clone() else { return };
-    let Some(s) = h.steps.get(i) else { return }; if s.new.is_empty() { return }
-    let file = file_of(&kind, &own, &h.pcb, &h.sch);
+    let Some(s) = app.screens.plotview.hist.steps.as_ref().and_then(|h| h.steps.get(i).cloned()) else { return }; if s.new.is_empty() { return }
+    let side = app.screens.plotview.hist.side; pick(app, side, s.new, s.label);
+}
+/// The live file on show (the working copy) and the viewer's key, when a board or schematic shows.
+fn live(app: &Backplane) -> Option<(String, String)> {
+    let (kind, key, _, own) = open_file(app)?;
+    let (pcb, sch) = app.screens.plotview.hist.steps.as_ref().map(|h| (h.pcb.clone(), h.sch.clone())).or_else(|| app.screens.plotview.hist.refs.as_ref().map(|r| (r.pcb.clone(), r.sch.clone()))).unwrap_or_default();
+    Some((key, file_of(&kind, &own, &pcb, &sch)))
+}
+/// A version picked for a side (0 old, 1 new; `path` a version path, or the live file for the working copy): the comparison on show keeps its
+/// other side; with none on show the new side is the working copy. Diff first.
+pub fn pick(app: &mut Backplane, side: u8, path: String, label: String) {
+    let Some((key, file)) = live(app) else { return };
+    let cur = app.screens.plotview.compare.clone().filter(|c| c.base == key && app.screens.plotview.hist.at.is_none());
+    let (old, new, name, to) = match (side, cur) {
+        (0, Some(c)) => (path, c.new, label, c.to),
+        (0, None) => (path, file, label, String::new()),
+        (_, Some(c)) => (c.old, path, c.label, if label.is_empty() { String::new() } else { label }),
+        (_, None) => return,
+    };
+    if old.is_empty() || new.is_empty() { return }
     app.screens.plotview.hist.at = None; app.screens.plotview.hist.playing = false;
-    set(app, Some(Cmp { base: key, label: s.label.clone(), old: s.new.clone(), new: file, mode: 1, bits: 0 }));
+    set(app, Some(Cmp { base: key, label: name, old, new, mode: 1, bits: 0, to }));
 }
 /// The step `i` of the track on show (None: the live file): the file as the step left it, or with Highlight edits its edits on the step before.
 pub fn select(app: &mut Backplane, i: Option<usize>) {
@@ -145,7 +161,7 @@ pub fn select(app: &mut Backplane, i: Option<usize>) {
     let s = &h.steps[i]; if s.new.is_empty() { return }
     let mode = if app.screens.plotview.hist.diff { 1 } else { 2 };
     app.screens.plotview.hist.at = Some(i);
-    set(app, Some(Cmp { base: key, label: s.label.clone(), old: s.old.clone(), new: s.new.clone(), mode, bits: 0 }));
+    set(app, Some(Cmp { base: key, label: s.label.clone(), old: s.old.clone(), new: s.new.clone(), mode, bits: 0 , to: String::new() }));
     warm(app, &h, i, mode);
 }
 /// Hs.warm: the steps either side of the one on show are plotted ahead into the hub's kept versions (kicad.warm), so the next ‹ or › finds its
@@ -159,7 +175,7 @@ fn warm(app: &mut Backplane, h: &Steps, i: usize, mode: u8) {
 }
 /// The sources the steps before and after `i` would watch (as `select` shows them), "" past either end.
 pub fn near(h: &Steps, i: usize, mode: u8, bits: u32) -> (String, String) {
-    let at = |j: Option<usize>| j.and_then(|j| h.steps.get(j)).filter(|s| !s.new.is_empty()).map_or(String::new(), |s| shown(&Cmp { base: String::new(), label: String::new(), old: s.old.clone(), new: s.new.clone(), mode, bits }));
+    let at = |j: Option<usize>| j.and_then(|j| h.steps.get(j)).filter(|s| !s.new.is_empty()).map_or(String::new(), |s| shown(&Cmp { base: String::new(), label: String::new(), old: s.old.clone(), new: s.new.clone(), mode, bits, to: String::new() }));
     (at(i.checked_sub(1)), at(Some(i + 1)))
 }
 /// Old / Diff / New of the comparison on show.
@@ -243,8 +259,8 @@ pub fn step_row(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyEleme
 }
 
 /// The compare menu opens or shuts (asking for the versions, and making its field the first time).
-pub fn toggle_menu(app: &mut Backplane, cx: &mut Context<Backplane>) {
-    let m = if app.screens.plotview.menu == 1 { 0 } else { 1 }; app.screens.plotview.menu = m;
+pub fn toggle_menu(app: &mut Backplane, side: u8, cx: &mut Context<Backplane>) {
+    let m = if app.screens.plotview.menu == 1 && app.screens.plotview.hist.side == side { 0 } else { 1 }; app.screens.plotview.menu = m; app.screens.plotview.hist.side = side;
     if m != 1 { return }
     ask_refs(app); app.screens.plotview.hist.ref_err.clear();
     if app.screens.plotview.hist.ref_input.is_none() {
@@ -254,7 +270,7 @@ pub fn toggle_menu(app: &mut Backplane, cx: &mut Context<Backplane>) {
             let text = input.read(cx).content.trim().to_string(); if text.is_empty() { return }
             let t = this.selected.clone(); if t.is_empty() { return }
             this.screens.plotview.hist.ref_err.clear();
-            let _ = this.tx.try_send(Command::Rpc("history.resolve".into(), super::settings::Secret(json!({"thread": t, "side": "a", "ref": text})), "resolve")); cx.notify();
+            let _ = this.tx.try_send(Command::Rpc("history.resolve".into(), super::settings::Secret(json!({"thread": t, "side": if this.screens.plotview.hist.side == 1 { "b" } else { "a" }, "ref": text})), "resolve")); cx.notify();
         }).detach();
         app.screens.plotview.hist.ref_input = Some(input);
     }
@@ -263,21 +279,19 @@ pub fn toggle_menu(app: &mut Backplane, cx: &mut Context<Backplane>) {
 pub fn resolved(app: &mut Backplane, r: &Value, cx: &mut Context<Backplane>) {
     let v = &r["resolved"];
     let (commit, git, top, name) = (v["commit"].as_str().unwrap_or(""), v["git"].as_str().unwrap_or(""), v["top"].as_str().unwrap_or(""), v["ref"].as_str().unwrap_or(""));
-    let Some((kind, key, _, own)) = open_file(app) else { return };
-    let (pcb, sch) = app.screens.plotview.hist.steps.as_ref().map(|h| (h.pcb.clone(), h.sch.clone())).or_else(|| app.screens.plotview.hist.refs.as_ref().map(|r| (r.pcb.clone(), r.sch.clone()))).unwrap_or_default();
-    let file = file_of(&kind, &own, &pcb, &sch);
-    let old = version(git, top, commit, &file);
-    if commit.is_empty() || old.is_empty() {
+    let Some((_, file)) = live(app) else { return };
+    let path = version(git, top, commit, &file);
+    if commit.is_empty() || path.is_empty() {
         let why = r["error"].as_str().filter(|w| !w.is_empty()).map_or_else(|| if commit.is_empty() { "No commit, branch or tag by that name here".to_string() } else { "That version has no copy of this file".to_string() }, |w| w.lines().next().unwrap_or(w).to_string());
         app.screens.plotview.hist.ref_err = why; cx.notify(); return }
     if let Some(i) = app.screens.plotview.hist.ref_input.clone() { i.update(cx, |i, cx| i.set(String::new(), cx)); }
-    app.screens.plotview.hist.at = None; app.screens.plotview.hist.playing = false; app.screens.plotview.hist.ref_err.clear();
-    set(app, Some(Cmp { base: key, label: name.to_string(), old, new: file, mode: 1, bits: 0 }));
+    app.screens.plotview.hist.ref_err.clear();
+    pick(app, if v["side"] == "b" { 1 } else { 0 }, path, name.to_string());
 }
 
 /// The menu's rows of versions: (label, what it is, what a press does).
 #[derive(Clone, Debug, PartialEq)]
-pub enum Pick { Step(usize), Commit(String, String) }
+pub enum Pick { Step(usize), Commit(String, String), /** the working copy */ Live }
 /// Hs.menu: the newest steps of the track (newest first; older ones are on the scrubber), then the project's versions.
 pub fn menu_rows(h: Option<&Steps>, r: Option<&super::plot::Refs>) -> Vec<(String, String, Pick)> {
     let mut out = vec![];
@@ -346,8 +360,8 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
     if let (true, Some(cmp)) = (comparing, cmp) {
         // the comparison: its sides (the old one opens the versions menu), Close; then the legend and Old / Diff / New
         let row = div().flex().items_center().gap(px(4.)).min_w_0()
-            .child(btn(cx, light, "cmp-side-a", &format!("Old: {}", cmp.label), pv.menu == 1, true, "Pick the old version", |app, cx| toggle_menu(app, cx)))
-            .child(btn(cx, light, "cmp-side-b", "New: Working copy", false, false, "The files as they are now", |_, _| {}))
+            .child(btn(cx, light, "cmp-side-a", &format!("Old: {}", cmp.label), pv.menu == 1 && hist.side == 0, true, "Pick the old version", |app, cx| toggle_menu(app, 0, cx)))
+            .child(btn(cx, light, "cmp-side-b", &format!("New: {}", if cmp.to.is_empty() { "Working copy" } else { cmp.to.as_str() }), pv.menu == 1 && hist.side == 1, true, "Pick the new version", |app, cx| toggle_menu(app, 1, cx)))
             .child(div().flex_1())
             .child(btn(cx, light, "cmp-off", "Close", false, true, "Back to the file as it is now", |app, _| set(app, None)));
         let mut modes = div().flex().items_center().gap(px(4.)).min_w_0();
@@ -367,7 +381,7 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
             .child(div().id("hist-title").mx(px(8.)).min_w_0().flex_shrink().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("text")).child(title))
             .child(div().flex_1())
             .child(btn(cx, light, "hist-diff", "Highlight edits", hist.diff && at.is_some(), n > 0, "Compare a snapshot with the one before: red removed, yellow changed, green added. From Live, show the latest snapshot.", |app, _| { stop(app); highlight(app) }))
-            .child(btn(cx, light, "compare-btn", "Compare", pv.menu == 1, true, "Compare two versions of the file", |app, cx| toggle_menu(app, cx)))
+            .child(btn(cx, light, "compare-btn", "Compare", pv.menu == 1, true, "Compare two versions of the file", |app, cx| toggle_menu(app, 0, cx)))
             .child(btn(cx, light, "step-live", "Live", at.is_none(), at.is_some(), "Back to the file as it is now", |app, _| { stop(app); select(app, None) }));
         // the scrubber: a tick a step, the live file last, each where it falls in the track
         let span = n.max(1) as f32;
@@ -394,10 +408,11 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
         bar = bar.child(row).child(scrub).child(said_row);
     }
     if pv.menu == 1 {
-        let rows = menu_rows(hist.steps.as_ref(), hist.refs.as_ref());
+        let mut rows = menu_rows(hist.steps.as_ref(), hist.refs.as_ref());
+        if hist.side == 1 { rows.insert(0, ("Working copy".into(), "the files as they are now".into(), Pick::Live)); }
         let mut list = div().id("compare-list").absolute().left(px(12.)).bottom(relative(1.)).mb(px(4.)).w(px(460.)).max_h(px(360.)).overflow_y_scroll().flex().flex_col()
             .bg(c("raise")).border_1().border_color(c("line")).occlude()
-            .child(div().px_3().py(px(6.)).text_color(c("faint")).child("Compare from (old)"))
+            .child(div().px_3().py(px(6.)).text_color(c("faint")).child(if hist.side == 1 { "Compare with (new)" } else { "Compare from (old)" }))
             .children(hist.ref_input.clone().map(|i| div().mx_3().mb(px(6.)).px_2().py_1().border_1().border_color(c("line")).bg(c("bg")).child(i)))
             .children((!hist.ref_err.is_empty()).then(|| div().px_3().pb(px(6.)).text_color(c("bad")).child(hist.ref_err.clone())));
         if rows.is_empty() { list = list.child(div().px_3().py(px(6.)).border_t_1().border_color(c("line")).text_color(c("dim")).child(if hist.refs.is_none() { "Loading versions…" } else { "No versions in this project's history yet" })); }
@@ -405,7 +420,7 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
             list = list.child(div().id(SharedString::from(format!("cmp-{i}"))).flex().items_baseline().gap(px(10.)).px_3().py(px(6.)).border_t_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("panel")))
                 .child(div().flex_none().max_w(px(220.)).overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("text")).child(label))
                 .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("faint")).child(sub))
-                .on_click(cx.listener(move |this, _, _, cx| { stop(this); match &pick { Pick::Step(i) => compare_step(this, *i), Pick::Commit(c, l) => compare(this, Some((c, l))) } cx.notify(); })));
+                .on_click(cx.listener(move |this, _, _, cx| { stop(this); match &pick { Pick::Step(i) => compare_step(this, *i), Pick::Commit(c, l) => compare(this, Some((c, l))), Pick::Live => if let Some((_, f)) = live(this) { self::pick(this, 1, f, String::new()) } } cx.notify(); })));
         }
         bar = bar.child(list);
     }
@@ -419,7 +434,7 @@ mod tests {
     #[test] fn a_version_is_the_hubs_git_path_and_a_comparison_shows_old_diff_or_new() {
         assert_eq!(version("/p/.git", "/p", "abc", "/p/b.kicad_pcb"), "git\t/p/.git\tabc\t2\t/p/b.kicad_pcb");
         assert_eq!(version("/p/.git", "/p", "abc", "/x/b.kicad_pcb"), ""); assert_eq!(version("/p/.git", "/p", "", "/p/b.kicad_pcb"), "");
-        let mut c = Cmp { base: "0|/p|".into(), label: "step 2".into(), old: "OLD".into(), new: "NEW".into(), mode: 1, bits: 0 };
+        let mut c = Cmp { base: "0|/p|".into(), label: "step 2".into(), old: "OLD".into(), new: "NEW".into(), mode: 1, bits: 0, to: String::new() };
         assert_eq!(shown(&c), "diff\nOLD\nNEW"); c.bits = 4096; assert_eq!(shown(&c), "diff\nOLD\nNEW\n4096", "marks keep to the focus"); c.mode = 0; assert_eq!(shown(&c), "OLD", "only a Diff has marks"); c.bits = 0; assert_eq!(shown(&c), "OLD"); c.mode = 2; assert_eq!(shown(&c), "NEW");
         c.old.clear(); c.mode = 0; assert_eq!(shown(&c), "NEW", "a first step has no old version: what there is shows");
     }
