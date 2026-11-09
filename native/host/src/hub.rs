@@ -15,6 +15,8 @@ pub struct Cfg { pub home: PathBuf, pub version: String, pub commit: String, pub
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Rebuilt { Ran(bool), Merged }
 
+/// Reads a view sent to a linked machine, waiting for its answer: (client, request id) -> (method, view, target).
+static FAR_READS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<(u64, String), (String, String, Value)>>> = std::sync::LazyLock::new(Default::default);
 pub struct Hub {
     pub cfg: Cfg, pub auth: Auth, pub epoch: String, pub presenter: Arc<dyn Presenter>,
     pub store: Store, pub model: Mutex<Model>, gen: AtomicU64, pub changed: broadcast::Sender<u64>, pub frames: broadcast::Sender<Value>, pub native_key: String,
@@ -532,6 +534,13 @@ impl Hub {
         // a view session that names the accounts wire version may manage accounts (settings/accounts_hub.rs `note_request`)
         crate::settings::accounts_hub::note_request(&c.gen, c.client, !c.view_id.is_empty() || msg.get("m").and_then(Value::as_str).map_or(false, |m| m.starts_with("view.")), msg);
         let out = self.request_one(c, msg).await;
+        // a read sent to a linked machine is answered later (net/rpc.rs pushes it): kept, so it is recorded for the view when it comes (`far_replied`)
+        if out.is_empty() && !c.view_id.is_empty() && matches!(msg.get("m").and_then(Value::as_str).unwrap_or(""), "git.diff" | "git.status" | "git.act" | "git.revert" | "files.dir" | "boards.list" | "history.refs")
+            && !crate::net::far::params_link(msg.get("p").unwrap_or(&Value::Null)).is_empty() {
+            let key = (c.client, msg.get("id").map(Value::to_string).unwrap_or_default());
+            let mut g = FAR_READS.lock().unwrap(); if g.len() > 256 { g.clear(); }
+            g.insert(key, (msg["m"].as_str().unwrap_or("").to_string(), c.view_id.clone(), c.target.clone()));
+        }
         // the Files tab and its kin are reads of the hub for a hub-drawn view: the policy applies the reply (Fm.reply, Pdf.got, Mech.after ...) on the view's next request
         let method = msg.get("m").and_then(Value::as_str).unwrap_or("");
         // the intent written: the reply brings the composer back (pages::apply_reads), on the very next view request
@@ -553,6 +562,13 @@ impl Hub {
         out
     }
     async fn request_one(&self, c: &mut Conn, msg: &Value) -> Vec<Value> { self.request_one_r(c, msg, true).await }
+    /// A linked machine answered a read this client's view sent (`request` kept it): recorded as the view's read, as a reply here would be.
+    pub fn far_replied(&self, client: u64, frame: &Value) {
+        let Some((m, view, target)) = FAR_READS.lock().unwrap().remove(&(client, frame.get("id").map(Value::to_string).unwrap_or_default())) else { return };
+        if frame["t"] != "reply" { return }
+        if matches!(m.as_str(), "files.dir" | "boards.list" | "history.refs") { crate::session::record_reply(client, &m, frame) } else { crate::session::record_reply_bound_m(client, "history.refs", &m, frame, &view, &target) }
+        if let Some(id) = frame.get("id").and_then(Value::as_u64) { crate::session::replied_late(client, id) }
+    }
     /// A request run on this hub whatever its params name: the owner's side of /far/rpc runs a linked machine's request here, and must never route it onward
     ///.
     pub async fn request_here(&self, c: &mut Conn, msg: &Value) -> Vec<Value> { self.request_one_r(c, msg, false).await }

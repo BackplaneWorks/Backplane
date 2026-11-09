@@ -335,6 +335,13 @@ impl Plan<'_> {
     /// How many projects are in the Older group (no live thread, quiet for more than QUIET_DAYS): drawn only once it is opened
     pub fn older_count(&self) -> usize { self.older_n }
     pub fn ids(&self) -> Vec<&str> { self.order.iter().map(|(i,_)|self.projects[*i].id).collect() }
+    /// Where a listed project stands among other machines' projects (`merge_ordered`): its group (0 live, 1 quiet, 2 older), then its
+    /// last move, newest first; None when it is not listed. (Within one machine its own order stands: manual keys, then creation.)
+    pub fn place(&self, id: &str) -> Option<(u8, std::cmp::Reverse<u64>)> {
+        let (p, _) = self.find(id)?;
+        let live = !(p.sh.pinned.is_empty() && p.sh.active.is_empty() && p.sh.snoozed.is_empty());
+        Some((if live { 0 } else if p.latest + QUIET_DAYS > self.o.now { 1 } else { 2 }, std::cmp::Reverse(p.latest)))
+    }
     fn find(&self,id: &str) -> Option<(&Planned<'_>,bool)> {
         self.order.iter().find(|(i,_)|self.projects[*i].id==id).map(|(i,quiet)|(&self.projects[*i],*quiet))
     }
@@ -393,6 +400,10 @@ impl Plan<'_> {
     /// then the threads settled within QUIET_DAYS, newest settled first (faded, for bringing back). `keep(title, project)` is the search.
     /// Rows are the roots of the thread trees, as in the project list; each names its project.
     pub fn active(&self, keep: &dyn Fn(&str, &str) -> bool) -> (Vec<Value>, Vec<Value>) {
+        let (l, f) = self.active_keyed(keep); (l.into_iter().map(|x| x.1).collect(), f.into_iter().map(|x| x.1).collect())
+    }
+    /// `active` with each row's sort key, so the rows of several machines go in one order (`ActiveKey`, smaller first).
+    pub fn active_keyed(&self, keep: &dyn Fn(&str, &str) -> bool) -> (Vec<(ActiveKey, Value)>, Vec<(ActiveKey, Value)>) {
         let (st, o) = (self.st, self.o);
         let mut live: Vec<(u64, u64, &str, &str)> = vec![]; let mut faded: Vec<(u64, &str, &str)> = vec![];
         for p in &self.projects {
@@ -409,7 +420,8 @@ impl Plan<'_> {
             j["project"] = json!(st.projects[pid].title); j["projectId"] = json!(q(o, pid)); j["faded"] = json!(shelf == 1);
             j
         };
-        (live.iter().map(|(_, _, id, pid)| row(id, pid, 0)).collect(), faded.iter().map(|(_, id, pid)| row(id, pid, 1)).collect())
+        use std::cmp::Reverse;
+        (live.iter().map(|(u, a, id, pid)| ((Reverse(*u), Reverse(*a)), row(id, pid, 0))).collect(), faded.iter().map(|(at, id, pid)| ((Reverse(0), Reverse(*at)), row(id, pid, 1))).collect())
     }
 }
 
@@ -448,6 +460,19 @@ pub fn row_key(st: &State, kind: &str, id: &str) -> i128 {
         "settled" => i128::from(t.settled_at),
         "snoozed" => -i128::from(st.snooze_until.get(id).copied().unwrap_or(0)),
         _ => i128::from(rank(t)),
+    }
+}
+/// An Active row's place: what needs the person most, then the newest (its last move; a settled row's settle time).
+pub type ActiveKey = (std::cmp::Reverse<u64>, std::cmp::Reverse<u64>);
+/// Several machines' lists as one: each list keeps its own order, and at each step the head with the smallest key goes first (the
+/// first list's on a tie). So projects and Active rows of every machine stand by recency together, and a manual order stays.
+pub fn merge_ordered<T, K: Ord>(lists: Vec<Vec<T>>, key: &dyn Fn(&T) -> K) -> Vec<T> {
+    let mut qs: Vec<std::collections::VecDeque<T>> = lists.into_iter().map(Into::into).collect();
+    let mut out = vec![];
+    loop {
+        let mut best: Option<usize> = None;
+        for (i, q) in qs.iter().enumerate() { if let Some(h) = q.front() { if best.map_or(true, |b| key(h) < key(qs[b].front().unwrap())) { best = Some(i) } } }
+        match best { Some(i) => out.push(qs[i].pop_front().unwrap()), None => return out }
     }
 }
 /// Every thread row of another machine's project carries that machine's marker (`crate::mirror::mark_of`) and name; this machine's rows carry none.
@@ -532,6 +557,12 @@ mod tests {
         assert_eq!(local["settled"][0]["machine"], "framework"); assert_eq!(local["threadsPage"]["total"], 1);
     }
     #[test] fn ago_words() { assert_eq!(ago(100, 100), "now"); assert_eq!(ago(100, 40), "1m"); assert_eq!(ago(10000, 0), "2h"); assert_eq!(ago(200000, 0), "2d"); assert_eq!(ago(5, 9), "now"); }
+    #[test] fn several_machines_lists_merge_by_key_keeping_each_ones_order() {
+        // (a manual order on one machine stays: its 9 before its 1)
+        let m = merge_ordered(vec![vec![(1, "a9"), (1, "a1"), (3, "a3")], vec![(0, "b0"), (2, "b2"), (3, "b3")], vec![]], &|x: &(u8, &str)| x.0);
+        assert_eq!(m.iter().map(|x| x.1).collect::<Vec<_>>(), ["b0", "a9", "a1", "b2", "a3", "b3"]);
+        assert!(merge_ordered::<u8, u8>(vec![vec![], vec![]], &|x| *x).is_empty());
+    }
     #[test] fn new_threads_sort_newest_first_and_a_quiet_project_is_marked() {
         let s = fold(&[PC, &tc("a", 11), &tc("b", 12)]); let open = HashSet::new();
         let v = projects(&s, &opts(&open, 100));

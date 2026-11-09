@@ -12,6 +12,7 @@ pub mod head;
 pub mod hubpick;
 pub mod ctxmenu;
 pub mod badge;
+pub mod machines;
 pub mod bar;
 pub mod hints;
 pub mod blink;

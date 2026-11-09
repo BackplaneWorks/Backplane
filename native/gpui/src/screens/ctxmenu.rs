@@ -78,7 +78,14 @@ pub fn title_items(data: &Value) -> Vec<Item> {
     v
 }
 /// The items for a project's header.
-pub fn project_items(pid_raw: &str) -> Vec<Item> { vec![item("New thread", "new-thread", pid_raw, false), item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
+/// A project that is also on linked machines (the hub's `newOn`): one New thread per machine, this one first, each naming its machine.
+pub fn new_items(pid_raw: &str, new_on: &Value) -> Vec<Item> {
+    let on: Vec<Item> = new_on.as_array().into_iter().flatten().map(|n| item(&s(n, "label"), "new-thread", &s(n, "value"), false)).filter(|i| !i.label.is_empty() && !i.value.is_empty()).collect();
+    if on.len() > 1 { on } else { vec![item("New thread", "new-thread", pid_raw, false)] }
+}
+pub fn project_items(pid_raw: &str) -> Vec<Item> { project_items_on(pid_raw, &Value::Null) }
+pub fn project_items_on(pid_raw: &str, new_on: &Value) -> Vec<Item> { let mut v = new_items(pid_raw, new_on); v.extend(project_rest(pid_raw)); v }
+fn project_rest(pid_raw: &str) -> Vec<Item> { vec![item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {
@@ -105,6 +112,8 @@ impl Backplane {
             }
             _ => {}
         }
+        if m.items.get(i).map_or(false, |it| it.action == "new-thread") { self.arm_new(); }
+        let Some(m) = self.screens.ctx.as_mut() else { return };
         let step = press(m, i, &self.data);
         if let Some(c) = step.send { let _ = self.tx.try_send(c); }
         if step.close { self.screens.ctx = None; }
@@ -203,6 +212,9 @@ mod tests {
         let it = title_items(&d); assert!(it.iter().find(|i| i.label == "Delete").unwrap().confirm && !it.iter().find(|i| i.label == "Diff").unwrap().confirm);
     }
     #[test] fn a_project_offers_new_thread_rename_badge_and_a_confirmed_remove() {
+        let on = serde_json::json!([{"value":"p1","label":"New thread on desk"},{"value":"L~p9","label":"New thread on lap (away)"}]);
+        let it = project_items_on("p1", &on); assert_eq!(it.iter().map(|i| (i.label.as_str(), i.value.as_str())).take(3).collect::<Vec<_>>(), [("New thread on desk", "p1"), ("New thread on lap (away)", "L~p9"), ("Intent…", "p1")]);
+        assert_eq!(it[1].action, "new-thread");
         let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", LOCAL_INTENT, "proj-rename", "look", "proj-remove"]); assert!(it[4].confirm && !it[2].confirm && it[2].value == "p1" && it[1].value == "p1");
     }
     #[test] fn an_archived_row_offers_unarchive_not_archive() {
