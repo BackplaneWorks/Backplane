@@ -401,7 +401,9 @@ impl Tab {
     pub fn detached(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>) -> Arc<Tab> {
         Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0), paints: Default::default(), resize_at: Mutex::new(None), resize_done: Mutex::new(-1.0) })
     }
-    fn with<R>(&self, f: impl FnOnce(&Browser) -> R) -> Option<R> { self.browser.lock().unwrap().as_ref().map(|b| f(&b.0)) }
+    /// The browser, taken out of its lock before CEF is called: on macOS CEF runs callbacks on this thread inside the call (`on_before_close` takes
+    /// the same lock), so holding it across the call deadlocks the window (seen on closing a tab).
+    fn with<R>(&self, f: impl FnOnce(&Browser) -> R) -> Option<R> { let b = self.browser.lock().unwrap().as_ref().map(|b| b.0.clone()); b.map(|b| f(&b)) }
     fn host<R>(&self, f: impl FnOnce(&BrowserHost) -> R) -> Option<R> { self.with(|b| b.host().map(|h| f(&h))).flatten() }
     pub fn ready(&self) -> bool { self.browser.lock().unwrap().is_some() }
     pub fn cursor(&self) -> Cur { *self.cursor.lock().unwrap() }
