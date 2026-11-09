@@ -49,36 +49,36 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
     suspend fun load() { try { page = DataClient.call("accounts.page"); failure = "" } catch (e: Exception) { failure = e.message ?: "" } }
     LaunchedEffect(DataClient.conn) { load() }
     Column(Modifier.fillMaxSize()) {
-        DBar("Accounts", back)
+        DBar(Msg.android_accounts, back)
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val p = page
-            if (p == null) DMono(if (failure.isEmpty()) "Asking the hub…" else failure, if (failure.isEmpty()) dfaint else dcs.error, 12)
+            if (p == null) DMono(if (failure.isEmpty()) Msg.android_rescue_asking else Tr.t(failure), if (failure.isEmpty()) dfaint else dcs.error, 12)
             else {
                 p.optJSONArray("providers").objects().forEach { pv ->
-                    DMono(pv.optString("title").uppercase(), dfaint)
+                    DMono(Tr.t(pv.optString("title")).uppercase(), dfaint)
                     val accounts = pv.optJSONArray("accounts").objects()
-                    if (accounts.isEmpty()) DMono("No accounts", dfaint, 12)
+                    if (accounts.isEmpty()) DMono(Msg.android_accounts_none, dfaint, 12)
                     accounts.forEach { a -> AccountRow(a) { open(a.optString("id")) } }
-                    DBtn(pv.optString("add"), false, modifier = Modifier.testTag("accounts.add.${pv.optString("provider")}")) {
+                    DBtn(Tr.t(pv.optString("add")), false, modifier = Modifier.testTag("accounts.add.${pv.optString("provider")}")) {
                         // Google asks no name: the sign-in starts at once, its own listener first (GoogleLoop)
                         if (pv.optString("provider") == "google") scope.launch { addAccount(pv, "", open) { failure = it } } else { name = ""; adding = pv }
                     }
                     DLine()
                 }
-                if (p.optString("error").isNotEmpty()) DMono(p.optString("error"), dcs.error, 11, lines = 4)
-                if (failure.isNotEmpty()) DMono(failure, dcs.error, 11, lines = 4)
-                DMono(p.optString("note"), dcs.onSurfaceVariant, 11, lines = 3)
+                if (p.optString("error").isNotEmpty()) DMono(Tr.t(p.optString("error")), dcs.error, 11, lines = 4)
+                if (failure.isNotEmpty()) DMono(Tr.t(failure), dcs.error, 11, lines = 4)
+                DMono(Tr.t(p.optString("note")), dcs.onSurfaceVariant, 11, lines = 3)
             }
         }
     }
     adding?.let { pv ->
-        AlertDialog(onDismissRequest = { adding = null }, title = { Text(pv.optString("add"), fontFamily = BpMono, fontSize = 14.sp) },
-            text = { DField(name, { name = it }, "Name (Work, Personal)", Modifier.testTag("accounts.add.name")) },
+        AlertDialog(onDismissRequest = { adding = null }, title = { Text(Tr.t(pv.optString("add")), fontFamily = BpMono, fontSize = 14.sp) },
+            text = { DField(name, { name = it }, Msg.android_account_name_hint, Modifier.testTag("accounts.add.name")) },
             confirmButton = { TextButton(onClick = {
                 adding = null
                 scope.launch { addAccount(pv, name, open) { failure = it } }
-            }) { Text("Add and sign in", fontFamily = BpMono) } },
-            dismissButton = { TextButton(onClick = { adding = null }) { Text("Cancel", fontFamily = BpMono) } })
+            }) { Text(Msg.android_account_add, fontFamily = BpMono) } },
+            dismissButton = { TextButton(onClick = { adding = null }) { Text(Msg.common_cancel, fontFamily = BpMono) } })
     }
 }
 
@@ -103,11 +103,11 @@ private fun AccountRow(a: JSONObject, onClick: () -> Unit) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(a.optString("label"), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                DMono(a.optString("line"), tone(a.optString("tone")), 11)
+                DMono(Tr.t(a.optString("line")), tone(a.optString("tone")), 11)
             }
             if (a.optString("email").isNotEmpty()) DMono(a.optString("email"), dcs.onSurfaceVariant, 11)
-            if (a.optString("limits").isNotEmpty()) DMono(a.optString("limits"), dfaint, 11, lines = 2)
-            if (a.optString("hold").isNotEmpty()) DMono(a.optString("hold"), dwarn, 11)
+            if (a.optString("limits").isNotEmpty()) DMono(Tr.t(a.optString("limits")), dfaint, 11, lines = 2)
+            if (a.optString("hold").isNotEmpty()) DMono(Tr.t(a.optString("hold")), dwarn, 11)
         }
     }
 }
@@ -149,50 +149,50 @@ internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit, moved: 
     val busy = a?.optJSONObject("signin")?.optBoolean("busy") == true || a?.optString("state") == "connecting"
     LaunchedEffect(id, busy) { while (busy) { delay(1500); load(); if (a?.optJSONObject("signin")?.optBoolean("busy") != true && a?.optString("state") != "connecting") break } }
     Column(Modifier.fillMaxSize()) {
-        DBar(a?.let { "${it.optString("title")} · ${it.optString("label")}" } ?: "Account", back)
+        DBar(a?.let { "${it.optString("title")} · ${it.optString("label")}" } ?: Msg.android_account, back)
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val x = a
-            if (x == null) DMono(if (failure.isEmpty()) "Asking the hub…" else failure, if (failure.isEmpty()) dfaint else dcs.error, 12)
+            if (x == null) DMono(if (failure.isEmpty()) Msg.android_rescue_asking else Tr.t(failure), if (failure.isEmpty()) dfaint else dcs.error, 12)
             else {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("account.state")) { DDot(tone(x.optString("tone")), 8); Spacer(Modifier.width(8.dp)); DMono(x.optString("line"), tone(x.optString("tone")), 13, bold = true) }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("account.state")) { DDot(tone(x.optString("tone")), 8); Spacer(Modifier.width(8.dp)); DMono(Tr.t(x.optString("line")), tone(x.optString("tone")), 13, bold = true) }
                 if (x.optString("email").isNotEmpty()) DMono(if (x.optString("plan").isEmpty()) x.optString("email") else "${x.optString("email")} · ${x.optString("plan")}", dcs.onSurfaceVariant, 12)
-                if (x.optString("message").isNotEmpty()) DMono(x.optString("message"), dcs.onSurfaceVariant, 12, lines = 4)
-                x.optJSONArray("limits").strings().forEach { DMono(it, dfaint, 12) }
-                if (x.optString("hold").isNotEmpty()) DMono(x.optString("hold"), dwarn, 12)
+                if (x.optString("message").isNotEmpty()) DMono(Tr.t(x.optString("message")), dcs.onSurfaceVariant, 12, lines = 4)
+                x.optJSONArray("limits").strings().forEach { DMono(Tr.t(it), dfaint, 12) }
+                if (x.optString("hold").isNotEmpty()) DMono(Tr.t(x.optString("hold")), dwarn, 12)
                 x.optJSONObject("signin")?.let { s ->
                     DLine()
-                    Text(s.optString("text"), color = if (s.optBoolean("done")) dok else dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, modifier = Modifier.testTag("account.signin.text"))
+                    Text(Tr.t(s.optString("text")), color = if (s.optBoolean("done")) dok else dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, modifier = Modifier.testTag("account.signin.text"))
                     val url = s.optString("url")
                     if (url.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        DBtn("Open sign-in page", true, modifier = Modifier.testTag("account.signin.open")) { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        DBtn(if (copied == "link") "Copied" else "Copy link", false) { copy("link", url) }
+                        DBtn(Msg.android_signin_open, true, modifier = Modifier.testTag("account.signin.open")) { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        DBtn(if (copied == "link") Msg.android_copied else Msg.menu_copylink, false) { copy("link", url) }
                     }
                     val c = s.optString("code")
                     if (c.isNotEmpty()) {
                         Text(c, color = dcs.onSurface, fontFamily = BpMono, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("account.signin.code"))
-                        DBtn(if (copied == "code") "Copied" else "Copy code", false) { copy("code", c) }
+                        DBtn(if (copied == "code") Msg.android_copied else Msg.android_copy_code, false) { copy("code", c) }
                     }
                     if (s.optBoolean("paste")) {
-                        DField(code, { code = it }, "Paste the code here", Modifier.testTag("account.signin.field"))
+                        DField(code, { code = it }, Msg.android_code_paste, Modifier.testTag("account.signin.field"))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            DBtn("Paste", false) { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()?.let { code = it } }
-                            DBtn("Send code", true, code.isNotBlank(), Modifier.testTag("account.signin.send")) { scope.launch { act("code") { put("code", code.trim()) } } }
+                            DBtn(Msg.android_paste, false) { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()?.let { code = it } }
+                            DBtn(Msg.android_code_send, true, code.isNotBlank(), Modifier.testTag("account.signin.send")) { scope.launch { act("code") { put("code", code.trim()) } } }
                         }
                     }
-                    if (s.optString("error").isNotEmpty()) DMono(s.optString("error"), dcs.error, 12, lines = 4)
+                    if (s.optString("error").isNotEmpty()) DMono(Tr.t(s.optString("error")), dcs.error, 12, lines = 4)
                 }
                 DLine()
                 x.optJSONArray("actions").objects().forEach { b ->
                     val action = b.optString("action")
-                    DBtn(b.optString("label"), action == "signin" && x.optString("state") == "expired", modifier = Modifier.testTag("account.act.$action"), danger = b.optBoolean("danger")) {
+                    DBtn(Tr.t(b.optString("label")), action == "signin" && x.optString("state") == "expired", modifier = Modifier.testTag("account.act.$action"), danger = b.optBoolean("danger")) {
                         if (action == "remove") confirm = true else scope.launch { act(action) }
                     }
                 }
-                if (failure.isNotEmpty()) DMono(failure, dcs.error, 12, Modifier.testTag("account.error"), lines = 4)
+                if (failure.isNotEmpty()) DMono(Tr.t(failure), dcs.error, 12, Modifier.testTag("account.error"), lines = 4)
             }
         }
     }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, text = { Text(a?.optString("remove") ?: "", fontFamily = BpMono, fontSize = 13.sp) },
-        confirmButton = { TextButton(onClick = { confirm = false; scope.launch { act("remove") } }) { Text("Remove", color = dcs.error, fontFamily = BpMono) } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Keep it", fontFamily = BpMono) } })
+    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, text = { Text(Tr.t(a?.optString("remove") ?: ""), fontFamily = BpMono, fontSize = 13.sp) },
+        confirmButton = { TextButton(onClick = { confirm = false; scope.launch { act("remove") } }) { Text(Msg.common_remove, color = dcs.error, fontFamily = BpMono) } },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text(Msg.android_keep, fontFamily = BpMono) } })
 }

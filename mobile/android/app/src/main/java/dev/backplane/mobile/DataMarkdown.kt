@@ -293,7 +293,7 @@ private fun CodeBlock(b: MdBlock.Code) {
     Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant))) {
         Row(Modifier.fillMaxWidth().padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(b.lang, Modifier.weight(1f), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp)
-            Text(if (copied) "Copied" else "Copy", Modifier.clickable { clip.setText(AnnotatedString(b.text)); copied = true }.padding(horizontal = 10.dp, vertical = 6.dp).testTag("md.copy"), color = dcs.primary, fontFamily = BpMono, fontSize = 11.sp)
+            Text(if (copied) Msg.android_copied else Msg.common_copy, Modifier.clickable { clip.setText(AnnotatedString(b.text)); copied = true }.padding(horizontal = 10.dp, vertical = 6.dp).testTag("md.copy"), color = dcs.primary, fontFamily = BpMono, fontSize = 11.sp)
         }
         Text(b.text, Modifier.horizontalScroll(rememberScrollState()).padding(start = 10.dp, end = 10.dp, bottom = 10.dp), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, lineHeight = 17.sp, softWrap = false)
     }

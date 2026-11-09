@@ -52,6 +52,10 @@ jobs:
             android:
               - 'mobile/android/**'
               - 'test/mobile/**'
+              - 'i18n/**'
+              - 'scripts/i18n-android.py'
+              - 'scripts/check-android-i18n.py'
+              - 'scripts/i18n-check.py'
               - '.github/workflows/ci.yml'
             windows:
               - 'native/**'
@@ -256,6 +260,8 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
+      - name: catalog and copy checks
+        run: python3 scripts/i18n-check.py && python3 scripts/i18n-android.py --check && python3 scripts/check-android-i18n.py
       - name: unit tests and debug build
         working-directory: mobile/android
         run: ./gradlew --no-daemon testDebugUnitTest assembleDebug

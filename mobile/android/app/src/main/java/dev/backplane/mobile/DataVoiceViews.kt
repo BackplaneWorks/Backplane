@@ -32,14 +32,14 @@ private fun JSONArray?.objs(): List<JSONObject> = if (this == null) emptyList() 
 @Composable
 internal fun MicChip(on: Boolean, press: () -> Unit) {
     Box(Modifier.size(40.dp).background(if (on) dcs.error else dcs.surfaceVariant).border(BorderStroke(1.dp, if (on) dcs.error else dcs.outlineVariant)).clickable(onClick = press).testTag("thread.mic"), contentAlignment = Alignment.Center) {
-        Icon(if (on) Icons.Default.Stop else Icons.Default.Mic, "Dictate", tint = if (on) dcs.onError else dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        Icon(if (on) Icons.Default.Stop else Icons.Default.Mic, Msg.android_dictate, tint = if (on) dcs.onError else dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }
 }
 
 @Composable
 private fun VChip(label: String, primary: Boolean = false, tag: String, press: () -> Unit) {
     Box(Modifier.heightIn(min = 36.dp).background(if (primary) dcs.primary else dcs.surfaceVariant).border(BorderStroke(1.dp, if (primary) dcs.primary else dcs.outlineVariant)).clickable(onClick = press).padding(horizontal = 10.dp).testTag(tag), contentAlignment = Alignment.Center) {
-        DMono(label, if (primary) dcs.onPrimary else dcs.onSurface, 12)
+        DMono(Tr.t(label), if (primary) dcs.onPrimary else dcs.onSurface, 12)
     }
 }
 
@@ -53,15 +53,15 @@ internal fun VoiceStrip(tid: String) {
     if (!on && note.isEmpty() && fixes.isEmpty() && ask == null) return
     Column(Modifier.fillMaxWidth().testTag("voice"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (note.isNotEmpty()) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(note, Modifier.weight(1f).testTag("voice.note"), color = if (v.optBoolean("bad")) dcs.error else dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
-            VChip("Close", tag = "voice.close") { DataVoice.act(tid, "voice-err", "") }
+            Text(Tr.t(note), Modifier.weight(1f).testTag("voice.note"), color = if (v.optBoolean("bad")) dcs.error else dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
+            VChip(Msg.common_close, tag = "voice.close") { DataVoice.act(tid, "voice-err", "") }
         }
         if (on) Row(Modifier.fillMaxWidth().testTag("voice.strip"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DDot(dcs.error, 8)
-            Text(v.optString("status"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, modifier = Modifier.testTag("voice.status"))
+            Text(Tr.t(v.optString("status")), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, modifier = Modifier.testTag("voice.status"))
             Box(Modifier.width(72.dp).height(4.dp).background(dcs.outlineVariant).testTag("voice.level")) { Box(Modifier.fillMaxHeight().fillMaxWidth(DataVoice.level / 100f).background(dcs.primary)) }
             Spacer(Modifier.weight(1f))
-            VChip(v.optString("stop").ifEmpty { "Stop" }, tag = "voice.stop") { DataVoice.stop(tid) }
+            VChip(v.optString("stop").ifEmpty { Msg.composer_stop }, tag = "voice.stop") { DataVoice.stop(tid) }
         }
         if (fixes.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             fixes.forEachIndexed { i, f -> VChip(f.optString("label"), tag = "voice.fix.$i") { DataVoice.act(tid, f.optString("action"), f.optString("value")) } }
@@ -69,8 +69,8 @@ internal fun VoiceStrip(tid: String) {
         if (ask != null) {
             val field = ask.optJSONObject("field")
             var typed by remember(ask.optString("text"), field?.optString("value")) { mutableStateOf(field?.optString("value") ?: "") }
-            Text(ask.optString("text"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("voice.ask"))
-            if (ask.optBoolean("fixing") && field != null) DField(typed, { typed = it }, field.optString("hint").ifEmpty { "The right spelling" }, Modifier.testTag("voice.fixfield"))
+            Text(Tr.t(ask.optString("text")), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("voice.ask"))
+            if (ask.optBoolean("fixing") && field != null) DField(typed, { typed = it }, Tr.t(field.optString("hint")).ifEmpty { Msg.android_voice_spelling }, Modifier.testTag("voice.fixfield"))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ask.optJSONArray("buttons").objs().forEachIndexed { n, b ->
                     val action = b.optString("action")
@@ -85,7 +85,7 @@ internal fun VoiceStrip(tid: String) {
 @Composable
 internal fun VoiceSettings() {
     LaunchedEffect(DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) DataVoice.loadPage() }
-    PageRows("VOICE", "voice", DataVoice.rows, DataVoice.pageError) { action, value, sent ->
+    PageRows(Msg.android_voice_head, "voice", DataVoice.rows, DataVoice.pageError) { action, value, sent ->
         DataVoice.pageAct(action, value, sent)
         // the key and the term are spent once the hub has them
         setOf("secret-save" to "kval", "voice-term" to "vterm").firstOrNull { it.first == action }?.second
@@ -106,29 +106,29 @@ internal fun PageRows(title: String, tag: String, rows: List<org.json.JSONObject
     val typed = remember { mutableStateMapOf<String, String>() }
     Column(Modifier.fillMaxWidth().testTag("settings.$tag"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         DMono(title, dfaint)
-        if (error.isNotEmpty()) DMono(error, dcs.error, 12)
+        if (error.isNotEmpty()) DMono(Tr.t(error), dcs.error, 12)
         rows.forEach { r ->
             val label = r.optString("label"); val tone = r.optString("tone")
             Column(Modifier.fillMaxWidth().testTag("$tag.row.$label"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(label, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
-                if (r.optString("note").isNotEmpty()) Text(r.optString("note"), color = when (tone) { "bad" -> dcs.error; "warn" -> dwarn; else -> dcs.onSurfaceVariant }, fontFamily = BpMono, fontSize = 11.sp,
+                Text(Tr.t(label), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
+                if (r.optString("note").isNotEmpty()) Text(Tr.t(r.optString("note")), color = when (tone) { "bad" -> dcs.error; "warn" -> dwarn; else -> dcs.onSurfaceVariant }, fontFamily = BpMono, fontSize = 11.sp,
                     modifier = Modifier.testTag("$tag.note.$label"))
                 // a code to scan (a pairing link's), as the hub drew it, and its line (the code, the address, until when)
                 val qr = PageRow.qr(r)
                 if (qr.isNotEmpty()) QrCode(qr, Modifier.fillMaxWidth().testTag("$tag.qr.$label"))
-                if (r.optString("qrnote").isNotEmpty()) Text(r.optString("qrnote"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("$tag.qrnote.$label"))
+                if (r.optString("qrnote").isNotEmpty()) Text(Tr.t(r.optString("qrnote")), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("$tag.qrnote.$label"))
                 r.optJSONArray("fields").objs().forEach { f ->
                     val name = f.optString("name")
                     val v = typed[name] ?: f.optString("value")
                     Box(Modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 10.dp).testTag("$tag.field.$name")) {
-                        if (v.isEmpty()) Text(f.optString("hint"), color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
+                        if (v.isEmpty()) Text(Tr.t(f.optString("hint")), color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
                         BasicTextField(v, { typed[name] = it }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), singleLine = true,
                             visualTransformation = if (f.optBoolean("secret")) PasswordVisualTransformation() else VisualTransformation.None, modifier = Modifier.fillMaxWidth())
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     r.optJSONArray("buttons").objs().forEachIndexed { i, b ->
-                        DBtn(b.optString("label"), b.optBoolean("on"), modifier = Modifier.testTag("$tag.btn.$label.$i")) {
+                        DBtn(Tr.t(b.optString("label")), b.optBoolean("on"), modifier = Modifier.testTag("$tag.btn.$label.$i")) {
                             val action = b.optString("action"); val value = b.optString("value"); val sent = typed.toMap()
                             if (!pageLocal(ctx, action, value)) scope.launch { act(action, value, sent)?.let { typed.remove(it) } }
                         }
@@ -160,7 +160,7 @@ internal fun pageLocal(ctx: android.content.Context, action: String, value: Stri
     when (action) {
         "copy", "copy-text" -> {
             (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("Backplane", value))
-            DataClient.say("Copied")
+            DataClient.say(Msg.android_copied)
         }
         "share-text" -> runCatching {
             ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, value), null)
@@ -168,7 +168,7 @@ internal fun pageLocal(ctx: android.content.Context, action: String, value: Stri
         }
         "open-url" -> if (PageRow.webUrl(value)) runCatching {
             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(value.trim())).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure { DataClient.say("No app here opens that link.") }
+        }.onFailure { DataClient.say(Msg.android_link_noapp) }
     }
     return true
 }

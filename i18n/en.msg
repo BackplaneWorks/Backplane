@@ -3368,6 +3368,33 @@ android.hub.migrate.vault = The 0.14 keys did not come: {why}. Add them again in
 android.hub.history.title = Conversation history
 android.hub.history.closed = Conversation history takes no new chats. Start one in a project.
 
+android.away = away
+android.open = Open
+android.search.messages = MESSAGES
+android.find.inthread = Find in thread
+android.find.error = error
+android.find.prev = Previous
+android.find.next = Next
+android.find.nomatch = no match
+android.find.count = {n, number} of {total, number}
+android.find.you = you said
+android.find.agent = agent said
+android.sub.thread = the thread
+android.sub.back = Back to {title}
+android.sub.gone = This subagent's steps are no longer kept.
+android.sub.more = {n, plural, one {# earlier step not shown} other {# earlier steps not shown}}
+android.sub.none = No steps reported yet.
+android.sub.asked = Asked
+android.sub.tool = tool
+android.machine.on = on {name}
+android.handoff.from = ‹ Handed over from {title}
+android.handoff.note = Note: {note}
+android.queue.unsent = Unsent
+android.mark.runs = runs on {machine}
+android.mark.also = also on {machines}
+android.mark.newon = New thread on {machine}
+android.google.signedin = Signed in.
+android.google.back = Back to Backplane
 # ---- ios: new entries go here ----
 
 # ---- end ----

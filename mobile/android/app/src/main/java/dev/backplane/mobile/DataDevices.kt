@@ -52,5 +52,5 @@ object DataDevices {
 @Composable
 internal fun DevicesSettings() {
     LaunchedEffect(DataClient.conn, DataClient.hubName) { if (DataClient.conn == DataClient.Conn.ONLINE) DataDevices.load() }
-    PageRows("DEVICES", "devices", DataDevices.rows, DataDevices.error) { action, value, _ -> DataDevices.act(action, value); null }
+    PageRows(Msg.android_devices_head, "devices", DataDevices.rows, DataDevices.error) { action, value, _ -> DataDevices.act(action, value); null }
 }

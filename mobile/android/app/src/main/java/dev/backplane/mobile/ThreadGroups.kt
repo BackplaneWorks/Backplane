@@ -23,7 +23,7 @@ object ThreadGroups {
     }
     /** The number on the row: the hub's count when it sends one (the list may hold only a page), else what is loaded. */
     fun count(hub: Int?, loaded: Int) = maxOf(hub ?: 0, loaded)
-    fun title(n: Int) = "Settled ($n)"
+    fun title(n: Int) = Msg.android_settled_title(n)
 
     /** A row of the tree: the thread, how deep it sits, how many children it has. */
     data class Node(val t: DThread, val depth: Int, val kids: Int)

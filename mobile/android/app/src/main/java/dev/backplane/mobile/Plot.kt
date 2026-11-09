@@ -526,13 +526,13 @@ class PlotStore {
         val previous = if (solid) assets.frame(key)?.mesh else null
         val why = o["none"] as? String
         if (why != null) {
-            if (solid) { mesh = MeshFrame(key, previous, why + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis()); return }
+            if (solid) { mesh = MeshFrame(key, previous, if (previous == null) why else Msg.android_mesh_previous(why), System.currentTimeMillis()); return }
             held = emptyList()
             frame = PlotFrame(key, FloatArray(0), FloatArray(0), 0f, emptyList(), emptySet(), why, System.currentTimeMillis(), fam)
             keepFrame(); return
         }
         parts.reset() // a new board mesh: its parts come again after it
-        mesh = MeshFrame(key, previous, "Received model; decoding…" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis(), decoding = true)
+        mesh = MeshFrame(key, previous, if (previous == null) Msg.android_mesh_decoding else Msg.android_mesh_previous(Msg.android_mesh_decoding), System.currentTimeMillis(), decoding = true)
         meshQueue.execute meshJob@ {
             if (!assets.current(key, ticket)) return@meshJob
             val bytes = o["mesh"] as? ByteArray ?: ByteArray(0)
@@ -544,7 +544,7 @@ class PlotStore {
             main.post {
                 if (gen != generation || !assets.current(key, ticket)) return@post
                 mesh = MeshFrame(key, m ?: previous,
-                    if (m != null) "" else "Unable to decode model" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis())
+                    if (m != null) "" else if (previous == null) Msg.android_mesh_bad else Msg.android_mesh_previous(Msg.android_mesh_bad), System.currentTimeMillis())
             }
         }
     }

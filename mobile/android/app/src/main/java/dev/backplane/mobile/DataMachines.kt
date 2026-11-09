@@ -26,5 +26,5 @@ object DataMachines {
 @Composable
 internal fun MachinesSettings() {
     LaunchedEffect(DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) DataMachines.load() }
-    PageRows("MACHINES", "machines", DataMachines.rows, DataMachines.error) { action, value, sent -> DataMachines.act(action, value, sent); null }
+    PageRows(Msg.android_machines_head, "machines", DataMachines.rows, DataMachines.error) { action, value, sent -> DataMachines.act(action, value, sent); null }
 }

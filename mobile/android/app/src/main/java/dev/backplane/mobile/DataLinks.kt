@@ -47,7 +47,7 @@ fun DataClient.openLink(url: String, thread: String) {
         // a hub that does not know link.resolve: a thread link as before, the rest says so
         if (!has("links")) {
             val id = if (text.startsWith("backplane://thread/")) text.removePrefix("backplane://thread/").substringBefore('#').substringBefore('/') else ""
-            if (id.isNotEmpty()) linkTarget = LinkTarget(LinkTarget.Kind.THREAD, id) else say("Update the hub to open this link.")
+            if (id.isNotEmpty()) linkTarget = LinkTarget(LinkTarget.Kind.THREAD, id) else say(Msg.android_link_old)
             return@launch
         }
         try {
@@ -57,9 +57,9 @@ fun DataClient.openLink(url: String, thread: String) {
                 "project" -> LinkTarget(LinkTarget.Kind.PROJECT, r.optString("project"))
                 "room" -> LinkTarget(LinkTarget.Kind.ROOM, r.optString("room"))
                 "file" -> LinkTarget(LinkTarget.Kind.FILE, r.optString("thread"), r.optString("path"), r.optInt("line"))
-                else -> { say(r.optString("note").ifEmpty { "That link does not open here." }); null }
+                else -> { say(Tr.t(r.optString("note").ifEmpty { "That link does not open here." })); null }
             }
-        } catch (e: Exception) { say(if (conn == DataClient.Conn.ONLINE) (e.message ?: "That link did not open.") else "Not connected to the hub.") }
+        } catch (e: Exception) { say(if (conn == DataClient.Conn.ONLINE) (e.message ?: Msg.android_link_failed) else Msg.android_link_offline) }
     }
 }
 
@@ -73,7 +73,7 @@ fun DataClient.say(note: String) {
 @Composable
 fun BoxScope.LinkNote() {
     val n = DataClient.linkNote
-    if (n.isNotEmpty()) Text(n, Modifier.align(Alignment.BottomCenter).padding(bottom = 70.dp, start = 16.dp, end = 16.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 12.dp, vertical = 9.dp).testTag("link.note"),
+    if (n.isNotEmpty()) Text(Tr.t(n), Modifier.align(Alignment.BottomCenter).padding(bottom = 70.dp, start = 16.dp, end = 16.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 12.dp, vertical = 9.dp).testTag("link.note"),
         color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
 }
 

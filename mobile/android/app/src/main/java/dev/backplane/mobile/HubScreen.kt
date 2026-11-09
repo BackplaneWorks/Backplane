@@ -62,25 +62,25 @@ internal fun HubScreen(back: () -> Unit) {
 
     asking?.let { a ->
         AlertDialog(onDismissRequest = { asking = null }, shape = RectangleShape,
-            title = { Text(a.label + "?", fontFamily = BpMono, fontSize = 15.sp) },
-            text = if (a.text.isEmpty()) null else { { Text(a.text, fontFamily = BpMono, fontSize = 13.sp) } },
-            confirmButton = { DBtn(a.label, true, modifier = Modifier.testTag("hub.confirm")) { send(a) } },
-            dismissButton = { DBtn("Cancel", false, modifier = Modifier.testTag("hub.cancel")) { asking = null } })
+            title = { Text(Tr.t(a.label) + if (Tr.lang == "ja") "？" else "?", fontFamily = BpMono, fontSize = 15.sp) },
+            text = if (a.text.isEmpty()) null else { { Text(Tr.t(a.text), fontFamily = BpMono, fontSize = 13.sp) } },
+            confirmButton = { DBtn(Tr.t(a.label), true, modifier = Modifier.testTag("hub.confirm")) { send(a) } },
+            dismissButton = { DBtn(Msg.common_cancel, false, modifier = Modifier.testTag("hub.cancel")) { asking = null } })
     }
     val panel = HubRescue.panel(fetch)
     Column(Modifier.fillMaxSize()) {
-        DBar("Hub", back)
+        DBar(Msg.android_hub, back)
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             DMono(DataClient.hubName, dcs.onSurfaceVariant, 12)
-            Text(panel.text, Modifier.testTag("hub.text"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
-            panel.actions.forEach { a -> DBtn(a.label, false, !busy, Modifier.fillMaxWidth().testTag("hub.action.${a.id}")) { asking = a } }
-            if (answer.isNotEmpty()) Text(answer, Modifier.testTag("hub.answer"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
-            if (progress.isNotEmpty()) Text(progress, Modifier.testTag("hub.progress"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
-            if (fetch != HubFetch.Loading) DBtn("Refresh", false, !busy, Modifier.testTag("hub.refresh")) { fetch = HubFetch.Loading; scope.launch { load() } }
+            Text(Tr.t(panel.text), Modifier.testTag("hub.text"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
+            panel.actions.forEach { a -> DBtn(Tr.t(a.label), false, !busy, Modifier.fillMaxWidth().testTag("hub.action.${a.id}")) { asking = a } }
+            if (answer.isNotEmpty()) Text(Tr.t(answer), Modifier.testTag("hub.answer"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
+            if (progress.isNotEmpty()) Text(Tr.t(progress), Modifier.testTag("hub.progress"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
+            if (fetch != HubFetch.Loading) DBtn(Msg.common_refresh, false, !busy, Modifier.testTag("hub.refresh")) { fetch = HubFetch.Loading; scope.launch { load() } }
             panel.incidents.forEach { i ->
                 DLine()
                 DMono(dStamp(i.atMs), dfaint)
-                Text(listOf(i.what, i.why, i.did).filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
+                Text(listOf(i.what, i.why, i.did).filter { it.isNotEmpty() }.joinToString(" · ") { Tr.t(it) }, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
             }
         }
     }
@@ -94,7 +94,7 @@ internal fun HubBanner(open: () -> Unit) {
     Column(Modifier.testTag("hub.banner").clickable(onClick = open)) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             DDot(if (n.warn) dwarn else dfaint, 8); Spacer(Modifier.width(8.dp))
-            Text(n.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(Tr.t(n.text), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DLine()
     }
@@ -107,13 +107,13 @@ internal fun StarBanner() {
     val ctx = LocalContext.current
     Column(Modifier.testTag("star.banner")) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(s.text, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(Tr.t(s.text), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(8.dp))
-            DMono(s.label.ifEmpty { "Star on GitHub" }, dcs.primary, 12, Modifier.testTag("star.open").clickable {
+            DMono(Tr.t(s.label.ifEmpty { "Star on GitHub" }), dcs.primary, 12, Modifier.testTag("star.open").clickable {
                 runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(s.url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 DataClient.starDecide("open")
             }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
-            DMono("Dismiss", dcs.onSurfaceVariant, 12, Modifier.testTag("star.dismiss").clickable { DataClient.starDecide("dismiss") }.padding(horizontal = 4.dp, vertical = 4.dp))
+            DMono(Msg.approval_dismiss, dcs.onSurfaceVariant, 12, Modifier.testTag("star.dismiss").clickable { DataClient.starDecide("dismiss") }.padding(horizontal = 4.dp, vertical = 4.dp))
         }
         DLine()
     }

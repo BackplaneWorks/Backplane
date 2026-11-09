@@ -102,7 +102,7 @@ data class DHistory(val count: Int = 0, val live: List<DThread> = emptyList(), v
     /** What the home list shows under the group's row: the live chats, then the rest when it is open. No row here ever starts a chat. */
     fun shown(open: Boolean): List<DThread> = live + (if (open) rows.filter { r -> live.none { it.id == r.id } } else emptyList())
     /** The group's row: drawn while any chat is in it. */
-    val title get() = "Conversation history ($count)"
+    val title get() = Msg.android_history_title(count)
     companion object {
         fun parse(o: JSONObject, before: DHistory? = null) = DHistory(o.optInt("count"), parseThreads(o.optJSONArray("live")),
             (before?.rows ?: emptyList()) + parseThreads(o.optJSONArray("threads")), if (o.isNull("next") || !o.has("next")) null else o.optString("next"))

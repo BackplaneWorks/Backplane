@@ -34,6 +34,17 @@ class TrTest {
         assertEquals(Tr.render(Icu.parse(Msg.ja[Msg.keys.indexOf("thread.count")]), mapOf("n" to 5L), "ja"), Msg.thread_count(5))
     }
 
+    @Test fun machineWords() {
+        // the hub's machine words (mirror.rs, sidebar.rs, present/screen.rs) and the find bar's count
+        Tr.fixed = "ja"
+        assertEquals("framework-1 で実行", Tr.t("runs on framework-1"))
+        assertEquals("desktop, framework にもあり", Tr.t("also on desktop, framework"))
+        assertEquals("desktop で新しいスレッド", Tr.t("New thread on desktop"))
+        assertEquals("未送信", Tr.t("Unsent")); assertEquals("あなたの発言", Tr.t(DataFind.who("user")))
+        assertEquals("3 / 12+", DataFind.count(2, 5, 12, true, Msg.android_find_nomatch) { a, b -> Msg.android_find_count(a, b) })
+        assertEquals("一致なし", DataFind.count(-1, 0, 0, false, Msg.android_find_nomatch) { a, b -> Msg.android_find_count(a, b) })
+    }
+
     @Test fun reverse() {
         Tr.fixed = "ja"
         assertEquals("言語", Tr.t("Language"))

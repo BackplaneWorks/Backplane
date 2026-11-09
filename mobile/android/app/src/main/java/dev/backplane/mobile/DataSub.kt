@@ -32,26 +32,26 @@ internal fun subResultLines(text: String, open: Boolean): Pair<String, Boolean> 
 internal fun SubScreen(thread: String, key: String, back: () -> Unit) {
     DisposableEffect(thread, key) { DataClient.openSub(thread, key); onDispose { DataClient.closeSub() } }
     val v = DataClient.subView?.takeIf { it.key == key && it.thread == thread }
-    val title = DataClient.threads.firstOrNull { it.id == thread }?.title ?: "the thread"
+    val title = DataClient.threads.firstOrNull { it.id == thread }?.title ?: Msg.android_sub_thread
     val state = rememberLazyListState()
     val n = v?.entries?.size ?: 0
     // live: a new step is followed while the reader is at the end (or has just opened it)
     var seen by remember(key) { mutableStateOf(0) }
     LaunchedEffect(n) { if (n > 0 && (seen == 0 || !state.canScrollForward || state.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= seen - 1 } == true)) state.scrollToItem(n + 1); seen = n }
     Column(Modifier.fillMaxSize().testTag("sub.screen")) {
-        DBar(v?.title ?: "Subagent", back)
+        DBar(v?.title ?: Msg.android_hub_work_subagent, back)
         Column(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                DMono("Back to $title", dcs.primary, 12, Modifier.weight(1f).clickable(onClick = back).testTag("sub.back"))
-                if (v != null) DMono(if (v.took.isEmpty()) v.state else "${v.state} · ${v.took}", if (v.live) dok else dfaint, 12, Modifier.testTag("sub.state"))
-                if (v != null && v.label.isNotEmpty()) { Spacer(Modifier.width(8.dp)); DBtn(v.label, false, modifier = Modifier.testTag("sub.stop")) { DataClient.workAct(thread, DWorkRow("", "", "", "", v.act, v.value, v.label)) } }
+                DMono(Msg.android_sub_back(title), dcs.primary, 12, Modifier.weight(1f).clickable(onClick = back).testTag("sub.back"))
+                if (v != null) DMono(Tr.t(if (v.took.isEmpty()) v.state else "${v.state} · ${v.took}"), if (v.live) dok else dfaint, 12, Modifier.testTag("sub.state"))
+                if (v != null && v.label.isNotEmpty()) { Spacer(Modifier.width(8.dp)); DBtn(Tr.t(v.label), false, modifier = Modifier.testTag("sub.stop")) { DataClient.workAct(thread, DWorkRow("", "", "", "", v.act, v.value, v.label)) } }
             }
-            if (v != null) listOf(v.meta, v.where).filter { it.isNotEmpty() }.forEach { DMono(it, dfaint, 11, lines = 2) }
+            if (v != null) listOf(v.meta, v.where).filter { it.isNotEmpty() }.forEach { DMono(Tr.t(it), dfaint, 11, lines = 2) }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("sub.list"), state = state, contentPadding = PaddingValues(vertical = 8.dp)) {
-            if (v == null) item("loading") { DMono(if (DataClient.subGone) "This subagent's steps are no longer kept." else "Loading…", dcs.onSurfaceVariant, 13, Modifier.padding(14.dp)) }
-            if (v != null && v.more > 0) item("more") { DMono("${v.more} earlier steps not shown", dfaint, 11, Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
-            if (v != null && v.entries.isEmpty()) item("none") { DMono("No steps reported yet.", dcs.onSurfaceVariant, 13, Modifier.padding(14.dp)) }
+            if (v == null) item("loading") { DMono(if (DataClient.subGone) Msg.android_sub_gone else Msg.viewer_loading, dcs.onSurfaceVariant, 13, Modifier.padding(14.dp)) }
+            if (v != null && v.more > 0) item("more") { DMono(Msg.android_sub_more(v.more), dfaint, 11, Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
+            if (v != null && v.entries.isEmpty()) item("none") { DMono(Msg.android_sub_none, dcs.onSurfaceVariant, 13, Modifier.padding(14.dp)) }
             items(v?.entries ?: emptyList(), key = { it.id }) { e -> SubEntry(thread, e) }
         }
     }
@@ -61,7 +61,7 @@ internal fun SubScreen(thread: String, key: String, back: () -> Unit) {
 private fun SubEntry(thread: String, e: DEntry) {
     when (e.kind) {
         "user" -> Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("sub.asked")) {
-            DMono("Asked", dfaint, 11); LinkText(e.text, thread, color = dcs.onSurface, size = 13, lineHeight = 19)
+            DMono(Msg.android_sub_asked, dfaint, 11); LinkText(e.text, thread, color = dcs.onSurface, size = 13, lineHeight = 19)
         }
         "assistant" -> Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) { LinkText(e.text, thread, color = dcs.onSurface, size = 13, lineHeight = 19) }
         "tool" -> {
@@ -72,14 +72,14 @@ private fun SubEntry(thread: String, e: DEntry) {
             Column(Modifier.fillMaxWidth().clickable(enabled = cut || open) { open = !open }.padding(horizontal = 12.dp, vertical = 3.dp).testTag("sub.tool.${e.id}")) {
                 Row {
                     Text(when (st) { "running" -> "▸"; "failed" -> "✗"; else -> "✓" }, color = tone, fontFamily = BpMono, fontSize = 12.sp); Spacer(Modifier.width(6.dp))
-                    Text(t?.name ?: "tool", color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp))
+                    Text(t?.name?.let { Tr.t(it) } ?: Msg.android_sub_tool, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp))
                     Text(t?.summary ?: "", color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 if (res.isNotEmpty()) Text(if (cut) "$res\n…" else res, color = if (st == "failed") dcs.error else dfaint, fontFamily = BpMono, fontSize = 11.sp, modifier = Modifier.padding(start = 18.dp))
             }
         }
         else -> Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag("sub.note")) {
-            DMono(e.label, dfaint, 11); Spacer(Modifier.width(8.dp)); DMono(e.text, if (e.tone.contains("error")) dcs.error else dcs.onSurfaceVariant, 12, Modifier.weight(1f), lines = 6)
+            DMono(Tr.t(e.label), dfaint, 11); Spacer(Modifier.width(8.dp)); DMono(e.text, if (e.tone.contains("error")) dcs.error else dcs.onSurfaceVariant, 12, Modifier.weight(1f), lines = 6)
         }
     }
 }

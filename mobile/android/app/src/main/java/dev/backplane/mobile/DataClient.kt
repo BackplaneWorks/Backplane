@@ -84,25 +84,25 @@ object DataClient {
         val inv = Pairing.invitation(text)
         if (inv != null) {
             if (pairingBusy) return
-            pairingBusy = true; pairingError = "Connecting…"
+            pairingBusy = true; pairingError = Msg.android_connecting
             scope.launch {
                 try {
                     val tries = inv.routes.ifEmpty { listOf(inv.origin) }
                     if (HubList.local(tries)) { pairingError = HubList.LOCAL; pairingBusy = false; return@launch }
                     val l = Pairing.exchange(inv, tries); pairingError = ""; adopt(l)
                 }
-                catch (e: Exception) { pairingError = e.message ?: "Hub unreachable" }
+                catch (e: Exception) { pairingError = e.message ?: Msg.android_hub_unreachable }
                 pairingBusy = false
             }
             return
         }
-        if (Pairing.bareCode(text)) { pairingError = "Enter the hub's address with the short code."; return }
-        if (Pairing.malformedInvitation(text)) { pairingError = "Enter the complete invitation link or a valid eight-character code."; return }
+        if (Pairing.bareCode(text)) { pairingError = Msg.android_pair_code_address; return }
+        if (Pairing.malformedInvitation(text)) { pairingError = Msg.android_pair_link_partial; return }
         adopt(text.trim())
     }
     private fun save(next: List<String>) { links = next; prefs().edit().putString("links", HubList.encode(next)).remove("link").apply() }
     private fun adopt(l: String) {
-        if (Pairing.key(l) == null) { pairingError = "Enter the hub's address or pairing link."; return }
+        if (Pairing.key(l) == null) { pairingError = Msg.android_pair_link_none; return }
         val changed = Pairing.key(link ?: "") != Pairing.key(l)
         save(HubList.adopt(links, l) { Pairing.key(it) }); needsRepair = false; adding = false
         if (changed) reset()
@@ -145,11 +145,11 @@ object DataClient {
                 val st = response?.code ?: 0
                 // the words a person reads in Settings: not the socket's ("failed to connect to /192.168.77.2 (port 3871) from /10.0.2.16")
                 val why = when {
-                    st != 0 -> "The hub answered HTTP $st"
-                    t is java.net.ConnectException || t is java.net.NoRouteToHostException -> "Can't reach $hubName: is it running, and is this phone on its network (or tailnet)?"
-                    t is java.net.SocketTimeoutException -> "$hubName did not answer in time."
-                    t is java.net.UnknownHostException -> "$hubName: no such address on this network."
-                    else -> t.message ?: "offline"
+                    st != 0 -> Msg.android_fail_http(st.toString())
+                    t is java.net.ConnectException || t is java.net.NoRouteToHostException -> Msg.android_fail_reach(hubName)
+                    t is java.net.SocketTimeoutException -> Msg.android_fail_timeout(hubName)
+                    t is java.net.UnknownHostException -> Msg.android_fail_dns(hubName)
+                    else -> t.message ?: Msg.android_offline_word
                 }
                 scope.launch { if (g == gen && (st == 401 || st == 403)) needsRepair = true; lost(g, why) }
             }
@@ -160,7 +160,7 @@ object DataClient {
         gen++
         watchdog?.cancel(); reconnect?.cancel()
         ws?.cancel(); ws = null
-        calls.values.forEach { it.completeExceptionally(Exception("Offline")) }; calls.clear()
+        calls.values.forEach { it.completeExceptionally(Exception(Msg.android_offline_cap)) }; calls.clear()
         listSub = 0; threadSub = 0
     }
     fun foreground() { if (link != null && (conn != Conn.ONLINE || System.currentTimeMillis() - heard > 20_000)) connect() else if (link != null) scope.launch { syncPush() } }
@@ -176,7 +176,7 @@ object DataClient {
         val o = runCatching { JSONObject(text) }.getOrNull() ?: return
         when (o.optString("t")) {
             "hello" -> {
-                if (!o.optString("proto").startsWith("data/")) { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
+                if (!o.optString("proto").startsWith("data/")) { failure = Msg.android_proto_old; lost(g, failure); return }
                 features = o.optJSONArray("features")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
                 notice = HubRescue.notice(o.optJSONObject("notice"))
                 heardMigrating(o.optJSONObject("migrating"))
@@ -187,7 +187,7 @@ object DataClient {
             "reply" -> {
                 val d = calls.remove(o.optInt("id", -1)) ?: return
                 if (o.optBoolean("ok")) d.complete(o.optJSONObject("result") ?: JSONObject())
-                else { val e = o.opt("error"); d.completeExceptionally(Refused(if (e is JSONObject) e.optString("message", e.optString("code")) else e?.toString() ?: "The hub refused")) }
+                else { val e = o.opt("error"); d.completeExceptionally(Refused(if (e is JSONObject) e.optString("message", e.optString("code")) else e?.toString() ?: Msg.android_hub_refused)) }
             }
             "d" -> push(o)
             "voice" -> DataVoice.frame(o)
@@ -202,11 +202,11 @@ object DataClient {
     class Refused(message: String) : Exception(message)
     suspend fun call(m: String, p: JSONObject = JSONObject()): JSONObject {
         val w = ws
-        if (conn == Conn.OFFLINE || w == null) throw Exception("Offline")
+        if (conn == Conn.OFFLINE || w == null) throw Exception(Msg.android_offline_cap)
         val id = nextId++
         val d = CompletableDeferred<JSONObject>(); calls[id] = d
         w.send(JSONObject().put("id", id).put("m", m).put("p", p).toString())
-        return try { withTimeout(25_000) { d.await() } } catch (e: TimeoutCancellationException) { calls.remove(id); throw Exception("The hub did not answer") }
+        return try { withTimeout(25_000) { d.await() } } catch (e: TimeoutCancellationException) { calls.remove(id); throw Exception(Msg.android_hub_noanswer) }
     }
 
     // ---- sync
@@ -461,7 +461,7 @@ object DataClient {
         } catch (e: Refused) {
             // the hub said no: the words come back to the draft, with why
             entries = entries + (tid to (entries[tid] ?: emptyList()).filter { it.clientId != cid || !it.sending })
-            refused(tid, text, e.message ?: "The hub refused")
+            refused(tid, text, e.message ?: Msg.android_hub_refused)
         } catch (e: Exception) {
             // the socket went: a text-only message waits in the outbox (sent again with the same clientId, so it posts once)
             val hub = hubKey()
@@ -510,7 +510,7 @@ object DataClient {
                     r.optJSONObject("entry")?.let(::parseEntry)?.let { e -> put(e, it.thread) }
                     if (has("queue")) runCatching { loadQueue(it.thread) }
                 } catch (e: Refused) {
-                    keepOutbox(outbox.remove(it.clientId)); refused(it.thread, it.text, e.message ?: "The hub refused")
+                    keepOutbox(outbox.remove(it.clientId)); refused(it.thread, it.text, e.message ?: Msg.android_hub_refused)
                 } catch (e: Exception) { break } // the socket went again: the rest waits for the next connect
             }
         } finally { flushing = false }
@@ -558,7 +558,7 @@ object DataClient {
     /** Runs it; throws the hub's plain words when it cannot. The answer's `kind` is what became of it. */
     suspend fun runCommand(tid: String, text: String): JSONObject {
         val r = call("composer.run", JSONObject().put("thread", tid).put("text", text))
-        if (r.optString("kind") == "btw") btw = btw + (tid to Btw(r.optString("q"), "Thinking…"))
+        if (r.optString("kind") == "btw") btw = btw + (tid to Btw(r.optString("q"), Msg.android_thinking))
         return r
     }
     fun closeBtw(tid: String) { btw = btw - tid }
@@ -692,17 +692,23 @@ object DataClient {
         call("onboard.act", JSONObject().put("action", b.action).put("value", b.value))
         if (!card.running && migrating == card) { migrating = null; migrateOpen = false }
     }
+    /** The notification channels, named in the app's language (again when it changes: a channel keeps its id, its name follows). */
+    fun channels() {
+        val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        nm.createNotificationChannel(android.app.NotificationChannel("data-alerts", Msg.native_notify_channel_personal, android.app.NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(android.app.NotificationChannel(LiveService.CHANNEL, Msg.native_notify_channel_live, android.app.NotificationManager.IMPORTANCE_LOW))
+    }
     private fun notify(o: JSONObject) {
         if (foreground) return
         if (!AppSettings.alertsOn() && !o.optBoolean("through")) return
         val tid = o.optString("thread"); val key = o.optString("key"); val ask = o.optString("ask")
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        nm.createNotificationChannel(android.app.NotificationChannel("data-alerts", "Alerts", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+        channels()
         // a notice of the hub's own (kind import) has no thread: its tap opens the lists
         val intent = android.content.Intent(app, DataActivity::class.java).apply { if (tid.isNotEmpty()) putExtra("thread", tid) }.putExtra("ask", ask).putExtra("link", o.optString("link")).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val open = android.app.PendingIntent.getActivity(app, key.hashCode(), intent, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
         val n = android.app.Notification.Builder(app, "data-alerts").setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle(o.optString("title").ifEmpty { "Backplane" })
-            .setContentText(o.optString("body")).apply { if (tid.isNotEmpty()) setGroup(tid) }.setNumber(o.optInt("badge")).setContentIntent(open).setAutoCancel(true).build()
+            .setContentText(Tr.t(o.optString("body"))).apply { if (tid.isNotEmpty()) setGroup(tid) }.setNumber(o.optInt("badge")).setContentIntent(open).setAutoCancel(true).build()
         nm.notify(alertTag, key.hashCode(), n)
     }
     // what was dealt with leaves this phone, by its key

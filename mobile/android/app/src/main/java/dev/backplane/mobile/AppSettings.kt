@@ -5,19 +5,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-// The tabs of the app, in the order of the bar.
-enum class Tab {
-    Home, Threads, Bots, Routines, Settings;
-    val title: String get() = title("en")
-    fun title(tag: String): String = when (this) {
-        Home -> NativeMessages.native_tab_home(tag)
-        Threads -> NativeMessages.tour_title_threads(tag)
-        Bots -> NativeMessages.tour_title_bots(tag)
-        Routines -> NativeMessages.bots_tab_routines(tag)
-        Settings -> NativeMessages.palette_settings(tag)
-    }
-}
-
 // Settings about this device: kept in SharedPreferences, applied at once,
 // never a round trip to a hub. The thread list's view also goes to
 // (Backplane.local), which draws the list; nothing here is written to a hub.
@@ -28,9 +15,8 @@ object AppSettings {
     // "system", "light" or "dark"
     var appearance by mutableStateOf("system")
         private set
+    // "auto" (the system's language), "en" or "ja": Tr.lang resolves it
     var lang by mutableStateOf("auto")
-        private set
-    var langPreview by mutableStateOf(false)
         private set
     // "projects" or "active"; empty until the hub's choice was carried over
     var threadList by mutableStateOf("")
@@ -52,7 +38,6 @@ object AppSettings {
     }
 
     fun putLang(v: String) { lang = v; prefs.edit().putString("app.lang", v).apply() }
-    fun forceLang(v: String) { if (v == "ja" || v == "en") { langPreview = true; lang = v } }
     fun alertsOn() = prefs.getBoolean("data.alerts", true)
     fun putAlerts(v: Boolean) { prefs.edit().putBoolean("data.alerts", v).apply() }
     fun putAppearance(v: String) { appearance = v; prefs.edit().putString("app.appearance", v).apply() }
