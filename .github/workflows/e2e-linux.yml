@@ -12,6 +12,10 @@ on:
       target:
         description: "linux-arm64 (ubuntu-22.04-arm) or linux-x64 (ubuntu-22.04)"
         default: "linux-arm64"
+      release:
+        description: "install the PUBLISHED v0.15.0 release's archive instead of a dry run's artifact (archive_run is ignored)"
+        type: boolean
+        default: false
       agy_probe:
         description: "F05-antigravity on its own in the container, on the PUBLISHED release's archive (archive_run is ignored)"
         type: boolean
@@ -37,14 +41,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: published release archive
-        if: ${{ inputs.agy_probe }}
+        if: ${{ inputs.agy_probe || inputs.release }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir arch && gh release download v0.15.0 --repo ${{ github.repository }} -p "*${{ inputs.target }}-native.tar.gz" -D arch
           ls -la arch
       - uses: actions/download-artifact@v4
-        if: ${{ !inputs.agy_probe }}
+        if: ${{ !inputs.agy_probe && !inputs.release }}
         with:
           name: archive-${{ inputs.target }}
           path: arch
@@ -80,7 +84,7 @@ jobs:
           docker run --rm --privileged -v "$PWD:/w" -v "$RUNNER_TEMP:$RUNNER_TEMP" -w /w ${{ inputs.image }} bash test/e2e/ci-container.sh ${{ inputs.agy_probe && 'agy' || inputs.probe_only && 'probe' || 'full' }} arch "$RUNNER_TEMP/e2e" 2>&1 | tee e2e.txt
       - name: own the files
         if: always()
-        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/e2e" . 2>/dev/null; sudo chmod -R u+rX "$RUNNER_TEMP/e2e" 2>/dev/null; true
+        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/e2e" . 2>/dev/null || true; sudo chmod -R u+rX "$RUNNER_TEMP/e2e" 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
