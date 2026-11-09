@@ -33,7 +33,8 @@ extension DataClient {
         guard let text = linkText(url) else { return }
         Task {
             // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
-            for _ in 0..<50 where !(conn == .online && has("links")) { try? await Task.sleep(nanoseconds: 100_000_000) }
+            var waited = 0
+            while !(conn == .online && has("links")) && waited < 50 { try? await Task.sleep(nanoseconds: 100_000_000); waited += 1 }
             // a hub that does not know link.resolve: a thread link as before, the rest says so
             guard has("links") else {
                 if let u = URL(string: text), u.host == "thread", let id = u.pathComponents.dropFirst().first, !id.isEmpty { linkTarget = DLinkTarget(kind: .thread, id: id) }
