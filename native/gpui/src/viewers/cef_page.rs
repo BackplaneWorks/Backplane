@@ -248,29 +248,30 @@ impl EntityInputHandler for CefPage {
     }
     fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> { None }
 }
-/// macOS: CEF's work runs on gpui's main thread when CEF asks for it (cef.rs `PUMP`), once for the process, for as long as it runs. A request
-/// for later waits for its time unless a sooner one comes; a delay is never longer than 1/30 s (CEF's own clients cap it the same way).
+/// macOS: CEF's work runs on gpui's main thread (cef.rs `PUMP`), once for the process, for as long as it runs, the way CEF's own cefclient pumps it:
+/// at the time CEF asks for (`on_schedule_message_pump_work`), and otherwise at least every 1/30 s, because CEF does not ask for all of its work
+/// (with only its requests the pump ran twice and the page never loaded). This wakes the main thread, it draws nothing: a frame is drawn only
+/// when CEF paints one.
 fn drive_pump<T: 'static>(cx: &mut Context<T>) {
     static ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if ON.swap(true, std::sync::atomic::Ordering::SeqCst) { return }
+    const MAX: std::time::Duration = std::time::Duration::from_millis(33);
     let rx = cef::pump_requests(); let ex = cx.background_executor().clone();
     cx.spawn(async move |_, _| {
         use futures_util::future::{select, Either};
-        let mut due: Option<std::time::Instant> = Some(std::time::Instant::now());
+        let mut due = std::time::Instant::now();
         loop {
-            let at = |d: i64| std::time::Instant::now() + std::time::Duration::from_millis(d.clamp(0, 33) as u64);
-            match due {
-                None => match rx.recv().await { Ok(d) => due = Some(at(d)), Err(_) => return },
-                Some(t) => {
-                    let wait = t.saturating_duration_since(std::time::Instant::now());
-                    if wait.is_zero() { due = None; cef::pump_work(); continue }
-                    match select(std::pin::pin!(rx.recv()), std::pin::pin!(ex.timer(wait))).await {
-                        Either::Left((Ok(d), _)) => { let n = at(d); if n < t { due = Some(n); } }
-                        Either::Left((Err(_), _)) => return,
-                        Either::Right(_) => { due = None; cef::pump_work(); }
-                    }
+            let wait = due.saturating_duration_since(std::time::Instant::now());
+            if !wait.is_zero() {
+                match select(std::pin::pin!(rx.recv()), std::pin::pin!(ex.timer(wait))).await {
+                    Either::Left((Ok(d), _)) => { let n = std::time::Instant::now() + std::time::Duration::from_millis(d.max(0) as u64).min(MAX); if n < due { due = n; } continue }
+                    Either::Left((Err(_), _)) => return,
+                    Either::Right(_) => {}
                 }
             }
+            cef::pump_work();
+            due = std::time::Instant::now() + MAX;
+            while let Ok(d) = rx.try_recv() { due = due.min(std::time::Instant::now() + std::time::Duration::from_millis(d.max(0) as u64)); }
         }
     }).detach();
 }
