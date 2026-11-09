@@ -180,6 +180,14 @@ impl Backplane {
         if self.timeline.logical_scroll_top().item_ix < history::RUNWAY_ROWS { self.history_want_now(); }
         cx.notify();
     }
+    /// After each frame of the timeline: whether the reader is more than a screen above the end changed, so "Latest" shows or goes.
+    pub(crate) fn away_check(&mut self, cx: &mut Context<Self>) {
+        let (max, y) = (f32::from(self.timeline.max_offset_for_scrollbar().height), -f32::from(self.timeline.scroll_px_offset_for_scrollbar().y));
+        let away = self.timeline.item_count() > 0 && timeline::away_from_end(y, max);
+        if away != self.screens.away { self.screens.away = away; cx.notify(); }
+    }
+    /// "Latest": back to the thread's end, following it again.
+    pub(crate) fn to_latest(&mut self, cx: &mut Context<Self>) { self.timeline_to_end(); self.screens.away = false; self.m("latest", serde_json::json!({})); cx.notify(); }
     /// The next older page, now (none while one is on its way, at the start of the thread, or on a project's page).
     fn history_want_now(&mut self) {
         let older = crate::string(&self.data["thread"], "historyOlder");
