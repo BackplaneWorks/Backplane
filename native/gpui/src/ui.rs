@@ -592,7 +592,7 @@ impl Render for Backplane {
         ctl.push(CtlEntry { id: "ui:Draw".into(), label: "Draw".into(), ctl: Ctl::Pad });
         if !self.sidebar_open { ctl.push(CtlEntry { id: "ui:Unfold sidebar".into(), label: "Unfold sidebar".into(), ctl: Ctl::ToggleSidebar }); }
         let connected = self.status == "Connected";
-        if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(cx); }
+        if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(window, cx); }
 
         let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")),self.picker_keys(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(px(13. * self.local.text_pct as f32 / 100.)).font_family(self.local.font.clone()).line_height(px(20. * self.local.text_pct as f32 / 100.))
