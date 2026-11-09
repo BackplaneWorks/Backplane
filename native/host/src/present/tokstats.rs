@@ -19,7 +19,7 @@ fn secs(ms: u64) -> String { if ms < 60000 { format!("{} s", tenths(ms / 100)) }
 /// Ts.rate: output tokens a second, to a tenth
 fn rate(out: u64, ms: u64) -> String { format!("{} tok/s", tenths(out * 10000 / ms.max(1))) }
 /// Use.tokens: 950, 5.9k, 62k, 1.2M
-fn short(n: u64) -> String {
+pub fn short(n: u64) -> String {
     let t = |x10: u64| if x10 % 10 == 0 { (x10 / 10).to_string() } else { format!("{}.{}", x10 / 10, x10 % 10) };
     if n < 1000 { n.to_string() } else if n < 9950 { t((n + 50) / 100) + "k" } else if n < 999500 { ((n + 500) / 1000).to_string() + "k" } else if n < 9950000 { t((n + 50000) / 100000) + "M" } else { ((n + 500000) / 1000000).to_string() + "M" }
 }
@@ -73,7 +73,22 @@ pub fn sections(provider: &str, usage: &str, last: &str, tv: &str, speed: &str, 
     out
 }
 
+/// The composer's token button (0.14's Ts.chip): the thread's tokens, its cost and the context held, each only once known ("18k tok · $0.0123 · ctx 9%"), "" for none.
+/// `tv` and `usage` as in `sections`.
+pub fn chip(usage: &str, tv: &str) -> String {
+    let (used, window) = (part(usage, 0), part(usage, 1));
+    let mut v = vec![];
+    if part(tv, 0) > 0 { v.push(format!("{} tok", short(part(tv, 1) + part(tv, 2) + part(tv, 3) + part(tv, 4)))) }
+    if part(tv, 7) > 0 { v.push(usd(part(tv, 6))) }
+    if used > 0 { v.push(if window == 0 { format!("{} ctx", short(used)) } else { format!("ctx {}", pct(used, window)) }) }
+    v.join(" · ")
+}
+
 #[cfg(test)] mod tests { use super::*;
+    #[test] fn the_token_button_says_tokens_cost_and_context_once_known() {
+        assert_eq!(chip("45000/200000", "2/2000/14000/1000/1000/10/12300000/2/2"), "18k tok · $0.0123 · ctx 22%");
+        assert_eq!(chip("", ""), ""); assert_eq!(chip("1200/0", ""), "1.2k ctx"); assert_eq!(chip("", "1/10/0/0/5/0/0/0/1"), "15 tok", "no cost told: none shown");
+    }
     fn flat(v: &[Value]) -> Vec<String> { v.iter().flat_map(|s| s["rows"].as_array().unwrap().iter().map(|r| format!("{}={}", r["label"].as_str().unwrap(), r["value"].as_str().unwrap()))).collect() }
     #[test] fn formats_as_panel_does() {
         assert_eq!((num(7), num(1234), num(1234567), usd(421_000_000), usd(1_200_000_000)), ("7".into(), "1,234".into(), "1,234,567".into(), "$0.4210".into(), "$1.20".into()));
