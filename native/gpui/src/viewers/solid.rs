@@ -443,6 +443,9 @@ impl Drop for Worker { fn drop(&mut self) { let (m, cv) = &*self.slot; m.lock().
 /// Whether the panel's shape differs enough from the one the camera was fitted for to fit it again.
 pub fn aspect_changed(was: f32, now: f32) -> bool { was <= 0.0 || (now / was - 1.0).abs() > 0.03 }
 pub fn note_keeps_model(page_key: &str, note_key: &str) -> bool { page_key == note_key }
+/// Whether a picture taken off the screen during window frame `at` is surely no longer read by the GPU when frame `now` is built: the
+/// frame that last drew it (`at`) has ended by the end of the next one's draw.
+pub fn gone_from_gpu(at: u64, now: u64) -> bool { at + 2 <= now }
 
 /// A model being made: its key, what is happening, since when, about how long it took the last time (ms, 0 unknown).
 #[derive(Clone, Debug, PartialEq)] pub struct Stage { pub key: String, pub text: String, pub since: std::time::Instant, pub about: u64 }
@@ -463,7 +466,7 @@ pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
     is_solid_key(key).then(|| serde_json::json!({"kind": if k == "2" { "3d" } else if k == "3" { "3d-bare" } else { "3d-full" }, "root": root, "path": path, "tree": ""}))
 }
 pub struct SolidPage {
-    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, drag: Option<(Drag, Point<Pixels>)>,
+    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
@@ -479,7 +482,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, failed: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, failed: false, note: "No 3D model yet".into(), reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
@@ -525,7 +528,7 @@ impl SolidPage {
             Msg::Mesh(SolidFrame::Note(key, why)) => { // why there is no model; the same source's previous model stays shown
                 if !note_keeps_model(&self.key, &key) {
                     // another source's model could not be made: the old source's model must not show under this key
-                    self.mesh = None; self.cam = None; if let Some(i) = self.image.take() { self.retired.push(i); }
+                    self.mesh = None; self.cam = None; if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
                     self.floor = self.latest + 1; // a render of the old model still in flight is stale
                     self.born.clear(); self.parts = (0, 0);
                 }
@@ -544,7 +547,7 @@ impl SolidPage {
             Msg::Image { ticket, image, ms, tris, w, h, by } => {
                 if !shows(ticket, self.on_screen, self.floor) { return } // never painted, so never in the atlas: nothing to give back
                 self.on_screen = ticket;
-                if let Some(old) = self.image.replace(image) { self.retired.push(old); }
+                if let Some(old) = self.image.replace(image) { self.retired.push((old, self.frames)); }
                 self.stats = Stats { images: self.stats.images + 1, painted: self.stats.painted, last_ms: ms, last_tris: tris, last_size: (w, h), by }; cx.notify();
                 // a fade is drawn picture after picture while it runs (no timer: the next is asked when this one is in), then once more at rest
                 if ticket == self.latest && self.drag.is_none() && self.fading { let still = self.fades().1; self.ask_render(still); }
@@ -632,22 +635,29 @@ impl SolidPage {
     /// For the demo: the button went up, the full picture is asked for.
     pub fn settle(&mut self) { self.ask_render(false); }
     /// Give the images back to the atlas (call before dropping the page, with the window).
-    pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).chain(self.image.take()) { let _ = window.drop_image(i); } }
+    pub fn release(&mut self, window: &mut Window) { for i in self.retired.drain(..).map(|r| r.0).chain(self.image.take()) { let _ = window.drop_image(i); } }
     /// The pictures that are (or may still be) in the window's sprite atlas, on the GPU.
     pub fn atlas_images(&self) -> usize { self.retired.len() + self.image.is_some() as usize }
     /// The page is put away (the viewer closed, another page or thread shown): its pictures leave the atlas and its model the GPU; the model
     /// stays here, on the CPU, so showing the page again draws it again at once. The next paint asks for a new picture.
-    pub fn put_away(&mut self, window: &mut Window) {
-        let n = self.atlas_images();
-        if n == 0 { return }
-        self.release(window); self.asked = (0, 0); self.on_screen = self.latest; self.worker.forget();
-        eprintln!("GPUI_METRIC {{\"event\":\"solid_put_away\",\"images_dropped\":{n},\"atlas_images\":{}}}", self.atlas_images());
+    pub fn put_away(&mut self) {
+        let Some(i) = self.image.take() else { return };
+        self.retired.push((i, self.frames)); self.asked = (0, 0); self.on_screen = self.latest; self.worker.forget();
+    }
+    /// Once a window frame (from the window's render, the page drawn or not): the pictures that left the screen two frames ago leave the
+    /// atlas. Not sooner: the frame that last drew one may still be on the GPU (gpui waits for a frame only at the end of the next one's
+    /// draw), and gpui destroys an image's texture at once when it is dropped, a texture the GPU would still be reading.
+    pub fn collect(&mut self, window: &mut Window) {
+        self.frames += 1;
+        let before = self.retired.len();
+        let frames = self.frames;
+        self.retired.retain(|(i, at)| if gone_from_gpu(*at, frames) { let _ = window.drop_image(i.clone()); false } else { true });
+        if self.image.is_none() && self.retired.is_empty() && before > 0 { eprintln!("GPUI_METRIC {{\"event\":\"solid_put_away\",\"images_dropped\":{before},\"atlas_images\":{}}}", self.atlas_images()); }
     }
 }
 impl Render for SolidPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // images no longer shown leave the sprite atlas (gpui keeps a painted RenderImage there until it is dropped)
-        for old in self.retired.drain(..) { let _ = window.drop_image(old); }
         if self.stats.images != self.counted { self.counted = self.stats.images; self.stats.painted += 1; }
         let size = self.size.clone();
         let probe = canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
@@ -852,6 +862,10 @@ mod tests {
         let h = 600.0; let px = 1.0 / c.unit(h); let p = c.pivot; let s0 = screen(&c, p); c.pan(100.0, 0.0, h); let s1 = screen(&c, p);
         assert!(((s1.0 - s0.0) * px - 100.0).abs() < 1e-2, "{}", (s1.0 - s0.0) * px);
         let n = c.named("top"); assert_eq!((n.shift, n.target, n.dist), ([0.0, 0.0], c.pivot, c.fit), "a standard view centres the model again");
+    }
+    #[test] fn a_picture_leaves_the_atlas_only_when_the_gpu_is_done_with_it() {
+        assert!(!super::gone_from_gpu(7, 7) && !super::gone_from_gpu(7, 8), "the frame that drew it may still be on the GPU while the next is built");
+        assert!(super::gone_from_gpu(7, 9));
     }
     #[test] fn retry_asks_for_the_same_source_again() {
         assert_eq!(super::retry_watch("2|/p|/p/mech/a.step").unwrap(), serde_json::json!({"kind": "3d", "root": "/p", "path": "/p/mech/a.step", "tree": ""}));
