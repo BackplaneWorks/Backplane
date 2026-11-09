@@ -166,8 +166,7 @@ impl Backplane {
         let mut rows = match r["shown"]["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
         for row in &mut rows { row[history::PAGE_KEY] = Value::String(cursor.clone()); }
         let old = match self.data["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
-        let merged = history::splice(old.clone(), rows);
-        let (x, y) = history::changed(&old, &merged, 0);
+        let (merged, x, y) = history::splice_changed(old, rows);
         splice_keeping(&self.timeline, x, y.len());
         if self.data["thread"]["historyOlder"] == cursor.as_str() {
             let next = history::next_older(&cursor, r["window"]["older"].as_str().unwrap_or(""), r["window"]["hasMore"] == true, merged.len());
