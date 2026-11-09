@@ -17,7 +17,7 @@ pub fn subs_is_open(p: &Panels, thread: &Value) -> bool {
 
 fn cell(light: bool, id: &'static str, label: String, detail: String, open: bool) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
-    div().id(id).px_3().h_full().flex().items_center().gap_2().border_l_1().border_color(c("line")).text_size(px(11.)).cursor_pointer().hover(|s| s.bg(c("raise"))).when(open, |d| d.bg(c("raise")))
+    div().id(id).px_3().h_full().flex().items_center().gap_2().text_size(px(11.)).cursor_pointer().hover(|s| s.bg(c("raise"))).when(open, |d| d.bg(c("raise")))
         .child(div().text_color(c("faint")).child(label)).child(detail).child(crate::art::icon(if open { "chevron-down" } else { "chevron-right" }, 12., c("faint")))
 }
 

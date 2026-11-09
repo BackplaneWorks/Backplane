@@ -1,4 +1,4 @@
-//! A thread's own actions, as the hub lists them: the header's tools (`thread.tools`: pin, settle, archive, fork, stop...) and its menu
+//! A thread's own actions, as the hub lists them: the header's tools (`thread.tools`: pin, settle, archive, fork, stop...; drawn by head.rs) and its menu
 //! (`thread.menu`: Diff, Terminal, Find file, Snooze with its choices, Delete...), plus the two questions the hub asks back, a rename
 //! (`renaming`: a title box, drawn in the sidebar row: siderow.rs) and a delete (`deleting`: armed by the menu's first click, confirmed by its
 //! second: ctxmenu.rs). Every press is the action the item names. Nothing here decides what a thread can do.
@@ -12,11 +12,11 @@ use std::collections::HashMap;
 const SEP: char = '\u{1f}';
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Item { pub label: String, pub tip: String, pub action: String, pub value: String, pub on: bool, pub danger: bool, pub options: Vec<(String, String)> }
+pub struct Item { pub label: String, pub icon: String, pub tip: String, pub action: String, pub value: String, pub on: bool, pub danger: bool, pub options: Vec<(String, String)> }
 
 fn items(v: &Value) -> Vec<Item> {
     v.as_array().into_iter().flatten().map(|t| Item {
-        label: string(t, "label"), tip: string(t, "tip"), action: string(t, "action"), value: string(t, "value"), on: t["on"].as_bool().unwrap_or(false), danger: t["danger"].as_bool().unwrap_or(false),
+        label: string(t, "label"), icon: string(t, "icon"), tip: string(t, "tip"), action: string(t, "action"), value: string(t, "value"), on: t["on"].as_bool().unwrap_or(false), danger: t["danger"].as_bool().unwrap_or(false),
         options: t["options"].as_array().into_iter().flatten().map(|o| (string(o, "label"), string(o, "value"))).collect(),
     }).filter(|i| !i.action.is_empty() || !i.options.is_empty()).collect()
 }
@@ -42,23 +42,6 @@ pub fn rename_save(id: &str, text: &str) -> Option<Command> { let t = text.trim(
 
 /// A thread tool whose answer is a new thread the window goes to (Fork thread, Buy it): the window arms for it before sending, as New thread does.
 pub fn makes_thread(action: &str) -> bool { matches!(action, "fork" | "fab-buy") }
-fn small(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, danger: bool, cmd: Command, tip: (String, String)) -> AnyElement {
-    let c = |n: &str| theme::color(light, n);
-    let (a, v) = match cmd { Command::Action(a, v) => (a, v), _ => (String::new(), String::new()) };
-    let rect = format!("tool:{a}"); // a header tool reports its rectangle (tool:<action>), so a run can press Buy it as a person would
-    let d = crate::ui::with_rect(div().id(SharedString::from(id)), move || rect).px_2().h_full().flex().items_center().text_size(px(11.)).cursor_pointer().border_l_1().border_color(c("line")).hover(|s| s.bg(c("raise")));
-    let d = if danger { d.text_color(c("bad")) } else if on { d.text_color(c("accent")) } else { d.text_color(c("dim")) };
-    d.child(label).tooltip(super::super::keys::tip(&tip.0, &tip.1, light)).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); if makes_thread(&a) { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element()
-}
-
-/// The header's strip: each tool. The rest of the thread's actions are in the header's right-click menu (`context_items`). Returned as elements for the header row's right side.
-pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, local: &crate::local::Local) -> Vec<AnyElement> {
-    if !thread.is_object() { return Vec::new(); }
-    let mut out: Vec<AnyElement> = vec![div().flex_1().into_any_element()];
-    for (i, t) in tools(thread).into_iter().enumerate() { let k = if t.tip.contains("Ctrl+") { String::new() } else { super::super::keys::hint(local, super::super::keys::id_for(&t.action, &t.value, "")) }; out.push(small(cx, light, format!("tool-{i}"), t.label.clone(), t.on, t.danger, press(&t), (if t.tip.is_empty() { t.label.clone() } else { t.tip.clone() }, k))); }
-    out
-}
-
 /// The header's right-click menu: the hub's thread menu (Diff, Terminal, Find file, Snooze choices, Delete...) as context-menu items.
 pub fn context_items(thread: &Value) -> Vec<super::ctxmenu::Item> {
     let mut v = Vec::new();

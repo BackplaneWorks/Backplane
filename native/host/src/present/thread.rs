@@ -420,6 +420,8 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("diff".into(), crate::session::pages::diff_json(&params["session"], thread));
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
     o.insert("title".into(), json!(t.title));
+    // the header's crumb names the project (and opens its page): its raw id and title
+    o.insert("project".into(), json!({"id": t.project, "title": st.projects.get(&t.project).map(|p| p.title.as_str()).unwrap_or("")}));
     o.insert("branch".into(), json!(t.branch));
     o.insert("readingSeen".into(), json!(newest_id.as_deref().unwrap_or("-")));
     // a sent message's references (@bot >thread %project #room &model) as cards the client draws under it
@@ -498,8 +500,8 @@ mod tests {
         let got = thread_object(&st, "h", th, &p["params"], "").expect("a plain idle thread is drawn here");
         let want = &p["out"]["shown"]["thread"];
         for (k, w) in want.as_object().unwrap() { if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w); continue } assert_eq!(got.get(k), Some(w), "key {k}"); }
-        // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`) and the picker's other agents (`pickerAgents`) are Backplane's own: the recorded helper reply has no such keys
-        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands")).count(), want.as_object().unwrap().len());
+        // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`), the picker's other agents (`pickerAgents`) and the header's project (`project`) are Backplane's own: the recorded helper reply has no such keys
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project")).count(), want.as_object().unwrap().len());
     }
     // Diff opened on thread A leaves the session's panel on; a view of thread B (the + makes it and goes there) is accepted, not refused as an unported page
     #[test] fn a_view_of_another_thread_after_diff_on_one_is_accepted() {

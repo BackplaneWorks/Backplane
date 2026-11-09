@@ -63,8 +63,9 @@ pub fn picker(this: &Backplane, cx: &mut Context<Backplane>, light: bool, ctl: &
     let away = this.screens.elsewhere.clone();
     let cur = away.as_ref().map(|e| e.1.clone()).or_else(|| es.first().map(|e| e.label.clone())).unwrap_or_default();
     ctl.push(CtlEntry { id: "hub:menu".into(), label: "Hub".into(), ctl: Ctl::Hub(Act::Menu) });
-    let mut col = div().flex().flex_col().border_b_1().border_color(c("line")).child(
-        div().id("hub-picker").flex().items_center().gap_2().px_3().py_1().cursor_pointer().text_size(px(12.)).hover(|s| s.bg(c("panel")))
+    let mut col = div().flex().flex_col().border_b_1().border_color(c("rule")).child(
+        // the thread header's row height (less this column's rule, which the header's row counts in its own), so the two rules are one line
+        div().id("hub-picker").flex().items_center().gap_2().px_3().h(px(super::head::ROW_H - 1.)).cursor_pointer().text_size(px(12.)).hover(|s| s.bg(c("panel")))
             .children(away.as_ref().map(|_| crate::art::icon("link", 12., c("accent"))))
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().when(away.is_some(), |d| d.text_color(c("accent"))).child(cur)).child(crate::art::icon(if this.hub_menu { "chevron-down" } else { "chevron-right" }, 14., c("dim")))
             .on_click(cx.listener(|this, _, _, cx| act(this, Act::Menu, cx))));
