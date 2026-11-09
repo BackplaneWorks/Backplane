@@ -21,6 +21,7 @@ if [ -z "${BQ_HELD:-}" ]; then . "$HERE/lib-buildslot.sh"; export BQ_HELD=1
   bo_ready && export BQ_OFFLOAD=1   # every slot taken: the tests and builds run on a Boat box instead of waiting
   bq_run queued "$0" "$@"; rc=$?; rm -f "$ST"; exit $rc; fi
 . "$HERE/lib-buildslot.sh"; bp_notmp_target "${HOST_TARGET:-}" && bp_notmp_target "${GPUI_TARGET:-}" || exit 1   # lane temp and target dirs are on disk (lib-bptmp.sh)
+declare -A KEY SKIP   # the gate's suite keys; read by the smoke start on every path (a Boat build has none: `${KEY[hub]:-}` on an undeclared name is an unbound variable under set -u)
 BX=; [ -n "${BP_BOAT_IDX:-}" ] && { BX=$BP_BOAT_IDX; unset BP_BOAT_IDX; }   # started by bq_run under a Boat lease: the cargo steps run on that box (boat_core below)
 OFFLINE=--offline; [ -z "${BP_REMOTE_CORE:-}" ] || OFFLINE=   # (a Boat box has the network and no registry copy)
 PROFILE=${PROFILE:-fast}  # cargo profile: fast (no LTO, incremental; Cargo.toml) by default, PROFILE=release for the fat-LTO build
@@ -111,7 +112,6 @@ elif [ "$GATE" = 1 ]; then
   GOK=$DEV/.gate-ok; mkdir -p "$GOK"; RV=$(rustc -V 2>/dev/null); ex=(':(exclude)mobile' ':(exclude)order' ':(exclude,glob)docs/*.md')
   gkey() { local s=$1; shift; { printf '%s\n' "$s $RV $PROFILE"; git -C "$ROOT" ls-files -s -- "$@" scripts/dev-build.sh scripts/gate-skip.txt scripts/lib-buildslot.sh 2>/dev/null; } | sha1sum | cut -c1-16; }
   git -C "$ROOT" rev-parse HEAD > /dev/null 2>&1 && ok=1 || ok=0
-  declare -A KEY SKIP
   if [ "$ok" = 1 ]; then
     KEY[hub]=$(gkey hub . "${ex[@]}" ':(exclude)native/gpui' ':(exclude)native/voice'); KEY[window]=$(gkey window . "${ex[@]}" ':(exclude)native/host' ':(exclude)native/voice' ':(exclude)native/guard')
     KEY[voice]=$(gkey voice native/voice)
