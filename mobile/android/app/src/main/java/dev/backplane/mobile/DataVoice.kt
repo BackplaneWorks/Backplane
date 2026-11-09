@@ -58,12 +58,12 @@ object DataVoice {
         val tf = DataClient.field(tid)
         val caret = VoiceText.length(tf.text.substring(0, tf.selection.start.coerceIn(0, tf.text.length)))
         marks[tid] = caret
-        if (!recorder.start(tid, link)) { local(tid, "The microphone could not start."); return }
+        if (!recorder.start(tid, link)) { local(tid, Msg.android_mic_failed); return }
         scope.launch {
             try {
                 val path = DataClient.call("voice.start", JSONObject().put("thread", tid).put("draft", tf.text).put("caret", caret)).optString("path")
                 if (path.isEmpty()) recorder.gone() else recorder.address(path)
-            } catch (e: Exception) { recorder.gone(); local(tid, e.message ?: "The hub did not start dictation.") }
+            } catch (e: Exception) { recorder.gone(); local(tid, e.message ?: Msg.android_dictation_failed) }
         }
     }
     fun stop(tid: String) {

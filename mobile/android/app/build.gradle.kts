@@ -77,6 +77,17 @@ android {
     }
 }
 
+// The app's copy comes from i18n/en.msg and ja.msg (Msg.kt, scripts/i18n-android.py): every build checks that Msg.kt is current and that no
+// bare English reaches the screen (scripts/check-android-i18n.py), so a stale catalog or a hard-coded label fails here, in CI and on a desktop alike.
+val i18nCheck = tasks.register<Exec>("i18nCheck") {
+    val root = rootProject.projectDir.parentFile.parentFile
+    inputs.files(fileTree(root.resolve("i18n")), fileTree(projectDir.resolve("src/main/java")), root.resolve("mobile/android/i18n-allow.txt"))
+    outputs.upToDateWhen { false }
+    workingDir = root
+    commandLine("sh", "-c", "python3 scripts/i18n-check.py && python3 scripts/i18n-android.py --check && python3 scripts/check-android-i18n.py")
+}
+tasks.named("preBuild") { dependsOn(i18nCheck) }
+
 dependencies {
     val bom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(bom)

@@ -3391,6 +3391,33 @@ android.hub.migrate.vault = 0.14のキーを移行できませんでした: {why
 android.hub.history.title = 会話履歴
 android.hub.history.closed = 会話履歴では新しいチャットを始められません。プロジェクトで始めてください。
 
+android.away = 応答なし
+android.open = 開く
+android.search.messages = メッセージ
+android.find.inthread = スレッド内を検索
+android.find.error = エラー
+android.find.prev = 前へ
+android.find.next = 次へ
+android.find.nomatch = 一致なし
+android.find.count = {n, number} / {total, number}
+android.find.you = あなたの発言
+android.find.agent = エージェントの発言
+android.sub.thread = スレッド
+android.sub.back = {title} に戻る
+android.sub.gone = このサブエージェントの手順はもう保存されていません。
+android.sub.more = {n, plural, other {それ以前の # 件の手順は表示されていません}}
+android.sub.none = まだ手順の報告はありません。
+android.sub.asked = 依頼内容
+android.sub.tool = ツール
+android.machine.on = {name} 上
+android.handoff.from = ‹ {title} から引き継ぎ
+android.handoff.note = メモ: {note}
+android.queue.unsent = 未送信
+android.mark.runs = {machine} で実行
+android.mark.also = {machines} にもあり
+android.mark.newon = {machine} で新しいスレッド
+android.google.signedin = サインインしました。
+android.google.back = Backplane に戻る
 # ---- ios: new entries go here ----
 
 # ---- end ----

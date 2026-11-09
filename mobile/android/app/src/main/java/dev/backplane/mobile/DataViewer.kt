@@ -55,6 +55,8 @@ import kotlin.math.abs
 // The viewer over a thread (the desktop's right rail): Board, Schematic, 3D, Mech, Files and Browser, on the data/1 viewer requests (native/host/src/data/ext.rs).
 // Plots and models arrive as the hub's own binary frames and are drawn by the app's GPU view (PlotStore, PlotSurface: pinch, pan, orbit, tap to inspect).
 private val tabs = listOf("Board", "Schematic", "3D", "Split", "Mech", "Files", "Diff", "Review", "Browser")
+/** A tab's name on screen (the list above holds its id: tags, links and the debug intent use it). */
+private fun tabLabel(t: String) = when (t) { "Board" -> Msg.viewer_board; "Schematic" -> Msg.viewer_schematic; "3D" -> Msg.viewer_solid; "Split" -> Msg.android_viewer_split; "Mech" -> Msg.viewer_mech; "Files" -> Msg.viewer_files; "Diff" -> Msg.viewer_diff; "Review" -> Msg.viewer_review; "Browser" -> Msg.bots_tab_browser; else -> t }
 
 /** A file asked to be opened from the Files tab: the viewer jumps to its tab with the path. */
 private data class Target(val tab: String, val path: String)
@@ -74,18 +76,18 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     }
     DisposableEffect(thread.id) { onDispose { DataClient.stopWatch(thread.id) } }
     Column(Modifier.fillMaxSize()) {
-        DBar("Viewer · ${thread.title.ifEmpty { "New thread" }}", back)
+        DBar(Msg.android_viewer_title(thread.title.ifEmpty { Msg.thread_new }), back)
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState())) {
             tabs.forEach { t ->
-                DMono(t, if (t == tab) dcs.onPrimary else dcs.onSurface, 12, Modifier.background(if (t == tab) dcs.primary else dcs.surfaceVariant).clickable { tab = t; target = null }.padding(horizontal = 14.dp, vertical = 12.dp).testTag("vtab.$t"), bold = t == tab)
+                DMono(tabLabel(t), if (t == tab) dcs.onPrimary else dcs.onSurface, 12, Modifier.background(if (t == tab) dcs.primary else dcs.surfaceVariant).clickable { tab = t; target = null }.padding(horizontal = 14.dp, vertical = 12.dp).testTag("vtab.$t"), bold = t == tab)
             }
         }
         DLine()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
-                "Board" -> PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: "", files == null || files?.pcb.orEmpty().isNotEmpty() || target != null, "No board in this project yet")
-                "Schematic" -> PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: "", files == null || files?.sch.orEmpty().isNotEmpty() || target != null, "No schematic in this project yet")
-                "3D" -> PlotTab(thread, "3d", "", files == null || files?.pcb.orEmpty().isNotEmpty(), "No board in this project yet")
+                "Board" -> PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: "", files == null || files?.pcb.orEmpty().isNotEmpty() || target != null, Msg.android_viewer_noboard)
+                "Schematic" -> PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: "", files == null || files?.sch.orEmpty().isNotEmpty() || target != null, Msg.android_viewer_nosch)
+                "3D" -> PlotTab(thread, "3d", "", files == null || files?.pcb.orEmpty().isNotEmpty(), Msg.android_viewer_noboard)
                 "Split" -> SplitTab(thread, files)
                 "Diff" -> DiffTab(thread)
                 "Review" -> ReviewTab(thread)
@@ -147,7 +149,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
                 if (best == null || frame == null) { info = ""; picked = ""; lit = emptyList(); s.mark("") }
                 else { val at = best.optInt("c"); val idx = best.optInt("p"); picked = "$at,$idx"; lit = emptyList(); s.mark(picked)
                     scope.launch {
-                        info = runCatching { DataClient.info(frame.key, at, idx) }.getOrDefault("").ifEmpty { "piece $at,$idx" }
+                        info = runCatching { DataClient.info(frame.key, at, idx) }.getOrDefault("").ifEmpty { Msg.android_viewer_piece("$at,$idx") }
                         lit = Probe.light(info, listOf(frame.key))[frame.key].orEmpty()
                     } }
             }
@@ -164,18 +166,18 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             three && mesh != null && !mesh.decoding && mesh.none.isNotEmpty() -> mesh.none
             else -> ""
         }
-        if (say.isNotEmpty() && three && mesh?.mesh != null) DMono(say, dcs.onSurfaceVariant, 11, Modifier.align(Alignment.TopStart).padding(8.dp).background(dcs.surfaceVariant.copy(alpha = 0.85f)).padding(8.dp).testTag("viewer.note"))
-        else if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
-        else if (three && (mesh?.mesh == null || mesh.decoding)) Loading("Loading 3D model…", Modifier.align(Alignment.Center))
+        if (say.isNotEmpty() && three && mesh?.mesh != null) DMono(Tr.t(say), dcs.onSurfaceVariant, 11, Modifier.align(Alignment.TopStart).padding(8.dp).background(dcs.surfaceVariant.copy(alpha = 0.85f)).padding(8.dp).testTag("viewer.note"))
+        else if (say.isNotEmpty()) DMono(Tr.t(say), dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
+        else if (three && (mesh?.mesh == null || mesh.decoding)) Loading(Msg.android_viewer_loading3d, Modifier.align(Alignment.Center))
         else if (frame == null && !three) CircularProgressIndicator(Modifier.align(Alignment.Center))
         val progress = parts?.label.orEmpty()
-        if (progress.isNotEmpty() && mesh?.mesh != null) DMono(progress, dcs.onSurfaceVariant, 11, Modifier.align(Alignment.BottomStart).padding(8.dp).background(dcs.surfaceVariant.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp).testTag("viewer.parts"))
+        if (progress.isNotEmpty() && mesh?.mesh != null) DMono(Tr.t(progress), dcs.onSurfaceVariant, 11, Modifier.align(Alignment.BottomStart).padding(8.dp).background(dcs.surfaceVariant.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp).testTag("viewer.parts"))
         val l = layers
         if (!three && layersPresent.isNotEmpty() && l != null) {
             Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ViewChip(l.head, l.mode > 0, "viewer.layers") { refs = null; menu = !menu }
-                if (comparing.isEmpty()) ViewChip("Compare", refs != null, "viewer.compare") { menu = false; if (refs != null) refs = null else scope.launch { refs = runCatching { DataClient.refs(thread.id) }.getOrDefault(emptyList()) } }
-                else ViewChip("Close compare", true, "viewer.compare.close") { comparing = ""; scope.launch { runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" } } }
+                ViewChip(Tr.t(l.head), l.mode > 0, "viewer.layers") { refs = null; menu = !menu }
+                if (comparing.isEmpty()) ViewChip(Msg.viewer_history_compare, refs != null, "viewer.compare") { menu = false; if (refs != null) refs = null else scope.launch { refs = runCatching { DataClient.refs(thread.id) }.getOrDefault(emptyList()) } }
+                else ViewChip(Msg.android_compare_close, true, "viewer.compare.close") { comparing = ""; scope.launch { runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" } } }
             }
             if (menu) LayerMenu(l, layersPresent, act, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp))
             refs?.let { rows -> RefMenu(rows, { c -> refs = null; scope.launch { runCatching { DataClient.compare(thread.id, kind, c, l.bits, path); comparing = c }.onFailure { error = it.message ?: "" } } }, Modifier.align(Alignment.TopStart).padding(top = 44.dp, start = 8.dp)) }
@@ -194,7 +196,7 @@ private fun ViewChip(label: String, on: Boolean, tag: String, onClick: () -> Uni
 private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, String) -> Unit, modifier: Modifier) {
     Column(modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("layer.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (l.modes) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf("All", "Dim", "Only").forEachIndexed { i, label ->
+            listOf(Msg.viewer_layers_all, Msg.viewer_layers_dim, Msg.viewer_layers_only).forEachIndexed { i, label ->
                 DMono(label, if (l.mode == i) dcs.primary else dcs.onSurface, 12, Modifier.border(BorderStroke(1.dp, if (l.mode == i) dcs.primary else dcs.outlineVariant)).clickable { act("mode", i.toString()) }.padding(horizontal = 8.dp, vertical = 3.dp).testTag("layer.mode.$i"))
             }
         }
@@ -202,10 +204,10 @@ private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, St
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(14.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(if (r.on) dcs.primary else dcs.surfaceVariant).clickable { act("toggle", r.layer.toString()) }.testTag("layer.box.${r.layer}"))
                 Spacer(Modifier.width(10.dp))
-                DMono(r.name, if (r.active) dcs.primary else dcs.onSurface, 12, Modifier.clickable { act("pick", r.layer.toString()) }.testTag("layer.name.${r.layer}"))
+                DMono(Tr.t(r.name), if (r.active) dcs.primary else dcs.onSurface, 12, Modifier.clickable { act("pick", r.layer.toString()) }.testTag("layer.name.${r.layer}"))
             }
         }
-        if (l.reset) DMono("Reset layers", dcs.primary, 12, Modifier.clickable { act("reset", "") }.testTag("layer.reset"))
+        if (l.reset) DMono(Msg.viewer_layers_reset, dcs.primary, 12, Modifier.clickable { act("reset", "") }.testTag("layer.reset"))
     }
 }
 
@@ -213,9 +215,9 @@ private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, St
 @Composable
 private fun RefMenu(rows: List<DataClient.Ref>, pick: (String) -> Unit, modifier: Modifier) {
     Column(modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("compare.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (rows.isEmpty()) DMono("No versions to compare with", dcs.onSurfaceVariant, 12)
+        if (rows.isEmpty()) DMono(Msg.android_compare_none, dcs.onSurfaceVariant, 12)
         rows.forEachIndexed { i, r ->
-            Row(Modifier.clickable { pick(r.commit) }.testTag("compare.row.$i"), horizontalArrangement = Arrangement.spacedBy(8.dp)) { DMono(r.kind, dcs.onSurfaceVariant, 12); DMono(r.label, dcs.onSurface, 12) }
+            Row(Modifier.clickable { pick(r.commit) }.testTag("compare.row.$i"), horizontalArrangement = Arrangement.spacedBy(8.dp)) { DMono(Tr.t(r.kind), dcs.onSurfaceVariant, 12); DMono(Tr.t(r.label), dcs.onSurface, 12) }
         }
     }
 }
@@ -230,7 +232,7 @@ private fun MechTab(thread: DThread, open: String?) {
     Column(Modifier.fillMaxSize()) {
         when {
             m == null -> CircularProgressIndicator(Modifier.padding(24.dp))
-            m.parts.isEmpty() -> DMono("No models in mech/ yet", dcs.onSurfaceVariant, 12, Modifier.padding(24.dp))
+            m.parts.isEmpty() -> DMono(Msg.android_mech_none, dcs.onSurfaceVariant, 12, Modifier.padding(24.dp))
             else -> {
                 Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     m.parts.forEach { p -> DMono(p.substringAfterLast('/'), if (p == part) dcs.onPrimary else dcs.onSurface, 12, Modifier.background(if (p == part) dcs.primary else dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { part = p }.padding(horizontal = 10.dp, vertical = 6.dp).testTag("mech.part.${p.substringAfterLast('/')}")) }
@@ -254,8 +256,8 @@ private fun MechSolid(thread: DThread, path: String) {
             s.mesh(mesh)
         })
         val say = if (error.isNotEmpty()) error else mesh?.takeIf { !it.decoding }?.none.orEmpty()
-        if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
-        else if (mesh?.mesh == null || mesh.decoding) Loading("Loading 3D model…", Modifier.align(Alignment.Center))
+        if (say.isNotEmpty()) DMono(Tr.t(say), dcs.onSurfaceVariant, 12, Modifier.align(Alignment.Center).padding(24.dp))
+        else if (mesh?.mesh == null || mesh.decoding) Loading(Msg.android_viewer_loading3d, Modifier.align(Alignment.Center))
     }
 }
 
@@ -289,11 +291,11 @@ private fun FilesTab(thread: DThread, start: String, startLine: Int, open: (Targ
             DMono("/" + dir, dcs.onSurface, 12)
         }
         DLine()
-        if (err.isNotEmpty()) DMono(err, dcs.error, 12, Modifier.padding(12.dp))
+        if (err.isNotEmpty()) DMono(Tr.t(err), dcs.error, 12, Modifier.padding(12.dp))
         val l = list
         if (l == null && err.isEmpty()) CircularProgressIndicator(Modifier.padding(24.dp))
         l?.let { es ->
-            if (es.isEmpty()) DMono("empty", dcs.onSurfaceVariant, 12, Modifier.padding(12.dp))
+            if (es.isEmpty()) DMono(Msg.android_folder_empty, dcs.onSurfaceVariant, 12, Modifier.padding(12.dp))
             LazyColumn(Modifier.fillMaxSize().testTag("files.list")) {
                 items(es.sortedWith(compareBy({ !it.dir }, { it.name.lowercase() })), key = { it.name }) { e ->
                     val full = if (dir.isEmpty()) e.name else "$dir/${e.name}"
@@ -346,11 +348,11 @@ private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () 
         DLine()
         val b = bytes
         when {
-            failed -> DMono("This file could not be read.", dcs.error, 12, Modifier.padding(16.dp))
+            failed -> DMono(Msg.android_file_bad, dcs.error, 12, Modifier.padding(16.dp))
             b == null -> CircularProgressIndicator(Modifier.padding(24.dp))
             ext(path) in imageExt -> {
                 val bmp = remember(b) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
-                if (bmp != null) Image(bmp, null, Modifier.fillMaxSize().padding(8.dp).testTag("preview.image"), contentScale = ContentScale.Fit) else DMono("Not a picture this phone can show.", dcs.onSurfaceVariant, 12, Modifier.padding(16.dp))
+                if (bmp != null) Image(bmp, null, Modifier.fillMaxSize().padding(8.dp).testTag("preview.image"), contentScale = ContentScale.Fit) else DMono(Msg.android_file_noimage, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp))
             }
             ext(path) == "pdf" -> PdfPreview(b)
             ext(path) in textExt || b.size < 200_000 && b.none { it.toInt() == 0 } -> {
@@ -360,7 +362,7 @@ private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () 
                     if (ext(path) == "md") MdText(text) else Text(text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
                 }
             }
-            else -> DMono("No preview for this file (${size(b.size.toLong())}).", dcs.onSurfaceVariant, 12, Modifier.padding(16.dp))
+            else -> DMono(Msg.android_file_nopreview(size(b.size.toLong())), dcs.onSurfaceVariant, 12, Modifier.padding(16.dp))
         }
     }
 }
@@ -372,12 +374,12 @@ private fun PdfPreview(b: ByteArray) {
     val file = remember(b) { java.io.File(ctx.cacheDir, "preview.pdf").also { it.writeBytes(b) } }
     val r = remember(b) { runCatching { android.graphics.pdf.PdfRenderer(android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)) }.getOrNull() }
     DisposableEffect(b) { onDispose { runCatching { r?.close() } } }
-    if (r == null) { DMono("This PDF could not be opened.", dcs.error, 12, Modifier.padding(16.dp)); return }
+    if (r == null) { DMono(Msg.android_pdf_bad, dcs.error, 12, Modifier.padding(16.dp)); return }
     val bmp = remember(b, page) { r.openPage(page).use { p -> val w = 1080; val h = (w * p.height.toFloat() / p.width).toInt()
         android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.WHITE); p.render(it, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) } }.asImageBitmap() }
     Column(Modifier.fillMaxSize().testTag("preview.pdf")) {
         Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            DBtn("‹", false, page > 0) { page-- }; DMono("page ${page + 1} of ${r.pageCount}", dcs.onSurface, 12); DBtn("›", false, page + 1 < r.pageCount) { page++ }
+            DBtn("‹", false, page > 0) { page-- }; DMono(Msg.android_pdf_page(page + 1, r.pageCount), dcs.onSurface, 12); DBtn("›", false, page + 1 < r.pageCount) { page++ }
         }
         Image(bmp, null, Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), contentScale = ContentScale.FillWidth)
     }
@@ -407,20 +409,20 @@ private fun BrowserTab(thread: DThread) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!driving) DBtn("Take over", true, modifier = Modifier.testTag("browser.takeover")) { driving = true; run("takeover") }
+                if (!driving) DBtn(Msg.android_browser_takeover, true, modifier = Modifier.testTag("browser.takeover")) { driving = true; run("takeover") }
                 else {
                     DBtn("‹", false, modifier = Modifier.testTag("browser.back")) { run("toolbar") { put("command", "back") } }
                     DBtn("›", false, modifier = Modifier.testTag("browser.forward")) { run("toolbar") { put("command", "forward") } }
                     DBtn("↻", false, modifier = Modifier.testTag("browser.reload")) { run("toolbar") { put("command", "reload") } }
-                    Box(Modifier.weight(1f)) { DField(url, { url = it }, "Address", Modifier.testTag("browser.url")) }
-                    DBtn("Go", true, url.isNotBlank(), Modifier.testTag("browser.go")) { run("navigate") { put("url", pageUrl(url)) } }
+                    Box(Modifier.weight(1f)) { DField(url, { url = it }, Msg.browser_address, Modifier.testTag("browser.url")) }
+                    DBtn(Msg.common_go, true, url.isNotBlank(), Modifier.testTag("browser.go")) { run("navigate") { put("url", pageUrl(url)) } }
                 }
             }
             if (driving) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     // the key field: what the keyboard types here goes to the page (Enter, Tab and the arrows of a hardware keyboard too)
                     Box(Modifier.weight(1f).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 10.dp)) {
-                        if (keys.text == BrowserInput.SENTINEL) Text("Keys", color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
+                        if (keys.text == BrowserInput.SENTINEL) Text(Msg.android_browser_keys, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
                         BasicTextField(keys, ::keyed, singleLine = true,
                             textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary),
                             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Send),
@@ -431,20 +433,20 @@ private fun BrowserTab(thread: DThread) {
                                 if (k.isEmpty()) false else { press(k); true }
                             })
                     }
-                    DBtn("Hand back", false, modifier = Modifier.testTag("browser.handback")) { driving = false; run("handback") }
+                    DBtn(Msg.android_browser_handback, false, modifier = Modifier.testTag("browser.handback")) { driving = false; run("handback") }
                 }
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     for ((label, k) in BrowserInput.keyButtons) DBtn(label, false, modifier = Modifier.testTag("browser.key.$k")) { press(k) }
                 }
             }
         }
-        if (err.isNotEmpty()) DMono(err, dcs.error, 12, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+        if (err.isNotEmpty()) DMono(Tr.t(err), dcs.error, 12, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
         DLine()
         Box(Modifier.weight(1f).fillMaxWidth().background(dcs.background), contentAlignment = Alignment.Center) {
             val f = frame
             when {
                 f != null -> { val frameW = rememberUpdatedState(f.width)   // a new frame must not restart a drag in progress
-                    Image(f, "Browser page", Modifier.fillMaxWidth().testTag("browser.frame").pointerInput(driving) {
+                    Image(f, Msg.android_browser_page, Modifier.fillMaxWidth().testTag("browser.frame").pointerInput(driving) {
                     detectTapGestures { p -> if (driving && size.width > 0 && size.height > 0) run("click") { put("x", (p.x * 1000 / size.width).toInt().coerceIn(0, 1000)); put("y", (p.y * 1000 / size.height).toInt().coerceIn(0, 1000)) } }
                 }.pointerInput(driving) {
                     if (!driving) return@pointerInput
@@ -456,11 +458,11 @@ private fun BrowserTab(thread: DThread) {
                     }
                     detectDragGestures(onDragEnd = { send(true) }, onDragCancel = { send(true) }) { c, d -> c.consume(); dx += d.x; dy += d.y; send(false) }
                 }, contentScale = ContentScale.FillWidth) }
-                none -> DMono("No browser page yet. An agent opens one when it needs the web.", dcs.onSurfaceVariant, 12, Modifier.padding(24.dp))
+                none -> DMono(Msg.android_browser_none, dcs.onSurfaceVariant, 12, Modifier.padding(24.dp))
                 else -> CircularProgressIndicator()
             }
         }
-        if (driving) DMono("You have the page: a tap clicks, a drag scrolls, the key field types. Hand it back when you are done.", dcs.onSurfaceVariant, 11, Modifier.padding(8.dp))
+        if (driving) DMono(Msg.android_browser_driving, dcs.onSurfaceVariant, 11, Modifier.padding(8.dp))
     }
 }
 
@@ -484,17 +486,17 @@ private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
     var info by remember(thread.id) { mutableStateOf("") }
     var lit by remember(thread.id) { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     val tap: (String, Int, Int) -> Unit = { key, at, idx -> scope.launch {
-        info = runCatching { DataClient.info(key, at, idx) }.getOrDefault("").ifEmpty { "piece $at,$idx" }
+        info = runCatching { DataClient.info(key, at, idx) }.getOrDefault("").ifEmpty { Msg.android_viewer_piece("$at,$idx") }
         lit = Probe.light(info, listOf("1|$root|", "0|$root|"))
     } }
     val clear = { info = ""; lit = emptyMap() }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("split")) {
         val panes: @Composable (Modifier) -> Unit = { m ->
-            SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || files?.sch.isNullOrEmpty()) "No schematic in this project yet" else "", m, lit = lit["1|$root|"].orEmpty(), tap = tap, untap = clear)
+            SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || files?.sch.isNullOrEmpty()) Msg.android_viewer_nosch else "", m, lit = lit["1|$root|"].orEmpty(), tap = tap, untap = clear)
             val pick: @Composable (Modifier) -> Unit = { a -> Row(a.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ViewChip("Board", !three, "split.pick.board") { splitThree[thread.id] = false }; ViewChip("3D", three, "split.pick.3d") { splitThree[thread.id] = true } } }
-            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
-            else SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) "No board in this project yet" else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
+                ViewChip(Msg.viewer_board, !three, "split.pick.board") { splitThree[thread.id] = false }; ViewChip(Msg.viewer_solid, three, "split.pick.3d") { splitThree[thread.id] = true } } }
+            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
+            else SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
         }
         if (maxWidth > maxHeight) Row(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxHeight()) }
         else Column(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxWidth()) }
@@ -518,9 +520,9 @@ private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: Me
             }
             s.markAll(lit)
         })
-        DMono(label.uppercase(), dcs.onSurfaceVariant, 10, Modifier.align(Alignment.TopStart).padding(6.dp))
+        DMono(tabLabel(label).uppercase(), dcs.onSurfaceVariant, 10, Modifier.align(Alignment.TopStart).padding(6.dp))
         val say = if (none.isNotEmpty()) none else frame?.none.orEmpty()
-        if (say.isNotEmpty()) DMono(say, dcs.onSurfaceVariant, 11, Modifier.align(Alignment.Center).padding(12.dp))
+        if (say.isNotEmpty()) DMono(Tr.t(say), dcs.onSurfaceVariant, 11, Modifier.align(Alignment.Center).padding(12.dp))
         else if (frame == null && (!three || mesh == null)) CircularProgressIndicator(Modifier.align(Alignment.Center).size(24.dp))
         pick?.invoke(Modifier.align(Alignment.TopEnd))
     }
@@ -536,15 +538,15 @@ private fun DiffTab(thread: DThread) {
     LaunchedEffect(thread.id, n) { diff = null; err = ""; runCatching { DataClient.diff(thread.id) }.onSuccess { diff = it.first; nogit = it.second }.onFailure { err = it.message ?: "" } }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            DMono("CHANGES", dcs.onSurfaceVariant, 11, Modifier.weight(1f).padding(start = 4.dp)); DBtn("Refresh", false, modifier = Modifier.testTag("diff.refresh")) { n++ }
+            DMono(Msg.android_changes_head, dcs.onSurfaceVariant, 11, Modifier.weight(1f).padding(start = 4.dp)); DBtn(Msg.common_refresh, false, modifier = Modifier.testTag("diff.refresh")) { n++ }
         }
         DLine()
         val d = diff
         when {
-            err.isNotEmpty() -> DMono(err, dcs.error, 12, Modifier.padding(16.dp))
+            err.isNotEmpty() -> DMono(Tr.t(err), dcs.error, 12, Modifier.padding(16.dp))
             d == null -> CircularProgressIndicator(Modifier.padding(24.dp))
-            nogit.isNotEmpty() -> DMono("This project is not a git repository, so there is nothing to compare.", dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.nogit"))
-            d.isBlank() -> DMono("No changes.", dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.none"))
+            nogit.isNotEmpty() -> DMono(Msg.android_diff_nogit, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.nogit"))
+            d.isBlank() -> DMono(Msg.android_diff_none, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.none"))
             else -> {
                 val green = androidx.compose.ui.graphics.Color(0xFF4CAF7A); val lines = remember(d) { d.lines().take(4000) }
                 LazyColumn(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).testTag("diff.list")) {
@@ -571,7 +573,7 @@ private fun ReviewTab(thread: DThread) {
     var page by remember { mutableStateOf("Checks") }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Checks", "BOM", "Comments").forEach { p -> DBtn(p, page == p, modifier = Modifier.testTag("review.page.$p")) { page = p } }
+            listOf("Checks" to Msg.review_checks, "BOM" to Msg.review_bom, "Comments" to Msg.review_comments).forEach { (p, l) -> DBtn(l, page == p, modifier = Modifier.testTag("review.page.$p")) { page = p } }
         }
         DLine()
         when (page) { "BOM" -> ReportPage(thread, "bom", false); "Comments" -> CommentsPage(thread); else -> ReportPage(thread, "checks", true) }
@@ -586,14 +588,14 @@ private fun ReportPage(thread: DThread, kind: String, ticks: Boolean) {
     var run by remember(kind) { mutableIntStateOf(0) }
     LaunchedEffect(thread.id, kind, run) { rep = null; err = ""; runCatching { DataClient.reviewPage(thread.id, kind) }.onSuccess { rep = it; tasks = it.tasks }.onFailure { err = it.message ?: "" } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp).testTag("review.$kind"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        DBtn(if (ticks) "Run checks" else "Refresh", false, modifier = Modifier.testTag("review.run")) { run++ }
+        DBtn(if (ticks) Msg.android_checks_run else Msg.common_refresh, false, modifier = Modifier.testTag("review.run")) { run++ }
         val r = rep
-        if (err.isNotEmpty()) DMono(err, dcs.error, 12)
+        if (err.isNotEmpty()) DMono(Tr.t(err), dcs.error, 12)
         if (r == null && err.isEmpty()) CircularProgressIndicator()
         r?.let {
-            if (it.line.isNotEmpty()) DMono(it.line, dcs.primary, 12, bold = true)
-            if (it.gate.isNotEmpty()) DMono(it.gate, dcs.onSurfaceVariant, 11)
-            if (it.err.isNotEmpty()) DMono(it.err, dcs.error, 12)
+            if (it.line.isNotEmpty()) DMono(Tr.t(it.line), dcs.primary, 12, bold = true)
+            if (it.gate.isNotEmpty()) DMono(Tr.t(it.gate), dcs.onSurfaceVariant, 11)
+            if (it.err.isNotEmpty()) DMono(Tr.t(it.err), dcs.error, 12)
             if (it.md.isNotEmpty()) MdText(it.md)
             if (ticks) tasks.forEachIndexed { i, t ->
                 Row(Modifier.fillMaxWidth().clickable { scope.launch { runCatching { DataClient.tick(thread.id, i) }.onSuccess { n -> if (n.isNotEmpty()) tasks = n } } }.padding(vertical = 6.dp).testTag("review.task.$i"), verticalAlignment = Alignment.CenterVertically) {
@@ -601,7 +603,7 @@ private fun ReportPage(thread: DThread, kind: String, ticks: Boolean) {
                     Text(t.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
                 }
             }
-            if (it.md.isEmpty() && it.line.isEmpty() && it.err.isEmpty() && tasks.isEmpty()) DMono("Nothing to show.", dcs.onSurfaceVariant, 12)
+            if (it.md.isEmpty() && it.line.isEmpty() && it.err.isEmpty() && tasks.isEmpty()) DMono(Msg.android_nothing, dcs.onSurfaceVariant, 12)
         }
     }
 }
@@ -615,13 +617,13 @@ private fun CommentsPage(thread: DThread) {
     LaunchedEffect(thread.id) { load() }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp).testTag("review.comments"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (err.isNotEmpty()) DMono(err, dcs.error, 12)
+            if (err.isNotEmpty()) DMono(Tr.t(err), dcs.error, 12)
             val l = list
-            if (l == null) CircularProgressIndicator() else if (l.isEmpty()) DMono("No comments yet. Add one below; the agent reads the open ones with its next message.", dcs.onSurfaceVariant, 12)
+            if (l == null) CircularProgressIndicator() else if (l.isEmpty()) DMono(Msg.android_comments_none, dcs.onSurfaceVariant, 12)
             l?.filter { it.parent.isEmpty() }?.forEach { c ->
                 Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (c.resolved) dcs.outlineVariant else dcs.primary.copy(alpha = .6f))).padding(10.dp)) {
-                    Row { DMono((c.by.ifEmpty { "you" }) + if (c.resolved) " · resolved" else "", dcs.onSurfaceVariant, 11, Modifier.weight(1f))
-                        DMono(if (c.resolved) "reopen" else "resolve", dcs.primary, 11, Modifier.clickable { scope.launch { runCatching { DataClient.comment(thread.id, if (c.resolved) "reopen" else "resolve") { put("id", c.id) } }; load() } }.testTag("review.resolve.${c.id}")) }
+                    Row { DMono((c.by.ifEmpty { Msg.android_you }) + if (c.resolved) " · " + Msg.android_resolved else "", dcs.onSurfaceVariant, 11, Modifier.weight(1f))
+                        DMono(if (c.resolved) Msg.android_reopen else Msg.android_resolve, dcs.primary, 11, Modifier.clickable { scope.launch { runCatching { DataClient.comment(thread.id, if (c.resolved) "reopen" else "resolve") { put("id", c.id) } }; load() } }.testTag("review.resolve.${c.id}")) }
                     Text(c.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
                     l.filter { it.parent == c.id }.forEach { r -> Text("↳ " + r.text, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
                 }
@@ -629,9 +631,9 @@ private fun CommentsPage(thread: DThread) {
         }
         DLine()
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.weight(1f)) { DField(draft, { draft = it }, "A review comment", Modifier.testTag("review.composer"), 4) }
+            Box(Modifier.weight(1f)) { DField(draft, { draft = it }, Msg.android_comment_hint, Modifier.testTag("review.composer"), 4) }
             Spacer(Modifier.width(8.dp))
-            DBtn("Add", true, draft.isNotBlank(), Modifier.testTag("review.add")) { val t = draft; draft = ""; scope.launch { runCatching { DataClient.comment(thread.id, "add") { put("text", t) } }.onFailure { err = it.message ?: "" }; load() } }
+            DBtn(Msg.common_add, true, draft.isNotBlank(), Modifier.testTag("review.add")) { val t = draft; draft = ""; scope.launch { runCatching { DataClient.comment(thread.id, "add") { put("text", t) } }.onFailure { err = it.message ?: "" }; load() } }
         }
     }
 }
@@ -676,8 +678,8 @@ private fun ProbeCard(info: String, lit: Int, modifier: Modifier, close: () -> U
     Row(modifier.fillMaxWidth().background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(head, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            if (rest.isNotEmpty() || lit > 1) Text(listOf(rest, if (lit > 1) "$lit lit" else "").filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            if (rest.isNotEmpty() || lit > 1) Text(listOf(rest, if (lit > 1) Msg.android_probe_lit(lit) else "").filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
-        Box(Modifier.size(44.dp).clickable(onClick = close).testTag("viewer.info.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, "Close", tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+        Box(Modifier.size(44.dp).clickable(onClick = close).testTag("viewer.info.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
     }
 }

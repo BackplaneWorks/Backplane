@@ -11,7 +11,10 @@ class DataActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         AppSettings.init(this)
+        // the system's language (a change of it makes the activity anew): Automatic follows it (Tr.kt)
+        Tr.system = resources.configuration.locales[0].language
         DataClient.init(this)
+        DataClient.channels()
         intent?.data?.let { route(it) }
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         // a check without hands (debug builds): --es thread <id> --es vtab 3D opens that thread's viewer on that tab

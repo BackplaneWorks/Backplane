@@ -62,7 +62,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class PairScanner(val open: Boolean, val note: String, val blocked: Boolean, val start: () -> Unit, val close: () -> Unit, val failed: () -> Unit)
 
 @Composable
-fun pairScanner(tag: String): PairScanner {
+fun pairScanner(): PairScanner {
     val ctx = LocalContext.current
     var open by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
@@ -70,7 +70,7 @@ fun pairScanner(tag: String): PairScanner {
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) { note = ""; blocked = false; open = true }
         else {
-            note = NativeMessages.native_pair_scanner_denied(tag)
+            note = Msg.native_pair_scanner_denied
             // refused with "don't ask again" (or twice): Android shows no prompt any more
             blocked = ctx.activity()?.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) == false
         }
@@ -85,23 +85,23 @@ fun pairScanner(tag: String): PairScanner {
     return PairScanner(open, note, blocked,
         start = {
             when {
-                !ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) -> { note = NativeMessages.native_pair_scanner_unavailable(tag); blocked = false }
+                !ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) -> { note = Msg.native_pair_scanner_unavailable; blocked = false }
                 ctx.cameraAllowed() -> { note = ""; blocked = false; open = true }
                 else -> ask.launch(Manifest.permission.CAMERA)
             }
         },
         close = { open = false },
-        failed = { open = false; blocked = false; note = NativeMessages.native_pair_scanner_unavailable(tag) })
+        failed = { open = false; blocked = false; note = Msg.native_pair_scanner_unavailable })
 }
 
 /** Under Scan: why the camera is not there, and (refused for good) the way to Settings. */
 @Composable
-fun ScanNote(tag: String, scan: PairScanner) {
+fun ScanNote(scan: PairScanner) {
     if (scan.note.isEmpty()) return
     val ctx = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(scan.note, Modifier.testTag("pair.scan.note"), color = dcs.onSurfaceVariant, fontSize = 13.sp)
-        if (scan.blocked) DBtn(NativeMessages.native_settings_system_open(tag), false, modifier = Modifier.testTag("pair.scan.settings")) {
+        if (scan.blocked) DBtn(Msg.native_settings_system_open, false, modifier = Modifier.testTag("pair.scan.settings")) {
             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
@@ -125,7 +125,7 @@ private tailrec fun Context.activity(): Activity? = when (this) {
  * A camera that does not start calls [failed] (the pairing screen says so and keeps its photo and paste).
  */
 @Composable
-fun ScannerView(tag: String, close: () -> Unit, failed: () -> Unit, found: (String) -> Unit) {
+fun ScannerView(close: () -> Unit, failed: () -> Unit, found: (String) -> Unit) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     BackHandler(onBack = close)
@@ -187,15 +187,15 @@ fun ScannerView(tag: String, close: () -> Unit, failed: () -> Unit, found: (Stri
         // the square to aim with; the camera reads the whole frame
         Box(Modifier.align(Alignment.Center).size(260.dp).border(BorderStroke(3.dp, Color.White.copy(alpha = 0.9f))))
         Row(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).padding(4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            IconButton(close, Modifier.testTag("pair.scanner.close")) { Icon(Icons.Filled.Close, NativeMessages.common_close(tag), tint = Color.White) }
-            Text(NativeMessages.native_pair_scanner_title(tag), color = Color.White, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            IconButton(close, Modifier.testTag("pair.scanner.close")) { Icon(Icons.Filled.Close, Msg.common_close, tint = Color.White) }
+            Text(Msg.native_pair_scanner_title, color = Color.White, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             val c = camera
             if (c != null && c.cameraInfo.hasFlashUnit()) IconButton(onClick = { light = !light; c.cameraControl.enableTorch(light) }, modifier = Modifier.testTag("pair.scanner.light")) {
-                Icon(if (light) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff, NativeMessages.native_pair_scanner_light(tag), tint = Color.White)
+                Icon(if (light) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff, Msg.native_pair_scanner_light, tint = Color.White)
             } else Box(Modifier.size(48.dp))
         }
         val bad = wrong != 0L
-        Text(if (bad) NativeMessages.native_pair_scanner_invalid(tag) else NativeMessages.native_pair_scanner_instructions(tag),
+        Text(if (bad) Msg.native_pair_scanner_invalid else Msg.native_pair_scanner_instructions,
             Modifier.align(Alignment.BottomCenter).padding(horizontal = 24.dp, vertical = 32.dp).background(Color.Black.copy(alpha = 0.7f))
                 .padding(horizontal = 14.dp, vertical = 10.dp).testTag(if (bad) "pair.scanner.invalid" else "pair.scanner.hint"),
             color = if (bad) Color(0xFFFFB4AB) else Color.White, textAlign = TextAlign.Center, fontFamily = BpMono, fontSize = 12.sp)

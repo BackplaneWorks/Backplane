@@ -63,6 +63,11 @@ internal val LocalTermOpen = compositionLocalOf<(String) -> Unit> { {} }
 internal val LocalTermsOpen = compositionLocalOf<(String?) -> Unit> { {} }
 
 internal fun termsOn() = DataClient.has("terms")
+/** A terminal's state word (running, exited N, stopped, failed to start) in the app's language. */
+internal fun termStateLabel(s: String) = when {
+    s == "running" -> Msg.state_running; s == "stopped" -> Msg.state_stopped; s == "failed to start" -> Msg.android_term_failed
+    s.startsWith("exited ") -> Msg.android_term_exited(s.removePrefix("exited ")); else -> Tr.t(s)
+}
 
 // ---- drawing
 
@@ -143,8 +148,8 @@ internal fun TermCard(e: DEntry) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("term.card.${t.id}")) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).clickable { open(t.key) }.padding(start = 10.dp, end = 4.dp).heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
             DMono(sc.title.ifEmpty { t.title }, dcs.onSurface, 12, Modifier.weight(1f), bold = true)
-            if (state.isNotEmpty()) { Spacer(Modifier.width(8.dp)); DMono(state, termStateColor(state), 11, Modifier.testTag("term.card.state")) }
-            if (sc.running) { Spacer(Modifier.width(8.dp)); DBtn("Stop", false, modifier = Modifier.testTag("term.card.stop"), danger = true) { Terms.stop(t.key) } }
+            if (state.isNotEmpty()) { Spacer(Modifier.width(8.dp)); DMono(termStateLabel(state), termStateColor(state), 11, Modifier.testTag("term.card.state")) }
+            if (sc.running) { Spacer(Modifier.width(8.dp)); DBtn(Msg.composer_stop, false, modifier = Modifier.testTag("term.card.stop"), danger = true) { Terms.stop(t.key) } }
         }
         val rows = remember(rev) { cardRows(sc.vt.lines(0), sc.vt.cursor().y, 8) }
         val n = maxOf(rows.size, 3)
@@ -199,8 +204,8 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
         val tight = LocalContext.current.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE && WindowInsets.isImeVisible
         if (!tight) DBar(sc.vt.title().ifEmpty { sc.title.ifEmpty { title0 } }, back) {
             val state = sc.stateLine
-            if (state.isNotEmpty()) DMono(state, termStateColor(state), 11, Modifier.padding(end = 8.dp).testTag("term.state"))
-            if (sc.running) DBtn("Stop", false, modifier = Modifier.testTag("term.stop"), danger = true) { Terms.stop(key) }
+            if (state.isNotEmpty()) DMono(termStateLabel(state), termStateColor(state), 11, Modifier.padding(end = 8.dp).testTag("term.state"))
+            if (sc.running) DBtn(Msg.composer_stop, false, modifier = Modifier.testTag("term.stop"), danger = true) { Terms.stop(key) }
             Spacer(Modifier.width(4.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -229,8 +234,8 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
                 drawTerm(lines, live, if (scroll == 0) sc.vt.cursor() else null)
             }
             DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem({ Text("Paste", fontFamily = BpMono) }, { menu = false; paste() }, Modifier.testTag("term.menu.paste"))
-                DropdownMenuItem({ Text("Copy screen", fontFamily = BpMono) }, { menu = false; clip.setText(AnnotatedString(sc.vt.lines(0).joinToString("\n") { l -> l.runs.joinToString("") { it.text } }.trimEnd())) }, Modifier.testTag("term.menu.copy"))
+                DropdownMenuItem({ Text(Msg.android_paste, fontFamily = BpMono) }, { menu = false; paste() }, Modifier.testTag("term.menu.paste"))
+                DropdownMenuItem({ Text(Msg.android_term_copy, fontFamily = BpMono) }, { menu = false; clip.setText(AnnotatedString(sc.vt.lines(0).joinToString("\n") { l -> l.runs.joinToString("") { it.text } }.trimEnd())) }, Modifier.testTag("term.menu.copy"))
             }
             // the keyboard's door: a field nobody sees; what it receives is the program's input
             BasicTextField(
@@ -267,10 +272,10 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
                     Text(label, color = if (on) dcs.onPrimary else dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
-            K("Esc") { press(65307, 27) }; K("Tab") { press(65289, 9) }; K("Ctrl", ctrl) { ctrl = !ctrl }
+            K(Msg.native_key_esc, tag = "Esc") { press(65307, 27) }; K(Msg.native_key_tab, tag = "Tab") { press(65289, 9) }; K("Ctrl", ctrl) { ctrl = !ctrl }
             K("←", tag = "left") { press(65361) }; K("↑", tag = "up") { press(65362) }; K("→", tag = "right") { press(65363) }; K("↓", tag = "down") { press(65364) }
             K("|", tag = "pipe") { typed('|'.code) }; K("~", tag = "tilde") { typed('~'.code) }; K("/", tag = "slash") { typed('/'.code) }; K("-", tag = "dash") { typed('-'.code) }
-            K("Paste") { paste() }
+            K(Msg.android_paste, tag = "Paste") { paste() }
         }
     }
 }
@@ -289,19 +294,19 @@ internal fun TermsScreen(project: String?, back: () -> Unit, open: (String) -> U
     }
     val title = project?.let { p -> DataClient.projects.firstOrNull { it.id == p }?.title }
     Column(Modifier.fillMaxSize().background(dcs.surfaceVariant)) {
-        DBar(if (title != null) "Terminals · $title" else "Terminals", back) {
-            IconButton({ epoch++ }, modifier = Modifier.testTag("terms.refresh")) { Icon(Icons.Default.Refresh, "Refresh", tint = dcs.onSurfaceVariant) }
+        DBar(if (title != null) Msg.android_terminals_in(title) else Msg.android_terminals, back) {
+            IconButton({ epoch++ }, modifier = Modifier.testTag("terms.refresh")) { Icon(Icons.Default.Refresh, Msg.common_refresh, tint = dcs.onSurfaceVariant) }
         }
         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            DBtn("New shell", true, DataClient.conn == DataClient.Conn.ONLINE, Modifier.testTag("terms.new")) {
+            DBtn(Msg.android_term_new, true, DataClient.conn == DataClient.Conn.ONLINE, Modifier.testTag("terms.new")) {
                 scope.launch { try { open(Terms.newShell(project, 80, 24)) } catch (e: Exception) { err = e.message ?: "" } }
             }
             if (err.isNotEmpty()) { Spacer(Modifier.width(10.dp)); DMono(err, dcs.error, 12, Modifier.weight(1f)) }
         }
         DLine()
         val list = rows
-        if (list == null) DMono(if (DataClient.conn == DataClient.Conn.ONLINE) "Loading…" else "Offline", dfaint, 12, Modifier.padding(14.dp))
-        else if (list.isEmpty()) DMono("No terminals", dfaint, 12, Modifier.padding(14.dp).testTag("terms.none"))
+        if (list == null) DMono(if (DataClient.conn == DataClient.Conn.ONLINE) Msg.viewer_loading else Msg.android_offline_cap, dfaint, 12, Modifier.padding(14.dp))
+        else if (list.isEmpty()) DMono(Msg.android_terms_none, dfaint, 12, Modifier.padding(14.dp).testTag("terms.none"))
         else LazyColumn(Modifier.fillMaxSize().testTag("terms.list")) {
             items(list, key = { it.key }) { r ->
                 Column(Modifier.fillMaxWidth().clickable { open(r.key) }.testTag("terms.row.${r.key}")) {
@@ -311,7 +316,7 @@ internal fun TermsScreen(project: String?, back: () -> Unit, open: (String) -> U
                             DMono(r.title.ifEmpty { r.key }, dcs.onSurface, 13, bold = true)
                             if (r.cwd.isNotEmpty()) DMono(r.cwd, dfaint, 11)
                         }
-                        Column(horizontalAlignment = Alignment.End) { DMono(r.state, termStateColor(r.state), 11); DMono(r.kind, dfaint, 11) }
+                        Column(horizontalAlignment = Alignment.End) { DMono(termStateLabel(r.state), termStateColor(r.state), 11); DMono(Tr.t(r.kind), dfaint, 11) }
                     }
                     DLine()
                 }

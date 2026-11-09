@@ -38,9 +38,9 @@ import kotlin.math.max
 private const val INK = 0x1f2328
 
 private fun hint(t: PadTool) = when (t) {
-    PadTool.Pen -> "Drag to draw"
-    PadTool.Boxes -> "Drag to draw a box · drag its middle to move it, a side to resize · tap a side to type its length"
-    PadTool.Eraser -> "Drag over what to erase"
+    PadTool.Pen -> Msg.android_pad_pen_hint
+    PadTool.Boxes -> Msg.android_pad_box_hint
+    PadTool.Eraser -> Msg.android_pad_eraser_hint
 }
 
 /** The pad's picture on `c`, in paper pixels (the caller scales). `marks`: the selection and what is being drawn, for the screen; without, for the attachment. */
@@ -86,11 +86,11 @@ fun DrawPadSheet(close: () -> Unit, attach: (ByteArray) -> Unit) {
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
         tick.let { } // read, so the sheet recomposes on each change
         Column(Modifier.fillMaxWidth().padding(10.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("pad"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Draw", color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(Msg.draw_title, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             Text(hint(pad.tool), Modifier.testTag("pad.hint"), color = dfaint, fontFamily = BpMono, fontSize = 11.sp) // wraps: the Box tool's hint is long
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                listOf(PadTool.Pen to "Pen", PadTool.Boxes to "Box", PadTool.Eraser to "Eraser").forEach { (t, label) ->
-                    DBtn(label, pad.tool == t, modifier = Modifier.testTag("pad.${label.lowercase()}")) { pad.setTool(t); touched() }
+                listOf(Triple(PadTool.Pen, "pen", Msg.android_pad_pen), Triple(PadTool.Boxes, "box", Msg.android_pad_box), Triple(PadTool.Eraser, "eraser", Msg.android_pad_eraser)).forEach { (t, id, label) ->
+                    DBtn(label, pad.tool == t, modifier = Modifier.testTag("pad.$id")) { pad.setTool(t); touched() }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -100,7 +100,7 @@ fun DrawPadSheet(close: () -> Unit, attach: (ByteArray) -> Unit) {
                         .background(Color(0xff000000.toInt() or col)).clickable { pad.setColor(i); touched() }.testTag("pad.color.$i"))
                 }
             }
-            Canvas(Modifier.fillMaxWidth().aspectRatio(PAD_W / PAD_H).background(Color.White).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("pad.paper").semantics { contentDescription = "Drawing paper" }
+            Canvas(Modifier.fillMaxWidth().aspectRatio(PAD_W / PAD_H).background(Color.White).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("pad.paper").semantics { contentDescription = Msg.android_pad_paper }
                 .pointerInput(Unit) {
                     val k = PAD_W / max(size.width, 1).toFloat()
                     // a side is a fingertip wide (about 14 dp) and so is the eraser, whatever the phone's size; never less than the desktop's
@@ -125,13 +125,13 @@ fun DrawPadSheet(close: () -> Unit, attach: (ByteArray) -> Unit) {
                 drawIntoCanvas { c -> val n = c.nativeCanvas; n.save(); n.scale(size.width / PAD_W, size.width / PAD_W); padPaint(n, pad, true); n.restore() }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                DBtn("Undo", false, pad.canUndo, Modifier.testTag("pad.undo")) { pad.undo(); touched() }
-                DBtn(if (pad.picked != null) "Delete" else "Clear", false, !pad.isEmpty, Modifier.testTag("pad.delete")) { pad.delete(); touched() }
+                DBtn(Msg.android_undo, false, pad.canUndo, Modifier.testTag("pad.undo")) { pad.undo(); touched() }
+                DBtn(if (pad.picked != null) Msg.common_delete else Msg.common_clear, false, !pad.isEmpty, Modifier.testTag("pad.delete")) { pad.delete(); touched() }
                 Spacer(Modifier.weight(1f))
-                DBtn("Cancel", false, modifier = Modifier.testTag("pad.cancel"), onClick = close)
-                DBtn("Attach", true, !pad.isEmpty, Modifier.testTag("pad.attach")) { attach(padPicture(pad)); close() }
+                DBtn(Msg.draw_cancel, false, modifier = Modifier.testTag("pad.cancel"), onClick = close)
+                DBtn(Msg.draw_save, true, !pad.isEmpty, Modifier.testTag("pad.attach")) { attach(padPicture(pad)); close() }
             }
         }
     }
-    if (asking) TextPrompt("Length, e.g. 40 mm", pad.lengthText(), "Set", { asking = false; touched() }) { pad.commitLength(it); touched() }
+    if (asking) TextPrompt(Msg.android_pad_length, pad.lengthText(), Msg.common_set, { asking = false; touched() }) { pad.commitLength(it); touched() }
 }

@@ -824,7 +824,7 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         setEGLConfigChooser(8, 8, 8, 8, 0, 0)
         preserveEGLContextOnPause = true
         isFocusable = true; isFocusableInTouchMode = true
-        contentDescription = "Board and model viewer. Arrow keys orbit, shift arrows pan, plus and minus zoom, F fits."
+        contentDescription = Msg.android_viewer_a11y
         setRenderer(renderer)
         renderMode = RENDERMODE_WHEN_DIRTY
         // frames only while a part is fading in

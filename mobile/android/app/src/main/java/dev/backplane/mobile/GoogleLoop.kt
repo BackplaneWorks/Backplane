@@ -65,12 +65,13 @@ object GoogleLoop {
                     continue
                 }
                 val back = "${BuildConfig.URL_SCHEME}://google"
-                val body = ("<!doctype html><meta name=viewport content=\"width=device-width\"><title>Backplane</title>" +
-                    "<p style=\"font:16px sans-serif;margin:24px\">Signed in. <a href=\"$back\">Back to Backplane</a></p>" +
+                // the browser tab's words in the app's language (Msg); the markup is not copy
+                val page = ("<!doctype html><meta name=viewport content=\"width=device-width\"><title>Backplane</title>" +
+                    "<p style=\"font:16px sans-serif;margin:24px\">${Msg.android_google_signedin} <a href=\"$back\">${Msg.android_google_back}</a></p>" +
                     "<script>location.href='$back'</script>").toByteArray()
                 runCatching {
-                    c.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${body.size}\r\n" +
-                        "Cache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray() + body)
+                    c.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${page.size}\r\n" +
+                        "Cache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray() + page)
                     c.close()
                 }
                 stopIf(s)

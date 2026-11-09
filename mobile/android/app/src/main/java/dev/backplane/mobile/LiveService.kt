@@ -22,7 +22,7 @@ import androidx.core.content.ContextCompat
 class LiveService : Service() {
     companion object {
         private const val ID = 0x6c697665
-        private const val CHANNEL = "live"
+        internal const val CHANNEL = "live"
         private var working: List<String> = emptyList()
         private var instance: LiveService? = null
         private var pending = false
@@ -41,7 +41,7 @@ class LiveService : Service() {
         }
         /** What the ongoing notification says: one thread's title, or how many work and their titles. */
         fun text(titles: List<String>): Pair<String, String> =
-            if (titles.size == 1) "Working" to titles[0].ifEmpty { "New thread" } else "${titles.size} threads working" to titles.joinToString(" · ") { it.ifEmpty { "New thread" } }
+            if (titles.size == 1) Msg.android_live_working to titles[0].ifEmpty { Msg.thread_new } else Msg.android_live_count(titles.size) to titles.joinToString(" · ") { it.ifEmpty { Msg.thread_new } }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -64,7 +64,7 @@ class LiveService : Service() {
 
     private fun notification(): Notification {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Threads working", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, Msg.native_notify_channel_live, NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, ID, Intent(this, DataActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val (title, body) = text(working)
         return Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle(title).setContentText(body)

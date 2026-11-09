@@ -59,11 +59,11 @@ internal fun MigrateBanner() {
         Column(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 DDot(if (c.state == "failed") dwarn else dcs.primary, 8); Spacer(Modifier.width(8.dp))
-                Text(c.title, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(Tr.t(c.title), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 c.pct?.let { DMono("$it%", dcs.onSurfaceVariant, 11) }
             }
             if (c.pct != null) { Spacer(Modifier.height(5.dp)); MigrateBar(c.pct) }
-            c.head.forEach { Spacer(Modifier.height(3.dp)); DMono(it, dcs.onSurfaceVariant, 11) }
+            c.head.forEach { Spacer(Modifier.height(3.dp)); DMono(Tr.t(it), dcs.onSurfaceVariant, 11) }
         }
         DLine()
     }
@@ -79,20 +79,20 @@ private fun MigrateSheet(c: DMigrateCard) {
     var busy by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = { DataClient.migrateOpen = false }, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding().testTag("migrate.card")) {
-            Text(c.title, color = dcs.onSurface, fontFamily = BpMono, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            if (c.body.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(c.body, color = dcs.onSurface, fontSize = 14.sp) }
+            Text(Tr.t(c.title), color = dcs.onSurface, fontFamily = BpMono, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            if (c.body.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(Tr.t(c.body), color = dcs.onSurface, fontSize = 14.sp) }
             if (c.pct != null) {
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) { MigrateBar(c.pct, Modifier.weight(1f)); Spacer(Modifier.width(8.dp)); DMono("${c.pct}%", dcs.onSurfaceVariant, 12) }
             }
             if (c.lines.isNotEmpty()) Spacer(Modifier.height(10.dp))
-            c.lines.forEach { Text(it, Modifier.padding(vertical = 2.dp), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp) }
-            if (err.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(err, color = dcs.error, fontFamily = BpMono, fontSize = 12.sp) }
+            c.lines.forEach { Text(Tr.t(it), Modifier.padding(vertical = 2.dp), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp) }
+            if (err.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(Tr.t(err), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp) }
             if (c.buttons.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     c.buttons.forEach { b ->
-                        DBtn(b.label, b.on, !busy, Modifier.testTag("migrate.act.${b.value}")) {
+                        DBtn(Tr.t(b.label), b.on, !busy, Modifier.testTag("migrate.act.${b.value}")) {
                             busy = true
                             scope.launch { err = try { DataClient.migrateAct(c, b); "" } catch (e: Exception) { e.message ?: "" }; busy = false }
                         }
