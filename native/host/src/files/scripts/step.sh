@@ -13,7 +13,8 @@ else
   [ "$top" = / ] || [ "$top" = "$HOME" ] && exit 0
   [ -d "$gd" ] || [ -L "$gd" ] || [ -n "$(find . -maxdepth 4 \( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' \) -print | head -n 1)" ] || exit 0
   if [ -e "$gd" ] || [ -L "$gd" ]; then
-    if ! { [ -n "$reg" ] && [ ! -L "$gd" ] && [ -d "$gd" ] && grep -qxF "$(ino "$gd") $gd" "$reg"; }; then
+    # trusted: the registry names this folder with its inode (the device number before the colon is not compared: it changes when the disk is mounted again)
+    if ! { [ -n "$reg" ] && [ ! -L "$gd" ] && [ -d "$gd" ] && i=$(ino "$gd") && awk -v i="${i#*:}" -v g="$gd" '{ k = $1; sub(/^[^:]*:/, "", k) } k == i && substr($0, length($1) + 2) == g { f = 1 } END { exit !f }' "$reg"; }; then
       mv "$gd" "$gd.untrusted-$(date +%s)" || exit 0
     fi
   fi
