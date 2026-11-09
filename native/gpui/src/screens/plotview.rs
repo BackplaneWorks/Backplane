@@ -32,12 +32,24 @@ pub struct PlotView {
     /// Pieces a cross-probe lights (chunk index, piece info index), and the canvas's focus for the keys.
     pub lit: Vec<(usize, usize)>, pub focus: Option<FocusHandle>,
     pub down: Option<(f32, f32)>, pub picked: Option<super::plot::Pick>, pub card: Option<super::plot::Card>,
+    /// The plot as last tessellated, and what it was made from: a paint with the same camera, canvas and chunks submits these again
+    /// instead of tessellating every chunk (tens of ms on a real board) for a frame that only moved something else.
+    pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
+}
+
+/// What a tessellated plot depends on: the frame's chunks (by identity), the order and fade they are drawn in, the camera and the canvas.
+#[derive(Clone, PartialEq, Debug)]
+pub struct TessKey { chunks: Vec<usize>, order: Vec<(usize, u32)>, view: [u32; 3], bounds: Bounds<Pixels> }
+impl TessKey {
+    pub fn of(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: &View, b: Bounds<Pixels>) -> TessKey {
+        TessKey { chunks: chunks.iter().map(|c| std::sync::Arc::as_ptr(c) as usize).collect(), order: order.iter().map(|&(i, f)| (i, f.to_bits())).collect(), view: [v.cx.to_bits(), v.cy.to_bits(), v.scale.to_bits()], bounds: b }
+    }
 }
 
 fn color(c: &Chunk, factor: f32) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha * factor; r.into() }
 
 /// A chunk's stroke width in pixels: the hub's width is in micrometres on the capsule (radius = width / 2).
-fn paint_chunk(window: &mut Window, c: &Chunk, factor: f32, v: &View, o: Point<Pixels>, w: f32, h: f32, mut sp: Option<&mut [f32; 3]>) {
+fn paint_chunk(out: &mut Vec<(Path<Pixels>, Hsla)>, c: &Chunk, factor: f32, v: &View, o: Point<Pixels>, w: f32, h: f32, mut sp: Option<&mut [f32; 3]>) {
     // (script mode only) ms since the last lap, added to the culling/tessellation/submission split
     let mut t = sp.as_ref().map(|_| std::time::Instant::now());
     let mut lap = |k: usize, sp: &mut Option<&mut [f32; 3]>| { if let (Some(t), Some(sp)) = (t.as_mut(), sp.as_mut()) { let n = std::time::Instant::now(); sp[k] += n.duration_since(*t).as_secs_f32() * 1000.0; *t = n; } };
@@ -66,8 +78,8 @@ fn paint_chunk(window: &mut Window, c: &Chunk, factor: f32, v: &View, o: Point<P
             if round_ends { circle(&mut dots, a.0, a.1); circle(&mut dots, b.0, b.1); any_dot = true; }
         }
         lap(0, &mut sp);
-        if any { if let Ok(path) = pb.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
-        if any_dot { if let Ok(path) = dots.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
+        if any { if let Ok(path) = pb.build() { lap(1, &mut sp); out.push((path, color(c, factor))); } }
+        if any_dot { if let Ok(path) = dots.build() { lap(1, &mut sp); out.push((path, color(c, factor))); } }
     }
     if !c.polys.is_empty() {
         let mut pb = PathBuilder::fill(); let mut any = false;
@@ -80,7 +92,7 @@ fn paint_chunk(window: &mut Window, c: &Chunk, factor: f32, v: &View, o: Point<P
             pb.close(); any = true;
         }
         lap(0, &mut sp);
-        if any { if let Ok(path) = pb.build() { lap(1, &mut sp); window.paint_path(path, color(c, factor)); lap(2, &mut sp); } }
+        if any { if let Ok(path) = pb.build() { lap(1, &mut sp); out.push((path, color(c, factor))); } }
     }
 }
 
@@ -152,8 +164,19 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         let measure = this.update(cx, |app, _| app.screens.pv(slot).measure);
         let t0 = measure.then(std::time::Instant::now); let mut sp = [0f32; 3];
         let (lit, probe) = this.update(cx, |app, _| { let pv = app.screens.pv(slot); (pv.picked.clone(), pv.lit.clone()) });
+        let key = TessKey::of(&chunks, &order, &v, b);
+        let paths = match this.update(cx, |app, _| app.screens.pv(slot).tess.as_ref().filter(|t| t.0 == key).map(|t| t.1.clone())) {
+            Some(p) => p,
+            None => {
+                let mut out = Vec::new();
+                for &(i, factor) in &order { paint_chunk(&mut out, &chunks[i], factor, &v, b.origin, w, h, measure.then_some(&mut sp)); }
+                let p = std::rc::Rc::new(out); this.update(cx, |app, _| app.screens.pv(slot).tess = Some((key, p.clone()))); p
+            }
+        };
         window.with_content_mask(Some(ContentMask { bounds: b }), |window| {
-            for &(i, factor) in &order { paint_chunk(window, &chunks[i], factor, &v, b.origin, w, h, measure.then_some(&mut sp)); }
+            let t2 = measure.then(std::time::Instant::now);
+            for (path, color) in paths.iter() { window.paint_path(path.clone(), *color); }
+            if let Some(t2) = t2 { sp[2] += t2.elapsed().as_secs_f32() * 1000.0; }
             if !probe.is_empty() { paint_probe(window, &chunks, &probe, &v, b.origin, w, h); }
             if let Some(p) = &lit { paint_lit(window, p, &v, b.origin, w, h); }
         });
@@ -266,6 +289,17 @@ pub fn report_state(app: &mut Backplane) {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn a_tessellated_plot_is_reused_only_for_the_same_chunks_order_camera_and_canvas() {
+        let a = std::sync::Arc::new(Chunk::default()); let b = std::sync::Arc::new(Chunk::default());
+        let v = View { cx: 1., cy: 2., scale: 0.5 }; let bx = Bounds::new(point(px(10.), px(20.)), size(px(300.), px(200.)));
+        let k = TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &v, bx);
+        assert_eq!(k, TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &v, bx), "the same paint");
+        assert_ne!(k, TessKey::of(&[a.clone(), std::sync::Arc::new(Chunk::default())], &[(0, 1.0), (1, 0.4)], &v, bx), "a chunk replaced");
+        assert_ne!(k, TessKey::of(&[a.clone(), b.clone()], &[(1, 1.0), (0, 0.4)], &v, bx), "another order");
+        assert_ne!(k, TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 1.0)], &v, bx), "another fade");
+        assert_ne!(k, TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &View { scale: 0.6, ..v }, bx), "zoomed");
+        assert_ne!(k, TessKey::of(&[a, b], &[(0, 1.0), (1, 0.4)], &v, Bounds::new(point(px(10.), px(20.)), size(px(301.), px(200.)))), "resized");
+    }
     #[test] fn an_untouched_camera_is_fitted_again_when_the_canvas_size_changes() {
         assert!(refit_needed(false, (480., 600.), 520., 930.));
         assert!(!refit_needed(false, (520., 930.), 521., 929.), "a pixel of jitter is not a change");
