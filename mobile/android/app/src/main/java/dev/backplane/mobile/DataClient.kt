@@ -51,6 +51,8 @@ object DataClient {
     /** a pairing link that came from outside the app: nothing happens until the person says so */
     var askLink by mutableStateOf<String?>(null)
     val hubName get() = link?.let { Pairing.key(it) } ?: ""
+    /** The hub's machine name from its hello, for titles ("" until heard, or from an older hub); `hubName` stays the key. */
+    var hubTitle by mutableStateOf(""); private set
 
     private var ws: WebSocket? = null
     private var gen = 0
@@ -125,7 +127,7 @@ object DataClient {
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
     fun unpair() { links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
-    private fun reset() { notice = HubNotice(); star = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
+    private fun reset() { hubTitle = ""; notice = HubNotice(); star = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
     fun connect() {
@@ -177,6 +179,7 @@ object DataClient {
             "hello" -> {
                 if (!o.optString("proto").startsWith("data/")) { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
                 features = o.optJSONArray("features")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+                hubTitle = o.optString("name") // the machine's name (an older hub sends none: the address shows)
                 notice = HubRescue.notice(o.optJSONObject("notice"))
                 heardMigrating(o.optJSONObject("migrating"))
                 commands = o.optJSONArray("commands")?.let { a -> (0 until a.length()).map { val w = a.getJSONObject(it); Word(w.optString("word"), w.optString("label"), w.optString("desc")) } } ?: emptyList()

@@ -304,7 +304,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         kotlinx.coroutines.delay(2500); if (flash == id) flash = ""
     }
     Column(Modifier.fillMaxSize().background(dcs.surfaceVariant)) {
-        DBar(DataClient.hubName.ifEmpty { "Backplane" }, null, { dismiss ->
+        DBar(DataClient.hubTitle.ifEmpty { DataClient.hubName.ifEmpty { "Backplane" } }, null, { dismiss ->
             DataClient.links.drop(1).mapNotNull { Pairing.key(it) }.forEach { k -> DropdownMenuItem({ Text(k, fontFamily = BpMono) }, { dismiss(); DataClient.useHub(k) }, Modifier.testTag("home.hub.use.$k")) }
             DropdownMenuItem({ Text("Add a hub", fontFamily = BpMono) }, { dismiss(); DataClient.pairingError = ""; DataClient.adding = true }, Modifier.testTag("home.hub.add"))
             if (termsOn()) DropdownMenuItem({ Text("Terminals", fontFamily = BpMono) }, { dismiss(); termsOpen(null) }, Modifier.testTag("home.hub.terms"))
