@@ -24,6 +24,8 @@ const ESC_OWNERS: [&str; 9] = ["TextInput", "PickInput", "AskInput", "ImpInput",
 const TERM_BARE: &str = "Composer || (!TextInput && !PickInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage && !Terminal)";
 /// Where Ctrl+H is the viewer's: everywhere but the small fields, the terminal and web pages, whose own it stays (it deletes a character in many fields and in a shell, and opens a web page's history).
 /// The composer is included, as in the old client: the board beside it answers without a click on the canvas. With no plot on show the key goes on to the composer (`key_layers`).
+/// Ctrl+L to the message box: everywhere but the shell (its Ctrl+L clears the screen) and the Browser page (its address bar)
+const NOT_SHELL: &str = "!Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 const NOT_FIELD: &str = "!TextInput && !PickInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 /// The open model menu has its keys wherever the keyboard is: the window says `Picker` while it is open, and these bind at the depth of each text field, after the field's own keys, so they come first.
 const PICK_SCOPES: [&str; 6] = ["Picker", "Picker > Composer", "Picker > PickInput", "Picker > TextInput", "Picker > AskInput", "Picker > ImpInput"];
@@ -39,6 +41,7 @@ pub const TABLE: &[Entry] = &[
     e("newline", "New line in the message", "Composer", "shift-enter", Fixed),
     e("send-alt", "Send (also)", "Composer", "ctrl-enter", Fixed),
     e("focus", "Put the keyboard in the message box", "Composer", "/", Fixed),
+    e("focus-key", "Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)", "Composer", "secondary-l", Rebind),
     e("models", "Agent, model and effort", "Composer", "ctrl-m", Rebind),
     e("account", "Account of this thread, with what each has left", "Composer", "secondary-shift-a", Rebind),
     e("account-pick", "Pick account 1…9 in the account menu", "Composer", "1…9", Fixed),
@@ -145,7 +148,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None), KeyBinding::new(&k("account"), AccountMenu, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
-        KeyBinding::new("/", FocusComposer, Some(SLASH)),
+        KeyBinding::new("/", FocusComposer, Some(SLASH)), KeyBinding::new(&k("focus-key"), FocusComposer, Some(NOT_SHELL)),
         KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
     // Super+` (off a Mac: Cmd+` there goes from window to window) toggles the terminal too, from the shell as well, as in the old client
     if !mac() { v.push(KeyBinding::new("super-`", ToggleTerminal, None)); }
@@ -452,6 +455,10 @@ mod tests {
         assert_eq!(d("/", &["Viewer"]), "keys::FocusComposer", "a key back to the message box from the board, schematic or 3D");
         assert_eq!(d("/", &["Viewer", "FilesPage"]), "", "the Files page's filter"); assert_eq!(d("/", &["Viewer", "Terminal"]), "", "the shell's");
         assert_eq!(d("ctrl-shift-s", &[]), "keys::SettleThread");
+    }
+    #[test] fn ctrl_l_puts_the_keyboard_in_the_message_box_from_anywhere_but_the_shell_and_the_browser() {
+        for c in [&[][..], &["TextInput"][..], &["Viewer"][..], &["Viewer", "FilesPage"][..], &["AskInput"][..], &["Composer"][..]] { assert_eq!(d("ctrl-l", c), "keys::FocusComposer", "{c:?}"); }
+        for c in ["Terminal", "BrowserBar", "BrowserView", "CefPage"] { assert_eq!(d("ctrl-l", &["Viewer", c]), "", "{c} keeps its own Ctrl+L"); }
     }
     #[test] fn the_pad_has_its_keys_and_they_never_reach_the_composer() {
         assert_eq!(d("ctrl-z", &["DrawPad"]), "pad::Undo"); assert_eq!(d("delete", &["DrawPad"]), "pad::Delete"); assert_eq!(d("backspace", &["DrawPad"]), "pad::Delete");
