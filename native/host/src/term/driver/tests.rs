@@ -58,6 +58,21 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"handback"})).await["ok"], true); assert!(d.br.agent_drives_ok("b1").await);
 }
 
+/// A phone's toolbar (data/1 browser op toolbar) becomes a takeover and the command on the page's input queue: back, forward and reload reach the helper in order.
+#[tokio::test] async fn a_phones_back_forward_and_reload_reach_the_helper_in_order() {
+    let (hub, _d, log) = setup("phone-toolbar").await;
+    assert!(crate::data::ext::browser_requests("b1", &json!({"thread":"b1","op":"toolbar","command":"explode"})).is_err());
+    for c in ["back", "forward", "reload"] {
+        for q in crate::data::ext::browser_requests("b1", &json!({"thread":"b1","op":"toolbar","command":c})).unwrap() { assert_eq!(rpc(&hub, "bots.browser", q).await["ok"], true) }
+    }
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"type","text":"hi"})).await["ok"], true);
+    assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"press","key":"ArrowDown"})).await["ok"], true);
+    assert!(wait(10, || sent(&log).iter().any(|x| x["op"] == "press")).await, "the queued input reached the helper");
+    let ops: Vec<String> = sent(&log).iter().filter(|r| ["back", "forward", "reload", "type", "press"].contains(&r["op"].as_str().unwrap_or(""))).map(|r| r["op"].as_str().unwrap().to_string()).collect();
+    assert_eq!(ops, ["back", "forward", "reload", "type", "press"]);
+    let r = sent(&log); assert_eq!(r.iter().find(|x| x["op"] == "press").unwrap()["key"], "ArrowDown"); assert_eq!(r.iter().find(|x| x["op"] == "type").unwrap()["text"], "hi");
+}
+
 #[tokio::test] async fn a_recording_ends_after_ten_minutes() {
     let (hub, d, _log) = setup("expire").await; rpc(&hub, "bots.teach", json!({"bot":"b1","op":"start"})).await;
     let start = d.st.lock().await.teach.get("b1").start; d.tick(start + 599).await; assert_eq!(d.st.lock().await.teach.get("b1").mode, "rec"); d.tick(start + 600).await; assert_eq!(d.st.lock().await.teach.get("b1").mode, "review");

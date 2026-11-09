@@ -42,7 +42,7 @@ async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status:
     peering.routes.machines(j, verified);
 }
 /// Whether a hub answers GET /hello at `url` (http or https; the link's own address, not a guess)
-pub(super) async fn link_up(url: &str) -> bool {
+async fn link_up(url: &str) -> bool {
     if !super::botnet::url_ok(url) { return false }
     let a = ["-sS", "--proto", "=http,https", "-m", "4", "-H", "@-", "-w", "\n%{http_code}", "--url"].map(String::from).into_iter().chain([format!("{}/hello", url.trim_end_matches('/'))]).collect();
     super::botnet::curl(a, String::new()).await.code == 200
@@ -59,17 +59,7 @@ pub fn spawn_loops(hub: Arc<Hub>, table: Arc<PeerTable>, peering: Arc<Peering>) 
     tokio::spawn(async move {
         table.start(&hub).await; // the peer table first: the rules read it
         // (only the finder: it suggests machines; nothing here links to one by itself)
-        loop {
-            find_once(&hub, &p2, &t2).await; super::mesh::announce(&hub, &p2).await;
-            // (the next pass: on schedule, or at once when a link has just stopped being found, a pairing approved since this pass: it would otherwise
-            // not be the owner's own for up to two minutes)
-            let (mut waited, was_missing) = (Duration::ZERO, missing_own(&p2, &t2));
-            loop {
-                tokio::time::sleep(Duration::from_secs(2)).await; waited += Duration::from_secs(2);
-                let missing = missing_own(&p2, &t2);
-                if (missing && !was_missing) || waited >= next_find(missing) { break }
-            }
-        }
+        loop { find_once(&hub, &p2, &t2).await; tokio::time::sleep(next_find(missing_own(&p2, &t2))).await }
     });
 }
 

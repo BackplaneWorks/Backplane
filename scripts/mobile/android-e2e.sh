@@ -19,6 +19,8 @@ $E adb root >/dev/null 2>&1; sleep 3   # the emulator image allows it: sendevent
 LINK=$($ROOT/scripts/mobile/data-hub.sh link); ENC=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$LINK")
 $A pm clear $PKG >/dev/null; $A pm grant $PKG android.permission.POST_NOTIFICATIONS >/dev/null 2>&1
 $A "am start -n $PKG/dev.backplane.mobile.DataActivity -d 'bpgpui://pair?url=$ENC'" >/dev/null; sleep 5
+# a link that pairs asks first (its Pair is the last "Pair" on screen: the pairing page behind has one too)
+if has "Pair with this hub?"; then set -- $($UI bounds "Pair" exact $(( $($UI count "Pair" exact) - 1 ))); $A input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )); sleep 4; fi
 want "Fix the ecc83 board"; want "ada"; want "lab"; shot 01-home
 if [ "${ONLY:-}" != viewer ]; then   # ONLY=viewer runs just the viewer steps (after pairing)
 # search
@@ -95,14 +97,29 @@ tapt "Diff" exact; sleep 3; want "CHANGES"; if [ "${ONLY:-}" = viewer ]; then wa
 $A input swipe 900 320 100 320 250; sleep 1; tapt "Review" exact; sleep 2; want "Checks" exact; tapt "Run checks" exact; sleep 8; shot 36-checks; tapt "BOM" exact; sleep 6; shot 37-bom
 tapt "Comments" exact; sleep 2; tapf; typ "check%sthe%sdecoupling"; tapt "Add" exact; sleep 3; want "check the decoupling"; shot 38-comment; tapt "resolve"; sleep 2; want "resolved"; shot 39-resolved
 if [ "${LIVE:-}" = 1 ]; then
-  # a real page in the helper's Chrome: take over, open it by address, tap its button, and the page's own server hears the click
-  rm -f /tmp/live-clicks.txt; python3 $ROOT/test/mobile/live_page.py 3899 /tmp/live-clicks.txt & LP=$!
-  $A input swipe 900 320 100 320 250; sleep 1; tapt "Browser" exact; sleep 2; tapt "Take over"; want "Hand back"
-  tapf; $A input text "127.0.0.1:3899"; sleep 1; tapt "Go" exact; sleep 12; shot 32l-live-page; shot 32l2-live-page
+  # a real page in the helper's Chrome: take over, open it by address, tap its button, type into its box, press Enter and Backspace, drag to scroll;
+  # the page's own server hears each (test/mobile/live_page.py). Points on the page (a 1280x800 viewport) are found on the picture's bounds.
+  EV=$ROOT/build/mobile/live-events.txt; rm -f $EV; python3 $ROOT/test/mobile/live_page.py 3899 $EV & LP=$!; trap 'kill $LP 2>/dev/null' EXIT   # a failed step stops it too
+  heard() { for i in 1 2 3 4 5 6 7 8 9 10; do grep -q "$1" $EV 2>/dev/null && { echo "ok   $2"; return 0; }; sleep 1; done; echo "FAIL: $2 (the page heard: $(tr '\n' '|' < $EV 2>/dev/null))"; kill $LP 2>/dev/null; exit 1; }
+  pg() { set -- $($UI bounds "Browser page" exact) $1 $2 || { echo "FAIL: no picture of the page"; exit 1; }; echo $(($1 + $5 * ($3 - $1) / 1280)) $(($2 + $6 * ($4 - $2) / 800)); }
+  $A input swipe 900 320 100 320 250; sleep 1; tapt "Browser" exact; sleep 2; tapt "Take over"; want "Hand back"; want "↻" exact; want "⏎" exact
+  $UI edit 1 >/dev/null && echo "ok   the key field is there (the second text field)" || { echo "FAIL: no key field"; shot fail-keys; exit 1; }
+  tapf 0; $A input text "127.0.0.1:3899"; sleep 1; tapt "Go" exact; sleep 12; shot 32l-live-page
   $A input keyevent KEYCODE_BACK; sleep 2; shot 33l0-live-no-keyboard
-  $A input tap 540 1395; sleep 4; shot 33l-live-after-click
+  $A input tap $(pg 640 400); sleep 4; shot 33l-live-after-click
+  heard "^click" "a tap on the page's button reached the page"
+  $A input tap $(pg 640 160); sleep 2                     # the page's box takes the focus
+  tapf 1; $A input text "hello"; sleep 3; shot 33m-live-typed
+  heard "^typed hello$" "text typed in the key field reached the page's box"
+  $A input keyevent KEYCODE_DEL; sleep 2; heard "^typed hell$" "Backspace in the key field reached the page"
+  $A input keyevent KEYCODE_ENTER; sleep 2; heard "^key Enter$" "Enter in the key field reached the page"
+  tapt "⇥" exact; heard "^key Tab$" "the Tab key button reached the page"
+  $A input keyevent KEYCODE_BACK; sleep 2
+  set -- $(pg 640 600); $A input swipe $1 $2 $1 $(($2 - 500)) 600; sleep 4; shot 33n-live-scrolled
+  for i in 1 2 3 4 5 6 7 8; do grep -Eq "^scrolled [1-9]" $EV && break; sleep 1; done
+  # 500 screen pixels on a picture 1080 wide of a page 1280 wide are about 590 page pixels: most of the drag must arrive (a drag cut off by a new frame scrolled ~150)
+  y=$(grep '^scrolled' $EV | tail -1 | cut -d' ' -f2); [ "${y:-0}" -ge 400 ] && echo "ok   a drag up on the picture scrolled the page down ($(grep '^scrolled' $EV | tr '\n' ' '))" || { echo "FAIL: the page did not scroll (heard: $(tr '\n' '|' < $EV))"; kill $LP; exit 1; }
   kill $LP 2>/dev/null
-  [ -s /tmp/live-clicks.txt ] && echo "ok   a tap on the page's button reached the page (the server heard $(wc -l < /tmp/live-clicks.txt) click)" || { echo "FAIL: the page heard no click"; exit 1; }
   echo "e2e: all steps passed"; exit 0
 fi
 $A input swipe 900 320 100 320 250; sleep 1; tapt "Browser" exact; sleep 3; want "Take over"; shot 32-browser; tapt "Take over"; want "Hand back"; $A input tap 540 700; sleep 2; gone "take over the browser first"; shot 33-browser-driving

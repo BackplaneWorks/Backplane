@@ -1,0 +1,277 @@
+{
+ "_": "The Browser tab's key field and drag (iOS BrowserInput.swift, Android BrowserInput.kt). The field starts as one zero-width space (the sentinel) so a Backspace on it is seen. keys: the field's text before (old, default the sentinel) and after (text) as the ops sent, compared by code point (what is kept at both ends is not sent again; each removed character other than the sentinel is a Backspace, the sentinel alone removed is one); next: what the field holds after (the sentinel again when it is gone, after an Enter or a Tab, or past 64 characters after it). scroll: a drag on the picture in page pixels.",
+ "keys": [
+  {
+   "name": "unchanged",
+   "text": "\u200b",
+   "want": [],
+   "next": "\u200b"
+  },
+  {
+   "name": "a letter after the sentinel",
+   "text": "\u200ba",
+   "want": [
+    [
+     "type",
+     "a"
+    ]
+   ],
+   "next": "\u200ba"
+  },
+  {
+   "name": "a letter before the sentinel",
+   "text": "a\u200b",
+   "want": [
+    [
+     "type",
+     "a"
+    ]
+   ],
+   "next": "a\u200b"
+  },
+  {
+   "name": "a pasted word",
+   "text": "\u200bhello world",
+   "want": [
+    [
+     "type",
+     "hello world"
+    ]
+   ],
+   "next": "\u200bhello world"
+  },
+  {
+   "name": "backspace deletes the sentinel",
+   "text": "",
+   "want": [
+    [
+     "press",
+     "Backspace"
+    ]
+   ],
+   "next": "\u200b"
+  },
+  {
+   "name": "a newline is Enter",
+   "text": "\u200b\n",
+   "want": [
+    [
+     "press",
+     "Enter"
+    ]
+   ],
+   "next": "\u200b"
+  },
+  {
+   "name": "text then a newline then text",
+   "text": "\u200bab\ncd",
+   "want": [
+    [
+     "type",
+     "ab"
+    ],
+    [
+     "press",
+     "Enter"
+    ],
+    [
+     "type",
+     "cd"
+    ]
+   ],
+   "next": "\u200b"
+  },
+  {
+   "name": "a tab is Tab",
+   "text": "\u200ba\tb",
+   "want": [
+    [
+     "type",
+     "a"
+    ],
+    [
+     "press",
+     "Tab"
+    ],
+    [
+     "type",
+     "b"
+    ]
+   ],
+   "next": "\u200b"
+  },
+  {
+   "name": "the sentinel replaced by a letter",
+   "text": "x",
+   "want": [
+    [
+     "press",
+     "Backspace"
+    ],
+    [
+     "type",
+     "x"
+    ]
+   ],
+   "next": "\u200b"
+  },
+  {
+   "name": "two letters at once",
+   "old": "\u200b",
+   "text": "\u200bab",
+   "want": [
+    [
+     "type",
+     "ab"
+    ]
+   ],
+   "next": "\u200bab"
+  },
+  {
+   "name": "one more letter after some",
+   "old": "\u200bab",
+   "text": "\u200babc",
+   "want": [
+    [
+     "type",
+     "c"
+    ]
+   ],
+   "next": "\u200babc"
+  },
+  {
+   "name": "backspace on a typed letter",
+   "old": "\u200bab",
+   "text": "\u200ba",
+   "want": [
+    [
+     "press",
+     "Backspace"
+    ]
+   ],
+   "next": "\u200ba"
+  },
+  {
+   "name": "two letters removed at once",
+   "old": "\u200babc",
+   "text": "\u200ba",
+   "want": [
+    [
+     "press",
+     "Backspace"
+    ],
+    [
+     "press",
+     "Backspace"
+    ]
+   ],
+   "next": "\u200ba"
+  },
+  {
+   "name": "all of it removed",
+   "old": "\u200bab",
+   "text": "",
+   "want": [
+    [
+     "press",
+     "Backspace"
+    ],
+    [
+     "press",
+     "Backspace"
+    ]
+   ],
+   "next": "\u200b"
+  },
+  {
+   "name": "a word is replaced (autocorrect)",
+   "old": "\u200bteh",
+   "text": "\u200bthe",
+   "want": [
+    [
+     "press",
+     "Backspace"
+    ],
+    [
+     "press",
+     "Backspace"
+    ],
+    [
+     "type",
+     "he"
+    ]
+   ],
+   "next": "\u200bthe"
+  },
+  {
+   "name": "an emoji is one character",
+   "old": "\u200b",
+   "text": "\u200b\ud83d\ude00",
+   "want": [
+    [
+     "type",
+     "\ud83d\ude00"
+    ]
+   ],
+   "next": "\u200b\ud83d\ude00"
+  },
+  {
+   "name": "the field resets past 64",
+   "old": "\u200baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "text": "\u200baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "want": [
+    [
+     "type",
+     "a"
+    ]
+   ],
+   "next": "\u200b"
+  }
+ ],
+ "scroll": [
+  {
+   "name": "a drag up scrolls down",
+   "dx": 0,
+   "dy": -100,
+   "image": 1280,
+   "shown": 640,
+   "want": [
+    0,
+    200
+   ]
+  },
+  {
+   "name": "a drag left scrolls right",
+   "dx": -50,
+   "dy": 0,
+   "image": 1280,
+   "shown": 1280,
+   "want": [
+    50,
+    0
+   ]
+  },
+  {
+   "name": "both at once, rounded",
+   "dx": 10.4,
+   "dy": 33.3,
+   "image": 1000,
+   "shown": 300,
+   "want": [
+    -35,
+    -111
+   ]
+  },
+  {
+   "name": "nothing shown yet",
+   "dx": 10,
+   "dy": 10,
+   "image": 1280,
+   "shown": 0,
+   "want": [
+    0,
+    0
+   ]
+  }
+ ]
+}

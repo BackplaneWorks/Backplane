@@ -864,8 +864,6 @@ struct DataEntryRow: View {
         case "assistant":
             VStack(alignment: .leading, spacing: 4) {
                 DataMarkdown(text: entry.text, thread: thread)
-                // the pictures the reply names (the hub lists them as attachments); tap for the full size
-                ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) }
                 if !entry.live { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
             }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("data.entry.assistant")
         case "tool", "step":

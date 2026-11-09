@@ -17,7 +17,7 @@ use std::sync::{atomic::{AtomicU64, Ordering::Relaxed}, Arc};
 static NONCE: AtomicU64 = AtomicU64::new(0);
 fn now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 /// `Fr.nonced`: a body of its own, so two equal requests in one second are two signed bodies, not a replay of one
-pub(super) fn nonced(body: &str) -> String { format!("{{\"n\":{},{}", Value::String(format!("{}.{}", now(), NONCE.fetch_add(1, Relaxed))), &body[1..]) }
+fn nonced(body: &str) -> String { format!("{{\"n\":{},{}", Value::String(format!("{}.{}", now(), NONCE.fetch_add(1, Relaxed))), &body[1..]) }
 
 /// One signed POST to `link`'s /far/rpc: (status, body); status 0 when it could not be made (no address, away, a copy).
 pub(super) async fn post(sync: &FarSync, hub: &Arc<Hub>, link: &str, body: &str) -> (u16, String) {
@@ -179,8 +179,6 @@ pub async fn serve(sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
 pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
     if copy { return HttpReply::text("403 Forbidden", "a hub on a copied log does not take /far/rpc") }
     let link = match sync.peering.signed_in("far-rpc", r) { Ok(p) => p, Err(e) => return e };
-    // a link says where it is now: taken for an approved link whether or not the machine finder lists it (it is how the finder comes to find it)
-    if let Ok(o) = serde_json::from_slice::<Value>(&r.body) { if o["m"] == "peer.address" { return super::mesh::address_received(sync, hub, &link, &o["p"]).await } }
     if !sync.own(&link) { return HttpReply::text("403 Forbidden", "threads are shared with the owner's own machines") }
     let Ok(o) = serde_json::from_slice::<Value>(&r.body) else { return HttpReply::text("400 Bad Request", "not JSON") };
     let m = o["m"].as_str().unwrap_or("");

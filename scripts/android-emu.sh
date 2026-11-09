@@ -12,7 +12,7 @@
 # emulators use; stop ends this unit and this serial only. Nothing here stops netsimd or an adb server.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd); W=$ROOT/build/gpui/android
-ANDROID_HOME=$HOME/Android-sdk-writable; export ANDROID_HOME ANDROID_SDK_ROOT=$ANDROID_HOME JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ANDROID_AVD_HOME=$W/avd
+ANDROID_HOME=$HOME/Android-sdk-writable; export ANDROID_HOME ANDROID_SDK_ROOT=$ANDROID_HOME JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64} ANDROID_AVD_HOME=$W/avd
 PORT=${EMU_PORT:-5584}; AVD=${EMU_AVD:-bp-gpui-android}; UNIT=bp-emu-$PORT; ADB="$ANDROID_HOME/platform-tools/adb -s emulator-$PORT"; IMG="system-images;android-34;google_apis;x86_64"
 NETSIM=$(( PORT / 2 % 90 + 10 ))   # this emulator's own netsimd instance (consoles take even ports; the default instance, 0, is left to others)
 booted() { [ "$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }

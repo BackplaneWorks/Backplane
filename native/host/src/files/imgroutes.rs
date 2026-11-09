@@ -31,27 +31,6 @@ fn pct(s: &str) -> String { // Att.unpct: percent-decoded, `+` stays, a bad esca
     String::from_utf8_lossy(&o).into_owned()
 }
 
-/// The snapshot a message's image is served from (the same for /message-image and the phones' attachment.get): the ref hub kept, else the message looked up in the
-/// recent log, its own text authorizing the path; None for anything else and for a deleted thread's.
-pub async fn find_snapshot(hub: &Arc<Hub>, retained: Option<&Arc<AtomicUsize>>, entry: &str, path: &str) -> Option<mimg::Snap> {
-    if !mimg::is_image(path) || !mimg::no_climb(path) { return None }
-    let home = hub.cfg.home.clone();
-    // snapshots before it announces the message; here the loop runs just after the commit. Wait (up to CATCH_UP) while the loop is
-    // behind the log as it stood when this request arrived, then look once: an image the message named is there by then.
-    let target = hub.store.len(); let t0 = std::time::Instant::now();
-    if let Some(r) = retained { while r.load(Ordering::Acquire) < target && t0.elapsed() < CATCH_UP { tokio::time::sleep(std::time::Duration::from_millis(25)).await } }
-    let (h, e, p) = (home, entry.to_string(), path.to_string());
-    let looked = tokio::task::spawn_blocking(move || mimg::lookup(&h, &e, &p)).await;
-    let (hub2, e, p) = (hub.clone(), entry.to_string(), path.to_string());
-    let s = match looked {
-        Ok(Ok(s)) => match tokio::task::spawn_blocking(move || adopt_ref(&hub2, s, &e, &p)).await { Ok(Some(s)) => s, _ => return None },
-        _ => {
-            if missed(entry, path) { return None }
-            match tokio::task::spawn_blocking(move || snapshot_from_log(&hub2, &e, &p)).await { Ok(Some(s)) => s, _ => { remember_miss(entry, path); return None } } } };
-    if let Some(t) = &s.thread { if hub.model().await.threads.get(t).map_or(false, |m| m.deleted) { return None } }
-    Some(s)
-}
-
 struct MessageImage { retained: Arc<AtomicUsize> }
 impl HttpHandler for MessageImage {
     fn routes(&self) -> &'static [&'static str] { &["/message-image"] }
@@ -61,7 +40,23 @@ impl HttpHandler for MessageImage {
             let (entry, path) = (pct(&req.param("entry")), pct(&req.param("path")));
             let unavailable = || HttpReply::text("404 Not Found", "Image unavailable");
             if !mimg::is_image(&path) || !mimg::no_climb(&path) { return unavailable() }
-            let s = match find_snapshot(hub, Some(&self.retained), &entry, &path).await { Some(s) => s, None => return unavailable() };
+            let home = hub.cfg.home.clone();
+            // snapshots before it announces the message; here the loop runs just after the commit. Wait (up to CATCH_UP) while the loop is
+            // behind the log as it stood when this request arrived, then look once: an image the message named is there by then.
+            let target = hub.store.len(); let t0 = std::time::Instant::now();
+            while self.retained.load(Ordering::Acquire) < target && t0.elapsed() < CATCH_UP { tokio::time::sleep(std::time::Duration::from_millis(25)).await }
+            let (h, e, p) = (home.clone(), entry.clone(), path.clone());
+            let looked = tokio::task::spawn_blocking(move || mimg::lookup(&h, &e, &p)).await;
+            // no ref: a message from before this hub kept refs. Find it in the recent log, as the
+            // hub reads store.db, and let the message's own text authorize the path (Img.message_allowed); bounded so a bad id costs little.
+            let (hub2, e, p) = (hub.clone(), entry.clone(), path.clone());
+            let s = match looked {
+                Ok(Ok(s)) => match tokio::task::spawn_blocking(move || adopt_ref(&hub2, s, &e, &p)).await { Ok(Some(s)) => s, _ => return unavailable() },
+                _ => {
+                    if missed(&entry, &path) { return unavailable() }
+                    match tokio::task::spawn_blocking(move || snapshot_from_log(&hub2, &e, &p)).await { Ok(Some(s)) => s, _ => { remember_miss(&entry, &path); return unavailable() } } } };
+            // a message of a deleted thread grants nothing
+            if let Some(t) = &s.thread { if hub.model().await.threads.get(t).map_or(false, |m| m.deleted) { return unavailable() } }
             let (p, ct) = (s.path.to_string_lossy().into_owned(), fm::ctype(&s.path.to_string_lossy()));
             tokio::task::spawn_blocking(move || serve::send(&p, ct, "")).await.unwrap_or_else(|_| unavailable())
         })

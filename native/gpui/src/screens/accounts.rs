@@ -352,33 +352,33 @@ pub fn press_nth(this: &mut Backplane, n: u8, cx: &mut Context<Backplane>) {
 
 /// The Account part of the one menu: the default account and each saved account of the thread's provider, each with its digit and what it has left, the bound one
 /// ticked; one that cannot be used says why. It has the keyboard (context `AccountMenu`, its digits) when the account key opened the menu.
-pub fn section(cx: &mut Context<Backplane>, light: bool, st: &Accounts, s: f32) -> Stateful<Div> {
+pub fn section(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
-    let mut list = div().id("acct-menu").key_context("AccountMenu").max_h(px(300. * s)).overflow_y_scroll().flex().flex_col().pb_1();
+    let mut list = div().id("acct-menu").key_context("AccountMenu").max_h(px(300.)).overflow_y_scroll().flex().flex_col().pb_1();
     if let Some(h) = &st.focus { list = list.track_focus(h); }
     for (i, r) in menu_rows(&st.snap, now_s()).into_iter().enumerate() {
         let row = r.clone();
         let mut text = div().flex_1().min_w_0().flex().flex_col().gap(px(1.))
             .child(div().flex().items_center().gap_2()
-                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(13. * s)).text_color(c(if r.usable { "text" } else { "faint" })).child(r.label))
-                .child(div().flex_shrink_0().max_w(px(150. * s)).overflow_hidden().whitespace_nowrap().text_size(px(11. * s)).text_color(c("faint")).child(r.detail)));
-        if !r.left.is_empty() { text = text.child(div().overflow_hidden().whitespace_nowrap().text_size(px(11. * s)).text_color(c(if r.out { "warn" } else { "dim" })).child(r.left)); }
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(13.)).text_color(c(if r.usable { "text" } else { "faint" })).child(r.label))
+                .child(div().flex_shrink_0().max_w(px(150.)).overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c("faint")).child(r.detail)));
+        if !r.left.is_empty() { text = text.child(div().overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(c(if r.out { "warn" } else { "dim" })).child(r.left)); }
         list = list.child(div().id(SharedString::from(format!("acct-m-{i}"))).flex().items_center().gap_2().px_3().py(px(5.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise")))
-            .child(div().w(px(16.)).flex_shrink_0().text_size(px(11. * s)).text_color(c(if st.menu { "accent" } else { "dim" })).child(r.key.map_or(String::new(), |k| k.to_string())))
+            .child(div().w(px(16.)).flex_shrink_0().text_size(px(11.)).text_color(c(if st.menu { "accent" } else { "dim" })).child(r.key.map_or(String::new(), |k| k.to_string())))
             .child(div().w(px(14.)).flex_shrink_0().child(if r.on { crate::art::icon("circle-check", 14., c("accent")) } else { div().into_any_element() }))
             .child(text)
             .on_click(cx.listener(move |this, _, _, cx| press(this, &row, cx))));
     }
-    if !st.notice.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11. * s)).text_color(c("bad")).child(st.notice.clone())); }
-    if !st.info.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11. * s)).text_color(c("text")).child(st.info.clone())); }
+    if !st.notice.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("bad")).child(st.notice.clone())); }
+    if !st.info.is_empty() { list = list.child(div().px_3().py_1().text_size(px(11.)).text_color(c("text")).child(st.info.clone())); }
     // the bound account's "Move all threads here", as on its card in Settings
     let (bound, epoch) = binding(&st.snap);
     if let Some(p) = profiles(&st.snap).into_iter().find(|p| p["id"] == bound.as_str() && p["state"] == "connected") {
         let prov = string(&p, "provider");
-        list = list.child(div().id("acct-m-moveall").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13. * s)).text_color(c("dim"))
+        list = list.child(div().id("acct-m-moveall").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13.)).text_color(c("dim"))
             .child("Move all threads here").on_click(cx.listener(move |this, _, _, cx| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": bound, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } cx.notify(); })));
     }
-    list.child(div().id("acct-m-manage").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13. * s)).text_color(c("dim"))
+    list.child(div().id("acct-m-manage").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13.)).text_color(c("dim"))
         .child("Manage accounts in Settings").on_click(cx.listener(|this, _, _, cx| { this.screens.acct.menu = false; this.screens.picker_open = false; this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); cx.notify(); })))
 }
 

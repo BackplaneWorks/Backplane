@@ -20,3 +20,4 @@ run term-stream TermStreamTests.swift "" TermStream.swift
 run vt VtTests.swift "" Vt.swift
 run term-card TermCardTests.swift "" Vt.swift TermCard.swift
 run migration MigrationTests.swift "" Migration.swift
+run browser-input BrowserInputTests.swift "$ROOT/test/mobile/browser_input_cases.json" BrowserInput.swift

@@ -165,7 +165,7 @@ impl Driver {
     }
     async fn input(&self, bot: &str, i: &Input) {
         let (p, op) = (&i.p, i.op.as_str());
-        if !matches!(op, "click" | "mouse" | "type" | "press" | "scroll" | "navigate" | "back" | "reload") { return }
+        if !matches!(op, "click" | "mouse" | "type" | "press" | "scroll" | "navigate" | "back" | "forward" | "reload") { return }
         let (vw, vh) = if matches!(op, "click" | "mouse") { self.viewport(bot).await } else { (1280, 800) };
         let (x, y) = task::scale(p.get("x").and_then(Value::as_u64).unwrap_or(0), p.get("y").and_then(Value::as_u64).unwrap_or(0), 1000, 1000, vw, vh);
         let num = |k: &str| p.get(k).filter(|v| v.is_number()).cloned();

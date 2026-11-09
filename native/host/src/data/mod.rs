@@ -3,7 +3,7 @@
 //! Reads come from the model (`Model::page`, thread and project metadata) and the policy state; writes are the hub's own RPCs (`project.add`, `thread.create`,
 //! `turn.start`, `ask.answer`, `turn.interrupt`) run as this connection; subscriptions turn each new log line, and the streamed text of a running turn, into
 //! pushes (`thread`, `project`, `entry`, `text`, `turn`) for the lists and threads a connection asked for.
-mod ext;
+pub(crate) mod ext;
 mod link;
 pub mod term;
 /// What a phone hears of a push on its socket (ext.rs `notify_of`).
@@ -170,8 +170,6 @@ fn row_entry(r: &crate::model::Row) -> Option<Value> {
         if kind == "assistant" && r.text.trim().is_empty() { return None }
         let mut en = json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { crate::settings::order::pay_shown(&r.text) },"at":at});
         if crate::present::thread::agent_only(&r.role, &r.text) { en["agentOnly"] = json!(true) }
-        // an agent's reply draws the images it names, as attachments the phones fetch by `attachment.get` (id `img~<message>~<path>`)
-        if kind == "assistant" && crate::files::mimg::may(&r.text) { let a: Vec<Value> = crate::files::mimg::paths(&r.text).into_iter().take(12).map(|p| json!({"id":format!("img~{}~{}", r.id, p),"name":p.rsplit('/').next().unwrap_or(""),"mime":mime_of(&p),"bytes":0})).collect(); if !a.is_empty() { en["attachments"] = json!(a) } }
         return Some(en);
     }
     act_entry(&r.thread, &r.id, &r.role, &r.akind, &r.text, at)
@@ -297,17 +295,9 @@ async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, cl
     Ok(e)
 }
 /// `attachment.get {id}`: an image a message carries, from the thread's folder; the id names the thread and the stored file.
-async fn attachment_get(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
+fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
     use base64::Engine;
     let id = s(p, "id");
-    // a picture an agent's reply names: the same snapshot /message-image serves (the message's own text authorizes the path)
-    if let Some(rest) = id.strip_prefix("img~") {
-        let Some((entry, path)) = rest.split_once('~') else { return Err(err("unknown attachment")) };
-        let snap = crate::files::imgroutes::find_snapshot(hub, None, entry, path).await.ok_or_else(|| err("unknown attachment"))?;
-        let bytes = std::fs::read(&snap.path).map_err(|_| err("unknown attachment"))?;
-        if bytes.len() > MAX_ATTACH_BYTES { return Err(err("unknown attachment")) }
-        return Ok(json!({"mime":mime_of(&snap.path.to_string_lossy()),"data":base64::engine::general_purpose::STANDARD.encode(bytes)}));
-    }
     let Some((th, file)) = id.split_once('~') else { return Err(err("unknown attachment")) };
     let clean = |x: &str| !x.is_empty() && x.len() <= 220 && x.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) && !x.starts_with('.');
     if !clean(th) || !clean(file) { return Err(err("unknown attachment")) }
@@ -373,7 +363,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             thread_json(hub, &g, &id, &asks).map(|t| json!({"thread":t})).ok_or_else(|| err("no thread was made"))
         }
         "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId"), p.get("attachments").unwrap_or(&Value::Null)).await?})),
-        "attachment.get" => attachment_get(hub, p).await,
+        "attachment.get" => attachment_get(hub, p),
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
         // the same answer every client gets (its `result`, not the reply around it); the phones draw it
         "update.status" | "update.check" | "app.update" | "update.now" => Ok(rpc(hub, c, m, json!({})).await?["result"].clone()),

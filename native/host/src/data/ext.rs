@@ -358,11 +358,20 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
             }
             _ => { // browser
                 if !hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
-                let mut q = p.clone(); if let Some(o) = q.as_object_mut() { o.remove("thread"); o.insert("bot".into(), json!(th)); }
-                rpc(hub, c, "bots.browser", q).await.map(|_| json!({}))
+                for q in browser_requests(th, p).map_err(|e| err(&e))? { rpc(hub, c, "bots.browser", q).await?; }
+                Ok(json!({}))
             }
         }
     }.await)
+}
+/// The bots.browser requests for a phone's `browser {thread, op, ...}`. The toolbar's back, forward and reload take the page over and go
+/// on its input queue like a tap or a key (the desktop's toolbar answers later on its own socket, which a data/1 reply cannot wait for).
+pub(crate) fn browser_requests(th: &str, p: &Value) -> Result<Vec<Value>, String> {
+    let mut q = p.clone(); if let Some(o) = q.as_object_mut() { o.remove("thread"); o.insert("bot".into(), json!(th)); }
+    if s(p, "op") != "toolbar" { return Ok(vec![q]) }
+    let cmd = s(p, "command");
+    if !matches!(cmd, "back" | "forward" | "reload") { return Err("unsupported browser toolbar command".into()) }
+    Ok(vec![json!({"bot":th,"op":"takeover"}), json!({"bot":th,"op":cmd})])
 }
 /// Frames the hub pushes to this connection that a phone's viewer reads: a plot (binary CBOR, or JSON for "none") and a browser frame's announcement.
 pub fn wants_raw(b: &[u8]) -> bool { b.len() > 7 && (0xA0..=0xB7).contains(&b[0]) && b[1] == 1 && b[2..7] == [0x64, b'p', b'l', b'o', b't'] }

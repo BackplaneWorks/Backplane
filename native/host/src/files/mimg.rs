@@ -14,61 +14,21 @@ pub const MI_PIXELS: u64 = 32 * 1024 * 1024;
 const EXTS: [&str; 6] = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"];
 
 // ---- core/images: which paths a message names
-fn sep(c: char) -> bool { matches!(c, ' ' | '\n' | '\t' | '\r' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '`' | '"' | '\'' | ',' | ';' | '|') }
+fn sep(c: char) -> bool { matches!(c, ' ' | '\n' | '\t' | '\r' | '(' | ')' | '[' | ']' | '<' | '>' | '`' | '"' | '\'' | ',' | ';' | '|') }
 fn abs_or_home(p: &str) -> bool { crate::plat::fs::is_abs(p) || p.starts_with("~/") }
 /// Img.is_image
-pub fn is_image(p: &str) -> bool { abs_or_home(p) && has_ext(p) }
-fn has_ext(p: &str) -> bool { let l = p.to_lowercase(); EXTS.iter().any(|e| l.ends_with(e)) }
-/// Img.bare: "file://" dropped, bold/strike marks (* ~) around it dropped, trailing . : ! ? dropped (each, repeatedly).
-fn bare(w: &str) -> String {
-    let w = w.trim_start_matches('*'); let w = w.trim_start_matches("~~"); let w = w.strip_prefix("file://").unwrap_or(w);
-    w.trim_end_matches(['.', ':', '!', '?', '*', '~']).to_string()
-}
+pub fn is_image(p: &str) -> bool { abs_or_home(p) && { let l = p.to_lowercase(); EXTS.iter().any(|e| l.ends_with(e)) } }
+/// Img.bare: "file://" dropped, one trailing . : ! ? dropped.
+fn bare(w: &str) -> String { let w = w.strip_prefix("file://").unwrap_or(w); match w.chars().last() { Some('.' | ':' | '!' | '?') => w[..w.len() - 1].to_string(), _ => w.to_string() } }
 /// Img.may: an image extension (any case) follows some dot.
 pub fn may(s: &str) -> bool {
     let b = s.as_bytes();
     (0..b.len()).filter(|i| b[*i] == b'.').any(|i| { let t: String = s[i + 1..].chars().take(4).collect::<String>().to_lowercase(); EXTS.iter().any(|e| format!(".{t}").starts_with(e)) })
 }
-/// Img.code: a fenced block that names a language (```rust, ```python) is a code sample: its paths are not pictures. A bare fence (or text/plain) is
-/// just a way of quoting, so its lines stay. The fence lines themselves are dropped.
-fn without_code(text: &str) -> String {
-    let (mut out, mut skip, mut open) = (String::new(), false, false);
-    for l in text.split('\n') {
-        let t = l.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            if open { open = false; skip = false } else { open = true; let tag = t.trim_start_matches(['`', '~']).trim().to_lowercase(); skip = !(tag.is_empty() || matches!(tag.as_str(), "text" | "txt" | "plain" | "plaintext" | "markdown" | "md")) }
-            continue
-        }
-        if !skip { out.push_str(l); out.push('\n') }
-    }
-    out
-}
-fn exists(p: &str) -> bool { match source(p) { Ok(f) => std::fs::symlink_metadata(&f).map_or(false, |m| m.is_file()), Err(_) => false } }
-fn is_dir(p: &str) -> bool { let f = match p.strip_prefix("~/") { Some(r) => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(r), None => PathBuf::from(p) }; f.is_absolute() && std::fs::metadata(&f).map_or(false, |m| m.is_dir()) }
 /// Img.paths: the images a message shows, in order, each once. A word longer than 1024 characters is no path.
-/// Forms: bare, in `backticks`, in lists, **bold**, (parentheses), with trailing punctuation, `![alt](path)`, `~/path`, file://path, and a folder
-/// followed by file names (a line naming a folder that exists, then lines that begin with an image's bare name): each joined name that exists is shown.
 pub fn paths(text: &str) -> Vec<String> {
     let mut out: Vec<String> = vec![];
-    let (mut folder, mut idle): (Option<String>, u8) = (None, 0);
-    for line in without_code(text).lines() {
-        let mut hit = false;
-        let t = line.trim_start().trim_start_matches(|c: char| matches!(c, '-' | '*' | '+' | '>' | '`' | ' ' | '\t'));
-        let first = match t.split_once(". ") { Some((n, rest)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => rest.trim_start(), _ => t };
-        let first = first.split(sep).next().unwrap_or("");
-        for w in line.split(sep).filter(|w| { let n = w.chars().count(); n > 0 && n <= 1024 }) {
-            let p = bare(w);
-            if is_image(&p) { if !out.contains(&p) { out.push(p) } hit = true }
-            else if abs_or_home(&p) && !has_ext(&p) && p.len() > 1 && is_dir(&p) { folder = Some(p.trim_end_matches('/').to_string()); hit = true }
-        }
-        // a list item that starts with a bare file name, under a folder line
-        let name = bare(first);
-        if let Some(dir) = &folder { if !name.is_empty() && !name.contains(['/', '\\']) && has_ext(&name) && !abs_or_home(&name) {
-            let p = format!("{dir}/{name}");
-            if is_image(&p) && exists(&p) { if !out.contains(&p) { out.push(p) } hit = true }
-        } }
-        if hit { idle = 0 } else if !line.trim().is_empty() { idle += 1; if idle >= 2 { folder = None } }
-    }
+    for w in text.split(sep).filter(|w| { let n = w.chars().count(); n > 0 && n <= 1024 }) { let p = bare(w); if is_image(&p) && !out.contains(&p) { out.push(p) } }
     out
 }
 /// Img.message_allowed: both the saved message and the exact spelling authorize the path.
@@ -210,22 +170,6 @@ mod tests {
         assert!(paths("rel/x.png /x.txt http://x/y.png").is_empty());
         assert!(paths(&format!("/{}.png", "a".repeat(1100))).is_empty()); assert!(may("a .PNG b") && may("x.jpeg") && !may("x.txt png") && !may(""));
         assert!(message_allowed("see /a/b.png", "/a/b.png")); for (t, p) in [("see /a/b.png", "/a/c.png"), ("/a/../b.png", "/a/../b.png"), ("/a/./b.png", "/a/./b.png"), ("x", "/a/b.png"), ("/a/b.txt", "/a/b.txt")] { assert!(!message_allowed(t, p), "{p}") }
-    }
-    /// Every form an agent writes a picture in, one fixture: bare, backticks, list, bold, parentheses, trailing punctuation, markdown image, ~/, a folder
-    /// plus file names; and a code sample that is not a picture.
-    #[cfg(unix)] #[test] fn every_form_of_a_path_draws() {
-        let d = tmp("forms"); for n in ["a.png", "b.jpg", "c.jpeg", "d.gif", "e.webp", "f.png", "g.png", "h.png", "i.png"] { std::fs::write(d.join(n), png(4, 4)).unwrap() }
-        let (dir, home) = (d.to_string_lossy().into_owned(), std::env::var("HOME").unwrap_or_default());
-        let text = format!("Bare: {dir}/a.png\nBackticks: `{dir}/b.jpg`\n- list {dir}/c.jpeg\n- **{dir}/d.gif**\n(see {dir}/e.webp).\nEnd: {dir}/f.png.\n![shot]({dir}/g.png)\n\
-Wide chip — {dir}/h.png;\n\nFolder: `{dir}`\n- i.png — the last\n- missing.png\n- no.txt\n\n```rust\nlet p = \"{dir}/code.png\";\n```\nHome ~/x.png and {home}/x.png");
-        let got = paths(&text);
-        let want: Vec<String> = ["a.png", "b.jpg", "c.jpeg", "d.gif", "e.webp", "f.png", "g.png", "h.png", "i.png"].iter().map(|n| format!("{dir}/{n}")).collect();
-        assert_eq!(&got[..9], &want[..], "{got:?}"); assert_eq!(got[9..], ["~/x.png".to_string(), format!("{home}/x.png")]);
-        assert!(!got.iter().any(|p| p.ends_with("code.png") || p.ends_with("missing.png")));
-        for p in &want { assert!(message_allowed(&text, p), "{p}") }
-        // the folder form ends: a later paragraph's bare name is not joined to it
-        let t2 = format!("{dir}\n- a.png\n\nSome prose here.\nMore prose here.\nlater.png");
-        assert_eq!(paths(&t2), [format!("{dir}/a.png")]);
     }
     #[cfg(unix)] #[test] fn a_backslash_is_refused_on_unix() { assert!(!message_allowed("/a/b\\.png", "/a/b\\.png")) }
     /// Windows: an image an agent names as C:\\x\\y.png (the hub's own attachments are written so) is allowed, a climb under either separator is not.
