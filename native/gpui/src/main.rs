@@ -118,7 +118,7 @@ impl Backplane {
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Refs(r)=>{ self.screens.plotview.hist.refs=screens::plot::refs_of(&r); cx.notify(); }
-            Event::Steps(r)=>{ self.screens.plotview.hist.steps=screens::histbar::steps_of(&r); cx.notify(); }
+            Event::Steps(r)=>{ self.screens.plotview.hist.steps=screens::histbar::steps_of(&r); screens::histbar::arrived(self); cx.notify(); }
             Event::Sheets(rows)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); cx.notify(); }
             Event::BrowserDownload(owner,id,name,error)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.take_download(&id,&name,&error,cx));}}},
             Event::BrowserTabs(owner,text)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.set_tabs(&text,cx));}}},
