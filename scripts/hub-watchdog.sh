@@ -84,8 +84,11 @@ start_watcher() {
 
 check() {
   mkdir -p "$ST"
-  # one check at a time: a restart can outlast the timer
-  exec 9> "$ST/lock"; flock -n 9 || exit 0
+  # one check at a time: a restart can outlast the timer. flock(1) holds the lock itself (its descriptor is close-on-exec), so nothing a check starts carries it.
+  # It was `exec 9> lock; flock -n 9`: fresh-watch.sh started from a check inherited descriptor 9, and so did the hub, the window and every agent it started after;
+  # each later check found the lock taken and left without a word (silent from 2026-11-08 21:20 to 11-09). The old file `lock` may still be held by those: a new name.
+  [ -n "${WATCHDOG_LOCKED:-}" ] || exec env WATCHDOG_LOCKED=1 flock -n -E 0 "$ST/check.lock" "$0" check
+  unset WATCHDOG_LOCKED
   if [ -e "$D/.stopped" ]; then [ "$(get said-stopped)" = 1 ] || { log "the hub was stopped by hand: leaving it stopped"; put said-stopped 1; }; put fails 0; exit 0; fi
   put said-stopped 0
   space_check
@@ -122,7 +125,7 @@ case "${1:-}" in
   check) check;;
   status) mkdir -p "$ST"; echo "fails: $(get fails), restarts in a row: $(get step), next no sooner than: $( [ "$(get after)" -gt "$(now)" ] && date -d "@$(get after)" || echo now)"; systemctl --user is-active backplane-hub-watchdog.timer 2>/dev/null; tail -5 "$LOG" 2>/dev/null;;
   install) mkdir -p "$UNITS"
-    for u in service timer; do sed -e "s|@SCRIPT@|$HERE/hub-watchdog.sh|g" -e "s|@TAILNET@|${FRESH_TAILNET_PORT:-8451}|g" -e "s|@DISPLAY@|${DISPLAY:-:0}|g" "$HERE/systemd/backplane-hub-watchdog.$u" > "$UNITS/backplane-hub-watchdog.$u"; done
+    for u in service timer; do sed -e "s|@SCRIPT@|$HERE/hub-watchdog.sh|g" -e "s|@TAILNET@|${FRESH_TAILNET_PORT:-8451}|g" -e "s|@DISPLAY@|${DISPLAY:-:0}|g" -e "s|@MEM@|${FRESH_MEM:-20G}|g" "$HERE/systemd/backplane-hub-watchdog.$u" > "$UNITS/backplane-hub-watchdog.$u"; done
     systemctl --user daemon-reload && systemctl --user enable --now backplane-hub-watchdog.timer && { mkdir -p "$ST"; put said-ok 0; log "installed: a check every 30 s ($HERE/hub-watchdog.sh)"; echo "the watchdog is on: log in $LOG"; };;
   uninstall) systemctl --user disable --now backplane-hub-watchdog.timer; log "uninstalled"; rm -f "${UNITS:?}/backplane-hub-watchdog.service" "${UNITS:?}/backplane-hub-watchdog.timer"; systemctl --user daemon-reload; echo "the watchdog is off";;
   *) sed -n 2,14p "$0"; exit 2;;
