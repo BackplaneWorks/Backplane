@@ -105,7 +105,14 @@ fn white(s: &str) -> bool { s.chars().all(|c| matches!(c, ' ' | '\n' | '\r' | '\
 /// The window leaves it out; data/1 marks it `agentOnly` so the phones leave it out too, without reading its words.
 /// What the agent is told once a secret is saved (settings/secret.rs), after the secret's handle `{"secret":…,"set":true}`.
 pub const SAVED_NOTE: &str = " The person saved this secret in Backplane's vault. Use it by name with secret_run; you will never see its value.";
+/// A `/give` handoff (commands/handoff.rs): the first words of the message the agent reads, the tone and kind of the activity that carries the card, and the card
+/// back from that activity's text (None when it is not one).
+pub const HANDOFF_HEAD: &str = "[Backplane] The user hands you work from the thread ";
+pub const HANDOFF_TONE: &str = "handoff";
+pub fn handoff_card(text: &str) -> Option<Value> { let v: Value = serde_json::from_str(text).ok()?; (v["from"].is_string() && v["refs"].is_array()).then_some(v) }
 pub fn agent_only(role: &str, text: &str) -> bool {
+    // a `/give` handoff: the agent reads the message, the person sees its card (the activity that carries it)
+    (role == "user" && text.starts_with(HANDOFF_HEAD)) ||
     (role == "user" && text.starts_with("{\"secret\":") && text.ends_with(SAVED_NOTE)) || role == "system" && ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."].iter().any(|h| text.starts_with(&format!("[Backplane] {h}")))
 }
 /// Hub.order.note: Backplane's own note of an order's progress in its buy thread (settings/order.rs `progress`, ids "o:<order>:<status>")
@@ -268,6 +275,9 @@ pub(crate) fn plain_act(e: &Ent) -> Value {
     // a chat terminal (term/emb.rs): a card in the timeline, its screen streamed by `term` frames under `key` (set by thread_object_checked)
     if e.role == "term" && e.akind == "terminal" { let (title, cols, rows, cmd) = term_summary(&e.text);
         return json!({"id": e.id, "kind": "term", "text": title, "title": title, "cols": cols, "rows": rows, "cmd": cmd}) }
+    // a `/give` handoff received: the summary, what the work touched and the way back to its source (commands/handoff.rs)
+    if e.role == HANDOFF_TONE { if let Some(c) = handoff_card(&e.text) {
+        return json!({"id": e.id, "kind": "handoff", "text": c["summary"], "title": c["title"], "from": c["from"], "note": c["note"], "refs": c["refs"]}) } }
     let text = if e.akind == "result" && e.text.trim().is_empty() { "The turn ended with an error; the agent gave no reason.".to_string() } else if e.text == e.akind { String::new() } else { e.text.clone() };
     let tone = if e.akind == "restart" { "info restart".to_string() } else { e.role.clone() };
     json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text})
@@ -509,6 +519,14 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_handoff_is_a_card_and_its_message_is_the_agents() {
+        let card = json!({"from":"t1","title":"First","note":"n","summary":"Routing.","refs":[{"kind":"thread","label":"First","url":"backplane://thread/t1","thread":"t1"}]});
+        let e = Ent { id: "k1".into(), msg: false, role: HANDOFF_TONE.into(), akind: HANDOFF_TONE.into(), text: card.to_string(), at: 1 };
+        let a = plain_act(&e); assert_eq!((a["kind"].as_str(), a["text"].as_str(), a["from"].as_str(), a["title"].as_str(), a["note"].as_str()), (Some("handoff"), Some("Routing."), Some("t1"), Some("First"), Some("n")), "{a}"); assert_eq!(a["refs"], card["refs"]);
+        let plain = Ent { text: "not json".into(), ..e.clone() }; assert_eq!(plain_act(&plain)["kind"], "act", "an activity of that tone that is no card is a plain row");
+        assert!(agent_only("user", &format!("{HANDOFF_HEAD}\"First\" (t1).")) && !agent_only("user", "hello") && !agent_only("assistant", HANDOFF_HEAD));
+    }
+
     /// The phones fold a run themselves from what the data API sends (mobile DataFold.swift / DataFold.kt): the same table holds all three to these words.
     #[test] fn the_fold_label_table_the_phones_share() {
         let v: Value = serde_json::from_str(include_str!("../../../../test/mobile/fold_labels.json")).unwrap();

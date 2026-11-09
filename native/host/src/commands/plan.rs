@@ -10,7 +10,7 @@ pub struct Plan { pub events: Vec<Value>, pub reply: Value, /// a running turn t
 
 /// One entry of a thread as the handoff text reads it: a message or an activity row.
 #[derive(Clone, Debug)]
-pub struct Line { pub msg: bool, pub role: String, pub kind: String, pub text: String }
+pub struct Line { pub id: String, pub msg: bool, pub role: String, pub kind: String, pub text: String }
 /// The entries of the thread a request names (`thread`), newest first, for the requests that hand its conversation over.
 #[derive(Default)]
 pub struct Ctx { pub entries: Vec<Line>, pub buy: Buy }

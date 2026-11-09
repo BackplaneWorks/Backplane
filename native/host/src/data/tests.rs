@@ -435,6 +435,30 @@ impl crate::api::RpcHandler for PushState {
     assert!(quote["text"].as_str().unwrap_or("").contains("](http://127.0.0.1:3871/q/q_live?t=tok)"), "a live quote has the link to open too: {quote}");
     assert_eq!(live_note["agentOnly"], true, "{live_note}");
 }
+// docs/PHONE-DATA.md, "Handoffs": the agent reads the handoff message, the phone gets its card; the summary the popup rows carry is the model's
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_a_handoff_is_a_card_on_a_page_and_live_and_its_message_is_the_agents() {
+    let (hub, port) = up("handoff").await;
+    let card = crate::commands::handoff::card("t1", "First", "check DRC", "Routing the rail.", &[json!({"kind":"thread","label":"First","url":"backplane://thread/t1","thread":"t1"}), json!({"kind":"board","label":"a.kicad_pcb","path":"a.kicad_pcb","url":"a.kicad_pcb","thread":"t1"})]);
+    let text = crate::commands::handoff::agent_text(&card);
+    hub.commit_many(&[json!({"$":"MessagePosted","thread":"t2","msg":"h1","role":"user","text":text,"at":1700000041}), crate::commands::handoff::card_event("t2", "k1", 1700000041, &card)]).await.unwrap();
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t2"})).await; let es = r["result"]["entries"].as_array().unwrap().clone();
+    assert_eq!(es.iter().find(|e| e["id"] == "h1").unwrap()["agentOnly"], true, "the handoff message is the agent's");
+    let c = es.iter().find(|e| e["kind"] == "handoff").unwrap_or_else(|| panic!("{r}"));
+    assert_eq!((c["id"].as_str(), c["text"].as_str(), c["handoff"]["from"].as_str(), c["handoff"]["title"].as_str(), c["handoff"]["note"].as_str()), (Some("k1"), Some("Routing the rail."), Some("t1"), Some("First"), Some("check DRC")), "{c}");
+    assert_eq!((c["handoff"]["refs"][0]["url"].as_str(), c["handoff"]["refs"][1]["kind"].as_str(), c["handoff"]["refs"][1]["thread"].as_str()), (Some("backplane://thread/t1"), Some("board"), Some("t1")));
+    // live
+    let sub = ask(&mut ws, 2, "subscribe", json!({"topic":"thread","thread":"t2"})).await["result"]["sub"].as_u64().unwrap();
+    hub.commit(&crate::commands::handoff::card_event("t2", "k2", 1700000050, &card)).await.unwrap();
+    let mut live = Value::Null; for _ in 0..20 { let v = next(&mut ws).await; if v["k"] == "entry" && v["sub"] == sub && v["entry"]["id"] == "k2" { live = v["entry"].clone(); break } }
+    assert_eq!((live["kind"].as_str(), live["handoff"]["summary"].as_str()), (Some("handoff"), Some("Routing the rail.")), "{live}");
+    // a link to the message the card names: its thread, and the message
+    let r = ask(&mut ws, 3, "link.resolve", json!({"url":"backplane://thread/t1#m1"})).await; assert_eq!((r["result"]["kind"].as_str(), r["result"]["thread"].as_str(), r["result"]["msg"].as_str()), (Some("thread"), Some("t1"), Some("m1")), "{r}");
+    // the popup rows say what the writing model made of a thread, else its project
+    let r = ask(&mut ws, 4, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["detail"], "alpha", "{r}");
+    hub.commit(&json!({"$":"SettingSet","key":"summary.t1","value":"Routing the rail; DRC left.","at":1700000060})).await.unwrap();
+    let r = ask(&mut ws, 5, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["detail"], "Routing the rail; DRC left.", "{r}");
+}
 #[test] fn data_a_messages_attachment_lines_are_not_shown() {
     assert_eq!(shown_text("hi\n\n[attachment: /a/x.png]\n[attachment: /a/y.jpg]"), "hi");
     assert_eq!(shown_text("hi\n\n[Attached image: /a/x.png]"), "hi", "a message from before the change still hides its paths");

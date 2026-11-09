@@ -4,6 +4,7 @@
 //!, so a log either hub wrote reads in the other.
 pub mod fold;
 pub mod give;
+pub mod handoff;
 pub mod key;
 pub mod plan;
 pub mod actions;
@@ -179,7 +180,7 @@ async fn entries_upto(hub: &Arc<Hub>, th: &str, max: usize) -> Ctx {
                     .filter_map(|r| m.row(&hub.store, crate::model::Ent { seq: r.seq as u32, ord: r.ord as u32 }, th, false).ok()).collect();
                 (p, rows) }
             Err(_) => break } };
-        for r in rows { out.push(Line { msg: r.kind == "msg", role: r.role.clone(), kind: r.akind.clone(), text: r.text.clone() }) }
+        for r in rows { out.push(Line { id: r.id.clone(), msg: r.kind == "msg", role: r.role.clone(), kind: r.akind.clone(), text: r.text.clone() }) }
         if out.len() >= max { break }
         match page.ids.last().and_then(|l| l.parse::<u64>().ok()) { Some(l) if page.ids.len() == 32 && l > 1 => before = l, _ => break }
     }
