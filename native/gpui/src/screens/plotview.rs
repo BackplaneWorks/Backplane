@@ -308,6 +308,40 @@ pub fn probe_sync(cx: &mut Context<Backplane>, slot: usize, pv: &mut PlotView, k
     cx.spawn(async move |this, cx| { let _ = this.update(cx, |app, _| probe_one(app, slot, &key, &card)); }).detach();
 }
 
+/// The box (plot micrometres) around the lit pieces on these chunks, padded so the part sits in some of its surroundings; None with nothing lit.
+pub fn lit_box(chunks: &[std::sync::Arc<super::plot::Chunk>], lit: &[(usize, usize)]) -> Option<[f32; 4]> {
+    let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    for (ci, i) in lit { let Some(c) = chunks.get(*ci) else { continue }; for p in c.pieces.iter().filter(|p| p.info as usize == *i) { b = [b[0].min(p.bbox[0]), b[1].min(p.bbox[1]), b[2].max(p.bbox[2]), b[3].max(p.bbox[3])]; } }
+    if b[0] > b[2] { return None }
+    let pad = (b[2] - b[0]).max(b[3] - b[1]) * 0.6 + 2000.;
+    Some([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad])
+}
+/// "Bring it into view" (0.14's probe chip): canvas `slot`'s camera on the probed part (its pieces asked of the hub by its ref; the answer comes as
+/// `Event::Probe(3 + slot, ..)`, `frame_on`), or on the lit net or piece when there is no part.
+pub fn bring_into_view(app: &mut Backplane, slot: usize) {
+    let key = if slot == 0 { app.screens.plot.frame.as_ref().map(|f| f.key.clone()) } else { app.data["thread"]["viewer"]["panes"][slot - 1]["key"].as_str().map(str::to_string) }.unwrap_or_default();
+    let card = app.screens.pv(slot).card.clone().or_else(|| app.data["thread"]["viewer"]["probe"].as_str().and_then(super::plot::card));
+    let r = card.and_then(|c| c.rows.iter().find(|x| x.0 == "ref" || x.0 == "symbol").map(|x| x.1.clone())).filter(|r| !r.is_empty());
+    if let (Some(r), false) = (r, key.is_empty()) {
+        let tag: &'static str = ["probe3", "probe4", "probe5"][slot.min(2)];
+        let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": "ref", "value": r})), tag));
+        return
+    }
+    let lit = app.screens.pv(slot).lit.clone();
+    frame_on(app, slot, &lit);
+}
+/// The camera of canvas `slot` on these pieces, no closer than 12 times the whole drawing's fit.
+pub fn frame_on(app: &mut Backplane, slot: usize, pieces: &[(usize, usize)]) {
+    let key = if slot == 0 { app.screens.plot.frame.as_ref().map(|f| f.key.clone()) } else { app.data["thread"]["viewer"]["panes"][slot - 1]["key"].as_str().map(str::to_string) }.unwrap_or_default();
+    let Some(f) = app.screens.plot.frame_for(&key) else { return };
+    let chunks = f.chunks.clone();
+    let pv = app.screens.pv(slot);
+    let (Some(b), Some(bounds)) = (lit_box(&chunks, pieces), pv.bounds) else { return };
+    let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+    let mut v = View::fit(b, w.max(10.), h.max(10.));
+    if pv.fitted > 0. { v.scale = v.scale.min(pv.fitted * 12.); }
+    pv.view = Some(v); pv.touched = true;
+}
 /// What the viewer shows now, for the hub's `viewer.state` (an agent's viewer_show answers with it): the page, its source, the part (Mech), the sheet (schematic), the active layer and the tapped piece. Sent only on change.
 pub fn report_state(app: &mut Backplane) {
     let v = app.data["thread"]["viewer"].clone();
@@ -341,6 +375,12 @@ mod tests {
         assert_ne!(k, TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 1.0)], &v, bx), "another fade");
         assert_ne!(k, TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &View { scale: 0.6, ..v }, bx), "zoomed");
         assert_ne!(k, TessKey::of(&[a, b], &[(0, 1.0), (1, 0.4)], &v, Bounds::new(point(px(10.), px(20.)), size(px(301.), px(200.)))), "resized");
+    }
+    #[test] fn the_lit_box_is_the_lit_pieces_padded() {
+        let c = super::super::plot::Chunk { pieces: vec![super::super::plot::Piece { info: 7, bbox: [0., 0., 1000., 500.], at: 0, n: 0, kind: 0 }, super::super::plot::Piece { info: 8, bbox: [9e5, 9e5, 9.1e5, 9.1e5], at: 0, n: 0, kind: 0 }], ..Default::default() };
+        let b = lit_box(&[std::sync::Arc::new(c)], &[(0, 7)]).unwrap();
+        assert_eq!(b, [-2600., -2600., 3600., 3100.]);
+        assert!(lit_box(&[], &[(0, 7)]).is_none());
     }
     #[test] fn an_untouched_camera_is_fitted_again_when_the_canvas_size_changes() {
         assert!(refit_needed(false, (480., 600.), 520., 930.));
