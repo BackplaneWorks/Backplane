@@ -159,8 +159,20 @@ fn chip(path: &str) -> Value {
     let ext = base.rsplit('.').next().unwrap_or("").to_lowercase();
     json!({"label": label, "path": path, "image": matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp"), "url": format!("/img?path={}", enc(path))})
 }
+/// Img.paths: the image files a message names, each once, in order
+fn img_paths(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in text.split(|c: char| matches!(c, ' ' | '\n' | '\t' | '\r' | '(' | ')' | '[' | ']' | '<' | '>' | '`' | '"' | '\'' | ',' | ';' | '|')) {
+        if w.is_empty() || w.chars().count() > 1024 { continue }
+        let b = w.strip_prefix("file://").unwrap_or(w);
+        let b = if b.ends_with(['.', ':', '!', '?']) { &b[..b.len() - 1] } else { b };
+        let l = b.to_lowercase();
+        if (crate::plat::fs::is_abs(b) || b.starts_with("~/")) && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"].iter().any(|e| l.ends_with(e)) && !out.iter().any(|o| o == b) { out.push(b.to_string()) }
+    }
+    out
+}
 fn images(entry: &str, text: &str) -> Vec<Value> {
-    crate::files::mimg::paths(text).into_iter().map(|p| json!({"path": p, "url": format!("/message-image?entry={}&path={}", enc(entry), enc(&p))})).collect()
+    img_paths(text).into_iter().map(|p| json!({"path": p, "url": format!("/message-image?entry={}&path={}", enc(entry), enc(&p))})).collect()
 }
 
 /// `entries` of shown.thread for a plain page; `running`: the thread's turn runs; `open`: runs the person opened (the "fold:<id>" choices = "1");

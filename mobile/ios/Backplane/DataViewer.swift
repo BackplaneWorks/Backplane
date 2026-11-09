@@ -478,7 +478,7 @@ struct DataPDFView: UIViewRepresentable {
     func updateUIView(_ v: PDFView, context: Context) {}
 }
 
-// Browser: the page's newest frame; a tap is a click once the person has the page
+// Browser: the page's newest frame; once the person has the page a tap clicks, a drag scrolls and the key field types (BrowserInput.swift)
 struct DataBrowserTab: View {
     let client: DataClient
     let thread: DThread
@@ -487,17 +487,51 @@ struct DataBrowserTab: View {
     @State private var driving = false
     @State private var url = ""
     @State private var err = ""
+    @State private var keys = BrowserInput.sentinel
+    @State private var chain: Task<Void, Never>?   // the person's input reaches the hub in the order it was made
+    @State private var dragSent = CGSize.zero      // how much of this drag has been sent as scroll
+    @State private var dragging = false
+    @FocusState private var keysFocused: Bool
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                if !driving { Button("Take over") { driving = true; run("takeover") }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.browser.takeover") }
-                else {
-                    Button("‹") { run("toolbar", ["command": "back"]) }.accessibilityIdentifier("data.browser.back")
-                    TextField("Address", text: $url).dmono(13).padding(8).dbox().textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("data.browser.url")
-                    Button("Go") { run("navigate", ["url": pageUrl(url)]) }.disabled(url.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.browser.go")
-                    Button("Hand back") { driving = false; run("handback") }.accessibilityIdentifier("data.browser.handback")
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    if !driving { Button("Take over") { driving = true; run("takeover") }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.browser.takeover") }
+                    else {
+                        Button("‹") { run("toolbar", ["command": "back"]) }.accessibilityIdentifier("data.browser.back")
+                        Button("›") { run("toolbar", ["command": "forward"]) }.accessibilityIdentifier("data.browser.forward")
+                        Button("↻") { run("toolbar", ["command": "reload"]) }.accessibilityIdentifier("data.browser.reload")
+                        TextField("Address", text: $url).dmono(13).padding(8).dbox().textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier("data.browser.url")
+                        Button("Go") { run("navigate", ["url": pageUrl(url)]) }.disabled(url.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.browser.go")
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                if driving {
+                    HStack(spacing: 8) {
+                        // the key field: what the keyboard types here goes to the page (Enter, Tab and the arrows of a hardware keyboard too)
+                        ZStack(alignment: .leading) {
+                            if keys == BrowserInput.sentinel { Text("Keys").dmono(13).foregroundStyle(.secondary).padding(8).allowsHitTesting(false) }
+                            TextField("", text: Binding(get: { keys }, set: keyed)).dmono(13).padding(8)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.send).focused($keysFocused)
+                                .onSubmit { press("Enter"); keysFocused = true }
+                                .onKeyPress(keys: [.tab, .leftArrow, .upArrow, .rightArrow, .downArrow]) { k in
+                                    let name: [KeyEquivalent: String] = [.tab: "Tab", .leftArrow: "ArrowLeft", .upArrow: "ArrowUp", .rightArrow: "ArrowRight", .downArrow: "ArrowDown"]
+                                    guard let n = name[k.key] else { return .ignored }
+                                    press(n); return .handled
+                                }
+                                .accessibilityIdentifier("data.browser.keys")
+                        }.dbox()
+                        Button("Hand back") { driving = false; keysFocused = false; run("handback") }.accessibilityIdentifier("data.browser.handback")
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(BrowserInput.keyButtons.indices, id: \.self) { i in
+                                let b = BrowserInput.keyButtons[i]
+                                Button(b.0) { press(b.1) }.buttonStyle(DButton(primary: false)).accessibilityIdentifier("data.browser.key." + b.1)
+                            }
+                        }
+                    }
+                }
             }.padding(8).background(BackplaneDesign.panel)
             if !err.isEmpty { Text(err).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(.horizontal, 12) }
             Divider()
@@ -505,8 +539,16 @@ struct DataBrowserTab: View {
                 if let f = frame {
                     Image(uiImage: f).resizable().scaledToFit().frame(width: geo.size.width, height: geo.size.height, alignment: .top)
                         .contentShape(Rectangle())
-                        .gesture(DragGesture(minimumDistance: 0).onEnded { g in
+                        .gesture(DragGesture(minimumDistance: 0).onChanged { g in
                             guard driving else { return }
+                            let t = g.translation
+                            if !dragging && hypot(t.width, t.height) < BrowserInput.slop { return }
+                            dragging = true
+                            scroll(t, f, geo.size, all: false)
+                        }.onEnded { g in
+                            guard driving else { return }
+                            defer { dragging = false; dragSent = .zero }
+                            if dragging { scroll(g.translation, f, geo.size, all: true); return }
                             // the picture is fitted to the width (and the height): the click is where it landed on the picture, 0 to 1000
                             let s = min(geo.size.width / f.size.width, geo.size.height / f.size.height)
                             let w = f.size.width * s, h = f.size.height * s
@@ -517,7 +559,7 @@ struct DataBrowserTab: View {
                 } else if none { Text("No browser page yet. An agent opens one when it needs the web.").font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
                 else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             }
-            if driving { Text("You have the page: a tap clicks. Hand it back when you are done.").font(.caption2).foregroundStyle(.secondary).padding(8) }
+            if driving { Text("You have the page: a tap clicks, a drag scrolls, the key field types. Hand it back when you are done.").font(.caption2).foregroundStyle(.secondary).padding(8) }
         }
         .task {
             while !Task.isCancelled { await load(); try? await Task.sleep(for: .seconds(2)) }
@@ -528,7 +570,21 @@ struct DataBrowserTab: View {
         if let d = await client.screenBytes(thread.id) { frame = UIImage(data: d); none = false } else { none = frame == nil }
     }
     private func run(_ op: String, _ extra: [String: Any] = [:]) {
-        Task { err = ""; do { try await client.browser(thread.id, op, extra) } catch { err = error.localizedDescription } }
+        let prev = chain
+        chain = Task { await prev?.value; err = ""; do { try await client.browser(thread.id, op, extra) } catch { err = error.localizedDescription } }
+    }
+    private func press(_ k: String) { run("press", ["key": k]) }
+    private func keyed(_ v: String) {
+        guard v != keys else { return }
+        for (op, a) in BrowserInput.keys(keys, v) { if op == "type" { run("type", ["text": a]) } else { press(a) } }
+        keys = BrowserInput.next(v)
+    }
+    /// The drag so far (`t`) less what was sent, as the page's scroll: in steps while the finger moves, the rest when it lifts.
+    private func scroll(_ t: CGSize, _ f: UIImage, _ box: CGSize, all: Bool) {
+        let s = min(box.width / f.size.width, box.height / f.size.height)
+        let d = BrowserInput.scroll(Double(t.width - dragSent.width), Double(t.height - dragSent.height), image: Double(f.size.width), shown: Double(f.size.width * s))
+        guard (all && (d.0 != 0 || d.1 != 0)) || abs(d.0) + abs(d.1) >= BrowserInput.step else { return }
+        run("scroll", ["dx": d.0, "dy": d.1]); dragSent = t
     }
 }
 

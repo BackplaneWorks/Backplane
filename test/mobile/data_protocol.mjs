@@ -62,7 +62,33 @@ const nf = await fetch(`${base}/files/get?thread=${t}&path=..%2Fetc%2Fpasswd&tok
 const sc0 = await fetch(`${base}/bots/${t}/screen.jpg?token=${token}`); check("the browser page's newest frame is served as a JPEG", sc0.status === 200 && sc0.headers.get("content-type") === "image/jpeg");
 const tk = await call("browser", { thread: t, op: "takeover" }); check("browser takeover answers", true);
 await call("browser", { thread: t, op: "click", x: 500, y: 500 }); check("a browser click is accepted after takeover", true);
+// the rest of the person's input while they have the page: the address, the toolbar, keys and scroll (each answers; the stand-in helper of
+// scripts/mobile/data-hub.sh writes what reached it to build/mobile/hub/browser-ops.jsonl; LIVE=1 runs the real helper, so only the answers are checked)
+const okCall = async (p) => { try { await call("browser", { thread: t, ...p }); return true } catch (e) { console.log("     ", p.op, e); return false } };
+check("browser navigate is accepted", await okCall({ op: "navigate", url: "http://127.0.0.1:9/next" }));
+for (const command of ["back", "forward", "reload"]) check(`browser toolbar ${command} answers`, await okCall({ op: "toolbar", command }));
+let badTool = false; try { await call("browser", { thread: t, op: "toolbar", command: "explode" }) } catch (e) { badTool = true } check("an unknown toolbar command is refused", badTool);
+check("browser type is accepted", await okCall({ op: "type", text: "héllo wörld" }));
+for (const key of ["Enter", "Backspace", "Tab", "ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"]) check(`browser press ${key} is accepted`, await okCall({ op: "press", key }));
+check("browser scroll is accepted", await okCall({ op: "scroll", dx: -40, dy: 474 }));
+if (process.env.LIVE !== "1") {
+  const opsFile = new URL("../../build/mobile/hub/browser-ops.jsonl", import.meta.url);
+  let ops = []; for (let i = 0; i < 30; i++) { ops = readFileSync(opsFile, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l)).filter(o => o.page === t);
+    if (ops.some(o => o.op === "scroll")) break; await new Promise(r => setTimeout(r, 200)) }
+  const has = (op, f = () => true) => ops.some(o => o.op === op && f(o));
+  check("the click reached the page at its pixel (500,500 of 1000 → 640,400)", has("click", o => o.x === 640 && o.y === 400));
+  check("navigate reached the page with its address", has("navigate", o => o.url === "http://127.0.0.1:9/next"));
+  for (const c of ["back", "forward", "reload"]) check(`toolbar ${c} reached the page`, has(c));
+  check("the typed text reached the page as it was sent", has("type", o => o.text === "héllo wörld"));
+  for (const key of ["Enter", "Backspace", "Tab", "ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"]) check(`press ${key} reached the page`, has("press", o => o.key === key));
+  check("the scroll reached the page with dx and dy", has("scroll", o => o.dx === -40 && o.dy === 474));
+  const order = ops.filter(o => ["type", "press", "scroll"].includes(o.op)).map(o => o.op === "press" ? o.key : o.op);
+  check("keys and scroll reached the page in the order sent", order.join(",") === "type,Enter,Backspace,Tab,ArrowLeft,ArrowUp,ArrowRight,ArrowDown,scroll");
+}
 let refused = false; try { await call("browser", { thread: t, op: "handback" }); await call("browser", { thread: t, op: "click", x: 1, y: 1 }) } catch (e) { refused = true } check("a click without the page taken over is refused", refused);
+for (const p of [{ op: "type", text: "x" }, { op: "press", key: "Enter" }, { op: "scroll", dx: 0, dy: 10 }]) {
+  let no = false; try { await call("browser", { thread: t, ...p }) } catch (e) { no = String(e).includes("take over") } check(`${p.op} without the page taken over is refused`, no);
+}
 // diff and review
 // the diff is against the thread's checkpoint (made when its first turn started): a change after that shows
 appendFileSync(new URL("../../build/mobile/hub/proj/README.md", import.meta.url), "diff-marker-" + Date.now() + "\n");

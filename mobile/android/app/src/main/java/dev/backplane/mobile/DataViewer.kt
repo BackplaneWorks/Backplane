@@ -34,6 +34,23 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.math.abs
 
 // The viewer over a thread (the desktop's right rail): Board, Schematic, 3D, Mech, Files and Browser, on the data/1 viewer requests (native/host/src/data/ext.rs).
 // Plots and models arrive as the hub's own binary frames and are drawn by the app's GPU view (PlotStore, PlotSurface: pinch, pan, orbit, tap to inspect).
@@ -364,7 +381,7 @@ private fun PdfPreview(b: ByteArray) {
     }
 }
 
-// ---- Browser: the page's newest frame; a tap is a click once the person has the page
+// ---- Browser: the page's newest frame; once the person has the page a tap clicks, a drag scrolls and the key field types (BrowserInput.kt)
 @Composable
 private fun BrowserTab(thread: DThread) {
     val scope = rememberCoroutineScope()
@@ -373,19 +390,50 @@ private fun BrowserTab(thread: DThread) {
     var driving by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf("") }
     var err by remember { mutableStateOf("") }
-    var size by remember { mutableStateOf(IntSize.Zero) }
+    var keys by remember { mutableStateOf(TextFieldValue(BrowserInput.SENTINEL, TextRange(BrowserInput.SENTINEL.length))) }
+    val order = remember { Mutex() }   // the person's input reaches the hub in the order it was made
     suspend fun load() { val b = DataClient.screenBytes(thread.id); if (b == null) none = frame == null else { frame = BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap(); none = false } }
     LaunchedEffect(thread.id) { while (true) { load(); delay(2000) } }
     LaunchedEffect(DataClient.shot) { if (DataClient.shotBot == thread.id) load() }
-    fun run(op: String, extra: JSONObject.() -> Unit = {}) = scope.launch { err = ""; runCatching { DataClient.browser(thread.id, op, extra) }.onFailure { err = it.message ?: "" } }
+    fun run(op: String, extra: JSONObject.() -> Unit = {}) = scope.launch { order.withLock { err = ""; runCatching { DataClient.browser(thread.id, op, extra) }.onFailure { err = it.message ?: "" } } }
+    fun press(k: String) = run("press") { put("key", k) }
+    fun keyed(v: TextFieldValue) {
+        if (v.text == keys.text) { keys = v; return }
+        for ((op, a) in BrowserInput.keys(keys.text, v.text)) if (op == "type") run("type") { put("text", a) } else press(a)
+        val n = BrowserInput.next(v.text); keys = if (n == v.text) v else TextFieldValue(n, TextRange(n.length))
+    }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!driving) DBtn("Take over", true, modifier = Modifier.testTag("browser.takeover")) { driving = true; run("takeover") }
-            else {
-                DBtn("‹", false, modifier = Modifier.testTag("browser.back")) { run("toolbar") { put("command", "back") } }
-                Box(Modifier.weight(1f)) { DField(url, { url = it }, "Address", Modifier.testTag("browser.url")) }
-                DBtn("Go", true, url.isNotBlank(), Modifier.testTag("browser.go")) { run("navigate") { put("url", pageUrl(url)) } }
-                DBtn("Hand back", false, modifier = Modifier.testTag("browser.handback")) { driving = false; run("handback") }
+        Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!driving) DBtn("Take over", true, modifier = Modifier.testTag("browser.takeover")) { driving = true; run("takeover") }
+                else {
+                    DBtn("‹", false, modifier = Modifier.testTag("browser.back")) { run("toolbar") { put("command", "back") } }
+                    DBtn("›", false, modifier = Modifier.testTag("browser.forward")) { run("toolbar") { put("command", "forward") } }
+                    DBtn("↻", false, modifier = Modifier.testTag("browser.reload")) { run("toolbar") { put("command", "reload") } }
+                    Box(Modifier.weight(1f)) { DField(url, { url = it }, "Address", Modifier.testTag("browser.url")) }
+                    DBtn("Go", true, url.isNotBlank(), Modifier.testTag("browser.go")) { run("navigate") { put("url", pageUrl(url)) } }
+                }
+            }
+            if (driving) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // the key field: what the keyboard types here goes to the page (Enter, Tab and the arrows of a hardware keyboard too)
+                    Box(Modifier.weight(1f).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 10.dp)) {
+                        if (keys.text == BrowserInput.SENTINEL) Text("Keys", color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
+                        BasicTextField(keys, ::keyed, singleLine = true,
+                            textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary),
+                            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { press("Enter") }),
+                            modifier = Modifier.fillMaxWidth().testTag("browser.keys").onPreviewKeyEvent { ev ->
+                                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                val k = when (ev.key) { Key.Enter, Key.NumPadEnter -> "Enter"; Key.Tab -> "Tab"; Key.DirectionLeft -> "ArrowLeft"; Key.DirectionUp -> "ArrowUp"; Key.DirectionRight -> "ArrowRight"; Key.DirectionDown -> "ArrowDown"; else -> "" }
+                                if (k.isEmpty()) false else { press(k); true }
+                            })
+                    }
+                    DBtn("Hand back", false, modifier = Modifier.testTag("browser.handback")) { driving = false; run("handback") }
+                }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((label, k) in BrowserInput.keyButtons) DBtn(label, false, modifier = Modifier.testTag("browser.key.$k")) { press(k) }
+                }
             }
         }
         if (err.isNotEmpty()) DMono(err, dcs.error, 12, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
@@ -393,14 +441,24 @@ private fun BrowserTab(thread: DThread) {
         Box(Modifier.weight(1f).fillMaxWidth().background(dcs.background), contentAlignment = Alignment.Center) {
             val f = frame
             when {
-                f != null -> Image(f, null, Modifier.fillMaxWidth().onSizeChanged { size = it }.testTag("browser.frame").pointerInput(driving) {
+                f != null -> { val frameW = rememberUpdatedState(f.width)   // a new frame must not restart a drag in progress
+                    Image(f, "Browser page", Modifier.fillMaxWidth().testTag("browser.frame").pointerInput(driving) {
                     detectTapGestures { p -> if (driving && size.width > 0 && size.height > 0) run("click") { put("x", (p.x * 1000 / size.width).toInt().coerceIn(0, 1000)); put("y", (p.y * 1000 / size.height).toInt().coerceIn(0, 1000)) } }
-                }, contentScale = ContentScale.FillWidth)
+                }.pointerInput(driving) {
+                    if (!driving) return@pointerInput
+                    // a drag scrolls the page the other way, in steps; the rest goes when the finger lifts
+                    var dx = 0f; var dy = 0f
+                    fun send(all: Boolean) {
+                        val (sx, sy) = BrowserInput.scroll(dx.toDouble(), dy.toDouble(), frameW.value.toDouble(), size.width.toDouble())
+                        if ((all && (sx != 0 || sy != 0)) || abs(sx) + abs(sy) >= BrowserInput.STEP) { run("scroll") { put("dx", sx); put("dy", sy) }; dx = 0f; dy = 0f }
+                    }
+                    detectDragGestures(onDragEnd = { send(true) }, onDragCancel = { send(true) }) { c, d -> c.consume(); dx += d.x; dy += d.y; send(false) }
+                }, contentScale = ContentScale.FillWidth) }
                 none -> DMono("No browser page yet. An agent opens one when it needs the web.", dcs.onSurfaceVariant, 12, Modifier.padding(24.dp))
                 else -> CircularProgressIndicator()
             }
         }
-        if (driving) DMono("You have the page: a tap clicks. Hand it back when you are done.", dcs.onSurfaceVariant, 11, Modifier.padding(8.dp))
+        if (driving) DMono("You have the page: a tap clicks, a drag scrolls, the key field types. Hand it back when you are done.", dcs.onSurfaceVariant, 11, Modifier.padding(8.dp))
     }
 }
 

@@ -100,28 +100,12 @@ pub async fn post_json(home: &Path, url: &str, body: &str) -> Resp {
     let _ = std::fs::remove_file(&file); r
 }
 
-/// Where other machines reach this hub: BACKPLANE_URL when set, else its MagicDNS name on the tailnet (the hub listens there on the same port), else the
-/// https address `tailscale serve` gives a hub that listens only on loopback (it is not at its own port on the tailnet), else its listen address.
+/// Where other machines reach this hub: BACKPLANE_URL when set, else its MagicDNS name on the tailnet (the hub
+/// listens there on the same port), else its listen address.
 pub async fn url_here(tailnet: bool, host: &str, port: u16) -> String {
-    let env = std::env::var("BACKPLANE_URL").unwrap_or_default();
-    let dns = if env.trim().is_empty() && tailnet { tailscale_dns().await } else { String::new() };
-    let serve = if env.trim().is_empty() && !tailnet && super::machines::loopback(&format!("http://{host}")) { served_url(port).await } else { String::new() };
-    choose_url(&env, tailnet, &dns, &serve, host, port)
-}
-/// The pure choice of `url_here`: `env` BACKPLANE_URL, `dns` the MagicDNS name ("" none), `serve` the https address `tailscale serve` maps to this port ("" none).
-pub fn choose_url(env: &str, tailnet: bool, dns: &str, serve: &str, host: &str, port: u16) -> String {
-    if !env.trim().is_empty() { return env.trim().to_string() }
-    if tailnet && !dns.is_empty() { return format!("http://{dns}:{port}") }
-    if !serve.is_empty() { return serve.to_string() }
+    if let Ok(e) = std::env::var("BACKPLANE_URL") { if !e.trim().is_empty() { return e.trim().to_string() } }
+    if tailnet { let n = tailscale_dns().await; if !n.is_empty() { return format!("http://{n}:{port}") } }
     format!("http://{host}:{port}")
-}
-/// The https address `tailscale serve` has for this port ("" when none, or no tailscale); asked at most every 30 seconds.
-async fn served_url(port: u16) -> String {
-    static LAST: std::sync::Mutex<Option<(std::time::Instant, u16, String)>> = std::sync::Mutex::new(None);
-    if let Some((t, p, u)) = LAST.lock().unwrap().clone() { if p == port && t.elapsed() < std::time::Duration::from_secs(30) { return u } }
-    let out = tokio::time::timeout(std::time::Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["serve", "status", "--json"]).stderr(Stdio::null()).output()).await;
-    let u = match out { Ok(Ok(o)) if o.status.success() => super::tailnet::serve(&String::from_utf8_lossy(&o.stdout), &port.to_string()), _ => String::new() };
-    *LAST.lock().unwrap() = Some((std::time::Instant::now(), port, u.clone())); u
 }
 /// Self.DNSName of `tailscale status --json`, without the trailing dot; "" when there is none.
 pub async fn tailscale_dns() -> String {
@@ -146,13 +130,6 @@ pub async fn plain(url: &str) -> Resp {
 
 #[cfg(test)]
 mod tests {
-    #[test] fn a_loopback_hub_behind_tailscale_serve_names_its_https_address() {
-        use super::choose_url as c;
-        assert_eq!(c("", false, "", "https://box.ts.net:8451", "127.0.0.1", 3797), "https://box.ts.net:8451");
-        assert_eq!(c("http://pinned:1", false, "", "https://box.ts.net:8451", "127.0.0.1", 3797), "http://pinned:1", "BACKPLANE_URL first");
-        assert_eq!(c("", true, "box.ts.net", "https://box.ts.net:8451", "127.0.0.1", 3797), "http://box.ts.net:3797", "on the tailnet it listens there itself");
-        assert_eq!(c("", false, "", "", "127.0.0.1", 3797), "http://127.0.0.1:3797");
-    }
     use super::*;
     fn tmp(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-botnet-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
 
