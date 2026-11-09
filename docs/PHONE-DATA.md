@@ -7,7 +7,7 @@ natively with typed Codable structs, cache-first. Fresh-home screens only: proje
 - Discovery: `GET /client/capabilities` (Bearer) gains `"data":{"proto":"data/1"}`; the app uses this protocol when it is present.
 - Socket: `ws://host:port/ws?data=1&enc=json&token=<tok>` (hub token or a paired device's; revoke closes the socket). One socket per hub.
   `enc=json`: JSON text frames both ways (the app has no CBOR codec; default without `enc` is binary CBOR, plain string keys).
-- First frame: `{"t":"hello","proto":"data/1","hub":"<host:port as asked>","version":"…","epoch":"…","now":<ms>}`; `{"t":"hb"}` every 15 s.
+- First frame: `{"t":"hello","proto":"data/1","hub":"<host:port as asked>","name":"<the machine's name: BACKPLANE_NAME, else its host name; a phone's title>","version":"…","epoch":"…","now":<ms>}`; `{"t":"hb"}` every 15 s.
 - Request `{"id":<u64>,"m":"…","p":{…}}`; reply `{"t":"reply","id","ok":true,"result":{…}}` or `{"t":"reply","id","ok":false,"error":"text"|{"code","message"}}`.
 - Times: unix ms. Ids and cursors: opaque strings. `next:null` = no more.
 
