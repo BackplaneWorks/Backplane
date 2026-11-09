@@ -55,7 +55,7 @@ pub fn header(st: &State, thread: &str, session: &Value) -> Option<Value> {
     let (buy, line) = (info("fab.buy"), info("fab.ready"));
     if buy.is_empty() || st.settings.get(&format!("buy.{thread}")).map_or(false, |v| !v.is_empty()) { return None }
     let label = if info("fab.again") == "1" { "Buy again".to_string() } else { buy };
-    Some(json!({"icon": "box", "label": label, "tip": if line.is_empty() { "Ready to order".to_string() } else { line }, "action": "fab-buy", "value": "", "on": false, "danger": false}))
+    Some(json!({"icon": "shopping-cart", "label": label, "tip": if line.is_empty() { "Ready to order".to_string() } else { line }, "action": "fab-buy", "value": "", "on": false, "danger": false}))
 }
 
 #[cfg(test)]
