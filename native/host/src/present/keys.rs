@@ -311,6 +311,14 @@ pub fn stats(st: &State, id: &str) -> Value {
     Value::Array(super::tokstats::sections(&t.provider, get(format!("usage.{id}")), get(format!("turn.last.{id}")), get(format!("{tok}t.{id}")), get(format!("turn.speed.{id}")), get(format!("turn.models.{id}"))))
 }
 
+/// The composer's token button for a thread (present/tokstats.rs `chip`), from the same settings as its panel.
+pub fn tok_chip(st: &State, id: &str) -> String {
+    if !st.threads.contains_key(id) { return String::new() }
+    let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
+    let tok = { let ep = format!("{}{}", get("tok.epoch".into()), get("tok.recount".into())); if ep.is_empty() { "tok.".to_string() } else { format!("tok.{ep}.") } };
+    super::tokstats::chip(get(format!("usage.{id}")), get(format!("{tok}t.{id}")))
+}
+
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
 pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&str>) -> Option<Map<String, Value>> {
     let t = st.threads.get(id)?;
