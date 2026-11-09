@@ -163,9 +163,11 @@ pub fn cap(col: usize, here: usize) -> &'static str {
     if col == 2 { "←→" } else if col == here { "↑↓" } else if col == (here + 1) % COLS.len() { "Tab" } else { "⇧Tab" }
 }
 
-/// What the menu keeps between frames: the search box, the scroll of the model list, the cursor once a key moved it (with its thread: a cursor moved on another thread is not this one's).
+/// What the menu keeps between frames: the search box, the scroll of the model list, the cursor once a key moved it (with its thread: a cursor moved on another thread is not this one's);
+/// where the chip and its row were last drawn (the menu floats from them, and a press on the chip is not a press outside the menu) and the height the open menu holds (screens/combo.rs `hold`).
 #[derive(Default)]
-pub struct Pick { pub search: Option<Entity<Composer>>, pub q: String, pub scroll: ScrollHandle, pub ascroll: ScrollHandle, pub cur: Option<(String, Cursor)> }
+pub struct Pick { pub search: Option<Entity<Composer>>, pub q: String, pub scroll: ScrollHandle, pub ascroll: ScrollHandle, pub cur: Option<(String, Cursor)>,
+    pub row: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub chip: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub held: std::rc::Rc<std::cell::Cell<[f32; 3]>> }
 
 /// The provider in force (the marked choice of the provider section), "" when the hub lists none.
 pub fn provider_of(sections: &[Section]) -> String {
@@ -182,14 +184,14 @@ pub enum Mode { Wide, Stack, Drill }
 pub struct Fit { pub mode: Mode, pub s: f32, pub w: f32, pub agent_w: f32, pub effort_w: f32, pub list_h: f32, pub menu_h: f32, pub side_row: bool }
 /// The menu's width: the composer's (0 until measured), kept to what the window shows of it.
 pub fn menu_width(bar_w: f32, shown_w: f32) -> f32 { let shown = shown_w.max(280.); if bar_w > 0. { bar_w.min(shown) } else { shown.min(898.) } }
-/// The menu's width (the composer's, 0 until measured), the window's height, the text size in percent.
-pub fn fit(menu_w: f32, win_h: f32, pct: u32) -> Fit {
+/// The menu's width (the composer's, 0 until measured), the height it may take (the room between the chip's row and the window's edge, screens/combo.rs `spot`), the text size in percent.
+pub fn fit(menu_w: f32, room_h: f32, pct: u32) -> Fit {
     let s = (pct as f32 / 100.).clamp(0.6, 2.);
     let w = if menu_w > 0. { menu_w } else { 898. };
     let mode = if w >= 700. * s { Mode::Wide } else if w >= 420. * s { Mode::Stack } else { Mode::Drill };
     let agent_w = match mode { Mode::Wide => (220. * s).min(w * 0.3), Mode::Stack => (150. * s).min(w * 0.4), Mode::Drill => w };
-    // the whole menu may take what the window leaves over the composer and the thread's head
-    let menu_h = (win_h - 230. * s.max(1.)).max(190.);
+    // the menu floats over the thread: it may take the room it is given, and no less than a usable minimum
+    let menu_h = room_h.max(160.);
     let chrome = match mode { Mode::Wide => 64., Mode::Stack => 206., Mode::Drill => 64. } * s;
     let side = 150. * s; // Account and Usage under the columns: it scrolls inside its own cap, so it never pushes the lists out
     let list_h = (menu_h - chrome - side.min(menu_h * 0.35)).clamp(110. * s, 300. * s);
@@ -334,7 +336,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
         Mode::Stack => div().flex().items_start().child(agents).child(div().flex_1().min_w_0().flex().flex_col().child(model_col).child(div().border_t_1().border_color(c("line")).child(effort_body))),
         Mode::Drill => div().flex().flex_col().child(match cur.col { 0 => agents.into_any_element(), 2 => effort_body.into_any_element(), _ => model_col.into_any_element() }),
     };
-    Some(body.id("picker").w_full().min_w_0().text_size(z(12.)).into_any_element())
+    // as tall as the agent column in every mode (one column at a time too): stepping from column to column or a shorter list leaves the menu's height as it is
+    Some(body.id("picker").w_full().min_w_0().min_h(px(agents_h)).text_size(z(12.)).into_any_element())
 }
 
 /// A hover with the whole text of a row, for what the row had to cut short.
@@ -348,7 +351,7 @@ impl Backplane {
     }
     /// Open the menu (screens/combo.rs) with the keyboard in the model search.
     pub(crate) fn picker_show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.screens.picker_open = true; self.screens.pick.cur = None;
+        self.screens.picker_open = true; self.screens.pick.cur = None; self.screens.pick.held.set([0.; 3]);
         if self.screens.pick.search.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
             input.update(cx, |i, _| i.set_placeholder("Search models"));
@@ -452,13 +455,13 @@ mod tests {
         // never wider than the room, in any mode
         for w in [300., 420., 560., 700., 760., 898.] { for pct in [80, 100, 125] { let f = fit(w, 700., pct); assert!(f.agent_w <= f.w * 0.41 || f.mode == Mode::Drill, "{w} {pct}"); assert!(f.mode == Mode::Drill || f.agent_w + f.effort_w * (f.mode == Mode::Wide) as i32 as f32 <= f.w, "{w} {pct}"); } }
     }
-    #[test] fn the_menu_never_outgrows_the_window_and_the_list_keeps_a_minimum() {
-        for h in [480., 600., 640., 720., 900., 1238.] { for pct in [80, 100, 125] {
+    #[test] fn the_menu_never_outgrows_its_room_and_the_list_keeps_a_minimum() {
+        for h in [200., 250., 370., 410., 480., 600., 640., 720., 900., 1238.] { for pct in [80, 100, 125] {
             let f = fit(898., h, pct);
-            assert!(f.menu_h <= (h - 230. * f.s.max(1.)).max(190.) + 0.01, "{h} {pct}: the menu leaves the composer and the head their room");
+            assert!(f.menu_h <= h.max(160.) + 0.01, "{h} {pct}: the menu keeps to the room between the chip and the window's edge");
             assert!(f.list_h >= 110. * f.s - 0.01 && f.list_h <= 300. * f.s + 0.01, "{h} {pct}: {}", f.list_h);
         } }
-        assert!(fit(898., 1238., 80).list_h > fit(898., 600., 80).list_h, "a taller window gives the list more");
+        assert!(fit(898., 900., 80).list_h > fit(898., 300., 80).list_h, "more room gives the list more");
         assert_eq!(fit(0., 900., 100).w, 898., "before the composer is measured: the composer's own cap");
     }
     #[test] fn the_menu_keeps_to_what_the_window_shows_of_the_composer() {
