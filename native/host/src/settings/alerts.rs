@@ -2,7 +2,8 @@
 //! the webhook (settings::webhook) is posted, and the desk used last gets `{"t":"notify"}` as a desktop notification, unless a focused desk in use
 //! is showing the thread and the kind is one a watching desk holds (ask, done, fail, merged: never a note or a reminder).
 //! A desk (the GPUI window, the web page) says where it is with `desk.look {thread, focused}` on connect, on a change and every `BEAT_S` seconds
-//! while in use. This record never reaches a phone: a phone hears only what the uberbot orders (push/mod.rs). Not ported here: the Live Activity, and the owner's other machines
+//! while in use. The same record is a phone push of its own unless a focused desk in use shows the thread (0.14's rule; push/mod.rs `alert` holds the push policy);
+//! the uberbot's own orders reach the phones as before. Not ported here: the Live Activity, and the owner's other machines
 //! (`Far.note.*`, the net lane). The body of a done/fail alert with no text of its own is "Finished"/"Failed".
 use crate::{api::{Caller, Fut, Observer, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
@@ -21,6 +22,14 @@ impl Look {
 }
 /// Desk.seen over every desk.
 pub fn seen(desks: &[(u64, Look)], thread: &str, now: u64) -> bool { desks.iter().any(|(_, l)| l.sees(thread, now)) }
+/// What a phone says of an alert (0.14's Push.alert.body): the record's own text (an ask, a merge, a note), else the last reply's first line, "Finished" when there is
+/// none, "Failed" for a failure.
+pub fn phone_body(kind: &str, text: &str, last: &str) -> String {
+    if matches!(kind, "ask" | "merged") || !text.is_empty() { return body(kind, text) }
+    if kind == "fail" { return "Failed".into() }
+    let line: String = last.trim().lines().next().unwrap_or("").trim().chars().take(180).collect();
+    if line.is_empty() { "Finished".into() } else { line }
+}
 /// Desk.lead: the desk used last.
 pub fn lead(desks: &[(u64, Look)]) -> Option<u64> { desks.iter().fold(None::<(u64, u64)>, |best, (c, l)| match best { Some((_, at)) if l.at <= at => best, _ => Some((*c, l.at)) }).map(|(c, _)| c) }
 /// Alert.holds: kinds a watching desk holds.
@@ -56,6 +65,8 @@ impl Needs {
         if self.open.values().any(|t| *t == thread) { return None }
         self.told.remove(&thread).map(|(c, k)| (thread, c, k))
     }
+    /// An open ask of the thread, if one is known (the phone's alert is cleared when it closes).
+    pub fn ask_of(&self, thread: &str) -> String { self.open.iter().filter(|(_, t)| *t == thread).map(|(id, _)| id.clone()).max().unwrap_or_default() }
 }
 impl Desks {
     pub fn new() -> Arc<Desks> { Arc::new(Desks::default()) }
@@ -104,6 +115,12 @@ impl Observer for Alerts {
                 let looks = desks.live(&hub);
                 let watched = holds(&kind) && seen(&looks, &thread, now);
                 if !watched { if let Some(c) = lead(&looks) { hub.push(c, frame(&thread, &title, &text_body, &kind, &key)); if kind == "ask" { desks.needs.lock().unwrap().told(&thread, c, &key); } } }
+                // the phones: the same record is a push of its own unless a focused desk in use shows the thread (0.14's rule; push/mod.rs `alert`)
+                if !watched {
+                    let ask = if kind == "ask" { desks.needs.lock().unwrap().ask_of(&thread) } else { String::new() };
+                    let last = if kind == "done" && text.is_empty() { let m = hub.model().await; m.page(&hub.store, &thread, 0, 8).ok().and_then(|p| p.rows.iter().find(|r| r.kind == "msg" && r.role == "assistant" && !r.text.trim().is_empty()).map(|r| r.text.clone())).unwrap_or_default() } else { String::new() };
+                    crate::push::alert(&hub, &thread, &kind, &key, &phone_body(&kind, &text, &last), &ask, now).await;
+                }
                 let state = match kind.as_str() { "fail" => "failed", "done" => "completed", _ => "" };
                 let _ = crate::settings::webhook::deliver(&hub, &thread, &kind, state, "", "", &text_body, &title).await;
             });
@@ -133,6 +150,12 @@ mod tests {
     #[test] fn the_desk_used_last_leads() {
         assert_eq!(lead(&[(1, l("a", true, 10)), (2, l("b", false, 30)), (3, l("c", true, 20))]), Some(2));
         assert_eq!(lead(&[]), None);
+    }
+    #[test] fn a_phone_says_the_records_text_else_the_last_reply_as_014_did() {
+        assert_eq!(phone_body("done", "", "Done: the board is routed.\nMore below."), "Done: the board is routed.");
+        assert_eq!(phone_body("done", "", " "), "Finished"); assert_eq!(phone_body("fail", "", "half a reply"), "Failed");
+        assert_eq!(phone_body("ask", "Bash rm x", "ignored"), "Needs you: Bash rm x"); assert_eq!(phone_body("note", "call mum", "x"), "call mum");
+        assert_eq!(phone_body("merged", "", "x"), "Merged: its branch");
     }
     #[test] fn only_ask_done_fail_merged_are_held() { for k in ["ask", "done", "fail", "merged"] { assert!(holds(k)) } for k in ["note", "reminder", ""] { assert!(!holds(k)) } }
     #[test] fn the_record_and_its_body() {
