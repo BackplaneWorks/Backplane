@@ -227,6 +227,8 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     if pv.focus.is_none() { pv.focus = Some(cx.focus_handle()); }
     let (w, h) = pv.bounds.map_or((480., 600.), |b| (f32::from(b.size.width), f32::from(b.size.height)));
     let view = super::plotview::ensure_view(pv, frame, w, h);
+    // the probe the hub keeps for this board, lit on this source too (after a page switch, a reopening, a new frame)
+    super::plotview::probe_sync(cx, slot, pv, &frame.key, viewer["probe"].as_str().unwrap_or(""));
     let mut col = div().size_full().flex().flex_col();
     // the page's toolbar first: the pane's controls at its end (the design history bar is under the canvas, screens::histbar)
     let mut actions = actions;
@@ -267,10 +269,15 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     // the card of the piece last tapped (Insp.card): what it is, then key = value rows; a tap on nothing, or Close, puts it away
     // (Split's panes, slots 1 and 2, name it in their bar instead: a card there covered the drawing beside it)
     if let Some(card) = pv.card.clone().filter(|_| slot == 0) {
-        let mut box_ = div().id(SharedString::from(format!("pick-card-{slot}"))).absolute().left_2().bottom_2().max_w(px(300.)).flex().flex_col().gap_1().p_2().text_size(px(12.)).border_1().border_color(c("line")).bg(c("panel")).occlude()
-            .child(div().flex().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).child(card.title.clone()))
-                .child(div().id(SharedString::from(format!("pick-close-{slot}"))).cursor_pointer().text_color(c("dim")).child("×").on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.card = None; pv.picked = None; cx.notify(); }))));
-        for (k, v) in card.rows.iter().take(14) { box_ = box_.child(div().flex().gap_2().child(div().w(px(70.)).text_color(c("dim")).child(k.clone())).child(div().flex_1().min_w_0().child(v.clone()))); }
+        // compact (0.14's probe chip spirit): the part or net in the head, then the few rows that say what it is; every row in the tooltip
+        let words = probe_words(&card);
+        let full = std::iter::once(card.title.clone()).chain(card.rows.iter().map(|(k, v)| format!("{k}: {v}"))).collect::<Vec<_>>().join("\n");
+        let mut box_ = div().id(SharedString::from(format!("pick-card-{slot}"))).absolute().left_2().bottom_2().max_w(px(280.)).flex().flex_col().gap(px(2.)).px_2().py_1().text_size(px(11.)).border_1().border_color(c("accent")).bg(c("panel")).occlude()
+            .tooltip(crate::keys::tip(&full, "", light))
+            .child(div().flex().items_center().gap_2().child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::BOLD).child(words.join(" · ")))
+                .child(div().id(SharedString::from(format!("pick-close-{slot}"))).flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("Clear", "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
+                    .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.card = None; pv.picked = None; pv.lit.clear(); super::plotview::keep_probe(this, None); cx.notify(); }))));
+        for (k, v) in card_rows(&card) { box_ = box_.child(div().flex().gap_2().child(div().w(px(58.)).flex_none().text_color(c("dim")).child(k)).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(v))); }
         area = area.child(box_);
     }
     col = col.child(area);
@@ -387,9 +394,17 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
             .tooltip(crate::keys::tip(&full, "", light))
             .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(words.join(" · ")))
             .child(div().id("split-probe-clear").flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip("Clear", "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
-                .on_click(cx.listener(|this, _, _, cx| { for i in 0..3 { let pv = this.screens.pv(i); pv.picked = None; pv.card = None; pv.lit.clear(); } super::plotview::report_state(this); cx.notify(); }))));
+                .on_click(cx.listener(|this, _, _, cx| { for i in 0..3 { let pv = this.screens.pv(i); pv.picked = None; pv.card = None; pv.lit.clear(); } super::plotview::keep_probe(this, None); super::plotview::report_state(this); cx.notify(); }))));
     }
     row.child(actions).into_any_element()
+}
+/// The card's rows beyond its head: what kind of piece (the info's title) and its footprint, layer and type, at most four (the ref, value and net are the head).
+pub fn card_rows(card: &super::plot::Card) -> Vec<(String, String)> {
+    let get = |k: &str| card.rows.iter().find(|r| r.0 == k).map(|r| r.1.trim().to_string()).filter(|v| !v.is_empty());
+    let mut v = vec![];
+    if card.rows.iter().any(|r| r.0 == "ref" && !r.1.is_empty()) { v.push(("piece".to_string(), card.title.clone())); }
+    for k in ["footprint", "layer", "type", "shape"] { if let Some(x) = get(k) { v.push((k.to_string(), x)); } }
+    v.truncate(4); v
 }
 /// What the probe chip says: the part's reference (else what was tapped), its value and its net, as 0.14's Probe.label named a probe by its ref or net.
 pub fn probe_words(card: &super::plot::Card) -> Vec<String> {
@@ -536,9 +551,21 @@ pub fn width_for(window_w: f32, x: f32, rail: f32, sidebar: f32) -> u32 {
 struct ResizeDrag;
 struct Ghost;
 impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div() } }
+/// A width from the edge's drag: on screen at once; written to this device's file once the drag rests (300 ms), not on every move (a file write per
+/// pointer move made the drag stutter).
+static PANE_SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn set_pane(this: &mut Backplane, w: u32, cx: &mut Context<Backplane>) {
-    PANE_W.store(w, std::sync::atomic::Ordering::Relaxed);
-    this.local.viewer_px = w; this.local.save(); this.ui_epoch += 1; cx.notify();
+    use std::sync::atomic::Ordering::Relaxed;
+    if PANE_W.load(Relaxed) == w && this.local.viewer_px == w { return }
+    PANE_W.store(w, Relaxed);
+    this.local.viewer_px = w; this.ui_epoch += 1; cx.notify();
+    if !PANE_SAVE.swap(true, Relaxed) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+            PANE_SAVE.store(false, Relaxed);
+            let _ = this.update(cx, |this, _| this.local.save());
+        }).detach();
+    }
 }
 /// The pane's left edge: drag to resize, double click for the default (the web's split).
 fn resize_handle(cx: &mut Context<Backplane>) -> AnyElement {
@@ -594,6 +621,11 @@ mod tests {
         assert_eq!(split_share(0.99, false, 1000.), 0.86);
         assert_eq!(split_share(0.3, true, 200.), 0.45, "a small pane: never less than 45 percent each way");
         assert!((share_at(600., 100., 1000.) - 0.5).abs() < 1e-6);
+    }
+    #[test] fn the_probe_card_is_a_head_and_at_most_four_rows() {
+        let c = super::super::plot::card("pad 1;net=GND;type=smd;shape=custom;ref=H9;value=M2 standoff;footprint=SMTSO;layer=F.Cu").unwrap();
+        let r = card_rows(&c);
+        assert_eq!(r.len(), 4); assert_eq!(r[0], ("piece".to_string(), "pad 1".to_string())); assert_eq!(r[1].0, "footprint");
     }
     #[test] fn the_probe_chip_names_a_part_by_its_reference() {
         let c = super::super::plot::card("fp_poly;ref=C5;value=47uF 100V;net=GND").unwrap();
