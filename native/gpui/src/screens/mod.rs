@@ -38,6 +38,7 @@ pub mod panels;
 pub mod place;
 pub mod plot;
 pub mod projects;
+pub mod queue;
 pub mod plotview;
 pub mod select;
 pub mod siderow;
