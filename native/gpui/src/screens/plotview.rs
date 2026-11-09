@@ -174,7 +174,8 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
                 "left" => Some(v.pan(60., 0.)), "right" => Some(v.pan(-60., 0.)), "up" => Some(v.pan(0., 60.)), "down" => Some(v.pan(0., -60.)),
                 "+" | "=" | "plus" => Some(v.zoom(1.25, w / 2., h / 2., w, h, pv.fitted)), "-" | "minus" => Some(v.zoom(0.8, w / 2., h / 2., w, h, pv.fitted)),
                 "0" | "home" => { pv.view = None; cx.notify(); return }
-                "escape" => { pv.picked = None; pv.card = None; pv.lit.clear(); cx.notify(); return }
+                // (a Split's probe is lit in both its panes: Escape clears it in both)
+                "escape" => { let all: &[usize] = if slot == 0 { &[0] } else { &[1, 2] }; for &i in all { let p = this.screens.pv(i); p.picked = None; p.card = None; p.lit.clear(); } cx.notify(); return }
                 _ => None,
             };
             if let Some(nv) = nv { pv.touched = true; pv.view = Some(nv); cx.notify(); }
