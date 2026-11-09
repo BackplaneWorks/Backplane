@@ -40,7 +40,8 @@ class DataActivity : ComponentActivity() {
         // debug builds only: bpgpui://unpair forgets the hub in this process (a test's fresh start without pm clear or force-stop: on the emulator,
         // every app process that draws and then dies leaves its rendering memory behind on the host; scripts/android-emu.sh fresh)
         if (BuildConfig.DEBUG && u.host == "unpair") { DataClient.unpair(); return }
-        if (u.host == "thread") u.pathSegments.firstOrNull()?.let { DataClient.openFromIntent = it }
+        // (a thread of another machine, `desktop~t9` or a link id: the hub says which thread it is; this machine's own opens as it did)
+        if (u.host == "thread") u.pathSegments.firstOrNull()?.let { if (it.contains('~')) DataClient.openLink(u.toString(), "") else DataClient.openFromIntent = it }
         else if (u.host == "account") u.pathSegments.firstOrNull()?.let { DataClient.openAccount = it } else DataClient.askLink = u.toString()
     }
     override fun onResume() { super.onResume(); DataClient.foreground = true; DataClient.foreground() }
