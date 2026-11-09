@@ -443,8 +443,14 @@ impl Backplane {
             .child(canvas({ let (me, reg) = (cx.entity().downgrade(), self.screens.reg.clone()); move |_, _, cx| {
                 let Some(this) = me.upgrade() else { return };
                 { let rows = &this.read(cx).data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
-                cx.defer(move |cx| this.update(cx, |this, _| this.history_want()));
-            } }, |_, _, _, _| {}).absolute().size_0()).into_any_element()
+                cx.defer(move |cx| this.update(cx, |this, cx| { this.history_want(); this.away_check(cx); }));
+            } }, |_, _, _, _| {}).absolute().size_0())
+            // "Latest": far up a long thread, the way back to its end (the place is kept per thread, so a reader returns where they left)
+            .when(self.screens.away && !no_rows, |d| d.child(div().absolute().bottom(px(12.)).right(px(20.)).child(
+                with_rect(div().id("to-latest"), || "latest".to_string()).flex().items_center().gap_1().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(11.)).text_color(c("dim")).cursor_pointer()
+                    .hover(|s| s.text_color(c("text")).bg(c("raise"))).on_click(cx.listener(|this, _, _, cx| this.to_latest(cx)))
+                    .child(art::icon("chevron-down", 12., c("dim"))).child("Latest"))))
+            .into_any_element()
     }
 }
 

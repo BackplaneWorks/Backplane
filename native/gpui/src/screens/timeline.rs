@@ -427,12 +427,16 @@ impl Backplane {
 pub const RUNWAY: f32 = 1600.;
 /// `y`: how far the list is scrolled from the top of the rows measured (past `max` at its end, where it is `max`); `max` its range.
 pub fn near_top(y: f32, max: f32) -> bool { y.min(max) < RUNWAY }
+/// More than LATEST_AWAY above the end of what is held: the timeline offers "Latest" (E1: a reader far up a long thread had no way back but the wheel).
+pub const LATEST_AWAY: f32 = 1200.;
+pub fn away_from_end(y: f32, max: f32) -> bool { max - y.min(max) > LATEST_AWAY }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::prelude::v1::test;
     #[test] fn history_is_asked_for_within_the_runway_of_the_top() {
+        assert!(away_from_end(0., 5000.) && !away_from_end(4000., 5000.) && !away_from_end(5000., 5000.) && !away_from_end(0., 0.), "Latest only well above the end");
         assert!(near_top(0., 5000.)); assert!(near_top(RUNWAY - 1., 5000.)); assert!(!near_top(RUNWAY, 5000.));
         assert!(near_top(9000., 300.), "at the end of a short list, past its range");
     }
