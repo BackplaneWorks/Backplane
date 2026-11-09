@@ -232,9 +232,9 @@ struct DHistory: Decodable { var live: [DThread] = []; var threads: [DThread] = 
     enum CodingKeys: String, CodingKey { case live, threads, next, count }
     init() {}
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); live = (try? c.decode([DThread].self, forKey: .live)) ?? []; threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; next = try? c.decode(String.self, forKey: .next); count = (try? c.decode(Int.self, forKey: .count)) ?? 0 } }
-struct DSearch: Decodable { var threads: [DThread]; var projects: [DProject]
-    enum CodingKeys: String, CodingKey { case threads, projects }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; projects = (try? c.decode([DProject].self, forKey: .projects)) ?? [] } }
+struct DSearch: Decodable { var threads: [DThread]; var projects: [DProject]; var messages: [DHit]
+    enum CodingKeys: String, CodingKey { case threads, projects, messages }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); threads = (try? c.decode([DThread].self, forKey: .threads)) ?? []; projects = (try? c.decode([DProject].self, forKey: .projects)) ?? []; messages = (try? c.decode([DHit].self, forKey: .messages)) ?? [] } }
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
 struct DChoice: Decodable, Identifiable {
     var label: String; var value: String; var on: Bool; var ok: Bool; var why: String; var id: String { value }
@@ -260,10 +260,15 @@ struct DBuyReply: Decodable { var buy: DBuy?
 struct DThreadRef: Decodable { var thread: String
     enum K: String, CodingKey { case thread }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); thread = c.str(.thread) } }
-/// "Search in thread" (feature search with `thread`): what was said, newest first; `msg` is the entry it is in. `at` in ms (an older hub said seconds).
-struct DHit: Decodable, Identifiable { var msg = "", role = "", text = ""; var at = 0; var id: String { msg + "|\(at)" }
-    enum K: String, CodingKey { case msg, role, text, at }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); msg = c.str(.msg); role = c.str(.role); text = c.str(.text); at = c.int(.at); if at > 0 && at < 100_000_000_000 { at *= 1000 } } }
+/// What was said (`search`'s `messages`, `find`'s `matches`): `msg` is the entry it is in, `text` a line around the first word; `search` also names the
+/// thread, its title and its project's. `at` in ms (an older hub said seconds).
+struct DHit: Decodable, Identifiable { var thread = "", title = "", project = "", msg = "", role = "", text = ""; var at = 0; var id: String { thread + "|" + msg + "|\(at)" }
+    enum K: String, CodingKey { case thread, title, project, msg, role, text, at }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); thread = c.str(.thread); title = c.str(.title); project = c.str(.project); msg = c.str(.msg); role = c.str(.role); text = c.str(.text); at = c.int(.at); if at > 0 && at < 100_000_000_000 { at *= 1000 } } }
+/// `find {thread, q}` (feature find): every message of the thread with every word, oldest first; `total` of them, `more` past the hub's cap.
+struct DFind: Decodable { var q = ""; var matches: [DHit] = []; var total = 0; var more = false
+    enum K: String, CodingKey { case q, matches, total, more }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); q = c.str(.q); matches = (try? c.decode([DHit].self, forKey: .matches)) ?? []; total = c.int(.total); more = c.bool(.more) } }
 struct DHits: Decodable { var messages: [DHit]
     enum K: String, CodingKey { case messages }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); messages = (try? c.decode([DHit].self, forKey: .messages)) ?? [] } }

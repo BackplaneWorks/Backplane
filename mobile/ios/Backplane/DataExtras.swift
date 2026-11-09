@@ -44,22 +44,55 @@ struct DataThreadDialogs: ViewModifier {
     }
 }
 
-/// Search over threads and projects (the hub's `search`).
+/// A thread opened at one message (a search hit): it reads older pages until the message is held, scrolls to it and marks it.
+struct DThreadAt: Hashable { var id: String; var msg: String }
+
+/// A snippet of what was said with the query's words in bold (ThreadFind.spans).
+func dSnippet(_ text: String, _ q: String) -> Text {
+    var out = Text("")
+    for (run, word) in ThreadFind.spans(text, q) { out = out + (word ? Text(run).bold().foregroundColor(BackplaneDesign.accentText) : Text(run)) }
+    return out
+}
+
+/// One "Messages" row of the search: the snippet with the words in bold, who said it, the thread and its project, when.
+struct DataMessageHit: View {
+    let hit: DHit
+    let query: String
+    private var place: String {
+        let who = hit.role == "user" ? "you said" : "agent said"
+        let parts: [String] = [who, hit.title.isEmpty ? "Thread" : hit.title, hit.project, dAgo(hit.at)]
+        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            dSnippet(hit.text, query).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(3).multilineTextAlignment(.leading)
+            Text(place).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1)
+        }.padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+    }
+}
+
+/// Search over threads and projects (the hub's `search`), and under them what was said ("Messages": a tap opens the thread at the message).
 struct DataSearchResults: View {
     let client: DataClient
     let query: String
     let open: (String) -> Void
+    var openAt: (DThreadAt) -> Void = { _ in }
     @State private var result: DSearch?
     var body: some View {
         List {
             if let r = result {
-                if r.threads.isEmpty && r.projects.isEmpty { Text("Nothing matches “\(query)”").dmono(12).foregroundStyle(BackplaneDesign.dim).padding(12).dataRow() }
+                if r.threads.isEmpty && r.projects.isEmpty && r.messages.isEmpty { Text("Nothing matches “\(query)”").dmono(12).foregroundStyle(BackplaneDesign.dim).padding(12).dataRow() }
                 ForEach(r.projects) { p in Label { Text(p.title).dmono(13) } icon: { Image(systemName: "folder").foregroundStyle(BackplaneDesign.ok) }.padding(.horizontal, 12).frame(minHeight: 40).dataRow().accessibilityIdentifier("data.search.project." + p.id) }
                 ForEach(r.threads.filter { !$0.history }) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
                 // the old Scratch chats the search found, under their group's name (feature history)
                 let old = r.threads.filter(\.history)
                 if !old.isEmpty { DHeading(text: "Conversation history").padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.history") }
                 ForEach(old) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
+                if !r.messages.isEmpty { DHeading(text: "Messages").padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.messages") }
+                ForEach(r.messages) { h in
+                    Button { openAt(DThreadAt(id: h.thread, msg: h.msg)) } label: { DataMessageHit(hit: h, query: query) }
+                        .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.message." + h.thread + "." + h.msg)
+                }
             } else { ProgressView().frame(maxWidth: .infinity).dataRow() }
         }
         .listStyle(.plain).scrollContentBackground(.hidden).background(BackplaneDesign.panel)

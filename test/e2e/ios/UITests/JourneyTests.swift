@@ -860,4 +860,39 @@ final class Journeys: XCTestCase {
         d.step("the new shell runs a command", timeout: 20, act: { d.app.typeText("echo NEW-SHELL-$((6*7))\n") }, expect: { text().contains("NEW-SHELL-42") })
         d.shot("11-new-shell")
     }
+
+    // Search and find on a hub from scripts/mobile/data-hub.sh started with SEARCH=1 (thread t4 "Find": 70 messages, "quasar" in m2, m30, m55, m68; once in t1):
+    // the home search lists what was said under "Messages"; a tap opens the thread at the message (older pages read), marked; the find bar counts,
+    // steps (newest first, wrapping) and closes, which clears the mark.
+    func test_data_search() {
+        d = Driver("data-search"); defer { d.finish() }
+        d.launch()
+        let sbAlert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Allow"]
+        if sbAlert.waitForExistence(timeout: 5) { sbAlert.tap() }
+        let search = d.el("data.search")
+        guard d.step("the list", timeout: 25, act: {}, expect: { search.exists }) else { return }
+        d.step("search: what was said", act: { d.tap(search); search.typeText("quasar") },
+               expect: { d.el("data.search.messages").exists && d.el("data.search.message.t4.m30").exists && d.el("data.search.message.t1.m3").exists })
+        d.step("you said / agent said, the thread and project", act: {}, expect: { d.label("agent said · Find · demo").exists && d.label("you said · Fix the ecc83 board · demo").exists })
+        d.shot("1-home-messages")
+        let marked = d.el("data.thread.marked")
+        guard d.step("a hit opens its thread at the message, older pages read, marked", timeout: 25, act: { d.tap(d.el("data.search.message.t4.m30")) },
+                     expect: { marked.exists && d.label("The Quasar pad pitch").exists }) else { return }
+        sleep(1); d.shot("2-opened-at-hit")
+        guard d.step("Find in thread", act: { d.tap(d.el("data.thread.more")); d.tap(d.app.buttons["Find in thread"]) }, expect: { d.el("data.find.bar").waitForExistence(timeout: 5) }) else { return }
+        let bar = d.el("data.find.bar"), count = d.el("data.find.count")
+        func says(_ s: String) -> Bool { count.label == s }
+        d.step("typing finds every match, the newest first", act: { d.type(bar, "quasar") }, expect: { says("4 of 4") && d.label("DRC is clean around the quasar").exists && marked.exists })
+        sleep(1); d.shot("3-find-newest")
+        d.step("previous", act: { d.tap(d.el("data.find.prev")) }, expect: { says("3 of 4") && d.label("Placed the quasar connector").exists })
+        d.step("previous again", act: { d.tap(d.el("data.find.prev")) }, expect: { says("2 of 4") })
+        d.step("previous to the oldest (older pages read)", timeout: 25, act: { d.tap(d.el("data.find.prev")) }, expect: { says("1 of 4") && d.label("Check the quasar footprint").isHittable })
+        sleep(1); d.shot("4-find-oldest")
+        d.step("previous wraps to the newest", act: { d.tap(d.el("data.find.prev")) }, expect: { says("4 of 4") })
+        d.step("next wraps to the oldest", act: { d.tap(d.el("data.find.next")) }, expect: { says("1 of 4") })
+        d.step("nothing matches", act: { d.type(bar, "zz") }, expect: { says("0 of 0") && !marked.exists })
+        d.shot("5-find-none")
+        d.step("close clears the mark", act: { d.tap(d.el("data.find.close")) }, expect: { !bar.exists && !marked.exists })
+        d.shot("6-find-closed")
+    }
 }

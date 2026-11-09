@@ -44,6 +44,13 @@ if os.environ.get("LINKS") == "1":
     ev+=[{"$":"ThreadCreated","id":"t3","project":"p1","title":"Links","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":N+2},
          {"$":"MessagePosted","thread":"t3","msg":"m1","role":"user","text":"Where is it? backplane://thread/t2 and src/main.rs:5, mail me@example.com","at":N+2},
          {"$":"MessagePosted","thread":"t3","msg":"m2","role":"assistant","text":fx,"at":N+3}]
+# SEARCH=1: a thread "Find" of 70 messages (more than one page) where "quasar" is said in m2, m30, m55 and m68, and once in t1 (the search and find checks)
+if os.environ.get("SEARCH") == "1":
+    ev+=[{"$":"ThreadCreated","id":"t4","project":"p1","title":"Find","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":N-100}]
+    said={2:"Check the quasar footprint on J3.",30:"The Quasar pad pitch is 0.5 mm, see the datasheet.",55:"Placed the quasar connector near the edge.",68:"DRC is clean around the quasar part now."}
+    for i in range(1,71):
+        ev.append({"$":"MessagePosted","thread":"t4","msg":"m%d"%i,"role":"user" if i%2 else "assistant","text":said.get(i,"Step %d of the layout: routing the next net."%i),"at":N-100+i})
+    ev.append({"$":"MessagePosted","thread":"t1","msg":"m3","role":"user","text":"Is the quasar part on this board too?","at":N+2})
 open(H+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))
 PY
   # STEP models: the console FreeCAD only (the hub tries FreeCAD's GUI first, which hangs headless on this machine: no `freecad` on the hub's PATH, no GUI to find)
