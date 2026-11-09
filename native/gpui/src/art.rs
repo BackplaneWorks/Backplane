@@ -286,15 +286,28 @@ impl Cats {
         r
     }
 }
-/// A cat, `size` px square. Only a moving mood asks for another frame, so an idle window never repaints.
+/// A moving cat's next pose comes this long after the last: 30 a second, not every display frame (each one draws the view the cat is in).
+pub const CAT_STEP: std::time::Duration = std::time::Duration::from_millis(33);
+/// Ask the view a moving cat is drawn in to draw again in CAT_STEP; one wait per view, however many cats it has.
+fn cat_tick(window: &mut Window, cx: &mut App) {
+    thread_local! { static WAITING: std::cell::RefCell<std::collections::HashSet<EntityId>> = Default::default(); }
+    let view = window.current_view();
+    if !WAITING.with(|w| w.borrow_mut().insert(view)) { return }
+    window.spawn(cx, async move |cx| {
+        cx.background_executor().timer(CAT_STEP).await;
+        WAITING.with(|w| w.borrow_mut().remove(&view));
+        let _ = cx.update(|_, cx| cx.notify(view));
+    }).detach();
+}
+/// A cat, `size` px square. Only a moving mood asks for another frame (at CAT_STEP), so an idle window never repaints.
 pub fn cat(rig: Option<Arc<Rig>>, mood: &str, size: f32, started: std::time::Instant, name: String) -> AnyElement {
     let away = mood == "away";
     match rig {
-        Some(rig) => canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+        Some(rig) => canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, cx| {
             report(&name, b, window.scale_factor());
             let ms = if rig.moving { started.elapsed().as_secs_f32() * 1000.0 } else { 0.0 };
             paint_cat(window, b, &rig, ms, size, if away { 0.5 } else { 1.0 });
-            if rig.moving { window.request_animation_frame(); }
+            if rig.moving { cat_tick(window, cx); }
         }).size(px(size)).into_any_element(),
         None => div().size(px(size)).into_any_element(),
     }
