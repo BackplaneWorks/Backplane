@@ -8,7 +8,7 @@ import UIKit
 private struct TermState: View {
     let state: String
     var body: some View {
-        Text(TermCard.word(state)).dmono(11).lineLimit(1)
+        Text(Tr.t(TermCard.word(state))).dmono(11).lineLimit(1)
             .foregroundStyle(TermCard.live(state) ? BackplaneDesign.ok : state.hasPrefix("exited 0") ? BackplaneDesign.dim : state.hasPrefix("exited") || state == "failed to start" ? BackplaneDesign.bad : BackplaneDesign.dim)
     }
 }
@@ -28,7 +28,7 @@ private struct TermCardSurface: UIViewRepresentable {
     func updateUIView(_ v: TermSurface, context: Context) {
         let r = TermCard.rows(screen.vt.lines(0), cursor: screen.vt.cursor, n: shown)
         v.lines = r.lines; v.cursor = r.cursorRow.map { (screen.vt.cursor.x, $0) }
-        v.isAccessibilityElement = true; v.accessibilityLabel = "Terminal screen"; v.accessibilityValue = r.lines.map { $0.runs.map(\.text).joined() }.joined(separator: "\n")
+        v.isAccessibilityElement = true; v.accessibilityLabel = Tr.t("Terminal screen"); v.accessibilityValue = r.lines.map { $0.runs.map(\.text).joined() }.joined(separator: "\n")
         _ = rev
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView v: TermSurface, context: Context) -> CGSize? {
@@ -48,11 +48,11 @@ struct DataTermCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "terminal").font(.system(size: 12)).foregroundStyle(BackplaneDesign.dim)
-                Text(info.title.isEmpty ? "Terminal" : info.title).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                Text(info.title.isEmpty ? Tr.t("Terminal") : info.title).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1)
                 Spacer(minLength: 4)
-                if screen.missing { Text("gone").dmono(11).foregroundStyle(BackplaneDesign.dim) } else { TermState(state: screen.state).accessibilityIdentifier("term.card.state") }
+                if screen.missing { Text(Tr.t("gone")).dmono(11).foregroundStyle(BackplaneDesign.dim) } else { TermState(state: screen.state).accessibilityIdentifier("term.card.state") }
                 if screen.live {
-                    Button { client.terms.stop(info.key) } label: { Text("Stop").dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 8).frame(minHeight: 28).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
+                    Button { client.terms.stop(info.key) } label: { Text(Tr.t("Stop")).dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 8).frame(minHeight: 28).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
                         .buttonStyle(.plain).accessibilityIdentifier("term.card.stop")
                 }
             }.padding(.horizontal, 8).frame(minHeight: 34).background(BackplaneDesign.raised)
@@ -134,15 +134,15 @@ struct TermFullView: View {
         let screen = terms.screen(route.key)
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel("Close").accessibilityIdentifier("term.close")
+                Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel(Tr.t("Close")).accessibilityIdentifier("term.close")
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(screen.title.isEmpty ? (route.title.isEmpty ? "Terminal" : route.title) : screen.title).dmono(13, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                    Text(screen.title.isEmpty ? (route.title.isEmpty ? Tr.t("Terminal") : route.title) : screen.title).dmono(13, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1)
                     TermState(state: screen.missing ? "gone" : screen.state).accessibilityIdentifier("term.state")
                 }
                 Spacer(minLength: 0)
-                if scroll > 0 { Button { handle.surface?.scrollToBottom() } label: { Image(systemName: "arrow.down.to.line").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.accent) }.accessibilityLabel("Jump to the end").accessibilityIdentifier("term.bottom") }
-                Button { handle.surface?.pasteFromButton() } label: { Image(systemName: "doc.on.clipboard").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel("Paste").accessibilityIdentifier("term.paste")
-                if screen.live { Button { terms.stop(route.key) } label: { Text("Stop").dmono(12, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 10).frame(minHeight: 32).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }.accessibilityIdentifier("term.stop") }
+                if scroll > 0 { Button { handle.surface?.scrollToBottom() } label: { Image(systemName: "arrow.down.to.line").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.accent) }.accessibilityLabel(Tr.t("Jump to the end")).accessibilityIdentifier("term.bottom") }
+                Button { handle.surface?.pasteFromButton() } label: { Image(systemName: "doc.on.clipboard").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel(Tr.t("Paste")).accessibilityIdentifier("term.paste")
+                if screen.live { Button { terms.stop(route.key) } label: { Text(Tr.t("Stop")).dmono(12, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 10).frame(minHeight: 32).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }.accessibilityIdentifier("term.stop") }
             }.padding(.horizontal, 8).frame(minHeight: 44).background(BackplaneDesign.panel)
             TermInputRepresentable(key: route.key, screen: screen, rev: screen.rev, scroll: scroll, fontSize: font, terms: terms, handle: handle, onFont: { font = $0 }, onScroll: { scroll = $0 })
         }
@@ -168,15 +168,15 @@ struct DataTermsView: View {
         VStack(spacing: 0) {
             HStack {
                 Button { Task { creating = true; defer { creating = false }
-                    do { let k = try await client.terms.newShell(project: project, cols: 80, rows: 24); error = ""; client.terms.open(k, title: "Shell"); await load() }
-                    catch { self.error = error.localizedDescription } } } label: { Text("New shell") }
+                    do { let k = try await client.terms.newShell(project: project, cols: 80, rows: 24); error = ""; client.terms.open(k, title: Tr.t("Shell")); await load() }
+                    catch { self.error = error.localizedDescription } } } label: { Text(Tr.t("New shell")) }
                     .buttonStyle(DButton(primary: true)).disabled(creating).accessibilityIdentifier("terms.new")
                 Spacer(minLength: 0)
             }.padding(10)
-            if !error.isEmpty { Text(error).dmono(12).foregroundStyle(BackplaneDesign.bad).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10) }
+            if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10) }
             DLine()
             if rows.isEmpty {
-                Text(loaded ? "No terminals." : "Loading…").dmono(12).foregroundStyle(BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                Text(Tr.t(loaded ? "No terminals." : "Loading…")).dmono(12).foregroundStyle(BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 Spacer(minLength: 0)
             } else {
                 List {
@@ -185,8 +185,8 @@ struct DataTermsView: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "terminal").font(.system(size: 12)).foregroundStyle(BackplaneDesign.dim)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(r.title.isEmpty ? "Terminal" : r.title).dmono(13, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1)
-                                    HStack(spacing: 8) { TermState(state: r.state); Text(word(r)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                                    Text(r.title.isEmpty ? Tr.t("Terminal") : r.title).dmono(13, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                                    HStack(spacing: 8) { TermState(state: r.state); Text(Tr.t(word(r))).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                                 }
                                 Spacer(minLength: 0)
                             }.padding(.horizontal, 12).frame(minHeight: 50).contentShape(Rectangle())
@@ -196,7 +196,7 @@ struct DataTermsView: View {
             }
         }
         .background(BackplaneDesign.panel)
-        .dataBar("Terminals")
+        .dataBar(Tr.t("Terminals"))
         .task(id: client.conn == .online) { await load() }
         .refreshable { await load() }
         .onChange(of: client.terms.fullscreen == nil) { _, closed in if closed { Task { await load() } } }

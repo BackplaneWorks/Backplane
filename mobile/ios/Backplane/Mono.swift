@@ -69,13 +69,13 @@ struct LicencesView: View {
     }
     var body: some View {
         List {
-            Section("JetBrains Mono 2.304") {
-                Text("Code blocks, inline code and mono labels. Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono). Licensed under the SIL Open Font License 1.1.")
+            Section {
+                Text(verbatim: "Code blocks, inline code and mono labels. Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono). Licensed under the SIL Open Font License 1.1.")
                     .font(.footnote)
                 Text(ofl).font(.mono(.caption2)).textSelection(.enabled)
-            }
+            } header: { Text(verbatim: "JetBrains Mono 2.304") }
         }
-        .navigationTitle("Licences")
+        .navigationTitle(Tr.t("Licences"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }

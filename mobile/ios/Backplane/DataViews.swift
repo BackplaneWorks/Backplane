@@ -17,15 +17,15 @@ struct DataRoot: View {
         Group {
             if client.links.isEmpty || client.needsRepair {
                 NavigationStack {
-                    PairView(tag: "en", link: "", status: client.pairingError, repair: client.needsRepair) { client.pair($0) }
+                    PairView(link: "", status: client.pairingError, repair: client.needsRepair) { client.pair($0) }
                         .safeAreaInset(edge: .bottom) {
                             // refused or not, a paired phone can still look at the hub
                             if !client.links.isEmpty {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    NavigationLink { DataHubView(client: client) } label: { Text("Hub") }.buttonStyle(DButton()).accessibilityIdentifier("repair.hub")
+                                    NavigationLink { DataHubView(client: client) } label: { Text(Tr.t("Hub")) }.buttonStyle(DButton()).accessibilityIdentifier("repair.hub")
                                     // revoked here: the other paired hubs are one tap away
                                     ForEach(client.links.dropFirst().compactMap { Pairing.key($0) }, id: \.self) { k in
-                                        Button("Use " + k) { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("repair.use.\(k)")
+                                        Button(Tr.ios_hub_use(hub: k)) { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("repair.use.\(k)")
                                     }
                                 }.padding(12)
                             }
@@ -35,8 +35,8 @@ struct DataRoot: View {
                 NavigationStack(path: $path) { DataThreadsView(client: client, path: $path) }
                     .sheet(isPresented: $client.adding) {
                         NavigationStack {
-                            PairView(tag: "en", link: "", status: client.pairingError, adding: true) { client.pair($0) }
-                                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { client.adding = false; client.pairingError = "" }.accessibilityIdentifier("pair.cancel") } }
+                            PairView(link: "", status: client.pairingError, adding: true) { client.pair($0) }
+                                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(Tr.t("Cancel")) { client.adding = false; client.pairingError = "" }.accessibilityIdentifier("pair.cancel") } }
                         }
                     }
                     .sheet(isPresented: Binding(get: { client.migrationOpen && client.migration.card != nil }, set: { client.migrationOpen = $0 })) { DataMigrationCard(client: client) }
@@ -46,6 +46,9 @@ struct DataRoot: View {
         .tint(BackplaneDesign.accent)
         .preferredColorScheme(settings.colorScheme)
         .modifier(TextSizeModifier(size: settings.dynamicType))
+        // the app's language (Settings, Language), for SwiftUI's own controls and dates too; a change draws everything again at once
+        .environment(\.locale, Tr.locale)
+        .environment(\.backplaneLanguage, Tr.lang)
         .task {
             if !client.links.isEmpty, client.conn == .offline { client.connect() }
             #if DEBUG
@@ -129,11 +132,11 @@ struct DataThreadsView: View {
             if client.conn != .online { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
                 if client.has("search") {
-                    TextField("Search projects and threads", text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField(Tr.t("Search projects and threads"), text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(.horizontal, 10).frame(height: 36).dbox().accessibilityIdentifier("data.search")
                 } else { Spacer() }
                 Button { addingProject = true } label: { Image(systemName: "plus").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }
-                    .accessibilityLabel("Add project").accessibilityIdentifier("data.project.add")
+                    .accessibilityLabel(Tr.t("Add project")).accessibilityIdentifier("data.project.add")
             }.padding(.horizontal, 10).padding(.vertical, 8)
             DataMachineChips(client: client)
             DLine()
@@ -151,8 +154,8 @@ struct DataThreadsView: View {
                     ForEach(client.links.dropFirst().compactMap { Pairing.key($0) }, id: \.self) { k in
                         Button(k) { client.useHub(k) }.accessibilityIdentifier("data.hub.use.\(k)")
                     }
-                    if client.has("terms") { Button("Terminals") { path.append(DTermsRoute(project: "")) }.accessibilityIdentifier("data.hub.terms") }
-                    Button("Add a hub") { client.pairingError = ""; client.adding = true }.accessibilityIdentifier("data.hub.add")
+                    if client.has("terms") { Button(Tr.t("Terminals")) { path.append(DTermsRoute(project: "")) }.accessibilityIdentifier("data.hub.terms") }
+                    Button(Tr.t("Add a hub")) { client.pairingError = ""; client.adding = true }.accessibilityIdentifier("data.hub.add")
                 } label: {
                     HStack(spacing: 8) {
                         BrandMark(size: 20, conn: client.conn == .online)
@@ -163,7 +166,7 @@ struct DataThreadsView: View {
             }.dflat()
             ToolbarItem(placement: .topBarTrailing) {
                 Button { path.append(DPage(name: "settings")) } label: { Image(systemName: "gearshape").foregroundStyle(BackplaneDesign.dim) }
-                    .accessibilityLabel("Settings").accessibilityIdentifier("data.settings")
+                    .accessibilityLabel(Tr.t("Settings")).accessibilityIdentifier("data.settings")
             }.dflat()
         }
         .navigationDestination(for: String.self) { DataThreadView(client: client, id: $0).environment(\.dataSubThread, client.has("subview") ? $0 : "") }
@@ -172,23 +175,23 @@ struct DataThreadsView: View {
         .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
-            else { DLoading(text: client.conn == .online ? "Loading the thread…" : "Connecting to the hub…") } // never a blank page while the thread list comes
+            else { DLoading(text: Tr.t(client.conn == .online ? "Loading the thread…" : "Connecting to the hub…")) } // never a blank page while the thread list comes
         }
         .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else { DataImprovementsView(client: client) } }
         .navigationDestination(for: DAccountRoute.self) { DataAccountView(client: client, route: $0) }
         .navigationDestination(for: DTermsRoute.self) { DataTermsView(client: client, project: $0.project) }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
-        .alert("Rename project", isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
-            TextField("Title", text: $projectTitle)
-            Button("Rename") { if let p = renamingProject { Task { await client.projectAct(p.id, "rename", title: projectTitle) } } }
-            Button("Cancel", role: .cancel) {}
+        .alert(Tr.t("Rename project"), isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
+            TextField(Tr.t("Title"), text: $projectTitle)
+            Button(Tr.t("Rename")) { if let p = renamingProject { Task { await client.projectAct(p.id, "rename", title: projectTitle) } } }
+            Button(Tr.t("Cancel"), role: .cancel) {}
         }
-        .confirmationDialog("Remove “\(projectMenu?.title ?? "")” and its threads from the list?", isPresented: Binding(get: { projectMenu != nil }, set: { if !$0 { projectMenu = nil } }), titleVisibility: .visible) {
-            Button("Remove project", role: .destructive) { if let p = projectMenu { Task { await client.projectAct(p.id, "remove") } } }
-            Button("Keep it", role: .cancel) {}
+        .confirmationDialog(Tr.ios_project_remove_ask(title: projectMenu?.title ?? ""), isPresented: Binding(get: { projectMenu != nil }, set: { if !$0 { projectMenu = nil } }), titleVisibility: .visible) {
+            Button(Tr.t("Remove project"), role: .destructive) { if let p = projectMenu { Task { await client.projectAct(p.id, "remove") } } }
+            Button(Tr.t("Keep it"), role: .cancel) {}
         }
         .confirmationDialog(pickNew?.title ?? "", isPresented: Binding(get: { pickNew != nil }, set: { if !$0 { pickNew = nil } }), titleVisibility: .visible) {
-            ForEach(pickNew?.newOn ?? [], id: \.value) { n in Button(n.label + (n.away ? " · away" : "")) { newThread = n.value; pickNew = nil }.accessibilityIdentifier("data.thread.new.on." + n.value) }
+            ForEach(pickNew?.newOn ?? [], id: \.value) { n in Button(dAway(Tr.t(n.label), n.away)) { newThread = n.value; pickNew = nil }.accessibilityIdentifier("data.thread.new.on." + n.value) }
         }
         .sheet(isPresented: $addingProject) { DataNewProjectSheet(client: client) }
         .sheet(item: $badgeProject) { DataBadgeSheet(client: client, project: $0) }
@@ -211,9 +214,9 @@ struct DataThreadsView: View {
         List {
             if client.projects.isEmpty && client.listsLoaded {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("No projects yet").dmono(14, bold: true)
-                    Text("A project is a folder on your hub's computer. Add one to start a thread.").dmono(12).foregroundStyle(BackplaneDesign.dim)
-                    Button("Add a project") { addingProject = true }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.project.add.empty")
+                    Text(Tr.t("No projects yet")).dmono(14, bold: true)
+                    Text(Tr.t("A project is a folder on your hub's computer. Add one to start a thread.")).dmono(12).foregroundStyle(BackplaneDesign.dim)
+                    Button(Tr.t("Add a project")) { addingProject = true }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.project.add.empty")
                 }.padding(14).dataRow()
             }
             ForEach(client.bots.filter { $0.uber && !$0.thread.isEmpty }) { b in botRow(b) }
@@ -223,17 +226,17 @@ struct DataThreadsView: View {
                     let g = ThreadGroups.splitNested(client.threads, project: p.id, hidden: botThreads)
                     let n = ThreadGroups.count(hub: p.settledCount, loaded: g.settled.count)
                     ForEach(ThreadGroups.tree(g.active, all: g.all, open: treeOpen), id: \.t.id) { treeRow($0) }
-                    if g.active.isEmpty && n == 0 { Text("No threads").dmono(12).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32).dataRow() }
+                    if g.active.isEmpty && n == 0 { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32).dataRow() }
                     if n > 0 {
                         let open = client.settledOpen.contains(p.id)
                         Button { client.setSettled(open: !open, p.id) } label: {
-                            HStack(spacing: 6) { Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10)); Text(ThreadGroups.title(n)).dmono(11); Spacer() }
+                            HStack(spacing: 6) { Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10)); Text(Tr.t(ThreadGroups.title(n))).dmono(11); Spacer() }
                                 .foregroundStyle(BackplaneDesign.faint).padding(.leading, 30).frame(height: 32).contentShape(Rectangle())
                         }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.settled." + p.id)
                         if open {
                             ForEach(ThreadGroups.tree(g.settled, all: g.all, open: treeOpen), id: \.t.id) { treeRow($0) }
                             if client.settledMore[p.id] != nil {
-                                Button { Task { await client.loadSettled(p.id, more: true) } } label: { Text("More").dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
+                                Button { Task { await client.loadSettled(p.id, more: true) } } label: { Text(Tr.t("More")).dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
                                     .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.settled.more." + p.id)
                             }
                         }
@@ -246,19 +249,19 @@ struct DataThreadsView: View {
                 Button { client.setHistory(open: !open) } label: {
                     HStack(spacing: 8) {
                         Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
-                        Text(ThreadGroups.historyTitle(client.history.count).uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(minLength: 0)
+                        Text(Tr.t(ThreadGroups.historyTitle(client.history.count)).uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(minLength: 0)
                     }.padding(.leading, 10).frame(height: 40).contentShape(Rectangle())
                 }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history")
                 ForEach(ThreadGroups.history(live: client.history.live, rows: client.history.threads, open: open)) { threadRow($0) }
                 if open && client.history.next != nil {
-                    Button { Task { await client.loadHistory(more: true) } } label: { Text("More").dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
+                    Button { Task { await client.loadHistory(more: true) } } label: { Text(Tr.t("More")).dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
                         .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history.more")
                 }
             }
             let bots = client.bots.filter { !$0.uber && !$0.thread.isEmpty }
-            if !bots.isEmpty { DHeading(text: "Bots").padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow(); ForEach(bots) { botRow($0) } }
+            if !bots.isEmpty { DHeading(text: Tr.t("Bots")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow(); ForEach(bots) { botRow($0) } }
             if !client.rooms.isEmpty {
-                DHeading(text: "Rooms").padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow()
+                DHeading(text: Tr.t("Rooms")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow()
                 ForEach(client.rooms) { r in
                     Button { path.append(r) } label: { sideRow("#", r.name, "room") }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.room." + r.id)
                 }
@@ -272,7 +275,7 @@ struct DataThreadsView: View {
         HStack(spacing: 8) {
             Text(sigil).dmono(13, bold: true).foregroundStyle(BackplaneDesign.accent).frame(width: 16)
             Text(name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer()
-            Text(detail).dmono(11).foregroundStyle(BackplaneDesign.faint)
+            Text(Tr.t(detail)).dmono(11).foregroundStyle(BackplaneDesign.faint)
         }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle())
     }
     private func botRow(_ b: DBot) -> some View {
@@ -286,7 +289,7 @@ struct DataThreadsView: View {
                     Image(systemName: dataBadgeSymbol(p.icon)).font(.system(size: 13)).foregroundStyle(Color(css: p.css) ?? BackplaneDesign.ok)
                     Text(p.title.uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                     // another machine's project says where it is ("on desktop"); one that is also on a linked machine says so ("also on desktop")
-                    let where_ = p.mark.map { $0.label + ($0.away ? " · away" : "") } ?? p.also
+                    let where_ = p.mark.map { dAway(Tr.t($0.label), $0.away) } ?? Tr.t(p.also)
                     if !where_.isEmpty { Text(where_).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1).accessibilityIdentifier("data.project.where." + p.id) }
                     if p.waiting > 0 { Text("\(p.waiting)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad) }
                     Spacer(minLength: 0)
@@ -294,13 +297,13 @@ struct DataThreadsView: View {
             }.buttonStyle(.plain).accessibilityIdentifier("data.project." + p.id)
             if client.has("terms") {
                 Button { path.append(DTermsRoute(project: p.id)) } label: { Image(systemName: "terminal").font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim).frame(width: 36, height: 40).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).accessibilityLabel("Terminals in \(p.title)").accessibilityIdentifier("data.terms." + p.id)
+                    .buttonStyle(.plain).accessibilityLabel(Tr.ios_project_terms(project: p.title)).accessibilityIdentifier("data.terms." + p.id)
             }
             Button { if p.newOn.count > 1 { pickNew = p } else { newThread = p.id } } label: { Image(systemName: "plus").font(.system(size: 14)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).contentShape(Rectangle()) }
-                .buttonStyle(.plain).accessibilityLabel("New thread in \(p.title)").accessibilityIdentifier("data.thread.new." + p.id)
+                .buttonStyle(.plain).accessibilityLabel(Tr.ios_project_newthread(project: p.title)).accessibilityIdentifier("data.thread.new." + p.id)
         }
         .padding(.leading, 10).padding(.trailing, 2).background(flash == p.id ? BackplaneDesign.accent.opacity(0.18) : Color.clear).id("project." + p.id).dataRow()
-        .contextMenu { if client.has("actions") { Button("Rename", systemImage: "pencil") { projectTitle = p.title; renamingProject = p }; Button("Badge", systemImage: "paintpalette") { badgeProject = p }; Button("Remove project", systemImage: "trash", role: .destructive) { projectMenu = p } } }
+        .contextMenu { if client.has("actions") { Button(Tr.t("Rename"), systemImage: "pencil") { projectTitle = p.title; renamingProject = p }; Button(Tr.t("Badge"), systemImage: "paintpalette") { badgeProject = p }; Button(Tr.t("Remove project"), systemImage: "trash", role: .destructive) { projectMenu = p } } }
     }
     private func treeRow(_ r: ThreadGroups.Node<DThread>) -> some View {
         threadRow(r.t, depth: r.depth, kids: r.kids)
@@ -315,8 +318,8 @@ struct DataThreadsView: View {
             .contextMenu { if client.has("actions") { DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting) } }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if client.has("actions") {
-                    Button(t.settled ? "Unsettle" : "Settle") { Task { await client.threadAct(t.id, t.settled ? "unsettle" : "settle") } }.tint(BackplaneDesign.ok)
-                    Button("Archive") { Task { await client.threadAct(t.id, "archive") } }.tint(BackplaneDesign.faint)
+                    Button(Tr.t(t.settled ? "Unsettle" : "Settle")) { Task { await client.threadAct(t.id, t.settled ? "unsettle" : "settle") } }.tint(BackplaneDesign.ok)
+                    Button(Tr.t("Archive")) { Task { await client.threadAct(t.id, "archive") } }.tint(BackplaneDesign.faint)
                 }
             }
             .onAppear { client.prefetch(t.id) }
@@ -331,10 +334,10 @@ struct DataLocksStrip: View {
     @Binding var path: NavigationPath
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("LOCKS").dmono(11).foregroundStyle(BackplaneDesign.dim)
+            Text(Tr.t("LOCKS")).dmono(11).foregroundStyle(BackplaneDesign.dim)
             ForEach(client.locks) { l in
                 Button { if !l.thread.isEmpty { path.append(l.thread) } } label: {
-                    HStack(spacing: 8) { Text(l.name).dmono(12).lineLimit(1); Text(l.line).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(); if l.waiting > 0 { Text("\(l.waiting) waiting").dmono(11).foregroundStyle(BackplaneDesign.dim) } }
+                    HStack(spacing: 8) { Text(l.name).dmono(12).lineLimit(1); Text(Tr.t(l.line)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(); if l.waiting > 0 { Text(Tr.ios_lock_waiting(n: l.waiting)).dmono(11).foregroundStyle(BackplaneDesign.dim) } }
                 }.accessibilityIdentifier("data.lock.\(l.name)")
             }
         }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.panel)
@@ -348,12 +351,12 @@ struct DataConnectionBanner: View {
             HStack(spacing: 8) {
                 DDot(color: client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(client.conn == .connecting ? "Connecting to \(client.hubName)…" : "Offline · showing what this phone has saved").dmono(12)
-                    if client.conn == .offline, !client.failure.isEmpty { Text(client.failure).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(2) }
+                    Text(client.conn == .connecting ? Tr.ios_conn_connecting(hub: client.hubName) : Tr.t("Offline · showing what this phone has saved")).dmono(12)
+                    if client.conn == .offline, !client.failure.isEmpty { Text(Tr.t(client.failure)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(2) }
                 }
                 Spacer()
-                NavigationLink(value: DPage(name: "hub")) { Text("Hub") }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("conn.hub")
-                if client.conn == .offline { Button("Retry") { client.connect() }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent) }
+                NavigationLink(value: DPage(name: "hub")) { Text(Tr.t("Hub")) }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("conn.hub")
+                if client.conn == .offline { Button(Tr.t("Retry")) { client.connect() }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent) }
             }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.raised)
             DLine()
         }.accessibilityIdentifier("data.connection.banner")
@@ -369,9 +372,9 @@ struct DataMachineChips: View {
                 HStack(spacing: 6) {
                     ForEach(client.chips) { c in
                         Button { client.pickMachine(c.value) } label: {
-                            Text(c.label + (c.away ? " · away" : "")).dmono(11).foregroundStyle(c.on ? BackplaneDesign.accent : BackplaneDesign.dim).padding(.horizontal, 10).frame(height: 28)
+                            Text(dAway(Tr.t(c.label), c.away)).dmono(11).foregroundStyle(c.on ? BackplaneDesign.accent : BackplaneDesign.dim).padding(.horizontal, 10).frame(height: 28)
                                 .overlay(Rectangle().stroke(c.on ? BackplaneDesign.accent : BackplaneDesign.faint.opacity(0.5), lineWidth: 1)).opacity(c.away && !c.on ? 0.55 : 1)
-                        }.buttonStyle(.plain).accessibilityLabel(c.hint.isEmpty ? c.label : c.hint).accessibilityIdentifier("data.machine." + (c.value.isEmpty ? "all" : c.value))
+                        }.buttonStyle(.plain).accessibilityLabel(Tr.t(c.hint.isEmpty ? c.label : c.hint)).accessibilityIdentifier("data.machine." + (c.value.isEmpty ? "all" : c.value))
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 8)
             }.accessibilityIdentifier("data.machines")
@@ -391,7 +394,7 @@ struct DataThreadRow: View {
                     if kids > 0 {
                         Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint)
                             .frame(width: 22, height: 22).contentShape(Rectangle()).highPriorityGesture(TapGesture().onEnded { toggle() })
-                            .accessibilityLabel(open ? "Hide its \(kids) subthreads" : "Show its \(kids) subthreads").accessibilityAddTraits(.isButton).accessibilityIdentifier("data.thread.kids." + thread.id)
+                            .accessibilityLabel(open ? Tr.ios_kids_hide(n: kids) : Tr.ios_kids_show(n: kids)).accessibilityAddTraits(.isButton).accessibilityIdentifier("data.thread.kids." + thread.id)
                     } else { Color.clear.frame(width: 22, height: 22) }
                 }.padding(.top, -2)
                 DStatusDot(thread: thread).padding(.top, 5).frame(width: 14)
@@ -399,7 +402,7 @@ struct DataThreadRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if thread.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.accent) }
-                    Text(thread.title.isEmpty ? "New thread" : thread.title).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                    Text(thread.title.isEmpty ? Tr.t("New thread") : thread.title).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
                 }
                 if !thread.preview.isEmpty { Text(thread.preview.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1) }
             }
@@ -407,7 +410,7 @@ struct DataThreadRow: View {
             if kids > 0 && !open { Text("\(kids)").dmono(11).foregroundStyle(BackplaneDesign.faint) }
             if thread.waiting > 0 { Text("\(thread.waiting)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad) }
             // another machine's thread: its machine's short name before the age, quiet; dimmer with "away" when that machine did not answer
-            if let m = thread.mark { Text(m.short + (m.away ? " · away" : "")).dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.thread.mark." + thread.id) }
+            if let m = thread.mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.thread.mark." + thread.id) }
             Text(dAgo(thread.updatedAt)).dmono(11).foregroundStyle(BackplaneDesign.faint)
         }
         .padding(.leading, 4 + 16 * CGFloat(min(depth, 4))).padding(.trailing, 12).padding(.vertical, 8).opacity(thread.mark?.away == true ? 0.5 : thread.settled ? 0.55 : 1).contentShape(Rectangle())
@@ -433,9 +436,9 @@ struct DataNewProjectSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
-                TextField("Folder on the hub's computer", text: $path).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField(Tr.t("Folder on the hub's computer"), text: $path).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .padding(.horizontal, 10).frame(height: 40).dbox().padding(12).accessibilityIdentifier("data.project.path")
-                if !error.isEmpty { Text(error).dmono(12).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 12).padding(.bottom, 8) }
+                if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 12).padding(.bottom, 8) }
                 DLine()
                 List {
                     if let d = dirs {
@@ -445,11 +448,11 @@ struct DataNewProjectSheet: View {
                 }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
             }
             .background(BackplaneDesign.panel)
-            .dataBar("Add project", back: false)
+            .dataBar(Tr.t("Add project"), back: false)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.dmono(13) }.dflat()
+                ToolbarItem(placement: .cancellationAction) { Button(Tr.t("Cancel")) { dismiss() }.dmono(13) }.dflat()
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") { Task { await add() } }.dmono(13, bold: true).disabled(busy || path.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.project.add.confirm")
+                    Button(Tr.t("Add")) { Task { await add() } }.dmono(13, bold: true).disabled(busy || path.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.project.add.confirm")
                 }.dflat()
             }
             .task { await go(nil) }
@@ -480,21 +483,21 @@ struct DataNewThreadSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(owner?.title ?? "New thread").dmono(14, bold: true).lineLimit(1); Spacer()
-                Button("Cancel") { dismiss() }.dmono(13).foregroundStyle(BackplaneDesign.dim)
+                Text(owner?.title ?? Tr.t("New thread")).dmono(14, bold: true).lineLimit(1); Spacer()
+                Button(Tr.t("Cancel")) { dismiss() }.dmono(13).foregroundStyle(BackplaneDesign.dim)
             }
-            if let w = owner?.newOn.first(where: { $0.value == project }), (owner?.newOn.count ?? 0) > 1 || owner?.mark != nil { Text(w.label).dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.thread.new.where") }
+            if let w = owner?.newOn.first(where: { $0.value == project }), (owner?.newOn.count ?? 0) > 1 || owner?.mark != nil { Text(Tr.t(w.label)).dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.thread.new.where") }
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text).dmono(13).scrollContentBackground(.hidden).padding(6).accessibilityIdentifier("data.thread.new.text")
-                if text.isEmpty { Text("What should it do?").dmono(13).foregroundStyle(BackplaneDesign.faint).padding(.horizontal, 11).padding(.vertical, 14).allowsHitTesting(false) }
+                if text.isEmpty { Text(Tr.t("What should it do?")).dmono(13).foregroundStyle(BackplaneDesign.faint).padding(.horizontal, 11).padding(.vertical, 14).allowsHitTesting(false) }
             }.frame(minHeight: 120).dbox(BackplaneDesign.accent)
-            if !error.isEmpty { Text(error).dmono(12).foregroundStyle(BackplaneDesign.bad) }
+            if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad) }
             HStack(spacing: 6) {
                 if client.has("picker") {
                     Button { picking = true } label: { Text(chip.isEmpty ? " " : chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
-                        .buttonStyle(.plain).accessibilityLabel("Model: " + chip).accessibilityIdentifier("data.thread.new.model")
+                        .buttonStyle(.plain).accessibilityLabel(Tr.ios_model_label(model: chip)).accessibilityIdentifier("data.thread.new.model")
                 } else { Spacer() }
-                Button(busy ? "Starting…" : "Start") { Task { await start() } }.buttonStyle(DButton(primary: true)).disabled(busy).accessibilityIdentifier("data.thread.new.start")
+                Button(Tr.t(busy ? "Starting…" : "Start")) { Task { await start() } }.buttonStyle(DButton(primary: true)).disabled(busy).accessibilityIdentifier("data.thread.new.start")
             }
             Spacer(minLength: 0)
         }
@@ -532,11 +535,11 @@ private struct DataBtwCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("btw · \(btw.q)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(verbatim: "btw · \(btw.q)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
-                Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("Close").accessibilityIdentifier("thread.btw.close")
+                Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel(Tr.t("Close")).accessibilityIdentifier("thread.btw.close")
             }
-            ScrollView { Text(btw.a).font(.footnote).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 220)
+            ScrollView { Text(btw.a == "Thinking…" ? Tr.t(btw.a) : btw.a).font(.footnote).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 220)
         }
         .padding(.horizontal).padding(.vertical, 8).background(BackplaneDesign.panel).accessibilityElement(children: .contain).accessibilityIdentifier("thread.btw")
     }
@@ -554,18 +557,18 @@ private struct DataSecretBox: View {
     @State private var err = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(name0.isEmpty ? "A secret for this chat. Agents use it by name and never see the value." : "Secret: \(name0). Agents use it by name and never see the value.").font(.footnote)
+            Text(name0.isEmpty ? Tr.t("A secret for this chat. Agents use it by name and never see the value.") : Tr.ios_secret_named(name: name0)).font(.footnote)
             if let p = asked?.purpose, !p.isEmpty { Text(p).font(.caption).foregroundStyle(.secondary) }
-            if name0.isEmpty { TextField("Name", text: $name).textFieldStyle(.roundedBorder).autocorrectionDisabled().textInputAutocapitalization(.never).accessibilityIdentifier("thread.secret.name") }
-            SecureField("Paste the value", text: $value).textFieldStyle(.roundedBorder).accessibilityIdentifier("thread.secret.value")
-            if !err.isEmpty { Text(err).font(.caption).foregroundStyle(.red) }
+            if name0.isEmpty { TextField(Tr.t("Name"), text: $name).textFieldStyle(.roundedBorder).autocorrectionDisabled().textInputAutocapitalization(.never).accessibilityIdentifier("thread.secret.name") }
+            SecureField(Tr.t("Paste the value"), text: $value).textFieldStyle(.roundedBorder).accessibilityIdentifier("thread.secret.value")
+            if !err.isEmpty { Text(Tr.t(err)).font(.caption).foregroundStyle(.red) }
             HStack {
-                Button("Save") {
+                Button(Tr.t("Save")) {
                     Task { do { try await client.saveSecret(thread, name: (name0.isEmpty ? name : name0).trimmingCharacters(in: .whitespaces), value: value, purpose: asked?.purpose ?? ""); value = ""; shut() }
                         catch { err = (error as? DError)?.message ?? "The hub refused the secret" } }
                 }.disabled((name0.isEmpty && name.isEmpty) || value.isEmpty).accessibilityIdentifier("thread.secret.save")
-                Button("Cancel") { value = ""; shut() }.accessibilityIdentifier("thread.secret.cancel")
-                if let a = asked { Button("Not needed") { Task { await client.dismissSecret(thread, name: a.name); value = ""; shut() } } }
+                Button(Tr.t("Cancel")) { value = ""; shut() }.accessibilityIdentifier("thread.secret.cancel")
+                if let a = asked { Button(Tr.t("Not needed")) { Task { await client.dismissSecret(thread, name: a.name); value = ""; shut() } } }
             }
         }
         .padding(12).background(BackplaneDesign.panel).accessibilityElement(children: .contain).accessibilityIdentifier("thread.secret")
@@ -625,7 +628,7 @@ struct DataThreadView: View {
         let held = Set(q.map(\.msg)); return all.filter { !held.contains($0.id) && !($0.clientId.map(held.contains) ?? false) }
     }
     private var working: Bool { thread?.state == "working" || thread?.state == "asking" }
-    private var chip: String { guard let t = thread else { return "" }; return t.chip.isEmpty ? "\(t.provider) / \(t.model.isEmpty ? "default" : t.model)" : t.chip }
+    private var chip: String { guard let t = thread else { return "" }; return t.chip.isEmpty ? "\(t.provider) / \(t.model.isEmpty ? Tr.t("default") : t.model)" : t.chip }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -634,7 +637,7 @@ struct DataThreadView: View {
             DataStarBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip
-            if let m = thread?.mark { Text("on " + m.name + (m.away ? " · away" : "")).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 3).accessibilityIdentifier("data.thread.machine") }
+            if let m = thread?.mark { Text(dAway(Tr.ios_machine_on(machine: m.name), m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 3).accessibilityIdentifier("data.thread.machine") }
             if findOpen { findBar }
             if let w = client.work[id], !w.rows.isEmpty { DataWorkPanel(client: client, thread: id, work: w) }
             ScrollViewReader { proxy in
@@ -645,19 +648,19 @@ struct DataThreadView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         // a tap, as on Android: in a VStack every row appears at once, so an onAppear here would pull the whole history page by page
                         if client.older[id] != nil {
-                            Button { client.loadOlder(id) } label: { Text("load earlier").dmono(12).foregroundStyle(BackplaneDesign.dim).frame(maxWidth: .infinity, minHeight: 36) }
+                            Button { client.loadOlder(id) } label: { Text(Tr.t("load earlier")).dmono(12).foregroundStyle(BackplaneDesign.dim).frame(maxWidth: .infinity, minHeight: 36) }
                                 .buttonStyle(.plain).accessibilityIdentifier("data.thread.older")
                         }
                         ForEach(DataFold.rows(list, running: working)) { r in
                             switch r {
                             case .entry(let e): DataEntryRow(client: client, thread: id, entry: e)
                                 // the message a find or a search hit went to
-                                .background { if mark == e.id { Rectangle().fill(BackplaneDesign.accent.opacity(0.12)).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }.padding(-4).accessibilityElement().accessibilityLabel("Marked message").accessibilityIdentifier("data.thread.marked") } }
+                                .background { if mark == e.id { Rectangle().fill(BackplaneDesign.accent.opacity(0.12)).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }.padding(-4).accessibilityElement().accessibilityLabel(Tr.k("ios.thread.marked")).accessibilityIdentifier("data.thread.marked") } }
                                 .id(e.id)
                             case .fold(let f): DataFoldRow(fold: f, open: Binding(get: { openRuns.contains(f.id) }, set: { if $0 { openRuns.insert(f.id) } else { openRuns.remove(f.id) } })).id("fold:" + f.id)
                             }
                         }
-                        if list.isEmpty && client.loadedThreads.contains(id) { Text("Start a conversation.").dmono(13).foregroundStyle(BackplaneDesign.dim).padding(.top, 40).frame(maxWidth: .infinity, alignment: .leading) }
+                        if list.isEmpty && client.loadedThreads.contains(id) { Text(Tr.t("Start a conversation.")).dmono(13).foregroundStyle(BackplaneDesign.dim).padding(.top, 40).frame(maxWidth: .infinity, alignment: .leading) }
                         if thread?.state == "working" { DWorkingRow() }
                         Color.clear.frame(height: 1).id("end")
                     }
@@ -681,7 +684,7 @@ struct DataThreadView: View {
                 }
             }
             if let order { DataOrderCard(order: order) }
-            if let m = thread?.mark { Text(m.runs + (m.away ? " · away" : "")).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.top, 4).accessibilityIdentifier("data.thread.runs") }
+            if let m = thread?.mark { Text(dAway(Tr.t(m.runs), m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.top, 4).accessibilityIdentifier("data.thread.runs") }
             DataMentionBar(client: client, text: text) { text = $0; client.setDraft(id, $0) }
             DVoiceStrip(client: client, thread: id, draft: text)
             if let b = client.btw[id] { DataBtwCard(btw: b) { client.closeBtw(id) } }
@@ -707,29 +710,29 @@ struct DataThreadView: View {
         .task(id: "\(list.count)|\(thread?.state ?? "")|\(client.conn == .online)") { if client.has("order"), let o = try? await client.order(id) { order = o } else if !client.has("order") { order = nil } }
         .task(id: "\(thread?.state ?? "")|\(client.conn == .online)") { if client.conn == .online, thread?.state != "working" { buy = await client.buyOf(id) } }
         .background(BackplaneDesign.background)
-        .dataBar(thread?.title.isEmpty == false ? thread!.title : "Thread")
+        .dataBar(thread?.title.isEmpty == false ? thread!.title : Tr.t("Thread"))
         // Buy it when there is something to buy, the thread's menu, the viewers in the corner (the person's order, 11-04)
         .toolbar {
             if let b = buy {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { startBuy() } label: { Image(systemName: "cart").foregroundStyle(BackplaneDesign.accent) }.disabled(buying).accessibilityLabel(b.label).accessibilityIdentifier("data.thread.buy")
+                    Button { startBuy() } label: { Image(systemName: "cart").foregroundStyle(BackplaneDesign.accent) }.disabled(buying).accessibilityLabel(Tr.t(b.label)).accessibilityIdentifier("data.thread.buy")
                 }.dflat()
             }
             if let t = thread, client.has("actions") {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        if let b = buy { Button(b.label, systemImage: "cart") { startBuy() } }
+                        if let b = buy { Button(Tr.t(b.label), systemImage: "cart") { startBuy() } }
                         // the find bar when the hub has `find`; else the older sheet of hits
-                        if client.has("find") { Button("Find in thread", systemImage: "magnifyingglass") { findOpen = true; findFocus = true } }
-                        else if client.has("search") { Button("Search in thread", systemImage: "magnifyingglass") { finding = true } }
+                        if client.has("find") { Button(Tr.k("ios.find.bar"), systemImage: "magnifyingglass") { findOpen = true; findFocus = true } }
+                        else if client.has("search") { Button(Tr.t("Search in thread"), systemImage: "magnifyingglass") { finding = true } }
                         DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting)
                     } label: { Image(systemName: "ellipsis").foregroundStyle(BackplaneDesign.dim) }
-                        .accessibilityLabel("Thread actions").accessibilityIdentifier("data.thread.more")
+                        .accessibilityLabel(Tr.t("Thread actions")).accessibilityIdentifier("data.thread.more")
                 }.dflat()
             }
             if client.has("viewers") {
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink(value: DViewerRoute(id: id)) { Image(systemName: "square.grid.2x2").foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel("Viewer").accessibilityIdentifier("data.thread.viewer")
+                    NavigationLink(value: DViewerRoute(id: id)) { Image(systemName: "square.grid.2x2").foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel(Tr.t("Viewer")).accessibilityIdentifier("data.thread.viewer")
                 }.dflat()
             }
         }
@@ -776,14 +779,14 @@ struct DataThreadView: View {
     private var findBar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
-                TextField("Find in thread", text: $findQ).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled().focused($findFocus).submitLabel(.search)
+                TextField(Tr.k("ios.find.bar"), text: $findQ).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled().focused($findFocus).submitLabel(.search)
                     .onSubmit { findStep(-1) }
                     .padding(.horizontal, 8).frame(height: 32).dbox().accessibilityIdentifier("data.find.bar")
-                Text(ThreadFind.label(findAt, total: findRes?.total, more: findRes?.more ?? false)).dmono(11).foregroundStyle(BackplaneDesign.dim).fixedSize().accessibilityIdentifier("data.find.count")
+                Text(Tr.t(ThreadFind.label(findAt, total: findRes?.total, more: findRes?.more ?? false))).dmono(11).foregroundStyle(BackplaneDesign.dim).fixedSize().accessibilityIdentifier("data.find.count")
                 let none = (findRes?.matches.isEmpty ?? true)
-                Button { findStep(-1) } label: { Image(systemName: "chevron.up").frame(width: 32, height: 32) }.disabled(none).accessibilityLabel("Previous match").accessibilityIdentifier("data.find.prev")
-                Button { findStep(1) } label: { Image(systemName: "chevron.down").frame(width: 32, height: 32) }.disabled(none).accessibilityLabel("Next match").accessibilityIdentifier("data.find.next")
-                Button { findClose() } label: { Image(systemName: "xmark").frame(width: 32, height: 32) }.accessibilityLabel("Close find").accessibilityIdentifier("data.find.close")
+                Button { findStep(-1) } label: { Image(systemName: "chevron.up").frame(width: 32, height: 32) }.disabled(none).accessibilityLabel(Tr.k("ios.find.prev")).accessibilityIdentifier("data.find.prev")
+                Button { findStep(1) } label: { Image(systemName: "chevron.down").frame(width: 32, height: 32) }.disabled(none).accessibilityLabel(Tr.k("ios.find.next")).accessibilityIdentifier("data.find.next")
+                Button { findClose() } label: { Image(systemName: "xmark").frame(width: 32, height: 32) }.accessibilityLabel(Tr.k("ios.find.close")).accessibilityIdentifier("data.find.close")
             }.foregroundStyle(BackplaneDesign.dim).padding(.horizontal, 10).padding(.vertical, 4).background(BackplaneDesign.panel)
             DLine()
         }
@@ -793,12 +796,12 @@ struct DataThreadView: View {
     private var stateStrip: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                DHeading(text: "State")
-                if let t = thread { DStatusDot(thread: t, size: 6); Text(dStatusWord(t)).dmono(11).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("data.thread.state") }
+                DHeading(text: Tr.t("State"))
+                if let t = thread { DStatusDot(thread: t, size: 6); Text(Tr.t(dStatusWord(t))).dmono(11).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("data.thread.state") }
                 Spacer()
                 if let t = thread, client.has("actions") {
-                    strip(t.pinned ? "Unpin" : "Pin", on: t.pinned) { Task { await client.threadAct(id, t.pinned ? "unpin" : "pin") } }
-                    strip(t.settled ? "Unsettle" : "Settle", on: t.settled) { Task { await client.threadAct(id, t.settled ? "unsettle" : "settle") } }
+                    strip(Tr.t(t.pinned ? "Unpin" : "Pin"), on: t.pinned) { Task { await client.threadAct(id, t.pinned ? "unpin" : "pin") } }
+                    strip(Tr.t(t.settled ? "Unsettle" : "Settle"), on: t.settled) { Task { await client.threadAct(id, t.settled ? "unsettle" : "settle") } }
                 }
             }.padding(.leading, 14).frame(height: 32).background(BackplaneDesign.panel)
             DLine()
@@ -813,7 +816,7 @@ struct DataThreadView: View {
         VStack(spacing: 0) {
             DLine()
             VStack(alignment: .leading, spacing: 8) {
-                if !notice.isEmpty { Text(notice).dmono(12).foregroundStyle(BackplaneDesign.warn).accessibilityIdentifier("data.images.notice") }
+                if !notice.isEmpty { Text(Tr.t(notice)).dmono(12).foregroundStyle(BackplaneDesign.warn).accessibilityIdentifier("data.images.notice") }
                 if !pending.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -821,49 +824,49 @@ struct DataThreadView: View {
                                 ZStack(alignment: .topTrailing) {
                                     if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFill().frame(width: 64, height: 64).clipped().overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
                                     Button { pending.remove(at: i) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(BackplaneDesign.text).frame(width: 20, height: 20).background(BackplaneDesign.raised) }
-                                        .accessibilityLabel("Remove picture")
+                                        .accessibilityLabel(Tr.t("Remove picture"))
                                 }
                             }
                         }
                     }.accessibilityIdentifier("data.pending.images")
                 }
-                UIKitField(text: text, placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw", editable: true,
+                UIKitField(text: text, placeholder: Tr.t("Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw"), editable: true,
                            onChange: { text = $0; client.setDraft(id, $0) },
                            onSend: { send() }, onPasteImages: { imgs in add(imgs.compactMap { $0.jpegData(compressionQuality: 0.95) }) },
                            font: UIFontMetrics(forTextStyle: .body).scaledFont(for: Mono.uiFont(size: 14)), caret: caret)
                     .padding(.horizontal, 10).padding(.vertical, 9).frame(minHeight: 44, alignment: .topLeading).dbox(BackplaneDesign.accent)
-                    .accessibilityLabel("Message")
+                    .accessibilityLabel(Tr.t("Message"))
                 HStack(spacing: 6) {
                     if client.has("picker") || thread?.chip.isEmpty == false {
                         Button { modelSheet = true } label: { Text(chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
-                            .buttonStyle(.plain).accessibilityLabel("Model: " + chip).accessibilityIdentifier("data.thread.model")
+                            .buttonStyle(.plain).accessibilityLabel(Tr.ios_model_label(model: chip)).accessibilityIdentifier("data.thread.model")
                     } else { Spacer(minLength: 0) }
                     if client.has("voice") {
                         let on = client.voice.listening(id)
                         Button { micPress() } label: {
                             Image(systemName: on ? "mic.fill" : "mic").font(.system(size: 15)).foregroundStyle(on ? BackplaneDesign.bad : BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
                         }
-                        .buttonStyle(.plain).accessibilityLabel(on ? "Stop dictation" : "Dictate").accessibilityIdentifier("data.mic")
+                        .buttonStyle(.plain).accessibilityLabel(Tr.t(on ? "Stop dictation" : "Dictate")).accessibilityIdentifier("data.mic")
                     }
                     // Attach: a photo from the library, or one taken now with the camera
                     Menu {
-                        Button("Choose a photo", systemImage: "photo") { photoLibrary = true }
-                        if UIImagePickerController.isSourceTypeAvailable(.camera) { Button("Take a photo", systemImage: "camera") { camera = true } }
+                        Button(Tr.t("Choose a photo"), systemImage: "photo") { photoLibrary = true }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) { Button(Tr.t("Take a photo"), systemImage: "camera") { camera = true } }
                     } label: {
                         Image(systemName: "paperclip").font(.system(size: 15)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
                     }
                     .disabled(!client.canSendImages || pending.count >= 4)
-                    .accessibilityLabel(client.canSendImages ? "Attach pictures" : "Attach pictures (this hub does not take pictures yet)").accessibilityIdentifier("data.attach")
+                    .accessibilityLabel(Tr.t(client.canSendImages ? "Attach pictures" : "Attach pictures (this hub does not take pictures yet)")).accessibilityIdentifier("data.attach")
                     Button { if client.canSendImages { drawing = true } else { notice = "This hub does not take pictures yet: update it, then draw again." } } label: {
                         Image(systemName: "pencil.tip").font(.system(size: 15)).foregroundStyle(client.canSendImages ? BackplaneDesign.dim : BackplaneDesign.faint).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
                     }
                     .disabled(pending.count >= 4)
-                    .accessibilityLabel("Draw").accessibilityIdentifier("data.draw")
+                    .accessibilityLabel(Tr.t("Draw")).accessibilityIdentifier("data.draw")
                     let blank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pending.isEmpty
                     if working && blank {
-                        Button("Stop") { Task { await client.interrupt(id) } }.buttonStyle(DButton(danger: true)).accessibilityLabel("Stop").accessibilityIdentifier("thread.send")
+                        Button(Tr.t("Stop")) { Task { await client.interrupt(id) } }.buttonStyle(DButton(danger: true)).accessibilityLabel(Tr.t("Stop")).accessibilityIdentifier("thread.send")
                     } else {
-                        Button(client.commandOf(text)?.label ?? "Send") { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
+                        Button(Tr.t(client.commandOf(text)?.label ?? "Send")) { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
                     }
                 }
             }
@@ -930,17 +933,17 @@ struct DataQueueStrip: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(rows) { r in
                 HStack(spacing: 8) {
-                    Text(r.tag.uppercased()).dmono(10).foregroundStyle(r.tag == "Refused" ? BackplaneDesign.bad : BackplaneDesign.faint).accessibilityIdentifier("queue.tag")
+                    Text(Tr.t(r.tag).uppercased()).dmono(10).foregroundStyle(r.tag == "Refused" ? BackplaneDesign.bad : BackplaneDesign.faint).accessibilityIdentifier("queue.tag")
                     Text(r.text).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("queue.text")
                     ForEach(r.buttons.filter { $0.action != "q-up" }, id: \.self) { b in
                         Button { Task { await client.queueAct(thread, b) } } label: {
-                            Text(b.label).dmono(12).foregroundStyle(b.action == "q-steer" ? BackplaneDesign.accent : b.action.hasSuffix("-remove") ? BackplaneDesign.bad : BackplaneDesign.dim)
+                            Text(Tr.t(b.label)).dmono(12).foregroundStyle(b.action == "q-steer" ? BackplaneDesign.accent : b.action.hasSuffix("-remove") ? BackplaneDesign.bad : BackplaneDesign.dim)
                                 .padding(.horizontal, 10).frame(minHeight: 30).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityIdentifier("queue.\(b.action)")
                     }
                 }.accessibilityElement(children: .contain).accessibilityIdentifier("queue.row")
             }
-            if let e = client.queueError[thread] { Text(e).dmono(11).foregroundStyle(BackplaneDesign.bad).accessibilityIdentifier("queue.error") }
+            if let e = client.queueError[thread] { Text(Tr.t(e)).dmono(11).foregroundStyle(BackplaneDesign.bad).accessibilityIdentifier("queue.error") }
         }
         .padding(.horizontal, 14).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel)
         .overlay(alignment: .top) { DLine() }
@@ -956,7 +959,7 @@ struct DataWorkPanel: View {
     private var open: Bool { chosen ?? (work.live > 0) }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button { chosen = !open } label: { HStack { Text("BACKGROUND WORK · \(work.word.uppercased())").dmono(11).foregroundStyle(BackplaneDesign.dim); Spacer() } }
+            Button { chosen = !open } label: { HStack { Text(Tr.ios_work_head(word: Tr.t(work.word)).uppercased()).dmono(11).foregroundStyle(BackplaneDesign.dim); Spacer() } }
                 .accessibilityIdentifier("data.work.head")
             if open {
                 ForEach(work.rows, id: \.self) { r in
@@ -968,7 +971,7 @@ struct DataWorkPanel: View {
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(r.title).dmono(12).lineLimit(1).foregroundStyle(BackplaneDesign.text)
                                         if let m = r.meta, !m.isEmpty { Text(m).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1) }
-                                        Text(r.doing.isEmpty ? "\(r.kind) · \(r.state)" : r.doing).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                                        Text(r.doing.isEmpty ? Tr.t(r.kind) + " · " + Tr.t(r.state) : Tr.t(r.doing)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                                     }
                                     Spacer(minLength: 0)
                                     Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.accent)
@@ -977,12 +980,12 @@ struct DataWorkPanel: View {
                         } else {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(r.title).dmono(12).lineLimit(1)
-                            Text(r.doing.isEmpty ? "\(r.kind) · \(r.state)" : r.doing).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                            Text(r.doing.isEmpty ? Tr.t(r.kind) + " · " + Tr.t(r.state) : Tr.t(r.doing)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                         }
                         Spacer()
                         }
                         if let label = r.label, !label.isEmpty {
-                            Button { client.workAct(thread, r) } label: { Text(label).dmono(12) }.accessibilityIdentifier("data.work.\(r.act ?? "").\(r.value ?? "")")
+                            Button { client.workAct(thread, r) } label: { Text(Tr.t(label)).dmono(12) }.accessibilityIdentifier("data.work.\(r.act ?? "").\(r.value ?? "")")
                         }
                     }
                 }
@@ -1000,11 +1003,11 @@ struct DataFoldRow: View {
             Button { open.toggle() } label: {
                 HStack(spacing: 8) {
                     Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 12)
-                    Text(fold.label).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                    Text(Tr.t(fold.label)).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                     Spacer(minLength: 0)
                 }.padding(.horizontal, 8).frame(minHeight: 36).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).accessibilityLabel(fold.label).accessibilityValue(open ? "open" : "shut").accessibilityIdentifier("data.fold." + fold.id)
+            .buttonStyle(.plain).accessibilityLabel(Tr.t(fold.label)).accessibilityValue(Tr.t(open ? "open" : "shut")).accessibilityIdentifier("data.fold." + fold.id)
             if open { ForEach(fold.items) { DataToolRow(entry: $0) }.padding(.leading, 8) }
         }.accessibilityIdentifier("data.entry.tool")
     }
@@ -1015,7 +1018,7 @@ struct DataToolRow: View {
     @State private var whole = false
     @Environment(\.dataSubThread) private var subThread
     private var name: String { entry.kind == "step" ? "" : entry.tool?.name ?? "tool" }
-    private var what: String { entry.kind == "step" ? (entry.label.isEmpty ? "Design change" : entry.label) : (entry.tool?.summary ?? "").isEmpty ? "" : entry.text }
+    private var what: String { entry.kind == "step" ? Tr.t(entry.label.isEmpty ? "Design change" : entry.label) : (entry.tool?.summary ?? "").isEmpty ? "" : entry.text }
     var body: some View {
         // an Agent call opens its subagent's own view (feature subview)
         if let sub = entry.tool?.sub, !sub.isEmpty, !subThread.isEmpty {
@@ -1024,7 +1027,7 @@ struct DataToolRow: View {
                     Text(name).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text)
                     Text(what).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(2)
                     Spacer(minLength: 0)
-                    Text("Open").dmono(12).foregroundStyle(BackplaneDesign.accent); Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.accent)
+                    Text(Tr.k("ios.handoff.open")).dmono(12).foregroundStyle(BackplaneDesign.accent); Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.accent)
                 }.padding(.vertical, 3).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityIdentifier("data.tool.sub.\(sub)")
         } else {
@@ -1038,12 +1041,13 @@ struct DataToolRow: View {
 }
 
 private let dClock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
-private let dDay: DateFormatter = { let f = DateFormatter(); f.dateFormat = "EEE d MMM HH:mm"; return f }()
-/// A message's time: the clock today, the day too on another.
+private let dDayEn: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "EEE d MMM HH:mm"; return f }()
+private let dDayJa: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "ja_JP"); f.dateFormat = "M月d日(EEE) HH:mm"; return f }()
+/// A message's time: the clock today, the day too on another (in the app's language).
 func dStamp(_ ms: Int) -> String {
     guard ms > 0 else { return "" }
     let d = Date(timeIntervalSince1970: Double(ms) / 1000)
-    return (Calendar.current.isDateInToday(d) ? dClock : dDay).string(from: d)
+    return (Calendar.current.isDateInToday(d) ? dClock : Tr.lang == "ja" ? dDayJa : dDayEn).string(from: d)
 }
 
 struct DataEntryRow: View {
@@ -1063,8 +1067,8 @@ struct DataEntryRow: View {
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
                         if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
                     }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised)
-                    if entry.sending { Text("Sending…").dmono(11).foregroundStyle(BackplaneDesign.faint) }
-                    else if entry.failed { Button("Not sent · Retry") { client.retry(thread, entry) }.dmono(11).foregroundStyle(BackplaneDesign.bad) }
+                    if entry.sending { Text(Tr.t("Sending…")).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                    else if entry.failed { Button(Tr.t("Not sent · Retry")) { client.retry(thread, entry) }.dmono(11).foregroundStyle(BackplaneDesign.bad) }
                     else { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                 }
             }.padding(.vertical, 4).accessibilityIdentifier("data.entry.user")
@@ -1085,8 +1089,8 @@ struct DataEntryRow: View {
             DataHandoffCard(client: client, thread: thread, handoff: entry.handoff!)
         default:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if !entry.label.isEmpty { Text(entry.label).dmono(12, bold: true) }
-                DLinkText(text: entry.text, size: 12, thread: thread)
+                if !entry.label.isEmpty { Text(Tr.t(entry.label)).dmono(12, bold: true) }
+                DLinkText(text: Tr.t(entry.text), size: 12, thread: thread)
                 Spacer(minLength: 0)
             }.foregroundStyle(entry.tone == "error" ? BackplaneDesign.bad : BackplaneDesign.dim).padding(.vertical, 3)
         }
@@ -1105,10 +1109,10 @@ struct DataHandoffCard: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button { if let u = URL(string: "backplane://thread/\(handoff.from)") { client.openLink(u, thread: thread) } } label: { Text("‹ Handed over from \(handoff.title)").dmono(11).foregroundStyle(BackplaneDesign.accent).lineLimit(1) }
+            Button { if let u = URL(string: "backplane://thread/\(handoff.from)") { client.openLink(u, thread: thread) } } label: { Text(Tr.ios_handoff_from(title: handoff.title)).dmono(11).foregroundStyle(BackplaneDesign.accent).lineLimit(1) }
                 .accessibilityIdentifier("handoff.back")
             Text(handoff.summary).dmono(13).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("handoff.summary")
-            if !handoff.note.isEmpty { Text("Note: \(handoff.note)").dmono(12).foregroundStyle(BackplaneDesign.dim) }
+            if !handoff.note.isEmpty { Text(Tr.ios_handoff_note(note: handoff.note)).dmono(12).foregroundStyle(BackplaneDesign.dim) }
             ForEach(Array(handoff.refs.enumerated()), id: \.offset) { i, r in
                 Button { open(r) } label: {
                     HStack(spacing: 8) {
@@ -1130,22 +1134,22 @@ struct DataAskCard: View {
     var body: some View {
         let ask = entry.ask
         VStack(alignment: .leading, spacing: 8) {
-            DHeading(text: ask?.isOpen == true ? "Asks" : "Asked")
+            DHeading(text: Tr.t(ask?.isOpen == true ? "Asks" : "Asked"))
             Text(ask?.question ?? entry.text).dmono(13).foregroundStyle(BackplaneDesign.text).textSelection(.enabled)
             if ask?.isOpen == true {
                 if (ask?.options ?? []).isEmpty {
                     HStack(spacing: 6) {
-                        TextField("Your answer", text: $answer).dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
-                        Button("Send") { Task { await client.answer(thread, ask: ask!.id, option: answer) } }.buttonStyle(DButton(primary: true)).disabled(answer.isEmpty)
+                        TextField(Tr.t("Your answer"), text: $answer).dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
+                        Button(Tr.t("Send")) { Task { await client.answer(thread, ask: ask!.id, option: answer) } }.buttonStyle(DButton(primary: true)).disabled(answer.isEmpty)
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 6) { ForEach(ask!.options) { o in
-                        Button { Task { await client.answer(thread, ask: ask!.id, option: o.id) } } label: { Text(o.label).frame(maxWidth: .infinity, alignment: .leading) }
+                        Button { Task { await client.answer(thread, ask: ask!.id, option: o.id) } } label: { Text(Tr.t(o.label)).frame(maxWidth: .infinity, alignment: .leading) }
                             .buttonStyle(DButton(primary: o.id == "accept", danger: o.id == "deny" || o.id == "decline"))
                             .accessibilityIdentifier("data.ask." + o.id)
                     } }
                 }
-            } else if let a = ask?.answered { Text("Answered: \(a)").dmono(12).foregroundStyle(BackplaneDesign.dim) }
+            } else if let a = ask?.answered { Text(Tr.ios_ask_answered(answer: Tr.t(a))).dmono(12).foregroundStyle(BackplaneDesign.dim) }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .dbox(ask?.isOpen == true ? BackplaneDesign.bad : BackplaneDesign.line, fill: BackplaneDesign.panel)
@@ -1165,28 +1169,28 @@ struct DataImprovementsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                DHeading(text: "What would you like to improve?")
+                DHeading(text: Tr.t("What would you like to improve?"))
                 TextEditor(text: $text).dmono(13).scrollContentBackground(.hidden).padding(6).frame(minHeight: 140).dbox(BackplaneDesign.accent).accessibilityIdentifier("improvements.text")
-                Text("A public GitHub issue draft on BackplaneWorks/Backplane opens in your browser, filled with this text. You review it and press Submit there; nothing is sent from here. Do not include private information.").dmono(11).foregroundStyle(BackplaneDesign.dim)
-                Button("Open a GitHub issue draft") { openURL(issueURL) }.buttonStyle(DButton())
+                Text(Tr.t("A public GitHub issue draft on BackplaneWorks/Backplane opens in your browser, filled with this text. You review it and press Submit there; nothing is sent from here. Do not include private information.")).dmono(11).foregroundStyle(BackplaneDesign.dim)
+                Button(Tr.t("Open a GitHub issue draft")) { openURL(issueURL) }.buttonStyle(DButton())
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("improvements.github")
                 if !client.projects.isEmpty {
                     DLine()
-                    DHeading(text: "Project")
+                    DHeading(text: Tr.t("Project"))
                     DChoices(options: client.projects.map { (label: $0.title, value: $0.id) }, value: Binding(get: { project.isEmpty ? (client.projects.first?.id ?? "") : project }, set: { project = $0 }))
-                    Button("Send to an agent thread") {
+                    Button(Tr.t("Send to an agent thread")) {
                         let p = project.isEmpty ? (client.projects.first?.id ?? "") : project
                         Task { if (try? await client.createThread(project: p, text: "Improvement idea for this app:\n\n" + text)) != nil { sent = "Thread started in Threads."; text = "" } }
                     }
                     .buttonStyle(DButton(primary: true))
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || client.conn != .online).accessibilityIdentifier("improvements.thread")
-                    if !sent.isEmpty { Text(sent).dmono(12).foregroundStyle(BackplaneDesign.dim) }
-                    Text("Starts a thread on your hub in the chosen project with this text.").dmono(11).foregroundStyle(BackplaneDesign.dim)
+                    if !sent.isEmpty { Text(Tr.t(sent)).dmono(12).foregroundStyle(BackplaneDesign.dim) }
+                    Text(Tr.t("Starts a thread on your hub in the chosen project with this text.")).dmono(11).foregroundStyle(BackplaneDesign.dim)
                 }
             }.padding(16)
         }
         .background(BackplaneDesign.background)
-        .dataBar("Improvements")
+        .dataBar(Tr.t("Improvements"))
     }
     private var issueURL: URL {
         let info = Bundle.main.infoDictionary
@@ -1209,25 +1213,28 @@ struct DataSettingsView: View {
     private func onOff(_ title: String, _ on: Binding<Bool>, id: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             DHeading(text: title)
-            DChoices(options: [(label: "on", value: true), (label: "off", value: false)], value: on).accessibilityIdentifier(id)
+            DChoices(options: [(label: Tr.t("on"), value: true), (label: Tr.t("off"), value: false)], value: on).accessibilityIdentifier(id)
         }
     }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                DHeading(text: "Appearance")
-                DChoices(options: [(label: "system", value: "system"), (label: "light", value: "light"), (label: "dark", value: "dark")], value: $settings.appearance)
-                DHeading(text: "Text size")
-                DChoices(options: [(label: "system", value: "system")] + AppSettings.textSteps.map { (label: $0.tag, value: $0.tag) }, value: $settings.textSize).accessibilityIdentifier("settings.textsize")
-                onOff("Alerts on this phone", $settings.alerts, id: "settings.alerts")
+                DHeading(text: Tr.k("settings.lang"))
+                DChoices(options: [(label: Tr.k("settings.lang.auto"), value: "auto"), (label: Tr.k("settings.lang.en"), value: "en"), (label: Tr.k("settings.lang.ja"), value: "ja")], value: $settings.lang).accessibilityIdentifier("settings.lang")
+                Text(Tr.k("settings.lang.note")).dmono(11).foregroundStyle(BackplaneDesign.dim)
+                DHeading(text: Tr.t("Appearance"))
+                DChoices(options: [(label: Tr.t("system"), value: "system"), (label: Tr.t("light"), value: "light"), (label: Tr.t("dark"), value: "dark")], value: $settings.appearance)
+                DHeading(text: Tr.t("Text size"))
+                DChoices(options: [(label: Tr.t("system"), value: "system")] + AppSettings.textSteps.map { (label: $0.tag, value: $0.tag) }, value: $settings.textSize).accessibilityIdentifier("settings.textsize")
+                onOff(Tr.t("Alerts on this phone"), $settings.alerts, id: "settings.alerts")
                     .onChange(of: settings.alerts) { _, on in Task { if on { await client.enablePush() }; await client.pushMute(); if client.has("notifysettings") { await client.notify.load() } } }
-                if settings.alerts { onOff("Alert sound", $settings.alertSound, id: "settings.sound") }
-                onOff("Haptics", $settings.haptics, id: "settings.haptics")
-                Text("Off: only what you let through reaches this phone. Alerts come from your uberbot.").dmono(11).foregroundStyle(BackplaneDesign.dim)
+                if settings.alerts { onOff(Tr.t("Alert sound"), $settings.alertSound, id: "settings.sound") }
+                onOff(Tr.t("Haptics"), $settings.haptics, id: "settings.haptics")
+                Text(Tr.t("Off: only what you let through reaches this phone. Alerts come from your uberbot.")).dmono(11).foregroundStyle(BackplaneDesign.dim)
                 // an older hub has no Notifications page: its quiet hours and urgent switch are drawn here
                 if client.has("push") && !client.has("notifysettings") { DLine(); DataQuietSection(client: client) }
                 DLine()
-                DHeading(text: "Hubs")
+                DHeading(text: Tr.t("Hubs"))
                 let keys = client.links.compactMap { Pairing.key($0) }
                 ForEach(keys.indices, id: \.self) { i in
                     let k = keys[i]
@@ -1235,19 +1242,19 @@ struct DataSettingsView: View {
                         if i == 0 { DDot(color: client.conn == .online ? BackplaneDesign.ok : client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8) }
                         Text(k).dmono(13).lineLimit(1)
                         Spacer()
-                        if i == 0 { Text(client.conn.rawValue).dmono(11).foregroundStyle(BackplaneDesign.dim) }
-                        else { Button("Use") { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.use.\(k)") }
-                        Button("Forget") { forgetKey = k }.buttonStyle(DButton(danger: true)).accessibilityIdentifier("settings.hub.forget.\(k)")
+                        if i == 0 { Text(Tr.t(client.conn.rawValue)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
+                        else { Button(Tr.t("Use")) { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.use.\(k)") }
+                        Button(Tr.t("Forget")) { forgetKey = k }.buttonStyle(DButton(danger: true)).accessibilityIdentifier("settings.hub.forget.\(k)")
                     }
                 }
-                if client.links.isEmpty { Text("Not paired").dmono(13) }
-                if !client.failure.isEmpty, client.conn != .online { Text(client.failure).dmono(11).foregroundStyle(BackplaneDesign.dim) }
+                if client.links.isEmpty { Text(Tr.t("Not paired")).dmono(13) }
+                if !client.failure.isEmpty, client.conn != .online { Text(Tr.t(client.failure)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
                 HStack(spacing: 6) {
-                    Button("Reconnect") { client.connect() }.buttonStyle(DButton())
-                    Button("Add a hub") { client.pairingError = ""; client.adding = true }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.add")
+                    Button(Tr.t("Reconnect")) { client.connect() }.buttonStyle(DButton())
+                    Button(Tr.t("Add a hub")) { client.pairingError = ""; client.adding = true }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.add")
                 }
-                NavigationLink(value: DPage(name: "hub")) { Text("Hub") }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub")
-                if client.has("accounts") { NavigationLink(value: DPage(name: "accounts")) { Text("Accounts") }.buttonStyle(DButton()).accessibilityIdentifier("settings.accounts") }
+                NavigationLink(value: DPage(name: "hub")) { Text(Tr.t("Hub")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub")
+                if client.has("accounts") { NavigationLink(value: DPage(name: "accounts")) { Text(Tr.t("Accounts")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.accounts") }
                 DLine()
                 DataUpdateSection(client: client)
                 DLine()
@@ -1255,17 +1262,17 @@ struct DataSettingsView: View {
                 if client.has("devices") { DataDevicesSection(client: client); DLine() }
                 if client.has("machines") { DataMachinesSection(client: client); DLine() }
                 if client.has("notifysettings") { DataNotifySection(client: client); DLine() }
-                NavigationLink(value: DPage(name: "improvements")) { Text("Improvements") }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
+                NavigationLink(value: DPage(name: "improvements")) { Text(Tr.t("Improvements")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
                 DLine()
                 let i = Bundle.main.infoDictionary
-                Text("Version \(i?["CFBundleShortVersionString"] as? String ?? "?") (\(i?["CFBundleVersion"] as? String ?? "?"))").dmono(11).foregroundStyle(BackplaneDesign.faint)
+                Text(Tr.ios_version(version: i?["CFBundleShortVersionString"] as? String ?? "?", build: i?["CFBundleVersion"] as? String ?? "?")).dmono(11).foregroundStyle(BackplaneDesign.faint)
             }.padding(16)
         }
         .background(BackplaneDesign.background)
-        .dataBar("Settings")
-        .confirmationDialog("Forget \(forgetKey ?? "this hub")?", isPresented: Binding(get: { forgetKey != nil }, set: { if !$0 { forgetKey = nil } }), titleVisibility: .visible) {
-            Button("Forget", role: .destructive) { if let k = forgetKey { client.forgetHub(k) }; forgetKey = nil }
-        } message: { Text("This phone's saved copy of its threads is removed. Pair again to come back.") }
+        .dataBar(Tr.t("Settings"))
+        .confirmationDialog(Tr.ios_hub_forget_ask(hub: forgetKey ?? Tr.t("this hub")), isPresented: Binding(get: { forgetKey != nil }, set: { if !$0 { forgetKey = nil } }), titleVisibility: .visible) {
+            Button(Tr.t("Forget"), role: .destructive) { if let k = forgetKey { client.forgetHub(k) }; forgetKey = nil }
+        } message: { Text(Tr.t("This phone's saved copy of its threads is removed. Pair again to come back.")) }
     }
 }
 
@@ -1276,16 +1283,16 @@ struct DataUpdateSection: View {
     private func load(_ m: String, _ p: [String: Any] = [:]) async { if let r: DUpdate = try? await client.call(m, p) { status = r } }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            DHeading(text: "Updates")
+            DHeading(text: Tr.t("Updates"))
             if let u = status {
-                Text("Backplane \(u.current)").dmono(13)
-                Text(u.line).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("settings.update.line")
-                DChoices(options: [(label: "stable", value: "stable"), (label: "beta", value: "beta")],
+                Text(verbatim: "Backplane \(u.current)").dmono(13)
+                Text(Tr.t(u.line)).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("settings.update.line")
+                DChoices(options: [(label: Tr.t("stable"), value: "stable"), (label: Tr.t("beta"), value: "beta")],
                          value: Binding(get: { u.channel }, set: { c in Task { await load("update.channel", ["channel": c]) } })).accessibilityIdentifier("settings.update.channel")
                 if u.canCheck {
-                    Button("Check now") { Task { await load("update.check"); try? await Task.sleep(for: .seconds(3)); await load("update.status") } }.buttonStyle(DButton()).accessibilityIdentifier("settings.update.check")
+                    Button(Tr.t("Check now")) { Task { await load("update.check"); try? await Task.sleep(for: .seconds(3)); await load("update.status") } }.buttonStyle(DButton()).accessibilityIdentifier("settings.update.check")
                 }
-            } else { Text("Not connected").dmono(11).foregroundStyle(BackplaneDesign.dim) }
+            } else { Text(Tr.t("Not connected")).dmono(11).foregroundStyle(BackplaneDesign.dim) }
         }
         .task(id: client.conn) { await load("update.status") }
     }
@@ -1324,23 +1331,23 @@ struct DataOrderCard: View {
     @Environment(\.openURL) private var openURL
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(order.name.isEmpty ? "ORDER" : "ORDER · \(order.name)").dmono(12, bold: true).foregroundStyle(BackplaneDesign.text)
+            Text(order.name.isEmpty ? Tr.t("Order").uppercased() : Tr.ios_order_named(name: order.name).uppercased()).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(order.steps.enumerated()), id: \.offset) { i, s in
                         if i > 0 { Text("›").dmono(11).foregroundStyle(BackplaneDesign.faint) }
                         switch s.mark {
-                        case "done": Text("✓ \(s.label)").dmono(11).foregroundStyle(BackplaneDesign.dim)
-                        case "on": Text(s.label).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accentText)
-                        default: Text(s.label).dmono(11).foregroundStyle(BackplaneDesign.faint)
+                        case "done": Text("✓ " + Tr.t(s.label)).dmono(11).foregroundStyle(BackplaneDesign.dim)
+                        case "on": Text(Tr.t(s.label)).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accentText)
+                        default: Text(Tr.t(s.label)).dmono(11).foregroundStyle(BackplaneDesign.faint)
                         }
                     }
                 }
             }
-            Text(order.line).dmono(12).foregroundStyle(order.waiting ? BackplaneDesign.dim : BackplaneDesign.text)
-            if !order.total.isEmpty { Text(order.total).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text) }
-            if !order.customs.isEmpty { Text(order.customs).dmono(11).foregroundStyle(BackplaneDesign.dim) }
-            if let u = order.payURL { Button(order.label.isEmpty ? "Buy now" : order.label) { openURL(u) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("thread.order.pay") }
+            Text(Tr.t(order.line)).dmono(12).foregroundStyle(order.waiting ? BackplaneDesign.dim : BackplaneDesign.text)
+            if !order.total.isEmpty { Text(Tr.t(order.total)).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text) }
+            if !order.customs.isEmpty { Text(Tr.t(order.customs)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
+            if let u = order.payURL { Button(Tr.t(order.label.isEmpty ? "Buy now" : order.label)) { openURL(u) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("thread.order.pay") }
         }
         .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
         .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("thread.order") // a container: Buy now keeps its own identifier
@@ -1353,12 +1360,12 @@ struct AskPairView: View {
     let link: String
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Pair with this hub?").font(.title2.weight(.semibold))
+            Text(Tr.t("Pair with this hub?")).font(.title2.weight(.semibold))
             Text(verbatim: Pairing.invitation(link)?.origin.absoluteString ?? Pairing.key(link) ?? "").font(.system(.body, design: .monospaced))
-            Text("A link opened this. Pair only with a hub you know.").font(.footnote).foregroundStyle(.secondary)
+            Text(Tr.t("A link opened this. Pair only with a hub you know.")).font(.footnote).foregroundStyle(.secondary)
             HStack(spacing: 8) {
-                Button("Cancel") { client.askLink = nil }.buttonStyle(PairActionStyle()).accessibilityIdentifier("pair.ask.cancel")
-                Button("Pair") { client.askLink = nil; client.pair(link) }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 0)).accessibilityIdentifier("pair.ask.yes")
+                Button(Tr.t("Cancel")) { client.askLink = nil }.buttonStyle(PairActionStyle()).accessibilityIdentifier("pair.ask.cancel")
+                Button(Tr.t("Pair")) { client.askLink = nil; client.pair(link) }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 0)).accessibilityIdentifier("pair.ask.yes")
             }
         }
         .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).background(BackplaneDesign.background)
@@ -1373,3 +1380,6 @@ struct AskPairView: View {
         #endif
     }
 }
+
+/// A machine's word with " · away" when it does not answer (the hub's `away`), in the language on show.
+func dAway(_ label: String, _ away: Bool) -> String { away ? Tr.ios_machine_away(label: label) : label }

@@ -27,7 +27,6 @@ struct QRCodeView: View {
 // The camera reading a pairing code: the first QR code it sees goes to
 // found (the app pairs with any link Pairing understands)
 struct ScanView: View {
-    let tag: String
     let found: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var denied = false
@@ -37,20 +36,20 @@ struct ScanView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if denied {
-                    Text(NativeMessages.native_pair_scanner_denied(tag))
+                    Text(Tr.k("native.pair.scanner.denied"))
                         .foregroundStyle(.white).multilineTextAlignment(.center).padding()
                 } else {
                     Scanner { s in found(s); dismiss() }.ignoresSafeArea()
                     VStack {
                         Spacer()
-                        Text(NativeMessages.native_pair_scanner_instructions(tag))
+                        Text(Tr.k("native.pair.scanner.instructions"))
                             .font(.footnote).foregroundStyle(.white).multilineTextAlignment(.center).padding()
                     }
                 }
             }
-            .navigationTitle(NativeMessages.native_pair_scanner_title(tag))
+            .navigationTitle(Tr.k("native.pair.scanner.title"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.common_cancel(tag)) { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(Tr.k("common.cancel")) { dismiss() } } }
             .task {
                 switch AVCaptureDevice.authorizationStatus(for: .video) {
                 case .notDetermined: denied = !(await AVCaptureDevice.requestAccess(for: .video))
@@ -139,13 +138,13 @@ struct DeviceManagerView: View {
         // (machine: a hub-to-hub invite made in Bots; its "device" is the link it made)
         let id: String; let state: String; let created: Date; let expires: Date; let used: Date?; let device: String; let deviceName: String; let deviceRevoked: Bool; let machine: Bool
         var revocable: Bool { state == "open" || (state == "used" && !device.isEmpty && !deviceRevoked) }
-        var title: String { machine ? "Machine invite" : "Device invitation" }
+        var title: String { Tr.t(machine ? "Machine invite" : "Device invitation") }
         var summary: String {
             switch state {
-            case "used": return "Used " + (used.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "") + " by " + (deviceName.isEmpty ? (machine ? "a machine" : "a device") : deviceName) + (deviceRevoked ? (machine ? " (unlinked)" : " (revoked)") : "")
-            case "revoked": return device.isEmpty ? "Revoked, never used" : "Revoked with " + (deviceName.isEmpty ? (machine ? "the machine it linked" : "the device it paired") : deviceName)
-            case "expired": return "Expired, never used"
-            default: return "Not used yet · expires " + expires.formatted(date: .omitted, time: .shortened)
+            case "used": return Tr.ios_link_used(when: used.map { $0.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Tr.locale)) } ?? "", who: deviceName.isEmpty ? Tr.t(machine ? "a machine" : "a device") : deviceName, mark: deviceRevoked ? (machine ? "unlinked" : "revoked") : "none")
+            case "revoked": return device.isEmpty ? Tr.t("Revoked, never used") : Tr.ios_link_revoked_with(who: deviceName.isEmpty ? Tr.t(machine ? "the machine it linked" : "the device it paired") : deviceName)
+            case "expired": return Tr.t("Expired, never used")
+            default: return Tr.ios_link_open(time: expires.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(Tr.locale)))
             }
         }
     }
@@ -182,9 +181,9 @@ struct DeviceManagerView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Add another computer or phone. Invitations work once and expire in 10 minutes.")
-                    if !status.isEmpty { Text(status).foregroundStyle(.secondary) }
-                    Button("Add a device") { Task {
+                    Text(Tr.t("Add another computer or phone. Invitations work once and expire in 10 minutes."))
+                    if !status.isEmpty { Text(Tr.t(status)).foregroundStyle(.secondary) }
+                    Button(Tr.t("Add a device")) { Task {
                         status = "Creating invitation…"
                         do { let result = try await request("/auth/invitations", method: "POST")
                             guard let value = result["link"] as? String, let code = result["code"] as? String,
@@ -198,49 +197,49 @@ struct DeviceManagerView: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 if clock.date < invitation.expires {
                                     Text(invitation.code).font(.mono(.largeTitle, weight: .bold)).privacySensitive()
-                                    Text("Hub address: " + invitation.address)
-                                    Text("Expires ").font(.footnote) + Text(invitation.expires, style: .relative).font(.footnote)
+                                    Text(Tr.ios_hub_address(address: invitation.address))
+                                    Text(Tr.t("Expires ")).font(.footnote) + Text(invitation.expires, style: .relative).font(.footnote)
                                     QRCodeView(rows: invitation.qr).privacySensitive()
                                     HStack {
-                                        Button("Copy link") { UIPasteboard.general.string = invitation.link }
-                                        ShareLink("Share", item: invitation.link)
-                                        Button("Copy code") { UIPasteboard.general.string = invitation.code }
+                                        Button(Tr.t("Copy link")) { UIPasteboard.general.string = invitation.link }
+                                        ShareLink(Tr.t("Share"), item: invitation.link)
+                                        Button(Tr.t("Copy code")) { UIPasteboard.general.string = invitation.code }
                                     }
-                                } else { Text("Expired — create a new invitation.") }
+                                } else { Text(Tr.t("Expired — create a new invitation.")) }
                             }
                         }
                     }
-                    Text("Paired devices").font(.headline)
-                    if devices.isEmpty { Text("Existing pairings are preserved. New devices appear here after connecting.").foregroundStyle(.secondary) }
+                    Text(Tr.t("Paired devices")).font(.headline)
+                    if devices.isEmpty { Text(Tr.t("Existing pairings are preserved. New devices appear here after connecting.")).foregroundStyle(.secondary) }
                     ForEach(devices) { device in
                         VStack(alignment: .leading) {
                             Text(device.name).font(.headline)
-                            Text("Last seen ") + Text(device.lastSeen, style: .relative)
-                            Button("Revoke", role: .destructive) { revokeTarget = device }
+                            Text(Tr.t("Last seen ")) + Text(device.lastSeen, style: .relative)
+                            Button(Tr.t("Revoke"), role: .destructive) { revokeTarget = device }
                         }.padding(.vertical, 8)
                     }
-                    Text("Pairing links").font(.headline)
-                    if links.isEmpty { Text("Links made with Add a device, and invites made in Bots to link a machine, appear here.").foregroundStyle(.secondary) }
+                    Text(Tr.t("Pairing links")).font(.headline)
+                    if links.isEmpty { Text(Tr.t("Links made with Add a device, and invites made in Bots to link a machine, appear here.")).foregroundStyle(.secondary) }
                     ForEach(links) { x in
                         VStack(alignment: .leading) {
-                            Text(x.title + " · " + x.created.formatted(date: .abbreviated, time: .shortened)).font(.headline)
+                            Text(x.title + " · " + x.created.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Tr.locale))).font(.headline)
                             Text(x.summary).foregroundStyle(.secondary)
-                            if x.revocable { Button("Revoke", role: .destructive) { uninviteTarget = x } }
+                            if x.revocable { Button(Tr.t("Revoke"), role: .destructive) { uninviteTarget = x } }
                         }.padding(.vertical, 8)
                     }
                 }.frame(maxWidth: 520, alignment: .leading).padding(24)
             }
-            .navigationTitle("Devices")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .navigationTitle(Tr.t("Devices"))
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(Tr.t("Done")) { dismiss() } } }
             .task { await refresh() }
-            .alert("Revoke access?", isPresented: Binding(get: { revokeTarget != nil }, set: { if !$0 { revokeTarget = nil } })) {
-                Button("Revoke", role: .destructive) { if let device = revokeTarget { Task { do { _ = try await request("/auth/revoke", method: "POST", device: device.id);await refresh() } catch { status = "Could not revoke this device." } } };revokeTarget = nil }
-                Button("Cancel", role: .cancel) { revokeTarget = nil }
-            } message: { Text("This device will need a new invitation to reconnect.") }
-            .alert("Revoke this link?", isPresented: Binding(get: { uninviteTarget != nil }, set: { if !$0 { uninviteTarget = nil } })) {
-                Button("Revoke", role: .destructive) { if let x = uninviteTarget { Task { do { _ = try await request("/auth/revoke", method: "POST", invitation: x.id);await refresh() } catch { status = "Could not revoke this link." } } };uninviteTarget = nil }
-                Button("Cancel", role: .cancel) { uninviteTarget = nil }
-            } message: { Text(uninviteTarget?.state == "used" ? (uninviteTarget?.machine == true ? "The machine it linked (" : "The device it paired (") + ((uninviteTarget?.deviceName).flatMap { $0.isEmpty ? nil : $0 } ?? "unnamed") + (uninviteTarget?.machine == true ? ") is unlinked too." : ") loses access too.") : "It will no longer pair anything.") }
+            .alert(Tr.t("Revoke access?"), isPresented: Binding(get: { revokeTarget != nil }, set: { if !$0 { revokeTarget = nil } })) {
+                Button(Tr.t("Revoke"), role: .destructive) { if let device = revokeTarget { Task { do { _ = try await request("/auth/revoke", method: "POST", device: device.id);await refresh() } catch { status = "Could not revoke this device." } } };revokeTarget = nil }
+                Button(Tr.t("Cancel"), role: .cancel) { revokeTarget = nil }
+            } message: { Text(Tr.t("This device will need a new invitation to reconnect.")) }
+            .alert(Tr.t("Revoke this link?"), isPresented: Binding(get: { uninviteTarget != nil }, set: { if !$0 { uninviteTarget = nil } })) {
+                Button(Tr.t("Revoke"), role: .destructive) { if let x = uninviteTarget { Task { do { _ = try await request("/auth/revoke", method: "POST", invitation: x.id);await refresh() } catch { status = "Could not revoke this link." } } };uninviteTarget = nil }
+                Button(Tr.t("Cancel"), role: .cancel) { uninviteTarget = nil }
+            } message: { Text(uninviteTarget?.state == "used" ? Tr.ios_link_revoke_used(kind: uninviteTarget?.machine == true ? "machine" : "device", name: (uninviteTarget?.deviceName).flatMap { $0.isEmpty ? nil : $0 } ?? Tr.t("unnamed")) : Tr.t("It will no longer pair anything.")) }
         }
     }
 }

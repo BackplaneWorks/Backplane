@@ -2,34 +2,6 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-// The tabs of the app, in the order of the bar.
-enum AppTab: String, CaseIterable, Identifiable {
-    case home, threads, bots, routines, settings
-    var id: String { rawValue }
-
-    var title: String { title("en") }
-
-    func title(_ tag: String) -> String {
-        switch self {
-        case .home: NativeMessages.native_tab_home(tag)
-        case .threads: NativeMessages.tour_title_threads(tag)
-        case .bots: NativeMessages.tour_title_bots(tag)
-        case .routines: NativeMessages.bots_tab_routines(tag)
-        case .settings: NativeMessages.palette_settings(tag)
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .home: "house"
-        case .threads: "bubble.left.and.bubble.right"
-        case .bots: "pawprint"
-        case .routines: "clock.arrow.circlepath"
-        case .settings: "gearshape"
-        }
-    }
-}
-
 // Settings about this device: kept in UserDefaults, applied at once, never a
 // round trip to a hub. The thread list's view also goes to
 // (Backplane.local), which draws the list; nothing here is written to a hub.
@@ -41,7 +13,8 @@ final class AppSettings {
 
     // "system", "light" or "dark"
     var appearance: String { didSet { d.set(appearance, forKey: "app.appearance") } }
-    var lang: String { didSet { d.set(lang, forKey: "app.lang") } }
+    // "auto" (the system's language), "en" or "ja": what the app shows (Tr.lang), changed at once
+    var lang: String { didSet { d.set(lang, forKey: "app.lang"); Tr.lang = Tr.resolve(lang) } }
     @ObservationIgnored let langPreview: Bool
     // "projects" or "active"; empty until the hub's choice was carried over
     var threadList: String { didSet { d.set(threadList, forKey: "app.threadList") } }
@@ -73,6 +46,7 @@ final class AppSettings {
         alerts = d.object(forKey: "app.alerts") as? Bool ?? true
         alertSound = d.object(forKey: "app.alertSound") as? Bool ?? true
         classic = d.bool(forKey: "app.classic")
+        Tr.lang = Tr.resolve(lang)
     }
 
     static let textSteps: [(tag: String, size: DynamicTypeSize)] = [("xs", .xSmall), ("s", .small), ("m", .medium), ("l", .large), ("xl", .xLarge), ("xxl", .xxLarge), ("xxxl", .xxxLarge)]

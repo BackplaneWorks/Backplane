@@ -51,15 +51,15 @@ struct DataQuietSection: View {
     private func set(_ a: Date, _ b: Date) { Task { await client.setQuiet(Self.text(a) + "-" + Self.text(b)) } }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            DHeading(text: "Quiet hours")
-            DChoices(options: [(label: "on", value: true), (label: "off", value: false)], value: Binding(get: { on }, set: { v in Task { await client.setQuiet(v ? "22:00-07:00" : "off") } })).accessibilityIdentifier("settings.quiet")
+            DHeading(text: Tr.t("Quiet hours"))
+            DChoices(options: [(label: Tr.t("on"), value: true), (label: Tr.t("off"), value: false)], value: Binding(get: { on }, set: { v in Task { await client.setQuiet(v ? "22:00-07:00" : "off") } })).accessibilityIdentifier("settings.quiet")
             if on {
-                DatePicker("From", selection: Binding(get: { parts().0 }, set: { set($0, parts().1) }), displayedComponents: .hourAndMinute).dmono(13)
-                DatePicker("To", selection: Binding(get: { parts().1 }, set: { set(parts().0, $0) }), displayedComponents: .hourAndMinute).dmono(13)
+                DatePicker(Tr.t("From"), selection: Binding(get: { parts().0 }, set: { set($0, parts().1) }), displayedComponents: .hourAndMinute).dmono(13)
+                DatePicker(Tr.t("To"), selection: Binding(get: { parts().1 }, set: { set(parts().0, $0) }), displayedComponents: .hourAndMinute).dmono(13)
             }
-            DHeading(text: "Urgent asks come through")
-            DChoices(options: [(label: "on", value: true), (label: "off", value: false)], value: Binding(get: { client.quietUrgent }, set: { v in Task { await client.setQuietUrgent(v) } })).accessibilityIdentifier("settings.urgent")
-            Text("In your time zone, on every phone. Held alerts arrive as one when quiet hours end.").dmono(11).foregroundStyle(BackplaneDesign.dim)
+            DHeading(text: Tr.t("Urgent asks come through"))
+            DChoices(options: [(label: Tr.t("on"), value: true), (label: Tr.t("off"), value: false)], value: Binding(get: { client.quietUrgent }, set: { v in Task { await client.setQuietUrgent(v) } })).accessibilityIdentifier("settings.urgent")
+            Text(Tr.t("In your time zone, on every phone. Held alerts arrive as one when quiet hours end.")).dmono(11).foregroundStyle(BackplaneDesign.dim)
         }
     }
 }

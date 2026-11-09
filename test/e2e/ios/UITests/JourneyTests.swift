@@ -923,6 +923,86 @@ final class Journeys: XCTestCase {
         d.shot("6-find-closed")
     }
 
+    // The app in Japanese (docs/i18n/README.md): I18N_MODE=auto, a simulator whose language is Japanese and the setting left on Automatic, first unpaired
+    // (the pairing screen, then a real pairing); else (settings) an English simulator where Settings › Language › 日本語 is chosen by hand. Then every
+    // screen a person sees first: the list, a thread and its composer, its menu, the viewer's kinds, a bot, a room, the hub page and Add a hub. Pictures
+    // only: what is English, clipped or tofu is judged by looking at them. Rig: scripts/mobile/ios-i18n-journey.sh (data-hub.sh's demo hub).
+    func test_data_i18n() {
+        d = Driver("data-i18n"); defer { d.finish() }
+        let d = self.d!   // the closures below capture the driver, not self
+        let auto = d.env["I18N_MODE"] == "auto"
+        let p = auto ? "auto-" : "ja-"
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        func sysAlert() { for w in ["Allow", "許可", "Don’t Allow", "許可しない"] { let b = springboard.buttons[w]; if b.exists { b.tap(); return } } }
+        func any(_ ws: [String]) -> XCUIElement? { ws.lazy.map { d.app.buttons[$0] }.first { $0.exists } }
+        func skip() { for _ in 0..<4 { if let b = any(["Skip", "スキップ"]) { b.tap(); sleep(1) } } }
+        func back() { let b = d.app.navigationBars.buttons.element(boundBy: 0); if b.exists { b.tap(); sleep(1) } }
+        func shot(_ n: String) { sleep(1); d.shot(p + n) }
+        let rows = d.app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'data.thread.row.'"))
+        d.app.terminate(); d.app.launchArguments = ["-app.alerts", "<false/>"]
+        if auto {
+            d.app.launchEnvironment = ["BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+            let addr = d.el("pair.address")
+            guard d.step("the pairing screen", timeout: 20, act: {}, expect: { addr.exists }) else { return }
+            shot("00-pair")
+            d.step("type the pairing link", act: { d.tap(addr); d.type(addr, d.link) }, expect: { d.el("pair.connect").isEnabled })
+            shot("01-pair-typed")
+            d.step("connect", timeout: 30, act: { d.tap(d.el("pair.connect")) }, expect: { rows.firstMatch.exists || any(["スキップ", "Skip"]) != nil })
+        } else {
+            d.app.launchEnvironment = ["BACKPLANE_LINK": d.link, "BACKPLANE_PERFORMANCE": "1"]; d.app.launch()
+        }
+        sleep(2); sysAlert(); skip()
+        guard d.step("the list", timeout: 30, act: {}, expect: { rows.firstMatch.exists }) else { return }
+        let lang = d.el("settings.lang")
+        guard d.step("Settings", act: { d.tap(d.el("data.settings")) }, expect: { lang.waitForExistence(timeout: 8) }) else { return }
+        if auto {
+            d.step("Automatic is on, and the app is Japanese", act: {}, expect: { lang.buttons["自動"].isSelected && d.label("言語").exists })
+        } else {
+            shot("00-settings-english")
+            d.step("Language › 日本語", act: { d.tap(lang.buttons["日本語"]) }, expect: { lang.buttons["日本語"].isSelected && d.label("言語").exists })
+        }
+        shot("02-settings")
+        d.app.swipeUp(); shot("03-settings-more")
+        d.app.swipeUp(); shot("04-settings-end")
+        d.step("the hub page", act: { d.app.swipeDown(); d.app.swipeDown(); d.tap(d.el("settings.hub")) }, expect: { d.app.navigationBars.count > 0 && !lang.exists })
+        shot("05-hub"); back(); back()
+        d.step("back to the list", act: {}, expect: { rows.firstMatch.waitForExistence(timeout: 8) })
+        shot("06-home")
+        let search = d.el("data.search")
+        if search.exists { d.tap(search); d.type(search, "zzqq"); shot("07-search-none"); search.clearIfThere(); search.typeText("\n"); sleep(1) }
+        let menu = d.el("data.hub")
+        if menu.exists { menu.tap(); shot("08-hub-menu"); d.app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap(); sleep(1) }
+        let t1 = rows.containing(NSPredicate(format: "label CONTAINS 'ecc83'")).firstMatch
+        guard d.step("open a thread", act: { d.tap(t1.exists ? t1 : rows.firstMatch) }, expect: { d.el("thread.composer").waitForExistence(timeout: 10) }) else { return }
+        shot("10-thread")
+        let comp = d.el("thread.composer")
+        d.step("type in the composer", act: { d.tap(comp); d.type(comp, "ボードを確認して") }, expect: { d.el("thread.send").isEnabled })
+        shot("11-composer")
+        d.step("send, the stand-in answers", timeout: 30, act: { d.tap(d.el("thread.send")) }, expect: { d.label("ボードを確認して").exists })
+        sleep(4); shot("12-answered")
+        d.step("the thread's menu", act: { d.tap(d.el("data.thread.more")) }, expect: { d.app.buttons.count > 0 })
+        shot("13-thread-menu"); d.app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.6)).tap(); sleep(1)   // beside the menu, never the cart
+        if d.step("the viewer", timeout: 20, act: { d.tap(d.el("data.thread.viewer")) }, expect: { d.el("data.vtab.Board").exists || d.el("data.viewer.surface").exists }) {
+            sleep(2); shot("20-viewer-files")
+            for (i, (k, wait)) in [("Board", 5), ("Schematic", 4), ("3D", 8), ("Mech", 10), ("Diff", 3)].enumerated() {
+                let tb = d.el("data.vtab." + k); guard tb.exists else { d.note("no viewer tab \(k)"); continue }
+                tb.tap(); sleep(UInt32(wait)); shot("2\(i + 1)-viewer-\(k.lowercased())")
+            }
+            let parts = d.el("data.viewer.parts"); if parts.exists { parts.tap(); shot("26-viewer-parts"); back() }
+            back()
+        }
+        d.step("back to the list for the bot", act: { for _ in 0..<4 where !d.el("data.settings").exists { back() } }, expect: { d.el("data.settings").waitForExistence(timeout: 8) })
+        let bot = d.app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'data.bot.'")).firstMatch
+        if d.step("a bot", timeout: 15, act: { for _ in 0..<3 where !bot.isHittable { d.app.swipeUp() }; d.tap(bot) }, expect: { d.el("thread.composer").waitForExistence(timeout: 8) && !d.el("data.settings").exists }) { shot("30-bot"); back() }
+        let room = d.app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'data.room.' AND NOT identifier BEGINSWITH 'data.room.composer' AND NOT identifier BEGINSWITH 'data.room.post'")).firstMatch
+        if d.step("a room", timeout: 15, act: { for _ in 0..<3 where !room.isHittable { d.app.swipeUp() }; d.tap(room) }, expect: { d.el("data.room.composer").waitForExistence(timeout: 8) }) { shot("31-room"); back() }
+        d.app.swipeUp(); shot("32-list-end")
+        if !auto, d.el("data.hub").exists {
+            d.step("Add a hub (the pairing screen)", act: { d.app.swipeDown(); d.el("data.hub").tap(); d.tap(d.el("data.hub.add")) }, expect: { d.el("pair.address").waitForExistence(timeout: 8) })
+            shot("40-pair-sheet"); d.el("pair.cancel").tapIfThere()
+        }
+    }
+
     // Messages interrupt by default (docs/PHONE-DATA.md `thread.queue`): a message sent while a stand-in turn runs is taken at once (no queue row), and with
     // the hub cut off the phone keeps what is written in its outbox (Unsent rows, Edit and Remove, kept across a relaunch) and sends the rest when it is back.
     // Rig: scripts/mobile/ios-interrupt-journey.sh (a hub behind a relay that HUB_CTL /cut and /heal cut; INTERRUPT_THREAD a thread with no messages yet).
@@ -1054,4 +1134,9 @@ final class Journeys: XCTestCase {
         d.step("3: the Unsent row is gone", timeout: 15, act: {}, expect: { !(0..<tags.count).contains { tags.element(boundBy: $0).label.uppercased().contains("UNSENT") } })
         d.shot("3b-far-link-back-delivered")
     }
+}
+
+extension XCUIElement {
+    func tapIfThere() { if exists && isHittable { tap() } }
+    func clearIfThere() { guard exists, let v = value as? String, !v.isEmpty else { return }; tap(); typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: v.count)) }
 }

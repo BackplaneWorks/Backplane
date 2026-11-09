@@ -279,7 +279,7 @@ private struct DMdCode: View {
             HStack {
                 Text(lang).dmono(11).foregroundStyle(BackplaneDesign.dim)
                 Spacer(minLength: 0)
-                Button(copied ? "Copied" : "Copy") {
+                Button(Tr.t(copied ? "Copied" : "Copy")) {
                     UIPasteboard.general.string = text; copied = true
                     Task { try? await Task.sleep(nanoseconds: 1_500_000_000); copied = false }
                 }.dmono(11).foregroundStyle(BackplaneDesign.accent).padding(.vertical, 6).accessibilityIdentifier("md.copy")
