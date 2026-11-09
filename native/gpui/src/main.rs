@@ -242,7 +242,7 @@ fn main()->anyhow::Result<()> {
     script::metric(started,"process_start",serde_json::json!({}));
     // Windows: an unpacked release asks to install itself where the guard can update it (install.rs); on Install the installed one runs
     #[cfg(windows)] if install::maybe_install(config.pending) { return Ok(()) }
-    let app=Application::new();
+    let app=Application::new().with_assets(art::Assets);
     // macOS hands a backplane:// link to the app itself, at launch and while it runs
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});
     app.run(move|cx:&mut App|{

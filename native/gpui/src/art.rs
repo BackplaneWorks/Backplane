@@ -237,38 +237,37 @@ fn log_once(what: String) {
     if SEEN.lock().unwrap().get_or_insert_with(Default::default).insert(what.clone()) { eprintln!("GPUI_LOG {{\"asset_missing\":{}}}", Value::String(what)); }
 }
 
-struct IconLayer { segs: Vec<Seg>, fill: bool }
-fn icons() -> &'static HashMap<String, Vec<IconLayer>> {
-    static ICONS: std::sync::OnceLock<HashMap<String, Vec<IconLayer>>> = std::sync::OnceLock::new();
-    ICONS.get_or_init(|| {
-        let path = assets_dir().join("icons.json");
-        let v: Value = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
-        v.as_object().into_iter().flatten().map(|(k, layers)| (k.clone(), layers.as_array().into_iter().flatten()
-            .map(|l| IconLayer { segs: parse_d(l["d"].as_str().unwrap_or("")), fill: l["fill"] == true }).collect())).collect()
-    })
+/// icons.json as read: name -> its layers (`d`, `fill`), read once.
+fn icons() -> &'static HashMap<String, Value> {
+    static ICONS: std::sync::OnceLock<HashMap<String, Value>> = std::sync::OnceLock::new();
+    ICONS.get_or_init(|| std::fs::read_to_string(assets_dir().join("icons.json")).ok().and_then(|t| serde_json::from_str::<HashMap<String, Value>>(&t).ok()).unwrap_or_default())
 }
-/// A Lucide icon as vector paths on its 24 x 24 grid: a 2-unit round stroke, or a filled layer. `size` px square.
+/// The icons as SVG files for GPUI's renderer (`icon/<name>.svg`, made from icons.json): GPUI rasterizes each once per size into its sprite
+/// atlas, so a frame draws an icon as one sprite instead of tessellating its paths again (40-odd icons on screen, every frame).
+pub struct Assets;
+impl AssetSource for Assets {
+    fn load(&self, path: &str) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        Ok(path.strip_prefix("icon/").and_then(|p| p.strip_suffix(".svg")).and_then(icon_svg).map(|s| std::borrow::Cow::Owned(s.into_bytes())))
+    }
+    fn list(&self, _: &str) -> anyhow::Result<Vec<SharedString>> { Ok(Vec::new()) }
+}
+/// A Lucide icon as an SVG: its layers on the 24 x 24 grid, a 2-unit round stroke or a filled layer (even-odd).
+fn icon_svg(name: &str) -> Option<String> {
+    let layers = icons().get(name)?.as_array()?;
+    let esc = |d: &str| d.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
+    let body: String = layers.iter().map(|l| { let d = esc(l["d"].as_str().unwrap_or(""));
+        if l["fill"] == true { format!(r#"<path d="{d}" fill="black" fill-rule="evenodd" stroke="none"/>"#) } else { format!(r#"<path d="{d}"/>"#) } }).collect();
+    Some(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"#))
+}
+/// A Lucide icon, `size` px square, in `color` (a sprite GPUI keeps per size: `Assets`).
 pub fn icon(name: &'static str, size: f32, color: Rgba) -> AnyElement {
-    let Some(layers) = icons().get(name) else {
+    if !icons().contains_key(name) {
         log_once(format!("icon {name} not in icons.json"));
         return div().size(px(size)).into_any_element();
     };
-    canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+    canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, cx| {
         if rects_on() { report(&format!("icon:{name}"), b, window.scale_factor()); }
-        let s = size / 24.0; let o = b.origin;
-        for l in layers {
-            let f = |x: f32, y: f32| point(o.x + px(x * s), o.y + px(y * s));
-            if l.fill {
-                let mut pb = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::even_odd().with_tolerance(0.02)));
-                trace(&mut pb, &l.segs, s, f);
-                if let Ok(p) = pb.build() { window.paint_path(p, color); }
-            } else {
-                let w = 2.0 * s;
-                let mut pb = PathBuilder::stroke(px(w)).with_style(PathStyle::Stroke(StrokeOptions::default().with_line_width(w).with_line_cap(LineCap::Round).with_line_join(LineJoin::Round).with_tolerance(0.02)));
-                trace(&mut pb, &l.segs, s, f);
-                if let Ok(p) = pb.build() { window.paint_path(p, color); }
-            }
-        }
+        let _ = window.paint_svg(b, SharedString::from(format!("icon/{name}.svg")), TransformationMatrix::unit(), color.into(), cx);
     }).size(px(size)).into_any_element()
 }
 
