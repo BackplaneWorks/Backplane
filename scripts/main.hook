@@ -18,6 +18,10 @@ hit=
 while read -r old new ref; do [ "$ref" = refs/heads/main ] && hit=1; done
 [ -n "$hit" ] || exit 0
 root=$(git worktree list --porcelain 2>/dev/null | awk 'NR==1{print substr($0,10)}')
-# the builder reads main from the refs, so it does not matter which checkout it is started from
-[ -x "$root/scripts/main-build.sh" ] && "$root/scripts/main-build.sh" ensure > /dev/null 2>&1
+# the builder reads main from the refs, but its script is the one in the checkout it starts from: the main checkout's working tree can be far behind main
+# (a stale main-build.sh there runs its own old dev-build.sh, and published builds without the embedded browser), so it starts from the builder's own checkout,
+# which main-build.sh keeps at the last tip it built (and it re-runs itself from each tip it checks out); the main checkout only when there is none yet
+s=$root/scripts/main-build.sh
+for wt in "${MAIN_WT:-}" "$HOME/Documents/Backplane-main-build"; do [ -n "$wt" ] && [ -x "$wt/scripts/main-build.sh" ] && { s=$wt/scripts/main-build.sh; break; }; done
+[ -x "$s" ] && "$s" ensure > /dev/null 2>&1
 exit 0

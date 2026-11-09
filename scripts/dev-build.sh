@@ -178,6 +178,13 @@ A=${ASSETS:-$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/assets}; [ -d "$A"
 mark "kistack"
 sh "$ROOT/scripts/build-kistack.sh" "$D/kistack" >/dev/null || { echo "dev-build: KiStack missing or not the pinned commit (deploy/kistack.lock)" >&2; exit 1; }
 git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
+# a build without the Browser is not published: the person's Browser tab and the agents' preview_* tools would stop working with no error until the next build
+# (the window built without cef, the runtime missing or a link to it broken, or no browser helper). GPUI_FEATURES set to something without cef opts out.
+case " ${GPUI_FEATURES-cef} " in *cef*) miss=
+  case " $FEATURES " in *cef*) ;; *) miss="the window built without cef (see $DEV/.cef-build.log)";; esac
+  for f in libcef.so resources.pak icudtl.dat v8_context_snapshot.bin locales/en-US.pak backplane-browser; do [ -e "$D/$f" ] || miss="$miss${miss:+, }no $f"; done
+  if [ -n "$miss" ]; then case " $FEATURES " in *cef*) echo "error: $miss" > "$LOG";; *) cp "$DEV/.cef-build.log" "$LOG" 2>/dev/null;; esac; fail "browser: $miss"; fi;;
+esac
 [ -z "$HKP" ] || wait "$HKP" 2>/dev/null; [ -s "$HK" ] && cp "$HK" "$D/HAIKU"
 # the last gate: this hub, under this guard, starts and restarts on a real-shaped home, and the build now current can still read what it wrote. Nothing is published otherwise.
 if [ -z "${SKIP_SMOKE:-}" ] || [ -n "$BX" ]; then   # (a build made on a Boat box is always smoke-started here, whatever SKIP_SMOKE says)

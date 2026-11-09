@@ -17,7 +17,7 @@ say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 status() { printf '{"phase":"%s","text":"%s","done":0,"total":0}\n' "$1" "$2" > "$ST.n" && mv -f "$ST.n" "$ST"; }
 tip() { git -C "$REPO" rev-parse --verify -q "refs/heads/$BR" 2>/dev/null; }
 built() { cat "$DEV/.main-built" 2>/dev/null; }
-running() { [ -f "$PIDF" ] && p=$(cat "$PIDF" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q main-build; }
+running() { [ -f "$PIDF" ] && p=$(cat "$PIDF" 2>/dev/null) && [ -n "$p" ] && [ "$p" != $$ ] && kill -0 "$p" 2>/dev/null && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q main-build; }
 mkdir -p "$DEV" "$TG"
 case "${1:-}" in
   ensure) running && exit 0
@@ -26,6 +26,7 @@ case "${1:-}" in
   status) if running; then echo "running (pid $(cat "$PIDF"))"; else echo "not running"; fi
           echo "main:  $(tip | cut -c1-10)"; echo "built: $(built | cut -c1-10)"; echo "bad:   $(cat "$DEV/.main-bad" 2>/dev/null | cut -c1-10)"; exit 0;;
 esac
+SELF=$(sha256sum < "$0")   # (what this loop runs: the tip's copy, when it differs, replaces it; see the checkout below)
 running && { echo "main-build: already running (pid $(cat "$PIDF"))" >&2; exit 1; }
 echo $$ > "$PIDF"
 [ -n "$(tip)" ] || { echo "main-build: no $BR branch" >&2; exit 1; }
@@ -47,6 +48,9 @@ while :; do
   if [ "${avail:-0}" -lt "$FREE" ]; then status failed "Not building $BR $(printf %s "$t" | cut -c1-10): ${avail}G free, need ${FREE}G"; [ "${1:-}" = --once ] && exit 1; sleep 30; continue; fi
   say "building $BR $(printf %s "$t" | cut -c1-10) (tests first)"
   git -C "$WT" checkout -q --detach "$t" && git -C "$WT" clean -qfd -e Cargo.lock || { say "cannot check out $t"; sleep "$POLL"; continue; }
+  # this loop runs the tip's own main-build.sh: one started from a checkout that is behind (the main checkout's working tree) re-runs itself from the tip it just
+  # checked out, so an old copy never keeps building main (an old one published builds without the embedded browser, the guard, voice and the browser helper)
+  if [ -x "$WT/scripts/main-build.sh" ] && [ "$(sha256sum < "$WT/scripts/main-build.sh")" != "$SELF" ]; then say "main-build.sh changed at $(printf %s "$t" | cut -c1-10): restarting from it"; trap - INT TERM EXIT; exec "$WT/scripts/main-build.sh" "$@"; fi
   # the build script of the commit being built, not this one's: a gate main adds (the guard, the smoke start) takes effect with the next build, not when this loop is restarted
   DB=$WT/scripts/dev-build.sh; [ -x "$DB" ] || DB=$HERE/dev-build.sh
   ( exec setsid env BQ_MAIN=1 MAIN_PREV="$b" BUILD_ROOT="$WT" HOST_TARGET="$TG/host" GPUI_TARGET="$TG/gpui" VOICE_TARGET="$TG/voice" "$DB" --gate ) &
