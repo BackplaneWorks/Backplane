@@ -476,6 +476,8 @@ mod tests {
         let mut q = ready(false); q["id"] = json!("q_card"); let s = sum(&q); assert!(!s.contains("tok"), "the setting holds no token");
         let c = card("L", false, false, false, false, &s); assert_eq!(marks(&c), "done,done,done,on,,"); assert_eq!((c["total"].as_str(), c["pay"].as_str(), c["label"].as_str()), (Some("$112.40"), Some("http://s/q/q_card?t=tok"), Some("Buy now · $112.40")));
         assert_eq!(c["customs"], "Includes import VAT and duties: nothing to pay on delivery.");
+        let mut bad = ready(false); bad["id"] = json!("q_card"); bad["quote"]["problems"] = json!(["No price for Mars"]);
+        assert_eq!(card("L", false, false, false, false, &sum(&bad))["line"], "The quote has something to fix first: see it above.", "the posted quote is above the card, on every client");
         q["order"] = json!({"status":"placed"}); let c = card("L", false, false, false, false, &sum(&q)); assert_eq!(marks(&c), "done,done,done,done,on,"); assert_eq!(c["pay"], "", "paid: no Buy now"); assert_eq!(c["line"], "Ordered: your order is in production.");
         q["order"] = json!({"status":"delivered"}); assert_eq!(marks(&card("L", false, false, false, false, &sum(&q))), "done,done,done,done,done,done");
     }
