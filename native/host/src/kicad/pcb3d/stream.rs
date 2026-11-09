@@ -234,7 +234,8 @@ pub struct Times { pub first: Option<f64>, pub all: f64, pub models: usize, pub 
 /// Every part of the plan to `emit`, in order: the frame that starts them, the boxes, then each model the moment it is converted
 /// (models::convert, cached by content). Blocks until all are out or `stop` is set. `board_tris`: what the board itself already uses.
 #[allow(clippy::too_many_arguments)]
-pub fn parts(key: &str, rev: &str, plan: &Plan, board_tris: u64, cache: &super::models::Cache, tools: &[super::super::stepglb::Mesher], stop: &std::sync::atomic::AtomicBool, emit: &(dyn Fn(Vec<u8>) + Sync)) -> Times {
+/// `say`: what is happening, in the person's words, as it changes (the window shows it while the parts come).
+pub fn parts(key: &str, rev: &str, plan: &Plan, board_tris: u64, cache: &super::models::Cache, tools: &[super::super::stepglb::Mesher], stop: &std::sync::atomic::AtomicBool, emit: &(dyn Fn(Vec<u8>) + Sync), say: &(dyn Fn(String) + Sync)) -> Times {
     use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering::Relaxed};
     let t0 = Instant::now();
     let (done, budget, first) = (AtomicU32::new(0), AtomicU64::new(MOST_TRIS.saturating_sub(board_tris)), std::sync::Mutex::new(None::<f64>));
@@ -258,8 +259,21 @@ pub fn parts(key: &str, rev: &str, plan: &Plan, board_tris: u64, cache: &super::
         }
     }
     let fall_back = |u: &Use| { boxed.fetch_add(u.at.len(), Relaxed); boxes(u.refs.clone(), u.boxes.iter().flatten().copied().collect()) };
+    // the models not converted yet: they take seconds each, the rest milliseconds
+    let fresh: std::collections::HashSet<String> = jobs.iter().filter(|j| cache.lookup(&j.0).is_none()).map(|j| j.0.clone()).collect();
+    let tool = match tools.first() { Some(super::super::stepglb::Mesher::Step2glb(_)) => "OpenCascade", _ => "FreeCAD" };
+    let (made, of) = (AtomicUsize::new(0), plan.of);
+    let tell = |made: usize| {
+        let d = done.load(Relaxed);
+        say(if fresh.is_empty() || made >= fresh.len() { format!("Placing parts: {d} of {of}") } else { format!("Converting 3D models with {tool}: {made} of {} · {d} of {of} parts placed", fresh.len()) });
+    };
+    tell(0);
     super::models::convert(cache, jobs, tools, stop, |k: &str, r: Result<PathBuf, String>| {
         if stop.load(Relaxed) { return }
+        let made = if fresh.contains(k) { made.fetch_add(1, Relaxed) + 1 } else { made.load(Relaxed) };
+        struct Tell<'a>(&'a (dyn Fn(usize) + Sync), usize);
+        impl Drop for Tell<'_> { fn drop(&mut self) { (self.0)(self.1) } }
+        let _tell = Tell(&tell, made); // after this model's frames, whichever way out
         let Some(ix) = by_key.get(k) else { return };
         let tris = r.ok().and_then(|p| std::fs::read(p).ok()).and_then(|b| super::super::glb::tris(&b).ok()).filter(|t| !t.is_empty());
         let Some(mut ts) = tris else { failed.fetch_add(1, Relaxed); for &i in ix { fall_back(&plan.uses[i]) } return };
@@ -334,6 +348,15 @@ mod tests {
         assert!(near(corner(0.0, 0.0, 0.0), [2900.0, 950.0, -100.0]) && near(corner(1000.0, 1000.0, 1000.0), [3100.0, 1050.0, 0.0]), "{:?} {:?}", corner(0.0, 0.0, 0.0), corner(1000.0, 1000.0, 1000.0));
         let (n, d) = box_model(); assert_eq!(n, 12); assert!(d.len() >= 120);
     }
+    #[test] fn the_parts_say_how_far_they_are() {
+        let mut u1 = fp(30.0, 10.0, 0.0, Side::Top); u1.models = vec![mr("gone.step")];
+        let b = Board { footprints: vec![u1], ..Board::default() };
+        let p = plan(&b, (1.6, 0.0), &|_: &str| None);
+        let said = std::sync::Mutex::new(vec![]);
+        let cache = super::super::models::Cache::new(std::env::temp_dir().join(format!("bp-said-{}", std::process::id())));
+        parts("2|/r|", "", &p, 0, &cache, &[], &std::sync::atomic::AtomicBool::new(false), &|_f: Vec<u8>| {}, &|t: String| said.lock().unwrap().push(t));
+        assert_eq!(said.into_inner().unwrap(), vec!["Placing parts: 1 of 1".to_string()], "a box is placed at once, nothing to convert");
+    }
     #[test] fn a_model_encodes_as_the_boards_mesh_does() {
         let t = [Tri3 { a: [0.01, 0.02, 0.03], b: [1.0, 0.0, 0.0], c: [0.0, 1.0, 0.0], color: 0xff0000 }];
         let (n, d) = encode_model(&t); assert_eq!(n, 1);
@@ -394,7 +417,7 @@ mod tests {
             for (name, cache) in [("cold", &cold), ("warm", &cold)] {
                 let (frames, bytes_out) = (std::sync::atomic::AtomicUsize::new(0), std::sync::atomic::AtomicUsize::new(0));
                 let stop = std::sync::atomic::AtomicBool::new(false);
-                let t = parts("2|/r|", "rev", &plan, so.n as u64, cache, &tools, &stop, &|f: Vec<u8>| { frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed); bytes_out.fetch_add(f.len(), std::sync::atomic::Ordering::Relaxed); });
+                let t = parts("2|/r|", "rev", &plan, so.n as u64, cache, &tools, &stop, &|f: Vec<u8>| { frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed); bytes_out.fetch_add(f.len(), std::sync::atomic::Ordering::Relaxed); }, &|_| {});
                 eprintln!("  parts {name}: first {} ms, all {:.0} ms; {} frames, {} KB; {} part frames, {} boxed, {} failed; to all parts from the start {:.0} ms",
                     t.first.map_or("-".into(), |f| format!("{f:.0}")), t.all, frames.into_inner(), bytes_out.into_inner() >> 10, t.models, t.boxes, t.failed, first + tp.elapsed().as_secs_f64() * 1000.0);
             }
@@ -427,7 +450,7 @@ mod tests {
             let dir = board_dir(path);
             let plan = plan(&made.board, made.seat, &|raw: &str| super::super::models::resolve(raw, &dir, &env));
             let tools = super::super::super::stepglb::machine(&std::env::temp_dir());
-            parts("2|/r|", "", &plan, 0, &cache, &tools, &std::sync::atomic::AtomicBool::new(false), &|_f: Vec<u8>| {}); // the cache warm, every model converted
+            parts("2|/r|", "", &plan, 0, &cache, &tools, &std::sync::atomic::AtomicBool::new(false), &|_f: Vec<u8>| {}, &|_| {}); // the cache warm, every model converted
             let side: std::collections::HashMap<&str, &str> = made.board.footprints.iter().map(|f| (f.reference.as_str(), if f.side == Side::Bottom { "B" } else { "F" })).collect();
             let ext = |ts: &[[i32; 9]], a: &[f32; 12]| {
                 let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);

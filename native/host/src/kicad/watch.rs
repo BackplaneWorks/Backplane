@@ -25,6 +25,16 @@ pub fn stamp(path: &str) -> Stamp {
 /// A saved version or a comparison: immutable, read once.
 pub fn is_version(path: &str) -> bool { path.starts_with("git\t") || path.starts_with("diff\n") }
 pub fn solid_kind(k: u32) -> bool { matches!(k, 2..=4) }
+/// What the hub is doing to make a 3D source's model, in the person's words: `native` a board made here (pcb3d), `cached` a converted model already kept.
+pub fn stage_text(kind: u32, file: &str, native: bool, cached: bool, tools: &[stepglb::Mesher]) -> String {
+    let path = file.rsplit(['\t', '\n']).next().unwrap_or(file);
+    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tool = match tools.first() { Some(stepglb::Mesher::Step2glb(_)) => "OpenCascade", Some(stepglb::Mesher::FreeCad { .. }) => "FreeCAD", None => "" };
+    if native { return format!("Making the board's 3D model from {name}…") }
+    if cached || path.ends_with(".glb") { return format!("Reading {name}…") }
+    if solidread::is_step(path) { return if tool.is_empty() { format!("Meshing {name}…") } else { format!("Meshing {name} with {tool}…") } }
+    let _ = kind; format!("Exporting the board's 3D model with KiCad (kicad-cli)…")
+}
 pub fn key(kind: u32, root: &str, path: &str) -> String { format!("{kind}|{root}|{path}") }
 pub fn kind_of(name: &str) -> Option<u32> { Some(match name { "board" => 0, "schematic" => 1, "3d" => 2, "3d-bare" => 3, "3d-full" => 4, _ => return None }) }
 /// FNV-1a of a key (Key.hash), the info file's name.
@@ -38,7 +48,8 @@ struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Op
 struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, parts_at: usize }
 #[derive(Default)]
 /// `prewarmed`: each board whose part models were queued for conversion, by the revision it was then (pcb3d::stream::prewarm)
-struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String> }
+/// `took`: how long the last read of each 3D source's file took (ms), told as the estimate of the next one
+struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64> }
 
 pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, home: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
 
@@ -157,6 +168,13 @@ impl Plots {
         let who: Vec<u64> = { let st = self.st.lock().unwrap(); st.subs.iter().filter(|(c, v)| only.map_or(true, |o| o == **c) && v.iter().any(|s| s.key == ky)).map(|(c, _)| *c).collect() };
         for c in who { hub.push(c, json!({"t":"plotnote","key":ky,"text":text.trim()})); }
     }
+    /// A 3D source's loading stage to its watchers: what the hub is doing for it now (`text`, "" when it is done), for how long already
+    /// (`ms`) and, when known, about how long it took the last time (`about`, ms; 0 unknown). The window shows the text with the time running.
+    /// A frame like a plot's (binary to a window), with neither `mesh`, `none` nor `parts`: a phone that does not know it passes it by.
+    fn stage(&self, hub: &Arc<Hub>, ky: &str, text: &str, ms: u64, about: u64) {
+        let who: Vec<u64> = { let st = self.st.lock().unwrap(); st.subs.iter().filter(|(_, v)| v.iter().any(|s| s.key == ky)).map(|(c, _)| *c).collect() };
+        for c in who { hub.push(c, json!({"t":"plot","key":ky,"stage":text,"ms":ms,"about":about})); }
+    }
     fn send_to(&self, hub: &Arc<Hub>, ky: &str, p: &Arc<Plot>, only: Option<u64>) {
         let mut gone = vec![];
         { let mut st = self.st.lock().unwrap();
@@ -213,7 +231,10 @@ impl Plots {
                 let (me, hub, ky) = (me.clone(), hub.clone(), ky.clone());
                 rt.spawn(async move { me.sync_parts(&hub, &ky, None) });
             };
-            let t = pcb3d::stream::parts(&ky, &rev, &made.0, made.1, &cache, &tools, &stop, &emit);
+            let t0 = std::time::Instant::now();
+            let say = |text: String| { if !stop.load(std::sync::atomic::Ordering::Relaxed) { me.stage(&hub, &ky, &text, t0.elapsed().as_millis() as u64, 0) } };
+            let t = pcb3d::stream::parts(&ky, &rev, &made.0, made.1, &cache, &tools, &stop, &emit, &say);
+            if !stop.load(std::sync::atomic::Ordering::Relaxed) { me.stage(&hub, &ky, "", t0.elapsed().as_millis() as u64, 0) }
             eprintln!("pcb3d: {} parts: first {} ms, all {:.0} ms ({} part frames, {} instances boxed, {} models failed)", file, t.first.map_or("-".into(), |f| format!("{f:.0}")), t.all, t.models, t.boxes, t.failed);
         });
     }
@@ -275,11 +296,20 @@ impl Plots {
         let (kind, file) = { let mut st = self.st.lock().unwrap(); let Some(s) = st.srcs.get_mut(ky) else { return }; if s.busy { s.again = true; return } s.busy = true; (s.kind, s.file.clone()) };
         let (me, hub, ky) = (self.clone(), hub.clone(), ky.to_string());
         tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
+            let solid3 = solid_kind(kind);
+            let about = if solid3 { me.st.lock().unwrap().took.get(&file).copied().unwrap_or(0) } else { 0 };
+            let say = |text: &str| if solid3 { me.stage(&hub, &ky, text, t0.elapsed().as_millis() as u64, about) };
+            if solid3 && me.readers.available_permits() == 0 { say("Waiting for another drawing to finish…") }
             let _slot = me.readers.acquire().await.ok();
             // Pv.read.at: a model whose GLB is known too big is refused at once, not behind another model's read
-            let native3d = solid_kind(kind) && file.ends_with(".kicad_pcb") && !file.starts_with("diff\n") && Self::board3d_native(&hub).await;
-            let known = if solid_kind(kind) && !native3d { solidread::known(kind, &file) } else { 0 };
-            let _one = if solid_kind(kind) && !native3d && solid::fits(known) { Some(me.solid.lock().await) } else { None };
+            let native3d = solid3 && file.ends_with(".kicad_pcb") && !file.starts_with("diff\n") && Self::board3d_native(&hub).await;
+            let known = if solid3 && !native3d { solidread::known(kind, &file) } else { 0 };
+            let _one = if solid3 && !native3d && solid::fits(known) {
+                let g = match me.solid.try_lock() { Ok(g) => g, Err(_) => { say("Waiting for another 3D model to finish…"); me.solid.lock().await } };
+                Some(g)
+            } else { None };
+            if solid3 { say(&stage_text(kind, &file, native3d, known > 0, &stepglb::machine(&me.home))) }
             let before = if is_version(&file) { Stamp::default() } else { stamp(&file) };
             let mut parts = None;
             let out = if native3d { me.run_board3d(&hub, kind, &file, &ky).await.map(|r| match r { Ok((p, plan)) => { parts = plan; (0, String::new(), Some(p)) } Err(e) => (3, e, None) }) }
@@ -290,6 +320,12 @@ impl Plots {
             let plot = if code == 0 { Some(Arc::new(made.unwrap_or_else(|| plot::parse_child(&text)))) } else { None };
             { let mut st = me.st.lock().unwrap();
               if let Some(s) = st.srcs.get_mut(&ky) { s.busy = false; s.stamp = Some(before.clone()); again = std::mem::take(&mut s.again); if let Some(p) = &plot { s.plot = Some(p.clone()) } } }
+            if solid3 {
+                let ms = t0.elapsed().as_millis() as u64;
+                if code == 0 && !is_version(&file) { me.st.lock().unwrap().took.insert(file.clone(), ms); }
+                let mb = plot.as_ref().and_then(|p| p.solid.as_ref()).map_or(0.0, |s| s.d.len() as f64 / 1048576.0);
+                if mb >= 2.0 { say(&format!("Sending the model ({mb:.1} MB)…")) }
+            }
             match (&plot, code) {
                 (Some(p), _) => {
                     me.send_to(&hub, &ky, p, None); me.revision(&hub, &ky, None);
@@ -303,6 +339,7 @@ impl Plots {
                     drop(st); for c in gone { me.stop(c) } }
             }
             if matches!(code, 0 | 2) && (ky.starts_with("2|") || ky.starts_with("3|")) { me.note(&hub, &ky, None) } // Pv.handle PGot
+            if solid3 { say("") }
             if again { me.read(&hub, &ky) }
         });
     }
@@ -500,6 +537,16 @@ impl RpcHandler for KicadRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_3d_source_says_what_the_hub_does_for_it() {
+        let fc = [stepglb::Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() }]; let occ = [stepglb::Mesher::Step2glb("/s".into())];
+        assert_eq!(stage_text(2, "/p/b.kicad_pcb", true, false, &fc), "Making the board's 3D model from b.kicad_pcb…");
+        assert_eq!(stage_text(2, "/p/mech/lid.step", false, false, &fc), "Meshing lid.step with FreeCAD…");
+        assert_eq!(stage_text(2, "/p/mech/lid.STEP", false, false, &occ), "Meshing lid.STEP with OpenCascade…");
+        assert_eq!(stage_text(2, "/p/mech/lid.step", false, true, &fc), "Reading lid.step…", "a mesh already made is only read");
+        assert_eq!(stage_text(2, "git\tabc\t/p/b.kicad_pcb", true, false, &fc), "Making the board's 3D model from b.kicad_pcb…", "a saved version names its file");
+        assert_eq!(stage_text(2, "/p/b.kicad_pcb", false, false, &fc), "Exporting the board's 3D model with KiCad (kicad-cli)…");
+        assert_eq!(stage_text(2, "/p/m.glb", false, false, &[]), "Reading m.glb…");
+    }
     #[test] fn kept_names_a_key_and_a_model() {
         assert_eq!(kept_of("2|/a|\t00000000000000ff"), ("2|/a|", 255));
         assert_eq!(kept_of("ff"), ("", 255), "an older phone: the id alone");
