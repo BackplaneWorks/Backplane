@@ -159,7 +159,8 @@ impl Backplane {
     }
     /// A history page landed: laid into the rows held, the reader staying where they are.
     pub(crate) fn older_landed(&mut self, cursor: String, page: Option<Value>, cx: &mut Context<Self>) {
-        self.screens.paging = None;
+        // how long the page took, asked to landed (the wheel's notes say whether the reader waited for it at the top)
+        if let Some(t) = self.screens.paging.take() { self.m("history", serde_json::json!({"ms": t.elapsed().as_millis() as u64, "rows": page.as_ref().and_then(|r| r["shown"]["thread"]["entries"].as_array()).map_or(0, |a| a.len())})); }
         let Some(mut r) = page else { cx.notify(); return };
         let (a, b) = (crate::string(&r["shown"]["thread"], "id"), crate::string(&self.data["thread"], "id"));
         if attach::raw_id(&a) != attach::raw_id(&b) { return; }
@@ -174,7 +175,16 @@ impl Backplane {
         }
         self.data["thread"]["entries"] = Value::Array(merged);
         self.timeline_seek();
+        // a page of a long thread is mostly tool calls folded into a few rows: while the reader is still within RUNWAY_ROWS of the top, ask for the next
+        // page now rather than after the next frame, so scrolling up a thread of a thousand messages does not wait at the top for each page in turn
+        if self.timeline.logical_scroll_top().item_ix < history::RUNWAY_ROWS { self.history_want_now(); }
         cx.notify();
+    }
+    /// The next older page, now (none while one is on its way, at the start of the thread, or on a project's page).
+    fn history_want_now(&mut self) {
+        let older = crate::string(&self.data["thread"], "historyOlder");
+        if older.is_empty() || self.data["projectHome"].is_object() || self.screens.paging.is_some() { return; }
+        if self.tx.try_send(Command::History(older)).is_ok() { self.screens.paging = Some(std::time::Instant::now()); }
     }
     /// After each frame: the reader is within reach of the top of the rows held and more are there, so ask for them before they get there.
     pub(crate) fn history_want(&mut self) {
