@@ -6,7 +6,7 @@ choice remains available. When no native window or usable runtime exists,
 Chrome frames continue with a visible fallback reason. Web clients, phones, and windows viewing a
 remote hub receive JPEG frames through the existing watcher leases.
 
-Linux x86_64 release builds include the native runtime. Other platforms keep
+Linux, Windows x64 and macOS arm64 release builds include the native runtime (docs/browser-cef-port.md). Without it, a client keeps
 Chrome frames. To supply CEF from a source build:
 
 1. Build the prebuilt CEF distribution with `scripts/build-cef.sh`, under the
@@ -73,7 +73,7 @@ hang, affecting popup login flows. Popup links are covered and pass. The
 the reproduced stall; its proposed fix remains an unvalidated draft. The release
 workflow runs `tools/browser/test/popup-cef.ts` as a required functional gate;
 this remains a release blocker, with no waiver or Chromium source build.
-macOS, Windows, and native Wayland embedding are later work.
+macOS and Windows embed it too (docs/browser-cef-port.md). Native Wayland embedding is later work.
 
 Build a Linux x64 release with `BACKPLANE_CEF_RELEASE=1 scripts/build.sh`,
 then `scripts/package.sh VERSION linux-x64`. The package refuses missing or

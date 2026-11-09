@@ -27,7 +27,7 @@ On Linux and macOS, press Update in 0.14 as usual: 0.15 installs beside it, star
 
 ## What each platform's archive carries
 
-Every archive holds the hub, the desktop client, the guard, `backplane-voice` (dictation), `backplane-browser` (the Browser tab's helper), `backplane-step2glb` (STEP to GLB without FreeCAD) and `assets/` with the generated icons and cat rigs; `release.yml` fails a build that misses any. On Linux the client also has the embedded Chromium (feature `cef`) with its runtime beside it (`libcef.so`, the `.pak` files, `icudtl.dat`, `v8_context_snapshot.bin`, `locales/`). On macOS and Windows the client is built without it: the Browser tab shows the page as the hub's helper draws it (a frame stream), not an embedded browser.
+Every archive holds the hub, the desktop client, the guard, `backplane-voice` (dictation), `backplane-browser` (the Browser tab's helper), `backplane-step2glb` (STEP to GLB without FreeCAD) and `assets/` with the generated icons and cat rigs; `release.yml` fails a build that misses any. On Linux the client also has the embedded Chromium (feature `cef`) with its runtime beside it (`libcef.so`, the `.pak` files, `icudtl.dat`, `v8_context_snapshot.bin`, `locales/`). Windows has it too, beside `backplane-gpui.exe` (`libcef.dll`, `chrome_elf.dll` and the other DLLs, the paks, `icudtl.dat`, the snapshot, `locales/`). On macOS the runtime is in `cef/` beside the client: the framework, five `Backplane Helper*.app` bundles and a stub `Backplane.app`, all ad-hoc signed (`scripts/cef-runtime-pack.sh`, `docs/browser-cef-port.md`). On every platform, a client whose runtime is missing or incomplete starts anyway. Its Browser tab says why and shows the page as the hub's helper draws it (a frame stream).
 
 ## Phones
 
