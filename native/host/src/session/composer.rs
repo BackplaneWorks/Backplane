@@ -244,7 +244,9 @@ pub trait Facts { fn bot_thread(&self, thread: &str) -> bool; /// the bot whose 
     fn bot_of(&self, _thread: &str) -> Option<String> { None } fn account_params(&self, thread: &str) -> bool; /// the thread's named account binding, as its setting text (Accounts.owner); None when it has none (Accounts.named)
     fn account_binding(&self, _thread: &str) -> Option<String> { None }
     /// the thread's provider ("claude" when unknown)
-    fn provider_of(&self, _thread: &str) -> String { "claude".into() } }
+    fn provider_of(&self, _thread: &str) -> String { "claude".into() }
+    /// the newest message the person typed in the thread, whole (Retry.last); None when there is none
+    fn last_person_text(&self, _thread: &str) -> Option<String> { None } }
 
 /// The composer's actions as the presenter's action table calls them: `params` is the object the hub builds for a view request (`session`, `action`, `value`, `cid`, `hub`,
 /// `now` in milliseconds). `draft`, `send` and `send-alt` (the other follow-up mode: Follow.mode answers "steer" for both); everything else, and every case not ported, is None.
@@ -329,6 +331,18 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
             let rid = session["rid"].as_u64().unwrap_or(0);
             Some(ActOut { session_patch: json!({"rid": rid + 1, "drafts": {"@sbox": "", "@sbox.th": "", "@sbox.err": "", "@f.sname": ""}}),
                 cmds: vec![json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "secret.dismiss", "p": {"name": s(params, "value")}}).to_string()})] })
+        }
+        // Retry (the head's button on a failed turn, 0.14's Retry.dispatch): the person's newest message there sent again, as `turn.start` marked `retry`
+        // (a re-delivery, not a new prompt: the star nudge does not count it); a bot's thread is talked to as the bot, as Send does
+        "retry" => {
+            let sel = s(session, "sel"); if !safe(sel) { return None }
+            let Some(text) = facts.last_person_text(sel).filter(|t| !t.trim().is_empty()) else { return Some(say("There is no message of yours in this thread to send again.")) };
+            let rid = session["rid"].as_u64().unwrap_or(0);
+            let msg = msg_id(s(params, "cid"), params["now"].as_u64().unwrap_or(0) / 1000, rid);
+            let (m, p) = match facts.bot_of(sel) { Some(b) => ("bots.say", json!({"bot": b, "text": text, "msg": msg})), None => ("turn.start", bind(json!({"thread": sel, "text": text, "msg": msg, "mode": "steer", "retry": true}), facts.account_binding(sel).as_deref())) };
+            let request = format!("{{\"id\":{rid},\"m\":\"{m}\",\"p\":{}}}", serde_json::to_string(&p).ok()?);
+            let mut outbox = Map::new(); outbox.insert(rid.to_string(), json!(request));
+            Some(ActOut { session_patch: json!({"rid": rid + 1, "outbox": outbox}), cmds: vec![json!({"type": "send", "hub": hub, "text": request}), json!({"type": "scroll"})] })
         }
         "send" | "send-alt" => {
             let sel = s(session, "sel");
@@ -503,6 +517,17 @@ mod tests {
     impl Facts for Plain { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
     struct Bot;
     impl Facts for Bot { fn bot_thread(&self, _: &str) -> bool { true } fn account_params(&self, _: &str) -> bool { false } }
+    struct Said;
+    impl Facts for Said { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } fn last_person_text(&self, t: &str) -> Option<String> { (t == "t1").then(|| "check the LDO\n\nand the bulk caps".into()) } }
+    #[test] fn retry_sends_the_persons_newest_message_again_marked_as_a_retry() {
+        let p = |sel: &str| json!({"session": {"sel": sel, "rid": 7, "drafts": {"t1": "half typed"}}, "action": "retry", "value": "", "cid": "c", "hub": "h", "now": 5000u64});
+        let o = act(&p("t1"), &Said).unwrap();
+        let (m, body) = sent_method(&o).unwrap();
+        assert_eq!((m.as_str(), body["thread"].as_str(), body["text"].as_str(), body["retry"].as_bool()), ("turn.start", Some("t1"), Some("check the LDO\n\nand the bulk caps"), Some(true)));
+        assert_eq!(o.session_patch["rid"], 8); assert!(o.session_patch.get("drafts").is_none(), "the draft being typed is left alone");
+        assert!(says(&act(&p("t2"), &Said).unwrap()).contains("no message of yours"), "nothing to send again: it says so");
+        assert!(says(&act(&p("t1"), &Plain).unwrap()).contains("no message of yours"));
+    }
     #[test] fn an_install_link_is_asked_about_before_it_is_sent() {
         let sess = |d: &str| json!({"sel": "t1", "rid": 4, "drafts": {"t1": d}});
         let p = |d: &str, w: &str| json!({"hub": "h", "action": "skill", "value": w, "session": sess(d)});
