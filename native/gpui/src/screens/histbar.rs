@@ -146,6 +146,21 @@ pub fn select(app: &mut Backplane, i: Option<usize>) {
     let mode = if app.screens.plotview.hist.diff { 1 } else { 2 };
     app.screens.plotview.hist.at = Some(i);
     set(app, Some(Cmp { base: key, label: s.label.clone(), old: s.old.clone(), new: s.new.clone(), mode, bits: 0 }));
+    warm(app, &h, i, mode);
+}
+/// Hs.warm: the steps either side of the one on show are plotted ahead into the hub's kept versions (kicad.warm), so the next ‹ or › finds its
+/// board ready (0.14 measured 1.1 s for a new step's board on neurband, 0.4 s for a kept one).
+fn warm(app: &mut Backplane, h: &Steps, i: usize, mode: u8) {
+    let Some((kind, _, root, _)) = open_file(app) else { return };
+    let bits = crate::viewers::layers::bits(&app.data["thread"]["viewer"]);
+    let (before, after) = near(h, i, mode, bits);
+    if before.is_empty() && after.is_empty() { return }
+    let _ = app.tx.try_send(Command::Rpc("kicad.warm".into(), super::settings::Secret(json!({"kind": kind, "root": root, "before": before, "after": after})), "warm"));
+}
+/// The sources the steps before and after `i` would watch (as `select` shows them), "" past either end.
+pub fn near(h: &Steps, i: usize, mode: u8, bits: u32) -> (String, String) {
+    let at = |j: Option<usize>| j.and_then(|j| h.steps.get(j)).filter(|s| !s.new.is_empty()).map_or(String::new(), |s| shown(&Cmp { base: String::new(), label: String::new(), old: s.old.clone(), new: s.new.clone(), mode, bits }));
+    (at(i.checked_sub(1)), at(Some(i + 1)))
 }
 /// Old / Diff / New of the comparison on show.
 pub fn mode(app: &mut Backplane, m: u8) { if let Some(mut c) = app.screens.plotview.compare.clone() { c.mode = m; set(app, Some(c)); } }
@@ -428,6 +443,11 @@ mod tests {
         assert_eq!(row_kinds("Design change · a.kicad_sch (new), b.kicad_pcb"), ["board", "schematic"]);
         assert_eq!(row_kinds("Design change · old.kicad_pcb (removed), s.kicad_sch"), ["schematic"], "a removed file shows nothing");
         assert!(row_kinds("Design change").is_empty()); assert!(row_kinds("Design change · notes.md").is_empty());
+    }
+    #[test] fn the_steps_either_side_are_named_as_they_would_show() {
+        let h = Steps { steps: vec![Step { new: "N1".into(), ..Step::default() }, Step { old: "N1".into(), new: "N2".into(), ..Step::default() }, Step { old: "N2".into(), new: "N3".into(), ..Step::default() }], ..Steps::default() };
+        assert_eq!(near(&h, 1, 1, 0), ("N1".to_string(), "diff\nN2\nN3".to_string()), "a first step has no old: it shows as it is");
+        assert_eq!(near(&h, 0, 2, 0), (String::new(), "N2".to_string())); assert_eq!(near(&h, 2, 1, 8), ("diff\nN1\nN2\n8".to_string(), String::new()));
     }
     #[test] fn the_arrows_go_as_0_14s_did() {
         assert_eq!(back(None, 3), Some(2), "from live, back is the newest step"); assert_eq!(back(Some(2), 3), Some(1)); assert_eq!(back(Some(0), 3), Some(0)); assert_eq!(back(None, 0), None);
