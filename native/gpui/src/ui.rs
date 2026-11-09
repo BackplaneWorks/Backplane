@@ -161,12 +161,14 @@ impl Backplane {
                 let selected = raw == self.selected && self.project_page.is_none(); // a project's page on show: its head is the one highlighted, no row
                 ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
                 let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
-                let toggle = (kids > 0).then(|| {
+                // only a project's tree unfolds: an Active-view or Conversation-history row with subthreads has no rows to show under it, so no chevron
+                let tree = sub.is_empty() && !pid.is_empty();
+                let toggle = (kids > 0 && tree).then(|| {
                     let tid = id.clone();
                     div().id(SharedString::from(format!("tree-{id}"))).flex_shrink_0().w(px(16.)).h_full().flex().items_center().cursor_pointer().child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
                         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
                 });
-                if kids > 0 { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
+                if kids > 0 && tree { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
                 with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).flex().items_center().gap_2().pl(px(6. + depth * 14.)).pr_3().h(px(32.)).when(faded, |d| d.opacity(0.55))
                     .border_l_2().border_color(if selected { c("accent") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
