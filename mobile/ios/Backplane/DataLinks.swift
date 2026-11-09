@@ -31,13 +31,15 @@ extension DataClient {
 
     func openLink(_ url: URL, thread: String) {
         guard let text = linkText(url) else { return }
-        // a hub that does not know link.resolve: a thread link as before, the rest says so
-        guard has("links") else {
-            if let u = URL(string: text), u.host == "thread", let id = u.pathComponents.dropFirst().first, !id.isEmpty { linkTarget = DLinkTarget(kind: .thread, id: id) }
-            else { say("Update the hub to open this link.") }
-            return
-        }
         Task {
+            // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
+            for _ in 0..<50 where !(conn == .online && has("links")) { try? await Task.sleep(nanoseconds: 100_000_000) }
+            // a hub that does not know link.resolve: a thread link as before, the rest says so
+            guard has("links") else {
+                if let u = URL(string: text), u.host == "thread", let id = u.pathComponents.dropFirst().first, !id.isEmpty { linkTarget = DLinkTarget(kind: .thread, id: id) }
+                else { say("Update the hub to open this link.") }
+                return
+            }
             do {
                 let r: DLinkReply = try await call("link.resolve", ["url": text, "thread": thread])
                 switch r.kind {

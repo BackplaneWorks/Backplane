@@ -41,13 +41,15 @@ private fun linkText(url: String): String? {
 
 fun DataClient.openLink(url: String, thread: String) {
     val text = linkText(url) ?: return
-    // a hub that does not know link.resolve: a thread link as before, the rest says so
-    if (!has("links")) {
-        val id = if (text.startsWith("backplane://thread/")) text.removePrefix("backplane://thread/").substringBefore('#').substringBefore('/') else ""
-        if (id.isNotEmpty()) linkTarget = LinkTarget(LinkTarget.Kind.THREAD, id) else say("Update the hub to open this link.")
-        return
-    }
     scope.launch {
+        // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
+        for (i in 0 until 50) { if (conn == DataClient.Conn.ONLINE && has("links")) break; delay(100) }
+        // a hub that does not know link.resolve: a thread link as before, the rest says so
+        if (!has("links")) {
+            val id = if (text.startsWith("backplane://thread/")) text.removePrefix("backplane://thread/").substringBefore('#').substringBefore('/') else ""
+            if (id.isNotEmpty()) linkTarget = LinkTarget(LinkTarget.Kind.THREAD, id) else say("Update the hub to open this link.")
+            return@launch
+        }
         try {
             val r = call("link.resolve", JSONObject().put("url", text).put("thread", thread))
             linkTarget = when (r.optString("kind")) {
