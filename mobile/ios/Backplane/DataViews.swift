@@ -1220,7 +1220,7 @@ struct DataSettingsView: View {
                 DHeading(text: "Text size")
                 DChoices(options: [(label: "system", value: "system")] + AppSettings.textSteps.map { (label: $0.tag, value: $0.tag) }, value: $settings.textSize).accessibilityIdentifier("settings.textsize")
                 onOff("Alerts on this phone", $settings.alerts, id: "settings.alerts")
-                    .onChange(of: settings.alerts) { _, on in Task { if on { await client.enablePush() }; await client.pushMute() } }
+                    .onChange(of: settings.alerts) { _, on in Task { if on { await client.enablePush() }; await client.pushMute(); if client.has("notifysettings") { await client.notify.load() } } }
                 if settings.alerts { onOff("Alert sound", $settings.alertSound, id: "settings.sound") }
                 onOff("Haptics", $settings.haptics, id: "settings.haptics")
                 Text("Off: only what you let through reaches this phone. Alerts come from your uberbot.").dmono(11).foregroundStyle(BackplaneDesign.dim)
