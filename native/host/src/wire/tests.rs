@@ -118,6 +118,18 @@ async fn a_requests_changes_come_before_its_reply() {
     assert_eq!(live_notice(&(String::new(), 0), "t2", 5, long), Tell::Now, "a stream this view has seen none of");
 }
 
+// the steps of a streamed reply come further apart as a picture costs more (a long reply, a busy machine): one part in LIVE_SHARE of the hub's time, between bounds
+#[test] fn the_gap_between_streamed_steps_follows_what_a_picture_costs() {
+    let ms = Duration::from_millis;
+    assert_eq!(live_gap(Duration::ZERO), LIVE_EVERY, "no picture yet");
+    assert_eq!(live_gap(ms(5)), LIVE_EVERY, "a cheap picture: ten steps a second");
+    assert_eq!(live_gap(ms(60)), ms(480), "a 60 ms picture: two steps a second");
+    assert_eq!(live_gap(ms(900)), LIVE_SLOWEST, "never further apart than this");
+    let seen = ("t1".to_string(), 10usize);
+    assert_eq!(live_notice_every(&seen, "t1", 14, ms(300), live_gap(ms(60))), Tell::In(ms(180)));
+    assert_eq!(live_notice_every(&seen, "t1", 14, ms(480), live_gap(ms(60))), Tell::Now);
+}
+
 /// A view stream on `thread`: opened, its frames collected.
 async fn view_on(port: u16, thread: &str) -> (Items, tokio::task::JoinHandle<()>) {
     let (ws, _) = connect_async(format!("ws://127.0.0.1:{port}/ws?view=1&mobile=1&enc=cbor&token=tok")).await.unwrap();

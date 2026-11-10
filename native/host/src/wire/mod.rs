@@ -178,11 +178,18 @@ pub enum Tell { Now, In(Duration), No }
 /// Whether a view whose revision is current is told (`view.changed`) because the reply being streamed in the thread it shows moved: `seen` is the
 /// text it was last given or told about, `(thread, len)` the text now, `since` the time since it was last told of text alone.
 /// Only the view showing the thread hears of it: a stream in another thread changes nothing this one draws.
-pub fn live_notice(seen: &(String, usize), thread: &str, len: usize, since: Duration) -> Tell {
+pub fn live_notice(seen: &(String, usize), thread: &str, len: usize, since: Duration) -> Tell { live_notice_every(seen, thread, len, since, LIVE_EVERY) }
+/// How long a view is left alone between two notices of streamed text alone, from what its last picture cost the hub: `LIVE_EVERY`, or `LIVE_SHARE` times
+/// that cost when it is more. A picture carries the whole reply so far, so it costs more as the reply grows, and more again on a busy machine: the steps then
+/// come further apart and the hub spends at most one part in `LIVE_SHARE` of its time on a reply being read, however long the reply and however slow the machine.
+pub const LIVE_SHARE: u32 = 8;
+pub const LIVE_SLOWEST: Duration = Duration::from_secs(2);
+pub fn live_gap(cost: Duration) -> Duration { (cost * LIVE_SHARE).clamp(LIVE_EVERY, LIVE_SLOWEST) }
+pub fn live_notice_every(seen: &(String, usize), thread: &str, len: usize, since: Duration, every: Duration) -> Tell {
     if thread.is_empty() || (seen.0 == thread && seen.1 == len) { return Tell::No }
     // a view that just came to this thread and has seen none of its text: nothing to tell while there is none
     if seen.0 != thread && len == 0 { return Tell::No }
-    if since >= LIVE_EVERY { Tell::Now } else { Tell::In(LIVE_EVERY - since) }
+    if since >= every { Tell::Now } else { Tell::In(every - since) }
 }
 
 /// A view stream with no credential of its own (tests, no pairing registry installed). Fails closed once one is.
@@ -205,6 +212,8 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token:
     let mut due: Option<tokio::time::Instant> = None;
     // the streamed text this view was last given or told about (its thread, how many bytes), and when it was last told of text alone
     let (mut live, mut live_at): ((String, usize), tokio::time::Instant) = (Default::default(), tokio::time::Instant::now());
+    // what the view's last picture cost the hub: it sets how far apart the notices of streamed text come (`live_gap`)
+    let mut cost = Duration::ZERO;
     loop {
         tokio::select! {
             m = rx.next() => {
@@ -214,7 +223,9 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token:
                 let v = match decode(&m) { None => continue, Some(Err(reply)) => { tx.send(pack(&conn, &reply)).await?; continue } Some(Ok(v)) => v };
                 // a view request's picture carries the streamed text as it is now: read before the request, so text that comes while it is answered is still news
                 let lens = v.get("m").and_then(Value::as_str).filter(|m| m.starts_with("view.")).map(|_| hub.live_lens());
+                let asked = std::time::Instant::now();
                 for f in hub.request(&mut conn, &v).await { tx.send(pack(&conn, &f)).await?; }
+                if lens.is_some() { cost = asked.elapsed(); }
                 if let Some(lens) = lens { let th = crate::session::shown_thread(conn.client, &conn.target); let n = lens.iter().find(|(t, _)| *t == th).map_or(0, |x| x.1); live = (th, n); }
             }
             n = changes.recv() => { match n { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => if due.is_none() && !conn.view_id.is_empty() { due = Some(tokio::time::Instant::now() + Duration::from_millis(50)) }, Err(_) => return Ok(()) } }
@@ -224,7 +235,7 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token:
                 else {
                     // streamed text is no log line, so the revision stands still while a reply is written: the view showing that thread is told as its text grows
                     let th = crate::session::shown_thread(conn.client, &conn.target); let n = hub.live_text_len(&th); let now = tokio::time::Instant::now();
-                    match live_notice(&live, &th, n, now.saturating_duration_since(live_at)) {
+                    match live_notice_every(&live, &th, n, now.saturating_duration_since(live_at), live_gap(cost)) {
                         Tell::Now => { tx.send(pack(&conn, &hub.notice(&conn, rev))).await?; live = (th, n); live_at = now; }
                         Tell::In(wait) => due = Some(now + wait),
                         Tell::No => {}
