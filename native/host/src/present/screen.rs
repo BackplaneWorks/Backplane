@@ -30,7 +30,7 @@ impl super::Screen for Recent {
         // a revoked device gone); opening the page reads it too (the page in the session is still the one before the press)
         let devpage=super::settings::page(&params["session"])=="devices" || (text(params,"action")=="settings-page" && text(params,"value")=="devices");
         let acted; let params=if devpage && text(params,"action").starts_with("device-") { match super::settings::device_act(text(params,"action"),text(params,"value")) { Some(patch)=>{ let mut c=params.clone(); crate::session::patch::merge(&mut c["session"],&patch); c["action"]=json!(""); c["value"]=json!(""); acted=c; &acted } None=>params } } else { params };
-        let withinfo; let params=if super::settings::is_open(&params["session"]) || params["target"]["kind"]=="thread" || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { params };
+        let withinfo; let params=if super::settings::is_open(&params["session"]) || shows_thread(params) || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { params };
         // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
         let withmig; let params=match crate::import014::last_published(&_hub.cfg.home) { Some(v) => { let mut c=params.clone(); c["importV014"]=v; withmig=c; &withmig } None => params };
         let m=_hub.mirrors();
@@ -46,6 +46,8 @@ pub use crate::sidebar::fuzzy_hit;
 fn flag(s: &Value,k: &str) -> bool { s["open"][k].as_bool().unwrap_or(false) }
 fn refused<T>(reason: &'static str) -> Option<T> { super::refusal::report(reason); None }
 
+/// A target that shows a thread (a thread, or a bot, whose chat is one) needs the hub's models info for its picker.
+pub fn shows_thread(p: &Value) -> bool { matches!(text(&p["target"],"kind"),"thread"|"bot") }
 fn bots(st: &State, hub: &str, now: u64) -> Vec<Value> {
     let mut bots: Vec<_>=st.bots_nav.iter().filter(|(id,_)|!id.contains('~')).collect();
     let uber=setting(st,"uber.bot").to_string();
@@ -837,6 +839,7 @@ mod dispatcher_tests {
 
 #[cfg(test)]
 mod thread_binding_tests {
+    #[test] fn a_bot_chat_gets_the_models_info_like_a_thread() { for k in ["thread","bot"] { assert!(shows_thread(&json!({"target":{"kind":k,"id":"x"}})), "{k}"); } assert!(!shows_thread(&json!({"target":{"kind":"recent"}}))); }
     use super::*;
     fn fixture(lean: bool) -> (State,Value,Value) {
         let pair:Value=serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json"))).unwrap();

@@ -502,6 +502,17 @@ mod tests {
                 "codex": {"cli": "codex 1.2", "labels": {"default": "Codex's configured default", "gpt-6.1-sol": "GPT-6.1-Sol · Latest workhorse"}, "efforts": {"gpt-6.1-sol": ["low", "medium", "high", "xhigh", "max", "ultra"]}},
                 "grok": {"cli": "", "labels": {}}, "opencode": {"cli": "1.0 · lists no models", "error": "lists no models: sign in with `opencode auth login`", "labels": {}}}})
     }
+    #[test] fn every_agent_lists_its_models_in_a_bot_chat_with_the_info_and_default_only_without() {
+        let mut m = info();
+        for p in ["claude", "codex", "grok", "opencode", "muse", "antigravity", "pi", "omp"] { if !m[p].is_array() { m[p] = json!(["m1", "m2"]) } }
+        for (p, _) in AGENTS {
+            let with = picker_with(p, "", "", "", Some(&m));
+            let n = m[*p].as_array().map_or(0, |a| a.iter().filter(|x| x.as_str().map_or(false, |s| !s.is_empty() && s != "default")).count());
+            assert_eq!(with["models"].as_array().unwrap().len(), 1 + n, "{p}: default and its real models");
+            assert_eq!(picker_with(p, "", "", "", None)["models"].as_array().unwrap().len(), 1, "{p}: no info is the bare default (the bug)");
+            let a = picker_agents(Some(&m)); assert_eq!(a[*p]["models"].as_array().map_or(0, Vec::len) > 1 || n == 0 || a[*p]["ok"] == false, true, "{p}: agents list");
+        }
+    }
     #[test] fn an_accounts_catalog_lays_over_the_detected_list() {
         let info = json!({"claude":["fable","opus"],"about":{"claude":{"cli":"2","labels":{"default":"d","fable":"Fable 5.1"},"efforts":{"fable":["low"]}}}});
         let cat = vec![json!({"id":"default","label":"Default"}), json!({"id":"claude-fable-5-1[1m]","label":"Fable 5.1","efforts":["low","high"]}), json!({"id":"claude-fable-5-2[1m]","label":"Fable 5.2","efforts":["low","high"]})];
