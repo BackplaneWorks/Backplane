@@ -69,6 +69,15 @@ Bub's); `https://boat-hub.tail9e0cf2.ts.net/healthz` answers `ok` from the deskt
 
 ## The cutover (only after the person says yes)
 
+Run as `scripts/boat-hub-cutover.sh <step>` in this order: `backup`, `link`, `link-join CODE`, `approve`, `join`, `home`, `carry`, `retire`, `check`
+(`rollback` undoes it). The carry is `scripts/boat-hub-carry.py`: from a copy of the desktop log, every live bot but the uberbot (with its thread,
+messages, memories, routines, settings), every live room with its posts and every live hook, ids kept, the desktop uberbot's id replaced by the
+Boat replica's; appended to the Boat log with its hub stopped. Dry run Nov 10: 230 lines (5 bots, 13 rooms) on a copy of the Boat home; a client
+of that copy sees all of them. RPCs go through `scripts/hub-rpc.mjs` (the hub's /ws, CBOR). The Boat signs in to Claude with its own session
+(Settings, Agents on the Boat hub): the desktop's account files are not copied, since two machines refreshing one OAuth session would log one
+out. APNs is set on both hubs: each pushes for its own threads, and Bub's pushes come only from the lease holder. Google's refresh token goes to
+the Boat with the vault; the desktop's copy is left unused rather than signed out (sign-out revokes it at Google).
+
 0. Backup: stop nothing; copy the desktop home (`~/.backplane-gpui-fresh/home`) to `~/.backplane-gpui-fresh/backup-<date>/` with
    `~/.config/backplane/apns*`, and `boat snapshot bx_479dqxby bp-hub-before`. Rollback = the steps below in reverse (each is one setting or
    one service).
