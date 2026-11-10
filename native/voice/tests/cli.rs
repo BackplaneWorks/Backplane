@@ -570,14 +570,14 @@ fn local_with_nothing_downloaded_says_so() {
 fn local_status_and_remove_report_the_folder() {
     let t = tempfile::tempdir().unwrap();
     let dir = t.path().to_str().unwrap();
-    std::fs::write(t.path().join("silero_vad.onnx"), "12345").unwrap();
+    std::fs::copy(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("vad/silero_vad.onnx"), t.path().join("silero_vad.onnx")).unwrap();
     let mut r = Run::new(&["local-status", "--local-dir", dir], "http://127.0.0.1:9/v1", &[]);
     assert_eq!(r.done(), 0);
     let e = &r.events()[0];
     let keys: Vec<&String> = e.as_object().unwrap().keys().collect();
     assert_eq!(keys, vec!["event", "platform", "supported", "runtime", "vad", "vadBundled", "models", "bytes"]);
     assert_eq!(e["vadBundled"], json!(false), "no release copy beside a test build");
-    assert_eq!((&e["event"], &e["vad"], &e["runtime"], &e["bytes"]), (&json!("local"), &json!(true), &json!(false), &json!(5)));
+    assert_eq!((&e["event"], &e["vad"], &e["runtime"], &e["bytes"]), (&json!("local"), &json!(true), &json!(false), &json!(643854)));
     assert_eq!(e["models"][0], json!({"id": "parakeet-v2", "label": "Parakeet TDT 0.6B v2 (English)", "size": 482440461, "installed": false}));
     assert_eq!(r.names(), vec!["local", "end"]);
     let mut r = Run::new(&["local-remove", "--local-dir", dir], "http://127.0.0.1:9/v1", &[]);
@@ -603,11 +603,13 @@ fn a_runtime_of_another_version_is_refused_with_a_plain_error() {
         let s = Command::new("cc").arg("-shared").arg("-fPIC").arg(&c).arg("-o").arg(rt.join(lib)).status().unwrap();
         assert!(s.success());
     }
-    std::fs::write(vad_path(t.path()), "x").unwrap();
+    std::fs::copy(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("vad/silero_vad.onnx"), vad_path(t.path())).unwrap();
     let m = t.path().join("sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8");
     std::fs::create_dir_all(&m).unwrap();
-    std::fs::write(m.join("encoder.int8.onnx"), "x").unwrap();
-    std::fs::write(m.join("tokens.txt"), "x").unwrap();
+    // the pinned sizes, sparse
+    for (f, n) in [("encoder.int8.onnx", 652282309), ("decoder.int8.onnx", 7257753), ("joiner.int8.onnx", 1739080), ("tokens.txt", 9384)] {
+        std::fs::File::create(m.join(f)).unwrap().set_len(n).unwrap();
+    }
     let dir = t.path().to_str().unwrap();
     let mut r = Run::new(&["live", "--engine", "local", "--local-dir", dir, "--source", "stdin"], "http://127.0.0.1:9/v1", &[]);
     let e = r.next("error");

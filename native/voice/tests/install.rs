@@ -307,3 +307,67 @@ fn the_vad_beside_the_helper_is_used_and_one_that_does_not_match_is_not() {
     run(t.path(), &r.pins).0.unwrap();
     assert_eq!(std::fs::read(vad_path(t.path())).unwrap(), b"silero");
 }
+
+/// Every file an install leaves is there, not empty, and the hash its pin or the runtime's manifest gives.
+fn all_hash_checked(dir: &Path, r: &Rig) {
+    let vad = std::fs::read(vad_path(dir)).unwrap();
+    assert!(!vad.is_empty() && Some(sha256(&vad)) == r.pins.vad.sha256);
+    for (n, size, sha) in &r.pins.models[0].files {
+        let b = std::fs::read(dir.join(DIR).join(n)).unwrap();
+        assert!(!b.is_empty() && b.len() as u64 == *size && sha256(&b) == *sha, "{n}");
+    }
+    let rt = runtime_dir(dir);
+    let list = std::fs::read_to_string(rt.join(".files")).unwrap();
+    let names: Vec<&str> = list.lines().map(|l| l.splitn(3, ' ').nth(2).unwrap()).collect();
+    let mut want = vec![c_library(), onnx_library(), "sherpa-onnx.node"];
+    want.sort();
+    assert_eq!(names, want);
+    for l in list.lines() {
+        let mut it = l.splitn(3, ' ');
+        let (size, sha, name) = (it.next().unwrap().parse::<u64>().unwrap(), it.next().unwrap(), it.next().unwrap());
+        let b = std::fs::read(rt.join(name)).unwrap();
+        assert!(size > 0 && b.len() as u64 == size && sha256(&b) == sha, "{name}");
+    }
+    assert_eq!(std::fs::read_to_string(dir.join("ready-m")).unwrap(), "ok");
+}
+
+/// What a crash in the middle of an install left on 2026-11-09: the names in place and no bytes (the renames reached the
+/// disk, the data did not), a dead install's staging folder, and a later install's ready mark. The next install mends it.
+#[test]
+fn an_install_into_a_fresh_home_is_whole_and_one_a_crash_emptied_is_mended() {
+    let r = rig();
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("voice/local");
+    run(&dir, &r.pins).0.unwrap();
+    all_hash_checked(&dir, &r);
+
+    for f in std::fs::read_dir(runtime_dir(&dir)).unwrap().flatten() {
+        std::fs::File::create(f.path()).unwrap();
+    }
+    std::fs::File::create(vad_path(&dir)).unwrap();
+    let dead = dir.join(".stage-999999999");
+    std::fs::create_dir_all(dead.join("rt")).unwrap();
+    std::fs::File::create(dead.join("runtime.tgz")).unwrap();
+    let s = local::status_with(&dir, &r.pins);
+    assert_eq!((&s["runtime"], &s["vad"]), (&serde_json::json!(false), &serde_json::json!(false)));
+    assert!(!dir.join("ready-m").exists(), "status drops a mark over broken files");
+
+    let before = r.files.hits.load(Ordering::SeqCst);
+    run(&dir, &r.pins).0.unwrap();
+    assert_eq!(r.files.hits.load(Ordering::SeqCst), before + 2, "the runtime and the VAD again, not the model");
+    all_hash_checked(&dir, &r);
+    assert!(no_stage(&dir), "a dead install's staging folder goes");
+}
+
+#[test]
+fn a_runtime_package_with_an_empty_library_is_refused() {
+    let mut r = rig();
+    let (c, o) = (format!("package/{}", c_library()), format!("package/{}", onnx_library()));
+    let rt = tgz(&[(c.as_str(), b"".as_slice()), (o.as_str(), b"onnx")]);
+    let only = Files::start(HashMap::from([("/empty-rt.tgz".to_string(), rt.clone())]));
+    r.pins.runtimes[0].1 = Pin { url: format!("{}/empty-rt.tgz", only.base), size: None, sha256: None, sha512: Some(sha512(&rt)) };
+    let t = tempfile::tempdir().unwrap();
+    let e = run(t.path(), &r.pins).0.unwrap_err();
+    assert!(e.contains("missing or empty"), "{e}");
+    assert!(!t.path().join("ready-m").exists() && !runtime_dir(t.path()).exists() && no_stage(t.path()));
+}
