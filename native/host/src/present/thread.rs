@@ -91,7 +91,37 @@ fn took(s: u64) -> String {
     if s < 60 { format!("{s}s") } else if s < 3600 { format!("{}m {}s", s / 60, s % 60) } else { format!("{}h {}m", s / 3600, (s % 3600) / 60) }
 }
 
-fn md_blocks(text: &str) -> Vec<Value> { md::nodes_json(&md::render(text)) }
+/// A message's Markdown as blocks. Every picture of a thread draws its page of messages again, and a posted message never changes, so the blocks of the
+/// texts drawn lately are kept (`Blocks`): rendering them was half of the hub's work for one picture of a long thread, at every streamed step and key press.
+fn md_blocks(text: &str) -> Vec<Value> {
+    static KEPT: std::sync::LazyLock<std::sync::Mutex<Blocks>> = std::sync::LazyLock::new(Default::default);
+    let key = Blocks::key(text);
+    if let Some(b) = KEPT.lock().unwrap().get(key) { return b }
+    let b = md_fresh(text);
+    KEPT.lock().unwrap().put(key, text.len(), &b);
+    b
+}
+/// The same, never kept: the reply being streamed is another text at every step.
+fn md_fresh(text: &str) -> Vec<Value> { md::nodes_json(&md::render(text)) }
+
+/// The rendered blocks of the texts drawn lately, by the text's length and hash. Two generations: a text asked for again moves to the new one, and when
+/// the new one is full (`MAX` texts or `MAX_BYTES` of text) the old one is dropped, so what is kept is bounded and what is on show stays.
+#[derive(Default)]
+pub struct Blocks { new: HashMap<(usize, u64), Vec<Value>>, old: HashMap<(usize, u64), Vec<Value>>, bytes: usize }
+impl Blocks {
+    pub const MAX: usize = 512;
+    pub const MAX_BYTES: usize = 4 << 20;
+    pub fn key(text: &str) -> (usize, u64) { use std::hash::{Hash, Hasher}; let mut h = std::collections::hash_map::DefaultHasher::new(); text.hash(&mut h); (text.len(), h.finish()) }
+    pub fn get(&mut self, key: (usize, u64)) -> Option<Vec<Value>> {
+        if let Some(b) = self.new.get(&key) { return Some(b.clone()) }
+        let b = self.old.remove(&key)?; self.put(key, key.0, &b); Some(b)
+    }
+    pub fn put(&mut self, key: (usize, u64), len: usize, blocks: &[Value]) {
+        if self.new.len() >= Self::MAX || self.bytes + len > Self::MAX_BYTES { self.old = std::mem::take(&mut self.new); self.bytes = 0; }
+        if self.new.insert(key, blocks.to_vec()).is_none() { self.bytes += len; }
+    }
+    pub fn len(&self) -> usize { self.new.len() + self.old.len() }
+}
 
 /// Every row draws; where its own key is not ready it degrades (images are not found: `images` is empty; attachment lines stay in the text; a reminder, a terminal
 /// and a review comment show as plain activity rows; a thought shows only when the setting is on, and that setting refuses the thread). Kept for the refusal API.
@@ -448,7 +478,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     if running {
         // the reply being streamed (the hub's live text), as it is written: a reply of its own above "Working", replaced by its message when that lands
         let live = params["liveText"].as_str().unwrap_or("");
-        if !live.trim().is_empty() { entries.push(json!({"id": format!("@stream:{thread}"), "kind": "assistant", "text": live, "blocks": md_blocks(live), "images": [], "stamp": "", "streaming": true})) }
+        if !live.trim().is_empty() { entries.push(json!({"id": format!("@stream:{thread}"), "kind": "assistant", "text": live, "blocks": md_fresh(live), "images": [], "stamp": "", "streaming": true})) }
         entries.push(json!({"id": format!("@working:{thread}"), "kind": "assistant", "text": "Working", "blocks": md_blocks("Working"), "images": [], "stamp": ""}))
     }
     // Signal.why: the first error of the thread's last turn (newest first, stopping at the person's message), at most 400 characters
@@ -519,6 +549,22 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
 
 #[cfg(test)]
 mod tests {
+    // the kept blocks are the rendered ones, a text still drawn outlives the turnover, and what is kept stays bounded (count and bytes)
+    #[test] fn kept_markdown_blocks_are_the_rendered_ones_and_bounded() {
+        use super::{md_blocks, md_fresh, Blocks};
+        let t = "# Title\n\nSome **bold** text and `code`.\n\n- a\n- b\n\n```rust\nfn x() {}\n```\n";
+        assert_eq!(md_blocks(t), md_fresh(t)); assert_eq!(md_blocks(t), md_fresh(t), "the kept copy");
+        assert_ne!(Blocks::key("a b"), Blocks::key("b a"));
+        let mut b = Blocks::default(); b.put(Blocks::key("kept"), 4, &md_fresh("kept"));
+        for i in 0..Blocks::MAX * 5 {
+            let x = format!("text {i}"); b.put(Blocks::key(&x), x.len(), &md_fresh(&x));
+            assert!(b.len() <= Blocks::MAX * 2, "{} kept", b.len());
+            if i % 100 == 0 { assert_eq!(b.get(Blocks::key("kept")), Some(md_fresh("kept")), "drawn again every 100 texts: still kept at {i}"); }
+        }
+        assert!(b.get(Blocks::key("text 0")).is_none(), "a text not drawn since is dropped");
+        let big = "x".repeat(Blocks::MAX_BYTES / 2 + 1); let mut b = Blocks::default();
+        for i in 0..6 { let x = format!("{i}{big}"); b.put(Blocks::key(&x), x.len(), &[]); assert!(b.len() <= 2, "two generations of one big text each"); }
+    }
     #[test] fn a_handoff_is_a_card_and_its_message_is_the_agents() {
         let card = json!({"from":"t1","title":"First","note":"n","summary":"Routing.","refs":[{"kind":"thread","label":"First","url":"backplane://thread/t1","thread":"t1"}]});
         let e = Ent { id: "k1".into(), msg: false, role: HANDOFF_TONE.into(), akind: HANDOFF_TONE.into(), text: card.to_string(), at: 1 };
