@@ -24,7 +24,7 @@ fn field(l: &str, i: usize) -> &str { l.split('\t').nth(i).unwrap_or("") }
 fn set<'a>(st: &'a State, k: &str) -> &'a str { st.settings.get(k).map_or("", String::as_str) }
 /// Thread.blank: what asking after an unknown thread finds
 fn blank() -> Thread {
-    Thread { project: String::new(), title: String::new(), created: 0, activity: 0, turn: Turn::Idle, pending: 0, archived: true, override_: Override::None, settled_at: 0, unsettled_at: 0, pinned: false,
+    Thread { project: String::new(), title: String::new(), created: 0, activity: 0, turn: Turn::Idle, pending: 0, archived: true, override_: Override::None, settled_at: 0, unsettled_at: 0, pinned: false, pinned_at: 0,
         worktree_mode: false, branch: String::new(), worktree: String::new(), provider: String::new(), model: String::new(), session: String::new(), deleted: true }
 }
 

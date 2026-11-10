@@ -4,13 +4,13 @@ package dev.backplane.mobile
 object ThreadGroups {
     /** `all`: every thread of the project the groups were made from, children included (what [tree] nests from). */
     data class Split(val active: List<DThread>, val settled: List<DThread>, val all: List<DThread> = active + settled)
-    /** A project's threads, `hidden` (bots' threads) left out: active ones first (pinned, then newest activity), settled ones newest settle first. A subagent or
+    /** A project's threads, `hidden` (bots' threads) left out: active ones first (pinned in the hub's pin order, then newest activity), settled ones newest settle first. A subagent or
      *  subthread whose parent is here is in neither group: it sits under its parent, wherever that is (the desktop's Kids.set). */
     fun split(all: List<DThread>, project: String, hidden: Set<String> = emptySet()): Split {
         val mine = all.filter { it.project == project && !it.archived && it.id !in hidden }
         val ids = mine.associateBy { it.id }
         val roots = mine.filter { parentIn(it, ids) == null }
-        val active = roots.filter { !it.settled }.sortedWith(compareByDescending<DThread> { it.pinned }.thenByDescending { it.updatedAt }.thenBy { it.id })
+        val active = roots.filter { !it.settled }.sortedWith(compareByDescending<DThread> { it.pinned }.thenBy { if (it.pinned) it.pinOrder else 0 }.thenByDescending { it.updatedAt }.thenBy { it.id })
         val settled = roots.filter { it.settled }.sortedWith(compareByDescending<DThread> { it.settledAt }.thenBy { it.id })
         return Split(active, settled, mine.sortedWith(compareByDescending<DThread> { it.updatedAt }.thenBy { it.id }))
     }

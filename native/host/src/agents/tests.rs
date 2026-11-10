@@ -506,6 +506,11 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     let read = call("thread_read", json!({"threadId":other,"limit":3})).await.1; assert_eq!(read["entries"].as_array().unwrap().len(), 3); assert_eq!(read["status"]["id"], other);
     assert!(read["entries"].as_array().unwrap().iter().all(|e| e["kind"] == "message" || e["kind"] == "activity"));
     assert_eq!(call("thread_update", json!({"threadId":other,"title":"Renamed"})).await, (true, json!({"threadId":other,"title":"Renamed"})));
+    // pinned: the sidebar's Pin for an agent or the uberbot; alone, like account
+    assert_eq!(call("thread_update", json!({"threadId":other,"pinned":true})).await, (true, json!({"threadId":other,"pinned":true})));
+    assert!(log_from(&hub, 0).await.iter().any(|e| is(e, "ThreadPinned") && e["id"] == other && e["pinned"] == true));
+    assert_eq!(call("thread_update", json!({"threadId":other,"pinned":"maybe"})).await.0, false);
+    assert_eq!(call("thread_update", json!({"threadId":other,"pinned":false,"title":"x"})).await, (false, json!({"error":"pinned cannot be combined with title, report or parent"})));
     assert_eq!(call("thread_interrupt", json!({"threadId":other})).await, (true, json!({"threadId":other,"state":"not running"})));
     ag.shutdown();
 }

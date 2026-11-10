@@ -63,15 +63,26 @@ fn key_cmp(a: &[bool], b: &[bool]) -> std::cmp::Ordering {
     std::cmp::Ordering::Equal
 }
 fn order_key(st: &State, id: &str, section: &str) -> Vec<bool> { st.order_keys.get(id).map(|k| key_read(if section == "pinned" { &k.0 } else { &k.1 })).unwrap_or_default() }
-/// Slot.before for the pinned and active shelves: keyed threads first, by key; the rest newest first
+/// Slot.before for the pinned and active shelves: keyed threads first, by key; the rest newest first (pins: in the order they were pinned)
 fn slot_cmp(st: &State, section: &str, a: &str, b: &str) -> std::cmp::Ordering {
     let (ka, kb) = (order_key(st, a, section), order_key(st, b, section));
     match (ka.is_empty(), kb.is_empty()) {
         (false, false) => key_cmp(&ka, &kb),
         (false, true) => std::cmp::Ordering::Less,
         (true, false) => std::cmp::Ordering::Greater,
+        // the pins nobody dragged: in the order they were pinned (the newest at the bottom)
+        (true, true) if section == "pinned" => st.threads[a].pinned_at.cmp(&st.threads[b].pinned_at).then_with(|| rank(&st.threads[b]).cmp(&rank(&st.threads[a]))),
         (true, true) => rank(&st.threads[b]).cmp(&rank(&st.threads[a])),
     }
+}
+
+/// Where a pinned thread stands on its project's Pinned shelf (0 first), in the sidebar's order (`slot_cmp`); 0 for one not pinned.
+/// The phones sort their pinned rows by it (data/1 `pinOrder`), so they list the pins as the desktop does.
+pub fn pin_place(st: &State, id: &str) -> u64 {
+    let Some(t) = st.threads.get(id).filter(|t| t.pinned) else { return 0 };
+    let mut v: Vec<&str> = st.threads.iter().filter(|(_, x)| x.pinned && !x.deleted && !x.archived && x.project == t.project).map(|(i, _)| i.as_str()).collect();
+    v.sort_by(|a, b| slot_cmp(st, "pinned", a, b));
+    v.iter().position(|x| *x == id).unwrap_or(0) as u64
 }
 
 // ---- the thread tree -------------------------------------------------------------------------------
@@ -593,6 +604,18 @@ mod tests {
         assert_eq!(local["threads"].as_array().unwrap().iter().map(|v| (v["id"].as_str().unwrap(), v["mark"]["short"].as_str())).collect::<Vec<_>>(), [("a1", None), ("b1", Some("framework"))], "this machine's rows look as before");
         assert_eq!((local["settledCount"].as_u64(), local["archivedCount"].as_u64(), local["shelf"].as_str()), (Some(5), Some(1), Some("Settled 5")));
         assert_eq!(local["settled"][0]["machine"], "framework"); assert_eq!(local["threadsPage"]["total"], 1);
+    }
+    #[test] fn pins_list_in_the_order_they_were_pinned_and_a_dragged_one_keeps_its_place() {
+        let mut l = vec![r#"{"$":"ProjectCreated","id":"p","title":"P","root":"/p","at":1}"#.to_string()];
+        for (i, t) in ["a", "b", "c", "d"].iter().enumerate() { l.push(format!(r#"{{"$":"ThreadCreated","id":"{t}","project":"p","title":"{t}","at":{}}}"#, 10 + i)); }
+        // pinned c, a, b (b the newest activity): listed c, a, b, as pinned
+        for (t, at) in [("c", 20), ("a", 21), ("b", 22)] { l.push(format!(r#"{{"$":"ThreadPinned","id":"{t}","pinned":true,"at":{at}}}"#)); }
+        let st = fold(&l.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(["a", "b", "c", "d"].map(|t| pin_place(&st, t)), [1, 2, 0, 0], "d is not pinned");
+        // b dragged to the top: a keyed pin goes first, the others keep the order they were pinned in
+        l.push(r#"{"$":"ThreadOrdered","id":"b","section":"pinned","key":"4","at":30}"#.into());
+        let st = fold(&l.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(["a", "b", "c"].map(|t| pin_place(&st, t)), [2, 0, 1]);
     }
     #[test] fn ago_words() { assert_eq!(ago(100, 100), "now"); assert_eq!(ago(100, 40), "1m"); assert_eq!(ago(10000, 0), "2h"); assert_eq!(ago(200000, 0), "2d"); assert_eq!(ago(5, 9), "now"); }
     #[test] fn several_machines_lists_merge_by_key_keeping_each_ones_order() {

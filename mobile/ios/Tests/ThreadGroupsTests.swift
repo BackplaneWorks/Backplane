@@ -1,7 +1,7 @@
 // ThreadGroups against hand-made rows. Compiled with Backplane/ThreadGroups.swift alone, outside the app: scripts/mobile/ios-thread-groups-test.sh.
 import Foundation
 
-struct T: ShelvedThread { var id: String; var project = "p"; var settled = false; var pinned = false; var archived = false; var updatedAt = 0; var settledAt = 0 }
+struct T: ShelvedThread { var id: String; var project = "p"; var settled = false; var pinned = false; var pinOrder = 0; var archived = false; var updatedAt = 0; var settledAt = 0 }
 var failed = 0, passed = 0
 func check(_ ok: Bool, _ name: String, _ got: Any) { if ok { passed += 1 } else { failed += 1; print("FAIL \(name): got \(got)") } }
 func ids(_ ts: [T]) -> [String] { ts.map(\.id) }
@@ -23,6 +23,9 @@ live[3].settled = false
 g = ThreadGroups.split(live, project: "p", hidden: ["bot"])
 check(ids(g.active) == ["c", "s1", "a"] && ids(g.settled) == ["b", "s2"], "unsettled live", (ids(g.active), ids(g.settled)))
 
+// pins in the hub's order (the order they were pinned or dragged to), whatever their activity
+check(ids(ThreadGroups.split([T(id: "p2", pinned: true, pinOrder: 1, updatedAt: 90), T(id: "p1", pinned: true, pinOrder: 0, updatedAt: 1), T(id: "n", updatedAt: 99)], project: "p").active) == ["p1", "p2", "n"], "pin order", "")
+
 // ties are stable; an empty project is empty
 check(ids(ThreadGroups.split([T(id: "m", updatedAt: 1), T(id: "k", updatedAt: 1)], project: "p").active) == ["k", "m"], "ties by id", "")
 check(ThreadGroups.split(rows, project: "none").active.isEmpty, "no threads", "")
@@ -36,7 +39,7 @@ check(ids(ThreadGroups.history(live: hl, rows: hr, open: true)) == ["live", "old
 check(ThreadGroups.historyTitle(3) == "Conversation history (3)", "history title", ThreadGroups.historyTitle(3))
 
 // subagents and subthreads nest under their parent, wherever it is; a lost parent or a loop makes roots (as ThreadGroupsTest.kt)
-struct N: NestedThread { var id: String; var project = "p"; var settled = false; var pinned = false; var archived = false; var updatedAt = 0; var settledAt = 0; var parent = "" }
+struct N: NestedThread { var id: String; var project = "p"; var settled = false; var pinned = false; var pinOrder = 0; var archived = false; var updatedAt = 0; var settledAt = 0; var parent = "" }
 let nl = [N(id: "a", updatedAt: 9), N(id: "a1", updatedAt: 8, parent: "a"), N(id: "a2", updatedAt: 7, parent: "a"), N(id: "a11", updatedAt: 6, parent: "a1"), N(id: "b", updatedAt: 5),
           N(id: "lost", updatedAt: 4, parent: "gone"), N(id: "c1", updatedAt: 3, parent: "c2"), N(id: "c2", updatedAt: 2, parent: "c1"),
           N(id: "s", settled: true, updatedAt: 1, settledAt: 1), N(id: "s1", updatedAt: 10, parent: "s")]

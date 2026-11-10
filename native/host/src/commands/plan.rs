@@ -123,7 +123,10 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
             Some(Plan { events: ev, reply: ok(id), stop: Some(th.clone()), wt: None, scratch: None, act: None })
         }
         "thread.unsettle" => done(vec![json!({"$":"ThreadUnsettled","id":th,"at":at})], id),
-        "thread.pin" => done(vec![json!({"$":"ThreadPinned","id":th,"pinned":true,"at":at})], id),
+        // a new pin goes to the bottom of the Pinned shelf: a place a drag gave it on an earlier pin is dropped
+        "thread.pin" => { let mut ev = vec![json!({"$":"ThreadPinned","id":th,"pinned":true,"at":at})];
+            if !f.threads.get(&th).map_or(false, |t| t.pinned) && !f.nav(&th).pinned.is_empty() { ev.push(json!({"$":"ThreadOrdered","id":th,"section":"pinned","key":"","at":at})) }
+            done(ev, id) }
         "thread.unpin" => done(vec![json!({"$":"ThreadPinned","id":th,"pinned":false,"at":at})], id),
         "thread.unarchive" => done(vec![json!({"$":"ThreadArchived","id":th,"archived":false,"at":at})], id),
         // a rename: the title trimmed; a blank one changes nothing (Rename.changes)
