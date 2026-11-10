@@ -67,6 +67,13 @@ pub const TITLE_SYSTEM: &str = "You title threads in a coding agent's sidebar. T
 /// The model that titles threads (the person's Claude login runs it); Codex's light model is the fallback.
 pub const TITLE_MODEL: &str = "claude-haiku-5-5";
 
+/// Title.input: what the title writer reads. The message is fenced and the request comes after it: handed bare, a short question ("what is this board")
+/// reads as one put to the writer, and it answered it, refused it, or titled its own instructions ("Board title request: 3-7 words...").
+pub fn title_input(text: &str) -> String {
+    let t: String = text.chars().take(4000).collect();
+    format!("<user_message>\n{}\n</user_message>\n\nWrite the title for the thread this starts. Reply with the title only.", t.trim())
+}
+
 /// Title.clean: the answer's first line without markdown marks, quotes, a "Title:" label or a trailing period, spaces collapsed, 60 characters at most ("" for none).
 pub fn title_clean(answer: &str) -> String {
     let first = answer.trim().lines().next().unwrap_or("").trim();
@@ -127,8 +134,8 @@ impl Agents {
     /// A thread's title from `text`: the Writing setting's provider and model when the person chose one, else Haiku under the thread's own account (else the default login), then Haiku on the default login, then Codex's light model.
     /// The cleaned title, or None (each failed attempt is logged).
     pub async fn write_title(&self, thread: &str, text: &str) -> Option<String> {
-        let input: String = text.chars().take(4000).collect();
-        if input.trim().is_empty() { return None }
+        if text.trim().is_empty() { return None }
+        let input = title_input(text);
         let mut tries: Vec<(&str, String, Launch, &str)> = vec![];
         // Settings > Writing: a provider or model the person chose is what names threads (the page says so); with neither set, Haiku as before
         let (tp, tm) = { let w = self.world().await; (w.setting("text.provider").to_string(), w.setting("text.model").to_string()) };
@@ -210,6 +217,11 @@ mod tests {
         assert_eq!(title_clean("  \"Fix the Haiku titler.\"\nmore"), "Fix the Haiku titler"); assert_eq!(title_clean("## Title: **Auto-settle merged threads**"), "Auto-settle merged threads");
         assert_eq!(title_clean("'quoted'"), "quoted"); assert_eq!(title_clean("Wait..."), "Wait..."); assert_eq!(title_clean("   "), "");
         let long = title_clean(&"word ".repeat(30)); assert_eq!(long.chars().count(), 60); assert!(long.ends_with("..."));
+    }
+    #[test] fn the_title_writer_reads_the_message_as_text_to_title_not_a_question_to_answer() {
+        let i = title_input("  What is this board?\n");
+        assert!(i.starts_with("<user_message>\nWhat is this board?\n</user_message>"), "{i}"); assert!(i.ends_with("Reply with the title only."), "the request comes last: {i}");
+        assert!(title_input(&"x".repeat(9000)).chars().count() < 4200, "a long message is clipped");
     }
     #[test] fn a_handoff_summary_is_one_plain_paragraph() {
         assert_eq!(give_clean("  Two\nlines   here.\n\nAnd more. "), "Two lines here. And more."); let long = give_clean(&"word ".repeat(400)); assert_eq!(long.chars().count(), 900); assert!(long.ends_with("..."));
