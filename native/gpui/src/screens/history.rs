@@ -20,14 +20,24 @@ fn first_shared(rows: &[Value], page: &[Value]) -> Option<(usize, usize)> {
     page.iter().enumerate().find_map(|(j, r)| at.get(id(r)).map(|i| (*i, j)))
 }
 
+/// How far up the rows held a picture of the newest page may find its place: the newest page sits at the end of what is held, so a row it
+/// shares further up (a run's fold id seen again, a row an older page brought back above) is not where it starts. Matching it there cut every
+/// row read for history away, the list asked for those pages again, the next picture cut them again: the thread flashed between its newest
+/// page and its history many times a second (Nov 10, both recordings of opening Bub).
+pub fn tail_from(rows: &[Value], fresh: &[Value]) -> usize { rows.len().saturating_sub(fresh.len() * 2 + 16) }
+/// The first row of `fresh` that the tail of `rows` (from `tail_from`) also holds: (its index in `rows`, its index in `fresh`).
+fn first_shared_tail(rows: &[Value], fresh: &[Value]) -> Option<(usize, usize)> {
+    let from = tail_from(rows, fresh);
+    first_shared(&rows[from..], fresh).map(|(i, j)| (i + from, j))
+}
 /// Where a picture of the newest page starts in the rows held (None: it shares nothing with them).
-pub fn merge_point(rows: &[Value], fresh: &[Value]) -> Option<usize> { first_shared(rows, fresh).map(|(i, _)| i) }
+pub fn merge_point(rows: &[Value], fresh: &[Value]) -> Option<usize> { first_shared_tail(rows, fresh).map(|(i, _)| i) }
 
 /// A new picture of the newest page over the rows held: the rows above it stay, and from the first row they share the picture is the truth, so a
 /// reply that ended, a run that shut or a row the hub took away goes with it. The page's rows before that first shared row are only the cut head of
 /// a run the rows held have whole. Shares nothing: the thread moved on by more than a page, and the picture stands alone.
 pub fn merge(mut rows: Vec<Value>, fresh: Vec<Value>) -> Vec<Value> {
-    match first_shared(&rows, &fresh) {
+    match first_shared_tail(&rows, &fresh) {
         Some((i, j)) => { rows.truncate(i); rows.extend(fresh.into_iter().skip(j)); rows }
         None => fresh,
     }
@@ -85,10 +95,15 @@ pub fn changed(old: &[Value], new: &[Value], from: usize) -> (Range<usize>, Rang
     (start..a, start..b)
 }
 
-/// The next older page to ask for after one landed: none at the start of the thread, none past the cap, and never the page just read (a hub answering
-/// the same cursor would otherwise be asked for ever).
-pub fn next_older(read: &str, older: &str, has_more: bool, rows: usize) -> String {
-    if !has_more || older == read || rows >= MAX_ROWS { String::new() } else { older.to_string() }
+/// The next older page to ask for after one landed: none at the start of the thread, none past the cap, and never a page already read for the
+/// rows held (`seen`, by `page_mark`): a hub answering the same cursor, or two cursors that lead to each other, would otherwise be asked for
+/// ever, and every page that lands moves the rows on screen (Nov 10: a 27-row and a 2-row page in turn, 40 a second).
+pub fn next_older(read: &str, older: &str, has_more: bool, rows: usize, seen: &HashSet<String>) -> String {
+    if !has_more || older == read || rows >= MAX_ROWS || seen.contains(&page_mark(older)) { String::new() } else { older.to_string() }
+}
+/// What names a page whatever else its cursor carries: its `before` (the hub's epoch and target change nothing about which rows it holds).
+pub fn page_mark(cursor: &str) -> String {
+    match serde_json::from_str::<Value>(cursor) { Ok(c) if !c["before"].is_null() => c["before"].as_str().map_or_else(|| c["before"].to_string(), str::to_string), _ => cursor.to_string() }
 }
 
 #[cfg(test)]
@@ -154,7 +169,28 @@ mod tests {
         assert_eq!(changed(&rows(&["a"]), &marked, 0), (1..1, 1..1));
     }
     #[test] fn paging_ends_at_the_start_at_the_cap_and_on_a_repeated_cursor() {
-        assert_eq!(next_older("p1", "p2", true, 10), "p2");
-        assert_eq!(next_older("p1", "p2", false, 10), ""); assert_eq!(next_older("p1", "p1", true, 10), ""); assert_eq!(next_older("p1", "p2", true, MAX_ROWS), "");
+        let none = HashSet::new();
+        assert_eq!(next_older("p1", "p2", true, 10, &none), "p2");
+        assert_eq!(next_older("p1", "p2", false, 10, &none), ""); assert_eq!(next_older("p1", "p1", true, 10, &none), ""); assert_eq!(next_older("p1", "p2", true, MAX_ROWS, &none), "");
+    }
+    fn cur(before: u64, epoch: &str) -> String { json!({"version": 1, "epoch": epoch, "target": {"kind": "thread", "id": "t"}, "query": "", "before": before.to_string()}).to_string() }
+    #[test] fn two_cursors_that_lead_to_each_other_are_read_once_each() {
+        // the Nov 10 loop: A's page names B, B's names A again; each read once, then paging stops
+        let (a, b) = (cur(900, "1"), cur(880, "1"));
+        let mut seen = HashSet::new();
+        seen.insert(page_mark(&a)); assert_eq!(next_older(&a, &b, true, 30, &seen), b);
+        seen.insert(page_mark(&b)); assert_eq!(next_older(&b, &a, true, 32, &seen), "", "A again");
+        assert_eq!(next_older(&b, &cur(900, "2"), true, 32, &seen), "", "the same page under a new epoch is the same page");
+        assert_eq!(page_mark(&a), "900"); assert_eq!(page_mark("plain"), "plain");
+    }
+    #[test] fn a_picture_finds_its_place_in_the_tail_and_never_cuts_the_history_above() {
+        // an older page brought a row back above everything ("m", a run's fold seen again); the newest picture also has it: before, merge cut at
+        // index 0 and every row read for history went
+        let mut held: Vec<String> = vec!["m".into()]; for i in 0..200 { held.push(format!("h{i}")); } for x in ["x", "y", "z"] { held.push(x.into()); }
+        let held: Vec<&str> = held.iter().map(String::as_str).collect();
+        let got = merge(rows(&held), rows(&["m", "y", "z", "n"]));
+        assert_eq!(got.len(), 205, "{:?}", ids(&got)[..3].to_vec());
+        assert_eq!(ids(&got)[..2], ["m", "h0"]); assert_eq!(ids(&got)[got.len() - 3..], ["y", "z", "n"]);
+        assert_eq!(merge_point(&rows(&held), &rows(&["m", "y", "z", "n"])), Some(202));
     }
 }

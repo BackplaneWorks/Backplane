@@ -306,8 +306,9 @@ impl Backplane {
         // Only the newest rows, only within a moment of their first draw, so scrolling back to a row or opening a thread never replays it.
         let len = self.data["thread"]["entries"].as_array().map_or(0, |r| r.len());
         let settled = self.screens.shown_at.elapsed().as_millis() > 800;
-        let first = *self.screens.born.entry(id.clone()).or_insert_with(std::time::Instant::now);
-        let fresh = settled && ei + 3 >= len && first.elapsed().as_millis() < 260 && !was_streamed;
+        // born: when the row came in with a picture (glue.rs timeline_picture), not when it was first drawn: a row scrolled to for the first time,
+        // or drawn after a page re-laid the list, did not just arrive (Nov 10: the newest rows faded in again on opening Bub)
+        let fresh = settled && ei + 3 >= len && self.screens.born.get(&id).map_or(false, |t| t.elapsed().as_millis() < 260) && !was_streamed;
         let inner: AnyElement = if fresh {
             inner.with_animation(SharedString::from(format!("arrive-{id}")), Animation::new(std::time::Duration::from_millis(220)).with_easing(ease_out_quint()),
                 |el, d| el.opacity(d).mt(px(10. * (1. - d)))).into_any_element()

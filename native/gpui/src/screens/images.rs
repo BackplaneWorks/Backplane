@@ -16,7 +16,7 @@ pub enum Slot { Loading, Ready(Arc<Image>), Failed }
 
 struct Entry { slot: Slot, used: u64, bytes: usize }
 #[derive(Default)]
-struct State { items: HashMap<String, Entry>, queue: VecDeque<(String, Target)>, workers: usize, tick: u64, done: u64, retired: Vec<Arc<Image>> }
+struct State { items: HashMap<String, Entry>, queue: VecDeque<(String, Target)>, workers: usize, tick: u64, done: u64, retired: Vec<Arc<Image>>, decoded: HashMap<String, Arc<RenderImage>>, retired_decoded: Vec<Arc<RenderImage>> }
 
 /// Shared by the render and the fetch workers.
 #[derive(Clone, Default)]
@@ -59,6 +59,15 @@ pub fn shrink(img: Arc<Image>) -> Arc<Image> {
     use image::ImageEncoder;
     if enc.write_image(small.as_raw(), small.width(), small.height(), image::ExtendedColorType::Rgba8).is_err() { return img }
     Arc::new(Image::from_bytes(ImageFormat::Png, out))
+}
+/// The picture decoded here, on the fetch thread, as GPUI paints it (BGRA). Handed to `img` as a RenderImage it is drawn in the first frame
+/// it is on; as an Image, GPUI decodes it on its own executor and draws an empty box until that ends: a reply's pictures showed as blank boxes
+/// for a few frames each time they came on screen (Nov 10). None for a format this build does not decode (GPUI decodes those as before).
+pub fn decode(img: &Image) -> Option<Arc<RenderImage>> {
+    let format = match img.format { ImageFormat::Png => image::ImageFormat::Png, ImageFormat::Jpeg => image::ImageFormat::Jpeg, _ => return None };
+    let mut buf = image::load_from_memory_with_format(&img.bytes, format).ok()?.into_rgba8();
+    for px in buf.chunks_exact_mut(4) { px.swap(0, 2); }
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
 }
 fn fetch(t: &Target, url: &str) -> Option<Arc<Image>> {
     let mut s = t.stream().ok()?; s.set_timeouts(Duration::from_secs(30)).ok()?;
@@ -120,18 +129,21 @@ impl Images {
         Slot::Loading
     }
     /// A thread was opened again: failed images may be asked for once more.
+    /// The picture for `url` decoded for painting, once it has arrived and could be (see `decode`).
+    pub fn decoded(&self, url: &str) -> Option<Arc<RenderImage>> { self.s.0.lock().ok()?.decoded.get(url).cloned() }
     pub fn retry(&self) { if let Ok(mut st) = self.s.0.lock() { st.items.retain(|_, e| !matches!(e.slot, Slot::Failed)); } }
     /// How many fetches have finished (arrived or failed) so far: the window redraws when this moves, not on every poll.
     pub fn done(&self) -> u64 { self.s.0.lock().map_or(0, |st| st.done) }
     /// The images the cache let go of leave GPUI too: its decoded copy (asset cache) and its texture, which otherwise stay for as long as the
     /// window runs, however many images a long thread shows. True when one went (the parts are drawn again: one may still have been on screen).
     pub fn release(&self, window: &mut Window, cx: &mut App) -> bool {
-        let gone = self.s.0.lock().map(|mut st| std::mem::take(&mut st.retired)).unwrap_or_default();
+        let (gone, gone_decoded) = self.s.0.lock().map(|mut st| (std::mem::take(&mut st.retired), std::mem::take(&mut st.retired_decoded))).unwrap_or_default();
+        for r in &gone_decoded { cx.drop_image(r.clone(), Some(window)); }
         for img in &gone {
             if let Some(r) = img.clone().get_render_image(window, cx) { cx.drop_image(r, Some(window)); }
             img.clone().remove_asset(cx);
         }
-        !gone.is_empty()
+        !gone.is_empty() || !gone_decoded.is_empty()
     }
     pub fn loading(&self) -> bool { self.s.0.lock().map_or(false, |st| st.items.values().any(|e| matches!(e.slot, Slot::Loading))) }
     pub fn bytes(&self) -> usize { self.s.0.lock().map_or(0, |st| st.items.values().map(|e| e.bytes).sum()) }
@@ -142,7 +154,9 @@ impl Images {
                 loop { if let Some(j) = st.queue.pop_front() { break j; } st = match self.s.1.wait_timeout(st, Duration::from_secs(30)) { Ok((g, to)) => { if to.timed_out() && g.queue.is_empty() { let mut g = g; g.workers -= 1; return; } g } Err(_) => return }; }
             };
             let img = fetch(&job.1, &job.0).map(shrink);
+            let painted = img.as_deref().and_then(decode);
             let Ok(mut st) = self.s.0.lock() else { return };
+            if let Some(r) = painted { st.decoded.insert(job.0.clone(), r); }
             // what it costs once drawn: GPUI's decoded copy (BGRA), whatever the file's own size
             let bytes = img.as_ref().map_or(0, |i| dims(&i.bytes).map_or(i.bytes.len() * 4, |(w, h)| w as usize * h as usize * 4));
             if let Some(e) = st.items.get_mut(&job.0) { e.slot = img.map_or(Slot::Failed, Slot::Ready); e.bytes = bytes; }
@@ -151,7 +165,7 @@ impl Images {
             let tick = st.tick;
             while st.items.values().map(|e| e.bytes).sum::<usize>() > CACHE_BYTES {
                 let old = st.items.iter().filter(|(_, e)| e.used < tick && e.bytes > 0).min_by_key(|(_, e)| e.used).map(|(k, _)| k.clone());
-                match old { Some(k) => { if let Some(Entry { slot: Slot::Ready(i), .. }) = st.items.remove(&k) { st.retired.push(i); } } None => break }
+                match old { Some(k) => { if let Some(Entry { slot: Slot::Ready(i), .. }) = st.items.remove(&k) { st.retired.push(i); } if let Some(r) = st.decoded.remove(&k) { st.retired_decoded.push(r); } } None => break }
             }
         }
     }

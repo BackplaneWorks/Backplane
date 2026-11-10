@@ -229,7 +229,7 @@ impl Backplane {
         let Some(rows)=self.data["thread"]["entries"].as_array_mut() else {return};
         let n=rows.len();self.echo_seq+=1;
         rows.push(serde_json::json!({"id":format!("local-echo-{}",self.echo_seq),"kind":"user","text":text,"stamp":"","blocks":[],"attachments":[]}));
-        self.timeline.splice(n..n,1);
+        self.timeline.splice(n..n,1);self.screens.born.insert(format!("local-echo-{}",self.echo_seq),Instant::now());
     }
     /// A thread (or a project with its first thread) is being made on the person's say: the first new thread row to appear is opened.
     pub fn arm_new(&mut self){self.arm_new=Some((Instant::now(),self.thread_ids().into_iter().collect()));}
