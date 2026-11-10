@@ -273,11 +273,15 @@ async fn local_file(a: Args) -> ! {
     let model = a.model.clone();
     let r = tokio::task::spawn_blocking(move || {
         let (rec, vad) = sherpa::engine(&dir, &model, 4)?;
-        Ok::<String, String>(session::transcribe(vad, rec, &pcm))
+        Ok::<Vec<session::Seg>, String>(session::segments(vad, rec, &pcm))
     })
     .await;
     match r {
-        Ok(Ok(t)) => emit(json!({"event": "done", "item": "file", "text": t.trim()})),
+        Ok(Ok(segs)) => {
+            let text = segs.iter().map(|s| s.3.as_str()).collect::<Vec<_>>().join(" ");
+            let segments: Vec<Value> = segs.iter().map(|s| json!([s.0, s.1, s.2, s.3])).collect();
+            emit(json!({"event": "done", "item": "file", "text": text.trim(), "segments": segments}))
+        }
         Ok(Err(e)) => fail(&e),
         Err(e) => fail(&e.to_string()),
     }

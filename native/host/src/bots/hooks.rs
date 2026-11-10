@@ -2,7 +2,7 @@
 //! : bothub's `Bots.hook`/`Bots.token`/`Bots.hooked`, server's `BotJob.hook`/`BotJob.token`/`Bot.hook.in`, botnet's `Bn.check`/`Bn.bearer`.
 //! The secret and the token are files (`<home>/secrets/hooks/<id>` and `<id>.token`, 0600); the log learns only the id, bot and name.
 //! A call proves itself by our signature (X-Backplane-Timestamp + X-Backplane-Signature, fresh, constant time), by GitHub's (X-Hub-Signature-256 with
-//! X-GitHub-Delivery as the replay key) or by `Authorization: Bearer <token>`; each is accepted once (the replay cache). A Pebble ring's form (voice/ring.rs) may also prove itself by the Index signature, over its bytes; a form with a recording is answered 202 and heard here first.
+//! X-GitHub-Delivery as the replay key) or by `Authorization: Bearer <token>`; each is accepted once (the replay cache). A Pebble ring's form may also prove itself by the Index signature, over its bytes; any ring form becomes a kept note (bots/ring.rs).
 use super::rpc::{now_s, Bots};
 use crate::voice::ring;
 use crate::{api::{Fut, HttpHandler, HttpReply}, auth::Req, hub::Hub, net::{botnet, owner, pairing, sign}};
@@ -52,22 +52,10 @@ impl Bots {
         if tok.is_empty() && gs(p, "op") != "off" { return reply(id, false, json!({"error":"could not keep the webhook's token"})) }
         reply(id, true, json!({"tokenHook":hid,"token":tok,"tokenUrl":format!("{}/hook/{hid}", base(&self.hub))}))
     }
-    /// A call let in, by what proved it: a signed ring form is the person's own voice note, a form under a token goes as JSON, anything else as it came.
-    async fn arrived(&self, hid: &str, body: &str, signed: bool, form: bool, size: &str) -> Result<(), String> {
-        if signed { return self.ringed(hid, body).await }
+    /// A call let in that is not a ring's: a form under a token goes as JSON, anything else as it came.
+    async fn arrived(&self, hid: &str, body: &str, form: bool, size: &str) -> Result<(), String> {
         if form { return self.hooked(hid, &ring::form_json(body, size)).await }
         self.hooked(hid, body).await
-    }
-    /// A verified voice note from the person's ring (its signature proves it came from their phone): the bot hears it as their own words, at hop 0; the app's test button is logged and wakes no one (Bots.ring).
-    async fn ringed(&self, hid: &str, body: &str) -> Result<(), String> {
-        let w = self.world().await;
-        let Some(h) = w.hooks.get(hid).filter(|h| !h.revoked && w.live(&h.bot)).cloned() else { return Ok(()) };
-        let (th, now) = (w.bot(&h.bot).map(|b| b.thread.clone()).unwrap_or_default(), now_s());
-        if ring::test(body) { drop(w); return self.hub.commit_many(&[json!({"$":"HookHit","id":hid,"at":now})]).await.map(|_| ()).map_err(|e| format!("{e:#}")) }
-        let mid = self.hub_id("m", now);
-        let woke = self.hub.commit_many(&[json!({"$":"HookHit","id":hid,"at":now}), json!({"$":"BotWoke","bot":h.bot,"hop":0,"at":now})]).await.map_err(|e| format!("{e:#}"));
-        drop(w); woke?;
-        self.inbox_deliver_raw(&th, &mid, &ring::note(body), None).await
     }
     /// A verified call: the bot hears the payload as data, never as instructions (Bots.hooked).
     async fn hooked(&self, hid: &str, body: &str) -> Result<(), String> {
@@ -121,14 +109,11 @@ impl HttpHandler for HookHttp {
             let (secret, token) = { let (home, hid) = (home.clone(), hid.clone()); tokio::task::spawn_blocking(move || (secret_of(&home, &hid), token_of(&home, &hid))).await.unwrap_or_default() };
             let key = if h("x-backplane-signature").is_empty() && !h("x-index-signature").is_empty() { ring::index_key(&secret, &hid, now, &h, &req.body) } else { check(&secret, &token, &hid, now, &h, &body, &nonce) };
             if key.starts_with('!') { return HttpReply::text("401 Unauthorized", denied(&key)) }
+            // a Pebble ring's form is a recording kept and heard (bots/ring.rs): its stable delivery id, not the replay cache, decides a repeat, which is answered 2xx
+            if form { let ps = crate::voice::ringbox::parts(&req.body, &ct); if crate::voice::ringbox::is_ring(&ps, &h("x-index-webhook-version")) { return self.bots.ring_in(&hid, req, ps, key.contains(":i:")).await } }
             if !self.seen.lock().unwrap().accept(&key, now) { return HttpReply::text("401 Unauthorized", "already seen") }
-            let (signed, size) = (key.contains(":i:"), h("x-audio-size"));
-            if form && ring::has_audio(&body) {
-                let (bots, hub, raw) = (self.bots.clone(), hub.clone(), req.body.clone());
-                tokio::spawn(async move { let heard = crate::voice::session::ring(&hub, &nonce, &ct, &body, &raw).await; if let Err(e) = bots.arrived(&hid, &heard, signed, true, &size).await { eprintln!("hook {hid}: {e}") } });
-                return HttpReply::text("202 Accepted", "accepted")
-            }
-            match self.bots.arrived(&hid, &body, signed, form, &size).await { Ok(()) => HttpReply::text("200 OK", "ok"), Err(e) => HttpReply::text("500 Internal Server Error", &e) }
+            let size = h("x-audio-size");
+            match self.bots.arrived(&hid, &body, form, &size).await { Ok(()) => HttpReply::text("200 OK", "ok"), Err(e) => HttpReply::text("500 Internal Server Error", &e) }
         })
     }
 }

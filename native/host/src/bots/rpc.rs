@@ -111,6 +111,7 @@ impl Bots {
         }
         super::api::register(&hub, &b);
         hub.register_http(Arc::new(super::hooks::HookHttp { bots: b.clone(), seen: Default::default() }));
+        hub.register_rpc(Arc::new(super::ring::RingRpc(b.clone()))); hub.register_http(Arc::new(super::ring::RingAudio)); b.ring_recover();
         super::mail::requests::register(&hub, &b);
         let me = b.clone(); tokio::spawn(async move { let n = me.mail_recover().await; if n > 0 { eprintln!("bots: {n} mail header(s) recovered from the journal") } });
         b
@@ -160,7 +161,7 @@ impl Bots {
         match self.hub.commit_many(&events).await { Ok(_) => vec![ok(id)], Err(e) => vec![err(id, &format!("{e:#}"))] }
     }
 
-    async fn create(self: &Arc<Self>, id: &Value, p: &Value) -> Vec<Value> {
+    pub(super) async fn create(self: &Arc<Self>, id: &Value, p: &Value) -> Vec<Value> {
         let name = gs(p, "name").trim().to_string(); let now = now_s();
         if !name_ok(&name) { return vec![err(id, "a bot's name is 1 to 24 letters, digits, - or _")] }
         let w = self.world().await;

@@ -584,6 +584,10 @@ service: `tailscale serve --bg --https=3788 http://127.0.0.1:3787`.
 
 ### A Pebble Index ring
 
+Settings → Ring → Set up does all of this for the Pebble bot. The ring's forms are kept
+with their audio, de-duplicated by `X-Index-Delivery`, heard here and routed:
+see docs/ring.md, which replaces the rest of this section where they differ.
+
 Make a webhook for the bot, press Token, then in the Pebble app (Index 01
 Settings, Webhook, a gesture):
 

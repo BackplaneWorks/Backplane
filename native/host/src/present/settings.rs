@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("notifications", "Notifications"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("notifications", "Notifications"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -612,6 +612,47 @@ fn usage(st: &State) -> Vec<Value> {
     v.push(row("All threads", &line(&all), vec![])); v
 }
 
+/// Settings > Ring (docs/ring.md): the Pebble Index ring's setup (its webhook's URL and header for the Pebble app), a search over what was said, and
+/// the notes (`ring.notes` from the hub, newest said first): their words, how they were heard, Play (the recording's own link), Hear again with the
+/// local model or OpenAI, Send again, and What happened (the ring bot's thread, where the note went).
+fn ring(st: &State, session: &Value, info: &Value) -> Vec<Value> {
+    let parsed = |k: &str| info[k].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).unwrap_or(Value::Null);
+    let (setup, notes, busy) = (parsed("ring.setup"), parsed("ring.notes"), s(info, "ring.busy"));
+    let zone = super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc);
+    let when = |t: u64| super::thread::clock(t, 0, &zone);
+    let mut v = vec![];
+    if s(&setup, "hook").is_empty() {
+        v.push(row("Pebble Index ring", "Not set up. Set up makes the Pebble bot (it sorts each note into a request, a reminder, a calendar ask, an errand, a todo or a note), its webhook and the #ring-requests room.", vec![btn("Set up", "ring-op", "setup", true)]));
+    } else {
+        let (url, tok) = (s(&setup, "url"), s(&setup, "token"));
+        let test = info["ring.test"].as_str().and_then(|t| t.parse::<u64>().ok()).map_or(String::new(), |t| format!(" The last test event came {}.", when(t)));
+        let https = if url.starts_with("https://") { "" } else { " This address is plain HTTP: the Pebble app wants HTTPS (share the hub with tailscale serve, docs/ring.md)." };
+        v.push(row("Pebble Index ring", &format!("In the Pebble app: Index 01 Settings › Webhook › Hold & talk (and Double click & hold if you like). URL: {url}. Header: Authorization, with the value Copy header gives. What to send: Both. Save, then Send test event. The phone must be on your tailnet.{https}{test}"),
+            vec![btn("Copy URL", "copy", url, false), btn("Copy header", "copy", &format!("Bearer {tok}"), false), btn("Set up again", "ring-op", "setup", false)]));
+    }
+    let q = draft(session, "@f.ringq");
+    let mut sb = vec![btn("Search", "ring-search", "", true)]; if !s(&notes, "q").is_empty() { sb.push(btn("Show all", "ring-search", "clear", false)) }
+    let total = notes["total"].as_u64().unwrap_or(0);
+    let count = if total == 0 { "No recordings yet.".to_string() } else if s(&notes, "q").is_empty() { format!("{total} recording{}; the newest 40 are below.", if total == 1 { "" } else { "s" }) } else { format!("{} of {total} have “{}”.", notes["found"].as_u64().unwrap_or(0), s(&notes, "q")) };
+    v.push(json!({"label": "Recordings", "note": count, "fields": [{"name": "ringq", "hint": "Search what you said", "secret": false, "value": q}], "buttons": sb}));
+    for n in notes["notes"].as_array().into_iter().flatten() {
+        let id = s(n, "id"); let g = s(n, "gesture");
+        let label = if g.is_empty() { when(n["said"].as_u64().unwrap_or(0)) } else { format!("{} · {g}", when(n["said"].as_u64().unwrap_or(0))) };
+        let heard = match (s(n, "model"), n["conf"].as_i64()) { ("", _) => "Not heard".to_string(), ("ring", _) => "The Pebble app's words".to_string(), (m, Some(c)) => format!("Heard by {m}, {c}% sure"), (m, None) => format!("Heard by {m}") };
+        let state = match s(n, "state") { "sent" => "given to Pebble", "new" => "waiting to be heard", "heard" => "waiting to go to Pebble", "failed" => "not given to Pebble", x => x };
+        let state = if busy == id { "being heard now" } else { state };
+        let mut note = format!("{}\n{heard} · {state}", if s(n, "words").is_empty() { "(no words)" } else { s(n, "words") });
+        if !s(n, "unsure").is_empty() { note.push_str(&format!("\n{}", s(n, "unsure"))) }
+        if !s(n, "error").is_empty() { note.push_str(&format!("\n{}", s(n, "error"))) }
+        let mut b = vec![];
+        if !s(n, "play").is_empty() { b.push(btn("Play", "open-url", s(n, "play"), false)); b.push(btn("Hear again (local)", "ring-op", &format!("hear:{id}:local"), false)); b.push(btn("Hear again (OpenAI)", "ring-op", &format!("hear:{id}:openai"), false)); }
+        if !s(n, "thread").is_empty() { b.push(btn("What happened", "link-open", &format!("backplane://thread/{}", s(n, "thread")), false)) }
+        if s(n, "state") != "sent" || n["heard"].as_u64().unwrap_or(0) > 1 { b.push(btn("Send again", "ring-op", &format!("send:{id}"), false)) }
+        let mut r = row(&label, &note, b); if s(n, "state") == "failed" { r["tone"] = json!("bad") } v.push(r);
+    }
+    v
+}
+
 /// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back.
 pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     let p = page(session);
@@ -620,7 +661,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string()), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
+        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string()), "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -644,7 +685,8 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "settings-page" => {
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
-            if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
+            if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); }
+            if p == "ring" { send(session, hub, "ring.search", json!({"q": ""}), &mut cmds, &mut rid); } // the list and the setup as they stand now // what is downloaded, the key's mask and the microphones are read afresh
             json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.qfrom": Value::Null, "@f.qto": Value::Null, "@quiet.err": "", "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@kinstall": "", "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
         }
         "dev-star" => { send(session, hub, "star.replay", json!({}), &mut cmds, &mut rid); json!({"open": {"settings": false}}) }
@@ -689,6 +731,16 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         }
         // the client's own answers to the key it saved straight to the hub
         "voice-op" => { send(session, hub, "bots.voice", json!({"op": "page-act", "action": "voice-op", "value": value}), &mut cmds, &mut rid); json!({}) }
+        // Ring: setup, hear again and send again go to the hub; a search sets what every client's list shows
+        "ring-op" => {
+            let (op, rest) = value.split_once(':').unwrap_or((value, ""));
+            match op { "setup" => send(session, hub, "ring.setup", json!({}), &mut cmds, &mut rid),
+                "hear" => { let (id, engine) = rest.split_once(':').unwrap_or((rest, "")); send(session, hub, "ring.hear", json!({"note": id, "engine": engine}), &mut cmds, &mut rid) }
+                "send" => send(session, hub, "ring.send", json!({"note": rest}), &mut cmds, &mut rid),
+                _ => return None }
+            json!({})
+        }
+        "ring-search" => { let q = if value == "clear" { String::new() } else { draft(session, "@f.ringq").trim().to_string() }; send(session, hub, "ring.search", json!({"q": q}), &mut cmds, &mut rid); if value == "clear" { json!({"drafts": {"@f.ringq": ""}}) } else { json!({}) } }
         "voice-term" => { for (k, v) in crate::voice::page::term_settings(draft(session, "@f.vterm")) { send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); } json!({"drafts": {"@f.vterm": ""}}) }
         // Machines: every press goes to the hub as machines.page.act, with the fields as typed
         a if a.starts_with("machine-") => {
@@ -751,6 +803,27 @@ mod tests {
 
     /// Matrix S09: a Voice chip chosen in Settings is lit when the page is drawn again. The page is drawn from the lean copy of the state,
     /// which once dropped every `voice.` setting, so the engine, the model, a dictionary entry and a learned fix all looked unchosen.
+    #[test] fn the_ring_page_sets_up_lists_plays_hears_again_and_opens_where_a_note_went() {
+        let s = State::new(); let none = ring(&s, &json!({"drafts": {}}), &json!({}));
+        assert_eq!(none[0]["buttons"][0]["value"], "setup"); assert_eq!(none[1]["note"], "No recordings yet.");
+        let n = |id: &str, state: &str, play: &str, thread: &str| json!({"id": id, "said": 1_790_000_000u64, "gesture": "Hold & talk", "words": "Call Jeff", "model": "parakeet-v2", "conf": 91, "unsure": "", "state": state, "error": "", "thread": thread, "play": play, "heard": 1});
+        let info = json!({"ring.setup": json!({"bot": "b1", "hook": "h1", "url": "https://desk.ts.net:8451/hook/h1", "token": "t0k"}).to_string(),
+            "ring.notes": json!({"q": "", "total": 2, "found": 2, "notes": [n("n1", "sent", "https://desk.ts.net:8451/ring/audio/n1?k=c", "t9"), n("n2", "failed", "", "")]}).to_string()});
+        let r = ring(&s, &json!({"drafts": {"@f.ringq": "jeff"}}), &info);
+        let acts = |r: &Value| r["buttons"].as_array().unwrap().iter().map(|b| (b["action"].as_str().unwrap().to_string(), b["value"].as_str().unwrap().to_string())).collect::<Vec<_>>();
+        assert!(r[0]["note"].as_str().unwrap().contains("URL: https://desk.ts.net:8451/hook/h1")); assert!(!r[0]["note"].as_str().unwrap().contains("plain HTTP"));
+        assert_eq!(acts(&r[0])[..2], [("copy".to_string(), "https://desk.ts.net:8451/hook/h1".to_string()), ("copy".to_string(), "Bearer t0k".to_string())]);
+        assert_eq!(r[1]["fields"][0]["value"], "jeff"); assert_eq!(r[1]["note"], "2 recordings; the newest 40 are below.");
+        assert_eq!(r[2]["label"], "Mon 21 Sep 14:13 · Hold & talk"); assert_eq!(r[2]["note"], "Call Jeff\nHeard by parakeet-v2, 91% sure · given to Pebble");
+        assert_eq!(acts(&r[2]), [("open-url".to_string(), "https://desk.ts.net:8451/ring/audio/n1?k=c".to_string()), ("ring-op".to_string(), "hear:n1:local".to_string()), ("ring-op".to_string(), "hear:n1:openai".to_string()), ("link-open".to_string(), "backplane://thread/t9".to_string())]);
+        assert_eq!(acts(&r[3]), [("ring-op".to_string(), "send:n2".to_string())]); assert_eq!(r[3]["tone"], "bad");
+        let sent = |a: &str, v: &str, session: Value| { let o = act("h", &session, a, v).unwrap(); o.cmds.iter().map(|c| serde_json::from_str::<Value>(c["text"].as_str().unwrap()).unwrap()).map(|m| (m["m"].as_str().unwrap().to_string(), m["p"].clone())).collect::<Vec<_>>() };
+        assert_eq!(sent("ring-op", "hear:n1:openai", json!({})), [("ring.hear".to_string(), json!({"note": "n1", "engine": "openai"}))]);
+        assert_eq!(sent("ring-op", "setup", json!({})), [("ring.setup".to_string(), json!({}))]);
+        assert_eq!(sent("ring-search", "", json!({"drafts": {"@f.ringq": " jeff "}})), [("ring.search".to_string(), json!({"q": "jeff"}))]);
+        assert_eq!(sent("settings-page", "ring", json!({})).iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["ring.search"]);
+        assert!(act("h", &json!({}), "ring-op", "rm:n1").is_none());
+    }
     #[test] fn voice_choices_are_lit_from_the_lean_state() {
         let mut s = State::new(); s.lean = true;
         for (k, v) in [("voice.engine", "local"), ("voice.model", "parakeet-v3"), ("voice.device", "mic2"), ("voice.e.kicad", "KiCad = key cad"), ("voice.l.jason", "JSON\t2\t0")] {
@@ -772,7 +845,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Notifications", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Notifications", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn about_says_what_this_windows_browser_tab_is() {
