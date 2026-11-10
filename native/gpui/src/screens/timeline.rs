@@ -327,13 +327,16 @@ pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str,
         let el = match imgs.get(target, url) {
             Slot::Ready(img) => { let shown = img.clone(); let n = name.clone();
                 let (bw, bh) = match super::images::dims(&img.bytes) { Some((w, h)) => super::images::fit(w, h, 480., 360.), None => (480., 120.) };
-                // an explicit box of the picture's own aspect: layout and paint agree, so the picture never spills over the rows below
-                div().w(px(bw)).h(px(bh)).flex_none().overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { this.screens.lightbox = Some((shown.clone(), n.clone())); cx.notify(); }))
+                // a box of the picture's own aspect: layout and paint agree, so the picture never spills over the rows below. In a column
+                // narrower than the picture (a viewer open beside the thread) the box narrows with it and its height follows, so the picture
+                // is drawn whole instead of being cut at the column's edge.
+                let mut frame = div().w(px(bw)).max_w_full().flex_none(); frame.style().aspect_ratio = Some(bw / bh.max(1.0));
+                frame.overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { this.screens.lightbox = Some((shown.clone(), n.clone())); cx.notify(); }))
                     .child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
             Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.loading", &[("name", name.as_str().into())])).into_any_element(),
             Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(crate::i18n::tf("gpui.timeline.could.not.load", &[("name", name.as_str().into())])).into_any_element(),
         };
-        row = row.child(div().id(SharedString::from(format!("img-{key}-{i}"))).child(el));
+        row = row.child(div().id(SharedString::from(format!("img-{key}-{i}"))).max_w_full().child(el));
     }
     if items.len() > MAX_IMAGES { row = row.child(div().px_2().py_1().text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.more.images", &[("n", (items.len() - MAX_IMAGES).into())]))); }
     Some(row.into_any_element())
