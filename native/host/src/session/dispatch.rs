@@ -30,8 +30,10 @@ pub(crate) fn fab_tail<F: Facts>(f: &F, hub: &str, session: &mut Value, cmds: &m
     if sel.is_empty() || sel.contains('~') || sel.starts_with("project-home-") || sel.starts_with('@') || !select::Facts::thread_exists(f, &sel) { return }
     let at = select::fab_at(f, &sel);
     let d = &session["drafts"];
-    let want = at != s(d, "@fab.at") && !at.ends_with('#') && (!at.ends_with("#running") || s(&session["info"], &format!("fab.line:{sel}")).is_empty());
-    if !want { return }
+    if at == s(d, "@fab.at") || at.ends_with('#') { return }
+    // a running turn with a card already shown asks nothing, but the place is still noted: without it every turn after the first ends where the
+    // last look was made ("completed" again) and the card (Buy it in the header) never sees the fab files that turn wrote
+    if at.ends_with("#running") && !s(&session["info"], &format!("fab.line:{sel}")).is_empty() { patch::merge(session, &json!({"drafts": {"@fab.at": at}})); return }
     let rid = session["rid"].as_u64().unwrap_or(0);
     cmds.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"fab.look\",\"p\":{{\"thread\":{}}}}}", serde_json::to_string(&sel).unwrap_or_default())}));
     patch::merge(session, &json!({"rid": rid + 1, "drafts": {"@fab.at": at}}));
@@ -175,6 +177,22 @@ mod tests {
         assert_eq!(last["type"], json!("send")); assert!(last["text"].as_str().unwrap().contains("\"m\":\"fab.look\""));
         assert_eq!(d.session["drafts"]["@fab.at"], json!("onon#t1700000002-3#idle"));
         assert_eq!(d.session["rid"].as_u64(), Some(2 + d.cmds.iter().filter(|c| c["type"] == "send").count() as u64), "one rid per send: the pin's and the look's");
+    }
+    /// e2e n1110: an agent wrote the board's fab file in the thread's third turn and said "press Buy it"; the header had no Buy it until the window was
+    /// reopened. Every turn after the first ended at the place of the last look, so nothing looked again.
+    #[test] fn every_turn_that_ends_asks_for_the_card_again() {
+        let looks = |c: &[Value]| c.iter().filter(|c| c["text"].as_str().map_or(false, |t| t.contains("\"m\":\"fab.look\""))).count();
+        let mut s = session(); s["info"] = json!({format!("fab.line:{T}"): "No goal yet."}); // the card of the look made when the thread was opened
+        for turn in 1..=3 {
+            let mut c = vec![]; fab_tail(&M { exists: T, running: true }, "h", &mut s, &mut c);
+            assert_eq!(looks(&c), 0, "turn {turn}: a card that is shown is not asked for while the turn runs");
+            let rid = s["rid"].clone();
+            let mut c = vec![]; fab_tail(&M { exists: T, running: false }, "h", &mut s, &mut c);
+            assert_eq!(looks(&c), 1, "turn {turn} ended: its files (a new fab file) are looked at: {s}");
+            assert_eq!(s["rid"].as_u64(), rid.as_u64().map(|r| r + 1), "one rid for the look, none for the note");
+            let mut c = vec![]; fab_tail(&M { exists: T, running: false }, "h", &mut s, &mut c);
+            assert_eq!(looks(&c), 0, "turn {turn}: the same place asks nothing more");
+        }
     }
     #[test] fn answer_and_interrupt_are_one_numbered_request_each() {
         let f = M { exists: T, running: false };
