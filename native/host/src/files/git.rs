@@ -177,13 +177,19 @@ pub async fn plain(cwd: &str, cmd: &str, args: &[&str]) -> Ran { if copy_refused
 /// GhRun.push (git push and ls-remote): as the user's git has it set up, refused on a copied log. (Its several-accounts retry is GhRun.try, not ported.)
 pub async fn push(cwd: &str, args: &[&str]) -> Ran { plain(cwd, "git", args).await }
 
+/// A commit git refused because it has no name or email for the person (a machine where git was never set up: "Author identity unknown", "*** Please tell
+/// me who you are." and eight more lines): the one thing to do, in the words Init uses (scripts/init.sh). Any other failure stays as git said it.
+pub fn no_identity(out: &str) -> Option<&'static str> {
+    ["Please tell me who you are", "empty ident name", "unable to auto-detect email address", "auto-detection is disabled"].iter().any(|m| out.contains(m))
+        .then_some("git does not know your name and email on this machine yet, so nothing was committed. Set them once (git config --global user.name \"Your Name\" and git config --global user.email you@example.com), then press it again.")
+}
 async fn step_commit(cwd: &str, msg: &str) -> Result<String, String> {
     let msg = if msg.trim().is_empty() { "Update from Backplane" } else { msg };
     label("commit", async {
         seq(run(cwd, &["add", "-A"]).await, false)?;
         let q = run(cwd, &["diff", "--no-ext-diff", "--no-textconv", "--cached", "--quiet"]).await;
         if q.code == 0 { return Ok("commit: nothing to commit".into()) }
-        seq(run(cwd, &["commit", "-m", msg]).await, false)?;
+        seq(run(cwd, &["commit", "-m", msg]).await, false).map_err(|e| no_identity(&e).map_or(e, |plain| format!("error: {plain}")))?;
         Ok(format!("commit: {}", seq(run(cwd, &["log", "-1", "--format=%h %s"]).await, false)?))
     }.await)
 }
@@ -227,6 +233,15 @@ mod tests {
     use super::*;
     fn tmp(n: &str) -> String { let p = std::env::temp_dir().join(format!("bp-git-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p.to_string_lossy().into_owned() }
     async fn g(cwd: &str, a: &[&str]) -> Ran { proc("git", a, cwd, &[("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")]).await }
+    /// e2e n1110: Commit on a machine where git was never set up put git's ten-line "*** Please tell me who you are." in red in the thread.
+    #[test] fn a_commit_without_a_git_identity_says_the_one_thing_to_do() {
+        let git = "Author identity unknown\n\n*** Please tell me who you are.\n\nRun\n\n  git config --global user.email \"you@example.com\"\n  git config --global user.name \"Your Name\"\n\nto set your account's default identity.\nOmit --global to set the identity only in this repository.\n\nfatal: unable to auto-detect email address (got 'kostas@KpcO.(none)')";
+        let plain = no_identity(git).unwrap();
+        assert!(plain.starts_with("git does not know your name and email") && plain.contains("git config --global user.email") && !plain.contains('\n'), "{plain}");
+        for other in ["fatal: empty ident name (for <k@h>) not allowed", "fatal: no email was given and auto-detection is disabled"] { assert!(no_identity(other).is_some(), "{other}") }
+        for other in ["nothing to commit, working tree clean", "error: pathspec 'x' did not match any file(s) known to git", "fatal: Unable to create '.git/index.lock': File exists."] { assert_eq!(no_identity(other), None, "{other}") }
+        assert_eq!(label("commit", Err(format!("error: {plain}"))).unwrap_err(), format!("error: commit: {plain}"));
+    }
     #[test] fn b64url_matches_rfc4648() {
         for (s, e) in [("", ""), ("f", "Zg"), ("fo", "Zm8"), ("foo", "Zm9v"), ("foobar", "Zm9vYmFy"), ("t1793832639-1684539", "dDE3OTM4MzI2MzktMTY4NDUzOQ"), ("a?>b", "YT8-Yg")] { assert_eq!(b64url(s), e) }
         assert_eq!(checkpoint_ref("t1", 3), "refs/backplane/checkpoints/dDE/turn/3");
