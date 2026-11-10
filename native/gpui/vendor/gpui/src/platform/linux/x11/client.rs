@@ -145,6 +145,10 @@ pub struct Xdnd {
     other_window: xproto::Window,
     drag_type: u32,
     retrieved: bool,
+    /// the selection was asked for (once a drag: a second ask while the first is answered loses the data under some bridges)
+    requested: bool,
+    /// the drop came before the data: it is submitted when the data arrives (Backplane: Hyprland's Xwayland bridge answers late)
+    dropped: bool,
     position: Point<Pixels>,
 }
 
@@ -808,14 +812,22 @@ impl X11Client {
                     window.handle_input(PlatformInput::FileDrop(FileDropEvent::Exited {}));
                     self.0.borrow_mut().xdnd_state = Xdnd::default();
                 } else if event.type_ == state.atoms.XdndPosition {
-                    if let Ok(pos) = get_reply(
-                        || "Failed to query pointer position",
-                        state.xcb_connection.query_pointer(event.window),
+                    // Backplane: the position the message carries (root coordinates, data.l[2] = x << 16 | y), in the window's logical
+                    // pixels. Asking the server for the pointer (as gpui did) is stale while a Wayland client drags into an Xwayland window:
+                    // the X pointer does not follow that drag, so the drop landed where the pointer last was, often outside every element.
+                    let root = state.xcb_connection.setup().roots[state.x_root_index].root;
+                    let (rx, ry) = ((arg2 >> 16) as i16, (arg2 & 0xffff) as i16);
+                    if let Ok(t) = get_reply(
+                        || "Failed to translate the drag position",
+                        state.xcb_connection.translate_coordinates(root, event.window, rx, ry),
                     ) {
-                        state.xdnd_state.position =
-                            Point::new(Pixels(pos.win_x as f32), Pixels(pos.win_y as f32));
+                        state.xdnd_state.position = Point::new(
+                            Pixels(t.dst_x as f32 / state.scale_factor),
+                            Pixels(t.dst_y as f32 / state.scale_factor),
+                        );
                     }
-                    if !state.xdnd_state.retrieved {
+                    if !state.xdnd_state.retrieved && !state.xdnd_state.requested {
+                        state.xdnd_state.requested = true;
                         check_reply(
                             || "Failed to convert selection for drag and drop",
                             state.xcb_connection.convert_selection(
@@ -840,6 +852,26 @@ impl X11Client {
                     window
                         .handle_input(PlatformInput::FileDrop(FileDropEvent::Pending { position }));
                 } else if event.type_ == state.atoms.XdndDrop {
+                    if !state.xdnd_state.retrieved {
+                        // Backplane: the data has not come yet (or was never asked for): the drop waits for it (SelectionNotify),
+                        // and Finished is sent once it is read, so the source keeps it until then
+                        state.xdnd_state.dropped = true;
+                        if !state.xdnd_state.requested {
+                            state.xdnd_state.requested = true;
+                            check_reply(
+                                || "Failed to convert selection for drag and drop",
+                                state.xcb_connection.convert_selection(
+                                    event.window,
+                                    state.atoms.XdndSelection,
+                                    state.xdnd_state.drag_type,
+                                    state.atoms.XDND_DATA,
+                                    arg2,
+                                ),
+                            )
+                            .log_err();
+                        }
+                        return Some(());
+                    }
                     xdnd_send_finished(
                         &state.xcb_connection,
                         &state.atoms,
@@ -856,6 +888,14 @@ impl X11Client {
             Event::SelectionNotify(event) => {
                 let window = self.get_window(event.requestor)?;
                 let mut state = self.0.borrow_mut();
+                if event.property == x11rb::NONE && state.xdnd_state.dropped {
+                    // Backplane: the source could not give the data for a drop that waited for it: end the drag, nothing dropped
+                    xdnd_send_finished(&state.xcb_connection, &state.atoms, event.requestor, state.xdnd_state.other_window);
+                    state.xdnd_state = Xdnd::default();
+                    drop(state);
+                    window.handle_input(PlatformInput::FileDrop(FileDropEvent::Exited {}));
+                    return Some(());
+                }
                 let reply = get_reply(
                     || "Failed to get XDND_DATA",
                     state.xcb_connection.get_property(
@@ -877,13 +917,29 @@ impl X11Client {
                         .filter_map(|path| Url::parse(path).log_err())
                         .filter_map(|url| url.to_file_path().log_err())
                         .collect();
+                    let position = state.xdnd_state.position;
                     let input = PlatformInput::FileDrop(FileDropEvent::Entered {
-                        position: state.xdnd_state.position,
+                        position,
                         paths: crate::ExternalPaths(paths),
                     });
+                    let dropped = state.xdnd_state.dropped;
+                    if dropped {
+                        xdnd_send_finished(
+                            &state.xcb_connection,
+                            &state.atoms,
+                            event.requestor,
+                            state.xdnd_state.other_window,
+                        );
+                    }
                     drop(state);
                     window.handle_input(input);
-                    self.0.borrow_mut().xdnd_state.retrieved = true;
+                    if dropped {
+                        // the drop that waited for this data
+                        window.handle_input(PlatformInput::FileDrop(FileDropEvent::Submit { position }));
+                        self.0.borrow_mut().xdnd_state = Xdnd::default();
+                    } else {
+                        self.0.borrow_mut().xdnd_state.retrieved = true;
+                    }
                 }
             }
             Event::ConfigureNotify(event) => {
