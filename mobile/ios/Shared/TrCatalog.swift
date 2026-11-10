@@ -346,6 +346,7 @@ ios.buy.from	Buy it · from {price}	購入 · {price}から
 ios.buy.last	Buy it · last estimate: from {price}	購入 · 前回の見積もり: {price}から
 ios.buy.incomplete	Buy it · estimate incomplete	購入 · 見積もりが不完全
 ios.improve.search	Search projects…	プロジェクトを検索…
+android.notify.head	NOTIFICATIONS	通知
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除
 common.save	Save	保存
