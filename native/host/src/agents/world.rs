@@ -17,6 +17,8 @@ pub struct T {
     #[serde(default)] pub running_at: u64,
     /// settled and not woken since: nothing the hub does by itself (a report, a wake, a restart) starts it again
     #[serde(default)] pub settled: bool,
+    /// its worktree job found no repository to branch (WorktreeSkipped): it runs in the project folder, an improvement thread too
+    #[serde(default)] pub wt_skipped: bool,
 }
 
 /// A delegated task: its state is one of queued, running, done, failed, cancelled; a terminal state sticks (TaskState.next).
@@ -70,7 +72,7 @@ impl World {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 40] = ["ThreadSettled", "ThreadUnsettled", "ThreadWoke", "LockChanged", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
+        const READ: [&str; 41] = ["WorktreeSkipped", "ThreadSettled", "ThreadUnsettled", "ThreadWoke", "LockChanged", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -91,7 +93,8 @@ impl World {
             "TaskStateSet" => if let Some(k) = self.tasks.get_mut(&g("task")) { if !k.terminal() { k.state = g("state") } k.summary = g("summary") }, // Task.step: a terminal state sticks; the summary is replaced
             "TaskDelivered" => if let Some(k) = self.tasks.get_mut(&g("task")) { k.delivered = true },
             "ThreadCreated" => { self.threads.insert(g("id"), T { act: v.get("at").and_then(Value::as_u64).unwrap_or(0), project: g("project"), title: g("title"), provider: g("provider"), model: g("model"), worktree: g("worktree"), env: g("env"), branch: g("branch"), runtime: "full-access".into(), interaction: "default".into(), turn: "idle".into(), ..Default::default() }); }
-            "WorktreeSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.worktree = g("worktree") },
+            "WorktreeSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.worktree = g("worktree"); x.wt_skipped = false },
+            "WorktreeSkipped" => if let Some(x) = self.threads.get_mut(&g("id")) { x.worktree.clear(); x.wt_skipped = true },
             "ProviderSet" => { // State.switch.n: the old provider's session is kept as `session.<th>.<old>` and the new provider's is taken
                 let th = g("id");
                 if let Some(x) = self.threads.get_mut(&th) {

@@ -451,7 +451,8 @@ async fn remake_folder(cwd: &str, root: &str) -> Result<(), String> {
     if !p.is_dir() { std::fs::create_dir_all(p).map_err(|e| format!("its folder {cwd} is gone and could not be made again: {e}"))? }
     Ok(())
 }
-fn wants_worktree(id: &str, branch: &str, env: &str) -> bool { id.starts_with("improvement-") || (!branch.is_empty() && env != "local") }
+/// A thread that waits for its worktree before it starts: made with a branch, or an improvement thread. One whose job found no repository (`skipped`) runs in the project folder.
+fn wants_worktree(id: &str, branch: &str, env: &str, skipped: bool) -> bool { !skipped && (id.starts_with("improvement-") || (!branch.is_empty() && env != "local")) }
 /// What the Claude CLI says when `--resume` names a session it does not have.
 const SESSION_GONE: &str = "No conversation found with session ID";
 struct Live { input: mpsc::Sender<String>, pid: u32, key: String, person: bool, _busy: Option<crate::settings::accounts_hub::Busy> }
@@ -599,9 +600,9 @@ impl Actor {
             let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) };
             (t, w.cwd(&self.th), w.cx(&self.th), w.setting(&format!("ride.{}", self.th)).to_string())
         };
-        let (t, cwd, cx, ride) = if t.worktree.is_empty() && wants_worktree(&self.th, &t.branch, &t.env) { // made with a branch (or an improvement thread): never the project folder, which may be a guarded checkout
+        let (t, cwd, cx, ride) = if t.worktree.is_empty() && wants_worktree(&self.th, &t.branch, &t.env, t.wt_skipped) { // made with a branch (or an improvement thread): never the project folder, which may be a guarded checkout
             let end = Instant::now() + Duration::from_secs(60); let mut got = None;
-            loop { { let w = self.ag.world().await; if let Some(x) = w.threads.get(&self.th) { if !x.worktree.is_empty() { got = Some((x.clone(), w.cwd(&self.th), w.cx(&self.th), w.setting(&format!("ride.{}", self.th)).to_string())); } } } if got.is_some() || Instant::now() > end { break } tokio::time::sleep(Duration::from_millis(200)).await }
+            loop { { let w = self.ag.world().await; if let Some(x) = w.threads.get(&self.th) { if !x.worktree.is_empty() || x.wt_skipped { got = Some((x.clone(), w.cwd(&self.th), w.cx(&self.th), w.setting(&format!("ride.{}", self.th)).to_string())); } } } if got.is_some() || Instant::now() > end { break } tokio::time::sleep(Duration::from_millis(200)).await }
             match got { Some(g) => g, None => { let why = "this thread's worktree is not ready (its creation made none): not started in the project folder".to_string(); let (now, th) = (now_s(), self.th.clone()); self.commit(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("rf", now, self.ag.seq()),"tone":"error","kind":"refused","summary":format!("not started: {why}"),"at":now})]).await; return Err(why) } }
         } else { (t, cwd, cx, ride) };
         if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", if t.provider.is_empty() { "this provider's" } else { &t.provider })) }

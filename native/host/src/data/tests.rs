@@ -632,6 +632,7 @@ impl RpcHandler for FakeStar {
     assert_eq!(Streams::default().finished(), None, "a final message with no stream replaces nothing");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_improvements_lists_the_projects_and_remembers_the_choice() {
+    for d in ["/tmp/alpha", "/tmp/beta"] { std::fs::create_dir_all(d).unwrap(); } // only a project whose folder is there is offered
     let (h, port) = up("improve").await; h.register_rpc(Arc::new(crate::settings::improvements::ImprovementsRpc)); let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
     let r = ask(&mut ws, 1, "improvements.projects", json!({})).await; let ids: Vec<&str> = r["result"]["projects"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
     assert_eq!(r["result"]["project"], "", "nothing chosen yet: {r}"); assert!(ids.contains(&"p1") && ids.contains(&"p2"), "{ids:?}");

@@ -228,7 +228,10 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             imp.projects = projects(&r); imp.ctx = r.clone();
             let found = backplane_project(&imp.projects).map(|p| p.id.clone());
             // Backplane's own source until the person picks (the search's answer brings their last choice; a linked machine's project is not in this list)
-            if !imp.draft.locked() && imp.draft.key.is_empty() && imp.draft.project.is_empty() { if let Some(id) = found.clone() { imp.draft.project = id; } }
+            let gone = !imp.draft.project.is_empty() && !is_far(&imp.draft.project) && !imp.projects.iter().any(|p| p.id == imp.draft.project);
+            if !imp.draft.locked() && imp.draft.thread.is_empty() && gone { imp.draft.project.clear(); imp.draft.key.clear(); }
+            if !imp.draft.locked() && imp.draft.thread.is_empty() && imp.draft.project.is_empty() { if let Some(id) = found.clone() { imp.draft.project = id; } }
+            if !imp.draft.writer_project.is_empty() && imp.draft.writer.is_none() && !imp.projects.iter().any(|p| p.id == imp.draft.writer_project) { imp.draft.writer_project.clear(); }
             if imp.draft.writer_project.is_empty() {
                 let work: Vec<&Project> = imp.projects.iter().filter(|p| p.id != "scratch" && !p.root.is_empty()).collect();
                 let src = s(&r, "project");
@@ -304,7 +307,7 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             let imp = &mut this.screens.imp; if id != imp.pick_seq { return }
             imp.picks = r["projects"].as_array().cloned().unwrap_or_default();
             let last = s(&r, "project");
-            if !imp.picked && !imp.draft.locked() && imp.draft.key.is_empty() { imp.picked = true; if !last.is_empty() { imp.draft.project = last; } }
+            if !imp.picked && !imp.draft.locked() && imp.draft.thread.is_empty() { imp.picked = true; if !last.is_empty() && last != imp.draft.project { imp.draft.project = last; imp.draft.key.clear(); } }
         }
         Next::Remember => {}
         Next::ITurn => {
@@ -518,7 +521,7 @@ pub fn use_image_file(this: &mut Backplane, p: &Path, cx: &mut Context<Backplane
 
 fn record_start(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let imp = &mut this.screens.imp;
-    if imp.locked() || !imp.draft.key.is_empty() || imp.rec.is_some() { return }
+    if imp.locked() || !imp.draft.thread.is_empty() || imp.rec.is_some() { return }
     if let Some(why) = capture::unavailable() { return fail(this, why.into(), cx) }
     /* i18n-ok: drawn through tr */ let Some(xid) = window_id(this) else { return fail(this, "This window cannot be recorded here.".into(), cx) };
     /* i18n-ok: drawn through tr */ if !this.screens.imp.ensure_dir() { return fail(this, "Could not keep this draft on this device. Retry.".into(), cx) }
@@ -593,8 +596,8 @@ pub fn act(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     match id {
         "toggle" => return toggle(this, cx),
         "close" => return close(this, cx),
-        "dest-issue" | "dest-internal" if !locked && this.screens.imp.draft.key.is_empty() => {
-            let d = &mut this.screens.imp.draft; d.internal = id == "dest-internal"; d.inc_rec = false; d.forget_report(); this.screens.imp.review_open = false;
+        "dest-issue" | "dest-internal" if !locked && this.screens.imp.draft.thread.is_empty() => {
+            let d = &mut this.screens.imp.draft; d.key.clear(); d.internal = id == "dest-internal"; d.inc_rec = false; d.forget_report(); this.screens.imp.review_open = false;
             /* i18n-ok: drawn through tr */ this.screens.imp.note = if id == "dest-internal" { "Send starts a new thread in the chosen project.".into() } else { "Review the issue before opening GitHub.".into() };
         }
         "chk-shot" if !locked => { flip(this, |d| d.inc_shot = !d.inc_shot); this.screens.imp.draft.forget_report(); this.screens.imp.review_open = false; this.screens.imp.evidence_ok = false; }
@@ -611,7 +614,7 @@ pub fn act(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
             let p = this.screens.imp.draft.recording.clone();
             /* i18n-ok: drawn through tr */ if !p.is_empty() { match open_target(&p) { Ok(()) => { this.screens.imp.draft.rec_reviewed = true; this.screens.imp.note = "Playing the recording. Select it when you have reviewed the whole clip.".into(); } Err(e) => this.screens.imp.note = e } }
         }
-        "rec-discard" if !locked && this.screens.imp.draft.key.is_empty() => {
+        "rec-discard" if !locked && this.screens.imp.draft.thread.is_empty() => {
             let _ = std::fs::remove_file(this.screens.imp.file("recording.webm"));
             let d = &mut this.screens.imp.draft; d.recording.clear(); d.inc_rec = false; d.rec_reviewed = false; d.forget_report(); this.screens.imp.review_open = false;
         }
@@ -625,8 +628,9 @@ pub fn act(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
         /* i18n-ok: drawn through tr */ "save" => { let imp = &mut this.screens.imp; if !imp.draft.issue_body.is_empty() { imp.note = match save_file("backplane-issue.txt", imp.draft.issue_body.as_bytes()) { Ok(p) => format!("Saved {}", p.display()), Err(e) => e }; } }
         /* i18n-ok: drawn through tr */ "allow-again" if this.screens.imp.draft.opened => { this.screens.imp.draft.opened = false; this.screens.imp.note = "Review the report and press Open GitHub draft when ready.".into(); }
         "open-github" => return open_github(this, cx),
-        _ if id.starts_with("proj:") && !locked && this.screens.imp.draft.key.is_empty() => {
-            let p = id[5..].to_string(); this.screens.imp.draft.project = p.clone(); this.screens.imp.picked = true;
+        _ if id.starts_with("proj:") && !locked && this.screens.imp.draft.thread.is_empty() => {
+            // a key from a Send that made no thread is dropped with the old choice: the next Send makes its thread in this project
+            let p = id[5..].to_string(); if this.screens.imp.draft.project != p { this.screens.imp.draft.key.clear(); } this.screens.imp.draft.project = p.clone(); this.screens.imp.picked = true;
             ask(this, "improvements.project", json!({"project": p}), Next::Remember, cx); // remembered for the next request
         }
         _ if id.starts_with("wproj:") && !locked => { let d = &mut this.screens.imp.draft; d.writer_project = id[6..].to_string(); d.forget_report(); this.screens.imp.review_open = false; }
@@ -712,7 +716,7 @@ fn button(cx: &mut Context<Backplane>, light: bool, id: &str, label: &str, enabl
     let c = |n: &str| theme::color(light, n);
     let key = id.to_string();
     let d = probe(div().id(SharedString::from(format!("imp-{id}"))), id).px_3().py_1().text_size(px(12.)).border_1();
-    let d = if primary { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else if on { d.bg(c("raise")).text_color(c("text")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).text_color(c("text")) };
+    let d = if primary { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).font_weight(FontWeight::SEMIBOLD) } else { d.bg(c("raise")).border_color(c("line")).text_color(c("text")) };
     if enabled { d.cursor_pointer().hover(|s| s.opacity(0.85)).child(label.to_string()).on_click(cx.listener(move |this, _, _, cx| act(this, &key, cx))).into_any_element() } else { d.opacity(0.45).child(label.to_string()).into_any_element() }
 }
 fn check(cx: &mut Context<Backplane>, light: bool, id: &str, label: &str, on: bool, enabled: bool) -> AnyElement {
@@ -741,11 +745,11 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
     let d = &imp.draft; let ins = imp.inputs.as_ref()?;
     let locked = imp.locked(); let public = !d.internal;
     let mut col = div().flex().flex_col().flex_shrink_0().gap_3().w_full().max_w(px(680.)).px_4().py_3();
-    col = col.child(div().flex().gap_2().child(button(cx, light, "dest-issue", &trs("Public GitHub issue"), !locked && d.key.is_empty(), false, public)).child(button(cx, light, "dest-internal", &trs("Internal implementation thread"), !locked && d.key.is_empty(), false, !public)));
+    col = col.child(div().flex().gap_2().child(button(cx, light, "dest-issue", &trs("Public GitHub issue"), !locked && d.thread.is_empty(), false, public)).child(button(cx, light, "dest-internal", &trs("Internal implementation thread"), !locked && d.thread.is_empty(), false, !public)));
     col = col.child(field(light, &trs("What would you like to improve?"), &ins.text));
     if !public {
         // the project it goes to: the hub's search over every machine's projects, the chosen one marked (and named when the search hides it)
-        let free = !locked && d.key.is_empty();
+        let free = !locked && d.thread.is_empty();
         /* i18n-ok: a title and a machine name */ let label = |p: &Value| { let short = s(p, "short"); if short.is_empty() { s(p, "title") } else { format!("{} · {short}", s(p, "title")) } };
         let rows: Vec<AnyElement> = imp.picks.iter().take(PICK_ROWS).map(|p| button(cx, light, &format!("proj:{}", s(p, "id")), &label(p), free, false, s(p, "id") == d.project)).collect();
         let shown = imp.picks.iter().take(PICK_ROWS).any(|p| s(p, "id") == d.project);
@@ -786,10 +790,10 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
     match capture::unavailable() {
         Some(why) => col = col.child(div().flex().flex_col().gap_1().child(button(cx, light, "record", &trs("Record screen"), false, false, false)).child(para(light, &trs(why)))),
         None => {
-            col = col.child(div().flex().flex_col().gap_2().child(button(cx, light, "record", &trs("Record screen"), !locked && d.key.is_empty(), false, false))
+            col = col.child(div().flex().flex_col().gap_2().child(button(cx, light, "record", &trs("Record screen"), !locked && d.thread.is_empty(), false, false))
                 .child(para(light, &trs("Video of this window only, no audio. Up to 2 minutes and 9 MiB. Private copies expire after 24 hours. A recording may show private messages, credentials or other private information; it cannot be redacted.")))
                 .children((!d.recording.is_empty()).then(|| div().flex().flex_col().gap_2().child(div().text_size(px(12.)).child(tf("gpui.imp.rec.saved", &[("secs", (d.recording_ms / 1000).into())])))
-                    .child(div().flex().gap_2().child(button(cx, light, "rec-play", &trs("Play recording"), true, false, false)).child(button(cx, light, "rec-discard", &trs("Discard recording"), !locked && d.key.is_empty(), false, false)))
+                    .child(div().flex().gap_2().child(button(cx, light, "rec-play", &trs("Play recording"), true, false, false)).child(button(cx, light, "rec-discard", &trs("Discard recording"), !locked && d.thread.is_empty(), false, false)))
                     .child(check(cx, light, "chk-rec", &if public { trs("Select this recording for the public report and agent. Play it first.") } else { trs("Attach this recording to the local agent thread. Play it first.") }, d.inc_rec, !locked && d.rec_reviewed)))));
         }
     }

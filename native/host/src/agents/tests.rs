@@ -1487,6 +1487,16 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     hub.commit(&json!({"$":"WorktreeSet","id":T1,"worktree":work2.to_string_lossy(),"at":1700000200})).await.unwrap();
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; assert!(ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}"); let _ = t.await; ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn a_thread_whose_worktree_job_found_no_repository_starts_in_the_project_folder() {
+    let sd = dir("wts-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("wts", |w| base_log(w, 1, "").replace("\"branch\":\"\"", "\"branch\":\"imp-1\"").replace("\"env\":\"local\"", "\"env\":\"worktree\""), |_| Cli::standin(&sd)).await;
+    let from = len(&hub).await;
+    let h2 = hub.clone(); let t = tokio::spawn(async move { rpc(&h2, "turn.start", json!({"thread":T1,"text":"zqshort hi"})).await });
+    tokio::time::sleep(Duration::from_millis(600)).await; assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0, "it waits for the job's answer");
+    hub.commit(&json!({"$":"WorktreeSkipped","id":T1,"at":1700000200})).await.unwrap();
+    // well inside the 60 s the wait gives a worktree: the answer "no repository" ends it
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; assert!(ev.iter().any(|e| turn_is(e, "completed")), "{ev:?}"); let _ = t.await; ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn a_model_mention_is_logged_as_refs_and_told_to_the_agent_without_changing_the_thread() {
     let sd = dir("mn-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("mn", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;

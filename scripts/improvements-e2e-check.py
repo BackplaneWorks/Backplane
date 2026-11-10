@@ -60,6 +60,8 @@ th = [e for e in events if e.get("$") == "ThreadCreated" and str(e.get("id", "")
 wt = {e["id"]: e for e in events if e.get("$") == "WorktreeSet"}
 board = [e for e in th if e.get("project") == "p2"]; th = [e for e in th if e.get("project") != "p2"]
 check(len(board) == 1, "the second request made its thread in the project the person picked (Board)", str([e.get("id") for e in board]))
+check(len(board) == 1 and any(e.get("$") == "WorktreeSkipped" and e.get("id") == board[0]["id"] for e in events) and not wt.get(board[0]["id"], {}).get("worktree"),
+      "the Board folder, nested in another repo it is not part of, runs as itself: no worktree of the outer repo", str(wt.get(board[0]["id"]) if board else ""))
 check(len(th) == 2 and any(str(wt.get(e["id"], {}).get("branch", "")).startswith("imp-") and "/.backplane/worktrees/" in wt[e["id"]].get("worktree", "") for e in th), "the internal thread works in its own worktree on a imp-* branch, never the project folder", str(wt))
 check(len(th) == 2 and all(e["project"] == "p1" for e in th), "two improvement threads, both in the Backplane source project", str([e.get("id") for e in th]))
 users = [e for e in events if e.get("$") == "MessagePosted" and e.get("role") == "user" and str(e.get("thread", "")).startswith("improvement-")]

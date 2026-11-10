@@ -60,9 +60,9 @@ pub fn pick_projects(rows: &[Row], q: &str, last: &str) -> (Vec<Row>, String) {
     xs.truncate(PICK_MAX);
     (xs, if rows.iter().any(|r| r.id == last) { last.to_string() } else { String::new() })
 }
-/// Every project a request may go to: this machine's that are not removed and have a folder, and the shown linked machines'.
+/// Every project a request may go to: this machine's that are not removed and whose folder is there, and the shown linked machines'.
 pub async fn all_projects(hub: &Arc<Hub>) -> Vec<Row> {
-    let mut rows: Vec<Row> = { let m = hub.model().await; m.projects.iter().filter(|(id, p)| !p.removed && !p.root.is_empty() && id.as_str() != crate::sidebar::SCRATCH).map(|(id, p)| Row { id: id.clone(), title: p.title.clone(), root: p.root.clone(), machine: String::new() }).collect() };
+    let mut rows: Vec<Row> = { let m = hub.model().await; m.projects.iter().filter(|(id, p)| !p.removed && !p.root.is_empty() && id.as_str() != crate::sidebar::SCRATCH && std::path::Path::new(&p.root).is_dir()).map(|(id, p)| Row { id: id.clone(), title: p.title.clone(), root: p.root.clone(), machine: String::new() }).collect() };
     hub.mirrors().shown(|far| for (name, st) in far { for (id, p) in &st.projects { if !p.removed && !p.root.is_empty() && crate::net::far::is(id) { rows.push(Row { id: id.clone(), title: p.title.clone(), root: p.root.clone(), machine: name.clone() }) } } });
     rows
 }
@@ -73,12 +73,12 @@ pub async fn projects(hub: &Arc<Hub>, q: &str) -> Value {
     json!({"project":last,"projects":xs.iter().map(|r| json!({"id":r.id,"title":r.title,"root":r.root,"machine":r.machine,"short":if r.machine.is_empty() { String::new() } else { crate::mirror::short_name(&r.machine) }})).collect::<Vec<_>>()})
 }
 
-/// Improvements.context: the app's version, the source thread's project and account binding, and every project that is not removed.
+/// Improvements.context: the app's version, the source thread's project and account binding, and every project that is not removed and whose folder (if it has one) is there.
 pub async fn context(hub: &Arc<Hub>, thread: &str) -> Value {
     let (project, owns, mut projects) = {
         let m = hub.model().await;
         let t = m.threads.get(thread).filter(|t| !t.deleted);
-        let mut ps: Vec<(&String, &crate::model::ProjectMeta)> = m.projects.iter().filter(|(_, p)| !p.removed).collect();
+        let mut ps: Vec<(&String, &crate::model::ProjectMeta)> = m.projects.iter().filter(|(_, p)| !p.removed && (p.root.is_empty() || std::path::Path::new(&p.root).is_dir())).collect();
         ps.sort_by(|a, b| a.0.cmp(b.0));
         (t.map(|t| t.project.clone()).unwrap_or_default(), t.map(|t| t.provider.clone()), ps.into_iter().map(|(id, p)| json!({"id":id,"title":p.title,"root":p.root})).collect::<Vec<_>>())
     };
@@ -136,9 +136,9 @@ mod tests {
     #[test] fn a_body_over_the_bound_is_dropped_not_cut() { assert_eq!(limit("short"), "short"); assert_eq!(limit(&"x".repeat(120_001)), ""); assert_eq!(limit(&"x".repeat(120_000)).len(), 120_000); }
     #[tokio::test(flavor = "multi_thread")] async fn context_lists_live_projects_and_report_reads_only_a_finished_report_thread() {
         let home = std::env::temp_dir().join(format!("bp-imp-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let k = "ab".repeat(16); let th = thread_for(&k);
-        let log = format!("{}\n{}\n{}\n{}\n{}\n{}\n",
-            r#"{"$":"ProjectCreated","id":"p1","title":"Board","root":"/work/board","at":1}"#, r#"{"$":"ProjectCreated","id":"p2","title":"Gone","root":"/work/gone","at":1}"#, r#"{"$":"ProjectRemoved","id":"p2","at":2}"#,
+        let k = "ab".repeat(16); let th = thread_for(&k); let board = home.join("board"); std::fs::create_dir_all(&board).unwrap(); let board = board.to_string_lossy().into_owned();
+        let log = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+            format!(r#"{{"$":"ProjectCreated","id":"p1","title":"Board","root":"{board}","at":1}}"#), r#"{"$":"ProjectCreated","id":"p3","title":"Deleted folder","root":"/nonexistent/bp-imp-gone","at":1}"#, r#"{"$":"ProjectCreated","id":"p2","title":"Gone","root":"/work/gone","at":1}"#, r#"{"$":"ProjectRemoved","id":"p2","at":2}"#,
             format!(r#"{{"$":"ThreadCreated","id":"{th}","project":"p1","title":"Report","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":3}}"#),
             format!(r#"{{"$":"MessagePosted","thread":"{th}","msg":"m1","role":"assistant","text":"The draft report.","at":4}}"#),
             r#"{"$":"SettingSet","key":"account.thread.improvement-X.claude","value":"{}","at":4}"#);
@@ -146,7 +146,8 @@ mod tests {
         let hub = Hub::start(Cfg { home: home.clone(), version: "9.9.9".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let c = context(&hub, &th).await;
         assert_eq!((c["appVersion"].clone(), c["thread"].clone(), c["project"].clone()), (json!("9.9.9"), json!(th), json!("p1")));
-        assert_eq!(c["projects"], json!([{"id":"p1","title":"Board","root":"/work/board"}]), "a removed project is not offered");
+        assert_eq!(c["projects"], json!([{"id":"p1","title":"Board","root":board}]), "a removed project, or one whose folder is gone, is not offered");
+        assert_eq!(all_projects(&hub).await.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["p1"], "nor in the picker");
         assert_eq!(report(&hub, "t-not-a-report").await["error"], "Choose the report-writing thread first.");
         assert_eq!(report(&hub, &th).await, json!({"thread":th,"done":false,"body":""}), "no draft until the turn completed");
         hub.commit(&json!({"$":"TurnChanged","thread":th,"state":"completed","at":5})).await.unwrap();

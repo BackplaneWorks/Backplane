@@ -24,7 +24,8 @@ printf '#!/bin/sh\necho "$1" >> %s/opened.txt\n' "$R" > $R/bin/open; chmod +x $R
 # the Backplane source project: a throwaway repository named backplane-gpui with a local main branch; and a second project
 mkdir -p $R/proj/backplane-gpui $R/proj/board
 ( cd $R/proj/backplane-gpui && git init -q && git config user.email t@t && git config user.name t && echo x > README.md && git add . && git commit -qm init && git branch -M main )
-( cd $R/proj/board && git init -q && git config user.email t@t && git config user.name t && echo b > board.txt && git add . && git commit -qm init && git branch -M main )
+# Board is a plain folder inside the Backplane checkout's ignored build/ (no repository of its own): its request runs in the folder, never a worktree of the outer repo
+echo b > $R/proj/board/board.txt
 python3 - "$R" <<'PY'
 import json,sys,time
 R=sys.argv[1]; NOW=int(time.time())
