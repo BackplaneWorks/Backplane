@@ -47,11 +47,11 @@ Settings → Notifications on the desktop (GPUI) and on both phones (`notify.pag
 
 `aps.thread-id` groups by thread; `thread`, `ask`, `key` and `kind` ride beside it. The body is the first line, at most 180 characters. A tap opens the thread, at the approval when there is one.
 
-The badge counts open asks plus the waiting items not about an ask. An item leaves when its ask closes or, with no ask, when the person writes in its thread or any device opens it (`push.seen`). Opening an approval does not answer it. Every device then gets a silent clear, and a phone drops anything stale on connect and when it comes to the front (`push.state`).
+The badge counts open asks plus the waiting items not about an ask. An item leaves when its ask closes or, with no ask, when the person writes in its thread or any device opens it (`push.seen`; a focused desk showing the thread, `desk.look`, counts as opening it). `push.clear` deals with everything waiting at once; the open asks still count. Opening an approval does not answer it. Every device then gets a silent clear, and a phone drops anything stale on connect and when it comes to the front (`push.state`).
 
 ## Carriers
 
-- **iOS:** APNs (`push/apns.rs`). `push.apns.key` (a path; the key itself is never stored), `push.apns.keyid`, `push.apns.team`. The topic is the bundle id the app registered, and a debug build registers `sandbox`. See `push-retries.md`.
+- **iOS:** APNs (`push/apns.rs`). `push.apns.key` (a path; the key itself is never stored), `push.apns.keyid`, `push.apns.team`. The topic is the bundle id the app registered, and a debug build registers `sandbox`. The key must be allowed to push to that topic in production: Apple answers `400 TopicDisallowed` for a key restricted to another app (Nov 10: the hub named such a key, and every push was refused). Every send is logged with its answer: `push: APNs <type> <collapse id> to <handle> (<env> <bundle>): <status> [<reason>] apns-id <id>`. There is no relay: the hub posts to APNs itself, as 0.14 did. See `push-retries.md`.
 - **Android:** no push service. The app hears the same alert and clear on its socket (data/1 `notify`, `clear`), so only while its process lives.
 
 The Live Activity is not ported.

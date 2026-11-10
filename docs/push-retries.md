@@ -1,9 +1,9 @@
 APNs delivery failures
 
-`400 BadDeviceToken`, `DeviceTokenNotForTopic`, `TopicDisallowed`, `Unregistered` (also as `403`) and `410` retire the exact token through a `DeviceDropped` event. Other tokens and what is waiting are unchanged. Apple documents these answers at
+`400 BadDeviceToken`, `DeviceTokenNotForTopic`, `Unregistered` (also as `403`) and `410` retire the exact token through a `DeviceDropped` event, and the log says so (`push: device <handle> retired`). `TopicDisallowed` is the key's fault (it may not push to the topic), not the token's: the token is kept. Other tokens and what is waiting are unchanged. Apple documents these answers at
 https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns
 
-Any other answer (`403 ExpiredProviderToken`, `429`, `5xx`) keeps the token and is logged as `push: not delivered`. The push is not sent again: the item stays in the book and the badge, and the phone catches up on connect.
+Any other answer (`400 TopicDisallowed`, `403 ExpiredProviderToken`, `429`, `5xx`) keeps the token and is logged as `push: not delivered`. The push is not sent again: the item stays in the book and the badge, and the phone catches up on connect.
 
 Each curl delivery permits at most two retries for curl's transient-error classification, with 10-second per-attempt and 20-second retry-window limits. The provider token is reused for 40 minutes. A copy of a log sends nothing.
 

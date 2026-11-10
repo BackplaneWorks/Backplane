@@ -23,13 +23,14 @@ impl Frame {
 }
 
 pub fn host(env: &str) -> &'static str { if env == "sandbox" { "https://api.sandbox.push.apple.com" } else { "https://api.push.apple.com" } }
-/// What Apple's answer means. A token refused for good is retired; anything else may pass.
+/// What Apple's answer means. A token refused for good is retired; anything else may pass. `TopicDisallowed` is not the token's fault: the provider key may not push to this
+/// topic (a key restricted to another app; Nov 10 every push was refused so, and the phone's token was retired each time), so it is kept and the answer logged.
 pub fn outcome(status: &str, body: &str) -> Sent {
     let why = serde_json::from_str::<Value>(body).ok().and_then(|v| v["reason"].as_str().map(str::to_string)).unwrap_or_default();
     match status {
         "200" => Sent::Ok,
         "410" => Sent::Dead,
-        "400" | "403" if matches!(why.as_str(), "BadDeviceToken" | "DeviceTokenNotForTopic" | "TopicDisallowed" | "Unregistered") => Sent::Dead,
+        "400" | "403" if matches!(why.as_str(), "BadDeviceToken" | "DeviceTokenNotForTopic" | "Unregistered") => Sent::Dead,
         _ => Sent::Later(format!("APNs {status} {why}")),
     }
 }
@@ -59,7 +60,7 @@ pub fn token(key: &Path, kid: &str, team: &str, now: u64) -> Result<String, Stri
 pub fn curl_config(url: &str, jwt: &str, topic: &str, f: &Frame, body: &Path, out: &Path) -> String {
     let mut c = format!("url = \"{url}\"\nheader = \"authorization: bearer {jwt}\"\nheader = \"apns-topic: {topic}\"\nheader = \"apns-push-type: {}\"\nheader = \"apns-priority: {}\"\n", f.push_type, f.priority);
     if !f.collapse.is_empty() { c += &format!("header = \"apns-collapse-id: {}\"\n", f.collapse) }
-    c + &format!("data-binary = \"@{}\"\noutput = \"{}\"\nwrite-out = \"%{{http_code}}\"\n", body.display(), out.display())
+    c + &format!("data-binary = \"@{}\"\noutput = \"{}\"\nwrite-out = \"%{{http_code}} %header{{apns-id}}\"\n", body.display(), out.display())
 }
 
 #[derive(Default)]
@@ -72,7 +73,8 @@ impl Apns {
         Ok(g.0.clone())
     }
 }
-fn post(home: &Path, url: &str, jwt: &str, topic: &str, f: &Frame) -> Result<(String, String), String> {
+/// Apple's answer: the status, the body, and the `apns-id` it gave the push.
+fn post(home: &Path, url: &str, jwt: &str, topic: &str, f: &Frame) -> Result<(String, String, String), String> {
     let stamp = now_ms(); let tmp = home.join("tmp"); std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let d = tmp.join(format!("push-{stamp}-{:x}", std::process::id()));
     std::fs::DirBuilder::new().mode(0o700).create(&d).map_err(|e| e.to_string())?;
@@ -82,7 +84,8 @@ fn post(home: &Path, url: &str, jwt: &str, topic: &str, f: &Frame) -> Result<(St
         w(&body, &f.payload.to_string()).map_err(|e| e.to_string())?;
         w(&cfg, &curl_config(url, jwt, topic, f, &body, &out)).map_err(|e| e.to_string())?;
         let o = crate::proc::std_cmd(crate::proc::Kind::Net, "curl").args(["-sS", "--http2", "--max-time", "10", "--retry", "2", "--retry-max-time", "20", "--proto", "=https", "--max-redirs", "0", "-X", "POST", "-K"]).arg(&cfg).current_dir(&d).output().map_err(|e| e.to_string())?;
-        Ok((String::from_utf8_lossy(&o.stdout).trim().to_string(), std::fs::read_to_string(&out).unwrap_or_default()))
+        let w = String::from_utf8_lossy(&o.stdout).trim().to_string(); let (code, id) = w.split_once(' ').unwrap_or((w.as_str(), ""));
+        Ok((code.to_string(), std::fs::read_to_string(&out).unwrap_or_default(), id.trim().to_string()))
     })();
     let _ = std::fs::remove_dir_all(&d);
     r
@@ -102,11 +105,23 @@ impl Carrier for Apns {
             };
             let jwt = match self.jwt(&key, &kid, &team, now_ms() / 1000) { Ok(j) => j, Err(e) => return Sent::Later(e) };
             let (url, home, topic) = (format!("{}/3/device/{}", host(&d.env), d.token), hub.cfg.home.clone(), d.bundle.clone());
-            match tokio::task::spawn_blocking(move || post(&home, &url, &jwt, &topic, &f)).await { Ok(Ok((code, body))) => outcome(&code, &body), Ok(Err(e)) => Sent::Later(e), Err(_) => Sent::Later("the delivery task failed".into()) }
+            let what = format!("{} {} to {} ({} {})", f.push_type, f.collapse, super::page::handle(&d.token), d.env, d.bundle);
+            match tokio::task::spawn_blocking(move || post(&home, &url, &jwt, &topic, &f)).await {
+                // every send and Apple's answer, in the log (the device by its handle, never its token)
+                Ok(Ok((code, body, id))) => { let s = outcome(&code, &body); eprintln!("{}", said(&what, &code, &body, &id, &s)); s }
+                Ok(Err(e)) => { eprintln!("push: APNs {what}: not sent: {e}"); Sent::Later(e) }
+                Err(_) => Sent::Later("the delivery task failed".into()),
+            }
         })
     }
 }
 
+/// The log line for one send: what went, Apple's status, reason and apns-id, and what the hub does with it.
+pub fn said(what: &str, code: &str, body: &str, id: &str, s: &Sent) -> String {
+    let why = serde_json::from_str::<Value>(body).ok().and_then(|v| v["reason"].as_str().map(str::to_string)).unwrap_or_default();
+    let then = match s { Sent::Ok => "", Sent::Dead => ": the token is retired", Sent::Later(_) => ": kept" };
+    format!("push: APNs {what}: {code}{}{} apns-id {}{then}", if why.is_empty() { "" } else { " " }, why, if id.is_empty() { "-" } else { id })
+}
 /// Where the fallback is read: `BACKPLANE_APNS_ENV`, else `~/.config/backplane/apns.env` (the key file defaults to `apns/AuthKey_<key id>.p8` in the same folder).
 pub fn env_path() -> Option<std::path::PathBuf> {
     std::env::var_os("BACKPLANE_APNS_ENV").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".config/backplane/apns.env")))

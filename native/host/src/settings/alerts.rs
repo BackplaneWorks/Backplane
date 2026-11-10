@@ -85,9 +85,13 @@ pub fn start(hub: &Arc<Hub>) -> Arc<Desks> {
 struct DeskRpc(Arc<Desks>);
 impl RpcHandler for DeskRpc {
     fn methods(&self) -> &'static [&'static str] { &["desk.look"] }
-    fn call<'a>(&'a self, _hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, _m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
-            self.0.say(who.client, p.get("thread").and_then(Value::as_str).unwrap_or(""), p.get("focused").and_then(Value::as_bool).unwrap_or(false), now_ms() / 1000);
+            let (thread, focused) = (p.get("thread").and_then(Value::as_str).unwrap_or(""), p.get("focused").and_then(Value::as_bool).unwrap_or(false));
+            self.0.say(who.client, thread, focused, now_ms() / 1000);
+            // a focused desk showing a thread has seen it, as a phone opening it has (push.seen): its items leave the phones' badge. Without this, everything read
+            // only on the desktop stayed in the book for a week (Nov 10: a badge of 138).
+            if focused && !thread.is_empty() { if let Some(h) = hub.rpc_for("push.seen") { let _ = h.call(hub, who, &Value::Null, "push.seen", &json!({"thread":thread})).await; } }
             vec![json!({"t":"reply","id":id,"ok":true})]
         })
     }
