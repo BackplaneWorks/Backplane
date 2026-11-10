@@ -65,6 +65,9 @@ fn policy_error(pol: &Value) -> Option<&'static str> {
 /// view.page history pages and every other request do not).
 fn acknowledges(method: &str, mirror: bool) -> bool { method == "view.open" && !mirror }
 
+/// The thread whose conversation a connection's view shows ("" when it shows none): the one whose streamed text its picture carries.
+pub(crate) fn shown_thread(client: u64, target: &Value) -> String { actor::shown_thread(client, target) }
+
 impl Hub {
     /// The view branch of `Hub::request`: `m` starts with "view.".
     pub(crate) async fn view_request(&self, c: &mut Conn, id: Value, m: &str, msg: &Value) -> Vec<Value> {
