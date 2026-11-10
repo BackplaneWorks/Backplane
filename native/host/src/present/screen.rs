@@ -171,7 +171,20 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
                 "local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
         }
     } else if let Some(o)=super::onboard::act(st,hub,&session,p.get("hubInfo").unwrap_or(&Value::Null),&super::onboard::Client::of(p),&super::onboard::home_dir(),action,value) {
+        let ended=super::onboard::ended(action,&o.patch);
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
+        // setup ended with no thread open: the person lands in their newest thread (the step said they could write in it after setup),
+        // not on a page whose message box sends nowhere
+        if ended && text(&session,"sel").is_empty() { if let Some(id)=super::onboard::land(st) {
+            let mut a=p.clone(); a["session"]=session.clone(); a["action"]=json!("select"); a["value"]=json!(format!("{hub}|{id}"));
+            if let Some(out)=crate::session::dispatch::dispatch(&crate::session::dispatch::StateFacts(st),&a) {
+                session=out.session; cmds.extend(out.cmds);
+                if let Some(target)=out.next_target {
+                    return Some(json!({"remoteReady":false,"nextTarget":target,"session":session,"cmds":cmds,
+                        "local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+                }
+            }
+        } }
     } else if let Some(o)=super::botforms::act(st,hub,&session,action,value) {
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else if let Some(o)=super::settings::act(hub,&session,action,value) {
