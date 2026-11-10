@@ -2384,6 +2384,16 @@ notify.muted.hears.only.what.urgent = ミュート中: 緊急の確認だけ受�
 notify.hears.alerts = 通知を受け取ります。
 notify.hears = 受け取る
 notify.muted = ミュート
+gpui.e.failover.failover.order = フェイルオーバーの順序
+gpui.e.failover.applies.to.all.threads.bots = すべてのスレッド、ボット、ルーティン、サブスレッドに適用されます。アカウントが使用量の上限に達すると、使用量が残っている同じプロバイダーの別のアカウントへ、次にこのリストの下へと作業が移ります。すべてのアカウントが上限に達した場合は、最初にリセットされる時刻を知らせ、その時点で再開します。アカウントがリセットされると、作業はリストの上へ戻ります。
+gpui.e.failover.not.installed.on.this.machine = このマシンにはインストールされていません。スキップします。
+gpui.e.failover.its.own.sign.in.on = このマシンでの既定のサインインを使います。
+gpui.e.failover.account = アカウント 1 個。
+gpui.e.failover.accounts.the.one.with.the = アカウント {n} 個（使用量の残りが多い順）。
+gpui.e.failover.default.order = 既定の順序
+gpui.e.failover.use.the.default.order = 既定の順序を使う
+gpui.e.failover.choose.an.installed.provider.and = インストール済みのプロバイダーと、モデルまたはその既定を選び、末尾に追加します。
+gpui.e.failover.add.to.the.order = 順序に追加
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

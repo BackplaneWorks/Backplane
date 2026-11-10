@@ -2361,6 +2361,16 @@ notify.muted.hears.only.what.urgent = Muted: hears only what urgent asks let thr
 notify.hears.alerts = Hears alerts.
 notify.hears = hears
 notify.muted = muted
+gpui.e.failover.failover.order = Failover order
+gpui.e.failover.applies.to.all.threads.bots = Applies to all threads, bots, routines and subthreads. When an account hits its usage limit, work moves to another account of the same provider that has usage left, then down this list. When every account is out, Backplane says when the first one resets and continues then. Work moves back up the list as accounts reset.
+gpui.e.failover.not.installed.on.this.machine = Not installed on this machine. Skipped.
+gpui.e.failover.its.own.sign.in.on = Its own sign-in on this machine.
+gpui.e.failover.account = 1 account.
+gpui.e.failover.accounts.the.one.with.the = {n} accounts, the one with the most usage left first.
+gpui.e.failover.default.order = Default order
+gpui.e.failover.use.the.default.order = Use the default order
+gpui.e.failover.choose.an.installed.provider.and = Choose an installed provider, and a model or its default, then add it to the end.
+gpui.e.failover.add.to.the.order = Add to the order
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

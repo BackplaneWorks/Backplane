@@ -1,5 +1,6 @@
-//! The fallback chain: one ordered, opt-in list of `provider/model` per hub. Never wraps: an exhausted suffix blocks until a
-//! person intervenes. Ported here: parsing, validity against the installed models, editing and picking; the outage classifier (`classify`: only a provider's own
+//! The failover order (the fallback chain): one ordered list of providers, or `provider/model`, per hub; on unless the person turns it off, and Claude, Codex, Antigravity,
+//! Grok when they never set one (`DEFAULT_CHAIN`). A limit moves work to another account of its provider first, then to the first provider of the order that has an account
+//! free (from the top: one that has reset is taken again), and with everything out it waits for the earliest reset. Ported here: parsing, validity against the installed models, editing and picking; the outage classifier (`classify`: only a provider's own
 //! error envelope, never arbitrary text); holds on a provider or model; and the planner over named accounts (core/account-fallback: which account is
 //! eligible, the one with the most allowance left, when a hold ends, the thread's preference). What is NOT here is the driver: reading a failed turn,
 //! writing the hold, switching the thread to the next account or provider and starting it again is settings/driver.rs, which the agents' actor calls.
@@ -10,13 +11,23 @@ pub struct Target { pub provider: String, pub model: String }
 impl Target {
     pub fn key(&self) -> String { format!("{}/{}", self.provider, self.model) }
     /// Target.parse: the provider is the text before the first `/`, the model everything after it.
+    /// What a person reads: the provider alone when no model is named ("codex"), else `provider/model`.
+    pub fn label(&self) -> String { if self.model.is_empty() { self.provider.clone() } else { self.key() } }
     pub fn parse(s: &str) -> Target { let mut p = s.split('/'); let provider = p.next().unwrap_or("").to_string(); Target { provider, model: p.collect::<Vec<_>>().join("/") } }
 }
 
 /// Chain.parse
 pub fn parse(s: &str) -> Vec<Target> { if s.is_empty() { vec![] } else { s.split(',').map(Target::parse).collect() } }
 /// Chain.show
-pub fn show(xs: &[Target]) -> String { xs.iter().map(Target::key).collect::<Vec<_>>().join(",") }
+pub fn show(xs: &[Target]) -> String { xs.iter().map(Target::label).collect::<Vec<_>>().join(",") }
+/// The order a hub starts with: each provider on its own default model.
+pub const DEFAULT_CHAIN: &str = "claude,codex,antigravity,grok";
+/// The order in force: the person's (`fallback.chain`, even an empty one), else the default.
+pub fn chain_of(raw: Option<&str>) -> Vec<Target> { parse(raw.unwrap_or(DEFAULT_CHAIN)) }
+/// The order is followed unless the person turned it off (`fallback.on` = off).
+pub fn chain_on(raw: Option<&str>) -> bool { raw != Some("off") }
+/// A display name for a provider id.
+pub fn provider_name(p: &str) -> String { match p { "claude" => "Claude".into(), "codex" => "Codex".into(), "antigravity" => "Antigravity".into(), "grok" => "Grok".into(), "muse" => "Muse".into(), "opencode" => "OpenCode".into(), "pi" => "Pi".into(), "omp" => "Oh My Pi".into(), x => x.into() } }
 pub fn has(xs: &[Target], key: &str) -> bool { xs.iter().any(|t| t.key() == key) }
 
 /// Caps.valid: the provider lists models and the target names one of them (or none).

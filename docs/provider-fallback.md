@@ -1,22 +1,34 @@
 # Provider fallback
 
-Settings → Agents → Fallback hierarchy controls one opt-in ordered list for this hub.
-It applies to every Backplane thread, bot, delegated task, routine and mail
-short-run. Add installed provider/model pairs, move them up or down, or remove
-them. Turning it on never changes the model already selected in a thread.
+Settings → Agents → Failover order is one ordered list of providers (or
+provider/model pairs) for this hub. It is on unless turned off, and starts as
+Claude, Codex, Antigravity, Grok, each on its own default model. It applies to
+every Backplane thread, bot, subthread, delegated task and routine. Move
+entries up or down, remove them, add installed ones, or go back to the default
+order. Turning it on never changes the model already selected in a thread.
 
-Your chosen model runs first. A confirmed usage limit selects the next
-available entry after that exact provider/model. If the choice is absent,
-search from the top. The list never wraps. Entries missing from the installed
-catalog or held by a known limit are skipped. A working fallback stays selected;
-resetting a limit never moves it back automatically. An explicit model choice
-starts a new choice of intent.
+At a confirmed usage limit:
 
-A reported reset makes that provider or model eligible at the reported time.
-Without a reset, its availability hold remains until cleared in Settings. This
-avoids repeated launches against an exhausted account. Clearing a hold does not
-move working threads; paused work can be resumed explicitly. Exhausting the
-whole list preserves pending work and raises one action-needed notification.
+1. Same provider first: the work moves to another connected account of the
+   same provider with usage left, the one with the most left first, until every
+   one of them has run out for this request.
+2. Then the next provider: the first entry of the order, from the top, that is
+   installed (or has an account connected), is not held, and has an account
+   with usage left. A provider out earlier that has reset since is taken again.
+3. Everything out: one timeline line names every provider's accounts and the
+   earliest reset among all of them. The thread continues by itself at that
+   time, on whatever is free then. A limit that named no reset is tried again an
+   hour after it was met; a turn is the test.
+4. Coming back: between turns, a thread the order moved down goes back up to
+   the highest provider above it that has an account free again, and to the
+   account it left once that account has reset.
+
+Each switch writes one timeline line ("Switched to Codex (Spare): Claude
+(Personal) ran out (resets 15:40)", "Back on Claude (Personal): it has reset").
+The conversation is handed over the same way as a person's switch; parallel
+agents on one account are fine. Turning the order off keeps a thread on its
+provider: it moves between that provider's accounts and otherwise waits for
+the reset.
 
 An automatic switch creates a persistent notification naming the thread, old
 and new provider/model, reason, affected active count and known reset. Other

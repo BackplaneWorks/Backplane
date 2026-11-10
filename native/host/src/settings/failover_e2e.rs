@@ -21,6 +21,8 @@ async fn rig(name: &str, provider: &str) -> Rig {
     let ag = Agents::start_with(hub.clone(), Cli::standin(&bin)).await.unwrap();
     crate::commands::start_with(hub.clone(), Some(Arc::new(ag.clone())));
     let mgr = accounts_hub::start_cli(&hub, Some(ag.clone()), Cli::standin(&bin));
+    // one provider's rules unless a test sets the order: the machine's own CLIs (a models probe) must not add a provider to these
+    hub.commit(&json!({"$":"SettingSet","key":"fallback.chain","value":provider,"at":now()})).await.unwrap();
     Rig { hub, ag, mgr, dir }
 }
 impl Rig {
@@ -31,6 +33,16 @@ impl Rig {
         self.settled(&[&w.0, &p.0]).await;
         self.bind(T, provider, &w).await; (w, p)
     }
+    /// Claude's Work (the thread's) and Personal, and a Codex account, in the order Claude then Codex.
+    async fn across(&self) -> ((String, u64), (String, u64), (String, u64)) {
+        let al = |p: &str, used: f64| json!({"provider":p,"state":"ok","phase":"complete","at":now(),"windows":[{"scope":"five_hour","used_percent":used}]});
+        let w = self.mgr.plant("claude", "Work", "w@x.com", al("claude", 50.0)).await; let p = self.mgr.plant("claude", "Personal", "p@x.com", al("claude", 10.0)).await;
+        let c = self.mgr.plant("codex", "Spare", "c@x.com", al("codex", 5.0)).await;
+        self.settled(&[&w.0, &p.0, &c.0]).await; self.bind(T, "claude", &w).await;
+        self.hub.commit(&json!({"$":"SettingSet","key":"fallback.chain","value":"claude,codex","at":now()})).await.unwrap();
+        (w, p, c)
+    }
+    async fn provider(&self, th: &str) -> String { self.hub.model().await.threads.get(th).map(|t| t.provider.clone()).unwrap_or_default() }
     async fn settled(&self, ids: &[&String]) { let end = Instant::now() + Duration::from_secs(5); loop { let inv = self.hub.setting("accounts.inventory").await.unwrap_or_default(); if ids.iter().all(|i| ac::ready(&ac::profile(&inv, i), ac::profile(&inv, i)["provider"].as_str().unwrap_or(""), 2)) { return } assert!(Instant::now() < end, "the inventory never told of them: {inv}"); tokio::time::sleep(Duration::from_millis(50)).await } }
     async fn bind(&self, th: &str, provider: &str, a: &(String, u64)) { self.hub.commit(&json!({"$":"SettingSet","key":ac::binding_key(th, provider),"value":ac::binding_show(&a.0, a.1),"at":now()})).await.unwrap(); }
     fn mode(&self, who: &str, m: &str) { std::fs::write(self.dir.join(format!("mode.{who}")), m).unwrap() }
@@ -348,4 +360,52 @@ impl Rig {
     r.tick(now()).await; assert!(!r.hub.setting(&kw).await.unwrap_or_default().is_empty(), "nothing newer has been learned");
     r.say(T, "m1", "WORKS-AGAIN").await; r.rest(T, "completed", 1).await;
     let end = Instant::now() + Duration::from_secs(5); while !r.hub.setting(&kw).await.unwrap_or_default().is_empty() { assert!(Instant::now() < end, "the completed turn did not end the hold"); tokio::time::sleep(Duration::from_millis(50)).await }
+}
+
+/// Nov 10, the order the person set: every account of the provider first, then the next provider, with the conversation handed over and one line per switch; the way back
+/// up once the provider above has reset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_limit_tries_every_account_of_the_provider_then_the_next_provider_and_comes_back_when_one_resets() {
+    let r = rig("order", "claude").await; let (w, p, c) = r.across().await; let (rw, rp) = (now() + 7200, now() + 3600);
+    r.say(T, "m1", "FIRST-REQUEST remember the pad size").await; r.rest(T, "completed", 1).await;
+    r.mode("w@x.com", &format!("limit:{rw}")); r.mode("p@x.com", &format!("limit:{rp}"));
+    r.say(T, "m2", "SECOND-REQUEST route the board").await; r.rest(T, "completed", 4).await;
+    let ts = r.turns(); let who: Vec<&str> = ts.iter().map(|t| t["who"].as_str().unwrap()).collect();
+    assert_eq!(who, ["w@x.com", "w@x.com", "p@x.com", "c@x.com"], "Work, then Personal, then Codex: {ts:#?}");
+    assert_eq!((r.provider(T).await, r.binding(T, "codex").await), ("codex".to_string(), c.0.clone()));
+    let got = ts[3]["text"].as_str().unwrap();
+    for must in ["FIRST-REQUEST remember the pad size", "SECOND-REQUEST route the board"] { assert!(got.contains(must), "Codex gets the conversation: {must:?} missing:\n{got}") }
+    let z = r.zone().await;
+    let switches: Vec<String> = r.lines(T).into_iter().filter(|l| l.starts_with("Switched to")).collect();
+    assert_eq!(switches, vec![format!("Switched to Personal: Work ran out (resets {})", crate::agents::rules::when(&z, rw, now())),
+        format!("Switched to Codex (Spare): Claude (Personal) ran out (resets {})", crate::agents::rules::when(&z, rp, now()))], "one line per switch");
+    assert!(!r.log().iter().any(|e| e["$"] == "TurnChanged" && e["thread"] == T && e["state"] == "failed"), "{:?}", r.lines(T));
+    // not before Claude has reset
+    r.tick(rp - 10).await; assert_eq!(r.provider(T).await, "codex");
+    // Personal resets: between turns the thread goes back up to Claude, on Personal; the next message runs there with what Codex did handed over
+    std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); r.tick(rp + 1).await;
+    assert_eq!((r.provider(T).await, r.binding(T, "claude").await), ("claude".to_string(), p.0.clone()), "{:?}", r.lines(T));
+    assert!(r.lines(T).iter().any(|l| l == "Back on Claude (Personal): it has reset"), "{:?}", r.lines(T));
+    assert_eq!(r.hub.setting(&format!("fallback.intent.{T}")).await.unwrap_or_default(), "", "back where it started");
+    r.say(T, "m3", "THIRD").await; r.rest(T, "completed", 5).await; let ts = r.turns();
+    assert_eq!(ts[4]["who"], "p@x.com"); assert!(ts[4]["text"].as_str().unwrap().contains("answered by c@x.com"), "what Codex did goes with it:\n{}", ts[4]["text"]);
+    let _ = w;
+}
+/// Every account of every provider out: said once, with the earliest reset of them all, nothing runs before it, and then it goes on by itself on the account that reset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn with_every_account_of_every_provider_out_it_says_so_once_and_resumes_at_the_earliest_reset() {
+    let r = rig("orderall", "claude").await; let (_w, p, _c) = r.across().await; let (rw, rp, rc) = (now() + 7200, now() + 5400, now() + 3600);
+    r.mode("w@x.com", &format!("limit:{rw}")); r.mode("p@x.com", &format!("limit:{rp}")); r.mode("c@x.com", &format!("limit:{rc}"));
+    r.say(T, "m1", "THE-REQUEST").await; r.rest(T, "interrupted", 3).await; tokio::time::sleep(Duration::from_millis(800)).await;
+    assert_eq!(r.turns().len(), 3, "each account once: {:#?}", r.turns());
+    let waits: Vec<String> = r.lines(T).into_iter().filter(|l| l.starts_with("Every ")).collect();
+    assert_eq!(waits, vec![format!("Every account is out (Codex: Spare; Claude: Work, Personal). Continuing at {}, when the first one resets.", crate::agents::rules::when(&r.zone().await, rc, now()))], "once: {:?}", r.lines(T));
+    let rec: Value = serde_json::from_str(&r.hub.setting(&format!("provider.resume.{T}")).await.unwrap()).unwrap(); assert_eq!(rec["reset"], rc);
+    r.tick(rc - 5).await; tokio::time::sleep(Duration::from_millis(300)).await; assert_eq!(r.turns().len(), 3, "not before the reset");
+    std::fs::remove_file(r.dir.join("mode.c@x.com")).unwrap();
+    r.tick(rc + 1).await; r.rest(T, "completed", 4).await;
+    let ts = r.turns(); assert_eq!(ts[3]["who"], "c@x.com", "the account that reset first: {ts:#?}");
+    assert!(ts[2]["text"].as_str().unwrap().contains("THE-REQUEST"), "Codex was handed the request when it took over:\n{}", ts[2]["text"]);
+    assert!(ts[3]["resume"].as_str().unwrap().starts_with("cs-c@x.com") && ts[3]["text"].as_str().unwrap().starts_with("[Backplane] The provider's reported limit reset has arrived."), "and goes on in that session: {:#?}", ts[3]);
+    // later Claude's Personal resets too: the thread goes back up
+    std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); r.tick(rp + 1).await;
+    assert_eq!((r.provider(T).await, r.binding(T, "claude").await), ("claude".to_string(), p.0.clone()), "{:?}", r.lines(T));
 }

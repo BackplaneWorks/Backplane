@@ -2592,6 +2592,16 @@ notify.muted.hears.only.what.urgent	Muted: hears only what urgent asks let throu
 notify.hears.alerts	Hears alerts.	通知を受け取ります。
 notify.hears	hears	受け取る
 notify.muted	muted	ミュート
+gpui.e.failover.failover.order	Failover order	フェイルオーバーの順序
+gpui.e.failover.applies.to.all.threads.bots	Applies to all threads, bots, routines and subthreads. When an account hits its usage limit, work moves to another account of the same provider that has usage left, then down this list. When every account is out, Backplane says when the first one resets and continues then. Work moves back up the list as accounts reset.	すべてのスレッド、ボット、ルーティン、サブスレッドに適用されます。アカウントが使用量の上限に達すると、使用量が残っている同じプロバイダーの別のアカウントへ、次にこのリストの下へと作業が移ります。すべてのアカウントが上限に達した場合は、最初にリセットされる時刻を知らせ、その時点で再開します。アカウントがリセットされると、作業はリストの上へ戻ります。
+gpui.e.failover.not.installed.on.this.machine	Not installed on this machine. Skipped.	このマシンにはインストールされていません。スキップします。
+gpui.e.failover.its.own.sign.in.on	Its own sign-in on this machine.	このマシンでの既定のサインインを使います。
+gpui.e.failover.account	1 account.	アカウント 1 個。
+gpui.e.failover.accounts.the.one.with.the	{n} accounts, the one with the most usage left first.	アカウント {n} 個（使用量の残りが多い順）。
+gpui.e.failover.default.order	Default order	既定の順序
+gpui.e.failover.use.the.default.order	Use the default order	既定の順序を使う
+gpui.e.failover.choose.an.installed.provider.and	Choose an installed provider, and a model or its default, then add it to the end.	インストール済みのプロバイダーと、モデルまたはその既定を選び、末尾に追加します。
+gpui.e.failover.add.to.the.order	Add to the order	順序に追加
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -5116,6 +5126,9 @@ android.improve.nomatch	No project matches.	一致するプロジェクトはあ
 
     /// gpui.e.acct.sonnet.resets = Sonnet weekly  {left}% left · resets {when}
     static func gpui_e_acct_sonnet_resets(left: String, when: String) -> String { f("gpui.e.acct.sonnet.resets", ["left": left, "when": when]) }
+
+    /// gpui.e.failover.accounts.the.one.with.the = {n} accounts, the one with the most usage left first.
+    static func gpui_e_failover_accounts_the_one_with_the(n: String) -> String { f("gpui.e.failover.accounts.the.one.with.the", ["n": n]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }
