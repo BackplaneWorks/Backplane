@@ -3,14 +3,15 @@
 # the isolated display :61 (never the person's screen), one scope, nice 19. The run (test/improvements.json):
 # open the panel, type the description, evidence and details, capture this window (ffmpeg x11grab of our own window id), select the screenshot,
 # diagnostics and details, review the public issue, open the GitHub draft (a recorder stands in for the browser: nothing leaves the machine),
-# write the report with an agent (stand-in), load it, record the window, play it, then hand the request to an agent thread (internal).
+# write the report with an agent (stand-in), load it, record the window, play it, then hand the request to an agent thread (internal); then a second request
+# sent to the project the person picks (Board), and the panel opened again starts from that choice.
 # Pictures: build/gpui/shots/desktop/improvements-NN-*.png (this window only). Checks: improvements-e2e-check.py on the log, the events and the files.
 # usage: improvements-e2e.sh CLIENT_BIN HUB_BIN ASSETS_DIR            (binaries come from a build job, never built here)
 set -eu
 ROOT=${GPUI_MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/.." && pwd)
 CLIENT=$1; HUBBIN=$2; ASSETS=$3
 R=$ROOT/build/gpui/imp-e2e; OUT=$ROOT/build/gpui/results/improvements; SH=$ROOT/build/gpui/shots/desktop
-X=$ROOT/build/gpui/xvfb; PORT=3834; DISP=${IMP_DISPLAY:-:61}
+X=${XVFB_ROOT:-$ROOT/build/gpui/xvfb}; PORT=3834; DISP=${IMP_DISPLAY:-:61}
 mkdir -p $OUT $SH
 [ -x "$CLIENT" ] && [ -x "$HUBBIN" ] || { echo "need the client and hub binaries"; exit 2; }
 [ ! -e /tmp/.X11-unix/X${DISP#:} ] || { echo "display $DISP is in use"; exit 2; }
@@ -23,6 +24,7 @@ printf '#!/bin/sh\necho "$1" >> %s/opened.txt\n' "$R" > $R/bin/open; chmod +x $R
 # the Backplane source project: a throwaway repository named backplane-gpui with a local main branch; and a second project
 mkdir -p $R/proj/backplane-gpui $R/proj/board
 ( cd $R/proj/backplane-gpui && git init -q && git config user.email t@t && git config user.name t && echo x > README.md && git add . && git commit -qm init && git branch -M main )
+( cd $R/proj/board && git init -q && git config user.email t@t && git config user.name t && echo b > board.txt && git add . && git commit -qm init && git branch -M main )
 python3 - "$R" <<'PY'
 import json,sys,time
 R=sys.argv[1]; NOW=int(time.time())
@@ -46,7 +48,7 @@ tr "\0" "\n" < /proc/$HP/environ | grep -q "^BACKPLANE_AGENTS=$R/bin\$" || { ech
 echo "hub pid $HP environ ok: $(tr "\0" "\n" < /proc/$HP/environ | grep "^BACKPLANE_AGENTS=")"; curl -s -m3 -o /dev/null -w "hello %{http_code}\n" http://127.0.0.1:$PORT/hello
 LD_LIBRARY_PATH=$X/usr/lib/x86_64-linux-gnu $X/usr/bin/Xvfb $DISP -screen 0 1440x900x24 -nolisten tcp -xkbdir /usr/share/X11/xkb > $R/xvfb.log 2>&1 &
 echo $! > $R/xvfb.pid; sleep 2
-printf "font pango:monospace 8\nnew_window none\nfor_window [class=\".*\"] border none\ndefault_border none\nhide_edge_borders both\n" > $R/i3.conf
+printf "font pango:monospace 8\nnew_window none\nfor_window [class=\".*\"] border none\ndefault_border none\nhide_edge_borders both\nipc-socket $R/i3.sock\n" > $R/i3.conf
 DISPLAY=$DISP i3 -c $R/i3.conf > $R/i3.log 2>&1 &
 echo $! > $R/i3.pid; sleep 1
 export DISPLAY=$DISP VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LP_NUM_THREADS=2 BACKPLANE_GPUI_ASSETS=$ASSETS BACKPLANE_GPUI_RECTS=1

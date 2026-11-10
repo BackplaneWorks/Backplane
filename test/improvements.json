@@ -19,5 +19,10 @@
  {"click": "imp:rec-play"}, {"click": "imp:chk-rec"}, {"wait": 600}, {"imp": "snap improvements-08-recording-kept"},
  {"click": "imp:dest-internal"}, {"click": "imp:chk-rec"}, {"wait": 600}, {"imp": "snap improvements-09-internal"},
  {"click": "imp:primary"}, {"wait": 8000}, {"imp": "state"}, {"imp": "snap improvements-10-handed-off"},
- {"wait": 1500}
+ {"wait": 1500},
+ {"click": "ui:Improvements"}, {"wait": 4000}, {"click": "imp:dest-internal"}, {"imp": "text Make the board outline rounder."}, {"wait": 500},
+ {"click": "imp:proj:p2"}, {"wait": 800}, {"imp": "snap improvements-11-board-picked"},
+ {"click": "imp:primary"}, {"wait": 8000}, {"imp": "state"},
+ {"click": "ui:Improvements"}, {"wait": 2500}, {"click": "imp:dest-internal"}, {"wait": 500}, {"imp": "state"}, {"imp": "snap improvements-12-remembered"},
+ {"wait": 1000}
 ]

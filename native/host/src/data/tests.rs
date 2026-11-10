@@ -631,3 +631,11 @@ impl RpcHandler for FakeStar {
     assert_eq!(l.delta(), (2, true)); assert_eq!(l.finished(), Some(2)); l.end(); assert_eq!(l.delta(), (3, true)); assert_eq!(l.finished(), Some(3));
     assert_eq!(Streams::default().finished(), None, "a final message with no stream replaces nothing");
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_improvements_lists_the_projects_and_remembers_the_choice() {
+    let (h, port) = up("improve").await; h.register_rpc(Arc::new(crate::settings::improvements::ImprovementsRpc)); let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let r = ask(&mut ws, 1, "improvements.projects", json!({})).await; let ids: Vec<&str> = r["result"]["projects"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
+    assert_eq!(r["result"]["project"], "", "nothing chosen yet: {r}"); assert!(ids.contains(&"p1") && ids.contains(&"p2"), "{ids:?}");
+    let r = ask(&mut ws, 2, "improvements.project", json!({"project":"p2"})).await; assert_eq!(r["ok"], true, "{r}");
+    let r = ask(&mut ws, 3, "improvements.projects", json!({})).await; assert_eq!((r["result"]["project"].as_str(), r["result"]["projects"][0]["id"].as_str()), (Some("p2"), Some("p2")), "the last choice, first");
+    let r = ask(&mut ws, 4, "improvements.project", json!({"project":"nope"})).await; assert_eq!(r["ok"], false, "no such project");
+}

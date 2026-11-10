@@ -427,6 +427,8 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         // the same answer every client gets (its `result`, not the reply around it); the phones draw it
         "update.status" | "update.check" | "app.update" | "update.now" => Ok(rpc(hub, c, m, json!({})).await?["result"].clone()),
         "update.channel" => { let ch = s(p, "channel"); if ch != "stable" && ch != "beta" { return Err(err("no such channel")) } rpc(hub, c, "setting.set", json!({"key":"update.channel","value":ch})).await?; Ok(rpc(hub, c, "update.status", json!({})).await?["result"].clone()) }
+        // Improvements: the projects of every machine a request may go to (searched on the hub) and the last one chosen, as the desktop gets them
+        "improvements.projects" | "improvements.project" => Ok(rpc(hub, c, m, p.clone()).await?["result"].clone()),
         "turn.interrupt" => { rpc(hub, c, "turn.interrupt", json!({"thread":s(p, "thread")})).await?; Ok(json!({})) }
         _ => match ext::call(hub, c, m, p).await { Some(r) => r, None => Err(err("unknown method")) },
     }

@@ -24,7 +24,7 @@ for l in lines(f"{out}/events.jsonl"):
     except ValueError: pass
 
 # pictures: this window only, one per step
-want = ["01-open", "02-evidence", "03-review", "04-opened", "05-writer-started", "06-report-loaded", "07-recording", "08-recording-kept", "09-internal", "10-handed-off"]
+want = ["01-open", "02-evidence", "03-review", "04-opened", "05-writer-started", "06-report-loaded", "07-recording", "08-recording-kept", "09-internal", "10-handed-off", "11-board-picked", "12-remembered"]
 for w in want:
     p = f"{shots}/improvements-{w}.png"
     check(os.path.exists(p) and os.path.getsize(p) > 2000, f"picture {w}")
@@ -32,7 +32,7 @@ for w in want:
 # the client's own state, step by step
 check(len(states) >= 3, "the client reported its state three times", str(len(states)))
 if len(states) >= 3:
-    s1, s2, s3 = states[0], states[1], states[-1]
+    s1, s2, s3 = states[0], states[1], states[2]
     check(s1["evidence"] is True and s1["report"] > 0, "the public report was prepared", str(s1))
     check(s1["opened"] is True and s1["internal"] is False, "the GitHub draft was recorded as opened before it opened", str(s1))
     check(bool(s2.get("writer")) and s2["writer"].get("created") and s2["writer"].get("started"), "the report writer thread was created and its turn started", str(s2))
@@ -58,11 +58,18 @@ check(len([u for u in opened if u.endswith(".webm")]) >= 1, "the recording was p
 # the hub's log: two threads (writer, internal), attachments, the hand-off text, stand-in agents only
 th = [e for e in events if e.get("$") == "ThreadCreated" and str(e.get("id", "")).startswith("improvement-")]
 wt = {e["id"]: e for e in events if e.get("$") == "WorktreeSet"}
+board = [e for e in th if e.get("project") == "p2"]; th = [e for e in th if e.get("project") != "p2"]
+check(len(board) == 1, "the second request made its thread in the project the person picked (Board)", str([e.get("id") for e in board]))
 check(len(th) == 2 and any(str(wt.get(e["id"], {}).get("branch", "")).startswith("imp-") and "/.backplane/worktrees/" in wt[e["id"]].get("worktree", "") for e in th), "the internal thread works in its own worktree on a imp-* branch, never the project folder", str(wt))
 check(len(th) == 2 and all(e["project"] == "p1" for e in th), "two improvement threads, both in the Backplane source project", str([e.get("id") for e in th]))
 users = [e for e in events if e.get("$") == "MessagePosted" and e.get("role") == "user" and str(e.get("thread", "")).startswith("improvement-")]
 writer = [e for e in users if "Write an editable Backplane issue report" in e.get("text", "")]
-internal = [e for e in users if "<backplane_improvements_context>" in e.get("text", "")]
+internal = [e for e in users if "<backplane_improvements_context>" in e.get("text", "") and e.get("thread") not in {b["id"] for b in board}]
+to_board = [e for e in users if e.get("thread") in {b["id"] for b in board}]
+check(len(to_board) == 1 and to_board[0]["text"].startswith("Make the board outline rounder.") and "Implement the request above in the project Board" in to_board[0]["text"]
+      and "sent to the project Board" in to_board[0]["text"] and "main builder" not in to_board[0]["text"], "the Board request names its project, not Backplane", str([e.get("text", "")[:300] for e in to_board]))
+check(any(e.get("$") == "SettingSet" and e.get("key") == "improvements.project" and e.get("value") == "p2" for e in events), "the choice is remembered on the hub")
+check(len(states) >= 1 and states[-1].get("project") == "p2" and states[-1].get("thread") == "" and not states[-1].get("busy"), "the panel opened again, on a fresh draft, starts from the last choice", str(states[-1:] if states else ""))
 check(len(writer) == 1 and "[attachment: " in writer[0]["text"], "the writer got its prompt and the selected evidence", str(len(writer)))
 check(len(writer) == 1 and "Original description, verbatim, until end of input\nThe sidebar rows jump" in writer[0]["text"], "the writer prompt ends with the original description verbatim")
 check(len(internal) == 1, "the internal request was posted once", str(len(internal)))

@@ -1747,6 +1747,16 @@ gpui.bots.no.messages.yet = No messages yet.
 gpui.bots.connecting.to.the.bot.s = Connecting to the bot's browser page.
 gpui.bots.page.notyet = The {page} page is not drawn here yet.
 gpui.bots.no.routines = No routines.
+gpui.imp.send.to.project = Send to project
+gpui.imp.search.projects = Search projects…
+gpui.imp.choose.a.project.before.sending = Choose a project before sending.
+gpui.imp.choose.a.project.then.retry = Choose a project, then retry Send.
+gpui.imp.the.thread.runs.on.the = The thread runs on the other machine. Images and recordings stay on this computer. Ctrl+Enter sends this request.
+gpui.imp.ctrl.enter.sends.this.request = Ctrl+Enter sends this request.
+gpui.imp.send.starts.a.new.thread = Send starts a new thread in the chosen project.
+gpui.imp.creating.the.thread = Creating the thread…
+gpui.imp.request.sent.opening.the.new2 = Request sent. Opening the new thread.
+gpui.imp.project.chosen = Sending to {title}
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = Send the message
@@ -3438,6 +3448,8 @@ android.mark.also = also on {machines}
 android.mark.newon = New thread on {machine}
 android.google.signedin = Signed in.
 android.google.back = Back to Backplane
+android.improve.search = Search projects…
+android.improve.nomatch = No project matches.
 # ---- ios: new entries go here ----
 ios.viewerbg = 3D viewer background
 ios.viewerbg.auto = Auto
@@ -3781,6 +3793,7 @@ ios.buy = Buy it
 ios.buy.from = Buy it · from {price}
 ios.buy.last = Buy it · last estimate: from {price}
 ios.buy.incomplete = Buy it · estimate incomplete
+ios.improve.search = Search projects…
 
 android.notify.head = NOTIFICATIONS
 # ---- end ----
