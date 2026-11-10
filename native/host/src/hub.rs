@@ -492,6 +492,9 @@ impl Hub {
     /// The live text of every streaming thread (for a client that joins mid-turn).
     /// The text a thread's agent is streaming now ("" when none): the thread view draws it as the reply being written.
     pub fn live_text(&self, thread: &str) -> String { self.live.lock().unwrap().get(thread).cloned().unwrap_or_default() }
+    /// How much text each streaming thread has so far. Streamed text only grows until its stream ends, so a view that drew `n` bytes of a thread is current while this still says `n`.
+    pub fn live_lens(&self) -> Vec<(String, usize)> { self.live.lock().unwrap().iter().map(|(a, b)| (a.clone(), b.len())).collect() }
+    pub fn live_text_len(&self, thread: &str) -> usize { self.live.lock().unwrap().get(thread).map_or(0, String::len) }
     pub fn live_snapshot(&self) -> Vec<(String, String)> { self.live.lock().unwrap().iter().map(|(a, b)| (a.clone(), b.clone())).collect() }
     /// The `live` frame a joining client gets: every streaming thread's text so far.
     pub fn live_frame(&self) -> Value {
