@@ -15,6 +15,10 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
+/// Where a rail letter acts: as `FREE`, and from a board or schematic plot too. A plot takes no typing, and a click on it is where the keyboard
+/// goes when a person looks at a board; with the letters dead there they never acted (the message box has the keyboard everywhere else).
+/// The 3D and Mech views keep their own letters (F fits, 1-6 turn), and a web page, the terminal and the Files page their typing.
+/* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const RAIL: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && (!Viewer || Plot) && !BrowserBar && !FilesPage";
 /// Where "/" puts the keyboard in the message box: as `FREE`, and from a viewer too (a web page's own "/" is kept: `focus_composer`).
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const SLASH: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
@@ -163,9 +167,9 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     let alt = if mac() { Some(NOT_MAC_COMPOSER) } else { None };
     macro_rules! digits { ($($n:literal $p:ident $t:ident),*) => { v.extend([$(KeyBinding::new(concat!("alt-", $n), $p, alt), KeyBinding::new(concat!("secondary-", $n), $t, None)),*]); } }
     digits!("1" Project1 Thread1, "2" Project2 Thread2, "3" Project3 Thread3, "4" Project4 Thread4, "5" Project5 Thread5, "6" Project6 Thread6, "7" Project7 Thread7, "8" Project8 Thread8, "9" Project9 Thread9);
-    v.extend([KeyBinding::new("b", RailBoard, Some(FREE)), KeyBinding::new("s", RailSchematic, Some(FREE)), KeyBinding::new("3", Rail3d, Some(FREE)), KeyBinding::new("v", RailSplit, Some(FREE)),
-        KeyBinding::new("m", RailMech, Some(FREE)), KeyBinding::new("f", RailFiles, Some(FREE)), KeyBinding::new("d", RailDiff, Some(FREE)), KeyBinding::new("r", RailReview, Some(FREE)),
-        KeyBinding::new("w", RailBrowser, Some(FREE))]);
+    v.extend([KeyBinding::new("b", RailBoard, Some(RAIL)), KeyBinding::new("s", RailSchematic, Some(RAIL)), KeyBinding::new("3", Rail3d, Some(RAIL)), KeyBinding::new("v", RailSplit, Some(RAIL)),
+        KeyBinding::new("m", RailMech, Some(RAIL)), KeyBinding::new("f", RailFiles, Some(RAIL)), KeyBinding::new("d", RailDiff, Some(RAIL)), KeyBinding::new("r", RailReview, Some(RAIL)),
+        KeyBinding::new("w", RailBrowser, Some(RAIL))]);
     let key = |id: &str| find(id).map_or("", |x| x.key);
     for c in PICK_SCOPES.map(Some) {
         v.extend([KeyBinding::new(key("menu-up"), PickUp, c), KeyBinding::new(key("menu-down"), PickDown, c), KeyBinding::new(key("menu-left"), PickLeft, c), KeyBinding::new(key("menu-right"), PickRight, c),
@@ -463,6 +467,9 @@ mod tests {
         assert_eq!(d("/", &[]), "keys::FocusComposer"); assert_eq!(d("b", &[]), "keys::RailBoard"); assert_eq!(d("3", &[]), "keys::Rail3d"); assert_eq!(d("d", &[]), "keys::RailDiff");
         for c in ["Composer", "TextInput", "PickInput", "AskInput", "ImpInput", "Viewer", "BrowserBar", "FilesPage"] { for k in ["/", "b", "s", "3", "v", "m", "f", "d", "r", "w"] { if k == "/" && c == "Viewer" { continue } assert_eq!(d(k, &[c]), "", "{k} in {c}"); } }
         assert_eq!(d("/", &["Viewer"]), "keys::FocusComposer", "a key back to the message box from the board, schematic or 3D");
+        // from a board or schematic plot the rail's letters act (a click on the board is where the keyboard is while a person looks at it); the 3D view keeps F and its digits
+        assert_eq!(d("s", &["Viewer Plot"]), "keys::RailSchematic"); assert_eq!(d("3", &["Viewer Plot"]), "keys::Rail3d"); assert_eq!(d("b", &["Viewer Plot"]), "keys::RailBoard"); assert_eq!(d("f", &["Viewer Plot"]), "keys::RailFiles");
+        assert_eq!(d("/", &["Viewer Plot"]), "keys::FocusComposer"); assert_eq!(d("s", &["Viewer Plot", "TextInput"]), "", "a field over the plot keeps its typing");
         assert_eq!(d("/", &["Viewer", "FilesPage"]), "", "the Files page's filter"); assert_eq!(d("/", &["Viewer", "Terminal"]), "", "the shell's");
         assert_eq!(d("ctrl-shift-s", &[]), "keys::SettleThread");
     }
