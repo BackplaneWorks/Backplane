@@ -15,6 +15,8 @@ pub fn parse_css(css: &str) -> Option<Rgba> {
 }
 /// The project's mark: its icon in its colour (the theme's `ok` while the hub names none).
 pub fn mark(light: bool, project: &Value) -> AnyElement {
+    // a project named Backplane: the app's own logo (the hub's `backplane`, which no editor offers)
+    if logo(project) { return div().size(px(14.)).flex_shrink_0().child(art::logo(light, 14., "badge-logo")).into_any_element() }
     art::icon(icon_name(project["icon"].as_str().unwrap_or("")), 14., parse_css(project["css"].as_str().unwrap_or("")).unwrap_or_else(|| theme::color(light, "ok")))
 }
 /// The editor's choices as (label, value, on, css).
@@ -22,6 +24,8 @@ pub fn choices(look: &Value, key: &str) -> Vec<(String, String, bool, String)> {
     look[key].as_array().into_iter().flatten().map(|c| (c["label"].as_str().unwrap_or("").to_string(), c["value"].as_str().unwrap_or("").to_string(), c["on"].as_bool().unwrap_or(false), c["css"].as_str().unwrap_or("").to_string())).collect()
 }
 
+/// Whether the hub named the logo for this project (present/badge.rs `SECRET`).
+pub fn logo(project: &Value) -> bool { project["icon"] == "backplane" }
 /// The editor's Pick again: its words and the project it is for, when the hub offers it.
 pub fn again(look: &Value) -> Option<(String, String)> {
     let v = look["again"]["value"].as_str().filter(|v| !v.is_empty())?; Some((look["again"]["label"].as_str().unwrap_or("").to_string(), v.to_string()))
@@ -101,6 +105,7 @@ mod tests {
         assert_eq!(choices(&look, "icons")[0].1, "project.icon.p=cpu"); assert!(choices(&Value::Null, "colors").is_empty());
         assert_eq!(again(&serde_json::json!({"again":{"label":"Pick again","value":"p"}})), Some(("Pick again".to_string(), "p".to_string()))); assert_eq!(again(&look), None);
         assert_eq!((icon_name("usb"), icon_name("presentation")), ("usb", "presentation"));
+        assert!(logo(&serde_json::json!({"icon":"backplane"})) && !logo(&serde_json::json!({"icon":"cpu"})) && icon_name("backplane") == "folder", "the logo is drawn by itself, never as an icon of the list");
     }
     #[test] fn a_machine_marker_is_short_on_rows_full_in_the_header_and_dim_when_away() {
         let m = serde_json::json!({"name":"framework-1.tail.ts.net","short":"framework-1","away":false});

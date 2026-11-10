@@ -14,8 +14,14 @@ pub fn auto(id: &str) -> &'static str { TINTS[(id.bytes().map(|b| b as usize).su
 pub fn color_of<'a>(set: &'a str, id: &str) -> &'a str { TINTS.iter().find(|(n, _)| *n == set).map(|(n, _)| *n).unwrap_or_else(|| auto(id)) }
 pub fn css_of(name: &str) -> &'static str { TINTS.iter().find(|(n, _)| *n == name).map_or("#8a97a8", |(_, c)| c) }
 pub fn icon_of(set: &str) -> &'static str { ICONS.iter().copied().find(|i| *i == set).unwrap_or("folder") }
-/// The icon a project shows: the person's when they chose one (`set`), else the model's pick (`project.pick.<id>`: "<icon>" or "<icon> <tint>"), else the folder.
-pub fn icon_eff(set: &str, pick: &str) -> &'static str { if ICONS.contains(&set) { icon_of(set) } else { icon_of(pick.split(' ').next().unwrap_or("")) } }
+/// The icon a project shows: the person's when they chose one (`set`), else the logo for a project named Backplane (`SECRET`), else the model's pick (`project.pick.<id>`: "<icon>" or "<icon> <tint>"), else the folder.
+pub fn icon_eff(set: &str, pick: &str, title: &str) -> &'static str {
+    if ICONS.contains(&set) { icon_of(set) } else if secret(title) { SECRET } else { icon_of(pick.split(' ').next().unwrap_or("")) }
+}
+/// The app's own logo, a project's icon only by its name: a project titled "Backplane" shows it unless the person chose an icon by hand.
+/// It is in no list (`ICONS`, `badge.list`, the editor), so it cannot be picked, written by `look-set` or named by the model.
+pub const SECRET: &str = "backplane";
+pub fn secret(title: &str) -> bool { title.trim().eq_ignore_ascii_case("backplane") }
 /// The colour a project shows: the person's, else the pick's tint, else the one from its id.
 pub fn color_eff<'a>(set: &'a str, pick: &'a str, id: &str) -> &'a str { if TINTS.iter().any(|(n, _)| *n == set) { set } else { color_of(pick.split(' ').nth(1).unwrap_or(""), id) } }
 
@@ -48,10 +54,13 @@ mod tests {
         assert_eq!(color_of("pink", "p1"), "pink"); assert_eq!(color_of("nonsense", "p1"), auto("p1")); assert_eq!(icon_of("cpu"), "cpu"); assert_eq!(icon_of("x"), "folder");
     }
     #[test] fn the_persons_choice_wins_over_the_pick_and_the_pick_over_the_default() {
-        assert_eq!((icon_eff("cpu", "usb teal"), color_eff("pink", "usb teal", "p1")), ("cpu", "pink"));
-        assert_eq!((icon_eff("", "usb teal"), color_eff("", "usb teal", "p1")), ("usb", "teal"));
-        assert_eq!((icon_eff("", "presentation"), color_eff("", "presentation", "p1")), ("presentation", auto("p1")), "a pick with no tint keeps the colour from the id");
-        assert_eq!((icon_eff("skull", ""), color_eff("mauve", "", "p1")), ("folder", auto("p1")));
+        assert_eq!((icon_eff("cpu", "usb teal", "x"), color_eff("pink", "usb teal", "p1")), ("cpu", "pink"));
+        assert_eq!((icon_eff("", "usb teal", "x"), color_eff("", "usb teal", "p1")), ("usb", "teal"));
+        assert_eq!((icon_eff("", "presentation", "x"), color_eff("", "presentation", "p1")), ("presentation", auto("p1")), "a pick with no tint keeps the colour from the id");
+        assert_eq!((icon_eff("skull", "", "x"), color_eff("mauve", "", "p1")), ("folder", auto("p1")));
+        // the logo: by the name alone, under the person's own choice, in no list and never written
+        assert_eq!((icon_eff("", "usb teal", "Backplane"), icon_eff("", "", " backplane "), icon_eff("cpu", "", "Backplane"), icon_eff("", "", "Backplane 2")), (SECRET, SECRET, "cpu", "folder"));
+        assert!(!ICONS.contains(&SECRET) && setting_of("project.icon.p1=backplane").is_none() && !list().to_string().contains(SECRET));
         assert_eq!(editor("p1", "teal", "usb")["again"], json!({"label": "Pick again", "value": "p1"}));
     }
     #[test] fn only_a_tint_or_an_icon_of_the_list_is_written() {

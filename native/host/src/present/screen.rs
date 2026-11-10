@@ -430,7 +430,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             (indices,pager)
         })?;
         let pick=setting(pst,&format!("project.pick.{owner}"));
-        let icon=super::badge::icon_eff(setting(pst,&format!("project.icon.{owner}")),pick);
+        let icon=super::badge::icon_eff(setting(pst,&format!("project.icon.{owner}")),pick,pst.projects.get(owner).map_or("",|p|p.title.as_str()));
         project["icon"]=json!(icon);
         let color=super::badge::color_eff(setting(pst,&format!("project.color.{owner}")),pick,owner);
         project["color"]=json!(color); project["css"]=json!(super::badge::css_of(color));

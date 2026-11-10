@@ -348,7 +348,10 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                         shut = if (closed) shut - p.id else shut + p.id; prefs.edit().putStringSet("projects.shut", shut).apply()
                     }, onLongClick = { projMenu = p; projSheet = true }).padding(start = 10.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Default.FolderOpen, null, tint = dok, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(8.dp))
+                        // a project named Backplane: the app's own logo (the hub's `backplane`, which no badge sheet offers)
+                        if (p.icon == "backplane") androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(if (dcs.background.luminance() > 0.5f) R.drawable.brand_light else R.drawable.brand_dark), null, Modifier.size(15.dp).testTag("proj.logo.${p.id}"))
+                        else Icon(Icons.Default.FolderOpen, null, tint = dok, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(8.dp))
                         Box(Modifier.size(8.dp).background(runCatching { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(p.css)) }.getOrDefault(dcs.onSurfaceVariant)).testTag("proj.badge.${p.id}"))
                         Spacer(Modifier.width(6.dp))
                         DMono(p.title.uppercase(), dcs.onSurfaceVariant, 12)
