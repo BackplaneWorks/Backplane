@@ -168,7 +168,9 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
         }
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         let (hint, secret, v) = (f.hint.clone(), f.secret, f.value.clone());
-        input.update(cx, |i, cx| { i.set_placeholder(&trs(&hint)); i.masked = secret; i.set(v, cx); });
+        // a row's rename box is one row tall: a long title wrapped to three, drawn over the rows above and below it
+        let one_row = f.name == "title";
+        input.update(cx, |i, cx| { i.set_placeholder(&trs(&hint)); i.masked = secret; if one_row { i.max_lines = 1.; } i.set(v, cx); });
         let field = f.clone();
         if !f.vault {
             cx.observe(&input, move |this, input, cx| {

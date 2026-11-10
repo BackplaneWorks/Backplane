@@ -149,10 +149,14 @@ pub fn file_listed_only(kind: &str) -> bool { !matches!(kind, "folder" | "board"
 /// diff.revert.confirm (i18n/en.msg)
 /* i18n-ok: drawn through trs */ const REVERT_ASK: &str = "Put the files back as they were when this thread began? Every change shown below is undone, committed ones and new files too. Commits stay in git.";
 
+/// Whether the Diff page has a change to act on. With none ("No changes since this thread began", or a folder that is no repository) there is
+/// nothing to commit, push or put back: the buttons are not drawn (Commit then answered with git's "nothing to commit" and a failed push in the thread).
+pub fn diff_changed(diff: &Value) -> bool { diff["files"].as_array().map_or(false, |f| !f.is_empty()) }
+
 /// The Diff page's buttons as the harness's controls: (id, label, action, value); none while Diff is not on show.
 pub fn diff_controls(diff: &Value) -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
-    if !diff.is_object() { return vec![] }
-    /* i18n-ok: the harness's control labels (ctl entries the e2e drivers press) */ let mut v = vec![("git-commit_push", "Commit", "git", "commit_push"), ("git-commit_push_pr", "PR", "git", "commit_push_pr"), ("revert-ask", "Revert", "revert", "ask")];
+    if !diff.is_object() || !diff_changed(diff) { return vec![] }
+    /* i18n-ok: the harness's control labels (ctl entries the e2e drivers press) */ let mut v = vec![("git-commit_push", "Commit & push", "git", "commit_push"), ("git-commit_push_pr", "PR", "git", "commit_push_pr"), ("revert-ask", "Revert", "revert", "ask")];
     /* i18n-ok: ctl labels */ if diff["reverting"] == true { v.push(("revert-confirm", "Revert", "revert", "confirm")); v.push(("revert-cancel", "Cancel", "revert-no", "")); }
     v
 }
@@ -200,8 +204,10 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: An
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().text_size(px(12.));
     col = col.child(bar_wrap(light).child(div().flex_1().min_w(px(180.)).text_color(c("dim")).child(trs(&string(diff, "summary"))))
-        .children([(trs("Commit"), "commit_push"), ("PR".to_string(), "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l, false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>())
-        .child(btn(cx, light, "revert-ask".into(), trs("Revert"), diff["reverting"] == true, Command::Action("revert".into(), "ask".into()))).child(actions));
+        // the button says all it does: it commits and pushes (`commit_push`), as the palette's "Commit & push" and its tooltip say
+        .when(diff_changed(diff), |d| d.children([(trs("Commit & push"), "commit_push"), ("PR".to_string(), "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l, false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>())
+            .child(btn(cx, light, "revert-ask".into(), trs("Revert"), diff["reverting"] == true, Command::Action("revert".into(), "ask".into()))))
+        .child(actions));
     // Revert asks first (Ui.revert): the diff stays on show while the person decides what to discard
     if diff["reverting"] == true {
         col = col.child(div().flex().flex_col().gap_2().px_3().py_2().bg(c("raise")).border_y_1().border_color(c("bad"))
