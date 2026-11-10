@@ -168,8 +168,11 @@ pub fn hint(msg: &str) -> String {
 /// Acp.hint: ACP's own failure on the prompt (id 3) says how Grok signs in, as the JS hub's shared reply does.
 fn acp_hint(msg: &str) -> String { let l = msg.to_lowercase(); if l.contains("auth") || l.contains("login") { format!("{msg} (sign in once with `grok login`)") } else { msg.into() } }
 fn err_msg(o: &Value) -> String { o.get("error").and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or("grok failed").to_string() }
+/// The setting by which the person opts in to the pinned agent signing in with their Google account ("yes"); off by default.
+pub const OAUTH_OPTIN: &str = "agy.oauth.optin";
+pub const OAUTH_REFUSED: &str = "Antigravity's pinned agent is set to sign in with a Google account, which Google's Antigravity terms forbid for other software and can get the account suspended. Use a Gemini API key or a Google Cloud project instead, or Google's own agy CLI (uninstall the pinned agent), or opt in knowingly with the setting agy.oauth.optin = yes";
 pub const SIGNIN_MSG: &str = "Antigravity is not signed in: sign in under Settings › Agents › Antigravity first.";
-pub const MISSING_MSG: &str = "Antigravity is not installed: install it under Settings › Agents › Antigravity.";
+pub const MISSING_MSG: &str = "Antigravity is not installed: install Google's Antigravity CLI (agy), or install it under Settings › Agents › Antigravity.";
 
 fn update(a: &mut Acp, u: &Value) -> Vec<Value> {
     match gs(u, "sessionUpdate") {
@@ -378,22 +381,49 @@ pub fn info_about(a: &Info) -> Value {
 }
 
 // ---- The driver ----
-/// Agt.go: the runner script with the sign-in the settings name (agy.auth, agy.account, agy.gcp.project, agy.gcp.location).
-pub struct AgyDriver { turn: AgyTurn, st: Acp }
-impl AgyDriver { pub fn new() -> AgyDriver { AgyDriver { turn: AgyTurn::default(), st: Acp::default() } } pub fn done(&self) -> bool { self.st.done } }
+/// Agt.go: the runner script with the sign-in the settings name (agy.auth, agy.account, agy.gcp.project, agy.gcp.location), when Backplane's pinned
+/// agent is installed; otherwise the person's own `agy` CLI (agy_cli.rs), signed in as they are in a terminal. `prepare` decides.
+pub struct AgyDriver { turn: AgyTurn, st: Acp, cli: Option<std::path::PathBuf>, cs: super::agy_cli::St }
+impl AgyDriver {
+    pub fn new() -> AgyDriver { AgyDriver { turn: AgyTurn::default(), st: Acp::default(), cli: None, cs: Default::default() } }
+    pub fn done(&self) -> bool { if self.cli.is_some() { self.cs.done } else { self.st.done } }
+    /// Whether this turn runs the person's agy CLI.
+    pub fn on_cli(&self) -> bool { self.cli.is_some() }
+}
+/// Whether Backplane's pinned agent is installed under `home`.
+pub fn pinned(home: &str) -> bool { std::path::Path::new(&format!("{}/.ok", dir(&root(home)))).is_file() }
 impl Driver for AgyDriver {
-    /// Agx.write before the run: the runner script, renamed into place, so a turn starting from it never sees half of it.
-    fn prepare(&mut self, a: &TurnIn) -> Result<(), String> { write_runner(&root(&a.home)).map_err(|e| e.to_string()) }
+    /// Agx.write before the run: the runner script, renamed into place, so a turn starting from it never sees half of it. Without the pinned agent,
+    /// the person's agy CLI if there is one, with Backplane's MCP server kept in its mcp_config.json.
+    fn prepare(&mut self, a: &TurnIn) -> Result<(), String> {
+        if !pinned(&a.home) { if let Some(p) = super::agy_cli::find() {
+            let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+            if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home)) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
+            self.cli = Some(p); return Ok(())
+        } }
+        // Google's terms forbid other software reaching Antigravity with a Google sign-in ("using OpenClaw with Antigravity OAuth"): the pinned agent's
+        // Google-account methods run only once the person opted in, knowing that; an API key or a Google Cloud project is the supported way.
+        if pinned(&a.home) && browser(a.setting("agy.auth")) && a.setting(OAUTH_OPTIN) != "yes" { return Err(OAUTH_REFUSED.into()) }
+        write_runner(&root(&a.home)).map_err(|e| e.to_string())
+    }
     fn argv(&self, a: &TurnIn) -> Vec<String> {
+        if let Some(p) = &self.cli { let mut v = vec!["-c".to_string(), super::agy_cli::RUN.into(), p.to_string_lossy().into_owned()]; v.extend(super::agy_cli::args(a)); return v }
         let r = root(&a.home);
         args(&r, &format!("{}/secrets/api.env", a.home), a.setting("agy.auth"), a.setting("agy.account"), a.setting("agy.gcp.project"), a.setting("agy.gcp.location"))
     }
+    fn env(&self, a: &TurnIn) -> Vec<(String, String)> {
+        if self.cli.is_none() { return vec![] }
+        let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        vec![("BACKPLANE_MCP_URL".into(), a.mcp_url.clone()), ("BACKPLANE_HUB_EXE".into(), exe), ("AGY_CLI_OSC7501".into(), "off".into()), ("NO_COLOR".into(), "1".into())]
+    }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
+        if self.cli.is_some() { let note = std::mem::take(&mut self.cs.note); self.cs = super::agy_cli::St { session: a.session.clone(), step: -1, note, ..Default::default() }; return vec![super::agy_cli::input(a)] }
         self.turn = AgyTurn { acp: AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: mode_runtime(&a.runtime) != 3 },
             method: method(a.setting("agy.auth")).into(), mode: mode(&a.runtime).into(), model: a.model.clone() };
         self.st = Acp::default(); vec![init()]
     }
     fn on_line(&mut self, v: &Value) -> Reaction {
+        if self.cli.is_some() { return Reaction { send: vec![], shapes: super::agy_cli::line(&mut self.cs, v) } }
         let o = line(&mut self.st, &self.turn, v);
         let mut shapes = o.emit; for r in o.asks { shapes.push(json!({"type":"bp.ask","request":r})) }
         Reaction { send: o.send, shapes }
@@ -407,8 +437,10 @@ impl Driver for AgyDriver {
     fn answer(&mut self, request: &Value, answer: &str) -> Vec<String> { request.as_str().map(|r| vec![permit_answer(r, answer)]).unwrap_or_default() }
     fn ends_on_turn_end(&self) -> bool { true }
     /// Proto.install
-    fn install_hint(&self) -> Option<String> { Some("Install it under Settings › Agents › Antigravity.".into()) }
-    fn exit_why(&self, _code: i32) -> Option<String> { Some("antigravity exited before the turn ended (is it installed and signed in? see Settings › Agents › Antigravity)".into()) }
+    fn install_hint(&self) -> Option<String> { Some("Install Google's Antigravity CLI (agy) and sign in once by running it, or install it under Settings › Agents › Antigravity.".into()) }
+    fn exit_why(&self, _code: i32) -> Option<String> {
+        Some(if self.cli.is_some() { "agy exited before the turn ended (is it signed in? run `agy` once in a terminal)".into() } else { "antigravity exited before the turn ended (is it installed and signed in? see Settings › Agents › Antigravity)".into() })
+    }
 }
 fn mode_runtime(r: &str) -> u8 { match r { "approval-required" => 0, "auto-accept-edits" => 1, "auto" => 2, _ => 3 } }
 pub fn driver(provider: &str) -> Option<Made> { if provider == "antigravity" { Some(Made { cli: "sh", driver: Box::new(AgyDriver::new()) }) } else { None } }
@@ -516,6 +548,14 @@ mod tests {
         let d = super::super::muse::e2e::dir("agy-prepare"); let mut dr = AgyDriver::new();
         dr.prepare(&TurnIn { home: d.to_string_lossy().into(), ..Default::default() }).unwrap(); assert_eq!(std::fs::read_to_string(d.join("antigravity/agy.sh")).unwrap(), run_sh());
         std::fs::write(d.join("blocker"), "x").unwrap(); assert!(dr.prepare(&TurnIn { home: d.join("blocker").to_string_lossy().into(), ..Default::default() }).is_err());
+    }
+    /// Google's terms: the pinned agent's Google sign-in runs only once the person opted in; an API key needs no opt-in.
+    #[test] fn google_sign_in_on_the_pinned_agent_needs_an_opt_in() {
+        let d = super::super::muse::e2e::dir("agy-optin"); std::fs::create_dir_all(d.join(format!("antigravity/{VERSION}"))).unwrap(); std::fs::write(d.join(format!("antigravity/{VERSION}/.ok")), "").unwrap();
+        let ti = |auth: &str, opt: &str| TurnIn { home: d.to_string_lossy().into(), settings: vec![("agy.auth".into(), auth.into()), (OAUTH_OPTIN.into(), opt.into())], ..Default::default() };
+        for m in ["oauth-personal", "oauth-business"] { let e = AgyDriver::new().prepare(&ti(m, "")).unwrap_err(); assert!(e.contains("Google's Antigravity terms forbid"), "{e}"); }
+        AgyDriver::new().prepare(&ti("oauth-personal", "yes")).unwrap(); AgyDriver::new().prepare(&ti("gemini-api-key", "")).unwrap(); AgyDriver::new().prepare(&ti("agent-platform", "")).unwrap();
+        assert!(!AgyDriver::new().on_cli(), "a pinned agent is never passed over for the CLI");
     }
     #[test] fn install_answers() { assert_eq!(install_err("working\nok\n"), ""); assert_eq!(install_err("x\nthe download failed\n"), "the download failed"); assert_eq!(install_err(""), "the install failed"); }
     #[test] fn the_driver() {

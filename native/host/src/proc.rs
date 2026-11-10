@@ -193,8 +193,9 @@ mod tests {
     /// A raw socket to another machine is not a child process, so the gate above does not see it: every non-test connect is on this list,
     /// and each entry says why it is fine on a copy. A new one must be added here by a reviewer, not by accident.
     #[test] fn every_outbound_socket_is_on_the_allowlist() {
-        // presenter.rs: loopback to our own policy child; kicad/nng.rs: the KiCad unix socket; net/tailnet.rs: `hello_with` returns at once on a copy
-        const ALLOWED: [&str; 3] = ["presenter.rs", "kicad/nng.rs", "net/tailnet.rs"];
+        // presenter.rs: loopback to our own policy child; kicad/nng.rs: the KiCad unix socket; net/tailnet.rs: `hello_with` returns at once on a copy;
+        // agents/mcp_stdio.rs: the `--mcp-stdio` bridge an agent starts, loopback only (`endpoint` refuses any other host) to the hub's own MCP server
+        const ALLOWED: [&str; 4] = ["presenter.rs", "kicad/nng.rs", "net/tailnet.rs", "agents/mcp_stdio.rs"];
         fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { if p.file_name().map_or(false, |n| n == "bin") { continue } walk(&p, out) } else if p.extension().map_or(false, |x| x == "rs") { out.push(p) } } }
         let mut files = vec![]; walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
         let mut bad = vec![];
