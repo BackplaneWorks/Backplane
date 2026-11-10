@@ -90,12 +90,48 @@ impl Rig {
     let hold: Value = serde_json::from_str(&r.hub.setting(&fb::hold_key("claude", &w.0, w.1)).await.unwrap()).unwrap(); assert_eq!(hold["reset"], reset);
     let who = Caller { gen: "g".into(), client: 77002 }; accounts_hub::grant_client("g", 77002);
     let snap = r.hub.rpc_for("accounts").unwrap().call(&r.hub, &who, &json!(1), "accounts", &json!({"op":"list","thread":T})).await.remove(0);
-    assert_eq!(snap["result"]["holds"][&w.0]["until"], reset, "{snap}"); assert_eq!(snap["result"]["holds"][&w.0]["text"], format!("out, resets {}", crate::agents::rules::when(&r.zone().await, reset, now()))); assert!(snap["result"]["holds"][&p.0].is_null());
+    assert_eq!(snap["result"]["holds"][&w.0]["until"], reset, "{snap}"); assert_eq!(snap["result"]["holds"][&w.0]["text"], accounts_hub::limited_text(&r.zone().await, reset, now())); assert!(snap["result"]["holds"][&p.0].is_null());
     let pref: Value = serde_json::from_str(&r.hub.setting(&fb::preference_key(T)).await.unwrap()).unwrap(); assert_eq!(pref["binding"], ac::binding_show(&w.0, w.1), "where it goes back to");
     // the old account's session is kept under its own key, and the account that took over is what the next message runs on, in its own session
     assert!(!r.hub.setting(&ac::session_key(T, "claude", &w.0, w.1)).await.unwrap_or_default().is_empty());
     r.say(T, "m3", "THIRD").await; r.rest(T, "completed", 4).await; let ts = r.turns();
     assert_eq!(ts[3]["who"], "p@x.com"); assert!(!ts[3]["text"].as_str().unwrap().contains("FIRST-REQUEST"), "it has the conversation now: nothing is handed over twice");
+}
+/// Nov 10, the Calendar bot: on the CLI's own login, Claude Code answered "You've hit your weekly limit · resets Nov 12, 3am" and then cancelled its own command, and the turn
+/// stopped there as Interrupted, as if the person had pressed Stop. It ran out: the request goes on under the next account, says so once, and Settings marks the login limited.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_limit_the_cli_ends_by_cancelling_its_command_fails_over_from_the_default_login() {
+    let r = rig("cancel", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 7200;
+    r.bind(T, "claude", &(String::new(), 0)).await; // the thread on the CLI's own login, as the Calendar bot was
+    r.mode("default", &format!("cancel:{reset}"));
+    r.say(T, "m1", "CHECK-THE-CALENDAR for today").await; r.rest(T, "completed", 2).await;
+    let ts = r.turns(); assert_eq!((ts[0]["who"].as_str().unwrap(), ts[1]["who"].as_str().unwrap()), ("default", "p@x.com"), "the account with the most allowance left: {ts:#?}");
+    assert!(ts[1]["text"].as_str().unwrap().contains("CHECK-THE-CALENDAR for today"), "the request goes on with what it lost:\n{}", ts[1]["text"]);
+    assert_eq!(r.binding(T, "claude").await, p.0);
+    let say = format!("Switched to Personal: Default account ran out (resets {})", crate::agents::rules::when(&r.zone().await, reset, now()));
+    let lines = r.lines(T); assert_eq!(lines.iter().filter(|l| l.starts_with("Switched to")).count(), 1, "one line: {lines:?}"); assert!(lines.contains(&say), "{lines:?}");
+    let log = r.log();
+    assert!(!log.iter().any(|e| e["$"] == "TurnChanged" && e["thread"] == T && matches!(e["state"].as_str(), Some("interrupted" | "failed")) && e["failover"] != true), "the turn never reads as stopped or failed to whoever waits on it");
+    let hold: Value = serde_json::from_str(&r.hub.setting(&fb::hold_key("claude", "", 0)).await.unwrap()).unwrap(); assert_eq!(hold["reset"], reset, "the reset the limit gave");
+    let who = Caller { gen: "g".into(), client: 77003 }; accounts_hub::grant_client("g", 77003);
+    let snap = r.hub.rpc_for("accounts").unwrap().call(&r.hub, &who, &json!(1), "accounts", &json!({"op":"list"})).await.remove(0);
+    assert_eq!(snap["result"]["holds"][""]["text"], accounts_hub::limited_text(&r.zone().await, reset, now()), "Settings: the Default account is limited until its reset: {snap}");
+    assert!(snap["result"]["holds"][""]["text"].as_str().unwrap().starts_with("limited until "));
+    assert!(snap["result"]["holds"][&w.0].is_null() && snap["result"]["holds"][&p.0].is_null());
+    // the reset comes: the hold is over and the thread goes back to the login it left
+    std::fs::remove_file(r.dir.join("mode.default")).unwrap(); r.tick(reset + 1).await;
+    assert_eq!(r.binding(T, "claude").await, "", "{:?}", r.lines(T));
+    let snap = r.hub.rpc_for("accounts").unwrap().call(&r.hub, &who, &json!(2), "accounts", &json!({"op":"list"})).await.remove(0); let _ = snap;
+}
+/// The same ending with every account out: said once, with the reset, and nothing runs again before it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_cancelled_limit_with_every_account_out_is_said_once_with_the_reset_and_never_loops() {
+    let r = rig("cancelall", "claude").await; let (_w, _p) = r.two("claude").await; let (rd, rw, rp) = (now() + 9000, now() + 7200, now() + 3600);
+    r.bind(T, "claude", &(String::new(), 0)).await;
+    r.mode("default", &format!("cancel:{rd}")); r.mode("w@x.com", &format!("cancel:{rw}")); r.mode("p@x.com", &format!("cancel:{rp}"));
+    r.say(T, "m1", "THE-REQUEST").await; r.rest(T, "interrupted", 3).await; tokio::time::sleep(Duration::from_millis(800)).await;
+    assert_eq!(r.turns().len(), 3, "each login once: {:#?}", r.turns());
+    let waits: Vec<String> = r.lines(T).into_iter().filter(|l| l.starts_with("Every claude account is out")).collect();
+    assert_eq!(waits, vec![format!("Every claude account is out (Default account, Work, Personal). Continuing at {}, when the first one resets.", crate::agents::rules::when(&r.zone().await, rp, now()))], "{:?}", r.lines(T));
+    r.tick(rp - 5).await; tokio::time::sleep(Duration::from_millis(300)).await; assert_eq!(r.turns().len(), 3, "not before the reset");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn the_thread_goes_back_to_its_account_when_it_resets_and_resumes_its_own_session() {
     let r = rig("back", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 3600;

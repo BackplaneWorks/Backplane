@@ -104,7 +104,7 @@ mod tests {
             {"id":"b","provider":"codex","label":"Home","state":"connected","identity":{"email":"h@x.com"},"message":"","allowance":{"state":"ok","windows":[{"name":"codex/primary","window_minutes":300.0,"used_percent":5.0}]}},
             {"id":"c","provider":"claude","label":"Spare","state":"disconnected","identity":{},"message":""}],
             "attempts":[{"id":"t1","profile":"b","state":"failed","message":"old"},{"id":"t2","profile":"b","state":"waiting","url":"https://auth.openai.com/codex/device","userCode":"ABCD-1234","message":""}],
-            "holds":{"a":{"until":0,"text":"out"}},"error":""})
+            "holds":{"a":{"until":0,"text":"limited"}},"error":""})
     }
     #[test] fn every_state_reads_one_way() {
         for (st, want) in [("connected", ("connected", "ok")), ("expired", ("sign-in expired", "bad")), ("connecting", ("signing in", "warn")), ("unchecked", ("not checked yet", "dim")), ("disconnected", ("not signed in", "dim")), ("", ("not signed in", "dim"))] { assert_eq!(state_line(st), want, "{st}") }
@@ -113,7 +113,7 @@ mod tests {
         let p = page(&snap(), "UTC", 1000);
         let pv: Vec<&str> = p["providers"].as_array().unwrap().iter().map(|x| x["provider"].as_str().unwrap()).collect(); assert_eq!(pv, ["claude", "codex"]);
         let claude = &p["providers"][0]["accounts"]; assert_eq!(claude.as_array().unwrap().len(), 2);
-        assert_eq!((claude[0]["line"].as_str().unwrap(), claude[0]["tone"].as_str().unwrap(), claude[0]["hold"].as_str().unwrap()), ("sign-in expired", "bad", "out"));
+        assert_eq!((claude[0]["line"].as_str().unwrap(), claude[0]["tone"].as_str().unwrap(), claude[0]["hold"].as_str().unwrap()), ("sign-in expired", "bad", "limited"));
         assert!(claude[0]["limits"].as_str().unwrap().starts_with("5h  42% used, resets ") && claude[0]["limits"].as_str().unwrap().ends_with(" · 7d  10% used"), "{}", claude[0]["limits"]);
         assert_eq!(p["providers"][1]["accounts"][0]["limits"], "5h  5% used", "a Codex window by its length");
         assert_eq!(p["providers"][0]["add"], "Add a Claude account");

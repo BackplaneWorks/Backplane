@@ -219,7 +219,8 @@ impl RpcHandler for AccountsRpc {
     }
 }
 
-/// Which accounts are out now, for the menus: `{profile id: {"until": seconds, "text": "out, resets 15:40"}}`. The client shows the words; the hub knows the zone and the holds.
+/// Which accounts are out now, for the menus and Settings: `{profile id: {"until": seconds, "text": "limited until 15:40"}}`. The client shows the words; the hub knows the zone and
+/// the holds. The CLI's own login is id "" (each provider's: a hold names its provider); it is out when its hold is, as a named account is.
 pub async fn holds(hub: &Arc<Hub>, profiles: &Value, model: &str) -> Value {
     let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("account.limit.").map(|(k, _)| k.to_string()).collect() };
     let mut settings = std::collections::HashMap::new();
@@ -227,13 +228,17 @@ pub async fn holds(hub: &Arc<Hub>, profiles: &Value, model: &str) -> Value {
     let get = |k: &str| settings.get(k).cloned().unwrap_or_default();
     let (now, zone) = (now_ms() / 1000, hub.setting("tz.machine").await.unwrap_or_default());
     let mut out = serde_json::Map::new();
-    for p in profiles.as_array().into_iter().flatten() { let (id, pv, e) = (p["id"].as_str().unwrap_or(""), p["provider"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0));
-        if !fb::hold_current(&get, pv, id, e, model, now) { continue }
+    let own: Vec<Value> = ["claude", "codex"].iter().map(|pv| json!({"id":"","provider":pv,"epoch":0})).collect();
+    for p in own.iter().chain(profiles.as_array().into_iter().flatten()) { let (id, pv, e) = (p["id"].as_str().unwrap_or(""), p["provider"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0));
+        if out.contains_key(id) || !fb::hold_current(&get, pv, id, e, model, now) { continue }
         let until = fb::hold_until(&get, pv, id, e, model);
-        out.insert(id.to_string(), json!({"until":until,"text":if until > now { format!("out, resets {}", crate::agents::rules::when(&zone, until, now)) } else { "out".to_string() }}));
+        out.insert(id.to_string(), json!({"until":until,"text":limited_text(&zone, until, now)}));
     }
     Value::Object(out)
 }
+
+/// A held login's words: "limited until Nov 12, 03:00" (the reset in the machine's zone), "limited" when no end is known.
+pub fn limited_text(zone: &str, until: u64, now: u64) -> String { if until > now { format!("limited until {}", crate::agents::rules::when(zone, until, now)) } else { "limited".to_string() } }
 
 static LIVE: std::sync::Mutex<Vec<(std::path::PathBuf, std::sync::Weak<Accounts>)>> = std::sync::Mutex::new(Vec::new());
 /// The account manager running for `home` (the 0.14 import adds the profiles it copied to it).

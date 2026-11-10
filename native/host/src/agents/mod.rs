@@ -518,7 +518,8 @@ struct Actor {
 /// The state a line's events end the turn in.
 fn turn_end(ev: &[Value]) -> Option<String> { ev.iter().rev().find(|e| e["$"] == "TurnChanged" && matches!(e["state"].as_str(), Some("failed" | "interrupted" | "completed"))).and_then(|e| e["state"].as_str()).map(str::to_string) }
 /// What a failed turn says of itself, left out when the driver takes the turn over: it writes the Interrupted and the line that says what happened.
-fn failure_row(e: &Value) -> bool { (e["$"] == "TurnChanged" && e["state"] == "failed") || (e["$"] == "ActivityLogged" && e["tone"] == "error") }
+/// An Interrupted the CLI wrote itself (it cancelled its own command after the limit) goes too: left in, it would tell the turn's task and launcher that it ended.
+fn failure_row(e: &Value) -> bool { (e["$"] == "TurnChanged" && (e["state"] == "failed" || e["state"] == "interrupted") && e["failover"] != true) || (e["$"] == "ActivityLogged" && e["tone"] == "error") }
 
 async fn next_batch(rx: &mut mpsc::Receiver<String>) -> Option<Vec<String>> {
     let first = rx.recv().await?; let mut bytes = first.len(); let mut v = vec![first];
