@@ -101,6 +101,21 @@ Removal (`M.Worktree.drop`, laws `worktree_kept_*`, `worktree_dropped_*`):
 - First a checkpoint of the worktree is taken, then `git worktree remove --force`; the branch stays (`WorktreeRemoved`).
 - A message to such a thread makes the worktree again from its branch, restores that last checkpoint, and then runs (law `worktree_revives`). A hardware thread's code worktree is made again from its branch, without design files, before its turn (`Agents::design_ensure`); its turn checkpoints are of the code worktree.
 
+## Landing (this repository)
+
+Upstream main (`origin/main`) is the one main. Local `main` only ever follows it; it is never ahead.
+
+`scripts/land.sh`, run from a lane's worktree on its branch with everything committed, is the only way work reaches main:
+1. `git fetch origin main`;
+2. `git rebase origin/main` (a conflict aborts the rebase and stops: resolve it by hand, then land again);
+3. `scripts/check-author.sh origin/main..HEAD`;
+4. the tests, `scripts/dev-build.sh --gate --no-cut` (`LAND_TEST` replaces the command); a tree that already passed (`<git-dir>/land-tested`) is not tested again;
+5. `git push origin HEAD:main`, a fast-forward, never forced. Rejected because origin moved: back to 1, at most `LAND_TRIES` (3) times;
+6. local `main` fast-forwards to what was pushed (in the checkout that has it out).
+
+Every failure prints `land: FAILED: <why>` and exits non-zero; nothing is half-landed: either origin has the commits and local main follows, or nothing moved.
+The main hook (`scripts/main.hook`, the reference-transaction hook) refuses any move of local `main` to a commit that is not on `origin/main`, so a hand merge into main fails at once. `scripts/main-build.sh` builds only `origin/main` (it fetches every minute), so nothing unpushed reaches the app.
+
 ## GitHub accounts
 
 gh may be logged in to several accounts per host (`gh auth login` more than once). Backplane runs every gh call (listing merged pull requests, `gh pr create`) as the repository's account, and never switches gh's active account.

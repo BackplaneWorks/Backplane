@@ -1,21 +1,26 @@
 #!/bin/sh
 # reference-transaction hook, installed by scripts/install-hooks.sh into <common .git>/hooks/, which serves every worktree.
-# When refs/heads/main moves, make sure the main builder is running: it builds the new tip (tests, hub, window) and publishes it for the app to relaunch on.
-# It blocks moves of the retired branches gpui and gpui-next ("use main"), and a move of main to commits whose author or committer is not build@amemb.com (scripts/check-author.sh); everything else exits 0.
+# When refs/heads/main or refs/remotes/origin/main moves, make sure the main builder is running: it builds the new tip (tests, hub, window) and publishes it for the app to relaunch on.
+# It blocks moves of the retired branches gpui and gpui-next ("use main"), a move of main to commits whose author or committer is not build@amemb.com (scripts/check-author.sh),
+# and a move of main to a commit that is not on origin/main: upstream main is the one main, local main only follows it (land with scripts/land.sh: fetch, rebase onto
+# origin/main, test, push, then main fast-forwards). Everything else exits 0.
 if [ "$1" = prepared ]; then
-  z=0000000000000000000000000000000000000000; bad=; badmain=
+  z=0000000000000000000000000000000000000000; bad=; badmain=; ahead=
   root=$(git worktree list --porcelain 2>/dev/null | awk 'NR==1{print substr($0,10)}'); chk=$root/scripts/check-author.sh
   while read -r old new ref; do
     if [ "$ref" = refs/heads/main ] && [ "$new" != "$z" ] && [ "$old" != "$z" ] && [ -x "$chk" ]; then "$chk" "$new" --not "$old" || badmain=1; fi
+    if [ "$ref" = refs/heads/main ] && [ "$new" != "$z" ] && [ "$new" != "$old" ] && git rev-parse -q --verify refs/remotes/origin/main > /dev/null \
+       && ! git merge-base --is-ancestor "$new" refs/remotes/origin/main 2>/dev/null; then ahead=$new; fi
     case "$ref" in refs/heads/gpui|refs/heads/gpui-next) [ "$new" = "$z" ] || [ "$new" = "$old" ] || bad="$ref" ;; esac
   done
   [ -z "$bad" ] || { echo "refused: ${bad#refs/heads/} is retired; use main (commit on your own branch from origin/main, merge to main)" >&2; exit 1; }
   [ -z "$badmain" ] || exit 1
+  [ -z "$ahead" ] || { echo "refused: main would move to $(printf %s "$ahead" | cut -c1-10), which is not on origin/main; local main only follows upstream. Land from your branch with scripts/land.sh (fetch, rebase onto origin/main, test, push)" >&2; exit 1; }
   exit 0
 fi
 [ "$1" = committed ] || { cat > /dev/null; exit 0; }
 hit=
-while read -r old new ref; do [ "$ref" = refs/heads/main ] && hit=1; done
+while read -r old new ref; do case "$ref" in refs/heads/main|refs/remotes/origin/main) hit=1;; esac; done
 [ -n "$hit" ] || exit 0
 root=$(git worktree list --porcelain 2>/dev/null | awk 'NR==1{print substr($0,10)}')
 # the builder reads main from the refs, but its script is the one in the checkout it starts from: the main checkout's working tree can be far behind main
