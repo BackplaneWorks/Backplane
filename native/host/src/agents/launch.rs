@@ -11,6 +11,9 @@ impl Agents {
     pub async fn tool_launch(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         let launcher = match self.mailroom() { Some(m) if !crate::net::far::is(thread) => m.launcher(thread).await, _ => thread.to_string() }; let thread = launcher.as_str(); // a back office launches as its owner
         let prompt = s(a, "prompt").to_string();
+        // `_launch`: the id a linked machine gave a launch it held while this one was away and may post again (its answer lost): started once
+        let once = s(a, "_launch"); let once = (crate::net::far::is(thread) && !once.is_empty() && once.len() <= 64 && once.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))).then(|| format!("far.launched.{once}"));
+        if let Some(k) = &once { let had = self.world().await.setting(k).to_string(); if !had.is_empty() { return (true, json!({"threadId":had,"state":"started","note":"started already"})) } }
         let (caller, proj, default_prov, default_model, scratch_ok) = { let w = self.world().await;
             let c = w.threads.get(thread).cloned();
             let asked = s(a, "project");
@@ -42,6 +45,7 @@ impl Agents {
         if !parent.is_empty() { ev.push(json!({"$":"ThreadParentSet","id":th,"parent":parent,"at":now})); ev.push(json!({"$":"SettingSet","key":format!("thread.tree.{parent}"),"value":"1","at":now})) }
         let mid = hub_id("m", now, seq + 1);
         ev.push(json!({"$":"SettingSet","key":format!("autosettle.seed.{th}"),"value":mid,"at":now}));
+        if let Some(k) = once { ev.push(json!({"$":"SettingSet","key":k,"value":th,"at":now})) }
         self.commit_events(ev).await;
         if let Err(e) = self.deliver_as("user", &th, &mid, &prompt, None, vec![]).await { return fail(&format!("could not start the thread: {e}")) }
         let note = if report && !by.is_empty() { "Its reports will come to you as messages when its turn ends or it asks the person something. End your turn instead of polling." } else { "" };

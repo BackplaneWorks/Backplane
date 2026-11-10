@@ -60,6 +60,8 @@ impl Agents {
         if name == "thread_wait" { return Some(self.far_wait(&link, thread, &args).await) }
         // a message to a thread there: one id for every try, so a send whose answer was lost and goes again is taken once
         let args = if name == "thread_send" { let mut x = args; x["_msg"] = json!(hub_id("fs", now_s(), self.seq_n())); x } else { args };
+        // a launch there: one id for every try too (`_launch`: the owner starts it once, however many times it is posted)
+        let args = if name == "thread_launch" { let mut x = args; x["_launch"] = json!(hub_id("fl", now_s(), self.seq_n())); x } else { args };
         Some(match self.hub.far_call(&link, thread, tool, &args).await {
             Ok((ok, body)) => (ok, prefixed(&link, body)),
             // that machine cannot be reached now: the message waits here (net/farsend.rs) and goes, cutting into whatever runs there, the moment it is back
@@ -67,6 +69,12 @@ impl Agents {
                 let out = crate::net::farsend::global().unwrap(); let id = args["_msg"].as_str().unwrap_or("").to_string();
                 out.hold_m(sv(a, "threadId"), &link, "mcp.call", &id, json!({"tool": "thread_send", "from": thread, "args": args}), crate::net::farsend::now_ms());
                 (true, json!({"threadId": sv(a, "threadId"), "state": "held", "note": format!("{e}: it waits here and is delivered, as an interrupt of whatever runs there, when that machine is back")}))
+            }
+            // a launch on a machine that is away (the desktop asleep): held the same way, started there when it is back; its reports come to the launcher as any launch's do
+            Err(e) if name == "thread_launch" && e == "that machine is away" && crate::net::farsend::global().is_some() => {
+                let out = crate::net::farsend::global().unwrap(); let id = args["_launch"].as_str().unwrap_or("").to_string();
+                out.hold_m(thread, &link, "mcp.call", &id, json!({"tool": "thread_launch", "from": thread, "args": args}), crate::net::farsend::now_ms());
+                (true, json!({"state": "queued", "machine": sv(a, "machine"), "note": format!("{e}: the launch waits here and starts there when that machine is back. Its reports come to you as messages then; end your turn rather than wait.")}))
             }
             Err(e) => fail(&e),
         })
