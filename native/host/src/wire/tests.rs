@@ -106,6 +106,53 @@ async fn a_requests_changes_come_before_its_reply() {
 }
 
 
+// the decision alone: only the thread on show, only when its text moved, and no more often than LIVE_EVERY
+#[test] fn streamed_text_tells_the_view_showing_its_thread_at_a_bounded_rate() {
+    let seen = ("t1".to_string(), 10usize); let long = LIVE_EVERY * 2;
+    assert_eq!(live_notice(&seen, "t1", 10, long), Tell::No, "nothing new");
+    assert_eq!(live_notice(&seen, "t1", 14, long), Tell::Now, "the text grew");
+    assert_eq!(live_notice(&seen, "t1", 0, long), Tell::Now, "the stream ended");
+    assert_eq!(live_notice(&seen, "t1", 14, Duration::from_millis(30)), Tell::In(LIVE_EVERY - Duration::from_millis(30)), "told a moment ago: the rest of the wait");
+    assert_eq!(live_notice(&seen, "", 0, long), Tell::No, "a view that shows no conversation");
+    assert_eq!(live_notice(&(String::new(), 0), "t2", 0, long), Tell::No, "a thread with no stream");
+    assert_eq!(live_notice(&(String::new(), 0), "t2", 5, long), Tell::Now, "a stream this view has seen none of");
+}
+
+/// A view stream on `thread`: opened, its frames collected.
+async fn view_on(port: u16, thread: &str) -> (Items, tokio::task::JoinHandle<()>) {
+    let (ws, _) = connect_async(format!("ws://127.0.0.1:{port}/ws?view=1&mobile=1&enc=cbor&token=tok")).await.unwrap();
+    let (mut tx, mut rx) = ws.split();
+    let g = loop { if let Some(Ok(Message::Binary(b))) = rx.next().await { break cbor::decode(&b).unwrap() } };
+    assert_eq!(g["t"], "view", "the greeting: {g}");
+    let open = json!({"id":(1u64 << 47) + 1,"m":"view.open","p":{"version":1,"generation":g["generation"],"epoch":g["epoch"],"hub":"h","requestRevision":1,"target":{"kind":"thread","id":thread}}});
+    tx.send(Message::Binary(cbor::encode(&open).into())).await.unwrap();
+    let frames: Items = Default::default(); let f2 = frames.clone();
+    let task = tokio::spawn(async move { let _tx = tx; while let Some(Ok(m)) = rx.next().await { if let Message::Binary(b) = m { f2.lock().unwrap().push(cbor::decode(&b).unwrap()); } } });
+    for _ in 0..3000 { if frames.lock().unwrap().iter().any(|f| f["t"] == "reply") { break } tokio::time::sleep(Duration::from_millis(10)).await }
+    (frames, task)
+}
+
+// A reply being streamed is no log line, so the revision stands still while it is written. The view showing that thread is told all the same
+// (it was told only at the next commit: a streamed reply reached the desktop in five-second steps); a view of another thread is not.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_view_is_told_of_text_streamed_in_the_thread_it_shows_and_in_no_other() {
+    let (hub, port) = test_hub("wire-live", FIXTURE).await;
+    let ((a, ta), (b, tb)) = (view_on(port, "t1").await, view_on(port, "t2").await);
+    let told = |f: &Items| f.lock().unwrap().iter().filter(|f| f["t"] == "view.changed").count();
+    tokio::time::sleep(Duration::from_millis(400)).await;   // the start-up commits have been told
+    let (a0, b0) = (told(&a), told(&b));
+    hub.live_delta("t1", "The pour").await.unwrap();
+    for _ in 0..500 { if told(&a) > a0 { break } tokio::time::sleep(Duration::from_millis(10)).await }
+    assert_eq!(told(&a), a0 + 1, "the view on t1 is told of its streamed text");
+    // more text, faster than a view is told: a few notices, not one per piece
+    for i in 0..20 { hub.live_delta("t1", &format!(" goes {i}")).await.unwrap(); tokio::time::sleep(Duration::from_millis(10)).await; }
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let more = told(&a) - a0 - 1;
+    assert!((1..=6).contains(&more), "20 pieces in 0.2 s: told {more} times");
+    assert_eq!(told(&b), b0, "a view on another thread hears nothing of it");
+    ta.abort(); tb.abort();
+}
+
 // origin follows the log (read at each join), and a client holding another origin, "0" included, is sent the whole log.
 // (Hub::start's bootstrap writes housekeeping events, so a started hub's log is never empty; the origin is still read per join.)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
