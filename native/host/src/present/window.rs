@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// the entry a row draws (T.Row.preview): an activity shows its first 512-byte block
 #[derive(Clone, Debug)]
-struct E { id: String, msg: bool, role: String, kind: String, text: String }
+struct E { id: String, msg: bool, role: String, kind: String, text: String, private: bool }
 
 /// T.Blocks: the text cut into blocks of at most 512 bytes (by characters); (first block, block count)
 fn blocks(s: &str) -> (String, usize) {
@@ -20,9 +20,11 @@ fn blocks(s: &str) -> (String, usize) {
     if n == 0 { first = cur } n += 1;
     (first, n)
 }
-fn entry(r: &Row) -> E {
+/// `bot`: the thread is a bot's conversation, where the hub's reports and notes to the bot draw nothing (`thread::bot_private`)
+fn entry_in(r: &Row, bot: bool) -> E {
     let msg = r.kind == "msg";
-    E { id: r.id.clone(), msg, role: r.role.clone(), kind: r.akind.clone(), text: if msg { crate::settings::order::pay_shown(&r.text) } else { blocks(&r.text).0 } }
+    let private = msg && bot && super::thread::bot_private(&r.id, &r.role, &r.text);
+    E { id: r.id.clone(), msg, role: r.role.clone(), kind: r.akind.clone(), text: if msg { crate::settings::order::pay_shown(&r.text) } else { blocks(&r.text).0 }, private }
 }
 
 // ---- fold ----
@@ -30,7 +32,7 @@ fn white(s: &str) -> bool { s.chars().all(|c| matches!(c, ' ' | '\n' | '\r' | '\
 const NOTES: [&str; 4] = ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."];
 fn note(x: &str) -> bool { NOTES.iter().any(|h| x.starts_with(&format!("[Backplane] {h}"))) }
 /// Fold.blank: a message that shows nothing
-fn blank(e: &E) -> bool { e.msg && ((e.role == "assistant" && white(&e.text)) || (e.role == "system" && note(&e.text))) }
+fn blank(e: &E) -> bool { e.msg && (e.private || (e.role == "assistant" && white(&e.text)) || (e.role == "system" && note(&e.text))) }
 const CARRY: &str = "Backplane restarted while you were working. Continue where you left off.";
 fn api_err(x: &str) -> bool { x.starts_with("API Error") }
 fn told(x: &str) -> bool { x.starts_with(CARRY) }
@@ -101,7 +103,7 @@ fn latest(newest_first: &[E]) -> Vec<String> {
     let (mut human, mut agent, mut out) = (false, false, Vec::new());
     for e in newest_first {
         if human && agent { break }
-        if e.msg && e.role == "user" && !human { out.push(e.id.clone()); human = true }
+        if e.msg && e.role == "user" && !e.private && !human { out.push(e.id.clone()); human = true }
         else if e.msg && e.role == "assistant" && !agent && !blank(e) { out.push(e.id.clone()); agent = true }
     }
     out
@@ -125,16 +127,18 @@ pub(super) fn fold_choice(p: &Value, id: &str) -> bool {
 }
 
 /// The window of the page `before` (0: the newest) of `thread`. `ctx` is the thread's newest entries, newest first, for a page that is not the newest.
-pub fn window(page: &Page, ctx: &[Row], epoch: &str, before: u64, p: &Value) -> Option<Value> {
+/// `bot`: the thread is a bot's conversation (the uberbot's chat): what the hub hands the bot is left out (`thread::bot_private`).
+pub fn window(page: &Page, ctx: &[Row], epoch: &str, before: u64, p: &Value) -> Option<Value> { window_in(page, ctx, epoch, before, p, false) }
+pub fn window_in(page: &Page, ctx: &[Row], epoch: &str, before: u64, p: &Value, bot: bool) -> Option<Value> {
     if p["bodyPages"].as_u64() == Some(1) { return None }
     let by: HashMap<u64, &Row> = page.rows.iter().map(|r| (r.ord, r)).collect();
     let ids = &page.ids;
-    let ents: Vec<(u64, E)> = ids.iter().rev().filter_map(|id| by.get(&num(id)).map(|r| (r.ord, entry(r)))).collect(); // oldest first
+    let ents: Vec<(u64, E)> = ids.iter().rev().filter_map(|id| by.get(&num(id)).map(|r| (r.ord, entry_in(r, bot)))).collect(); // oldest first
     let open = |id: &str| fold_choice(p, id);
     let es: Vec<E> = ents.iter().map(|(_, e)| e.clone()).filter(|e| !step_base(e)).collect();
     let rs = context_roles(&es, spread(&es, roles(&shown(&es), &open)), &open);
     let newest_first: Vec<E> = ents.iter().rev().map(|(_, e)| e.clone()).collect();
-    let context: Vec<String> = if ctx.is_empty() { latest(&newest_first) } else { latest(&ctx.iter().map(entry).collect::<Vec<_>>()) };
+    let context: Vec<String> = if ctx.is_empty() { latest(&newest_first) } else { latest(&ctx.iter().map(|r| entry_in(r, bot)).collect::<Vec<_>>()) };
     let messages: Vec<String> = es.iter().filter(|e| e.msg && matches!(e.role.as_str(), "user" | "assistant") && !blank(e)).map(|e| e.id.clone()).collect();
     // the counts: the rows the page holds older / newer than the window's ids, plus what the store omitted
     let (first, last) = (ids.first().map(|s| num(s)), ids.last().map(|s| num(s)));
@@ -184,5 +188,19 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, 6);
+    }
+    /// Bot.private (Nov 10, Bub's chat on the phone): in a bot's conversation a launched thread's report is no message of the window; elsewhere it is
+    #[test] fn a_bots_window_leaves_out_what_the_hub_hands_the_bot() {
+        let m = |ord: u64, id: &str, role: &str, text: &str| Row { seq: ord, ord, id: id.into(), thread: "bub".into(), src: String::new(), kind: "msg", role: role.into(), akind: String::new(), text: text.into(), at: 1700000000 + ord };
+        let report = "[Backplane] Launched thread \"Always-on hub\" (t9) completed:\n\nBub: the prep is done.\n\n**Prep**\n- `bp-hub` is up";
+        let rows = vec![m(1, "u1", "user", "move the hub to the Boat"), m(2, "a1", "assistant", "On it."), m(3, "t:t9:lr-r1", "user", report),
+            m(4, "n1", "system", "[Backplane] Watched work \"build\" ended: exit 0"), m(5, "a2", "assistant", "The Boat is ready; say GO.")];
+        let page = Page { ids: (1..=5).rev().map(|n| n.to_string()).collect(), below: 0, above: 0, rows };
+        let ids = |w: &Value| w["messageIds"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let bot = window_in(&page, &[], "e", 0, &json!({"target":{}}), true).unwrap();
+        assert_eq!(ids(&bot), ["u1", "a1", "a2"], "{bot}");
+        assert_eq!(bot["contextMessages"], json!(["a2", "u1"]), "the person's prompt is theirs, not the report");
+        let plain = window_in(&page, &[], "e", 0, &json!({"target":{}}), false).unwrap();
+        assert_eq!(ids(&plain), ["u1", "a1", "t:t9:lr-r1", "a2"], "a thread that is no bot's keeps its reports");
     }
 }

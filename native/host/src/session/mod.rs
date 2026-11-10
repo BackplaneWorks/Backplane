@@ -219,7 +219,7 @@ impl Hub {
         // an older page still names the thread's latest human prompt and assistant text
         let ctx = if before == 0 { vec![] } else if let Some(f) = &far { f.latest_context(thread) } else { let m = self.model.lock().await; m.latest_context(&self.store, thread).unwrap_or_default() };
         // the Rust window first (present::window), computed here because the model lock is async and a presenter Screen cannot take it
-        if let Some(w) = crate::present::window::window(&page, &ctx, &self.epoch, before, &req) { return Some((w, page)) }
+        if let Some(w) = crate::present::window::window_in(&page, &ctx, &self.epoch, before, &req, far.is_none() && crate::data::bot_chat(thread)) { return Some((w, page)) }
         // what Rust does not answer (None) is the helper's, and only while the policy helper runs: the window helper is a child process the policy's V needs. A hub without the helper
         // starts nothing for any target, whatever BACKPLANE_WINDOW_BIN says (wants_log is false while the helper is not running): the native refusal stands
         if !self.presenter.wants_log() { return None }

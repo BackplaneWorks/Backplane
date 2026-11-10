@@ -183,26 +183,31 @@ fn ask_opened(hub: &Hub, id: &str) -> Option<Value> {
     let lines = hub.store.range(n.saturating_sub(ASK_SCAN), n).ok()?;
     lines.iter().rev().filter(|l| l.contains("\"AskOpened\"") && l.contains(id)).filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| s(e, "id") == id)
 }
-fn far_entries(f: &Arc<dyn crate::api::FarView>, th: &str, p: &Value) -> Result<Value, Value> {
+fn far_entries(f: &Arc<dyn crate::api::FarView>, th: &str, p: &Value, bot: bool) -> Result<Value, Value> {
     let before: u64 = s(p, "before").parse().unwrap_or(0);
     let page = f.page(th, before, limit_of(p, 40, 32)).ok_or_else(|| err("unknown thread"))?;
     let ids: HashSet<u64> = page.ids.iter().filter_map(|i| i.parse().ok()).collect();
     let mut rows: Vec<&crate::model::Row> = page.rows.iter().filter(|r| ids.contains(&r.ord) && r.thread == th).collect();
     rows.sort_by_key(|r| r.ord);
-    let out: Vec<Value> = rows.iter().filter_map(|r| row_entry(r)).collect();
+    let out: Vec<Value> = rows.iter().filter_map(|r| row_entry(r, bot)).collect();
     let more = page.below > 0 || page.rows.iter().map(|r| r.ord).collect::<HashSet<_>>().len() > ids.len();
     let next = if more { rows.first().map(|r| json!(r.ord.to_string())).unwrap_or(Value::Null) } else { Value::Null };
     let title = rows.iter().find(|r| r.kind == "msg" && r.role == "user").map(|r| clip(&shown_text(&r.text), 60)).unwrap_or_default();
     let thread = json!({"id":th,"project":"","title":title,"state":"idle","updatedAt":rows.last().map_or(0, |r| ms(r.at)),"pinned":false,"settled":false,"settledAt":0,"archived":false,"provider":"","model":"","effort":"","runtime":"","chip":"","preview":"","waiting":0,"parent":"","history":false});
     Ok(json!({"thread":thread,"entries":out,"next":next}))
 }
-fn row_entry(r: &crate::model::Row) -> Option<Value> {
+/// Whether `thread` is a bot's conversation (the uberbot's chat among them), from the hub's state; false before the state is up
+pub fn bot_chat(thread: &str) -> bool { crate::statehost::policies().and_then(|p| p.with_state(|st| st.bot_threads_has(thread))).unwrap_or(false) }
+/// a linked machine's thread is a bot's conversation there (its mirror's state says)
+fn far_bot(hub: &Hub, th: &str) -> bool { hub.mirrors().shown(|far| machines::holder(far, th).map_or(false, |(_, st)| st.bot_threads_has(th))) }
+/// `bot`: the thread is a bot's conversation (`present::thread::bot_private`)
+fn row_entry(r: &crate::model::Row, bot: bool) -> Option<Value> {
     let at = ms(r.at);
     if r.kind == "msg" {
         let kind = match r.role.as_str() { "user" => "user", "assistant" => "assistant", _ => "note" };
         if kind == "assistant" && r.text.trim().is_empty() { return None }
         let mut en = json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { crate::settings::order::pay_shown(&r.text) },"at":at});
-        if crate::present::thread::agent_only(&r.role, &r.text) { en["agentOnly"] = json!(true) }
+        if crate::present::thread::hidden(bot, &r.id, &r.role, &r.text) { en["agentOnly"] = json!(true) }
         return Some(en);
     }
     act_entry(&r.thread, &r.id, &r.role, &r.akind, &r.text, at)
@@ -235,7 +240,7 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     let th = s(p, "thread");
     // a thread of a linked machine, as this hub mirrors it: its page from the mirror (no asks or live text here)
     if th.contains('~') && !hub.model().await.threads.contains_key(th) { if let Some(f) = hub.far().filter(|f| f.has(th)) {
-        let mut r = far_entries(&f, th, p)?; let g = hub.model().await; let join = with_far(hub, "", |_, un, _| un.far.clone());
+        let mut r = far_entries(&f, th, p, far_bot(hub, th))?; let g = hub.model().await; let join = with_far(hub, "", |_, un, _| un.far.clone());
         if let Some(t) = thread_row(hub, &g, th, &HashMap::new(), &join) { r["thread"] = t } // (the mirror knows its title, project and machine)
         return Ok(r) } }
     let m = hub.model().await;
@@ -246,7 +251,8 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     let ids: HashSet<u64> = page.ids.iter().filter_map(|i| i.parse().ok()).collect();
     let mut rows: Vec<&crate::model::Row> = page.rows.iter().filter(|r| ids.contains(&r.ord) && r.thread == th).collect();
     rows.sort_by_key(|r| r.ord);
-    let mut out: Vec<Value> = rows.iter().filter_map(|r| { let mut e = row_entry(r)?;
+    let bot = bot_chat(th);
+    let mut out: Vec<Value> = rows.iter().filter_map(|r| { let mut e = row_entry(r, bot)?;
         // a user message's images are on its log line
         if r.kind == "msg" && r.role == "user" { if let Some(a) = attachments_of(hub, r.seq as usize - 1, &r.id) { e["attachments"] = a } }
         Some(e) }).collect();
@@ -488,7 +494,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 let kind = match role { "user" => "user", "assistant" => "assistant", _ => "note" };
                 // as a page has it: a quote's Buy now link ready to open, and the hub's note to the agent marked so no phone shows it
                 let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(s(&e, "text")) } else { crate::settings::order::pay_shown(s(&e, "text")) },"at":ms(e["at"].as_u64().unwrap_or(0))});
-                if crate::present::thread::agent_only(role, s(&e, "text")) { en["agentOnly"] = json!(true) }
+                if crate::present::thread::hidden(bot_chat(&th), id, role, s(&e, "text")) { en["agentOnly"] = json!(true) }
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
                 let replaced = if kind == "assistant" { subs.live.get_mut(&th).and_then(|l| l.finished()) } else { None };
@@ -553,9 +559,9 @@ async fn far_pushes(hub: &Hub, subs: &mut Subs) -> Vec<Value> {
         let Some(page) = f.page(&th, 0, 32) else { continue };
         let mut rows: Vec<&crate::model::Row> = page.rows.iter().filter(|r| r.thread == th).collect(); rows.sort_by_key(|r| r.ord);
         let turn = hub.mirrors().shown(|far| machines::holder(far, &th).map_or(String::new(), |(_, st)| st.threads.get(&th).map_or(String::new(), |t| turn_word(t.turn.word()).to_string())));
-        let targets = subs.threads(&th);
+        let targets = subs.threads(&th); let bot = far_bot(hub, &th);
         let known = subs.far_rows.entry(th.clone()).or_insert_with(|| (rows.iter().map(|r| r.id.clone()).collect(), turn.clone()));
-        for r in rows { if known.0.insert(r.id.clone()) { if let Some(en) = row_entry(r) { for sub in &targets { out.push(d(*sub, "entry", json!({"thread":th,"entry":en}))) } } } }
+        for r in rows { if known.0.insert(r.id.clone()) { if let Some(en) = row_entry(r, bot) { for sub in &targets { out.push(d(*sub, "entry", json!({"thread":th,"entry":en}))) } } } }
         if known.1 != turn && !turn.is_empty() { known.1 = turn.clone(); for sub in &targets { out.push(d(*sub, "turn", json!({"thread":th,"state":turn}))) } }
     } }
     out

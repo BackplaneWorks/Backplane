@@ -24,7 +24,10 @@ Thread  = {id, project, title, state, updatedAt, pinned, pinOrder, settled, sett
           state ∈ "idle" | "working" | "asking" | "failed"; preview ≤ 140 chars; waiting = open asks
 Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?}
           kind ∈ "user" | "assistant" | "tool" | "ask" | "note" | "step"
-          agentOnly: true on a message only the agent reads (the hub's note about a quote it posted): a client does not show it
+          agentOnly: true on a message only the agent reads (the hub's note about a quote it posted): a client does not show it; in a bot's conversation (the uberbot's chat) also
+          everything the hub hands the bot: launched-thread and task reports, watched work, mailroom/triage input, wake/routine/webhook
+          prompts, other threads' messages, `[Backplane]` notes and system notes (`present::thread::bot_private`). A launched thread that
+          waits on the person stays.
           live: true on the assistant entry still streaming (its text so far; later `k:"text"` pushes append to it)
           tool = {name, summary, state ∈ "running" | "done" | "failed"}
           ask  = {id, state ∈ "open" | "answered", question, options:[{id,label}], answered?:<option id or text>}

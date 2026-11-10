@@ -150,6 +150,21 @@ pub fn agent_only(role: &str, text: &str) -> bool {
     (role == "user" && text.starts_with(HANDOFF_HEAD)) ||
     (role == "user" && text.starts_with("{\"secret\":") && text.ends_with(SAVED_NOTE)) || role == "system" && ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."].iter().any(|h| text.starts_with(&format!("[Backplane] {h}")))
 }
+/// Bot.private: in a bot's conversation (the uberbot's chat, thread `bot_threads_has`), what the hub hands the bot is the bot's input, not the person's
+/// chat: launched-thread and delegated-task reports, watched-work ends, mailroom and triage input, wake, routine and webhook prompts, messages from other
+/// threads and bots, the hub's `[Backplane]` notes (retries, provider handovers, the mailroom's "told the person" note) and every system note. The
+/// person sees their own messages (`classify_kind` "person", a peer, a room) and the bot's replies; and a launched thread that waits on them
+/// (`launch::ask_note`) stays, since that one is theirs to answer. Marked `agentOnly` like `agent_only`: the window, shown.thread and the phones leave it out.
+pub fn bot_private(id: &str, role: &str, text: &str) -> bool {
+    if role == "assistant" { return false }
+    let first = text.lines().next().unwrap_or("");
+    if first.starts_with("[Backplane] Launched thread ") && first.contains(") needs the person: ") { return false }
+    if role == "system" { return true }
+    if ["[Backplane]", "[mail ", "[mailroom "].iter().any(|h| text.starts_with(h)) { return true }
+    !matches!(crate::state::fam::ext::classify_kind(crate::model::link_from(id), id, text), "person" | "peer" | "room")
+}
+/// `agent_only`, and in a bot's conversation `bot_private` too
+pub fn hidden(bot: bool, id: &str, role: &str, text: &str) -> bool { agent_only(role, text) || (bot && bot_private(id, role, text)) }
 /// Hub.order.note: Backplane's own note of an order's progress in its buy thread (settings/order.rs `progress`, ids "o:<order>:<status>")
 fn hub_note(e: &Ent) -> bool { e.msg && e.role == "assistant" && e.id.starts_with("o:") }
 fn blank(e: &Ent) -> bool { e.msg && ((e.role == "assistant" && white(&e.text)) || agent_only(&e.role, &e.text)) }
@@ -468,6 +483,9 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let think_on = st.settings.get("agent.thinking").map_or(false, |v| v == "on");
     let newest_id = es.last().map(|e| e.id.clone()); // U.Hold.newest over the whole page (a hidden thought included)
     let es: Vec<Ent> = es.into_iter().filter(|e| think_on || !(!e.msg && e.role == "thinking")).collect();
+    // Bot.private: in a bot's conversation the hub's reports and notes to the bot are not rows
+    let bot = st.bot_threads_has(thread);
+    let es: Vec<Ent> = es.into_iter().filter(|e| !(bot && e.msg && bot_private(&e.id, &e.role, &e.text))).collect();
     let zone = person_zone(st);
     let running = st.threads.get(thread).map_or(false, |t| t.turn == Turn::Running);
     let now_ms = params["now"].as_u64().unwrap_or(0);
