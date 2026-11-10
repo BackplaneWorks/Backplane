@@ -613,7 +613,7 @@ impl RpcHandler for KicadRpc {
                     vec![json!({"t":"reply","id":id,"ok":true})]
                 }
                 // Open in KiCad: the thread's design in the desktop KiCad (kicad/open.rs); the reply and a line in the thread say how it went
-                "kicad.open" => match super::open::open(hub, &s("thread")).await {
+                "kicad.open" => match super::open::open(hub, &s("thread"), &s("key")).await {
                     Ok(what) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"opened":what}})],
                     Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
                 },
