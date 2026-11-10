@@ -276,7 +276,7 @@ pub fn agent_ok(models: Option<&Value>, provider: &str) -> (bool, String) {
     let Some(m) = models.filter(|m| m["probed"] == true) else { return (true, String::new()) }; // not asked yet (the built-in list): nothing is known to be missing
     let about = &m["about"][provider];
     let cli = about["cli"].as_str().unwrap_or("");
-    if cli.is_empty() && provider != "claude" { return (false, if provider == "antigravity" { "not installed: Settings > Agents installs it".into() } else { "not installed on this machine".into() }) }
+    if cli.is_empty() && provider != "claude" { return (false, if provider == "antigravity" { "not installed: install Google's Antigravity CLI (agy), or Settings > Agents installs it".into() } else { "not installed on this machine".into() }) }
     (true, about["error"].as_str().unwrap_or("").to_string())
 }
 /// The chip under the composer: "claude / opus / high", the effort left out for an agent whose model takes none (0.14's View.mp.text).
@@ -538,7 +538,7 @@ mod tests {
         let row = |n: &str| p["providers"].as_array().unwrap().iter().find(|r| r["label"] == n).unwrap().clone();
         assert_eq!((row("codex")["on"].clone(), row("codex")["ok"].clone(), row("codex")["note"].clone()), (json!(true), json!(true), json!("Codex CLI")), "installed: what it is");
         assert_eq!((row("grok")["ok"].clone(), row("grok")["note"].clone()), (json!(false), json!("not installed")), "short beside its name; the model column says the rest");
-        assert_eq!(row("antigravity")["note"], "not installed"); assert_eq!(picker_agents(Some(&m))["antigravity"]["why"], "not installed: Settings > Agents installs it"); assert_eq!(row("claude")["ok"], true);
+        assert_eq!(row("antigravity")["note"], "not installed"); assert_eq!(picker_agents(Some(&m))["antigravity"]["why"], "not installed: install Google's Antigravity CLI (agy), or Settings > Agents installs it"); assert_eq!(row("claude")["ok"], true);
         assert_eq!(row("opencode")["ok"], true, "installed though it lists nothing: Settings says why");
         let mut unasked = m.clone(); unasked["probed"] = json!(false); assert_eq!(agent_ok(Some(&unasked), "grok"), (true, String::new()), "before the CLIs are asked nothing is missing");
         assert_eq!(p["efforts"].as_array().unwrap().iter().map(|c| c["value"].as_str().unwrap()).collect::<Vec<_>>(), ["", "low", "medium", "high", "xhigh"], "kept to the levels Backplane passes to Codex");

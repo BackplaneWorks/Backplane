@@ -350,7 +350,13 @@ for p in \"$d\"/profiles/*/; do [ -d \"$p\" ] || continue; s=0; [ -f \"$p/antigr
 exit 0\n")
 }
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct Info { pub have: String, pub old: String, pub plat: String, pub accts: Vec<String>, pub signed: Vec<String>, pub cache: String }
+pub struct Info { pub have: String, pub old: String, pub plat: String, pub accts: Vec<String>, pub signed: Vec<String>, pub cache: String,
+    /// the person's agy CLI, when turns run on it (no pinned agent): its version and the models `agy models` lists (id, name)
+    pub cli: String, pub cli_models: Vec<(String, String)> }
+/// `agy models`: "id<TAB>name" lines (a "Fetching ..." line first).
+pub fn cli_models(out: &str) -> Vec<(String, String)> {
+    out.lines().filter_map(|l| { let (i, n) = l.split_once('\t')?; let i = i.trim(); if i.is_empty() || i.contains(' ') { None } else { Some((i.to_string(), n.trim().to_string())) } }).collect()
+}
 pub fn info(out: &str) -> Info {
     let mut a = Info::default();
     for l in out.lines().map(str::trim) {
@@ -366,14 +372,19 @@ pub fn info(out: &str) -> Info {
     a
 }
 /// Agy.info.json: the "agy" object in the models info.
-pub fn info_json(a: &Info) -> Value { json!({"pin":VERSION,"have":a.have,"old":a.old,"plat":RELS.iter().any(|r| r.0 == a.plat),"accts":a.accts,"signed":a.signed}) }
+pub fn info_json(a: &Info) -> Value { json!({"pin":VERSION,"have":a.have,"old":a.old,"plat":RELS.iter().any(|r| r.0 == a.plat),"accts":a.accts,"signed":a.signed,"cli":a.cli}) }
 /// Agy.info.models: the models a client lists (none until the agent is installed).
 pub fn info_models(a: &Info) -> Vec<String> {
-    if a.have.is_empty() { return vec![] }
+    if a.have.is_empty() { return a.cli_models.iter().map(|m| m.0.clone()).collect() }
     serde_json::from_str::<Value>(&a.cache).ok().and_then(|c| c["models"].as_array().map(|m| m.iter().map(|x| gs(x, "id").to_string()).collect())).unwrap_or_default()
 }
 /// Agy.info.about: "about" for the picker.
 pub fn info_about(a: &Info) -> Value {
+    if a.have.is_empty() && !a.cli.is_empty() {
+        let mut labels = serde_json::Map::new(); labels.insert("default".into(), json!("Antigravity's own default"));
+        for (i, n) in &a.cli_models { labels.insert(i.clone(), json!(if n.is_empty() { i.clone() } else { n.clone() })); }
+        return json!({"cli": format!("Antigravity CLI {}", a.cli), "labels": labels})
+    }
     let c: Value = serde_json::from_str(&a.cache).unwrap_or(Value::Null); let dm = gs(&c, "default").to_string();
     let mut labels = serde_json::Map::new(); labels.insert("default".into(), json!("Antigravity's own default"));
     for m in c["models"].as_array().cloned().unwrap_or_default() { let id = gs(&m, "id"); { labels.insert(id.into(), json!(format!("{}{}", gs(&m, "name"), if id == dm { " · Antigravity's default" } else { "" }))); } }
@@ -520,6 +531,13 @@ mod tests {
         let i = info("have 1.3.0\nold 1.2.0\nplat Linux-x86_64\nacct 1 default\nacct 0 other\nmodels {\"models\":[{\"id\":\"m1\",\"name\":\"M\"}],\"default\":\"m1\"}\n");
         assert_eq!(i.signed, ["default"]); assert_eq!(i.accts, ["default", "other"]); assert_eq!(info_models(&i), ["m1"]); assert_eq!(info_json(&i)["plat"], true);
         assert_eq!(info_about(&i)["labels"]["m1"], "M · Antigravity's default"); assert!(info_models(&Info::default()).is_empty());
+    }
+    #[test] fn the_cli_is_what_the_picker_shows_without_the_pinned_agent() {
+        let i = Info { cli: "1.4.2".into(), cli_models: cli_models("Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-opus-5-5-high\tClaude Opus 5.5 (High)\n"), ..Default::default() };
+        assert_eq!(info_models(&i), ["gemini-4-argon-medium", "claude-opus-5-5-high"]);
+        let a = info_about(&i); assert_eq!(a["cli"], "Antigravity CLI 1.4.2"); assert_eq!(a["labels"]["gemini-4-argon-medium"], "Gemini 4 Argon (Medium)");
+        assert_eq!(info_about(&Info::default())["cli"], "", "neither: not installed");
+        let p = Info { have: VERSION.into(), cli: "1.4.2".into(), ..Default::default() }; assert!(info_about(&p)["cli"].as_str().unwrap().starts_with("Antigravity 1.3"), "the pinned agent runs turns when installed");
     }
     #[test] fn signing_in() {
         let mut s = AgySign::default(); let o = s.line("oauth-personal", "/h", &j(r#"{"id":1,"result":{}}"#)); assert_eq!(m(&o.send[0]), "authenticate");

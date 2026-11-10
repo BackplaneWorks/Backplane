@@ -218,7 +218,11 @@ pub async fn detect(home: &Path) -> Found {
         let root = agy::root(&home.to_string_lossy());
         let mut c = proc::tokio_cmd(Kind::Local, "sh"); c.arg("-c").arg(agy::probe_sh()).arg("sh").arg(&root).stdin(std::process::Stdio::null()).kill_on_drop(true);
         let out = tokio::time::timeout(Duration::from_secs(10), c.output()).await.ok().and_then(Result::ok).map_or(String::new(), |o| String::from_utf8_lossy(&o.stdout).into_owned());
-        agy::info(&out) };
+        let mut i = agy::info(&out);
+        // no pinned agent: turns run the person's agy CLI (providers/agy_cli.rs), so the picker lists it and the models it offers this sign-in
+        if i.have.is_empty() { if let Some(p) = at("agy") { i.cli = version(&p).await; if i.cli.is_empty() { i.cli = "?".into() }
+            i.cli_models = run(&p, &["models"], &[], Duration::from_secs(30)).await.filter(|r| r.0 == 0).map_or(vec![], |r| agy::cli_models(&r.1)); } }
+        i };
     let (claude, codex, grok, muse, opencode, pi, omp, agy) = tokio::join!(claude, codex, grok, muse, oc, pi, omp, ag);
     Found { claude, codex, grok, muse, opencode, pi, omp, agy }
 }
