@@ -41,6 +41,21 @@ fn walk_files(root: &std::path::Path) -> Vec<String> {
 /// PdfJob.why
 fn pdf_why(out: &str) -> String { if out.contains("nopoppler") { "PDFs show here with poppler's pdftoppm (the poppler or poppler-utils package)".into() } else { out.trim().into() } }
 
+/// A path as a message link gives it, as the opener wants it: from the thread's folder when relative, without a `:line[:col]` tail when the file
+/// is not named that way. `~/` and absolute paths stay as they are.
+pub fn link_path(path: &str, root: &str) -> String {
+    let abs = |p: &str| if p.starts_with("~/") || p.starts_with('/') { p.to_string() } else { format!("{}/{}", root.trim_end_matches('/'), p.trim_start_matches("./")) };
+    let full = abs(path);
+    let exists = |p: &str| { let q = match p.strip_prefix("~/") { Some(r) => std::env::var("HOME").map(|h| format!("{h}/{r}")).unwrap_or_default(), None => p.to_string() }; std::fs::symlink_metadata(q).is_ok() };
+    let mut cut = full.as_str();
+    while !exists(cut) {
+        let Some((head, tail)) = cut.rsplit_once(':') else { return full };
+        if tail.is_empty() || !tail.bytes().all(|b| b.is_ascii_digit()) { return full }
+        cut = head;
+    }
+    cut.to_string()
+}
+
 pub struct Misc;
 impl RpcHandler for Misc {
     fn methods(&self) -> &'static [&'static str] { &["file.open", "pdf.page", "mech.list", "mech.render", "history.resolve", "boards.list", "files.list", "kicad.components"] }
@@ -52,7 +67,10 @@ impl RpcHandler for Misc {
                 "file.open" => {
                     // a hub on a copied log acts outside its home nowhere
                     if std::env::var("BACKPLANE_COPY").as_deref() == Ok("1") { return reply(false, json!({"text":"refused: this hub runs on a copy of a log"})) }
-                    let path = s("path"); if path.contains('\0') { return reply(false, json!({"text":"bad path"})) }
+                    let mut path = s("path"); if path.contains('\0') { return reply(false, json!({"text":"bad path"})) }
+                    // a link in a message names a path from the thread's folder, maybe with a `:line` after it
+                    let thread = s("thread");
+                    if !thread.is_empty() { if let Some(root) = super::root_of(hub, &thread).await { path = link_path(&path, &root.to_string_lossy()) } }
                     let script = if s("how") == "reveal" { FILE_REVEAL } else { FILE_OPEN };
                     let r = proc("sh", &["-c", script, "sh", &path], "/", &[]).await;
                     if r.code == 0 { reply(true, json!({"text":""})) } else { reply(false, json!({"text":r.out.trim()})) }
@@ -177,6 +195,13 @@ mod tests {
         g(&["init", "-q"]); std::fs::write(d.join("f"), "x").unwrap(); g(&["add", "."]); g(&["commit", "-qm", "i"]); g(&["tag", "v1"]); let head = g(&["rev-parse", "HEAD"]);
         let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, "v1"], "/", &[]).await; let ls: Vec<&str> = r.out.split('\n').collect(); assert_eq!((r.code, ls[0]), (0, head.as_str())); assert!(ls[1].ends_with(".git") && ls[2].len() > 1);
         let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, "nope"], "/", &[]).await; assert_eq!(r.code, 1); assert!(r.out.contains("no commit, branch or tag named nope"));
+    }
+    #[test] fn a_links_path_is_made_whole_and_loses_its_line() {
+        let d = std::env::temp_dir().join(format!("bp-lp-{}", std::process::id())); std::fs::create_dir_all(d.join("mfg")).unwrap(); std::fs::write(d.join("mfg/a.zip"), "x").unwrap();
+        let root = d.to_string_lossy().into_owned();
+        assert_eq!(link_path("mfg/a.zip", &root), format!("{root}/mfg/a.zip")); assert_eq!(link_path("./mfg/a.zip:12:3", &root), format!("{root}/mfg/a.zip"));
+        assert_eq!(link_path("/abs/none.rs:5", &root), "/abs/none.rs:5"); assert_eq!(link_path("~/x", &root), "~/x");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[tokio::test] async fn file_open_refuses_a_missing_file_and_the_pdf_script_a_missing_pdf() {
         let r = proc("sh", &["-c", FILE_OPEN, "sh", "/nonexistent/file"], "/", &[]).await; assert_eq!(r.code, 1); assert!(r.out.contains("No such file"));

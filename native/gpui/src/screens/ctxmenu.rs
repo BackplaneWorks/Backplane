@@ -18,9 +18,31 @@ pub const LOCAL_SEARCH: &str = "local:search-thread";
 pub const LOCAL_INTENT: &str = "local:intent";
 /// A thread's "Move under…": the window's own second menu, the threads it may go under (`parent_choices`); each sends `row-reparent`.
 pub const LOCAL_MOVE: &str = "local:move";
+/// A link's or a picture's menu (right click in a message): the window's own items, each acting on its `value`.
+pub const LOCAL_FILE_OPEN: &str = "local:file-open";
+pub const LOCAL_FILE_REVEAL: &str = "local:file-reveal";
+pub const LOCAL_COPY: &str = "local:copy";
+pub const LOCAL_COPY_IMAGE: &str = "local:copy-image";
+pub const LOCAL_URL_OPEN: &str = "local:url-open";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm } }
+
+/// The menu of a link in a message: a file opens, shows in its folder, or has its path copied; a web address opens or is copied; any other link is copied.
+pub fn link_items(href: &str, file: bool) -> Vec<Item> {
+    use super::linkroute::{route, Route};
+    /* i18n-ok: menu labels, drawn through trs in render */ match route(href, file) {
+        /* i18n-ok: menu labels, drawn through trs in render */ Route::File(p) => vec![item("Open", LOCAL_FILE_OPEN, &p, false), item("Show in folder", LOCAL_FILE_REVEAL, &p, false), item("Copy path", LOCAL_COPY, &p, false)],
+        /* i18n-ok: menu labels, drawn through trs in render */ Route::Web(u) => vec![item("Open link", LOCAL_URL_OPEN, &u, false), item("Copy link", LOCAL_COPY, &u, false)],
+        /* i18n-ok: menu labels, drawn through trs in render */ _ => vec![item("Copy link", LOCAL_COPY, href.trim(), false)],
+    }
+}
+/// The menu of a picture in a message: copy it, and when it is a file on the hub's machine open it, show it in its folder, or copy its path.
+pub fn image_items(path: &str) -> Vec<Item> {
+    /* i18n-ok: menu labels, drawn through trs in render */ let mut v = vec![item("Copy image", LOCAL_COPY_IMAGE, "", false)];
+    /* i18n-ok: menu labels, drawn through trs in render */ if path.starts_with('/') || path.starts_with("~/") { v.extend([item("Open", LOCAL_FILE_OPEN, path, false), item("Show in folder", LOCAL_FILE_REVEAL, path, false), item("Copy path", LOCAL_COPY, path, false)]); }
+    v
+}
 
 /// The items for a thread row of the sidebar (`t` is its row, `project` the raw id of the project it is in).
 pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
@@ -92,6 +114,11 @@ impl Backplane {
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
         self.screens.ctx = Some(Menu { at, items, armed: None }); cx.notify();
     }
+    /// A file named in a message: the hub opens it (or shows it in its folder) on its machine; a relative path is from the thread's folder.
+    pub(crate) fn file_open(&mut self, path: &str, reveal: bool) {
+        let thread = raw(self.data["thread"]["id"].as_str().unwrap_or("")).to_string();
+        let _ = self.tx.try_send(Command::Rpc("file.open".into(), crate::screens::settings::Secret(serde_json::json!({"path": path, "thread": thread, "how": if reveal { "reveal" } else { "open" }})), "fileopen"));
+    }
     /// Esc or a click outside: true when there was a menu to close.
     pub(crate) fn ctx_close(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(m) = self.screens.ctx.take() else { return false };
@@ -104,6 +131,10 @@ impl Backplane {
             // the window's own items: the menu shuts as Esc shuts it (an armed Delete is disarmed), then the item opens its place
             Some((a, v)) if a == LOCAL_SEARCH => { self.ctx_close(cx); self.find_open_for(&v, cx); return }
             Some((a, v)) if a == LOCAL_INTENT => { self.ctx_close(cx); self.open_project(v, cx); return }
+            Some((a, v)) if a == LOCAL_FILE_OPEN || a == LOCAL_FILE_REVEAL => { self.ctx_close(cx); self.file_open(&v, a == LOCAL_FILE_REVEAL); return }
+            Some((a, v)) if a == LOCAL_COPY => { self.ctx_close(cx); cx.write_to_clipboard(ClipboardItem::new_string(v)); return }
+            Some((a, v)) if a == LOCAL_URL_OPEN => { self.ctx_close(cx); cx.open_url(&v); return }
+            Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); if let Some(img) = self.screens.ctx_img.take() { cx.write_to_clipboard(ClipboardItem::new_image(&img)); } return }
             // the second menu, where the first was: the threads this one may go under
             Some((a, v)) if a == LOCAL_MOVE => {
                 let (tid, project) = v.split_once('|').unwrap_or((v.as_str(), ""));
@@ -172,6 +203,12 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
 mod tests {
     use super::*; use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn a_link_and_a_picture_have_menus() {
+        let l = |h: &str, f: bool| link_items(h, f).into_iter().map(|i| (i.label, i.action, i.value)).collect::<Vec<_>>();
+        assert_eq!(l("mfg/a.zip", true).iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["Open", "Show in folder", "Copy path"]); assert_eq!(l("mfg/a.zip", true)[1], ("Show in folder".into(), LOCAL_FILE_REVEAL.into(), "mfg/a.zip".into()));
+        assert_eq!(l("https://x.io", false).iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), [LOCAL_URL_OPEN, LOCAL_COPY]); assert_eq!(l("javascript:x", false).len(), 1);
+        assert_eq!(image_items("/h/a.png").iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Copy image", "Open", "Show in folder", "Copy path"]); assert_eq!(image_items("").len(), 1);
+    }
     #[test] fn the_thread_names_menu_offers_rename_its_place_and_the_hubs_thread_menu() {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Snooze","action":"snooze","value":"","options":[{"label":"1 hour","value":"1h"}]},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},
             "projects":[{"id":"http://h:1|p1","threads":[{"id":"http://h:1|t7","title":"x","canChild":true,"depth":0}]}]}"#);
