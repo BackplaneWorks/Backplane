@@ -108,6 +108,17 @@ pub fn items(data: &Value) -> Vec<Item> {
             v.push(Item { label: string(t, "title"), place: on_machine(&ptitle, t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
         }
     }
+    // bots and rooms are places to jump to as threads are: the sidebar's own rows, by name. A bot is its chat thread (so the hub's title hit for that thread is the same item).
+    for b in data["bots"].as_array().into_iter().flatten() {
+        let (name, nav) = (string(b, "name"), string(b, "nav"));
+        if name.is_empty() { continue }
+        /* i18n-ok: a kind, drawn through trs */ v.push(Item { label: name, place: String::new(), kind: "bot", what: if nav.is_empty() || nav.starts_with('@') { Do::Action("bot".into(), string(b, "id")) } else { Do::Thread(nav) }, row: Value::Null });
+    }
+    for r in data["rooms"].as_array().into_iter().flatten() {
+        let (id, name) = (string(r, "id"), string(r, "name"));
+        if id.is_empty() || name.is_empty() { continue }
+        /* i18n-ok: a kind, drawn through trs */ v.push(Item { label: name, place: String::new(), kind: "room", what: Do::Action("room".into(), id), row: Value::Null });
+    }
     for t in data["conversationHistory"]["jump"].as_array().into_iter().flatten().chain(data["legacy"].as_array().into_iter().flatten()) {
         v.push(Item { label: string(t, "title"), place: trs("Conversation history"), kind: "thread", what: Do::Thread(string(t, "id")), row: Value::Null });
     }
@@ -260,6 +271,17 @@ mod tests {
         assert_eq!(l.iter().filter(|i| i.what == Do::Thread("h|t1".into())).count(), 1, "a held row is listed once");
         assert!(l.iter().any(|i| i.what == Do::Thread("h|t9".into()) && i.place == "Amp" && i.kind == "thread"), "{l:?}");
         p.q = "boar".into(); assert!(!listed(&data(), &p).iter().any(|i| i.what == Do::Thread("h|t9".into())), "an answer for another text is not shown");
+    }
+    #[test] fn a_bot_and_a_room_are_found_by_name() {
+        let d = json!({"bots": [{"id": "h|b1", "name": "foreman", "nav": "h|t7"}, {"id": "h|b2", "name": "far cat", "nav": "@remote:b2"}], "rooms": [{"id": "h|r1", "name": "shop floor"}]});
+        let p = Palette { q: "shop".into(), ..Default::default() };
+        let l = listed(&d, &p); assert_eq!((l[0].label.as_str(), l[0].kind, l[0].what.clone()), ("shop floor", "room", Do::Action("room".into(), "h|r1".into())));
+        // a bot is its chat thread: the hub's title hit for that thread is the same item, listed once, as a bot
+        let res = json!({"hits": [], "titles": [{"thread": "t7", "title": "foreman", "project": ""}]});
+        let p = Palette { q: "fore".into(), titles: title_items(&res, &|raw| format!("h|{raw}")), hits_q: "fore".into(), ..Default::default() };
+        let l = listed(&d, &p); assert_eq!(l.iter().filter(|i| i.kind != "action").map(|i| (i.label.as_str(), i.kind)).collect::<Vec<_>>(), [("foreman", "bot")]);
+        assert_eq!(l[0].what, Do::Thread("h|t7".into()));
+        let far = items(&d).into_iter().find(|i| i.label == "far cat").unwrap(); assert_eq!(far.what, Do::Action("bot".into(), "h|b2".into()));
     }
     #[test] fn an_old_scratch_chat_is_found_by_its_title() {
         let d = serde_json::json!({"conversationHistory": {"jump": [{"id": "h|s1", "title": "zebra scratch chat"}]}, "legacy": [{"id": "h|s2", "title": "live chat"}]});
