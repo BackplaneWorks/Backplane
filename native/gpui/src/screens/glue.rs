@@ -94,6 +94,7 @@ impl Backplane {
     pub(crate) fn timeline_show(&mut self, raw: &str) {
         self.timeline.reset(self.data["thread"]["entries"].as_array().map_or(0, |r| r.len()));
         self.screens.born.clear(); self.screens.shown_at = std::time::Instant::now();
+        self.screens.pages_read.clear(); // the rows start over: no page of them is held yet
         self.screens.seeking = self.screens.offsets.get(raw).cloned();
         // another thread on show: the find bar of the last one shuts with its mark (a find opening this one keeps its own)
         if raw != self.screens.find.thread { let f = &mut self.screens.find; f.open = false; f.mark.clear(); f.going = None; }
@@ -158,7 +159,7 @@ impl Backplane {
     pub(crate) fn timeline_picture(&mut self, mut prev: Value, window: &Value) {
         let id = crate::string(&self.data["thread"], "id"); let raw = attach::raw_id(&id).to_string();
         if raw.is_empty() { self.timeline.reset(0); return; }
-        let older = history::next_older("", window["older"].as_str().unwrap_or(""), window["hasMore"] == true, 0);
+        let older = history::next_older("", window["older"].as_str().unwrap_or(""), window["hasMore"] == true, 0, &self.screens.pages_read);
         let fresh = match self.data["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
         let prev_id = crate::string(&prev, "id");
         let held = if attach::raw_id(&prev_id) == raw && prev["loading"] != true { match prev["entries"].take() { Value::Array(a) => a, _ => vec![] } } else { vec![] };
@@ -166,9 +167,15 @@ impl Backplane {
         let (rows, top) = match at {
             Some(i) if !held.is_empty() => {
                 let before = held[i..].to_vec();
+                let had: std::collections::HashSet<String> = held.iter().filter_map(|r| r["id"].as_str().map(str::to_string)).collect();
+                let reader = self.reader(&held);
                 let rows = history::merge(held, fresh);
                 let (a, b) = history::changed(&before, &rows[i..], 0);
                 splice_keeping(&self.timeline, a.start + i..a.end + i, b.len());
+                self.hold_reader(reader, a.start + i..a.end + i, &rows);
+                // a row that came in with this picture arrives (ui.rs fades it in); one only drawn for the first time does not
+                let now = std::time::Instant::now();
+                for id in rows.iter().filter_map(|r| r["id"].as_str()).filter(|id| !had.contains(*id)) { self.screens.born.insert(id.to_string(), now); }
                 let top = if i > 0 { crate::string(&prev, "historyOlder") } else { older };
                 (rows, top)
             }
@@ -181,17 +188,23 @@ impl Backplane {
     /// A history page landed: laid into the rows held, the reader staying where they are.
     pub(crate) fn older_landed(&mut self, cursor: String, page: Option<Value>, cx: &mut Context<Self>) {
         // how long the page took, asked to landed (the wheel's notes say whether the reader waited for it at the top)
-        if let Some(t) = self.screens.paging.take() { self.m("history", serde_json::json!({"ms": t.elapsed().as_millis() as u64, "rows": page.as_ref().and_then(|r| r["shown"]["thread"]["entries"].as_array()).map_or(0, |a| a.len())})); }
+        if let Some(t) = self.screens.paging.take() { self.m("history", serde_json::json!({"ms": t.elapsed().as_millis() as u64, "page": history::page_mark(&cursor), "rows": page.as_ref().and_then(|r| r["shown"]["thread"]["entries"].as_array()).map_or(0, |a| a.len())})); }
         let Some(mut r) = page else { cx.notify(); return };
         let (a, b) = (crate::string(&r["shown"]["thread"], "id"), crate::string(&self.data["thread"], "id"));
         if attach::raw_id(&a) != attach::raw_id(&b) { return; }
         let mut rows = match r["shown"]["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
         for row in &mut rows { row[history::PAGE_KEY] = Value::String(cursor.clone()); }
         let old = match self.data["thread"]["entries"].take() { Value::Array(a) => a, _ => vec![] };
+        let (held, reader) = (old.len(), self.reader(&old));
         let (merged, x, y) = history::splice_changed(old, rows);
-        splice_keeping(&self.timeline, x, y.len());
+        splice_keeping(&self.timeline, x.clone(), y.len());
+        self.hold_reader(reader, x, &merged);
+        self.screens.pages_read.insert(history::page_mark(&cursor));
+        // a page that brought no row the list did not hold asks for no other at once: a hub whose pages lead back to rows already read would
+        // otherwise be read for ever (after the next frame `history_want` still asks, but only for a page not read yet)
+        let grew = merged.len() > held;
         if self.data["thread"]["historyOlder"] == cursor.as_str() {
-            let next = history::next_older(&cursor, r["window"]["older"].as_str().unwrap_or(""), r["window"]["hasMore"] == true, merged.len());
+            let next = history::next_older(&cursor, r["window"]["older"].as_str().unwrap_or(""), r["window"]["hasMore"] == true, merged.len(), &self.screens.pages_read);
             self.data["thread"]["historyOlder"] = Value::String(next);
         }
         self.data["thread"]["entries"] = Value::Array(merged);
@@ -200,20 +213,32 @@ impl Backplane {
         // a page of a long thread is mostly tool calls folded into a few rows: while the reader is still within RUNWAY_ROWS of the top, ask for the next
         // page now rather than after the next frame, so scrolling up a thread of a thousand messages does not wait at the top for each page in turn
         // the same while a kept place deep in the thread is being looked for (reopening a long thread where it was left): page after page at once
-        if self.timeline.logical_scroll_top().item_ix < history::RUNWAY_ROWS || self.screens.seeking.is_some() { self.history_want_now(); }
+        if grew && (self.timeline.logical_scroll_top().item_ix < history::RUNWAY_ROWS || self.screens.seeking.is_some()) { self.history_want_now(); }
         cx.notify();
+    }
+    /// The row at the top of the list (by id) and how far into it, before the rows change: `hold_reader` keeps the reader on it.
+    fn reader(&self, rows: &[Value]) -> (ListOffset, Option<String>) {
+        let top = self.timeline.logical_scroll_top();
+        (top, rows.get(top.item_ix).and_then(|r| r["id"].as_str()).map(str::to_string))
+    }
+    /// The rows `old` were replaced. The list puts a reader whose top row was among them at the start of the replaced stretch (offset 0): a page
+    /// that re-laid the rows around the reader moved the screen to older rows and back (Nov 10). The reader stays on their row where it still is.
+    fn hold_reader(&self, (top, id): (ListOffset, Option<String>), old: std::ops::Range<usize>, rows: &[Value]) {
+        let Some(id) = id else { return };
+        if !old.contains(&top.item_ix) { return; }
+        if let Some(ix) = rows.iter().position(|r| r["id"].as_str() == Some(id.as_str())) { self.timeline.scroll_to(ListOffset { item_ix: ix, offset_in_item: top.offset_in_item }); }
     }
     /// The next older page, now (none while one is on its way, at the start of the thread, or on a project's page).
     fn history_want_now(&mut self) {
         let older = crate::string(&self.data["thread"], "historyOlder");
-        if older.is_empty() || self.data["projectHome"].is_object() || self.screens.paging.is_some() { return; }
+        if older.is_empty() || self.data["projectHome"].is_object() || self.screens.paging.is_some() || self.screens.pages_read.contains(&history::page_mark(&older)) { return; }
         if self.tx.try_send(Command::History(older)).is_ok() { self.screens.paging = Some(std::time::Instant::now()); }
     }
     /// After each frame: the reader is within reach of the top of the rows held and more are there, so ask for them before they get there.
     pub(crate) fn history_want(&mut self) {
         let older = crate::string(&self.data["thread"], "historyOlder");
         if older.is_empty() { if self.data["thread"]["loading"] != true { self.screens.seeking = None; } return; } // the start of the thread: the place is not there
-        if self.data["projectHome"].is_object() || self.screens.paging.is_some_and(|t| t.elapsed().as_secs() < 10) { return; }
+        if self.data["projectHome"].is_object() || self.screens.paging.is_some_and(|t| t.elapsed().as_secs() < 10) || self.screens.pages_read.contains(&history::page_mark(&older)) { return; }
         let (max, y) = (f32::from(self.timeline.max_offset_for_scrollbar().height), -f32::from(self.timeline.scroll_px_offset_for_scrollbar().y));
         if (self.screens.seeking.is_some() || timeline::near_top(y, max)) && self.tx.try_send(Command::History(older)).is_ok() { self.screens.paging = Some(std::time::Instant::now()); }
     }
