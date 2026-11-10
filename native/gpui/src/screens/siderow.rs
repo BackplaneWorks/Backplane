@@ -2,7 +2,7 @@
 //! the waiting colour, idle grey; `style.css` .dot.* of 0.14) and the rename field drawn in the row itself (a right click's or the ▾ menu's
 //! Rename: the hub's `renaming`, no page over the window). The hub decides the status word and what is being renamed; this only draws.
 use super::settings::FieldSlot;
-use crate::{string, theme, Backplane};
+use crate::{hub::Command, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -97,6 +97,22 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fi
 /// sits on the same spot folded and unfolded (0.14 style.css .side-fold / .side-strip).
 pub const FOLD_ROW: f32 = 46.;
 /// The project badges the folded strip shows: (raw project id, title, the project) in the sidebar's order.
+/// The press a row's pin makes: Unpin on a pinned row, Pin on the others (the hub's `row-pin` / `row-unpin`, the context menu's too).
+pub fn pin_press(t: &Value) -> (&'static str, String) { (if t["pinned"].as_bool().unwrap_or(false) { "row-unpin" } else { "row-pin" }, t["id"].as_str().unwrap_or("").to_string()) }
+/// A thread row's pin: drawn on a pinned row, shown on hover on the others; a press pins or unpins and does not select the row.
+pub fn pin_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let (action, value) = pin_press(t); let pinned = action == "row-unpin";
+    /* i18n-ok: the context menu's words, drawn through trs */ let tip = crate::i18n::trs(if pinned { "Unpin" } else { "Pin" });
+    let raw = value.rsplit('|').next().unwrap_or("").to_string();
+    crate::ui::with_rect(div().id(SharedString::from(format!("pin-{value}"))), move || format!("pin:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
+        .when(!pinned, |d| d.invisible().group_hover(group, |s| s.visible()))
+        .tooltip(crate::keys::tip(&tip, "", light))
+        .child(crate::art::icon("pin", 12., c(if pinned { "dim" } else { "faint" })))
+        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(action.into(), value.clone())); cx.stop_propagation(); cx.notify(); }))
+        .into_any_element()
+}
+
 pub fn strip_projects(data: &Value) -> Vec<(String, String, &Value)> {
     data["projects"].as_array().into_iter().flatten().map(|p| { let id = string(p, "id"); (id.rsplit('|').next().unwrap_or("").to_string(), string(p, "title"), p) }).filter(|(id, _, _)| !id.is_empty()).collect()
 }
@@ -126,6 +142,10 @@ impl Backplane {
 #[cfg(test)]
 mod tests {
     use super::*; use core::prelude::v1::test; use serde_json::json;
+    #[test] fn a_rows_pin_unpins_a_pinned_thread_and_pins_the_others() {
+        assert_eq!(pin_press(&serde_json::json!({"id":"http://h:1|t7","pinned":true})), ("row-unpin", "http://h:1|t7".to_string()));
+        assert_eq!(pin_press(&serde_json::json!({"id":"t1"})), ("row-pin", "t1".to_string()));
+    }
     #[test] fn the_dots_are_0_14s_colours() {
         assert_eq!(dot_of("active", "run").token, "accent", "working is blue");
         assert_eq!(dot_of("finished", "idle"), Dot { token: "ok", round: true, hollow: false }, "finished is the green dot");

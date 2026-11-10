@@ -91,13 +91,13 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let (pinned, settled, settled_at) = flags(hub, id);
     // a model chosen within the provider is a ModesSet (the policy state), a switch of provider a ProviderSet (the model's fold)
     // `status`: the sidebar dot's word (signal.rs, children's work included): "finished" is the desktop's green dot, a turn done and not yet settled
-    let (model, effort, runtime, combo, status) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default(),
-        crate::present::keys::combo_of(st, id, crate::hub::now_ms() / 1000), crate::signal::index(st).get(id).map_or("", |n| crate::signal::display_name(st, *n, id))))).unwrap_or_default();
+    let (model, effort, runtime, combo, status, pin_order) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default(),
+        crate::present::keys::combo_of(st, id, crate::hub::now_ms() / 1000), crate::signal::index(st).get(id).map_or("", |n| crate::signal::display_name(st, *n, id)), crate::sidebar::pin_place(st, id)))).unwrap_or_default();
     let model = if model.is_empty() { t.model.clone() } else { model };
     // the composer's one chip: the model and what the account has left (present/keys.rs `combo`, its short form: a phone's row has room for about 20 characters;
     // the picker's title says it all)
     let chip = combo["short"].as_str().filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, &effort));
-    Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"settledAt":settled_at,"archived":t.archived,
+    Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"pinOrder":pin_order,"settled":settled,"settledAt":settled_at,"archived":t.archived,
         "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
@@ -108,9 +108,10 @@ fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) 
     let count = ts.iter().filter(|(_, t)| !t.archived).count();
     let updated = ts.iter().map(|(_, t)| t.activity.max(t.created)).max().unwrap_or(0);
     let waiting: u64 = ts.iter().map(|(i, _)| asks.get(*i).copied().unwrap_or(0)).sum();
-    let color = crate::present::badge::color_of(&setting_of(&format!("project.color.{id}")), id).to_string();
+    let pick = setting_of(&format!("project.pick.{id}"));
+    let color = crate::present::badge::color_eff(&setting_of(&format!("project.color.{id}")), &pick, id).to_string();
     Some(json!({"id":id,"title":p.title,"root":p.root,"origin":crate::mirror::origin_of_root(&p.root),"threadCount":count,"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
-        "icon":crate::present::badge::icon_of(&setting_of(&format!("project.icon.{id}"))),"css":crate::present::badge::css_of(&color),"color":color}))
+        "icon":crate::present::badge::icon_eff(&setting_of(&format!("project.icon.{id}")), &pick),"css":crate::present::badge::css_of(&color),"color":color}))
 }
 
 /// The linked machines' projects and threads next to this hub's: `f(shown machines, unified marks and join map, the pick)` (docs/PHONE-DATA.md, Your machines).

@@ -102,6 +102,10 @@ impl Backplane {
             if text != self.ctl_last {
                 self.ctl_last = text; metric(started, "controls", json!({"controls": ctl}));
             }
+            // G4b: every probed rectangle (menus' items, header tools, rows' pins: pressable things that are not controls), on change
+            let mut probes: Vec<(&String, &[f32; 4])> = rects.iter().collect(); probes.sort_by(|a, b| a.0.cmp(b.0));
+            let ptext = serde_json::to_string(&probes).unwrap_or_default();
+            if ptext != self.probes_last { self.probes_last = ptext; metric(started, "probes", json!({"rects": probes.iter().map(|(k, r)| json!({"id": k, "x": r[0], "y": r[1], "w": r[2], "h": r[3]})).collect::<Vec<_>>()})); }
         }
         if crate::art::rects_on() {
             // links in messages as painted last frame (the check harness aims at these; a code block's Copy is not one)

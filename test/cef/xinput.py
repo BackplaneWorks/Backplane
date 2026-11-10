@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X input through XTest (no xdotool here): xinput.py move X Y | click X Y [button] | type TEXT | key KEYSYM-NAME | chord MOD... KEYSYM-NAME | down KEYSYM-NAME | up KEYSYM-NAME | focus TITLE | pos
+"""Real X input through XTest (no xdotool here): xinput.py move X Y | click X Y [button] | drag X1 Y1 X2 Y2 | type TEXT | key KEYSYM-NAME | chord MOD... KEYSYM-NAME | down KEYSYM-NAME | up KEYSYM-NAME | focus TITLE | pos
 (`down`/`up`: a key held across commands, e.g. Control_L held while a screenshot is taken. `focus`: give the keyboard to the window whose title starts with
 TITLE, as a window manager does on a click: without a FocusIn, GPUI's X11 client sees no modifier changes and thinks its window inactive.)
 Uses $DISPLAY. Events go through the X server, so they reach the GPUI window exactly like a person's mouse and keyboard."""
@@ -38,6 +38,10 @@ elif cmd == 'type':
     for ch in a[0]:
         name = NAMES.get(ch, ch); key(name, shift=ch.isupper() or ch in ':_@&>%$#~^')
 elif cmd == 'key': key(a[0])
+elif cmd == 'drag':  # drag X1 Y1 X2 Y2: press, move in steps (a drag starts past a few pixels), release
+    x1, y1, x2, y2 = map(float, a[:4]); move(x1, y1); xt.XTestFakeButtonEvent(d, 1, 1, 0); x11.XSync(d, 0); time.sleep(0.1)
+    for i in range(1, 13): move(x1 + (x2 - x1) * i / 12, y1 + (y2 - y1) * i / 12); time.sleep(0.03)
+    time.sleep(0.15); xt.XTestFakeButtonEvent(d, 1, 0, 0); x11.XSync(d, 0); time.sleep(0.1)
 elif cmd == 'chord': chord(a)
 elif cmd == 'focus':
     W = ctypes.c_ulong; x11.XDefaultRootWindow.restype = W; x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]

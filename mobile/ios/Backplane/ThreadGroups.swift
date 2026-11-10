@@ -7,6 +7,8 @@ protocol ShelvedThread {
     var project: String { get }
     var settled: Bool { get }
     var pinned: Bool { get }
+    /// where a pinned thread stands on its project's Pinned shelf (the hub's `pinOrder`, the desktop's order)
+    var pinOrder: Int { get }
     var archived: Bool { get }
     var updatedAt: Int { get }
     var settledAt: Int { get }
@@ -16,11 +18,12 @@ protocol ShelvedThread {
 protocol NestedThread: ShelvedThread { var parent: String { get } }
 
 enum ThreadGroups {
-    /// A project's threads, `hidden` (bots' threads) left out: active ones first (pinned, then newest activity), settled ones newest settle first.
+    /// A project's threads, `hidden` (bots' threads) left out: active ones first (pinned in the hub's pin order, then newest activity), settled ones newest settle first.
     static func split<T: ShelvedThread>(_ all: [T], project: String, hidden: Set<String> = []) -> (active: [T], settled: [T]) {
         let mine = all.filter { $0.project == project && !$0.archived && !hidden.contains($0.id) }
         let active = mine.filter { !$0.settled }.sorted { a, b in
             if a.pinned != b.pinned { return a.pinned }
+            if a.pinned && a.pinOrder != b.pinOrder { return a.pinOrder < b.pinOrder }
             return a.updatedAt != b.updatedAt ? a.updatedAt > b.updatedAt : a.id < b.id
         }
         let settled = mine.filter(\.settled).sorted { a, b in a.settledAt != b.settledAt ? a.settledAt > b.settledAt : a.id < b.id }

@@ -44,6 +44,11 @@ fn ok() -> Value { json!({"t":"reply","id":7,"ok":true}) }
     let (e, r) = ask(&h, "thread.settle", json!({"thread":"t1"})).await; assert_eq!(r, ok());
     assert_eq!(e, vec![json!({"$":"ThreadSettled","id":"t1","manual":true,"at":0}), json!({"$":"WorkSet","thread":"t1","kind":"bg","rows":"","at":0})], "thread.settle");
     let (e, r) = ask(&h, "thread.pin", json!({"thread":"nope"})).await; assert_eq!(e.len(), 1); assert_eq!(r, ok());
+    // a pin dragged to a place, unpinned and pinned again goes to the bottom: its old place is dropped; pinning a pinned one keeps it
+    ask(&h, "thread.pin", json!({"thread":"t2"})).await; ask(&h, "thread.reorder", json!({"section":"pinned","thread":"t2","ids":["t2"]})).await;
+    let (e, _) = ask(&h, "thread.pin", json!({"thread":"t2"})).await; assert_eq!(e.len(), 1, "already pinned: {e:?}");
+    ask(&h, "thread.unpin", json!({"thread":"t2"})).await;
+    let (e, _) = ask(&h, "thread.pin", json!({"thread":"t2"})).await; assert_eq!(e[1], json!({"$":"ThreadOrdered","id":"t2","section":"pinned","key":"","at":0}));
 }
 // Rename.changes: trimmed, a blank title changes nothing
 #[tokio::test] async fn rename_trims_and_a_blank_title_changes_nothing() {

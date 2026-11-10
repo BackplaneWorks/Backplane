@@ -42,13 +42,15 @@ pub struct RoomNav { pub name: String, pub members: usize }
 pub struct Thread {
     pub project: String, pub title: String, pub created: u64, pub activity: u64, pub turn: Turn, pub pending: u64,
     pub archived: bool, pub override_: Override, pub settled_at: u64, pub unsettled_at: u64, pub pinned: bool,
+    /// when it was last pinned (the Pinned shelf lists unkeyed pins in the order they were pinned)
+    #[serde(default)] pub pinned_at: u64,
     pub worktree_mode: bool, pub branch: String, pub worktree: String, pub provider: String, pub model: String, pub session: String, pub deleted: bool,
 }
 impl Thread {
     /// Thread.blank: what an event for an unknown thread finds (hidden: archived and deleted).
     pub(crate) fn blank() -> Thread {
         Thread { project: String::new(), title: String::new(), created: 0, activity: 0, turn: Turn::Idle, pending: 0, archived: true, override_: Override::None,
-                 settled_at: 0, unsettled_at: 0, pinned: false, worktree_mode: false, branch: String::new(), worktree: String::new(),
+                 settled_at: 0, unsettled_at: 0, pinned: false, pinned_at: 0, worktree_mode: false, branch: String::new(), worktree: String::new(),
                  provider: String::new(), model: String::new(), session: String::new(), deleted: true }
     }
 }
@@ -165,7 +167,7 @@ impl State {
                 let id = s(e, "id")?; let at = n(e, "at")?;
                 let mode = s(e, "env")?;
                 self.threads.insert(id.into(), Thread { project: s(e, "project")?.into(), title: s(e, "title")?.into(), created: at, activity: at, turn: Turn::Idle, pending: 0,
-                    archived: false, override_: Override::None, settled_at: 0, unsettled_at: 0, pinned: false, worktree_mode: mode == "worktree",
+                    archived: false, override_: Override::None, settled_at: 0, unsettled_at: 0, pinned: false, pinned_at: 0, worktree_mode: mode == "worktree",
                     branch: s(e, "branch")?.into(), worktree: s(e, "worktree")?.into(), provider: s(e, "provider")?.into(), model: s(e, "model")?.into(), session: String::new(), deleted: false });
             }
             "ThreadRenamed" => { let id = s(e, "id")?; let t = s(e, "title")?.to_string(); self.thread_mut(id).title = t; }
@@ -196,7 +198,7 @@ impl State {
                 if !(t.unsettled_at >= t.settled_at) { t.unsettled_at = t.settled_at.max(at); }
             }
             "ThreadArchived" => { let id = s(e, "id")?; let b = fam::json::gbool(e, "archived", false); self.thread_mut(id).archived = b; }
-            "ThreadPinned" => { let id = s(e, "id")?; let b = fam::json::gbool(e, "pinned", false); self.thread_mut(id).pinned = b; }
+            "ThreadPinned" => { let id = s(e, "id")?; let b = fam::json::gbool(e, "pinned", false); let at = fam::json::gnat(e, "at", 0); let t = self.thread_mut(id); if b && !t.pinned { t.pinned_at = at; } t.pinned = b; }
             "ThreadDeleted" => { let id = s(e, "id")?; self.thread_mut(id).deleted = true; }
             "WorktreeSet" => { let id = s(e, "id")?; let (b, w) = (s(e, "branch")?.to_string(), s(e, "worktree")?.to_string()); let t = self.thread_mut(id); t.worktree_mode = true; t.branch = b; t.worktree = w; }
             "WorktreeSkipped" => { let id = s(e, "id")?; let t = self.thread_mut(id); t.worktree_mode = false; t.branch.clear(); t.worktree.clear(); }
@@ -401,6 +403,12 @@ mod tests {
         let s = fold(&[PC, TC, r#"{"$":"ThreadPinned","id":"t1","pinned":true,"at":1}"#, r#"{"$":"ThreadSettled","id":"t1","manual":false,"at":60}"#]);
         assert!(!s.threads["t1"].pinned); assert_eq!(s.threads["t1"].override_, Override::None);
         let s = fold(&[PC, TC, r#"{"$":"ThreadSettled","id":"t1","manual":true,"at":60}"#]); assert_eq!(s.threads["t1"].override_, Override::ForcedSettled);
+    }
+    #[test] fn a_pin_keeps_when_it_was_made_and_pinning_again_keeps_that() {
+        let pin = |on: bool, at: u64| format!(r#"{{"$":"ThreadPinned","id":"t1","pinned":{on},"at":{at}}}"#);
+        let (a, b, c, d) = (pin(true, 5), pin(true, 9), pin(false, 12), pin(true, 20));
+        assert_eq!(fold(&[PC, TC, &a, &b]).threads["t1"].pinned_at, 5, "already pinned: the first pin stands");
+        let s = fold(&[PC, TC, &a, &c, &d]); assert_eq!((s.threads["t1"].pinned, s.threads["t1"].pinned_at), (true, 20), "unpinned and pinned again: the new time");
     }
     #[test] fn usage_keeps_the_old_part_when_the_new_one_is_zero() {
         let s = fold(&[r#"{"$":"UsageSet","thread":"t1","used":100,"window":200,"at":1}"#, r#"{"$":"UsageSet","thread":"t1","used":0,"window":300,"at":2}"#, r#"{"$":"UsageSet","thread":"t1","used":7,"window":0,"at":3}"#]);

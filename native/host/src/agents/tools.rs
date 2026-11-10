@@ -77,6 +77,16 @@ impl Agents {
         if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         if a.get("provider").is_some() || a.get("model").is_some() { return fail("changing a thread's provider or model is not available in the Rust hub yet") }
         if a.get("account").is_some() { if a.get("title").is_some() || a.get("report").is_some() || a.get("parent").is_some() { return fail("account cannot be combined with title, report or parent") } return self.tool_update_account(thread, target, a).await }
+        // pinned: the sidebar's Pin and Unpin (thread.pin / thread.unpin); alone, like account
+        if let Some(pv) = a.get("pinned") {
+            let on = match pv { Value::Bool(b) => *b, Value::String(v) if v == "true" => true, Value::String(v) if v == "false" => false, _ => return fail("pinned is true or false") };
+            if a.get("title").is_some() || a.get("report").is_some() || a.get("parent").is_some() { return fail("pinned cannot be combined with title, report or parent") }
+            let (was, keyed) = pin_state(target);
+            if was != on { let now = now_s(); let mut ev = vec![json!({"$":"ThreadPinned","id":target,"pinned":on,"at":now})];
+                if on && keyed { ev.push(json!({"$":"ThreadOrdered","id":target,"section":"pinned","key":"","at":now})) }
+                self.commit_events(ev).await; }
+            return (true, json!({"threadId":target,"pinned":on}))
+        }
         let title = sv(a, "title").trim().to_string();
         let flag = match a.get("report") { Some(Value::Bool(b)) => Some(*b), Some(Value::String(v)) if v == "true" => Some(true), Some(Value::String(v)) if v == "false" => Some(false), _ => None };
         if let (Some(on), true) = (flag, title.is_empty()) { // Mcp.report.k: a launched thread's reports turned off or on (its launcher stays)
@@ -101,6 +111,7 @@ impl Agents {
         let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
         if crate::net::far::is(target) { return fail("name the thread (threadId)") }
         if !self.same_project(thread, target).await { return fail(NOT_HERE) }
+        if pin_state(target).0 { return fail("the person pinned that thread, so it stays where it is; thread_update {pinned: false} first if they asked to settle it") }
         self.commit_events(vec![json!({"$":"ThreadSettled","id":target,"manual":true,"at":now_s()})]).await;
         // another thread is stopped as the person's Settle stops it (its turn, its agent process); the caller's own turn ends by itself
         if target != thread {
@@ -166,4 +177,9 @@ impl Agents {
         if implement { return self.deliver(&th, &hub_id("m", now, self.seq()), "Implement the proposed plan.", None, vec![]).await }
         Ok(())
     }
+}
+
+/// (pinned, has a place a drag gave it on the Pinned shelf), from the policies' fold; (false, false) before it is up
+fn pin_state(id: &str) -> (bool, bool) {
+    crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(false, |t| t.pinned), st.order_keys.get(id).map_or(false, |k| !k.0.is_empty())))).unwrap_or((false, false))
 }

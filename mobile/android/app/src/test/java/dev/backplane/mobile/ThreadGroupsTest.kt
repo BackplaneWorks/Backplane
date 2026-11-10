@@ -20,6 +20,10 @@ class ThreadGroupsTest {
         assertEquals(listOf("c", "b", "a"), ids(g.active))
         assertEquals(listOf("s2", "s1"), ids(g.settled))
     }
+    @Test fun pinsSitInTheHubsPinOrderWhateverTheirActivity() {
+        val l = listOf(t("p2", pinned = true, updated = 90).copy(pinOrder = 1), t("p1", pinned = true, updated = 1).copy(pinOrder = 0), t("n", updated = 99))
+        assertEquals(listOf("p1", "p2", "n"), ids(ThreadGroups.split(l, "p").active))
+    }
     @Test fun aThreadSettledLiveMovesDownAndAnUnsettledOneMovesBackUp() {
         var live = rows.map { if (it.id == "b") it.copy(settled = true, settledAt = 300) else it }
         var g = ThreadGroups.split(live, "p", setOf("bot"))

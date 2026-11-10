@@ -48,6 +48,7 @@ data class DThread(
     val parent: String = "", val effort: String = "", val runtime: String = "", val chip: String = "", val settledAt: Long = 0, // chip: the composer's "claude / opus / high", in the hub's words
     val history: Boolean = false, // an old Scratch chat (feature history): listed under Conversation history, never under a project
     val mark: DMark? = null, // the machine it runs on when it is another one; null for this hub's own
+    val pinOrder: Int = 0, // where a pinned thread stands on its project's Pinned shelf (the hub's order: as pinned, or as dragged)
     val status: String = "", // the sidebar dot's word (feature status): active, waiting, blocked, failed, stalled, finished (the desktop's green dot: done, not yet settled), settled, inactive; "" from an older hub
 )
 // the picker under the composer (`thread.picker`): sections the hub lists, drawn in order; a press is `thread.pick`
@@ -77,7 +78,7 @@ fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("r
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) })
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.str("status"),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)

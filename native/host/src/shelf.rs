@@ -84,7 +84,7 @@ mod tests {
     const OVERRIDES: [Override; 3] = [Override::None, Override::ForcedSettled, Override::ForcedActive];
     fn thread(r: &mut Rng) -> Thread {
         Thread { project: "p".into(), title: String::new(), created: r.below(1000), activity: r.below(1000), turn: TURNS[r.below(5) as usize], pending: r.below(3), archived: r.bool(),
-                 override_: OVERRIDES[r.below(3) as usize], settled_at: r.below(50), unsettled_at: r.below(50), pinned: r.bool(), worktree_mode: false, branch: String::new(),
+                 override_: OVERRIDES[r.below(3) as usize], settled_at: r.below(50), unsettled_at: r.below(50), pinned: r.bool(), pinned_at: 0, worktree_mode: false, branch: String::new(),
                  worktree: String::new(), provider: String::new(), model: String::new(), session: String::new(), deleted: r.bool() }
     }
 
