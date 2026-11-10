@@ -429,14 +429,15 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             indices.sort_unstable(); // Mob.native.tree_rows filters in tree order.
             (indices,pager)
         })?;
-        let icon=setting(pst,&format!("project.icon.{owner}"));
-        project["icon"]=json!(super::badge::icon_of(icon));
-        let color=super::badge::color_of(setting(pst,&format!("project.color.{owner}")),owner);
+        let pick=setting(pst,&format!("project.pick.{owner}"));
+        let icon=super::badge::icon_eff(setting(pst,&format!("project.icon.{owner}")),pick);
+        project["icon"]=json!(icon);
+        let color=super::badge::color_eff(setting(pst,&format!("project.color.{owner}")),pick,owner);
         project["color"]=json!(color); project["css"]=json!(super::badge::css_of(color));
         project["machine"]=json!(machine);
         // folded by its chevron (0.14's project-closed:<id>): the window draws its head alone
         project["closed"]=json!(flag(&session,&format!("project-closed:{owner}")));
-        if machine.is_empty() && text(&session["drafts"],"@look")==owner { project["look"]=super::badge::editor(owner,setting(st,&format!("project.color.{owner}")),icon); }
+        if machine.is_empty() && text(&session["drafts"],"@look")==owner { project["look"]=super::badge::editor(owner,color,icon); }
         // another machine's project: its marker after the name ("on desktop"); this machine's has none
         if !machine.is_empty() { let m=un.mark(machine); sidebar::label_rows(&mut project,&m); project["mark"]=m; }
         // the same repository on a linked machine: its threads in this project, each row naming its machine

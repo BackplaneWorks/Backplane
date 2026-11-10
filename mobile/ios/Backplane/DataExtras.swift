@@ -240,11 +240,17 @@ func dataBadgeSymbol(_ icon: String) -> String {
     case "flask-conical": "flask"
     case "book": "book"
     case "star": "star"
+    case "usb": "cable.connector"
+    case "plug": "powerplug"
+    case "presentation": "play.rectangle"
+    case "gauge": "gauge"
+    case "file-text": "doc.text"
+    case "image": "photo"
     default: "folder"
     }
 }
 
-/// A project's badge: the hub's tints and icons (`badge.list`); a press is `project.act color|icon`.
+/// A project's badge: the hub's tints and icons (`badge.list`); a press is `project.act color|icon|pick`.
 struct DataBadgeSheet: View {
     let client: DataClient
     let project: DProject
@@ -274,6 +280,8 @@ struct DataBadgeSheet: View {
                             }
                         }
                     }
+                    // Pick again: the hub's model chooses the icon anew (the person's choice is cleared)
+                    Section { Button(Tr.t("Pick again")) { Task { await client.projectAct(project.id, "pick") } }.accessibilityIdentifier("badge.again") }
                 } else { ProgressView() }
             }
             .navigationTitle(project.title).navigationBarTitleDisplayMode(.inline)

@@ -2194,6 +2194,7 @@ gpui.order.named = 注文 · {name}
 gpui.buy.now = 今すぐ購入
 gpui.order.buy.now.price = 今すぐ購入 · {price}
 gpui.badge.away = {name} · 不在
+gpui.badge.again = 選び直す
 gpui.badge.on = {name} 上
 gpui.badge.runs.on = {name} で実行
 gpui.badge.also.on = {name} にもあります

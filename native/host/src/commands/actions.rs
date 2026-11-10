@@ -111,6 +111,8 @@ pub fn act(req: &Req) -> Option<ActOut> {
         // the project's badge editor (@look is the project it is open for): the same press shuts it; look-set writes `project.color.<id>=<tint>` or `project.icon.<id>=<icon>` and leaves it open
         "look" => { if v.is_empty() { return None } let now = if draft(r.session, "@look") == v { "" } else { v }; a.set("@look", now); a.set("@menu", ""); a.set("@del", ""); a.set("@rm", ""); }
         "look-set" => { let (key, val) = crate::present::badge::setting_of(v)?; a.rpc("setting.set", json!({"key": key, "value": val})); }
+        // Pick again: the person's icon and colour go, and the hub's model picks anew (agents/iconpick.rs `project.pick`)
+        "look-again" => { if v.is_empty() { return None } a.rpc("project.pick", json!({"project": v})); }
         // Regenerate title: the hub's title model writes a new one (thread.retitle)
         "row-retitle" => { a.rpc("thread.retitle", json!({"thread": v})); a.set("@del", ""); a.set("@menu", ""); }
         // the phones send "id\u{1f}title"; a blank id or title is never sent
@@ -197,6 +199,7 @@ mod tests {
         let mut s3 = sess.clone(); s3["drafts"] = json!({"@look": "p1"}); assert_eq!(run("look", "p1", &s3).unwrap().session_patch["drafts"]["@look"], "", "the same press shuts it");
         let o = run("look-set", "project.color.p1=pink", &sess).unwrap();
         assert_eq!(o.cmds[0]["text"].as_str().unwrap(), "{\"id\":3,\"m\":\"setting.set\",\"p\":{\"key\":\"project.color.p1\",\"value\":\"pink\"}}");
+        assert!(run("look-again", "p1", &sess).unwrap().cmds[0]["text"].as_str().unwrap().contains("\"m\":\"project.pick\",\"p\":{\"project\":\"p1\"}")); assert!(run("look-again", "", &sess).is_none());
         assert!(run("look-set", "agent.provider=codex", &sess).is_none() && run("look-set", "project.icon.p1=skull", &sess).is_none(), "only the badge settings, only listed values");
         let o = run("row-detach", "t2", &sess).unwrap(); assert_eq!(o.cmds[0]["text"].as_str().unwrap(), "{\"id\":3,\"m\":\"thread.detach\",\"p\":{\"thread\":\"t2\"}}");
         let o = run("row-reparent", "t2|t1", &sess).unwrap(); assert_eq!(o.cmds[0]["text"].as_str().unwrap(), "{\"id\":3,\"m\":\"thread.reparent\",\"p\":{\"thread\":\"t2\",\"parent\":\"t1\"}}");

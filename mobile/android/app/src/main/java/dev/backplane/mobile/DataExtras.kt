@@ -81,7 +81,7 @@ fun ThreadMenus(t: DThread, shown: Boolean, close: () -> Unit, deleted: () -> Un
     if (deleting) ActionSheet(Msg.android_thread_delete_ask(t.title), listOf("Delete thread" to { DataClient.threadAct(t.id, "delete"); deleted() }, "Keep it" to {}), { deleting = false })
 }
 
-/** A project's badge: the hub's tints and icons (`badge.list`); a press is `project.act color|icon`. */
+/** A project's badge: the hub's tints and icons (`badge.list`); a press is `project.act color|icon|pick`. */
 @Composable
 fun BadgeSheet(p: DProject, close: () -> Unit) {
     var list by remember { mutableStateOf<JSONObject?>(null) }
@@ -106,6 +106,8 @@ fun BadgeSheet(p: DProject, close: () -> Unit) {
                     }
                 }
             }
+            // Pick again: the hub's model chooses the icon anew (the person's choice is cleared)
+            if (l != null) DBtn(Tr.t("Pick again"), false, modifier = Modifier.testTag("badge.again")) { DataClient.projectAct(p.id, "pick") }
             DBtn(Msg.common_close, false, onClick = close)
         }
     }
