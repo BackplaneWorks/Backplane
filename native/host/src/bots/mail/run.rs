@@ -84,6 +84,7 @@ impl Bots {
         if crate::copy::on() || steps.is_empty() { return }
         let report: Vec<String> = steps.iter().filter_map(|s| match s { StepEnd::Turn { thread, .. } | StepEnd::Fallback { thread, .. } => Some(thread.clone()), _ => None }).collect();
         let ended: Vec<String> = steps.iter().filter_map(|s| match s { StepEnd::Turn { thread, state, .. } if (state == "completed" || state == "failed") && ephemeral(thread) => Some(thread.clone()), _ => None }).collect();
+        let answers: Vec<(String, String, usize)> = steps.iter().filter_map(|s| match s { StepEnd::RoomReply { thread, room, line } => Some((thread.clone(), room.clone(), *line)), _ => None }).collect();
         let (_, outs) = self.decide_acc(&report, false, |c| {
             let mut st = Step::none();
             for s in steps { match s {
@@ -97,10 +98,19 @@ impl Bots {
                 }
                 StepEnd::Ask { id, thread, tool, detail } => { if on && tool != "settings_proposal" { let a = c.triage_ask(&id, &thread, &tool, &detail); st = st.cat(a) } }
                 StepEnd::Fallback { thread, run } => { if let Some(r) = &run { let turn = c.th(&thread).turn; let e = c.run_ended(r, &turn); st = st.cat(e) } }
+                StepEnd::RoomReply { .. } => {}
             } }
             ((), st)
         }).await;
         self.perform(outs).await;
+        // Room.answer: the person asked in a room and the bot answered only in its own chat, where they do not look: its reply is posted in the room as the bot's own room_post
+        let answers = if answers.is_empty() || self.hub.setting("room.answer").await.map_or(false, |v| v == "off") { vec![] } else { answers }; // the setting `room.answer` = off leaves replies where the bot wrote them
+        for (thread, room, line) in answers {
+            let text = self.hub.store.get(line - 1).ok().and_then(|l| serde_json::from_str::<serde_json::Value>(&l).ok()).and_then(|e| e["text"].as_str().map(str::to_string)).unwrap_or_default();
+            if text.trim().is_empty() { continue }
+            let (ok, r) = self.tool_call(&thread, "room_post", &json!({"room": room, "text": text})).await;
+            if !ok { eprintln!("bots: a room answer could not be posted: {r}") }
+        }
         // a mail run or back office that ended keeps no agent process: one is left per run otherwise, and an uberbot's routines start several an hour. A later delivery resumes it by its session.
         for th in ended { let idle = self.hub.model().await.threads.get(&th).map_or(true, |t| t.turn != "running"); if idle { self.inbox.stop(&th).await } }
     }

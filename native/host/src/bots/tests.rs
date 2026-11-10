@@ -137,6 +137,26 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert_eq!(rec.got.lock().unwrap()[1].2, "plain");
 }
 
+#[tokio::test] async fn a_reply_to_the_persons_room_message_is_posted_in_the_room() {
+    // Room.answer: the person asks in a room, the bot's turn ends with its reply only in its own chat: the hub posts that reply in the room as the bot,
+    // and the other member hears it one hop on. With `room.answer` off the reply stays in the chat.
+    let (hub, bots, rec) = start("answer", "").await;
+    let (a, b) = (bot(&hub, "aa").await, bot(&hub, "bb").await); let ta = th_a(&bots, &a).await;
+    assert_eq!(rpc(&hub, "bots.room", json!({"room":"r1","name":"lab","members":format!("{a}\n{b}")})).await["ok"], true);
+    let turn = |msg: &str, reply: &str| vec![json!({"$":"MessagePosted","thread":ta,"msg":msg,"role":"user","text":"[message from you in #lab]\nwho is on it","at":5}),
+        json!({"$":"MessageFrom","thread":ta,"msg":msg,"from":"person","kind":"room","ref":"lab","at":5}), json!({"$":"TurnChanged","thread":ta,"state":"running","at":5}),
+        json!({"$":"MessagePosted","thread":ta,"msg":format!("a-{msg}"),"role":"assistant","text":reply,"at":6}), json!({"$":"TurnChanged","thread":ta,"state":"completed","at":7})];
+    let posts = |l: &[Value]| l.iter().filter(|e| e["$"] == "RoomPosted" && e["from"] == "aa").map(|e| (e["text"].as_str().unwrap_or("").to_string(), e["hop"].as_u64().unwrap_or(0))).collect::<Vec<_>>();
+    hub.commit_many(&turn("m1", "bb is on it")).await.unwrap();
+    until(&hub, |l| !posts(l).is_empty()).await;
+    assert_eq!(posts(&log(&hub)), vec![("bb is on it".to_string(), 1)]);
+    until(&hub, |_| rec.got.lock().unwrap().iter().any(|g| g.2 == "[message from aa in #lab]\nbb is on it")).await;
+    hub.commit(&json!({"$":"SettingSet","key":"room.answer","value":"off","at":8})).await.unwrap();
+    hub.commit_many(&turn("m2", "still bb")).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(posts(&log(&hub)).len(), 1, "off: the reply stays in the bot's chat");
+}
+
 #[tokio::test] async fn bots_post_once_and_wakes_other_members_here() {
     // laws bots_post_once, bot_held_wakes_none: a person's post (hop 0) is logged once, every live member bot hears it with its origin;
     // members elsewhere, a deleted bot and the uberbot do not
@@ -1227,6 +1247,7 @@ fn stored(e: &Value) -> Value {
     let rec: Value = serde_json::from_str(include_str!("../../../../test/bots/fixtures/js-ledger-calls.json")).unwrap();
     let js: Vec<Value> = include_str!("../../../../test/bots/fixtures/js-ledger.jsonl").lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let (hub, bots, inbox) = start("ledger", "").await;
+    hub.commit(&json!({"$":"SettingSet","key":"room.answer","value":"off","at":1})).await.unwrap(); // the recording is of a hub that left a bot's reply in its chat (Room.answer posts it in the room)
     let work = std::env::temp_dir().join(format!("bp-ledger-{}", std::process::id())); let _ = std::fs::remove_dir_all(&work); std::fs::create_dir_all(&work).unwrap(); let work = crate::plat::fs::canonicalize(&work).unwrap();
     std::fs::write(work.join("afile"), "x").unwrap(); let w = work.to_str().unwrap().to_string();
     let (mut done, mut n) = (0usize, 0); let mut ids: Vec<(String, String)> = vec![];
